@@ -155,6 +155,196 @@ Future<double> pendienteEntrega(int? telegramId) async {
   return total;
 }
 
+/// Días restantes de vigencia (negativo si vencido, null si sin pagos).
+int? diasRestantes(String? pagadoHasta) {
+  if (pagadoHasta == null || pagadoHasta.length < 10) return null;
+  final hoy = DateTime.now();
+  final hoyDia = DateTime(hoy.year, hoy.month, hoy.day);
+  final p = pagadoHasta.substring(0, 10).split('-').map(int.parse).toList();
+  final ph = DateTime(p[0], p[1], p[2]);
+  return ph.difference(hoyDia).inDays;
+}
+
+/// Texto de estado de mensualidad para listas.
+String textoEstado(String? pagadoHasta) {
+  final d = diasRestantes(pagadoHasta);
+  if (d == null) return 'Sin pagos registrados';
+  if (d < 0) return 'Vencido hace ${-d} día${-d == 1 ? '' : 's'}';
+  if (d == 0) return 'Vence hoy';
+  return '$d día${d == 1 ? '' : 's'} restantes';
+}
+
+/// Lista de clientes activos. Si `q` está vacío devuelve TODOS ordenados
+/// por nombre; si no, filtra por nombre, carnet o teléfono.
+Future<List<Map<String, dynamic>>> listaClientes([String q = '']) async {
+  final nq = _norm(q);
+  final digitos =
+      q.replaceAll(RegExp(r'[^0-9]'), ''); // para carnet/teléfono
+  final rows = await _activos();
+  List<Map<String, dynamic>> res;
+  if (nq.isEmpty && digitos.isEmpty) {
+    res = rows;
+  } else {
+    res = rows.where((c) {
+      final norm = (c['nombre_norm'] as String?) ?? _norm('${c['nombre']}');
+      if (nq.isNotEmpty && norm.contains(nq)) return true;
+      if (digitos.isNotEmpty) {
+        for (final k in ['telefono', 'movil', 'carnet']) {
+          final v = '${c[k] ?? ''}'.replaceAll(RegExp(r'[^0-9]'), '');
+          if (v.contains(digitos)) return true;
+        }
+      }
+      return false;
+    }).toList();
+  }
+  res.sort((a, b) => '${a['nombre']}'.compareTo('${b['nombre']}'));
+  return res;
+}
+
+/// Clientes que vencen en los próximos `dias` (incluye hoy).
+Future<List<Map<String, dynamic>>> porVencer({int dias = 3}) async {
+  final hoy = _hoyIso();
+  final limite = DateTime.now().add(Duration(days: dias));
+  final limIso =
+      '${limite.year.toString().padLeft(4, '0')}-${limite.month.toString().padLeft(2, '0')}-${limite.day.toString().padLeft(2, '0')}';
+  final rows = await _activos();
+  final res = rows.where((c) {
+    final ph = c['pagado_hasta'] as String?;
+    return ph != null &&
+        ph.compareTo(hoy) >= 0 &&
+        ph.compareTo(limIso) <= 0;
+  }).toList();
+  res.sort((a, b) => '${a['pagado_hasta']}'.compareTo('${b['pagado_hasta']}'));
+  return res;
+}
+
+/// Clientes inactivos (papelera de reciclaje).
+Future<List<Map<String, dynamic>>> clientesInactivos() async {
+  final todos = await LocalDb.instance.allMirror('clientes');
+  final res =
+      todos.where((c) => c['estado'] != 'activo').toList();
+  res.sort((a, b) => '${a['nombre']}'.compareTo('${b['nombre']}'));
+  return res;
+}
+
+/// Agrupa clientes activos por quién los inscribió (para el dueño).
+Future<Map<String, List<Map<String, dynamic>>>> clientesPorEntrenador() async {
+  final rows = await _activos();
+  final mapa = <String, List<Map<String, dynamic>>>{};
+  for (final c in rows) {
+    final quien = '${c['registrado_por_nombre'] ?? '—'}';
+    mapa.putIfAbsent(quien, () => []).add(c);
+  }
+  for (final l in mapa.values) {
+    l.sort((a, b) => '${a['nombre']}'.compareTo('${b['nombre']}'));
+  }
+  return mapa;
+}
+
+/// (cantidad de activos, pendientes de pago que restan en el mes,
+/// estimado de cobro total del mes en CUP).
+Future<(int, int, double)> resumenCartera(double mensualidad) async {
+  final rows = await _activos();
+  final n = DateTime.now();
+  final finMes =
+      '${n.year.toString().padLeft(4, '0')}-${n.month.toString().padLeft(2, '0')}-${DateTime(n.year, n.month + 1, 0).day.toString().padLeft(2, '0')}';
+  var pendientes = 0;
+  for (final c in rows) {
+    final ph = c['pagado_hasta'] as String?;
+    if (ph == null || ph.compareTo(finMes) < 0) pendientes++;
+  }
+  return (rows.length, pendientes, pendientes * mensualidad);
+}
+
+/// Teléfono cubano válido: 8 dígitos empezando con 5.
+bool validarTelefono(String v) {
+  final d = v.replaceAll(RegExp(r'[^0-9]'), '');
+  return d.length == 8 && d.startsWith('5');
+}
+
+/// Carnet: 6 a 11 dígitos (6 = fecha de nacimiento para menores sin carnet).
+bool validarCarnet(String v) {
+  final d = v.replaceAll(RegExp(r'[^0-9]'), '');
+  return d.length >= 6 && d.length <= 11;
+}
+
+/// Edad calculada desde el carnet (los 6 primeros dígitos = AAMMDD).
+int? edadDeCarnet(String? carnet) {
+  final d = (carnet ?? '').replaceAll(RegExp(r'[^0-9]'), '');
+  if (d.length < 6) return null;
+  final hoy = DateTime.now();
+  var anio = int.tryParse(d.substring(0, 2)) ?? 0;
+  final mes = int.tryParse(d.substring(2, 4)) ?? 0;
+  final dia = int.tryParse(d.substring(4, 6)) ?? 0;
+  if (mes < 1 || mes > 12 || dia < 1 || dia > 31) return null;
+  anio += (anio <= hoy.year % 100) ? 2000 : 1900;
+  var edad = hoy.year - anio;
+  if (hoy.month < mes || (hoy.month == mes && hoy.day < dia)) edad--;
+  return edad < 0 || edad > 120 ? null : edad;
+}
+
+/// Posibles duplicados al inscribir (nombre parecido, carnet o teléfono igual).
+Future<List<Map<String, dynamic>>> posiblesDuplicados(
+    {required String nombre,
+    String? carnet,
+    String? telefono}) async {
+  final rows = await _activos();
+  final nn = _norm(nombre);
+  final dc = (carnet ?? '').replaceAll(RegExp(r'[^0-9]'), '');
+  final dt = (telefono ?? '').replaceAll(RegExp(r'[^0-9]'), '');
+  final res = <Map<String, dynamic>>[];
+  for (final c in rows) {
+    final cn = (c['nombre_norm'] as String?) ?? _norm('${c['nombre']}');
+    var motivo = '';
+    if (dc.isNotEmpty &&
+        '${c['carnet'] ?? ''}'.replaceAll(RegExp(r'[^0-9]'), '') == dc) {
+      motivo = 'mismo carnet';
+    } else if (dt.isNotEmpty &&
+        ('${c['telefono'] ?? ''}'.replaceAll(RegExp(r'[^0-9]'), '') == dt ||
+            '${c['movil'] ?? ''}'.replaceAll(RegExp(r'[^0-9]'), '') == dt)) {
+      motivo = 'mismo teléfono';
+    } else if (nn.isNotEmpty && (cn.contains(nn) || nn.contains(cn))) {
+      motivo = 'nombre parecido';
+    }
+    if (motivo.isNotEmpty) {
+      res.add({...c, '_motivo': motivo});
+    }
+  }
+  return res;
+}
+
+/// Pagos diarios de hoy (del espejo).
+Future<List<Map<String, dynamic>>> diariosDeHoy() async {
+  final hoy = _hoyIso();
+  final todos = await LocalDb.instance.allMirror('pagos_diarios');
+  final res =
+      todos.where((d) => (d['fecha'] as String?) == hoy).toList();
+  res.sort((a, b) =>
+      '${b['registrado_por_nombre']}'.compareTo('${a['registrado_por_nombre']}'));
+  return res;
+}
+
+/// Resumen del turno del entrenador: (cobrado hoy, pendiente a entregar).
+Future<(double, double)> miTurnoHoy(int? telegramId) async {
+  if (telegramId == null) return (0.0, 0.0);
+  final hoy = _hoyIso();
+  double cobrado = 0;
+  for (final p in await LocalDb.instance.allMirror('pagos')) {
+    if ((p['telegram_user_id'] as int?) == telegramId &&
+        (p['fecha'] as String?) == hoy) {
+      cobrado += (p['monto'] as num?)?.toDouble() ?? 0;
+    }
+  }
+  for (final d in await LocalDb.instance.allMirror('pagos_diarios')) {
+    if ((d['registrado_por'] as int?) == telegramId &&
+        (d['fecha'] as String?) == hoy) {
+      cobrado += (d['total'] as num?)?.toDouble() ?? 0;
+    }
+  }
+  final pendiente = await pendienteEntrega(telegramId);
+  return (cobrado, pendiente);
+}
+
 /// Desglose del pendiente: (mensualidades, diarios).
 Future<
     (

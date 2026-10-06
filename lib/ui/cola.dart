@@ -1,4 +1,5 @@
-/// Estado de sincronización y cola de operaciones.
+/// Sincronización detallada: última vez, qué subió/bajó, errores
+/// y cola de operaciones (con opción de cancelar las pendientes).
 library;
 
 import 'package:flutter/material.dart';
@@ -15,6 +16,8 @@ class ColaScreen extends StatefulWidget {
 
 class _ColaScreenState extends State<ColaScreen> {
   List<Map<String, dynamic>> _ops = [];
+  SyncDetalle _det = const SyncDetalle();
+  bool _sincronizando = false;
 
   @override
   void initState() {
@@ -24,7 +27,47 @@ class _ColaScreenState extends State<ColaScreen> {
 
   Future<void> _cargar() async {
     final ops = await LocalDb.instance.recentOps();
-    if (mounted) setState(() => _ops = ops);
+    final det = await SyncEngine.instance.detalle();
+    if (mounted) {
+      setState(() {
+        _ops = ops;
+        _det = det;
+      });
+    }
+  }
+
+  Future<void> _sincronizar() async {
+    setState(() => _sincronizando = true);
+    await SyncEngine.instance.run();
+    await _cargar();
+    if (mounted) setState(() => _sincronizando = false);
+  }
+
+  Future<void> _cancelar(String uuid, String tipo) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Cancelar operación'),
+        content: Text(
+            '¿Cancelar esta operación (${_tipo(tipo)})? No se subirá al sistema.'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('No')),
+          ElevatedButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Sí, cancelar')),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    final borrada = await LocalDb.instance.cancelOp(uuid);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(borrada
+            ? 'Operación cancelada'
+            : 'Ya no se puede cancelar (fue aplicada)')));
+    _cargar();
   }
 
   String _emoji(String estado) {
@@ -50,13 +93,25 @@ class _ColaScreenState extends State<ColaScreen> {
         return 'Pago diario';
       case 'foto':
         return 'Foto';
+      case 'editar_cliente':
+        return 'Edición de cliente';
+      case 'cambiar_estado':
+        return 'Cambio de estado';
       default:
         return t;
     }
   }
 
+  String _hora(DateTime? d) {
+    if (d == null) return '—';
+    return '${d.day.toString().padLeft(2, '0')}/${d.month.toString().padLeft(2, '0')} '
+        '${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}';
+  }
+
   @override
   Widget build(BuildContext context) {
+    final pendientes =
+        _ops.where((o) => o['estado'] == 'pendiente' || o['estado'] == 'error').length;
     return Scaffold(
       appBar: AppBar(title: const Text('📤 Sincronización')),
       body: Column(
@@ -64,21 +119,67 @@ class _ColaScreenState extends State<ColaScreen> {
           const SyncBanner(),
           Padding(
             padding: const EdgeInsets.all(12),
+            child: Card(
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _fila('⬇️ Última bajada', _hora(_det.ultimaPull)),
+                    _fila('⬆️ Última subida', _hora(_det.ultimaPush)),
+                    _fila('📤 Subidos (última vez)', '${_det.subidos}'),
+                    _fila('📥 Bajados (última vez)', '${_det.bajados}'),
+                    _fila('⏳ Pendientes ahora', '$pendientes'),
+                    if (_det.error != null &&
+                        _det.error!.isNotEmpty)
+                      Padding(
+                        padding:
+                            const EdgeInsets.only(top: 6),
+                        child: Text('⚠️ ${_det.error}',
+                            style: const TextStyle(
+                                color: Colors.red,
+                                fontSize: 12)),
+                      ),
+                    const SizedBox(height: 8),
+                    const Text(
+                      'La app baja cambios de otros entrenadores cada 2 min. '
+                      'Tus cambios suben cada hora o con el botón.',
+                      style: TextStyle(
+                          color: Colors.grey, fontSize: 12),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          Padding(
+            padding:
+                const EdgeInsets.symmetric(horizontal: 12),
             child: SizedBox(
               width: double.infinity,
               child: ElevatedButton.icon(
                 icon: const Text('🔄'),
-                label: const Text('Sincronizar ahora'),
-                onPressed: () async {
-                  await SyncEngine.instance.run();
-                  _cargar();
-                },
+                label: Text(_sincronizando
+                    ? 'Sincronizando…'
+                    : 'Sincronizar ahora'),
+                onPressed:
+                    _sincronizando ? null : _sincronizar,
               ),
+            ),
+          ),
+          const Padding(
+            padding: EdgeInsets.fromLTRB(12, 12, 12, 4),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: Text('Operaciones recientes:',
+                  style:
+                      TextStyle(fontWeight: FontWeight.bold)),
             ),
           ),
           Expanded(
             child: _ops.isEmpty
-                ? const Center(child: Text('Sin operaciones todavía'))
+                ? const Center(
+                    child: Text('Sin operaciones todavía'))
                 : RefreshIndicator(
                     onRefresh: _cargar,
                     child: ListView.builder(
@@ -86,23 +187,56 @@ class _ColaScreenState extends State<ColaScreen> {
                       itemBuilder: (ctx, i) {
                         final op = _ops[i];
                         final estado = '${op['estado']}';
+                        final cancelable = estado ==
+                                'pendiente' ||
+                            estado == 'error';
                         return ListTile(
                           leading: Text(_emoji(estado),
-                              style: const TextStyle(fontSize: 24)),
-                          title: Text(_tipo('${op['tipo']}')),
+                              style: const TextStyle(
+                                  fontSize: 24)),
+                          title:
+                              Text(_tipo('${op['tipo']}')),
                           subtitle: Text(
                               '${op['creada_ts']}'.substring(0, 16).replaceAll('T', ' ') +
-                                  (op['error'] != null
+                                  (op['error'] != null &&
+                                          '${op['error']}'
+                                              .isNotEmpty
                                       ? '\n${op['error']}'
                                       : '')),
-                          trailing: Text(estado,
-                              style:
-                                  const TextStyle(color: Colors.grey)),
+                          trailing: cancelable
+                              ? IconButton(
+                                  tooltip: 'Cancelar',
+                                  icon: const Icon(
+                                      Icons.cancel_outlined,
+                                      color: Colors.red),
+                                  onPressed: () =>
+                                      _cancelar(
+                                          '${op['op_uuid']}',
+                                          '${op['tipo']}'),
+                                )
+                              : Text(estado,
+                                  style: const TextStyle(
+                                      color: Colors.grey,
+                                      fontSize: 12)),
                         );
                       },
                     ),
                   ),
           ),
+        ],
+      ),
+    );
+  }
+
+  Widget _fila(String etiqueta, String valor) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 4),
+      child: Row(
+        children: [
+          Expanded(child: Text(etiqueta)),
+          Text(valor,
+              style:
+                  const TextStyle(fontWeight: FontWeight.bold)),
         ],
       ),
     );
