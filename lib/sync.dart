@@ -17,8 +17,10 @@ library;
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
+import 'package:image/image.dart' as img;
 import 'package:uuid/uuid.dart';
 
 import 'auth.dart';
@@ -368,6 +370,20 @@ class SyncEngine {
   }
 
   // -- fotos -------------------------------------------------------------
+  /// Reduce la foto a máx. 1024px de ancho (JPEG 80) antes de subirla.
+  /// Las fotos de cámara a resolución completa (varios MB) no terminan
+  /// de subir con conexiones lentas; así quedan en ~150-300 KB.
+  Uint8List _comprimirFoto(Uint8List bytes) {
+    try {
+      final dec = img.decodeImage(bytes);
+      if (dec == null || dec.width <= 1024) return bytes;
+      final chica = img.copyResize(dec, width: 1024);
+      return Uint8List.fromList(img.encodeJpg(chica, quality: 80));
+    } catch (_) {
+      return bytes; // si falla, se intenta con la original
+    }
+  }
+
   Future<void> _uploadFotos() async {
     final fotos = await _db.fotosPendientes();
     for (final f in fotos) {
@@ -383,22 +399,27 @@ class SyncEngine {
         await _db.markFotoLista(fid);
         continue;
       }
-      final bytes = await file.readAsBytes();
+      var bytes = await file.readAsBytes();
+      bytes = _comprimirFoto(bytes);
       final path = 'pendientes/${f['op_uuid']}.jpg';
-      try {
-        final r = await http.post(
-            Uri.parse('$_base/storage/v1/object/'
-                '${AppConfig.bucketFotos}/$path'),
-            headers: {
-              ..._headers(),
-              'Content-Type': 'image/jpeg',
-              'x-upsert': 'true',
-            },
-            body: bytes).timeout(const Duration(seconds: 60));
-        if (r.statusCode != 200 && r.statusCode != 201) continue;
-      } catch (_) {
-        continue; // reintenta en el próximo ciclo
+      var ok = false;
+      for (var intento = 0; intento < 3 && !ok; intento++) {
+        try {
+          final r = await http.post(
+              Uri.parse('$_base/storage/v1/object/'
+                  '${AppConfig.bucketFotos}/$path'),
+              headers: {
+                ..._headers(),
+                'Content-Type': 'image/jpeg',
+                'x-upsert': 'true',
+              },
+              body: bytes).timeout(const Duration(seconds: 120));
+          ok = r.statusCode == 200 || r.statusCode == 201;
+        } catch (_) {
+          ok = false; // reintenta en este ciclo y en el próximo
+        }
       }
+      if (!ok) continue;
       // encola la op 'foto' para que el puente la guarde en gym.db
       final d = await _db.db;
       final opUuid = const Uuid().v4();
