@@ -46,7 +46,7 @@ Future<void> _programarSubidaFondo() async {
       'subirPendientes',
       frequency: const Duration(hours: 1),
       constraints: Constraints(networkType: NetworkType.connected),
-      existingWorkPolicy: ExistingWorkPolicy.keep,
+      existingWorkPolicy: ExistingPeriodicWorkPolicy.keep,
     );
   } catch (_) {
     // sin segundo plano no se rompe nada: la app sincroniza al abrirse
