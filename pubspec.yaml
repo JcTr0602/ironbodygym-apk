@@ -1,0 +1,30 @@
+name: ironbody_gym
+description: APK offline-first para entrenadores de Iron Body Gym (Trinidad, Cuba).
+publish_to: "none"
+version: 1.0.0+1
+
+environment:
+  sdk: ">=3.2.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  supabase_flutter: ^2.8.0
+  sqflite: ^2.3.3+1
+  path_provider: ^2.1.4
+  path: ^1.9.0
+  image_picker: ^1.1.2
+  uuid: ^4.5.1
+  intl: ^0.19.0
+  http: ^1.2.2
+  shared_preferences: ^2.3.2
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/logo.jpg
