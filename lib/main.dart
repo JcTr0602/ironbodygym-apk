@@ -31,9 +31,9 @@ void callbackDispatcher() {
       if (auth.loggedIn) {
         await SyncEngine.instance.push();
       }
-      return Future.value(true);
+      return true;
     } catch (_) {
-      return Future.value(false);
+      return false;
     }
   });
 }
@@ -47,7 +47,7 @@ Future<void> _programarSubidaFondo() async {
       'subirPendientes',
       frequency: const Duration(hours: 1),
       constraints: Constraints(networkType: NetworkType.connected),
-      existingWorkPolicy: ExistingPeriodicWorkPolicy.keep,
+      existingWorkPolicy: ExistingWorkPolicy.keep,
     );
   } catch (_) {
     // sin segundo plano no se rompe nada: la app sincroniza al abrirse
