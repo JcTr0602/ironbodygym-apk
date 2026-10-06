@@ -15,4 +15,11 @@ class AppConfig {
   static const movilConfirmacion = '58191577';
   static const telegramContacto = '@Jctr0602';
   static const whatsappContacto = '58191577';
+
+  /// Versión visible en Ayuda/Ajustes (mantener igual que pubspec).
+  static const appVersion = '1.0.2';
+
+  /// Usuarios con permiso de dueño (solo Jc). Comparación en minúsculas
+  /// contra la parte local del email alias (nombre@ironbody.gym).
+  static const ownerUsernames = {'jc', 'jctr0602', 'julio'};
 }
