@@ -1,14 +1,20 @@
 /// Inscripción de cliente con foto (offline-first).
+///
+/// Solo se encola al confirmar el resumen: escribir el nombre no genera
+/// ninguna operación (el "Pendiente a entregar" solo cuenta operaciones
+/// confirmadas).
 library;
 
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:uuid/uuid.dart';
 
 import '../localdb.dart';
+import '../negocio.dart';
 import '../sync.dart';
 import 'widgets.dart';
 
@@ -21,11 +27,24 @@ class InscribirScreen extends StatefulWidget {
 class _InscribirScreenState extends State<InscribirScreen> {
   final _nombre = TextEditingController();
   final _telefono = TextEditingController();
-  final _movil = TextEditingController();
+  final _carnet = TextEditingController();
+  final _dias = TextEditingController();
+  final _monto = TextEditingController();
   String _sexo = 'M';
+  String _periodo = 'mensual';
   int _meses = 1;
   File? _foto;
   bool _guardando = false;
+
+  @override
+  void dispose() {
+    _nombre.dispose();
+    _telefono.dispose();
+    _carnet.dispose();
+    _dias.dispose();
+    _monto.dispose();
+    super.dispose();
+  }
 
   Future<void> _tomarFoto(ImageSource origen) async {
     final img =
@@ -39,6 +58,34 @@ class _InscribirScreenState extends State<InscribirScreen> {
     setState(() => _foto = destino);
   }
 
+  double _montoPeriodo(Map<String, double> precios) {
+    if (_periodo == 'semanal') return precios['semanal']!;
+    if (_periodo == 'quincenal') return precios['quincenal']!;
+    if (_periodo == 'personalizado') {
+      return double.tryParse(_monto.text.trim().replaceAll(',', '.')) ??
+          0;
+    }
+    return precios['mensual']! * _meses;
+  }
+
+  int _diasPeriodo() {
+    if (_periodo == 'semanal') return 7;
+    if (_periodo == 'quincenal') return 15;
+    if (_periodo == 'personalizado') {
+      return int.tryParse(_dias.text.trim()) ?? 0;
+    }
+    return 30 * _meses;
+  }
+
+  String _etiquetaPeriodo() {
+    if (_periodo == 'semanal') return 'Semana';
+    if (_periodo == 'quincenal') return 'Quincena';
+    if (_periodo == 'personalizado') {
+      return '${_dias.text.trim()} días (personalizado)';
+    }
+    return '$_meses mes${_meses == 1 ? '' : 'es'}';
+  }
+
   Future<void> _guardar() async {
     final nombre = _nombre.text.trim();
     if (nombre.isEmpty) {
@@ -46,6 +93,100 @@ class _InscribirScreenState extends State<InscribirScreen> {
           const SnackBar(content: Text('Escribe el nombre')));
       return;
     }
+    final tel = _telefono.text.trim();
+    if (tel.isNotEmpty && !validarTelefono(tel)) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text(
+              'Teléfono inválido: 8 dígitos empezando con 5')));
+      return;
+    }
+    final carnet = _carnet.text.trim();
+    if (carnet.isNotEmpty && !validarCarnet(carnet)) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Carnet inválido: 6 a 11 dígitos')));
+      return;
+    }
+    final precios0 = await _precios();
+    if (!mounted) return;
+    if (_periodo == 'personalizado' &&
+        (_diasPeriodo() <= 0 || _montoPeriodo(precios0) <= 0)) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Indica días y monto válidos')));
+      return;
+    }
+
+    // Anti-duplicado: nombre parecido, mismo carnet o teléfono.
+    final dups = await posiblesDuplicados(
+        nombre: nombre,
+        carnet: carnet.isEmpty ? null : carnet,
+        telefono: tel.isEmpty ? null : tel);
+    if (dups.isNotEmpty && mounted) {
+      final seguir = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('⚠️ Posible duplicado'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                  'Ya existe(n) cliente(s) parecido(s):'),
+              const SizedBox(height: 8),
+              for (final d in dups)
+                Text('• ${d['nombre']} (${d['_motivo']})'),
+              const SizedBox(height: 8),
+              const Text('¿Seguro que es un cliente nuevo?'),
+            ],
+          ),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('Revisar')),
+            ElevatedButton(
+                onPressed: () => Navigator.pop(ctx, true),
+                child: const Text('Sí, es nuevo')),
+          ],
+        ),
+      );
+      if (seguir != true) return;
+    }
+
+    // Confirmación con resumen (la operación solo se crea aquí).
+    final precios = await _precios();
+    final monto = _montoPeriodo(precios);
+    final dias = _diasPeriodo();
+    final hasta = previewHastaDias(null, dias);
+    if (!mounted) return;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Confirmar inscripción'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Nombre: $nombre'),
+            Text('Período: ${_etiquetaPeriodo()}'),
+            Text('Monto: ${fmtMonto(monto)} CUP (efectivo)',
+                style: const TextStyle(fontWeight: FontWeight.bold)),
+            Text('Válido hasta: ${fmtFecha(hasta)}',
+                style: const TextStyle(fontWeight: FontWeight.bold)),
+            if (tel.isNotEmpty) Text('Teléfono: $tel'),
+            if (carnet.isNotEmpty) Text('Carnet: $carnet'),
+          ],
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancelar')),
+          ElevatedButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Confirmar')),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+
     setState(() => _guardando = true);
     try {
       final opUuid = const Uuid().v4();
@@ -56,12 +197,12 @@ class _InscribirScreenState extends State<InscribirScreen> {
         payload: {
           'nombre': nombre,
           'sexo': _sexo,
+          'periodo': _periodo,
           'meses': _meses,
-          'telefono': _telefono.text.trim().isEmpty
-              ? null
-              : _telefono.text.trim(),
-          'movil':
-              _movil.text.trim().isEmpty ? null : _movil.text.trim(),
+          if (_periodo == 'personalizado') 'dias': dias,
+          if (_periodo == 'personalizado') 'monto': monto,
+          'telefono': tel.isEmpty ? null : tel,
+          'carnet': carnet.isEmpty ? null : carnet,
           'fecha': DateTime.now().toIso8601String().substring(0, 10),
         },
         fotoPath: fotoPath,
@@ -74,7 +215,7 @@ class _InscribirScreenState extends State<InscribirScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('✅ Guardado (se sincronizará)')));
       Navigator.of(context).pop();
-      SyncEngine.instance.run();
+      SyncEngine.instance.push();
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context)
@@ -82,6 +223,15 @@ class _InscribirScreenState extends State<InscribirScreen> {
     } finally {
       if (mounted) setState(() => _guardando = false);
     }
+  }
+
+  Future<Map<String, double>> _precios() async {
+    final aj = await LocalDb.instance.getAjustes();
+    return {
+      'mensual': (aj['mensualidad'] as num?)?.toDouble() ?? 2000,
+      'semanal': (aj['pago_semanal'] as num?)?.toDouble() ?? 600,
+      'quincenal': (aj['pago_quincenal'] as num?)?.toDouble() ?? 1200,
+    };
   }
 
   @override
@@ -115,21 +265,99 @@ class _InscribirScreenState extends State<InscribirScreen> {
                 const SizedBox(height: 12),
                 Campo(
                     ctrl: _telefono,
-                    etiqueta: 'Teléfono (opcional)',
-                    teclado: TextInputType.phone),
+                    etiqueta: 'Teléfono (8 dígitos)',
+                    teclado: TextInputType.phone,
+                    formato: [
+                      FilteringTextInputFormatter.digitsOnly
+                    ]),
                 Campo(
-                    ctrl: _movil,
-                    etiqueta: 'Móvil (opcional)',
-                    teclado: TextInputType.phone),
+                    ctrl: _carnet,
+                    etiqueta: 'Carnet de identidad (6–11 dígitos)',
+                    teclado: TextInputType.number,
+                    formato: [
+                      FilteringTextInputFormatter.digitsOnly
+                    ]),
                 const SizedBox(height: 4),
-                const Text('Meses pagados:'),
-                DropdownButton<int>(
-                  value: _meses,
-                  items: [1, 2, 3, 6, 12]
-                      .map((m) => DropdownMenuItem(
-                          value: m, child: Text('$m mes(es)')))
-                      .toList(),
-                  onChanged: (v) => setState(() => _meses = v ?? 1),
+                const Text('Período inicial:'),
+                FutureBuilder<Map<String, double>>(
+                  future: _precios(),
+                  builder: (ctx, snap) {
+                    final pr = snap.data ??
+                        {
+                          'mensual': 2000.0,
+                          'semanal': 600.0,
+                          'quincenal': 1200.0
+                        };
+                    return Column(
+                      crossAxisAlignment:
+                          CrossAxisAlignment.start,
+                      children: [
+                        DropdownButton<String>(
+                          value: _periodo == 'mensual'
+                              ? 'mensual:$_meses'
+                              : _periodo,
+                          isExpanded: true,
+                          items: [
+                            DropdownMenuItem(
+                                value: 'semanal',
+                                child: Text(
+                                    'Semana (${fmtMonto(pr['semanal'])} CUP)')),
+                            DropdownMenuItem(
+                                value: 'quincenal',
+                                child: Text(
+                                    'Quincena (${fmtMonto(pr['quincenal'])} CUP)')),
+                            for (final m in [1, 2, 3, 6, 12])
+                              DropdownMenuItem(
+                                  value: 'mensual:$m',
+                                  child: Text(
+                                      '$m mes${m == 1 ? '' : 'es'}')),
+                            const DropdownMenuItem(
+                                value: 'personalizado',
+                                child:
+                                    Text('Personalizado…')),
+                          ],
+                          onChanged: (v) => setState(() {
+                            if (v == 'semanal' ||
+                                v == 'quincenal' ||
+                                v == 'personalizado') {
+                              _periodo = v!;
+                            } else {
+                              _periodo = 'mensual';
+                              _meses =
+                                  int.parse(v!.split(':')[1]);
+                            }
+                          }),
+                        ),
+                        if (_periodo == 'personalizado') ...[
+                          const SizedBox(height: 8),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: Campo(
+                                    ctrl: _dias,
+                                    etiqueta: 'Días',
+                                    teclado:
+                                        TextInputType.number,
+                                    formato: [
+                                      FilteringTextInputFormatter
+                                          .digitsOnly
+                                    ]),
+                              ),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Campo(
+                                    ctrl: _monto,
+                                    etiqueta: 'Monto (CUP)',
+                                    teclado: const TextInputType
+                                        .numberWithOptions(
+                                        decimal: true)),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ],
+                    );
+                  },
                 ),
                 const SizedBox(height: 12),
                 const Text('Foto:'),
@@ -137,7 +365,8 @@ class _InscribirScreenState extends State<InscribirScreen> {
                 if (_foto != null)
                   ClipRRect(
                     borderRadius: BorderRadius.circular(8),
-                    child: Image.file(_foto!, height: 200, fit: BoxFit.cover),
+                    child: Image.file(_foto!,
+                        height: 200, fit: BoxFit.cover),
                   ),
                 Row(
                   children: [
@@ -145,7 +374,8 @@ class _InscribirScreenState extends State<InscribirScreen> {
                       child: OutlinedButton.icon(
                         icon: const Text('📷'),
                         label: const Text('Cámara'),
-                        onPressed: () => _tomarFoto(ImageSource.camera),
+                        onPressed: () =>
+                            _tomarFoto(ImageSource.camera),
                       ),
                     ),
                     const SizedBox(width: 8),
@@ -153,7 +383,8 @@ class _InscribirScreenState extends State<InscribirScreen> {
                       child: OutlinedButton.icon(
                         icon: const Text('🖼️'),
                         label: const Text('Galería'),
-                        onPressed: () => _tomarFoto(ImageSource.gallery),
+                        onPressed: () =>
+                            _tomarFoto(ImageSource.gallery),
                       ),
                     ),
                   ],
@@ -162,13 +393,14 @@ class _InscribirScreenState extends State<InscribirScreen> {
                 SizedBox(
                   width: double.infinity,
                   child: ElevatedButton(
-                    onPressed: _guardando ? null : _guardar,
+                    onPressed:
+                        _guardando ? null : _guardar,
                     child: _guardando
                         ? const SizedBox(
                             height: 20,
                             width: 20,
-                            child:
-                                CircularProgressIndicator(strokeWidth: 2))
+                            child: CircularProgressIndicator(
+                                strokeWidth: 2))
                         : const Text('Guardar',
                             style: TextStyle(fontSize: 18)),
                   ),
