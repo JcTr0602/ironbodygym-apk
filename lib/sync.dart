@@ -17,8 +17,10 @@ library;
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
+import 'package:image/image.dart' as img;
 import 'package:uuid/uuid.dart';
 
 import 'auth.dart';
@@ -32,11 +34,19 @@ class SyncStatus {
   final int pending;
   final DateTime? lastOk;
   final String? lastError;
+
+  /// Progreso 0..1 de la fase actual (null = indeterminado).
+  final double? progreso;
+
+  /// Detalle legible del progreso, ej. "Subiendo foto 2 de 5…".
+  final String? detalle;
   const SyncStatus(
       {this.phase = SyncPhase.idle,
       this.pending = 0,
       this.lastOk,
-      this.lastError});
+      this.lastError,
+      this.progreso,
+      this.detalle});
 }
 
 /// Detalle de la última sincronización (para la pantalla de Sync).
@@ -84,15 +94,42 @@ class SyncEngine {
         if (contentType != null) 'Content-Type': contentType,
       };
 
-  void _emit(SyncPhase phase, {String? error}) async {
+  void _emit(SyncPhase phase,
+      {String? error, double? progreso, String? detalle}) async {
     final pending = await _db.countPendingOps();
     final lastOk = await _ultimaOk();
     _current = SyncStatus(
         phase: phase,
         pending: pending,
         lastOk: lastOk,
-        lastError: error);
+        lastError: error,
+        progreso: progreso,
+        detalle: detalle);
     _status.add(_current);
+  }
+
+  /// Describe un error de red en lenguaje del entrenador (punto 20):
+  /// distingue "sin internet" de "error del servidor".
+  String _describeError(Object e) {
+    final s = e.toString();
+    final l = s.toLowerCase();
+    if (e is SocketException ||
+        l.contains('socketexception') ||
+        l.contains('failed host lookup') ||
+        l.contains('network is unreachable') ||
+        l.contains('no address associated with hostname')) {
+      return 'Sin conexión a internet';
+    }
+    if (e is TimeoutException || l.contains('timeout')) {
+      return 'Conexión muy lenta (tiempo agotado)';
+    }
+    final m51 = RegExp(r'http 5\d\d').firstMatch(l);
+    if (m51 != null) return 'Error del servidor (reintenta luego)';
+    if (l.contains('http 401') || l.contains('401')) {
+      return 'Sesión vencida';
+    }
+    final corto = s.length > 90 ? '${s.substring(0, 90)}…' : s;
+    return 'Error de red: $corto';
   }
 
   Future<DateTime?> _ultimaOk() async {
@@ -137,8 +174,8 @@ class SyncEngine {
       _sesionVencida();
       _emit(SyncPhase.idle);
     } catch (e) {
-      await _db.setMeta('last_sync_error', e.toString());
-      _emit(SyncPhase.error, error: e.toString());
+      await _db.setMeta('last_sync_error', _describeError(e));
+      _emit(SyncPhase.error, error: _describeError(e));
       await Future.delayed(const Duration(seconds: 2));
       _emit(SyncPhase.idle);
     } finally {
@@ -162,7 +199,7 @@ class SyncEngine {
       _sesionVencida();
       _emit(SyncPhase.idle);
     } catch (e) {
-      _emit(SyncPhase.error, error: e.toString());
+      _emit(SyncPhase.error, error: _describeError(e));
       await Future.delayed(const Duration(seconds: 2));
       _emit(SyncPhase.idle);
     } finally {
@@ -184,7 +221,7 @@ class SyncEngine {
       _sesionVencida();
       _emit(SyncPhase.idle);
     } catch (e) {
-      _emit(SyncPhase.error, error: e.toString());
+      _emit(SyncPhase.error, error: _describeError(e));
       await Future.delayed(const Duration(seconds: 2));
       _emit(SyncPhase.idle);
     } finally {
@@ -194,44 +231,81 @@ class SyncEngine {
 
   // -- subida ----------------------------------------------------------
   /// Devuelve la cantidad de ops que quedaron aplicadas.
+  ///
+  /// Envío en lote (punto 19): varias ops por petición PostgREST
+  /// (bulk + on_conflict para idempotencia), menos viajes de ida y vuelta
+  /// con conexiones de alta latencia.
   Future<int> _uploadOps() async {
     var aplicadas = 0;
     final ops = await _db.pendingOps();
+    // 1) las ya aplicadas se marcan sin reenviar
+    final porEnviar = <Map<String, dynamic>>[];
     for (final op in ops) {
       final uuid = op['op_uuid'] as String;
-      // ¿ya fue aplicada?
       if (await _opAplicada(uuid)) {
         await _db.markOp(uuid, 'aplicada');
         aplicadas++;
-        continue;
-      }
-      final body = jsonEncode({
-        'op_uuid': uuid,
-        'device_tag': 'apk-android',
-        'tipo': op['tipo'],
-        'payload': jsonDecode(op['payload'] as String),
-      });
-      http.Response r;
-      try {
-        r = await http
-            .post(Uri.parse('$_base/rest/v1/sync_ops'),
-                headers: {..._headers(), 'Content-Type': 'application/json'},
-                body: body)
-            .timeout(const Duration(seconds: 30));
-      } catch (e) {
-        await _db.bumpOp(uuid, 'sin conexión: $e');
-        continue;
-      }
-      if (r.statusCode == 201 || r.statusCode == 200 || r.statusCode == 409) {
-        // 409 = ya existe (reintento): idempotente, se sigue.
-        await _db.markOp(uuid, 'enviada');
-      } else if (r.statusCode == 401) {
-        throw SessionExpired();
       } else {
-        await _db.bumpOp(uuid, 'HTTP ${r.statusCode}');
+        porEnviar.add(op);
       }
     }
-    // segunda pasada: marcar aplicadas (incluye las 'enviada')
+    // 2) envío en lotes de 50
+    const loteTam = 50;
+    var hechos = 0;
+    for (var i = 0; i < porEnviar.length; i += loteTam) {
+      final fin =
+          (i + loteTam < porEnviar.length) ? i + loteTam : porEnviar.length;
+      final lote = porEnviar.sublist(i, fin);
+      _emit(SyncPhase.uploading,
+          detalle:
+              '⬆️ Subiendo operaciones ${fin} de ${porEnviar.length}…',
+          progreso: fin / porEnviar.length);
+      final body = jsonEncode([
+        for (final op in lote)
+          {
+            'op_uuid': op['op_uuid'],
+            'device_tag': 'apk-android',
+            'tipo': op['tipo'],
+            'payload': jsonDecode(op['payload'] as String),
+          }
+      ]);
+      try {
+        final r = await http
+            .post(
+                Uri.parse(
+                    '$_base/rest/v1/sync_ops?on_conflict=op_uuid'),
+                headers: {
+                  ..._headers(),
+                  'Content-Type': 'application/json',
+                  // duplicados se fusionan: idempotente por op_uuid
+                  'Prefer':
+                      'resolution=merge-duplicates,return=minimal',
+                },
+                body: body)
+            .timeout(const Duration(seconds: 60));
+        if (r.statusCode == 401) throw SessionExpired();
+        if (r.statusCode == 200 ||
+            r.statusCode == 201 ||
+            r.statusCode == 204) {
+          for (final op in lote) {
+            await _db.markOp(op['op_uuid'] as String, 'enviada');
+          }
+          hechos += lote.length;
+        } else {
+          for (final op in lote) {
+            await _db.bumpOp(op['op_uuid'] as String,
+                _describeError('HTTP ${r.statusCode}'));
+          }
+        }
+      } catch (e) {
+        if (e is SessionExpired) rethrow;
+        for (final op in lote) {
+          await _db.bumpOp(
+              op['op_uuid'] as String, _describeError(e));
+        }
+      }
+    }
+    // 3) segunda pasada: marcar aplicadas (incluye las 'enviada')
     for (final op in await _db.unappliedOps()) {
       final uuid = op['op_uuid'] as String;
       if (await _opAplicada(uuid)) {
@@ -306,10 +380,16 @@ class SyncEngine {
     final since = wm;
     var maxSeq = wm;
     var bajados = 0;
-    for (final tabla in ['clientes', 'pagos', 'pagos_diarios']) {
+    const tablas = ['clientes', 'pagos', 'pagos_diarios'];
+    var ti = 0;
+    for (final tabla in tablas) {
+      ti++;
       final supTabla =
           {'clientes': 'sync_clientes', 'pagos': 'sync_pagos'}[tabla] ??
               'sync_pagos_diarios';
+      _emit(SyncPhase.downloading,
+          detalle: '⬇️ Bajando $tabla ($ti de ${tablas.length})…',
+          progreso: ti / (tablas.length + 1));
       var pageWm = since;
       while (true) {
         final r = await http.get(
@@ -337,6 +417,9 @@ class SyncEngine {
       }
     }
     // borrados (tombstones)
+    _emit(SyncPhase.downloading,
+        detalle: '⬇️ Bajando borrados…',
+        progreso: tablas.length / (tablas.length + 1));
     var pageWm = since;
     while (true) {
       final r = await http.get(
@@ -368,9 +451,171 @@ class SyncEngine {
   }
 
   // -- fotos -------------------------------------------------------------
+  /// Reduce la foto a máx. 1024px de ancho (JPEG 80) antes de subirla.
+  /// Las fotos de cámara a resolución completa (varios MB) no terminan
+  /// de subir con conexiones lentas; así quedan en ~150-300 KB.
+  Uint8List _comprimirFoto(Uint8List bytes) {
+    try {
+      final dec = img.decodeImage(bytes);
+      if (dec == null || dec.width <= 1024) return bytes;
+      final chica = img.copyResize(dec, width: 1024);
+      return Uint8List.fromList(img.encodeJpg(chica, quality: 80));
+    } catch (_) {
+      return bytes; // si falla, se intenta con la original
+    }
+  }
+
+  /// Crea una subida tus reanudable. Devuelve la URL de subida o null
+  /// si tus no está disponible / fue rechazada.
+  Future<String?> _tusCrear(String objectPath, int length) async {
+    String meta(String k, String v) =>
+        '$k ${base64Encode(utf8.encode(v))}';
+    try {
+      final r = await http
+          .post(
+            Uri.parse('$_base/storage/v1/upload/resumable'),
+            headers: {
+              ..._headers(),
+              'Tus-Resumable': '1.0.0',
+              'Upload-Length': '$length',
+              'Upload-Metadata': [
+                meta('filename', objectPath.split('/').last),
+                meta('bucketName', AppConfig.bucketFotos),
+                meta('objectName', objectPath),
+                meta('contentType', 'image/jpeg'),
+              ].join(','),
+            },
+          )
+          .timeout(const Duration(seconds: 30));
+      if (r.statusCode != 200 && r.statusCode != 201) return null;
+      final loc = r.headers['location'];
+      if (loc == null || loc.isEmpty) return null;
+      return loc.startsWith('http') ? loc : '$_base$loc';
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Cuánto ya se subió según el servidor: >=0 offset, -1 no existe,
+  /// -2 no se pudo averiguar.
+  Future<int> _tusOffset(String location) async {
+    try {
+      final r = await http.head(Uri.parse(location), headers: {
+        ..._headers(),
+        'Tus-Resumable': '1.0.0',
+      }).timeout(const Duration(seconds: 30));
+      if (r.statusCode == 404 || r.statusCode == 410) return -1;
+      if (r.statusCode != 200) return -2;
+      return int.tryParse(r.headers['upload-offset'] ?? '') ?? -2;
+    } catch (_) {
+      return -2;
+    }
+  }
+
+  /// Sube la foto por partes con tus (punto 17): si se corta la conexión,
+  /// continúa donde quedó en vez de empezar de cero.
+  /// Devuelve true si terminó, false si hay que reintentar luego,
+  /// null si tus no está disponible (usar el método simple).
+  Future<bool?> _subirFotoTus(
+      String opUuid, String objectPath, Uint8List bytes) async {
+    final locKey = 'tus_loc_$opUuid';
+    final offKey = 'tus_offset_$opUuid';
+    String? location = await _db.getMeta(locKey);
+    if (location != null && location.isEmpty) location = null;
+    var offset = int.tryParse(await _db.getMeta(offKey) ?? '0') ?? 0;
+
+    if (location == null) {
+      location = await _tusCrear(objectPath, bytes.length);
+      if (location == null) return null;
+      await _db.setMeta(locKey, location);
+      offset = 0;
+    } else {
+      final remoto = await _tusOffset(location);
+      if (remoto == -1) {
+        // expiró en el servidor: crear de nuevo
+        location = await _tusCrear(objectPath, bytes.length);
+        if (location == null) return null;
+        await _db.setMeta(locKey, location);
+        offset = 0;
+      } else if (remoto >= 0) {
+        offset = remoto;
+      }
+      // remoto == -2: no se pudo averiguar; se usa el guardado
+    }
+    if (offset > bytes.length) offset = 0;
+    final url = location!;
+
+    const chunk = 256 * 1024;
+    while (offset < bytes.length) {
+      final fin =
+          (offset + chunk < bytes.length) ? offset + chunk : bytes.length;
+      var okChunk = false;
+      for (var intento = 0; intento < 3 && !okChunk; intento++) {
+        try {
+          final r = await http
+              .patch(
+                Uri.parse(url),
+                headers: {
+                  ..._headers(),
+                  'Tus-Resumable': '1.0.0',
+                  'Content-Type': 'application/offset+octet-stream',
+                  'Upload-Offset': '$offset',
+                },
+                body: bytes.sublist(offset, fin),
+              )
+              .timeout(const Duration(seconds: 120));
+          if (r.statusCode == 204 || r.statusCode == 200) {
+            offset =
+                int.tryParse(r.headers['upload-offset'] ?? '') ?? fin;
+            okChunk = true;
+          } else if (r.statusCode == 404 || r.statusCode == 410) {
+            // la subida murió en el servidor: recrearla luego
+            await _db.setMeta(locKey, '');
+            await _db.setMeta(offKey, '0');
+            return false;
+          }
+        } catch (_) {
+          okChunk = false;
+        }
+      }
+      if (!okChunk) {
+        await _db.setMeta(offKey, '$offset');
+        return false; // se retoma donde quedó
+      }
+      await _db.setMeta(offKey, '$offset');
+    }
+    // limpia el estado tus de esta foto
+    await _db.setMeta(locKey, '');
+    await _db.setMeta(offKey, '0');
+    return true;
+  }
+
+  /// Método simple (un solo PUT): respaldo si tus no está disponible.
+  Future<bool> _subirFotoSimple(String path, Uint8List bytes) async {
+    for (var intento = 0; intento < 3; intento++) {
+      try {
+        final r = await http
+            .post(
+                Uri.parse('$_base/storage/v1/object/'
+                    '${AppConfig.bucketFotos}/$path'),
+                headers: {
+                  ..._headers(),
+                  'Content-Type': 'image/jpeg',
+                  'x-upsert': 'true',
+                },
+                body: bytes)
+            .timeout(const Duration(seconds: 120));
+        if (r.statusCode == 200 || r.statusCode == 201) return true;
+      } catch (_) {}
+    }
+    return false;
+  }
+
   Future<void> _uploadFotos() async {
     final fotos = await _db.fotosPendientes();
+    var i = 0;
     for (final f in fotos) {
+      i++;
       final fid = f['id'] as int;
       var clienteId = f['cliente_id'] as int?;
       clienteId ??= await _clienteDeOp(f['op_uuid'] as String);
@@ -383,22 +628,20 @@ class SyncEngine {
         await _db.markFotoLista(fid);
         continue;
       }
-      final bytes = await file.readAsBytes();
+      var bytes = await file.readAsBytes();
+      bytes = _comprimirFoto(bytes);
       final path = 'pendientes/${f['op_uuid']}.jpg';
-      try {
-        final r = await http.post(
-            Uri.parse('$_base/storage/v1/object/'
-                '${AppConfig.bucketFotos}/$path'),
-            headers: {
-              ..._headers(),
-              'Content-Type': 'image/jpeg',
-              'x-upsert': 'true',
-            },
-            body: bytes).timeout(const Duration(seconds: 60));
-        if (r.statusCode != 200 && r.statusCode != 201) continue;
-      } catch (_) {
-        continue; // reintenta en el próximo ciclo
-      }
+      _emit(SyncPhase.photos,
+          detalle: '📷 Subiendo foto $i de ${fotos.length}…',
+          progreso: (i - 1) / fotos.length);
+      // reanudable primero; si tus no está disponible, método simple
+      final tus =
+          await _subirFotoTus(f['op_uuid'] as String, path, bytes);
+      final ok = tus ?? await _subirFotoSimple(path, bytes);
+      if (!ok) continue;
+      _emit(SyncPhase.photos,
+          detalle: '📷 Subiendo foto $i de ${fotos.length}…',
+          progreso: i / fotos.length);
       // encola la op 'foto' para que el puente la guarde en gym.db
       final d = await _db.db;
       final opUuid = const Uuid().v4();

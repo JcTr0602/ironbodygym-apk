@@ -6,6 +6,8 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:uuid/uuid.dart';
 
 import '../fotos.dart';
@@ -219,8 +221,100 @@ class _FichaScreenState extends State<FichaScreen> {
     SyncEngine.instance.push();
   }
 
-  Future<void> _aPapelera() async {
+  /// Cambia la foto del cliente: cámara o galería (punto 29).
+  Future<void> _cambiarFoto() async {
+    final origen = await showDialog<ImageSource>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('📷 Cambiar foto'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading:
+                  const Text('📸', style: TextStyle(fontSize: 24)),
+              title: const Text('Tomar foto'),
+              onTap: () =>
+                  Navigator.pop(ctx, ImageSource.camera),
+            ),
+            ListTile(
+              leading:
+                  const Text('🖼️', style: TextStyle(fontSize: 24)),
+              title: const Text('Elegir de la galería'),
+              onTap: () =>
+                  Navigator.pop(ctx, ImageSource.gallery),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (origen == null || !mounted) return;
+    final img = await ImagePicker().pickImage(
+        source: origen, maxWidth: 1024, imageQuality: 80);
+    if (img == null || !mounted) return;
+    final dir = await getApplicationDocumentsDirectory();
+    final destino = File('${dir.path}/foto_${widget.clienteId}_'
+        '${DateTime.now().millisecondsSinceEpoch}.jpg');
+    await File(img.path).copy(destino.path);
+    // Encola la subida (se comprime al subir, punto 16).
+    final opUuid = const Uuid().v4();
+    final fid = await LocalDb.instance.addFotoPendiente(
+        opUuid: opUuid, localPath: destino.path);
+    await LocalDb.instance.setFotoCliente(fid, widget.clienteId);
+    if (!mounted) return;
+    setState(() => _foto = destino);
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('📷 Foto actualizada (se sincronizará)')));
+    SyncEngine.instance.push();
+  }
+
+  /// Renovación rápida con un toque: 1 mes en efectivo (punto 30).
+  Future<void> _renovar() async {
+    final c = _c;
+    if (c == null) return;
+    final aj = await LocalDb.instance.getAjustes();
+    final mensual = (aj['mensualidad'] as num?)?.toDouble() ?? 2000;
+    final nuevo =
+        previewHastaDias(c['pagado_hasta'] as String?, 30);
+    if (!mounted) return;
     final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('🔄 Renovación rápida'),
+        content: Text('${c['nombre']}\n'
+            '1 mes — ${fmtMonto(mensual)} CUP en efectivo\n'
+            'Nuevo vencimiento: ${fmtFecha(nuevo)}'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancelar')),
+          ElevatedButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Renovar')),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    await LocalDb.instance.queueOp(
+      opUuid: const Uuid().v4(),
+      tipo: 'pago_mensual',
+      payload: {
+        'cliente_id': widget.clienteId,
+        'periodo': 'mensual',
+        'meses': 1,
+        'metodo': 'efectivo',
+        'fecha':
+            DateTime.now().toIso8601String().substring(0, 10),
+      },
+    );
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('✅ Renovado (se sincronizará)')));
+    _cargar();
+    SyncEngine.instance.push();
+  }
+
+  Future<void> _aPapelera() async {    final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('🗑️ Enviar a papelera'),
@@ -253,6 +347,8 @@ class _FichaScreenState extends State<FichaScreen> {
   @override
   Widget build(BuildContext context) {
     final c = _c;
+    final vencido = c != null &&
+        (diasRestantes(c['pagado_hasta'] as String?) ?? 0) < 0;
     return Scaffold(
       appBar: AppBar(
         title: Text(c == null ? '…' : '👤 ${c['nombre']}'),
@@ -284,6 +380,13 @@ class _FichaScreenState extends State<FichaScreen> {
                                 radius: 60,
                                 child: Text('👤',
                                     style: TextStyle(fontSize: 48))),
+                      ),
+                      Center(
+                        child: TextButton.icon(
+                          icon: const Text('📷'),
+                          label: const Text('Cambiar foto'),
+                          onPressed: _cambiarFoto,
+                        ),
                       ),
                       const SizedBox(height: 12),
                       _fila('🪪 Carnet', '${c['carnet'] ?? '—'}'),
@@ -344,6 +447,18 @@ class _FichaScreenState extends State<FichaScreen> {
                               '${fmtFecha(p['fecha'] as String?)} · ${p['periodo'] ?? 'mensual'}'),
                         ),
                       const SizedBox(height: 16),
+                      if (vencido)
+                        SizedBox(
+                          width: double.infinity,
+                          child: ElevatedButton.icon(
+                            icon: const Text('🔄'),
+                            label: const Text(
+                                'Renovación rápida (1 mes)',
+                                style: TextStyle(fontSize: 16)),
+                            onPressed: _renovar,
+                          ),
+                        ),
+                      if (vencido) const SizedBox(height: 8),
                       SizedBox(
                         width: double.infinity,
                         child: ElevatedButton(
