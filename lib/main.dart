@@ -40,8 +40,7 @@ void callbackDispatcher() {
 
 Future<void> _programarSubidaFondo() async {
   try {
-    await Workmanager().initialize(callbackDispatcher,
-        isInDebugMode: false);
+    await Workmanager().initialize(callbackDispatcher);
     await Workmanager().registerPeriodicTask(
       'ironbody-sync-fondo',
       'subirPendientes',
