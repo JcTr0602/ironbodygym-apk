@@ -8,11 +8,15 @@ import 'package:flutter/material.dart';
 import '../auth.dart';
 import '../localdb.dart';
 import '../negocio.dart';
+import '../novedades.dart';
+import '../perfil.dart';
 import '../sync.dart';
 import '../theme.dart';
+import 'ajustes.dart';
 import 'ayuda.dart';
 import 'buscar.dart';
 import 'cola.dart';
+import 'cumpleanos.dart';
 import 'inscribir.dart';
 import 'listas.dart';
 import 'login.dart';
@@ -42,6 +46,9 @@ class _HomeScreenState extends State<HomeScreen> {
   final _auth = AuthService();
   static const naranja = Color(0xFFE8821A);
 
+  /// Aviso "llevas +8h sin subir" (punto 10). Texto listo o null.
+  String? _avisoSync;
+
   @override
   void initState() {
     super.initState();
@@ -49,6 +56,10 @@ class _HomeScreenState extends State<HomeScreen> {
     // Auto-actualiza contadores cuando termina una sincronización.
     _sub = SyncEngine.instance.statusStream.listen((s) {
       if (s.phase == SyncPhase.idle) _cargar();
+    });
+    // "Lo Nuevo" una vez tras actualizar (punto 46).
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) mostrarNovedadesSiHay(context);
     });
   }
 
@@ -68,6 +79,17 @@ class _HomeScreenState extends State<HomeScreen> {
     final cart = await resumenCartera(mens);
     final porSubir = await LocalDb.instance.countPendingOps();
     final det = await SyncEngine.instance.detalle();
+    // Aviso "+8h sin subir" (punto 10)
+    String? aviso;
+    final quiereAviso =
+        await PerfilService.instance.getRecordatorioSync();
+    if (quiereAviso && porSubir > 0 && det.ultimaPush != null) {
+      final horas =
+          DateTime.now().difference(det.ultimaPush!).inHours;
+      if (horas >= 8) {
+        aviso = '⏳ Llevas $horas h sin subir cambios';
+      }
+    }
     if (mounted) {
       setState(() {
         _vencen = v.length;
@@ -78,6 +100,7 @@ class _HomeScreenState extends State<HomeScreen> {
         _pendiente = p;
         _porSubir = porSubir;
         _lastSync = det.ultimaPull ?? det.ultimaPush;
+        _avisoSync = aviso;
       });
     }
   }
@@ -186,7 +209,41 @@ class _HomeScreenState extends State<HomeScreen> {
               offset: const Offset(0, -40),
               child: Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: Card(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (_avisoSync != null)
+                      Padding(
+                        padding:
+                            const EdgeInsets.only(bottom: 8),
+                        child: InkWell(
+                          onTap: () =>
+                              _ir(const ColaScreen()),
+                          borderRadius:
+                              BorderRadius.circular(12),
+                          child: Container(
+                            width: double.infinity,
+                            padding:
+                                const EdgeInsets.symmetric(
+                                    vertical: 10,
+                                    horizontal: 12),
+                            decoration: BoxDecoration(
+                              color: Colors.orange.shade700,
+                              borderRadius:
+                                  BorderRadius.circular(12),
+                            ),
+                            child: Text(
+                              '$_avisoSync\nToca para sincronizar ahora',
+                              style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.bold),
+                              textAlign: TextAlign.center,
+                            ),
+                          ),
+                        ),
+                      ),
+                    Card(
                   elevation: 4,
                   shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(16)),
@@ -253,6 +310,8 @@ class _HomeScreenState extends State<HomeScreen> {
                     ),
                   ),
                 ),
+                  ],
+                ),
               ),
             ),
             Expanded(
@@ -285,6 +344,10 @@ class _HomeScreenState extends State<HomeScreen> {
                         () => _ir(const TransferenciaScreen())),
                     _boton(Icons.person_pin, 'Mi turno',
                         () => _ir(const MiTurnoScreen())),
+                    _boton(Icons.cake, 'Cumpleaños',
+                        () => _ir(const CumpleanosScreen())),
+                    _boton(Icons.settings, 'Ajustes',
+                        () => _ir(const AjustesScreen())),
                   ],
                 ),
               ),

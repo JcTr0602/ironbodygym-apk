@@ -25,6 +25,7 @@ class _ListasScreenState extends State<ListasScreen>
   List<Map<String, dynamic>> _menos30 = [];
   List<Map<String, dynamic>> _mas30 = [];
   List<Map<String, dynamic>> _porVencer = [];
+  String _orden = 'nombre'; // nombre | vencimiento | dias
 
   @override
   void initState() {
@@ -46,6 +47,39 @@ class _ListasScreenState extends State<ListasScreen>
         _porVencer = pv;
       });
     }
+  }
+
+  /// Ordena una lista según el criterio elegido (punto 26).
+  List<Map<String, dynamic>> _ordenar(
+      List<Map<String, dynamic>> rows) {
+    final r = [...rows];
+    switch (_orden) {
+      case 'vencimiento':
+        r.sort((a, b) {
+          final c = '${a['pagado_hasta'] ?? ''}'
+              .compareTo('${b['pagado_hasta'] ?? ''}');
+          return c != 0
+              ? c
+              : '${a['nombre']}'.compareTo('${b['nombre']}');
+        });
+        break;
+      case 'dias':
+        r.sort((a, b) {
+          final da =
+              diasRestantes(a['pagado_hasta'] as String?) ?? 999999;
+          final db =
+              diasRestantes(b['pagado_hasta'] as String?) ?? 999999;
+          final c = da.compareTo(db);
+          return c != 0
+              ? c
+              : '${a['nombre']}'.compareTo('${b['nombre']}');
+        });
+        break;
+      default:
+        r.sort((a, b) =>
+            '${a['nombre']}'.compareTo('${b['nombre']}'));
+    }
+    return r;
   }
 
   Future<void> _pagoRapido(Map<String, dynamic> c) async {
@@ -82,16 +116,43 @@ class _ListasScreenState extends State<ListasScreen>
       body: Column(
         children: [
           const SyncBanner(),
+          Padding(
+            padding:
+                const EdgeInsets.fromLTRB(16, 4, 16, 0),
+            child: Row(
+              children: [
+                const Text('Ordenar: ',
+                    style: TextStyle(fontSize: 13)),
+                DropdownButton<String>(
+                  value: _orden,
+                  items: const [
+                    DropdownMenuItem(
+                        value: 'nombre',
+                        child: Text('Nombre')),
+                    DropdownMenuItem(
+                        value: 'vencimiento',
+                        child: Text('Vencimiento')),
+                    DropdownMenuItem(
+                        value: 'dias',
+                        child: Text('Días restantes')),
+                  ],
+                  onChanged: (v) =>
+                      setState(() => _orden = v ?? 'nombre'),
+                ),
+              ],
+            ),
+          ),
           Expanded(
             child: TabBarView(
               controller: _tab,
               children: [
-                _lista(_hoy, '🎉 Nadie vence hoy. Todo al día.'),
-                _lista(_porVencer,
+                _lista(_ordenar(_hoy),
+                    '🎉 Nadie vence hoy. Todo al día.'),
+                _lista(_ordenar(_porVencer),
                     '🎉 Nadie por vencer en 3 días.'),
-                _lista(_menos30,
+                _lista(_ordenar(_menos30),
                     '🎉 Sin atrasados de menos de un mes.'),
-                _lista(_mas30,
+                _lista(_ordenar(_mas30),
                     '🎉 Sin atrasados de más de un mes.'),
               ],
             ),

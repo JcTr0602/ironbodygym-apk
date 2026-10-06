@@ -48,7 +48,8 @@ class _InscribirScreenState extends State<InscribirScreen> {
 
   Future<void> _tomarFoto(ImageSource origen) async {
     final img =
-        await ImagePicker().pickImage(source: origen, imageQuality: 80);
+        await ImagePicker().pickImage(
+          source: origen, maxWidth: 1024, imageQuality: 80);
     if (img == null) return;
     // copia a almacenamiento propio (el temporal del picker puede borrarse)
     final dir = await getApplicationDocumentsDirectory();

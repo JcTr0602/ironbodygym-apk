@@ -42,19 +42,21 @@ class SyncBanner extends StatelessWidget {
         switch (s.phase) {
           case SyncPhase.uploading:
             color = Colors.orange;
-            texto = '⬆️ Subiendo operaciones…';
+            texto = s.detalle ?? '⬆️ Subiendo operaciones…';
             break;
           case SyncPhase.downloading:
             color = Colors.orange;
-            texto = '⬇️ Descargando cambios…';
+            texto = s.detalle ?? '⬇️ Descargando cambios…';
             break;
           case SyncPhase.photos:
             color = Colors.orange;
-            texto = '📷 Subiendo fotos…';
+            texto = s.detalle ?? '📷 Subiendo fotos…';
             break;
           case SyncPhase.error:
             color = Colors.red;
-            texto = '⚠️ Error de sincronización';
+            texto = s.lastError?.isNotEmpty == true
+                ? '⚠️ ${s.lastError}'
+                : '⚠️ Error de sincronización';
             break;
           case SyncPhase.idle:
             if (s.pending > 0) {
@@ -67,6 +69,9 @@ class SyncBanner extends StatelessWidget {
             }
             break;
         }
+        final enProgreso = s.phase == SyncPhase.uploading ||
+            s.phase == SyncPhase.downloading ||
+            s.phase == SyncPhase.photos;
         return InkWell(
           onTap: () => SyncEngine.instance.run(),
           child: Container(
@@ -74,25 +79,47 @@ class SyncBanner extends StatelessWidget {
             color: color,
             padding:
                 const EdgeInsets.symmetric(vertical: 6, horizontal: 12),
-            child: mostrarDesglose
-                ? FutureBuilder<Map<String, int>>(
-                    future: LocalDb.instance.pendingByType(),
-                    builder: (c2, s2) {
-                      final det = (s2.data ?? {})
-                          .entries
-                          .map((e) => _etiqueta(e.key, e.value))
-                          .join(' · ');
-                      return Text(
-                          det.isEmpty ? texto : '$texto: $det',
-                          style: const TextStyle(
-                              color: Colors.white, fontSize: 12),
-                          textAlign: TextAlign.center);
-                    },
-                  )
-                : Text(texto,
-                    style: const TextStyle(
-                        color: Colors.white, fontSize: 13),
-                    textAlign: TextAlign.center),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                mostrarDesglose
+                    ? FutureBuilder<Map<String, int>>(
+                        future:
+                            LocalDb.instance.pendingByType(),
+                        builder: (c2, s2) {
+                          final det = (s2.data ?? {})
+                              .entries
+                              .map((e) =>
+                                  _etiqueta(e.key, e.value))
+                              .join(' · ');
+                          return Text(
+                              det.isEmpty
+                                  ? texto
+                                  : '$texto: $det',
+                              style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 12),
+                              textAlign: TextAlign.center);
+                        },
+                      )
+                    : Text(texto,
+                        style: const TextStyle(
+                            color: Colors.white, fontSize: 13),
+                        textAlign: TextAlign.center),
+                if (enProgreso)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 4),
+                    child: LinearProgressIndicator(
+                      value: s.progreso,
+                      backgroundColor: Colors.white30,
+                      valueColor:
+                          const AlwaysStoppedAnimation<Color>(
+                              Colors.white),
+                      minHeight: 4,
+                    ),
+                  ),
+              ],
+            ),
           ),
         );
       },
