@@ -7,6 +7,8 @@ library;
 
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import 'config.dart';
+
 String usernameToEmail(String username) {
   var n = username.trim().toLowerCase();
   // quita tildes
@@ -57,6 +59,32 @@ class AuthService {
   Future<void> signIn(String username, String password) async {
     final email = usernameToEmail(username);
     await _c.auth.signInWithPassword(email: email, password: password);
+  }
+
+  /// ¿Es el dueño? Solo Jc tiene acciones restringidas (ej. borrado
+  /// definitivo en papelera).
+  bool get isOwner {
+    final email = session?.user.email ?? '';
+    final base = email.split('@').first.toLowerCase();
+    return AppConfig.ownerUsernames.contains(base);
+  }
+
+  /// Nombre de usuario (parte local del email alias), en minúsculas.
+  String get username {
+    final email = session?.user.email ?? '';
+    return email.split('@').first.toLowerCase();
+  }
+
+  /// Cambia la contraseña del usuario logueado. Verifica primero la
+  /// actual re-autenticando (si es incorrecta, lanza).
+  Future<void> changePassword(String actual, String nueva) async {
+    final email = session?.user.email;
+    if (email == null || email.isEmpty) {
+      throw StateError('sin sesión');
+    }
+    // Re-autentica con la contraseña actual.
+    await _c.auth.signInWithPassword(email: email, password: actual);
+    await _c.auth.updateUser(UserAttributes(password: nueva));
   }
 
   Future<void> signOut() => _c.auth.signOut();
