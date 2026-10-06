@@ -1,4 +1,5 @@
 /// Registro de pagos diarios del turno (ej. 200 CUP por turno).
+/// Muestra los turnos ya registrados hoy para evitar duplicados.
 library;
 
 import 'package:flutter/material.dart';
@@ -20,6 +21,7 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
   int _cantidad = 1;
   bool _guardando = false;
   double _precio = 200;
+  List<Map<String, dynamic>> _hoy = [];
 
   @override
   void initState() {
@@ -30,6 +32,12 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
             _precio = (aj['pago_diario'] as num?)?.toDouble() ?? 200);
       }
     });
+    _cargarHoy();
+  }
+
+  Future<void> _cargarHoy() async {
+    final h = await diariosDeHoy();
+    if (mounted) setState(() => _hoy = h);
   }
 
   Future<void> _guardar() async {
@@ -47,8 +55,8 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
           content: Text('✅ Guardado (se sincronizará)')));
-      Navigator.of(context).pop();
-      SyncEngine.instance.run();
+      _cargarHoy();
+      SyncEngine.instance.push();
     } finally {
       if (mounted) setState(() => _guardando = false);
     }
@@ -80,7 +88,8 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
                     ChoiceChip(
                         label: const Text('🌙 Tarde'),
                         selected: _turno == 'tarde',
-                        onSelected: (_) => setState(() => _turno = 'tarde')),
+                        onSelected: (_) =>
+                            setState(() => _turno = 'tarde')),
                   ],
                 ),
                 const SizedBox(height: 16),
@@ -112,6 +121,27 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
                         style: TextStyle(fontSize: 18)),
                   ),
                 ),
+                const SizedBox(height: 24),
+                const Divider(),
+                const Text('Registrados hoy:',
+                    style:
+                        TextStyle(fontWeight: FontWeight.bold)),
+                const SizedBox(height: 8),
+                if (_hoy.isEmpty)
+                  const Text('Nada registrado hoy todavía',
+                      style: TextStyle(color: Colors.grey)),
+                for (final d in _hoy)
+                  ListTile(
+                    dense: true,
+                    leading: Text(
+                        d['turno'] == 'mañana' ? '☀️' : '🌙',
+                        style:
+                            const TextStyle(fontSize: 22)),
+                    title: Text(
+                        '${d['cantidad']} pago(s) — ${fmtMonto(d['total'])} CUP'),
+                    subtitle: Text(
+                        '${d['registrado_por_nombre'] ?? ''}'),
+                  ),
               ],
             ),
           ),
