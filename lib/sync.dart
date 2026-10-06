@@ -251,14 +251,13 @@ class SyncEngine {
     }
     // 2) envío en lotes de 50
     const loteTam = 50;
-    var hechos = 0;
     for (var i = 0; i < porEnviar.length; i += loteTam) {
       final fin =
           (i + loteTam < porEnviar.length) ? i + loteTam : porEnviar.length;
       final lote = porEnviar.sublist(i, fin);
       _emit(SyncPhase.uploading,
           detalle:
-              '⬆️ Subiendo operaciones ${fin} de ${porEnviar.length}…',
+              '⬆️ Subiendo operaciones $fin de ${porEnviar.length}…',
           progreso: fin / porEnviar.length);
       final body = jsonEncode([
         for (final op in lote)
@@ -290,7 +289,6 @@ class SyncEngine {
           for (final op in lote) {
             await _db.markOp(op['op_uuid'] as String, 'enviada');
           }
-          hechos += lote.length;
         } else {
           for (final op in lote) {
             await _db.bumpOp(op['op_uuid'] as String,
@@ -543,7 +541,7 @@ class SyncEngine {
       // remoto == -2: no se pudo averiguar; se usa el guardado
     }
     if (offset > bytes.length) offset = 0;
-    final url = location!;
+    final url = location;
 
     const chunk = 256 * 1024;
     while (offset < bytes.length) {
