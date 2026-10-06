@@ -5,6 +5,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:workmanager/workmanager.dart';
 
 import 'auth.dart';
 import 'config.dart';
@@ -15,6 +16,44 @@ import 'ui/login.dart';
 
 final navigatorKey = GlobalKey<NavigatorState>();
 
+/// Tarea en segundo plano (punto 21): sube lo pendiente aunque la app
+/// esté cerrada. Todo va en try/catch: si falla, se reintenta luego.
+@pragma('vm:entry-point')
+void callbackDispatcher() {
+  Workmanager().executeTask((task, inputData) async {
+    try {
+      WidgetsFlutterBinding.ensureInitialized();
+      await Supabase.initialize(
+        url: AppConfig.supabaseUrl,
+        anonKey: AppConfig.anonKey,
+      );
+      final auth = AuthService();
+      if (auth.loggedIn) {
+        await SyncEngine.instance.push();
+      }
+      return Future.value(true);
+    } catch (_) {
+      return Future.value(false);
+    }
+  });
+}
+
+Future<void> _programarSubidaFondo() async {
+  try {
+    await Workmanager().initialize(callbackDispatcher,
+        isInDebugMode: false);
+    await Workmanager().registerPeriodicTask(
+      'ironbody-sync-fondo',
+      'subirPendientes',
+      frequency: const Duration(hours: 1),
+      constraints: Constraints(networkType: NetworkType.connected),
+      existingWorkPolicy: ExistingPeriodicWorkPolicy.keep,
+    );
+  } catch (_) {
+    // sin segundo plano no se rompe nada: la app sincroniza al abrirse
+  }
+}
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Supabase.initialize(
@@ -22,6 +61,8 @@ Future<void> main() async {
     anonKey: AppConfig.anonKey,
   );
   await ThemeController.load();
+  // Subida en segundo plano (punto 21): aunque cierren la app.
+  await _programarSubidaFondo();
   // Sesión vencida -> volver al login con aviso.
   SyncEngine.instance.onSessionExpired = () {
     navigatorKey.currentState?.pushAndRemoveUntil(

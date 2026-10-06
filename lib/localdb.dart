@@ -171,10 +171,10 @@ class LocalDb {
   }
 
   // -- fotos pendientes --------------------------------------------------
-  Future<void> addFotoPendiente(
+  Future<int> addFotoPendiente(
       {required String opUuid, required String localPath}) async {
     final d = await db;
-    await d.insert('fotos_pendientes',
+    return d.insert('fotos_pendientes',
         {'op_uuid': opUuid, 'local_path': localPath, 'estado': 'pendiente'});
   }
 

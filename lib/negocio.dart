@@ -283,6 +283,54 @@ int? edadDeCarnet(String? carnet) {
   return edad < 0 || edad > 120 ? null : edad;
 }
 
+/// Fecha de nacimiento desde el carnet (6 primeros dígitos = AAMMDD).
+DateTime? fechaNacDeCarnet(String? carnet) {
+  final d = (carnet ?? '').replaceAll(RegExp(r'[^0-9]'), '');
+  if (d.length < 6) return null;
+  final hoy = DateTime.now();
+  var anio = int.tryParse(d.substring(0, 2)) ?? 0;
+  final mes = int.tryParse(d.substring(2, 4)) ?? 0;
+  final dia = int.tryParse(d.substring(4, 6)) ?? 0;
+  if (mes < 1 || mes > 12 || dia < 1 || dia > 31) return null;
+  anio += (anio <= hoy.year % 100) ? 2000 : 1900;
+  try {
+    final f = DateTime(anio, mes, dia);
+    if (f.month != mes || f.day != dia) return null;
+    return f;
+  } catch (_) {
+    return null;
+  }
+}
+
+/// Clientes que cumplen años en los próximos [dias] (incluye hoy).
+/// Cada mapa trae '_dias_para' (días que faltan) y '_cumple' (edad que cumple).
+Future<List<Map<String, dynamic>>> cumpleanosProximos(
+    {int dias = 7}) async {
+  final hoy = DateTime.now();
+  final hoyDia = DateTime(hoy.year, hoy.month, hoy.day);
+  final rows = await _activos();
+  final res = <Map<String, dynamic>>[];
+  for (final c in rows) {
+    final nac = fechaNacDeCarnet('${c['carnet'] ?? ''}');
+    if (nac == null) continue;
+    var proximo = DateTime(hoyDia.year, nac.month, nac.day);
+    if (proximo.isBefore(hoyDia)) {
+      proximo = DateTime(hoyDia.year + 1, nac.month, nac.day);
+    }
+    final falta = proximo.difference(hoyDia).inDays;
+    if (falta <= dias) {
+      res.add({
+        ...c,
+        '_dias_para': falta,
+        '_cumple': proximo.year - nac.year,
+      });
+    }
+  }
+  res.sort(
+      (a, b) => (a['_dias_para'] as int).compareTo(b['_dias_para'] as int));
+  return res;
+}
+
 /// Posibles duplicados al inscribir (nombre parecido, carnet o teléfono igual).
 Future<List<Map<String, dynamic>>> posiblesDuplicados(
     {required String nombre,
