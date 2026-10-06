@@ -160,6 +160,16 @@ class LocalDb {
     return d.query('ops_queue', orderBy: 'creada_ts DESC', limit: limit);
   }
 
+  /// Cancela una operación propia aún no aplicada (no se subirá).
+  /// Devuelve true si se eliminó.
+  Future<bool> cancelOp(String opUuid) async {
+    final d = await db;
+    final n = await d.delete('ops_queue',
+        where: 'op_uuid=? AND estado IN (\'pendiente\', \'error\')',
+        whereArgs: [opUuid]);
+    return n > 0;
+  }
+
   // -- fotos pendientes --------------------------------------------------
   Future<void> addFotoPendiente(
       {required String opUuid, required String localPath}) async {
