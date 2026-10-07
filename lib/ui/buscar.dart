@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 
 import '../fotos.dart';
 import '../negocio.dart';
+import '../sync.dart';
 import 'ficha.dart';
 import 'widgets.dart';
 
@@ -38,10 +39,29 @@ class _BuscarScreenState extends State<BuscarScreen> {
     }
   }
 
+  /// Botón "Actualizar": baja cambios del servidor y recarga la lista.
+  Future<void> _actualizar() async {
+    await SyncEngine.instance.pull();
+    await _buscar();
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('✅ Lista actualizada')));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('🔍 Buscar cliente')),
+      appBar: AppBar(
+        title: const Text('🔍 Buscar cliente'),
+        actions: [
+          IconButton(
+            tooltip: 'Actualizar (bajar cambios)',
+            icon: const Icon(Icons.refresh),
+            onPressed: _actualizar,
+          ),
+        ],
+      ),
       body: Column(
         children: [
           const SyncBanner(),
@@ -133,15 +153,41 @@ class _FilaCliente extends StatefulWidget {
 
 class _FilaClienteState extends State<_FilaCliente> {
   File? _foto;
+  String? _resueltoPara;
 
   @override
   void initState() {
     super.initState();
-    FotoCache.instance
-        .enCache(widget.cliente['foto_storage'] as String?)
-        .then((f) {
-      if (mounted && f != null) setState(() => _foto = f);
-    });
+    _resolverFoto();
+  }
+
+  @override
+  void didUpdateWidget(_FilaCliente old) {
+    super.didUpdateWidget(old);
+    // Si cambió la foto del cliente (p. ej. bajó del servidor), re-resolver.
+    if (old.cliente['foto_storage'] !=
+        widget.cliente['foto_storage']) {
+      _resolverFoto();
+    }
+  }
+
+  /// Lee la caché; si hay foto_storage sin caché, la descarga en
+  /// segundo plano. Así la miniatura aparece aunque la fila ya se
+  /// hubiera construido antes (al volver de la ficha, Flutter reutiliza
+  /// el estado y el initState no se repite).
+  Future<void> _resolverFoto() async {
+    final sp = widget.cliente['foto_storage'] as String?;
+    _resueltoPara = sp;
+    final enCache =
+        await FotoCache.instance.enCache(sp);
+    if (!mounted || _resueltoPara != sp) return;
+    if (enCache != null) {
+      setState(() => _foto = enCache);
+      return;
+    }
+    final descargada = await FotoCache.instance.obtener(sp);
+    if (!mounted || _resueltoPara != sp) return;
+    if (descargada != null) setState(() => _foto = descargada);
   }
 
   @override

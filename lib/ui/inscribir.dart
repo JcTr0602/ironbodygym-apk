@@ -116,11 +116,35 @@ class _InscribirScreenState extends State<InscribirScreen> {
       return;
     }
 
-    // Anti-duplicado: nombre parecido, mismo carnet o teléfono.
+    // Anti-duplicado: el carnet de 11 dígitos no se repite (bloqueo);
+    // sin carnet, aviso por nombre parecido pero se permite.
     final dups = await posiblesDuplicados(
         nombre: nombre,
         carnet: carnet.isEmpty ? null : carnet,
         telefono: tel.isEmpty ? null : tel);
+    final carnetDigitos = carnet.replaceAll(RegExp(r'[^0-9]'), '');
+    final carnetDuplicado = carnetDigitos.length == 11 &&
+        dups.any((d) => d['_motivo'] == 'mismo carnet');
+    if (carnetDuplicado && mounted) {
+      final dueno = dups.firstWhere(
+          (d) => d['_motivo'] == 'mismo carnet');
+      await showDialog<void>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('⛔ Carnet duplicado'),
+          content: Text(
+              'El carnet $carnet ya pertenece a "${dueno['nombre']}".\n'
+              'Cada carnet corresponde a un solo cliente: no se puede '
+              'inscribir de nuevo.'),
+          actions: [
+            ElevatedButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('Entendido')),
+          ],
+        ),
+      );
+      return;
+    }
     if (dups.isNotEmpty && mounted) {
       final seguir = await showDialog<bool>(
         context: context,

@@ -10,6 +10,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:uuid/uuid.dart';
 
+import '../auth.dart';
 import '../fotos.dart';
 import '../localdb.dart';
 import '../negocio.dart';
@@ -344,6 +345,148 @@ class _FichaScreenState extends State<FichaScreen> {
     SyncEngine.instance.push();
   }
 
+  /// Corregir pago (solo admin): editar monto/fecha o anular, con doble
+  /// confirmación. Encola 'editar_pago' / 'anular_pago'.
+  Future<void> _corregirPago(Map<String, dynamic> p) async {
+    final pagoId = p['id'] as int?;
+    if (pagoId == null) return;
+    final accion = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('🛠️ Corregir pago'),
+        content: Text(
+            '${fmtMonto(p['monto'])} CUP — ${fmtFecha(p['fecha'] as String?)}'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cancelar')),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, 'editar'),
+              child: const Text('Editar monto/fecha')),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, 'anular'),
+              child: const Text('Anular pago',
+                  style: TextStyle(color: Colors.red))),
+        ],
+      ),
+    );
+    if (accion == null || !mounted) return;
+
+    if (accion == 'anular') {
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('⚠️ Anular pago'),
+          content: const Text(
+              '¿Seguro? El pago quedará anulado en el sistema. '
+              'Esta acción se sincronizará.'),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('No')),
+            ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.red),
+                onPressed: () => Navigator.pop(ctx, true),
+                child: const Text('Sí, anular')),
+          ],
+        ),
+      );
+      if (ok != true || !mounted) return;
+      await LocalDb.instance.queueOp(
+        opUuid: const Uuid().v4(),
+        tipo: 'anular_pago',
+        payload: {'pago_id': pagoId},
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('✅ Pago anulado (se sincronizará)')));
+      _cargar();
+      SyncEngine.instance.push();
+      return;
+    }
+
+    // editar monto/fecha
+    final montoCtrl = TextEditingController(
+        text: fmtMonto(p['monto']));
+    final fechaCtrl = TextEditingController(
+        text: (p['fecha'] as String? ?? '').substring(0, 10));
+    final datos = await showDialog<Map<String, String>>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('✏️ Editar pago'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: montoCtrl,
+              keyboardType:
+                  const TextInputType.numberWithOptions(decimal: true),
+              decoration: const InputDecoration(
+                  labelText: 'Monto (CUP)',
+                  border: OutlineInputBorder()),
+            ),
+            const SizedBox(height: 8),
+            TextField(
+              controller: fechaCtrl,
+              keyboardType: TextInputType.datetime,
+              decoration: const InputDecoration(
+                  labelText: 'Fecha (AAAA-MM-DD)',
+                  border: OutlineInputBorder()),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cancelar')),
+          ElevatedButton(
+              onPressed: () => Navigator.pop(ctx,
+                  {'monto': montoCtrl.text, 'fecha': fechaCtrl.text}),
+              child: const Text('Continuar')),
+        ],
+      ),
+    );
+    if (datos == null || !mounted) return;
+    final monto =
+        double.tryParse(datos['monto']!.replaceAll(',', '.'));
+    final fecha = datos['fecha']!.trim();
+    final fechaOk = RegExp(r'^\d{4}-\d{2}-\d{2}$').hasMatch(fecha);
+    if (monto == null || monto <= 0 || !fechaOk) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Monto o fecha inválidos')));
+      return;
+    }
+    final confirma = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Confirmar corrección'),
+        content: Text(
+            'De: ${fmtMonto(p['monto'])} CUP — ${fmtFecha(p['fecha'] as String?)}\n'
+            'A: ${fmtMonto(monto)} CUP — $fecha'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancelar')),
+          ElevatedButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Confirmar')),
+        ],
+      ),
+    );
+    if (confirma != true || !mounted) return;
+    await LocalDb.instance.queueOp(
+      opUuid: const Uuid().v4(),
+      tipo: 'editar_pago',
+      payload: {'pago_id': pagoId, 'monto': monto, 'fecha': fecha},
+    );
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('✅ Corrección guardada (se sincronizará)')));
+    _cargar();
+    SyncEngine.instance.push();
+  }
+
   @override
   Widget build(BuildContext context) {
     final c = _c;
@@ -432,7 +575,7 @@ class _FichaScreenState extends State<FichaScreen> {
                         ),
                       ),
                       const Divider(),
-                      const Text('Últimos pagos:',
+                      const Text('Historial de pagos:',
                           style: TextStyle(fontWeight: FontWeight.bold)),
                       const SizedBox(height: 8),
                       if (_pagos.isEmpty)
@@ -445,6 +588,14 @@ class _FichaScreenState extends State<FichaScreen> {
                               '${fmtMonto(p['monto'])} CUP — ${p['metodo'] ?? ''}'),
                           subtitle: Text(
                               '${fmtFecha(p['fecha'] as String?)} · ${p['periodo'] ?? 'mensual'}'),
+                          trailing: AuthService().isAdmin
+                              ? IconButton(
+                                  tooltip: 'Corregir pago',
+                                  icon: const Icon(Icons.tune,
+                                      size: 20),
+                                  onPressed: () => _corregirPago(p),
+                                )
+                              : null,
                         ),
                       const SizedBox(height: 16),
                       if (vencido)

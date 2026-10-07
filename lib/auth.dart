@@ -69,6 +69,15 @@ class AuthService {
     return AppConfig.ownerUsernames.contains(base);
   }
 
+  /// ¿Tiene rol de administrador? userMetadata['rol']=='admin' o el
+  /// usuario propio de Jc. La sección Administración solo se muestra
+  /// si esto es true.
+  bool get isAdmin {
+    if (username == 'jctr0602') return true;
+    final rol = session?.user.userMetadata?['rol'];
+    return '${rol ?? ''}'.toLowerCase() == 'admin';
+  }
+
   /// Nombre de usuario (parte local del email alias), en minúsculas.
   String get username {
     final email = session?.user.email ?? '';

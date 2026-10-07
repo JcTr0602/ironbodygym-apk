@@ -12,6 +12,7 @@ import '../novedades.dart';
 import '../perfil.dart';
 import '../sync.dart';
 import '../theme.dart';
+import 'admin.dart';
 import 'ajustes.dart';
 import 'ayuda.dart';
 import 'buscar.dart';
@@ -36,9 +37,8 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   int _vencen = 0;
   int _atras = 0;
-  int _activos = 0;
-  int _pendMes = 0;
-  double _estMes = 0;
+  int _inscripciones = 0;
+  int _pagosMes = 0;
   double _pendiente = 0;
   int _porSubir = 0;
   DateTime? _lastSync;
@@ -74,9 +74,9 @@ class _HomeScreenState extends State<HomeScreen> {
     final a = await atrasados(masDe30: false);
     final a30 = await atrasados(masDe30: true);
     final p = await pendienteEntrega(_auth.telegramId);
-    final aj = await LocalDb.instance.getAjustes();
-    final mens = (aj['mensualidad'] as num?)?.toDouble() ?? 2000;
-    final cart = await resumenCartera(mens);
+    final todos = await LocalDb.instance.allMirror('clientes');
+    final insc = todos.where((c) => c['estado'] == 'activo').length;
+    final pagados = await pagosRealizadosMes();
     final porSubir = await LocalDb.instance.countPendingOps();
     final det = await SyncEngine.instance.detalle();
     // Aviso "+8h sin subir" (punto 10)
@@ -94,9 +94,8 @@ class _HomeScreenState extends State<HomeScreen> {
       setState(() {
         _vencen = v.length;
         _atras = a.length + a30.length;
-        _activos = cart.$1;
-        _pendMes = cart.$2;
-        _estMes = cart.$3;
+        _inscripciones = insc;
+        _pagosMes = pagados;
         _pendiente = p;
         _porSubir = porSubir;
         _lastSync = det.ultimaPull ?? det.ultimaPush;
@@ -299,11 +298,10 @@ class _HomeScreenState extends State<HomeScreen> {
                           mainAxisAlignment:
                               MainAxisAlignment.spaceEvenly,
                           children: [
-                            _miniContador('👥', '$_activos', 'Activos'),
-                            _miniContador('🗓️', '$_pendMes',
-                                'Pend. mes'),
-                            _miniContador('💵',
-                                fmtMonto(_estMes), 'Est. mes'),
+                            _miniContador(Icons.people, '$_inscripciones',
+                                'Inscripciones'),
+                            _miniContador(Icons.verified,
+                                '$_pagosMes', 'Pagos realizados'),
                           ],
                         ),
                       ],
@@ -325,29 +323,33 @@ class _HomeScreenState extends State<HomeScreen> {
                   crossAxisSpacing: 12,
                   childAspectRatio: 1.6,
                   children: [
-                    _boton(Icons.add, 'Inscribir',
+                    _boton(Icons.person_add_alt, 'Inscribir',
                         () => _ir(const InscribirScreen())),
                     _boton(Icons.search, 'Buscar',
                         () => _ir(const BuscarScreen())),
                     _boton(Icons.payments, 'Agregar Pago',
                         () => _ir(const PagoScreen())),
-                    _boton(Icons.calendar_month,
+                    _boton(Icons.event_available,
                         'Vencen hoy ($_vencen)',
-                        () => _ir(const ListasScreen())),
-                    _boton(Icons.warning_amber,
+                        () => _ir(const ListasScreen(inicial: 0))),
+                    _boton(Icons.schedule,
                         'Atrasados ($_atras)',
-                        () => _ir(const ListasScreen())),
-                    _boton(Icons.confirmation_number,
+                        () => _ir(const ListasScreen(inicial: 2))),
+                    _boton(Icons.receipt_long,
                         'Pago diario',
                         () => _ir(const PagoDiarioScreen())),
-                    _boton(Icons.credit_card, 'Transferencia',
+                    _boton(Icons.account_balance, 'Transferencia',
                         () => _ir(const TransferenciaScreen())),
-                    _boton(Icons.person_pin, 'Mi turno',
+                    _boton(Icons.badge, 'Mi turno',
                         () => _ir(const MiTurnoScreen())),
                     _boton(Icons.cake, 'Cumpleaños',
                         () => _ir(const CumpleanosScreen())),
                     _boton(Icons.settings, 'Ajustes',
                         () => _ir(const AjustesScreen())),
+                    if (_auth.isAdmin)
+                      _boton(Icons.admin_panel_settings,
+                          'Administración',
+                          () => _ir(const AdminScreen())),
                   ],
                 ),
               ),
@@ -398,12 +400,21 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Widget _miniContador(String emoji, String valor, String etiqueta) {
+  Widget _miniContador(
+      IconData icono, String valor, String etiqueta) {
     return Column(
       children: [
-        Text('$emoji $valor',
-            style: const TextStyle(
-                fontSize: 15, fontWeight: FontWeight.bold)),
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icono, size: 18, color: naranja),
+            const SizedBox(width: 4),
+            Text(valor,
+                style: const TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.bold)),
+          ],
+        ),
         Text(etiqueta,
             style:
                 const TextStyle(fontSize: 11, color: Colors.grey)),

@@ -13,7 +13,9 @@ import 'ficha.dart';
 import 'widgets.dart';
 
 class ListasScreen extends StatefulWidget {
-  const ListasScreen({super.key});
+  /// Pestaña inicial: 0=Hoy, 1=Por vencer, 2=Atrasados <30d, 3=Atrasados +30d.
+  final int inicial;
+  const ListasScreen({super.key, this.inicial = 0});
   @override
   State<ListasScreen> createState() => _ListasScreenState();
 }
@@ -30,7 +32,8 @@ class _ListasScreenState extends State<ListasScreen>
   @override
   void initState() {
     super.initState();
-    _tab = TabController(length: 4, vsync: this);
+    _tab = TabController(
+        length: 4, vsync: this, initialIndex: widget.inicial);
     _cargar();
   }
 

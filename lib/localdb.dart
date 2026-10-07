@@ -21,12 +21,26 @@ class LocalDb {
     final dir = await getDatabasesPath();
     _db = await openDatabase(
       p.join(dir, 'ironbody.db'),
-      version: 1,
+      version: 2,
       onCreate: (db, _) async {
-        for (final t in ['clientes', 'pagos', 'pagos_diarios']) {
+        await _crearTablas(db);
+      },
+      onUpgrade: (db, oldV, _) async {
+        // v2: espejo de gastos (cierre de caja del admin).
+        if (oldV < 2) {
           await db.execute(
-              'CREATE TABLE $t (id INTEGER PRIMARY KEY, data TEXT NOT NULL, sync_seq INTEGER NOT NULL)');
+              'CREATE TABLE IF NOT EXISTS gastos (id INTEGER PRIMARY KEY, data TEXT NOT NULL, sync_seq INTEGER NOT NULL)');
         }
+      },
+    );
+    return _db!;
+  }
+
+  static Future<void> _crearTablas(Database db) async {
+    for (final t in ['clientes', 'pagos', 'pagos_diarios', 'gastos']) {
+      await db.execute(
+          'CREATE TABLE $t (id INTEGER PRIMARY KEY, data TEXT NOT NULL, sync_seq INTEGER NOT NULL)');
+    }
         await db.execute('CREATE TABLE ops_queue ('
             'op_uuid TEXT PRIMARY KEY, tipo TEXT NOT NULL, payload TEXT NOT NULL, '
             'estado TEXT NOT NULL DEFAULT \'pendiente\', intentos INTEGER NOT NULL DEFAULT 0, '
@@ -37,9 +51,6 @@ class LocalDb {
             'estado TEXT NOT NULL DEFAULT \'pendiente\')');
         await db.execute(
             'CREATE TABLE meta (k TEXT PRIMARY KEY, v TEXT NOT NULL)');
-      },
-    );
-    return _db!;
   }
 
   // -- espejos ---------------------------------------------------------
@@ -93,6 +104,10 @@ class LocalDb {
       setMeta('ajustes', jsonEncode(a));
 
   // -- cola de operaciones ---------------------------------------------
+  // Estados: 'pendiente' (por subir), 'error' (fallo transitorio, se
+  // reintenta), 'enviada' (en el servidor, falta confirmar aplicada),
+  // 'aplicada' (terminal OK), 'rechazada' (terminal: el servidor la
+  // rechazó con 4xx; visible en la cola, no se reintenta ni bloquea).
   Future<void> queueOp(
       {required String opUuid,
       required String tipo,
@@ -116,11 +131,13 @@ class LocalDb {
         orderBy: 'creada_ts ASC');
   }
 
-  /// Todas las no aplicadas (para re-chequear `aplicada` en el servidor).
+  /// Todas las no aplicadas ni rechazadas (para re-chequear `aplicada`
+  /// en el servidor).
   Future<List<Map<String, dynamic>>> unappliedOps() async {
     final d = await db;
     return d.query('ops_queue',
-        where: 'estado != \'aplicada\'', orderBy: 'creada_ts ASC');
+        where: 'estado NOT IN (\'aplicada\', \'rechazada\')',
+        orderBy: 'creada_ts ASC');
   }
 
   Future<void> markOp(String opUuid, String estado, {String? error}) async {
@@ -160,12 +177,12 @@ class LocalDb {
     return d.query('ops_queue', orderBy: 'creada_ts DESC', limit: limit);
   }
 
-  /// Cancela una operación propia aún no aplicada (no se subirá).
-  /// Devuelve true si se eliminó.
+  /// Cancela una operación propia aún no aplicada ni rechazada
+  /// definitivamente (no se subirá). Devuelve true si se eliminó.
   Future<bool> cancelOp(String opUuid) async {
     final d = await db;
     final n = await d.delete('ops_queue',
-        where: 'op_uuid=? AND estado IN (\'pendiente\', \'error\')',
+        where: 'op_uuid=? AND estado IN (\'pendiente\', \'error\', \'rechazada\')',
         whereArgs: [opUuid]);
     return n > 0;
   }

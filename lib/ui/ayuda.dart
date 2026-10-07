@@ -138,12 +138,11 @@ class AyudaScreen extends StatelessWidget {
                   emoji: '📞',
                   color: Colors.green,
                 ),
-                Padding(
-                  padding:
-                      const EdgeInsets.symmetric(vertical: 12),
+                const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 12),
                   child: Text(
                     'Iron Body Gym · versión ${AppConfig.appVersion}',
-                    style: const TextStyle(
+                    style: TextStyle(
                         color: Colors.grey, fontSize: 12),
                     textAlign: TextAlign.center,
                   ),
@@ -174,7 +173,7 @@ class AyudaScreen extends StatelessWidget {
             style: TextStyle(
                 fontWeight: FontWeight.bold, fontSize: 16)),
         subtitle:
-            Text('Versión ${AppConfig.appVersion}'),
+            const Text('Versión ${AppConfig.appVersion}'),
         children: [
           for (final n in novedades) ...[
             Padding(

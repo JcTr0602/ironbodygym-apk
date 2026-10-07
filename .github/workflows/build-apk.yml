@@ -2,8 +2,8 @@ name: Build APK (Iron Body Gym)
 
 # Compila la APK release en los servidores de GitHub y la deja como
 # artefacto descargable. Se dispara a mano desde la pestaña Actions.
-# Firma: debug-key estándar (misma en cualquier máquina con Android SDK),
-# suficiente para instalación interna; las actualizaciones mantienen firma.
+# Firma: llave release persistente (secretos KEYSTORE_BASE64, KEYSTORE_PASSWORD,
+# KEY_ALIAS, KEY_PASSWORD). Sin secretos, cae a la llave debug (solo desarrollo).
 
 on:
   workflow_dispatch:
@@ -30,6 +30,19 @@ jobs:
 
       - name: Get dependencies
         run: flutter pub get
+
+      - name: Setup keystore de firma release
+        run: |
+          if [ -n "${{ secrets.KEYSTORE_BASE64 }}" ]; then
+            echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > android/release.p12
+            printf 'storeFile=release.p12\nstorePassword=%s\nkeyAlias=%s\nkeyPassword=%s\n' \
+              "${{ secrets.KEYSTORE_PASSWORD }}" \
+              "${{ secrets.KEY_ALIAS }}" \
+              "${{ secrets.KEY_PASSWORD }}" > android/key.properties
+            echo "Firma release activada."
+          else
+            echo "Sin secreto KEYSTORE_BASE64: se firma con debug."
+          fi
 
       - name: Build release APK
         run: flutter build apk --release

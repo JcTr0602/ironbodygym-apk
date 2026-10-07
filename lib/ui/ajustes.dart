@@ -298,12 +298,11 @@ class _AjustesScreenState extends State<AjustesScreen> {
                   onTap: _cambiarClave,
                 ),
                 const Divider(),
-                Padding(
-                  padding:
-                      const EdgeInsets.symmetric(vertical: 8),
+                const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 8),
                   child: Text(
                     'Versión ${AppConfig.appVersion}',
-                    style: const TextStyle(
+                    style: TextStyle(
                         color: Colors.grey, fontSize: 12),
                     textAlign: TextAlign.center,
                   ),

@@ -25,7 +25,7 @@ void callbackDispatcher() {
       WidgetsFlutterBinding.ensureInitialized();
       await Supabase.initialize(
         url: AppConfig.supabaseUrl,
-        anonKey: AppConfig.anonKey,
+        publishableKey: AppConfig.anonKey,
       );
       final auth = AuthService();
       if (auth.loggedIn) {
@@ -57,7 +57,7 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Supabase.initialize(
     url: AppConfig.supabaseUrl,
-    anonKey: AppConfig.anonKey,
+    publishableKey: AppConfig.anonKey,
   );
   await ThemeController.load();
   // Subida en segundo plano (punto 21): aunque cierren la app.

@@ -76,6 +76,8 @@ class _ColaScreenState extends State<ColaScreen> {
         return '✅';
       case 'enviada':
         return '📤';
+      case 'rechazada':
+        return '⛔';
       case 'error':
         return '⚠️';
       default:
@@ -97,6 +99,18 @@ class _ColaScreenState extends State<ColaScreen> {
         return 'Edición de cliente';
       case 'cambiar_estado':
         return 'Cambio de estado';
+      case 'ajuste':
+        return 'Cambio de precio';
+      case 'admin_usuario':
+        return 'Usuario APK';
+      case 'confirmar_entrega':
+        return 'Confirmar entrega';
+      case 'gasto':
+        return 'Gasto';
+      case 'editar_pago':
+        return 'Corrección de pago';
+      case 'anular_pago':
+        return 'Anulación de pago';
       default:
         return t;
     }

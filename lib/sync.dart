@@ -21,6 +21,7 @@ import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
 import 'package:image/image.dart' as img;
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:uuid/uuid.dart';
 
 import 'auth.dart';
@@ -88,11 +89,71 @@ class SyncEngine {
 
   String get _base => AppConfig.supabaseUrl;
 
-  Map<String, String> _headers({String? contentType}) => {
-        'apikey': AppConfig.anonKey,
-        'Authorization': 'Bearer ${_auth.session?.accessToken ?? ''}',
-        if (contentType != null) 'Content-Type': contentType,
-      };
+  /// Petición autenticada con reintento tras refrescar el token.
+  ///
+  /// Ante un HTTP 401 se intenta `refreshSession()` UNA vez y se reintenta
+  /// la petición con el token nuevo; solo si el refresh funciona pero el
+  /// reintento sigue dando 401 se declara la sesión vencida. Si el
+  /// refresh falla (p. ej. sin internet), se devuelve la respuesta
+  /// original: un fallo de red nunca expulsa al login.
+  Future<http.Response> _reqAuth(
+      Future<http.Response> Function(String token) hacer) async {
+    var r = await hacer(_auth.session?.accessToken ?? '');
+    if (r.statusCode != 401) return r;
+    try {
+      final res = await Supabase.instance.client.auth.refreshSession();
+      final nuevo = res.session?.accessToken ?? '';
+      if (nuevo.isEmpty) return r;
+      r = await hacer(nuevo);
+    } catch (_) {
+      return r; // sin red para refrescar: no es vencimiento real
+    }
+    if (r.statusCode == 401) throw SessionExpired();
+    return r;
+  }
+
+  Future<http.Response> _getAuth(Uri url,
+          {Duration timeout = const Duration(seconds: 30)}) =>
+      _reqAuth((t) => http.get(url, headers: {
+            'apikey': AppConfig.anonKey,
+            'Authorization': 'Bearer $t',
+          }).timeout(timeout));
+
+  Future<http.Response> _postAuth(Uri url,
+          {Map<String, String>? headers,
+          Object? body,
+          Duration timeout = const Duration(seconds: 60)}) =>
+      _reqAuth((t) => http
+          .post(url,
+              headers: {
+                'apikey': AppConfig.anonKey,
+                'Authorization': 'Bearer $t',
+                ...?headers,
+              },
+              body: body)
+          .timeout(timeout));
+
+  Future<http.Response> _headAuth(Uri url,
+          {Duration timeout = const Duration(seconds: 30)}) =>
+      _reqAuth((t) => http.head(url, headers: {
+            'apikey': AppConfig.anonKey,
+            'Authorization': 'Bearer $t',
+            'Tus-Resumable': '1.0.0',
+          }).timeout(timeout));
+
+  Future<http.Response> _patchAuth(Uri url,
+          {required Map<String, String> headers,
+          Object? body,
+          Duration timeout = const Duration(seconds: 120)}) =>
+      _reqAuth((t) => http
+          .patch(url,
+              headers: {
+                'apikey': AppConfig.anonKey,
+                'Authorization': 'Bearer $t',
+                ...headers,
+              },
+              body: body)
+          .timeout(timeout));
 
   void _emit(SyncPhase phase,
       {String? error, double? progreso, String? detalle}) async {
@@ -269,26 +330,26 @@ class SyncEngine {
           }
       ]);
       try {
-        final r = await http
-            .post(
-                Uri.parse(
-                    '$_base/rest/v1/sync_ops?on_conflict=op_uuid'),
-                headers: {
-                  ..._headers(),
-                  'Content-Type': 'application/json',
-                  // duplicados se fusionan: idempotente por op_uuid
-                  'Prefer':
-                      'resolution=merge-duplicates,return=minimal',
-                },
-                body: body)
-            .timeout(const Duration(seconds: 60));
-        if (r.statusCode == 401) throw SessionExpired();
+        final r = await _postAuth(
+            Uri.parse('$_base/rest/v1/sync_ops?on_conflict=op_uuid'),
+            headers: {
+              'Content-Type': 'application/json',
+              // duplicados se fusionan: idempotente por op_uuid
+              'Prefer': 'resolution=merge-duplicates,return=minimal',
+            },
+            body: body);
         if (r.statusCode == 200 ||
             r.statusCode == 201 ||
-            r.statusCode == 204) {
+            r.statusCode == 204 ||
+            r.statusCode == 409) {
+          // 409 = ya encolada (idempotente)
           for (final op in lote) {
             await _db.markOp(op['op_uuid'] as String, 'enviada');
           }
+        } else if (r.statusCode >= 400 && r.statusCode < 500) {
+          // error de cliente: reintenta op por op para aislar la
+          // culpable en vez de atascar el lote entero
+          await _uploadUnaPorUna(lote);
         } else {
           for (final op in lote) {
             await _db.bumpOp(op['op_uuid'] as String,
@@ -314,13 +375,53 @@ class SyncEngine {
     return aplicadas;
   }
 
+  /// Reintenta un lote op por op: la que falle con 4xx se marca
+  /// 'rechazada' (definitiva y visible en la cola) y NO bloquea a las
+  /// demás. Los fallos de red siguen siendo transitorios (reintento).
+  Future<void> _uploadUnaPorUna(
+      List<Map<String, dynamic>> lote) async {
+    for (final op in lote) {
+      final uuid = op['op_uuid'] as String;
+      final body = jsonEncode({
+        'op_uuid': uuid,
+        'device_tag': 'apk-android',
+        'tipo': op['tipo'],
+        'payload': jsonDecode(op['payload'] as String),
+      });
+      try {
+        final r = await _postAuth(
+            Uri.parse('$_base/rest/v1/sync_ops?on_conflict=op_uuid'),
+            headers: {
+              'Content-Type': 'application/json',
+              'Prefer':
+                  'resolution=merge-duplicates,return=minimal',
+            },
+            body: body);
+        if (r.statusCode == 200 ||
+            r.statusCode == 201 ||
+            r.statusCode == 204 ||
+            r.statusCode == 409) {
+          await _db.markOp(uuid, 'enviada');
+        } else if (r.statusCode >= 400 && r.statusCode < 500) {
+          await _db.markOp(uuid, 'rechazada',
+              error: '❌ El servidor la rechazó (HTTP ${r.statusCode}). '
+                  'Revisa los datos o cancela la operación.');
+        } else {
+          await _db.bumpOp(uuid, _describeError('HTTP ${r.statusCode}'));
+        }
+      } catch (e) {
+        if (e is SessionExpired) rethrow;
+        await _db.bumpOp(uuid, _describeError(e));
+      }
+    }
+  }
+
   Future<bool> _opAplicada(String uuid) async {
     try {
-      final r = await http.get(
+      final r = await _getAuth(
           Uri.parse('$_base/rest/v1/sync_ops?op_uuid=eq.$uuid'
               '&select=aplicada'),
-          headers: _headers()).timeout(const Duration(seconds: 20));
-      if (r.statusCode == 401) throw SessionExpired();
+          timeout: const Duration(seconds: 20));
       if (r.statusCode != 200) return false;
       final rows = jsonDecode(r.body) as List;
       return rows.isNotEmpty && rows.first['aplicada'] == true;
@@ -332,10 +433,10 @@ class SyncEngine {
 
   Future<int?> _clienteDeOp(String uuid) async {
     try {
-      final r = await http.get(
+      final r = await _getAuth(
           Uri.parse('$_base/rest/v1/sync_ops?op_uuid=eq.$uuid'
               '&select=resultado'),
-          headers: _headers()).timeout(const Duration(seconds: 20));
+          timeout: const Duration(seconds: 20));
       if (r.statusCode != 200) return null;
       final rows = jsonDecode(r.body) as List;
       if (rows.isEmpty) return null;
@@ -355,13 +456,16 @@ class SyncEngine {
 
   // -- bajada ------------------------------------------------------------
   /// Devuelve la cantidad de filas nuevas bajadas.
+  ///
+  /// Invariante del watermark: solo avanza al final del ciclo, después de
+  /// aplicar todos los cambios. Si algo falla a mitad, el watermark no se
+  /// mueve y la próxima bajada re-aplica (idempotente) desde el mismo
+  /// punto. No hay ningún camino donde el watermark avance sin aplicar.
   Future<int> _download() async {
     // ajustes + server_seq (informativo)
     try {
-      final r = await http.get(
-          Uri.parse('$_base/rest/v1/sync_estado?id=eq.1'
-              '&select=server_seq,ajustes'),
-          headers: _headers()).timeout(const Duration(seconds: 20));
+      final r = await _getAuth(Uri.parse('$_base/rest/v1/sync_estado?id=eq.1'
+          '&select=server_seq,ajustes'));
       if (r.statusCode == 200) {
         final rows = jsonDecode(r.body) as List;
         if (rows.isNotEmpty && rows.first['ajustes'] is Map) {
@@ -378,25 +482,25 @@ class SyncEngine {
     final since = wm;
     var maxSeq = wm;
     var bajados = 0;
-    const tablas = ['clientes', 'pagos', 'pagos_diarios'];
+    const tablas = ['clientes', 'pagos', 'pagos_diarios', 'gastos'];
+    const supTablas = {
+      'clientes': 'sync_clientes',
+      'pagos': 'sync_pagos',
+      'pagos_diarios': 'sync_pagos_diarios',
+      'gastos': 'sync_gastos',
+    };
     var ti = 0;
     for (final tabla in tablas) {
       ti++;
-      final supTabla =
-          {'clientes': 'sync_clientes', 'pagos': 'sync_pagos'}[tabla] ??
-              'sync_pagos_diarios';
+      final supTabla = supTablas[tabla]!;
       _emit(SyncPhase.downloading,
           detalle: '⬇️ Bajando $tabla ($ti de ${tablas.length})…',
           progreso: ti / (tablas.length + 1));
       var pageWm = since;
       while (true) {
-        final r = await http.get(
-            Uri.parse('$_base/rest/v1/$supTabla?select=id,data,sync_seq'
-                '&sync_seq=gt.$pageWm&order=sync_seq.asc&limit=500'),
-            headers: _headers()).timeout(const Duration(seconds: 30));
-        if (r.statusCode == 401) {
-          throw SessionExpired();
-        }
+        final r = await _getAuth(Uri.parse(
+            '$_base/rest/v1/$supTabla?select=id,data,sync_seq'
+            '&sync_seq=gt.$pageWm&order=sync_seq.asc&limit=500'));
         if (r.statusCode != 200) {
           throw Exception('bajada $tabla: HTTP ${r.statusCode}');
         }
@@ -420,11 +524,9 @@ class SyncEngine {
         progreso: tablas.length / (tablas.length + 1));
     var pageWm = since;
     while (true) {
-      final r = await http.get(
-          Uri.parse('$_base/rest/v1/sync_borrados'
-              '?select=entidad,entidad_id,sync_seq'
-              '&sync_seq=gt.$pageWm&order=sync_seq.asc&limit=500'),
-          headers: _headers()).timeout(const Duration(seconds: 30));
+      final r = await _getAuth(Uri.parse('$_base/rest/v1/sync_borrados'
+          '?select=entidad,entidad_id,sync_seq'
+          '&sync_seq=gt.$pageWm&order=sync_seq.asc&limit=500'));
       if (r.statusCode != 200) {
         throw Exception('bajada borrados: HTTP ${r.statusCode}');
       }
@@ -469,22 +571,20 @@ class SyncEngine {
     String meta(String k, String v) =>
         '$k ${base64Encode(utf8.encode(v))}';
     try {
-      final r = await http
-          .post(
-            Uri.parse('$_base/storage/v1/upload/resumable'),
-            headers: {
-              ..._headers(),
-              'Tus-Resumable': '1.0.0',
-              'Upload-Length': '$length',
-              'Upload-Metadata': [
-                meta('filename', objectPath.split('/').last),
-                meta('bucketName', AppConfig.bucketFotos),
-                meta('objectName', objectPath),
-                meta('contentType', 'image/jpeg'),
-              ].join(','),
-            },
-          )
-          .timeout(const Duration(seconds: 30));
+      final r = await _postAuth(
+        Uri.parse('$_base/storage/v1/upload/resumable'),
+        headers: {
+          'Tus-Resumable': '1.0.0',
+          'Upload-Length': '$length',
+          'Upload-Metadata': [
+            meta('filename', objectPath.split('/').last),
+            meta('bucketName', AppConfig.bucketFotos),
+            meta('objectName', objectPath),
+            meta('contentType', 'image/jpeg'),
+          ].join(','),
+        },
+        timeout: const Duration(seconds: 30),
+      );
       if (r.statusCode != 200 && r.statusCode != 201) return null;
       final loc = r.headers['location'];
       if (loc == null || loc.isEmpty) return null;
@@ -498,10 +598,7 @@ class SyncEngine {
   /// -2 no se pudo averiguar.
   Future<int> _tusOffset(String location) async {
     try {
-      final r = await http.head(Uri.parse(location), headers: {
-        ..._headers(),
-        'Tus-Resumable': '1.0.0',
-      }).timeout(const Duration(seconds: 30));
+      final r = await _headAuth(Uri.parse(location));
       if (r.statusCode == 404 || r.statusCode == 410) return -1;
       if (r.statusCode != 200) return -2;
       return int.tryParse(r.headers['upload-offset'] ?? '') ?? -2;
@@ -550,18 +647,15 @@ class SyncEngine {
       var okChunk = false;
       for (var intento = 0; intento < 3 && !okChunk; intento++) {
         try {
-          final r = await http
-              .patch(
-                Uri.parse(url),
-                headers: {
-                  ..._headers(),
-                  'Tus-Resumable': '1.0.0',
-                  'Content-Type': 'application/offset+octet-stream',
-                  'Upload-Offset': '$offset',
-                },
-                body: bytes.sublist(offset, fin),
-              )
-              .timeout(const Duration(seconds: 120));
+          final r = await _patchAuth(
+            Uri.parse(url),
+            headers: {
+              'Tus-Resumable': '1.0.0',
+              'Content-Type': 'application/offset+octet-stream',
+              'Upload-Offset': '$offset',
+            },
+            body: bytes.sublist(offset, fin),
+          );
           if (r.statusCode == 204 || r.statusCode == 200) {
             offset =
                 int.tryParse(r.headers['upload-offset'] ?? '') ?? fin;
@@ -592,17 +686,14 @@ class SyncEngine {
   Future<bool> _subirFotoSimple(String path, Uint8List bytes) async {
     for (var intento = 0; intento < 3; intento++) {
       try {
-        final r = await http
-            .post(
-                Uri.parse('$_base/storage/v1/object/'
-                    '${AppConfig.bucketFotos}/$path'),
-                headers: {
-                  ..._headers(),
-                  'Content-Type': 'image/jpeg',
-                  'x-upsert': 'true',
-                },
-                body: bytes)
-            .timeout(const Duration(seconds: 120));
+        final r = await _postAuth(
+            Uri.parse('$_base/storage/v1/object/'
+                '${AppConfig.bucketFotos}/$path'),
+            headers: {
+              'Content-Type': 'image/jpeg',
+              'x-upsert': 'true',
+            },
+            timeout: const Duration(seconds: 120));
         if (r.statusCode == 200 || r.statusCode == 201) return true;
       } catch (_) {}
     }

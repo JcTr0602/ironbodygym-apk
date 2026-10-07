@@ -15,6 +15,19 @@ class Novedad {
 }
 
 const novedades = [
+  Novedad('1.0.3', [
+    '🛡️ Sección Administración (solo Jc): estadísticas, precios, usuarios APK, pendiente a entregar, gastos, cierre de caja y exportar',
+    '💰 Pendiente a entregar ahora cuenta también lo que aún no se sincroniza',
+    '📊 Mi Turno con historial diario, desglose por método y última entrega confirmada',
+    '📋 Botón Actualizar en Buscar y miniaturas que se descargan solas',
+    '🔄 El botón Atrasados ahora abre los atrasados de menos de 30 días',
+    '✅ Nueva tarjeta "Pagos realizados" en el inicio',
+    '🛠️ Corregir pagos (monto/fecha o anular) desde la ficha, solo admin',
+    '⛔ Alerta de duplicados por carnet al inscribir',
+    '🧾 Gastos del gym y cierre de caja diario',
+    '🔐 La sesión ahora refresca el token antes de pedirte entrar de nuevo',
+    '📤 Si una operación es rechazada por el servidor, ya no bloquea a las demás',
+  ]),
   Novedad('1.0.2', [
     '🎂 Cumpleaños de la semana (la fecha sale del carnet)',
     '⚙️ Nueva sección de Ajustes: foto de perfil, móvil, carnet, tema',
