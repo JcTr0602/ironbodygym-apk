@@ -4,6 +4,9 @@ plugins {
     id("dev.flutter.flutter-gradle-plugin")
 }
 
+import java.util.Properties
+import java.io.FileInputStream
+
 android {
     namespace = "com.ironbodygym.ironbody_gym"
     compileSdk = flutter.compileSdkVersion
@@ -11,9 +14,9 @@ android {
 
     // Firma release: lee android/key.properties (generado en CI desde secretos).
     // Sin ese archivo se usa la llave debug (comportamiento anterior).
-    val keystoreProperties = java.util.Properties().apply {
+    val keystoreProperties = Properties().apply {
         val f = rootProject.file("key.properties")
-        if (f.exists()) load(f.inputStream())
+        if (f.exists()) load(FileInputStream(f))
     }
 
     signingConfigs {
