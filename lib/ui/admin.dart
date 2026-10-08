@@ -22,6 +22,7 @@ import 'auditoria.dart';
 import 'riesgo.dart';
 import 'historial_entrenador.dart';
 import 'exportar_excel.dart';
+import 'usuarios.dart';
 import 'widgets.dart';
 
 class AdminScreen extends StatefulWidget {
@@ -169,167 +170,6 @@ class _AdminScreenState extends State<AdminScreen> {
       if (c == clave) return e;
     }
     return clave;
-  }
-
-  // -- usuarios APK ----------------------------------------------------
-  Future<void> _crearUsuario() async {
-    final nombreCtrl = TextEditingController();
-    final passCtrl = TextEditingController();
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('👤 Crear usuario APK'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-                controller: nombreCtrl,
-                decoration: const InputDecoration(
-                    labelText: 'Nombre de usuario',
-                    border: OutlineInputBorder())),
-            const SizedBox(height: 8),
-            TextField(
-                controller: passCtrl,
-                obscureText: true,
-                decoration: const InputDecoration(
-                    labelText: 'Contraseña',
-                    border: OutlineInputBorder())),
-          ],
-        ),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Cancelar')),
-          ElevatedButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('Crear')),
-        ],
-      ),
-    );
-    if (ok != true || !mounted) return;
-    final nombre = nombreCtrl.text.trim();
-    final pass = passCtrl.text;
-    if (nombre.isEmpty || pass.length < 4) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('Nombre vacío o contraseña muy corta (mín. 4)')));
-      return;
-    }
-    await LocalDb.instance.queueOp(
-      opUuid: const Uuid().v4(),
-      tipo: 'admin_usuario',
-      payload: {'accion': 'crear', 'username': nombre, 'password': pass},
-    );
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('✅ Usuario encolado (se sincronizará)')));
-    SyncEngine.instance.push();
-  }
-
-  Future<void> _accionUsuario() async {
-    final userCtrl = TextEditingController();
-    final passCtrl = TextEditingController();
-    String accion = 'bloquear';
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setS) => AlertDialog(
-          title: const Text('👤 Gestionar usuario'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                  controller: userCtrl,
-                  decoration: const InputDecoration(
-                      labelText: 'Nombre de usuario',
-                      border: OutlineInputBorder())),
-              const SizedBox(height: 8),
-              DropdownButton<String>(
-                value: accion,
-                isExpanded: true,
-                items: const [
-                  DropdownMenuItem(
-                      value: 'bloquear',
-                      child: Text('Bloquear')),
-                  DropdownMenuItem(
-                      value: 'desbloquear',
-                      child: Text('Desbloquear')),
-                  DropdownMenuItem(
-                      value: 'password',
-                      child: Text('Cambiar contraseña')),
-                  DropdownMenuItem(
-                      value: 'eliminar',
-                      child: Text('Eliminar')),
-                ],
-                onChanged: (v) => setS(() => accion = v ?? accion),
-              ),
-              if (accion == 'password') ...[
-                const SizedBox(height: 8),
-                TextField(
-                    controller: passCtrl,
-                    obscureText: true,
-                    decoration: const InputDecoration(
-                        labelText: 'Nueva contraseña',
-                        border: OutlineInputBorder())),
-              ],
-            ],
-          ),
-          actions: [
-            TextButton(
-                onPressed: () => Navigator.pop(ctx, false),
-                child: const Text('Cancelar')),
-            ElevatedButton(
-                onPressed: () => Navigator.pop(ctx, true),
-                child: const Text('Aplicar')),
-          ],
-        ),
-      ),
-    );
-    if (ok != true || !mounted) return;
-    final username = userCtrl.text.trim();
-    if (username.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Escribe el nombre de usuario')));
-      return;
-    }
-    if (accion == 'password' && passCtrl.text.length < 4) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('Contraseña muy corta (mín. 4)')));
-      return;
-    }
-    if (accion == 'eliminar') {
-      final conf = await showDialog<bool>(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          title: const Text('⚠️ Eliminar usuario'),
-          content: Text(
-              '¿Eliminar definitivamente al usuario "$username"?'),
-          actions: [
-            TextButton(
-                onPressed: () => Navigator.pop(ctx, false),
-                child: const Text('No')),
-            ElevatedButton(
-                style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.red),
-                onPressed: () => Navigator.pop(ctx, true),
-                child: const Text('Sí, eliminar')),
-          ],
-        ),
-      );
-      if (conf != true || !mounted) return;
-    }
-    await LocalDb.instance.queueOp(
-      opUuid: const Uuid().v4(),
-      tipo: 'admin_usuario',
-      payload: {
-        'accion': accion,
-        'username': username,
-        if (accion == 'password') 'password': passCtrl.text,
-      },
-    );
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('✅ Acción encolada (se sincronizará)')));
-    SyncEngine.instance.push();
   }
 
   // -- pendiente a entrega ----------------------------------------------
@@ -587,29 +427,21 @@ class _AdminScreenState extends State<AdminScreen> {
                           ),
                         ]),
                         _seccion('👥 Usuarios APK', [
-                          Row(
-                            children: [
-                              Expanded(
-                                child: ElevatedButton.icon(
-                                  icon: const Icon(Icons.person_add),
-                                  label: const Text('Crear usuario'),
-                                  onPressed: _crearUsuario,
-                                ),
-                              ),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: OutlinedButton.icon(
-                                  icon:
-                                      const Icon(Icons.manage_accounts),
-                                  label: const Text('Gestionar'),
-                                  onPressed: _accionUsuario,
-                                ),
-                              ),
-                            ],
+                          SizedBox(
+                            width: double.infinity,
+                            child: ElevatedButton.icon(
+                              icon:
+                                  const Icon(Icons.manage_accounts),
+                              label: const Text('Gestionar usuarios'),
+                              onPressed: () => Navigator.of(context)
+                                  .push(MaterialPageRoute(
+                                      builder: (_) =>
+                                          const UsuariosScreen())),
+                            ),
                           ),
                           const SizedBox(height: 4),
                           const Text(
-                            'Bloquear, desbloquear, cambiar contraseña o eliminar por nombre de usuario.',
+                            'Ver lista, bloquear, desbloquear, cambiar contraseña o eliminar.',
                             style: TextStyle(
                                 fontSize: 12, color: Colors.grey),
                           ),

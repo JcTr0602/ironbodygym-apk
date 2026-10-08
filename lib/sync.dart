@@ -496,13 +496,18 @@ class SyncEngine {
     int? serverSeq;
     try {
       final r = await _getAuth(Uri.parse('$_base/rest/v1/sync_estado?id=eq.1'
-          '&select=server_seq,ajustes'));
+          '&select=server_seq,ajustes,usuarios'));
       if (r.statusCode == 200) {
         final rows = jsonDecode(r.body) as List;
         if (rows.isNotEmpty) {
           if (rows.first['ajustes'] is Map) {
             await _db.setAjustes(
                 Map<String, dynamic>.from(rows.first['ajustes']));
+          }
+          // v1.0.12: lista de usuarios APK para gestión
+          if (rows.first['usuarios'] is List) {
+            await _db.setMeta('usuarios_apk',
+                jsonEncode(rows.first['usuarios']));
           }
           serverSeq = rows.first['server_seq'] as int?;
           if (serverSeq != null) {
