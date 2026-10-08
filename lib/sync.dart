@@ -228,10 +228,10 @@ class SyncEngine {
     if (_running || !_auth.loggedIn) return;
     _running = true;
     try {
-      await push();
+      await _doPush();
       // Pull repetido: si llegan cambios durante la descarga, seguir.
       for (var i = 0; i < 3; i++) {
-        await pull();
+        await _doPull();
         final wm = await _db.getWatermark();
         final ss = int.tryParse(await _db.getMeta('server_seq') ?? '0') ?? 0;
         if (wm >= ss) break;
@@ -257,6 +257,15 @@ class SyncEngine {
     if (_running || !_auth.loggedIn) return;
     _running = true;
     try {
+      await _doPush();
+    } finally {
+      _running = false;
+    }
+  }
+
+  /// Lógica interna de subida (sin guard _running).
+  Future<void> _doPush() async {
+    try {
       _emit(SyncPhase.uploading);
       final n = await _uploadOps();
       _emit(SyncPhase.photos);
@@ -271,8 +280,6 @@ class SyncEngine {
       _emit(SyncPhase.error, error: _describeError(e));
       await Future.delayed(const Duration(seconds: 2));
       _emit(SyncPhase.idle);
-    } finally {
-      _running = false;
     }
   }
 
@@ -280,6 +287,15 @@ class SyncEngine {
   Future<void> pull() async {
     if (_running || !_auth.loggedIn) return;
     _running = true;
+    try {
+      await _doPull();
+    } finally {
+      _running = false;
+    }
+  }
+
+  /// Lógica interna de bajada (sin guard _running).
+  Future<void> _doPull() async {
     try {
       _emit(SyncPhase.downloading);
       final n = await _download();
@@ -293,8 +309,6 @@ class SyncEngine {
       _emit(SyncPhase.error, error: _describeError(e));
       await Future.delayed(const Duration(seconds: 2));
       _emit(SyncPhase.idle);
-    } finally {
-      _running = false;
     }
   }
 

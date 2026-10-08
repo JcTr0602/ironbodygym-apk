@@ -2,6 +2,7 @@
 library;
 
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../auth.dart';
 import '../sync.dart';
@@ -14,18 +15,55 @@ class LoginScreen extends StatefulWidget {
   State<LoginScreen> createState() => _LoginScreenState();
 }
 
-class _LoginScreenState extends State<LoginScreen> {
+class _LoginScreenState extends State<LoginScreen>
+    with SingleTickerProviderStateMixin {
   final _user = TextEditingController();
   final _pass = TextEditingController();
+  final _userFocus = FocusNode();
+  final _passFocus = FocusNode();
   bool _cargando = false;
   bool _verPass = false;
   String? _error;
   final _auth = AuthService();
+  late AnimationController _anim;
+  late Animation<double> _fade;
+  late Animation<Offset> _slide;
 
   @override
   void initState() {
     super.initState();
     _error = widget.aviso;
+    // Animación de entrada: fade + deslizamiento suave
+    _anim = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 600),
+    );
+    _fade = CurvedAnimation(parent: _anim, curve: Curves.easeOut);
+    _slide = Tween<Offset>(
+      begin: const Offset(0, 0.08),
+      end: Offset.zero,
+    ).animate(CurvedAnimation(parent: _anim, curve: Curves.easeOut));
+    _anim.forward();
+    // Recupera el último usuario
+    SharedPreferences.getInstance().then((p) {
+      final u = p.getString('ultimo_usuario');
+      if (u != null && u.isNotEmpty) {
+        _user.text = u;
+      }
+    });
+    // Resalta el campo activo
+    _userFocus.addListener(() => setState(() {}));
+    _passFocus.addListener(() => setState(() {}));
+  }
+
+  @override
+  void dispose() {
+    _anim.dispose();
+    _user.dispose();
+    _pass.dispose();
+    _userFocus.dispose();
+    _passFocus.dispose();
+    super.dispose();
   }
 
   Future<void> _entrar() async {
@@ -41,6 +79,10 @@ class _LoginScreenState extends State<LoginScreen> {
     });
     try {
       await _auth.signIn(u, p);
+      // Guarda el usuario para la próxima vez
+      SharedPreferences.getInstance().then((prefs) {
+        prefs.setString('ultimo_usuario', u);
+      });
       if (!mounted) return;
       Navigator.of(context).pushReplacement(
           MaterialPageRoute(builder: (_) => const HomeScreen()));
@@ -60,7 +102,11 @@ class _LoginScreenState extends State<LoginScreen> {
     return Scaffold(
       backgroundColor: const Color(0xFF1B1B1B),
       body: SafeArea(
-        child: Column(
+        child: FadeTransition(
+          opacity: _fade,
+          child: SlideTransition(
+            position: _slide,
+            child: Column(
           children: [
             const SizedBox(height: 36),
             ClipRRect(
@@ -109,6 +155,7 @@ class _LoginScreenState extends State<LoginScreen> {
                     children: [
                       TextField(
                         controller: _user,
+                        focusNode: _userFocus,
                         textCapitalization: TextCapitalization.words,
                         decoration: InputDecoration(
                           hintText: 'Usuario',
@@ -120,12 +167,18 @@ class _LoginScreenState extends State<LoginScreen> {
                             borderRadius: BorderRadius.circular(16),
                             borderSide: BorderSide.none,
                           ),
+                          focusedBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(16),
+                            borderSide: const BorderSide(
+                                color: Color(0xFFE8821A), width: 2),
+                          ),
                         ),
                         onSubmitted: (_) => _entrar(),
                       ),
                       const SizedBox(height: 14),
                       TextField(
                         controller: _pass,
+                        focusNode: _passFocus,
                         obscureText: !_verPass,
                         decoration: InputDecoration(
                           hintText: 'Contraseña',
@@ -145,6 +198,11 @@ class _LoginScreenState extends State<LoginScreen> {
                           border: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(16),
                             borderSide: BorderSide.none,
+                          ),
+                          focusedBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(16),
+                            borderSide: const BorderSide(
+                                color: Color(0xFFE8821A), width: 2),
                           ),
                         ),
                         onSubmitted: (_) => _entrar(),
@@ -205,7 +263,15 @@ class _LoginScreenState extends State<LoginScreen> {
                 textAlign: TextAlign.center,
               ),
             ),
+            const SizedBox(height: 4),
+            const Text(
+              'v1.0.4',
+              style: TextStyle(color: Colors.white24, fontSize: 10),
+              textAlign: TextAlign.center,
+            ),
           ],
+            ),
+          ),
         ),
       ),
     );

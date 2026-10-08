@@ -102,20 +102,23 @@ class _BuscarScreenState extends State<BuscarScreen> {
                     child: Text(_busco
                         ? 'Sin resultados'
                         : 'Cargando…'))
-                : ListView.builder(
-                    itemCount: _res.length,
-                    itemBuilder: (ctx, i) {
-                      final c = _res[i];
-                      return _FilaCliente(
-                          cliente: c,
-                          onTap: () => Navigator.of(context)
-                              .push(MaterialPageRoute(
-                                  builder: (_) => FichaScreen(
-                                      clienteId:
-                                          (c['id'] as int?) ??
-                                              0)))
-                              .then((_) => _buscar()));
-                    },
+                : RefreshIndicator(
+                    onRefresh: _actualizar,
+                    child: ListView.builder(
+                      itemCount: _res.length,
+                      itemBuilder: (ctx, i) {
+                        final c = _res[i];
+                        return _FilaCliente(
+                            cliente: c,
+                            onTap: () => Navigator.of(context)
+                                .push(MaterialPageRoute(
+                                    builder: (_) => FichaScreen(
+                                        clienteId:
+                                            (c['id'] as int?) ??
+                                                0)))
+                                .then((_) => _buscar()));
+                      },
+                    ),
                   ),
           ),
         ],
@@ -195,9 +198,23 @@ class _FilaClienteState extends State<_FilaCliente> {
     final c = widget.cliente;
     final ph = c['pagado_hasta'] as String?;
     final d = diasRestantes(ph);
+    // Colores consistentes: vencido rojo, por vencer amarillo, al día verde
     final color = d == null
         ? Colors.grey
-        : (d < 0 ? Colors.red : (d == 0 ? Colors.orange : Colors.green));
+        : (d < 0
+            ? Colors.red
+            : (d <= 7 ? Colors.amber.shade700 : Colors.green));
+    // Iniciales para el placeholder (ej: "Juan Pérez" -> "JP")
+    final nombre = '${c['nombre']}';
+    final partes = nombre.trim().split(RegExp(r'\s+'));
+    String iniciales = '';
+    if (partes.isNotEmpty) {
+      iniciales = partes[0].isNotEmpty ? partes[0][0].toUpperCase() : '';
+      if (partes.length > 1 && partes.last.isNotEmpty) {
+        iniciales += partes.last[0].toUpperCase();
+      }
+    }
+    if (iniciales.isEmpty) iniciales = '?';
     return ListTile(
       leading: _foto != null
           ? ClipRRect(
@@ -205,7 +222,14 @@ class _FilaClienteState extends State<_FilaCliente> {
               child: Image.file(_foto!,
                   width: 40, height: 40, fit: BoxFit.cover),
             )
-          : const CircleAvatar(child: Text('👤')),
+          : CircleAvatar(
+              backgroundColor: const Color(0xFFE8821A).withValues(alpha: 0.2),
+              child: Text(iniciales,
+                  style: const TextStyle(
+                      color: Color(0xFFE8821A),
+                      fontWeight: FontWeight.bold,
+                      fontSize: 16)),
+            ),
       title: Text('${c['nombre']}'),
       subtitle: Text(textoEstado(ph),
           style: TextStyle(color: color, fontSize: 12)),
