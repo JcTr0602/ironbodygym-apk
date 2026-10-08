@@ -344,6 +344,26 @@ class _FichaScreenState extends State<FichaScreen> {
     SyncEngine.instance.push();
   }
 
+  /// Muestra la foto en grande al tocarla (v1.0.11).
+  void _verFotoGrande() {
+    final f = _foto;
+    if (f == null) return;
+    showDialog(
+      context: context,
+      builder: (ctx) => Dialog(
+        backgroundColor: Colors.transparent,
+        insetPadding: const EdgeInsets.all(16),
+        child: GestureDetector(
+          onTap: () => Navigator.of(ctx).pop(),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(16),
+            child: Image.file(f, fit: BoxFit.contain),
+          ),
+        ),
+      ),
+    );
+  }
+
   /// Cambia la foto del cliente: cámara o galería (punto 29).
   Future<void> _cambiarFoto() async {
     final origen = await showDialog<ImageSource>(
@@ -692,12 +712,17 @@ class _FichaScreenState extends State<FichaScreen> {
                     children: [
                       Center(
                         child: _foto != null
-                            ? ClipRRect(
-                                borderRadius: BorderRadius.circular(60),
-                                child: Image.file(_foto!,
-                                    width: 120,
-                                    height: 120,
-                                    fit: BoxFit.cover),
+                            ? GestureDetector(
+                                // Ver foto en grande al tocar (v1.0.11)
+                                onTap: () => _verFotoGrande(),
+                                child: ClipRRect(
+                                  borderRadius:
+                                      BorderRadius.circular(60),
+                                  child: Image.file(_foto!,
+                                      width: 120,
+                                      height: 120,
+                                      fit: BoxFit.cover),
+                                ),
                               )
                             : const CircleAvatar(
                                 radius: 60,
