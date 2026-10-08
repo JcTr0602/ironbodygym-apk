@@ -2,11 +2,14 @@
 /// tema, preferencias y cambio de contraseña.
 library;
 
+import 'dart:convert';
 import 'dart:io';
 
+import 'package:crypto/crypto.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:local_auth/local_auth.dart';
 
 import '../auth.dart';
 import '../config.dart';
@@ -29,6 +32,9 @@ class _AjustesScreenState extends State<AjustesScreen> {
   String? _movil;
   String? _carnet;
   bool _recordatorio = true;
+  bool _vincular = false;
+  bool _huella = false;
+  bool _tienePin = false;
 
   @override
   void initState() {
@@ -42,13 +48,115 @@ class _AjustesScreenState extends State<AjustesScreen> {
     final movil = await _perfil.getMovil();
     final carnet = await _perfil.getCarnet();
     final rec = await _perfil.getRecordatorioSync();
+    final vinc = await _perfil.getVincularDispositivo();
+    final hue = await _perfil.getHuella();
+    final pin = await _perfil.getPinHash();
     if (mounted) {
       setState(() {
         _avatar = tiene ? av : null;
         _movil = movil;
         _carnet = carnet;
         _recordatorio = rec;
+        _vincular = vinc;
+        _huella = hue;
+        _tienePin = pin != null;
       });
+    }
+  }
+
+  /// Prueba la huella y devuelve true si el dispositivo la soporta.
+  Future<bool> _probarHuella() async {
+    try {
+      final auth = LocalAuthentication();
+      final puede = await auth.canCheckBiometrics;
+      if (!puede) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+              content: Text('Este dispositivo no tiene huella')));
+        }
+        return false;
+      }
+      final ok = await auth.authenticate(
+        localizedReason: 'Confirma tu huella para activarla',
+      );
+      return ok;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Configura o cambia el PIN rápido (4 dígitos).
+  Future<void> _configurarPin() async {
+    final c1 = TextEditingController();
+    final c2 = TextEditingController();
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(_tienePin ? '🔢 Cambiar PIN' : '🔢 Crear PIN rápido'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: c1,
+              keyboardType: TextInputType.number,
+              maxLength: 4,
+              obscureText: true,
+              decoration: const InputDecoration(
+                labelText: 'PIN (4 dígitos)',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 8),
+            TextField(
+              controller: c2,
+              keyboardType: TextInputType.number,
+              maxLength: 4,
+              obscureText: true,
+              decoration: const InputDecoration(
+                labelText: 'Repite el PIN',
+                border: OutlineInputBorder(),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          if (_tienePin)
+            TextButton(
+              onPressed: () async {
+                await _perfil.setPinHash(null);
+                if (ctx.mounted) Navigator.pop(ctx, true);
+              },
+              child: const Text('Quitar PIN',
+                  style: TextStyle(color: Colors.red)),
+            ),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancelar')),
+          ElevatedButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Guardar')),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) {
+      if (ok == true) _cargar();
+      return;
+    }
+    final p1 = c1.text.trim();
+    final p2 = c2.text.trim();
+    if (p1.length != 4 || p1 != p2 || int.tryParse(p1) == null) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('PIN inválido: 4 dígitos iguales')));
+      return;
+    }
+    // SHA-256 del PIN
+    final bytes = utf8.encode('ironbody-pin-$p1');
+    final hash = sha256.convert(bytes).toString();
+    await _perfil.setPinHash(hash);
+    if (mounted) {
+      setState(() => _tienePin = true);
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('✅ PIN configurado')));
     }
   }
 
@@ -309,6 +417,61 @@ class _AjustesScreenState extends State<AjustesScreen> {
                   onTap: () => Navigator.of(context).push(
                       MaterialPageRoute(
                           builder: (_) => const AvisosScreen())),
+                ),
+                const Divider(),
+                const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 4),
+                  child: Text('🔐 Seguridad',
+                      style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.bold)),
+                ),
+                SwitchListTile(
+                  title: const Text('📱 Vincular a este dispositivo'),
+                  subtitle: const Text(
+                      'Avisa si entras desde otro teléfono',
+                      style: TextStyle(fontSize: 12)),
+                  value: _vincular,
+                  onChanged: (v) async {
+                    await _perfil.setVincularDispositivo(v);
+                    if (v) {
+                      // Vincula ahora mismo
+                      final devId = await _perfil.getDeviceId();
+                      await _perfil.setDispositivoVinculado(
+                          _auth.username, devId);
+                    }
+                    if (mounted) {
+                      setState(() => _vincular = v);
+                    }
+                  },
+                ),
+                SwitchListTile(
+                  title: const Text('👆 Entrar con huella digital'),
+                  value: _huella,
+                  onChanged: (v) async {
+                    if (v) {
+                      // Verifica que el dispositivo la soporte
+                      final ok = await _probarHuella();
+                      if (!ok) return;
+                    }
+                    await _perfil.setHuella(v);
+                    if (mounted) {
+                      setState(() => _huella = v);
+                    }
+                  },
+                ),
+                ListTile(
+                  leading: const Text('🔢',
+                      style: TextStyle(fontSize: 24)),
+                  title: const Text('PIN rápido'),
+                  subtitle: Text(
+                      _tienePin
+                          ? 'Configurado (4 dígitos)'
+                          : 'Sin configurar',
+                      style: const TextStyle(fontSize: 12)),
+                  trailing:
+                      const Icon(Icons.chevron_right),
+                  onTap: _configurarPin,
                 ),
                 const Divider(),
                 const Padding(

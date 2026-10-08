@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../auth.dart';
+import '../perfil.dart';
 import '../sync.dart';
 import 'home.dart';
 
@@ -66,6 +67,27 @@ class _LoginScreenState extends State<LoginScreen>
     super.dispose();
   }
 
+  /// v1.0.12: verifica si el dispositivo está vinculado al usuario.
+  /// Devuelve true si no hay vinculación activa o si coincide.
+  Future<bool> _verificarDispositivo(String username) async {
+    try {
+      final perfil = PerfilService.instance;
+      if (!await perfil.getVincularDispositivo()) return true;
+      final actual = await perfil.getDeviceId();
+      final vinculado =
+          await perfil.getDispositivoVinculado(username.toLowerCase());
+      if (vinculado == null || vinculado.isEmpty) {
+        // Primera vez: vincula automáticamente
+        await perfil.setDispositivoVinculado(
+            username.toLowerCase(), actual);
+        return true;
+      }
+      return vinculado == actual;
+    } catch (_) {
+      return true;
+    }
+  }
+
   Future<void> _entrar() async {
     final u = _user.text.trim();
     final p = _pass.text;
@@ -83,7 +105,17 @@ class _LoginScreenState extends State<LoginScreen>
       SharedPreferences.getInstance().then((prefs) {
         prefs.setString('ultimo_usuario', u);
       });
+      // v1.0.12: verifica vinculación de dispositivo
+      final vinculado = await _verificarDispositivo(u);
       if (!mounted) return;
+      if (!vinculado) {
+        // Dispositivo no vinculado: avisa pero permite entrar
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text(
+              '⚠️ Entrando desde un dispositivo no vinculado'),
+          duration: Duration(seconds: 4),
+        ));
+      }
       Navigator.of(context).pushReplacement(
           MaterialPageRoute(builder: (_) => const HomeScreen()));
       // sincroniza al entrar
