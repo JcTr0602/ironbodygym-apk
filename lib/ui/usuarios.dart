@@ -263,6 +263,8 @@ class _UsuariosScreenState extends State<UsuariosScreen> {
                                   final titulos = {
                                     'bloquear': 'Bloquear',
                                     'desbloquear': 'Desbloquear',
+                                    'forzar_cierre':
+                                        'Cerrar sesión a distancia',
                                     'reset_pass': 'Cambiar contraseña',
                                     'eliminar': 'Eliminar',
                                   };
@@ -279,6 +281,11 @@ class _UsuariosScreenState extends State<UsuariosScreen> {
                                       value: 'desbloquear',
                                       child: Text('✅ Desbloquear'),
                                     ),
+                                  const PopupMenuItem(
+                                    value: 'forzar_cierre',
+                                    child:
+                                        Text('🚪 Cerrar sesión a distancia'),
+                                  ),
                                   const PopupMenuItem(
                                     value: 'reset_pass',
                                     child: Text('🔑 Cambiar contraseña'),

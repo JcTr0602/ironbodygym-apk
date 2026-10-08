@@ -294,10 +294,30 @@ class SyncEngine {
     if (_running || !_auth.loggedIn) return;
     _running = true;
     try {
+      // v1.0.12: cierre remoto de sesión (el dueño lo forzó)
+      await _verificarCierreForzado();
       await _doPull();
     } finally {
       _running = false;
     }
+  }
+
+  /// Si el dueño forzó el cierre, cierra sesión local (v1.0.12).
+  Future<void> _verificarCierreForzado() async {
+    try {
+      final user = _auth.session?.user;
+      final fc = user?.userMetadata?['forzar_cierre'];
+      if (fc == null) return;
+      final ultimo = int.tryParse(
+              await _db.getMeta('forzar_cierre_visto') ?? '0') ??
+          0;
+      final marca = fc is int ? fc : int.tryParse('$fc') ?? 0;
+      if (marca > ultimo) {
+        await _db.setMeta('forzar_cierre_visto', '$marca');
+        await _auth.signOut();
+        onSessionExpired?.call();
+      }
+    } catch (_) {}
   }
 
   /// Lógica interna de bajada (sin guard _running).
