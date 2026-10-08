@@ -654,15 +654,17 @@ class _FichaScreenState extends State<FichaScreen> {
       return;
     }
 
-    // editar monto/fecha
+    // editar monto/fecha/método (v1.0.12: método incluido)
     final montoCtrl = TextEditingController(
         text: fmtMonto(p['monto']));
     final fechaCtrl = TextEditingController(
         text: (p['fecha'] as String? ?? '').substring(0, 10));
+    String metodo = '${p['metodo'] ?? 'efectivo'}';
     final datos = await showDialog<Map<String, String>>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('✏️ Editar pago'),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setS) => AlertDialog(
+          title: const Text('✏️ Editar pago'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -682,6 +684,24 @@ class _FichaScreenState extends State<FichaScreen> {
                   labelText: 'Fecha (AAAA-MM-DD)',
                   border: OutlineInputBorder()),
             ),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                const Text('Método: '),
+                ChoiceChip(
+                  label: const Text('💵 Efectivo'),
+                  selected: metodo == 'efectivo',
+                  onSelected: (_) => setS(() => metodo = 'efectivo'),
+                ),
+                const SizedBox(width: 8),
+                ChoiceChip(
+                  label: const Text('📱 Transferencia'),
+                  selected: metodo == 'transferencia',
+                  onSelected: (_) =>
+                      setS(() => metodo = 'transferencia'),
+                ),
+              ],
+            ),
           ],
         ),
         actions: [
@@ -689,10 +709,14 @@ class _FichaScreenState extends State<FichaScreen> {
               onPressed: () => Navigator.pop(ctx),
               child: const Text('Cancelar')),
           ElevatedButton(
-              onPressed: () => Navigator.pop(ctx,
-                  {'monto': montoCtrl.text, 'fecha': fechaCtrl.text}),
+              onPressed: () => Navigator.pop(ctx, {
+                    'monto': montoCtrl.text,
+                    'fecha': fechaCtrl.text,
+                    'metodo': metodo,
+                  }),
               child: const Text('Continuar')),
         ],
+      ),
       ),
     );
     if (datos == null || !mounted) return;
@@ -710,8 +734,8 @@ class _FichaScreenState extends State<FichaScreen> {
       builder: (ctx) => AlertDialog(
         title: const Text('Confirmar corrección'),
         content: Text(
-            'De: ${fmtMonto(p['monto'])} CUP — ${fmtFecha(p['fecha'] as String?)}\n'
-            'A: ${fmtMonto(monto)} CUP — $fecha'),
+            'De: ${fmtMonto(p['monto'])} CUP — ${fmtFecha(p['fecha'] as String?)} — ${p['metodo'] ?? ''}\n'
+            'A: ${fmtMonto(monto)} CUP — $fecha — ${datos['metodo']}'),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(ctx, false),
@@ -726,7 +750,12 @@ class _FichaScreenState extends State<FichaScreen> {
     await LocalDb.instance.queueOp(
       opUuid: const Uuid().v4(),
       tipo: 'editar_pago',
-      payload: {'pago_id': pagoId, 'monto': monto, 'fecha': fecha},
+      payload: {
+        'pago_id': pagoId,
+        'monto': monto,
+        'fecha': fecha,
+        'metodo': datos['metodo'],
+      },
     );
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
