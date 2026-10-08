@@ -1,6 +1,9 @@
-/// Auditoría básica: quién hizo qué y cuándo.
-/// Muestra las operaciones recientes con el usuario que las realizó.
+/// Auditoría mejorada (v1.0.12): quién hizo qué, a qué cliente,
+/// qué cambió y foto asociada.
 library;
+
+import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 
@@ -16,6 +19,10 @@ class AuditoriaScreen extends StatefulWidget {
 class _AuditoriaScreenState extends State<AuditoriaScreen> {
   List<Map<String, dynamic>> _ops = [];
   bool _cargando = true;
+  // cliente_id -> nombre (caché)
+  final Map<int, String> _nombres = {};
+  // cliente_id -> foto_path local (caché)
+  final Map<int, String?> _fotos = {};
 
   @override
   void initState() {
@@ -25,14 +32,51 @@ class _AuditoriaScreenState extends State<AuditoriaScreen> {
 
   Future<void> _cargar() async {
     setState(() => _cargando = true);
-    // Obtiene las ops recientes con info del usuario
     final ops = await LocalDb.instance.recentOps(limit: 100);
+    // Precargar nombres y fotos de clientes mencionados
+    final clientes = await LocalDb.instance.allMirror('clientes');
+    final porId = <int, Map<String, dynamic>>{
+      for (final c in clientes)
+        (c['id'] as int): c,
+    };
+    for (final op in ops) {
+      final p = _payload(op);
+      final cid = _clienteId(p, '${op['tipo']}');
+      if (cid != null && !_nombres.containsKey(cid)) {
+        final c = porId[cid];
+        if (c != null) {
+          _nombres[cid] = '${c['nombre'] ?? 'Cliente $cid'}';
+          _fotos[cid] = c['foto_local'] as String?;
+        }
+      }
+    }
     if (mounted) {
       setState(() {
         _ops = ops;
         _cargando = false;
       });
     }
+  }
+
+  Map<String, dynamic> _payload(Map<String, dynamic> op) {
+    try {
+      final p = op['payload'];
+      if (p is String) return Map<String, dynamic>.from(jsonDecode(p));
+      if (p is Map) return Map<String, dynamic>.from(p);
+    } catch (_) {}
+    return {};
+  }
+
+  int? _clienteId(Map<String, dynamic> p, String tipo) {
+    for (final k in ['cliente_id', 'id', 'cliente']) {
+      final v = p[k];
+      if (v is int) return v;
+      if (v is String) {
+        final n = int.tryParse(v);
+        if (n != null) return n;
+      }
+    }
+    return null;
   }
 
   String _nombreTipo(String tipo) {
@@ -49,9 +93,68 @@ class _AuditoriaScreenState extends State<AuditoriaScreen> {
         return '📷 Foto';
       case 'gasto':
         return '🧾 Gasto';
+      case 'editar_cliente':
+        return '✏️ Edición de cliente';
+      case 'admin_usuario':
+        return '👤 Gestión de usuario';
       default:
         return tipo;
     }
+  }
+
+  /// Describe qué cambió en la operación.
+  String _detalle(Map<String, dynamic> op) {
+    final tipo = '${op['tipo']}';
+    final p = _payload(op);
+    final cid = _clienteId(p, tipo);
+    final nombre = cid != null ? (_nombres[cid] ?? 'Cliente $cid') : null;
+
+    switch (tipo) {
+      case 'editar_cliente':
+        final campos = {
+          'nombre': 'nombre',
+          'telefono': 'teléfono',
+          'carnet': 'carnet',
+          'notas': 'notas',
+          'sexo': 'sexo',
+          'pagado_hasta': 'vencimiento',
+        };
+        final cambiados = [
+          for (final k in p.keys)
+            if (campos.containsKey(k)) campos[k]!
+        ];
+        final q = cambiados.isEmpty ? '' : ' (${cambiados.join(', ')})';
+        return nombre != null ? 'Editó a $nombre$q' : 'Edición$q';
+      case 'pago_mensual':
+        final monto = p['monto'];
+        final metodo = p['metodo'] ?? 'efectivo';
+        return nombre != null
+            ? '$nombre — ${monto ?? '?'} CUP ($metodo)'
+            : 'Pago ${monto ?? '?'} CUP';
+      case 'inscribir':
+        final n = '${p['nombre'] ?? nombre ?? '?'}';
+        return 'Inscribió a $n';
+      case 'foto':
+        return nombre != null ? 'Foto de $nombre' : 'Foto';
+      case 'cambiar_estado':
+        final est = p['estado'] ?? '?';
+        return nombre != null ? '$nombre → $est' : 'Estado → $est';
+      case 'gasto':
+        return '${p['concepto'] ?? 'Gasto'} (${p['monto'] ?? '?'} CUP)';
+      case 'admin_usuario':
+        return '${p['accion'] ?? '?'}: ${p['username'] ?? '?'}';
+      default:
+        return nombre ?? '';
+    }
+  }
+
+  String _usuario(Map<String, dynamic> op) {
+    final p = _payload(op);
+    for (final k in ['registrado_por', 'usuario', 'username']) {
+      final v = p[k];
+      if (v is String && v.isNotEmpty) return v;
+    }
+    return 'Este dispositivo';
   }
 
   @override
@@ -80,33 +183,44 @@ class _AuditoriaScreenState extends State<AuditoriaScreen> {
                       final estado = '${op['estado']}';
                       final fecha =
                           '${op['creada_ts']}'.substring(0, 16).replaceAll('T', ' ');
-                      // El usuario está en el payload o en device_tag
-                      final payload = op['payload'] as String? ?? '{}';
-                      String usuario = 'Desconocido';
-                      try {
-                        // Intenta extraer el usuario del payload
-                        if (payload.contains('registrado_por')) {
-                          final m = RegExp(r'"registrado_por"\s*:\s*"([^"]+)"')
-                              .firstMatch(payload);
-                          if (m != null) usuario = m.group(1)!;
-                        }
-                      } catch (_) {}
+                      final detalle = _detalle(op);
+                      final usuario = _usuario(op);
+                      final p = _payload(op);
+                      final cid = _clienteId(p, tipo);
+                      final fotoPath = cid != null ? _fotos[cid] : null;
+                      final tieneFoto = fotoPath != null &&
+                          fotoPath.isNotEmpty &&
+                          File(fotoPath).existsSync();
 
                       return Card(
                         margin: const EdgeInsets.symmetric(
                             horizontal: 12, vertical: 6),
                         child: ListTile(
-                          leading: CircleAvatar(
-                            child: Text(
-                              usuario.isNotEmpty
-                                  ? usuario[0].toUpperCase()
-                                  : '?',
-                            ),
-                          ),
+                          leading: tieneFoto
+                              ? ClipRRect(
+                                  borderRadius: BorderRadius.circular(20),
+                                  child: Image.file(
+                                    File(fotoPath),
+                                    width: 40,
+                                    height: 40,
+                                    fit: BoxFit.cover,
+                                  ),
+                                )
+                              : CircleAvatar(
+                                  child: Text(
+                                    usuario.isNotEmpty
+                                        ? usuario[0].toUpperCase()
+                                        : '?',
+                                  ),
+                                ),
                           title: Text(_nombreTipo(tipo)),
                           subtitle: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
+                              if (detalle.isNotEmpty)
+                                Text(detalle,
+                                    style: const TextStyle(
+                                        fontWeight: FontWeight.w500)),
                               Text('👤 $usuario'),
                               Text('📅 $fecha'),
                               Text(
