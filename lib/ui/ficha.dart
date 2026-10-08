@@ -148,6 +148,12 @@ class _FichaScreenState extends State<FichaScreen> {
     final carnet =
         TextEditingController(text: '${c['carnet'] ?? ''}');
     String sexo = '${c['sexo'] ?? 'M'}';
+    // Fecha de vencimiento vigente (v1.0.11)
+    DateTime? pagadoHasta;
+    final phRaw = c['pagado_hasta'] as String?;
+    if (phRaw != null && phRaw.isNotEmpty) {
+      pagadoHasta = DateTime.tryParse(phRaw);
+    }
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => StatefulBuilder(
@@ -199,6 +205,47 @@ class _FichaScreenState extends State<FichaScreen> {
                             setS(() => sexo = 'F')),
                   ],
                 ),
+                const SizedBox(height: 8),
+                // Selector de vencimiento vigente (v1.0.11)
+                InkWell(
+                  onTap: () async {
+                    final picked = await showDatePicker(
+                      context: ctx,
+                      initialDate: pagadoHasta ?? DateTime.now(),
+                      firstDate: DateTime(2020),
+                      lastDate: DateTime(2030),
+                      helpText: 'Pagado hasta',
+                    );
+                    if (picked != null) {
+                      setS(() => pagadoHasta = picked);
+                    }
+                  },
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 12, vertical: 12),
+                    decoration: BoxDecoration(
+                      border: Border.all(color: Colors.grey.shade400),
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.calendar_today, size: 18),
+                        const SizedBox(width: 8),
+                        Text(
+                          pagadoHasta == null
+                              ? 'Pagado hasta: —'
+                              : 'Pagado hasta: ${pagadoHasta!.day.toString().padLeft(2, '0')}/'
+                                  '${pagadoHasta!.month.toString().padLeft(2, '0')}/'
+                                  '${pagadoHasta!.year}',
+                          style: const TextStyle(fontSize: 15),
+                        ),
+                        const Spacer(),
+                        const Icon(Icons.edit,
+                            size: 16, color: Colors.grey),
+                      ],
+                    ),
+                  ),
+                ),
               ],
             ),
           ),
@@ -231,6 +278,11 @@ class _FichaScreenState extends State<FichaScreen> {
           const SnackBar(content: Text('El nombre no puede estar vacío')));
       return;
     }
+    final phStr = pagadoHasta == null
+        ? null
+        : '${pagadoHasta!.year.toString().padLeft(4, '0')}-'
+            '${pagadoHasta!.month.toString().padLeft(2, '0')}-'
+            '${pagadoHasta!.day.toString().padLeft(2, '0')}';
     await LocalDb.instance.queueOp(
       opUuid: const Uuid().v4(),
       tipo: 'editar_cliente',
@@ -240,6 +292,7 @@ class _FichaScreenState extends State<FichaScreen> {
         'telefono': tel.isEmpty ? null : tel,
         'carnet': car.isEmpty ? null : car,
         'sexo': sexo,
+        if (phStr != null) 'pagado_hasta': phStr,
       },
     );
     if (!mounted) return;
