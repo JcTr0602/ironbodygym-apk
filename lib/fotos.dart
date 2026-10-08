@@ -46,27 +46,46 @@ class FotoCache {
   }
 
   /// Descarga la foto si no está en caché. Null si falla.
+  /// v1.0.9: mejor manejo de errores.
   Future<File?> obtener(String? storagePath) async {
     final ya = await enCache(storagePath);
     if (ya != null || storagePath == null || storagePath.isEmpty) return ya;
     try {
+      final token = _auth.session?.accessToken ?? '';
       final r = await http.get(
         Uri.parse('${AppConfig.supabaseUrl}/storage/v1/object/'
             '${AppConfig.bucketFotos}/$storagePath'),
         headers: {
           'apikey': AppConfig.anonKey,
-          'Authorization':
-              'Bearer ${_auth.session?.accessToken ?? ''}',
+          if (token.isNotEmpty) 'Authorization': 'Bearer $token',
         },
       ).timeout(const Duration(seconds: 30));
-      if (r.statusCode != 200 || r.bodyBytes.isEmpty) return null;
+      if (r.statusCode != 200 || r.bodyBytes.isEmpty) {
+        // Log para diagnóstico (no rompe la app)
+        // ignore: avoid_print
+        print('FotoCache: HTTP ${r.statusCode} para $storagePath');
+        return null;
+      }
       final d = await _dir();
       final f = File('${d.path}/${_nombreArchivo(storagePath)}.jpg');
       await f.writeAsBytes(r.bodyBytes);
       _memoria[storagePath] = f;
       return f;
-    } catch (_) {
+    } catch (e) {
+      // ignore: avoid_print
+      print('FotoCache: error descargando $storagePath: $e');
       return null;
     }
+  }
+
+  /// Invalida el caché para una ruta (fuerza re-descarga).
+  Future<void> invalidar(String? storagePath) async {
+    if (storagePath == null || storagePath.isEmpty) return;
+    _memoria.remove(storagePath);
+    try {
+      final d = await _dir();
+      final f = File('${d.path}/${_nombreArchivo(storagePath)}.jpg');
+      if (await f.exists()) await f.delete();
+    } catch (_) {}
   }
 }
