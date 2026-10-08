@@ -258,12 +258,16 @@ class SyncEngine {
     _running = true;
     try {
       await _doPush();
+    } catch (_) {
+      // Llamadas fire-and-forget: el error ya se mostró vía _emit.
     } finally {
       _running = false;
     }
   }
 
   /// Lógica interna de subida (sin guard _running).
+  /// P0 (2026-10-08): propaga la excepción para que run() no marque
+  /// "sincronizado" si el push falló por dentro.
   Future<void> _doPush() async {
     try {
       _emit(SyncPhase.uploading);
@@ -276,10 +280,12 @@ class SyncEngine {
     } on SessionExpired {
       _sesionVencida();
       _emit(SyncPhase.idle);
+      rethrow;
     } catch (e) {
       _emit(SyncPhase.error, error: _describeError(e));
       await Future.delayed(const Duration(seconds: 2));
       _emit(SyncPhase.idle);
+      rethrow;
     }
   }
 
@@ -305,10 +311,12 @@ class SyncEngine {
     } on SessionExpired {
       _sesionVencida();
       _emit(SyncPhase.idle);
+      rethrow;
     } catch (e) {
       _emit(SyncPhase.error, error: _describeError(e));
       await Future.delayed(const Duration(seconds: 2));
       _emit(SyncPhase.idle);
+      rethrow;
     }
   }
 
@@ -357,7 +365,7 @@ class SyncEngine {
             headers: {
               'Content-Type': 'application/json',
               // duplicados se fusionan: idempotente por op_uuid
-              'Prefer': 'resolution=merge-duplicates,return=minimal',
+              'Prefer': 'resolution=ignore-duplicates,return=minimal',
             },
             body: body);
         if (r.statusCode == 200 ||
@@ -416,7 +424,7 @@ class SyncEngine {
             headers: {
               'Content-Type': 'application/json',
               'Prefer':
-                  'resolution=merge-duplicates,return=minimal',
+                  'resolution=ignore-duplicates,return=minimal',
             },
             body: body);
         if (r.statusCode == 200 ||
