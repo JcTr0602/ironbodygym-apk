@@ -219,11 +219,10 @@ class _FilaClienteState extends State<_FilaCliente> {
   @override
   void didUpdateWidget(_FilaCliente old) {
     super.didUpdateWidget(old);
-    // Si cambió la foto del cliente (p. ej. bajó del servidor), re-resolver.
-    if (old.cliente['foto_storage'] !=
-        widget.cliente['foto_storage']) {
-      _resolverFoto();
-    }
+    // v1.1: re-resuelve siempre (no solo si cambió foto_storage).
+    // Así, si la foto se descargó en la ficha y ahora está en caché,
+    // la miniatura aparece al volver a la lista.
+    _resolverFoto();
   }
 
   /// Lee la caché; si hay foto_storage sin caché, la descarga en

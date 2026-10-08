@@ -17,6 +17,7 @@ import '../negocio.dart';
 import '../sync.dart';
 import 'cuentas_cobrar.dart';
 import 'papelera.dart';
+import 'congelados.dart';
 import 'auditoria.dart';
 import 'riesgo.dart';
 import 'historial_entrenador.dart';
@@ -706,6 +707,18 @@ class _AdminScreenState extends State<AdminScreen> {
                                   'Abrir papelera'),
                               onPressed: () =>
                                   _ir(const PapeleraScreen()),
+                            ),
+                          ),
+                        ]),
+                        _seccion('❄️ Congelados', [
+                          SizedBox(
+                            width: double.infinity,
+                            child: OutlinedButton.icon(
+                              icon: const Icon(Icons.ac_unit),
+                              label: const Text(
+                                  'Ver congelados'),
+                              onPressed: () =>
+                                  _ir(const CongeladosScreen()),
                             ),
                           ),
                         ]),

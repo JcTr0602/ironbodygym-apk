@@ -10,6 +10,8 @@ import 'dart:convert';
 import 'package:path/path.dart' as p;
 import 'package:sqflite/sqflite.dart';
 
+import 'fotos.dart';
+
 class LocalDb {
   LocalDb._();
   static final LocalDb instance = LocalDb._();
@@ -57,6 +59,24 @@ class LocalDb {
   Future<void> upsertMirror(
       String tabla, int id, Map<String, dynamic> data, int syncSeq) async {
     final d = await db;
+    // v1.0.9.1: si cambia foto_storage, invalidar caché para forzar re-descarga
+    if (tabla == 'clientes') {
+      final rows = await d.query(tabla,
+          columns: ['data'], where: 'id=?', whereArgs: [id], limit: 1);
+      if (rows.isNotEmpty) {
+        try {
+          final old = jsonDecode(rows.first['data'] as String)
+              as Map<String, dynamic>;
+          final oldFoto = old['foto_storage'] as String?;
+          final newFoto = data['foto_storage'] as String?;
+          if (oldFoto != newFoto && oldFoto != null && oldFoto.isNotEmpty) {
+            // Importación diferida para evitar ciclo
+            // ignore: avoid_dynamic_calls
+            await FotoCache.instance.invalidar(oldFoto);
+          }
+        } catch (_) {}
+      }
+    }
     await d.insert(
         tabla,
         {'id': id, 'data': jsonEncode(data), 'sync_seq': syncSeq},
@@ -107,6 +127,12 @@ class LocalDb {
   Future<void> marcarAvisado(int clienteId) async {
     final ahora = DateTime.now().toIso8601String();
     await setMeta('avisado_$clienteId', ahora);
+  }
+
+  /// Desmarca el aviso (v1.1). Permite deshacer si fue un error.
+  Future<void> desmarcarAvisado(int clienteId) async {
+    final d = await db;
+    await d.delete('meta', where: 'k=?', whereArgs: ['avisado_$clienteId']);
   }
 
   /// Devuelve el timestamp de aviso, o null si no se ha avisado.

@@ -6,7 +6,6 @@ import 'package:flutter/material.dart';
 
 import '../localdb.dart';
 import '../sync.dart';
-import 'widgets.dart';
 
 class ColaScreen extends StatefulWidget {
   const ColaScreen({super.key});
@@ -257,134 +256,271 @@ class _ColaScreenState extends State<ColaScreen> {
   Widget build(BuildContext context) {
     final pendientes =
         _ops.where((o) => o['estado'] == 'pendiente' || o['estado'] == 'error').length;
+    final estaOk = _det.error == null || _det.error!.isEmpty;
     return Scaffold(
       appBar: AppBar(title: const Text('📤 Sincronización')),
-      body: Column(
-        children: [
-          const SyncBanner(),
-          Padding(
-            padding: const EdgeInsets.all(12),
-            child: Card(
-              child: Padding(
+      body: RefreshIndicator(
+        onRefresh: _cargar,
+        child: ListView(
+          padding: const EdgeInsets.all(16),
+          children: [
+            // Cabecera de estado visual (v1.0.9.1)
+            Container(
+              padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: estaOk
+                      ? [const Color(0xFF4CAF50), const Color(0xFF2E7D32)]
+                      : [const Color(0xFFF44336), const Color(0xFFC62828)],
+                ),
+                borderRadius: BorderRadius.circular(20),
+                boxShadow: [
+                  BoxShadow(
+                    color: (estaOk ? Colors.green : Colors.red).withValues(alpha: 0.3),
+                    blurRadius: 12,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
+              ),
+              child: Column(
+                children: [
+                  Text(
+                    estaOk ? '✅' : '⚠️',
+                    style: const TextStyle(fontSize: 48),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    estaOk ? 'Sincronizado' : 'Error de sincronización',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 22,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    pendientes > 0
+                        ? '$pendientes operaciones pendientes'
+                        : 'Todo al día',
+                    style: const TextStyle(
+                      color: Colors.white70,
+                      fontSize: 14,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
+            // Tarjetas de estadísticas
+            Row(
+              children: [
+                Expanded(
+                  child: _tarjetaStat(
+                    '⬇️',
+                    'Bajados',
+                    '${_det.bajados}',
+                    'Última: ${_hora(_det.ultimaPull)}',
+                    Colors.blue,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: _tarjetaStat(
+                    '⬆️',
+                    'Subidos',
+                    '${_det.subidos}',
+                    'Última: ${_hora(_det.ultimaPush)}',
+                    Colors.orange,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            // Botón sincronizar
+            SizedBox(
+              width: double.infinity,
+              height: 52,
+              child: ElevatedButton.icon(
+                icon: _sincronizando
+                    ? const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: Colors.white,
+                        ),
+                      )
+                    : const Text('🔄', style: TextStyle(fontSize: 20)),
+                label: Text(
+                  _sincronizando ? 'Sincronizando…' : 'Sincronizar ahora',
+                  style: const TextStyle(fontSize: 16),
+                ),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFFE8821A),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                ),
+                onPressed: _sincronizando ? null : _sincronizar,
+              ),
+            ),
+            if (_det.error != null && _det.error!.isNotEmpty) ...[
+              const SizedBox(height: 12),
+              Container(
                 padding: const EdgeInsets.all(12),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+                decoration: BoxDecoration(
+                  color: Colors.red.shade50,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: Colors.red.shade200),
+                ),
+                child: Row(
                   children: [
-                    _fila('⬇️ Última bajada', _hora(_det.ultimaPull)),
-                    _fila('⬆️ Última subida', _hora(_det.ultimaPush)),
-                    _fila('📤 Subidos (última vez)', '${_det.subidos}'),
-                    _fila('📥 Bajados (última vez)', '${_det.bajados}'),
-                    _fila('⏳ Pendientes ahora', '$pendientes'),
-                    if (_det.error != null &&
-                        _det.error!.isNotEmpty)
-                      Padding(
-                        padding:
-                            const EdgeInsets.only(top: 6),
-                        child: Text('⚠️ ${_det.error}',
-                            style: const TextStyle(
-                                color: Colors.red,
-                                fontSize: 12)),
+                    const Text('⚠️', style: TextStyle(fontSize: 20)),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        _det.error!,
+                        style: const TextStyle(
+                            color: Colors.red, fontSize: 13),
                       ),
-                    const SizedBox(height: 8),
-                    const Text(
-                      'La app baja cambios de otros entrenadores cada 2 min. '
-                      'Tus cambios suben cada hora o con el botón.',
-                      style: TextStyle(
-                          color: Colors.grey, fontSize: 12),
                     ),
                   ],
                 ),
               ),
+            ],
+            const SizedBox(height: 16),
+            const Text(
+              'Operaciones recientes',
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
             ),
-          ),
-          Padding(
-            padding:
-                const EdgeInsets.symmetric(horizontal: 12),
-            child: SizedBox(
-              width: double.infinity,
-              child: ElevatedButton.icon(
-                icon: const Text('🔄'),
-                label: Text(_sincronizando
-                    ? 'Sincronizando…'
-                    : 'Sincronizar ahora'),
-                onPressed:
-                    _sincronizando ? null : _sincronizar,
-              ),
-            ),
-          ),
-          const Padding(
-            padding: EdgeInsets.fromLTRB(12, 12, 12, 4),
-            child: Align(
-              alignment: Alignment.centerLeft,
-              child: Text('Operaciones recientes:',
-                  style:
-                      TextStyle(fontWeight: FontWeight.bold)),
-            ),
-          ),
-          Expanded(
-            child: _ops.isEmpty
-                ? const Center(
-                    child: Text('Sin operaciones todavía'))
-                : RefreshIndicator(
-                    onRefresh: _cargar,
-                    child: ListView.builder(
-                      itemCount: _ops.length,
-                      itemBuilder: (ctx, i) {
-                        final op = _ops[i];
-                        final estado = '${op['estado']}';
-                        final cancelable = estado ==
-                                'pendiente' ||
-                            estado == 'error';
-                        return ListTile(
-                          leading: Text(_emoji(estado),
-                              style: const TextStyle(
-                                  fontSize: 24)),
-                          title:
-                              Text(_tipo('${op['tipo']}')),
-                          subtitle: Text(
-                              '${op['creada_ts']}'.substring(0, 16).replaceAll('T', ' ') +
-                                  (op['error'] != null &&
-                                          '${op['error']}'
-                                              .isNotEmpty
-                                      ? '\n${op['error']}'
-                                      : '')),
-                          trailing: cancelable
-                              ? IconButton(
-                                  tooltip: 'Cancelar',
-                                  icon: const Icon(
-                                      Icons.cancel_outlined,
-                                      color: Colors.red),
-                                  onPressed: () =>
-                                      _cancelar(
-                                          '${op['op_uuid']}',
-                                          '${op['tipo']}'),
-                                )
-                              : Text(estado,
-                                  style: const TextStyle(
-                                      color: Colors.grey,
-                                      fontSize: 12)),
-                          onTap: () => _verDetalle(op),
-                        );
-                      },
-                    ),
+            const SizedBox(height: 8),
+            if (_ops.isEmpty)
+              const Center(
+                child: Padding(
+                  padding: EdgeInsets.all(24),
+                  child: Text('Sin operaciones todavía',
+                      style: TextStyle(color: Colors.grey)),
+                ),
+              )
+            else
+              ..._ops.map((op) {
+                final estado = '${op['estado']}';
+                final cancelable =
+                    estado == 'pendiente' || estado == 'error';
+                return Card(
+                  margin: const EdgeInsets.only(bottom: 8),
+                  child: ListTile(
+                    leading: Text(_emoji(estado),
+                        style: const TextStyle(fontSize: 24)),
+                    title: Text(_tipo('${op['tipo']}')),
+                    subtitle: Text(
+                        '${op['creada_ts']}'.substring(0, 16).replaceAll('T', ' ') +
+                            (op['error'] != null &&
+                                    '${op['error']}'.isNotEmpty
+                                ? '\n${op['error']}'
+                                : '')),
+                    trailing: cancelable
+                        ? IconButton(
+                            tooltip: 'Cancelar',
+                            icon: const Icon(Icons.cancel_outlined,
+                                color: Colors.red),
+                            onPressed: () => _cancelar(
+                                '${op['op_uuid']}', '${op['tipo']}'),
+                          )
+                        : _estadoChip(estado),
+                    onTap: () => _verDetalle(op),
                   ),
+                );
+              }),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Tarjeta de estadística (v1.0.9.1)
+  Widget _tarjetaStat(
+      String emoji, String titulo, String valor, String subtitulo, Color color) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.grey.withValues(alpha: 0.15),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(emoji, style: const TextStyle(fontSize: 24)),
+          const SizedBox(height: 8),
+          Text(
+            valor,
+            style: TextStyle(
+              fontSize: 24,
+              fontWeight: FontWeight.bold,
+              color: color,
+            ),
+          ),
+          Text(
+            titulo,
+            style: const TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            subtitulo,
+            style: const TextStyle(fontSize: 11, color: Colors.grey),
           ),
         ],
       ),
     );
   }
 
-  Widget _fila(String etiqueta, String valor) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 4),
-      child: Row(
-        children: [
-          Expanded(child: Text(etiqueta)),
-          Text(valor,
-              style:
-                  const TextStyle(fontWeight: FontWeight.bold)),
-        ],
+  /// Chip de estado para operaciones (v1.0.9.1)
+  Widget _estadoChip(String estado) {
+    Color bg;
+    Color fg;
+    String texto;
+    if (estado == 'aplicada') {
+      bg = Colors.green.shade100;
+      fg = Colors.green.shade800;
+      texto = 'aplicada';
+    } else if (estado == 'rechazada') {
+      bg = Colors.red.shade100;
+      fg = Colors.red.shade800;
+      texto = 'rechazada';
+    } else if (estado == 'enviada') {
+      bg = Colors.blue.shade100;
+      fg = Colors.blue.shade800;
+      texto = 'enviada';
+    } else {
+      bg = Colors.grey.shade200;
+      fg = Colors.grey.shade700;
+      texto = estado;
+    }
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Text(
+        texto,
+        style: TextStyle(
+            color: fg, fontSize: 12, fontWeight: FontWeight.w600),
       ),
     );
   }
+
+
 }

@@ -31,6 +31,7 @@ class _FichaScreenState extends State<FichaScreen> {
   Map<String, dynamic>? _c;
   List<Map<String, dynamic>> _pagos = [];
   File? _foto;
+  bool _verificando = false;
 
   @override
   void initState() {
@@ -52,6 +53,61 @@ class _FichaScreenState extends State<FichaScreen> {
         _pagos = pagos;
         _foto = foto;
       });
+    }
+  }
+
+  /// Verifica los datos del cliente contra el servidor (v1.0.10).
+  /// Descarga la versión actual y compara con la local.
+  Future<void> _verificarServidor() async {
+    if (_verificando) return;
+    setState(() => _verificando = true);
+    try {
+      final messenger = ScaffoldMessenger.of(context);
+      // Forzar pull y recargar
+      await SyncEngine.instance.pull();
+      final antes = _c;
+      await _cargar();
+      if (!mounted) return;
+      final despues = _c;
+      // Comparar campos clave
+      final cambios = <String>[];
+      if (antes != null && despues != null) {
+        for (final k in [
+          'pagado_hasta',
+          'estado',
+          'telefono',
+          'foto_storage',
+          'nombre'
+        ]) {
+          if ('${antes[k]}' != '${despues[k]}') {
+            cambios.add(k);
+          }
+        }
+      }
+      if (cambios.isEmpty) {
+        messenger.showSnackBar(
+          const SnackBar(
+            content: Text('✅ Datos al día con el servidor'),
+            duration: Duration(seconds: 2),
+          ),
+        );
+      } else {
+        messenger.showSnackBar(
+          SnackBar(
+            content: Text(
+                '🔄 Actualizado desde el servidor: ${cambios.join(', ')}'),
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('⚠️ Error al verificar: $e')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _verificando = false);
     }
   }
 
@@ -555,9 +611,21 @@ class _FichaScreenState extends State<FichaScreen> {
       appBar: AppBar(
         title: Text(c == null ? '…' : '👤 ${c['nombre']}'),
         actions: [
-          if (c != null)
+          if (c != null) ...[
+            // Verificar datos contra el servidor (v1.0.10)
+            IconButton(
+                tooltip: 'Verificar con servidor',
+                icon: _verificando
+                    ? const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(
+                            strokeWidth: 2, color: Colors.white))
+                    : const Icon(Icons.cloud_sync),
+                onPressed: _verificando ? null : _verificarServidor),
             IconButton(
                 tooltip: 'Editar', icon: const Icon(Icons.edit), onPressed: _editar),
+          ],
         ],
       ),
       body: Column(
@@ -604,7 +672,7 @@ class _FichaScreenState extends State<FichaScreen> {
                       _fila('🗓️ Inscripción',
                           fmtFecha(c['fecha_inscripcion'] as String?)),
                       _fila('👤 Inscrito por',
-                          '${c['registrado_por_nombre'] ?? '—'}'),
+                          _textoInscritoPor(c['registrado_por_nombre'] as String?)),
                       InkWell(
                         onTap: _editarNotas,
                         child: Padding(
@@ -780,5 +848,15 @@ class _FichaScreenState extends State<FichaScreen> {
         ],
       ),
     );
+  }
+
+  /// Texto amigable para "Inscrito por" (v1.1).
+  /// Los importados del Excel muestran "Migración del sistema anterior".
+  String _textoInscritoPor(String? raw) {
+    if (raw == null || raw.isEmpty) return '—';
+    if (raw.startsWith('Excel')) {
+      return 'Migración del sistema anterior';
+    }
+    return raw;
   }
 }

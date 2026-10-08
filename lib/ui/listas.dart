@@ -197,7 +197,7 @@ class _ListasScreenState extends State<ListasScreen>
             trailing: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                // Botón avisar (v1.0.8)
+                // Botón avisar (v1.0.8, toggle en v1.1)
                 FutureBuilder<String?>(
                   future: LocalDb.instance.getAvisado(id),
                   builder: (ctx, snap) {
@@ -206,14 +206,27 @@ class _ListasScreenState extends State<ListasScreen>
                       child: Text(avisado ? '✅' : '📢',
                           style: const TextStyle(fontSize: 18)),
                       onPressed: () async {
-                        await LocalDb.instance.marcarAvisado(id);
-                        if (mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                                content: Text(
-                                    '📢 ${c['nombre']} marcado como avisado')),
-                          );
-                          setState(() {});
+                        if (avisado) {
+                          // Deshacer: quitar la marca
+                          await LocalDb.instance.desmarcarAvisado(id);
+                          if (mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                  content: Text(
+                                      '↩️ Marca de avisado quitada para ${c['nombre']}')),
+                            );
+                            setState(() {});
+                          }
+                        } else {
+                          await LocalDb.instance.marcarAvisado(id);
+                          if (mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                  content: Text(
+                                      '📢 ${c['nombre']} marcado como avisado')),
+                            );
+                            setState(() {});
+                          }
                         }
                       },
                     );

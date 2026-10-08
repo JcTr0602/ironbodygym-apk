@@ -65,6 +65,7 @@ Future<Map<String, dynamic>?> pagoDialogo(
   String metodo = 'efectivo';
   final diasCtrl = TextEditingController();
   final montoCtrl = TextEditingController();
+  DateTime fechaPago = DateTime.now(); // v1.1: permite elegir fecha del pago
 
   PeriodoSel actual() {
     double monto;
@@ -107,6 +108,44 @@ Future<Map<String, dynamic>?> pagoDialogo(
               children: [
                 Text(
                     'Vence: ${fmtFecha(cliente['pagado_hasta'] as String?)}'),
+                const SizedBox(height: 8),
+                // Selector de fecha del pago (v1.1)
+                InkWell(
+                  onTap: () async {
+                    final picked = await showDatePicker(
+                      context: ctx,
+                      initialDate: fechaPago,
+                      firstDate: DateTime(2020),
+                      lastDate: DateTime.now(),
+                      helpText: 'Fecha del pago',
+                    );
+                    if (picked != null) {
+                      setS(() => fechaPago = picked);
+                    }
+                  },
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 12, vertical: 10),
+                    decoration: BoxDecoration(
+                      border: Border.all(color: Colors.grey.shade400),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.calendar_today, size: 18),
+                        const SizedBox(width: 8),
+                        Text(
+                          'Pagado el: ${fechaPago.day.toString().padLeft(2, '0')}/'
+                          '${fechaPago.month.toString().padLeft(2, '0')}/'
+                          '${fechaPago.year}',
+                          style: const TextStyle(fontSize: 15),
+                        ),
+                        const Spacer(),
+                        const Icon(Icons.edit, size: 16, color: Colors.grey),
+                      ],
+                    ),
+                  ),
+                ),
                 const SizedBox(height: 8),
                 const Text('Período:'),
                 DropdownButton<String>(
@@ -252,6 +291,8 @@ Future<Map<String, dynamic>?> pagoDialogo(
     'monto': s.monto,
     'pagado_hasta': nuevo,
     'metodo': metodo,
-    'fecha': DateTime.now().toIso8601String().substring(0, 10),
+    'fecha': '${fechaPago.year.toString().padLeft(4, '0')}-'
+        '${fechaPago.month.toString().padLeft(2, '0')}-'
+        '${fechaPago.day.toString().padLeft(2, '0')}',
   };
 }

@@ -15,6 +15,42 @@ class Novedad {
 }
 
 const novedades = [
+  Novedad('1.0.10', [
+    '📅 Fecha del pago elegible al renovar (ayer, hoy, etc.)',
+    '☁️ Botón "Verificar con servidor" en la ficha del cliente',
+    '❄️ Lista de congelados en Administración (descongelar)',
+    '🔄 Botón flotante de sincronizar en la vista principal',
+    '📊 Pantalla de sincronización rediseñada',
+    '✅ Avisado ahora es toggle (se puede deshacer)',
+    '📝 "Inscrito por" muestra "Migración del sistema anterior"',
+    '🖼️ Miniaturas de fotos en lista corregidas',
+    '📷 Caché de fotos se invalida al cambiar la foto',
+  ]),
+  Novedad('1.0.9', [
+    '👥 Historial por entrenador: cobrado, pagos, inscripciones y pendiente',
+    '❄️ Congelar membresía: pausa el vencimiento (no aparece en vencidos)',
+    '📊 Exportar Excel: clientes y pagos del mes en CSV',
+  ]),
+  Novedad('1.0.8', [
+    '📊 Dashboard: ingresos hoy/7 días/mes, activos vs vencidos',
+    '📅 Mi día: cobros del turno, por cobrar hoy, cerrar turno',
+    '💸 Cuentas por cobrar: dinero dormido en vencidos',
+    '📢 Marcar avisado en vencidos',
+    '🔔 Mis avisos: configura notificaciones',
+    '📈 Gráfico de ingresos últimos 7 días',
+  ]),
+  Novedad('1.0.7', [
+    '📋 Resumen post-sync: popup con lo subido/bajado',
+    '🎂 Cumpleaños del mes mejorado',
+    '🏥 Panel salud del sistema',
+    '📷 Editor de foto: zoom y mover para centrar',
+    '🔄 Sync silenciosa al abrir la app',
+    '🗑️ Papelera con selección múltiple',
+    '⚠️ Eliminar definitivo (solo dueño)',
+    '💰 Cobro en 2 toques',
+    '⚠️ Clientes en riesgo',
+    '📋 Ficha 360 con totales',
+  ]),
   Novedad('1.0.6', [
     '🔄 Rechazadas: ahora puedes ver el motivo y reenviar la operación',
     '✅ Confirmación de cobro a pantalla completa (check grande, monto, vencimiento)',
