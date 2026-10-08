@@ -5,10 +5,14 @@ library;
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:uuid/uuid.dart';
 
 import '../fotos.dart';
+import '../localdb.dart';
 import '../negocio.dart';
 import '../sync.dart';
+import 'confirmacion_cobro.dart';
+import 'dialogo_pago.dart';
 import 'ficha.dart';
 import 'widgets.dart';
 
@@ -47,6 +51,34 @@ class _BuscarScreenState extends State<BuscarScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('✅ Lista actualizada')));
     }
+  }
+
+  /// Cobro en 2 toques: diálogo de pago directo desde la lista,
+  /// con confirmación a pantalla completa.
+  Future<void> _pagoRapido(Map<String, dynamic> c) async {
+    final payload = await pagoDialogo(context, c);
+    if (payload == null || !mounted) return;
+    await LocalDb.instance.queueOp(
+      opUuid: const Uuid().v4(),
+      tipo: 'pago_mensual',
+      payload: payload,
+    );
+    if (!mounted) return;
+    final monto = '${payload['monto'] ?? ''} CUP';
+    final venc = '${payload['pagado_hasta'] ?? ''}';
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => ConfirmacionCobroScreen(
+          nombreCliente: '${c['nombre'] ?? ''}',
+          monto: monto,
+          nuevoVencimiento:
+              venc.length >= 10 ? venc.substring(0, 10) : venc,
+        ),
+      ),
+    );
+    if (!mounted) return;
+    _buscar();
+    SyncEngine.instance.push();
   }
 
   @override
@@ -116,7 +148,21 @@ class _BuscarScreenState extends State<BuscarScreen> {
                                         clienteId:
                                             (c['id'] as int?) ??
                                                 0)))
-                                .then((_) => _buscar()));
+                                .then((_) => _buscar()),
+                            trailing: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                IconButton(
+                                  tooltip: 'Cobro rápido',
+                                  icon: const Text('💰',
+                                      style: TextStyle(
+                                          fontSize: 22)),
+                                  onPressed: () =>
+                                      _pagoRapido(c),
+                                ),
+                                const Icon(Icons.chevron_right),
+                              ],
+                            ));
                       },
                     ),
                   ),
@@ -131,24 +177,30 @@ class _BuscarScreenState extends State<BuscarScreen> {
 class FilaCliente extends StatelessWidget {
   final Map<String, dynamic> cliente;
   final VoidCallback? onTap;
+  final VoidCallback? onLongPress;
   final Widget? trailing;
+  final Widget? leading;
   const FilaCliente(
       {super.key,
       required this.cliente,
       this.onTap,
-      this.trailing});
+      this.onLongPress,
+      this.trailing,
+      this.leading});
 
   @override
   Widget build(BuildContext context) =>
-      _FilaCliente(cliente: cliente, onTap: onTap, trailing: trailing);
+      _FilaCliente(cliente: cliente, onTap: onTap, onLongPress: onLongPress, trailing: trailing, leading: leading);
 }
 
 class _FilaCliente extends StatefulWidget {
   final Map<String, dynamic> cliente;
   final VoidCallback? onTap;
+  final VoidCallback? onLongPress;
   final Widget? trailing;
+  final Widget? leading;
   const _FilaCliente(
-      {required this.cliente, this.onTap, this.trailing});
+      {required this.cliente, this.onTap, this.onLongPress, this.trailing, this.leading});
 
   @override
   State<_FilaCliente> createState() => _FilaClienteState();
@@ -216,26 +268,28 @@ class _FilaClienteState extends State<_FilaCliente> {
     }
     if (iniciales.isEmpty) iniciales = '?';
     return ListTile(
-      leading: _foto != null
-          ? ClipRRect(
-              borderRadius: BorderRadius.circular(20),
-              child: Image.file(_foto!,
-                  width: 40, height: 40, fit: BoxFit.cover),
-            )
-          : CircleAvatar(
-              backgroundColor: const Color(0xFFE8821A).withValues(alpha: 0.2),
-              child: Text(iniciales,
-                  style: const TextStyle(
-                      color: Color(0xFFE8821A),
-                      fontWeight: FontWeight.bold,
-                      fontSize: 16)),
-            ),
+      leading: widget.leading ??
+          (_foto != null
+              ? ClipRRect(
+                  borderRadius: BorderRadius.circular(20),
+                  child: Image.file(_foto!,
+                      width: 40, height: 40, fit: BoxFit.cover),
+                )
+              : CircleAvatar(
+                  backgroundColor: const Color(0xFFE8821A).withValues(alpha: 0.2),
+                  child: Text(iniciales,
+                      style: const TextStyle(
+                          color: Color(0xFFE8821A),
+                          fontWeight: FontWeight.bold,
+                          fontSize: 16)),
+                )),
       title: Text('${c['nombre']}'),
       subtitle: Text(textoEstado(ph),
           style: TextStyle(color: color, fontSize: 12)),
       trailing: widget.trailing ??
           const Icon(Icons.chevron_right),
       onTap: widget.onTap,
+      onLongPress: widget.onLongPress,
     );
   }
 }

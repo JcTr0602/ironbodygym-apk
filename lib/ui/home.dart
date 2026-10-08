@@ -61,6 +61,26 @@ class _HomeScreenState extends State<HomeScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) mostrarNovedadesSiHay(context);
     });
+    // Sincronización silenciosa (v1.0.7): si hay pendientes al abrir la app,
+    // intenta subirlos en segundo plano sin molestar al usuario.
+    _syncSilencioso();
+  }
+
+  /// Intenta sincronizar en silencio si hay operaciones pendientes.
+  /// No muestra diálogos ni errores; solo lo intenta.
+  Future<void> _syncSilencioso() async {
+    try {
+      final pendientes = await LocalDb.instance.countPendingOps();
+      if (pendientes > 0 && mounted) {
+        // Espera un poco para no bloquear el inicio
+        await Future.delayed(const Duration(seconds: 3));
+        if (mounted) {
+          await SyncEngine.instance.push();
+        }
+      }
+    } catch (_) {
+      // Silencioso: si falla, el usuario sincroniza manualmente
+    }
   }
 
   @override

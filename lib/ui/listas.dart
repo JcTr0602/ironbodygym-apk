@@ -8,6 +8,7 @@ import '../localdb.dart';
 import '../negocio.dart';
 import '../sync.dart';
 import 'buscar.dart';
+import 'confirmacion_cobro.dart';
 import 'dialogo_pago.dart';
 import 'ficha.dart';
 import 'widgets.dart';
@@ -94,8 +95,20 @@ class _ListasScreenState extends State<ListasScreen>
       payload: payload,
     );
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('✅ Pago de ${c['nombre']} guardado')));
+    // Confirmación a pantalla completa (cobro en 2 toques)
+    final monto = '${payload['monto'] ?? ''} CUP';
+    final venc = '${payload['pagado_hasta'] ?? ''}';
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => ConfirmacionCobroScreen(
+          nombreCliente: '${c['nombre'] ?? ''}',
+          monto: monto,
+          nuevoVencimiento:
+              venc.length >= 10 ? venc.substring(0, 10) : venc,
+        ),
+      ),
+    );
+    if (!mounted) return;
     _cargar();
     SyncEngine.instance.push();
   }

@@ -16,6 +16,7 @@ import 'package:uuid/uuid.dart';
 import '../localdb.dart';
 import '../negocio.dart';
 import '../sync.dart';
+import 'editor_foto.dart';
 import 'widgets.dart';
 
 class InscribirScreen extends StatefulWidget {
@@ -56,7 +57,15 @@ class _InscribirScreenState extends State<InscribirScreen> {
     final destino =
         File('${dir.path}/foto_${DateTime.now().millisecondsSinceEpoch}.jpg');
     await File(img.path).copy(destino.path);
-    setState(() => _foto = destino);
+    // Editor simple: permite zoom/mover para centrar la cara
+    if (!mounted) return;
+    final editada = await mostrarEditorFoto(context, destino);
+    if (editada == null) {
+      // usuario canceló: borra la copia temporal
+      try { await destino.delete(); } catch (_) {}
+      return;
+    }
+    setState(() => _foto = editada);
   }
 
   double _montoPeriodo(Map<String, double> precios) {

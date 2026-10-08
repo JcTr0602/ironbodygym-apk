@@ -41,6 +41,70 @@ class _ColaScreenState extends State<ColaScreen> {
     await SyncEngine.instance.run();
     await _cargar();
     if (mounted) setState(() => _sincronizando = false);
+    // Resumen post-sync (solo en sincronización manual desde aquí)
+    if (mounted) _mostrarResumen();
+  }
+
+  /// Muestra un diálogo con el resumen de la sincronización recién hecha.
+  Future<void> _mostrarResumen() async {
+    final det = await SyncEngine.instance.detalle();
+    if (!mounted) return;
+    final subidos = det.subidos;
+    final bajados = det.bajados;
+    final error = det.error;
+    await showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('🔄 Sincronización completada'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _resumenFila('📤 Subidos', '$subidos'),
+            const SizedBox(height: 8),
+            _resumenFila('📥 Bajados', '$bajados'),
+            if (error != null && error.isNotEmpty) ...[
+              const SizedBox(height: 12),
+              Text(
+                '⚠️ $error',
+                style: const TextStyle(color: Colors.red, fontSize: 13),
+              ),
+            ],
+            if (subidos == 0 && bajados == 0)
+              const Padding(
+                padding: EdgeInsets.only(top: 12),
+                child: Text(
+                  'No hubo cambios nuevos.',
+                  style: TextStyle(color: Colors.grey),
+                ),
+              ),
+          ],
+        ),
+        actions: [
+          ElevatedButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Entendido'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _resumenFila(String etiqueta, String valor) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Text(etiqueta, style: const TextStyle(fontSize: 16)),
+        Text(
+          valor,
+          style: const TextStyle(
+            fontSize: 18,
+            fontWeight: FontWeight.bold,
+            color: Color(0xFFE8821A),
+          ),
+        ),
+      ],
+    );
   }
 
   Future<void> _cancelar(String uuid, String tipo) async {

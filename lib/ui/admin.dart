@@ -17,6 +17,7 @@ import '../negocio.dart';
 import '../sync.dart';
 import 'papelera.dart';
 import 'auditoria.dart';
+import 'riesgo.dart';
 import 'widgets.dart';
 
 class AdminScreen extends StatefulWidget {
@@ -30,11 +31,15 @@ class _AdminScreenState extends State<AdminScreen> {
   int _inscMes = 0;
   int _morosos = 0;
   List<Map<String, dynamic>> _pend = [];
+  List<Map<String, dynamic>> _inscPorEntrenador = [];
   List<Map<String, dynamic>> _gastos = [];
   Map<String, double> _caja = {'efectivo': 0, 'transferencia': 0};
   double _gastosHoy = 0;
   final Map<String, TextEditingController> _montos = {};
   bool _cargando = true;
+  // Salud del sistema
+  SyncDetalle _syncDet = const SyncDetalle();
+  int _pendientesSubir = 0;
 
   static const _clavesMonto = [
     ('mensualidad', 'Mensualidad'),
@@ -63,6 +68,7 @@ class _AdminScreenState extends State<AdminScreen> {
     final insc = await inscripcionesMes();
     final mor = await morosos();
     final pend = await pendientePorEntrenador();
+    final inscEntrenador = await inscripcionesPorEntrenador();
     final gastos = await gastosTodos();
     final caja = await cobradoHoyPorMetodo();
     final hoy = DateTime.now();
@@ -71,15 +77,21 @@ class _AdminScreenState extends State<AdminScreen> {
         '${hoy.day.toString().padLeft(2, '0')}';
     final gh = await gastosDe(hoyIso);
     final aj = await LocalDb.instance.getAjustes();
+    // Salud del sistema
+    final det = await SyncEngine.instance.detalle();
+    final pendSubir = await LocalDb.instance.countPendingOps();
     if (mounted) {
       setState(() {
         _ingresos = ing;
         _inscMes = insc;
         _morosos = mor;
         _pend = pend;
+        _inscPorEntrenador = inscEntrenador;
         _gastos = gastos;
         _caja = caja;
         _gastosHoy = gh;
+        _syncDet = det;
+        _pendientesSubir = pendSubir;
         for (final (clave, _) in _clavesMonto) {
           _montos
               .putIfAbsent(clave, () => TextEditingController())
@@ -500,6 +512,33 @@ class _AdminScreenState extends State<AdminScreen> {
                           _fila('➕ Inscripciones', '$_inscMes'),
                           _fila('⏳ Morosos', '$_morosos'),
                         ]),
+                        if (_inscPorEntrenador.isNotEmpty)
+                          _seccion('👥 Inscripciones por entrenador', [
+                            for (final e in _inscPorEntrenador)
+                              _fila('• ${e['nombre']}',
+                                  '${e['cantidad']}'),
+                          ]),
+                        _seccion('🏥 Salud del sistema', [
+                          _fila('🔄 Última sincronización',
+                              _fechaHora(_syncDet.ultimaPush)),
+                          _fila('⬇️ Última bajada',
+                              _fechaHora(_syncDet.ultimaPull)),
+                          _fila('📤 Pendientes por subir',
+                              '$_pendientesSubir'),
+                          _fila('📥 Bajados (última vez)',
+                              '${_syncDet.bajados}'),
+                          if (_syncDet.error != null &&
+                              _syncDet.error!.isNotEmpty)
+                            Padding(
+                              padding:
+                                  const EdgeInsets.only(top: 8),
+                              child: Text(
+                                '⚠️ ${_syncDet.error}',
+                                style: const TextStyle(
+                                    color: Colors.red, fontSize: 13),
+                              ),
+                            ),
+                        ]),
                         _seccion('💵 Montos (precios)', [
                           for (final (clave, etiqueta) in _clavesMonto)
                             Padding(
@@ -647,6 +686,29 @@ class _AdminScreenState extends State<AdminScreen> {
                             ),
                           ),
                         ]),
+                        _seccion('⚠️ Clientes en riesgo', [
+                          const Text(
+                            'Inactivos con 3+ pagos cuyo último pago fue hace más de 60 días. Buenos candidatos para recuperar.',
+                            style: TextStyle(
+                                color: Colors.grey, fontSize: 12),
+                          ),
+                          const SizedBox(height: 8),
+                          SizedBox(
+                            width: double.infinity,
+                            child: ElevatedButton.icon(
+                              icon:
+                                  const Icon(Icons.warning_amber),
+                              label: const Text(
+                                  'Ver clientes en riesgo'),
+                              onPressed: () => Navigator.of(context).push(
+                                MaterialPageRoute(
+                                  builder: (_) =>
+                                      const RiesgoScreen(),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ]),
                         _seccion('📋 Auditoría', [
                           SizedBox(
                             width: double.infinity,
@@ -717,5 +779,15 @@ class _AdminScreenState extends State<AdminScreen> {
         ],
       ),
     );
+  }
+
+  /// Formatea fecha/hora para la sección de salud ("nunca" si es null).
+  String _fechaHora(DateTime? dt) {
+    if (dt == null) return 'nunca';
+    final d = dt.day.toString().padLeft(2, '0');
+    final m = dt.month.toString().padLeft(2, '0');
+    final h = dt.hour.toString().padLeft(2, '0');
+    final min = dt.minute.toString().padLeft(2, '0');
+    return '$d/$m $h:$min';
   }
 }

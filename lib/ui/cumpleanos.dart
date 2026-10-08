@@ -1,4 +1,4 @@
-/// 🎂 Cumpleaños de la semana: la fecha de nacimiento sale del carnet
+/// 🎂 Cumpleaños del mes: la fecha de nacimiento sale del carnet
 /// de identidad del cliente (6 primeros dígitos = AAMMDD).
 library;
 
@@ -17,6 +17,23 @@ class CumpleanosScreen extends StatefulWidget {
 
 class _CumpleanosScreenState extends State<CumpleanosScreen> {
   List<Map<String, dynamic>> _res = [];
+  bool _cargando = true;
+
+  static const _meses = [
+    '',
+    'enero',
+    'febrero',
+    'marzo',
+    'abril',
+    'mayo',
+    'junio',
+    'julio',
+    'agosto',
+    'septiembre',
+    'octubre',
+    'noviembre',
+    'diciembre'
+  ];
 
   @override
   void initState() {
@@ -25,64 +42,84 @@ class _CumpleanosScreenState extends State<CumpleanosScreen> {
   }
 
   Future<void> _cargar() async {
-    final r = await cumpleanosProximos(dias: 7);
-    if (mounted) setState(() => _res = r);
+    final r = await cumpleanosDelMes();
+    if (mounted) {
+      setState(() {
+        _res = r;
+        _cargando = false;
+      });
+    }
   }
 
-  String _cuando(int d) {
-    if (d == 0) return '¡Hoy! 🎉';
-    if (d == 1) return 'Mañana';
-    return 'En $d días';
+  String _etiqueta(Map<String, dynamic> c) {
+    final hoy = DateTime.now();
+    final dia = c['_dia'] as int? ?? 0;
+    if (dia == hoy.day) return '¡Hoy! 🎉';
+    if (c['_paso'] == true) return 'Ya cumplió';
+    return 'Día $dia';
   }
 
   @override
   Widget build(BuildContext context) {
+    final mes = _meses[DateTime.now().month];
     return Scaffold(
-      appBar: AppBar(title: const Text('🎂 Cumpleaños de la semana')),
+      appBar: AppBar(title: Text('🎂 Cumpleaños de $mes')),
       body: Column(
         children: [
           const SyncBanner(),
+          Padding(
+            padding: const EdgeInsets.all(12),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                '${_res.length} cumpleañero(s) este mes',
+                style: const TextStyle(color: Colors.grey, fontSize: 12),
+              ),
+            ),
+          ),
           Expanded(
-            child: _res.isEmpty
-                ? const Center(
-                    child: Text(
-                        'Sin cumpleaños esta semana.\n'
-                        'La fecha sale del carnet de identidad.',
-                        textAlign: TextAlign.center))
-                : RefreshIndicator(
-                    onRefresh: _cargar,
-                    child: ListView.builder(
-                      itemCount: _res.length,
-                      itemBuilder: (ctx, i) {
-                        final c = _res[i];
-                        final d = c['_dias_para'] as int? ?? 0;
-                        return FilaCliente(
-                          cliente: c,
-                          onTap: () => Navigator.of(context)
-                              .push(MaterialPageRoute(
-                                  builder: (_) => FichaScreen(
-                                      clienteId:
-                                          (c['id'] as int?) ?? 0)))
-                              .then((_) => _cargar()),
-                          trailing: Column(
-                            mainAxisAlignment:
-                                MainAxisAlignment.center,
-                            crossAxisAlignment:
-                                CrossAxisAlignment.end,
-                            children: [
-                              Text(_cuando(d),
-                                  style: const TextStyle(
-                                      fontWeight: FontWeight.bold)),
-                              Text('Cumple ${c['_cumple']}',
-                                  style: const TextStyle(
-                                      color: Colors.grey,
-                                      fontSize: 12)),
-                            ],
-                          ),
-                        );
-                      },
-                    ),
-                  ),
+            child: _cargando
+                ? const Center(child: CircularProgressIndicator())
+                : _res.isEmpty
+                    ? const Center(
+                        child: Text(
+                            'Sin cumpleaños este mes.\n'
+                            'La fecha sale del carnet de identidad.',
+                            textAlign: TextAlign.center))
+                    : RefreshIndicator(
+                        onRefresh: _cargar,
+                        child: ListView.builder(
+                          itemCount: _res.length,
+                          itemBuilder: (ctx, i) {
+                            final c = _res[i];
+                            return FilaCliente(
+                              cliente: c,
+                              onTap: () => Navigator.of(context)
+                                  .push(MaterialPageRoute(
+                                      builder: (_) => FichaScreen(
+                                          clienteId:
+                                              (c['id'] as int?) ?? 0)))
+                                  .then((_) => _cargar()),
+                              trailing: Column(
+                                mainAxisAlignment:
+                                    MainAxisAlignment.center,
+                                crossAxisAlignment:
+                                    CrossAxisAlignment.end,
+                                children: [
+                                  Text(_etiqueta(c),
+                                      style: const TextStyle(
+                                          fontWeight: FontWeight.bold)),
+                                  Text(
+                                      '${c['_fecha_cumple']} · Cumple ${c['_cumple']}',
+                                      style: const TextStyle(
+                                          color: Colors.grey,
+                                          fontSize: 12)),
+                                ],
+                              ),
+                            );
+                          },
+                        ),
+                      ),
           ),
         ],
       ),

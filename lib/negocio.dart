@@ -395,6 +395,33 @@ Future<List<Map<String, dynamic>>> cumpleanosProximos(
   return res;
 }
 
+/// Clientes que cumplen años en el mes actual.
+/// Cada mapa trae '_dia' (día del mes), '_fecha_cumple' (DD/MM),
+/// '_cumple' (edad que cumple) y '_paso' (true si ya pasó este mes).
+/// Ordenados por día del mes.
+Future<List<Map<String, dynamic>>> cumpleanosDelMes() async {
+  final hoy = DateTime.now();
+  final rows = await _activos();
+  final res = <Map<String, dynamic>>[];
+  for (final c in rows) {
+    final nac = fechaNacDeCarnet('${c['carnet'] ?? ''}');
+    if (nac == null) continue;
+    if (nac.month != hoy.month) continue;
+    final dia = nac.day;
+    final etiqueta =
+        '${dia.toString().padLeft(2, '0')}/${hoy.month.toString().padLeft(2, '0')}';
+    res.add({
+      ...c,
+      '_dia': dia,
+      '_fecha_cumple': etiqueta,
+      '_cumple': hoy.year - nac.year,
+      '_paso': dia < hoy.day,
+    });
+  }
+  res.sort((a, b) => (a['_dia'] as int).compareTo(b['_dia'] as int));
+  return res;
+}
+
 /// Posibles duplicados al inscribir (nombre parecido, carnet o teléfono igual).
 Future<List<Map<String, dynamic>>> posiblesDuplicados(
     {required String nombre,
@@ -650,6 +677,28 @@ Future<int> inscripcionesMes() async {
     if ('${cl['fecha_inscripcion'] ?? ''}'.startsWith(pref)) c++;
   }
   return c;
+}
+
+/// Inscripciones del mes agrupadas por entrenador (v1.0.7).
+/// Devuelve lista de {nombre, cantidad}.
+Future<List<Map<String, dynamic>>> inscripcionesPorEntrenador() async {
+  final n = DateTime.now();
+  final pref = '${n.year.toString().padLeft(4, '0')}-'
+      '${n.month.toString().padLeft(2, '0')}';
+  final porEntrenador = <String, int>{};
+  for (final cl in await LocalDb.instance.allMirror('clientes')) {
+    if ('${cl['fecha_inscripcion'] ?? ''}'.startsWith(pref)) {
+      final nombre =
+          (cl['registrado_por_nombre'] as String?)?.trim() ?? 'Desconocido';
+      porEntrenador[nombre] = (porEntrenador[nombre] ?? 0) + 1;
+    }
+  }
+  final lista = porEntrenador.entries
+      .map((e) => {'nombre': e.key, 'cantidad': e.value})
+      .toList();
+  lista.sort((a, b) =>
+      ((b['cantidad'] as int)).compareTo((a['cantidad'] as int)));
+  return lista;
 }
 
 /// Nº de morosos: clientes activos con pagado_hasta anterior a hoy.

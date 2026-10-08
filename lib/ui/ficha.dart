@@ -17,6 +17,7 @@ import '../negocio.dart';
 import '../sync.dart';
 import 'dialogo_pago.dart';
 import 'confirmacion_cobro.dart';
+import 'editor_foto.dart';
 import 'widgets.dart';
 
 class FichaScreen extends StatefulWidget {
@@ -269,13 +270,20 @@ class _FichaScreenState extends State<FichaScreen> {
     final destino = File('${dir.path}/foto_${widget.clienteId}_'
         '${DateTime.now().millisecondsSinceEpoch}.jpg');
     await File(img.path).copy(destino.path);
+    if (!mounted) return;
+    // Editor simple: permite zoom/mover para centrar la cara
+    final editada = await mostrarEditorFoto(context, destino);
+    if (editada == null || !mounted) {
+      try { await destino.delete(); } catch (_) {}
+      return;
+    }
     // Encola la subida (se comprime al subir, punto 16).
     final opUuid = const Uuid().v4();
     final fid = await LocalDb.instance.addFotoPendiente(
-        opUuid: opUuid, localPath: destino.path);
+        opUuid: opUuid, localPath: editada.path);
     await LocalDb.instance.setFotoCliente(fid, widget.clienteId);
     if (!mounted) return;
-    setState(() => _foto = destino);
+    setState(() => _foto = editada);
     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
         content: Text('📷 Foto actualizada (se sincronizará)')));
     SyncEngine.instance.push();
@@ -587,6 +595,67 @@ class _FichaScreenState extends State<FichaScreen> {
                         ),
                       ),
                       const Divider(),
+                      // Resumen 360 (v1.0.7): totales del cliente
+                      if (_pagos.isNotEmpty)
+                        Builder(builder: (context) {
+                          final total = _pagos.fold<double>(
+                              0, (s, p) => s + ((p['monto'] as num?)?.toDouble() ?? 0));
+                          final metodos = <String, int>{};
+                          for (final p in _pagos) {
+                            final m = (p['metodo'] as String?) ?? 'efectivo';
+                            metodos[m] = (metodos[m] ?? 0) + 1;
+                          }
+                          final metodoTop = metodos.entries.isEmpty
+                              ? ''
+                              : metodos.entries
+                                  .reduce((a, b) => a.value >= b.value ? a : b)
+                                  .key;
+                          return Container(
+                            padding: const EdgeInsets.all(12),
+                            margin: const EdgeInsets.only(bottom: 12),
+                            decoration: BoxDecoration(
+                              color: Colors.orange.shade50,
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(color: Colors.orange.shade200),
+                            ),
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceAround,
+                              children: [
+                                Column(
+                                  children: [
+                                    Text('${_pagos.length}',
+                                        style: const TextStyle(
+                                            fontSize: 22,
+                                            fontWeight: FontWeight.bold,
+                                            color: Color(0xFFE8821A))),
+                                    const Text('pagos',
+                                        style: TextStyle(fontSize: 12)),
+                                  ],
+                                ),
+                                Column(
+                                  children: [
+                                    Text(total.toStringAsFixed(0),
+                                        style: const TextStyle(
+                                            fontSize: 22,
+                                            fontWeight: FontWeight.bold,
+                                            color: Color(0xFFE8821A))),
+                                    const Text('CUP total',
+                                        style: TextStyle(fontSize: 12)),
+                                  ],
+                                ),
+                                if (metodoTop.isNotEmpty)
+                                  Column(
+                                    children: [
+                                      Text(metodoTop == 'efectivo' ? '💵' : '📱',
+                                          style: const TextStyle(fontSize: 22)),
+                                      const Text('prefiere',
+                                          style: TextStyle(fontSize: 12)),
+                                    ],
+                                  ),
+                              ],
+                            ),
+                          );
+                        }),
                       const Text('Historial de pagos:',
                           style: TextStyle(fontWeight: FontWeight.bold)),
                       const SizedBox(height: 8),

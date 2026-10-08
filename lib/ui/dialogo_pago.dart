@@ -247,7 +247,10 @@ Future<Map<String, dynamic>?> pagoDialogo(
     'periodo': s.periodo,
     'meses': s.meses,
     if (s.periodo == 'personalizado') 'dias': s.dias,
-    if (s.periodo == 'personalizado') 'monto': s.monto,
+    // Monto calculado y vencimiento previsto: los usa la pantalla de
+    // confirmación. El servidor los ignora (recalcula él mismo).
+    'monto': s.monto,
+    'pagado_hasta': nuevo,
     'metodo': metodo,
     'fecha': DateTime.now().toIso8601String().substring(0, 10),
   };
