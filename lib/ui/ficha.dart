@@ -6,6 +6,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_contacts/flutter_contacts.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:uuid/uuid.dart';
@@ -169,15 +170,36 @@ class _FichaScreenState extends State<FichaScreen> {
                         labelText: 'Nombre',
                         border: OutlineInputBorder())),
                 const SizedBox(height: 8),
-                TextField(
-                    controller: telefono,
-                    keyboardType: TextInputType.phone,
-                    inputFormatters: [
-                      FilteringTextInputFormatter.digitsOnly
-                    ],
-                    decoration: const InputDecoration(
-                        labelText: 'Teléfono (8 dígitos)',
-                        border: OutlineInputBorder())),
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                          controller: telefono,
+                          keyboardType: TextInputType.phone,
+                          inputFormatters: [
+                            FilteringTextInputFormatter.digitsOnly
+                          ],
+                          decoration: const InputDecoration(
+                              labelText: 'Teléfono (8 dígitos)',
+                              border: OutlineInputBorder())),
+                    ),
+                    const SizedBox(width: 8),
+                    // Elegir de los contactos del teléfono (v1.0.11)
+                    IconButton(
+                      tooltip: 'Elegir de contactos',
+                      icon: const Icon(Icons.contacts,
+                          color: Color(0xFFE8821A)),
+                      onPressed: () async {
+                        final tel =
+                            await _elegirDeContactos(ctx);
+                        if (tel != null && tel.isNotEmpty) {
+                          setS(() =>
+                              telefono.text = tel);
+                        }
+                      },
+                    ),
+                  ],
+                ),
                 const SizedBox(height: 8),
                 TextField(
                     controller: carnet,
@@ -344,9 +366,42 @@ class _FichaScreenState extends State<FichaScreen> {
     SyncEngine.instance.push();
   }
 
+  /// Elige un teléfono de los contactos del teléfono (v1.0.11).
+  /// Devuelve el número en formato cubano (8 dígitos) o null.
+  Future<String?> _elegirDeContactos(BuildContext ctx) async {
+    // Pedir permiso
+    if (!await FlutterContacts.requestPermission(readonly: true)) {
+      if (ctx.mounted) {
+        ScaffoldMessenger.of(ctx).showSnackBar(const SnackBar(
+            content: Text(
+                'Sin permiso de contactos no se puede elegir')));
+      }
+      return null;
+    }
+    // Abrir el selector nativo de contactos
+    final contacto =
+        await FlutterContacts.openExternalPick();
+    if (contacto == null) return null;
+    // Tomar el primer número móvil válido
+    for (final tel in contacto.phones) {
+      var d = tel.number.replaceAll(RegExp(r'\D'), '');
+      if (d.startsWith('53') && d.length > 8) {
+        d = d.substring(2);
+      }
+      if (d.length == 8 && d.startsWith('5')) {
+        return d;
+      }
+    }
+    if (ctx.mounted) {
+      ScaffoldMessenger.of(ctx).showSnackBar(SnackBar(
+          content: Text(
+              'El contacto "${contacto.displayName}" no tiene un móvil cubano válido')));
+    }
+    return null;
+  }
+
   /// Muestra la foto en grande al tocarla (v1.0.11).
-  void _verFotoGrande() {
-    final f = _foto;
+  void _verFotoGrande() {    final f = _foto;
     if (f == null) return;
     showDialog(
       context: context,

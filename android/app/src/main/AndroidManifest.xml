@@ -5,6 +5,8 @@
     <!-- Cámara: foto del cliente al inscribir -->
     <uses-permission android:name="android.permission.CAMERA"/>
     <uses-feature android:name="android.hardware.camera" android:required="false"/>
+    <!-- Contactos: elegir teléfono desde la agenda (v1.0.11) -->
+    <uses-permission android:name="android.permission.READ_CONTACTS"/>
     <application
         android:label="Iron Body Gym"
         android:name="${applicationName}"
