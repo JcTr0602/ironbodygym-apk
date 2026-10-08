@@ -167,6 +167,38 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
+  /// Navega a una pantalla y recarga al volver (v1.0.11).
+  Future<void> _ir(Widget w) async {
+    await Navigator.of(context)
+        .push(MaterialPageRoute(builder: (_) => w));
+    if (mounted) _cargar();
+  }
+
+  /// Tarjeta de estadística de clientes tocable (v1.0.11).
+  Widget _statCliente(
+      String valor, String etiqueta, Color? color, VoidCallback onTap) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(12),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        child: Column(
+          children: [
+            Text(valor,
+                style: TextStyle(
+                    fontSize: 22,
+                    fontWeight: FontWeight.bold,
+                    color: color)),
+            const SizedBox(height: 2),
+            Text(etiqueta,
+                style:
+                    const TextStyle(fontSize: 12, color: Colors.grey)),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final alDia = _activos - _morosos;
