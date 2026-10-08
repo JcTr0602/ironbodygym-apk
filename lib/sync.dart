@@ -222,12 +222,20 @@ class SyncEngine {
   }
 
   /// Ciclo completo: push + pull (botón "Sincronizar ahora", al entrar).
+  /// Repite el pull hasta que el watermark alcance al server_seq
+  /// (pueden llegar cambios nuevos mientras se descarga).
   Future<void> run() async {
     if (_running || !_auth.loggedIn) return;
     _running = true;
     try {
       await push();
-      await pull();
+      // Pull repetido: si llegan cambios durante la descarga, seguir.
+      for (var i = 0; i < 3; i++) {
+        await pull();
+        final wm = await _db.getWatermark();
+        final ss = int.tryParse(await _db.getMeta('server_seq') ?? '0') ?? 0;
+        if (wm >= ss) break;
+      }
       await _marcarOk();
       await _db.setMeta('last_sync_error', '');
       _emit(SyncPhase.idle);
@@ -462,15 +470,22 @@ class SyncEngine {
   /// mueve y la próxima bajada re-aplica (idempotente) desde el mismo
   /// punto. No hay ningún camino donde el watermark avance sin aplicar.
   Future<int> _download() async {
-    // ajustes + server_seq (informativo)
+    // ajustes + server_seq (para verificación de sincronización)
+    int? serverSeq;
     try {
       final r = await _getAuth(Uri.parse('$_base/rest/v1/sync_estado?id=eq.1'
           '&select=server_seq,ajustes'));
       if (r.statusCode == 200) {
         final rows = jsonDecode(r.body) as List;
-        if (rows.isNotEmpty && rows.first['ajustes'] is Map) {
-          await _db.setAjustes(
-              Map<String, dynamic>.from(rows.first['ajustes']));
+        if (rows.isNotEmpty) {
+          if (rows.first['ajustes'] is Map) {
+            await _db.setAjustes(
+                Map<String, dynamic>.from(rows.first['ajustes']));
+          }
+          serverSeq = rows.first['server_seq'] as int?;
+          if (serverSeq != null) {
+            await _db.setMeta('server_seq', '$serverSeq');
+          }
         }
       }
     } catch (_) {}
@@ -498,8 +513,12 @@ class SyncEngine {
           progreso: ti / (tablas.length + 1));
       var pageWm = since;
       while (true) {
+        // gastos tiene esquema plano en Supabase (sin columna 'data')
+        final select = tabla == 'gastos'
+            ? 'id,fecha,concepto,monto,registrado_por,sync_seq'
+            : 'id,data,sync_seq';
         final r = await _getAuth(Uri.parse(
-            '$_base/rest/v1/$supTabla?select=id,data,sync_seq'
+            '$_base/rest/v1/$supTabla?select=$select'
             '&sync_seq=gt.$pageWm&order=sync_seq.asc&limit=500'));
         if (r.statusCode != 200) {
           throw Exception('bajada $tabla: HTTP ${r.statusCode}');
@@ -509,8 +528,21 @@ class SyncEngine {
         for (final row in rows) {
           final m = Map<String, dynamic>.from(row as Map);
           final seq = (m['sync_seq'] as int?) ?? 0;
-          await _db.upsertMirror(tabla, (m['id'] as int?) ?? 0,
-              Map<String, dynamic>.from(m['data'] as Map), seq);
+          final id = (m['id'] as int?) ?? 0;
+          // gastos usa columnas planas en Supabase (sin 'data' JSON)
+          final Map<String, dynamic> data;
+          if (tabla == 'gastos') {
+            data = {
+              'id': id,
+              'fecha': m['fecha'],
+              'concepto': m['concepto'],
+              'monto': m['monto'],
+              'registrado_por': m['registrado_por'],
+            };
+          } else {
+            data = Map<String, dynamic>.from(m['data'] as Map);
+          }
+          await _db.upsertMirror(tabla, id, data, seq);
           if (seq > maxSeq) maxSeq = seq;
           bajados++;
         }

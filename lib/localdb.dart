@@ -68,6 +68,20 @@ class LocalDb {
     await d.delete(tabla, where: 'id=?', whereArgs: [id]);
   }
 
+  /// Actualización optimista: cambia el estado de un cliente en el espejo
+  /// local sin esperar al servidor. Se usa al encolar `cambiar_estado`.
+  Future<void> updateMirrorEstado(int clienteId, String estado) async {
+    final d = await db;
+    final rows = await d.query('clientes',
+        where: 'id=?', whereArgs: [clienteId], limit: 1);
+    if (rows.isEmpty) return;
+    final data =
+        jsonDecode(rows.first['data'] as String) as Map<String, dynamic>;
+    data['estado'] = estado;
+    await d.update('clientes', {'data': jsonEncode(data)},
+        where: 'id=?', whereArgs: [clienteId]);
+  }
+
   Future<List<Map<String, dynamic>>> allMirror(String tabla) async {
     final d = await db;
     final rows = await d.query(tabla);
@@ -122,6 +136,15 @@ class LocalDb {
       'creada_ts': DateTime.now().toIso8601String(),
       'foto_path': fotoPath,
     });
+    // Actualización optimista: refleja el cambio en el espejo local de
+    // inmediato, sin esperar al pull del servidor.
+    if (tipo == 'cambiar_estado') {
+      final cid = (payload['cliente_id'] as int?) ?? 0;
+      final est = (payload['estado'] as String?) ?? '';
+      if (cid > 0 && est.isNotEmpty) {
+        await updateMirrorEstado(cid, est);
+      }
+    }
   }
 
   Future<List<Map<String, dynamic>>> pendingOps() async {
