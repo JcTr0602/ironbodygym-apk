@@ -19,6 +19,8 @@ import 'cuentas_cobrar.dart';
 import 'papelera.dart';
 import 'auditoria.dart';
 import 'riesgo.dart';
+import 'historial_entrenador.dart';
+import 'exportar_excel.dart';
 import 'widgets.dart';
 
 class AdminScreen extends StatefulWidget {
@@ -753,6 +755,28 @@ class _AdminScreenState extends State<AdminScreen> {
                             ),
                           ),
                         ]),
+                        _seccion('👥 Historial por entrenador', [
+                          const Text(
+                            'Cobrado, pagos e inscripciones del mes por entrenador.',
+                            style: TextStyle(
+                                color: Colors.grey, fontSize: 12),
+                          ),
+                          const SizedBox(height: 8),
+                          SizedBox(
+                            width: double.infinity,
+                            child: ElevatedButton.icon(
+                              icon: const Icon(Icons.person_search),
+                              label: const Text(
+                                  'Ver historial por entrenador'),
+                              onPressed: () => Navigator.of(context).push(
+                                MaterialPageRoute(
+                                  builder: (_) =>
+                                      const HistorialEntrenadorScreen(),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ]),
                         _seccion('📋 Auditoría', [
                           SizedBox(
                             width: double.infinity,
@@ -777,6 +801,25 @@ class _AdminScreenState extends State<AdminScreen> {
                               label: const Text(
                                   'Compartir CSV (clientes + pagos del mes)'),
                               onPressed: _exportar,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          SizedBox(
+                            width: double.infinity,
+                            child: ElevatedButton.icon(
+                              icon: const Icon(Icons.table_chart),
+                              label:
+                                  const Text('📊 Exportar Excel'),
+                              onPressed: () async {
+                                final ok = await exportarExcel();
+                                if (context.mounted) {
+                                  ScaffoldMessenger.of(context)
+                                      .showSnackBar(SnackBar(
+                                          content: Text(ok
+                                              ? '📊 Archivos listos para compartir'
+                                              : '⚠️ No se pudo generar el archivo')));
+                                }
+                              },
                             ),
                           ),
                         ]),

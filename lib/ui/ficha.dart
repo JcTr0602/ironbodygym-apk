@@ -365,6 +365,45 @@ class _FichaScreenState extends State<FichaScreen> {
     SyncEngine.instance.push();
   }
 
+  /// Congelar/descongelar membresía (v1.0.9).
+  /// El cliente congelado no aparece en vencidos.
+  Future<void> _congelar() async {
+    final esCongelado = (_c?['estado'] as String?) == 'congelado';
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(esCongelado ? '☀️ Descongelar' : '❄️ Congelar membresía'),
+        content: Text(esCongelado
+            ? '¿Reactivar la membresía de ${_c?['nombre']}? Volverá a contar el vencimiento.'
+            : '¿Congelar la membresía de ${_c?['nombre']}? No aparecerá en vencidos mientras esté congelada.'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancelar')),
+          ElevatedButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: Text(esCongelado ? 'Descongelar' : 'Congelar')),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    await LocalDb.instance.queueOp(
+      opUuid: const Uuid().v4(),
+      tipo: 'cambiar_estado',
+      payload: {
+        'cliente_id': widget.clienteId,
+        'estado': esCongelado ? 'activo' : 'congelado'
+      },
+    );
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(esCongelado
+            ? '☀️ Membresía descongelada'
+            : '❄️ Membresía congelada')));
+    _cargar();
+    SyncEngine.instance.push();
+  }
+
   /// Corregir pago (solo admin): editar monto/fecha o anular, con doble
   /// confirmación. Encola 'editar_pago' / 'anular_pago'.
   Future<void> _corregirPago(Map<String, dynamic> p) async {
@@ -697,6 +736,21 @@ class _FichaScreenState extends State<FichaScreen> {
                           onPressed: _pagar,
                           child: const Text('💰 Registrar pago',
                               style: TextStyle(fontSize: 17)),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      SizedBox(
+                        width: double.infinity,
+                        child: OutlinedButton.icon(
+                          icon: Text(
+                              (_c?['estado'] as String?) == 'congelado'
+                                  ? '☀️'
+                                  : '❄️'),
+                          label: Text(
+                              (_c?['estado'] as String?) == 'congelado'
+                                  ? 'Descongelar membresía'
+                                  : 'Congelar membresía'),
+                          onPressed: _congelar,
                         ),
                       ),
                       const SizedBox(height: 8),
