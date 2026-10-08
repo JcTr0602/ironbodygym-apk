@@ -14,6 +14,7 @@ import 'package:uuid/uuid.dart';
 
 import '../localdb.dart';
 import '../negocio.dart';
+import '../permisos.dart';
 import '../sync.dart';
 import 'cuentas_cobrar.dart';
 import 'papelera.dart';
@@ -426,7 +427,8 @@ class _AdminScreenState extends State<AdminScreen> {
                             ),
                           ),
                         ]),
-                        _seccion('👥 Usuarios APK', [
+                        if (Permisos().gestionarUsuarios)
+                          _seccion('👥 Usuarios APK', [
                           SizedBox(
                             width: double.infinity,
                             child: ElevatedButton.icon(
