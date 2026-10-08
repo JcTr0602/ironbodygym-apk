@@ -15,7 +15,22 @@ class Novedad {
 }
 
 const novedades = [
-  Novedad('1.0.3', [
+  Novedad('1.0.5', [
+    '🔄 La APK ahora verifica si el servidor rechazó una operación (no más falso "aplicada")',
+    '🐛 Fix: clientes nuevos desde la APK ahora aparecen correctamente',
+    '📋 Diálogo "Novedades" al actualizar',
+  ]),
+  Novedad('1.0.4', [
+    '🔧 Fix crítico: el botón de sincronizar ahora sí funciona (bug _running)',
+    '⚡ Al archivar, el cliente desaparece al momento (actualización optimista)',
+    '🔄 La descarga se repite hasta estar al día (no más falso "sincronizado")',
+    '🐛 Fix error 400 en gastos que bloqueaba la descarga',
+    '👆 Detalle tocable de operaciones con errores en lenguaje claro',
+    '🎨 Iniciales en vez de 👤 para clientes sin foto',
+    '🌈 Colores: rojo vencido, amarillo por vencer, verde al día',
+    '⬇️ Pull-to-refresh en la lista de clientes',
+    '✨ Login con animación, recuerda usuario y muestra versión',
+  ]),
     '🛡️ Sección Administración (solo Jc): estadísticas, precios, usuarios APK, pendiente a entregar, gastos, cierre de caja y exportar',
     '💰 Pendiente a entregar ahora cuenta también lo que aún no se sincroniza',
     '📊 Mi Turno con historial diario, desglose por método y última entrega confirmada',

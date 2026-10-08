@@ -163,6 +163,13 @@ class LocalDb {
         orderBy: 'creada_ts ASC');
   }
 
+  /// Ops con un estado específico (ej: 'enviada' para verificar resultado).
+  Future<List<Map<String, dynamic>>> opsByEstado(String estado) async {
+    final d = await db;
+    return d.query('ops_queue',
+        where: 'estado = ?', whereArgs: [estado], orderBy: 'creada_ts ASC');
+  }
+
   Future<void> markOp(String opUuid, String estado, {String? error}) async {
     final d = await db;
     await d.update(

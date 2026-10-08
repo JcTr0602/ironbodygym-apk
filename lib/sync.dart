@@ -593,7 +593,38 @@ class SyncEngine {
     if (maxSeq > since) {
       await _db.setWatermark(maxSeq);
     }
+    // Sincronizar estado final de operaciones enviadas (aplicada/rechazada)
+    await _syncOpStatus();
     return bajados;
+  }
+
+  /// Baja el estado final de las ops enviadas (el puente las marca como
+  /// aplicada/rechazada en Supabase). Actualiza la cola local.
+  Future<void> _syncOpStatus() async {
+    try {
+      final enviadas = await _db.opsByEstado('enviada');
+      if (enviadas.isEmpty) return;
+      for (final op in enviadas) {
+        final uuid = op['op_uuid'] as String;
+        final r = await _getAuth(Uri.parse(
+            '$_base/rest/v1/sync_ops?select=estado,error&op_uuid=eq.$uuid'));
+        if (r.statusCode == 200) {
+          final rows = jsonDecode(r.body) as List;
+          if (rows.isNotEmpty) {
+            final estado = rows.first['estado'] as String?;
+            final error = rows.first['error'] as String?;
+            if (estado == 'aplicada') {
+              await _db.markOp(uuid, 'aplicada');
+            } else if (estado == 'rechazada') {
+              await _db.markOp(uuid, 'rechazada',
+                  error: error ?? 'Rechazada por el servidor.');
+            }
+          }
+        }
+      }
+    } catch (_) {
+      // No bloquea la sincronización si falla
+    }
   }
 
   // -- fotos -------------------------------------------------------------
