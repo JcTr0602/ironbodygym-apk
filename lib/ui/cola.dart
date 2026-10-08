@@ -2,9 +2,12 @@
 /// y cola de operaciones (con opción de cancelar las pendientes).
 library;
 
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 
 import '../localdb.dart';
+import '../negocio.dart';
 import '../sync.dart';
 
 class ColaScreen extends StatefulWidget {
@@ -198,7 +201,7 @@ class _ColaScreenState extends State<ColaScreen> {
     }
   }
 
-  void _verDetalle(Map<String, dynamic> op) {
+  void _verDetalle(Map<String, dynamic> op) async {
     final tipo = _tipo('${op['tipo']}');
     final estado = '${op['estado']}';
     final fecha = '${op['creada_ts']}'.substring(0, 16).replaceAll('T', ' ');
@@ -214,6 +217,9 @@ class _ColaScreenState extends State<ColaScreen> {
     } else if (error.contains('HTTP 409')) {
       errorClaro = 'La operación ya fue registrada (duplicada). No es necesario reintentar.';
     }
+    // Detalles del payload según tipo (v1.0.11)
+    final detalles = await _detallesOp(op);
+    if (!mounted) return;
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -225,6 +231,10 @@ class _ColaScreenState extends State<ColaScreen> {
             Text('📅 $fecha'),
             const SizedBox(height: 8),
             Text('Estado: $estado'),
+            for (final d in detalles) ...[
+              const SizedBox(height: 4),
+              Text(d),
+            ],
             if (errorClaro.isNotEmpty) ...[
               const SizedBox(height: 8),
               Text('⚠️ $errorClaro',
@@ -250,6 +260,79 @@ class _ColaScreenState extends State<ColaScreen> {
         ],
       ),
     );
+  }
+
+  /// Detalles legibles del payload según el tipo de operación (v1.0.11).
+  Future<List<String>> _detallesOp(Map<String, dynamic> op) async {
+    final detalles = <String>[];
+    Map<String, dynamic> payload = {};
+    try {
+      final raw = op['payload'];
+      if (raw is String && raw.isNotEmpty) {
+        payload = Map<String, dynamic>.from(
+            jsonDecode(raw) as Map);
+      } else if (raw is Map) {
+        payload = Map<String, dynamic>.from(raw);
+      }
+    } catch (_) {}
+    if (payload.isEmpty) return detalles;
+
+    // Nombre del cliente si hay cliente_id
+    Future<String?> nombreCliente(dynamic id) async {
+      if (id == null) return null;
+      try {
+        final c = await clientePorId(int.tryParse('$id') ?? 0);
+        return c?['nombre'] as String?;
+      } catch (_) {
+        return null;
+      }
+    }
+
+    final tipo = '${op['tipo']}';
+    if (tipo == 'foto') {
+      final n = await nombreCliente(payload['cliente_id']);
+      if (n != null) detalles.add('👤 Cliente: $n');
+    } else if (tipo == 'pago_mensual' || tipo == 'pago_diario') {
+      final n = await nombreCliente(payload['cliente_id']);
+      if (n != null) detalles.add('👤 Cliente: $n');
+      if (payload['monto'] != null) {
+        detalles.add('💰 Monto: ${payload['monto']} CUP');
+      }
+      if (payload['metodo'] != null) {
+        final m = payload['metodo'] == 'efectivo'
+            ? '💵 Efectivo'
+            : '📱 Transferencia';
+        detalles.add('Método: $m');
+      }
+      if (payload['fecha'] != null) {
+        detalles.add('📅 Fecha: ${payload['fecha']}');
+      }
+    } else if (tipo == 'inscribir') {
+      if (payload['nombre'] != null) {
+        detalles.add('👤 Cliente: ${payload['nombre']}');
+      }
+    } else if (tipo == 'editar_cliente') {
+      final n = await nombreCliente(payload['cliente_id']);
+      if (n != null) detalles.add('👤 Cliente: $n');
+    } else if (tipo == 'cambiar_estado') {
+      final n = await nombreCliente(payload['cliente_id']);
+      if (n != null) detalles.add('👤 Cliente: $n');
+      if (payload['estado'] != null) {
+        detalles.add('Estado: ${payload['estado']}');
+      }
+    } else if (tipo == 'gasto') {
+      if (payload['concepto'] != null) {
+        detalles.add('📝 ${payload['concepto']}');
+      }
+      if (payload['monto'] != null) {
+        detalles.add('💰 Monto: ${payload['monto']} CUP');
+      }
+    } else if (tipo == 'confirmar_entrega') {
+      if (payload['monto'] != null) {
+        detalles.add('💰 Monto: ${payload['monto']} CUP');
+      }
+    }
+    return detalles;
   }
 
   @override
