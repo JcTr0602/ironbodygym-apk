@@ -123,6 +123,18 @@ class _ColaScreenState extends State<ColaScreen> {
   }
 
   /// Muestra el detalle completo de una operación al tocarla.
+  Future<void> _reenviar(Map<String, dynamic> op) async {
+    final uuid = op['op_uuid'] as String;
+    // Marca como pendiente para que se reintente en el próximo push
+    await LocalDb.instance.markOp(uuid, 'pendiente', error: null);
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('🔄 Operación marcada para reenviar')),
+      );
+      _cargar();
+    }
+  }
+
   void _verDetalle(Map<String, dynamic> op) {
     final tipo = _tipo('${op['tipo']}');
     final estado = '${op['estado']}';
@@ -158,6 +170,16 @@ class _ColaScreenState extends State<ColaScreen> {
           ],
         ),
         actions: [
+          if (estado == 'rechazada') ...[
+            TextButton(
+              onPressed: () async {
+                Navigator.of(ctx).pop();
+                await _reenviar(op);
+              },
+              child: const Text('🔄 Reenviar',
+                  style: TextStyle(color: Colors.orange)),
+            ),
+          ],
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(),
             child: const Text('Cerrar'),

@@ -16,6 +16,7 @@ import '../localdb.dart';
 import '../negocio.dart';
 import '../sync.dart';
 import 'dialogo_pago.dart';
+import 'confirmacion_cobro.dart';
 import 'widgets.dart';
 
 class FichaScreen extends StatefulWidget {
@@ -64,8 +65,19 @@ class _FichaScreenState extends State<FichaScreen> {
       payload: payload,
     );
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('✅ Pago guardado (se sincronizará)')));
+    // Pantalla de confirmación fullscreen (v1.0.6)
+    final monto = '${payload['monto'] ?? ''} CUP';
+    final venc = '${payload['pagado_hasta'] ?? ''}'.substring(0, 10);
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => ConfirmacionCobroScreen(
+          nombreCliente: '${c['nombre'] ?? ''}',
+          monto: monto,
+          nuevoVencimiento: venc,
+        ),
+      ),
+    );
+    if (!mounted) return;
     _cargar();
     SyncEngine.instance.push();
   }

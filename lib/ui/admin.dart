@@ -16,6 +16,7 @@ import '../localdb.dart';
 import '../negocio.dart';
 import '../sync.dart';
 import 'papelera.dart';
+import 'auditoria.dart';
 import 'widgets.dart';
 
 class AdminScreen extends StatefulWidget {
@@ -643,6 +644,22 @@ class _AdminScreenState extends State<AdminScreen> {
                                   'Abrir papelera'),
                               onPressed: () =>
                                   _ir(const PapeleraScreen()),
+                            ),
+                          ),
+                        ]),
+                        _seccion('📋 Auditoría', [
+                          SizedBox(
+                            width: double.infinity,
+                            child: ElevatedButton.icon(
+                              icon: const Icon(Icons.history),
+                              label: const Text(
+                                  'Ver quién hizo qué y cuándo'),
+                              onPressed: () => Navigator.of(context).push(
+                                MaterialPageRoute(
+                                  builder: (_) =>
+                                      const AuditoriaScreen(),
+                                ),
+                              ),
                             ),
                           ),
                         ]),

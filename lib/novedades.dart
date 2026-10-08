@@ -15,6 +15,12 @@ class Novedad {
 }
 
 const novedades = [
+  Novedad('1.0.6', [
+    '🔄 Rechazadas: ahora puedes ver el motivo y reenviar la operación',
+    '✅ Confirmación de cobro a pantalla completa (check grande, monto, vencimiento)',
+    '📋 Auditoría: quién hizo qué y cuándo (solo dueño)',
+    '💰 Pago rápido desde vencidos (ya existía, mejorado)',
+  ]),
   Novedad('1.0.5', [
     '🔄 La APK ahora verifica si el servidor rechazó una operación (no más falso "aplicada")',
     '🐛 Fix: clientes nuevos desde la APK ahora aparecen correctamente',
