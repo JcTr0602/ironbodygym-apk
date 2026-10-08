@@ -423,49 +423,7 @@ class _HomeScreenState extends State<HomeScreen> {
           ],
         ),
       ),
-      // Botón flotante de sincronización (v1.1)
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: _syncRapido,
-        backgroundColor: const Color(0xFFE8821A),
-        icon: const Icon(Icons.sync, color: Colors.white),
-        label: const Text('Sincronizar',
-            style: TextStyle(color: Colors.white)),
-      ),
     );
-  }
-
-  /// Sincronización rápida desde el botón flotante (v1.1).
-  /// Muestra un resumen poco invasivo al terminar.
-  Future<void> _syncRapido() async {
-    final messenger = ScaffoldMessenger.of(context);
-    final detAntes = await SyncEngine.instance.detalle();
-    final subidosAntes = detAntes.subidos;
-    final bajadosAntes = detAntes.bajados;
-    await SyncEngine.instance.run();
-    if (!mounted) return;
-    final det = await SyncEngine.instance.detalle();
-    final subidos = det.subidos - subidosAntes;
-    final bajados = det.bajados - bajadosAntes;
-    // Popup poco invasivo: SnackBar con resumen
-    messenger.showSnackBar(
-      SnackBar(
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text('✅ Sincronización completada',
-                style: TextStyle(fontWeight: FontWeight.bold)),
-            Text('📤 $subidos subidos · 📥 $bajados bajados'),
-            if (det.error != null && det.error!.isNotEmpty)
-              Text('⚠️ ${det.error}',
-                  style: const TextStyle(color: Colors.yellow)),
-          ],
-        ),
-        duration: const Duration(seconds: 4),
-        behavior: SnackBarBehavior.floating,
-      ),
-    );
-    _cargar();
   }
 
   Widget _miniContador(

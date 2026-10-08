@@ -19,7 +19,6 @@ const novedades = [
     '📅 Fecha del pago elegible al renovar (ayer, hoy, etc.)',
     '☁️ Botón "Verificar con servidor" en la ficha del cliente',
     '❄️ Lista de congelados en Administración (descongelar)',
-    '🔄 Botón flotante de sincronizar en la vista principal',
     '📊 Pantalla de sincronización rediseñada',
     '✅ Avisado ahora es toggle (se puede deshacer)',
     '📝 "Inscrito por" muestra "Migración del sistema anterior"',
