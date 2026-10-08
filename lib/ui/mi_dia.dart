@@ -4,6 +4,9 @@ library;
 
 import 'package:flutter/material.dart';
 
+import 'dart:io';
+
+import '../fotos.dart';
 import '../localdb.dart';
 import '../negocio.dart';
 import 'widgets.dart';
@@ -39,6 +42,11 @@ class _MiDiaScreenState extends State<MiDiaScreen> {
       for (final c in clientes)
         if (c['id'] is int) c['id'] as int: '${c['nombre'] ?? '—'}'
     };
+    final fotos = <int, String?>{
+      for (final c in clientes)
+        if (c['id'] is int)
+          c['id'] as int: c['foto_storage'] as String?,
+    };
     final cobrados = <Map<String, dynamic>>[];
     double total = 0;
     for (final p in await LocalDb.instance.allMirror('pagos')) {
@@ -51,6 +59,7 @@ class _MiDiaScreenState extends State<MiDiaScreen> {
         'monto': monto,
         'metodo': '${p['metodo'] ?? 'efectivo'}',
         'periodo': '${p['periodo'] ?? 'mensual'}',
+        'foto_storage': fotos[p['cliente_id'] as int?],
       });
     }
     cobrados.sort((a, b) =>
@@ -185,13 +194,17 @@ class _MiDiaScreenState extends State<MiDiaScreen> {
                     for (final c in _cobrados)
                       Card(
                         child: ListTile(
-                          leading: Text(
-                            (c['metodo'] as String) ==
-                                    'transferencia'
-                                ? '📱'
-                                : '💵',
-                            style:
-                                const TextStyle(fontSize: 22),
+                          leading: _FotoMini(
+                            fotoStorage:
+                                c['foto_storage'] as String?,
+                            fallback: Text(
+                              (c['metodo'] as String) ==
+                                      'transferencia'
+                                  ? '📱'
+                                  : '💵',
+                              style: const TextStyle(
+                                  fontSize: 22),
+                            ),
                           ),
                           title: Text('${c['nombre']}'),
                           subtitle:
@@ -226,9 +239,13 @@ class _MiDiaScreenState extends State<MiDiaScreen> {
                     for (final c in _porCobrar)
                       Card(
                         child: ListTile(
-                          leading: const Icon(
-                              Icons.warning_amber,
-                              color: Colors.orange),
+                          leading: _FotoMini(
+                            fotoStorage:
+                                c['foto_storage'] as String?,
+                            fallback: const Icon(
+                                Icons.warning_amber,
+                                color: Colors.orange),
+                          ),
                           title:
                               Text('${c['nombre'] ?? '—'}'),
                           subtitle: Text(
@@ -252,6 +269,45 @@ class _MiDiaScreenState extends State<MiDiaScreen> {
                 ],
               ),
             ),
+    );
+  }
+}
+
+/// Miniatura de foto del cliente (v1.0.13).
+class _FotoMini extends StatefulWidget {
+  final String? fotoStorage;
+  final Widget fallback;
+  const _FotoMini({required this.fotoStorage, required this.fallback});
+
+  @override
+  State<_FotoMini> createState() => _FotoMiniState();
+}
+
+class _FotoMiniState extends State<_FotoMini> {
+  File? _foto;
+
+  @override
+  void initState() {
+    super.initState();
+    _cargar();
+  }
+
+  Future<void> _cargar() async {
+    final f = await FotoCache.instance.enCache(widget.fotoStorage);
+    if (mounted) setState(() => _foto = f);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_foto == null) return widget.fallback;
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(20),
+      child: Image.file(
+        _foto!,
+        width: 40,
+        height: 40,
+        fit: BoxFit.cover,
+      ),
     );
   }
 }

@@ -44,6 +44,16 @@ jobs:
             echo "Sin secreto KEYSTORE_BASE64: se firma con debug."
           fi
 
+      - name: Verificar versión
+        run: |
+          PUB=$(grep '^version:' pubspec.yaml | sed 's/version: \([0-9.]*\).*/\1/')
+          CFG=$(grep "static const appVersion" lib/config.dart | sed "s/.*'\(.*\)'.*/\1/")
+          if [ "$PUB" != "$CFG" ]; then
+            echo "❌ Versión desactualizada: pubspec=$PUB pero config.dart=$CFG"
+            exit 1
+          fi
+          echo "✅ Versión $PUB consistente."
+
       - name: Build release APK
         run: flutter build apk --release
 

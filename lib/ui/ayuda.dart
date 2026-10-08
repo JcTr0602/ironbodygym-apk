@@ -1,6 +1,6 @@
 /// ❓ Ayuda para entrenadores.
 ///
-/// Secciones plegables + "🎉 Lo Nuevo" destacada con los cambios por versión.
+/// Secciones plegables por tema + "🎉 Lo Nuevo" con la versión actual destacada.
 library;
 
 import 'package:flutter/material.dart';
@@ -24,117 +24,119 @@ class AyudaScreen extends StatelessWidget {
               padding: const EdgeInsets.all(16),
               children: [
                 _novedadesCard(),
+                const _Tema('💪 Tu trabajo diario'),
                 const _Seccion(
-                  'Cómo inscribir un cliente',
+                  'Inscribir un cliente',
                   '1. Toca "Inscribir" en el inicio.\n'
                   '2. Escribe el nombre y, si quieres, teléfono, carnet y foto.\n'
                   '3. Elige el período de pago y confirma.\n'
-                  '4. Revisa que no sea un duplicado (la app te avisa).\n'
-                  'Todo se guarda en el teléfono aunque no haya internet.',
+                  '4. Si ya existe alguien parecido, la app te avisa.\n\n'
+                  '💡 Todo se guarda en el teléfono aunque no haya internet.',
                   emoji: '📝',
                   color: Colors.blue,
                 ),
                 const _Seccion(
-                  'Cómo cobrar una mensualidad',
+                  'Cobrar una mensualidad',
                   '1. Busca al cliente o ábrelo desde las listas.\n'
                   '2. Toca "💰 Registrar pago" (o el botón 💰 de la lista).\n'
-                  '3. Elige el período (semana, quincena, meses o personalizado) y el método (efectivo o transferencia).\n'
-                  '4. Confirma el resumen.\n'
-                  'Si el cliente está vencido, en su ficha verás "🔄 Renovación rápida" para cobrarle 1 mes con un toque.',
+                  '3. Elige el período y el método (efectivo o transferencia).\n'
+                  '4. Confirma el resumen.\n\n'
+                  '💡 Si está vencido, en su ficha verás "🔄 Renovación rápida" '
+                  'para cobrarle 1 mes con un toque.',
                   emoji: '💰',
                   color: Colors.green,
                 ),
                 const _Seccion(
-                  'Pago diario y transferencia',
-                  '• Pago diario: para quien entrena un día suelto. Se registra en "Pago diario" del inicio.\n'
-                  '• Transferencia: muestra los datos de las tarjetas para que el cliente transfiera y confirme por WhatsApp al 58191577.',
-                  emoji: '💵',
+                  'Pago diario',
+                  'Para quien entrena un día suelto. Se registra en '
+                  '"Pago diario" del inicio.',
+                  emoji: '🎫',
                   color: Colors.teal,
                 ),
                 const _Seccion(
-                  '¿Cómo funciona la app?',
-                  'La app guarda todo en el teléfono, no necesita internet para trabajar. '
-                  'Inscribes y cobras con normalidad en el gym, y cuando tengas conexión '
-                  'los datos se envían solos al sistema.',
+                  'Las listas',
+                  '• 📅 Vencen hoy: pagan hoy.\n'
+                  '• 🔜 Por vencer: vencen en los próximos 3 días.\n'
+                  '• ⏳ -30d: atrasados de menos de un mes.\n'
+                  '• 🚨 +30d: atrasados de más de un mes.\n'
+                  '• 🎂 Cumpleaños: cumplen años esta semana.\n\n'
+                  '💡 Toca 💰 en cualquier fila para cobrar sin entrar a la ficha.',
+                  emoji: '📋',
+                  color: Colors.purple,
+                ),
+                const _Seccion(
+                  'Mi turno',
+                  'Lo que cobraste hoy y tu pendiente a entregar. '
+                  'Cada entrenador solo ve lo suyo.',
+                  emoji: '👤',
+                  color: Colors.indigo,
+                ),
+                const _Tema('💵 Dinero'),
+                const _Seccion(
+                  'Pendiente a entregar',
+                  'Es el efectivo que cobraste y aún no le entregaste a Jc. '
+                  'Baja solo cuando él lo confirma. No es un error.',
+                  emoji: '🤝',
+                  color: Colors.green,
+                ),
+                const _Seccion(
+                  'Cobro por transferencia',
+                  'Muestra los datos de las tarjetas para que el cliente '
+                  'transfiera y confirme por WhatsApp al '
+                  '${AppConfig.whatsappContacto}.',
                   emoji: '📱',
+                  color: Colors.teal,
+                ),
+                const _Tema('📱 La app'),
+                const _Seccion(
+                  '¿Necesita internet?',
+                  'No para trabajar. Inscribes y cobras con normalidad en el gym; '
+                  'cuando tengas conexión, los datos se envían solos.',
+                  emoji: '📶',
                   color: Colors.orange,
                 ),
                 const _Seccion(
                   'Sincronización',
-                  '• La app revisa automáticamente si hay cambios de otros entrenadores cada 2 minutos.\n'
-                  '• Tus cambios se suben cada hora, en segundo plano, o cuando toques "Sincronizar ahora".\n'
-                  '• Las fotos se suben por partes: si se corta la conexión, continúan donde quedaron.\n'
-                  '• En el inicio siempre verás la hora de la última sincronización correcta. '
+                  '• Revisa cambios de otros entrenadores cada 2 minutos.\n'
+                  '• Tus cambios suben cada hora, en segundo plano, o al tocar '
+                  '"Sincronizar ahora".\n'
+                  '• Si ves ⏳ "N por subir", son tus cambios esperando conexión.\n'
+                  '• En el inicio verás la hora de la última sincronización. '
                   'Si es vieja, busca mejor cobertura.',
                   emoji: '🔄',
                   color: Colors.blue,
                 ),
                 const _Seccion(
-                  'Cola de sincronización',
-                  'Todo lo que haces sin conexión queda en la cola como "pendiente a subir". '
-                  'Nada se pierde: al sincronizar, sube en orden. '
-                  'Puedes cancelar una operación tuya que aún no haya subido si te equivocaste. '
-                  'La franja de arriba te muestra el progreso de lo que falta.',
-                  emoji: '⏳',
-                  color: Colors.amber,
-                ),
-                const _Seccion(
-                  'Pendiente a entregar',
-                  'Es el dinero en efectivo que cobraste y aún no le has entregado a Jc. '
-                  'Baja solo cuando él lo confirma en su sistema. No es un error: es tu cuenta pendiente.',
-                  emoji: '💰',
-                  color: Colors.green,
-                ),
-                const _Seccion(
-                  'Listas',
-                  '• 📅 Vencen hoy: pagan hoy.\n'
-                  '• 🔜 Por vencer: vencen en los próximos 3 días.\n'
-                  '• ⏳ -30d: atrasados de menos de un mes.\n'
-                  '• 🚨 +30d: atrasados de más de un mes.\n'
-                  '• 🎂 Cumpleaños: cumplen años esta semana (la fecha sale del carnet).\n'
-                  '• Toca 💰 en cualquier fila para cobrar sin entrar a la ficha.\n'
-                  '• Puedes ordenar cada lista por nombre, vencimiento o días restantes.',
-                  emoji: '📋',
-                  color: Colors.purple,
-                ),
-                const _Seccion(
                   'Papelera',
-                  'Los clientes inactivos van a la papelera. Desde ahí puedes recuperarlos '
-                  'sin inscribirlos de nuevo, o recuperarlos y renovarles el pago de una vez. '
+                  'Los clientes inactivos van a la papelera. Desde ahí puedes '
+                  'recuperarlos sin inscribirlos de nuevo. '
                   'Solo Jc puede eliminarlos definitivamente.',
                   emoji: '🗑️',
                   color: Colors.grey,
                 ),
+                const _Tema('🆘 Si algo falla'),
                 const _Seccion(
-                  'Mi turno',
-                  'Muestra lo que cobraste hoy y tu pendiente a entregar. '
-                  'Cada entrenador solo ve lo suyo.',
-                  emoji: '👤',
-                  color: Colors.indigo,
-                ),
-                const _Seccion(
-                  'Tus datos y tu privacidad',
-                  '• Cada entrenador solo ve sus propios datos: tu pendiente a entregar, tu turno y tus cobros son solo tuyos. '
-                  'No puedes ver los de otros entrenadores, ni ellos los tuyos.\n'
-                  '• El dueño (Jc) tiene acceso a muchos más datos: los cobros de todos, los totales y las estadísticas. '
-                  'Esos datos los verifica su asistente personal de inteligencia artificial, diseñado y programado por él '
-                  'para llevar el control del gimnasio.',
-                  emoji: '🔒',
-                  color: Colors.red,
-                ),
-                const _Seccion(
-                  'Si algo falla',
-                  '• "Sin conexión a internet": sigue trabajando, todo se guarda y sube después.\n'
-                  '• "Conexión muy lenta": ten paciencia, las fotos continúan donde quedaron.\n'
+                  'Problemas comunes',
+                  '• "Sin conexión": sigue trabajando, todo se guarda y sube después.\n'
+                  '• "Conexión muy lenta": ten paciencia, las fotos continúan '
+                  'donde quedaron.\n'
                   '• "Error del servidor": reintenta luego; si sigue, avisa a Jc.\n'
-                  '• Si te saca al login: tu sesión venció, entra de nuevo con tu usuario.\n'
-                  '• Si un cliente no aparece: sincroniza manualmente y revisa la hora de última sincronización.',
+                  '• "Te saca al login": tu sesión venció, entra de nuevo.\n'
+                  '• "Un cliente no aparece": sincroniza manualmente.',
                   emoji: '⚠️',
                   color: Colors.red,
                 ),
                 const _Seccion(
+                  'Tu privacidad',
+                  'Solo ves tus datos: tu pendiente, tu turno, tus cobros. '
+                  'Jc ve los totales de todos para llevar el control del gym.',
+                  emoji: '🔒',
+                  color: Colors.red,
+                ),
+                const _Seccion(
                   'Contacto',
-                  '¿Dudas con la app? Escríbele a Jc por WhatsApp: ${AppConfig.whatsappContacto}.',
+                  '¿Dudas con la app? Escríbele a Jc por WhatsApp: '
+                  '${AppConfig.whatsappContacto}.',
                   emoji: '📞',
                   color: Colors.green,
                 ),
@@ -155,7 +157,11 @@ class AyudaScreen extends StatelessWidget {
     );
   }
 
+  /// Tarjeta "Lo Nuevo": la versión actual destacada, las anteriores plegadas.
   static Widget _novedadesCard() {
+    if (novedades.isEmpty) return const SizedBox.shrink();
+    final actual = novedades.first;
+    final anteriores = novedades.skip(1).toList();
     return Card(
       margin: const EdgeInsets.only(bottom: 10),
       shape: RoundedRectangleBorder(
@@ -172,35 +178,75 @@ class AyudaScreen extends StatelessWidget {
         title: const Text('Lo Nuevo',
             style: TextStyle(
                 fontWeight: FontWeight.bold, fontSize: 16)),
-        subtitle:
-            const Text('Versión ${AppConfig.appVersion}'),
+        subtitle: Text('Versión ${actual.version}'),
         children: [
-          for (final n in novedades) ...[
+          for (final c in actual.cambios)
             Padding(
               padding:
-                  const EdgeInsets.fromLTRB(16, 4, 16, 0),
+                  const EdgeInsets.fromLTRB(24, 3, 16, 3),
               child: Align(
                 alignment: Alignment.centerLeft,
-                child: Text('Versión ${n.version}',
-                    style: const TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 13)),
+                child: Text('• $c',
+                    style: const TextStyle(fontSize: 14)),
               ),
             ),
-            for (final c in n.cambios)
-              Padding(
-                padding:
-                    const EdgeInsets.fromLTRB(24, 2, 16, 2),
-                child: Align(
-                  alignment: Alignment.centerLeft,
-                  child: Text('• $c',
-                      style: const TextStyle(fontSize: 13)),
-                ),
-              ),
-            const SizedBox(height: 8),
-          ],
-          const SizedBox(height: 4),
+          if (anteriores.isNotEmpty)
+            ExpansionTile(
+              title: const Text('Versiones anteriores',
+                  style: TextStyle(
+                      fontSize: 13, color: Colors.grey)),
+              children: [
+                for (final n in anteriores) ...[
+                  Padding(
+                    padding:
+                        const EdgeInsets.fromLTRB(16, 4, 16, 0),
+                    child: Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text('Versión ${n.version}',
+                          style: const TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 13)),
+                    ),
+                  ),
+                  for (final c in n.cambios)
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(
+                          24, 2, 16, 2),
+                      child: Align(
+                        alignment: Alignment.centerLeft,
+                        child: Text('• $c',
+                            style: const TextStyle(
+                                fontSize: 13,
+                                color: Colors.black87)),
+                      ),
+                    ),
+                  const SizedBox(height: 8),
+                ],
+              ],
+            ),
+          const SizedBox(height: 8),
         ],
+      ),
+    );
+  }
+}
+
+/// Encabezado de grupo temático.
+class _Tema extends StatelessWidget {
+  final String texto;
+  const _Tema(this.texto);
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(4, 12, 4, 4),
+      child: Align(
+        alignment: Alignment.centerLeft,
+        child: Text(texto,
+            style: const TextStyle(
+                fontSize: 15,
+                fontWeight: FontWeight.bold,
+                color: Color(0xFFE8821A))),
       ),
     );
   }
@@ -217,7 +263,7 @@ class _Seccion extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Card(
-      margin: const EdgeInsets.only(bottom: 10),
+      margin: const EdgeInsets.only(bottom: 8),
       child: ExpansionTile(
         leading: CircleAvatar(
           backgroundColor: color.withValues(alpha: 0.15),
@@ -234,7 +280,8 @@ class _Seccion extends StatelessWidget {
             child: Align(
               alignment: Alignment.centerLeft,
               child: Text(texto,
-                  style: const TextStyle(fontSize: 14)),
+                  style: const TextStyle(
+                      fontSize: 14, height: 1.4)),
             ),
           ),
         ],
