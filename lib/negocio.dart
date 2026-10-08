@@ -717,6 +717,42 @@ Future<double> ingresosSemana() async {
   return t;
 }
 
+/// Pagos del período para desglose (v1.0.11).
+/// periodo: 'hoy', 'semana', 'mes'. Devuelve lista con monto y método.
+Future<List<Map<String, dynamic>>> pagosDelPeriodo(
+    String periodo) async {
+  String desdeIso, hastaIso;
+  final hoy = DateTime.now();
+  String iso(DateTime d) => '${d.year.toString().padLeft(4, '0')}-'
+      '${d.month.toString().padLeft(2, '0')}-'
+      '${d.day.toString().padLeft(2, '0')}';
+  if (periodo == 'hoy') {
+    desdeIso = hastaIso = iso(hoy);
+  } else if (periodo == 'semana') {
+    desdeIso = iso(hoy.subtract(const Duration(days: 6)));
+    hastaIso = iso(hoy);
+  } else {
+    desdeIso =
+        '${hoy.year.toString().padLeft(4, '0')}-${hoy.month.toString().padLeft(2, '0')}-01';
+    hastaIso = iso(hoy);
+  }
+  final out = <Map<String, dynamic>>[];
+  for (final p in await LocalDb.instance.allMirror('pagos')) {
+    final f = '${p['fecha'] ?? ''}';
+    if (f.length >= 10) {
+      final dia = f.substring(0, 10);
+      if (dia.compareTo(desdeIso) >= 0 &&
+          dia.compareTo(hastaIso) <= 0) {
+        out.add({
+          'monto': (p['monto'] as num?)?.toDouble() ?? 0,
+          'metodo': '${p['metodo'] ?? 'efectivo'}',
+        });
+      }
+    }
+  }
+  return out;
+}
+
 /// Ingresos por día de los últimos 7 días (v1.0.8).
 /// Devuelve lista de {dia: 'Lun', monto: 123.0} ordenada de más antiguo a hoy.
 Future<List<Map<String, dynamic>>> ingresosUltimos7Dias() async {

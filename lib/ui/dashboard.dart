@@ -7,6 +7,8 @@ library;
 import 'package:flutter/material.dart';
 
 import '../negocio.dart';
+import 'buscar.dart';
+import 'listas.dart';
 import 'widgets.dart';
 
 class DashboardScreen extends StatefulWidget {
@@ -57,30 +59,108 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
   }
 
-  Widget _tarjetaIngreso(String titulo, double valor, IconData icono) {
+  /// Detalle de ingresos por período (v1.0.11).
+  /// Muestra desglose por método de pago.
+  Future<void> _detalleIngresos(String periodo) async {
+    final titulo = periodo == 'hoy'
+        ? 'Ingresos de hoy'
+        : periodo == 'semana'
+            ? 'Ingresos últimos 7 días'
+            : 'Ingresos del mes';
+    // Obtener pagos del período para el desglose
+    final pagos = await pagosDelPeriodo(periodo);
+    double efectivo = 0, transferencia = 0;
+    for (final p in pagos) {
+      final m = (p['monto'] as num?)?.toDouble() ?? 0;
+      if ('${p['metodo']}' == 'transferencia') {
+        transferencia += m;
+      } else {
+        efectivo += m;
+      }
+    }
+    if (!mounted) return;
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(titulo,
+                style: const TextStyle(
+                    fontSize: 18, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 12),
+            _filaDetalle('💵 Efectivo', efectivo),
+            _filaDetalle('📱 Transferencia', transferencia),
+            const Divider(),
+            _filaDetalle('💰 Total', efectivo + transferencia,
+                negrita: true),
+            const SizedBox(height: 8),
+            Text('${pagos.length} pagos registrados',
+                style:
+                    const TextStyle(color: Colors.grey, fontSize: 13)),
+            const SizedBox(height: 16),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _filaDetalle(String etiqueta, double valor,
+      {bool negrita = false}) {    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(etiqueta, style: const TextStyle(fontSize: 15)),
+          Text('${fmtMonto(valor)} CUP',
+              style: TextStyle(
+                  fontSize: 15,
+                  fontWeight:
+                      negrita ? FontWeight.bold : FontWeight.normal,
+                  color: negrita ? naranja : null)),
+        ],
+      ),
+    );
+  }
+
+  Widget _tarjetaIngreso(
+      String titulo, double valor, IconData icono, VoidCallback onTap) {
     return Expanded(
-      child: Card(
-        elevation: 2,
-        shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16)),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 8),
-          child: Column(
-            children: [
-              Icon(icono, color: naranja, size: 26),
-              const SizedBox(height: 6),
-              Text(titulo,
-                  style: const TextStyle(
-                      fontSize: 11, color: Colors.grey)),
-              const SizedBox(height: 2),
-              Text(fmtMonto(valor),
-                  style: const TextStyle(
-                      fontSize: 17,
-                      fontWeight: FontWeight.bold,
-                      color: naranja)),
-              const Text('CUP',
-                  style: TextStyle(fontSize: 10, color: Colors.grey)),
-            ],
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(16),
+        child: Card(
+          elevation: 2,
+          shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16)),
+          child: Padding(
+            padding:
+                const EdgeInsets.symmetric(vertical: 14, horizontal: 8),
+            child: Column(
+              children: [
+                Icon(icono, color: naranja, size: 26),
+                const SizedBox(height: 6),
+                Text(titulo,
+                    style: const TextStyle(
+                        fontSize: 11, color: Colors.grey)),
+                const SizedBox(height: 2),
+                Text(fmtMonto(valor),
+                    style: const TextStyle(
+                        fontSize: 17,
+                        fontWeight: FontWeight.bold,
+                        color: naranja)),
+                const Text('CUP',
+                    style: TextStyle(fontSize: 10, color: Colors.grey)),
+                const SizedBox(height: 4),
+                const Icon(Icons.touch_app,
+                    size: 14, color: Colors.grey),
+              ],
+            ),
           ),
         ),
       ),
@@ -117,13 +197,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   const SizedBox(height: 8),
                   Row(
                     children: [
-                      _tarjetaIngreso('Hoy', _hoy, Icons.today),
+                      _tarjetaIngreso('Hoy', _hoy, Icons.today,
+                          () => _detalleIngresos('hoy')),
                       const SizedBox(width: 8),
-                      _tarjetaIngreso(
-                          '7 días', _semana, Icons.date_range),
+                      _tarjetaIngreso('7 días', _semana,
+                          Icons.date_range, () => _detalleIngresos('semana')),
                       const SizedBox(width: 8),
-                      _tarjetaIngreso(
-                          'Este mes', _mes, Icons.calendar_month),
+                      _tarjetaIngreso('Este mes', _mes,
+                          Icons.calendar_month, () => _detalleIngresos('mes')),
                     ],
                   ),
                   const SizedBox(height: 16),
@@ -195,44 +276,20 @@ class _DashboardScreenState extends State<DashboardScreen> {
                             mainAxisAlignment:
                                 MainAxisAlignment.spaceAround,
                             children: [
-                              Column(
-                                children: [
-                                  Text('$_activos',
-                                      style: const TextStyle(
-                                          fontSize: 24,
-                                          fontWeight: FontWeight.bold)),
-                                  const Text('activos',
-                                      style: TextStyle(
-                                          fontSize: 12,
-                                          color: Colors.grey)),
-                                ],
-                              ),
-                              Column(
-                                children: [
-                                  Text('$alDia',
-                                      style: const TextStyle(
-                                          fontSize: 24,
-                                          fontWeight: FontWeight.bold,
-                                          color: Colors.green)),
-                                  const Text('al día',
-                                      style: TextStyle(
-                                          fontSize: 12,
-                                          color: Colors.grey)),
-                                ],
-                              ),
-                              Column(
-                                children: [
-                                  Text('$_morosos',
-                                      style: const TextStyle(
-                                          fontSize: 24,
-                                          fontWeight: FontWeight.bold,
-                                          color: Colors.red)),
-                                  const Text('vencidos',
-                                      style: TextStyle(
-                                          fontSize: 12,
-                                          color: Colors.grey)),
-                                ],
-                              ),
+                              _statCliente(
+                                  '$_activos', 'activos', null,
+                                  () => _ir(const BuscarScreen())),
+                              _statCliente(
+                                  '$alDia',
+                                  'al día',
+                                  Colors.green,
+                                  () => _ir(const BuscarScreen())),
+                              _statCliente(
+                                  '$_morosos',
+                                  'vencidos',
+                                  Colors.red,
+                                  () => _ir(const ListasScreen(
+                                      inicial: 2))),
                             ],
                           ),
                           const SizedBox(height: 12),

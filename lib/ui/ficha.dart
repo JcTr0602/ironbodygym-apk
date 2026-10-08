@@ -117,6 +117,11 @@ class _FichaScreenState extends State<FichaScreen> {
     if (c == null) return;
     final payload = await pagoDialogo(context, c);
     if (payload == null || !mounted) return;
+    // v1.0.11: si es el dueño quien cobra, se marca entregado automáticamente
+    // (no tiene sentido que se deba dinero a sí mismo)
+    if (AuthService().isOwner) {
+      payload['entregado'] = 1;
+    }
     await LocalDb.instance.queueOp(
       opUuid: const Uuid().v4(),
       tipo: 'pago_mensual',

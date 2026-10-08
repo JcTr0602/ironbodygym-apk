@@ -2,8 +2,11 @@
 /// adeudado (mayor primero). El dinero dormido, visible.
 library;
 
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 
+import '../fotos.dart';
 import '../negocio.dart';
 import 'widgets.dart';
 
@@ -142,22 +145,10 @@ class _CuentasCobrarScreenState
                     for (final c in _cuentas)
                       Card(
                         child: ListTile(
-                          leading: CircleAvatar(
-                            backgroundColor:
-                                (c['dias'] as int) > 30
-                                    ? Colors.red.shade100
-                                    : Colors.orange.shade100,
-                            child: Text(
-                              '${c['dias']}d',
-                              style: TextStyle(
-                                fontSize: 11,
-                                fontWeight: FontWeight.bold,
-                                color: (c['dias'] as int) >
-                                        30
-                                    ? Colors.red
-                                    : Colors.orange.shade800,
-                              ),
-                            ),
+                          leading: _FotoConDias(
+                            fotoStorage:
+                                c['foto_storage'] as String?,
+                            dias: c['dias'] as int,
                           ),
                           title:
                               Text('${c['nombre']}'),
@@ -180,6 +171,81 @@ class _CuentasCobrarScreenState
                 ],
               ),
             ),
+    );
+  }
+}
+
+/// Miniatura de foto con insignia de días de atraso (v1.0.11).
+class _FotoConDias extends StatefulWidget {
+  final String? fotoStorage;
+  final int dias;
+  const _FotoConDias({required this.fotoStorage, required this.dias});
+
+  @override
+  State<_FotoConDias> createState() => _FotoConDiasState();
+}
+
+class _FotoConDiasState extends State<_FotoConDias> {
+  File? _foto;
+
+  @override
+  void initState() {
+    super.initState();
+    _cargar();
+  }
+
+  Future<void> _cargar() async {
+    final f =
+        await FotoCache.instance.enCache(widget.fotoStorage);
+    if (mounted) setState(() => _foto = f);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final color =
+        widget.dias > 30 ? Colors.red : Colors.orange.shade800;
+    final bg =
+        widget.dias > 30 ? Colors.red.shade100 : Colors.orange.shade100;
+    return Stack(
+      children: [
+        CircleAvatar(
+          radius: 24,
+          backgroundColor: bg,
+          backgroundImage:
+              _foto != null ? FileImage(_foto!) : null,
+          child: _foto == null
+              ? Text(
+                  '${widget.dias}d',
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.bold,
+                    color: color,
+                  ),
+                )
+              : null,
+        ),
+        // Insignia con días
+        Positioned(
+          right: 0,
+          bottom: 0,
+          child: Container(
+            padding: const EdgeInsets.symmetric(
+                horizontal: 5, vertical: 2),
+            decoration: BoxDecoration(
+              color: color,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Text(
+              '${widget.dias}d',
+              style: const TextStyle(
+                fontSize: 9,
+                fontWeight: FontWeight.bold,
+                color: Colors.white,
+              ),
+            ),
+          ),
+        ),
+      ],
     );
   }
 }
