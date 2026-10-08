@@ -13,6 +13,7 @@ import '../config.dart';
 import '../negocio.dart';
 import '../perfil.dart';
 import '../theme.dart';
+import 'avisos.dart';
 import 'widgets.dart';
 
 class AjustesScreen extends StatefulWidget {
@@ -296,6 +297,18 @@ class _AjustesScreenState extends State<AjustesScreen> {
                   trailing:
                       const Icon(Icons.chevron_right),
                   onTap: _cambiarClave,
+                ),
+                const Divider(),
+                ListTile(
+                  leading: const Text('🔔',
+                      style: TextStyle(fontSize: 24)),
+                  title:
+                      const Text('Mis avisos'),
+                  trailing:
+                      const Icon(Icons.chevron_right),
+                  onTap: () => Navigator.of(context).push(
+                      MaterialPageRoute(
+                          builder: (_) => const AvisosScreen())),
                 ),
                 const Divider(),
                 const Padding(

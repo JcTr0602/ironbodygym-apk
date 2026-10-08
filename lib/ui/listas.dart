@@ -186,20 +186,48 @@ class _ListasScreenState extends State<ListasScreen>
         itemCount: rows.length,
         itemBuilder: (ctx, i) {
           final c = rows[i];
+          final id = (c['id'] as int?) ?? 0;
           return FilaCliente(
             cliente: c,
             onTap: () => Navigator.of(context)
                 .push(MaterialPageRoute(
                     builder: (_) => FichaScreen(
-                        clienteId: (c['id'] as int?) ?? 0)))
+                        clienteId: id)))
                 .then((_) => _cargar()),
-            trailing: ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 10, vertical: 6),
-              ),
-              child: const Text('💰'),
-              onPressed: () => _pagoRapido(c),
+            trailing: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // Botón avisar (v1.0.8)
+                FutureBuilder<String?>(
+                  future: LocalDb.instance.getAvisado(id),
+                  builder: (ctx, snap) {
+                    final avisado = snap.data != null;
+                    return TextButton(
+                      child: Text(avisado ? '✅' : '📢',
+                          style: const TextStyle(fontSize: 18)),
+                      onPressed: () async {
+                        await LocalDb.instance.marcarAvisado(id);
+                        if (mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                                content: Text(
+                                    '📢 ${c['nombre']} marcado como avisado')),
+                          );
+                          setState(() {});
+                        }
+                      },
+                    );
+                  },
+                ),
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 10, vertical: 6),
+                  ),
+                  child: const Text('💰'),
+                  onPressed: () => _pagoRapido(c),
+                ),
+              ],
             ),
           );
         },

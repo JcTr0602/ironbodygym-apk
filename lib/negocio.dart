@@ -667,6 +667,86 @@ Future<double> ingresosMes() async {
   return t;
 }
 
+/// Ingresos de hoy (espejo `pagos` + diarios). v1.0.8.
+Future<double> ingresosHoy() async {
+  final hoy = _hoyIso();
+  double t = 0;
+  for (final p in await LocalDb.instance.allMirror('pagos')) {
+    final f = '${p['fecha'] ?? ''}';
+    if (f.length >= 10 && f.substring(0, 10) == hoy) {
+      t += (p['monto'] as num?)?.toDouble() ?? 0;
+    }
+  }
+  for (final d in await LocalDb.instance.allMirror('pagos_diarios')) {
+    final f = '${d['fecha'] ?? ''}';
+    if (f.length >= 10 && f.substring(0, 10) == hoy) {
+      t += (d['total'] as num?)?.toDouble() ?? 0;
+    }
+  }
+  return t;
+}
+
+/// Ingresos de los últimos 7 días (espejo `pagos` + diarios). v1.0.8.
+Future<double> ingresosSemana() async {
+  final hoy = DateTime.now();
+  final desde = hoy.subtract(const Duration(days: 6));
+  String iso(DateTime d) => '${d.year.toString().padLeft(4, '0')}-'
+      '${d.month.toString().padLeft(2, '0')}-'
+      '${d.day.toString().padLeft(2, '0')}';
+  final desdeIso = iso(desde);
+  final hoyIso = iso(hoy);
+  double t = 0;
+  for (final p in await LocalDb.instance.allMirror('pagos')) {
+    final f = '${p['fecha'] ?? ''}';
+    if (f.length >= 10) {
+      final dia = f.substring(0, 10);
+      if (dia.compareTo(desdeIso) >= 0 && dia.compareTo(hoyIso) <= 0) {
+        t += (p['monto'] as num?)?.toDouble() ?? 0;
+      }
+    }
+  }
+  for (final d in await LocalDb.instance.allMirror('pagos_diarios')) {
+    final f = '${d['fecha'] ?? ''}';
+    if (f.length >= 10) {
+      final dia = f.substring(0, 10);
+      if (dia.compareTo(desdeIso) >= 0 && dia.compareTo(hoyIso) <= 0) {
+        t += (d['total'] as num?)?.toDouble() ?? 0;
+      }
+    }
+  }
+  return t;
+}
+
+/// Ingresos por día de los últimos 7 días (v1.0.8).
+/// Devuelve lista de {dia: 'Lun', monto: 123.0} ordenada de más antiguo a hoy.
+Future<List<Map<String, dynamic>>> ingresosUltimos7Dias() async {
+  final hoy = DateTime.now();
+  String iso(DateTime d) => '${d.year.toString().padLeft(4, '0')}-'
+      '${d.month.toString().padLeft(2, '0')}-'
+      '${d.day.toString().padLeft(2, '0')}';
+  const diasSem = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'];
+  final resultado = <Map<String, dynamic>>[];
+  for (int i = 6; i >= 0; i--) {
+    final d = hoy.subtract(Duration(days: i));
+    final diaIso = iso(d);
+    double t = 0;
+    for (final p in await LocalDb.instance.allMirror('pagos')) {
+      final f = '${p['fecha'] ?? ''}';
+      if (f.length >= 10 && f.substring(0, 10) == diaIso) {
+        t += (p['monto'] as num?)?.toDouble() ?? 0;
+      }
+    }
+    resultado.add({
+      'dia': diasSem[d.weekday - 1],
+      'monto': t,
+    });
+  }
+  return resultado;
+}
+
+/// Nº de clientes activos. v1.0.8.
+Future<int> activosCount() async => (await _activos()).length;
+
 /// Inscripciones del mes calendario actual.
 Future<int> inscripcionesMes() async {
   final n = DateTime.now();

@@ -15,6 +15,7 @@ import 'package:uuid/uuid.dart';
 import '../localdb.dart';
 import '../negocio.dart';
 import '../sync.dart';
+import 'cuentas_cobrar.dart';
 import 'papelera.dart';
 import 'auditoria.dart';
 import 'riesgo.dart';
@@ -331,12 +332,29 @@ class _AdminScreenState extends State<AdminScreen> {
   // -- pendiente a entrega ----------------------------------------------
   Future<void> _confirmarEntrega(
       {int? trainerId, required String nombre}) async {
+    final notaCtrl = TextEditingController();
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('💰 Confirmar entrega'),
-        content: Text('¿Confirmas que recibiste el dinero pendiente de '
-            '"$nombre"? Su pendiente se pondrá en cero.'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('¿Confirmas que recibiste el dinero pendiente de '
+                '"$nombre"? Su pendiente se pondrá en cero.'),
+            const SizedBox(height: 12),
+            TextField(
+              controller: notaCtrl,
+              decoration: const InputDecoration(
+                labelText: 'Nota (opcional)',
+                hintText: 'Ej: entregó en dos partes',
+                border: OutlineInputBorder(),
+              ),
+              maxLines: 2,
+            ),
+          ],
+        ),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(ctx, false),
@@ -347,12 +365,15 @@ class _AdminScreenState extends State<AdminScreen> {
         ],
       ),
     );
+    final nota = notaCtrl.text.trim();
+    notaCtrl.dispose();
     if (ok != true || !mounted) return;
     await LocalDb.instance.queueOp(
       opUuid: const Uuid().v4(),
       tipo: 'confirmar_entrega',
       payload: {
         'trainer_telegram_id': trainerId ?? 'todos',
+        if (nota.isNotEmpty) 'nota': nota,
       },
     );
     if (!mounted) return;
@@ -683,6 +704,29 @@ class _AdminScreenState extends State<AdminScreen> {
                                   'Abrir papelera'),
                               onPressed: () =>
                                   _ir(const PapeleraScreen()),
+                            ),
+                          ),
+                        ]),
+                        _seccion('💸 Cuentas por cobrar', [
+                          const Text(
+                            'Clientes vencidos ordenados por monto adeudado. El dinero dormido, visible.',
+                            style: TextStyle(
+                                color: Colors.grey, fontSize: 12),
+                          ),
+                          const SizedBox(height: 8),
+                          SizedBox(
+                            width: double.infinity,
+                            child: ElevatedButton.icon(
+                              icon:
+                                  const Icon(Icons.money_off),
+                              label: const Text(
+                                  'Ver cuentas por cobrar'),
+                              onPressed: () => Navigator.of(context).push(
+                                MaterialPageRoute(
+                                  builder: (_) =>
+                                      const CuentasCobrarScreen(),
+                                ),
+                              ),
                             ),
                           ),
                         ]),

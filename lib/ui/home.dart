@@ -18,9 +18,11 @@ import 'ayuda.dart';
 import 'buscar.dart';
 import 'cola.dart';
 import 'cumpleanos.dart';
+import 'dashboard.dart';
 import 'inscribir.dart';
 import 'listas.dart';
 import 'login.dart';
+import 'mi_dia.dart';
 import 'mi_turno.dart';
 import 'pago.dart';
 import 'pago_diario.dart';
@@ -362,6 +364,10 @@ class _HomeScreenState extends State<HomeScreen> {
                         () => _ir(const TransferenciaScreen())),
                     _boton(Icons.badge, 'Mi turno',
                         () => _ir(const MiTurnoScreen())),
+                    _boton(Icons.calendar_today, 'Mi día',
+                        () => _ir(const MiDiaScreen())),
+                    _boton(Icons.dashboard, 'Dashboard',
+                        () => _ir(const DashboardScreen())),
                     _boton(Icons.cake, 'Cumpleaños',
                         () => _ir(const CumpleanosScreen())),
                     _boton(Icons.settings, 'Ajustes',

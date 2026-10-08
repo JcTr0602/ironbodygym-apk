@@ -103,6 +103,17 @@ class LocalDb {
     return rows.isEmpty ? null : rows.first['v'] as String;
   }
 
+  /// Marca un cliente como avisado (v1.0.8). Solo local, no sincroniza.
+  Future<void> marcarAvisado(int clienteId) async {
+    final ahora = DateTime.now().toIso8601String();
+    await setMeta('avisado_$clienteId', ahora);
+  }
+
+  /// Devuelve el timestamp de aviso, o null si no se ha avisado.
+  Future<String?> getAvisado(int clienteId) async {
+    return getMeta('avisado_$clienteId');
+  }
+
   Future<int> getWatermark() async =>
       int.tryParse(await getMeta('sync_seq') ?? '0') ?? 0;
 
