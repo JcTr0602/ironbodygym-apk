@@ -163,6 +163,13 @@ class _HomeScreenState extends State<HomeScreen> {
         '${l.hour.toString().padLeft(2, '0')}:${l.minute.toString().padLeft(2, '0')}';
   }
 
+  /// Rol del usuario actual (v1.0.11): Dueño vs Entrenador.
+  String _rolUsuario() {
+    if (_auth.isOwner) return '👑 Dueño';
+    if (_auth.isAdmin) return '⭐ Administrador';
+    return '🏋️ Entrenador';
+  }
+
   @override
   Widget build(BuildContext context) {
     final nombre = _auth.displayName;
@@ -198,7 +205,8 @@ class _HomeScreenState extends State<HomeScreen> {
                                 fontSize: 24,
                                 fontWeight: FontWeight.bold)),
                         const SizedBox(height: 2),
-                        Text('Entrenador · ${_horaSync()}',
+                        Text(
+                            '${_rolUsuario()} · ${_horaSync()}',
                             style: const TextStyle(
                                 color: Colors.white70, fontSize: 12)),
                       ],
