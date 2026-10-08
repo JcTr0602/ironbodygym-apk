@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 
 import '../localdb.dart';
 import '../negocio.dart';
+import 'detalle_entrenador.dart';
 import 'widgets.dart';
 
 class HistorialEntrenadorScreen extends StatefulWidget {
@@ -115,7 +116,14 @@ class _HistorialEntrenadorScreenState
                           itemCount: _datos.length,
                           itemBuilder: (ctx, i) {
                             final d = _datos[i];
-                            return Card(
+                            return InkWell(
+                              onTap: () => Navigator.of(context).push(
+                                MaterialPageRoute(
+                                  builder: (_) => DetalleEntrenadorScreen(
+                                      nombre: '${d['nombre']}'),
+                                ),
+                              ),
+                              child: Card(
                               margin: const EdgeInsets.symmetric(
                                   horizontal: 12, vertical: 6),
                               child: Padding(
@@ -162,7 +170,8 @@ class _HistorialEntrenadorScreenState
                                   ],
                                 ),
                               ),
-                            );
+                            ),
+                          );
                           },
                         ),
                       ),
