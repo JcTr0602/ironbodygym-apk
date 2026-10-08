@@ -27,6 +27,7 @@ import 'mi_turno.dart';
 import 'pago.dart';
 import 'pago_diario.dart';
 import 'papelera.dart';
+import 'pagos_realizados.dart';
 import 'pendiente.dart';
 import 'transferencia.dart';
 
@@ -331,7 +332,9 @@ class _HomeScreenState extends State<HomeScreen> {
                             _miniContador(Icons.people, '$_inscripciones',
                                 'Inscripciones'),
                             _miniContador(Icons.verified,
-                                '$_pagosMes', 'Pagos realizados'),
+                                '$_pagosMes', 'Pagos realizados',
+                                onTap: () => _ir(
+                                    const PagosRealizadosScreen())),
                           ],
                         ),
                       ],
@@ -435,8 +438,9 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _miniContador(
-      IconData icono, String valor, String etiqueta) {
-    return Column(
+      IconData icono, String valor, String etiqueta,
+      {VoidCallback? onTap}) {
+    final contenido = Column(
       children: [
         Row(
           mainAxisSize: MainAxisSize.min,
@@ -453,6 +457,16 @@ class _HomeScreenState extends State<HomeScreen> {
             style:
                 const TextStyle(fontSize: 11, color: Colors.grey)),
       ],
+    );
+    if (onTap == null) return contenido;
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(8),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(
+            horizontal: 8, vertical: 4),
+        child: contenido,
+      ),
     );
   }
 
