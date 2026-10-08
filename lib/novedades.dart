@@ -15,6 +15,13 @@ class Novedad {
 }
 
 const novedades = [
+  Novedad('1.0.13', [
+    '✅ Pagos realizados tocable: lista de clientes que pagaron',
+    '🖼️ Miniaturas de fotos en Mi día',
+    '❓ Ayuda rediseñada por temas, más fácil de leer',
+    '🎫 Pago diario: botón rápido ⚡, nota, total del día, deshacer y corregir',
+    '🗑️ Eliminar cliente definitivamente desde la papelera (arreglado)',
+  ]),
   Novedad('1.0.12', [
     '👥 Gestión de usuarios APK: lista con estado y último acceso',
     '🚫 Bloquear/desbloquear/cambiar contraseña sin escribir nombres',
