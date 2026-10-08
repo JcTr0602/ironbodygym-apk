@@ -31,6 +31,7 @@ const novedades = [
     '⬇️ Pull-to-refresh en la lista de clientes',
     '✨ Login con animación, recuerda usuario y muestra versión',
   ]),
+  Novedad('1.0.3', [
     '🛡️ Sección Administración (solo Jc): estadísticas, precios, usuarios APK, pendiente a entregar, gastos, cierre de caja y exportar',
     '💰 Pendiente a entregar ahora cuenta también lo que aún no se sincroniza',
     '📊 Mi Turno con historial diario, desglose por método y última entrega confirmada',
