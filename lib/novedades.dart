@@ -15,6 +15,27 @@ class Novedad {
 }
 
 const novedades = [
+  Novedad('1.0.12', [
+    '👥 Gestión de usuarios APK: lista con estado y último acceso',
+    '🚫 Bloquear/desbloquear/cambiar contraseña sin escribir nombres',
+    '🚪 Cerrar sesión a distancia desde la lista de usuarios',
+    '🔐 Seguridad en perfil: vincular dispositivo, huella digital, PIN rápido',
+    '📊 Detalle por entrenador al tocar (hoy, últimos 7 días, mes)',
+    '📋 Auditoría mejorada: cliente, qué cambió y foto',
+    '✏️ Editar pago completo: monto, fecha y método',
+    '🛡️ Fixes de seguridad: sync real, precios siempre actualizados',
+  ]),
+  Novedad('1.0.11', [
+    '❌ Quitado botón flotante de sincronizar (tapaba Ayuda)',
+    '📅 Editar vencimiento de mensualidad desde la ficha',
+    '🔍 Detalle de cada operación sincronizada',
+    '🔍 Foto en grande al tocarla en la ficha',
+    '📇 Elegir teléfono desde los contactos del móvil',
+    '📊 Dashboard interactivo (toca las tarjetas)',
+    '🐛 Dueño ya no se debe a sí mismo en Pendiente a entregar',
+    '📷 Miniatura de foto en Cuentas por cobrar',
+    '👑 Rol en home: Dueño / Entrenador',
+  ]),
   Novedad('1.0.10', [
     '📅 Fecha del pago elegible al renovar (ayer, hoy, etc.)',
     '☁️ Botón "Verificar con servidor" en la ficha del cliente',
