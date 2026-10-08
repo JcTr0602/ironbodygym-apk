@@ -122,6 +122,51 @@ class _ColaScreenState extends State<ColaScreen> {
         '${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}';
   }
 
+  /// Muestra el detalle completo de una operación al tocarla.
+  void _verDetalle(Map<String, dynamic> op) {
+    final tipo = _tipo('${op['tipo']}');
+    final estado = '${op['estado']}';
+    final fecha = '${op['creada_ts']}'.substring(0, 16).replaceAll('T', ' ');
+    final error = '${op['error'] ?? ''}';
+    // Traduce errores técnicos a lenguaje claro
+    String errorClaro = error;
+    if (error.contains('cliente no existe')) {
+      errorClaro =
+          'El cliente ya no existe en el servidor (fue eliminado). No es necesario reintentar.';
+    } else if (error.contains('HTTP 400')) {
+      errorClaro =
+          'El servidor rechazó la operación por datos inválidos. Revisa los datos e intenta de nuevo.';
+    } else if (error.contains('HTTP 409')) {
+      errorClaro = 'La operación ya fue registrada (duplicada). No es necesario reintentar.';
+    }
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(tipo),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('📅 $fecha'),
+            const SizedBox(height: 8),
+            Text('Estado: $estado'),
+            if (errorClaro.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              Text('⚠️ $errorClaro',
+                  style: const TextStyle(color: Colors.red)),
+            ],
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Cerrar'),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final pendientes =
@@ -232,6 +277,7 @@ class _ColaScreenState extends State<ColaScreen> {
                                   style: const TextStyle(
                                       color: Colors.grey,
                                       fontSize: 12)),
+                          onTap: () => _verDetalle(op),
                         );
                       },
                     ),
