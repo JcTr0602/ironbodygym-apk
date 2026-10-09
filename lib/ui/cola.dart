@@ -9,6 +9,7 @@ import 'package:flutter/material.dart';
 import '../localdb.dart';
 import '../negocio.dart';
 import '../sync.dart';
+import 'diseno.dart';
 
 class ColaScreen extends StatefulWidget {
   const ColaScreen({super.key});
@@ -57,19 +58,33 @@ class _ColaScreenState extends State<ColaScreen> {
     await showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('🔄 Sincronización completada'),
+        title: const Text('Sincronización completada'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _resumenFila('📤 Subidos', '$subidos'),
+            _resumenFila(context, Icons.upload, 'Subidos', '$subidos'),
             const SizedBox(height: 8),
-            _resumenFila('📥 Bajados', '$bajados'),
+            _resumenFila(context, Icons.download, 'Bajados', '$bajados'),
             if (error != null && error.isNotEmpty) ...[
               const SizedBox(height: 12),
-              Text(
-                '⚠️ $error',
-                style: const TextStyle(color: Colors.red, fontSize: 13),
+              Row(
+                crossAxisAlignment:
+                    CrossAxisAlignment.start,
+                children: [
+                  const Icon(Icons.warning,
+                      size: 16,
+                      color: AppColores.error),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      error,
+                      style: const TextStyle(
+                          color: AppColores.error,
+                          fontSize: 13),
+                    ),
+                  ),
+                ],
               ),
             ],
             if (subidos == 0 && bajados == 0)
@@ -92,17 +107,28 @@ class _ColaScreenState extends State<ColaScreen> {
     );
   }
 
-  Widget _resumenFila(String etiqueta, String valor) {
+  Widget _resumenFila(
+      BuildContext ctx, IconData icono, String etiqueta, String valor) {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
-        Text(etiqueta, style: const TextStyle(fontSize: 16)),
+        Row(
+          children: [
+            Icon(icono,
+                size: 20,
+                color:
+                    Theme.of(ctx).colorScheme.onSurfaceVariant),
+            const SizedBox(width: 8),
+            Text(etiqueta,
+                style: const TextStyle(fontSize: 16)),
+          ],
+        ),
         Text(
           valor,
           style: const TextStyle(
             fontSize: 18,
             fontWeight: FontWeight.bold,
-            color: Color(0xFFE8821A),
+            color: AppColores.naranja,
           ),
         ),
       ],
@@ -136,18 +162,33 @@ class _ColaScreenState extends State<ColaScreen> {
     _cargar();
   }
 
-  String _emoji(String estado) {
+  /// Icono y color por estado de operación (v1.1: sin emojis).
+  IconData _iconoEstado(String estado) {
     switch (estado) {
       case 'aplicada':
-        return '✅';
+        return Icons.check_circle;
       case 'enviada':
-        return '📤';
+        return Icons.upload;
       case 'rechazada':
-        return '⛔';
+        return Icons.block;
       case 'error':
-        return '⚠️';
+        return Icons.warning;
       default:
-        return '⏳';
+        return Icons.schedule;
+    }
+  }
+
+  Color _colorEstado(String estado) {
+    switch (estado) {
+      case 'aplicada':
+        return AppColores.exito;
+      case 'enviada':
+        return AppColores.info;
+      case 'rechazada':
+      case 'error':
+        return AppColores.error;
+      default:
+        return AppColores.naranja;
     }
   }
 
@@ -195,7 +236,7 @@ class _ColaScreenState extends State<ColaScreen> {
     await LocalDb.instance.markOp(uuid, 'pendiente', error: null);
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('🔄 Operación marcada para reenviar')),
+        const SnackBar(content: Text('Operación marcada para reenviar')),
       );
       _cargar();
     }
@@ -228,7 +269,16 @@ class _ColaScreenState extends State<ColaScreen> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('📅 $fecha'),
+            Row(
+              children: [
+                const Icon(Icons.calendar_today,
+                    size: 14, color: Colors.grey),
+                const SizedBox(width: 6),
+                Text(fecha,
+                    style:
+                        const TextStyle(fontSize: 13)),
+              ],
+            ),
             const SizedBox(height: 8),
             Text('Estado: $estado'),
             for (final d in detalles) ...[
@@ -237,8 +287,22 @@ class _ColaScreenState extends State<ColaScreen> {
             ],
             if (errorClaro.isNotEmpty) ...[
               const SizedBox(height: 8),
-              Text('⚠️ $errorClaro',
-                  style: const TextStyle(color: Colors.red)),
+              Row(
+                crossAxisAlignment:
+                    CrossAxisAlignment.start,
+                children: [
+                  const Icon(Icons.warning,
+                      size: 16,
+                      color: AppColores.error),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(errorClaro,
+                        style: const TextStyle(
+                            color:
+                                AppColores.error)),
+                  ),
+                ],
+              ),
             ],
           ],
         ),
@@ -249,7 +313,7 @@ class _ColaScreenState extends State<ColaScreen> {
                 Navigator.of(ctx).pop();
                 await _reenviar(op);
               },
-              child: const Text('🔄 Reenviar',
+              child: const Text('Reenviar',
                   style: TextStyle(color: Colors.orange)),
             ),
           ],
@@ -291,45 +355,45 @@ class _ColaScreenState extends State<ColaScreen> {
     final tipo = '${op['tipo']}';
     if (tipo == 'foto') {
       final n = await nombreCliente(payload['cliente_id']);
-      if (n != null) detalles.add('👤 Cliente: $n');
+      if (n != null) detalles.add('Cliente: $n');
     } else if (tipo == 'pago_mensual' || tipo == 'pago_diario') {
       final n = await nombreCliente(payload['cliente_id']);
-      if (n != null) detalles.add('👤 Cliente: $n');
+      if (n != null) detalles.add('Cliente: $n');
       if (payload['monto'] != null) {
-        detalles.add('💰 Monto: ${payload['monto']} CUP');
+        detalles.add('Monto: ${payload['monto']} CUP');
       }
       if (payload['metodo'] != null) {
         final m = payload['metodo'] == 'efectivo'
-            ? '💵 Efectivo'
-            : '📱 Transferencia';
+            ? 'Efectivo'
+            : 'Transferencia';
         detalles.add('Método: $m');
       }
       if (payload['fecha'] != null) {
-        detalles.add('📅 Fecha: ${payload['fecha']}');
+        detalles.add('Fecha: ${payload['fecha']}');
       }
     } else if (tipo == 'inscribir') {
       if (payload['nombre'] != null) {
-        detalles.add('👤 Cliente: ${payload['nombre']}');
+        detalles.add('Cliente: ${payload['nombre']}');
       }
     } else if (tipo == 'editar_cliente') {
       final n = await nombreCliente(payload['cliente_id']);
-      if (n != null) detalles.add('👤 Cliente: $n');
+      if (n != null) detalles.add('Cliente: $n');
     } else if (tipo == 'cambiar_estado') {
       final n = await nombreCliente(payload['cliente_id']);
-      if (n != null) detalles.add('👤 Cliente: $n');
+      if (n != null) detalles.add('Cliente: $n');
       if (payload['estado'] != null) {
         detalles.add('Estado: ${payload['estado']}');
       }
     } else if (tipo == 'gasto') {
       if (payload['concepto'] != null) {
-        detalles.add('📝 ${payload['concepto']}');
+        detalles.add('${payload['concepto']}');
       }
       if (payload['monto'] != null) {
-        detalles.add('💰 Monto: ${payload['monto']} CUP');
+        detalles.add('Monto: ${payload['monto']} CUP');
       }
     } else if (tipo == 'confirmar_entrega') {
       if (payload['monto'] != null) {
-        detalles.add('💰 Monto: ${payload['monto']} CUP');
+        detalles.add('Monto: ${payload['monto']} CUP');
       }
     }
     return detalles;
@@ -342,15 +406,16 @@ class _ColaScreenState extends State<ColaScreen> {
     final conError =
         _ops.where((o) => o['estado'] == 'error').length;
     // v1.0.14: tres estados claros en vez de binario ok/error
+    // v1.1: icono Material en vez de emoji
     final String estadoSync;
     final List<Color> colores;
-    final String emoji;
+    final IconData iconoEstado;
     final String titulo;
     final String subtitulo;
     if (conError > 0) {
       estadoSync = 'error';
       colores = [const Color(0xFFF44336), const Color(0xFFC62828)];
-      emoji = '❌';
+      iconoEstado = Icons.warning;
       titulo = 'Atención requerida';
       subtitulo = conError == 1
           ? '1 operación falló y necesita tu revisión'
@@ -358,7 +423,7 @@ class _ColaScreenState extends State<ColaScreen> {
     } else if (pendientes > 0) {
       estadoSync = 'pendiente';
       colores = [const Color(0xFFFF9800), const Color(0xFFF57C00)];
-      emoji = '⏳';
+      iconoEstado = Icons.schedule;
       titulo = 'Pendiente de sincronizar';
       subtitulo = pendientes == 1
           ? '1 operación esperando conexión'
@@ -366,12 +431,12 @@ class _ColaScreenState extends State<ColaScreen> {
     } else {
       estadoSync = 'ok';
       colores = [const Color(0xFF4CAF50), const Color(0xFF2E7D32)];
-      emoji = '✅';
+      iconoEstado = Icons.check_circle;
       titulo = 'Sincronizado';
       subtitulo = 'Todo al día';
     }
     return Scaffold(
-      appBar: AppBar(title: const Text('📤 Sincronización')),
+      appBar: AppBar(title: const Text('Sincronización')),
       body: RefreshIndicator(
         onRefresh: _cargar,
         child: ListView(
@@ -397,9 +462,10 @@ class _ColaScreenState extends State<ColaScreen> {
               ),
               child: Column(
                 children: [
-                  Text(
-                    emoji,
-                    style: const TextStyle(fontSize: 48),
+                  Icon(
+                    iconoEstado,
+                    size: 48,
+                    color: Colors.white,
                   ),
                   const SizedBox(height: 8),
                   Text(
@@ -449,7 +515,7 @@ class _ColaScreenState extends State<ColaScreen> {
               children: [
                 Expanded(
                   child: _tarjetaStat(
-                    '⬇️',
+                    Icons.download,
                     'Bajados',
                     '${_det.bajados}',
                     'Última: ${_hora(_det.ultimaPull)}',
@@ -459,7 +525,7 @@ class _ColaScreenState extends State<ColaScreen> {
                 const SizedBox(width: 12),
                 Expanded(
                   child: _tarjetaStat(
-                    '⬆️',
+                    Icons.upload,
                     'Subidos',
                     '${_det.subidos}',
                     'Última: ${_hora(_det.ultimaPush)}',
@@ -483,7 +549,7 @@ class _ColaScreenState extends State<ColaScreen> {
                           color: Colors.white,
                         ),
                       )
-                    : const Text('🔄', style: TextStyle(fontSize: 20)),
+                    : const Icon(Icons.sync, size: 20),
                 label: Text(
                   _sincronizando ? 'Sincronizando…' : 'Sincronizar ahora',
                   style: const TextStyle(fontSize: 16),
@@ -508,13 +574,16 @@ class _ColaScreenState extends State<ColaScreen> {
                 ),
                 child: Row(
                   children: [
-                    const Text('⚠️', style: TextStyle(fontSize: 20)),
+                    const Icon(Icons.warning,
+                        size: 20,
+                        color: AppColores.error),
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
                         _det.error!,
                         style: const TextStyle(
-                            color: Colors.red, fontSize: 13),
+                            color: AppColores.error,
+                            fontSize: 13),
                       ),
                     ),
                   ],
@@ -544,23 +613,32 @@ class _ColaScreenState extends State<ColaScreen> {
                 // v1.0.14: tiempo relativo para saber hace cuánto espera
                 final creada = '${op['creada_ts'] ?? ''}';
                 final hace = tiempoRelativo(creada);
-                return Card(
-                  margin: const EdgeInsets.only(bottom: 8),
-                  // v1.0.14: borde de color según estado
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    side: BorderSide(
-                      color: esError
-                          ? Colors.red.shade300
-                          : esPendiente
-                              ? Colors.orange.shade300
-                              : Colors.green.shade200,
-                      width: 1,
+                return Padding(
+                  padding:
+                      const EdgeInsets.only(bottom: 8),
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: AppColores.superficie(context),
+                      borderRadius:
+                          BorderRadius.circular(AppRadio.lg),
+                      border: Border.all(
+                        color: esError
+                            ? AppColores.error
+                                .withValues(alpha: 0.5)
+                            : esPendiente
+                                ? AppColores.naranja
+                                    .withValues(alpha: 0.5)
+                                : AppColores.exito
+                                    .withValues(alpha: 0.4),
+                        width: 1,
+                      ),
+                      boxShadow:
+                          AppSombra.tarjeta(context),
                     ),
-                  ),
-                  child: ListTile(
-                    leading: Text(_emoji(estado),
-                        style: const TextStyle(fontSize: 24)),
+                    child: ListTile(
+                      leading: Icon(_iconoEstado(estado),
+                          size: 26,
+                          color: _colorEstado(estado)),
                     title: Text(_tipo('${op['tipo']}')),
                     subtitle: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -619,6 +697,7 @@ class _ColaScreenState extends State<ColaScreen> {
                           )
                         : _estadoChip(estado),
                     onTap: () => _verDetalle(op),
+                    ),
                   ),
                 );
               }),
@@ -630,24 +709,19 @@ class _ColaScreenState extends State<ColaScreen> {
 
   /// Tarjeta de estadística (v1.0.9.1)
   Widget _tarjetaStat(
-      String emoji, String titulo, String valor, String subtitulo, Color color) {
+      IconData icono, String titulo, String valor, String subtitulo, Color color) {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.grey.withValues(alpha: 0.15),
-            blurRadius: 8,
-            offset: const Offset(0, 2),
-          ),
-        ],
+        color: AppColores.superficie(context),
+        borderRadius: BorderRadius.circular(AppRadio.lg),
+        border: Border.all(color: AppColores.borde(context)),
+        boxShadow: AppSombra.tarjeta(context),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(emoji, style: const TextStyle(fontSize: 24)),
+          Icon(icono, size: 24, color: color),
           const SizedBox(height: 8),
           Text(
             valor,
