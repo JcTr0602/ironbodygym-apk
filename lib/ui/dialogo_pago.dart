@@ -97,8 +97,12 @@ Future<Map<String, dynamic>?> pagoDialogo(
     builder: (ctx) => StatefulBuilder(
       builder: (ctx, setS) {
         final s = actual();
+        final fpIso = '${fechaPago.year.toString().padLeft(4, '0')}-'
+            '${fechaPago.month.toString().padLeft(2, '0')}-'
+            '${fechaPago.day.toString().padLeft(2, '0')}';
         final nuevo = previewHastaDias(
-            cliente['pagado_hasta'] as String?, _diasDe(s));
+            cliente['pagado_hasta'] as String?, _diasDe(s),
+            fechaPago: fpIso);
         return AlertDialog(
           title: Text('💰 Pago — ${cliente['nombre']}'),
           content: SingleChildScrollView(
@@ -250,8 +254,12 @@ Future<Map<String, dynamic>?> pagoDialogo(
 
   // Paso 2: confirmación con resumen.
   final s = paso1;
-  final nuevo =
-      previewHastaDias(cliente['pagado_hasta'] as String?, _diasDe(s));
+  final fpIso2 = '${fechaPago.year.toString().padLeft(4, '0')}-'
+      '${fechaPago.month.toString().padLeft(2, '0')}-'
+      '${fechaPago.day.toString().padLeft(2, '0')}';
+  final nuevo = previewHastaDias(
+      cliente['pagado_hasta'] as String?, _diasDe(s),
+      fechaPago: fpIso2);
   final ok = await showDialog<bool>(
     context: context,
     builder: (ctx) => AlertDialog(

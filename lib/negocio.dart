@@ -119,11 +119,16 @@ String previewHasta(String? pagadoHasta, int meses) =>
     previewHastaDias(pagadoHasta, 30 * meses);
 
 /// Nuevo pagado_hasta estimado sumando `dias` exactos.
-String previewHastaDias(String? pagadoHasta, int dias) {
-  final hoy = _hoyIso();
-  final base = (pagadoHasta != null && pagadoHasta.compareTo(hoy) > 0)
+///
+/// v1.0.14: la base es lo más lejano entre el pagado_hasta actual y la
+/// fecha del pago (no "hoy"). Así, si el cliente paga por adelantado,
+/// los días restantes no se pierden.
+String previewHastaDias(String? pagadoHasta, int dias,
+    {String? fechaPago}) {
+  final fp = fechaPago ?? _hoyIso();
+  final base = (pagadoHasta != null && pagadoHasta.compareTo(fp) > 0)
       ? pagadoHasta
-      : hoy;
+      : fp;
   final p = base.split('-').map(int.parse).toList();
   final d = DateTime(p[0], p[1], p[2]).add(Duration(days: dias));
   return '${d.year.toString().padLeft(4, '0')}-'
