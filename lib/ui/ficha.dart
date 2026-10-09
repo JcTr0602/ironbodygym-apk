@@ -1062,6 +1062,19 @@ class _FichaScreenState extends State<FichaScreen> {
                                 textoEstado(c['pagado_hasta']
                                     as String?)),
                             _filaInfo(
+                                Icons.payments_outlined,
+                                'Último pago',
+                                _pagos.isEmpty
+                                    ? '—'
+                                    : fmtFecha(_pagos.first['fecha']
+                                        as String?)),
+                            _filaInfo(
+                                Icons.repeat,
+                                'Tipo',
+                                _pagos.isEmpty
+                                    ? '—'
+                                    : etiquetaPeriodo(_pagos.first)),
+                            _filaInfo(
                                 Icons.date_range,
                                 'Inscripción',
                                 fmtFecha(c[

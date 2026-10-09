@@ -107,6 +107,20 @@ String fmtFecha(String? iso) {
   return '${p[2]}/${p[1]}/${p[0]}';
 }
 
+/// Etiqueta legible del periodo de un pago: Mensualidad, Semana, etc.
+String etiquetaPeriodo(Map<String, dynamic> p) {
+  switch ('${p['periodo'] ?? 'mensual'}') {
+    case 'semanal':
+      return 'Semana';
+    case 'quincenal':
+      return 'Quincena';
+    case 'personalizado':
+      return 'Personalizado';
+    default:
+      return 'Mensualidad';
+  }
+}
+
 /// Tiempo relativo legible: "hace 2 horas", "ayer", etc. (v1.0.14)
 String tiempoRelativo(String? iso) {
   if (iso == null || iso.isEmpty) return 'Sin accesos registrados';
