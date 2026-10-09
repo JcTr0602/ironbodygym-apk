@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../localdb.dart';
 import '../negocio.dart';
+import 'diseno.dart';
 import 'ficha.dart';
 
 /// Feed de actividad reciente (v1.0.15).
@@ -89,8 +90,12 @@ class _ActividadScreenState extends State<ActividadScreen> {
     return l;
   }
 
-  /// v1.0.15: extrae el id de cliente del detalle ("cliente 150 ...").
+  /// v1.1: usa cliente_id del servidor; fallback a regex para
+  /// entradas antiguas (v1.0.15).
   int? _clienteIdDe(Map<String, dynamic> a) {
+    final cid = a['cliente_id'];
+    if (cid is int) return cid;
+    if (cid is String) return int.tryParse(cid);
     final det = '${a['detalle'] ?? ''}';
     final m = RegExp(r'cliente\s+(\d+)').firstMatch(det);
     if (m != null) return int.tryParse(m.group(1)!);
@@ -118,14 +123,27 @@ class _ActividadScreenState extends State<ActividadScreen> {
     }
   }
 
-  String _emojiAccion(String accion) {
-    if (accion.contains('inscri')) return '➕';
-    if (accion.contains('pago_diario')) return '🎫';
-    if (accion.contains('pago')) return '💰';
-    if (accion.contains('foto')) return '📷';
-    if (accion.contains('editar')) return '✏️';
-    if (accion.contains('eliminar')) return '🗑️';
-    return '📋';
+  /// Icono Material por tipo de acción (v1.1: sin emojis).
+  IconData _iconoAccion(String accion) {
+    if (accion.contains('inscri')) return Icons.person_add;
+    if (accion.contains('pago_diario')) return Icons.receipt_long;
+    if (accion.contains('pago')) return Icons.payments;
+    if (accion.contains('foto')) return Icons.photo_camera;
+    if (accion.contains('editar')) return Icons.edit;
+    if (accion.contains('eliminar')) return Icons.delete_outline;
+    if (accion.contains('restaur')) return Icons.restore_from_trash;
+    if (accion.contains('congel')) return Icons.ac_unit;
+    if (accion.contains('verific')) return Icons.verified_user;
+    return Icons.assignment;
+  }
+
+  /// Color semántico por tipo de acción.
+  Color _colorAccion(String accion) {
+    if (accion.contains('inscri')) return AppColores.exito;
+    if (accion.contains('pago')) return AppColores.naranja;
+    if (accion.contains('eliminar')) return AppColores.error;
+    if (accion.contains('editar')) return AppColores.info;
+    return AppColores.textoSecundarioClaro;
   }
 
   /// Agrupa por día: devuelve lista de (tituloDia, items).
@@ -165,7 +183,7 @@ class _ActividadScreenState extends State<ActividadScreen> {
     final grupos = _agruparPorDia(filtrados);
     return Scaffold(
       appBar: AppBar(
-        title: const Text('📋 Actividad reciente'),
+        title: const Text('Actividad reciente'),
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh),
@@ -185,9 +203,9 @@ class _ActividadScreenState extends State<ActividadScreen> {
               children: [
                 _chipFiltro('todo', 'Todo'),
                 const SizedBox(width: 8),
-                _chipFiltro('inscripcion', '➕ Inscripciones'),
+                _chipFiltro('inscripcion', 'Inscripciones'),
                 const SizedBox(width: 8),
-                _chipFiltro('pago', '💰 Pagos'),
+                _chipFiltro('pago', 'Pagos'),
               ],
             ),
           ),
@@ -199,7 +217,7 @@ class _ActividadScreenState extends State<ActividadScreen> {
                   horizontal: 12, vertical: 0),
               child: Row(
                 children: [
-                  _chipActor('todos', '👥 Todos'),
+                  _chipActor('todos', 'Todos'),
                   const SizedBox(width: 8),
                   for (final actor in _actores) ...[
                     _chipActor(actor, actor),
@@ -247,37 +265,125 @@ class _ActividadScreenState extends State<ActividadScreen> {
                                       '${a['accion'] ?? ''}';
                                   final tieneCliente =
                                       _clienteIdDe(a) != null;
-                                  return ListTile(
-                                    dense: true,
-                                    leading: Text(
-                                      _emojiAccion(accion),
-                                      style: const TextStyle(
-                                          fontSize: 22),
+                                  final color =
+                                      _colorAccion(accion);
+                                  return Padding(
+                                    padding: const EdgeInsets
+                                        .symmetric(
+                                        horizontal: 12,
+                                        vertical: 4),
+                                    child: InkWell(
+                                      borderRadius:
+                                          BorderRadius.circular(
+                                              AppRadio.md),
+                                      onTap: tieneCliente
+                                          ? () =>
+                                              _abrirFicha(a)
+                                          : null,
+                                      child: Padding(
+                                        padding:
+                                            const EdgeInsets
+                                                .symmetric(
+                                                horizontal:
+                                                    8,
+                                                vertical:
+                                                    8),
+                                        child: Row(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment
+                                                  .start,
+                                          children: [
+                                            Container(
+                                              width: 44,
+                                              height: 44,
+                                              decoration:
+                                                  BoxDecoration(
+                                                color: color
+                                                    .withValues(
+                                                        alpha:
+                                                            0.14),
+                                                shape:
+                                                    BoxShape
+                                                        .circle,
+                                              ),
+                                              child: Icon(
+                                                _iconoAccion(
+                                                    accion),
+                                                color: color,
+                                                size: 22,
+                                              ),
+                                            ),
+                                            const SizedBox(
+                                                width:
+                                                    AppEspacio
+                                                        .md),
+                                            Expanded(
+                                              child: Column(
+                                                crossAxisAlignment:
+                                                    CrossAxisAlignment
+                                                        .start,
+                                                children: [
+                                                  Text(
+                                                    '${a['detalle'] ?? ''}',
+                                                    style:
+                                                        AppTexto
+                                                            .cuerpo,
+                                                    maxLines:
+                                                        3,
+                                                    overflow:
+                                                        TextOverflow
+                                                            .ellipsis,
+                                                  ),
+                                                  const SizedBox(
+                                                      height:
+                                                          4),
+                                                  Row(
+                                                    children: [
+                                                      Icon(
+                                                          Icons
+                                                              .person_outline,
+                                                          size:
+                                                              13,
+                                                          color: Theme.of(
+                                                                  context)
+                                                              .colorScheme
+                                                              .onSurfaceVariant),
+                                                      const SizedBox(
+                                                          width:
+                                                              4),
+                                                      Expanded(
+                                                        child:
+                                                            Text(
+                                                          '${a['actor'] ?? '—'} · ${tiempoRelativo(a['ts'] as String?)}',
+                                                          style:
+                                                              AppTexto
+                                                                  .etiqueta
+                                                                  .copyWith(
+                                                            color: Theme.of(context)
+                                                                .colorScheme
+                                                                .onSurfaceVariant,
+                                                          ),
+                                                          overflow:
+                                                              TextOverflow
+                                                                  .ellipsis,
+                                                        ),
+                                                      ),
+                                                    ],
+                                                  ),
+                                                ],
+                                              ),
+                                            ),
+                                            if (tieneCliente)
+                                              const Icon(
+                                                  Icons
+                                                      .chevron_right,
+                                                  size: 20,
+                                                  color: Colors
+                                                      .grey),
+                                          ],
+                                        ),
+                                      ),
                                     ),
-                                    title: Text(
-                                      '${a['detalle'] ?? ''}',
-                                      style: const TextStyle(
-                                          fontSize: 14),
-                                      maxLines: 2,
-                                      overflow:
-                                          TextOverflow.ellipsis,
-                                    ),
-                                    subtitle: Text(
-                                      '${a['actor'] ?? ''} · '
-                                      '${tiempoRelativo(a['ts'] as String?)}',
-                                      style: const TextStyle(
-                                          fontSize: 12),
-                                    ),
-                                    // v1.0.15: tocar abre la ficha
-                                    trailing: tieneCliente
-                                        ? const Icon(
-                                            Icons.chevron_right,
-                                            size: 18,
-                                            color: Colors.grey)
-                                        : null,
-                                    onTap: tieneCliente
-                                        ? () => _abrirFicha(a)
-                                        : null,
                                   );
                                 }),
                               ],
