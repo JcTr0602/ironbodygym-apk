@@ -93,8 +93,12 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // v1.0.16: para el dueño es "Mis cobros" (no trabaja turnos);
+    // se oculta todo lo de pendiente/entregas que no le aplica.
+    final esDueno = _auth.isAdmin;
     return Scaffold(
-      appBar: AppBar(title: const Text('📊 Mi turno')),
+      appBar: AppBar(
+          title: Text(esDueno ? '💵 Mis cobros' : '📊 Mi turno')),
       body: Column(
         children: [
           const SyncBanner(),
@@ -130,75 +134,84 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
                       ),
                     ),
                   ),
-                  const SizedBox(height: 12),
-                  Card(
-                    color: _pendiente > 0
-                        ? Colors.orange.shade50
-                        : Colors.green.shade50,
-                    child: ListTile(
-                      leading: Text(
-                          _pendiente > 0 ? '💰' : '✅',
-                          style:
-                              const TextStyle(fontSize: 32)),
-                      title: const Text('Pendiente a entregar'),
-                      subtitle: Text(
-                          '${fmtMonto(_pendiente)} CUP',
-                          style: const TextStyle(
-                              fontSize: 22,
-                              fontWeight: FontWeight.bold)),
-                      trailing:
-                          const Icon(Icons.chevron_right),
-                      onTap: () => Navigator.of(context)
-                          .push(MaterialPageRoute(
-                              builder: (_) =>
-                                  const PendienteScreen()))
-                          .then((_) => _cargar()),
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: Colors.blue.shade50,
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: const Text(
-                      'ℹ️ El "Pendiente a entregar" SOLO se reinicia cuando '
-                      'Jc confirma que recibió el dinero. Registrar más '
-                      'cobros no lo reduce: lo aumenta.',
-                      style: TextStyle(fontSize: 13),
-                      textAlign: TextAlign.center,
-                    ),
-                  ),
-                  if (_pendPorDia.isNotEmpty) ...[
+                  if (!esDueno) ...[
                     const SizedBox(height: 12),
-                    const Text('Detalle del pendiente por día:',
-                        style: TextStyle(
-                            fontWeight: FontWeight.bold)),
-                    const SizedBox(height: 4),
-                    for (final e in _pendPorDia.entries)
-                      ListTile(
-                        dense: true,
-                        leading: const Text('📅'),
-                        title: Text(fmtFecha(e.key)),
-                        trailing: Text('${fmtMonto(e.value)} CUP',
+                    Card(
+                      color: _pendiente > 0
+                          ? Colors.orange.shade50
+                          : Colors.green.shade50,
+                      child: ListTile(
+                        leading: Text(
+                            _pendiente > 0 ? '💰' : '✅',
                             style: const TextStyle(
+                                fontSize: 32)),
+                        title:
+                            const Text('Pendiente a entregar'),
+                        subtitle: Text(
+                            '${fmtMonto(_pendiente)} CUP',
+                            style: const TextStyle(
+                                fontSize: 22,
                                 fontWeight: FontWeight.bold)),
+                        trailing:
+                            const Icon(Icons.chevron_right),
+                        onTap: () => Navigator.of(context)
+                            .push(MaterialPageRoute(
+                                builder: (_) =>
+                                    const PendienteScreen()))
+                            .then((_) => _cargar()),
                       ),
-                  ],
-                  const SizedBox(height: 12),
-                  Card(
-                    child: ListTile(
-                      leading: const Text('📦',
-                          style: TextStyle(fontSize: 28)),
-                      title: const Text('Última entrega confirmada'),
-                      subtitle: Text(_ultimaEntrega == null
-                          ? 'Aún no hay entregas confirmadas'
-                          : '${fmtFecha(_ultimaEntrega!['fecha'] as String?)}'
-                              ' — ${fmtMonto(_ultimaEntrega!['monto'])} CUP'),
                     ),
-                  ),
+                    const SizedBox(height: 8),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: Colors.blue.shade50,
+                        borderRadius:
+                            BorderRadius.circular(12),
+                      ),
+                      child: const Text(
+                        'ℹ️ El "Pendiente a entregar" SOLO se reinicia cuando '
+                        'Jc confirma que recibió el dinero. Registrar más '
+                        'cobros no lo reduce: lo aumenta.',
+                        style: TextStyle(fontSize: 13),
+                        textAlign: TextAlign.center,
+                      ),
+                    ),
+                    if (_pendPorDia.isNotEmpty) ...[
+                      const SizedBox(height: 12),
+                      const Text(
+                          'Detalle del pendiente por día:',
+                          style: TextStyle(
+                              fontWeight: FontWeight.bold)),
+                      const SizedBox(height: 4),
+                      for (final e in _pendPorDia.entries)
+                        ListTile(
+                          dense: true,
+                          leading: const Text('📅'),
+                          title: Text(fmtFecha(e.key)),
+                          trailing: Text(
+                              '${fmtMonto(e.value)} CUP',
+                              style: const TextStyle(
+                                  fontWeight:
+                                      FontWeight.bold)),
+                        ),
+                    ],
+                    const SizedBox(height: 12),
+                    Card(
+                      child: ListTile(
+                        leading: const Text('📦',
+                            style: TextStyle(fontSize: 28)),
+                        title: const Text(
+                            'Última entrega confirmada'),
+                        subtitle: Text(_ultimaEntrega ==
+                                null
+                            ? 'Aún no hay entregas confirmadas'
+                            : '${fmtFecha(_ultimaEntrega!['fecha'] as String?)}'
+                                ' — ${fmtMonto(_ultimaEntrega!['monto'])} CUP'),
+                      ),
+                    ),
+                  ],
                   const SizedBox(height: 12),
                   Card(
                     child: ListTile(

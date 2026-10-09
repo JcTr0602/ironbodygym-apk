@@ -445,7 +445,10 @@ class _HomeScreenState extends State<HomeScreen> {
                         () => _ir(const PagoDiarioScreen())),
                     _boton(Icons.account_balance, 'Transferencia',
                         () => _ir(const TransferenciaScreen())),
-                    _boton(Icons.badge, 'Mi turno',
+                    _boton(
+                        Icons.badge,
+                        // v1.0.16: el dueño no trabaja turnos
+                        _auth.isAdmin ? 'Mis cobros' : 'Mi turno',
                         () => _ir(const MiTurnoScreen())),
                     _boton(Icons.calendar_today, 'Mi día',
                         () => _ir(const MiDiaScreen())),
