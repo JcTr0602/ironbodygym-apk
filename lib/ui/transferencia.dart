@@ -87,7 +87,7 @@ class _TransferenciaScreenState extends State<TransferenciaScreen> {
                   'verificamos tu pago y activamos tu mensualidad.',
                 ),
                 const SizedBox(height: 12),
-                const Text('️ Telegram: ${AppConfig.telegramContacto}'),
+                const Text(' Telegram: ${AppConfig.telegramContacto}'),
                 const Text('WhatsApp: ${AppConfig.whatsappContacto}'),
               ],
             ),

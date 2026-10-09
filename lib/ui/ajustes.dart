@@ -314,7 +314,7 @@ class _AjustesScreenState extends State<AjustesScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('️ Ajustes')),
+      appBar: AppBar(title: const Text(' Ajustes')),
       body: Column(
         children: [
           const SyncBanner(),

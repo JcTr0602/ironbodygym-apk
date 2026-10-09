@@ -82,7 +82,7 @@ class _RiesgoScreenState extends State<RiesgoScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('️ Clientes en riesgo'),
+        title: const Text(' Clientes en riesgo'),
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh),
@@ -116,8 +116,8 @@ class _RiesgoScreenState extends State<RiesgoScreen> {
                         child: ListTile(
                           leading: const CircleAvatar(
                             backgroundColor: Colors.orange,
-                            child: Text('️',
-                                style: TextStyle(fontSize: 20)),
+                            child: Icon(Icons.warning,
+                                color: Colors.white, size: 22),
                           ),
                           title: Text('${r['nombre']}',
                               style: const TextStyle(

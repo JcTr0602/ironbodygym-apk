@@ -159,7 +159,7 @@ class _InscribirScreenState extends State<InscribirScreen> {
       final seguir = await showDialog<bool>(
         context: context,
         builder: (ctx) => AlertDialog(
-          title: const Text('️ Posible duplicado'),
+          title: const Text(' Posible duplicado'),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
