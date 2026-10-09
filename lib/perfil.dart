@@ -243,7 +243,8 @@ class PerfilService {
       'ultima_actividad',
       'perfil_movil',
       'perfil_carnet',
-      'recordatorio_sync',
+      'pref_recordatorio_sync',
+      'metricas_home',
     ]) {
       await p.remove(k);
     }

@@ -54,7 +54,11 @@ class _PinLockScreenState extends State<PinLockScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    // No se puede salir con el botón Atrás ni el gesto del sistema:
+    // solo el PIN correcto cierra esta pantalla.
+    return PopScope(
+      canPop: false,
+      child: Scaffold(
       body: SafeArea(
         child: Padding(
           padding: const EdgeInsets.all(32),
@@ -103,6 +107,7 @@ class _PinLockScreenState extends State<PinLockScreen> {
             ],
           ),
         ),
+      ),
       ),
     );
   }

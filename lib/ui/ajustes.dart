@@ -2,6 +2,7 @@
 /// datos y acerca de. Organizado por secciones con iconos.
 library;
 
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
@@ -11,6 +12,7 @@ import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:sqflite/sqflite.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../auth.dart';
@@ -132,6 +134,7 @@ class _AjustesScreenState extends State<AjustesScreen> {
     if (img == null || !mounted) return;
     final destino = await _perfil.avatarFile();
     await File(img.path).copy(destino.path);
+    if (!mounted) return;
     setState(() => _avatar = destino);
     _msg('Foto de perfil actualizada');
   }
@@ -401,7 +404,7 @@ class _AjustesScreenState extends State<AjustesScreen> {
   Future<void> _configurarPin() async {
     final c1 = TextEditingController();
     final c2 = TextEditingController();
-    final ok = await showDialog<bool>(
+    final accion = await showDialog<String>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: Text(_tienePin ? 'Cambiar PIN' : 'Crear PIN rápido'),
@@ -436,28 +439,40 @@ class _AjustesScreenState extends State<AjustesScreen> {
             TextButton(
               onPressed: () async {
                 await _perfil.setPinHash(null);
-                if (ctx.mounted) Navigator.pop(ctx, true);
+                if (ctx.mounted) Navigator.pop(ctx, 'quitar');
               },
               child: const Text('Quitar PIN',
                   style: TextStyle(color: Colors.red)),
             ),
           TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
+              onPressed: () => Navigator.pop(ctx, null),
               child: const Text('Cancelar')),
           ElevatedButton(
-              onPressed: () => Navigator.pop(ctx, true),
+              onPressed: () => Navigator.pop(ctx, 'guardar'),
               child: const Text('Guardar')),
         ],
       ),
     );
-    if (ok != true || !mounted) {
-      if (ok == true) _cargar();
+    if (!mounted) return;
+    if (accion == 'quitar') {
+      // PIN eliminado: actualizar estado y desactivar el bloqueo.
+      await _perfil.setBloqueoMinutos(0);
+      setState(() {
+        _tienePin = false;
+        _bloqueoMinutos = 0;
+      });
+      _msg('PIN eliminado');
       return;
     }
+    if (accion != 'guardar') return;
     final p1 = c1.text.trim();
     final p2 = c2.text.trim();
-    if (p1.length != 4 || p1 != p2 || int.tryParse(p1) == null) {
-      _msg('PIN inválido: 4 dígitos iguales');
+    if (p1.length != 4 || int.tryParse(p1) == null) {
+      _msg('El PIN debe tener 4 dígitos');
+      return;
+    }
+    if (p1 != p2) {
+      _msg('Los PIN no coinciden');
       return;
     }
     final hash = await _perfil.hashPinNuevo(p1);
@@ -515,6 +530,9 @@ class _AjustesScreenState extends State<AjustesScreen> {
       return;
     }
     try {
+      // Vaciar el WAL al archivo principal para una copia consistente.
+      final db = await LocalDb.instance.db;
+      await db.execute('PRAGMA wal_checkpoint(TRUNCATE)');
       final ruta = await LocalDb.instance.dbPath();
       final tmp = await getTemporaryDirectory();
       final fecha =
@@ -530,9 +548,12 @@ class _AjustesScreenState extends State<AjustesScreen> {
   }
 
   /// Importar respaldo de la BD (item 17: entrenadores también).
+  /// Importación segura por etapas: el archivo se valida ANTES de tocar
+  /// la base actual, y se guarda una copia de recuperación por si falla.
   Future<void> _importarRespaldo() async {
     final res = await FilePicker.platform.pickFiles(
-      type: FileType.any,
+      type: FileType.custom,
+      allowedExtensions: ['db'],
       dialogTitle: 'Elige el archivo de respaldo (.db)',
     );
     final ruta = res?.files.single.path;
@@ -557,10 +578,65 @@ class _AjustesScreenState extends State<AjustesScreen> {
       ),
     );
     if (ok != true || !mounted) return;
+    _msg('Validando respaldo…');
     try {
+      final tmp = await getTemporaryDirectory();
+      final tmpPath = '${tmp.path}/respaldo-a-validar.db';
+      final tmpFile = File(tmpPath);
+      if (await tmpFile.exists()) await tmpFile.delete();
+      await File(ruta).copy(tmpPath);
+      // 1. Validar integridad SQLite del archivo elegido.
+      final testDb = await openDatabase(tmpPath, readOnly: true);
+      try {
+        final integ = await testDb.rawQuery('PRAGMA integrity_check');
+        final integOk = integ.isNotEmpty &&
+            '${integ.first.values.first}'.toLowerCase() == 'ok';
+        if (!integOk) throw 'el archivo está dañado';
+        // 2. Verificar que trae las tablas de la app.
+        final tablas = await testDb.rawQuery(
+            "SELECT name FROM sqlite_master WHERE type='table'");
+        final nombres = tablas.map((t) => '${t['name']}').toSet();
+        const requeridas = {
+          'clientes',
+          'pagos',
+          'pagos_diarios',
+          'gastos',
+          'ops_queue',
+          'fotos_pendientes',
+          'meta'
+        };
+        final faltan = requeridas.difference(nombres);
+        if (faltan.isNotEmpty) {
+          throw 'no es un respaldo válido (faltan: ${faltan.join(', ')})';
+        }
+      } finally {
+        await testDb.close();
+      }
+      // 3. Copia de recuperación de la base actual.
       await LocalDb.instance.close();
       final destino = await LocalDb.instance.dbPath();
-      await File(ruta).copy(destino);
+      final rollback = File('${tmp.path}/ironbody-antes-de-importar.db');
+      if (await rollback.exists()) await rollback.delete();
+      final actual = File(destino);
+      if (await actual.exists()) await actual.copy(rollback.path);
+      // 4. Limpiar WAL/SHM remanentes y copiar el respaldo validado.
+      for (final suf in ['-wal', '-shm']) {
+        final f = File('$destino$suf');
+        if (await f.exists()) await f.delete();
+      }
+      await File(tmpPath).copy(destino);
+      await tmpFile.delete();
+      // 5. Reabrir: si la nueva base no abre, restaurar la anterior.
+      try {
+        await LocalDb.instance.db;
+      } catch (_) {
+        await LocalDb.instance.close();
+        if (await rollback.exists()) {
+          await rollback.copy(destino);
+          await LocalDb.instance.db;
+        }
+        throw 'el respaldo no se pudo abrir; se restauró la base anterior';
+      }
       if (!mounted) return;
       await showDialog(
         context: context,
@@ -577,7 +653,7 @@ class _AjustesScreenState extends State<AjustesScreen> {
         ),
       );
     } catch (e) {
-      _msg('No se pudo importar: $e');
+      if (mounted) _msg('No se pudo importar: $e');
     }
   }
 
@@ -672,19 +748,22 @@ class _AjustesScreenState extends State<AjustesScreen> {
     setState(() => _buscandoUpdate = true);
     try {
       final resp = await http
-          .get(Uri.parse(
-              'https://api.github.com/repos/JcTr0602/ironbodygym-apk/releases/latest'))
+          .get(
+            Uri.parse(
+                'https://api.github.com/repos/JcTr0602/ironbodygym-apk/releases/latest'),
+            // GitHub exige User-Agent; sin él responde 403.
+            headers: {'User-Agent': 'IronBodyGym-App'},
+          )
           .timeout(const Duration(seconds: 15));
       if (!mounted) return;
       if (resp.statusCode != 200) throw 'HTTP ${resp.statusCode}';
-      final tag = RegExp(r'"tag_name"\s*:\s*"([^"]+)"')
-          .firstMatch(resp.body)
-          ?.group(1);
-      final remota =
-          (tag ?? '').replaceAll(RegExp(r'^v'), '').trim();
+      final tag =
+          (jsonDecode(resp.body) as Map)['tag_name'] as String? ?? '';
+      final remota = tag.replaceAll(RegExp(r'^v'), '').trim();
       const actual = AppConfig.appVersion;
+      // Comparación semántica: solo avisar si la remota es SUPERIOR.
       final hayNueva =
-          remota.isNotEmpty && remota != actual;
+          remota.isNotEmpty && esVersionMayor(remota, actual);
       await showDialog(
         context: context,
         builder: (ctx) => AlertDialog(

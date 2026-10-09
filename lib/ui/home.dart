@@ -89,9 +89,6 @@ class _HomeScreenState extends State<HomeScreen>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    // Marca actividad al abrir (para el bloqueo automático).
-    PerfilService.instance.setUltimaActividad(
-        DateTime.now().millisecondsSinceEpoch);
     _cargar();
     // Auto-actualiza contadores cuando termina una sincronización.
     // (item 11: avisa si la sincronización falla).
@@ -111,6 +108,11 @@ class _HomeScreenState extends State<HomeScreen>
     // "Lo Nuevo" una vez tras actualizar (punto 46).
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) mostrarNovedadesSiHay(context);
+    });
+    // Bloqueo al abrir: revisa la inactividad ANTES de sellar actividad,
+    // para que el PIN también aplique en arranque en frío.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _revisarBloqueo(alAbrir: true);
     });
     // Sincronización silenciosa (v1.0.7): si hay pendientes al abrir la app,
     // intenta subirlos en segundo plano sin molestar al usuario.
@@ -157,17 +159,26 @@ class _HomeScreenState extends State<HomeScreen>
     }
   }
 
-  Future<void> _revisarBloqueo() async {
+  Future<void> _revisarBloqueo({bool alAbrir = false}) async {
     try {
       final minutos =
           await PerfilService.instance.getBloqueoMinutos();
-      if (minutos <= 0) return;
+      if (minutos <= 0) {
+        if (alAbrir) await _sellarActividad();
+        return;
+      }
       final pin =
           await PerfilService.instance.getPinHash();
-      if (pin == null) return;
+      if (pin == null) {
+        if (alAbrir) await _sellarActividad();
+        return;
+      }
       final ultima =
           await PerfilService.instance.getUltimaActividad();
-      if (ultima <= 0) return;
+      if (ultima <= 0) {
+        if (alAbrir) await _sellarActividad();
+        return;
+      }
       final transcurridos = DateTime.now()
           .difference(
               DateTime.fromMillisecondsSinceEpoch(ultima))
@@ -180,8 +191,15 @@ class _HomeScreenState extends State<HomeScreen>
           ),
         );
       }
+      // Al abrir, sellar actividad después de revisar (el PIN ya sella
+      // al validarse; esto cubre el caso donde no hizo falta bloquear).
+      if (alAbrir) await _sellarActividad();
     } catch (_) {}
   }
+
+  Future<void> _sellarActividad() =>
+      PerfilService.instance.setUltimaActividad(
+          DateTime.now().millisecondsSinceEpoch);
 
   Future<void> _cargar() async {
     final v = await vencenHoy();
@@ -205,14 +223,15 @@ class _HomeScreenState extends State<HomeScreen>
     final resSem = await resumenSemanal();
     final pHoy =
         await pendienteDetalleHoy(_auth.telegramId);
-    // Alerta de entrenadores sin sincronizar (item 13, solo dueño).
+    // Alerta de entrenadores sin actividad reciente (item 13, solo dueño).
     final sinSync = <Map<String, dynamic>>[];
     if (_auth.isOwner) {
       final acts = await ultimaActividadPorActor();
       final ahora = DateTime.now();
       for (final entry in acts.entries) {
         final actor = entry.key;
-        if (actor.toLowerCase().contains('jctr0602')) {
+        // No alertar sobre uno mismo (usuario de la sesión actual).
+        if (actor.toLowerCase() == _auth.username.toLowerCase()) {
           continue;
         }
         final horas =
@@ -1240,7 +1259,9 @@ class _HomeScreenState extends State<HomeScreen>
     return 'Entrega confirmada $cuando$quien'.trim();
   }
 
-  /// Alerta de entrenadores sin sincronizar (item 13, dueño).
+  /// Alerta de entrenadores sin actividad reciente (item 13, dueño).
+  /// NOTA: se mide la última actividad registrada en el feed, no una
+  /// marca real de sincronización; el texto lo refleja con honestidad.
   Widget _tarjetaAlertaSync() {
     return Tarjeta(
       color: AppColores.alerta.withValues(alpha: 0.12),
@@ -1254,7 +1275,7 @@ class _HomeScreenState extends State<HomeScreen>
                   size: 18,
                   color: AppColores.alertaOscuro),
               SizedBox(width: 6),
-              Text('Sin sincronizar',
+              Text('Sin actividad reciente',
                   style: AppTexto.subtitulo),
             ],
           ),
@@ -1264,7 +1285,7 @@ class _HomeScreenState extends State<HomeScreen>
               padding:
                   const EdgeInsets.only(bottom: 4),
               child: Text(
-                '${s['actor']} lleva ${s['horas']} h sin sincronizar',
+                '${s['actor']}: sin actividad registrada en ${s['horas']} h',
                 style: AppTexto.secundario,
               ),
             ),

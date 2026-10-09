@@ -6,6 +6,7 @@
 //   función de agregación pura, no el acceso a SQLite).
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ironbody_gym/auth.dart';
+import 'package:ironbody_gym/negocio.dart';
 
 void main() {
   group('usernameToEmail', () {
@@ -104,6 +105,25 @@ void main() {
         ],
       );
       expect(r['2026-10-09'], 0);
+    });
+  });
+
+  group('esVersionMayor', () {
+    test('versión superior detectada', () {
+      expect(esVersionMayor('1.1.2', '1.1.1'), true);
+      expect(esVersionMayor('1.2.0', '1.1.9'), true);
+      expect(esVersionMayor('2.0.0', '1.9.9'), true);
+    });
+
+    test('1.1.10 mayor que 1.1.2 (no compara como texto)', () {
+      expect(esVersionMayor('1.1.10', '1.1.2'), true);
+      expect(esVersionMayor('1.1.2', '1.1.10'), false);
+    });
+
+    test('igual o inferior no es nueva', () {
+      expect(esVersionMayor('1.1.1', '1.1.1'), false);
+      expect(esVersionMayor('1.0.9', '1.1.1'), false);
+      expect(esVersionMayor('', '1.1.1'), false);
     });
   });
 }

@@ -121,6 +121,23 @@ String etiquetaPeriodo(Map<String, dynamic> p) {
   }
 }
 
+/// true si [remota] es una versión semántica superior a [actual].
+/// Compara por componentes numéricos: 1.1.10 > 1.1.2.
+bool esVersionMayor(String remota, String actual) {
+  List<int> partes(String v) => v
+      .split('.')
+      .map((p) => int.tryParse(p.replaceAll(RegExp(r'[^0-9]'), '')) ?? 0)
+      .toList();
+  final r = partes(remota);
+  final a = partes(actual);
+  for (var i = 0; i < r.length || i < a.length; i++) {
+    final rv = i < r.length ? r[i] : 0;
+    final av = i < a.length ? a[i] : 0;
+    if (rv != av) return rv > av;
+  }
+  return false;
+}
+
 /// Tiempo relativo legible: "hace 2 horas", "ayer", etc. (v1.0.14)
 String tiempoRelativo(String? iso) {
   if (iso == null || iso.isEmpty) return 'Sin accesos registrados';
@@ -752,7 +769,7 @@ Future<Map<String, dynamic>?> ultimaEntregaConfirmada(
 String saludoHora() {
   final h = DateTime.now().hour;
   if (h >= 5 && h < 12) return 'Buenos días';
-  if (h >= 12 && h < 19) return 'Buenas tardes';
+  if (h >= 12 && h < 18) return 'Buenas tardes';
   return 'Buenas noches';
 }
 
@@ -856,18 +873,34 @@ Future<List<Map<String, dynamic>>> entregasRecientes(
 }
 
 /// Total entregado (confirmado) hoy por el dueño.
-/// Mejora 15 del Home (cuadre del día).
+/// Usa `entregado_ts` (fecha real de confirmación que guarda el servidor),
+/// no la fecha del pago. Incluye mensualidades y pagos diarios.
 Future<double> entregadoHoy() async {
   final hoy = _isoDia(DateTime.now());
   double total = 0;
   for (final p in await LocalDb.instance.allMirror('pagos')) {
-    if (esPendiente(p['entregado'])) continue;
-    if ('${p['fecha'] ?? ''}'.length >= 10 &&
-        '${p['fecha']}'.substring(0, 10) == hoy) {
+    if (_diaEntrega(p) == hoy) {
       total += (p['monto'] as num?)?.toDouble() ?? 0;
     }
   }
+  for (final d in await LocalDb.instance.allMirror('pagos_diarios')) {
+    if (_diaEntrega(d) == hoy) {
+      total += (d['total'] as num?)?.toDouble() ?? 0;
+    }
+  }
   return total;
+}
+
+/// Día (ISO yyyy-MM-dd, hora local) en que se confirmó la entrega,
+/// o '' si el pago sigue pendiente o no trae marca de entrega.
+String _diaEntrega(Map<String, dynamic> p) {
+  final ts = '${p['entregado_ts'] ?? ''}';
+  if (ts.isEmpty) return '';
+  try {
+    return _isoDia(DateTime.parse(ts).toLocal());
+  } catch (_) {
+    return '';
+  }
 }
 
 /// Resumen de la semana actual: cobrado total y clientes nuevos.
