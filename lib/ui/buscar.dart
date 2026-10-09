@@ -390,26 +390,31 @@ class _FilaClienteState extends State<_FilaCliente> {
             horizontal: AppEspacio.lg, vertical: AppEspacio.sm),
         child: Row(
           children: [
+            // v1.1 papelera: el leading (checkbox) convive con la foto,
+            // no la reemplaza.
+            if (widget.leading != null) ...[
+              widget.leading!,
+              const SizedBox(width: AppEspacio.sm),
+            ],
             // Foto
-            widget.leading ??
-                (_foto != null
-                    ? ClipRRect(
-                        borderRadius: BorderRadius.circular(28),
-                        child: Image.file(_foto!,
-                            width: 56,
-                            height: 56,
-                            fit: BoxFit.cover),
-                      )
-                    : CircleAvatar(
-                        radius: 28,
-                        backgroundColor: AppColores.naranja
-                            .withValues(alpha: 0.15),
-                        child: Text(iniciales,
-                            style: const TextStyle(
-                                color: AppColores.naranja,
-                                fontWeight: FontWeight.bold,
-                                fontSize: 20)),
-                      )),
+            _foto != null
+                ? ClipRRect(
+                    borderRadius: BorderRadius.circular(28),
+                    child: Image.file(_foto!,
+                        width: 56,
+                        height: 56,
+                        fit: BoxFit.cover),
+                  )
+                : CircleAvatar(
+                    radius: 28,
+                    backgroundColor: AppColores.naranja
+                        .withValues(alpha: 0.15),
+                    child: Text(iniciales,
+                        style: const TextStyle(
+                            color: AppColores.naranja,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 20)),
+                  ),
             const SizedBox(width: AppEspacio.md),
             // Nombre + badge + días
             Expanded(

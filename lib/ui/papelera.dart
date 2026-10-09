@@ -1,4 +1,4 @@
-/// 🗑️ Papelera de reciclaje: clientes inactivos (2–3 meses sin ir).
+/// Papelera de reciclaje: clientes inactivos (2–3 meses sin ir).
 /// Se pueden recuperar sin volver a inscribir desde cero.
 ///
 /// Nota (punto 45): la app NO tiene botón de borrado definitivo; los
@@ -43,7 +43,7 @@ class _PapeleraScreenState extends State<PapeleraScreen> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('♻️ Recuperar cliente'),
+        title: const Text('Recuperar cliente'),
         content: Text(
             '¿Reactivar a ${c['nombre']}? Volverá a aparecer en las listas.'),
         actions: [
@@ -67,7 +67,7 @@ class _PapeleraScreenState extends State<PapeleraScreen> {
     );
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('✅ ${c['nombre']} recuperado')));
+        SnackBar(content: Text('${c['nombre']} recuperado')));
     _cargar();
     SyncEngine.instance.push();
   }
@@ -77,7 +77,7 @@ class _PapeleraScreenState extends State<PapeleraScreen> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('🔄 Recuperar y renovar'),
+        title: const Text('Recuperar y renovar'),
         content: Text(
             '¿Reactivar a ${c['nombre']} y registrar su pago ahora?'),
         actions: [
@@ -114,7 +114,7 @@ class _PapeleraScreenState extends State<PapeleraScreen> {
     );
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('✅ ${c['nombre']} renovado')));
+        SnackBar(content: Text('${c['nombre']} renovado')));
     _cargar();
     SyncEngine.instance.push();
   }
@@ -134,7 +134,7 @@ class _PapeleraScreenState extends State<PapeleraScreen> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('⚠️ Eliminar definitivamente'),
+        title: const Text('Eliminar definitivamente'),
         content: Text(
           '¿Borrar PARA SIEMPRE a $nombres$mas?\n\n'
           'Esta acción no se puede deshacer. Solo el dueño puede hacerlo.',
@@ -155,7 +155,7 @@ class _PapeleraScreenState extends State<PapeleraScreen> {
     final ok2 = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('⚠️ ¿Seguro?'),
+        title: const Text('¿Seguro?'),
         content: const Text(
           'Última oportunidad. Los datos se borrarán permanentemente.',
         ),
@@ -180,7 +180,7 @@ class _PapeleraScreenState extends State<PapeleraScreen> {
     }
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('🗑️ ${_seleccionados.length} eliminados definitivamente')));
+        SnackBar(content: Text('${_seleccionados.length} eliminados definitivamente')));
     setState(() => _seleccionados.clear());
     _cargar();
     SyncEngine.instance.push();
@@ -191,7 +191,7 @@ class _PapeleraScreenState extends State<PapeleraScreen> {
     final esDueno = AuthService().isOwner;
     return Scaffold(
       appBar: AppBar(
-        title: const Text('🗑️ Papelera'),
+        title: const Text('Papelera'),
         actions: _seleccionados.isNotEmpty
             ? [
                 TextButton(
@@ -236,7 +236,7 @@ class _PapeleraScreenState extends State<PapeleraScreen> {
           Expanded(
             child: _res.isEmpty
                 ? const Center(
-                    child: Text('Papelera vacía 🎉'))
+                    child: Text('Papelera vacía'))
                 : RefreshIndicator(
                     onRefresh: _cargar,
                     child: ListView.builder(
@@ -290,12 +290,12 @@ class _PapeleraScreenState extends State<PapeleraScreen> {
                             mainAxisSize: MainAxisSize.min,
                             children: [
                               TextButton(
-                                child: const Text('♻️'),
+                                child: const Icon(Icons.restore_from_trash),
                                 onPressed: () =>
                                     _recuperar(c),
                               ),
                               TextButton(
-                                child: const Text('🔄 Renovar'),
+                                child: const Text('Renovar'),
                                 onPressed: () =>
                                     _recuperarYRenovar(c),
                               ),
