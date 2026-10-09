@@ -11,7 +11,7 @@ import 'auth.dart';
 import 'config.dart';
 import 'sync.dart';
 import 'theme.dart';
-import 'ui/home.dart';
+import 'ui/bloqueo.dart';
 import 'ui/login.dart';
 
 final navigatorKey = GlobalKey<NavigatorState>();
@@ -137,7 +137,17 @@ class _IronBodyAppState extends State<IronBodyApp> {
           ),
           useMaterial3: true,
         ),
-        home: _auth.loggedIn ? const HomeScreen() : const LoginScreen(),
+        home: FutureBuilder<Widget>(
+          future: pantallaInicial(_auth),
+          builder: (ctx, snap) {
+            if (!snap.hasData) {
+              return const Scaffold(
+                body: Center(child: CircularProgressIndicator()),
+              );
+            }
+            return snap.data!;
+          },
+        ),
       ),
     );
   }
