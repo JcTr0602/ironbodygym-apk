@@ -1,4 +1,4 @@
-/// Pantalla principal: diseño C (hero con franja).
+/// Pantalla principal: diseño v1.1 (sistema de diseño centralizado).
 library;
 
 import 'dart:async';
@@ -18,8 +18,10 @@ import 'actividad.dart';
 import 'ayuda.dart';
 import 'buscar.dart';
 import 'cola.dart';
+import 'componentes.dart';
 import 'cumpleanos.dart';
 import 'dashboard.dart';
+import 'diseno.dart';
 import 'inscribir.dart';
 import 'listas.dart';
 import 'login.dart';
@@ -28,7 +30,6 @@ import 'mi_turno.dart';
 import 'pago.dart';
 import 'pago_diario.dart';
 import 'papelera.dart';
-import 'pagos_realizados.dart';
 import 'pendiente.dart';
 import 'transferencia.dart';
 
@@ -42,15 +43,14 @@ class _HomeScreenState extends State<HomeScreen> {
   int _vencen = 0;
   int _atras = 0;
   int _inscripciones = 0;
-  int _pagosMes = 0;
   double _pendiente = 0;
   double _porRecoger = 0;
   int _porSubir = 0;
   int _noLeidas = 0;
+  double _cobradoHoy = 0; // v1.1: para la tarjeta de resumen
   DateTime? _lastSync;
   StreamSubscription? _sub;
   final _auth = AuthService();
-  static const naranja = Color(0xFFE8821A);
 
   /// Aviso "llevas +8h sin subir" (punto 10). Texto listo o null.
   String? _avisoSync;
@@ -102,10 +102,12 @@ class _HomeScreenState extends State<HomeScreen> {
     final p = await pendienteEntrega(_auth.telegramId);
     final todos = await LocalDb.instance.allMirror('clientes');
     final insc = todos.where((c) => c['estado'] == 'activo').length;
-    final pagados = await pagosRealizadosMes();
     final porSubir = await LocalDb.instance.countPendingOps();
     final det = await SyncEngine.instance.detalle();
     final noLeidas = await actividadNoLeidas();
+    // v1.1: cobrado hoy para la tarjeta de resumen
+    final cobrado = await cobradoHoyPorMetodo();
+    final cobradoHoy = (cobrado['efectivo'] ?? 0) + (cobrado['transferencia'] ?? 0);
     // v1.0.15: el dueño ve lo pendiente a recoger (no a entregar).
     // No se cuentan sus propios cobros: solo lo de los entrenadores.
     double porRecoger = 0;
@@ -129,11 +131,11 @@ class _HomeScreenState extends State<HomeScreen> {
         _vencen = v.length;
         _atras = a.length + a30.length;
         _inscripciones = insc;
-        _pagosMes = pagados;
         _pendiente = p;
         _porRecoger = porRecoger;
         _porSubir = porSubir;
         _noLeidas = noLeidas;
+        _cobradoHoy = cobradoHoy;
         _lastSync = det.ultimaPull ?? det.ultimaPush;
         _avisoSync = aviso;
       });
@@ -177,401 +179,602 @@ class _HomeScreenState extends State<HomeScreen> {
         '${l.hour.toString().padLeft(2, '0')}:${l.minute.toString().padLeft(2, '0')}';
   }
 
-  /// Rol del usuario actual (v1.0.11): Dueño vs Entrenador.
-  String _rolUsuario() {
-    if (_auth.isOwner) return '👑 Dueño';
-    if (_auth.isAdmin) return '⭐ Administrador';
-    return '🏋️ Entrenador';
-  }
-
   @override
   Widget build(BuildContext context) {
     final nombre = _auth.displayName;
+    final esDueno = _auth.isOwner;
     return Scaffold(
-      backgroundColor: const Color(0xFFF4F4F4),
       body: SafeArea(
-        child: Column(
-          children: [
-            // Hero oscuro
-            Container(
-              width: double.infinity,
-              decoration: const BoxDecoration(
-                color: Color(0xFF1B1B1B),
-                borderRadius: BorderRadius.vertical(
-                    bottom: Radius.circular(24)),
-              ),
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 56),
-              child: Row(
-                children: [
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(30),
-                    child: Image.asset('assets/logo.jpg',
-                        height: 60, width: 60, fit: BoxFit.cover),
+        child: RefreshIndicator(
+          onRefresh: _cargar,
+          child: SingleChildScrollView(
+            physics: const AlwaysScrollableScrollPhysics(),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Header oscuro
+                Container(
+                  width: double.infinity,
+                  decoration: const BoxDecoration(
+                    gradient: AppColores.gradienteCarbon,
+                    borderRadius: BorderRadius.vertical(
+                        bottom: Radius.circular(AppRadio.xl)),
                   ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text('Hola, $nombre 👋',
-                            style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 24,
-                                fontWeight: FontWeight.bold)),
-                        const SizedBox(height: 2),
-                        Text(
-                            '${_rolUsuario()} · ${_horaSync()}',
-                            style: const TextStyle(
-                                color: Colors.white70, fontSize: 12)),
-                      ],
-                    ),
-                  ),
-                  ValueListenableBuilder<ThemeMode>(
-                    valueListenable: ThemeController.mode,
-                    builder: (_, mode, __) => IconButton(
-                      tooltip: 'Modo oscuro / claro',
-                      color: Colors.white70,
-                      icon: Icon(mode == ThemeMode.dark
-                          ? Icons.light_mode
-                          : Icons.dark_mode),
-                      onPressed: () => ThemeController.toggle(),
-                    ),
-                  ),
-                  // v1.0.16: salir vive abajo junto a Papelera/Ayuda
-                ],
-              ),
-            ),
-            // Tarjeta de estado (solapa sobre el hero)
-            Transform.translate(
-              offset: const Offset(0, -40),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    if (_avisoSync != null)
-                      Padding(
-                        padding:
-                            const EdgeInsets.only(bottom: 8),
-                        child: InkWell(
-                          onTap: () =>
-                              _ir(const ColaScreen()),
-                          borderRadius:
-                              BorderRadius.circular(12),
-                          child: Container(
-                            width: double.infinity,
-                            padding:
-                                const EdgeInsets.symmetric(
-                                    vertical: 10,
-                                    horizontal: 12),
-                            decoration: BoxDecoration(
-                              color: Colors.orange.shade700,
-                              borderRadius:
-                                  BorderRadius.circular(12),
-                            ),
-                            child: Text(
-                              '$_avisoSync\nToca para sincronizar ahora',
-                              style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.bold),
-                              textAlign: TextAlign.center,
-                            ),
-                          ),
+                  padding: const EdgeInsets.fromLTRB(
+                      AppEspacio.lg,
+                      AppEspacio.sm,
+                      AppEspacio.lg,
+                      AppEspacio.xl),
+                  child: Row(
+                    children: [
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(24),
+                        child: Image.asset('assets/logo.jpg',
+                            height: 48,
+                            width: 48,
+                            fit: BoxFit.cover),
+                      ),
+                      const SizedBox(width: AppEspacio.md),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment:
+                              CrossAxisAlignment.start,
+                          children: [
+                            Text('Hola, $nombre',
+                                style: AppTexto.titulo.copyWith(
+                                    color: Colors.white)),
+                            const SizedBox(height: 2),
+                            Text(_rolTexto(),
+                                style: AppTexto.secundario
+                                    .copyWith(
+                                        color:
+                                            Colors.white60)),
+                          ],
                         ),
                       ),
-                    Card(
-                  elevation: 4,
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(16)),
-                  child: Padding(
-                    padding: const EdgeInsets.all(12),
+                      // Píldora de sync
+                      _pildoraSync(),
+                      ValueListenableBuilder<ThemeMode>(
+                        valueListenable:
+                            ThemeController.mode,
+                        builder: (_, mode, __) => IconButton(
+                          tooltip: 'Modo oscuro / claro',
+                          color: Colors.white70,
+                          icon: Icon(
+                              mode == ThemeMode.dark
+                                  ? Icons.light_mode
+                                  : Icons.dark_mode),
+                          onPressed: () =>
+                              ThemeController.toggle(),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                // Tarjeta de resumen 2x2
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(
+                      AppEspacio.lg,
+                      AppEspacio.lg,
+                      AppEspacio.lg,
+                      0),
+                  child: Tarjeta(
+                    padding: EdgeInsets.zero,
                     child: Column(
                       children: [
-                        InkWell(
-                          onTap: () => _ir(const PendienteScreen()),
-                          borderRadius: BorderRadius.circular(12),
-                          child: Container(
-                            width: double.infinity,
-                            padding: const EdgeInsets.symmetric(
-                                vertical: 10, horizontal: 12),
-                            decoration: BoxDecoration(
-                              color: _auth.isOwner
-                                  // v1.0.15: el dueño ve lo pendiente a recoger
-                                  ? (_porRecoger > 0
-                                      ? const Color(0xFFFFE3C2)
-                                      : const Color(0xFFDFF5DF))
-                                  : (_pendiente > 0
-                                      ? const Color(0xFFFFE3C2)
-                                      : const Color(0xFFDFF5DF)),
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            child: Text(
-                              _auth.isOwner
-                                  ? '📥 Pendiente a recoger: ${fmtMonto(_porRecoger)} CUP'
-                                  : '💰 Pendiente a entregar: ${fmtMonto(_pendiente)} CUP',
-                              style: const TextStyle(
-                                  fontSize: 17,
-                                  fontWeight: FontWeight.bold),
-                              textAlign: TextAlign.center,
-                            ),
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        InkWell(
-                          onTap: () => _ir(const ColaScreen()),
-                          borderRadius: BorderRadius.circular(12),
-                          child: Container(
-                            width: double.infinity,
-                            padding: const EdgeInsets.symmetric(
-                                vertical: 8, horizontal: 12),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFFF0F0F0),
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            child: Text(
-                              _porSubir > 0
-                                  ? '⏳ $_porSubir por subir'
-                                  : '✅ Todo sincronizado',
-                              style: const TextStyle(fontSize: 14),
-                              textAlign: TextAlign.center,
-                            ),
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        InkWell(
-                          onTap: () async {
-                            await Navigator.of(context).push(
-                              MaterialPageRoute(
-                                  builder: (_) =>
-                                      const ActividadScreen()),
-                            );
-                            // Al volver, recargar el contador
-                            _cargar();
-                          },
-                          borderRadius: BorderRadius.circular(12),
-                          child: Container(
-                            width: double.infinity,
-                            padding: const EdgeInsets.symmetric(
-                                vertical: 10, horizontal: 12),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFFE3F2FD),
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            child: Row(
-                              mainAxisAlignment:
-                                  MainAxisAlignment.center,
-                              children: [
-                                const Text(
-                                  '📋 Actividad reciente',
-                                  style: TextStyle(
-                                      fontSize: 15,
-                                      fontWeight: FontWeight.bold),
-                                ),
-                                if (_noLeidas > 0) ...[
-                                  const SizedBox(width: 8),
-                                  Container(
-                                    padding:
-                                        const EdgeInsets.symmetric(
-                                            horizontal: 8,
-                                            vertical: 2),
-                                    decoration: BoxDecoration(
-                                      color: Colors.red,
-                                      borderRadius:
-                                          BorderRadius.circular(
-                                              12),
-                                    ),
-                                    child: Text(
-                                      '$_noLeidas',
-                                      style: const TextStyle(
-                                        color: Colors.white,
-                                        fontSize: 12,
-                                        fontWeight:
-                                            FontWeight.bold,
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ],
-                            ),
-                          ),
-                        ),
-                        const SizedBox(height: 8),
                         Row(
-                          mainAxisAlignment:
-                              MainAxisAlignment.spaceEvenly,
                           children: [
-                            _miniContador(Icons.people, '$_inscripciones',
-                                'Inscripciones'),
-                            _miniContador(Icons.verified,
-                                '$_pagosMes', 'Pagos realizados',
-                                onTap: () => _ir(
-                                    const PagosRealizadosScreen())),
+                            Expanded(
+                                child: _celdaResumen(
+                                    '$_inscripciones',
+                                    'Clientes',
+                                    Icons.people,
+                                    null)),
+                            _divisorVertical(),
+                            Expanded(
+                                child: _celdaResumen(
+                                    fmtMonto(_cobradoHoy),
+                                    'Cobrado hoy',
+                                    Icons.payments,
+                                    null)),
+                          ],
+                        ),
+                        _divisorHorizontal(),
+                        Row(
+                          children: [
+                            Expanded(
+                                child: _celdaResumen(
+                                    '$_vencen',
+                                    'Vencen hoy',
+                                    Icons.event_available,
+                                    () => _ir(const ListasScreen(
+                                        inicial: 0)))),
+                            _divisorVertical(),
+                            Expanded(
+                                child: _celdaResumen(
+                                    '$_atras',
+                                    'Atrasados',
+                                    Icons.schedule,
+                                    () => _ir(const ListasScreen(
+                                        inicial: 2)))),
                           ],
                         ),
                       ],
                     ),
                   ),
                 ),
-                  ],
+                // Pendiente (elemento operativo: prominente)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(
+                      AppEspacio.lg,
+                      AppEspacio.md,
+                      AppEspacio.lg,
+                      0),
+                  child: _tarjetaPendiente(esDueno),
                 ),
-              ),
-            ),
-            Expanded(
-              child: Transform.translate(
-                offset: const Offset(0, -24),
-                child: GridView.count(
-                  crossAxisCount: 2,
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 16),
-                  mainAxisSpacing: 12,
-                  crossAxisSpacing: 12,
-                  childAspectRatio: 1.6,
-                  children: [
-                    _boton(Icons.person_add_alt, 'Inscribir',
-                        () => _ir(const InscribirScreen())),
-                    _boton(Icons.search, 'Buscar',
-                        () => _ir(const BuscarScreen())),
-                    _boton(Icons.payments, 'Agregar Pago',
-                        () => _ir(const PagoScreen())),
-                    _boton(Icons.event_available,
-                        'Vencen hoy ($_vencen)',
-                        () => _ir(const ListasScreen(inicial: 0))),
-                    _boton(Icons.schedule,
-                        'Atrasados ($_atras)',
-                        () => _ir(const ListasScreen(inicial: 2))),
-                    _boton(Icons.receipt_long,
-                        'Pago diario',
-                        () => _ir(const PagoDiarioScreen())),
-                    _boton(Icons.account_balance, 'Transferencia',
-                        () => _ir(const TransferenciaScreen())),
-                    _boton(
-                        Icons.badge,
-                        // v1.0.16: el dueño no trabaja turnos
-                        _auth.isAdmin ? 'Mis cobros' : 'Mi turno',
-                        () => _ir(const MiTurnoScreen())),
-                    _boton(Icons.calendar_today, 'Mi día',
-                        () => _ir(const MiDiaScreen())),
-                    _boton(Icons.dashboard, 'Dashboard',
-                        () => _ir(const DashboardScreen())),
-                    _boton(Icons.cake, 'Cumpleaños',
-                        () => _ir(const CumpleanosScreen())),
-                    _boton(Icons.settings, 'Ajustes',
-                        () => _ir(const AjustesScreen())),
-                    _boton(Icons.sync, 'Sincronización',
-                        () => _ir(const ColaScreen())),
-                    if (_auth.isAdmin)
-                      _boton(Icons.admin_panel_settings,
-                          'Administración',
-                          () => _ir(const AdminScreen())),
-                  ],
+                // Por subir + Actividad
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(
+                      AppEspacio.lg,
+                      AppEspacio.md,
+                      AppEspacio.lg,
+                      0),
+                  child: Row(
+                    children: [
+                      Expanded(
+                          child: _miniTarjeta(
+                        icono: _porSubir > 0
+                            ? Icons.cloud_upload
+                            : Icons.check_circle,
+                        titulo: _porSubir > 0
+                            ? '$_porSubir por subir'
+                            : 'Al día',
+                        color: _porSubir > 0
+                            ? AppColores.alerta
+                            : AppColores.exito,
+                        onTap: () =>
+                            _ir(const ColaScreen()),
+                      )),
+                      const SizedBox(
+                          width: AppEspacio.sm),
+                      Expanded(
+                          child: _miniTarjeta(
+                        icono: Icons.receipt_long,
+                        titulo: 'Actividad',
+                        badge: _noLeidas > 0
+                            ? '$_noLeidas'
+                            : null,
+                        color: AppColores.info,
+                        onTap: () async {
+                          await Navigator.of(context).push(
+                            MaterialPageRoute(
+                                builder: (_) =>
+                                    const ActividadScreen()),
+                          );
+                          _cargar();
+                        },
+                      )),
+                    ],
+                  ),
                 ),
-              ),
-            ),
-            // Fila secundaria
-            Transform.translate(
-              offset: const Offset(0, -12),
-              child: Padding(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 16),
-                child: Row(
-                  children: [
-                    Expanded(
-                        child: _chipSecundario(
-                            Icons.delete_outline,
-                            'Papelera',
-                            () => _ir(
-                                const PapeleraScreen()))),
-                    const SizedBox(width: 8),
-                    Expanded(
-                        child: _chipSecundario(
-                            Icons.help_outline,
-                            'Ayuda',
-                            () =>
-                                _ir(const AyudaScreen()))),
-                    const SizedBox(width: 8),
-                    Expanded(
-                        child: _chipSecundario(
-                            Icons.logout,
-                            'Salir',
-                            _salir,
-                            color: Colors.red.shade700)),
-                  ],
+                if (_avisoSync != null)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(
+                        AppEspacio.lg,
+                        AppEspacio.md,
+                        AppEspacio.lg,
+                        0),
+                    child: Tarjeta(
+                      color: AppColores.alerta
+                          .withValues(alpha: 0.12),
+                      onTap: () =>
+                          _ir(const ColaScreen()),
+                      child: Row(
+                        children: [
+                          const Icon(
+                              Icons.warning_amber,
+                              color: AppColores.alerta),
+                          const SizedBox(
+                              width: AppEspacio.sm),
+                          Expanded(
+                            child: Text(
+                              '$_avisoSync\nToca para sincronizar ahora',
+                              style: AppTexto.secundario,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                // Acciones principales
+                _tituloSeccion('Acciones'),
+                Padding(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: AppEspacio.lg),
+                  child: GridView.count(
+                    crossAxisCount: 2,
+                    shrinkWrap: true,
+                    physics:
+                        const NeverScrollableScrollPhysics(),
+                    mainAxisSpacing: AppEspacio.sm,
+                    crossAxisSpacing: AppEspacio.sm,
+                    childAspectRatio: 2.2,
+                    children: [
+                      _botonPrimario(
+                          Icons.person_add_alt,
+                          'Inscribir',
+                          () =>
+                              _ir(const InscribirScreen())),
+                      _botonPrimario(Icons.search,
+                          'Buscar',
+                          () =>
+                              _ir(const BuscarScreen())),
+                      _botonPrimario(Icons.payments,
+                          'Cobrar',
+                          () =>
+                              _ir(const PagoScreen())),
+                      _botonPrimario(
+                          Icons.event_available,
+                          'Vencimientos',
+                          () => _ir(const ListasScreen(
+                              inicial: 0))),
+                    ],
+                  ),
                 ),
-              ),
+                // Rápido
+                _tituloSeccion('Rápido'),
+                Padding(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: AppEspacio.lg),
+                  child: GridView.count(
+                    crossAxisCount: 2,
+                    shrinkWrap: true,
+                    physics:
+                        const NeverScrollableScrollPhysics(),
+                    mainAxisSpacing: AppEspacio.sm,
+                    crossAxisSpacing: AppEspacio.sm,
+                    childAspectRatio: 2.2,
+                    children: [
+                      _botonRapido(
+                          Icons.badge,
+                          _auth.isAdmin
+                              ? 'Mis cobros'
+                              : 'Mi turno',
+                          () =>
+                              _ir(const MiTurnoScreen())),
+                      _botonRapido(
+                          Icons.calendar_today,
+                          'Mi día',
+                          () =>
+                              _ir(const MiDiaScreen())),
+                      _botonRapido(
+                          Icons.receipt_long,
+                          'Pago diario',
+                          () => _ir(
+                              const PagoDiarioScreen())),
+                      _botonRapido(
+                          Icons.account_balance,
+                          'Transferencia',
+                          () => _ir(
+                              const TransferenciaScreen())),
+                      _botonRapido(
+                          Icons.cake,
+                          'Cumpleaños',
+                          () => _ir(
+                              const CumpleanosScreen())),
+                      _botonRapido(
+                          Icons.dashboard,
+                          'Dashboard',
+                          () => _ir(
+                              const DashboardScreen())),
+                    ],
+                  ),
+                ),
+                // Herramientas
+                _tituloSeccion('Herramientas'),
+                Padding(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: AppEspacio.lg),
+                  child: GridView.count(
+                    crossAxisCount: 3,
+                    shrinkWrap: true,
+                    physics:
+                        const NeverScrollableScrollPhysics(),
+                    mainAxisSpacing: AppEspacio.sm,
+                    crossAxisSpacing: AppEspacio.sm,
+                    childAspectRatio: 1.4,
+                    children: [
+                      _herramienta(Icons.sync,
+                          'Sincronizar',
+                          () =>
+                              _ir(const ColaScreen())),
+                      _herramienta(
+                          Icons.delete_outline,
+                          'Papelera',
+                          () =>
+                              _ir(const PapeleraScreen())),
+                      _herramienta(
+                          Icons.help_outline,
+                          'Ayuda',
+                          () =>
+                              _ir(const AyudaScreen())),
+                      _herramienta(
+                          Icons.settings,
+                          'Ajustes',
+                          () =>
+                              _ir(const AjustesScreen())),
+                      _herramienta(
+                          Icons.logout, 'Salir', _salir,
+                          color: AppColores.error),
+                    ],
+                  ),
+                ),
+                if (_auth.isAdmin)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(
+                        AppEspacio.lg,
+                        AppEspacio.sm,
+                        AppEspacio.lg,
+                        0),
+                    child: Tarjeta(
+                      onTap: () =>
+                          _ir(const AdminScreen()),
+                      child: const Row(
+                        children: [
+                          Icon(
+                              Icons
+                                  .admin_panel_settings,
+                              color: AppColores.naranja,
+                              size: 28),
+                          SizedBox(
+                              width: AppEspacio.sm),
+                          Text('Administración',
+                              style: AppTexto.subtitulo),
+                          Spacer(),
+                          Icon(Icons.chevron_right,
+                              color: Colors.grey),
+                        ],
+                      ),
+                    ),
+                  ),
+                const SizedBox(height: AppEspacio.lg),
+                const Center(
+                  child: Text('© Creado por JcTr0602',
+                      style: TextStyle(
+                          color: Colors.grey,
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold)),
+                ),
+                const SizedBox(height: AppEspacio.lg),
+              ],
             ),
-            const Padding(
-              padding: EdgeInsets.only(bottom: 8),
-              child: Text('© Creado por JcTr0602',
-                  style: TextStyle(
-                      color: Colors.grey,
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// Texto del rol sin emojis (v1.1: iconos Material).
+  String _rolTexto() {
+    if (_auth.isOwner) return 'Dueño · ${_horaSync()}';
+    if (_auth.isAdmin) {
+      return 'Administrador · ${_horaSync()}';
+    }
+    return 'Entrenador · ${_horaSync()}';
+  }
+
+  /// Píldora de estado de sincronización en el header.
+  Widget _pildoraSync() {
+    final ok = _lastSync != null;
+    return InkWell(
+      borderRadius:
+          BorderRadius.circular(AppRadio.circular),
+      onTap: () => _ir(const ColaScreen()),
+      child: Container(
+        padding: const EdgeInsets.symmetric(
+            horizontal: AppEspacio.sm,
+            vertical: AppEspacio.xs),
+        decoration: BoxDecoration(
+          color: (ok
+                  ? AppColores.exito
+                  : AppColores.alerta)
+              .withValues(alpha: 0.2),
+          borderRadius:
+              BorderRadius.circular(AppRadio.circular),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+                ok ? Icons.check_circle : Icons.schedule,
+                size: 14,
+                color:
+                    ok ? AppColores.exito : AppColores.alerta),
+            const SizedBox(width: 4),
+            Text(ok ? 'Sincronizado' : 'Pendiente',
+                style: AppTexto.etiqueta.copyWith(
+                    color: Colors.white)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _tituloSeccion(String texto) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(
+          AppEspacio.lg,
+          AppEspacio.lg,
+          AppEspacio.lg,
+          AppEspacio.sm),
+      child: Text(texto, style: AppTexto.titulo),
+    );
+  }
+
+  Widget _celdaResumen(String valor, String etiqueta,
+      IconData icono, VoidCallback? onTap) {
+    final contenido = Padding(
+      padding: const EdgeInsets.symmetric(
+          vertical: AppEspacio.lg),
+      child: Column(
+        children: [
+          Text(valor,
+              style: AppTexto.display
+                  .copyWith(color: AppColores.naranja)),
+          const SizedBox(height: 2),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(icono,
+                  size: 14, color: Colors.grey),
+              const SizedBox(width: 4),
+              Text(etiqueta,
+                  style: AppTexto.secundario.copyWith(
+                      color: Colors.grey)),
+            ],
+          ),
+        ],
+      ),
+    );
+    if (onTap == null) return contenido;
+    return InkWell(
+        onTap: onTap,
+        borderRadius:
+            BorderRadius.circular(AppRadio.md),
+        child: contenido);
+  }
+
+  Widget _divisorVertical() {
+    return Container(width: 1, color: Colors.grey.withValues(alpha: 0.2));
+  }
+
+  Widget _divisorHorizontal() {
+    return Container(
+        height: 1,
+        color: Colors.grey.withValues(alpha: 0.2));
+  }
+
+  /// Tarjeta de pendiente (elemento operativo: siempre prominente).
+  Widget _tarjetaPendiente(bool esDueno) {
+    final monto = esDueno ? _porRecoger : _pendiente;
+    final hay = monto > 0;
+    return Tarjeta(
+      color: (hay
+              ? AppColores.alerta
+              : AppColores.exito)
+          .withValues(alpha: 0.12),
+      onTap: () => _ir(const PendienteScreen()),
+      child: Row(
+        children: [
+          Container(
+            width: 44,
+            height: 44,
+            decoration: BoxDecoration(
+              color: (hay
+                      ? AppColores.alerta
+                      : AppColores.exito)
+                  .withValues(alpha: 0.2),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(
+                hay
+                    ? Icons.account_balance_wallet
+                    : Icons.check_circle,
+                color: hay
+                    ? AppColores.alertaOscuro
+                    : AppColores.exitoOscuro),
+          ),
+          const SizedBox(width: AppEspacio.md),
+          Expanded(
+            child: Column(
+              crossAxisAlignment:
+                  CrossAxisAlignment.start,
+              children: [
+                Text(
+                    esDueno
+                        ? 'Pendiente a recoger'
+                        : 'Pendiente a entregar',
+                    style: AppTexto.subtitulo),
+                Text('${fmtMonto(monto)} CUP',
+                    style: AppTexto.displayPequeno),
+              ],
+            ),
+          ),
+          const Icon(Icons.chevron_right,
+              color: Colors.grey),
+        ],
+      ),
+    );
+  }
+
+  Widget _miniTarjeta({
+    required IconData icono,
+    required String titulo,
+    required Color color,
+    String? badge,
+    VoidCallback? onTap,
+  }) {
+    return Tarjeta(
+      padding: const EdgeInsets.symmetric(
+          vertical: AppEspacio.md,
+          horizontal: AppEspacio.sm),
+      onTap: onTap,
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(icono, color: color, size: 20),
+          const SizedBox(width: AppEspacio.sm),
+          Text(titulo, style: AppTexto.subtitulo),
+          if (badge != null) ...[
+            const SizedBox(width: AppEspacio.xs),
+            Container(
+              padding: const EdgeInsets.symmetric(
+                  horizontal: 8, vertical: 2),
+              decoration: BoxDecoration(
+                color: AppColores.error,
+                borderRadius: BorderRadius.circular(
+                    AppRadio.circular),
+              ),
+              child: Text(badge,
+                  style: const TextStyle(
+                      color: Colors.white,
                       fontSize: 12,
                       fontWeight: FontWeight.bold)),
             ),
           ],
-        ),
+        ],
       ),
     );
   }
 
-  Widget _miniContador(
-      IconData icono, String valor, String etiqueta,
-      {VoidCallback? onTap}) {
-    final contenido = Column(
-      children: [
-        Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icono, size: 18, color: naranja),
-            const SizedBox(width: 4),
-            Text(valor,
-                style: const TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.bold)),
-          ],
-        ),
-        Text(etiqueta,
-            style:
-                const TextStyle(fontSize: 11, color: Colors.grey)),
-      ],
-    );
-    if (onTap == null) return contenido;
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(8),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(
-            horizontal: 8, vertical: 4),
-        child: contenido,
+  /// Botón de acción principal (naranja con gradiente).
+  Widget _botonPrimario(
+      IconData icono, String texto, VoidCallback onTap) {
+    return Container(
+      decoration: BoxDecoration(
+        gradient: AppColores.gradienteNaranja,
+        borderRadius:
+            BorderRadius.circular(AppRadio.lg),
+        boxShadow: AppSombra.botonPrimario,
       ),
-    );
-  }
-
-  Widget _chipSecundario(
-      IconData icono, String texto, VoidCallback onTap,
-      {Color? color}) {
-    final c = color ?? naranja;
-    return Card(
-      elevation: 1,
-      shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(12)),
       child: InkWell(
-        borderRadius: BorderRadius.circular(12),
+        borderRadius:
+            BorderRadius.circular(AppRadio.lg),
         onTap: onTap,
         child: Padding(
           padding: const EdgeInsets.symmetric(
-              vertical: 10, horizontal: 8),
+              vertical: AppEspacio.md),
           child: Row(
-            mainAxisAlignment:
-                MainAxisAlignment.center,
+            mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(icono, color: c, size: 20),
-              const SizedBox(width: 8),
+              Icon(icono,
+                  color: Colors.white, size: 22),
+              const SizedBox(width: AppEspacio.sm),
               Text(texto,
-                  style: TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w500,
-                      color: c)),
+                  style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 15,
+                      fontWeight: FontWeight.bold)),
             ],
           ),
         ),
@@ -579,24 +782,44 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Widget _boton(IconData icono, String texto, VoidCallback onTap) {
-    return Card(
-      elevation: 2,
-      shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16)),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(16),
-        onTap: onTap,
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(icono, color: naranja, size: 34),
-            const SizedBox(height: 6),
-            Text(texto,
-                style: const TextStyle(fontSize: 14),
-                textAlign: TextAlign.center),
-          ],
-        ),
+  /// Botón de acción rápida (gris, secundario).
+  Widget _botonRapido(
+      IconData icono, String texto, VoidCallback onTap) {
+    return Tarjeta(
+      onTap: onTap,
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(icono,
+              color: AppColores.naranja, size: 28),
+          const SizedBox(height: AppEspacio.xs),
+          Text(texto,
+              style: AppTexto.secundario,
+              textAlign: TextAlign.center),
+        ],
+      ),
+    );
+  }
+
+  /// Herramienta pequeña (icono + etiqueta).
+  Widget _herramienta(IconData icono, String texto,
+      VoidCallback onTap,
+      {Color? color}) {
+    final c = color ?? AppColores.textoSecundario(context);
+    return Tarjeta(
+      padding: const EdgeInsets.symmetric(
+          vertical: AppEspacio.md,
+          horizontal: AppEspacio.xs),
+      onTap: onTap,
+      child: Column(
+        children: [
+          Icon(icono, color: c, size: 22),
+          const SizedBox(height: 4),
+          Text(texto,
+              style: AppTexto.minuscula
+                  .copyWith(color: c),
+              textAlign: TextAlign.center),
+        ],
       ),
     );
   }
