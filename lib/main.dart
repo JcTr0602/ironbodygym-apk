@@ -120,9 +120,12 @@ class _IronBodyAppState extends State<IronBodyApp> {
         builder: (_, escala, __) => MaterialApp(
           builder: (ctx, child) {
             final mq = MediaQuery.of(ctx);
+            // La escala de la app se multiplica por la de accesibilidad
+            // del sistema, en vez de reemplazarla.
+            final sistema = mq.textScaler.scale(1.0);
             return MediaQuery(
               data: mq.copyWith(
-                textScaler: TextScaler.linear(escala),
+                textScaler: TextScaler.linear(escala * sistema),
               ),
               child: child!,
             );

@@ -6,8 +6,10 @@ library;
 
 import 'package:flutter/material.dart';
 
+import '../auth.dart';
 import '../perfil.dart';
 import 'diseno.dart';
+import 'login.dart';
 
 class PinLockScreen extends StatefulWidget {
   const PinLockScreen({super.key});
@@ -50,6 +52,37 @@ class _PinLockScreenState extends State<PinLockScreen> {
   void _borrar() {
     if (_pin.isEmpty || _verificando) return;
     setState(() => _pin = _pin.substring(0, _pin.length - 1));
+  }
+
+  /// Cierra la sesión si el usuario olvidó su PIN.
+  /// No es un bypass: para volver a entrar necesita la contraseña
+  /// de su cuenta, y el PIN se puede reconfigurar en Ajustes.
+  Future<void> _olvidePin() async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Olvidé mi PIN'),
+        content: const Text(
+            'Se cerrará tu sesión en este teléfono. Para volver a entrar '
+            'necesitarás tu contraseña de la cuenta. ¿Continuar?'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancelar')),
+          ElevatedButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Cerrar sesión')),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    await AuthService().signOut();
+    await PerfilService.instance.setPinHash(null);
+    if (!mounted) return;
+    Navigator.of(context).pushAndRemoveUntil(
+      MaterialPageRoute(builder: (_) => const LoginScreen()),
+      (_) => false,
+    );
   }
 
   @override
@@ -104,6 +137,13 @@ class _PinLockScreenState extends State<PinLockScreen> {
                 const CircularProgressIndicator()
               else
                 _teclado(),
+              const SizedBox(height: 16),
+              // Recuperación: si olvidó el PIN, cerrar sesión.
+              // Para volver a entrar necesita su contraseña de la cuenta.
+              TextButton(
+                onPressed: _olvidePin,
+                child: const Text('Olvidé mi PIN'),
+              ),
             ],
           ),
         ),

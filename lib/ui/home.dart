@@ -57,6 +57,9 @@ class _HomeScreenState extends State<HomeScreen>
   StreamSubscription? _sub;
   final _auth = AuthService();
 
+  /// Evita recargas simultáneas de _cargar().
+  bool _cargando = false;
+
   /// Aviso "llevas +Xh sin subir" (item 10). Texto listo o null.
   String? _avisoSync;
 
@@ -202,109 +205,134 @@ class _HomeScreenState extends State<HomeScreen>
           DateTime.now().millisecondsSinceEpoch);
 
   Future<void> _cargar() async {
-    final v = await vencenHoy();
-    final a = await atrasados(masDe30: false);
-    final a30 = await atrasados(masDe30: true);
-    final p = await pendienteEntrega(_auth.telegramId);
-    final todos = await LocalDb.instance.allMirror('clientes');
-    final insc = todos.where((c) => c['estado'] == 'activo').length;
-    final porSubir = await LocalDb.instance.countPendingOps();
-    final det = await SyncEngine.instance.detalle();
-    final noLeidas = await actividadNoLeidas();
-    final nombreVisible =
-        await PerfilService.instance.getNombreVisible();
-    final metricas =
-        await PerfilService.instance.getMetricasHome();
-    final ayer = await cobradoAyer();
-    final ult7 = await ingresosUltimos7Dias();
-    final entregas = await entregasRecientes();
-    final antig = await antiguedadPendiente();
-    final entHoy = await entregadoHoy();
-    final resSem = await resumenSemanal();
-    final pHoy =
-        await pendienteDetalleHoy(_auth.telegramId);
-    // Alerta de entrenadores sin actividad reciente (item 13, solo dueño).
-    final sinSync = <Map<String, dynamic>>[];
-    if (_auth.isOwner) {
-      final acts = await ultimaActividadPorActor();
-      final ahora = DateTime.now();
-      for (final entry in acts.entries) {
-        final actor = entry.key;
-        // No alertar sobre uno mismo (usuario de la sesión actual).
-        if (actor.toLowerCase() == _auth.username.toLowerCase()) {
-          continue;
+    if (_cargando) return;
+    _cargando = true;
+    try {
+      // Lecturas independientes en paralelo (no secuenciales).
+      final res = await Future.wait([
+        vencenHoy(), // 0
+        atrasados(masDe30: false), // 1
+        atrasados(masDe30: true), // 2
+        pendienteEntrega(_auth.telegramId), // 3
+        LocalDb.instance.allMirror('clientes'), // 4
+        LocalDb.instance.allMirror('pagos'), // 5
+        LocalDb.instance.countPendingOps(), // 6
+        SyncEngine.instance.detalle(), // 7
+        actividadNoLeidas(), // 8
+        PerfilService.instance.getNombreVisible(), // 9
+        PerfilService.instance.getMetricasHome(), // 10
+        cobradoAyer(), // 11
+        ingresosUltimos7Dias(), // 12
+        entregasRecientes(), // 13
+        antiguedadPendiente(), // 14
+        entregadoHoy(), // 15
+        resumenSemanal(), // 16
+        pendienteDetalleHoy(_auth.telegramId), // 17
+        cobradoHoyPorMetodo(), // 18
+        PerfilService.instance.getRecordatorioSync(), // 19
+        PerfilService.instance.getHorasAviso(), // 20
+        // Solo dueño:
+        _auth.isOwner
+            ? ultimaActividadPorActor()
+            : Future.value(<String, DateTime>{}), // 21
+        _auth.isOwner
+            ? pendienteRecoger(excluirTelegramId: _auth.telegramId)
+            : Future.value(0.0), // 22
+      ]);
+      final v = res[0] as List;
+      final a = res[1] as List;
+      final a30 = res[2] as List;
+      final p = res[3] as double;
+      final todos = res[4] as List<Map<String, dynamic>>;
+      final pagos = res[5] as List<Map<String, dynamic>>;
+      final porSubir = res[6] as int;
+      final det = res[7] as dynamic;
+      final noLeidas = res[8] as int;
+      final nombreVisible = res[9] as String?;
+      final metricas = res[10] as List<String>;
+      final ayer = res[11] as double;
+      final ult7 = res[12] as List<double>;
+      final entregas = res[13] as List<Map<String, dynamic>>;
+      final antig = res[14] as int?;
+      final entHoy = res[15] as double;
+      final resSem = res[16] as Map<String, dynamic>;
+      final pHoy = res[17] as Map<String, dynamic>;
+      final cobrado = res[18] as Map<String, dynamic>;
+      final quiereAviso = res[19] as bool;
+      final horasUmbral = res[20] as int;
+      final acts = res[21] as Map<String, DateTime>;
+      final porRecoger = res[22] as double;
+      final insc = todos.where((c) => c['estado'] == 'activo').length;
+      // Alerta de entrenadores sin actividad reciente (item 13, solo dueño).
+      final sinSync = <Map<String, dynamic>>[];
+      if (_auth.isOwner) {
+        final ahora = DateTime.now();
+        for (final entry in acts.entries) {
+          final actor = entry.key;
+          // No alertar sobre uno mismo (usuario de la sesión actual).
+          if (actor.toLowerCase() == _auth.username.toLowerCase()) {
+            continue;
+          }
+          final horas = ahora.difference(entry.value).inHours;
+          if (horas >= 12) {
+            sinSync.add({'actor': actor, 'horas': horas});
+          }
         }
-        final horas =
-            ahora.difference(entry.value).inHours;
-        if (horas >= 12) {
-          sinSync.add({'actor': actor, 'horas': horas});
+        sinSync.sort((a, b) =>
+            (b['horas'] as int).compareTo(a['horas'] as int));
+      }
+      // v1.1: cobrado hoy para la tarjeta de resumen
+      final cobradoHoy =
+          (cobrado['efectivo'] ?? 0) + (cobrado['transferencia'] ?? 0);
+      // v1.1.1: clientes que pagaron el mes en curso (misma lógica que
+      // PagosRealizadosScreen) y activos al día
+      final n = DateTime.now();
+      final pref =
+          '${n.year.toString().padLeft(4, '0')}-${n.month.toString().padLeft(2, '0')}';
+      final pagaronIds = <int>{};
+      for (final pg in pagos) {
+        final f = pg['fecha'] as String?;
+        final cid = pg['cliente_id'] as int?;
+        if (f != null && f.startsWith(pref) && cid != null) {
+          pagaronIds.add(cid);
         }
       }
-      sinSync.sort((a, b) =>
-          (b['horas'] as int).compareTo(a['horas'] as int));
-    }
-    // v1.1: cobrado hoy para la tarjeta de resumen
-    final cobrado = await cobradoHoyPorMetodo();
-    final cobradoHoy = (cobrado['efectivo'] ?? 0) + (cobrado['transferencia'] ?? 0);
-    // v1.1.1: clientes que pagaron el mes en curso (misma lógica que
-    // PagosRealizadosScreen) y activos al día
-    final n = DateTime.now();
-    final pref =
-        '${n.year.toString().padLeft(4, '0')}-${n.month.toString().padLeft(2, '0')}';
-    final pagos = await LocalDb.instance.allMirror('pagos');
-    final pagaronIds = <int>{};
-    for (final p in pagos) {
-      final f = p['fecha'] as String?;
-      final cid = p['cliente_id'] as int?;
-      if (f != null && f.startsWith(pref) && cid != null) {
-        pagaronIds.add(cid);
+      // Aviso "llevas +Xh sin subir" (item 10: horas configurables)
+      String? aviso;
+      if (quiereAviso && porSubir > 0 && det.ultimaPush != null) {
+        final horas = DateTime.now().difference(det.ultimaPush!).inHours;
+        if (horas >= horasUmbral) {
+          aviso = '⏳ Llevas $horas h sin subir cambios';
+        }
       }
-    }
-    // v1.0.15: el dueño ve lo pendiente a recoger (no a entregar).
-    // No se cuentan sus propios cobros: solo lo de los entrenadores.
-    double porRecoger = 0;
-    if (_auth.isOwner) {
-      porRecoger =
-          await pendienteRecoger(excluirTelegramId: _auth.telegramId);
-    }
-    // Aviso "llevas +Xh sin subir" (item 10: horas configurables)
-    String? aviso;
-    final quiereAviso =
-        await PerfilService.instance.getRecordatorioSync();
-    final horasUmbral =
-        await PerfilService.instance.getHorasAviso();
-    if (quiereAviso && porSubir > 0 && det.ultimaPush != null) {
-      final horas =
-          DateTime.now().difference(det.ultimaPush!).inHours;
-      if (horas >= horasUmbral) {
-        aviso = '⏳ Llevas $horas h sin subir cambios';
+      if (mounted) {
+        setState(() {
+          _vencen = v.length;
+          _atras = a.length + a30.length;
+          _inscripciones = insc;
+          _pendiente = p;
+          _porRecoger = porRecoger;
+          _porSubir = porSubir;
+          _noLeidas = noLeidas;
+          _cobradoHoy = (cobradoHoy as num).toDouble();
+          _pagaronMes = pagaronIds.length;
+          _alDia = insc - (a.length + a30.length);
+          _lastSync = det.ultimaPull ?? det.ultimaPush;
+          _avisoSync = aviso;
+          _nombreVisible = nombreVisible;
+          _metricas = metricas;
+          _cobradoAyer = ayer;
+          _ultimos7 = ult7;
+          _entregas = entregas;
+          _antiguedad = antig;
+          _entregadoHoyMonto = entHoy;
+          _resumenSem = resSem;
+          _pendHoy = pHoy;
+          _entrenadoresSinSync = sinSync;
+        });
       }
-    }
-    if (mounted) {
-      setState(() {
-        _vencen = v.length;
-        _atras = a.length + a30.length;
-        _inscripciones = insc;
-        _pendiente = p;
-        _porRecoger = porRecoger;
-        _porSubir = porSubir;
-        _noLeidas = noLeidas;
-        _cobradoHoy = cobradoHoy;
-        _pagaronMes = pagaronIds.length;
-        _alDia = insc - (a.length + a30.length);
-        _lastSync = det.ultimaPull ?? det.ultimaPush;
-        _avisoSync = aviso;
-        _nombreVisible = nombreVisible;
-        _metricas = metricas;
-        _cobradoAyer = ayer;
-        _ultimos7 = ult7;
-        _entregas = entregas;
-        _antiguedad = antig;
-        _entregadoHoyMonto = entHoy;
-        _resumenSem = resSem;
-        _pendHoy = pHoy;
-        _entrenadoresSinSync = sinSync;
-      });
+    } finally {
+      _cargando = false;
     }
   }
 
