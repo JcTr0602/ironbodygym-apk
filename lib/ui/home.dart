@@ -49,6 +49,8 @@ class _HomeScreenState extends State<HomeScreen> {
   int _porSubir = 0;
   int _noLeidas = 0;
   double _cobradoHoy = 0; // v1.1: para la tarjeta de resumen
+  int _pagaronMes = 0; // v1.1.1: clientes que pagaron el mes en curso
+  int _alDia = 0; // v1.1.1: activos con mensualidad vigente
   DateTime? _lastSync;
   StreamSubscription? _sub;
   final _auth = AuthService();
@@ -109,6 +111,20 @@ class _HomeScreenState extends State<HomeScreen> {
     // v1.1: cobrado hoy para la tarjeta de resumen
     final cobrado = await cobradoHoyPorMetodo();
     final cobradoHoy = (cobrado['efectivo'] ?? 0) + (cobrado['transferencia'] ?? 0);
+    // v1.1.1: clientes que pagaron el mes en curso (misma lógica que
+    // PagosRealizadosScreen) y activos al día
+    final n = DateTime.now();
+    final pref =
+        '${n.year.toString().padLeft(4, '0')}-${n.month.toString().padLeft(2, '0')}';
+    final pagos = await LocalDb.instance.allMirror('pagos');
+    final pagaronIds = <int>{};
+    for (final p in pagos) {
+      final f = p['fecha'] as String?;
+      final cid = p['cliente_id'] as int?;
+      if (f != null && f.startsWith(pref) && cid != null) {
+        pagaronIds.add(cid);
+      }
+    }
     // v1.0.15: el dueño ve lo pendiente a recoger (no a entregar).
     // No se cuentan sus propios cobros: solo lo de los entrenadores.
     double porRecoger = 0;
@@ -137,6 +153,8 @@ class _HomeScreenState extends State<HomeScreen> {
         _porSubir = porSubir;
         _noLeidas = noLeidas;
         _cobradoHoy = cobradoHoy;
+        _pagaronMes = pagaronIds.length;
+        _alDia = insc - (a.length + a30.length);
         _lastSync = det.ultimaPull ?? det.ultimaPush;
         _avisoSync = aviso;
       });
@@ -252,7 +270,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     ],
                   ),
                 ),
-                // Tarjeta de resumen 2x2
+                // Tarjeta de resumen 3x2 (v1.1.1: +pagaron el mes, +al día)
                 Padding(
                   padding: const EdgeInsets.fromLTRB(
                       AppEspacio.lg,
@@ -271,6 +289,13 @@ class _HomeScreenState extends State<HomeScreen> {
                                     'Clientes',
                                     Icons.people,
                                     null)),
+                            _divisorVertical(),
+                            Expanded(
+                                child: _celdaResumen(
+                                    '$_pagaronMes',
+                                    'Pagaron este mes',
+                                    Icons.verified,
+                                    () => _ir(const PagosRealizadosScreen()))),
                             _divisorVertical(),
                             Expanded(
                                 child: _celdaResumen(
@@ -298,6 +323,13 @@ class _HomeScreenState extends State<HomeScreen> {
                                     Icons.schedule,
                                     () => _ir(const ListasScreen(
                                         inicial: 2)))),
+                            _divisorVertical(),
+                            Expanded(
+                                child: _celdaResumen(
+                                    '$_alDia',
+                                    'Al día',
+                                    Icons.check_circle,
+                                    null)),
                           ],
                         ),
                       ],
