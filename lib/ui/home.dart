@@ -461,6 +461,8 @@ class _HomeScreenState extends State<HomeScreen> {
                         () => _ir(const CumpleanosScreen())),
                     _boton(Icons.settings, 'Ajustes',
                         () => _ir(const AjustesScreen())),
+                    _boton(Icons.sync, 'Sincronización',
+                        () => _ir(const ColaScreen())),
                     if (_auth.isAdmin)
                       _boton(Icons.admin_panel_settings,
                           'Administración',
@@ -479,12 +481,6 @@ class _HomeScreenState extends State<HomeScreen> {
                   mainAxisAlignment:
                       MainAxisAlignment.spaceEvenly,
                   children: [
-                    TextButton.icon(
-                        onPressed: () =>
-                            _ir(const ColaScreen()),
-                        icon: const Icon(Icons.sync, size: 18),
-                        label:
-                            const Text('Sincronización')),
                     TextButton.icon(
                         onPressed: () =>
                             _ir(const PapeleraScreen()),
@@ -506,8 +502,10 @@ class _HomeScreenState extends State<HomeScreen> {
             const Padding(
               padding: EdgeInsets.only(bottom: 8),
               child: Text('© Creado por JcTr0602',
-                  style:
-                      TextStyle(color: Colors.grey, fontSize: 11)),
+                  style: TextStyle(
+                      color: Colors.grey,
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold)),
             ),
           ],
         ),
