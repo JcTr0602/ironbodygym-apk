@@ -1,18 +1,15 @@
-/// Búsqueda de clientes: lista completa por defecto, filtrado por
-/// nombre, carnet o teléfono. Muestra estado de mensualidad y mini foto.
+/// Búsqueda de clientes (consulta/gestión): lista completa por defecto,
+/// filtrado por nombre, carnet, teléfono y —opcional— notas.
+/// El tap abre la ficha del cliente. El cobro vive en "Agregar pago".
 library;
 
 import 'dart:io';
 
 import 'package:flutter/material.dart';
-import 'package:uuid/uuid.dart';
 
 import '../fotos.dart';
-import '../localdb.dart';
 import '../negocio.dart';
 import '../sync.dart';
-import 'confirmacion_cobro.dart';
-import 'dialogo_pago.dart';
 import 'ficha.dart';
 import 'widgets.dart';
 
@@ -27,6 +24,8 @@ class _BuscarScreenState extends State<BuscarScreen> {
   List<Map<String, dynamic>> _res = [];
   bool _busco = false;
   String _filtro = 'todos'; // todos | aldia | vencidos | porvencer | sinfoto
+  bool _enNotas = false; // v1.0.15: búsqueda avanzada en notas
+  String _rangoEdad = 'todas'; // v1.0.15: todas | 18-25 | 26-35 | 36-50 | 50+
 
   @override
   void initState() {
@@ -36,8 +35,21 @@ class _BuscarScreenState extends State<BuscarScreen> {
 
   Future<void> _buscar() async {
     var r = await listaClientes(_q.text);
-    // v1.0.15: filtros rápidos para el archivo del gym
-    if (_filtro != 'todos') {
+    final q = _q.text.trim();
+    // v1.0.15: búsqueda avanzada — también en notas.
+    if (_enNotas && q.isNotEmpty) {
+      final nq = q.toLowerCase();
+      final todos = await listaClientes('');
+      final vistos = <dynamic>{for (final c in r) c['id']};
+      final extra = todos.where((c) =>
+          !vistos.contains(c['id']) &&
+          '${c['notas'] ?? ''}'.toLowerCase().contains(nq));
+      r = [...r, ...extra];
+      r.sort(
+          (a, b) => '${a['nombre']}'.compareTo('${b['nombre']}'));
+    }
+    // Filtros de estado de mensualidad.
+    if (_filtro != 'todos' && _filtro != 'sinfoto') {
       r = r.where((c) {
         final dias = _diasRestantes(c);
         switch (_filtro) {
@@ -47,13 +59,39 @@ class _BuscarScreenState extends State<BuscarScreen> {
             return dias < 0;
           case 'porvencer':
             return dias >= 0 && dias <= 7;
-          case 'sinfoto':
-            // Sin foto en caché (aproximación)
-            return true; // Se filtra visualmente
           default:
             return true;
         }
       }).toList();
+    }
+    // v1.0.15: filtro por rango de edad (edad desde el carnet).
+    if (_rangoEdad != 'todas') {
+      r = r.where((c) {
+        final edad = edadDeCarnet('${c['carnet'] ?? ''}');
+        if (edad == null) return false;
+        switch (_rangoEdad) {
+          case '18-25':
+            return edad >= 18 && edad <= 25;
+          case '26-35':
+            return edad >= 26 && edad <= 35;
+          case '36-50':
+            return edad >= 36 && edad <= 50;
+          case '50+':
+            return edad > 50;
+          default:
+            return true;
+        }
+      }).toList();
+    }
+    // v1.0.15: solo clientes sin foto (sin referencia o sin caché local).
+    if (_filtro == 'sinfoto') {
+      final sinFoto = <Map<String, dynamic>>[];
+      for (final c in r) {
+        final enCache = await FotoCache.instance
+            .enCache(c['foto_storage'] as String?);
+        if (enCache == null) sinFoto.add(c);
+      }
+      r = sinFoto;
     }
     if (mounted) {
       setState(() {
@@ -86,34 +124,6 @@ class _BuscarScreenState extends State<BuscarScreen> {
     }
   }
 
-  /// Cobro en 2 toques: diálogo de pago directo desde la lista,
-  /// con confirmación a pantalla completa.
-  Future<void> _pagoRapido(Map<String, dynamic> c) async {
-    final payload = await pagoDialogo(context, c);
-    if (payload == null || !mounted) return;
-    await LocalDb.instance.queueOp(
-      opUuid: const Uuid().v4(),
-      tipo: 'pago_mensual',
-      payload: payload,
-    );
-    if (!mounted) return;
-    final monto = '${payload['monto'] ?? ''} CUP';
-    final venc = '${payload['pagado_hasta'] ?? ''}';
-    await Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => ConfirmacionCobroScreen(
-          nombreCliente: '${c['nombre'] ?? ''}',
-          monto: monto,
-          nuevoVencimiento:
-              venc.length >= 10 ? venc.substring(0, 10) : venc,
-        ),
-      ),
-    );
-    if (!mounted) return;
-    _buscar();
-    SyncEngine.instance.push();
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -132,23 +142,14 @@ class _BuscarScreenState extends State<BuscarScreen> {
           const SyncBanner(),
           Padding(
             padding: const EdgeInsets.all(12),
-            child: Row(
-              children: [
-                Expanded(
-                  child: TextField(
-                    controller: _q,
-                    decoration: const InputDecoration(
-                        labelText: 'Nombre, carnet o teléfono',
-                        border: OutlineInputBorder(),
-                        prefixIcon: Icon(Icons.search)),
-                    onChanged: (_) => _buscar(),
-                    onSubmitted: (_) => _buscar(),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                ElevatedButton(
-                    onPressed: _buscar, child: const Text('Buscar')),
-              ],
+            child: TextField(
+              controller: _q,
+              decoration: const InputDecoration(
+                  labelText: 'Nombre, carnet o teléfono',
+                  border: OutlineInputBorder(),
+                  prefixIcon: Icon(Icons.search)),
+              onChanged: (_) => _buscar(),
+              onSubmitted: (_) => _buscar(),
             ),
           ),
           Padding(
@@ -175,8 +176,52 @@ class _BuscarScreenState extends State<BuscarScreen> {
                 _chipFiltro('porvencer', '🟡 Por vencer'),
                 const SizedBox(width: 6),
                 _chipFiltro('vencidos', '🔴 Vencidos'),
+                const SizedBox(width: 6),
+                _chipFiltro('sinfoto', '📷 Sin foto'),
               ],
             ),
+          ),
+          // v1.0.15: búsqueda avanzada (notas + rango de edad)
+          ExpansionTile(
+            dense: true,
+            visualDensity: VisualDensity.compact,
+            title: const Text('Búsqueda avanzada',
+                style: TextStyle(fontSize: 13)),
+            children: [
+              SwitchListTile(
+                dense: true,
+                visualDensity: VisualDensity.compact,
+                title: const Text('Buscar también en notas',
+                    style: TextStyle(fontSize: 13)),
+                value: _enNotas,
+                onChanged: (v) {
+                  setState(() => _enNotas = v);
+                  _buscar();
+                },
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('Rango de edad',
+                        style: TextStyle(
+                            fontSize: 12, color: Colors.grey)),
+                    const SizedBox(height: 4),
+                    Wrap(
+                      spacing: 6,
+                      children: [
+                        _chipEdad('todas', 'Todas'),
+                        _chipEdad('18-25', '18–25'),
+                        _chipEdad('26-35', '26–35'),
+                        _chipEdad('36-50', '36–50'),
+                        _chipEdad('50+', '50+'),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ],
           ),
           Expanded(
             child: _res.isEmpty
@@ -190,29 +235,18 @@ class _BuscarScreenState extends State<BuscarScreen> {
                       itemCount: _res.length,
                       itemBuilder: (ctx, i) {
                         final c = _res[i];
+                        // v1.0.15: Buscar es consulta/gestión — el tap abre
+                        // la ficha. Sin cobro rápido (eso vive en
+                        // "Agregar pago").
                         return _FilaCliente(
-                            cliente: c,
-                            onTap: () => Navigator.of(context)
-                                .push(MaterialPageRoute(
-                                    builder: (_) => FichaScreen(
-                                        clienteId:
-                                            (c['id'] as int?) ??
-                                                0)))
-                                .then((_) => _buscar()),
-                            trailing: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                IconButton(
-                                  tooltip: 'Cobro rápido',
-                                  icon: const Text('💰',
-                                      style: TextStyle(
-                                          fontSize: 22)),
-                                  onPressed: () =>
-                                      _pagoRapido(c),
-                                ),
-                                const Icon(Icons.chevron_right),
-                              ],
-                            ));
+                          cliente: c,
+                          onTap: () => Navigator.of(context)
+                              .push(MaterialPageRoute(
+                                  builder: (_) => FichaScreen(
+                                      clienteId:
+                                          (c['id'] as int?) ?? 0)))
+                              .then((_) => _buscar()),
+                        );
                       },
                     ),
                   ),
@@ -230,6 +264,20 @@ class _BuscarScreenState extends State<BuscarScreen> {
       visualDensity: VisualDensity.compact,
       onSelected: (_) {
         setState(() => _filtro = valor);
+        _buscar();
+      },
+    );
+  }
+
+  /// v1.0.15: chip de rango de edad (búsqueda avanzada).
+  Widget _chipEdad(String valor, String etiqueta) {
+    final activo = _rangoEdad == valor;
+    return ChoiceChip(
+      label: Text(etiqueta, style: const TextStyle(fontSize: 12)),
+      selected: activo,
+      visualDensity: VisualDensity.compact,
+      onSelected: (_) {
+        setState(() => _rangoEdad = valor);
         _buscar();
       },
     );
