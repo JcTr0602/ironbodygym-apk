@@ -16,6 +16,7 @@ import '../localdb.dart';
 import '../negocio.dart';
 import '../permisos.dart';
 import '../sync.dart';
+import '../tipos_pago.dart';
 import 'cuentas_cobrar.dart';
 import 'papelera.dart';
 import 'congelados.dart';
@@ -48,12 +49,11 @@ class _AdminScreenState extends State<AdminScreen> {
   SyncDetalle _syncDet = const SyncDetalle();
   int _pendientesSubir = 0;
 
+  List<TipoPago> _tipos = [];
+
   static const _clavesMonto = [
-    ('mensualidad', 'Mensualidad'),
     ('transferencia', 'Mensualidad por transferencia'),
     ('pago_diario', 'Pago diario'),
-    ('pago_semanal', 'Semana'),
-    ('pago_quincenal', 'Quincena'),
   ];
 
   @override
@@ -84,6 +84,7 @@ class _AdminScreenState extends State<AdminScreen> {
         '${hoy.day.toString().padLeft(2, '0')}';
     final gh = await gastosDe(hoyIso);
     final aj = await LocalDb.instance.getAjustes();
+    final tipos = await getTiposPago(soloActivos: false);
     // Salud del sistema
     final det = await SyncEngine.instance.detalle();
     final pendSubir = await LocalDb.instance.countPendingOps();
@@ -99,6 +100,7 @@ class _AdminScreenState extends State<AdminScreen> {
         _gastosHoy = gh;
         _syncDet = det;
         _pendientesSubir = pendSubir;
+        _tipos = tipos;
         for (final (clave, _) in _clavesMonto) {
           _montos
               .putIfAbsent(clave, () => TextEditingController())
@@ -172,6 +174,248 @@ class _AdminScreenState extends State<AdminScreen> {
       if (c == clave) return e;
     }
     return clave;
+  }
+
+  // -- tipos de pago dinámicos (v1.0.16) --------------------------------
+  static const _tiposFijos = {
+    'mensual',
+    'menores',
+    'semanal',
+    'quincenal'
+  };
+  bool _esTipoFijo(String id) => _tiposFijos.contains(id);
+
+  void _toggleTipo(TipoPago t, bool v) {
+    setState(() {
+      _tipos = [
+        for (final x in _tipos)
+          if (x.id == t.id)
+            TipoPago(
+                id: x.id,
+                nombre: x.nombre,
+                monto: x.monto,
+                dias: x.dias,
+                activo: v,
+                soloMenores: x.soloMenores)
+          else
+            x,
+      ];
+    });
+  }
+
+  Future<void> _editarTipo(TipoPago t) async {
+    final nombreCtrl = TextEditingController(text: t.nombre);
+    final montoCtrl =
+        TextEditingController(text: '${t.monto}');
+    final diasCtrl =
+        TextEditingController(text: '${t.dias}');
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('✏️ ${t.nombre}'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+                controller: nombreCtrl,
+                decoration: const InputDecoration(
+                    labelText: 'Nombre',
+                    border: OutlineInputBorder())),
+            const SizedBox(height: 8),
+            TextField(
+                controller: montoCtrl,
+                keyboardType: const TextInputType
+                    .numberWithOptions(decimal: true),
+                decoration: const InputDecoration(
+                    labelText: 'Monto (CUP)',
+                    border: OutlineInputBorder())),
+            const SizedBox(height: 8),
+            TextField(
+                controller: diasCtrl,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(
+                    labelText: 'Días que cubre',
+                    border: OutlineInputBorder())),
+          ],
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancelar')),
+          ElevatedButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Guardar')),
+        ],
+      ),
+    );
+    final nombre = nombreCtrl.text.trim();
+    final monto = double.tryParse(
+        montoCtrl.text.trim().replaceAll(',', '.'));
+    final dias = int.tryParse(diasCtrl.text.trim());
+    nombreCtrl.dispose();
+    montoCtrl.dispose();
+    diasCtrl.dispose();
+    if (ok != true || !mounted) return;
+    if (nombre.isEmpty || monto == null || monto <= 0) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Nombre y monto válido requeridos')));
+      return;
+    }
+    setState(() {
+      _tipos = [
+        for (final x in _tipos)
+          if (x.id == t.id)
+            TipoPago(
+                id: x.id,
+                nombre: nombre,
+                monto: monto,
+                dias: (dias != null && dias > 0) ? dias : x.dias,
+                activo: x.activo,
+                soloMenores: x.soloMenores)
+          else
+            x,
+      ];
+    });
+  }
+
+  Future<void> _agregarTipo() async {
+    final nombreCtrl = TextEditingController();
+    final montoCtrl = TextEditingController();
+    final diasCtrl = TextEditingController(text: '30');
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('➕ Nuevo tipo de pago'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+                controller: nombreCtrl,
+                decoration: const InputDecoration(
+                    labelText: 'Nombre (ej: Trimestre)',
+                    border: OutlineInputBorder())),
+            const SizedBox(height: 8),
+            TextField(
+                controller: montoCtrl,
+                keyboardType: const TextInputType
+                    .numberWithOptions(decimal: true),
+                decoration: const InputDecoration(
+                    labelText: 'Monto (CUP)',
+                    border: OutlineInputBorder())),
+            const SizedBox(height: 8),
+            TextField(
+                controller: diasCtrl,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(
+                    labelText: 'Días que cubre',
+                    border: OutlineInputBorder())),
+          ],
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancelar')),
+          ElevatedButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Agregar')),
+        ],
+      ),
+    );
+    final nombre = nombreCtrl.text.trim();
+    final monto = double.tryParse(
+        montoCtrl.text.trim().replaceAll(',', '.'));
+    final dias = int.tryParse(diasCtrl.text.trim()) ?? 30;
+    nombreCtrl.dispose();
+    montoCtrl.dispose();
+    diasCtrl.dispose();
+    if (ok != true || !mounted) return;
+    if (nombre.isEmpty || monto == null || monto <= 0 || dias <= 0) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content:
+              Text('Nombre, monto y días válidos requeridos')));
+      return;
+    }
+    final id = nombre
+        .toLowerCase()
+        .replaceAll(RegExp(r'[^a-z0-9]+'), '_')
+        .replaceAll(RegExp(r'^_+|_+$'), '');
+    if (id.isEmpty || _tipos.any((x) => x.id == id)) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Ya existe un tipo con ese nombre')));
+      return;
+    }
+    setState(() {
+      _tipos = [
+        ..._tipos,
+        TipoPago(
+            id: id, nombre: nombre, monto: monto, dias: dias),
+      ];
+    });
+  }
+
+  Future<void> _eliminarTipo(TipoPago t) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('🗑️ Eliminar tipo'),
+        content: Text(
+            '¿Eliminar "${t.nombre}"? Ya no aparecerá al cobrar.'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancelar')),
+          ElevatedButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Eliminar')),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    setState(() {
+      _tipos = [for (final x in _tipos) if (x.id != t.id) x];
+    });
+  }
+
+  Future<void> _guardarTipos() async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('💵 Guardar tipos de pago'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            for (final t in _tipos)
+              Text(
+                  '• ${t.nombre}: ${fmtMonto(t.monto)} CUP · ${t.dias} días${t.activo ? '' : ' (inactivo)'}'),
+            const SizedBox(height: 8),
+            const Text(
+                'Se aplicará en la próxima sincronización.'),
+          ],
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancelar')),
+          ElevatedButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Confirmar')),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    await LocalDb.instance.queueOp(
+      opUuid: const Uuid().v4(),
+      tipo: 'guardar_tipos_pago',
+      payload: {
+        'tipos': [for (final t in _tipos) t.toJson()],
+      },
+    );
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content:
+            Text('✅ Tipos guardados (se sincronizarán)')));
+    SyncEngine.instance.push();
   }
 
   // -- pendiente a entrega ----------------------------------------------
@@ -405,7 +649,67 @@ class _AdminScreenState extends State<AdminScreen> {
                               ),
                             ),
                         ]),
-                        _seccion('💵 Montos (precios)', [
+                        _seccion('💵 Tipos de pago', [
+                          for (final t in _tipos)
+                            ListTile(
+                              dense: true,
+                              contentPadding: EdgeInsets.zero,
+                              title: Text(t.nombre,
+                                  style: TextStyle(
+                                      fontSize: 14,
+                                      color: t.activo
+                                          ? null
+                                          : Colors.grey)),
+                              subtitle: Text(
+                                  '${fmtMonto(t.monto)} CUP · ${t.dias} días'
+                                  '${t.soloMenores ? ' · solo menores' : ''}',
+                                  style: const TextStyle(
+                                      fontSize: 12)),
+                              trailing: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Switch(
+                                    value: t.activo,
+                                    onChanged: (v) =>
+                                        _toggleTipo(t, v),
+                                  ),
+                                  IconButton(
+                                    icon: const Icon(
+                                        Icons.edit,
+                                        size: 20),
+                                    onPressed: () =>
+                                        _editarTipo(t),
+                                  ),
+                                  if (!_esTipoFijo(t.id))
+                                    IconButton(
+                                      icon: const Icon(
+                                          Icons.delete_outline,
+                                          size: 20,
+                                          color: Colors.red),
+                                      onPressed: () =>
+                                          _eliminarTipo(t),
+                                    ),
+                                ],
+                              ),
+                            ),
+                          const SizedBox(height: 4),
+                          OutlinedButton.icon(
+                            icon: const Icon(Icons.add),
+                            label: const Text(
+                                'Agregar tipo de pago'),
+                            onPressed: _agregarTipo,
+                          ),
+                          const SizedBox(height: 8),
+                          SizedBox(
+                            width: double.infinity,
+                            child: ElevatedButton(
+                              onPressed: _guardarTipos,
+                              child: const Text(
+                                  'Guardar tipos de pago'),
+                            ),
+                          ),
+                        ]),
+                        _seccion('💵 Otros precios', [
                           for (final (clave, etiqueta) in _clavesMonto)
                             Padding(
                               padding:

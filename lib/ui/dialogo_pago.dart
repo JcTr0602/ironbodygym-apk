@@ -9,6 +9,7 @@ import 'package:flutter/services.dart';
 
 import '../localdb.dart';
 import '../negocio.dart';
+import '../tipos_pago.dart';
 
 /// Selección de período hecha en el diálogo.
 class PeriodoSel {
@@ -16,11 +17,14 @@ class PeriodoSel {
   final int meses;
   final int dias; // solo personalizado
   final double monto; // calculado o manual
+  // v1.0.16: id del tipo de pago dinámico elegido (si aplica)
+  final String? tipoId;
   const PeriodoSel(
       {required this.periodo,
       this.meses = 1,
       this.dias = 0,
-      required this.monto});
+      required this.monto,
+      this.tipoId});
 }
 
 int _diasDe(PeriodoSel s) {
@@ -54,40 +58,68 @@ String _etiquetaPeriodo(PeriodoSel s) {
 Future<Map<String, dynamic>?> pagoDialogo(
     BuildContext context, Map<String, dynamic> cliente) async {
   final aj = await LocalDb.instance.getAjustes();
-  final mensual = (aj['mensualidad'] as num?)?.toDouble() ?? 2000;
   final transfer = (aj['transferencia'] as num?)?.toDouble() ?? 2500;
-  final semanal = (aj['pago_semanal'] as num?)?.toDouble() ?? 600;
-  final quincenal = (aj['pago_quincenal'] as num?)?.toDouble() ?? 1200;
   if (!context.mounted) return null;
 
-  // v1.0.14: menores de 18 pagan 1500/mes
+  // v1.0.16: tipos dinámicos; menores ven precio reducido automáticamente
   final menor = esMenor(cliente['carnet'] as String?);
-  final mensualEfectivo = menor ? precioMenorMensual : mensual;
+  final tipos = await getTiposPago(paraMenor: menor);
+  if (!context.mounted) return null;
+  if (tipos.isEmpty) {
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('No hay tipos de pago configurados')));
+    return null;
+  }
 
-  String periodo = 'mensual';
+  // Tipo inicial: 'mensual' (o 'menores' si es menor)
+  TipoPago tipoSel =
+      tipos.firstWhere((t) => t.id == (menor ? 'menores' : 'mensual'),
+          orElse: () => tipos.first);
   int meses = 1;
   String metodo = 'efectivo';
   final diasCtrl = TextEditingController();
   final montoCtrl = TextEditingController();
   DateTime fechaPago = DateTime.now(); // v1.1: permite elegir fecha del pago
 
+  /// Mapea el tipo elegido al período del motor del servidor.
+  /// Los 4 fijos usan su período nativo; los personalizados van como
+  /// 'personalizado' (días + monto), sin cambios en el servidor.
   PeriodoSel actual() {
     double monto;
+    String periodo;
     int dias = 0;
-    if (periodo == 'semanal') {
-      monto = semanal;
-    } else if (periodo == 'quincenal') {
-      monto = quincenal;
-    } else if (periodo == 'personalizado') {
+    final id = tipoSel.id;
+    if (id == 'personalizado') {
+      periodo = 'personalizado';
       dias = int.tryParse(diasCtrl.text.trim()) ?? 0;
       monto = double.tryParse(
               montoCtrl.text.trim().replaceAll(',', '.')) ??
           0;
+    } else if (id == 'semanal') {
+      periodo = 'semanal';
+      monto = tipoSel.monto;
+    } else if (id == 'quincenal') {
+      periodo = 'quincenal';
+      monto = tipoSel.monto;
+    } else if (id == 'mensual' || id == 'menores') {
+      periodo = 'mensual';
+      // transferencia solo afecta al mensual normal
+      final unit = (metodo == 'transferencia' && id == 'mensual')
+          ? transfer
+          : tipoSel.monto;
+      monto = unit * meses;
     } else {
-      monto = (metodo == 'efectivo' ? mensualEfectivo : transfer) * meses;
+      // Tipo personalizado de Jc -> motor 'personalizado'
+      periodo = 'personalizado';
+      dias = tipoSel.dias;
+      monto = tipoSel.monto;
     }
     return PeriodoSel(
-        periodo: periodo, meses: meses, dias: dias, monto: monto);
+        periodo: periodo,
+        meses: meses,
+        dias: dias,
+        monto: monto,
+        tipoId: id == 'personalizado' ? null : id);
   }
 
   bool valido(PeriodoSel s) {
@@ -135,7 +167,7 @@ Future<Map<String, dynamic>?> pagoDialogo(
                         Expanded(
                           child: Text(
                             'Menor de 18: precio especial '
-                            '${fmtMonto(precioMenorMensual)} CUP/mes.',
+                            '${fmtMonto(tipos.firstWhere((t) => t.id == 'menores', orElse: () => tipos.first).monto)} CUP/mes.',
                             style: TextStyle(
                                 fontSize: 13,
                                 color: Colors.blue.shade900),
@@ -226,37 +258,51 @@ Future<Map<String, dynamic>?> pagoDialogo(
                 const SizedBox(height: 8),
                 const Text('Período:'),
                 DropdownButton<String>(
-                  value: periodo == 'mensual' ? 'mensual:$meses' : periodo,
+                  value: tipoSel.id,
                   isExpanded: true,
                   items: [
-                    DropdownMenuItem(
-                        value: 'semanal',
-                        child: Text(
-                            'Semana (${fmtMonto(semanal)} CUP)')),
-                    DropdownMenuItem(
-                        value: 'quincenal',
-                        child: Text(
-                            'Quincena (${fmtMonto(quincenal)} CUP)')),
-                    for (final m in [1, 2, 3, 6, 12])
+                    for (final t in tipos)
                       DropdownMenuItem(
-                          value: 'mensual:$m',
-                          child: Text('$m mes${m == 1 ? '' : 'es'}')),
+                          value: t.id,
+                          child: Text(
+                              '${t.nombre} (${fmtMonto(t.monto)} CUP)')),
                     const DropdownMenuItem(
                         value: 'personalizado',
                         child: Text('Personalizado…')),
                   ],
                   onChanged: (v) => setS(() {
-                    if (v == 'semanal' ||
-                        v == 'quincenal' ||
-                        v == 'personalizado') {
-                      periodo = v!;
+                    if (v == 'personalizado') {
+                      tipoSel = const TipoPago(
+                          id: 'personalizado',
+                          nombre: 'Personalizado',
+                          monto: 0,
+                          dias: 0);
                     } else {
-                      periodo = 'mensual';
-                      meses = int.parse(v!.split(':')[1]);
+                      tipoSel = tipos
+                          .firstWhere((t) => t.id == v);
                     }
                   }),
                 ),
-                if (periodo == 'personalizado') ...[
+                // Selector de meses para mensual/menores
+                if (tipoSel.id == 'mensual' ||
+                    tipoSel.id == 'menores') ...[
+                  const SizedBox(height: 8),
+                  const Text('Meses:'),
+                  DropdownButton<int>(
+                    value: meses,
+                    isExpanded: true,
+                    items: [
+                      for (final m in [1, 2, 3, 6, 12])
+                        DropdownMenuItem(
+                            value: m,
+                            child: Text(
+                                '$m mes${m == 1 ? '' : 'es'}')),
+                    ],
+                    onChanged: (v) =>
+                        setS(() => meses = v ?? 1),
+                  ),
+                ],
+                if (tipoSel.id == 'personalizado') ...[
                   const SizedBox(height: 8),
                   TextField(
                     controller: diasCtrl,
