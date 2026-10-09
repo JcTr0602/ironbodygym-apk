@@ -31,6 +31,9 @@ String emailToUsername(String email) {
 class AuthService {
   SupabaseClient get _c => Supabase.instance.client;
 
+  /// Acceso a Supabase Storage (v1.0.14: fotos de usuarios).
+  SupabaseStorageClient get storage => _c.storage;
+
   Session? get session => _c.auth.currentSession;
   bool get loggedIn => session != null;
 

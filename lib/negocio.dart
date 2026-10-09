@@ -107,6 +107,43 @@ String fmtFecha(String? iso) {
   return '${p[2]}/${p[1]}/${p[0]}';
 }
 
+/// Tiempo relativo legible: "hace 2 horas", "ayer", etc. (v1.0.14)
+String tiempoRelativo(String? iso) {
+  if (iso == null || iso.isEmpty) return 'Sin accesos registrados';
+  try {
+    final dt = DateTime.parse(iso).toLocal();
+    final ahora = DateTime.now();
+    final diff = ahora.difference(dt);
+    if (diff.isNegative) return 'ahora mismo';
+    if (diff.inMinutes < 1) return 'ahora mismo';
+    if (diff.inMinutes < 60) {
+      final m = diff.inMinutes;
+      return 'hace $m minuto${m == 1 ? '' : 's'}';
+    }
+    if (diff.inHours < 24) {
+      final h = diff.inHours;
+      return 'hace $h hora${h == 1 ? '' : 's'}';
+    }
+    if (diff.inDays == 1) return 'ayer';
+    if (diff.inDays < 7) {
+      final d = diff.inDays;
+      return 'hace $d día${d == 1 ? '' : 's'}';
+    }
+    if (diff.inDays < 30) {
+      final s = (diff.inDays / 7).floor();
+      return 'hace $s semana${s == 1 ? '' : 's'}';
+    }
+    if (diff.inDays < 365) {
+      final me = (diff.inDays / 30).floor();
+      return 'hace $me mes${me == 1 ? '' : 'es'}';
+    }
+    final a = (diff.inDays / 365).floor();
+    return 'hace $a año${a == 1 ? '' : 's'}';
+  } catch (_) {
+    return 'Sin accesos registrados';
+  }
+}
+
 String fmtMonto(dynamic m) {
   if (m == null) return '—';
   final v = (m as num).toDouble();
@@ -370,6 +407,22 @@ DateTime? fechaNacDeCarnet(String? carnet) {
     return null;
   }
 }
+
+/// True si el carnet indica menos de 18 años (precio reducido).
+bool esMenor(String? carnet) {
+  final nac = fechaNacDeCarnet(carnet);
+  if (nac == null) return false;
+  final hoy = DateTime.now();
+  var edad = hoy.year - nac.year;
+  if (hoy.month < nac.month ||
+      (hoy.month == nac.month && hoy.day < nac.day)) {
+    edad--;
+  }
+  return edad < 18;
+}
+
+/// Precio mensual para menores de 18 años.
+const precioMenorMensual = 1500.0;
 
 /// Clientes que cumplen años en los próximos [dias] (incluye hoy).
 /// Cada mapa trae '_dias_para' (días que faltan) y '_cumple' (edad que cumple).

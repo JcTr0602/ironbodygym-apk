@@ -87,6 +87,8 @@ class _MiDiaScreenState extends State<MiDiaScreen> {
 
   Future<void> _cerrarTurno() async {
     final faltan = _porCobrar.length;
+    final sinMovimientos =
+        _cobrados.isEmpty && _totalHoy == 0;
     await showDialog<void>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -95,13 +97,30 @@ class _MiDiaScreenState extends State<MiDiaScreen> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('💰 Cobrado hoy: ${fmtMonto(_totalHoy)} CUP',
+            if (sinMovimientos) ...[
+              const Text(
+                '📭 Turno sin cobros registrados.',
+                style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 16),
+              ),
+              const SizedBox(height: 6),
+              const Text(
+                'Si trabajaste el turno pero nadie pagó, '
+                'queda registrado así.',
                 style:
-                    const TextStyle(fontWeight: FontWeight.bold)),
-            const SizedBox(height: 6),
-            Text('• ${_cobrados.length} cobros realizados'),
-            Text('• 💵 Efectivo: ${fmtMonto(_efectivo)} CUP'),
-            Text('• 📱 Transferencia: ${fmtMonto(_transferencia)} CUP'),
+                    TextStyle(fontSize: 13, color: Colors.grey),
+              ),
+            ] else ...[
+              Text('💰 Cobrado hoy: ${fmtMonto(_totalHoy)} CUP',
+                  style: const TextStyle(
+                      fontWeight: FontWeight.bold)),
+              const SizedBox(height: 6),
+              Text('• ${_cobrados.length} cobros realizados'),
+              Text('• 💵 Efectivo: ${fmtMonto(_efectivo)} CUP'),
+              Text(
+                  '• 📱 Transferencia: ${fmtMonto(_transferencia)} CUP'),
+            ],
             const SizedBox(height: 6),
             Text(faltan == 0
                 ? '✅ No quedó nadie por cobrar hoy.'

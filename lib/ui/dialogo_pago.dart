@@ -60,6 +60,10 @@ Future<Map<String, dynamic>?> pagoDialogo(
   final quincenal = (aj['pago_quincenal'] as num?)?.toDouble() ?? 1200;
   if (!context.mounted) return null;
 
+  // v1.0.14: menores de 18 pagan 1500/mes
+  final menor = esMenor(cliente['carnet'] as String?);
+  final mensualEfectivo = menor ? precioMenorMensual : mensual;
+
   String periodo = 'mensual';
   int meses = 1;
   String metodo = 'efectivo';
@@ -80,7 +84,7 @@ Future<Map<String, dynamic>?> pagoDialogo(
               montoCtrl.text.trim().replaceAll(',', '.')) ??
           0;
     } else {
-      monto = (metodo == 'efectivo' ? mensual : transfer) * meses;
+      monto = (metodo == 'efectivo' ? mensualEfectivo : transfer) * meses;
     }
     return PeriodoSel(
         periodo: periodo, meses: meses, dias: dias, monto: monto);
@@ -112,6 +116,34 @@ Future<Map<String, dynamic>?> pagoDialogo(
               children: [
                 Text(
                     'Vence: ${fmtFecha(cliente['pagado_hasta'] as String?)}'),
+                // v1.0.14: aviso de precio reducido para menores
+                if (menor)
+                  Container(
+                    margin:
+                        const EdgeInsets.only(top: 8, bottom: 4),
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: Colors.blue.shade50,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                          color: Colors.blue.shade200),
+                    ),
+                    child: Row(
+                      children: [
+                        const Text('🧒 ',
+                            style: TextStyle(fontSize: 16)),
+                        Expanded(
+                          child: Text(
+                            'Menor de 18: precio especial '
+                            '${fmtMonto(precioMenorMensual)} CUP/mes.',
+                            style: TextStyle(
+                                fontSize: 13,
+                                color: Colors.blue.shade900),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
                 // v1.0.14: aviso claro si paga por adelantado
                 Builder(builder: (_) {
                   final ph =
