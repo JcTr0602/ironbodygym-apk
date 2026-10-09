@@ -17,15 +17,23 @@ class TransferenciaScreen extends StatefulWidget {
 class _TransferenciaScreenState extends State<TransferenciaScreen> {
   double _efectivo = 2000;
   double _transfer = 2500;
+  // v1.0.16: datos bancarios desde ajustes remotos (fallback a constantes)
+  String _bandec = AppConfig.tarjetaBandec;
+  String _bpa = AppConfig.tarjetaBpa;
+  String _movil = AppConfig.movilConfirmacion;
 
   @override
   void initState() {
     super.initState();
     LocalDb.instance.getAjustes().then((aj) {
       if (mounted) {
+        final banc = AppConfig.datosBancarios(aj);
         setState(() {
           _efectivo = (aj['mensualidad'] as num?)?.toDouble() ?? 2000;
           _transfer = (aj['transferencia'] as num?)?.toDouble() ?? 2500;
+          _bandec = banc['bandec']!;
+          _bpa = banc['bpa']!;
+          _movil = banc['movil']!;
         });
       }
     });
@@ -46,10 +54,9 @@ class _TransferenciaScreenState extends State<TransferenciaScreen> {
                     'Puedes pagar tu mensualidad con Transfermóvil o Enzona '
                     'a cualquiera de estas tarjetas:'),
                 const SizedBox(height: 16),
-                _tarjeta(context, '💳 Bandec', AppConfig.tarjetaBandec),
-                _tarjeta(context, '💳 BPA', AppConfig.tarjetaBpa),
-                _tarjeta(context, '📱 Móvil para confirmar',
-                    AppConfig.movilConfirmacion),
+                _tarjeta(context, '💳 Bandec', _bandec),
+                _tarjeta(context, '💳 BPA', _bpa),
+                _tarjeta(context, '📱 Móvil para confirmar', _movil),
                 const Divider(),
                 Text(
                     '💰 Mensualidad por transferencia: ${fmtMonto(_transfer)} CUP',

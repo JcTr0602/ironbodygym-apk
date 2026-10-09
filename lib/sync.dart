@@ -392,7 +392,15 @@ class SyncEngine {
   /// con conexiones de alta latencia.
   Future<int> _uploadOps() async {
     var aplicadas = 0;
-    final ops = await _db.pendingOps();
+    // v1.0.16: solo subir las ops del usuario actual. Las de otro
+    // usuario quedan en espera hasta que su dueño vuelva a entrar.
+    final uid = _auth.userId;
+    final ops = await _db.pendingOpsDe(uid);
+    final ajenas = await _db.countOpsAjenas(uid);
+    if (ajenas > 0) {
+      _emit(SyncPhase.uploading,
+          detalle: '⏸️ $ajenas operaciones de otro usuario en espera…');
+    }
     // 1) las ya aplicadas se marcan sin reenviar
     final porEnviar = <Map<String, dynamic>>[];
     for (final op in ops) {
@@ -496,6 +504,13 @@ class SyncEngine {
             r.statusCode == 204 ||
             r.statusCode == 409) {
           await _db.markOp(uuid, 'enviada');
+        } else if (r.statusCode == 429 ||
+            r.statusCode == 408 ||
+            r.statusCode >= 500) {
+          // v1.0.16: errores temporales (rate limit, timeout, servidor)
+          // se reintentan con backoff, no se marcan como rechazadas
+          await _db.bumpOp(
+              uuid, '⏳ Servidor ocupado (HTTP ${r.statusCode}), reintentando…');
         } else if (r.statusCode >= 400 && r.statusCode < 500) {
           await _db.markOp(uuid, 'rechazada',
               error: '❌ El servidor la rechazó (HTTP ${r.statusCode}). '

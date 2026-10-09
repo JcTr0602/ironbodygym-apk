@@ -47,6 +47,10 @@ class AuthService {
 
   String? get _jwt => session?.accessToken;
 
+  /// ID de Supabase Auth del usuario (UUID). v1.0.16: para atribuir
+  /// operaciones en la cola offline al autor real.
+  String? get userId => session?.user.id;
+
   /// Telegram ID del entrenador (guardado al crear su usuario).
   int? get telegramId {
     final v = session?.user.userMetadata?['telegram_id'];

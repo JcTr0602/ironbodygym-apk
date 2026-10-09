@@ -44,4 +44,4 @@ flutter build apk --release
 
 ## Versionado
 
-`pubspec.yaml`: `version: 1.0.0+1` (incrementar `+N` en cada build).
+`pubspec.yaml`: `version: 1.0.15+17` (incrementar `+N` en cada build).

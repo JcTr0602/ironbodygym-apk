@@ -1040,6 +1040,30 @@ Future<double> ingresosMes() async {
   return t;
 }
 
+/// v1.0.16: mapa fecha (YYYY-MM-DD) -> total ingresos del día,
+/// incluyendo pagos mensuales Y pagos diarios. Centraliza el cálculo
+/// para que tarjetas, gráficos y desgloses usen los mismos números.
+Future<Map<String, double>> ingresosPorDia() async {
+  final porDia = <String, double>{};
+  for (final p in await LocalDb.instance.allMirror('pagos')) {
+    final f = '${p['fecha'] ?? ''}';
+    if (f.length >= 10) {
+      final dia = f.substring(0, 10);
+      porDia[dia] =
+          (porDia[dia] ?? 0) + ((p['monto'] as num?)?.toDouble() ?? 0);
+    }
+  }
+  for (final d in await LocalDb.instance.allMirror('pagos_diarios')) {
+    final f = '${d['fecha'] ?? ''}';
+    if (f.length >= 10) {
+      final dia = f.substring(0, 10);
+      porDia[dia] =
+          (porDia[dia] ?? 0) + ((d['total'] as num?)?.toDouble() ?? 0);
+    }
+  }
+  return porDia;
+}
+
 /// Ingresos de hoy (espejo `pagos` + diarios). v1.0.8.
 Future<double> ingresosHoy() async {
   final hoy = _hoyIso();
@@ -1123,31 +1147,40 @@ Future<List<Map<String, dynamic>>> pagosDelPeriodo(
       }
     }
   }
+  // v1.0.16: incluir pagos diarios (antes se excluían del desglose)
+  for (final d in await LocalDb.instance.allMirror('pagos_diarios')) {
+    final f = '${d['fecha'] ?? ''}';
+    if (f.length >= 10) {
+      final dia = f.substring(0, 10);
+      if (dia.compareTo(desdeIso) >= 0 &&
+          dia.compareTo(hastaIso) <= 0) {
+        out.add({
+          'monto': (d['total'] as num?)?.toDouble() ?? 0,
+          'metodo': 'efectivo',
+        });
+      }
+    }
+  }
   return out;
 }
 
 /// Ingresos por día de los últimos 7 días (v1.0.8).
 /// Devuelve lista de {dia: 'Lun', monto: 123.0} ordenada de más antiguo a hoy.
+/// v1.0.16: usa ingresosPorDia() centralizado (incluye pagos diarios).
 Future<List<Map<String, dynamic>>> ingresosUltimos7Dias() async {
   final hoy = DateTime.now();
   String iso(DateTime d) => '${d.year.toString().padLeft(4, '0')}-'
       '${d.month.toString().padLeft(2, '0')}-'
       '${d.day.toString().padLeft(2, '0')}';
   const diasSem = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'];
+  final porDia = await ingresosPorDia();
   final resultado = <Map<String, dynamic>>[];
   for (int i = 6; i >= 0; i--) {
     final d = hoy.subtract(Duration(days: i));
     final diaIso = iso(d);
-    double t = 0;
-    for (final p in await LocalDb.instance.allMirror('pagos')) {
-      final f = '${p['fecha'] ?? ''}';
-      if (f.length >= 10 && f.substring(0, 10) == diaIso) {
-        t += (p['monto'] as num?)?.toDouble() ?? 0;
-      }
-    }
     resultado.add({
       'dia': diasSem[d.weekday - 1],
-      'monto': t,
+      'monto': porDia[diaIso] ?? 0.0,
     });
   }
   return resultado;

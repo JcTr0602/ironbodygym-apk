@@ -10,6 +10,7 @@ import 'dart:convert';
 import 'package:path/path.dart' as p;
 import 'package:sqflite/sqflite.dart';
 
+import 'auth.dart';
 import 'fotos.dart';
 
 class LocalDb {
@@ -23,7 +24,7 @@ class LocalDb {
     final dir = await getDatabasesPath();
     _db = await openDatabase(
       p.join(dir, 'ironbody.db'),
-      version: 2,
+      version: 3,
       onCreate: (db, _) async {
         await _crearTablas(db);
       },
@@ -32,6 +33,16 @@ class LocalDb {
         if (oldV < 2) {
           await db.execute(
               'CREATE TABLE IF NOT EXISTS gastos (id INTEGER PRIMARY KEY, data TEXT NOT NULL, sync_seq INTEGER NOT NULL)');
+        }
+        // v3 (v1.0.16): autoría en la cola offline. Sin esto, las ops
+        // de un entrenador se atribuían a quien sincronizara después.
+        if (oldV < 3) {
+          await db.execute(
+              'ALTER TABLE ops_queue ADD COLUMN user_id TEXT');
+          await db.execute(
+              'ALTER TABLE ops_queue ADD COLUMN telegram_id INTEGER');
+          await db.execute(
+              'ALTER TABLE fotos_pendientes ADD COLUMN user_id TEXT');
         }
       },
     );
@@ -46,11 +57,12 @@ class LocalDb {
         await db.execute('CREATE TABLE ops_queue ('
             'op_uuid TEXT PRIMARY KEY, tipo TEXT NOT NULL, payload TEXT NOT NULL, '
             'estado TEXT NOT NULL DEFAULT \'pendiente\', intentos INTEGER NOT NULL DEFAULT 0, '
-            'error TEXT, creada_ts TEXT NOT NULL, foto_path TEXT)');
+            'error TEXT, creada_ts TEXT NOT NULL, foto_path TEXT, '
+            'user_id TEXT, telegram_id INTEGER)');
         await db.execute('CREATE TABLE fotos_pendientes ('
             'id INTEGER PRIMARY KEY AUTOINCREMENT, op_uuid TEXT NOT NULL, '
             'cliente_id INTEGER, local_path TEXT NOT NULL, '
-            'estado TEXT NOT NULL DEFAULT \'pendiente\')');
+            'estado TEXT NOT NULL DEFAULT \'pendiente\', user_id TEXT)');
         await db.execute(
             'CREATE TABLE meta (k TEXT PRIMARY KEY, v TEXT NOT NULL)');
   }
@@ -165,6 +177,8 @@ class LocalDb {
       required Map<String, dynamic> payload,
       String? fotoPath}) async {
     final d = await db;
+    // v1.0.16: guardar autoría para no atribuir ops ajenas al sincronizar
+    final auth = AuthService();
     await d.insert('ops_queue', {
       'op_uuid': opUuid,
       'tipo': tipo,
@@ -172,6 +186,8 @@ class LocalDb {
       'estado': 'pendiente',
       'creada_ts': DateTime.now().toIso8601String(),
       'foto_path': fotoPath,
+      'user_id': auth.userId,
+      'telegram_id': auth.telegramId,
     });
     // Actualización optimista: refleja el cambio en el espejo local de
     // inmediato, sin esperar al pull del servidor.
@@ -189,6 +205,30 @@ class LocalDb {
     return d.query('ops_queue',
         where: 'estado IN (\'pendiente\', \'error\')',
         orderBy: 'creada_ts ASC');
+  }
+
+  /// v1.0.16: ops pendientes del usuario indicado. Las de otro usuario
+  /// quedan en espera (no se suben con sesión ajena).
+  Future<List<Map<String, dynamic>>> pendingOpsDe(String? userId) async {
+    final d = await db;
+    if (userId == null) return pendingOps();
+    return d.query('ops_queue',
+        where: 'estado IN (\'pendiente\', \'error\') '
+            'AND (user_id = ? OR user_id IS NULL)',
+        whereArgs: [userId],
+        orderBy: 'creada_ts ASC');
+  }
+
+  /// v1.0.16: ¿hay ops pendientes de OTRO usuario?
+  Future<int> countOpsAjenas(String? userId) async {
+    final d = await db;
+    if (userId == null) return 0;
+    final r = await d.rawQuery(
+        'SELECT COUNT(*) c FROM ops_queue '
+        'WHERE estado IN (\'pendiente\', \'error\') '
+        'AND user_id IS NOT NULL AND user_id != ?',
+        [userId]);
+    return (r.first['c'] as int?) ?? 0;
   }
 
   /// Todas las no aplicadas ni rechazadas (para re-chequear `aplicada`
@@ -271,8 +311,13 @@ class LocalDb {
   Future<int> addFotoPendiente(
       {required String opUuid, required String localPath}) async {
     final d = await db;
-    return d.insert('fotos_pendientes',
-        {'op_uuid': opUuid, 'local_path': localPath, 'estado': 'pendiente'});
+    return d.insert('fotos_pendientes', {
+      'op_uuid': opUuid,
+      'local_path': localPath,
+      'estado': 'pendiente',
+      // v1.0.16: autoría
+      'user_id': AuthService().userId,
+    });
   }
 
   Future<List<Map<String, dynamic>>> fotosPendientes() async {

@@ -2,10 +2,8 @@
 /// tema, preferencias y cambio de contraseña.
 library;
 
-import 'dart:convert';
 import 'dart:io';
 
-import 'package:crypto/crypto.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
@@ -149,9 +147,8 @@ class _AjustesScreenState extends State<AjustesScreen> {
           content: Text('PIN inválido: 4 dígitos iguales')));
       return;
     }
-    // SHA-256 del PIN
-    final bytes = utf8.encode('ironbody-pin-$p1');
-    final hash = sha256.convert(bytes).toString();
+    // v1.0.16: hash endurecido con salt + 10000 iteraciones
+    final hash = await _perfil.hashPinNuevo(p1);
     await _perfil.setPinHash(hash);
     if (mounted) {
       setState(() => _tienePin = true);
