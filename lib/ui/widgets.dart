@@ -135,8 +135,18 @@ class _SyncBannerState extends State<SyncBanner>
               ];
               icono = Icons.check_circle_outline;
               titulo = 'Todo al día';
-              subtitulo =
-                  'Última sincronización: ${_hace(s.lastOk)}';
+              // v1.0.17: resumen discreto de la última sincronización
+              final res = s.ultimoResumen;
+              final resHora = s.ultimoResumenHora;
+              final reciente = res != null &&
+                  resHora != null &&
+                  DateTime.now()
+                          .difference(resHora)
+                          .inMinutes <
+                      10;
+              subtitulo = reciente
+                  ? 'Última sincronización: $res'
+                  : 'Última sincronización: ${_hace(s.lastOk)}';
             }
             break;
         }

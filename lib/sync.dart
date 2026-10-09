@@ -46,6 +46,13 @@ class SyncStatus {
   /// (watermark < server_seq). "Cola vacía" no basta para decir
   /// que los datos están al día.
   final bool hayNovedades;
+
+  /// v1.0.17: resumen discreto de la última sincronización,
+  /// ej. "↑ 2 enviados · ↓ 3 nuevos" o "Sin cambios".
+  final String? ultimoResumen;
+
+  /// Cuándo se generó ultimoResumen (para mostrarlo solo si es reciente).
+  final DateTime? ultimoResumenHora;
   const SyncStatus(
       {this.phase = SyncPhase.idle,
       this.pending = 0,
@@ -53,7 +60,9 @@ class SyncStatus {
       this.lastError,
       this.progreso,
       this.detalle,
-      this.hayNovedades = false});
+      this.hayNovedades = false,
+      this.ultimoResumen,
+      this.ultimoResumenHora});
 }
 
 /// Detalle de la última sincronización (para la pantalla de Sync).
@@ -178,7 +187,10 @@ class SyncEngine {
           .timeout(timeout));
 
   void _emit(SyncPhase phase,
-      {String? error, double? progreso, String? detalle}) async {
+      {String? error,
+      double? progreso,
+      String? detalle,
+      String? resumen}) async {
     final pending = await _db.countPendingOps();
     final lastOk = await _ultimaOk();
     // v1.0.15: detectar si el servidor tiene cambios sin bajar
@@ -189,6 +201,10 @@ class SyncEngine {
           int.tryParse(await _db.getMeta('server_seq') ?? '0') ?? 0;
       novedades = ss > wm;
     } catch (_) {}
+    // v1.0.17: conservar el último resumen salvo que se pase uno nuevo
+    final res = resumen ?? _current.ultimoResumen;
+    final resHora =
+        resumen != null ? DateTime.now() : _current.ultimoResumenHora;
     _current = SyncStatus(
         phase: phase,
         pending: pending,
@@ -196,7 +212,9 @@ class SyncEngine {
         lastError: error,
         progreso: progreso,
         detalle: detalle,
-        hayNovedades: novedades);
+        hayNovedades: novedades,
+        ultimoResumen: res,
+        ultimoResumenHora: resHora);
     _status.add(_current);
   }
 
@@ -295,7 +313,18 @@ class SyncEngine {
       }
       await _marcarOk();
       await _db.setMeta('last_sync_error', '');
-      _emit(SyncPhase.idle);
+      // v1.0.17: resumen discreto de lo que realmente cambió
+      final subidos =
+          int.tryParse(await _db.getMeta('last_uploaded') ?? '0') ?? 0;
+      final bajados =
+          int.tryParse(await _db.getMeta('last_downloaded') ?? '0') ?? 0;
+      final resumen = (subidos == 0 && bajados == 0)
+          ? 'Sin cambios'
+          : [
+              if (subidos > 0) '↑ $subidos enviado${subidos == 1 ? '' : 's'}',
+              if (bajados > 0) '↓ $bajados nuevo${bajados == 1 ? '' : 's'}',
+            ].join(' · ');
+      _emit(SyncPhase.idle, resumen: resumen);
     } on SessionExpired {
       _sesionVencida();
       _emit(SyncPhase.idle);
@@ -318,6 +347,12 @@ class SyncEngine {
       await _doPush();
       // v1.0.14: limpiar error viejo si el push tuvo éxito
       await _db.setMeta('last_sync_error', '');
+      // v1.0.17: pull silencioso tras el push para actualizar el watermark.
+      // Sin esto, el server_seq avanza por las ops propias y el banner
+      // muestra "Hay cambios nuevos" aunque no haya nada que bajar.
+      try {
+        await _doPull(silencioso: true);
+      } catch (_) {}
     } catch (_) {
       // Llamadas fire-and-forget: el error ya se mostró vía _emit.
     } finally {
@@ -381,10 +416,12 @@ class SyncEngine {
   }
 
   /// Lógica interna de bajada (sin guard _running).
-  Future<void> _doPull() async {
+  /// Si [silencioso] es true, no emite fases de progreso (pull de
+  /// mantenimiento tras un push; el usuario no pidió ver el proceso).
+  Future<void> _doPull({bool silencioso = false}) async {
     try {
-      _emit(SyncPhase.downloading);
-      final n = await _download();
+      if (!silencioso) _emit(SyncPhase.downloading);
+      final n = await _download(silencioso: silencioso);
       await _db.setMeta('last_pull_ok', DateTime.now().toIso8601String());
       await _db.setMeta('last_downloaded', '$n');
       _emit(SyncPhase.idle);
@@ -586,7 +623,7 @@ class SyncEngine {
   /// aplicar todos los cambios. Si algo falla a mitad, el watermark no se
   /// mueve y la próxima bajada re-aplica (idempotente) desde el mismo
   /// punto. No hay ningún camino donde el watermark avance sin aplicar.
-  Future<int> _download() async {
+  Future<int> _download({bool silencioso = false}) async {
     // ajustes + server_seq (para verificación de sincronización)
     int? serverSeq;
     try {
@@ -635,10 +672,12 @@ class SyncEngine {
     for (final tabla in tablas) {
       ti++;
       final supTabla = supTablas[tabla]!;
-      _emit(SyncPhase.downloading,
-          detalle:
-              'Descargando ${_nombreAmigable(tabla)}… $ti de ${tablas.length}',
-          progreso: ti / (tablas.length + 1));
+      if (!silencioso) {
+        _emit(SyncPhase.downloading,
+            detalle:
+                'Descargando ${_nombreAmigable(tabla)}… $ti de ${tablas.length}',
+            progreso: ti / (tablas.length + 1));
+      }
       var pageWm = since;
       while (true) {
         // gastos tiene esquema plano en Supabase (sin columna 'data')
@@ -679,9 +718,11 @@ class SyncEngine {
       }
     }
     // borrados (tombstones)
-    _emit(SyncPhase.downloading,
-        detalle: 'Descargando eliminados…',
-        progreso: tablas.length / (tablas.length + 1));
+    if (!silencioso) {
+      _emit(SyncPhase.downloading,
+          detalle: 'Descargando eliminados…',
+          progreso: tablas.length / (tablas.length + 1));
+    }
     var pageWm = since;
     while (true) {
       final r = await _getAuth(Uri.parse('$_base/rest/v1/sync_borrados'
