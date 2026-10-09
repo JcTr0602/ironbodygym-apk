@@ -424,12 +424,67 @@ class _FichaScreenState extends State<FichaScreen> {
     );
   }
 
-  /// Cambia la foto del cliente: cámara o galería (punto 29).
-  Future<void> _cambiarFoto() async {
-    final origen = await showDialog<ImageSource>(
+  /// ¿El cliente tiene foto asignada? (v1.0.15)
+  Future<bool> _tieneFoto() async {
+    try {
+      // Revisar el caché local de fotos
+      final f = await FotoCache.instance
+          .enCache('bot/${widget.clienteId}.jpg');
+      if (f != null) return true;
+      final f2 = await FotoCache.instance
+          .enCache('apk/${widget.clienteId}.jpg');
+      return f2 != null;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Elimina la foto del cliente (v1.0.15).
+  Future<void> _eliminarFoto() async {
+    final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('📷 Cambiar foto'),
+        title: const Text('🗑️ Eliminar foto'),
+        content: const Text(
+            '¿Eliminar la foto de este cliente? Esta acción se sincronizará.'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancelar')),
+          ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.red,
+                  foregroundColor: Colors.white),
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Eliminar')),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    // Limpia el caché local
+    await FotoCache.instance.invalidar('bot/${widget.clienteId}.jpg');
+    await FotoCache.instance.invalidar('apk/${widget.clienteId}.jpg');
+    // Encola la operación para el servidor
+    await LocalDb.instance.queueOp(
+      opUuid: const Uuid().v4(),
+      tipo: 'eliminar_foto',
+      payload: {'cliente_id': widget.clienteId},
+    );
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('✅ Foto eliminada (se sincronizará)')),
+    );
+    SyncEngine.instance.push();
+    setState(() {});
+  }
+
+  /// Cambia la foto del cliente: cámara, galería o eliminar (v1.0.15).
+  Future<void> _cambiarFoto() async {
+    final tieneFoto = await _tieneFoto();
+    final origen = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('📷 Foto del cliente'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -438,22 +493,38 @@ class _FichaScreenState extends State<FichaScreen> {
                   const Text('📸', style: TextStyle(fontSize: 24)),
               title: const Text('Tomar foto'),
               onTap: () =>
-                  Navigator.pop(ctx, ImageSource.camera),
+                  Navigator.pop(ctx, 'camera'),
             ),
             ListTile(
               leading:
                   const Text('🖼️', style: TextStyle(fontSize: 24)),
               title: const Text('Elegir de la galería'),
               onTap: () =>
-                  Navigator.pop(ctx, ImageSource.gallery),
+                  Navigator.pop(ctx, 'gallery'),
             ),
+            if (tieneFoto)
+              ListTile(
+                leading: const Text('🗑️',
+                    style: TextStyle(fontSize: 24)),
+                title: const Text('Eliminar foto',
+                    style: TextStyle(color: Colors.red)),
+                onTap: () =>
+                    Navigator.pop(ctx, 'eliminar'),
+              ),
           ],
         ),
       ),
     );
     if (origen == null || !mounted) return;
+    if (origen == 'eliminar') {
+      await _eliminarFoto();
+      return;
+    }
+    final src = origen == 'camera'
+        ? ImageSource.camera
+        : ImageSource.gallery;
     final img = await ImagePicker().pickImage(
-        source: origen, maxWidth: 1024, imageQuality: 80);
+        source: src, maxWidth: 1024, imageQuality: 80);
     if (img == null || !mounted) return;
     final dir = await getApplicationDocumentsDirectory();
     final destino = File('${dir.path}/foto_${widget.clienteId}_'
