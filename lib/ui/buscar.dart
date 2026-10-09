@@ -26,6 +26,7 @@ class _BuscarScreenState extends State<BuscarScreen> {
   final _q = TextEditingController();
   List<Map<String, dynamic>> _res = [];
   bool _busco = false;
+  String _filtro = 'todos'; // todos | aldia | vencidos | porvencer | sinfoto
 
   @override
   void initState() {
@@ -34,12 +35,44 @@ class _BuscarScreenState extends State<BuscarScreen> {
   }
 
   Future<void> _buscar() async {
-    final r = await listaClientes(_q.text);
+    var r = await listaClientes(_q.text);
+    // v1.0.15: filtros rápidos para el archivo del gym
+    if (_filtro != 'todos') {
+      r = r.where((c) {
+        final dias = _diasRestantes(c);
+        switch (_filtro) {
+          case 'aldia':
+            return dias > 7;
+          case 'vencidos':
+            return dias < 0;
+          case 'porvencer':
+            return dias >= 0 && dias <= 7;
+          case 'sinfoto':
+            // Sin foto en caché (aproximación)
+            return true; // Se filtra visualmente
+          default:
+            return true;
+        }
+      }).toList();
+    }
     if (mounted) {
       setState(() {
         _res = r;
         _busco = true;
       });
+    }
+  }
+
+  int _diasRestantes(Map<String, dynamic> c) {
+    try {
+      final ph = '${c['pagado_hasta'] ?? ''}';
+      if (ph.length < 10) return 999;
+      final v = DateTime.parse(ph.substring(0, 10));
+      final hoy = DateTime.now();
+      final hoyDia = DateTime(hoy.year, hoy.month, hoy.day);
+      return v.difference(hoyDia).inDays;
+    } catch (_) {
+      return 999;
     }
   }
 
@@ -128,6 +161,23 @@ class _BuscarScreenState extends State<BuscarScreen> {
                       color: Colors.grey, fontSize: 12)),
             ),
           ),
+          // v1.0.15: filtros rápidos
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            padding:
+                const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+            child: Row(
+              children: [
+                _chipFiltro('todos', 'Todos'),
+                const SizedBox(width: 6),
+                _chipFiltro('aldia', '🟢 Al día'),
+                const SizedBox(width: 6),
+                _chipFiltro('porvencer', '🟡 Por vencer'),
+                const SizedBox(width: 6),
+                _chipFiltro('vencidos', '🔴 Vencidos'),
+              ],
+            ),
+          ),
           Expanded(
             child: _res.isEmpty
                 ? Center(
@@ -169,6 +219,19 @@ class _BuscarScreenState extends State<BuscarScreen> {
           ),
         ],
       ),
+    );
+  }
+
+  Widget _chipFiltro(String valor, String etiqueta) {
+    final activo = _filtro == valor;
+    return ChoiceChip(
+      label: Text(etiqueta, style: const TextStyle(fontSize: 12)),
+      selected: activo,
+      visualDensity: VisualDensity.compact,
+      onSelected: (_) {
+        setState(() => _filtro = valor);
+        _buscar();
+      },
     );
   }
 }

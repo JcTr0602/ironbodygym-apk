@@ -545,7 +545,7 @@ class SyncEngine {
     int? serverSeq;
     try {
       final r = await _getAuth(Uri.parse('$_base/rest/v1/sync_estado?id=eq.1'
-          '&select=server_seq,ajustes,usuarios'));
+          '&select=server_seq,ajustes,usuarios,actividad'));
       if (r.statusCode == 200) {
         final rows = jsonDecode(r.body) as List;
         if (rows.isNotEmpty) {
@@ -557,6 +557,11 @@ class SyncEngine {
           if (rows.first['usuarios'] is List) {
             await _db.setMeta('usuarios_apk',
                 jsonEncode(rows.first['usuarios']));
+          }
+          // v1.0.15: feed de actividad reciente
+          if (rows.first['actividad'] is List) {
+            await _db.setMeta('sync_estado_actividad',
+                jsonEncode(rows.first['actividad']));
           }
           serverSeq = rows.first['server_seq'] as int?;
           if (serverSeq != null) {

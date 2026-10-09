@@ -259,6 +259,24 @@ Future<double> pendienteEntrega(int? telegramId) async {
   return total;
 }
 
+/// v1.0.15: total pendiente a recoger por el dueño.
+/// Suma lo que todos los entrenadores tienen pendiente de entregar.
+Future<double> pendienteRecoger() async {
+  double total = 0;
+  for (final p in await LocalDb.instance.allMirror('pagos')) {
+    if ((p['metodo'] as String?) == 'efectivo' &&
+        _esPendiente(p['entregado'])) {
+      total += (p['monto'] as num?)?.toDouble() ?? 0;
+    }
+  }
+  for (final d in await LocalDb.instance.allMirror('pagos_diarios')) {
+    if (_esPendiente(d['entregado'])) {
+      total += (d['total'] as num?)?.toDouble() ?? 0;
+    }
+  }
+  return total;
+}
+
 /// Días restantes de vigencia (negativo si vencido, null si sin pagos).
 int? diasRestantes(String? pagadoHasta) {
   if (pagadoHasta == null || pagadoHasta.length < 10) return null;

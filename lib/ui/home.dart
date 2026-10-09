@@ -14,6 +14,7 @@ import '../sync.dart';
 import '../theme.dart';
 import 'admin.dart';
 import 'ajustes.dart';
+import 'actividad.dart';
 import 'ayuda.dart';
 import 'buscar.dart';
 import 'cola.dart';
@@ -43,7 +44,9 @@ class _HomeScreenState extends State<HomeScreen> {
   int _inscripciones = 0;
   int _pagosMes = 0;
   double _pendiente = 0;
+  double _porRecoger = 0;
   int _porSubir = 0;
+  int _noLeidas = 0;
   DateTime? _lastSync;
   StreamSubscription? _sub;
   final _auth = AuthService();
@@ -102,6 +105,12 @@ class _HomeScreenState extends State<HomeScreen> {
     final pagados = await pagosRealizadosMes();
     final porSubir = await LocalDb.instance.countPendingOps();
     final det = await SyncEngine.instance.detalle();
+    final noLeidas = await actividadNoLeidas();
+    // v1.0.15: el dueño ve lo pendiente a recoger (no a entregar)
+    double porRecoger = 0;
+    if (_auth.isOwner) {
+      porRecoger = await pendienteRecoger();
+    }
     // Aviso "+8h sin subir" (punto 10)
     String? aviso;
     final quiereAviso =
@@ -120,7 +129,9 @@ class _HomeScreenState extends State<HomeScreen> {
         _inscripciones = insc;
         _pagosMes = pagados;
         _pendiente = p;
+        _porRecoger = porRecoger;
         _porSubir = porSubir;
+        _noLeidas = noLeidas;
         _lastSync = det.ultimaPull ?? det.ultimaPush;
         _avisoSync = aviso;
       });
@@ -289,13 +300,20 @@ class _HomeScreenState extends State<HomeScreen> {
                             padding: const EdgeInsets.symmetric(
                                 vertical: 10, horizontal: 12),
                             decoration: BoxDecoration(
-                              color: _pendiente > 0
-                                  ? const Color(0xFFFFE3C2)
-                                  : const Color(0xFFDFF5DF),
+                              color: _auth.isOwner
+                                  // v1.0.15: el dueño ve lo pendiente a recoger
+                                  ? (_porRecoger > 0
+                                      ? const Color(0xFFFFE3C2)
+                                      : const Color(0xFFDFF5DF))
+                                  : (_pendiente > 0
+                                      ? const Color(0xFFFFE3C2)
+                                      : const Color(0xFFDFF5DF)),
                               borderRadius: BorderRadius.circular(12),
                             ),
                             child: Text(
-                              '💰 Pendiente a entregar: ${fmtMonto(_pendiente)} CUP',
+                              _auth.isOwner
+                                  ? '📥 Pendiente a recoger: ${fmtMonto(_porRecoger)} CUP'
+                                  : '💰 Pendiente a entregar: ${fmtMonto(_pendiente)} CUP',
                               style: const TextStyle(
                                   fontSize: 17,
                                   fontWeight: FontWeight.bold),
@@ -321,6 +339,64 @@ class _HomeScreenState extends State<HomeScreen> {
                                   : '✅ Todo sincronizado',
                               style: const TextStyle(fontSize: 14),
                               textAlign: TextAlign.center,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        InkWell(
+                          onTap: () async {
+                            await Navigator.of(context).push(
+                              MaterialPageRoute(
+                                  builder: (_) =>
+                                      const ActividadScreen()),
+                            );
+                            // Al volver, recargar el contador
+                            _cargar();
+                          },
+                          borderRadius: BorderRadius.circular(12),
+                          child: Container(
+                            width: double.infinity,
+                            padding: const EdgeInsets.symmetric(
+                                vertical: 10, horizontal: 12),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFE3F2FD),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: Row(
+                              mainAxisAlignment:
+                                  MainAxisAlignment.center,
+                              children: [
+                                const Text(
+                                  '📋 Actividad reciente',
+                                  style: TextStyle(
+                                      fontSize: 15,
+                                      fontWeight: FontWeight.bold),
+                                ),
+                                if (_noLeidas > 0) ...[
+                                  const SizedBox(width: 8),
+                                  Container(
+                                    padding:
+                                        const EdgeInsets.symmetric(
+                                            horizontal: 8,
+                                            vertical: 2),
+                                    decoration: BoxDecoration(
+                                      color: Colors.red,
+                                      borderRadius:
+                                          BorderRadius.circular(
+                                              12),
+                                    ),
+                                    child: Text(
+                                      '$_noLeidas',
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 12,
+                                        fontWeight:
+                                            FontWeight.bold,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ],
                             ),
                           ),
                         ),
