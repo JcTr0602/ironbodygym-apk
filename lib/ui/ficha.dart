@@ -16,8 +16,10 @@ import '../fotos.dart';
 import '../localdb.dart';
 import '../negocio.dart';
 import '../sync.dart';
+import 'componentes.dart';
 import 'dialogo_pago.dart';
 import 'confirmacion_cobro.dart';
+import 'diseno.dart';
 import 'editor_foto.dart';
 import 'widgets.dart';
 
@@ -838,14 +840,15 @@ class _FichaScreenState extends State<FichaScreen> {
   @override
   Widget build(BuildContext context) {
     final c = _c;
-    final vencido = c != null &&
-        (diasRestantes(c['pagado_hasta'] as String?) ?? 0) < 0;
+    final dias =
+        diasRestantes(c?['pagado_hasta'] as String?) ?? 999999;
+    final vencido = c != null && dias < 0;
+    final nombre = c == null ? '…' : '${c['nombre']}';
     return Scaffold(
       appBar: AppBar(
-        title: Text(c == null ? '…' : '👤 ${c['nombre']}'),
+        title: Text(nombre),
         actions: [
           if (c != null) ...[
-            // Verificar datos contra el servidor (v1.0.10)
             IconButton(
                 tooltip: 'Verificar con servidor',
                 icon: _verificando
@@ -853,11 +856,11 @@ class _FichaScreenState extends State<FichaScreen> {
                         width: 20,
                         height: 20,
                         child: CircularProgressIndicator(
-                            strokeWidth: 2, color: Colors.white))
+                            strokeWidth: 2,
+                            color: Colors.white))
                     : const Icon(Icons.cloud_sync),
-                onPressed: _verificando ? null : _verificarServidor),
-            IconButton(
-                tooltip: 'Editar', icon: const Icon(Icons.edit), onPressed: _editar),
+                onPressed:
+                    _verificando ? null : _verificarServidor),
           ],
         ],
       ),
@@ -866,208 +869,315 @@ class _FichaScreenState extends State<FichaScreen> {
           const SyncBanner(),
           Expanded(
             child: c == null
-                ? const Center(child: CircularProgressIndicator())
+                ? const Center(
+                    child: CircularProgressIndicator())
                 : ListView(
-                    padding: const EdgeInsets.all(16),
+                    padding: const EdgeInsets.all(
+                        AppEspacio.lg),
                     children: [
+                      // Cabecera: foto + nombre + badge
                       Center(
                         child: _foto != null
                             ? GestureDetector(
-                                // Ver foto en grande al tocar (v1.0.11)
-                                onTap: () => _verFotoGrande(),
+                                onTap: () =>
+                                    _verFotoGrande(),
                                 child: ClipRRect(
                                   borderRadius:
-                                      BorderRadius.circular(60),
-                                  child: Image.file(_foto!,
+                                      BorderRadius.circular(
+                                          60),
+                                  child: Image.file(
+                                      _foto!,
                                       width: 120,
                                       height: 120,
                                       fit: BoxFit.cover),
                                 ),
                               )
-                            : const CircleAvatar(
+                            : CircleAvatar(
                                 radius: 60,
-                                child: Text('👤',
-                                    style: TextStyle(fontSize: 48))),
+                                backgroundColor: AppColores
+                                    .naranja
+                                    .withValues(alpha: 0.15),
+                                child: Text(
+                                    _iniciales(nombre),
+                                    style: const TextStyle(
+                                        fontSize: 40,
+                                        fontWeight:
+                                            FontWeight.bold,
+                                        color: AppColores
+                                            .naranja)),
+                              ),
                       ),
+                      const SizedBox(
+                          height: AppEspacio.sm),
                       Center(
                         child: TextButton.icon(
-                          icon: const Text('📷'),
-                          label: const Text('Cambiar foto'),
+                          icon: const Icon(
+                              Icons.camera_alt,
+                              size: 18),
+                          label:
+                              const Text('Cambiar foto'),
                           onPressed: _cambiarFoto,
                         ),
                       ),
-                      const SizedBox(height: 12),
-                      _fila('🪪 Carnet', '${c['carnet'] ?? '—'}'),
-                      if (edadDeCarnet('${c['carnet'] ?? ''}') != null)
-                        _fila('🎂 Edad',
-                            '${edadDeCarnet('${c['carnet']}')} años'),
-                      _fila('📅 Pagado hasta',
-                          fmtFecha(c['pagado_hasta'] as String?)),
-                      _fila('📊 Estado',
-                          textoEstado(c['pagado_hasta'] as String?)),
-                      _fila('📞 Teléfono', '${c['telefono'] ?? '—'}'),
-                      _fila('⚧ Sexo', '${c['sexo'] ?? '—'}'),
-                      _fila('🗓️ Inscripción',
-                          fmtFecha(c['fecha_inscripcion'] as String?)),
-                      _fila('👤 Inscrito por',
-                          _textoInscritoPor(c['registrado_por_nombre'] as String?)),
-                      InkWell(
-                        onTap: _editarNotas,
-                        child: Padding(
-                          padding:
-                              const EdgeInsets.symmetric(vertical: 8),
-                          child: Row(
-                            crossAxisAlignment:
-                                CrossAxisAlignment.start,
-                            children: [
-                              const Expanded(
-                                  child: Text('📝 Notas')),
-                              Expanded(
-                                flex: 2,
-                                child: Text(
-                                  (c['notas'] as String?)
-                                          ?.isNotEmpty ==
-                                      true
-                                      ? '${c['notas']}'
-                                      : 'Toca para agregar…',
-                                  style: const TextStyle(
-                                      fontWeight: FontWeight.bold),
-                                  textAlign: TextAlign.right,
+                      Center(
+                        child: Text(nombre,
+                            style: AppTexto.displayPequeno),
+                      ),
+                      const SizedBox(
+                          height: AppEspacio.sm),
+                      Center(
+                          child: BadgeEstado.desdeDias(
+                              dias)),
+                      const SizedBox(
+                          height: AppEspacio.lg),
+                      // Acciones principales
+                      Row(
+                        children: [
+                          Expanded(
+                            child: BotonPrimario(
+                              texto: 'Registrar pago',
+                              icono: Icons.payments,
+                              onPressed: _pagar,
+                            ),
+                          ),
+                          const SizedBox(
+                              width: AppEspacio.sm),
+                          Expanded(
+                            child: BotonSecundario(
+                              texto: 'Editar',
+                              icono: Icons.edit,
+                              onPressed: _editar,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(
+                          height: AppEspacio.lg),
+                      // Información personal
+                      Tarjeta(
+                        child: Column(
+                          crossAxisAlignment:
+                              CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                                'Información personal',
+                                style: AppTexto.titulo),
+                            const SizedBox(
+                                height: AppEspacio.sm),
+                            _filaInfo(
+                                Icons.badge,
+                                'Carnet',
+                                '${c['carnet'] ?? '—'}'),
+                            if (edadDeCarnet(
+                                    '${c['carnet'] ?? ''}') !=
+                                null)
+                              _filaInfo(
+                                  Icons.cake,
+                                  'Edad',
+                                  '${edadDeCarnet('${c['carnet']}')} años'),
+                            _filaInfo(
+                                Icons.person,
+                                'Sexo',
+                                '${c['sexo'] ?? '—'}'),
+                            _filaInfo(
+                                Icons.phone,
+                                'Teléfono',
+                                '${c['telefono'] ?? '—'}'),
+                            _filaInfo(
+                                Icons.person_add,
+                                'Inscrito por',
+                                _textoInscritoPor(c[
+                                        'registrado_por_nombre']
+                                    as String?)),
+                            InkWell(
+                              onTap: _editarNotas,
+                              borderRadius:
+                                  BorderRadius.circular(
+                                      AppRadio.sm),
+                              child: Padding(
+                                padding:
+                                    const EdgeInsets.symmetric(
+                                        vertical:
+                                            AppEspacio.sm),
+                                child: Row(
+                                  children: [
+                                    const Icon(
+                                        Icons.note,
+                                        color: AppColores
+                                            .naranja,
+                                        size: 20),
+                                    const SizedBox(
+                                        width:
+                                            AppEspacio.md),
+                                    const Expanded(
+                                        child: Text(
+                                            'Notas',
+                                            style: AppTexto
+                                                .cuerpo)),
+                                    Expanded(
+                                      flex: 2,
+                                      child: Text(
+                                        (c['notas']
+                                                        as String?)
+                                                    ?.isNotEmpty ==
+                                                true
+                                            ? '${c['notas']}'
+                                            : 'Toca para agregar…',
+                                        style: AppTexto.cuerpo
+                                            .copyWith(
+                                                fontWeight:
+                                                    FontWeight
+                                                        .w600),
+                                        textAlign:
+                                            TextAlign.right,
+                                      ),
+                                    ),
+                                  ],
                                 ),
                               ),
-                            ],
-                          ),
+                            ),
+                          ],
                         ),
                       ),
-                      const Divider(),
-                      // Resumen 360 (v1.0.7): totales del cliente
-                      if (_pagos.isNotEmpty)
-                        Builder(builder: (context) {
-                          final total = _pagos.fold<double>(
-                              0, (s, p) => s + ((p['monto'] as num?)?.toDouble() ?? 0));
-                          final metodos = <String, int>{};
-                          for (final p in _pagos) {
-                            final m = (p['metodo'] as String?) ?? 'efectivo';
-                            metodos[m] = (metodos[m] ?? 0) + 1;
-                          }
-                          final metodoTop = metodos.entries.isEmpty
-                              ? ''
-                              : metodos.entries
-                                  .reduce((a, b) => a.value >= b.value ? a : b)
-                                  .key;
-                          return Container(
-                            padding: const EdgeInsets.all(12),
-                            margin: const EdgeInsets.only(bottom: 12),
-                            decoration: BoxDecoration(
-                              color: Colors.orange.shade50,
-                              borderRadius: BorderRadius.circular(12),
-                              border: Border.all(color: Colors.orange.shade200),
-                            ),
-                            child: Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceAround,
-                              children: [
-                                Column(
-                                  children: [
-                                    Text('${_pagos.length}',
-                                        style: const TextStyle(
-                                            fontSize: 22,
-                                            fontWeight: FontWeight.bold,
-                                            color: Color(0xFFE8821A))),
-                                    const Text('pagos',
-                                        style: TextStyle(fontSize: 12)),
-                                  ],
-                                ),
-                                Column(
-                                  children: [
-                                    Text(total.toStringAsFixed(0),
-                                        style: const TextStyle(
-                                            fontSize: 22,
-                                            fontWeight: FontWeight.bold,
-                                            color: Color(0xFFE8821A))),
-                                    const Text('CUP total',
-                                        style: TextStyle(fontSize: 12)),
-                                  ],
-                                ),
-                                if (metodoTop.isNotEmpty)
-                                  Column(
-                                    children: [
-                                      Text(metodoTop == 'efectivo' ? '💵' : '📱',
-                                          style: const TextStyle(fontSize: 22)),
-                                      const Text('prefiere',
-                                          style: TextStyle(fontSize: 12)),
-                                    ],
-                                  ),
-                              ],
-                            ),
-                          );
-                        }),
-                      const Text('Historial de pagos:',
-                          style: TextStyle(fontWeight: FontWeight.bold)),
-                      const SizedBox(height: 8),
-                      if (_pagos.isEmpty)
-                        const Text('Sin pagos registrados',
-                            style: TextStyle(color: Colors.grey)),
-                      for (final p in _pagos)
-                        ListTile(
-                          dense: true,
-                          title: Text(
-                              '${fmtMonto(p['monto'])} CUP — ${p['metodo'] ?? ''}'),
-                          subtitle: Text(
-                              '${fmtFecha(p['fecha'] as String?)} · ${p['periodo'] ?? 'mensual'}'),
-                          trailing: AuthService().isAdmin
-                              ? IconButton(
-                                  tooltip: 'Corregir pago',
-                                  icon: const Icon(Icons.tune,
-                                      size: 20),
-                                  onPressed: () => _corregirPago(p),
-                                )
-                              : null,
+                      const SizedBox(
+                          height: AppEspacio.md),
+                      // Membresía
+                      Tarjeta(
+                        child: Column(
+                          crossAxisAlignment:
+                              CrossAxisAlignment.start,
+                          children: [
+                            const Text('Membresía',
+                                style: AppTexto.titulo),
+                            const SizedBox(
+                                height: AppEspacio.sm),
+                            _filaInfo(
+                                Icons.calendar_today,
+                                'Pagado hasta',
+                                fmtFecha(c['pagado_hasta']
+                                    as String?)),
+                            _filaInfo(
+                                Icons.event,
+                                'Estado',
+                                textoEstado(c['pagado_hasta']
+                                    as String?)),
+                            _filaInfo(
+                                Icons.date_range,
+                                'Inscripción',
+                                fmtFecha(c[
+                                        'fecha_inscripcion']
+                                    as String?)),
+                          ],
                         ),
-                      const SizedBox(height: 16),
+                      ),
+                      const SizedBox(
+                          height: AppEspacio.md),
+                      // Resumen 360
+                      if (_pagos.isNotEmpty)
+                        _resumen360(),
+                      // Historial de pagos
+                      Tarjeta(
+                        child: Column(
+                          crossAxisAlignment:
+                              CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                                'Historial de pagos',
+                                style: AppTexto.titulo),
+                            const SizedBox(
+                                height: AppEspacio.sm),
+                            if (_pagos.isEmpty)
+                              const Text(
+                                  'Sin pagos registrados',
+                                  style: TextStyle(
+                                      color:
+                                          Colors.grey)),
+                            for (final p in _pagos)
+                              ListTile(
+                                dense: true,
+                                contentPadding:
+                                    EdgeInsets.zero,
+                                title: Text(
+                                    '${fmtMonto(p['monto'])} CUP — ${p['metodo'] ?? ''}',
+                                    style:
+                                        AppTexto.cuerpo),
+                                subtitle: Text(
+                                    '${fmtFecha(p['fecha'] as String?)} · ${p['periodo'] ?? 'mensual'}',
+                                    style: AppTexto
+                                        .secundario),
+                                trailing:
+                                    AuthService().isAdmin
+                                        ? IconButton(
+                                            tooltip:
+                                                'Corregir pago',
+                                            icon: const Icon(
+                                                Icons.tune,
+                                                size: 20),
+                                            onPressed: () =>
+                                                _corregirPago(
+                                                    p),
+                                          )
+                                        : null,
+                              ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(
+                          height: AppEspacio.md),
+                      // Acciones secundarias
                       if (vencido)
-                        SizedBox(
-                          width: double.infinity,
-                          child: ElevatedButton.icon(
-                            icon: const Text('🔄'),
-                            label: const Text(
+                        Padding(
+                          padding:
+                              const EdgeInsets.only(
+                                  bottom: AppEspacio.sm),
+                          child: BotonSecundario(
+                            texto:
                                 'Renovación rápida (1 mes)',
-                                style: TextStyle(fontSize: 16)),
+                            icono: Icons.refresh,
                             onPressed: _renovar,
                           ),
                         ),
-                      if (vencido) const SizedBox(height: 8),
-                      SizedBox(
-                        width: double.infinity,
-                        child: ElevatedButton(
-                          onPressed: _pagar,
-                          child: const Text('💰 Registrar pago',
-                              style: TextStyle(fontSize: 17)),
-                        ),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: OutlinedButton.icon(
+                              icon: Icon(
+                                  (_c?['estado']
+                                              as String?) ==
+                                          'congelado'
+                                      ? Icons.wb_sunny
+                                      : Icons.ac_unit,
+                                  size: 18),
+                              label: Text(
+                                  (_c?['estado']
+                                              as String?) ==
+                                          'congelado'
+                                      ? 'Descongelar'
+                                      : 'Congelar'),
+                              onPressed: _congelar,
+                            ),
+                          ),
+                          const SizedBox(
+                              width: AppEspacio.sm),
+                          Expanded(
+                            child: OutlinedButton.icon(
+                              icon: const Icon(
+                                  Icons.delete_outline,
+                                  size: 18,
+                                  color:
+                                      AppColores.error),
+                              label: const Text(
+                                  'A papelera',
+                                  style: TextStyle(
+                                      color: AppColores
+                                          .error)),
+                              onPressed: _aPapelera,
+                            ),
+                          ),
+                        ],
                       ),
-                      const SizedBox(height: 8),
-                      SizedBox(
-                        width: double.infinity,
-                        child: OutlinedButton.icon(
-                          icon: Text(
-                              (_c?['estado'] as String?) == 'congelado'
-                                  ? '☀️'
-                                  : '❄️'),
-                          label: Text(
-                              (_c?['estado'] as String?) == 'congelado'
-                                  ? 'Descongelar membresía'
-                                  : 'Congelar membresía'),
-                          onPressed: _congelar,
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      SizedBox(
-                        width: double.infinity,
-                        child: OutlinedButton.icon(
-                          icon: const Text('🗑️'),
-                          label: const Text('Enviar a papelera'),
-                          onPressed: _aPapelera,
-                        ),
-                      ),
+                      const SizedBox(
+                          height: AppEspacio.lg),
                     ],
                   ),
           ),
@@ -1076,14 +1186,110 @@ class _FichaScreenState extends State<FichaScreen> {
     );
   }
 
-  Widget _fila(String etiqueta, String valor) {
+  /// Iniciales para el placeholder de foto.
+  String _iniciales(String nombre) {
+    final partes =
+        nombre.trim().split(RegExp(r'\s+'));
+    var ini = '';
+    if (partes.isNotEmpty && partes[0].isNotEmpty) {
+      ini = partes[0][0].toUpperCase();
+      if (partes.length > 1 &&
+          partes.last.isNotEmpty) {
+        ini += partes.last[0].toUpperCase();
+      }
+    }
+    return ini.isEmpty ? '?' : ini;
+  }
+
+  /// Fila de información con icono.
+  Widget _filaInfo(
+      IconData icono, String etiqueta, String valor) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.symmetric(
+          vertical: AppEspacio.sm),
       child: Row(
         children: [
-          Expanded(child: Text(etiqueta)),
-          Text(valor, style: const TextStyle(fontWeight: FontWeight.bold)),
+          Icon(icono,
+              color: AppColores.naranja, size: 20),
+          const SizedBox(width: AppEspacio.md),
+          Expanded(
+              child: Text(etiqueta,
+                  style: AppTexto.cuerpo)),
+          Text(valor,
+              style: AppTexto.cuerpo.copyWith(
+                  fontWeight: FontWeight.w600),
+              textAlign: TextAlign.right),
         ],
+      ),
+    );
+  }
+
+  /// Resumen 360: totales del cliente.
+  Widget _resumen360() {
+    final total = _pagos.fold<double>(
+        0,
+        (s, p) =>
+            s +
+            ((p['monto'] as num?)?.toDouble() ??
+                0));
+    final metodos = <String, int>{};
+    for (final p in _pagos) {
+      final m = (p['metodo'] as String?) ?? 'efectivo';
+      metodos[m] = (metodos[m] ?? 0) + 1;
+    }
+    final metodoTop = metodos.entries.isEmpty
+        ? ''
+        : metodos.entries
+            .reduce(
+                (a, b) => a.value >= b.value ? a : b)
+            .key;
+    return Padding(
+      padding:
+          const EdgeInsets.only(bottom: AppEspacio.md),
+      child: Tarjeta(
+        color:
+            AppColores.naranja.withValues(alpha: 0.08),
+        child: Row(
+          mainAxisAlignment:
+              MainAxisAlignment.spaceAround,
+          children: [
+            Column(
+              children: [
+                Text('${_pagos.length}',
+                    style: AppTexto.displayPequeno
+                        .copyWith(
+                            color:
+                                AppColores.naranja)),
+                const Text('pagos',
+                    style: AppTexto.secundario),
+              ],
+            ),
+            Column(
+              children: [
+                Text(total.toStringAsFixed(0),
+                    style: AppTexto.displayPequeno
+                        .copyWith(
+                            color:
+                                AppColores.naranja)),
+                const Text('CUP total',
+                    style: AppTexto.secundario),
+              ],
+            ),
+            if (metodoTop.isNotEmpty)
+              Column(
+                children: [
+                  Icon(
+                      metodoTop == 'efectivo'
+                          ? Icons.payments
+                          : Icons.smartphone,
+                      color: AppColores.naranja,
+                      size: 28),
+                  const Text('prefiere',
+                      style: AppTexto.secundario),
+                ],
+              ),
+          ],
+        ),
       ),
     );
   }

@@ -8,8 +8,10 @@ import '../localdb.dart';
 import '../negocio.dart';
 import '../sync.dart';
 import 'buscar.dart';
+import 'componentes.dart';
 import 'confirmacion_cobro.dart';
 import 'dialogo_pago.dart';
+import 'diseno.dart';
 import 'ficha.dart';
 import 'widgets.dart';
 
@@ -117,15 +119,15 @@ class _ListasScreenState extends State<ListasScreen>
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('📋 Listas'),
+        title: const Text('Listas'),
         bottom: TabBar(
           controller: _tab,
           isScrollable: true,
           tabs: [
-            Tab(text: '📅 Hoy (${_hoy.length})'),
-            Tab(text: '🔜 Por vencer (${_porVencer.length})'),
-            Tab(text: '⏳ -30d (${_menos30.length})'),
-            Tab(text: '🚨 +30d (${_mas30.length})'),
+            Tab(text: 'Hoy (${_hoy.length})'),
+            Tab(text: 'Por vencer (${_porVencer.length})'),
+            Tab(text: 'Atrasados -30d (${_menos30.length})'),
+            Tab(text: 'Atrasados +30d (${_mas30.length})'),
           ],
         ),
       ),
@@ -162,14 +164,17 @@ class _ListasScreenState extends State<ListasScreen>
             child: TabBarView(
               controller: _tab,
               children: [
-                _lista(_ordenar(_hoy),
-                    '🎉 Nadie vence hoy. Todo al día.'),
+                _lista(_ordenar(_hoy), Icons.celebration,
+                    'Nadie vence hoy', 'Todo al día.'),
                 _lista(_ordenar(_porVencer),
-                    '🎉 Nadie por vencer en 3 días.'),
+                    Icons.celebration, 'Nadie por vencer',
+                    'Nada en los próximos 3 días.'),
                 _lista(_ordenar(_menos30),
-                    '🎉 Sin atrasados de menos de un mes.'),
+                    Icons.celebration, 'Sin atrasados',
+                    'Nada de menos de un mes.'),
                 _lista(_ordenar(_mas30),
-                    '🎉 Sin atrasados de más de un mes.'),
+                    Icons.celebration, 'Sin atrasados',
+                    'Nada de más de un mes.'),
               ],
             ),
           ),
@@ -178,12 +183,22 @@ class _ListasScreenState extends State<ListasScreen>
     );
   }
 
-  Widget _lista(List<Map<String, dynamic>> rows, String vacio) {
-    if (rows.isEmpty) return Center(child: Text(vacio));
+  Widget _lista(List<Map<String, dynamic>> rows, IconData iconoVacio,
+      String tituloVacio, String subtituloVacio) {
+    if (rows.isEmpty) {
+      return EstadoVacio(
+          icono: iconoVacio,
+          titulo: tituloVacio,
+          subtitulo: subtituloVacio);
+    }
     return RefreshIndicator(
       onRefresh: _cargar,
-      child: ListView.builder(
+      child: ListView.separated(
         itemCount: rows.length,
+        separatorBuilder: (_, __) => Divider(
+            height: 1,
+            indent: 84,
+            color: AppColores.borde(context)),
         itemBuilder: (ctx, i) {
           final c = rows[i];
           final id = (c['id'] as int?) ?? 0;
@@ -197,33 +212,45 @@ class _ListasScreenState extends State<ListasScreen>
             trailing: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                // Botón avisar (v1.0.8, toggle en v1.1)
+                // Botón avisar (toggle)
                 FutureBuilder<String?>(
                   future: LocalDb.instance.getAvisado(id),
                   builder: (ctx, snap) {
                     final avisado = snap.data != null;
-                    return TextButton(
-                      child: Text(avisado ? '✅' : '📢',
-                          style: const TextStyle(fontSize: 18)),
+                    return IconButton(
+                      icon: Icon(
+                          avisado
+                              ? Icons.check_circle
+                              : Icons
+                                  .notifications_outlined,
+                          color: avisado
+                              ? AppColores.exito
+                              : Colors.grey),
+                      tooltip: avisado
+                          ? 'Avisado (toca para quitar)'
+                          : 'Marcar como avisado',
                       onPressed: () async {
                         if (avisado) {
-                          // Deshacer: quitar la marca
-                          await LocalDb.instance.desmarcarAvisado(id);
+                          await LocalDb.instance
+                              .desmarcarAvisado(id);
                           if (mounted) {
-                            ScaffoldMessenger.of(context).showSnackBar(
+                            ScaffoldMessenger.of(context)
+                                .showSnackBar(
                               SnackBar(
                                   content: Text(
-                                      '↩️ Marca de avisado quitada para ${c['nombre']}')),
+                                      'Marca de avisado quitada para ${c['nombre']}')),
                             );
                             setState(() {});
                           }
                         } else {
-                          await LocalDb.instance.marcarAvisado(id);
+                          await LocalDb.instance
+                              .marcarAvisado(id);
                           if (mounted) {
-                            ScaffoldMessenger.of(context).showSnackBar(
+                            ScaffoldMessenger.of(context)
+                                .showSnackBar(
                               SnackBar(
                                   content: Text(
-                                      '📢 ${c['nombre']} marcado como avisado')),
+                                      '${c['nombre']} marcado como avisado')),
                             );
                             setState(() {});
                           }
@@ -232,13 +259,26 @@ class _ListasScreenState extends State<ListasScreen>
                     );
                   },
                 ),
-                ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 10, vertical: 6),
+                // Botón cobro rápido (naranja circular)
+                Container(
+                  width: 44,
+                  height: 44,
+                  decoration: BoxDecoration(
+                    gradient:
+                        AppColores.gradienteNaranja,
+                    shape: BoxShape.circle,
+                    boxShadow:
+                        AppSombra.botonPrimario,
                   ),
-                  child: const Text('💰'),
-                  onPressed: () => _pagoRapido(c),
+                  child: InkWell(
+                    customBorder:
+                        const CircleBorder(),
+                    onTap: () => _pagoRapido(c),
+                    child: const Icon(
+                        Icons.payments,
+                        color: Colors.white,
+                        size: 22),
+                  ),
                 ),
               ],
             ),

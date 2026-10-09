@@ -10,6 +10,8 @@ import 'package:flutter/material.dart';
 import '../fotos.dart';
 import '../negocio.dart';
 import '../sync.dart';
+import 'componentes.dart';
+import 'diseno.dart';
 import 'ficha.dart';
 import 'widgets.dart';
 
@@ -359,12 +361,6 @@ class _FilaClienteState extends State<_FilaCliente> {
     final c = widget.cliente;
     final ph = c['pagado_hasta'] as String?;
     final d = diasRestantes(ph);
-    // Colores consistentes: vencido rojo, por vencer amarillo, al día verde
-    final color = d == null
-        ? Colors.grey
-        : (d < 0
-            ? Colors.red
-            : (d <= 7 ? Colors.amber.shade700 : Colors.green));
     // Iniciales para el placeholder (ej: "Juan Pérez" -> "JP")
     final nombre = '${c['nombre']}';
     final partes = nombre.trim().split(RegExp(r'\s+'));
@@ -376,29 +372,70 @@ class _FilaClienteState extends State<_FilaCliente> {
       }
     }
     if (iniciales.isEmpty) iniciales = '?';
-    return ListTile(
-      leading: widget.leading ??
-          (_foto != null
-              ? ClipRRect(
-                  borderRadius: BorderRadius.circular(20),
-                  child: Image.file(_foto!,
-                      width: 40, height: 40, fit: BoxFit.cover),
-                )
-              : CircleAvatar(
-                  backgroundColor: const Color(0xFFE8821A).withValues(alpha: 0.2),
-                  child: Text(iniciales,
-                      style: const TextStyle(
-                          color: Color(0xFFE8821A),
-                          fontWeight: FontWeight.bold,
-                          fontSize: 16)),
-                )),
-      title: Text('${c['nombre']}'),
-      subtitle: Text(textoEstado(ph),
-          style: TextStyle(color: color, fontSize: 12)),
-      trailing: widget.trailing ??
-          const Icon(Icons.chevron_right),
+    // v1.1: badge según días restantes (con icono + texto, nunca solo color)
+    final dias = d ?? 999999;
+    final badge = BadgeEstado.desdeDias(dias);
+    final textoDias = d == null
+        ? 'Sin fecha'
+        : dias < 0
+            ? 'Vencido hace ${dias.abs()} días'
+            : dias == 0
+                ? 'Vence hoy'
+                : '$dias días restantes';
+    return InkWell(
       onTap: widget.onTap,
       onLongPress: widget.onLongPress,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(
+            horizontal: AppEspacio.lg, vertical: AppEspacio.sm),
+        child: Row(
+          children: [
+            // Foto
+            widget.leading ??
+                (_foto != null
+                    ? ClipRRect(
+                        borderRadius: BorderRadius.circular(28),
+                        child: Image.file(_foto!,
+                            width: 56,
+                            height: 56,
+                            fit: BoxFit.cover),
+                      )
+                    : CircleAvatar(
+                        radius: 28,
+                        backgroundColor: AppColores.naranja
+                            .withValues(alpha: 0.15),
+                        child: Text(iniciales,
+                            style: const TextStyle(
+                                color: AppColores.naranja,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 20)),
+                      )),
+            const SizedBox(width: AppEspacio.md),
+            // Nombre + badge + días
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(nombre,
+                      style: AppTexto.subtitulo.copyWith(
+                          fontSize: 16)),
+                  const SizedBox(height: 4),
+                  badge,
+                  const SizedBox(height: 2),
+                  Text(textoDias,
+                      style: AppTexto.secundario.copyWith(
+                          color: AppColores.textoSecundario(
+                              context))),
+                ],
+              ),
+            ),
+            // Acción rápida (o chevron por defecto)
+            widget.trailing ??
+                const Icon(Icons.chevron_right,
+                    color: Colors.grey),
+          ],
+        ),
+      ),
     );
   }
 }
