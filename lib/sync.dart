@@ -169,6 +169,32 @@ class SyncEngine {
     _status.add(_current);
   }
 
+  /// Verifica si hay internet real resolviendo un dominio confiable.
+  /// Timeout corto para no bloquear la sincronización.
+  ///
+  /// v1.0.14: en Cuba el DNS puede fallar solo para ciertos dominios
+  /// mientras WhatsApp sigue funcionando. Ante un error de red, se verifica
+  /// con google.com antes de declarar "sin conexión".
+  Future<bool> _hayInternet() async {
+    try {
+      final res = await InternetAddress.lookup('google.com')
+          .timeout(const Duration(seconds: 5));
+      return res.isNotEmpty;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Versión del error visible para el usuario: si parece "sin conexión"
+  /// pero sí hay internet, es que el servidor no responde.
+  Future<String> _describeErrorVisible(Object e) async {
+    final msg = _describeError(e);
+    if (msg == 'Sin conexión a internet' && await _hayInternet()) {
+      return 'No se pudo contactar el servidor (reintenta)';
+    }
+    return msg;
+  }
+
   /// Describe un error de red en lenguaje del entrenador (punto 20):
   /// distingue "sin internet" de "error del servidor".
   String _describeError(Object e) {
@@ -243,8 +269,9 @@ class SyncEngine {
       _sesionVencida();
       _emit(SyncPhase.idle);
     } catch (e) {
-      await _db.setMeta('last_sync_error', _describeError(e));
-      _emit(SyncPhase.error, error: _describeError(e));
+      final msgVisible = await _describeErrorVisible(e);
+      await _db.setMeta('last_sync_error', msgVisible);
+      _emit(SyncPhase.error, error: msgVisible);
       await Future.delayed(const Duration(seconds: 2));
       _emit(SyncPhase.idle);
     } finally {
@@ -282,7 +309,7 @@ class SyncEngine {
       _emit(SyncPhase.idle);
       rethrow;
     } catch (e) {
-      _emit(SyncPhase.error, error: _describeError(e));
+      _emit(SyncPhase.error, error: await _describeErrorVisible(e));
       await Future.delayed(const Duration(seconds: 2));
       _emit(SyncPhase.idle);
       rethrow;
@@ -333,7 +360,7 @@ class SyncEngine {
       _emit(SyncPhase.idle);
       rethrow;
     } catch (e) {
-      _emit(SyncPhase.error, error: _describeError(e));
+      _emit(SyncPhase.error, error: await _describeErrorVisible(e));
       await Future.delayed(const Duration(seconds: 2));
       _emit(SyncPhase.idle);
       rethrow;
