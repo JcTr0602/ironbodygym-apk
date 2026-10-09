@@ -725,6 +725,234 @@ Future<List<Map<String, dynamic>>> pendientePorEntrenador() async {
 }
 
 /// Ingresos del mes calendario actual (espejo `pagos` + diarios).
+/// v1.0.15: ingresos del mes anterior (para comparativa).
+Future<double> ingresosMesAnterior() async {
+  final n = DateTime.now();
+  var mes = n.month - 1;
+  var anio = n.year;
+  if (mes < 1) {
+    mes = 12;
+    anio--;
+  }
+  final pref = '${anio.toString().padLeft(4, '0')}-'
+      '${mes.toString().padLeft(2, '0')}';
+  double t = 0;
+  for (final p in await LocalDb.instance.allMirror('pagos')) {
+    if ('${p['fecha'] ?? ''}'.startsWith(pref)) {
+      t += (p['monto'] as num?)?.toDouble() ?? 0;
+    }
+  }
+  for (final d in await LocalDb.instance.allMirror('pagos_diarios')) {
+    if ('${d['fecha'] ?? ''}'.startsWith(pref)) {
+      t += (d['total'] as num?)?.toDouble() ?? 0;
+    }
+  }
+  return t;
+}
+
+/// v1.0.15: desglose de ingresos por método (efectivo vs transferencia).
+Future<Map<String, double>> ingresosPorMetodo() async {
+  final n = DateTime.now();
+  final pref = '${n.year.toString().padLeft(4, '0')}-'
+      '${n.month.toString().padLeft(2, '0')}';
+  double efectivo = 0, transferencia = 0;
+  for (final p in await LocalDb.instance.allMirror('pagos')) {
+    if ('${p['fecha'] ?? ''}'.startsWith(pref)) {
+      final m = (p['monto'] as num?)?.toDouble() ?? 0;
+      if ('${p['metodo']}' == 'transferencia') {
+        transferencia += m;
+      } else {
+        efectivo += m;
+      }
+    }
+  }
+  for (final d in await LocalDb.instance.allMirror('pagos_diarios')) {
+    if ('${d['fecha'] ?? ''}'.startsWith(pref)) {
+      efectivo += (d['total'] as num?)?.toDouble() ?? 0;
+    }
+  }
+  return {'efectivo': efectivo, 'transferencia': transferencia};
+}
+
+/// v1.0.15: desglose mensualidades vs pago diario.
+Future<Map<String, double>> ingresosPorTipo() async {
+  final n = DateTime.now();
+  final pref = '${n.year.toString().padLeft(4, '0')}-'
+      '${n.month.toString().padLeft(2, '0')}';
+  double mensual = 0, diario = 0;
+  for (final p in await LocalDb.instance.allMirror('pagos')) {
+    if ('${p['fecha'] ?? ''}'.startsWith(pref)) {
+      mensual += (p['monto'] as num?)?.toDouble() ?? 0;
+    }
+  }
+  for (final d in await LocalDb.instance.allMirror('pagos_diarios')) {
+    if ('${d['fecha'] ?? ''}'.startsWith(pref)) {
+      diario += (d['total'] as num?)?.toDouble() ?? 0;
+    }
+  }
+  return {'mensual': mensual, 'diario': diario};
+}
+
+/// v1.0.15: proyección de cierre de mes.
+Future<double> proyeccionMes() async {
+  final n = DateTime.now();
+  final dia = n.day;
+  final diasMes = DateTime(n.year, n.month + 1, 0).day;
+  if (dia < 1) return 0;
+  final actual = await ingresosMes();
+  return actual / dia * diasMes;
+}
+
+/// v1.0.15: mejor y peor día del mes.
+Future<Map<String, Map<String, dynamic>>> mejorPeorDia() async {
+  final n = DateTime.now();
+  final pref = '${n.year.toString().padLeft(4, '0')}-'
+      '${n.month.toString().padLeft(2, '0')}';
+  final porDia = <String, double>{};
+  for (final p in await LocalDb.instance.allMirror('pagos')) {
+    final f = '${p['fecha'] ?? ''}';
+    if (f.startsWith(pref) && f.length >= 10) {
+      final dia = f.substring(0, 10);
+      porDia[dia] =
+          (porDia[dia] ?? 0) + ((p['monto'] as num?)?.toDouble() ?? 0);
+    }
+  }
+  for (final d in await LocalDb.instance.allMirror('pagos_diarios')) {
+    final f = '${d['fecha'] ?? ''}';
+    if (f.startsWith(pref) && f.length >= 10) {
+      final dia = f.substring(0, 10);
+      porDia[dia] =
+          (porDia[dia] ?? 0) + ((d['total'] as num?)?.toDouble() ?? 0);
+    }
+  }
+  if (porDia.isEmpty) return {};
+  var mejor = porDia.entries.first;
+  var peor = porDia.entries.first;
+  for (final e in porDia.entries) {
+    if (e.value > mejor.value) mejor = e;
+    if (e.value < peor.value) peor = e;
+  }
+  return {
+    'mejor': {'dia': mejor.key, 'monto': mejor.value},
+    'peor': {'dia': peor.key, 'monto': peor.value},
+  };
+}
+
+/// v1.0.15: clientes nuevos este mes.
+Future<int> nuevosEsteMes() async {
+  final n = DateTime.now();
+  final pref = '${n.year.toString().padLeft(4, '0')}-'
+      '${n.month.toString().padLeft(2, '0')}';
+  int c = 0;
+  for (final cl in await LocalDb.instance.allMirror('clientes')) {
+    final f = '${cl['creado'] ?? cl['fecha_inscripcion'] ?? ''}';
+    if (f.startsWith(pref)) c++;
+  }
+  return c;
+}
+
+/// v1.0.15: clientes por vencer en 7 días.
+Future<List<Map<String, dynamic>>> porVencer7Dias() async {
+  final hoy = DateTime.now();
+  final hoyDia = DateTime(hoy.year, hoy.month, hoy.day);
+  final limite = hoyDia.add(const Duration(days: 7));
+  final res = <Map<String, dynamic>>[];
+  for (final c in await LocalDb.instance.allMirror('clientes')) {
+    try {
+      final ph = '${c['pagado_hasta'] ?? ''}';
+      if (ph.length < 10) continue;
+      final v = DateTime.parse(ph.substring(0, 10));
+      if (v.isAfter(hoyDia.subtract(const Duration(days: 1))) &&
+          !v.isAfter(limite)) {
+        res.add(c);
+      }
+    } catch (_) {}
+  }
+  res.sort((a, b) => '${a['pagado_hasta']}'.compareTo('${b['pagado_hasta']}'));
+  return res;
+}
+
+/// v1.0.15: ingresos últimos 30 días (para gráfico extendido).
+Future<List<Map<String, dynamic>>> ingresosUltimos30Dias() async {
+  final hoy = DateTime.now();
+  final res = <Map<String, dynamic>>[];
+  String iso(DateTime d) => '${d.year.toString().padLeft(4, '0')}-'
+      '${d.month.toString().padLeft(2, '0')}-'
+      '${d.day.toString().padLeft(2, '0')}';
+  const dias = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'];
+  for (var i = 29; i >= 0; i--) {
+    final dia = hoy.subtract(Duration(days: i));
+    final diaIso = iso(dia);
+    double t = 0;
+    for (final p in await LocalDb.instance.allMirror('pagos')) {
+      final f = '${p['fecha'] ?? ''}';
+      if (f.length >= 10 && f.substring(0, 10) == diaIso) {
+        t += (p['monto'] as num?)?.toDouble() ?? 0;
+      }
+    }
+    for (final d in await LocalDb.instance.allMirror('pagos_diarios')) {
+      final f = '${d['fecha'] ?? ''}';
+      if (f.length >= 10 && f.substring(0, 10) == diaIso) {
+        t += (d['total'] as num?)?.toDouble() ?? 0;
+      }
+    }
+    res.add({
+      'dia': dias[dia.weekday - 1],
+      'fecha': diaIso,
+      'monto': t,
+    });
+  }
+  return res;
+}
+
+/// v1.0.15: ranking de entrenadores por cobros del mes.
+Future<List<Map<String, dynamic>>> rankingEntrenadores() async {
+  final n = DateTime.now();
+  final pref = '${n.year.toString().padLeft(4, '0')}-'
+      '${n.month.toString().padLeft(2, '0')}';
+  final porEntrenador = <String, double>{};
+  final nombres = <String, String>{};
+  for (final p in await LocalDb.instance.allMirror('pagos')) {
+    if ('${p['fecha'] ?? ''}'.startsWith(pref)) {
+      final ent = '${p['entrenador'] ?? p['creado_por'] ?? '?'}';
+      porEntrenador[ent] =
+          (porEntrenador[ent] ?? 0) + ((p['monto'] as num?)?.toDouble() ?? 0);
+    }
+  }
+  for (final d in await LocalDb.instance.allMirror('pagos_diarios')) {
+    if ('${d['fecha'] ?? ''}'.startsWith(pref)) {
+      final ent = '${d['entrenador'] ?? d['creado_por'] ?? '?'}';
+      porEntrenador[ent] =
+          (porEntrenador[ent] ?? 0) + ((d['total'] as num?)?.toDouble() ?? 0);
+    }
+  }
+  final res = porEntrenador.entries
+      .map((e) => {
+            'entrenador': e.key,
+            'nombre': nombres[e.key] ?? e.key,
+            'total': e.value,
+          })
+      .toList();
+  res.sort(
+      (a, b) => (b['total'] as double).compareTo(a['total'] as double));
+  return res;
+}
+
+/// v1.0.15: clientes inactivos (pagado_hasta vencido hace 90+ días).
+Future<int> inactivosCount() async {
+  final limite = DateTime.now().subtract(const Duration(days: 90));
+  int c = 0;
+  for (final cl in await LocalDb.instance.allMirror('clientes')) {
+    try {
+      final ph = '${cl['pagado_hasta'] ?? ''}';
+      if (ph.length < 10) continue;
+      final v = DateTime.parse(ph.substring(0, 10));
+      if (v.isBefore(limite)) c++;
+    } catch (_) {}
+  }
+  return c;
+}
+
 Future<double> ingresosMes() async {
   final n = DateTime.now();
   final pref = '${n.year.toString().padLeft(4, '0')}-'
