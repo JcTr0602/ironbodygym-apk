@@ -27,6 +27,14 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
   List<Map<String, dynamic>> _hoy = [];
   final _notaCtrl = TextEditingController();
 
+  // v1.0.15: modo reporte
+  bool _modoReporte = false;
+  DateTime _fechaReporte = DateTime.now();
+  List<Map<String, dynamic>> _reporteDatos = [];
+  Map<String, Map<String, double>> _reporteTurnos = {};
+  List<Map<String, dynamic>> _ultimos7 = [];
+  bool _cargandoReporte = false;
+
   @override
   void dispose() {
     _notaCtrl.dispose();
@@ -48,6 +56,39 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
   Future<void> _cargarHoy() async {
     final h = await diariosDeHoy();
     if (mounted) setState(() => _hoy = h);
+  }
+
+  /// v1.0.15: carga los datos del reporte para la fecha seleccionada.
+  Future<void> _cargarReporte() async {
+    setState(() => _cargandoReporte = true);
+    final iso =
+        '${_fechaReporte.year.toString().padLeft(4, '0')}-'
+        '${_fechaReporte.month.toString().padLeft(2, '0')}-'
+        '${_fechaReporte.day.toString().padLeft(2, '0')}';
+    final datos = await diariosDeFecha(iso);
+    final turnos = await resumenDiarioPorTurno(iso);
+    final ult7 = await totalesDiariosUltimos(7);
+    if (mounted) {
+      setState(() {
+        _reporteDatos = datos;
+        _reporteTurnos = turnos;
+        _ultimos7 = ult7;
+        _cargandoReporte = false;
+      });
+    }
+  }
+
+  Future<void> _elegirFecha() async {
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _fechaReporte,
+      firstDate: DateTime(2024),
+      lastDate: DateTime.now(),
+    );
+    if (picked != null) {
+      setState(() => _fechaReporte = picked);
+      _cargarReporte();
+    }
   }
 
   /// Total cobrado hoy en pagos diarios.
@@ -237,14 +278,39 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('🎫 Pago diario')),
+      appBar: AppBar(
+        title: const Text('🎫 Pago diario'),
+        actions: [
+          // v1.0.15: alternar entre registrar y reporte
+          TextButton.icon(
+            icon: Icon(
+                _modoReporte ? Icons.edit_outlined : Icons.bar_chart),
+            label: Text(_modoReporte ? 'Registrar' : 'Reporte'),
+            onPressed: () {
+              setState(() => _modoReporte = !_modoReporte);
+              if (_modoReporte) _cargarReporte();
+            },
+          ),
+        ],
+      ),
       body: Column(
         children: [
           const SyncBanner(),
           Expanded(
-            child: ListView(
-              padding: const EdgeInsets.all(16),
-              children: [
+            child: _modoReporte
+                ? _vistaReporte()
+                : _vistaRegistro(),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// v1.0.15: vista de registro (la original).
+  Widget _vistaRegistro() {
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      children: [
                 Text('(${fmtMonto(_precio)} CUP por turno)',
                     style: const TextStyle(color: Colors.grey)),
                 const SizedBox(height: 16),
@@ -369,9 +435,277 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
                     ),
                   ),
               ],
-            ),
-          ),
-        ],
+            );
+  }
+
+  /// v1.0.15: vista de reporte por fecha y turno.
+  Widget _vistaReporte() {
+    final man = _reporteTurnos['mañana'];
+    final tar = _reporteTurnos['tarde'];
+    final cantMan = (man?['cantidad'] ?? 0).toInt();
+    final totMan = man?['total'] ?? 0;
+    final cantTar = (tar?['cantidad'] ?? 0).toInt();
+    final totTar = tar?['total'] ?? 0;
+    final total = totMan + totTar;
+
+    // Comparativa: ayer y promedio 7 días
+    double ayerTotal = 0;
+    double prom7 = 0;
+    if (_ultimos7.length >= 2) {
+      ayerTotal =
+          (_ultimos7[_ultimos7.length - 2]['total'] as num)
+              .toDouble();
+    }
+    if (_ultimos7.isNotEmpty) {
+      double suma = 0;
+      for (final d in _ultimos7) {
+        suma += (d['total'] as num).toDouble();
+      }
+      prom7 = suma / _ultimos7.length;
+    }
+
+    return _cargandoReporte
+        ? const Center(child: CircularProgressIndicator())
+        : ListView(
+            padding: const EdgeInsets.all(16),
+            children: [
+              // Selector de fecha
+              Row(
+                children: [
+                  IconButton(
+                    icon: const Icon(Icons.chevron_left),
+                    onPressed: () {
+                      setState(() {
+                        _fechaReporte = _fechaReporte.subtract(
+                            const Duration(days: 1));
+                      });
+                      _cargarReporte();
+                    },
+                  ),
+                  Expanded(
+                    child: InkWell(
+                      onTap: _elegirFecha,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                            vertical: 12),
+                        decoration: BoxDecoration(
+                          border: Border.all(
+                              color: Colors.grey.shade300),
+                          borderRadius:
+                              BorderRadius.circular(12),
+                        ),
+                        child: Text(
+                          '📅 ${fmtFecha(_fechaReporte.toIso8601String().substring(0, 10))}',
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold),
+                        ),
+                      ),
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.chevron_right),
+                    onPressed: _fechaReporte
+                            .toIso8601String()
+                            .substring(0, 10) ==
+                        DateTime.now()
+                            .toIso8601String()
+                            .substring(0, 10)
+                        ? null
+                        : () {
+                            setState(() {
+                              _fechaReporte =
+                                  _fechaReporte.add(
+                                      const Duration(days: 1));
+                            });
+                            _cargarReporte();
+                          },
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              // Total del día
+              Card(
+                color: const Color(0xFFE8821A),
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    children: [
+                      Text(
+                        '${fmtMonto(total)} CUP',
+                        style: const TextStyle(
+                            fontSize: 28,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.white),
+                      ),
+                      Text(
+                        '${cantMan + cantTar} pagos en el día',
+                        style: const TextStyle(
+                            color: Colors.white70),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+              // Desglose por turno
+              Row(
+                children: [
+                  Expanded(
+                      child: _tarjetaTurno('☀️ Mañana',
+                          cantMan, totMan)),
+                  const SizedBox(width: 8),
+                  Expanded(
+                      child: _tarjetaTurno(
+                          '🌙 Tarde', cantTar, totTar)),
+                ],
+              ),
+              const SizedBox(height: 12),
+              // Comparativas
+              if (ayerTotal > 0 || prom7 > 0)
+                Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: Column(
+                      crossAxisAlignment:
+                          CrossAxisAlignment.start,
+                      children: [
+                        const Text('📊 Comparativa',
+                            style: TextStyle(
+                                fontWeight:
+                                    FontWeight.bold)),
+                        const SizedBox(height: 4),
+                        if (ayerTotal > 0)
+                          Text(
+                              'Ayer: ${fmtMonto(ayerTotal)} CUP'),
+                        if (prom7 > 0)
+                          Text(
+                              'Promedio 7 días: ${fmtMonto(prom7)} CUP/día'),
+                      ],
+                    ),
+                  ),
+                ),
+              const SizedBox(height: 12),
+              // Mini-gráfico 7 días
+              if (_ultimos7.isNotEmpty) ...[
+                const Text('📈 Últimos 7 días',
+                    style: TextStyle(
+                        fontWeight: FontWeight.bold)),
+                const SizedBox(height: 8),
+                Container(
+                  height: 100,
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).brightness ==
+                            Brightness.dark
+                        ? Colors.grey.shade800
+                        : Colors.grey.shade100,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Row(
+                    crossAxisAlignment:
+                        CrossAxisAlignment.end,
+                    mainAxisAlignment:
+                        MainAxisAlignment.spaceAround,
+                    children: _ultimos7.map((d) {
+                      final m =
+                          (d['total'] as num).toDouble();
+                      final maxM = _ultimos7
+                          .map((e) =>
+                              (e['total'] as num).toDouble())
+                          .reduce(
+                              (a, b) => a > b ? a : b);
+                      final h = maxM > 0
+                          ? (m / maxM * 60)
+                              .clamp(4.0, 60.0)
+                          : 4.0;
+                      return Column(
+                        mainAxisAlignment:
+                            MainAxisAlignment.end,
+                        children: [
+                          Container(
+                            width: 24,
+                            height: h,
+                            decoration: BoxDecoration(
+                              color:
+                                  const Color(0xFFE8821A),
+                              borderRadius:
+                                  BorderRadius.circular(4),
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            (d['fecha'] as String)
+                                .substring(8, 10),
+                            style:
+                                const TextStyle(fontSize: 9),
+                          ),
+                        ],
+                      );
+                    }).toList(),
+                  ),
+                ),
+                const SizedBox(height: 12),
+              ],
+              // Detalle de registros
+              const Text('📋 Registros del día',
+                  style:
+                      TextStyle(fontWeight: FontWeight.bold)),
+              const SizedBox(height: 8),
+              if (_reporteDatos.isEmpty)
+                const Text('Sin registros este día',
+                    style: TextStyle(color: Colors.grey)),
+              for (final d in _reporteDatos)
+                Card(
+                  child: ListTile(
+                    dense: true,
+                    leading: Text(
+                        d['turno'] == 'mañana'
+                            ? '☀️'
+                            : '🌙',
+                        style:
+                            const TextStyle(fontSize: 22)),
+                    title: Text(
+                        '${d['cantidad']} pago(s) — ${fmtMonto(d['total'])} CUP'),
+                    subtitle: Text([
+                      if ((d['nota'] as String?)
+                              ?.isNotEmpty ==
+                          true)
+                        '📝 ${d['nota']}',
+                      '${d['registrado_por_nombre'] ?? ''}',
+                      if ((d['creado'] as String?)
+                              ?.isNotEmpty ==
+                          true)
+                        '🕐 ${(d['creado'] as String).length >= 16 ? (d['creado'] as String).substring(11, 16) : ''}',
+                    ]
+                        .where((s) => s.isNotEmpty)
+                        .join(' · ')),
+                  ),
+                ),
+            ],
+          );
+  }
+
+  Widget _tarjetaTurno(String titulo, int cantidad, double total) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          children: [
+            Text(titulo,
+                style: const TextStyle(fontSize: 14)),
+            const SizedBox(height: 4),
+            Text(fmtMonto(total),
+                style: const TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    color: Color(0xFFE8821A))),
+            Text('$cantidad pagos',
+                style: const TextStyle(
+                    fontSize: 12, color: Colors.grey)),
+          ],
+        ),
       ),
     );
   }

@@ -545,6 +545,64 @@ Future<List<Map<String, dynamic>>> diariosDeHoy() async {
   return res;
 }
 
+/// v1.0.15: pagos diarios de una fecha específica (para reporte).
+Future<List<Map<String, dynamic>>> diariosDeFecha(
+    String fechaIso) async {
+  final todos = await LocalDb.instance.allMirror('pagos_diarios');
+  final res = todos
+      .where((d) => (d['fecha'] as String?) == fechaIso)
+      .toList();
+  res.sort((a, b) =>
+      '${b['registrado_por_nombre']}'.compareTo('${a['registrado_por_nombre']}'));
+  return res;
+}
+
+/// v1.0.15: resumen de pagos diarios por turno para una fecha.
+/// Devuelve {mañana: {cantidad, total}, tarde: {cantidad, total}}.
+Future<Map<String, Map<String, double>>> resumenDiarioPorTurno(
+    String fechaIso) async {
+  final datos = await diariosDeFecha(fechaIso);
+  final res = {
+    'mañana': {'cantidad': 0.0, 'total': 0.0},
+    'tarde': {'cantidad': 0.0, 'total': 0.0},
+  };
+  for (final d in datos) {
+    final turno = '${d['turno'] ?? 'mañana'}';
+    final key = turno == 'tarde' ? 'tarde' : 'mañana';
+    res[key]!['cantidad'] =
+        res[key]!['cantidad']! + ((d['cantidad'] as num?)?.toDouble() ?? 0);
+    res[key]!['total'] =
+        res[key]!['total']! + ((d['total'] as num?)?.toDouble() ?? 0);
+  }
+  return res;
+}
+
+/// v1.0.15: totales de pagos diarios de los últimos N días.
+/// Devuelve lista de {fecha, total} ordenada cronológicamente.
+Future<List<Map<String, dynamic>>> totalesDiariosUltimos(
+    int dias) async {
+  final todos = await LocalDb.instance.allMirror('pagos_diarios');
+  final porFecha = <String, double>{};
+  for (final d in todos) {
+    final f = '${d['fecha'] ?? ''}';
+    if (f.length >= 10) {
+      final dia = f.substring(0, 10);
+      porFecha[dia] =
+          (porFecha[dia] ?? 0) + ((d['total'] as num?)?.toDouble() ?? 0);
+    }
+  }
+  final hoy = DateTime.now();
+  final res = <Map<String, dynamic>>[];
+  String iso(DateTime d) => '${d.year.toString().padLeft(4, '0')}-'
+      '${d.month.toString().padLeft(2, '0')}-'
+      '${d.day.toString().padLeft(2, '0')}';
+  for (var i = dias - 1; i >= 0; i--) {
+    final fecha = iso(hoy.subtract(Duration(days: i)));
+    res.add({'fecha': fecha, 'total': porFecha[fecha] ?? 0.0});
+  }
+  return res;
+}
+
 /// Resumen del turno del entrenador: (cobrado hoy, pendiente a entregar).
 Future<(double, double)> miTurnoHoy(int? telegramId) async {
   if (telegramId == null) return (0.0, 0.0);
