@@ -10,6 +10,7 @@ import 'package:flutter/services.dart';
 import '../localdb.dart';
 import '../negocio.dart';
 import '../tipos_pago.dart';
+import 'diseno.dart';
 
 /// Selección de período hecha en el diálogo.
 class PeriodoSel {
@@ -140,7 +141,7 @@ Future<Map<String, dynamic>?> pagoDialogo(
             cliente['pagado_hasta'] as String?, _diasDe(s),
             fechaPago: fpIso);
         return AlertDialog(
-          title: Text('💰 Pago — ${cliente['nombre']}'),
+          title: Text('Pago — ${cliente['nombre']}'),
           content: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -155,22 +156,26 @@ Future<Map<String, dynamic>?> pagoDialogo(
                         const EdgeInsets.only(top: 8, bottom: 4),
                     padding: const EdgeInsets.all(10),
                     decoration: BoxDecoration(
-                      color: Colors.blue.shade50,
-                      borderRadius: BorderRadius.circular(8),
+                      color: AppColores.info
+                          .withValues(alpha: 0.08),
+                      borderRadius: BorderRadius.circular(
+                          AppRadio.md),
                       border: Border.all(
-                          color: Colors.blue.shade200),
+                          color: AppColores.info
+                              .withValues(alpha: 0.4)),
                     ),
                     child: Row(
                       children: [
-                        const Text('🧒 ',
-                            style: TextStyle(fontSize: 16)),
+                        const Icon(Icons.child_care,
+                            color: AppColores.info),
+                        const SizedBox(
+                            width: AppEspacio.sm),
                         Expanded(
                           child: Text(
                             'Menor de 18: precio especial '
                             '${fmtMonto(tipos.firstWhere((t) => t.id == 'menores', orElse: () => tipos.first).monto)} CUP/mes.',
-                            style: TextStyle(
-                                fontSize: 13,
-                                color: Colors.blue.shade900),
+                            style: const TextStyle(
+                                fontSize: 13),
                           ),
                         ),
                       ],
@@ -189,26 +194,30 @@ Future<Map<String, dynamic>?> pagoDialogo(
                           top: 8, bottom: 4),
                       padding: const EdgeInsets.all(10),
                       decoration: BoxDecoration(
-                        color: Colors.green.shade50,
+                        color: AppColores.exito
+                            .withValues(alpha: 0.08),
                         borderRadius:
-                            BorderRadius.circular(8),
+                            BorderRadius.circular(
+                                AppRadio.md),
                         border: Border.all(
-                            color: Colors.green.shade200),
+                            color: AppColores.exito
+                                .withValues(alpha: 0.4)),
                       ),
                       child: Row(
                         children: [
-                          const Text('✅ ',
-                              style:
-                                  TextStyle(fontSize: 16)),
+                          const Icon(
+                              Icons.check_circle,
+                              color:
+                                  AppColores.exito),
+                          const SizedBox(
+                              width: AppEspacio.sm),
                           Expanded(
                             child: Text(
                               'Tiene $diasRest día(s) vigentes. '
                               'No se pierden: el nuevo período '
                               'empieza al vencer.',
-                              style: TextStyle(
-                                  fontSize: 13,
-                                  color:
-                                      Colors.green.shade900),
+                              style: const TextStyle(
+                                  fontSize: 13),
                             ),
                           ),
                         ],
@@ -333,13 +342,18 @@ Future<Map<String, dynamic>?> pagoDialogo(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     ChoiceChip(
-                        label: const Text('💵 Efectivo'),
+                        label: const Text('Efectivo'),
+                        avatar: const Icon(Icons.payments,
+                            size: 18),
                         selected: metodo == 'efectivo',
                         onSelected: (_) =>
                             setS(() => metodo = 'efectivo')),
                     const SizedBox(width: 8),
                     ChoiceChip(
-                        label: const Text('📱 Transfer.'),
+                        label: const Text('Transfer.'),
+                        avatar: const Icon(
+                            Icons.smartphone,
+                            size: 18),
                         selected: metodo == 'transferencia',
                         onSelected: (_) =>
                             setS(() => metodo = 'transferencia')),
@@ -389,7 +403,7 @@ Future<Map<String, dynamic>?> pagoDialogo(
         children: [
           Text('Cliente: ${cliente['nombre']}'),
           Text('Período: ${_etiquetaPeriodo(s)}'),
-          Text('Método: ${metodo == 'efectivo' ? '💵 Efectivo' : '📱 Transferencia'}'),
+          Text('Método: ${metodo == 'efectivo' ? 'Efectivo' : 'Transferencia'}'),
           // v1.0.15: monto prominente en la confirmación de cobro.
           const SizedBox(height: 8),
           Center(
@@ -397,7 +411,7 @@ Future<Map<String, dynamic>?> pagoDialogo(
                 style: const TextStyle(
                     fontSize: 34,
                     fontWeight: FontWeight.bold,
-                    color: Color(0xFFE8821A))),
+                    color: AppColores.naranja)),
           ),
           const SizedBox(height: 8),
           Text('Nuevo vencimiento: ${fmtFecha(nuevo)}',
