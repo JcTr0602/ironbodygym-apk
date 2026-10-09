@@ -112,6 +112,47 @@ Future<Map<String, dynamic>?> pagoDialogo(
               children: [
                 Text(
                     'Vence: ${fmtFecha(cliente['pagado_hasta'] as String?)}'),
+                // v1.0.14: aviso claro si paga por adelantado
+                Builder(builder: (_) {
+                  final ph =
+                      cliente['pagado_hasta'] as String?;
+                  if (ph != null && ph.compareTo(fpIso) > 0) {
+                    final diasRest = DateTime.parse(ph)
+                        .difference(DateTime.parse(fpIso))
+                        .inDays;
+                    return Container(
+                      margin: const EdgeInsets.only(
+                          top: 8, bottom: 4),
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: Colors.green.shade50,
+                        borderRadius:
+                            BorderRadius.circular(8),
+                        border: Border.all(
+                            color: Colors.green.shade200),
+                      ),
+                      child: Row(
+                        children: [
+                          const Text('✅ ',
+                              style:
+                                  TextStyle(fontSize: 16)),
+                          Expanded(
+                            child: Text(
+                              'Tiene $diasRest día(s) vigentes. '
+                              'No se pierden: el nuevo período '
+                              'empieza al vencer.',
+                              style: TextStyle(
+                                  fontSize: 13,
+                                  color:
+                                      Colors.green.shade900),
+                            ),
+                          ),
+                        ],
+                      ),
+                    );
+                  }
+                  return const SizedBox.shrink();
+                }),
                 const SizedBox(height: 8),
                 // Selector de fecha del pago (v1.1)
                 InkWell(
