@@ -36,6 +36,7 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
   List<Map<String, dynamic>> _vencimientos = [];
   double _cobradoAyer = 0;
   double _semanaAnt = 0;
+  bool _cerrado = false; // v1.1.1: turno actual ya cerrado
   final _auth = AuthService();
 
   @override
@@ -76,6 +77,8 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
       }
     }
     final vencimientos = await _misVencimientos(tid);
+    // v1.1.1: ¿el turno actual ya se cerró?
+    final cerrado = await _turnoCerrado();
     if (mounted) {
       setState(() {
         _cobrado = t.$1;
@@ -90,6 +93,7 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
         _cobradoAyer = cobradoAyer;
         _semanaAnt = semanaAnt;
         _vencimientos = vencimientos;
+        _cerrado = cerrado;
       });
     }
   }
@@ -143,6 +147,21 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
       _iso(DateTime.now().subtract(const Duration(days: 1)));
 
   /// Turno actual según la hora (v1.0.16).
+  /// v1.1.1: id corto para la clave de cierre (mañana/tarde/noche).
+  String _turnoId() {
+    final h = DateTime.now().hour;
+    if (h >= 5 && h < 12) return 'manana';
+    if (h >= 12 && h < 18) return 'tarde';
+    return 'noche';
+  }
+
+  /// Clave del cierre del turno actual (por día, turno y entrenador).
+  String _claveCierre() =>
+      'cierre_turno_${_hoy()}_${_turnoId()}_${_auth.telegramId}';
+
+  Future<bool> _turnoCerrado() async =>
+      (await LocalDb.instance.getMeta(_claveCierre())) != null;
+
   String _turnoActual() {
     final h = DateTime.now().hour;
     if (h >= 5 && h < 12) return 'Turno de mañana';
@@ -247,13 +266,46 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
               'que recibió el dinero.',
               style: TextStyle(fontSize: 12, color: Colors.grey),
             ),
+            if (_cerrado) ...[
+              const SizedBox(height: 8),
+              const Row(
+                children: [
+                  Icon(Icons.check_circle,
+                      color: Colors.green, size: 16),
+                  SizedBox(width: 6),
+                  Text('Este turno ya está cerrado',
+                      style: TextStyle(
+                          color: Colors.green,
+                          fontWeight: FontWeight.bold)),
+                ],
+              ),
+            ],
           ],
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(),
-            child: const Text('Cerrar'),
+            child:
+                Text(_cerrado ? 'Cerrar' : 'Cancelar'),
           ),
+          if (!_cerrado)
+            ElevatedButton.icon(
+              icon: const Icon(Icons.done_all, size: 18),
+              label: const Text('Confirmar cierre'),
+              onPressed: () async {
+                await LocalDb.instance.setMeta(
+                    _claveCierre(),
+                    DateTime.now().toIso8601String());
+                if (ctx.mounted) Navigator.of(ctx).pop();
+                if (mounted) {
+                  setState(() => _cerrado = true);
+                  ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                          content: Text(
+                              'Turno cerrado. ¡Buen trabajo!')));
+                }
+              },
+            ),
         ],
       ),
     );
@@ -598,14 +650,25 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
                     ),
                     const SizedBox(height: 12),
                     // v1.0.16: cierre de turno (idea 1)
+                    // v1.1.1: cierre real por turno, sin requerir pagos diarios
                     SizedBox(
                       width: double.infinity,
-                      child: ElevatedButton.icon(
-                        icon: const Icon(Icons.done_all),
-                        label: const Text(
-                            'Cerrar mi turno'),
-                        onPressed: _cierreTurno,
-                      ),
+                      child: _cerrado
+                          ? OutlinedButton.icon(
+                              icon: const Icon(
+                                  Icons.check_circle,
+                                  color: Colors.green),
+                              label: Text(
+                                  'Turno cerrado (${_turnoActual().toLowerCase()})'),
+                              onPressed: _cierreTurno,
+                            )
+                          : ElevatedButton.icon(
+                              icon:
+                                  const Icon(Icons.done_all),
+                              label: const Text(
+                                  'Cerrar mi turno'),
+                              onPressed: _cierreTurno,
+                            ),
                     ),
                   ],
                   const SizedBox(height: 12),
