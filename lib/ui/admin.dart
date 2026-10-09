@@ -1,4 +1,4 @@
-/// 🛡️ Administración (solo admin).
+/// Administración (solo admin).
 ///
 /// Estadísticas del negocio, montos, usuarios APK, pendiente a entrega,
 /// gastos, cierre de caja, papelera y exportar. Todo funciona offline:
@@ -17,6 +17,8 @@ import '../negocio.dart';
 import '../permisos.dart';
 import '../sync.dart';
 import '../tipos_pago.dart';
+import 'componentes.dart';
+import 'diseno.dart';
 import 'cuentas_cobrar.dart';
 import 'papelera.dart';
 import 'congelados.dart';
@@ -133,7 +135,7 @@ class _AdminScreenState extends State<AdminScreen> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('💰 Cambiar precios'),
+        title: const Text('Cambiar precios'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -165,7 +167,7 @@ class _AdminScreenState extends State<AdminScreen> {
     }
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('✅ Precios guardados (se sincronizarán)')));
+        const SnackBar(content: Text('Precios guardados (se sincronizarán)')));
     SyncEngine.instance.push();
   }
 
@@ -212,7 +214,7 @@ class _AdminScreenState extends State<AdminScreen> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: Text('✏️ ${t.nombre}'),
+        title: Text('Editar ${t.nombre}'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -285,7 +287,7 @@ class _AdminScreenState extends State<AdminScreen> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('➕ Nuevo tipo de pago'),
+        title: const Text('Nuevo tipo de pago'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -357,7 +359,7 @@ class _AdminScreenState extends State<AdminScreen> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('🗑️ Eliminar tipo'),
+        title: const Text('Eliminar tipo'),
         content: Text(
             '¿Eliminar "${t.nombre}"? Ya no aparecerá al cobrar.'),
         actions: [
@@ -380,7 +382,7 @@ class _AdminScreenState extends State<AdminScreen> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('💵 Guardar tipos de pago'),
+        title: const Text('Guardar tipos de pago'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -414,7 +416,7 @@ class _AdminScreenState extends State<AdminScreen> {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
         content:
-            Text('✅ Tipos guardados (se sincronizarán)')));
+            Text('Tipos guardados (se sincronizarán)')));
     SyncEngine.instance.push();
   }
 
@@ -425,7 +427,7 @@ class _AdminScreenState extends State<AdminScreen> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('💰 Confirmar entrega'),
+        title: const Text('Confirmar entrega'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -467,7 +469,7 @@ class _AdminScreenState extends State<AdminScreen> {
     );
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('✅ Entrega confirmada (se sincronizará)')));
+        const SnackBar(content: Text('Entrega confirmada (se sincronizará)')));
     _cargar();
     SyncEngine.instance.push();
   }
@@ -479,7 +481,7 @@ class _AdminScreenState extends State<AdminScreen> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('🧾 Agregar gasto'),
+        title: const Text('Agregar gasto'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -531,7 +533,7 @@ class _AdminScreenState extends State<AdminScreen> {
     );
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('✅ Gasto guardado (se sincronizará)')));
+        const SnackBar(content: Text('Gasto guardado (se sincronizará)')));
     _cargar();
     SyncEngine.instance.push();
   }
@@ -604,7 +606,7 @@ class _AdminScreenState extends State<AdminScreen> {
     final cobradoHoy = (_caja['efectivo'] ?? 0) + (_caja['transferencia'] ?? 0);
     final neto = cobradoHoy - _gastosHoy;
     return Scaffold(
-      appBar: AppBar(title: const Text('🛡️ Administración')),
+      appBar: AppBar(title: const Text('Administración')),
       body: Column(
         children: [
           const SyncBanner(),
@@ -616,26 +618,26 @@ class _AdminScreenState extends State<AdminScreen> {
                     child: ListView(
                       padding: const EdgeInsets.all(16),
                       children: [
-                        _seccion('📊 Estadísticas del mes', [
-                          _fila('💰 Ingresos',
+                        _seccion(Icons.bar_chart, 'Estadísticas del mes', [
+                          _fila(Icons.payments, 'Ingresos',
                               '${fmtMonto(_ingresos)} CUP'),
-                          _fila('➕ Inscripciones', '$_inscMes'),
-                          _fila('⏳ Morosos', '$_morosos'),
+                          _fila(Icons.person_add, 'Inscripciones', '$_inscMes'),
+                          _fila(Icons.warning, 'Morosos', '$_morosos'),
                         ]),
                         if (_inscPorEntrenador.isNotEmpty)
-                          _seccion('👥 Inscripciones por entrenador', [
+                          _seccion(Icons.group, 'Inscripciones por entrenador', [
                             for (final e in _inscPorEntrenador)
-                              _fila('• ${e['nombre']}',
+                              _fila(null, '${e['nombre']}',
                                   '${e['cantidad']}'),
                           ]),
-                        _seccion('🏥 Salud del sistema', [
-                          _fila('🔄 Última sincronización',
+                        _seccion(Icons.health_and_safety, 'Salud del sistema', [
+                          _fila(Icons.sync, 'Última sincronización',
                               _fechaHora(_syncDet.ultimaPush)),
-                          _fila('⬇️ Última bajada',
+                          _fila(Icons.download, 'Última bajada',
                               _fechaHora(_syncDet.ultimaPull)),
-                          _fila('📤 Pendientes por subir',
+                          _fila(Icons.upload, 'Pendientes por subir',
                               '$_pendientesSubir'),
-                          _fila('📥 Bajados (última vez)',
+                          _fila(Icons.download, 'Bajados (última vez)',
                               '${_syncDet.bajados}'),
                           if (_syncDet.error != null &&
                               _syncDet.error!.isNotEmpty)
@@ -643,13 +645,13 @@ class _AdminScreenState extends State<AdminScreen> {
                               padding:
                                   const EdgeInsets.only(top: 8),
                               child: Text(
-                                '⚠️ ${_syncDet.error}',
+                                _syncDet.error ?? '',
                                 style: const TextStyle(
                                     color: Colors.red, fontSize: 13),
                               ),
                             ),
                         ]),
-                        _seccion('💵 Tipos de pago', [
+                        _seccion(Icons.payments, 'Tipos de pago', [
                           for (final t in _tipos)
                             ListTile(
                               dense: true,
@@ -709,7 +711,7 @@ class _AdminScreenState extends State<AdminScreen> {
                             ),
                           ),
                         ]),
-                        _seccion('💵 Otros precios', [
+                        _seccion(Icons.price_change, 'Otros precios', [
                           for (final (clave, etiqueta) in _clavesMonto)
                             Padding(
                               padding:
@@ -733,7 +735,7 @@ class _AdminScreenState extends State<AdminScreen> {
                           ),
                         ]),
                         if (Permisos().gestionarUsuarios)
-                          _seccion('👥 Usuarios APK', [
+                          _seccion(Icons.smartphone, 'Usuarios APK', [
                           SizedBox(
                             width: double.infinity,
                             child: ElevatedButton.icon(
@@ -754,11 +756,12 @@ class _AdminScreenState extends State<AdminScreen> {
                           ),
                         ]),
                         _seccion(
-                            '💰 Pendiente a entregar (${fmtMonto(totalPend)} CUP)',
+                            Icons.outbox,
+                            'Pendiente a entregar (${fmtMonto(totalPend)} CUP)',
                             [
                               if (_pend.isEmpty)
                                 const Text(
-                                    '🎉 Nada pendiente. Todo cuadrado.',
+                                    'Nada pendiente. Todo cuadrado.',
                                     style:
                                         TextStyle(color: Colors.grey)),
                               for (final t in _pend)
@@ -802,15 +805,15 @@ class _AdminScreenState extends State<AdminScreen> {
                                   ),
                                 ),
                             ]),
-                        _seccion('🧾 Cierre de caja (hoy)', [
-                          _fila('💵 Efectivo',
+                        _seccion(Icons.point_of_sale, 'Cierre de caja (hoy)', [
+                          _fila(Icons.payments, 'Efectivo',
                               '${fmtMonto(_caja['efectivo'])} CUP'),
-                          _fila('💳 Transferencia',
+                          _fila(Icons.smartphone, 'Transferencia',
                               '${fmtMonto(_caja['transferencia'])} CUP'),
-                          _fila('🧾 Gastos',
+                          _fila(Icons.receipt_long, 'Gastos',
                               '${fmtMonto(_gastosHoy)} CUP'),
                           const Divider(),
-                          _fila('📦 Neto',
+                          _fila(Icons.inventory_2, 'Neto',
                               '${fmtMonto(neto)} CUP',
                               negrita: true),
                           const SizedBox(height: 8),
@@ -824,7 +827,7 @@ class _AdminScreenState extends State<AdminScreen> {
                             ),
                           ),
                         ]),
-                        _seccion('🧾 Últimos gastos', [
+                        _seccion(Icons.receipt_long, 'Últimos gastos', [
                           if (_gastos.isEmpty)
                             const Text('Sin gastos registrados.',
                                 style:
@@ -844,7 +847,7 @@ class _AdminScreenState extends State<AdminScreen> {
                                           FontWeight.bold)),
                             ),
                         ]),
-                        _seccion('🗑️ Papelera', [
+                        _seccion(Icons.delete_outline, 'Papelera', [
                           SizedBox(
                             width: double.infinity,
                             child: OutlinedButton.icon(
@@ -857,7 +860,7 @@ class _AdminScreenState extends State<AdminScreen> {
                             ),
                           ),
                         ]),
-                        _seccion('❄️ Congelados', [
+                        _seccion(Icons.ac_unit, 'Congelados', [
                           SizedBox(
                             width: double.infinity,
                             child: OutlinedButton.icon(
@@ -869,7 +872,7 @@ class _AdminScreenState extends State<AdminScreen> {
                             ),
                           ),
                         ]),
-                        _seccion('💸 Cuentas por cobrar', [
+                        _seccion(Icons.account_balance_wallet, 'Cuentas por cobrar', [
                           const Text(
                             'Clientes vencidos ordenados por monto adeudado. El dinero dormido, visible.',
                             style: TextStyle(
@@ -892,7 +895,7 @@ class _AdminScreenState extends State<AdminScreen> {
                             ),
                           ),
                         ]),
-                        _seccion('⚠️ Clientes en riesgo', [
+                        _seccion(Icons.warning, 'Clientes en riesgo', [
                           const Text(
                             'Inactivos con 3+ pagos cuyo último pago fue hace más de 60 días. Buenos candidatos para recuperar.',
                             style: TextStyle(
@@ -915,7 +918,7 @@ class _AdminScreenState extends State<AdminScreen> {
                             ),
                           ),
                         ]),
-                        _seccion('👥 Historial por entrenador', [
+                        _seccion(Icons.history, 'Historial por entrenador', [
                           const Text(
                             'Cobrado, pagos e inscripciones del mes por entrenador.',
                             style: TextStyle(
@@ -937,7 +940,7 @@ class _AdminScreenState extends State<AdminScreen> {
                             ),
                           ),
                         ]),
-                        _seccion('📋 Auditoría', [
+                        _seccion(Icons.fact_check, 'Auditoría', [
                           SizedBox(
                             width: double.infinity,
                             child: ElevatedButton.icon(
@@ -953,7 +956,7 @@ class _AdminScreenState extends State<AdminScreen> {
                             ),
                           ),
                         ]),
-                        _seccion('💾 Exportar', [
+                        _seccion(Icons.file_download, 'Exportar', [
                           SizedBox(
                             width: double.infinity,
                             child: ElevatedButton.icon(
@@ -993,18 +996,23 @@ class _AdminScreenState extends State<AdminScreen> {
     );
   }
 
-  Widget _seccion(String titulo, List<Widget> hijos) {
-    return Card(
-      margin: const EdgeInsets.only(bottom: 12),
-      child: Padding(
-        padding: const EdgeInsets.all(12),
+  /// Sección de administración (v1.1: Tarjeta + icono, sin emojis).
+  Widget _seccion(IconData icono, String titulo, List<Widget> hijos) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: AppEspacio.md),
+      child: Tarjeta(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(titulo,
-                style: const TextStyle(
-                    fontSize: 16, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 8),
+            Row(
+              children: [
+                Icon(icono,
+                    color: AppColores.naranja, size: 20),
+                const SizedBox(width: AppEspacio.sm),
+                Text(titulo, style: AppTexto.subtitulo),
+              ],
+            ),
+            const SizedBox(height: AppEspacio.sm),
             ...hijos,
           ],
         ),
@@ -1012,13 +1020,24 @@ class _AdminScreenState extends State<AdminScreen> {
     );
   }
 
-  Widget _fila(String etiqueta, String valor, {bool negrita = false}) {
+  Widget _fila(IconData? icono, String etiqueta, String valor,
+      {bool negrita = false}) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 6),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(etiqueta),
+          Row(
+            children: [
+              if (icono != null) ...[
+                Icon(icono,
+                    size: 16,
+                    color: AppColores.textoSecundarioClaro),
+                const SizedBox(width: 6),
+              ],
+              Text(etiqueta),
+            ],
+          ),
           Text(valor,
               style: TextStyle(
                   fontWeight:
