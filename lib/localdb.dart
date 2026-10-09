@@ -337,4 +337,17 @@ class LocalDb {
     await d.update('fotos_pendientes', {'estado': 'lista'},
         where: 'id=?', whereArgs: [fotoId]);
   }
+
+  /// Cierra la base de datos (para reemplazar el archivo al importar).
+  Future<void> close() async {
+    final d = _db;
+    _db = null;
+    await d?.close();
+  }
+
+  /// Ruta del archivo de la base de datos (para exportar/importar).
+  Future<String> dbPath() async {
+    final dir = await getDatabasesPath();
+    return p.join(dir, 'ironbody.db');
+  }
 }

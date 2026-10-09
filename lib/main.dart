@@ -12,7 +12,7 @@ import 'config.dart';
 import 'sync.dart';
 import 'theme.dart';
 import 'ui/diseno.dart';
-import 'ui/bloqueo.dart';
+import 'ui/home.dart';
 import 'ui/login.dart';
 
 final navigatorKey = GlobalKey<NavigatorState>();
@@ -114,7 +114,19 @@ class _IronBodyAppState extends State<IronBodyApp> {
   Widget build(BuildContext context) {
     return ValueListenableBuilder<ThemeMode>(
       valueListenable: ThemeController.mode,
-      builder: (_, mode, __) => MaterialApp(
+      builder: (_, mode, __) =>
+          ValueListenableBuilder<double>(
+        valueListenable: ThemeController.fontScale,
+        builder: (_, escala, __) => MaterialApp(
+          builder: (ctx, child) {
+            final mq = MediaQuery.of(ctx);
+            return MediaQuery(
+              data: mq.copyWith(
+                textScaler: TextScaler.linear(escala),
+              ),
+              child: child!,
+            );
+          },
         navigatorKey: navigatorKey,
         title: 'Iron Body Gym',
         themeMode: mode,
@@ -266,7 +278,9 @@ class _IronBodyAppState extends State<IronBodyApp> {
           useMaterial3: true,
         ),
         home: FutureBuilder<Widget>(
-          future: pantallaInicial(_auth),
+          future: _auth.loggedIn
+              ? Future.value(const HomeScreen())
+              : Future.value(const LoginScreen()),
           builder: (ctx, snap) {
             if (!snap.hasData) {
               return const Scaffold(
@@ -275,6 +289,7 @@ class _IronBodyAppState extends State<IronBodyApp> {
             }
             return snap.data!;
           },
+        ),
         ),
       ),
     );

@@ -61,11 +61,6 @@ class PerfilService {
   Future<void> clearDispositivoVinculado(String username) async =>
       (await _p).remove('seg_vinculado_$username');
 
-  /// ¿Usar huella digital para entrar?
-  Future<bool> getHuella() async =>
-      (await _p).getBool('seg_huella') ?? false;
-  Future<void> setHuella(bool v) async =>
-      (await _p).setBool('seg_huella', v);
 
   /// Hash del PIN rápido (4 dígitos). Null = sin PIN.
   ///
@@ -179,6 +174,101 @@ class PerfilService {
       (await _p).getString('ultima_version_vista');
   Future<void> setUltimaVersionVista(String v) async =>
       (await _p).setString('ultima_version_vista', v);
+
+  /// Nombre visible (item 5): override local del displayName.
+  Future<String?> getNombreVisible() async =>
+      (await _p).getString('nombre_visible');
+  Future<void> setNombreVisible(String? v) async {
+    final p = await _p;
+    if (v == null || v.trim().isEmpty) {
+      await p.remove('nombre_visible');
+    } else {
+      await p.setString('nombre_visible', v.trim());
+    }
+  }
+
+  /// Horas sin sincronizar antes de avisar (item 10). Por defecto 8.
+  Future<int> getHorasAviso() async =>
+      (await _p).getInt('horas_aviso_sync') ?? 8;
+  Future<void> setHorasAviso(int h) async =>
+      (await _p).setInt('horas_aviso_sync', h);
+
+  /// Avisar cuando una sincronización falla (item 11).
+  Future<bool> getAvisoFalloSync() async =>
+      (await _p).getBool('aviso_fallo_sync') ?? true;
+  Future<void> setAvisoFalloSync(bool v) async =>
+      (await _p).setBool('aviso_fallo_sync', v);
+
+  /// Sincronizar automáticamente al abrir la app (item 12).
+  Future<bool> getAutoSync() async =>
+      (await _p).getBool('auto_sync_abrir') ?? true;
+  Future<void> setAutoSync(bool v) async =>
+      (await _p).setBool('auto_sync_abrir', v);
+
+  /// Tema: 'sistema' | 'claro' | 'oscuro' (item 7).
+  Future<String> getTema() async =>
+      (await _p).getString('tema') ?? 'sistema';
+  Future<void> setTema(String v) async =>
+      (await _p).setString('tema', v);
+
+  /// Escala de letra 0.85–1.30 (item 8).
+  Future<double> getTamanoLetra() async =>
+      (await _p).getDouble('tamano_letra') ?? 1.0;
+  Future<void> setTamanoLetra(double v) async =>
+      (await _p).setDouble('tamano_letra', v.clamp(0.85, 1.3));
+
+  /// Bloqueo automático con PIN tras X minutos inactiva (item 14).
+  /// 0 = nunca.
+  Future<int> getBloqueoMinutos() async =>
+      (await _p).getInt('bloqueo_minutos') ?? 0;
+  Future<void> setBloqueoMinutos(int m) async =>
+      (await _p).setInt('bloqueo_minutos', m);
+  Future<int> getUltimaActividad() async =>
+      (await _p).getInt('ultima_actividad') ?? 0;
+  Future<void> setUltimaActividad(int ts) async =>
+      (await _p).setInt('ultima_actividad', ts);
+
+  /// Restablece todos los ajustes a sus valores por defecto (item 24).
+  /// No toca el avatar, el PIN ni la vinculación de dispositivo.
+  Future<void> resetAjustes() async {
+    final p = await _p;
+    for (final k in [
+      'nombre_visible',
+      'horas_aviso_sync',
+      'aviso_fallo_sync',
+      'auto_sync_abrir',
+      'tema',
+      'tamano_letra',
+      'bloqueo_minutos',
+      'ultima_actividad',
+      'perfil_movil',
+      'perfil_carnet',
+      'recordatorio_sync',
+    ]) {
+      await p.remove(k);
+    }
+  }
+
+  /// Métricas visibles en la tarjeta de resumen del Home (item 8).
+  /// Claves: clientes, pagaron, cobrado, vencen, atrasados, aldia.
+  Future<List<String>> getMetricasHome() async {
+    final p = await _p;
+    final raw = p.getStringList('metricas_home');
+    if (raw == null || raw.isEmpty) {
+      return [
+        'clientes',
+        'pagaron',
+        'cobrado',
+        'vencen',
+        'atrasados',
+        'aldia'
+      ];
+    }
+    return raw;
+  }
+
+  Future<void> setMetricasHome(List<String> v) async =>
+      (await _p).setStringList('metricas_home', v);
 
   Future<File> avatarFile() async {
     final dir = await getApplicationDocumentsDirectory();

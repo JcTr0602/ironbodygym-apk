@@ -33,7 +33,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
   int _activos = 0;
   int _morosos = 0;
   int _nuevos = 0;
-  List<Map<String, dynamic>> _porVencer = [];
   List<Map<String, dynamic>> _ranking = [];
   int _inactivos = 0;
   List<Map<String, dynamic>> _pend = [];
@@ -62,7 +61,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final activos = await activosCount();
     final mor = await morosos();
     final nuevos = await nuevosEsteMes();
-    final porVenc = await porVencer7Dias();
     final rank = await rankingEntrenadores();
     final inact = await inactivosCount();
     final pend = await pendientePorEntrenador();
@@ -81,7 +79,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
         _activos = activos;
         _morosos = mor;
         _nuevos = nuevos;
-        _porVencer = porVenc;
         _ranking = rank;
         _inactivos = inact;
         _pend = pend;
@@ -280,7 +277,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 children: [
                   const Text('Proyección cierre',
                       style: TextStyle(fontSize: 13)),
-                  Text('${fmtMonto(_proyeccion)} CUP',
+                  Text('${fmtMonto(_proyeccion.round())} CUP',
                       style: const TextStyle(
                           fontSize: 13,
                           fontWeight: FontWeight.bold,
@@ -637,39 +634,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     ),
                   ),
                   const SizedBox(height: 16),
-                  // v1.0.15: alerta por vencer
-                  if (_porVencer.isNotEmpty) ...[
-                    Card(
-                      color: Colors.amber.shade50,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(16),
-                        side: BorderSide(
-                            color: Colors.amber.shade300),
-                      ),
-                      child: ListTile(
-                        leading: const Text('⏰',
-                            style: TextStyle(fontSize: 24)),
-                        title: Text(
-                            '${_porVencer.length} clientes vencen en 7 días',
-                            style: const TextStyle(
-                                fontWeight: FontWeight.bold,
-                                fontSize: 14)),
-                        subtitle: Text(
-                          _porVencer
-                              .take(3)
-                              .map((c) =>
-                                  '${c['nombre'] ?? '?'} '
-                                  '(${fmtFecha(c['pagado_hasta'] as String?)})')
-                              .join(' · '),
-                          style: const TextStyle(fontSize: 12),
-                        ),
-                        trailing: const Icon(Icons.chevron_right),
-                        onTap: () => _ir(const ListasScreen(
-                            inicial: 1)),
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                  ],
                   // v1.0.15: ranking de entrenadores
                   if (_ranking.length > 1) ...[
                     const Text('Ranking del mes',

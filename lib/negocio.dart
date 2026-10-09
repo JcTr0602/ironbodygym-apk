@@ -734,6 +734,217 @@ Future<Map<String, dynamic>?> ultimaEntregaConfirmada(
   return {'fecha': fecha, 'monto': monto};
 }
 
+/// Saludo según la hora del día (mejora 1 del Home).
+String saludoHora() {
+  final h = DateTime.now().hour;
+  if (h >= 5 && h < 12) return 'Buenos días';
+  if (h >= 12 && h < 19) return 'Buenas tardes';
+  return 'Buenas noches';
+}
+
+/// Turno actual: Mañana (5-12), Tarde (12-18), Noche (resto).
+/// Mejora 11 del Home.
+String turnoActual() {
+  final h = DateTime.now().hour;
+  if (h >= 5 && h < 12) return 'Mañana';
+  if (h >= 12 && h < 18) return 'Tarde';
+  return 'Noche';
+}
+
+String _isoDia(DateTime d) =>
+    '${d.year.toString().padLeft(4, '0')}-'
+    '${d.month.toString().padLeft(2, '0')}-'
+    '${d.day.toString().padLeft(2, '0')}';
+
+/// Total cobrado ayer (mensualidades + diarios). Mejora 7 del Home.
+Future<double> cobradoAyer() async {
+  final ayer = _isoDia(
+      DateTime.now().subtract(const Duration(days: 1)));
+  double total = 0;
+  for (final p in await LocalDb.instance.allMirror('pagos')) {
+    if ('${p['fecha'] ?? ''}'.length >= 10 &&
+        '${p['fecha']}'.substring(0, 10) == ayer) {
+      total += (p['monto'] as num?)?.toDouble() ?? 0;
+    }
+  }
+  for (final d in await LocalDb.instance.allMirror('pagos_diarios')) {
+    if ('${d['fecha'] ?? ''}'.length >= 10 &&
+        '${d['fecha']}'.substring(0, 10) == ayer) {
+      total += (d['total'] as num?)?.toDouble() ?? 0;
+    }
+  }
+  return total;
+}
+
+/// Antigüedad en días del cobro pendiente más viejo sin entregar.
+/// Si telegramId es null, considera todos (vista del dueño).
+/// Mejora 14 del Home.
+Future<int?> antiguedadPendiente({int? telegramId}) async {
+  DateTime? masVieja;
+  void considera(String? fecha) {
+    if (fecha == null || fecha.length < 10) return;
+    try {
+      final f = DateTime.parse(fecha.substring(0, 10));
+      if (masVieja == null || f.isBefore(masVieja!)) {
+        masVieja = f;
+      }
+    } catch (_) {}
+  }
+
+  for (final p in await LocalDb.instance.allMirror('pagos')) {
+    if ((p['metodo'] as String?) != 'efectivo') continue;
+    if (!esPendiente(p['entregado'])) continue;
+    if (telegramId != null &&
+        (p['telegram_user_id'] as int?) != telegramId) {
+      continue;
+    }
+    considera(p['fecha'] as String?);
+  }
+  for (final d in await LocalDb.instance.allMirror('pagos_diarios')) {
+    if (!esPendiente(d['entregado'])) continue;
+    if (telegramId != null &&
+        (d['registrado_por'] as int?) != telegramId) {
+      continue;
+    }
+    considera(d['fecha'] as String?);
+  }
+  if (masVieja == null) return null;
+  final hoy = DateTime.now();
+  return DateTime(hoy.year, hoy.month, hoy.day)
+      .difference(
+          DateTime(masVieja!.year, masVieja!.month, masVieja!.day))
+      .inDays;
+}
+
+/// Últimas entregas confirmadas (ops `confirmar_entrega` aplicadas),
+/// ordenadas por fecha descendente. {fecha, entrenador}.
+/// Mejora 12 del Home.
+Future<List<Map<String, dynamic>>> entregasRecientes(
+    {int limite = 3}) async {
+  final ops =
+      await LocalDb.instance.opsByEstado('aplicada');
+  final lista = <Map<String, dynamic>>[];
+  for (final op in ops) {
+    if (op['tipo'] != 'confirmar_entrega') continue;
+    Map<String, dynamic> payload = {};
+    try {
+      payload = Map<String, dynamic>.from(
+          jsonDecode('${op['payload'] ?? '{}'}') as Map);
+    } catch (_) {}
+    lista.add({
+      'fecha': '${op['creada_ts'] ?? ''}',
+      'trainer_id': payload['trainer_telegram_id'],
+    });
+  }
+  lista.sort((a, b) =>
+      '${b['fecha']}'.compareTo('${a['fecha']}'));
+  return lista.take(limite).toList();
+}
+
+/// Total entregado (confirmado) hoy por el dueño.
+/// Mejora 15 del Home (cuadre del día).
+Future<double> entregadoHoy() async {
+  final hoy = _isoDia(DateTime.now());
+  double total = 0;
+  for (final p in await LocalDb.instance.allMirror('pagos')) {
+    if (esPendiente(p['entregado'])) continue;
+    if ('${p['fecha'] ?? ''}'.length >= 10 &&
+        '${p['fecha']}'.substring(0, 10) == hoy) {
+      total += (p['monto'] as num?)?.toDouble() ?? 0;
+    }
+  }
+  return total;
+}
+
+/// Resumen de la semana actual: cobrado total y clientes nuevos.
+/// Mejora 16 del Home.
+Future<Map<String, dynamic>> resumenSemanal() async {
+  final hoy = DateTime.now();
+  final lunes =
+      hoy.subtract(Duration(days: hoy.weekday - 1));
+  final inicio = _isoDia(DateTime(lunes.year, lunes.month, lunes.day));
+  double cobrado = 0;
+  for (final p in await LocalDb.instance.allMirror('pagos')) {
+    final f = '${p['fecha'] ?? ''}';
+    if (f.length >= 10 && f.substring(0, 10).compareTo(inicio) >= 0) {
+      cobrado += (p['monto'] as num?)?.toDouble() ?? 0;
+    }
+  }
+  for (final d in await LocalDb.instance.allMirror('pagos_diarios')) {
+    final f = '${d['fecha'] ?? ''}';
+    if (f.length >= 10 && f.substring(0, 10).compareTo(inicio) >= 0) {
+      cobrado += (d['total'] as num?)?.toDouble() ?? 0;
+    }
+  }
+  var nuevos = 0;
+  for (final c in await LocalDb.instance.allMirror('clientes')) {
+    final f = '${c['fecha_inscripcion'] ?? ''}';
+    if (f.length >= 10 && f.substring(0, 10).compareTo(inicio) >= 0) {
+      nuevos++;
+    }
+  }
+  return {'cobrado': cobrado, 'nuevos': nuevos};
+}
+
+/// Última actividad por actor desde el feed de actividad.
+/// {actor: DateTime}. Mejora 13 del Home.
+Future<Map<String, DateTime>> ultimaActividadPorActor() async {
+  final mapa = <String, DateTime>{};
+  final raw = await LocalDb.instance.getMeta('sync_estado_actividad');
+  if (raw == null || raw.isEmpty) return mapa;
+  try {
+    for (final a in jsonDecode(raw) as List) {
+      final m = Map<String, dynamic>.from(a as Map);
+      final actor = '${m['actor'] ?? ''}';
+      final ts = '${m['ts'] ?? ''}';
+      if (actor.isEmpty || ts.isEmpty) continue;
+      try {
+        final f = DateTime.parse(ts);
+        final prev = mapa[actor];
+        if (prev == null || f.isAfter(prev)) mapa[actor] = f;
+      } catch (_) {}
+    }
+  } catch (_) {}
+  return mapa;
+}
+
+/// Desglose del pendiente del entrenador cobrado hoy.
+/// {mensualidades: total, diarios: total, n}. Mejora 20 del Home.
+Future<Map<String, dynamic>> pendienteDetalleHoy(
+    int? telegramId) async {
+  final hoy = _isoDia(DateTime.now());
+  double mens = 0, diar = 0;
+  var n = 0;
+  for (final p in await LocalDb.instance.allMirror('pagos')) {
+    if ((p['metodo'] as String?) != 'efectivo') continue;
+    if (!esPendiente(p['entregado'])) continue;
+    if (telegramId != null &&
+        (p['telegram_user_id'] as int?) != telegramId) {
+      continue;
+    }
+    if ('${p['fecha'] ?? ''}'.length < 10 ||
+        '${p['fecha']}'.substring(0, 10) != hoy) {
+      continue;
+    }
+    mens += (p['monto'] as num?)?.toDouble() ?? 0;
+    n++;
+  }
+  for (final d in await LocalDb.instance.allMirror('pagos_diarios')) {
+    if (!esPendiente(d['entregado'])) continue;
+    if (telegramId != null &&
+        (d['registrado_por'] as int?) != telegramId) {
+      continue;
+    }
+    if ('${d['fecha'] ?? ''}'.length < 10 ||
+        '${d['fecha']}'.substring(0, 10) != hoy) {
+      continue;
+    }
+    diar += (d['total'] as num?)?.toDouble() ?? 0;
+    n++;
+  }
+  return {'mensualidades': mens, 'diarios': diar, 'n': n};
+}
+
 /// Total cobrado por el entrenador en el mes calendario actual.
 Future<double> cobradoMes(int? telegramId) async {
   if (telegramId == null) return 0;
