@@ -15,6 +15,15 @@ class Novedad {
 }
 
 const novedades = [
+  Novedad('1.1.0', [
+    'Rediseño visual completo: colores carbón y naranja, tarjetas, iconos Material en vez de emojis',
+    'Login, Home, listas, ficha e inscripción rediseñados',
+    'Cobrar, Mi Turno/Mis cobros y diálogo de pago renovados',
+    'Sincronización y Administración con nuevo diseño',
+    'Actividad: más detalles y tocar un registro abre la ficha del cliente',
+    'Papelera con foto de cliente',
+    'Pagos realizados accesible desde el inicio',
+  ]),
   Novedad('1.0.16', [
     'Tipos de pago dinámicos: agrégalos, edítalos o desactívalos en Administración → Tipos de pago',
     'Precio de menores configurable (ya no fijo en el código)',

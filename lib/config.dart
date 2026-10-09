@@ -22,7 +22,7 @@ class AppConfig {
   static const whatsappContacto = '58191577';
 
   /// Versión visible en Ayuda/Ajustes (mantener igual que pubspec).
-  static const appVersion = '1.0.16';
+  static const appVersion = '1.1.0';
 
   /// Usuarios con permiso de dueño (solo Jc). Comparación en minúsculas
   /// contra la parte local del email alias (nombre@ironbody.gym).
