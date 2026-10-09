@@ -63,6 +63,10 @@ class SyncBanner extends StatelessWidget {
               color = Colors.amber.shade700;
               texto = '⏳ ${s.pending} por subir';
               mostrarDesglose = true;
+            } else if (s.hayNovedades) {
+              // v1.0.15: el servidor tiene cambios sin bajar
+              color = Colors.blue.shade700;
+              texto = '⬇️ Hay cambios nuevos';
             } else {
               color = Colors.green;
               texto = '✅ Sincronizado';

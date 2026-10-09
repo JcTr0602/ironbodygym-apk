@@ -344,8 +344,16 @@ Future<Map<String, dynamic>?> pagoDialogo(
           Text('Cliente: ${cliente['nombre']}'),
           Text('Período: ${_etiquetaPeriodo(s)}'),
           Text('Método: ${metodo == 'efectivo' ? '💵 Efectivo' : '📱 Transferencia'}'),
-          Text('Monto: ${fmtMonto(s.monto)} CUP',
-              style: const TextStyle(fontWeight: FontWeight.bold)),
+          // v1.0.15: monto prominente en la confirmación de cobro.
+          const SizedBox(height: 8),
+          Center(
+            child: Text('${fmtMonto(s.monto)} CUP',
+                style: const TextStyle(
+                    fontSize: 34,
+                    fontWeight: FontWeight.bold,
+                    color: Color(0xFFE8821A))),
+          ),
+          const SizedBox(height: 8),
           Text('Nuevo vencimiento: ${fmtFecha(nuevo)}',
               style: const TextStyle(fontWeight: FontWeight.bold)),
         ],

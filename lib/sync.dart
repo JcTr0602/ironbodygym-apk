@@ -41,13 +41,19 @@ class SyncStatus {
 
   /// Detalle legible del progreso, ej. "Subiendo foto 2 de 5…".
   final String? detalle;
+
+  /// v1.0.15: true si el servidor tiene cambios no bajados
+  /// (watermark < server_seq). "Cola vacía" no basta para decir
+  /// que los datos están al día.
+  final bool hayNovedades;
   const SyncStatus(
       {this.phase = SyncPhase.idle,
       this.pending = 0,
       this.lastOk,
       this.lastError,
       this.progreso,
-      this.detalle});
+      this.detalle,
+      this.hayNovedades = false});
 }
 
 /// Detalle de la última sincronización (para la pantalla de Sync).
@@ -159,13 +165,22 @@ class SyncEngine {
       {String? error, double? progreso, String? detalle}) async {
     final pending = await _db.countPendingOps();
     final lastOk = await _ultimaOk();
+    // v1.0.15: detectar si el servidor tiene cambios sin bajar
+    bool novedades = false;
+    try {
+      final wm = await _db.getWatermark();
+      final ss =
+          int.tryParse(await _db.getMeta('server_seq') ?? '0') ?? 0;
+      novedades = ss > wm;
+    } catch (_) {}
     _current = SyncStatus(
         phase: phase,
         pending: pending,
         lastOk: lastOk,
         lastError: error,
         progreso: progreso,
-        detalle: detalle);
+        detalle: detalle,
+        hayNovedades: novedades);
     _status.add(_current);
   }
 

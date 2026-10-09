@@ -214,6 +214,19 @@ class LocalDb {
         where: 'op_uuid=?', whereArgs: [opUuid]);
   }
 
+  /// Elimina una operación de la cola local (v1.0.15: deshacer pago).
+  ///
+  /// Solo es seguro llamarla con ops en estado 'pendiente' o 'error':
+  /// el POST a Supabase nunca tuvo éxito, así que el servidor jamás la
+  /// vio. Una op 'enviada'/'aplicada' NO debe borrarse: ya está (o estará)
+  /// en el servidor; para esas se usa 'anular_pago'.
+  Future<void> deleteOp(String opUuid) async {
+    final d = await db;
+    await d.delete('ops_queue',
+        where: "op_uuid=? AND estado IN ('pendiente','error')",
+        whereArgs: [opUuid]);
+  }
+
   Future<void> bumpOp(String opUuid, String error) async {
     final d = await db;
     await d.rawUpdate(

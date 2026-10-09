@@ -334,7 +334,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
       height: 140,
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: Colors.grey.shade100,
+        // v1.0.15: respetar modo oscuro
+        color: Theme.of(context).brightness == Brightness.dark
+            ? Colors.grey.shade800
+            : Colors.grey.shade100,
         borderRadius: BorderRadius.circular(12),
       ),
       child: SingleChildScrollView(

@@ -106,10 +106,12 @@ class _HomeScreenState extends State<HomeScreen> {
     final porSubir = await LocalDb.instance.countPendingOps();
     final det = await SyncEngine.instance.detalle();
     final noLeidas = await actividadNoLeidas();
-    // v1.0.15: el dueño ve lo pendiente a recoger (no a entregar)
+    // v1.0.15: el dueño ve lo pendiente a recoger (no a entregar).
+    // No se cuentan sus propios cobros: solo lo de los entrenadores.
     double porRecoger = 0;
     if (_auth.isOwner) {
-      porRecoger = await pendienteRecoger();
+      porRecoger =
+          await pendienteRecoger(excluirTelegramId: _auth.telegramId);
     }
     // Aviso "+8h sin subir" (punto 10)
     String? aviso;

@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../localdb.dart';
 import '../negocio.dart';
+import 'ficha.dart';
 
 /// Feed de actividad reciente (v1.0.15).
 ///
@@ -20,7 +21,8 @@ class ActividadScreen extends StatefulWidget {
 class _ActividadScreenState extends State<ActividadScreen> {
   List<Map<String, dynamic>> _items = [];
   bool _cargando = true;
-  String _filtro = 'todo'; // todo | inscripcion | pago | entrenador
+  String _filtro = 'todo'; // todo | inscripcion | pago
+  String _filtroActor = 'todos'; // todos | nombre del actor
 
   @override
   void initState() {
@@ -56,15 +58,64 @@ class _ActividadScreenState extends State<ActividadScreen> {
   }
 
   List<Map<String, dynamic>> get _filtrados {
-    if (_filtro == 'todo') return _items;
     return _items.where((a) {
-      final acc = '${a['accion'] ?? ''}';
-      if (_filtro == 'inscripcion') return acc.contains('inscri');
-      if (_filtro == 'pago') {
-        return acc.contains('pago') && !acc.contains('diario');
+      // Filtro por tipo
+      if (_filtro != 'todo') {
+        final acc = '${a['accion'] ?? ''}';
+        if (_filtro == 'inscripcion' && !acc.contains('inscri')) {
+          return false;
+        }
+        if (_filtro == 'pago' &&
+            !(acc.contains('pago') && !acc.contains('diario'))) {
+          return false;
+        }
+      }
+      // v1.0.15: filtro por entrenador/actor
+      if (_filtroActor != 'todos') {
+        if ('${a['actor'] ?? ''}' != _filtroActor) return false;
       }
       return true;
     }).toList();
+  }
+
+  /// v1.0.15: actores únicos para el filtro por entrenador.
+  List<String> get _actores {
+    final s = <String>{};
+    for (final a in _items) {
+      final actor = '${a['actor'] ?? ''}'.trim();
+      if (actor.isNotEmpty) s.add(actor);
+    }
+    final l = s.toList()..sort();
+    return l;
+  }
+
+  /// v1.0.15: extrae el id de cliente del detalle ("cliente 150 ...").
+  int? _clienteIdDe(Map<String, dynamic> a) {
+    final det = '${a['detalle'] ?? ''}';
+    final m = RegExp(r'cliente\s+(\d+)').firstMatch(det);
+    if (m != null) return int.tryParse(m.group(1)!);
+    return null;
+  }
+
+  Future<void> _abrirFicha(Map<String, dynamic> a) async {
+    final id = _clienteIdDe(a);
+    if (id == null) return;
+    // Verificar que el cliente existe localmente
+    final c = await clientePorId(id);
+    if (c == null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+              content: Text('Cliente no disponible offline')),
+        );
+      }
+      return;
+    }
+    if (mounted) {
+      await Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => FichaScreen(clienteId: id)),
+      );
+    }
   }
 
   String _emojiAccion(String accion) {
@@ -125,7 +176,7 @@ class _ActividadScreenState extends State<ActividadScreen> {
       ),
       body: Column(
         children: [
-          // Filtros
+          // Filtros por tipo
           SingleChildScrollView(
             scrollDirection: Axis.horizontal,
             padding:
@@ -140,6 +191,23 @@ class _ActividadScreenState extends State<ActividadScreen> {
               ],
             ),
           ),
+          // v1.0.15: filtro por entrenador
+          if (_actores.length > 1)
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.symmetric(
+                  horizontal: 12, vertical: 0),
+              child: Row(
+                children: [
+                  _chipActor('todos', '👥 Todos'),
+                  const SizedBox(width: 8),
+                  for (final actor in _actores) ...[
+                    _chipActor(actor, actor),
+                    const SizedBox(width: 8),
+                  ],
+                ],
+              ),
+            ),
           Expanded(
             child: _cargando
                 ? const Center(child: CircularProgressIndicator())
@@ -177,6 +245,8 @@ class _ActividadScreenState extends State<ActividadScreen> {
                                 ...grupo.value.map((a) {
                                   final accion =
                                       '${a['accion'] ?? ''}';
+                                  final tieneCliente =
+                                      _clienteIdDe(a) != null;
                                   return ListTile(
                                     dense: true,
                                     leading: Text(
@@ -198,6 +268,16 @@ class _ActividadScreenState extends State<ActividadScreen> {
                                       style: const TextStyle(
                                           fontSize: 12),
                                     ),
+                                    // v1.0.15: tocar abre la ficha
+                                    trailing: tieneCliente
+                                        ? const Icon(
+                                            Icons.chevron_right,
+                                            size: 18,
+                                            color: Colors.grey)
+                                        : null,
+                                    onTap: tieneCliente
+                                        ? () => _abrirFicha(a)
+                                        : null,
                                   );
                                 }),
                               ],
@@ -219,6 +299,18 @@ class _ActividadScreenState extends State<ActividadScreen> {
       onSelected: (_) => setState(() => _filtro = valor),
     );
   }
+
+  /// v1.0.15: chip de filtro por entrenador/actor.
+  Widget _chipActor(String valor, String etiqueta) {
+    final activo = _filtroActor == valor;
+    return ChoiceChip(
+      label: Text(etiqueta,
+          style: const TextStyle(fontSize: 12)),
+      selected: activo,
+      onSelected: (_) =>
+          setState(() => _filtroActor = valor),
+    );
+  }
 }
 
 /// Cuenta las actividades no leídas (para el badge).
@@ -229,10 +321,25 @@ Future<int> actividadNoLeidas() async {
     final raw =
         await LocalDb.instance.getMeta('sync_estado_actividad');
     if (raw == null || raw.isEmpty) return 0;
+    // v1.0.15 fix: comparar como DateTime, no como texto.
+    // El servidor manda 'YYYY-MM-DD HH:MM:SS' y la APK guarda ISO8601;
+    // la comparación lexicográfica siempre daba falso.
+    final vistaDt =
+        vista.isEmpty ? null : DateTime.tryParse(vista)?.toUtc();
     int n = 0;
     for (final a in jsonDecode(raw) as List) {
       final ts = '${(a as Map)['ts'] ?? ''}';
-      if (vista.isEmpty || ts.compareTo(vista) > 0) n++;
+      if (vistaDt == null) {
+        n++;
+        continue;
+      }
+      // El servidor guarda ts en UTC sin zona; lo tratamos como UTC.
+      var tsDt = DateTime.tryParse(ts);
+      if (tsDt != null && tsDt.isUtc == false) {
+        tsDt = DateTime.utc(tsDt.year, tsDt.month, tsDt.day, tsDt.hour,
+            tsDt.minute, tsDt.second);
+      }
+      if (tsDt != null && tsDt.isAfter(vistaDt)) n++;
     }
     return n;
   } catch (_) {

@@ -261,16 +261,22 @@ Future<double> pendienteEntrega(int? telegramId) async {
 
 /// v1.0.15: total pendiente a recoger por el dueño.
 /// Suma lo que todos los entrenadores tienen pendiente de entregar.
-Future<double> pendienteRecoger() async {
+/// Con `excluirTelegramId` se omiten los cobros hechos por esa persona
+/// (el dueño no tiene nada que recogerse a sí mismo).
+Future<double> pendienteRecoger({int? excluirTelegramId}) async {
   double total = 0;
   for (final p in await LocalDb.instance.allMirror('pagos')) {
     if ((p['metodo'] as String?) == 'efectivo' &&
         _esPendiente(p['entregado'])) {
+      final tid = p['telegram_user_id'] as int?;
+      if (excluirTelegramId != null && tid == excluirTelegramId) continue;
       total += (p['monto'] as num?)?.toDouble() ?? 0;
     }
   }
   for (final d in await LocalDb.instance.allMirror('pagos_diarios')) {
     if (_esPendiente(d['entregado'])) {
+      final tid = d['registrado_por'] as int?;
+      if (excluirTelegramId != null && tid == excluirTelegramId) continue;
       total += (d['total'] as num?)?.toDouble() ?? 0;
     }
   }
@@ -694,7 +700,10 @@ Future<double> cobradoMes(int? telegramId) async {
 
 /// Pendiente a entregar agrupado por entrenador (vista del admin).
 /// Lista de {id, nombre, total, n} ordenada por total desc.
-Future<List<Map<String, dynamic>>> pendientePorEntrenador() async {
+/// Con `excluirTid` se omite a ese entrenador (el dueño no se lista
+/// a sí mismo en "pendiente a recoger").
+Future<List<Map<String, dynamic>>> pendientePorEntrenador(
+    {int? excluirTid}) async {
   final mapa = <int, Map<String, dynamic>>{};
   void suma(int id, String nombre, double monto) {
     final e = mapa.putIfAbsent(id,
@@ -708,6 +717,7 @@ Future<List<Map<String, dynamic>>> pendientePorEntrenador() async {
     if (!_esPendiente(p['entregado'])) continue;
     final tid = p['telegram_user_id'] as int?;
     if (tid == null) continue;
+    if (excluirTid != null && tid == excluirTid) continue;
     suma(tid, '${p['registrado_por'] ?? 'Entrenador $tid'}',
         (p['monto'] as num?)?.toDouble() ?? 0);
   }
@@ -715,6 +725,7 @@ Future<List<Map<String, dynamic>>> pendientePorEntrenador() async {
     if (!_esPendiente(d['entregado'])) continue;
     final tid = d['registrado_por'] as int?;
     if (tid == null) continue;
+    if (excluirTid != null && tid == excluirTid) continue;
     suma(tid, '${d['registrado_por_nombre'] ?? 'Entrenador $tid'}',
         (d['total'] as num?)?.toDouble() ?? 0);
   }
