@@ -1,4 +1,4 @@
-/// 💰 Agregar pago: caja rápida de mensualidades.
+/// Agregar pago: caja rápida de mensualidades.
 ///
 /// Resumen del día arriba (total, cantidad, efectivo vs transferencia),
 /// deshacer último pago propio, últimos 10 cobros con hora.
@@ -17,7 +17,9 @@ import '../localdb.dart';
 import '../negocio.dart';
 import '../sync.dart';
 import 'buscar.dart';
+import 'componentes.dart';
 import 'dialogo_pago.dart';
+import 'diseno.dart';
 import 'ficha.dart';
 import 'widgets.dart';
 
@@ -73,7 +75,6 @@ class _PagoScreenState extends State<PagoScreen> {
   List<_Cobro> _cobros = [];
   bool _cargandoCobros = true;
 
-  static const naranja = Color(0xFFE8821A);
   final _auth = AuthService();
 
   @override
@@ -227,7 +228,7 @@ class _PagoScreenState extends State<PagoScreen> {
     HapticFeedback.lightImpact();
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('✅ Pago de ${c['nombre']} guardado')));
+        SnackBar(content: Text('Pago de ${c['nombre']} guardado')));
     SyncEngine.instance.push();
     _cargarDatos();
     _buscar();
@@ -246,7 +247,7 @@ class _PagoScreenState extends State<PagoScreen> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('↩️ Deshacer último pago'),
+        title: const Text('Deshacer último pago'),
         content: Text(
             '¿Anular el cobro de ${u.nombre} por '
             '${fmtMonto(u.monto)} CUP (${u.hora})?'),
@@ -271,13 +272,13 @@ class _PagoScreenState extends State<PagoScreen> {
         await LocalDb.instance.deleteOp(u.opUuid!);
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-            content: Text('↩️ Pago deshecho (no había sido enviado)')));
+            content: Text('Pago deshecho (no había sido enviado)')));
       } else {
         // 'enviada': ya va en camino al servidor, no se puede borrar.
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
             content: Text(
-                '⏳ Ese pago se está sincronizando, intenta en unos segundos')));
+                'Ese pago se está sincronizando, intenta en unos segundos')));
         return;
       }
     } else if (u.pagoId != null) {
@@ -288,7 +289,7 @@ class _PagoScreenState extends State<PagoScreen> {
       );
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('✅ Pago anulado (se sincronizará)')));
+          content: Text('Pago anulado (se sincronizará)')));
       SyncEngine.instance.push();
     } else {
       return;
@@ -299,71 +300,83 @@ class _PagoScreenState extends State<PagoScreen> {
 
   Widget _resumenDia() {
     final ultimo = _ultimoMio;
-    return Container(
-      margin: const EdgeInsets.fromLTRB(12, 8, 12, 0),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: const Color(0xFFE8F5E9),
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Column(
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceAround,
-            children: [
-              Column(
-                children: [
-                  Text(
-                    '${fmtMonto(_totalHoy)} CUP',
-                    style: const TextStyle(
-                        fontSize: 22,
-                        fontWeight: FontWeight.bold,
-                        color: naranja),
+    final cs = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(
+          AppEspacio.md, AppEspacio.sm, AppEspacio.md, 0),
+      child: Tarjeta(
+        child: Column(
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceAround,
+              children: [
+                Column(
+                  children: [
+                    Text(
+                      '${fmtMonto(_totalHoy)} CUP',
+                      style: AppTexto.titulo.copyWith(
+                          color: AppColores.naranja,
+                          fontSize: 22),
+                    ),
+                    Text('Cobrado hoy',
+                        style: AppTexto.etiqueta.copyWith(
+                            color: cs.onSurfaceVariant)),
+                  ],
+                ),
+                Column(
+                  children: [
+                    Text(
+                      '${_cobros.length}',
+                      style: AppTexto.titulo.copyWith(
+                          fontSize: 22),
+                    ),
+                    Text('Pagos hoy',
+                        style: AppTexto.etiqueta.copyWith(
+                            color: cs.onSurfaceVariant)),
+                  ],
+                ),
+                Column(
+                  crossAxisAlignment:
+                      CrossAxisAlignment.start,
+                  children: [
+                    Row(children: [
+                      const Icon(Icons.payments,
+                          size: 14,
+                          color: AppColores.exito),
+                      const SizedBox(width: 4),
+                      Text(fmtMonto(_efectivoHoy),
+                          style: AppTexto.cuerpo),
+                    ]),
+                    const SizedBox(height: 4),
+                    Row(children: [
+                      const Icon(Icons.smartphone,
+                          size: 14,
+                          color: AppColores.info),
+                      const SizedBox(width: 4),
+                      Text(fmtMonto(_transferHoy),
+                          style: AppTexto.cuerpo),
+                    ]),
+                  ],
+                ),
+              ],
+            ),
+            if (ultimo != null) ...[
+              const SizedBox(height: AppEspacio.sm),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  icon: const Icon(Icons.undo, size: 18),
+                  label: Text(
+                      'Deshacer último (${fmtMonto(ultimo.monto)} CUP)'),
+                  onPressed: _deshacerUltimo,
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: AppColores.error,
                   ),
-                  const Text('Cobrado hoy',
-                      style:
-                          TextStyle(fontSize: 12, color: Colors.grey)),
-                ],
-              ),
-              Column(
-                children: [
-                  Text(
-                    '${_cobros.length}',
-                    style: const TextStyle(
-                        fontSize: 22, fontWeight: FontWeight.bold),
-                  ),
-                  const Text('Pagos hoy',
-                      style:
-                          TextStyle(fontSize: 12, color: Colors.grey)),
-                ],
-              ),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text('💵 ${fmtMonto(_efectivoHoy)}',
-                      style: const TextStyle(fontSize: 13)),
-                  Text('📱 ${fmtMonto(_transferHoy)}',
-                      style: const TextStyle(fontSize: 13)),
-                ],
-              ),
-            ],
-          ),
-          if (ultimo != null) ...[
-            const SizedBox(height: 8),
-            SizedBox(
-              width: double.infinity,
-              child: OutlinedButton.icon(
-                icon: const Text('↩️'),
-                label: Text(
-                    'Deshacer último (${fmtMonto(ultimo.monto)} CUP)'),
-                onPressed: _deshacerUltimo,
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: Colors.red.shade700,
                 ),
               ),
-            ),
+            ],
           ],
-        ],
+        ),
       ),
     );
   }
@@ -371,50 +384,58 @@ class _PagoScreenState extends State<PagoScreen> {
   Widget _ultimosCobros() {
     if (_cargandoCobros) return const SizedBox.shrink();
     final items = _cobros.take(10).toList();
-    return Container(
-      margin: const EdgeInsets.fromLTRB(12, 8, 12, 0),
-      decoration: BoxDecoration(
-        border: Border.all(color: Colors.grey.shade300),
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: ExpansionTile(
-        leading: const Text('🕐', style: TextStyle(fontSize: 20)),
-        title: Text('Últimos cobros (${items.length})',
-            style: const TextStyle(
-                fontSize: 14, fontWeight: FontWeight.bold)),
-        children: items.isEmpty
-            ? [
-                const Padding(
-                  padding: EdgeInsets.all(12),
-                  child: Text('Aún no hay cobros hoy.',
-                      style:
-                          TextStyle(fontSize: 13, color: Colors.grey)),
-                ),
-              ]
-            : items.map((c) {
-                final mio = c.esMio(_auth.telegramId);
-                return ListTile(
-                  dense: true,
-                  leading: Text(
-                      c.metodo == 'efectivo' ? '💵' : '📱',
-                      style: const TextStyle(fontSize: 18)),
-                  title: Text(c.nombre,
-                      style: TextStyle(
-                          fontSize: 14,
-                          fontWeight:
-                              mio ? FontWeight.bold : FontWeight.normal)),
-                  subtitle: Text(
-                      '${c.hora}'
-                      '${c.esLocal && c.estadoOp != 'enviada' ? ' · ⏳ por subir' : ''}'
-                      '${c.esLocal && c.estadoOp == 'enviada' ? ' · ⬆️ subiendo' : ''}',
-                      style: const TextStyle(fontSize: 12)),
-                  trailing: Text('${fmtMonto(c.monto)} CUP',
-                      style: const TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.bold,
-                          color: naranja)),
-                );
-              }).toList(),
+    final cs = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(
+          AppEspacio.md, AppEspacio.sm, AppEspacio.md, 0),
+      child: Tarjeta(
+        padding: EdgeInsets.zero,
+        child: ExpansionTile(
+          leading: const Icon(Icons.schedule,
+              color: AppColores.naranja),
+          title: Text('Últimos cobros (${items.length})',
+              style: AppTexto.subtitulo
+                  .copyWith(fontSize: 14)),
+          children: items.isEmpty
+              ? const [
+                  Padding(
+                    padding: EdgeInsets.all(
+                        AppEspacio.md),
+                    child: Text('Aún no hay cobros hoy.',
+                        style: AppTexto.secundario),
+                  ),
+                ]
+              : items.map((c) {
+                  final mio = c.esMio(_auth.telegramId);
+                  final iconoMetodo =
+                      c.metodo == 'efectivo'
+                          ? Icons.payments
+                          : Icons.smartphone;
+                  return ListTile(
+                    dense: true,
+                    leading: Icon(iconoMetodo,
+                        size: 20,
+                        color: c.metodo == 'efectivo'
+                            ? AppColores.exito
+                            : AppColores.info),
+                    title: Text(c.nombre,
+                        style: AppTexto.cuerpo.copyWith(
+                            fontWeight: mio
+                                ? FontWeight.bold
+                                : FontWeight.normal)),
+                    subtitle: Text(
+                        '${c.hora}'
+                        '${c.esLocal && c.estadoOp != 'enviada' ? ' · por subir' : ''}'
+                        '${c.esLocal && c.estadoOp == 'enviada' ? ' · subiendo' : ''}',
+                        style: AppTexto.etiqueta.copyWith(
+                            color: cs.onSurfaceVariant)),
+                    trailing: Text('${fmtMonto(c.monto)} CUP',
+                        style: AppTexto.cuerpo.copyWith(
+                            fontWeight: FontWeight.bold,
+                            color: AppColores.naranja)),
+                  );
+                }).toList(),
+        ),
       ),
     );
   }
@@ -422,7 +443,7 @@ class _PagoScreenState extends State<PagoScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('💰 Agregar pago')),
+      appBar: AppBar(title: const Text('Agregar pago')),
       body: Column(
         children: [
           const SyncBanner(),
@@ -486,8 +507,10 @@ class _PagoScreenState extends State<PagoScreen> {
                         trailing: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            ElevatedButton(
-                              child: const Text('💰 Pagar'),
+                            ElevatedButton.icon(
+                              icon: const Icon(Icons.payments,
+                                  size: 18),
+                              label: const Text('Pagar'),
                               onPressed: () => _pagar(c),
                             ),
                           ],
