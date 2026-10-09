@@ -288,7 +288,7 @@ class _LoginScreenState extends State<LoginScreen>
                       textAlign: TextAlign.center,
                     ),
                     const SizedBox(height: 4),
-                    Text(
+                    const Text(
                       'v${AppConfig.appVersion}',
                       style: const TextStyle(
                           color: Colors.white24, fontSize: 10),

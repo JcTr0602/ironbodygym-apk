@@ -172,7 +172,7 @@ class _SyncBannerState extends State<SyncBanner>
             borderRadius: BorderRadius.circular(16),
             boxShadow: [
               BoxShadow(
-                  color: gradiente.last.withOpacity(0.35),
+                  color: gradiente.last.withValues(alpha: 0.35),
                   blurRadius: 8,
                   offset: const Offset(0, 3)),
             ],

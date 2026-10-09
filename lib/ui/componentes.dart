@@ -197,7 +197,6 @@ class BadgeEstado extends StatelessWidget {
     // En modo oscuro aclarar el texto del badge.
     final oscuro =
         Theme.of(context).brightness == Brightness.dark;
-    final colorTexto = oscuro ? fondo.withValues(alpha: 1.0) : frente;
     return Container(
       padding: const EdgeInsets.symmetric(
           horizontal: AppEspacio.sm, vertical: AppEspacio.xs),
