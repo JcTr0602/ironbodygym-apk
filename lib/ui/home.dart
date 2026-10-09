@@ -478,23 +478,20 @@ class _HomeScreenState extends State<HomeScreen> {
                 padding:
                     const EdgeInsets.symmetric(horizontal: 16),
                 child: Row(
-                  mainAxisAlignment:
-                      MainAxisAlignment.spaceEvenly,
                   children: [
-                    TextButton.icon(
-                        onPressed: () =>
-                            _ir(const PapeleraScreen()),
-                        icon: const Icon(
+                    Expanded(
+                        child: _chipSecundario(
                             Icons.delete_outline,
-                            size: 18),
-                        label: const Text('Papelera')),
-                    TextButton.icon(
-                        onPressed: () =>
-                            _ir(const AyudaScreen()),
-                        icon: const Icon(
+                            'Papelera',
+                            () => _ir(
+                                const PapeleraScreen()))),
+                    const SizedBox(width: 12),
+                    Expanded(
+                        child: _chipSecundario(
                             Icons.help_outline,
-                            size: 18),
-                        label: const Text('Ayuda')),
+                            'Ayuda',
+                            () =>
+                                _ir(const AyudaScreen()))),
                   ],
                 ),
               ),
@@ -542,6 +539,35 @@ class _HomeScreenState extends State<HomeScreen> {
         padding: const EdgeInsets.symmetric(
             horizontal: 8, vertical: 4),
         child: contenido,
+      ),
+    );
+  }
+
+  Widget _chipSecundario(
+      IconData icono, String texto, VoidCallback onTap) {
+    return Card(
+      elevation: 1,
+      shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12)),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(
+              vertical: 10, horizontal: 8),
+          child: Row(
+            mainAxisAlignment:
+                MainAxisAlignment.center,
+            children: [
+              Icon(icono, color: naranja, size: 20),
+              const SizedBox(width: 8),
+              Text(texto,
+                  style: const TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w500)),
+            ],
+          ),
+        ),
       ),
     );
   }
