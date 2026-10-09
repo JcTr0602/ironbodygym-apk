@@ -1,4 +1,4 @@
-/// 📊 Mi turno: resumen del entrenador.
+/// Mi turno: resumen del entrenador.
 ///
 /// Cobrado hoy, historial diario, pendiente a entregar con desglose y la
 /// aclaración explícita de que el pendiente SOLO se reinicia cuando Jc
@@ -10,6 +10,8 @@ import 'package:flutter/material.dart';
 import '../auth.dart';
 import '../localdb.dart';
 import '../negocio.dart';
+import 'componentes.dart';
+import 'diseno.dart';
 import 'ficha.dart';
 import 'pendiente.dart';
 import 'widgets.dart';
@@ -143,9 +145,17 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
   /// Turno actual según la hora (v1.0.16).
   String _turnoActual() {
     final h = DateTime.now().hour;
-    if (h >= 5 && h < 12) return '🌅 Turno de mañana';
-    if (h >= 12 && h < 18) return '☀️ Turno de tarde';
-    return '🌙 Turno de noche';
+    if (h >= 5 && h < 12) return 'Turno de mañana';
+    if (h >= 12 && h < 18) return 'Turno de tarde';
+    return 'Turno de noche';
+  }
+
+  /// Icono según el turno actual.
+  IconData _iconoTurno() {
+    final h = DateTime.now().hour;
+    if (h >= 5 && h < 12) return Icons.wb_sunny_outlined;
+    if (h >= 12 && h < 18) return Icons.wb_sunny;
+    return Icons.nights_stay_outlined;
   }
 
   /// Total cobrado en los últimos 7 días (incluye hoy).
@@ -168,21 +178,21 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
     String pct = '';
     if (antes <= 0 && ahora <= 0) {
       flecha = '=';
-      color = Colors.grey;
+      color = AppColores.textoSecundarioClaro;
     } else if (antes <= 0) {
       flecha = '↑';
-      color = Colors.green;
+      color = AppColores.exito;
     } else {
       final d = (ahora - antes) / antes;
       if (d > 0.02) {
         flecha = '↑';
-        color = Colors.green;
+        color = AppColores.exito;
       } else if (d < -0.02) {
         flecha = '↓';
-        color = Colors.red;
+        color = AppColores.error;
       } else {
         flecha = '=';
-        color = Colors.grey;
+        color = AppColores.textoSecundarioClaro;
       }
       pct = ' (${(d * 100).toStringAsFixed(0)}%)';
     }
@@ -212,21 +222,21 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('🏁 Cierre de turno'),
+        title: const Text('Cierre de turno'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('📅 ${fmtFecha(_hoy())}'),
+            Text(fmtFecha(_hoy())),
             Text(_turnoActual()),
             const Divider(),
-            Text('💵 Cobrado hoy: ${fmtMonto(_cobrado)} CUP'),
+            Text('Cobrado hoy: ${fmtMonto(_cobrado)} CUP'),
             Text('   Efectivo: ${fmtMonto(_efectivoHoy)} CUP'),
             Text('   Transferencia: ${fmtMonto(_transferHoy)} CUP'),
             Text('   Operaciones: $nOps'),
             const Divider(),
             Text(
-              '📤 Total a entregar a Jc: ${fmtMonto(_pendiente)} CUP',
+              'Total a entregar a Jc: ${fmtMonto(_pendiente)} CUP',
               style: const TextStyle(
                   fontWeight: FontWeight.bold, fontSize: 16),
             ),
@@ -314,7 +324,7 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
     final esDueno = _auth.isAdmin;
     return Scaffold(
       appBar: AppBar(
-          title: Text(esDueno ? '💵 Mis cobros' : '📊 Mi turno')),
+          title: Text(esDueno ? 'Mis cobros' : 'Mi turno')),
       body: Column(
         children: [
           const SyncBanner(),
@@ -324,86 +334,97 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
               child: ListView(
                 padding: const EdgeInsets.all(16),
                 children: [
-                  Card(
-                    color: Colors.green.shade50,
-                    child: Padding(
-                      padding: const EdgeInsets.all(12),
-                      child: Column(
-                        children: [
-                          const ListTile(
-                            leading: Text('💵',
-                                style: TextStyle(fontSize: 32)),
-                            title: Text('Cobrado hoy'),
-                          ),
-                          Text('${fmtMonto(_cobrado)} CUP',
-                              style: const TextStyle(
-                                  fontSize: 26,
-                                  fontWeight: FontWeight.bold)),
-                          const SizedBox(height: 4),
-                          Text(
-                            'Efectivo: ${fmtMonto(_efectivoHoy)} · '
-                            'Transferencia: ${fmtMonto(_transferHoy)}',
-                            style: const TextStyle(
-                                fontSize: 13, color: Colors.grey),
-                          ),
-                        ],
-                      ),
+                  Tarjeta(
+                    child: Column(
+                      children: [
+                        const Row(
+                          mainAxisAlignment:
+                              MainAxisAlignment.center,
+                          children: [
+                            Icon(Icons.payments,
+                                color: AppColores.exito,
+                                size: 28),
+                            SizedBox(
+                                width: AppEspacio.sm),
+                            Text('Cobrado hoy',
+                                style: AppTexto.subtitulo),
+                          ],
+                        ),
+                        const SizedBox(
+                            height: AppEspacio.sm),
+                        Text('${fmtMonto(_cobrado)} CUP',
+                            style: AppTexto.titulo.copyWith(
+                                fontSize: 26,
+                                color:
+                                    AppColores.naranja)),
+                        const SizedBox(height: 4),
+                        Text(
+                          'Efectivo: ${fmtMonto(_efectivoHoy)} · '
+                          'Transferencia: ${fmtMonto(_transferHoy)}',
+                          style: AppTexto.secundario,
+                        ),
+                      ],
                     ),
                   ),
                   if (!esDueno) ...[
                     // v1.0.16: turno actual según la hora
                     Center(
                       child: Chip(
+                        avatar: Icon(
+                            _iconoTurno(),
+                            size: 18,
+                            color: AppColores.naranja),
                         label: Text(_turnoActual(),
                             style: const TextStyle(
                                 fontSize: 13)),
-                        backgroundColor:
-                            Colors.blue.shade50,
                       ),
                     ),
                     const SizedBox(height: 8),
                     // v1.0.16: qué tengo que entregar (idea 2)
-                    Card(
-                      color: Colors.blue.shade50,
-                      child: Padding(
-                        padding:
-                            const EdgeInsets.all(12),
-                        child: Column(
-                          crossAxisAlignment:
-                              CrossAxisAlignment.start,
-                          children: [
-                            const Text(
-                                '📤 Qué tengo que entregar',
-                                style: TextStyle(
-                                    fontWeight:
-                                        FontWeight.bold,
-                                    fontSize: 15)),
-                            const SizedBox(height: 4),
-                            Text(
-                                'Hoy cobraste ${fmtMonto(_cobrado)} CUP en efectivo '
-                                '(+ ${fmtMonto(_transferHoy)} por transferencia, que va directo).'),
-                            const SizedBox(height: 4),
-                            Text(
-                              'Total a entregar a Jc: ${fmtMonto(_pendiente)} CUP',
-                              style: const TextStyle(
-                                  fontWeight:
-                                      FontWeight.bold,
-                                  fontSize: 16),
-                            ),
-                          ],
-                        ),
+                    Tarjeta(
+                      child: Column(
+                        crossAxisAlignment:
+                            CrossAxisAlignment.start,
+                        children: [
+                          const Row(
+                            children: [
+                              Icon(Icons.outbox,
+                                  color: AppColores.info,
+                                  size: 20),
+                              SizedBox(
+                                  width: AppEspacio.sm),
+                              Text(
+                                  'Qué tengo que entregar',
+                                  style: AppTexto.subtitulo),
+                            ],
+                          ),
+                          const SizedBox(
+                              height: AppEspacio.sm),
+                          Text(
+                              'Hoy cobraste ${fmtMonto(_cobrado)} CUP en efectivo '
+                              '(+ ${fmtMonto(_transferHoy)} por transferencia, que va directo).',
+                              style: AppTexto.cuerpo),
+                          const SizedBox(height: 4),
+                          Text(
+                            'Total a entregar a Jc: ${fmtMonto(_pendiente)} CUP',
+                            style: AppTexto.subtitulo.copyWith(
+                                color: AppColores.naranja),
+                          ),
+                        ],
                       ),
                     ),
                     const SizedBox(height: 12),
-                    Card(
-                      color: _pendiente > 0
-                          ? Colors.orange.shade50
-                          : Colors.green.shade50,
+                    Tarjeta(
+                      padding: EdgeInsets.zero,
                       child: ListTile(
-                        leading: Text(
-                            _pendiente > 0 ? '💰' : '✅',
-                            style: const TextStyle(
-                                fontSize: 32)),
+                        leading: Icon(
+                            _pendiente > 0
+                                ? Icons.payments
+                                : Icons.check_circle,
+                            color: _pendiente > 0
+                                ? AppColores.naranja
+                                : AppColores.exito,
+                            size: 32),
                         title:
                             const Text('Pendiente a entregar'),
                         subtitle: Text(
@@ -421,20 +442,24 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
                       ),
                     ),
                     const SizedBox(height: 8),
-                    Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: Colors.blue.shade50,
-                        borderRadius:
-                            BorderRadius.circular(12),
-                      ),
-                      child: const Text(
-                        'ℹ️ El "Pendiente a entregar" SOLO se reinicia cuando '
-                        'Jc confirma que recibió el dinero. Registrar más '
-                        'cobros no lo reduce: lo aumenta.',
-                        style: TextStyle(fontSize: 13),
-                        textAlign: TextAlign.center,
+                    Tarjeta(
+                      color: AppColores.info
+                          .withValues(alpha: 0.08),
+                      child: const Row(
+                        children: [
+                          Icon(Icons.info_outline,
+                              color: AppColores.info),
+                          SizedBox(
+                              width: AppEspacio.sm),
+                          Expanded(
+                            child: Text(
+                              'El "Pendiente a entregar" SOLO se reinicia cuando '
+                              'Jc confirma que recibió el dinero. Registrar más '
+                              'cobros no lo reduce: lo aumenta.',
+                              style: AppTexto.secundario,
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                     if (_pendPorDia.isNotEmpty) ...[
@@ -447,7 +472,7 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
                       for (final e in _pendPorDia.entries)
                         ListTile(
                           dense: true,
-                          leading: const Text('📅'),
+                          leading: const Icon(Icons.calendar_today, size: 20, color: AppColores.naranja),
                           title: Text(fmtFecha(e.key)),
                           trailing: Text(
                               '${fmtMonto(e.value)} CUP',
@@ -457,10 +482,11 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
                         ),
                     ],
                     const SizedBox(height: 12),
-                    Card(
+                    Tarjeta(
+                      padding: EdgeInsets.zero,
                       child: ListTile(
-                        leading: const Text('📦',
-                            style: TextStyle(fontSize: 28)),
+                        leading: const Icon(Icons.inventory_2,
+                            size: 28, color: AppColores.info),
                         title: const Text(
                             'Última entrega confirmada'),
                         subtitle: Text(_ultimaEntrega ==
@@ -472,20 +498,26 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
                     ),
                     const SizedBox(height: 12),
                     // v1.0.16: mi tendencia (idea 4)
-                    Card(
-                      child: Padding(
-                        padding:
-                            const EdgeInsets.all(12),
-                        child: Column(
+                    Tarjeta(
+                      child: Column(
                           crossAxisAlignment:
                               CrossAxisAlignment.start,
                           children: [
-                            const Text('📊 Mi tendencia',
-                                style: TextStyle(
-                                    fontWeight:
-                                        FontWeight.bold,
-                                    fontSize: 15)),
-                            const SizedBox(height: 8),
+                            const Row(
+                              children: [
+                                Icon(Icons.trending_up,
+                                    color:
+                                        AppColores.naranja,
+                                    size: 20),
+                                SizedBox(
+                                    width: AppEspacio.sm),
+                                Text('Mi tendencia',
+                                    style:
+                                        AppTexto.subtitulo),
+                              ],
+                            ),
+                            const SizedBox(
+                                height: AppEspacio.sm),
                             _filaTendencia('Hoy vs ayer',
                                 _cobradoAyer, _cobrado),
                             const SizedBox(height: 4),
@@ -495,28 +527,33 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
                                 _cobradoSemana()),
                           ],
                         ),
-                      ),
                     ),
                     const SizedBox(height: 12),
                     // v1.0.16: mis vencimientos (idea 3)
-                    Card(
-                      child: Padding(
-                        padding:
-                            const EdgeInsets.all(12),
-                        child: Column(
+                    Tarjeta(
+                      child: Column(
                           crossAxisAlignment:
                               CrossAxisAlignment.start,
                           children: [
-                            Text(
-                                '⏰ Mis vencimientos (${_vencimientos.length})',
-                                style: const TextStyle(
-                                    fontWeight:
-                                        FontWeight.bold,
-                                    fontSize: 15)),
-                            const SizedBox(height: 4),
+                            Row(
+                              children: [
+                                const Icon(Icons.alarm,
+                                    color:
+                                        AppColores.alerta,
+                                    size: 20),
+                                const SizedBox(
+                                    width: AppEspacio.sm),
+                                Text(
+                                    'Mis vencimientos (${_vencimientos.length})',
+                                    style:
+                                        AppTexto.subtitulo),
+                              ],
+                            ),
+                            const SizedBox(
+                                height: AppEspacio.sm),
                             if (_vencimientos.isEmpty)
                               const Text(
-                                  'Nada por vencer en 7 días. 🎉',
+                                  'Nada por vencer en 7 días.',
                                   style: TextStyle(
                                       color: Colors.grey,
                                       fontSize: 13)),
@@ -526,12 +563,11 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
                                 dense: true,
                                 contentPadding:
                                     EdgeInsets.zero,
-                                leading: Text(
-                                    (v['vencido'] == true)
-                                        ? '🔴'
-                                        : '🟡',
-                                    style: const TextStyle(
-                                        fontSize: 18)),
+                                leading: Icon(Icons.circle,
+                                    size: 12,
+                                    color: (v['vencido'] == true)
+                                        ? AppColores.error
+                                        : AppColores.alerta),
                                 title: Text(
                                     '${v['nombre']}',
                                     style: const TextStyle(
@@ -559,7 +595,6 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
                               ),
                           ],
                         ),
-                      ),
                     ),
                     const SizedBox(height: 12),
                     // v1.0.16: cierre de turno (idea 1)
@@ -574,10 +609,11 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
                     ),
                   ],
                   const SizedBox(height: 12),
-                  Card(
+                  Tarjeta(
+                    padding: EdgeInsets.zero,
                     child: ListTile(
-                      leading: const Text('🗓️',
-                          style: TextStyle(fontSize: 28)),
+                      leading: const Icon(Icons.calendar_month,
+                          size: 28, color: AppColores.naranja),
                       title: const Text('Cobrado este mes'),
                       trailing: Text('${fmtMonto(_cobradoMes)} CUP',
                           style: const TextStyle(
@@ -598,12 +634,14 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
                   // v1.0.16: agrupado por semana (idea 8)
                   for (final sem
                       in _agruparPorSemana(_historial))
-                    Card(
-                      margin:
-                          const EdgeInsets.symmetric(vertical: 4),
-                      child: ExpansionTile(
-                        leading: const Text('🗓️',
-                            style: TextStyle(fontSize: 22)),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(
+                          vertical: AppEspacio.xs),
+                      child: Tarjeta(
+                        padding: EdgeInsets.zero,
+                        child: ExpansionTile(
+                        leading: const Icon(Icons.calendar_month,
+                            size: 22, color: AppColores.naranja),
                         title: Text(sem['titulo'] as String,
                             style: const TextStyle(
                                 fontWeight: FontWeight.bold)),
@@ -619,9 +657,8 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
                               as List<Map<String, dynamic>>)
                             ExpansionTile(
                               dense: true,
-                              leading: const Text('📅',
-                                  style:
-                                      TextStyle(fontSize: 18)),
+                              leading: const Icon(Icons.calendar_today,
+                                  size: 18, color: AppColores.naranja),
                               title: Text(
                                   fmtFecha(
                                       h['fecha'] as String?),
@@ -665,6 +702,7 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
                         ],
                       ),
                     ),
+                  ),
                 ],
               ),
             ),
