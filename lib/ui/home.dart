@@ -29,6 +29,7 @@ import 'mi_dia.dart';
 import 'mi_turno.dart';
 import 'pago.dart';
 import 'pago_diario.dart';
+import 'pagos_realizados.dart';
 import 'papelera.dart';
 import 'pendiente.dart';
 import 'transferencia.dart';
@@ -467,6 +468,11 @@ class _HomeScreenState extends State<HomeScreen> {
                           'Dashboard',
                           () => _ir(
                               const DashboardScreen())),
+                      _botonRapido(
+                          Icons.verified,
+                          'Pagos realizados',
+                          () => _ir(
+                              const PagosRealizadosScreen())),
                     ],
                   ),
                 ),
