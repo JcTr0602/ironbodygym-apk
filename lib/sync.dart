@@ -39,7 +39,7 @@ class SyncStatus {
   /// Progreso 0..1 de la fase actual (null = indeterminado).
   final double? progreso;
 
-  /// Detalle legible del progreso, ej. "Subiendo foto 2 de 5…".
+  /// Detalle legible del progreso, ej. "Subiendo fotos… 2 de 5".
   final String? detalle;
 
   /// v1.0.15: true si el servidor tiene cambios no bajados
@@ -94,6 +94,22 @@ class SyncEngine {
   final _db = LocalDb.instance;
 
   String get _base => AppConfig.supabaseUrl;
+
+  /// Nombre amigable de cada tabla espejo para los mensajes de progreso.
+  static String _nombreAmigable(String tabla) {
+    switch (tabla) {
+      case 'pagos_diarios':
+        return 'pagos del día';
+      case 'clientes':
+        return 'clientes';
+      case 'pagos':
+        return 'pagos';
+      case 'gastos':
+        return 'gastos';
+      default:
+        return tabla.replaceAll('_', ' ');
+    }
+  }
 
   /// Petición autenticada con reintento tras refrescar el token.
   ///
@@ -399,7 +415,7 @@ class SyncEngine {
     final ajenas = await _db.countOpsAjenas(uid);
     if (ajenas > 0) {
       _emit(SyncPhase.uploading,
-          detalle: '⏸️ $ajenas operaciones de otro usuario en espera…');
+          detalle: '$ajenas cambios de otro usuario en espera…');
     }
     // 1) las ya aplicadas se marcan sin reenviar
     final porEnviar = <Map<String, dynamic>>[];
@@ -420,7 +436,7 @@ class SyncEngine {
       final lote = porEnviar.sublist(i, fin);
       _emit(SyncPhase.uploading,
           detalle:
-              '⬆️ Subiendo operaciones $fin de ${porEnviar.length}…',
+              'Enviando tus cambios… $fin de ${porEnviar.length}',
           progreso: fin / porEnviar.length);
       final body = jsonEncode([
         for (final op in lote)
@@ -620,7 +636,8 @@ class SyncEngine {
       ti++;
       final supTabla = supTablas[tabla]!;
       _emit(SyncPhase.downloading,
-          detalle: '⬇️ Bajando $tabla ($ti de ${tablas.length})…',
+          detalle:
+              'Descargando ${_nombreAmigable(tabla)}… $ti de ${tablas.length}',
           progreso: ti / (tablas.length + 1));
       var pageWm = since;
       while (true) {
@@ -663,7 +680,7 @@ class SyncEngine {
     }
     // borrados (tombstones)
     _emit(SyncPhase.downloading,
-        detalle: '⬇️ Bajando borrados…',
+        detalle: 'Descargando eliminados…',
         progreso: tablas.length / (tablas.length + 1));
     var pageWm = since;
     while (true) {
@@ -895,7 +912,7 @@ class SyncEngine {
       bytes = _comprimirFoto(bytes);
       final path = 'pendientes/${f['op_uuid']}.jpg';
       _emit(SyncPhase.photos,
-          detalle: '📷 Subiendo foto $i de ${fotos.length}…',
+          detalle: 'Subiendo fotos… $i de ${fotos.length}',
           progreso: (i - 1) / fotos.length);
       // reanudable primero; si tus no está disponible, método simple
       final tus =
@@ -903,7 +920,7 @@ class SyncEngine {
       final ok = tus ?? await _subirFotoSimple(path, bytes);
       if (!ok) continue;
       _emit(SyncPhase.photos,
-          detalle: '📷 Subiendo foto $i de ${fotos.length}…',
+          detalle: 'Subiendo fotos… $i de ${fotos.length}',
           progreso: i / fotos.length);
       // encola la op 'foto' para que el puente la guarde en gym.db
       final d = await _db.db;

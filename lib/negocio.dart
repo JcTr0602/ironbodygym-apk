@@ -760,6 +760,66 @@ Future<double> cobradoMes(int? telegramId) async {
 /// Lista de {id, nombre, total, n} ordenada por total desc.
 /// Con `excluirTid` se omite a ese entrenador (el dueño no se lista
 /// a sí mismo en "pendiente a recoger").
+///
+/// Detalle de cada movimiento pendiente de un entrenador (v1.0.16).
+/// Lista de {tipo, ...} donde tipo es 'pago' o 'diario':
+/// - pago: {pago_id, cliente_id, cliente_nombre, monto, fecha, periodo,
+///          metodo, meses, dias, es_inscripcion}
+/// - diario: {diario_id, fecha, turno, cantidad, total, nota}
+Future<List<Map<String, dynamic>>> detallePendienteEntrenador(
+    int tid) async {
+  final items = <Map<String, dynamic>>[];
+  // Mapa cliente_id -> {nombre, fecha_inscripcion} (una sola pasada)
+  final clientes = <int, Map<String, String>>{};
+  for (final c in await LocalDb.instance.allMirror('clientes')) {
+    final id = (c['id'] as num?)?.toInt();
+    if (id == null) continue;
+    clientes[id] = {
+      'nombre': '${c['nombre'] ?? 'Cliente $id'}',
+      'fecha_inscripcion': '${c['fecha_inscripcion'] ?? ''}',
+    };
+  }
+  for (final p in await LocalDb.instance.allMirror('pagos')) {
+    if ((p['metodo'] as String?) != 'efectivo') continue;
+    if (!_esPendiente(p['entregado'])) continue;
+    if ((p['telegram_user_id'] as int?) != tid) continue;
+    final cid = (p['cliente_id'] as num?)?.toInt() ?? 0;
+    final cli = clientes[cid];
+    final fecha = '${p['fecha'] ?? ''}';
+    items.add({
+      'tipo': 'pago',
+      'pago_id': (p['id'] as num?)?.toInt(),
+      'cliente_id': cid,
+      'cliente_nombre': cli?['nombre'] ?? 'Cliente $cid',
+      'monto': (p['monto'] as num?)?.toDouble() ?? 0,
+      'fecha': fecha,
+      'periodo': '${p['periodo'] ?? 'mensual'}',
+      'metodo': '${p['metodo'] ?? 'efectivo'}',
+      'meses': (p['meses'] as num?)?.toInt() ?? 1,
+      'dias': (p['dias'] as num?)?.toInt() ?? 0,
+      // inscripción si el pago coincide con la fecha de inscripción
+      'es_inscripcion':
+          cli != null && (cli['fecha_inscripcion'] ?? '').isNotEmpty && fecha.startsWith(cli['fecha_inscripcion']!),
+    });
+  }
+  for (final d in await LocalDb.instance.allMirror('pagos_diarios')) {
+    if (!_esPendiente(d['entregado'])) continue;
+    if ((d['registrado_por'] as int?) != tid) continue;
+    items.add({
+      'tipo': 'diario',
+      'diario_id': (d['id'] as num?)?.toInt(),
+      'fecha': '${d['fecha'] ?? ''}',
+      'turno': '${d['turno'] ?? ''}',
+      'cantidad': (d['cantidad'] as num?)?.toInt() ?? 0,
+      'total': (d['total'] as num?)?.toDouble() ?? 0,
+      'nota': '${d['nota'] ?? ''}',
+    });
+  }
+  items.sort((a, b) =>
+      '${b['fecha']}'.compareTo('${a['fecha']}'));
+  return items;
+}
+
 Future<List<Map<String, dynamic>>> pendientePorEntrenador(
     {int? excluirTid}) async {
   final mapa = <int, Map<String, dynamic>>{};

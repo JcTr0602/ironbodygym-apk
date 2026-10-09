@@ -25,6 +25,7 @@ import 'historial_entrenador.dart';
 import 'exportar_excel.dart';
 import 'usuarios.dart';
 import 'widgets.dart';
+import 'detalle_pendiente.dart';
 
 class AdminScreen extends StatefulWidget {
   const AdminScreen({super.key});
@@ -464,6 +465,14 @@ class _AdminScreenState extends State<AdminScreen> {
                                   title: Text('${t['nombre']}'),
                                   subtitle: Text(
                                       '${t['n']} movimiento(s) — ${fmtMonto(t['total'])} CUP'),
+                                  // v1.0.16: tocar abre el detalle
+                                  // (qué cobros componen el pendiente)
+                                  onTap: () => _ir(
+                                      DetallePendienteScreen(
+                                          trainerId:
+                                              t['id'] as int,
+                                          nombre:
+                                              '${t['nombre']}')),
                                   trailing: TextButton(
                                     child: const Text('Confirmar'),
                                     onPressed: () =>
