@@ -338,8 +338,38 @@ class _ColaScreenState extends State<ColaScreen> {
   @override
   Widget build(BuildContext context) {
     final pendientes =
-        _ops.where((o) => o['estado'] == 'pendiente' || o['estado'] == 'error').length;
-    final estaOk = _det.error == null || _det.error!.isEmpty;
+        _ops.where((o) => o['estado'] == 'pendiente').length;
+    final conError =
+        _ops.where((o) => o['estado'] == 'error').length;
+    // v1.0.14: tres estados claros en vez de binario ok/error
+    final String estadoSync;
+    final List<Color> colores;
+    final String emoji;
+    final String titulo;
+    final String subtitulo;
+    if (conError > 0) {
+      estadoSync = 'error';
+      colores = [const Color(0xFFF44336), const Color(0xFFC62828)];
+      emoji = '❌';
+      titulo = 'Atención requerida';
+      subtitulo = conError == 1
+          ? '1 operación falló y necesita tu revisión'
+          : '$conError operaciones fallaron y necesitan tu revisión';
+    } else if (pendientes > 0) {
+      estadoSync = 'pendiente';
+      colores = [const Color(0xFFFF9800), const Color(0xFFF57C00)];
+      emoji = '⏳';
+      titulo = 'Pendiente de sincronizar';
+      subtitulo = pendientes == 1
+          ? '1 operación esperando conexión'
+          : '$pendientes operaciones esperando conexión';
+    } else {
+      estadoSync = 'ok';
+      colores = [const Color(0xFF4CAF50), const Color(0xFF2E7D32)];
+      emoji = '✅';
+      titulo = 'Sincronizado';
+      subtitulo = 'Todo al día';
+    }
     return Scaffold(
       appBar: AppBar(title: const Text('📤 Sincronización')),
       body: RefreshIndicator(
@@ -347,21 +377,19 @@ class _ColaScreenState extends State<ColaScreen> {
         child: ListView(
           padding: const EdgeInsets.all(16),
           children: [
-            // Cabecera de estado visual (v1.0.9.1)
+            // Cabecera de estado visual (v1.0.14: tres estados)
             Container(
               padding: const EdgeInsets.all(20),
               decoration: BoxDecoration(
                 gradient: LinearGradient(
                   begin: Alignment.topLeft,
                   end: Alignment.bottomRight,
-                  colors: estaOk
-                      ? [const Color(0xFF4CAF50), const Color(0xFF2E7D32)]
-                      : [const Color(0xFFF44336), const Color(0xFFC62828)],
+                  colors: colores,
                 ),
                 borderRadius: BorderRadius.circular(20),
                 boxShadow: [
                   BoxShadow(
-                    color: (estaOk ? Colors.green : Colors.red).withValues(alpha: 0.3),
+                    color: colores[0].withValues(alpha: 0.3),
                     blurRadius: 12,
                     offset: const Offset(0, 4),
                   ),
@@ -370,12 +398,12 @@ class _ColaScreenState extends State<ColaScreen> {
               child: Column(
                 children: [
                   Text(
-                    estaOk ? '✅' : '⚠️',
+                    emoji,
                     style: const TextStyle(fontSize: 48),
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    estaOk ? 'Sincronizado' : 'Error de sincronización',
+                    titulo,
                     style: const TextStyle(
                       color: Colors.white,
                       fontSize: 22,
@@ -384,14 +412,34 @@ class _ColaScreenState extends State<ColaScreen> {
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    pendientes > 0
-                        ? '$pendientes operaciones pendientes'
-                        : 'Todo al día',
+                    subtitulo,
                     style: const TextStyle(
                       color: Colors.white70,
                       fontSize: 14,
                     ),
+                    textAlign: TextAlign.center,
                   ),
+                  // v1.0.14: guía contextual según el estado
+                  if (estadoSync == 'pendiente') ...[
+                    const SizedBox(height: 12),
+                    const Text(
+                      'Se subirán automáticamente cuando haya conexión. '
+                      'Puedes seguir trabajando sin internet.',
+                      style: TextStyle(
+                          color: Colors.white70, fontSize: 12),
+                      textAlign: TextAlign.center,
+                    ),
+                  ],
+                  if (estadoSync == 'error') ...[
+                    const SizedBox(height: 12),
+                    const Text(
+                      'Revisa las operaciones marcadas abajo. '
+                      'Puedes reintentarlas o cancelarlas.',
+                      style: TextStyle(
+                          color: Colors.white70, fontSize: 12),
+                      textAlign: TextAlign.center,
+                    ),
+                  ],
                 ],
               ),
             ),
@@ -490,27 +538,84 @@ class _ColaScreenState extends State<ColaScreen> {
             else
               ..._ops.map((op) {
                 final estado = '${op['estado']}';
-                final cancelable =
-                    estado == 'pendiente' || estado == 'error';
+                final esPendiente = estado == 'pendiente';
+                final esError = estado == 'error';
+                final cancelable = esPendiente || esError;
+                // v1.0.14: tiempo relativo para saber hace cuánto espera
+                final creada = '${op['creada_ts'] ?? ''}';
+                final hace = tiempoRelativo(creada);
                 return Card(
                   margin: const EdgeInsets.only(bottom: 8),
+                  // v1.0.14: borde de color según estado
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    side: BorderSide(
+                      color: esError
+                          ? Colors.red.shade300
+                          : esPendiente
+                              ? Colors.orange.shade300
+                              : Colors.green.shade200,
+                      width: 1,
+                    ),
+                  ),
                   child: ListTile(
                     leading: Text(_emoji(estado),
                         style: const TextStyle(fontSize: 24)),
                     title: Text(_tipo('${op['tipo']}')),
-                    subtitle: Text(
-                        '${op['creada_ts']}'.substring(0, 16).replaceAll('T', ' ') +
-                            (op['error'] != null &&
-                                    '${op['error']}'.isNotEmpty
-                                ? '\n${op['error']}'
-                                : '')),
+                    subtitle: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          hace == 'Sin accesos registrados'
+                              ? creada.substring(0,
+                                      creada.length > 16 ? 16 : creada.length)
+                                  .replaceAll('T', ' ')
+                              : hace,
+                          style: const TextStyle(fontSize: 12),
+                        ),
+                        if (esError &&
+                            op['error'] != null &&
+                            '${op['error']}'.isNotEmpty)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 4),
+                            child: Text(
+                              '${op['error']}',
+                              style: TextStyle(
+                                  fontSize: 12,
+                                  color: Colors.red.shade700),
+                            ),
+                          ),
+                        if (esPendiente)
+                          const Padding(
+                            padding: EdgeInsets.only(top: 4),
+                            child: Text(
+                              'Se subirá cuando haya conexión',
+                              style: TextStyle(
+                                  fontSize: 12, color: Colors.grey),
+                            ),
+                          ),
+                      ],
+                    ),
                     trailing: cancelable
-                        ? IconButton(
-                            tooltip: 'Cancelar',
-                            icon: const Icon(Icons.cancel_outlined,
-                                color: Colors.red),
-                            onPressed: () => _cancelar(
-                                '${op['op_uuid']}', '${op['tipo']}'),
+                        ? Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              if (esError)
+                                IconButton(
+                                  tooltip: 'Reintentar',
+                                  icon: const Icon(Icons.refresh,
+                                      color: Colors.blue),
+                                  onPressed: () => _sincronizar(),
+                                ),
+                              IconButton(
+                                tooltip: 'Cancelar',
+                                icon: const Icon(Icons.cancel_outlined,
+                                    color: Colors.red),
+                                onPressed: () => _cancelar(
+                                    '${op['op_uuid']}',
+                                    '${op['tipo']}'),
+                              ),
+                            ],
                           )
                         : _estadoChip(estado),
                     onTap: () => _verDetalle(op),
