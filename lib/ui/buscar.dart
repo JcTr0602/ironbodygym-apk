@@ -83,15 +83,14 @@ class _BuscarScreenState extends State<BuscarScreen> {
         }
       }).toList();
     }
-    // v1.0.15: solo clientes sin foto (sin referencia o sin caché local).
+    // v1.1 fix: solo clientes sin foto asignada (sin referencia
+    // foto_storage). Antes verificaba el caché local, así que clientes
+    // CON foto pero sin descargar aparecían erróneamente aquí.
     if (_filtro == 'sinfoto') {
-      final sinFoto = <Map<String, dynamic>>[];
-      for (final c in r) {
-        final enCache = await FotoCache.instance
-            .enCache(c['foto_storage'] as String?);
-        if (enCache == null) sinFoto.add(c);
-      }
-      r = sinFoto;
+      r = r.where((c) {
+        final ref = c['foto_storage'] as String?;
+        return ref == null || ref.isEmpty;
+      }).toList();
     }
     if (mounted) {
       setState(() {
