@@ -259,6 +259,15 @@ class SyncEngine {
     if (e is TimeoutException || l.contains('timeout')) {
       return 'Conexión muy lenta (tiempo agotado)';
     }
+    // v1.1.1: ClientException y cortes a mitad de la conexión (típico con
+    // la conexión inestable) en lenguaje del entrenador, no el texto crudo
+    if (l.contains('connection abort') ||
+        l.contains('connection reset') ||
+        l.contains('connection closed') ||
+        l.contains('clientexception') ||
+        l.contains('handshake')) {
+      return 'Conexión interrumpida (reintenta)';
+    }
     final m51 = RegExp(r'http 5\d\d').firstMatch(l);
     if (m51 != null) return 'Error del servidor (reintenta luego)';
     if (l.contains('http 401') || l.contains('401')) {
