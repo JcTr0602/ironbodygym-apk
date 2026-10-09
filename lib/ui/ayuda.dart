@@ -158,74 +158,172 @@ class AyudaScreen extends StatelessWidget {
   }
 
   /// Tarjeta "Lo Nuevo": la versión actual destacada, las anteriores plegadas.
+  /// Tarjeta "Lo Nuevo" v1.1.1: cabecera con gradiente, cambios con
+  /// iconos y versiones anteriores con chips. Ya no es plegable la actual.
   static Widget _novedadesCard() {
     if (novedades.isEmpty) return const SizedBox.shrink();
     final actual = novedades.first;
     final anteriores = novedades.skip(1).toList();
     return Card(
       margin: const EdgeInsets.only(bottom: 10),
+      clipBehavior: Clip.antiAlias,
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
-        side: const BorderSide(
-            color: Color(0xFFE8821A), width: 2),
+        borderRadius: BorderRadius.circular(16),
       ),
-      child: ExpansionTile(
-        initiallyExpanded: true,
-        leading: const CircleAvatar(
-          backgroundColor: Color(0xFFFFE3C2),
-          child:
-              Icon(Icons.new_releases, color: Color(0xFFE8821A)),
-        ),
-        title: const Text('Lo Nuevo',
-            style: TextStyle(
-                fontWeight: FontWeight.bold, fontSize: 16)),
-        subtitle: Text('Versión ${actual.version}'),
+      elevation: 3,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          for (final c in actual.cambios)
-            Padding(
-              padding:
-                  const EdgeInsets.fromLTRB(24, 3, 16, 3),
-              child: Align(
-                alignment: Alignment.centerLeft,
-                child: Text('• $c',
-                    style: const TextStyle(fontSize: 14)),
+          // Cabecera con gradiente naranja
+          Container(
+            padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+            decoration: const BoxDecoration(
+              gradient: LinearGradient(
+                colors: [Color(0xFFE8821A), Color(0xFFC85A00)],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
               ),
             ),
-          if (anteriores.isNotEmpty)
-            ExpansionTile(
-              title: const Text('Versiones anteriores',
-                  style: TextStyle(
-                      fontSize: 13, color: Colors.grey)),
+            child: Row(
               children: [
-                for (final n in anteriores) ...[
-                  Padding(
-                    padding:
-                        const EdgeInsets.fromLTRB(16, 4, 16, 0),
-                    child: Align(
-                      alignment: Alignment.centerLeft,
-                      child: Text('Versión ${n.version}',
-                          style: const TextStyle(
-                              fontWeight: FontWeight.bold,
-                              fontSize: 13)),
-                    ),
+                Container(
+                  width: 44,
+                  height: 44,
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.22),
+                    shape: BoxShape.circle,
                   ),
-                  for (final c in n.cambios)
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(
-                          24, 2, 16, 2),
-                      child: Align(
-                        alignment: Alignment.centerLeft,
-                        child: Text('• $c',
-                            style: const TextStyle(
-                                fontSize: 13,
-                                color: Colors.black87)),
-                      ),
-                    ),
-                  const SizedBox(height: 8),
-                ],
+                  child: const Icon(Icons.new_releases,
+                      color: Colors.white, size: 24),
+                ),
+                const SizedBox(width: 12),
+                const Expanded(
+                  child: Text('Lo Nuevo',
+                      style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 17,
+                          color: Colors.white)),
+                ),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.22),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Text('v${actual.version}',
+                      style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 13)),
+                ),
               ],
             ),
-          const SizedBox(height: 8),
+          ),
+          // Cambios de la versión actual, con iconos
+          Padding(
+            padding: const EdgeInsets.fromLTRB(8, 10, 8, 4),
+            child: Column(
+              children: [
+                for (final c in actual.cambios)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(
+                        vertical: 5, horizontal: 8),
+                    child: Row(
+                      crossAxisAlignment:
+                          CrossAxisAlignment.start,
+                      children: [
+                        const Padding(
+                          padding: EdgeInsets.only(top: 2),
+                          child: Icon(Icons.check_circle,
+                              size: 18,
+                              color: Color(0xFFE8821A)),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(c,
+                              style: const TextStyle(
+                                  fontSize: 14,
+                                  height: 1.35)),
+                        ),
+                      ],
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          if (anteriores.isNotEmpty)
+            Theme(
+              data: ThemeData(
+                  dividerColor: Colors.transparent),
+              child: ExpansionTile(
+                tilePadding: const EdgeInsets.symmetric(
+                    horizontal: 16),
+                title: const Text('Versiones anteriores',
+                    style: TextStyle(
+                        fontSize: 13, color: Colors.grey)),
+                children: [
+                  for (final n in anteriores) ...[
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(
+                          16, 4, 16, 0),
+                      child: Align(
+                        alignment: Alignment.centerLeft,
+                        child: Container(
+                          padding:
+                              const EdgeInsets.symmetric(
+                                  horizontal: 8,
+                                  vertical: 2),
+                          decoration: BoxDecoration(
+                            color:
+                                const Color(0xFFFFE3C2),
+                            borderRadius:
+                                BorderRadius.circular(12),
+                          ),
+                          child: Text('v${n.version}',
+                              style: const TextStyle(
+                                  fontWeight:
+                                      FontWeight.bold,
+                                  fontSize: 12,
+                                  color:
+                                      Color(0xFFC85A00))),
+                        ),
+                      ),
+                    ),
+                    for (final c in n.cambios)
+                      Padding(
+                        padding:
+                            const EdgeInsets.fromLTRB(
+                                24, 4, 16, 2),
+                        child: Row(
+                          crossAxisAlignment:
+                              CrossAxisAlignment.start,
+                          children: [
+                            const Padding(
+                              padding:
+                                  EdgeInsets.only(top: 5),
+                              child: Icon(
+                                  Icons.fiber_manual_record,
+                                  size: 8,
+                                  color: Colors.grey),
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(c,
+                                  style: const TextStyle(
+                                      fontSize: 13,
+                                      color:
+                                          Colors.black87)),
+                            ),
+                          ],
+                        ),
+                      ),
+                    const SizedBox(height: 8),
+                  ],
+                ],
+              ),
+            ),
+          const SizedBox(height: 4),
         ],
       ),
     );
