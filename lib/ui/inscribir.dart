@@ -8,7 +8,6 @@ library;
 import 'dart:io';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:uuid/uuid.dart';
@@ -16,6 +15,8 @@ import 'package:uuid/uuid.dart';
 import '../localdb.dart';
 import '../negocio.dart';
 import '../sync.dart';
+import 'componentes.dart';
+import 'diseno.dart';
 import 'editor_foto.dart';
 import 'widgets.dart';
 
@@ -271,174 +272,324 @@ class _InscribirScreenState extends State<InscribirScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('➕ Inscribir cliente')),
+      appBar: AppBar(title: const Text('Inscribir cliente')),
       body: Column(
         children: [
           const SyncBanner(),
           Expanded(
             child: ListView(
-              padding: const EdgeInsets.all(16),
+              padding: const EdgeInsets.all(AppEspacio.lg),
               children: [
-                Campo(ctrl: _nombre, etiqueta: 'Nombre completo *'),
-                Row(
-                  children: [
-                    const Text('Sexo: '),
-                    ChoiceChip(
-                        label: const Text('♂️ M'),
-                        selected: _sexo == 'M',
-                        onSelected: (_) =>
-                            setState(() => _sexo = 'M')),
-                    const SizedBox(width: 8),
-                    ChoiceChip(
-                        label: const Text('♀️ F'),
-                        selected: _sexo == 'F',
-                        onSelected: (_) =>
-                            setState(() => _sexo = 'F')),
-                  ],
+                // Bloque 1: información personal
+                Tarjeta(
+                  child: Column(
+                    crossAxisAlignment:
+                        CrossAxisAlignment.start,
+                    children: [
+                      const Row(
+                        children: [
+                          Icon(Icons.person,
+                              color:
+                                  AppColores.naranja),
+                          SizedBox(
+                              width: AppEspacio.sm),
+                          Text('Información personal',
+                              style: AppTexto.titulo),
+                        ],
+                      ),
+                      const SizedBox(
+                          height: AppEspacio.md),
+                      CampoTexto(
+                          controller: _nombre,
+                          etiqueta:
+                              'Nombre completo *'),
+                      const SizedBox(
+                          height: AppEspacio.md),
+                      const Text('Sexo:',
+                          style: AppTexto.cuerpo),
+                      const SizedBox(
+                          height: AppEspacio.sm),
+                      Row(
+                        children: [
+                          ChoiceChip(
+                              label:
+                                  const Text('Masculino'),
+                              avatar: const Icon(
+                                  Icons.male,
+                                  size: 18),
+                              selected: _sexo == 'M',
+                              onSelected: (_) =>
+                                  setState(
+                                      () => _sexo = 'M')),
+                          const SizedBox(
+                              width: AppEspacio.sm),
+                          ChoiceChip(
+                              label:
+                                  const Text('Femenino'),
+                              avatar: const Icon(
+                                  Icons.female,
+                                  size: 18),
+                              selected: _sexo == 'F',
+                              onSelected: (_) =>
+                                  setState(
+                                      () => _sexo = 'F')),
+                        ],
+                      ),
+                      const SizedBox(
+                          height: AppEspacio.md),
+                      CampoTexto(
+                          controller: _telefono,
+                          etiqueta:
+                              'Teléfono (8 dígitos)',
+                          icono: Icons.phone,
+                          teclado:
+                              TextInputType.phone),
+                      const SizedBox(
+                          height: AppEspacio.md),
+                      CampoTexto(
+                          controller: _carnet,
+                          etiqueta:
+                              'Carnet (6–11 dígitos)',
+                          icono: Icons.badge,
+                          teclado:
+                              TextInputType.number),
+                    ],
+                  ),
                 ),
-                const SizedBox(height: 12),
-                Campo(
-                    ctrl: _telefono,
-                    etiqueta: 'Teléfono (8 dígitos)',
-                    teclado: TextInputType.phone,
-                    formato: [
-                      FilteringTextInputFormatter.digitsOnly
-                    ]),
-                Campo(
-                    ctrl: _carnet,
-                    etiqueta: 'Carnet de identidad (6–11 dígitos)',
-                    teclado: TextInputType.number,
-                    formato: [
-                      FilteringTextInputFormatter.digitsOnly
-                    ]),
-                const SizedBox(height: 4),
-                const Text('Período inicial:'),
-                FutureBuilder<Map<String, double>>(
-                  future: _precios(),
-                  builder: (ctx, snap) {
-                    final pr = snap.data ??
-                        {
-                          'mensual': 2000.0,
-                          'semanal': 600.0,
-                          'quincenal': 1200.0
-                        };
-                    return Column(
-                      crossAxisAlignment:
-                          CrossAxisAlignment.start,
-                      children: [
-                        DropdownButton<String>(
-                          value: _periodo == 'mensual'
-                              ? 'mensual:$_meses'
-                              : _periodo,
-                          isExpanded: true,
-                          items: [
-                            DropdownMenuItem(
-                                value: 'semanal',
-                                child: Text(
-                                    'Semana (${fmtMonto(pr['semanal'])} CUP)')),
-                            DropdownMenuItem(
-                                value: 'quincenal',
-                                child: Text(
-                                    'Quincena (${fmtMonto(pr['quincenal'])} CUP)')),
-                            for (final m in [1, 2, 3, 6, 12])
-                              DropdownMenuItem(
-                                  value: 'mensual:$m',
-                                  child: Text(
-                                      '$m mes${m == 1 ? '' : 'es'}')),
-                            const DropdownMenuItem(
-                                value: 'personalizado',
-                                child:
-                                    Text('Personalizado…')),
-                          ],
-                          onChanged: (v) => setState(() {
-                            if (v == 'semanal' ||
-                                v == 'quincenal' ||
-                                v == 'personalizado') {
-                              _periodo = v!;
-                            } else {
-                              _periodo = 'mensual';
-                              _meses =
-                                  int.parse(v!.split(':')[1]);
-                            }
-                          }),
-                        ),
-                        if (_periodo == 'personalizado') ...[
-                          const SizedBox(height: 8),
-                          Row(
+                const SizedBox(
+                    height: AppEspacio.md),
+                // Bloque 2: membresía
+                Tarjeta(
+                  child: Column(
+                    crossAxisAlignment:
+                        CrossAxisAlignment.start,
+                    children: [
+                      const Row(
+                        children: [
+                          Icon(
+                              Icons.card_membership,
+                              color:
+                                  AppColores.naranja),
+                          SizedBox(
+                              width: AppEspacio.sm),
+                          Text('Membresía',
+                              style: AppTexto.titulo),
+                        ],
+                      ),
+                      const SizedBox(
+                          height: AppEspacio.md),
+                      const Text('Período inicial:',
+                          style: AppTexto.cuerpo),
+                      const SizedBox(
+                          height: AppEspacio.sm),
+                      FutureBuilder<
+                          Map<String, double>>(
+                        future: _precios(),
+                        builder: (ctx, snap) {
+                          final pr = snap.data ??
+                              {
+                                'mensual': 2000.0,
+                                'semanal': 600.0,
+                                'quincenal': 1200.0
+                              };
+                          return Column(
+                            crossAxisAlignment:
+                                CrossAxisAlignment
+                                    .start,
                             children: [
-                              Expanded(
-                                child: Campo(
-                                    ctrl: _dias,
-                                    etiqueta: 'Días',
-                                    teclado:
-                                        TextInputType.number,
-                                    formato: [
-                                      FilteringTextInputFormatter
-                                          .digitsOnly
-                                    ]),
+                              DropdownButtonFormField<
+                                  String>(
+                                initialValue: _periodo ==
+                                        'mensual'
+                                    ? 'mensual:$_meses'
+                                    : _periodo,
+                                isExpanded: true,
+                                decoration:
+                                    InputDecoration(
+                                  border:
+                                      OutlineInputBorder(
+                                    borderRadius:
+                                        BorderRadius.circular(
+                                            AppRadio
+                                                .md),
+                                  ),
+                                  contentPadding:
+                                      const EdgeInsets
+                                          .symmetric(
+                                          horizontal:
+                                              AppEspacio
+                                                  .lg,
+                                          vertical:
+                                              AppEspacio
+                                                  .md),
+                                ),
+                                items: [
+                                  DropdownMenuItem(
+                                      value: 'semanal',
+                                      child: Text(
+                                          'Semana (${fmtMonto(pr['semanal'])} CUP)')),
+                                  DropdownMenuItem(
+                                      value:
+                                          'quincenal',
+                                      child: Text(
+                                          'Quincena (${fmtMonto(pr['quincenal'])} CUP)')),
+                                  for (final m
+                                      in [1, 2, 3, 6, 12])
+                                    DropdownMenuItem(
+                                        value:
+                                            'mensual:$m',
+                                        child: Text(
+                                            '$m mes${m == 1 ? '' : 'es'} (${fmtMonto(pr['mensual']! * m)} CUP)')),
+                                  const DropdownMenuItem(
+                                      value:
+                                          'personalizado',
+                                      child: Text(
+                                          'Personalizado…')),
+                                ],
+                                onChanged: (v) =>
+                                    setState(() {
+                                  if (v ==
+                                          'semanal' ||
+                                      v ==
+                                          'quincenal' ||
+                                      v ==
+                                          'personalizado') {
+                                    _periodo = v!;
+                                  } else {
+                                    _periodo =
+                                        'mensual';
+                                    _meses = int.parse(
+                                        v!.split(
+                                            ':')[1]);
+                                  }
+                                }),
                               ),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: Campo(
-                                    ctrl: _monto,
-                                    etiqueta: 'Monto (CUP)',
-                                    teclado: const TextInputType
-                                        .numberWithOptions(
-                                        decimal: true)),
-                              ),
+                              if (_periodo ==
+                                  'personalizado') ...[
+                                const SizedBox(
+                                    height:
+                                        AppEspacio
+                                            .md),
+                                Row(
+                                  children: [
+                                    Expanded(
+                                      child:
+                                          CampoTexto(
+                                              controller:
+                                                  _dias,
+                                              etiqueta:
+                                                  'Días',
+                                              teclado:
+                                                  TextInputType
+                                                      .number),
+                                    ),
+                                    const SizedBox(
+                                        width: AppEspacio
+                                            .sm),
+                                    Expanded(
+                                      child:
+                                          CampoTexto(
+                                              controller:
+                                                  _monto,
+                                              etiqueta:
+                                                  'Monto (CUP)',
+                                              teclado: const TextInputType
+                                                  .numberWithOptions(
+                                                  decimal:
+                                                      true)),
+                                    ),
+                                  ],
+                                ),
+                              ],
                             ],
+                          );
+                        },
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(
+                    height: AppEspacio.md),
+                // Bloque 3: fotografía
+                Tarjeta(
+                  child: Column(
+                    crossAxisAlignment:
+                        CrossAxisAlignment.start,
+                    children: [
+                      const Row(
+                        children: [
+                          Icon(Icons.camera_alt,
+                              color:
+                                  AppColores.naranja),
+                          SizedBox(
+                              width: AppEspacio.sm),
+                          Text('Fotografía',
+                              style: AppTexto.titulo),
+                        ],
+                      ),
+                      const SizedBox(
+                          height: AppEspacio.md),
+                      if (_foto != null)
+                        ClipRRect(
+                          borderRadius:
+                              BorderRadius.circular(
+                                  AppRadio.md),
+                          child: Image.file(_foto!,
+                              height: 200,
+                              width: double.infinity,
+                              fit: BoxFit.cover),
+                        ),
+                      if (_foto != null)
+                        const SizedBox(
+                            height: AppEspacio.sm),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: OutlinedButton.icon(
+                              icon: const Icon(
+                                  Icons.photo_camera),
+                              label: const Text(
+                                  'Cámara'),
+                              onPressed: () =>
+                                  _tomarFoto(
+                                      ImageSource
+                                          .camera),
+                            ),
+                          ),
+                          const SizedBox(
+                              width: AppEspacio.sm),
+                          Expanded(
+                            child: OutlinedButton.icon(
+                              icon: const Icon(
+                                  Icons.photo_library),
+                              label: const Text(
+                                  'Galería'),
+                              onPressed: () =>
+                                  _tomarFoto(
+                                      ImageSource
+                                          .gallery),
+                            ),
                           ),
                         ],
-                      ],
-                    );
-                  },
-                ),
-                const SizedBox(height: 12),
-                const Text('Foto:'),
-                const SizedBox(height: 8),
-                if (_foto != null)
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(8),
-                    child: Image.file(_foto!,
-                        height: 200, fit: BoxFit.cover),
-                  ),
-                Row(
-                  children: [
-                    Expanded(
-                      child: OutlinedButton.icon(
-                        icon: const Text('📷'),
-                        label: const Text('Cámara'),
-                        onPressed: () =>
-                            _tomarFoto(ImageSource.camera),
                       ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: OutlinedButton.icon(
-                        icon: const Text('🖼️'),
-                        label: const Text('Galería'),
-                        onPressed: () =>
-                            _tomarFoto(ImageSource.gallery),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 20),
-                SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton(
-                    onPressed:
-                        _guardando ? null : _guardar,
-                    child: _guardando
-                        ? const SizedBox(
-                            height: 20,
-                            width: 20,
-                            child: CircularProgressIndicator(
-                                strokeWidth: 2))
-                        : const Text('Guardar',
-                            style: TextStyle(fontSize: 18)),
+                    ],
                   ),
                 ),
+                const SizedBox(
+                    height: AppEspacio.xl),
+                _guardando
+                    ? const Center(
+                        child:
+                            CircularProgressIndicator(
+                                color: AppColores
+                                    .naranja))
+                    : BotonPrimario(
+                        texto: 'Guardar inscripción',
+                        icono: Icons.check,
+                        onPressed: _guardar,
+                      ),
+                const SizedBox(
+                    height: AppEspacio.lg),
               ],
             ),
           ),
