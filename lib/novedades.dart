@@ -15,6 +15,13 @@ class Novedad {
 }
 
 const novedades = [
+  Novedad('1.1.1', [
+    'Inicio: contador de clientes que pagaron este mes (tocable) y de clientes al día',
+    'Datos de transferencia: enviar por SMS o WhatsApp al móvil del cliente',
+    'Mi Turno: cierre de turno real, sin necesidad de pagos diarios',
+    'Tarjeta "Lo Nuevo" con nuevo diseño',
+    'Errores de red en lenguaje simple',
+  ]),
   Novedad('1.1.0', [
     'Rediseño visual completo: colores carbón y naranja, tarjetas, iconos Material en vez de emojis',
     'Login, Home, listas, ficha e inscripción rediseñados',
