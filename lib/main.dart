@@ -11,6 +11,7 @@ import 'auth.dart';
 import 'config.dart';
 import 'sync.dart';
 import 'theme.dart';
+import 'ui/diseno.dart';
 import 'ui/bloqueo.dart';
 import 'ui/login.dart';
 
@@ -118,22 +119,149 @@ class _IronBodyAppState extends State<IronBodyApp> {
         title: 'Iron Body Gym',
         themeMode: mode,
         theme: ThemeData(
-          // Colores del logo: naranja sobre grafito.
+          // v1.1: sistema de diseño centralizado (lib/ui/diseno.dart).
           colorScheme: ColorScheme.fromSeed(
-              seedColor: const Color(0xFFE8821A)),
+            seedColor: AppColores.naranja,
+            surface: AppColores.superficieClaro,
+          ),
+          scaffoldBackgroundColor: AppColores.fondoClaro,
           appBarTheme: const AppBarTheme(
-            backgroundColor: Color(0xFF232323),
+            backgroundColor: AppColores.carbon,
             foregroundColor: Colors.white,
+          ),
+          cardTheme: CardThemeData(
+            color: AppColores.superficieClaro,
+            shape: RoundedRectangleBorder(
+              borderRadius:
+                  BorderRadius.circular(AppRadio.lg),
+              side: const BorderSide(
+                  color: AppColores.bordeClaro),
+            ),
+            elevation: 2,
+          ),
+          dialogTheme: DialogThemeData(
+            shape: RoundedRectangleBorder(
+              borderRadius:
+                  BorderRadius.circular(AppRadio.xl),
+            ),
+          ),
+          elevatedButtonTheme: ElevatedButtonThemeData(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColores.naranja,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                borderRadius:
+                    BorderRadius.circular(AppRadio.lg),
+              ),
+              textStyle: const TextStyle(
+                  fontSize: 16, fontWeight: FontWeight.bold),
+            ),
+          ),
+          outlinedButtonTheme: OutlinedButtonThemeData(
+            style: OutlinedButton.styleFrom(
+              foregroundColor: AppColores.naranja,
+              side: const BorderSide(
+                  color: AppColores.naranja, width: 1.5),
+              shape: RoundedRectangleBorder(
+                borderRadius:
+                    BorderRadius.circular(AppRadio.lg),
+              ),
+            ),
+          ),
+          inputDecorationTheme: InputDecorationTheme(
+            border: OutlineInputBorder(
+              borderRadius:
+                  BorderRadius.circular(AppRadio.md),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius:
+                  BorderRadius.circular(AppRadio.md),
+              borderSide: const BorderSide(
+                  color: AppColores.naranja, width: 2),
+            ),
+          ),
+          textTheme: const TextTheme(
+            displayLarge: AppTexto.display,
+            displayMedium: AppTexto.displayPequeno,
+            titleLarge: AppTexto.titulo,
+            titleMedium: AppTexto.subtitulo,
+            bodyLarge: AppTexto.cuerpo,
+            bodyMedium: AppTexto.secundario,
+            labelLarge: AppTexto.etiqueta,
           ),
           useMaterial3: true,
         ),
         darkTheme: ThemeData(
           colorScheme: ColorScheme.fromSeed(
-              seedColor: const Color(0xFFE8821A),
-              brightness: Brightness.dark),
+            seedColor: AppColores.naranja,
+            brightness: Brightness.dark,
+            surface: AppColores.superficieOscuro,
+          ),
+          scaffoldBackgroundColor: AppColores.fondoOscuro,
           appBarTheme: const AppBarTheme(
-            backgroundColor: Color(0xFF141414),
+            backgroundColor: AppColores.carbonProfundo,
             foregroundColor: Colors.white,
+          ),
+          cardTheme: CardThemeData(
+            color: AppColores.superficieOscuro,
+            shape: RoundedRectangleBorder(
+              borderRadius:
+                  BorderRadius.circular(AppRadio.lg),
+              side: const BorderSide(
+                  color: AppColores.bordeOscuro),
+            ),
+            elevation: 2,
+          ),
+          dialogTheme: DialogThemeData(
+            backgroundColor: AppColores.superficieOscuro,
+            shape: RoundedRectangleBorder(
+              borderRadius:
+                  BorderRadius.circular(AppRadio.xl),
+            ),
+          ),
+          elevatedButtonTheme: ElevatedButtonThemeData(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColores.naranja,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                borderRadius:
+                    BorderRadius.circular(AppRadio.lg),
+              ),
+              textStyle: const TextStyle(
+                  fontSize: 16, fontWeight: FontWeight.bold),
+            ),
+          ),
+          outlinedButtonTheme: OutlinedButtonThemeData(
+            style: OutlinedButton.styleFrom(
+              foregroundColor: AppColores.naranja,
+              side: const BorderSide(
+                  color: AppColores.naranja, width: 1.5),
+              shape: RoundedRectangleBorder(
+                borderRadius:
+                    BorderRadius.circular(AppRadio.lg),
+              ),
+            ),
+          ),
+          inputDecorationTheme: InputDecorationTheme(
+            border: OutlineInputBorder(
+              borderRadius:
+                  BorderRadius.circular(AppRadio.md),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius:
+                  BorderRadius.circular(AppRadio.md),
+              borderSide: const BorderSide(
+                  color: AppColores.naranja, width: 2),
+            ),
+          ),
+          textTheme: const TextTheme(
+            displayLarge: AppTexto.display,
+            displayMedium: AppTexto.displayPequeno,
+            titleLarge: AppTexto.titulo,
+            titleMedium: AppTexto.subtitulo,
+            bodyLarge: AppTexto.cuerpo,
+            bodyMedium: AppTexto.secundario,
+            labelLarge: AppTexto.etiqueta,
           ),
           useMaterial3: true,
         ),

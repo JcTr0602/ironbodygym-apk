@@ -1,12 +1,15 @@
-/// Pantalla de acceso: diseño C (hero con franja).
+/// Pantalla de acceso: diseño v1.1 (sistema de diseño centralizado).
 library;
 
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../auth.dart';
+import '../config.dart';
 import '../perfil.dart';
 import '../sync.dart';
+import 'componentes.dart';
+import 'diseno.dart';
 import 'home.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -130,180 +133,242 @@ class _LoginScreenState extends State<LoginScreen>
 
   @override
   Widget build(BuildContext context) {
-    const naranja = Color(0xFFE8821A);
     return Scaffold(
-      backgroundColor: const Color(0xFF1B1B1B),
-      body: SafeArea(
-        child: FadeTransition(
-          opacity: _fade,
-          child: SlideTransition(
-            position: _slide,
-            child: Column(
-          children: [
-            const SizedBox(height: 36),
-            ClipRRect(
-              borderRadius: BorderRadius.circular(90),
-              child: Image.asset('assets/logo.jpg',
-                  height: 150, width: 150, fit: BoxFit.cover),
-            ),
-            const SizedBox(height: 18),
-            RichText(
-              text: const TextSpan(
-                style: TextStyle(
-                    fontSize: 34,
-                    fontWeight: FontWeight.w900,
-                    letterSpacing: 1),
-                children: [
-                  TextSpan(
-                      text: 'IRON ',
-                      style: TextStyle(color: Colors.white)),
-                  TextSpan(
-                      text: 'BODY',
-                      style: TextStyle(color: naranja)),
-                  TextSpan(
-                      text: ' GYM',
-                      style: TextStyle(color: Colors.white)),
-                ],
-              ),
-            ),
-            const SizedBox(height: 6),
-            const Text('E N T R E N A D O R E S',
-                style: TextStyle(
-                    color: Colors.white70,
-                    fontSize: 13,
-                    letterSpacing: 4)),
-            const SizedBox(height: 28),
-            Expanded(
-              child: Container(
-                width: double.infinity,
-                decoration: const BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.vertical(
-                      top: Radius.circular(28)),
-                ),
-                child: SingleChildScrollView(
-                  padding: const EdgeInsets.fromLTRB(24, 32, 24, 16),
-                  child: Column(
-                    children: [
-                      TextField(
-                        controller: _user,
-                        focusNode: _userFocus,
-                        textCapitalization: TextCapitalization.words,
-                        decoration: InputDecoration(
-                          hintText: 'Usuario',
-                          prefixIcon: const Icon(Icons.person,
-                              color: Colors.grey),
-                          filled: true,
-                          fillColor: const Color(0xFFF1F1F1),
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(16),
-                            borderSide: BorderSide.none,
+      body: Container(
+        decoration: const BoxDecoration(
+          gradient: AppColores.gradienteCarbon,
+        ),
+        child: SafeArea(
+          child: FadeTransition(
+            opacity: _fade,
+            child: SlideTransition(
+              position: _slide,
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.symmetric(
+                    horizontal: AppEspacio.xl),
+                child: Column(
+                  children: [
+                    const SizedBox(height: AppEspacio.xxl),
+                    // Logo
+                    Container(
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        boxShadow: [
+                          BoxShadow(
+                            color: AppColores.naranja
+                                .withValues(alpha: 0.3),
+                            blurRadius: 24,
+                            spreadRadius: 2,
                           ),
-                          focusedBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(16),
-                            borderSide: const BorderSide(
-                                color: Color(0xFFE8821A), width: 2),
-                          ),
-                        ),
-                        onSubmitted: (_) => _entrar(),
+                        ],
                       ),
-                      const SizedBox(height: 14),
-                      TextField(
-                        controller: _pass,
-                        focusNode: _passFocus,
-                        obscureText: !_verPass,
-                        decoration: InputDecoration(
-                          hintText: 'Contraseña',
-                          prefixIcon: const Icon(Icons.lock,
-                              color: Colors.grey),
-                          suffixIcon: IconButton(
-                            icon: Icon(
-                                _verPass
-                                    ? Icons.visibility_off
-                                    : Icons.visibility,
-                                color: Colors.grey),
-                            onPressed: () => setState(
-                                () => _verPass = !_verPass),
-                          ),
-                          filled: true,
-                          fillColor: const Color(0xFFF1F1F1),
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(16),
-                            borderSide: BorderSide.none,
-                          ),
-                          focusedBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(16),
-                            borderSide: const BorderSide(
-                                color: Color(0xFFE8821A), width: 2),
-                          ),
-                        ),
-                        onSubmitted: (_) => _entrar(),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(75),
+                        child: Image.asset('assets/logo.jpg',
+                            height: 130,
+                            width: 130,
+                            fit: BoxFit.cover),
                       ),
-                      if (_error != null) ...[
-                        const SizedBox(height: 12),
-                        Text(_error!,
-                            style: const TextStyle(
-                                color: Colors.red, fontSize: 13),
-                            textAlign: TextAlign.center),
-                      ],
-                      const SizedBox(height: 20),
-                      SizedBox(
-                        width: double.infinity,
-                        height: 56,
-                        child: ElevatedButton(
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: naranja,
-                            foregroundColor: Colors.white,
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(16),
-                            ),
-                          ),
-                          onPressed: _cargando ? null : _entrar,
-                          child: _cargando
-                              ? const SizedBox(
-                                  height: 22,
-                                  width: 22,
-                                  child: CircularProgressIndicator(
-                                      strokeWidth: 2,
-                                      color: Colors.white))
-                              : const Text('Entrar',
-                                  style: TextStyle(
-                                      fontSize: 20,
-                                      fontWeight: FontWeight.bold)),
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-                      const Text(
-                        'Sin conexión puedes entrar igual si ya lo hiciste antes.\n'
-                        'Todo se guarda y sincroniza solo.',
+                    ),
+                    const SizedBox(height: AppEspacio.lg),
+                    RichText(
+                      text: const TextSpan(
                         style: TextStyle(
-                            color: Colors.grey, fontSize: 12),
-                        textAlign: TextAlign.center,
+                            fontSize: 30,
+                            fontWeight: FontWeight.w900,
+                            letterSpacing: 1),
+                        children: [
+                          TextSpan(
+                              text: 'IRON ',
+                              style:
+                                  TextStyle(color: Colors.white)),
+                          TextSpan(
+                              text: 'BODY',
+                              style: TextStyle(
+                                  color: AppColores.naranja)),
+                          TextSpan(
+                              text: ' GYM',
+                              style:
+                                  TextStyle(color: Colors.white)),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: AppEspacio.sm),
+                    const Text('E N T R E N A D O R E S',
+                        style: TextStyle(
+                            color: Colors.white60,
+                            fontSize: 12,
+                            letterSpacing: 4)),
+                    const SizedBox(height: AppEspacio.xxl),
+                    // Campo usuario
+                    _campoOscuro(
+                      controller: _user,
+                      focusNode: _userFocus,
+                      hint: 'Usuario',
+                      icono: Icons.person,
+                      textCapitalization: TextCapitalization.words,
+                      onSubmitted: (_) => _entrar(),
+                    ),
+                    const SizedBox(height: AppEspacio.md),
+                    // Campo contraseña
+                    _campoOscuro(
+                      controller: _pass,
+                      focusNode: _passFocus,
+                      hint: 'Contraseña',
+                      icono: Icons.lock,
+                      obscure: !_verPass,
+                      suffix: IconButton(
+                        icon: Icon(
+                            _verPass
+                                ? Icons.visibility_off
+                                : Icons.visibility,
+                            color: Colors.white54),
+                        onPressed: () => setState(
+                            () => _verPass = !_verPass),
+                      ),
+                      onSubmitted: (_) => _entrar(),
+                    ),
+                    if (_error != null) ...[
+                      const SizedBox(height: AppEspacio.md),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: AppEspacio.md,
+                            vertical: AppEspacio.sm),
+                        decoration: BoxDecoration(
+                          color: AppColores.error
+                              .withValues(alpha: 0.15),
+                          borderRadius: BorderRadius.circular(
+                              AppRadio.md),
+                        ),
+                        child: Row(
+                          children: [
+                            const Icon(Icons.error_outline,
+                                color: AppColores.error,
+                                size: 18),
+                            const SizedBox(
+                                width: AppEspacio.sm),
+                            Expanded(
+                              child: Text(_error!,
+                                  style: const TextStyle(
+                                      color: AppColores.error,
+                                      fontSize: 13)),
+                            ),
+                          ],
+                        ),
                       ),
                     ],
-                  ),
+                    const SizedBox(height: AppEspacio.xl),
+                    // Botón entrar
+                    _cargando
+                        ? const SizedBox(
+                            height: 56,
+                            child: Center(
+                                child: CircularProgressIndicator(
+                                    color:
+                                        AppColores.naranja)),
+                          )
+                        : BotonPrimario(
+                            texto: 'ENTRAR',
+                            icono: Icons.login,
+                            onPressed: _entrar,
+                          ),
+                    const SizedBox(height: AppEspacio.lg),
+                    const Text(
+                      'Sin conexión puedes entrar igual si ya lo hiciste antes.\n'
+                      'Todo se guarda y sincroniza solo.',
+                      style: TextStyle(
+                          color: Colors.white54, fontSize: 12),
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: AppEspacio.xxl),
+                    const Text(
+                      '© Creado por JcTr0602',
+                      style: TextStyle(
+                          color: Colors.white38, fontSize: 11),
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'v${AppConfig.appVersion}',
+                      style: const TextStyle(
+                          color: Colors.white24, fontSize: 10),
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: AppEspacio.lg),
+                  ],
                 ),
               ),
             ),
-            Container(
-              color: Colors.white,
-              width: double.infinity,
-              padding: const EdgeInsets.only(bottom: 12),
-              child: const Text(
-                '© Creado por JcTr0602',
-                style: TextStyle(color: Colors.grey, fontSize: 11),
-                textAlign: TextAlign.center,
-              ),
-            ),
-            const SizedBox(height: 4),
-            const Text(
-              'v1.0.4',
-              style: TextStyle(color: Colors.white24, fontSize: 10),
-              textAlign: TextAlign.center,
-            ),
-          ],
-            ),
           ),
+        ),
+      ),
+    );
+  }
+
+  /// Campo de texto oscuro con borde naranja brillante al enfocar
+  /// (estilo del mockup v1.1).
+  Widget _campoOscuro({
+    required TextEditingController controller,
+    required FocusNode focusNode,
+    required String hint,
+    required IconData icono,
+    bool obscure = false,
+    Widget? suffix,
+    TextCapitalization textCapitalization =
+        TextCapitalization.none,
+    void Function(String)? onSubmitted,
+  }) {
+    final enfocado = focusNode.hasFocus;
+    return Container(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(AppRadio.lg),
+        boxShadow: enfocado
+            ? [
+                BoxShadow(
+                  color: AppColores.naranja
+                      .withValues(alpha: 0.4),
+                  blurRadius: 16,
+                  spreadRadius: 1,
+                ),
+              ]
+            : null,
+      ),
+      child: TextField(
+        controller: controller,
+        focusNode: focusNode,
+        obscureText: obscure,
+        textCapitalization: textCapitalization,
+        style: const TextStyle(color: Colors.white),
+        onSubmitted: onSubmitted,
+        decoration: InputDecoration(
+          hintText: hint,
+          hintStyle:
+              const TextStyle(color: Colors.white38),
+          prefixIcon:
+              Icon(icono, color: AppColores.naranja),
+          suffixIcon: suffix,
+          filled: true,
+          fillColor: const Color(0xFF2A2A2A),
+          border: OutlineInputBorder(
+            borderRadius:
+                BorderRadius.circular(AppRadio.lg),
+            borderSide: BorderSide.none,
+          ),
+          enabledBorder: OutlineInputBorder(
+            borderRadius:
+                BorderRadius.circular(AppRadio.lg),
+            borderSide: const BorderSide(
+                color: Color(0xFF3A3A3A)),
+          ),
+          focusedBorder: OutlineInputBorder(
+            borderRadius:
+                BorderRadius.circular(AppRadio.lg),
+            borderSide: const BorderSide(
+                color: AppColores.naranja, width: 2),
+          ),
+          contentPadding: const EdgeInsets.symmetric(
+              horizontal: AppEspacio.lg,
+              vertical: AppEspacio.lg),
         ),
       ),
     );
