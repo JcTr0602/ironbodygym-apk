@@ -173,7 +173,7 @@ String previewHastaDias(String? pagadoHasta, int dias,
       '${d.day.toString().padLeft(2, '0')}';
 }
 
-bool _esPendiente(dynamic v) => v == 0 || v == false;
+bool esPendiente(dynamic v) => v == 0 || v == false;
 
 /// Precios vigentes (del espejo de ajustes).
 Future<Map<String, double>> preciosVigentes() async {
@@ -242,13 +242,13 @@ Future<double> pendienteEntrega(int? telegramId) async {
   for (final p in await LocalDb.instance.allMirror('pagos')) {
     if ((p['telegram_user_id'] as int?) == telegramId &&
         (p['metodo'] as String?) == 'efectivo' &&
-        _esPendiente(p['entregado'])) {
+        esPendiente(p['entregado'])) {
       total += (p['monto'] as num?)?.toDouble() ?? 0;
     }
   }
   for (final d in await LocalDb.instance.allMirror('pagos_diarios')) {
     if ((d['registrado_por'] as int?) == telegramId &&
-        _esPendiente(d['entregado'])) {
+        esPendiente(d['entregado'])) {
       total += (d['total'] as num?)?.toDouble() ?? 0;
     }
   }
@@ -267,14 +267,14 @@ Future<double> pendienteRecoger({int? excluirTelegramId}) async {
   double total = 0;
   for (final p in await LocalDb.instance.allMirror('pagos')) {
     if ((p['metodo'] as String?) == 'efectivo' &&
-        _esPendiente(p['entregado'])) {
+        esPendiente(p['entregado'])) {
       final tid = p['telegram_user_id'] as int?;
       if (excluirTelegramId != null && tid == excluirTelegramId) continue;
       total += (p['monto'] as num?)?.toDouble() ?? 0;
     }
   }
   for (final d in await LocalDb.instance.allMirror('pagos_diarios')) {
-    if (_esPendiente(d['entregado'])) {
+    if (esPendiente(d['entregado'])) {
       final tid = d['registrado_por'] as int?;
       if (excluirTelegramId != null && tid == excluirTelegramId) continue;
       total += (d['total'] as num?)?.toDouble() ?? 0;
@@ -636,13 +636,13 @@ Future<
   for (final p in await LocalDb.instance.allMirror('pagos')) {
     if ((p['telegram_user_id'] as int?) == telegramId &&
         (p['metodo'] as String?) == 'efectivo' &&
-        _esPendiente(p['entregado'])) {
+        esPendiente(p['entregado'])) {
       mens.add(p);
     }
   }
   for (final d in await LocalDb.instance.allMirror('pagos_diarios')) {
     if ((d['registrado_por'] as int?) == telegramId &&
-        _esPendiente(d['entregado'])) {
+        esPendiente(d['entregado'])) {
       diarios.add(d);
     }
   }
@@ -714,7 +714,7 @@ Future<Map<String, dynamic>?> ultimaEntregaConfirmada(
   double monto = 0;
   for (final p in await LocalDb.instance.allMirror('pagos')) {
     if ((p['telegram_user_id'] as int?) != telegramId) continue;
-    if (_esPendiente(p['entregado'])) continue;
+    if (esPendiente(p['entregado'])) continue;
     final f = p['fecha'] as String?;
     if (f != null && (fecha == null || f.compareTo(fecha) > 0)) {
       fecha = f;
@@ -723,7 +723,7 @@ Future<Map<String, dynamic>?> ultimaEntregaConfirmada(
   }
   for (final d in await LocalDb.instance.allMirror('pagos_diarios')) {
     if ((d['registrado_por'] as int?) != telegramId) continue;
-    if (_esPendiente(d['entregado'])) continue;
+    if (esPendiente(d['entregado'])) continue;
     final f = d['fecha'] as String?;
     if (f != null && (fecha == null || f.compareTo(fecha) > 0)) {
       fecha = f;
@@ -781,7 +781,7 @@ Future<List<Map<String, dynamic>>> detallePendienteEntrenador(
   }
   for (final p in await LocalDb.instance.allMirror('pagos')) {
     if ((p['metodo'] as String?) != 'efectivo') continue;
-    if (!_esPendiente(p['entregado'])) continue;
+    if (!esPendiente(p['entregado'])) continue;
     if ((p['telegram_user_id'] as int?) != tid) continue;
     final cid = (p['cliente_id'] as num?)?.toInt() ?? 0;
     final cli = clientes[cid];
@@ -803,7 +803,7 @@ Future<List<Map<String, dynamic>>> detallePendienteEntrenador(
     });
   }
   for (final d in await LocalDb.instance.allMirror('pagos_diarios')) {
-    if (!_esPendiente(d['entregado'])) continue;
+    if (!esPendiente(d['entregado'])) continue;
     if ((d['registrado_por'] as int?) != tid) continue;
     items.add({
       'tipo': 'diario',
@@ -832,7 +832,7 @@ Future<List<Map<String, dynamic>>> pendientePorEntrenador(
 
   for (final p in await LocalDb.instance.allMirror('pagos')) {
     if ((p['metodo'] as String?) != 'efectivo') continue;
-    if (!_esPendiente(p['entregado'])) continue;
+    if (!esPendiente(p['entregado'])) continue;
     final tid = p['telegram_user_id'] as int?;
     if (tid == null) continue;
     if (excluirTid != null && tid == excluirTid) continue;
@@ -840,7 +840,7 @@ Future<List<Map<String, dynamic>>> pendientePorEntrenador(
         (p['monto'] as num?)?.toDouble() ?? 0);
   }
   for (final d in await LocalDb.instance.allMirror('pagos_diarios')) {
-    if (!_esPendiente(d['entregado'])) continue;
+    if (!esPendiente(d['entregado'])) continue;
     final tid = d['registrado_por'] as int?;
     if (tid == null) continue;
     if (excluirTid != null && tid == excluirTid) continue;

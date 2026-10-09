@@ -237,13 +237,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       onPressed: () => ThemeController.toggle(),
                     ),
                   ),
-                  IconButton(
-                    tooltip: 'Cerrar sesión',
-                    color: Colors.white38,
-                    iconSize: 20,
-                    icon: const Icon(Icons.logout),
-                    onPressed: _salir,
-                  ),
+                  // v1.0.16: salir vive abajo junto a Papelera/Ayuda
                 ],
               ),
             ),
@@ -485,13 +479,20 @@ class _HomeScreenState extends State<HomeScreen> {
                             'Papelera',
                             () => _ir(
                                 const PapeleraScreen()))),
-                    const SizedBox(width: 12),
+                    const SizedBox(width: 8),
                     Expanded(
                         child: _chipSecundario(
                             Icons.help_outline,
                             'Ayuda',
                             () =>
                                 _ir(const AyudaScreen()))),
+                    const SizedBox(width: 8),
+                    Expanded(
+                        child: _chipSecundario(
+                            Icons.logout,
+                            'Salir',
+                            _salir,
+                            color: Colors.red.shade700)),
                   ],
                 ),
               ),
@@ -544,7 +545,9 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _chipSecundario(
-      IconData icono, String texto, VoidCallback onTap) {
+      IconData icono, String texto, VoidCallback onTap,
+      {Color? color}) {
+    final c = color ?? naranja;
     return Card(
       elevation: 1,
       shape: RoundedRectangleBorder(
@@ -559,12 +562,13 @@ class _HomeScreenState extends State<HomeScreen> {
             mainAxisAlignment:
                 MainAxisAlignment.center,
             children: [
-              Icon(icono, color: naranja, size: 20),
+              Icon(icono, color: c, size: 20),
               const SizedBox(width: 8),
               Text(texto,
-                  style: const TextStyle(
+                  style: TextStyle(
                       fontSize: 14,
-                      fontWeight: FontWeight.w500)),
+                      fontWeight: FontWeight.w500,
+                      color: c)),
             ],
           ),
         ),
