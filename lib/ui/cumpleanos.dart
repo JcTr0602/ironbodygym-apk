@@ -54,7 +54,7 @@ class _CumpleanosScreenState extends State<CumpleanosScreen> {
   String _etiqueta(Map<String, dynamic> c) {
     final hoy = DateTime.now();
     final dia = c['_dia'] as int? ?? 0;
-    if (dia == hoy.day) return '¡Hoy! 🎉';
+    if (dia == hoy.day) return '¡Hoy!';
     if (c['_paso'] == true) return 'Ya cumplió';
     return 'Día $dia';
   }
@@ -63,7 +63,7 @@ class _CumpleanosScreenState extends State<CumpleanosScreen> {
   Widget build(BuildContext context) {
     final mes = _meses[DateTime.now().month];
     return Scaffold(
-      appBar: AppBar(title: Text('🎂 Cumpleaños de $mes')),
+      appBar: AppBar(title: Text('Cumpleaños de $mes')),
       body: Column(
         children: [
           const SyncBanner(),

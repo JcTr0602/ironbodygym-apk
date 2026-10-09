@@ -92,14 +92,14 @@ class _MiDiaScreenState extends State<MiDiaScreen> {
     await showDialog<void>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('🏁 Cierre del turno'),
+        title: const Text('Cierre del turno'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             if (sinMovimientos) ...[
               const Text(
-                '📭 Turno sin cobros registrados.',
+                'Turno sin cobros registrados.',
                 style: TextStyle(
                     fontWeight: FontWeight.bold,
                     fontSize: 16),
@@ -112,12 +112,12 @@ class _MiDiaScreenState extends State<MiDiaScreen> {
                     TextStyle(fontSize: 13, color: Colors.grey),
               ),
             ] else ...[
-              Text('💰 Cobrado hoy: ${fmtMonto(_totalHoy)} CUP',
+              Text('Cobrado hoy: ${fmtMonto(_totalHoy)} CUP',
                   style: const TextStyle(
                       fontWeight: FontWeight.bold)),
               const SizedBox(height: 6),
               Text('• ${_cobrados.length} cobros realizados'),
-              Text('• 💵 Efectivo: ${fmtMonto(_efectivo)} CUP'),
+              Text('• Efectivo: ${fmtMonto(_efectivo)} CUP'),
               Text(
                   '• 📱 Transferencia: ${fmtMonto(_transferencia)} CUP'),
             ],
@@ -147,7 +147,7 @@ class _MiDiaScreenState extends State<MiDiaScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('📅 Mi día'),
+        title: const Text('Mi día'),
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh),
@@ -194,7 +194,7 @@ class _MiDiaScreenState extends State<MiDiaScreen> {
                     ),
                   ),
                   const SizedBox(height: 16),
-                  const Text('✅ Cobros realizados hoy',
+                  const Text('Cobros realizados hoy',
                       style: TextStyle(
                           fontSize: 15, fontWeight: FontWeight.bold)),
                   const SizedBox(height: 8),
@@ -276,7 +276,7 @@ class _MiDiaScreenState extends State<MiDiaScreen> {
                     width: double.infinity,
                     child: ElevatedButton.icon(
                       icon: const Icon(Icons.flag),
-                      label: const Text('🏁 Cerrar turno'),
+                      label: const Text('Cerrar turno'),
                       style: ElevatedButton.styleFrom(
                         padding: const EdgeInsets.symmetric(
                             vertical: 14),

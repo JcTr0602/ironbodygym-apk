@@ -1,6 +1,6 @@
-/// ❓ Ayuda para entrenadores.
+/// Ayuda para entrenadores.
 ///
-/// Secciones plegables por tema + "🎉 Lo Nuevo" con la versión actual destacada.
+/// Secciones plegables por tema + "Lo Nuevo" con la versión actual destacada.
 library;
 
 import 'package:flutter/material.dart';
@@ -15,7 +15,7 @@ class AyudaScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('❓ Ayuda')),
+      appBar: AppBar(title: const Text('Ayuda')),
       body: Column(
         children: [
           const SyncBanner(),
@@ -24,59 +24,59 @@ class AyudaScreen extends StatelessWidget {
               padding: const EdgeInsets.all(16),
               children: [
                 _novedadesCard(),
-                const _Tema('💪 Tu trabajo diario'),
+                const _Tema('Tu trabajo diario'),
                 const _Seccion(
                   'Inscribir un cliente',
                   '1. Toca "Inscribir" en el inicio.\n'
                   '2. Escribe el nombre y, si quieres, teléfono, carnet y foto.\n'
                   '3. Elige el período de pago y confirma.\n'
                   '4. Si ya existe alguien parecido, la app te avisa.\n\n'
-                  '💡 Todo se guarda en el teléfono aunque no haya internet.',
-                  emoji: '📝',
+                  'Todo se guarda en el teléfono aunque no haya internet.',
+                  icono: Icons.edit_note,
                   color: Colors.blue,
                 ),
                 const _Seccion(
                   'Cobrar una mensualidad',
                   '1. Busca al cliente o ábrelo desde las listas.\n'
-                  '2. Toca "💰 Registrar pago" (o el botón 💰 de la lista).\n'
+                  '2. Toca "Registrar pago" (o el botón Pagar de la lista).\n'
                   '3. Elige el período y el método (efectivo o transferencia).\n'
                   '4. Confirma el resumen.\n\n'
-                  '💡 Si está vencido, en su ficha verás "🔄 Renovación rápida" '
+                  'Si está vencido, en su ficha verás "Renovación rápida" '
                   'para cobrarle 1 mes con un toque.',
-                  emoji: '💰',
+                  icono: Icons.payments,
                   color: Colors.green,
                 ),
                 const _Seccion(
                   'Pago diario',
                   'Para quien entrena un día suelto. Se registra en '
                   '"Pago diario" del inicio.',
-                  emoji: '🎫',
+                  icono: Icons.receipt_long,
                   color: Colors.teal,
                 ),
                 const _Seccion(
                   'Las listas',
-                  '• 📅 Vencen hoy: pagan hoy.\n'
-                  '• 🔜 Por vencer: vencen en los próximos 3 días.\n'
-                  '• ⏳ -30d: atrasados de menos de un mes.\n'
-                  '• 🚨 +30d: atrasados de más de un mes.\n'
-                  '• 🎂 Cumpleaños: cumplen años esta semana.\n\n'
-                  '💡 Toca 💰 en cualquier fila para cobrar sin entrar a la ficha.',
-                  emoji: '📋',
+                  '• Vencen hoy: pagan hoy.\n'
+                  '• Por vencer: vencen en los próximos 3 días.\n'
+                  '• -30d: atrasados de menos de un mes.\n'
+                  '• +30d: atrasados de más de un mes.\n'
+                  '• Cumpleaños: cumplen años esta semana.\n\n'
+                  'Toca Pagar en cualquier fila para cobrar sin entrar a la ficha.',
+                  icono: Icons.list_alt,
                   color: Colors.purple,
                 ),
                 const _Seccion(
                   'Mi turno',
                   'Lo que cobraste hoy y tu pendiente a entregar. '
                   'Cada entrenador solo ve lo suyo.',
-                  emoji: '👤',
+                  icono: Icons.person,
                   color: Colors.indigo,
                 ),
-                const _Tema('💵 Dinero'),
+                const _Tema('Dinero'),
                 const _Seccion(
                   'Pendiente a entregar',
                   'Es el efectivo que cobraste y aún no le entregaste a Jc. '
                   'Baja solo cuando él lo confirma. No es un error.',
-                  emoji: '🤝',
+                  icono: Icons.handshake,
                   color: Colors.green,
                 ),
                 const _Seccion(
@@ -84,15 +84,15 @@ class AyudaScreen extends StatelessWidget {
                   'Muestra los datos de las tarjetas para que el cliente '
                   'transfiera y confirme por WhatsApp al '
                   '${AppConfig.whatsappContacto}.',
-                  emoji: '📱',
+                  icono: Icons.smartphone,
                   color: Colors.teal,
                 ),
-                const _Tema('📱 La app'),
+                const _Tema('La app'),
                 const _Seccion(
                   '¿Necesita internet?',
                   'No para trabajar. Inscribes y cobras con normalidad en el gym; '
                   'cuando tengas conexión, los datos se envían solos.',
-                  emoji: '📶',
+                  icono: Icons.signal_cellular_alt,
                   color: Colors.orange,
                 ),
                 const _Seccion(
@@ -103,7 +103,7 @@ class AyudaScreen extends StatelessWidget {
                   '• Si ves ⏳ "N por subir", son tus cambios esperando conexión.\n'
                   '• En el inicio verás la hora de la última sincronización. '
                   'Si es vieja, busca mejor cobertura.',
-                  emoji: '🔄',
+                  icono: Icons.sync,
                   color: Colors.blue,
                 ),
                 const _Seccion(
@@ -111,10 +111,10 @@ class AyudaScreen extends StatelessWidget {
                   'Los clientes inactivos van a la papelera. Desde ahí puedes '
                   'recuperarlos sin inscribirlos de nuevo. '
                   'Solo Jc puede eliminarlos definitivamente.',
-                  emoji: '🗑️',
+                  icono: Icons.delete_outline,
                   color: Colors.grey,
                 ),
-                const _Tema('🆘 Si algo falla'),
+                const _Tema('Si algo falla'),
                 const _Seccion(
                   'Problemas comunes',
                   '• "Sin conexión": sigue trabajando, todo se guarda y sube después.\n'
@@ -123,21 +123,21 @@ class AyudaScreen extends StatelessWidget {
                   '• "Error del servidor": reintenta luego; si sigue, avisa a Jc.\n'
                   '• "Te saca al login": tu sesión venció, entra de nuevo.\n'
                   '• "Un cliente no aparece": sincroniza manualmente.',
-                  emoji: '⚠️',
+                  icono: Icons.warning,
                   color: Colors.red,
                 ),
                 const _Seccion(
                   'Tu privacidad',
                   'Solo ves tus datos: tu pendiente, tu turno, tus cobros. '
                   'Jc ve los totales de todos para llevar el control del gym.',
-                  emoji: '🔒',
+                  icono: Icons.lock,
                   color: Colors.red,
                 ),
                 const _Seccion(
                   'Contacto',
                   '¿Dudas con la app? Escríbele a Jc por WhatsApp: '
                   '${AppConfig.whatsappContacto}.',
-                  emoji: '📞',
+                  icono: Icons.phone,
                   color: Colors.green,
                 ),
                 const Padding(
@@ -255,10 +255,10 @@ class _Tema extends StatelessWidget {
 class _Seccion extends StatelessWidget {
   final String titulo;
   final String texto;
-  final String emoji;
+  final IconData icono;
   final Color color;
   const _Seccion(this.titulo, this.texto,
-      {required this.emoji, required this.color});
+      {required this.icono, required this.color});
 
   @override
   Widget build(BuildContext context) {
@@ -267,8 +267,7 @@ class _Seccion extends StatelessWidget {
       child: ExpansionTile(
         leading: CircleAvatar(
           backgroundColor: color.withValues(alpha: 0.15),
-          child: Text(emoji,
-              style: const TextStyle(fontSize: 20)),
+          child: Icon(icono, size: 20, color: color),
         ),
         title: Text(titulo,
             style: const TextStyle(

@@ -122,7 +122,7 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
     SyncEngine.instance.push();
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text('✅ $cantidad pago(s) guardado(s)'),
+      content: Text('$cantidad pago(s) guardado(s)'),
       action: uuid == null
           ? null
           : SnackBarAction(
@@ -138,7 +138,7 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
     _cargarHoy();
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('↩️ Registro deshecho')));
+        const SnackBar(content: Text('Registro deshecho')));
   }
 
   Future<void> _guardar() async {
@@ -202,7 +202,7 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, 'eliminar'),
-            child: const Text('🗑️ Eliminar',
+            child: const Text('Eliminar',
                 style: TextStyle(color: Colors.red)),
           ),
           TextButton(
@@ -247,7 +247,7 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
       SyncEngine.instance.push();
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('🗑️ Registro eliminado')));
+          const SnackBar(content: Text('Registro eliminado')));
       return;
     }
 
@@ -256,7 +256,7 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
     if (cantidad < 1) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('❌ La cantidad debe ser al menos 1')));
+          content: Text('La cantidad debe ser al menos 1')));
       return;
     }
     await LocalDb.instance.queueOp(
@@ -272,14 +272,14 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
     SyncEngine.instance.push();
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('✅ Registro actualizado')));
+        const SnackBar(content: Text('Registro actualizado')));
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('🎫 Pago diario'),
+        title: const Text('Pago diario'),
         actions: [
           // v1.0.15: alternar entre registrar y reporte
           TextButton.icon(
@@ -318,13 +318,13 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
                 Row(
                   children: [
                     ChoiceChip(
-                        label: const Text('☀️ Mañana'),
+                        label: const Text('Mañana'),
                         selected: _turno == 'mañana',
                         onSelected: (_) =>
                             setState(() => _turno = 'mañana')),
                     const SizedBox(width: 8),
                     ChoiceChip(
-                        label: const Text('🌙 Tarde'),
+                        label: const Text('Tarde'),
                         selected: _turno == 'tarde',
                         onSelected: (_) =>
                             setState(() => _turno = 'tarde')),
@@ -336,8 +336,8 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
                   children: [
                     Expanded(
                       child: ElevatedButton.icon(
-                        icon: const Text('⚡',
-                            style: TextStyle(fontSize: 20)),
+                        icon: const Icon(Icons.flash_on,
+                            size: 20),
                         label: const Text('Registrar 1',
                             style: TextStyle(fontSize: 18)),
                         style: ElevatedButton.styleFrom(

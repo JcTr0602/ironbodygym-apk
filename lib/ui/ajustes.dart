@@ -90,7 +90,7 @@ class _AjustesScreenState extends State<AjustesScreen> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: Text(_tienePin ? '🔢 Cambiar PIN' : '🔢 Crear PIN rápido'),
+        title: Text(_tienePin ? 'Cambiar PIN' : 'Crear PIN rápido'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -153,7 +153,7 @@ class _AjustesScreenState extends State<AjustesScreen> {
     if (mounted) {
       setState(() => _tienePin = true);
       ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('✅ PIN configurado')));
+          const SnackBar(content: Text('PIN configurado')));
     }
   }
 
@@ -161,20 +161,20 @@ class _AjustesScreenState extends State<AjustesScreen> {
     final origen = await showDialog<ImageSource>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('📷 Foto de perfil'),
+        title: const Text('Foto de perfil'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             ListTile(
               leading:
-                  const Text('📸', style: TextStyle(fontSize: 24)),
+                  const Icon(Icons.photo_camera, size: 24),
               title: const Text('Tomar foto'),
               onTap: () =>
                   Navigator.pop(ctx, ImageSource.camera),
             ),
             ListTile(
               leading:
-                  const Text('🖼️', style: TextStyle(fontSize: 24)),
+                  const Icon(Icons.photo_library, size: 24),
               title: const Text('Elegir de la galería'),
               onTap: () =>
                   Navigator.pop(ctx, ImageSource.gallery),
@@ -192,7 +192,7 @@ class _AjustesScreenState extends State<AjustesScreen> {
     setState(() => _avatar = destino);
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('📷 Foto de perfil actualizada')));
+          const SnackBar(content: Text('Foto de perfil actualizada')));
     }
   }
 
@@ -249,7 +249,7 @@ class _AjustesScreenState extends State<AjustesScreen> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('🔑 Cambiar contraseña'),
+        title: const Text('Cambiar contraseña'),
         content: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
