@@ -15,6 +15,32 @@ class Novedad {
 }
 
 const novedades = [
+  Novedad('1.0.16', [
+    '💰 Tipos de pago dinámicos: agrégalos, edítalos o desactívalos en Administración → Tipos de pago',
+    '🧒 Precio de menores configurable (ya no fijo en el código)',
+    '👆 Pendiente por entrenador tocable: ves qué compone cada monto',
+    '📊 Historial por entrenador mejorado: tendencia, comparativas y filtros',
+    '🏁 Mi Turno mejorado: cierre de turno, qué entregar, vencimientos, tendencia, historial semanal',
+    '💵 Para el dueño: "Mi turno" ahora es "Mis cobros" (sin pendiente/entregas)',
+    '🎨 Icono nuevo, SyncBanner rediseñado, Sincronización como tarjeta propia',
+  ]),
+  Novedad('1.0.15', [
+    '📊 Dashboard mejorado: comparativa del mes, desgloses, proyección, ranking de entrenadores, alerta por vencer, gráfico 30 días',
+    '🔍 Buscar diferenciado: búsqueda en notas, rango de edad, filtro sin foto',
+    '⚡ Caja rápida en Agregar pago',
+    '📋 Reporte de pagos diarios por fecha y turno',
+    '📷 Eliminar foto de cliente desde la ficha',
+    '🔔 Actividad con badge, pendiente a recoger',
+  ]),
+  Novedad('1.0.14', [
+    '🧒 Menores de 18 pagan 1500 CUP/mes automáticamente',
+    '👥 Usuarios APK: rol, dispositivo, historial de accesos, foto, compartir credenciales por WhatsApp',
+    '🏁 Cierre de turno sin pagos diarios',
+    '✅ Aviso visual de días vigentes al pagar por adelantado (fix del preview)',
+    '🌐 Distingue "sin internet" de "servidor inaccesible" (fix del falso "sin conexión")',
+    '🔐 Fix: la huella ahora sí se verifica al abrir',
+    '🔄 Pantalla de sincronización con 3 estados y mejor UX',
+  ]),
   Novedad('1.0.13', [
     '✅ Pagos realizados tocable: lista de clientes que pagaron',
     '🖼️ Miniaturas de fotos en Mi día',
@@ -136,6 +162,19 @@ const novedades = [
   ]),
 ];
 
+/// Compara versiones semánticas (1.0.10 > 1.0.9).
+/// La comparación de strings falla: "1.0.10" < "1.0.9" letra por letra.
+int compararVersiones(String a, String b) {
+  final pa = a.split('.').map((e) => int.tryParse(e) ?? 0).toList();
+  final pb = b.split('.').map((e) => int.tryParse(e) ?? 0).toList();
+  for (var i = 0; i < 3; i++) {
+    final x = i < pa.length ? pa[i] : 0;
+    final y = i < pb.length ? pb[i] : 0;
+    if (x != y) return x.compareTo(y);
+  }
+  return 0;
+}
+
 /// Muestra "Lo Nuevo" una sola vez tras actualizar. Devuelve true si la mostró.
 Future<bool> mostrarNovedadesSiHay(BuildContext context) async {
   final perfil = PerfilService.instance;
@@ -144,7 +183,7 @@ Future<bool> mostrarNovedadesSiHay(BuildContext context) async {
   await perfil.setUltimaVersionVista(AppConfig.appVersion);
   final nuevas = novedades
       .where((n) =>
-          vista == null || n.version.compareTo(vista) > 0)
+          vista == null || compararVersiones(n.version, vista) > 0)
       .toList();
   if (nuevas.isEmpty || !context.mounted) return false;
   await showDialog<void>(
