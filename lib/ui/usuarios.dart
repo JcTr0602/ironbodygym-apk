@@ -65,7 +65,7 @@ class _UsuariosScreenState extends State<UsuariosScreen> {
       final ok = await showDialog<bool>(
         context: context,
         builder: (ctx) => AlertDialog(
-          title: const Text('⚠️ Eliminar usuario'),
+          title: const Text('️ Eliminar usuario'),
           content: Text(
               '¿Eliminar a "$username"? Perderá acceso inmediatamente.'),
           actions: [
@@ -89,7 +89,7 @@ class _UsuariosScreenState extends State<UsuariosScreen> {
       final ok = await showDialog<bool>(
         context: context,
         builder: (ctx) => AlertDialog(
-          title: Text('🔑 Nueva contraseña para $username'),
+          title: Text('Nueva contraseña para $username'),
           content: TextField(
             controller: ctrl,
             decoration: const InputDecoration(
@@ -128,7 +128,7 @@ class _UsuariosScreenState extends State<UsuariosScreen> {
     );
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('✅ "$titulo" encolado para $username')),
+      SnackBar(content: Text('"$titulo" encolado para $username')),
     );
     // v1.0.14: ofrecer compartir credenciales tras crear/resetear
     if ((accion == 'crear' || accion == 'reset_pass') &&
@@ -152,7 +152,7 @@ Hola $username, estas son tus credenciales para la app del gym:
     showDialog<void>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('📤 Compartir credenciales'),
+        title: const Text('Compartir credenciales'),
         content: SingleChildScrollView(child: Text(texto)),
         actions: [
           TextButton(
@@ -167,7 +167,7 @@ Hola $username, estas son tus credenciales para la app del gym:
               Navigator.pop(ctx);
               ScaffoldMessenger.of(context).showSnackBar(
                 const SnackBar(
-                    content: Text('✅ Copiado, pégalo en WhatsApp')),
+                    content: Text('Copiado, pégalo en WhatsApp')),
               );
             },
           ),
@@ -183,7 +183,7 @@ Hola $username, estas son tus credenciales para la app del gym:
     showDialog<void>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: Text('🕐 Accesos de $username'),
+        title: Text('Accesos de $username'),
         content: SizedBox(
           width: double.maxFinite,
           child: accesos.isEmpty
@@ -270,13 +270,13 @@ Hola $username, estas son tus credenciales para la app del gym:
       await FotoCache.instance.invalidar(path);
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('✅ Foto actualizada')),
+        const SnackBar(content: Text('Foto actualizada')),
       );
       setState(() {});
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('❌ No se pudo subir: $e')),
+        SnackBar(content: Text('No se pudo subir: $e')),
       );
     }
   }
@@ -289,7 +289,7 @@ Hola $username, estas son tus credenciales para la app del gym:
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('👥 Cambiar rol'),
+        title: const Text('Cambiar rol'),
         content: Text(
           '"$username" pasará de "$rolActual" a "$nuevoRol".\n\n'
           '${nuevoRol == 'admin' ? 'Tendrá acceso a Administración, finanzas y auditoría.' : 'Solo verá las funciones de entrenador.'}'),
@@ -315,7 +315,7 @@ Hola $username, estas son tus credenciales para la app del gym:
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('👤 Crear usuario APK'),
+        title: const Text('Crear usuario APK'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -358,7 +358,7 @@ Hola $username, estas son tus credenciales para la app del gym:
     );
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('✅ Usuario encolado (se sincronizará)')));
+        const SnackBar(content: Text('Usuario encolado (se sincronizará)')));
     SyncEngine.instance.push();
     _compartirCredenciales(nombre, pass);
     _cargar();
@@ -368,7 +368,7 @@ Hola $username, estas son tus credenciales para la app del gym:
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('👥 Usuarios APK'),
+        title: const Text('Usuarios APK'),
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh),
@@ -415,13 +415,13 @@ Hola $username, estas son tus credenciales para la app del gym:
                             Expanded(child: Text(username)),
                             if (esDueno)
                               const Chip(
-                                label: Text('👑 Dueño',
+                                label: Text('Dueño',
                                     style: TextStyle(fontSize: 10)),
                                 visualDensity: VisualDensity.compact,
                               )
                             else if (esAdmin)
                               const Chip(
-                                label: Text('⭐ Admin',
+                                label: Text('Admin',
                                     style: TextStyle(fontSize: 10)),
                                 visualDensity: VisualDensity.compact,
                               ),
@@ -437,12 +437,12 @@ Hola $username, estas son tus credenciales para la app del gym:
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
-                              '🕐 $ultimoRel',
+                              'Último acceso: $ultimoRel',
                               style: const TextStyle(fontSize: 12),
                             ),
                             if (dispositivo.isNotEmpty)
                               Text(
-                                '📱 $dispositivo',
+                                dispositivo,
                                 style: const TextStyle(
                                     fontSize: 12, color: Colors.grey),
                               ),
@@ -479,38 +479,38 @@ Hola $username, estas son tus credenciales para la app del gym:
                                   const PopupMenuItem(
                                     value: 'cambiar_rol',
                                     child: Text(
-                                        '👥 Cambiar rol (entrenador ↔ admin)'),
+                                        'Cambiar rol (entrenador ↔ admin)'),
                                   ),
                                   const PopupMenuItem(
                                     value: 'foto',
-                                    child: Text('📷 Cambiar foto'),
+                                    child: Text('Cambiar foto'),
                                   ),
                                   const PopupMenuItem(
                                     value: 'historial',
-                                    child: Text('🕐 Ver historial de accesos'),
+                                    child: Text('Ver historial de accesos'),
                                   ),
                                   if (!bloqueado)
                                     const PopupMenuItem(
                                       value: 'bloquear',
-                                      child: Text('🚫 Bloquear'),
+                                      child: Text('Bloquear'),
                                     ),
                                   if (bloqueado)
                                     const PopupMenuItem(
                                       value: 'desbloquear',
-                                      child: Text('✅ Desbloquear'),
+                                      child: Text('Desbloquear'),
                                     ),
                                   const PopupMenuItem(
                                     value: 'forzar_cierre',
                                     child:
-                                        Text('🚪 Cerrar sesión a distancia'),
+                                        Text('Cerrar sesión a distancia'),
                                   ),
                                   const PopupMenuItem(
                                     value: 'reset_pass',
-                                    child: Text('🔑 Cambiar contraseña'),
+                                    child: Text('Cambiar contraseña'),
                                   ),
                                   const PopupMenuItem(
                                     value: 'eliminar',
-                                    child: Text('🗑️ Eliminar',
+                                    child: Text('️ Eliminar',
                                         style:
                                             TextStyle(color: Colors.red)),
                                   ),

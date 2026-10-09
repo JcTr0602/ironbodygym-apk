@@ -82,21 +82,21 @@ class _AuditoriaScreenState extends State<AuditoriaScreen> {
   String _nombreTipo(String tipo) {
     switch (tipo) {
       case 'inscribir':
-        return '📝 Inscripción';
+        return 'Inscripción';
       case 'pago_mensual':
-        return '💰 Pago mensual';
+        return 'Pago mensual';
       case 'pago_diario':
-        return '💵 Pago diario';
+        return 'Pago diario';
       case 'cambiar_estado':
-        return '🔄 Cambio de estado';
+        return 'Cambio de estado';
       case 'foto':
-        return '📷 Foto';
+        return 'Foto';
       case 'gasto':
-        return '🧾 Gasto';
+        return 'Gasto';
       case 'editar_cliente':
-        return '✏️ Edición de cliente';
+        return 'Edición de cliente';
       case 'admin_usuario':
-        return '👤 Gestión de usuario';
+        return 'Gestión de usuario';
       default:
         return tipo;
     }
@@ -161,7 +161,7 @@ class _AuditoriaScreenState extends State<AuditoriaScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('📋 Auditoría'),
+        title: const Text('Auditoría'),
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh),
@@ -221,8 +221,8 @@ class _AuditoriaScreenState extends State<AuditoriaScreen> {
                                 Text(detalle,
                                     style: const TextStyle(
                                         fontWeight: FontWeight.w500)),
-                              Text('👤 $usuario'),
-                              Text('📅 $fecha'),
+                              Text(usuario),
+                              Text(fecha),
                               Text(
                                 'Estado: $estado',
                                 style: TextStyle(

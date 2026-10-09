@@ -302,19 +302,19 @@ class _AjustesScreenState extends State<AjustesScreen> {
       await _auth.changePassword(actual.text, nueva.text);
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('✅ Contraseña cambiada')));
+          content: Text('Contraseña cambiada')));
     } catch (_) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
           content: Text(
-              '⚠️ No se pudo cambiar: verifica tu contraseña actual')));
+              'No se pudo cambiar: verifica tu contraseña actual')));
     }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('⚙️ Ajustes')),
+      appBar: AppBar(title: const Text('️ Ajustes')),
       body: Column(
         children: [
           const SyncBanner(),
@@ -336,23 +336,23 @@ class _AjustesScreenState extends State<AjustesScreen> {
                           )
                         : const CircleAvatar(
                             radius: 50,
-                            child: Text('👤',
+                            child: Text('',
                                 style: TextStyle(fontSize: 40))),
                   ),
                 ),
                 Center(
                   child: TextButton.icon(
-                    icon: const Text('📷'),
+                    icon: const Text(''),
                     label: const Text('Cambiar foto'),
                     onPressed: _cambiarAvatar,
                   ),
                 ),
                 const SizedBox(height: 8),
-                _fila('👤 Nombre', _auth.displayName,
+                _fila('Nombre', _auth.displayName,
                     null),
-                _fila('📱 Móvil', _movil ?? '—', () {
+                _fila('Móvil', _movil ?? '—', () {
                   _editarCampo(
-                    titulo: '📱 Número móvil',
+                    titulo: 'Número móvil',
                     valorActual: _movil,
                     etiqueta: 'Móvil (8 dígitos)',
                     validar: validarTelefono,
@@ -361,9 +361,9 @@ class _AjustesScreenState extends State<AjustesScreen> {
                     guardar: _perfil.setMovil,
                   );
                 }),
-                _fila('🪪 Carnet', _carnet ?? '—', () {
+                _fila('Carnet', _carnet ?? '—', () {
                   _editarCampo(
-                    titulo: '🪪 Carnet de identidad',
+                    titulo: 'Carnet de identidad',
                     valorActual: _carnet,
                     etiqueta: 'Carnet (6–11 dígitos)',
                     validar: validarCarnet,
@@ -376,7 +376,7 @@ class _AjustesScreenState extends State<AjustesScreen> {
                 ValueListenableBuilder<ThemeMode>(
                   valueListenable: ThemeController.mode,
                   builder: (_, mode, __) => SwitchListTile(
-                    title: const Text('🌙 Tema oscuro'),
+                    title: const Text('Tema oscuro'),
                     value: mode == ThemeMode.dark,
                     onChanged: (_) =>
                         ThemeController.toggle(),
@@ -395,7 +395,7 @@ class _AjustesScreenState extends State<AjustesScreen> {
                 ),
                 const Divider(),
                 ListTile(
-                  leading: const Text('🔑',
+                  leading: const Text('',
                       style: TextStyle(fontSize: 24)),
                   title:
                       const Text('Cambiar contraseña'),
@@ -405,7 +405,7 @@ class _AjustesScreenState extends State<AjustesScreen> {
                 ),
                 const Divider(),
                 ListTile(
-                  leading: const Text('🔔',
+                  leading: const Text('',
                       style: TextStyle(fontSize: 24)),
                   title:
                       const Text('Mis avisos'),
@@ -418,13 +418,13 @@ class _AjustesScreenState extends State<AjustesScreen> {
                 const Divider(),
                 const Padding(
                   padding: EdgeInsets.symmetric(vertical: 4),
-                  child: Text('🔐 Seguridad',
+                  child: Text('Seguridad',
                       style: TextStyle(
                           fontSize: 14,
                           fontWeight: FontWeight.bold)),
                 ),
                 SwitchListTile(
-                  title: const Text('📱 Vincular a este dispositivo'),
+                  title: const Text('Vincular a este dispositivo'),
                   subtitle: const Text(
                       'Avisa si entras desde otro teléfono',
                       style: TextStyle(fontSize: 12)),
@@ -443,7 +443,7 @@ class _AjustesScreenState extends State<AjustesScreen> {
                   },
                 ),
                 SwitchListTile(
-                  title: const Text('👆 Entrar con huella digital'),
+                  title: const Text('Entrar con huella digital'),
                   value: _huella,
                   onChanged: (v) async {
                     if (v) {
@@ -458,7 +458,7 @@ class _AjustesScreenState extends State<AjustesScreen> {
                   },
                 ),
                 ListTile(
-                  leading: const Text('🔢',
+                  leading: const Text('',
                       style: TextStyle(fontSize: 24)),
                   title: const Text('PIN rápido'),
                   subtitle: Text(

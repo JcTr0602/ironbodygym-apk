@@ -141,7 +141,7 @@ class _InscribirScreenState extends State<InscribirScreen> {
       await showDialog<void>(
         context: context,
         builder: (ctx) => AlertDialog(
-          title: const Text('⛔ Carnet duplicado'),
+          title: const Text('Carnet duplicado'),
           content: Text(
               'El carnet $carnet ya pertenece a "${dueno['nombre']}".\n'
               'Cada carnet corresponde a un solo cliente: no se puede '
@@ -159,7 +159,7 @@ class _InscribirScreenState extends State<InscribirScreen> {
       final seguir = await showDialog<bool>(
         context: context,
         builder: (ctx) => AlertDialog(
-          title: const Text('⚠️ Posible duplicado'),
+          title: const Text('️ Posible duplicado'),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -248,7 +248,7 @@ class _InscribirScreenState extends State<InscribirScreen> {
       }
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('✅ Guardado (se sincronizará)')));
+          const SnackBar(content: Text('Guardado (se sincronizará)')));
       Navigator.of(context).pop();
       SyncEngine.instance.push();
     } catch (e) {

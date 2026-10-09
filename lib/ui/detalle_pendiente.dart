@@ -93,7 +93,7 @@ class _DetallePendienteScreenState extends State<DetallePendienteScreen> {
                 : _items.isEmpty
                     ? const Center(
                         child: Text(
-                            '🎉 Nada pendiente.',
+                            'Nada pendiente.',
                             style: TextStyle(
                                 color: Colors.grey)))
                     : ListView.builder(
@@ -104,7 +104,7 @@ class _DetallePendienteScreenState extends State<DetallePendienteScreen> {
                           if (it['tipo'] == 'diario') {
                             return Card(
                               child: ListTile(
-                                leading: const Text('🎫',
+                                leading: const Text('',
                                     style: TextStyle(
                                         fontSize: 24)),
                                 title: Text(
@@ -125,10 +125,12 @@ class _DetallePendienteScreenState extends State<DetallePendienteScreen> {
                               it['es_inscripcion'] == true;
                           return Card(
                             child: ListTile(
-                              leading: Text(
-                                  esInsc ? '🆕' : '💰',
-                                  style: const TextStyle(
-                                      fontSize: 24)),
+                              leading: Icon(
+                                  esInsc
+                                      ? Icons.person_add
+                                      : Icons.payments,
+                                  color: const Color(0xFFE8821A),
+                                  size: 24),
                               title: Text(
                                   '${it['cliente_nombre']}',
                                   style: const TextStyle(

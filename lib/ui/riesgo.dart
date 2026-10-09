@@ -82,7 +82,7 @@ class _RiesgoScreenState extends State<RiesgoScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('⚠️ Clientes en riesgo'),
+        title: const Text('️ Clientes en riesgo'),
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh),
@@ -97,7 +97,7 @@ class _RiesgoScreenState extends State<RiesgoScreen> {
                   child: Padding(
                     padding: EdgeInsets.all(24),
                     child: Text(
-                      '🎉 No hay clientes en riesgo.\n\n'
+                      'No hay clientes en riesgo.\n\n'
                       'Se muestran aquí los inactivos con 3+ pagos '
                       'cuyo último pago fue hace más de 60 días.',
                       textAlign: TextAlign.center,
@@ -116,7 +116,7 @@ class _RiesgoScreenState extends State<RiesgoScreen> {
                         child: ListTile(
                           leading: const CircleAvatar(
                             backgroundColor: Colors.orange,
-                            child: Text('⚠️',
+                            child: Text('️',
                                 style: TextStyle(fontSize: 20)),
                           ),
                           title: Text('${r['nombre']}',
@@ -127,10 +127,10 @@ class _RiesgoScreenState extends State<RiesgoScreen> {
                                 CrossAxisAlignment.start,
                             children: [
                               Text(
-                                  '📅 Último pago: ${fmtFecha(r['ultimo_pago'] as String?)} '
+                                  'Último pago: ${fmtFecha(r['ultimo_pago'] as String?)} '
                                   '(hace ${r['hace_dias']} días)'),
                               Text(
-                                  '💰 Total histórico: ${fmtMonto(r['total'])} CUP '
+                                  'Total histórico: ${fmtMonto(r['total'])} CUP '
                                   '(${r['n_pagos']} pagos)'),
                             ],
                           ),

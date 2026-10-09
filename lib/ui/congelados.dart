@@ -47,7 +47,7 @@ class _CongeladosScreenState extends State<CongeladosScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('❄️ Congelados')),
+      appBar: AppBar(title: const Text('️ Congelados')),
       body: _cargando
           ? const Center(child: CircularProgressIndicator())
           : _clientes.isEmpty
@@ -55,7 +55,7 @@ class _CongeladosScreenState extends State<CongeladosScreen> {
                   child: Padding(
                     padding: EdgeInsets.all(24),
                     child: Text(
-                      '❄️ No hay clientes congelados.\n\n'
+                      'No hay clientes congelados.\n\n'
                       'Desde la ficha de un cliente puedes congelar '
                       'su membresía para pausar el vencimiento.',
                       textAlign: TextAlign.center,
@@ -74,7 +74,7 @@ class _CongeladosScreenState extends State<CongeladosScreen> {
                         margin: const EdgeInsets.symmetric(
                             horizontal: 12, vertical: 4),
                         child: ListTile(
-                          leading: const Text('❄️',
+                          leading: const Text('️',
                               style: TextStyle(fontSize: 28)),
                           title: Text('${c['nombre'] ?? ''}',
                               style: const TextStyle(
@@ -132,7 +132,7 @@ class _CongeladosScreenState extends State<CongeladosScreen> {
     await LocalDb.instance.updateMirrorEstado(id, 'activo');
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('✅ $nombre descongelado')),
+        SnackBar(content: Text('$nombre descongelado')),
       );
       _cargar();
     }

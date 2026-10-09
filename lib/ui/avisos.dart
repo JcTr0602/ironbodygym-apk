@@ -46,7 +46,7 @@ class _AvisosScreenState extends State<AvisosScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('🔔 Mis avisos')),
+      appBar: AppBar(title: const Text('Mis avisos')),
       body: _cargando
           ? const Center(child: CircularProgressIndicator())
           : Column(
@@ -73,7 +73,7 @@ class _AvisosScreenState extends State<AvisosScreen> {
                       ),
                       const Divider(),
                       SwitchListTile(
-                        title: const Text('🎂 Cumpleaños'),
+                        title: const Text('Cumpleaños'),
                         subtitle: const Text(
                             'Avisar de los cumpleaños del mes'),
                         value: _cumpleanos,
@@ -84,7 +84,7 @@ class _AvisosScreenState extends State<AvisosScreen> {
                       ),
                       const Divider(),
                       SwitchListTile(
-                        title: const Text('🔄 Sincronización'),
+                        title: const Text('Sincronización'),
                         subtitle: const Text(
                             'Avisar cuando haya pendientes por sincronizar'),
                         value: _sync,

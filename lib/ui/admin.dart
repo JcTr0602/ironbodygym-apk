@@ -767,7 +767,7 @@ class _AdminScreenState extends State<AdminScreen> {
                               for (final t in _pend)
                                 ListTile(
                                   dense: true,
-                                  leading: const Text('👤',
+                                  leading: const Text('',
                                       style: TextStyle(fontSize: 22)),
                                   title: Text('${t['nombre']}'),
                                   subtitle: Text(
@@ -972,15 +972,15 @@ class _AdminScreenState extends State<AdminScreen> {
                             child: ElevatedButton.icon(
                               icon: const Icon(Icons.table_chart),
                               label:
-                                  const Text('📊 Exportar Excel'),
+                                  const Text('Exportar Excel'),
                               onPressed: () async {
                                 final ok = await exportarExcel();
                                 if (context.mounted) {
                                   ScaffoldMessenger.of(context)
                                       .showSnackBar(SnackBar(
                                           content: Text(ok
-                                              ? '📊 Archivos listos para compartir'
-                                              : '⚠️ No se pudo generar el archivo')));
+                                              ? 'Archivos listos para compartir'
+                                              : 'No se pudo generar el archivo')));
                                 }
                               },
                             ),

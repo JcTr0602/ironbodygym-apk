@@ -91,7 +91,7 @@ class _PagosRealizadosScreenState extends State<PagosRealizadosScreen> {
     ];
     return Scaffold(
       appBar: AppBar(
-        title: const Text('✅ Pagos realizados'),
+        title: const Text('Pagos realizados'),
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh),

@@ -121,7 +121,7 @@ class _BuscarScreenState extends State<BuscarScreen> {
     await _buscar();
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('✅ Lista actualizada')));
+          const SnackBar(content: Text('Lista actualizada')));
     }
   }
 
@@ -129,7 +129,7 @@ class _BuscarScreenState extends State<BuscarScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('🔍 Buscar cliente'),
+        title: const Text('Buscar cliente'),
         actions: [
           IconButton(
             tooltip: 'Actualizar (bajar cambios)',
@@ -172,13 +172,13 @@ class _BuscarScreenState extends State<BuscarScreen> {
               children: [
                 _chipFiltro('todos', 'Todos'),
                 const SizedBox(width: 6),
-                _chipFiltro('aldia', '🟢 Al día'),
+                _chipFiltro('aldia', 'Al día', punto: AppColores.exito),
                 const SizedBox(width: 6),
-                _chipFiltro('porvencer', '🟡 Por vencer'),
+                _chipFiltro('porvencer', 'Por vencer', punto: AppColores.alerta),
                 const SizedBox(width: 6),
-                _chipFiltro('vencidos', '🔴 Vencidos'),
+                _chipFiltro('vencidos', 'Vencidos', punto: AppColores.error),
                 const SizedBox(width: 6),
-                _chipFiltro('sinfoto', '📷 Sin foto'),
+                _chipFiltro('sinfoto', 'Sin foto'),
               ],
             ),
           ),
@@ -257,10 +257,14 @@ class _BuscarScreenState extends State<BuscarScreen> {
     );
   }
 
-  Widget _chipFiltro(String valor, String etiqueta) {
+  Widget _chipFiltro(String valor, String etiqueta,
+      {Color? punto}) {
     final activo = _filtro == valor;
     return ChoiceChip(
       label: Text(etiqueta, style: const TextStyle(fontSize: 12)),
+      avatar: punto == null
+          ? null
+          : Icon(Icons.circle, size: 10, color: punto),
       selected: activo,
       visualDensity: VisualDensity.compact,
       onSelected: (_) {

@@ -85,7 +85,7 @@ class _CuentasCobrarScreenState
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('💸 Cuentas por cobrar'),
+        title: const Text('Cuentas por cobrar'),
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh),
@@ -135,7 +135,7 @@ class _CuentasCobrarScreenState
                       child: Padding(
                         padding: EdgeInsets.all(24),
                         child: Text(
-                          '🎉 Sin cuentas por cobrar.\n\n'
+                          'Sin cuentas por cobrar.\n\n'
                           'Todos los clientes activos están al día.',
                           textAlign: TextAlign.center,
                         ),

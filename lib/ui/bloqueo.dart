@@ -83,7 +83,7 @@ class _BloqueoScreenState extends State<BloqueoScreen> {
                   size: 80, color: Colors.orange),
               const SizedBox(height: 24),
               const Text(
-                '🔒 App bloqueada',
+                'App bloqueada',
                 style:
                     TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
               ),

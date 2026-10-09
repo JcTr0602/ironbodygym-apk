@@ -42,7 +42,7 @@ class _TransferenciaScreenState extends State<TransferenciaScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('💳 Datos de transferencia')),
+      appBar: AppBar(title: const Text('Datos de transferencia')),
       body: Column(
         children: [
           const SyncBanner(),
@@ -54,24 +54,24 @@ class _TransferenciaScreenState extends State<TransferenciaScreen> {
                     'Puedes pagar tu mensualidad con Transfermóvil o Enzona '
                     'a cualquiera de estas tarjetas:'),
                 const SizedBox(height: 16),
-                _tarjeta(context, '💳 Bandec', _bandec),
-                _tarjeta(context, '💳 BPA', _bpa),
-                _tarjeta(context, '📱 Móvil para confirmar', _movil),
+                _tarjeta(context, 'Bandec', _bandec),
+                _tarjeta(context, 'BPA', _bpa),
+                _tarjeta(context, 'Móvil para confirmar', _movil),
                 const Divider(),
                 Text(
-                    '💰 Mensualidad por transferencia: ${fmtMonto(_transfer)} CUP',
+                    'Mensualidad por transferencia: ${fmtMonto(_transfer)} CUP',
                     style:
                         const TextStyle(fontWeight: FontWeight.bold)),
                 Text('(En efectivo: ${fmtMonto(_efectivo)} CUP)'),
                 const SizedBox(height: 12),
                 const Text(
-                  '⚠️ IMPORTANTE: tienes que habilitar la opción para que '
+                  'IMPORTANTE: tienes que habilitar la opción para que '
                   'se vea el móvil del cual hiciste la transferencia. Así '
                   'verificamos tu pago y activamos tu mensualidad.',
                 ),
                 const SizedBox(height: 12),
-                const Text('✈️ Telegram: ${AppConfig.telegramContacto}'),
-                const Text('💬 WhatsApp: ${AppConfig.whatsappContacto}'),
+                const Text('️ Telegram: ${AppConfig.telegramContacto}'),
+                const Text('WhatsApp: ${AppConfig.whatsappContacto}'),
               ],
             ),
           ),

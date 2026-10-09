@@ -416,7 +416,7 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
                     child: ListTile(
                       dense: true,
                       leading: Text(
-                          d['turno'] == 'mañana' ? '☀️' : '🌙',
+                          d['turno'] == 'mañana' ? 'Mañana' : 'Tarde',
                           style:
                               const TextStyle(fontSize: 22)),
                       title: Text(
@@ -425,7 +425,7 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
                         if ((d['nota'] as String?)
                                 ?.isNotEmpty ==
                             true)
-                          '📝 ${d['nota']}',
+                          '${d['nota']}',
                         '${d['registrado_por_nombre'] ?? ''}',
                       ].join(' · ')),
                       trailing: const Icon(
@@ -495,7 +495,7 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
                               BorderRadius.circular(12),
                         ),
                         child: Text(
-                          '📅 ${fmtFecha(_fechaReporte.toIso8601String().substring(0, 10))}',
+                          fmtFecha(_fechaReporte.toIso8601String().substring(0, 10)),
                           textAlign: TextAlign.center,
                           style: const TextStyle(
                               fontSize: 16,
@@ -553,12 +553,12 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
               Row(
                 children: [
                   Expanded(
-                      child: _tarjetaTurno('☀️ Mañana',
+                      child: _tarjetaTurno('Mañana',
                           cantMan, totMan)),
                   const SizedBox(width: 8),
                   Expanded(
                       child: _tarjetaTurno(
-                          '🌙 Tarde', cantTar, totTar)),
+                          'Tarde', cantTar, totTar)),
                 ],
               ),
               const SizedBox(height: 12),
@@ -571,7 +571,7 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
                       crossAxisAlignment:
                           CrossAxisAlignment.start,
                       children: [
-                        const Text('📊 Comparativa',
+                        const Text('Comparativa',
                             style: TextStyle(
                                 fontWeight:
                                     FontWeight.bold)),
@@ -589,7 +589,7 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
               const SizedBox(height: 12),
               // Mini-gráfico 7 días
               if (_ultimos7.isNotEmpty) ...[
-                const Text('📈 Últimos 7 días',
+                const Text('Últimos 7 días',
                     style: TextStyle(
                         fontWeight: FontWeight.bold)),
                 const SizedBox(height: 8),
@@ -649,7 +649,7 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
                 const SizedBox(height: 12),
               ],
               // Detalle de registros
-              const Text('📋 Registros del día',
+              const Text('Registros del día',
                   style:
                       TextStyle(fontWeight: FontWeight.bold)),
               const SizedBox(height: 8),
@@ -662,8 +662,8 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
                     dense: true,
                     leading: Text(
                         d['turno'] == 'mañana'
-                            ? '☀️'
-                            : '🌙',
+                            ? 'Mañana'
+                            : 'Tarde',
                         style:
                             const TextStyle(fontSize: 22)),
                     title: Text(
@@ -672,12 +672,12 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
                       if ((d['nota'] as String?)
                               ?.isNotEmpty ==
                           true)
-                        '📝 ${d['nota']}',
+                        '${d['nota']}',
                       '${d['registrado_por_nombre'] ?? ''}',
                       if ((d['creado'] as String?)
                               ?.isNotEmpty ==
                           true)
-                        '🕐 ${(d['creado'] as String).length >= 16 ? (d['creado'] as String).substring(11, 16) : ''}',
+                        (d['creado'] as String).length >= 16 ? (d['creado'] as String).substring(11, 16) : '',
                     ]
                         .where((s) => s.isNotEmpty)
                         .join(' · ')),

@@ -119,11 +119,11 @@ class _MiDiaScreenState extends State<MiDiaScreen> {
               Text('• ${_cobrados.length} cobros realizados'),
               Text('• Efectivo: ${fmtMonto(_efectivo)} CUP'),
               Text(
-                  '• 📱 Transferencia: ${fmtMonto(_transferencia)} CUP'),
+                  '• Transferencia: ${fmtMonto(_transferencia)} CUP'),
             ],
             const SizedBox(height: 6),
             Text(faltan == 0
-                ? '✅ No quedó nadie por cobrar hoy.'
+                ? 'No quedó nadie por cobrar hoy.'
                 : '⏳ Quedaron $faltan por cobrar hoy.'),
             const SizedBox(height: 12),
             const Text(
@@ -184,8 +184,8 @@ class _MiDiaScreenState extends State<MiDiaScreen> {
                           const SizedBox(height: 4),
                           Text(
                               '${_cobrados.length} cobros · '
-                              '💵 ${fmtMonto(_efectivo)} · '
-                              '📱 ${fmtMonto(_transferencia)}',
+                              '${fmtMonto(_efectivo)} · '
+                              '${fmtMonto(_transferencia)}',
                               style: const TextStyle(
                                   color: Colors.white70,
                                   fontSize: 12)),
@@ -216,13 +216,13 @@ class _MiDiaScreenState extends State<MiDiaScreen> {
                           leading: _FotoMini(
                             fotoStorage:
                                 c['foto_storage'] as String?,
-                            fallback: Text(
+                            fallback: Icon(
                               (c['metodo'] as String) ==
                                       'transferencia'
-                                  ? '📱'
-                                  : '💵',
-                              style: const TextStyle(
-                                  fontSize: 22),
+                                  ? Icons.smartphone
+                                  : Icons.payments,
+                              size: 22,
+                              color: const Color(0xFFE8821A),
                             ),
                           ),
                           title: Text('${c['nombre']}'),
@@ -248,7 +248,7 @@ class _MiDiaScreenState extends State<MiDiaScreen> {
                       child: Padding(
                         padding: EdgeInsets.all(16),
                         child: Text(
-                            '🎉 Nadie vence hoy. Todo al día.',
+                            'Nadie vence hoy. Todo al día.',
                             textAlign: TextAlign.center,
                             style:
                                 TextStyle(color: Colors.grey)),

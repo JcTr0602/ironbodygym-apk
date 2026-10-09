@@ -230,7 +230,7 @@ class _DetalleEntrenadorScreenState extends State<DetalleEntrenadorScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text('👤 ${widget.nombre}')),
+      appBar: AppBar(title: Text(widget.nombre)),
       body: Column(
         children: [
           const SyncBanner(),
@@ -284,7 +284,7 @@ class _DetalleEntrenadorScreenState extends State<DetalleEntrenadorScreen> {
                         ),
                         const SizedBox(height: 12),
                         // Estado de entrega (idea 3)
-                        _seccion('💰 Estado de entrega', [
+                        _seccion(Icons.outbox, 'Estado de entrega', [
                           Text(
                               'Entregado: ${fmtMonto(_entregado)} CUP',
                               style: const TextStyle(
@@ -316,7 +316,7 @@ class _DetalleEntrenadorScreenState extends State<DetalleEntrenadorScreen> {
                             ),
                         ]),
                         // Comparativa (idea 5)
-                        _seccion('📊 Comparativa', [
+                        _seccion(Icons.bar_chart, 'Comparativa', [
                           _filaComparativa(
                               'Vs ${_nombreAnterior()}',
                               _totalAnterior,
@@ -351,7 +351,7 @@ class _DetalleEntrenadorScreenState extends State<DetalleEntrenadorScreen> {
                         ]),
                         // Actividad por día (ideas 6 y 7)
                         if (_diasActivos.isNotEmpty)
-                          _seccion('📈 Actividad por día', [
+                          _seccion(Icons.calendar_today, 'Actividad por día', [
                             for (final d in _diasActivos)
                               Padding(
                                 padding:
@@ -402,8 +402,7 @@ class _DetalleEntrenadorScreenState extends State<DetalleEntrenadorScreen> {
                               ),
                           ]),
                         // Cobros del período (idea 1)
-                        _seccion(
-                            '🧾 Cobros (${_cobros.length})',
+                        _seccion(Icons.receipt_long, 'Cobros (${_cobros.length})',
                             [
                               if (_cobros.isEmpty)
                                 const Text(
@@ -457,8 +456,7 @@ class _DetalleEntrenadorScreenState extends State<DetalleEntrenadorScreen> {
                                         fontSize: 12)),
                             ]),
                         // Inscripciones (idea 4)
-                        _seccion(
-                            '🆕 Inscripciones (${_inscripciones.length})',
+                        _seccion(Icons.person_add, 'Inscripciones (${_inscripciones.length})',
                             [
                               if (_inscripciones.isEmpty)
                                 const Text(
@@ -512,7 +510,7 @@ class _DetalleEntrenadorScreenState extends State<DetalleEntrenadorScreen> {
     );
   }
 
-  Widget _seccion(String titulo, List<Widget> hijos) {
+  Widget _seccion(IconData icono, String titulo, List<Widget> hijos) {
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
       child: Padding(
@@ -520,10 +518,16 @@ class _DetalleEntrenadorScreenState extends State<DetalleEntrenadorScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(titulo,
+            Row(
+              children: [
+                Icon(icono, size: 18, color: const Color(0xFFE8821A)),
+                const SizedBox(width: 6),
+                Text(titulo,
                 style: const TextStyle(
                     fontSize: 15,
                     fontWeight: FontWeight.bold)),
+              ],
+            ),
             const SizedBox(height: 8),
             ...hijos,
           ],

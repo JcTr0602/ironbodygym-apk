@@ -92,7 +92,7 @@ class _HistorialEntrenadorScreenState
       'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'
     ];
     return Scaffold(
-      appBar: AppBar(title: const Text('👥 Historial por entrenador')),
+      appBar: AppBar(title: const Text('Historial por entrenador')),
       body: Column(
         children: [
           const SyncBanner(),
@@ -143,11 +143,11 @@ class _HistorialEntrenadorScreenState
                                       mainAxisAlignment:
                                           MainAxisAlignment.spaceBetween,
                                       children: [
-                                        _metrica('💰 Cobrado',
+                                        _metrica('Cobrado',
                                             '${(d['cobrado'] as double).toStringAsFixed(0)} CUP'),
-                                        _metrica('🧾 Pagos',
+                                        _metrica('Pagos',
                                             '${d['pagos']}'),
-                                        _metrica('➕ Inscritos',
+                                        _metrica('Inscritos',
                                             '${d['inscripciones']}'),
                                       ],
                                     ),

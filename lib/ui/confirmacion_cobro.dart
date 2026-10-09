@@ -56,11 +56,11 @@ class ConfirmacionCobroScreen extends StatelessWidget {
                 padding: const EdgeInsets.all(20),
                 child: Column(
                   children: [
-                    _fila('👤 Cliente', nombreCliente),
+                    _fila('Cliente', nombreCliente),
                     const Divider(),
-                    _fila('💰 Monto', monto),
+                    _fila('Monto', monto),
                     const Divider(),
-                    _fila('📅 Nuevo vencimiento', nuevoVencimiento),
+                    _fila('Nuevo vencimiento', nuevoVencimiento),
                   ],
                 ),
               ),

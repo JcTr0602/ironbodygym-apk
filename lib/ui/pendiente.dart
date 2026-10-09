@@ -115,7 +115,7 @@ class _PendienteScreenState extends State<PendienteScreen> {
     if (!mounted) return;
     setState(() => _confirmando = false);
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text('✅ Recibido de $nombre confirmado '
+        content: Text('Recibido de $nombre confirmado '
             '(se aplicará al sincronizar)')));
     await _cargar();
   }
@@ -150,7 +150,7 @@ class _PendienteScreenState extends State<PendienteScreen> {
             for (final p in mens)
               ListTile(
                 dense: true,
-                leading: const Text('💰'),
+                leading: const Text(''),
                 title: Text('${fmtMonto(p['monto'])} CUP'),
                 subtitle: Text(
                     '${fmtFecha(p['fecha'] as String?)} · ${p['meses'] ?? 1} mes(es)'),
@@ -158,7 +158,7 @@ class _PendienteScreenState extends State<PendienteScreen> {
             for (final d in diarios)
               ListTile(
                 dense: true,
-                leading: const Text('🎫'),
+                leading: const Text(''),
                 title: Text('${fmtMonto(d['total'])} CUP'),
                 subtitle: Text(
                     '${fmtFecha(d['fecha'] as String?)} · ${d['turno'] ?? ''} x${d['cantidad'] ?? '?'}'),
@@ -174,7 +174,7 @@ class _PendienteScreenState extends State<PendienteScreen> {
     return Scaffold(
       appBar: AppBar(
           title: Text(
-              _esDueno ? '📥 Pendiente a recoger' : '💰 Pendiente a entregar')),
+              _esDueno ? 'Pendiente a recoger' : 'Pendiente a entregar')),
       body: Column(
         children: [
           const SyncBanner(),
@@ -199,10 +199,10 @@ class _PendienteScreenState extends State<PendienteScreen> {
     final subtitulo = _esDueno
         ? (total > 0
             ? 'por recoger de los entrenadores'
-            : 'al día, nada que recoger 🎉')
+            : 'al día, nada que recoger')
         : (total > 0
             ? 'por entregar al dueño'
-            : 'al día, nada pendiente 🎉');
+            : 'al día, nada pendiente');
     return Container(
       width: double.infinity,
       margin: const EdgeInsets.all(16),
@@ -238,7 +238,7 @@ class _PendienteScreenState extends State<PendienteScreen> {
           for (final p in _mens)
             ListTile(
               dense: true,
-              leading: const Text('💰'),
+              leading: const Text(''),
               title:
                   Text('${fmtMonto(p['monto'])} CUP — ${p['metodo']}'),
               subtitle: Text(
@@ -253,7 +253,7 @@ class _PendienteScreenState extends State<PendienteScreen> {
           for (final d in _diarios)
             ListTile(
               dense: true,
-              leading: const Text('🎫'),
+              leading: const Text(''),
               title: Text('${fmtMonto(d['total'])} CUP'),
               subtitle: Text(
                   '${fmtFecha(d['fecha'] as String?)} · ${d['turno'] ?? ''} x${d['cantidad'] ?? '?'}'),
@@ -280,7 +280,7 @@ class _PendienteScreenState extends State<PendienteScreen> {
           Padding(
             padding: EdgeInsets.only(top: 32),
             child: Text(
-                'Nada pendiente de recoger. 🎉',
+                'Nada pendiente de recoger.',
                 textAlign: TextAlign.center,
                 style: TextStyle(color: Colors.grey)),
           ),
@@ -327,7 +327,7 @@ class _PendienteScreenState extends State<PendienteScreen> {
                 child: SizedBox(
                   width: double.infinity,
                   child: ElevatedButton.icon(
-                    icon: const Text('✅'),
+                    icon: const Text(''),
                     label: const Text('Confirmar recibido'),
                     onPressed: _confirmando
                         ? null

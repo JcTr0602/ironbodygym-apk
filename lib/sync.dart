@@ -566,7 +566,7 @@ class SyncEngine {
               uuid, '⏳ Servidor ocupado (HTTP ${r.statusCode}), reintentando…');
         } else if (r.statusCode >= 400 && r.statusCode < 500) {
           await _db.markOp(uuid, 'rechazada',
-              error: '❌ El servidor la rechazó (HTTP ${r.statusCode}). '
+              error: 'El servidor la rechazó (HTTP ${r.statusCode}). '
                   'Revisa los datos o cancela la operación.');
         } else {
           await _db.bumpOp(uuid, _describeError('HTTP ${r.statusCode}'));

@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 
 import '../negocio.dart';
 import '../localdb.dart';
+import 'diseno.dart';
 import 'buscar.dart';
 import 'listas.dart';
 import 'widgets.dart';
@@ -40,7 +41,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   List<Map<String, dynamic>> _ultimos30 = [];
   String _periodoGrafico = '7'; // 7 | 30
 
-  static const naranja = Color(0xFFE8821A);
+  static const naranja = AppColores.naranja;
 
   @override
   void initState() {
@@ -126,10 +127,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 style: const TextStyle(
                     fontSize: 18, fontWeight: FontWeight.bold)),
             const SizedBox(height: 12),
-            _filaDetalle('💵 Efectivo', efectivo),
-            _filaDetalle('📱 Transferencia', transferencia),
+            _filaDetalle('Efectivo', efectivo),
+            _filaDetalle('Transferencia', transferencia),
             const Divider(),
-            _filaDetalle('💰 Total', efectivo + transferencia,
+            _filaDetalle('Total', efectivo + transferencia,
                 negrita: true),
             const SizedBox(height: 8),
             Text('${pagos.length} pagos registrados',
@@ -224,8 +225,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
       ),
       child: Row(
         children: [
-          Text(sube ? '📈' : '📉',
-              style: const TextStyle(fontSize: 20)),
+          Icon(sube ? Icons.trending_up : Icons.trending_down,
+              size: 20, color: AppColores.naranja),
           const SizedBox(width: 8),
           Expanded(
             child: Text(
@@ -262,22 +263,22 @@ class _DashboardScreenState extends State<DashboardScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text('📊 Desglose del mes',
+            const Text('Desglose del mes',
                 style:
                     TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
             const SizedBox(height: 8),
-            _filaDesglose('💵 Efectivo', ef, total),
-            _filaDesglose('📱 Transferencia', tr, total),
+            _filaDesglose('Efectivo', ef, total),
+            _filaDesglose('Transferencia', tr, total),
             const Divider(height: 16),
-            _filaDesglose('🗓️ Mensualidades', men, total),
-            _filaDesglose('🎫 Pago diario', dia, total),
+            _filaDesglose('Mensualidades', men, total),
+            _filaDesglose('Pago diario', dia, total),
             if (_proyeccion > 0) ...[
               const Divider(height: 16),
               Row(
                 mainAxisAlignment:
                     MainAxisAlignment.spaceBetween,
                 children: [
-                  const Text('🔮 Proyección cierre',
+                  const Text('Proyección cierre',
                       style: TextStyle(fontSize: 13)),
                   Text('${fmtMonto(_proyeccion)} CUP',
                       style: const TextStyle(
@@ -290,7 +291,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
             if (_mejorPeor.isNotEmpty) ...[
               const SizedBox(height: 8),
               Text(
-                '⭐ Mejor día: ${fmtFecha(_mejorPeor['mejor']!['dia'] as String?)} '
+                'Mejor día: ${fmtFecha(_mejorPeor['mejor']!['dia'] as String?)} '
                 '(${fmtMonto(_mejorPeor['mejor']!['monto'] as double)} CUP)',
                 style: const TextStyle(
                     fontSize: 12, color: Colors.grey),
@@ -430,15 +431,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('📅 ${fmtFecha(fechaIso)}',
+            Text(fmtFecha(fechaIso),
                 style: const TextStyle(
                     fontSize: 18, fontWeight: FontWeight.bold)),
             const SizedBox(height: 12),
-            _filaDetalle('💵 Efectivo', efectivo),
-            _filaDetalle('📱 Transferencia', transferencia),
-            _filaDetalle('🎫 Pago diario', diario),
+            _filaDetalle('Efectivo', efectivo),
+            _filaDetalle('Transferencia', transferencia),
+            _filaDetalle('Pago diario', diario),
             const Divider(),
-            _filaDetalle('💰 Total', monto, negrita: true),
+            _filaDetalle('Total', monto, negrita: true),
             const SizedBox(height: 8),
             Text('$n pagos registrados',
                 style:
@@ -482,7 +483,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         _activos > 0 ? alDia / _activos : 0.0;
     return Scaffold(
       appBar: AppBar(
-        title: const Text('📊 Dashboard'),
+        title: const Text('Dashboard'),
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh),
@@ -499,7 +500,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 children: [
                   const SyncBanner(),
                   const SizedBox(height: 8),
-                  const Text('💰 Ingresos',
+                  const Text('Ingresos',
                       style: TextStyle(
                           fontSize: 16, fontWeight: FontWeight.bold)),
                   const SizedBox(height: 8),
@@ -527,7 +528,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   // Gráfico con selector de período (v1.0.15: 7 o 30 días)
                   Row(
                     children: [
-                      const Text('📊 Ingresos por día',
+                      const Text('Ingresos por día',
                           style: TextStyle(
                               fontSize: 16,
                               fontWeight: FontWeight.bold)),
@@ -551,7 +552,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   const SizedBox(height: 8),
                   _graficoDias(),
                   const SizedBox(height: 16),
-                  const Text('👥 Clientes',
+                  const Text('Clientes',
                       style: TextStyle(
                           fontSize: 16, fontWeight: FontWeight.bold)),
                   const SizedBox(height: 8),
@@ -614,7 +615,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                     MainAxisAlignment.spaceEvenly,
                                 children: [
                                   if (_nuevos > 0)
-                                    Text('🆕 $_nuevos nuevos',
+                                    Text('$_nuevos nuevos',
                                         style: TextStyle(
                                             fontSize: 13,
                                             color:
@@ -622,7 +623,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                             fontWeight:
                                                 FontWeight.bold)),
                                   if (_inactivos > 0)
-                                    Text('💤 $_inactivos inactivos',
+                                    Text('$_inactivos inactivos',
                                         style: TextStyle(
                                             fontSize: 13,
                                             color:
@@ -671,7 +672,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   ],
                   // v1.0.15: ranking de entrenadores
                   if (_ranking.length > 1) ...[
-                    const Text('🏆 Ranking del mes',
+                    const Text('Ranking del mes',
                         style: TextStyle(
                             fontSize: 16,
                             fontWeight: FontWeight.bold)),
@@ -686,13 +687,19 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           children: _ranking.asMap().entries.map((e) {
                             final i = e.key;
                             final r = e.value;
-                            final medallas = ['🥇', '🥈', '🥉'];
                             return ListTile(
                               dense: true,
-                              leading: Text(
-                                  i < 3 ? medallas[i] : '${i + 1}°',
-                                  style: const TextStyle(
-                                      fontSize: 18)),
+                              leading: i < 3
+                                  ? Icon(Icons.emoji_events,
+                                      color: [
+                                        const Color(0xFFFFD700),
+                                        const Color(0xFFC0C0C0),
+                                        const Color(0xFFCD7F32)
+                                      ][i],
+                                      size: 22)
+                                  : Text('${i + 1}°',
+                                      style: const TextStyle(
+                                          fontSize: 18)),
                               title: Text('${r['nombre']}'),
                               trailing: Text(
                                 '${fmtMonto(r['total'])} CUP',
@@ -716,7 +723,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       child: Padding(
                         padding: EdgeInsets.all(16),
                         child: Text(
-                          '🎉 Nada pendiente de entregar.',
+                          'Nada pendiente de entregar.',
                           textAlign: TextAlign.center,
                         ),
                       ),

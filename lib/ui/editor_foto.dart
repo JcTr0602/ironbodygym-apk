@@ -38,7 +38,7 @@ class _EditorFotoDialogState extends State<EditorFotoDialog> {
           const Padding(
             padding: EdgeInsets.all(16),
             child: Text(
-              '📷 Ajusta la foto',
+              'Ajusta la foto',
               style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
             ),
           ),

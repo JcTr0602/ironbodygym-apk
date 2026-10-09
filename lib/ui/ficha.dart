@@ -90,7 +90,7 @@ class _FichaScreenState extends State<FichaScreen> {
       if (cambios.isEmpty) {
         messenger.showSnackBar(
           const SnackBar(
-            content: Text('✅ Datos al día con el servidor'),
+            content: Text('Datos al día con el servidor'),
             duration: Duration(seconds: 2),
           ),
         );
@@ -98,7 +98,7 @@ class _FichaScreenState extends State<FichaScreen> {
         messenger.showSnackBar(
           SnackBar(
             content: Text(
-                '🔄 Actualizado desde el servidor: ${cambios.join(', ')}'),
+                'Actualizado desde el servidor: ${cambios.join(', ')}'),
             duration: const Duration(seconds: 3),
           ),
         );
@@ -106,7 +106,7 @@ class _FichaScreenState extends State<FichaScreen> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('⚠️ Error al verificar: $e')),
+          SnackBar(content: Text('Error al verificar: $e')),
         );
       }
     } finally {
@@ -166,7 +166,7 @@ class _FichaScreenState extends State<FichaScreen> {
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setS) => AlertDialog(
-          title: const Text('✏️ Editar cliente'),
+          title: const Text('Editar cliente'),
           content: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -222,13 +222,13 @@ class _FichaScreenState extends State<FichaScreen> {
                   children: [
                     const Text('Sexo: '),
                     ChoiceChip(
-                        label: const Text('♂️ M'),
+                        label: const Text('M'),
                         selected: sexo == 'M',
                         onSelected: (_) =>
                             setS(() => sexo = 'M')),
                     const SizedBox(width: 8),
                     ChoiceChip(
-                        label: const Text('♀️ F'),
+                        label: const Text('F'),
                         selected: sexo == 'F',
                         onSelected: (_) =>
                             setS(() => sexo = 'F')),
@@ -326,7 +326,7 @@ class _FichaScreenState extends State<FichaScreen> {
     );
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('✅ Cambios guardados (se sincronizarán)')));
+        const SnackBar(content: Text('Cambios guardados (se sincronizarán)')));
     _cargar();
     SyncEngine.instance.push();
   }
@@ -339,7 +339,7 @@ class _FichaScreenState extends State<FichaScreen> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('📝 Notas del cliente'),
+        title: const Text('Notas del cliente'),
         content: TextField(
           controller: ctrl,
           maxLines: 4,
@@ -368,7 +368,7 @@ class _FichaScreenState extends State<FichaScreen> {
     );
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('✅ Nota guardada (se sincronizará)')));
+        const SnackBar(content: Text('Nota guardada (se sincronizará)')));
     _cargar();
     SyncEngine.instance.push();
   }
@@ -446,7 +446,7 @@ class _FichaScreenState extends State<FichaScreen> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('🗑️ Eliminar foto'),
+        title: const Text('Eliminar foto'),
         content: const Text(
             '¿Eliminar la foto de este cliente? Esta acción se sincronizará.'),
         actions: [
@@ -474,7 +474,7 @@ class _FichaScreenState extends State<FichaScreen> {
     );
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('✅ Foto eliminada (se sincronizará)')),
+      const SnackBar(content: Text('Foto eliminada (se sincronizará)')),
     );
     SyncEngine.instance.push();
     setState(() {});
@@ -486,27 +486,27 @@ class _FichaScreenState extends State<FichaScreen> {
     final origen = await showDialog<String>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('📷 Foto del cliente'),
+        title: const Text('Foto del cliente'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             ListTile(
               leading:
-                  const Text('📸', style: TextStyle(fontSize: 24)),
+                  const Icon(Icons.photo_camera, size: 24),
               title: const Text('Tomar foto'),
               onTap: () =>
                   Navigator.pop(ctx, 'camera'),
             ),
             ListTile(
               leading:
-                  const Text('🖼️', style: TextStyle(fontSize: 24)),
+                  const Icon(Icons.photo_library, size: 24),
               title: const Text('Elegir de la galería'),
               onTap: () =>
                   Navigator.pop(ctx, 'gallery'),
             ),
             if (tieneFoto)
               ListTile(
-                leading: const Text('🗑️',
+                leading: const Text('',
                     style: TextStyle(fontSize: 24)),
                 title: const Text('Eliminar foto',
                     style: TextStyle(color: Colors.red)),
@@ -547,7 +547,7 @@ class _FichaScreenState extends State<FichaScreen> {
     if (!mounted) return;
     setState(() => _foto = editada);
     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text('📷 Foto actualizada (se sincronizará)')));
+        content: Text('Foto actualizada (se sincronizará)')));
     SyncEngine.instance.push();
   }
 
@@ -563,7 +563,7 @@ class _FichaScreenState extends State<FichaScreen> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('🔄 Renovación rápida'),
+        title: const Text('Renovación rápida'),
         content: Text('${c['nombre']}\n'
             '1 mes — ${fmtMonto(mensual)} CUP en efectivo\n'
             'Nuevo vencimiento: ${fmtFecha(nuevo)}'),
@@ -592,7 +592,7 @@ class _FichaScreenState extends State<FichaScreen> {
     );
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('✅ Renovado (se sincronizará)')));
+        const SnackBar(content: Text('Renovado (se sincronizará)')));
     _cargar();
     SyncEngine.instance.push();
   }
@@ -600,7 +600,7 @@ class _FichaScreenState extends State<FichaScreen> {
   Future<void> _aPapelera() async {    final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('🗑️ Enviar a papelera'),
+        title: const Text('Enviar a papelera'),
         content: const Text(
             'El cliente quedará inactivo y no aparecerá en las listas. '
             'Podrás recuperarlo desde la Papelera.'),
@@ -622,7 +622,7 @@ class _FichaScreenState extends State<FichaScreen> {
     );
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('🗑️ Enviado a la papelera')));
+        const SnackBar(content: Text('Enviado a la papelera')));
     Navigator.of(context).pop();
     SyncEngine.instance.push();
   }
@@ -634,7 +634,7 @@ class _FichaScreenState extends State<FichaScreen> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: Text(esCongelado ? '☀️ Descongelar' : '❄️ Congelar membresía'),
+        title: Text(esCongelado ? 'Descongelar' : 'Congelar membresía'),
         content: Text(esCongelado
             ? '¿Reactivar la membresía de ${_c?['nombre']}? Volverá a contar el vencimiento.'
             : '¿Congelar la membresía de ${_c?['nombre']}? No aparecerá en vencidos mientras esté congelada.'),
@@ -660,8 +660,8 @@ class _FichaScreenState extends State<FichaScreen> {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
         content: Text(esCongelado
-            ? '☀️ Membresía descongelada'
-            : '❄️ Membresía congelada')));
+            ? 'Membresía descongelada'
+            : 'Membresía congelada')));
     _cargar();
     SyncEngine.instance.push();
   }
@@ -674,7 +674,7 @@ class _FichaScreenState extends State<FichaScreen> {
     final accion = await showDialog<String>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('🛠️ Corregir pago'),
+        title: const Text('Corregir pago'),
         content: Text(
             '${fmtMonto(p['monto'])} CUP — ${fmtFecha(p['fecha'] as String?)}'),
         actions: [
@@ -697,7 +697,7 @@ class _FichaScreenState extends State<FichaScreen> {
       final ok = await showDialog<bool>(
         context: context,
         builder: (ctx) => AlertDialog(
-          title: const Text('⚠️ Anular pago'),
+          title: const Text('Anular pago'),
           content: const Text(
               '¿Seguro? El pago quedará anulado en el sistema. '
               'Esta acción se sincronizará.'),
@@ -721,7 +721,7 @@ class _FichaScreenState extends State<FichaScreen> {
       );
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('✅ Pago anulado (se sincronizará)')));
+          content: Text('Pago anulado (se sincronizará)')));
       _cargar();
       SyncEngine.instance.push();
       return;
@@ -737,7 +737,7 @@ class _FichaScreenState extends State<FichaScreen> {
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setS) => AlertDialog(
-          title: const Text('✏️ Editar pago'),
+          title: const Text('Editar pago'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -762,13 +762,13 @@ class _FichaScreenState extends State<FichaScreen> {
               children: [
                 const Text('Método: '),
                 ChoiceChip(
-                  label: const Text('💵 Efectivo'),
+                  label: const Text('Efectivo'),
                   selected: metodo == 'efectivo',
                   onSelected: (_) => setS(() => metodo = 'efectivo'),
                 ),
                 const SizedBox(width: 8),
                 ChoiceChip(
-                  label: const Text('📱 Transferencia'),
+                  label: const Text('Transferencia'),
                   selected: metodo == 'transferencia',
                   onSelected: (_) =>
                       setS(() => metodo = 'transferencia'),
@@ -832,7 +832,7 @@ class _FichaScreenState extends State<FichaScreen> {
     );
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text('✅ Corrección guardada (se sincronizará)')));
+        content: Text('Corrección guardada (se sincronizará)')));
     _cargar();
     SyncEngine.instance.push();
   }

@@ -115,7 +115,7 @@ class _LoginScreenState extends State<LoginScreen>
         // Dispositivo no vinculado: avisa pero permite entrar
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
           content: Text(
-              '⚠️ Entrando desde un dispositivo no vinculado'),
+              'Entrando desde un dispositivo no vinculado'),
           duration: Duration(seconds: 4),
         ));
       }
@@ -288,7 +288,7 @@ class _LoginScreenState extends State<LoginScreen>
                       textAlign: TextAlign.center,
                     ),
                     const SizedBox(height: 4),
-                    const Text(
+                    Text(
                       'v${AppConfig.appVersion}',
                       style: const TextStyle(
                           color: Colors.white24, fontSize: 10),
