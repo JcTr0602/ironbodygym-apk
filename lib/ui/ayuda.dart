@@ -173,7 +173,8 @@ class AyudaScreen extends StatelessWidget {
         initiallyExpanded: true,
         leading: const CircleAvatar(
           backgroundColor: Color(0xFFFFE3C2),
-          child: Text('', style: TextStyle(fontSize: 20)),
+          child:
+              Icon(Icons.new_releases, color: Color(0xFFE8821A)),
         ),
         title: const Text('Lo Nuevo',
             style: TextStyle(

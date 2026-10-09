@@ -128,6 +128,15 @@ class _SyncBannerState extends State<SyncBanner>
               icono = Icons.cloud_download_outlined;
               titulo = 'Hay cambios nuevos';
               subtitulo = 'Toca para descargar';
+            } else if (s.lastOk == null) {
+              // v1.1.1: nunca se ha sincronizado: no decir "Todo al día"
+              gradiente = const [
+                Color(0xFF9CA3AF),
+                Color(0xFF6B7280)
+              ];
+              icono = Icons.cloud_off_outlined;
+              titulo = 'Sin sincronizar';
+              subtitulo = 'Toca para sincronizar';
             } else {
               gradiente = const [
                 Color(0xFF22C55E),
