@@ -285,6 +285,8 @@ class SyncEngine {
     _running = true;
     try {
       await _doPush();
+      // v1.0.14: limpiar error viejo si el push tuvo éxito
+      await _db.setMeta('last_sync_error', '');
     } catch (_) {
       // Llamadas fire-and-forget: el error ya se mostró vía _emit.
     } finally {
