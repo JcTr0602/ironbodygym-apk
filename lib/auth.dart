@@ -81,6 +81,12 @@ class AuthService {
   /// si esto es true.
   bool get isAdmin {
     if (username == 'jctr0602') return true;
+    // v1.2.2: leer de appMetadata (seguro, solo el servidor lo escribe)
+    // Fallback a userMetadata por compatibilidad con usuarios viejos
+    final rolApp = session?.user.appMetadata?['rol'];
+    if (rolApp != null) {
+      return '${rolApp}'.toLowerCase() == 'admin';
+    }
     final rol = session?.user.userMetadata?['rol'];
     return '${rol ?? ''}'.toLowerCase() == 'admin';
   }
