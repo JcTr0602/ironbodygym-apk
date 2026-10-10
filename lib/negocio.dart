@@ -49,6 +49,19 @@ Future<List<Map<String, dynamic>>> buscarClientes(String q) async {
   return res;
 }
 
+/// Clientes al día: activos con pagado_hasta >= hoy (no vencidos).
+/// v1.2.1: para el filtro "Al día" del resumen.
+Future<List<Map<String, dynamic>>> clientesAlDia() async {
+  final hoy = _hoyIso();
+  final rows = await _activos();
+  final res = rows.where((c) {
+    final ph = c['pagado_hasta'] as String?;
+    return ph != null && ph.compareTo(hoy) >= 0;
+  }).toList();
+  res.sort((a, b) => '${a['nombre']}'.compareTo('${b['nombre']}'));
+  return res;
+}
+
 /// Vencen exactamente hoy.
 Future<List<Map<String, dynamic>>> vencenHoy() async {
   final hoy = _hoyIso();
@@ -597,9 +610,6 @@ bool esMenor(String? carnet) {
   return edad < 18;
 }
 
-/// Precio mensual para menores de 18 años.
-const precioMenorMensual = 1500.0;
-
 /// Clientes que cumplen años en los próximos [dias] (incluye hoy).
 /// Cada mapa trae '_dias_para' (días que faltan) y '_cumple' (edad que cumple).
 Future<List<Map<String, dynamic>>> cumpleanosProximos(
@@ -998,6 +1008,8 @@ Future<List<Map<String, dynamic>>> entregasRecientes(
     lista.add({
       'fecha': '${op['creada_ts'] ?? ''}',
       'trainer_id': payload['trainer_telegram_id'],
+      // v1.2.1: nombre del entrenador (puede faltar en ops antiguas).
+      'trainer_nombre': payload['trainer_nombre'],
     });
   }
   lista.sort((a, b) =>
@@ -1440,6 +1452,15 @@ Future<List<Map<String, dynamic>>> pendientePorEntrenador(
     if (excluirTid != null && tid == excluirTid) continue;
     suma(tid, '${d['registrado_por_nombre'] ?? 'Entrenador $tid'}',
         (d['total'] as num?)?.toDouble() ?? 0);
+  }
+  // Gemini: incluir ventas de suplementos en CUP pendientes.
+  for (final v in await ventasSuplementosCup()) {
+    if (!esPendiente(v['entregado'])) continue;
+    final tid = v['registrado_por'] as int?;
+    if (tid == null) continue;
+    if (excluirTid != null && tid == excluirTid) continue;
+    suma(tid, '${v['registrado_por_nombre'] ?? 'Entrenador $tid'}',
+        totalVentaCup(v));
   }
   final l = mapa.values.toList()
     ..sort(

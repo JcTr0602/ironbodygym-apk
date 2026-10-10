@@ -16,7 +16,8 @@ import 'ficha.dart';
 import 'widgets.dart';
 
 class ListasScreen extends StatefulWidget {
-  /// Pestaña inicial: 0=Hoy, 1=Por vencer, 2=Atrasados <30d, 3=Atrasados +30d.
+  /// Pestaña inicial: 0=Hoy, 1=Por vencer, 2=Atrasados <30d, 3=Atrasados +30d,
+  /// 4=Al día (v1.2.1).
   final int inicial;
   const ListasScreen({super.key, this.inicial = 0});
   @override
@@ -30,13 +31,14 @@ class _ListasScreenState extends State<ListasScreen>
   List<Map<String, dynamic>> _menos30 = [];
   List<Map<String, dynamic>> _mas30 = [];
   List<Map<String, dynamic>> _porVencer = [];
+  List<Map<String, dynamic>> _alDia = []; // v1.2.1
   String _orden = 'nombre'; // nombre | vencimiento | dias
 
   @override
   void initState() {
     super.initState();
     _tab = TabController(
-        length: 4, vsync: this, initialIndex: widget.inicial);
+        length: 5, vsync: this, initialIndex: widget.inicial);
     _cargar();
   }
 
@@ -45,12 +47,14 @@ class _ListasScreenState extends State<ListasScreen>
     final m30 = await atrasados(masDe30: false);
     final p30 = await atrasados(masDe30: true);
     final pv = await porVencer(dias: 3);
+    final ad = await clientesAlDia(); // v1.2.1
     if (mounted) {
       setState(() {
         _hoy = h;
         _menos30 = m30;
         _mas30 = p30;
         _porVencer = pv;
+        _alDia = ad;
       });
     }
   }
@@ -128,6 +132,7 @@ class _ListasScreenState extends State<ListasScreen>
             Tab(text: 'Por vencer (${_porVencer.length})'),
             Tab(text: 'Atrasados -30d (${_menos30.length})'),
             Tab(text: 'Atrasados +30d (${_mas30.length})'),
+            Tab(text: 'Al día (${_alDia.length})'), // v1.2.1
           ],
         ),
       ),
@@ -175,6 +180,9 @@ class _ListasScreenState extends State<ListasScreen>
                 _lista(_ordenar(_mas30),
                     Icons.celebration, 'Sin atrasados',
                     'Nada de más de un mes.'),
+                _lista(_ordenar(_alDia), // v1.2.1
+                    Icons.check_circle, 'Nadie al día',
+                    'Todos los activos están vencidos.'),
               ],
             ),
           ),

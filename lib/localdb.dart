@@ -24,7 +24,7 @@ class LocalDb {
     final dir = await getDatabasesPath();
     _db = await openDatabase(
       p.join(dir, 'ironbody.db'),
-      version: 4,
+      version: 6,
       onCreate: (db, _) async {
         await _crearTablas(db);
       },
@@ -51,6 +51,17 @@ class LocalDb {
           await db.execute(
               'CREATE TABLE IF NOT EXISTS ventas_suplementos (id INTEGER PRIMARY KEY, data TEXT NOT NULL, sync_seq INTEGER NOT NULL)');
         }
+        // v5 (v1.2.1): categorías de suplementos.
+        if (oldV < 5) {
+          await db.execute(
+              'CREATE TABLE IF NOT EXISTS categorias_suplemento (id INTEGER PRIMARY KEY, data TEXT NOT NULL, sync_seq INTEGER NOT NULL)');
+        }
+        // v6 (v1.2.1 fix auditoría Gemini): ligar fotos pendientes a
+        // suplementos (antes solo se soportaba cliente_id).
+        if (oldV < 6) {
+          await db.execute(
+              'ALTER TABLE fotos_pendientes ADD COLUMN suplemento_id INTEGER');
+        }
       },
     );
     return _db!;
@@ -63,7 +74,8 @@ class LocalDb {
       'pagos_diarios',
       'gastos',
       'suplementos',
-      'ventas_suplementos'
+      'ventas_suplementos',
+      'categorias_suplemento', // v1.2.1
     ]) {
       await db.execute(
           'CREATE TABLE $t (id INTEGER PRIMARY KEY, data TEXT NOT NULL, sync_seq INTEGER NOT NULL)');
@@ -75,7 +87,8 @@ class LocalDb {
             'user_id TEXT, telegram_id INTEGER)');
         await db.execute('CREATE TABLE fotos_pendientes ('
             'id INTEGER PRIMARY KEY AUTOINCREMENT, op_uuid TEXT NOT NULL, '
-            'cliente_id INTEGER, local_path TEXT NOT NULL, '
+            'cliente_id INTEGER, suplemento_id INTEGER, '
+            'local_path TEXT NOT NULL, '
             'estado TEXT NOT NULL DEFAULT \'pendiente\', user_id TEXT)');
         await db.execute(
             'CREATE TABLE meta (k TEXT PRIMARY KEY, v TEXT NOT NULL)');
@@ -363,6 +376,13 @@ class LocalDb {
   Future<void> setFotoCliente(int fotoId, int clienteId) async {
     final d = await db;
     await d.update('fotos_pendientes', {'cliente_id': clienteId},
+        where: 'id=?', whereArgs: [fotoId]);
+  }
+
+  /// v1.2.1 fix auditoría Gemini: liga una foto pendiente a un suplemento.
+  Future<void> setFotoSuplemento(int fotoId, int suplementoId) async {
+    final d = await db;
+    await d.update('fotos_pendientes', {'suplemento_id': suplementoId},
         where: 'id=?', whereArgs: [fotoId]);
   }
 

@@ -384,7 +384,8 @@ class _FilaClienteState extends State<_FilaCliente> {
         : dias < 0
             ? 'Vencido hace ${dias.abs()} días'
             : dias == 0
-                ? 'Vence hoy'
+                // v1.2.1: el badge ya dice "VENCE HOY", no repetir.
+                ? 'Vence ${fmtFecha(ph)}'
                 : '$dias días restantes';
     return InkWell(
       onTap: widget.onTap,

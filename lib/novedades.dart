@@ -15,6 +15,18 @@ class Novedad {
 }
 
 const novedades = [
+  Novedad('1.2.0', [
+    'Módulo de suplementos: inventario, stock y foto',
+    'Ventas de suplementos en CUP y USD con tasa configurable',
+    'Inscripción + venta de suplemento en un solo flujo',
+    'Promo: 1 mes gratis por compra de suplemento',
+    'Pendientes CUP/USD por entrenador con desglose',
+    'Historial de ventas y anulación',
+    'Dashboard según rol (dueño/entrenador)',
+    'Administración reorganizada (secciones A–G)',
+    '"Mi día" ahora es "Día del gym"',
+    'Fix: "Último acceso" muestra actividad real',
+  ]),
   Novedad('1.1.1', [
     'Inicio: contador de clientes que pagaron este mes (tocable) y de clientes al día',
     'Datos de transferencia: enviar por SMS o WhatsApp al móvil del cliente',

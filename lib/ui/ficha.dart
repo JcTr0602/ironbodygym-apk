@@ -540,7 +540,10 @@ class _FichaScreenState extends State<FichaScreen> {
         ? ImageSource.camera
         : ImageSource.gallery;
     final img = await ImagePicker().pickImage(
-        source: src, maxWidth: 1024, imageQuality: 80);
+        source: src,
+        maxWidth: 800,
+        maxHeight: 800,
+        imageQuality: 75); // Gemini: compresión obligatoria para Cuba
     if (img == null || !mounted) return;
     final dir = await getApplicationDocumentsDirectory();
     final destino = File('${dir.path}/foto_${widget.clienteId}_'

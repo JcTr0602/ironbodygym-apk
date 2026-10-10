@@ -226,6 +226,11 @@ class BadgeEstado extends StatelessWidget {
           estado: EstadoMembresia.vencido,
           texto: 'VENCIDO ${dias.abs()} DÍAS');
     }
+    // v1.2.1: "Vence hoy" sin redundancia (antes "VENCE EN 0 DÍAS").
+    if (dias == 0) {
+      return const BadgeEstado(
+          estado: EstadoMembresia.porVencer, texto: 'VENCE HOY');
+    }
     if (dias <= umbral) {
       return BadgeEstado(
           estado: EstadoMembresia.porVencer,

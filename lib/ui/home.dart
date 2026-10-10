@@ -317,7 +317,16 @@ class _HomeScreenState extends State<HomeScreen>
           _metricas = metricas;
           _cobradoAyer = ayer;
           _ultimos7 = ult7;
-          _entregas = entregas;
+          // Bug 14 (v1.2.1): los entrenadores solo ven SUS propias
+          // entregas confirmadas, no las de otros entrenadores.
+          // El dueño ve todas.
+          _entregas = _auth.isOwner
+              ? entregas
+              : entregas
+                  .where((e) =>
+                      '${e['trainer_id']}' ==
+                      '${_auth.telegramId}')
+                  .toList();
           _entregadoHoyMonto = entHoy;
           _resumenSem = resSem;
           _entrenadoresSinSync = sinSync;
@@ -938,8 +947,9 @@ class _HomeScreenState extends State<HomeScreen>
             Icons.schedule,
             () => _ir(const ListasScreen(inicial: 2)));
       case 'aldia':
+        // v1.2.1: abre la lista filtrada "Al día", no todos los clientes.
         return _celdaResumen('$_alDia', 'Al día',
-            Icons.check_circle, () => _ir(const BuscarScreen()));
+            Icons.check_circle, () => _ir(const ListasScreen(inicial: 4)));
       default:
         return const SizedBox();
     }
@@ -1206,10 +1216,10 @@ class _HomeScreenState extends State<HomeScreen>
                 : 'hace $dif días';
       } catch (_) {}
     }
-    final tid = e['trainer_id'];
-    final quien = tid == null || tid == 'todos'
-        ? ''
-        : ' (entrenador $tid)';
+    // v1.2.1: mostrar nombre del entrenador, no el telegram_id.
+    // (Las ops antiguas sin nombre no muestran el paréntesis.)
+    final nombre = '${e['trainer_nombre'] ?? ''}'.trim();
+    final quien = nombre.isNotEmpty ? ' ($nombre)' : '';
     return 'Entrega confirmada $cuando$quien'.trim();
   }
 

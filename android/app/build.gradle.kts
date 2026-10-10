@@ -33,6 +33,13 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
+    // Excluye LICENSE.txt duplicado de room-common (room-common vs room-common-jvm).
+    packaging {
+        resources {
+            excludes += "META-INF/androidx/room/room-common/LICENSE.txt"
+        }
+    }
+
     defaultConfig {
         // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
         applicationId = "com.ironbodygym.ironbody_gym"

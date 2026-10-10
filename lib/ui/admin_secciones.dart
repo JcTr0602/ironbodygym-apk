@@ -11,6 +11,7 @@ import '../negocio.dart';
 import '../sync.dart';
 import '../tipos_pago.dart';
 import 'auditoria.dart';
+import 'categorias_suplemento.dart';
 import 'componentes.dart';
 import 'congelados.dart';
 import 'cuentas_cobrar.dart';
@@ -595,6 +596,14 @@ class SeccionSuplementosScreen extends StatelessWidget {
               texto: 'Gestionar catálogo',
               icono: Icons.inventory_2,
               onPressed: () => onIr(const SuplementosScreen()),
+            ),
+            const SizedBox(height: AppEspacio.sm),
+            // v1.2.1: CRUD de categorías.
+            BotonSecundario(
+              texto: 'Categorías',
+              icono: Icons.category_outlined,
+              onPressed: () =>
+                  onIr(const CategoriasSuplementoScreen()),
             ),
             const SizedBox(height: AppEspacio.sm),
             BotonSecundario(

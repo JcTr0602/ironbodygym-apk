@@ -14,6 +14,8 @@ import '../auth.dart';
 import '../localdb.dart';
 import '../negocio.dart';
 import '../sync.dart';
+import 'componentes.dart';
+import 'diseno.dart';
 import 'widgets.dart';
 
 class PendienteScreen extends StatefulWidget {
@@ -28,6 +30,8 @@ class _PendienteScreenState extends State<PendienteScreen> {
   List<Map<String, dynamic>> _diarios = [];
   // Vista dueño: desglose por entrenador {id, nombre, total, n}.
   List<Map<String, dynamic>> _porEntrenador = [];
+  // Gemini: totales USD separados (no mezclar con CUP).
+  double _totalUsd = 0;
   bool _cargando = true;
   bool _confirmando = false;
   late final bool _esDueno;
@@ -45,19 +49,26 @@ class _PendienteScreenState extends State<PendienteScreen> {
       // El dueño no se cuenta a sí mismo en lo pendiente a recoger.
       final porEnt = await pendientePorEntrenador(
           excluirTid: auth.telegramId);
+      // Gemini: USD separado del CUP.
+      final usd = await pendienteRecogerUsd(
+          excluirTelegramId: auth.telegramId);
       if (mounted) {
         setState(() {
           _porEntrenador = porEnt;
+          _totalUsd = usd;
           _cargando = false;
         });
       }
     } else {
       final tid = auth.telegramId;
       final (m, d) = await detallePendiente(tid);
+      // Gemini: USD separado del CUP.
+      final usd = await pendienteEntregaUsd(tid);
       if (mounted) {
         setState(() {
           _mens = m;
           _diarios = d;
+          _totalUsd = usd;
           _cargando = false;
         });
       }
@@ -105,15 +116,26 @@ class _PendienteScreenState extends State<PendienteScreen> {
       ),
     );
     if (ok != true || !mounted) return;
+    // Gemini-2: bandera anti doble-tap (ya existía _confirmando, se agrega
+    // try-finally para no quedar bloqueado si algo lanza excepción).
+    if (_confirmando) return;
     setState(() => _confirmando = true);
-    await LocalDb.instance.queueOp(
-      opUuid: const Uuid().v4(),
-      tipo: 'confirmar_entrega',
-      payload: {'trainer_telegram_id': trainerId},
-    );
-    SyncEngine.instance.push();
+    try {
+      await LocalDb.instance.queueOp(
+        opUuid: const Uuid().v4(),
+        tipo: 'confirmar_entrega',
+        // v1.2.1: incluir nombre del entrenador (antes solo el telegram_id,
+        // que se mostraba como "entrenador 1403501391").
+        payload: {
+          'trainer_telegram_id': trainerId,
+          'trainer_nombre': nombre
+        },
+      );
+      SyncEngine.instance.push();
+    } finally {
+      if (mounted) setState(() => _confirmando = false);
+    }
     if (!mounted) return;
-    setState(() => _confirmando = false);
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
         content: Text('Recibido de $nombre confirmado '
             '(se aplicará al sincronizar)')));
@@ -194,34 +216,61 @@ class _PendienteScreenState extends State<PendienteScreen> {
     );
   }
 
+  /// v1.2.1: rediseñada al estilo oscuro/naranja de la app
+  /// (antes fondo beige que no combinaba).
+  /// Gemini: muestra CUP y USD por separado (no mezclar monedas).
   Widget _tarjetaTotal() {
     final total = _esDueno ? _totalDueno : _totalEntrenador;
+    final hayPendiente = total > 0 || _totalUsd > 0;
     final subtitulo = _esDueno
-        ? (total > 0
+        ? (hayPendiente
             ? 'por recoger de los entrenadores'
             : 'al día, nada que recoger')
-        : (total > 0
+        : (hayPendiente
             ? 'por entregar al dueño'
             : 'al día, nada pendiente');
-    return Container(
-      width: double.infinity,
-      margin: const EdgeInsets.all(16),
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color:
-            total > 0 ? Colors.orange.shade50 : Colors.green.shade50,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-            color: total > 0 ? Colors.orange : Colors.green),
-      ),
-      child: Column(
-        children: [
-          Text('${fmtMonto(total)} CUP',
-              style: const TextStyle(
-                  fontSize: 32, fontWeight: FontWeight.bold)),
-          const SizedBox(height: 4),
-          Text(subtitulo, style: const TextStyle(color: Colors.grey)),
-        ],
+    final colorAcento =
+        hayPendiente ? AppColores.naranja : AppColores.exito;
+    // Gemini: montos por moneda, sin mezclar.
+    final montos = <String>[];
+    if (total > 0) montos.add('${fmtMonto(total)} CUP');
+    if (_totalUsd > 0) montos.add('${_totalUsd.toStringAsFixed(2)} USD');
+    final textoMonto =
+        montos.isEmpty ? '0 CUP' : montos.join(' · ');
+    return Padding(
+      padding: const EdgeInsets.all(AppEspacio.md),
+      child: Tarjeta(
+        padding: const EdgeInsets.all(AppEspacio.lg),
+        child: Column(
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(
+                  hayPendiente
+                      ? Icons.account_balance_wallet_outlined
+                      : Icons.check_circle_outline,
+                  color: colorAcento,
+                  size: 28,
+                ),
+                const SizedBox(width: AppEspacio.sm),
+                Flexible(
+                  child: Text(textoMonto,
+                      textAlign: TextAlign.center,
+                      style: AppTexto.display.copyWith(
+                        color: colorAcento,
+                        fontWeight: FontWeight.bold,
+                      )),
+                ),
+              ],
+            ),
+            const SizedBox(height: AppEspacio.xs),
+            Text(subtitulo,
+                style: AppTexto.secundario.copyWith(
+                    color:
+                        AppColores.textoSecundario(context))),
+          ],
+        ),
       ),
     );
   }

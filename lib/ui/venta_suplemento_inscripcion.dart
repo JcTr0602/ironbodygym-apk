@@ -8,6 +8,7 @@
 library;
 
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:uuid/uuid.dart';
@@ -168,6 +169,22 @@ class _VentaSuplementoInscripcionScreenState
         },
         0,
       );
+      // Gemini: reducción optimista de stock local (evita sobreventa offline).
+      // La tabla espejo usa columna data (JSON); no hay columna stock directa.
+      final db = await LocalDb.instance.db;
+      final sid2 = widget.suplemento['id'] as int?;
+      if (sid2 != null) {
+        final rows = await db.query('suplementos',
+            columns: ['data'], where: 'id = ?', whereArgs: [sid2]);
+        if (rows.isNotEmpty) {
+          final data =
+              jsonDecode(rows.first['data'] as String) as Map<String, dynamic>;
+          final stockActual = (data['stock'] as num?)?.toInt() ?? 0;
+          data['stock'] = (stockActual - widget.cantidad).clamp(0, 999999);
+          await db.update('suplementos', {'data': jsonEncode(data)},
+              where: 'id = ?', whereArgs: [sid2]);
+        }
+      }
       unawaited(SyncEngine.instance.push());
       if (mounted) Navigator.pop(context, true);
     } finally {

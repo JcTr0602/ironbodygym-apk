@@ -8,6 +8,7 @@
 library;
 
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:uuid/uuid.dart';
@@ -34,6 +35,8 @@ class _VentaSuplementoScreenState
   final _precio = TextEditingController();
   final _tasa = TextEditingController();
   final _compradorNombre = TextEditingController();
+  // v1.2.1: nota opcional de la venta (ej: "apartado").
+  final _nota = TextEditingController();
   String _moneda = 'CUP';
   String _tipoComprador = 'cliente'; // cliente | externo_nombre | externo_generico | inscribir_nuevo
   int? _clienteId;
@@ -78,6 +81,7 @@ class _VentaSuplementoScreenState
     _precio.dispose();
     _tasa.dispose();
     _compradorNombre.dispose();
+    _nota.dispose();
     super.dispose();
   }
 
@@ -209,13 +213,36 @@ class _VentaSuplementoScreenState
           'precio': precio,
           'moneda': _moneda,
           if (esUsd) 'usd_tasa': tasa,
-          'comprador_tipo': _tipoComprador,
+          // ChatGPT CRÍTICO 2: el servidor solo acepta 'cliente'|'externo'.
+          // 'externo_nombre' y 'externo_generico' se mapean a 'externo'.
+          'comprador_tipo':
+              _tipoComprador == 'cliente' ? 'cliente' : 'externo',
           if (_tipoComprador == 'cliente')
             'cliente_id': _clienteId,
           'comprador_nombre': nombreComprador,
           'fecha': DateTime.now().toIso8601String().substring(0, 10),
+          // v1.2.1: nota opcional.
+          if (_nota.text.trim().isNotEmpty)
+            'nota': _nota.text.trim(),
         },
       );
+      // Gemini: reducción optimista de stock local (evita sobreventa offline).
+      // La tabla espejo usa columna data (JSON); no hay columna stock directa.
+      // Si el servidor rechaza la op, el pull sincronizará el valor canónico.
+      final db = await LocalDb.instance.db;
+      final sid = widget.suplemento['id'] as int?;
+      if (sid != null) {
+        final rows = await db.query('suplementos',
+            columns: ['data'], where: 'id = ?', whereArgs: [sid]);
+        if (rows.isNotEmpty) {
+          final data =
+              jsonDecode(rows.first['data'] as String) as Map<String, dynamic>;
+          final stockActual = (data['stock'] as num?)?.toInt() ?? 0;
+          data['stock'] = (stockActual - _cantidad).clamp(0, 999999);
+          await db.update('suplementos', {'data': jsonEncode(data)},
+              where: 'id = ?', whereArgs: [sid]);
+        }
+      }
       unawaited(SyncEngine.instance.push());
       if (mounted) Navigator.pop(context, true);
     } finally {
@@ -336,6 +363,14 @@ class _VentaSuplementoScreenState
           const SizedBox(height: AppEspacio.sm),
           const EncabezadoSeccion(titulo: 'Comprador'),
           _selectorComprador(),
+          // v1.2.1: nota opcional de la venta.
+          const SizedBox(height: AppEspacio.sm),
+          const EncabezadoSeccion(titulo: 'Nota (opcional)'),
+          CampoTexto(
+            controller: _nota,
+            hint: 'Ej: apartado, fiado…',
+            icono: Icons.sticky_note_2_outlined,
+          ),
           const SizedBox(height: AppEspacio.lg),
           BotonPrimario(
             texto: _guardando ? 'Registrando…' : 'Confirmar venta',

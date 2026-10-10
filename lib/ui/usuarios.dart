@@ -262,8 +262,9 @@ Hola $username, estas son tus credenciales para la app del gym:
     final picker = ImagePicker();
     final img = await picker.pickImage(
       source: ImageSource.gallery,
-      maxWidth: 512,
-      imageQuality: 80,
+      maxWidth: 800,
+      maxHeight: 800,
+      imageQuality: 75, // Gemini: compresión obligatoria para Cuba
     );
     if (img == null || !mounted) return;
     final path = 'usuarios/${username.toLowerCase()}.jpg';

@@ -132,7 +132,10 @@ class _AjustesScreenState extends State<AjustesScreen> {
     );
     if (origen == null || !mounted) return;
     final img = await ImagePicker().pickImage(
-        source: origen, maxWidth: 512, imageQuality: 80);
+        source: origen,
+        maxWidth: 800,
+        maxHeight: 800,
+        imageQuality: 75); // Gemini: compresión obligatoria para Cuba
     if (img == null || !mounted) return;
     final destino = await _perfil.avatarFile();
     await File(img.path).copy(destino.path);
@@ -560,8 +563,9 @@ class _AjustesScreenState extends State<AjustesScreen> {
     }
     try {
       // Vaciar el WAL al archivo principal para una copia consistente.
+      // v1.2.1: wal_checkpoint retorna una fila, usar rawQuery (no execute).
       final db = await LocalDb.instance.db;
-      await db.execute('PRAGMA wal_checkpoint(TRUNCATE)');
+      await db.rawQuery('PRAGMA wal_checkpoint(TRUNCATE)');
       final ruta = await LocalDb.instance.dbPath();
       final tmp = await getTemporaryDirectory();
       final fecha =
@@ -580,13 +584,26 @@ class _AjustesScreenState extends State<AjustesScreen> {
   /// Importación segura por etapas: el archivo se valida ANTES de tocar
   /// la base actual, y se guarda una copia de recuperación por si falla.
   Future<void> _importarRespaldo() async {
-    final res = await FilePicker.platform.pickFiles(
-      type: FileType.custom,
-      allowedExtensions: ['db'],
-      dialogTitle: 'Elige el archivo de respaldo (.db)',
-    );
-    final ruta = res?.files.single.path;
+    // v1.2.1: pickFiles dentro del try para mostrar error si falla
+    // (antes la excepción quedaba sin capturar y parecía "no hacer nada").
+    // Gemini-2: FileType.any en vez de custom (en Android 13/14 los .db
+    // aparecen deshabilitados con FileType.custom).
+    String? ruta;
+    try {
+      final res = await FilePicker.platform.pickFiles(
+        type: FileType.any,
+        dialogTitle: 'Elige el archivo de respaldo (.db)',
+      );
+      ruta = res?.files.single.path;
+    } catch (e) {
+      if (mounted) _msg('No se pudo abrir el selector: $e');
+      return;
+    }
     if (ruta == null || !mounted) return;
+    if (!ruta.toLowerCase().endsWith('.db')) {
+      _msg('El archivo debe tener extensión .db');
+      return;
+    }
     final ok = await DialogoApp.confirmar(
       context,
       titulo: 'Importar respaldo',
@@ -755,27 +772,38 @@ class _AjustesScreenState extends State<AjustesScreen> {
   // ---------- Acerca de ----------
 
   /// Buscar actualizaciones en GitHub (item 20).
+  /// v1.2.1: la verificación automática vía GitHub no funciona desde Cuba
+  /// (API bloqueada); se muestra la versión actual y se indica que las
+  /// actualizaciones llegan por enlace directo.
   Future<void> _buscarActualizaciones() async {
     if (_buscandoUpdate) return;
     setState(() => _buscandoUpdate = true);
     try {
-      final resp = await http
-          .get(
-            Uri.parse(
-                'https://api.github.com/repos/JcTr0602/ironbodygym-apk/releases/latest'),
-            // GitHub exige User-Agent; sin él responde 403.
-            headers: {'User-Agent': 'IronBodyGym-App'},
-          )
-          .timeout(const Duration(seconds: 15));
+      String? remota;
+      try {
+        final resp = await http
+            .get(
+              Uri.parse(
+                  'https://api.github.com/repos/JcTr0602/ironbodygym-apk/releases/latest'),
+              // GitHub exige User-Agent; sin él responde 403.
+              headers: {'User-Agent': 'IronBodyGym-App'},
+            )
+            .timeout(const Duration(seconds: 15));
+        if (resp.statusCode == 200) {
+          final tag =
+              (jsonDecode(resp.body) as Map)['tag_name'] as String? ??
+                  '';
+          remota = tag.replaceAll(RegExp(r'^v'), '').trim();
+        }
+      } catch (_) {
+        // GitHub inaccesible (Cuba): se informa sin error alarmante.
+        remota = null;
+      }
       if (!mounted) return;
-      if (resp.statusCode != 200) throw 'HTTP ${resp.statusCode}';
-      final tag =
-          (jsonDecode(resp.body) as Map)['tag_name'] as String? ?? '';
-      final remota = tag.replaceAll(RegExp(r'^v'), '').trim();
       const actual = AppConfig.appVersion;
-      // Comparación semántica: solo avisar si la remota es SUPERIOR.
-      final hayNueva =
-          remota.isNotEmpty && esVersionMayor(remota, actual);
+      final hayNueva = remota != null &&
+          remota.isNotEmpty &&
+          esVersionMayor(remota, actual);
       await showDialog(
         context: context,
         builder: (ctx) => DialogoApp(
@@ -783,7 +811,9 @@ class _AjustesScreenState extends State<AjustesScreen> {
           iconoTitulo: Icons.system_update,
           contenido: Text(hayNueva
               ? 'Hay una nueva versión disponible: $remota\nTu versión: $actual'
-              : 'Tienes la última versión ($actual)'),
+              : remota == null
+                  ? 'Tu versión: $actual\n\nLa comprobación automática no está disponible con tu conexión. Las nuevas versiones te llegan por enlace directo.'
+                  : 'Tienes la última versión ($actual)'),
           acciones: [
             TextButton(
                 onPressed: () => Navigator.pop(ctx),
@@ -791,8 +821,6 @@ class _AjustesScreenState extends State<AjustesScreen> {
           ],
         ),
       );
-    } catch (_) {
-      _msg('No se pudo comprobar. Revisa tu conexión.');
     } finally {
       if (mounted) setState(() => _buscandoUpdate = false);
     }

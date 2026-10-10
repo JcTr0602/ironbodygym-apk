@@ -49,6 +49,10 @@ class _AdminScreenState extends State<AdminScreen> {
   static const _clavesMonto = [
     ('transferencia', 'Mensualidad por transferencia'),
     ('pago_diario', 'Pago diario'),
+    // v1.2.1: precio de menores configurable (antes hardcodeado 1500).
+    ('mensualidad_menores', 'Mensualidad menores'),
+    // v1.2.1: tasa USD del día para mostrar precios CUP en suplementos.
+    ('tasa_usd', 'Tasa USD (CUP por 1 USD)'),
   ];
 
   @override

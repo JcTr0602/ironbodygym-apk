@@ -51,7 +51,10 @@ class _InscribirScreenState extends State<InscribirScreen> {
   Future<void> _tomarFoto(ImageSource origen) async {
     final img =
         await ImagePicker().pickImage(
-          source: origen, maxWidth: 1024, imageQuality: 80);
+          source: origen,
+          maxWidth: 800,
+          maxHeight: 800,
+          imageQuality: 75); // Gemini: compresión obligatoria para Cuba
     if (img == null) return;
     // copia a almacenamiento propio (el temporal del picker puede borrarse)
     final dir = await getApplicationDocumentsDirectory();

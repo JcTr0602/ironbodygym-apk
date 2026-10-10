@@ -1,6 +1,7 @@
-// Historial de ventas de suplementos (solo dueño).
+// Historial de ventas de suplementos.
 //
-// Muestra quién vendió qué, cuándo, a cuánto y a quién.
+// - Dueño: ve todas las ventas (quién vendió qué, cuándo, a cuánto).
+// - Entrenador (v1.2.1, `soloMias: true`): ve solo SU propio historial.
 // Las ventas con precio diferente al oficial se destacan en ámbar.
 // Totales separados por moneda (CUP y USD no se mezclan).
 library;
@@ -10,6 +11,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:uuid/uuid.dart';
 
+import '../auth.dart';
 import '../localdb.dart';
 import '../sync.dart';
 import 'componentes.dart';
@@ -17,7 +19,9 @@ import 'diseno.dart';
 import 'widgets.dart';
 
 class HistorialVentasScreen extends StatefulWidget {
-  const HistorialVentasScreen({super.key});
+  /// v1.2.1: si es true, filtra solo las ventas del entrenador actual.
+  final bool soloMias;
+  const HistorialVentasScreen({super.key, this.soloMias = false});
 
   @override
   State<HistorialVentasScreen> createState() =>
@@ -37,8 +41,18 @@ class _HistorialVentasScreenState
   }
 
   Future<void> _cargar() async {
-    final ventas =
+    final todas =
         await LocalDb.instance.allMirror('ventas_suplementos');
+    // v1.2.1: el entrenador solo ve su propio historial.
+    // Fix auditoría Gemini: fallar cerrado — si tid es null, lista vacía.
+    final tid = AuthService().telegramId;
+    final ventas = widget.soloMias
+        ? (tid != null
+            ? todas
+                .where((v) => (v['registrado_por'] as num?)?.toInt() == tid)
+                .toList()
+            : <Map<String, dynamic>>[])
+        : todas;
     final prods =
         await LocalDb.instance.allMirror('suplementos');
     final mapa = <int, Map<String, dynamic>>{};
@@ -83,7 +97,9 @@ class _HistorialVentasScreenState
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Ventas de suplementos')),
+      appBar: AppBar(
+          title: Text(
+              widget.soloMias ? 'Mis ventas' : 'Ventas de suplementos')),
       body: Column(
         children: [
           const SyncBanner(compact: true),
@@ -181,6 +197,8 @@ class _HistorialVentasScreenState
     final conPromo = (v['promo_mes'] as int?) == 1;
     final viaInscripcion =
         (v['via_inscripcion'] as num?)?.toInt() == 1;
+    // v1.2.1: nota opcional de la venta (ej: "apartado").
+    final nota = '${v['nota'] ?? ''}'.trim();
 
     final lineaTotal = esUsd
         ? '$cant x ${precio.toStringAsFixed(2)} USD'
@@ -219,12 +237,14 @@ class _HistorialVentasScreenState
                       texto: 'Precio diferente',
                       color: AppColores.alerta,
                       icono: Icons.warning_amber),
-                IconButton(
-                  icon: const Icon(Icons.undo,
-                      color: AppColores.error, size: 20),
-                  tooltip: 'Anular venta',
-                  onPressed: () => _anular(v),
-                ),
+                // v1.2.1: anular es acción del dueño.
+                if (AuthService().isOwner)
+                  IconButton(
+                    icon: const Icon(Icons.undo,
+                        color: AppColores.error, size: 20),
+                    tooltip: 'Anular venta',
+                    onPressed: () => _anular(v),
+                  ),
               ],
             ),
             const SizedBox(height: 4),
@@ -232,6 +252,24 @@ class _HistorialVentasScreenState
               lineaTotal,
               style: AppTexto.cuerpo,
             ),
+            if (nota.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(top: 2),
+                child: Row(
+                  children: [
+                    const Icon(Icons.sticky_note_2_outlined,
+                        size: 13, color: Colors.grey),
+                    const SizedBox(width: 4),
+                    Expanded(
+                      child: Text(
+                        nota,
+                        style: AppTexto.secundario.copyWith(
+                            fontStyle: FontStyle.italic),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             const SizedBox(height: 4),
             Text(
               '$fecha · $vendedor → $comprador'

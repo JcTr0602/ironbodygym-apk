@@ -217,6 +217,11 @@ class _ColaScreenState extends State<ColaScreen> {
         return 'Anulación de pago';
       case 'inscripcion_venta_suplemento':
         return 'Inscripción + venta';
+      // v1.2.1: categorías de suplementos.
+      case 'crear_categoria':
+        return 'Nueva categoría';
+      case 'editar_categoria':
+        return 'Edición de categoría';
       default:
         return t;
     }

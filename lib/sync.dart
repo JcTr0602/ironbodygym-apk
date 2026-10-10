@@ -541,6 +541,10 @@ class SyncEngine {
         // llega por el pull) para no duplicar en el historial.
         if ('${op['tipo']}' == 'inscripcion_venta_suplemento') {
           await _db.limpiarOptimista('ventas_suplementos', uuid);
+        } else if ('${op['tipo']}' == 'crear_categoria') {
+          // v1.2.1: la categoría real llega por el pull; sin esto la
+          // fila temporal (id negativo) queda duplicada.
+          await _db.limpiarOptimista('categorias_suplemento', uuid);
         }
         aplicadas++;
       }
@@ -634,6 +638,31 @@ class SyncEngine {
     }
   }
 
+  /// v1.2.1 fix auditoría Gemini: resuelve el suplemento_id creado por
+  /// una op `crear_suplemento` leyendo el resultado que guarda el puente.
+  Future<int?> _suplementoDeOp(String uuid) async {
+    try {
+      final r = await _getAuth(
+          Uri.parse('$_base/rest/v1/sync_ops?op_uuid=eq.$uuid'
+              '&select=resultado'),
+          timeout: const Duration(seconds: 20));
+      if (r.statusCode != 200) return null;
+      final rows = jsonDecode(r.body) as List;
+      if (rows.isEmpty) return null;
+      final res = rows.first['resultado'];
+      if (res is Map) {
+        // El puente guarda el envelope {"ok":..., "resultado": {...}}.
+        final inner = res['resultado'];
+        final src = inner is Map ? inner : res;
+        final sid = src['suplemento_id'];
+        return sid is int ? sid : int.tryParse('$sid');
+      }
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }
+
   // -- bajada ------------------------------------------------------------
   /// Devuelve la cantidad de filas nuevas bajadas.
   ///
@@ -685,7 +714,8 @@ class SyncEngine {
       'pagos_diarios',
       'gastos',
       'suplementos',
-      'ventas_suplementos'
+      'ventas_suplementos',
+      'categorias_suplemento', // v1.2.1
     ];
     const supTablas = {
       'clientes': 'sync_clientes',
@@ -694,6 +724,8 @@ class SyncEngine {
       'gastos': 'sync_gastos',
       'suplementos': 'sync_suplementos',
       'ventas_suplementos': 'sync_ventas_suplementos',
+      // v1.2.1: si el servidor no tiene la tabla, el pull la omite.
+      'categorias_suplemento': 'sync_categorias_suplemento',
     };
     var ti = 0;
     for (final tabla in tablas) {
@@ -705,43 +737,56 @@ class SyncEngine {
                 'Descargando ${_nombreAmigable(tabla)}… $ti de ${tablas.length}',
             progreso: ti / (tablas.length + 1));
       }
-      var pageWm = since;
-      while (true) {
-        // gastos tiene esquema plano en Supabase (sin columna 'data')
-        final select = tabla == 'gastos'
-            ? 'id,fecha,concepto,monto,registrado_por,sync_seq'
-            : 'id,data,sync_seq';
-        final r = await _getAuth(Uri.parse(
-            '$_base/rest/v1/$supTabla?select=$select'
-            '&sync_seq=gt.$pageWm&order=sync_seq.asc&limit=500'));
-        if (r.statusCode != 200) {
-          throw Exception('bajada $tabla: HTTP ${r.statusCode}');
-        }
-        final rows = jsonDecode(r.body) as List;
-        if (rows.isEmpty) break;
-        for (final row in rows) {
-          final m = Map<String, dynamic>.from(row as Map);
-          final seq = (m['sync_seq'] as int?) ?? 0;
-          final id = (m['id'] as int?) ?? 0;
-          // gastos usa columnas planas en Supabase (sin 'data' JSON)
-          final Map<String, dynamic> data;
-          if (tabla == 'gastos') {
-            data = {
-              'id': id,
-              'fecha': m['fecha'],
-              'concepto': m['concepto'],
-              'monto': m['monto'],
-              'registrado_por': m['registrado_por'],
-            };
-          } else {
-            data = Map<String, dynamic>.from(m['data'] as Map);
+      try {
+        var pageWm = since;
+        while (true) {
+          // gastos tiene esquema plano en Supabase (sin columna 'data')
+          final select = tabla == 'gastos'
+              ? 'id,fecha,concepto,monto,registrado_por,sync_seq'
+              : 'id,data,sync_seq';
+          final r = await _getAuth(Uri.parse(
+              '$_base/rest/v1/$supTabla?select=$select'
+              '&sync_seq=gt.$pageWm&order=sync_seq.asc&limit=500'));
+          if (r.statusCode == 404 || r.statusCode == 400) {
+            // v1.2.1: la tabla no existe en Supabase (p. ej.
+            // sync_categorias_suplemento aún no creada). Se omite
+            // silenciosamente sin abortar el resto del pull.
+            break;
           }
-          await _db.upsertMirror(tabla, id, data, seq);
-          if (seq > maxSeq) maxSeq = seq;
-          bajados++;
+          if (r.statusCode != 200) {
+            throw Exception('bajada $tabla: HTTP ${r.statusCode}');
+          }
+          final rows = jsonDecode(r.body) as List;
+          if (rows.isEmpty) break;
+          for (final row in rows) {
+            final m = Map<String, dynamic>.from(row as Map);
+            final seq = (m['sync_seq'] as int?) ?? 0;
+            final id = (m['id'] as int?) ?? 0;
+            // gastos usa columnas planas en Supabase (sin 'data' JSON)
+            final Map<String, dynamic> data;
+            if (tabla == 'gastos') {
+              data = {
+                'id': id,
+                'fecha': m['fecha'],
+                'concepto': m['concepto'],
+                'monto': m['monto'],
+                'registrado_por': m['registrado_por'],
+              };
+            } else {
+              data = Map<String, dynamic>.from(m['data'] as Map);
+            }
+            await _db.upsertMirror(tabla, id, data, seq);
+            if (seq > maxSeq) maxSeq = seq;
+            bajados++;
+          }
+          if (rows.length < 500) break;
+          pageWm = maxSeq;
         }
-        if (rows.length < 500) break;
-        pageWm = maxSeq;
+      } catch (e) {
+        // 404/400 ya se manejan con break arriba (tabla no existe).
+        // Cualquier otro error (red, parseo, BD) debe abortar el pull
+        // para no dejar el watermark en estado inconsistente.
+        rethrow;
       }
     }
     // borrados (tombstones)
@@ -768,6 +813,9 @@ class SyncEngine {
           'pagos': 'pagos',
           'suplementos': 'suplementos',
           'ventas_suplementos': 'ventas_suplementos',
+          // v1.2.1: categorías de suplementos
+          'categorias_suplemento': 'categorias_suplemento',
+          'categoria_suplemento': 'categorias_suplemento',
         }[m['entidad']] ??
             'pagos_diarios';
         await _db.deleteMirror(tabla, (m['entidad_id'] as int?) ?? -1);
@@ -974,6 +1022,40 @@ class SyncEngine {
     return false;
   }
 
+  /// v1.2.1 fix auditoría Gemini: sube una foto pendiente de suplemento
+  /// y encola la op `foto_suplemento` para que el puente la vincule.
+  Future<void> _uploadFotoSuplemento(Map<String, dynamic> f, int fid,
+      int suplementoId, int i, int total) async {
+    if (f['suplemento_id'] == null) {
+      await _db.setFotoSuplemento(fid, suplementoId);
+    }
+    final file = File(f['local_path'] as String);
+    if (!await file.exists()) {
+      await _db.markFotoLista(fid);
+      return;
+    }
+    final bytes = await file.readAsBytes();
+    final path =
+        await subirFotoSuplemento(f['op_uuid'] as String, bytes);
+    _emit(SyncPhase.photos,
+        detalle: 'Subiendo fotos… $i de $total',
+        progreso: (i - 1) / total);
+    if (path == null) return; // sin conexión: reintenta en el próximo ciclo
+    _emit(SyncPhase.photos,
+        detalle: 'Subiendo fotos… $i de $total',
+        progreso: i / total);
+    final d = await _db.db;
+    await d.insert('ops_queue', {
+      'op_uuid': const Uuid().v4(),
+      'tipo': 'foto_suplemento',
+      'payload': jsonEncode(
+          {'suplemento_id': suplementoId, 'storage_path': path}),
+      'estado': 'pendiente',
+      'creada_ts': DateTime.now().toIso8601String(),
+    });
+    await _db.markFotoLista(fid);
+  }
+
   Future<void> _uploadFotos() async {
     final fotos = await _db.fotosPendientes();
     var i = 0;
@@ -981,10 +1063,19 @@ class SyncEngine {
       i++;
       final fid = f['id'] as int;
       var clienteId = f['cliente_id'] as int?;
+      // v1.2.1 fix auditoría Gemini: fotos de suplementos.
+      var suplementoId = f['suplemento_id'] as int?;
       clienteId ??= await _clienteDeOp(f['op_uuid'] as String);
-      if (clienteId == null) continue; // la inscripción aún no se aplica
+      suplementoId ??= await _suplementoDeOp(f['op_uuid'] as String);
+      if (clienteId == null && suplementoId == null) {
+        continue; // la creación aún no se aplica en el servidor
+      }
+      if (suplementoId != null) {
+        await _uploadFotoSuplemento(f, fid, suplementoId, i, fotos.length);
+        continue;
+      }
       if (f['cliente_id'] == null) {
-        await _db.setFotoCliente(fid, clienteId);
+        await _db.setFotoCliente(fid, clienteId!);
       }
       final file = File(f['local_path'] as String);
       if (!await file.exists()) {
