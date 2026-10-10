@@ -604,6 +604,24 @@ class _HomeScreenState extends State<HomeScreen>
                     ],
                   ),
                 ),
+                // v1.2.2: Botón Suplementos ancho completo
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(
+                      AppEspacio.lg, AppEspacio.sm, AppEspacio.lg, 0),
+                  child: Tarjeta(
+                    onTap: () => _ir(const SuplementosScreen()),
+                    child: const Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.medication,
+                            color: AppColores.naranja, size: 28),
+                        SizedBox(width: AppEspacio.sm),
+                        Text('Suplementos',
+                            style: AppTexto.secundario),
+                      ],
+                    ),
+                  ),
+                ),
                 // RESUMEN
                 EncabezadoSeccion(
                   titulo: 'RESUMEN',

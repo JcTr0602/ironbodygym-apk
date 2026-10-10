@@ -504,9 +504,8 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
                         texto: 'Inactivo',
                         color:
                             AppColores.textoSecundario(context)),
-                  // v1.2.1: acciones rápidas (venta rápida y compartir).
-                  // Gemini-2: Wrap en vez de Row para evitar overflow en
-                  // pantallas pequeñas o fuentes grandes.
+                  // v1.2.2: acciones movidas aquí desde abajo (mejor ubicación).
+                  // Rápida y Compartir como botones compactos con icono+etiqueta.
                   Wrap(
                     spacing: 4,
                     runSpacing: 2,
@@ -515,14 +514,14 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
                         onPressed: stock > 0
                             ? () => _ventaRapida(s)
                             : null,
-                        icon: const Icon(Icons.flash_on,
-                            size: 15),
+                        icon: const Icon(Icons.bolt,
+                            size: 16),
                         label: const Text('Rápida',
                             style: TextStyle(fontSize: 12)),
                         style: TextButton.styleFrom(
                           padding: const EdgeInsets.symmetric(
-                              horizontal: 4),
-                          minimumSize: Size.zero,
+                              horizontal: 8, vertical: 4),
+                          minimumSize: const Size(48, 32),
                           tapTargetSize:
                               MaterialTapTargetSize.shrinkWrap,
                         ),
@@ -531,14 +530,14 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
                         onPressed: () => compartirSuplemento(
                             context, s, _tasaUsd),
                         icon: const Icon(
-                            Icons.share_outlined,
-                            size: 15),
+                            Icons.share,
+                            size: 16),
                         label: const Text('Compartir',
                             style: TextStyle(fontSize: 12)),
                         style: TextButton.styleFrom(
                           padding: const EdgeInsets.symmetric(
-                              horizontal: 4),
-                          minimumSize: Size.zero,
+                              horizontal: 8, vertical: 4),
+                          minimumSize: const Size(48, 32),
                           tapTargetSize:
                               MaterialTapTargetSize.shrinkWrap,
                         ),
