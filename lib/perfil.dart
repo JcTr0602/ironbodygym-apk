@@ -10,6 +10,9 @@ import 'dart:math';
 import 'package:crypto/crypto.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+
+import 'auth.dart';
 
 class PerfilService {
   PerfilService._();
@@ -19,12 +22,71 @@ class PerfilService {
       SharedPreferences.getInstance();
 
   Future<String?> getMovil() async => (await _p).getString('perfil_movil');
-  Future<void> setMovil(String v) async =>
-      (await _p).setString('perfil_movil', v);
+  Future<void> setMovil(String v) async {
+    await (await _p).setString('perfil_movil', v);
+    // v1.2.2: sincronizar a Supabase (sobrevive reinstalación)
+    _syncPerfilToSupabase();
+  }
 
   Future<String?> getCarnet() async => (await _p).getString('perfil_carnet');
-  Future<void> setCarnet(String v) async =>
-      (await _p).setString('perfil_carnet', v);
+  Future<void> setCarnet(String v) async {
+    await (await _p).setString('perfil_carnet', v);
+    // v1.2.2: sincronizar a Supabase (sobrevive reinstalación)
+    _syncPerfilToSupabase();
+  }
+
+  /// v1.2.2: sube móvil/carnet a Supabase (tabla sync_usuarios_perfil).
+  /// No bloquea si no hay conexión; se reintenta en el próximo cambio.
+  Future<void> _syncPerfilToSupabase() async {
+    try {
+      final username = AuthService().username;
+      if (username.isEmpty) return;
+      final p = await _p;
+      final movil = p.getString('perfil_movil');
+      final carnet = p.getString('perfil_carnet');
+      await Supabase.instance.client.from('sync_usuarios_perfil').upsert({
+        'username': usernameToEmail(username).split('@').first,
+        'movil': movil,
+        'carnet': carnet,
+        'updated_at': DateTime.now().toIso8601String(),
+      }, onConflict: 'username');
+    } catch (_) {
+      // Sin conexión o error: se reintenta en el próximo cambio
+    }
+  }
+
+  /// v1.2.2: descarga el perfil desde Supabase si lo local está vacío.
+  /// Llamar al iniciar sesión.
+  Future<void> descargarPerfilSiVacio() async {
+    try {
+      final p = await _p;
+      final movilLocal = p.getString('perfil_movil');
+      final carnetLocal = p.getString('perfil_carnet');
+      // Si ya hay datos locales, no sobrescribir
+      if ((movilLocal?.isNotEmpty ?? false) ||
+          (carnetLocal?.isNotEmpty ?? false)) {
+        return;
+      }
+      final username = AuthService().username;
+      if (username.isEmpty) return;
+      final emailPrefix = usernameToEmail(username).split('@').first;
+      final res = await Supabase.instance.client
+          .from('sync_usuarios_perfil')
+          .select('movil, carnet')
+          .eq('username', emailPrefix)
+          .maybeSingle();
+      if (res != null) {
+        if (res['movil'] != null) {
+          await p.setString('perfil_movil', res['movil'] as String);
+        }
+        if (res['carnet'] != null) {
+          await p.setString('perfil_carnet', res['carnet'] as String);
+        }
+      }
+    } catch (_) {
+      // Sin conexión: se queda con lo local (vacío)
+    }
+  }
 
   /// ¿Avisar si lleva +8h sin subir cambios? (punto 10)
   Future<bool> getRecordatorioSync() async =>

@@ -104,6 +104,11 @@ class _LoginScreenState extends State<LoginScreen>
     });
     try {
       await _auth.signIn(u, p);
+      // v1.2.2: descarga perfil (móvil/carnet) si lo local está vacío
+      // (sobrevive reinstalaciones)
+      try {
+        await PerfilService.instance.descargarPerfilSiVacio();
+      } catch (_) {}
       // Guarda el usuario para la próxima vez
       SharedPreferences.getInstance().then((prefs) {
         prefs.setString('ultimo_usuario', u);
