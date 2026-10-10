@@ -463,11 +463,15 @@ class EncabezadoSeccion extends StatelessWidget {
   final String titulo;
   final String? accionTexto;
   final VoidCallback? onAccion;
+  final IconData? accionIcono;
+  final String? accionTooltip;
   const EncabezadoSeccion(
       {super.key,
       required this.titulo,
       this.accionTexto,
-      this.onAccion});
+      this.onAccion,
+      this.accionIcono,
+      this.accionTooltip});
 
   @override
   Widget build(BuildContext context) {
@@ -492,6 +496,14 @@ class EncabezadoSeccion extends StatelessWidget {
               child: Text(accionTexto!,
                   style: AppTexto.etiqueta.copyWith(
                       color: AppColores.naranja)),
+            ),
+          if (accionIcono != null && onAccion != null)
+            IconButton(
+              tooltip: accionTooltip,
+              iconSize: 20,
+              color: Colors.grey,
+              icon: Icon(accionIcono),
+              onPressed: onAccion,
             ),
         ],
       ),

@@ -142,9 +142,9 @@ class _VentaSuplementoScreenState
           cancelar: '');
       return;
     }
-    final esUsd = _moneda == 'USD';
+    final esCup = _moneda == 'CUP';
     final tasa = _tasaUsd;
-    if (esUsd && (tasa == null || tasa <= 0)) {
+    if (esCup && (tasa == null || tasa <= 0)) {
       await DialogoApp.confirmar(context,
           titulo: 'Revisa la valoración',
           mensaje:
@@ -263,7 +263,7 @@ class _VentaSuplementoScreenState
           cancelar: '');
       return;
     }
-    if (_moneda == 'USD') {
+    if (_moneda == 'CUP') {
       final tasa = _tasaUsd;
       if (tasa == null || tasa <= 0) {
         await DialogoApp.confirmar(context,
@@ -340,7 +340,7 @@ class _VentaSuplementoScreenState
           const SizedBox(height: AppEspacio.sm),
           const EncabezadoSeccion(titulo: 'Moneda'),
           _chipsMoneda(),
-          if (_moneda == 'USD') ...[
+          if (_moneda == 'CUP') ...[
             const SizedBox(height: AppEspacio.sm),
             CampoTexto(
               controller: _tasa,

@@ -605,7 +605,12 @@ class _HomeScreenState extends State<HomeScreen>
                   ),
                 ),
                 // RESUMEN
-                const EncabezadoSeccion(titulo: 'RESUMEN'),
+                EncabezadoSeccion(
+                  titulo: 'RESUMEN',
+                  accionIcono: Icons.tune,
+                  accionTooltip: 'Personalizar métricas',
+                  onAccion: _personalizarMetricas,
+                ),
                 Padding(
                   padding: const EdgeInsets.symmetric(
                       horizontal: AppEspacio.lg),
@@ -883,40 +888,25 @@ class _HomeScreenState extends State<HomeScreen>
       if (filas.isNotEmpty) filas.add(_divisorHorizontal());
       filas.add(Row(children: celdas));
     }
-    return Stack(
-      children: [
-        Tarjeta(
-          padding: EdgeInsets.zero,
-          child: Column(
-            children: [
-              ...filas,
-              // Mini-gráfico de 7 días (item 6)
-              if (_ultimos7.isNotEmpty) ...[
-                _divisorHorizontal(),
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(
-                      AppEspacio.lg,
-                      AppEspacio.sm,
-                      AppEspacio.lg,
-                      AppEspacio.md),
-                  child: _sparkline(),
-                ),
-              ],
-            ],
-          ),
-        ),
-        Positioned(
-          top: 2,
-          right: 2,
-          child: IconButton(
-            tooltip: 'Personalizar métricas',
-            iconSize: 18,
-            color: Colors.grey,
-            icon: const Icon(Icons.tune),
-            onPressed: _personalizarMetricas,
-          ),
-        ),
-      ],
+    return Tarjeta(
+      padding: EdgeInsets.zero,
+      child: Column(
+        children: [
+          ...filas,
+          // Mini-gráfico de 7 días (item 6)
+          if (_ultimos7.isNotEmpty) ...[
+            _divisorHorizontal(),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(
+                  AppEspacio.lg,
+                  AppEspacio.sm,
+                  AppEspacio.lg,
+                  AppEspacio.md),
+              child: _sparkline(),
+            ),
+          ],
+        ],
+      ),
     );
   }
 

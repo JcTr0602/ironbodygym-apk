@@ -15,6 +15,7 @@ import 'package:uuid/uuid.dart';
 import '../localdb.dart';
 import '../negocio.dart';
 import '../sync.dart';
+import '../tipos_pago.dart';
 import 'componentes.dart';
 import 'diseno.dart';
 import 'editor_foto.dart';
@@ -37,9 +38,31 @@ class _InscribirScreenState extends State<InscribirScreen> {
   int _meses = 1;
   File? _foto;
   bool _guardando = false;
+  bool _esMenor = false;
+  double _precioMenorVal = 1500;
+
+  @override
+  void initState() {
+    super.initState();
+    _carnet.addListener(_actualizarEsMenor);
+    _cargarPrecioMenor();
+  }
+
+  Future<void> _cargarPrecioMenor() async {
+    final p = await precioMenor();
+    if (mounted) setState(() => _precioMenorVal = p);
+  }
+
+  void _actualizarEsMenor() {
+    final esMenorVal = esMenor(_carnet.text.trim());
+    if (esMenorVal != _esMenor) {
+      setState(() => _esMenor = esMenorVal);
+    }
+  }
 
   @override
   void dispose() {
+    _carnet.removeListener(_actualizarEsMenor);
     _nombre.dispose();
     _telefono.dispose();
     _carnet.dispose();
@@ -79,7 +102,9 @@ class _InscribirScreenState extends State<InscribirScreen> {
       return double.tryParse(_monto.text.trim().replaceAll(',', '.')) ??
           0;
     }
-    return precios['mensual']! * _meses;
+    // v1.2.2: menores pagan precio reducido
+    final precioMensual = _esMenor ? _precioMenorVal : precios['mensual']!;
+    return precioMensual * _meses;
   }
 
   int _diasPeriodo() {
@@ -257,6 +282,9 @@ class _InscribirScreenState extends State<InscribirScreen> {
           'telefono': tel.isEmpty ? null : tel,
           'carnet': carnet.isEmpty ? null : carnet,
           'fecha': DateTime.now().toIso8601String().substring(0, 10),
+          // v1.2.2: guardar si es menor y el precio aplicado (histórico)
+          if (_esMenor) 'es_menor': true,
+          'precio_aplicado': monto,
         },
         fotoPath: fotoPath,
       );
@@ -457,7 +485,9 @@ class _InscribirScreenState extends State<InscribirScreen> {
                                         value:
                                             'mensual:$m',
                                         child: Text(
-                                            '$m mes${m == 1 ? '' : 'es'} (${fmtMonto(pr['mensual']! * m)} CUP)')),
+                                            _esMenor
+                                                ? '$m mes${m == 1 ? '' : 'es'} (${fmtMonto(_precioMenorVal * m)} CUP) — Menor de edad'
+                                                : '$m mes${m == 1 ? '' : 'es'} (${fmtMonto(pr['mensual']! * m)} CUP)')),
                                   const DropdownMenuItem(
                                       value:
                                           'personalizado',
