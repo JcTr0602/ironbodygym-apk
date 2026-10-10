@@ -62,8 +62,14 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
         await LocalDb.instance.allMirror('ventas_suplementos');
     if (!mounted) return;
     setState(() {
+      // v1.2.2: entrenadores solo ven productos con stock > 0
       _items = items
-          .where((s) => _esDueno || (s['activo'] as int?) == 1)
+          .where((s) {
+            if (_esDueno) return true;
+            final activo = (s['activo'] as int?) == 1;
+            final stock = (s['stock'] as num?)?.toInt() ?? 0;
+            return activo && stock > 0;
+          })
           .toList();
       _categorias = cats
           .where((c) =>
