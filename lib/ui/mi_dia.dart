@@ -9,6 +9,8 @@ import 'dart:io';
 import '../fotos.dart';
 import '../localdb.dart';
 import '../negocio.dart';
+import 'componentes.dart';
+import 'diseno.dart';
 import 'widgets.dart';
 
 class MiDiaScreen extends StatefulWidget {
@@ -25,8 +27,6 @@ class _MiDiaScreenState extends State<MiDiaScreen> {
   double _totalHoy = 0;
   double _efectivo = 0;
   double _transferencia = 0;
-
-  static const naranja = Color(0xFFE8821A);
 
   @override
   void initState() {
@@ -105,11 +105,13 @@ class _MiDiaScreenState extends State<MiDiaScreen> {
                     fontSize: 16),
               ),
               const SizedBox(height: 6),
-              const Text(
+              Text(
                 'Si trabajaste el turno pero nadie pagó, '
                 'queda registrado así.',
-                style:
-                    TextStyle(fontSize: 13, color: Colors.grey),
+                style: TextStyle(
+                    fontSize: 13,
+                    color:
+                        AppColores.textoSecundario(ctx)),
               ),
             ] else ...[
               Text('Cobrado hoy: ${fmtMonto(_totalHoy)} CUP',
@@ -124,12 +126,14 @@ class _MiDiaScreenState extends State<MiDiaScreen> {
             const SizedBox(height: 6),
             Text(faltan == 0
                 ? 'No quedó nadie por cobrar hoy.'
-                : '⏳ Quedaron $faltan por cobrar hoy.'),
+                : 'Quedaron $faltan por cobrar hoy.'),
             const SizedBox(height: 12),
-            const Text(
+            Text(
               'Recuerda: el pendiente a entregar solo se reinicia '
               'cuando Jc confirma que recibió el dinero.',
-              style: TextStyle(fontSize: 12, color: Colors.grey),
+              style: TextStyle(
+                  fontSize: 12,
+                  color: AppColores.textoSecundario(ctx)),
             ),
           ],
         ),
@@ -164,111 +168,108 @@ class _MiDiaScreenState extends State<MiDiaScreen> {
                 children: [
                   const SyncBanner(),
                   const SizedBox(height: 8),
-                  Card(
-                    color: naranja,
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(16)),
-                    child: Padding(
-                      padding: const EdgeInsets.all(18),
-                      child: Column(
-                        children: [
-                          const Text('Cobrado hoy',
-                              style: TextStyle(
-                                  color: Colors.white70,
-                                  fontSize: 13)),
-                          Text('${fmtMonto(_totalHoy)} CUP',
-                              style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 30,
-                                  fontWeight: FontWeight.bold)),
-                          const SizedBox(height: 4),
-                          Text(
-                              '${_cobrados.length} cobros · '
-                              '${fmtMonto(_efectivo)} · '
-                              '${fmtMonto(_transferencia)}',
-                              style: const TextStyle(
-                                  color: Colors.white70,
-                                  fontSize: 12)),
-                        ],
-                      ),
+                  Tarjeta(
+                    color: AppColores.naranja,
+                    padding: const EdgeInsets.all(18),
+                    child: Column(
+                      children: [
+                        Text('Cobrado hoy',
+                            style: AppTexto.secundario.copyWith(
+                                color: Colors.white.withValues(
+                                    alpha: 0.85))),
+                        Text('${fmtMonto(_totalHoy)} CUP',
+                            style: AppTexto.display.copyWith(
+                                color: Colors.white)),
+                        const SizedBox(height: 4),
+                        Text(
+                            '${_cobrados.length} cobros · '
+                            '${fmtMonto(_efectivo)} · '
+                            '${fmtMonto(_transferencia)}',
+                            style: AppTexto.minuscula.copyWith(
+                                color: Colors.white.withValues(
+                                    alpha: 0.85))),
+                      ],
                     ),
                   ),
                   const SizedBox(height: 16),
                   const Text('Cobros realizados hoy',
-                      style: TextStyle(
-                          fontSize: 15, fontWeight: FontWeight.bold)),
+                      style: AppTexto.subtitulo),
                   const SizedBox(height: 8),
                   if (_cobrados.isEmpty)
-                    const Card(
-                      child: Padding(
-                        padding: EdgeInsets.all(16),
-                        child: Text(
-                            'Aún no hay cobros registrados hoy.',
-                            textAlign: TextAlign.center,
-                            style:
-                                TextStyle(color: Colors.grey)),
-                      ),
+                    Tarjeta(
+                      child: Text(
+                          'Aún no hay cobros registrados hoy.',
+                          textAlign: TextAlign.center,
+                          style: AppTexto.secundario.copyWith(
+                              color: AppColores
+                                  .textoSecundario(context))),
                     )
                   else
                     for (final c in _cobrados)
-                      Card(
-                        child: ListTile(
-                          leading: _FotoMini(
-                            fotoStorage:
-                                c['foto_storage'] as String?,
-                            fallback: Icon(
-                              (c['metodo'] as String) ==
-                                      'transferencia'
-                                  ? Icons.smartphone
-                                  : Icons.payments,
-                              size: 22,
-                              color: const Color(0xFFE8821A),
+                      Padding(
+                        padding:
+                            const EdgeInsets.only(bottom: 8),
+                        child: Tarjeta(
+                          padding: EdgeInsets.zero,
+                          child: ListTile(
+                            leading: _FotoMini(
+                              fotoStorage:
+                                  c['foto_storage'] as String?,
+                              fallback: Icon(
+                                (c['metodo'] as String) ==
+                                        'transferencia'
+                                    ? Icons.smartphone
+                                    : Icons.payments,
+                                size: 22,
+                                color: AppColores.naranja,
+                              ),
                             ),
-                          ),
-                          title: Text('${c['nombre']}'),
-                          subtitle:
-                              Text('${c['periodo']}'),
-                          trailing: Text(
-                            '${fmtMonto(c['monto'])} CUP',
-                            style: const TextStyle(
-                                fontWeight: FontWeight.bold,
-                                color: naranja),
+                            title: Text('${c['nombre']}'),
+                            subtitle:
+                                Text(etiquetaPeriodo(c)),
+                            trailing: Text(
+                              '${fmtMonto(c['monto'])} CUP',
+                              style: const TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  color: AppColores.naranja),
+                            ),
                           ),
                         ),
                       ),
                   const SizedBox(height: 16),
                   Text(
-                      '⏳ Por cobrar hoy (${_porCobrar.length})',
-                      style: const TextStyle(
-                          fontSize: 15,
-                          fontWeight: FontWeight.bold)),
+                      'Por cobrar hoy (${_porCobrar.length})',
+                      style: AppTexto.subtitulo),
                   const SizedBox(height: 8),
                   if (_porCobrar.isEmpty)
-                    const Card(
-                      child: Padding(
-                        padding: EdgeInsets.all(16),
-                        child: Text(
-                            'Nadie vence hoy. Todo al día.',
-                            textAlign: TextAlign.center,
-                            style:
-                                TextStyle(color: Colors.grey)),
-                      ),
+                    Tarjeta(
+                      child: Text(
+                          'Nadie vence hoy. Todo al día.',
+                          textAlign: TextAlign.center,
+                          style: AppTexto.secundario.copyWith(
+                              color: AppColores
+                                  .textoSecundario(context))),
                     )
                   else
                     for (final c in _porCobrar)
-                      Card(
-                        child: ListTile(
-                          leading: _FotoMini(
-                            fotoStorage:
-                                c['foto_storage'] as String?,
-                            fallback: const Icon(
-                                Icons.warning_amber,
-                                color: Colors.orange),
+                      Padding(
+                        padding:
+                            const EdgeInsets.only(bottom: 8),
+                        child: Tarjeta(
+                          padding: EdgeInsets.zero,
+                          child: ListTile(
+                            leading: _FotoMini(
+                              fotoStorage:
+                                  c['foto_storage'] as String?,
+                              fallback: const Icon(
+                                  Icons.warning_amber,
+                                  color: AppColores.alerta),
+                            ),
+                            title:
+                                Text('${c['nombre'] ?? '—'}'),
+                            subtitle: Text(
+                                'Vence hoy · ${fmtFecha(c['pagado_hasta'] as String?)}'),
                           ),
-                          title:
-                              Text('${c['nombre'] ?? '—'}'),
-                          subtitle: Text(
-                              'Vence hoy · ${fmtFecha(c['pagado_hasta'] as String?)}'),
                         ),
                       ),
                   const SizedBox(height: 20),

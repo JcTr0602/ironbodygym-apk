@@ -115,6 +115,10 @@ class SyncEngine {
         return 'pagos';
       case 'gastos':
         return 'gastos';
+      case 'suplementos':
+        return 'suplementos';
+      case 'ventas_suplementos':
+        return 'ventas de suplementos';
       default:
         return tabla.replaceAll('_', ' ');
     }
@@ -533,6 +537,11 @@ class SyncEngine {
       final uuid = op['op_uuid'] as String;
       if (await _opAplicada(uuid)) {
         await _db.markOp(uuid, 'aplicada');
+        // Limpia la entrada optimista temporal (el registro real
+        // llega por el pull) para no duplicar en el historial.
+        if ('${op['tipo']}' == 'inscripcion_venta_suplemento') {
+          await _db.limpiarOptimista('ventas_suplementos', uuid);
+        }
         aplicadas++;
       }
     }
@@ -670,12 +679,21 @@ class SyncEngine {
     final since = wm;
     var maxSeq = wm;
     var bajados = 0;
-    const tablas = ['clientes', 'pagos', 'pagos_diarios', 'gastos'];
+    const tablas = [
+      'clientes',
+      'pagos',
+      'pagos_diarios',
+      'gastos',
+      'suplementos',
+      'ventas_suplementos'
+    ];
     const supTablas = {
       'clientes': 'sync_clientes',
       'pagos': 'sync_pagos',
       'pagos_diarios': 'sync_pagos_diarios',
       'gastos': 'sync_gastos',
+      'suplementos': 'sync_suplementos',
+      'ventas_suplementos': 'sync_ventas_suplementos',
     };
     var ti = 0;
     for (final tabla in tablas) {
@@ -745,8 +763,12 @@ class SyncEngine {
       for (final row in rows) {
         final m = Map<String, dynamic>.from(row as Map);
         final seq = (m['sync_seq'] as int?) ?? 0;
-        final tabla = {'clientes': 'clientes', 'pagos': 'pagos'}[
-                m['entidad']] ??
+        final tabla = {
+          'clientes': 'clientes',
+          'pagos': 'pagos',
+          'suplementos': 'suplementos',
+          'ventas_suplementos': 'ventas_suplementos',
+        }[m['entidad']] ??
             'pagos_diarios';
         await _db.deleteMirror(tabla, (m['entidad_id'] as int?) ?? -1);
         if (seq > maxSeq) maxSeq = seq;
@@ -795,6 +817,18 @@ class SyncEngine {
   /// Reduce la foto a máx. 1024px de ancho (JPEG 80) antes de subirla.
   /// Las fotos de cámara a resolución completa (varios MB) no terminan
   /// de subir con conexiones lentas; así quedan en ~150-300 KB.
+  /// Sube la foto de un suplemento al bucket y devuelve su storage_path
+  /// (`suplementos/<uuid>.jpg`), o null si falla. La op `foto_suplemento`
+  /// enlaza esa ruta en el servidor.
+  Future<String?> subirFotoSuplemento(
+      String opUuid, Uint8List bytes) async {
+    final comprimida = _comprimirFoto(bytes);
+    final path = 'suplementos/$opUuid.jpg';
+    final tus = await _subirFotoTus(opUuid, path, comprimida);
+    final ok = tus ?? await _subirFotoSimple(path, comprimida);
+    return ok ? path : null;
+  }
+
   Uint8List _comprimirFoto(Uint8List bytes) {
     try {
       final dec = img.decodeImage(bytes);
@@ -924,8 +958,7 @@ class SyncEngine {
   }
 
   /// Método simple (un solo PUT): respaldo si tus no está disponible.
-  Future<bool> _subirFotoSimple(String path, Uint8List bytes) async {
-    for (var intento = 0; intento < 3; intento++) {
+  Future<bool> _subirFotoSimple(String path, Uint8List bytes) async {    for (var intento = 0; intento < 3; intento++) {
       try {
         final r = await _postAuth(
             Uri.parse('$_base/storage/v1/object/'

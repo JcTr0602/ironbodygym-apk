@@ -5,6 +5,7 @@ library;
 import 'package:flutter/material.dart';
 
 import '../localdb.dart';
+import 'diseno.dart';
 import 'widgets.dart';
 
 class AvisosScreen extends StatefulWidget {
@@ -56,13 +57,15 @@ class _AvisosScreenState extends State<AvisosScreen> {
                   child: ListView(
                     padding: const EdgeInsets.all(16),
                     children: [
-                      const Text(
+                      Text(
                         'Elige qué avisos quieres recibir en la app.',
-                        style: TextStyle(color: Colors.grey),
+                        style: AppTexto.secundario.copyWith(
+                            color: AppColores.textoSecundario(context)),
                       ),
                       const SizedBox(height: 16),
                       SwitchListTile(
-                        title: const Text('⏳ Vencimientos'),
+                        secondary: const Icon(Icons.schedule_outlined),
+                        title: const Text('Vencimientos'),
                         subtitle: const Text(
                             'Avisar cuando haya clientes por vencer o vencidos'),
                         value: _vencimientos,
@@ -73,6 +76,7 @@ class _AvisosScreenState extends State<AvisosScreen> {
                       ),
                       const Divider(),
                       SwitchListTile(
+                        secondary: const Icon(Icons.cake_outlined),
                         title: const Text('Cumpleaños'),
                         subtitle: const Text(
                             'Avisar de los cumpleaños del mes'),
@@ -84,6 +88,7 @@ class _AvisosScreenState extends State<AvisosScreen> {
                       ),
                       const Divider(),
                       SwitchListTile(
+                        secondary: const Icon(Icons.sync_outlined),
                         title: const Text('Sincronización'),
                         subtitle: const Text(
                             'Avisar cuando haya pendientes por sincronizar'),

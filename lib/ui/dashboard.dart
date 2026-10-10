@@ -9,6 +9,7 @@ import 'package:flutter/material.dart';
 import '../negocio.dart';
 import '../localdb.dart';
 import 'diseno.dart';
+import 'componentes.dart';
 import 'buscar.dart';
 import 'listas.dart';
 import 'widgets.dart';
@@ -120,9 +121,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(titulo,
-                style: const TextStyle(
-                    fontSize: 18, fontWeight: FontWeight.bold)),
+            Text(titulo, style: AppTexto.titulo),
             const SizedBox(height: 12),
             _filaDetalle('Efectivo', efectivo),
             _filaDetalle('Transferencia', transferencia),
@@ -131,8 +130,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 negrita: true),
             const SizedBox(height: 8),
             Text('${pagos.length} pagos registrados',
-                style:
-                    const TextStyle(color: Colors.grey, fontSize: 13)),
+                style: AppTexto.secundario.copyWith(
+                    color: AppColores.textoSecundario(ctx))),
             const SizedBox(height: 16),
           ],
         ),
@@ -161,37 +160,33 @@ class _DashboardScreenState extends State<DashboardScreen> {
   Widget _tarjetaIngreso(
       String titulo, double valor, IconData icono, VoidCallback onTap) {
     return Expanded(
-      child: InkWell(
+      child: Tarjeta(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(16),
-        child: Card(
-          elevation: 2,
-          shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(16)),
-          child: Padding(
-            padding:
-                const EdgeInsets.symmetric(vertical: 14, horizontal: 8),
-            child: Column(
-              children: [
-                Icon(icono, color: naranja, size: 26),
-                const SizedBox(height: 6),
-                Text(titulo,
-                    style: const TextStyle(
-                        fontSize: 11, color: Colors.grey)),
-                const SizedBox(height: 2),
-                Text(fmtMonto(valor),
-                    style: const TextStyle(
-                        fontSize: 17,
-                        fontWeight: FontWeight.bold,
-                        color: naranja)),
-                const Text('CUP',
-                    style: TextStyle(fontSize: 10, color: Colors.grey)),
-                const SizedBox(height: 4),
-                const Icon(Icons.touch_app,
-                    size: 14, color: Colors.grey),
-              ],
-            ),
-          ),
+        padding:
+            const EdgeInsets.symmetric(vertical: 14, horizontal: 8),
+        child: Column(
+          children: [
+            Icon(icono, color: naranja, size: 26),
+            const SizedBox(height: 6),
+            Text(titulo,
+                style: TextStyle(
+                    fontSize: 11,
+                    color: AppColores.textoSecundario(context))),
+            const SizedBox(height: 2),
+            Text(fmtMonto(valor),
+                style: const TextStyle(
+                    fontSize: 17,
+                    fontWeight: FontWeight.bold,
+                    color: naranja)),
+            Text('CUP',
+                style: TextStyle(
+                    fontSize: 10,
+                    color: AppColores.textoSecundario(context))),
+            const SizedBox(height: 4),
+            Icon(Icons.touch_app,
+                size: 14,
+                color: AppColores.textoSecundario(context)),
+          ],
         ),
       ),
     );
@@ -213,12 +208,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: sube ? Colors.green.shade50 : Colors.red.shade50,
+        color: sube
+            ? AppColores.exito.withValues(alpha: 0.12)
+            : AppColores.error.withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
             color: sube
-                ? Colors.green.shade200
-                : Colors.red.shade200),
+                ? AppColores.exito.withValues(alpha: 0.35)
+                : AppColores.error.withValues(alpha: 0.35)),
       ),
       child: Row(
         children: [
@@ -235,8 +232,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
               style: TextStyle(
                   fontSize: 13,
                   color: sube
-                      ? Colors.green.shade800
-                      : Colors.red.shade800),
+                      ? AppColores.exito
+                      : AppColores.error),
             ),
           ),
         ],
@@ -251,13 +248,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final men = _porTipo['mensual'] ?? 0;
     final dia = _porTipo['diario'] ?? 0;
     final total = ef + tr;
-    return Card(
-      elevation: 2,
-      shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16)),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
+    return Tarjeta(
+      child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text('Desglose del mes',
@@ -290,13 +282,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
               Text(
                 'Mejor día: ${fmtFecha(_mejorPeor['mejor']!['dia'] as String?)} '
                 '(${fmtMonto(_mejorPeor['mejor']!['monto'] as double)} CUP)',
-                style: const TextStyle(
-                    fontSize: 12, color: Colors.grey),
+                style: TextStyle(
+                    fontSize: 12,
+                    color: AppColores.textoSecundario(context)),
               ),
             ],
           ],
         ),
-      ),
     );
   }
 
@@ -314,8 +306,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   fontSize: 13, fontWeight: FontWeight.bold)),
           const SizedBox(width: 8),
           Text('${pct.toStringAsFixed(0)}%',
-              style: const TextStyle(
-                  fontSize: 12, color: Colors.grey)),
+              style: TextStyle(
+                  fontSize: 12,
+                  color: AppColores.textoSecundario(context))),
         ],
       ),
     );
@@ -332,10 +325,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
       height: 140,
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        // v1.0.15: respetar modo oscuro
-        color: Theme.of(context).brightness == Brightness.dark
-            ? Colors.grey.shade800
-            : Colors.grey.shade100,
+        color: AppColores.superficie(context),
+        border: Border.all(color: AppColores.borde(context)),
         borderRadius: BorderRadius.circular(12),
       ),
       child: SingleChildScrollView(
@@ -372,7 +363,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       width: es30 ? 12 : 28,
                       height: altura,
                       decoration: BoxDecoration(
-                        color: const Color(0xFFE8821A),
+                        color: AppColores.naranja,
                         borderRadius: BorderRadius.circular(4),
                       ),
                     ),
@@ -428,9 +419,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(fmtFecha(fechaIso),
-                style: const TextStyle(
-                    fontSize: 18, fontWeight: FontWeight.bold)),
+            Text(fmtFecha(fechaIso), style: AppTexto.titulo),
             const SizedBox(height: 12),
             _filaDetalle('Efectivo', efectivo),
             _filaDetalle('Transferencia', transferencia),
@@ -439,8 +428,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
             _filaDetalle('Total', monto, negrita: true),
             const SizedBox(height: 8),
             Text('$n pagos registrados',
-                style:
-                    const TextStyle(color: Colors.grey, fontSize: 13)),
+                style: AppTexto.secundario.copyWith(
+                    color: AppColores.textoSecundario(ctx))),
             const SizedBox(height: 16),
           ],
         ),
@@ -465,8 +454,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     color: color)),
             const SizedBox(height: 2),
             Text(etiqueta,
-                style:
-                    const TextStyle(fontSize: 12, color: Colors.grey)),
+                style: TextStyle(
+                    fontSize: 12,
+                    color: AppColores.textoSecundario(context))),
           ],
         ),
       ),
@@ -553,12 +543,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       style: TextStyle(
                           fontSize: 16, fontWeight: FontWeight.bold)),
                   const SizedBox(height: 8),
-                  Card(
-                    elevation: 2,
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(16)),
-                    child: Padding(
-                      padding: const EdgeInsets.all(16),
+                  Tarjeta(
                       child: Column(
                         children: [
                           Row(
@@ -571,12 +556,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
                               _statCliente(
                                   '$alDia',
                                   'al día',
-                                  Colors.green,
+                                  AppColores.exito,
                                   () => _ir(const BuscarScreen())),
                               _statCliente(
                                   '$_morosos',
                                   'vencidos',
-                                  Colors.red,
+                                  AppColores.error,
                                   () => _ir(const ListasScreen(
                                       inicial: 2))),
                             ],
@@ -587,25 +572,33 @@ class _DashboardScreenState extends State<DashboardScreen> {
                             child: LinearProgressIndicator(
                               value: pctAlDia,
                               minHeight: 10,
-                              backgroundColor: Colors.red.shade100,
+                              backgroundColor: AppColores.error
+                                  .withValues(alpha: 0.2),
                               valueColor:
                                   const AlwaysStoppedAnimation<Color>(
-                                      Colors.green),
+                                      AppColores.exito),
                             ),
                           ),
                           const SizedBox(height: 4),
                           Text(
                               '${(pctAlDia * 100).toStringAsFixed(0)}% al día',
-                              style: const TextStyle(
-                                  fontSize: 11, color: Colors.grey)),
+                              style: TextStyle(
+                                  fontSize: 11,
+                                  color: AppColores.textoSecundario(
+                                      context))),
                           // v1.0.15: nuevos este mes + inactivos
                           if (_nuevos > 0 || _inactivos > 0) ...[
                             const SizedBox(height: 8),
                             Container(
                               padding: const EdgeInsets.all(8),
                               decoration: BoxDecoration(
-                                color: Colors.blue.shade50,
-                                borderRadius: BorderRadius.circular(8),
+                                color: AppColores.info
+                                    .withValues(alpha: 0.12),
+                                borderRadius:
+                                    BorderRadius.circular(8),
+                                border: Border.all(
+                                    color: AppColores.info
+                                        .withValues(alpha: 0.3)),
                               ),
                               child: Row(
                                 mainAxisAlignment:
@@ -613,25 +606,24 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                 children: [
                                   if (_nuevos > 0)
                                     Text('$_nuevos nuevos',
-                                        style: TextStyle(
+                                        style: const TextStyle(
                                             fontSize: 13,
-                                            color:
-                                                Colors.blue.shade800,
+                                            color: AppColores.info,
                                             fontWeight:
                                                 FontWeight.bold)),
                                   if (_inactivos > 0)
                                     Text('$_inactivos inactivos',
                                         style: TextStyle(
                                             fontSize: 13,
-                                            color:
-                                                Colors.grey.shade700)),
+                                            color: AppColores
+                                                .textoSecundario(
+                                                    context))),
                                 ],
                               ),
                             ),
                           ],
                         ],
                       ),
-                    ),
                   ),
                   const SizedBox(height: 16),
                   // v1.0.15: ranking de entrenadores
@@ -641,13 +633,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
                             fontSize: 16,
                             fontWeight: FontWeight.bold)),
                     const SizedBox(height: 8),
-                    Card(
-                      elevation: 2,
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(16)),
-                      child: Padding(
-                        padding: const EdgeInsets.all(12),
-                        child: Column(
+                    Tarjeta(
+                      padding: const EdgeInsets.all(12),
+                      child: Column(
                           children: _ranking.asMap().entries.map((e) {
                             final i = e.key;
                             final r = e.value;
@@ -674,34 +662,40 @@ class _DashboardScreenState extends State<DashboardScreen> {
                             );
                           }).toList(),
                         ),
-                      ),
                     ),
                     const SizedBox(height: 16),
                   ],
-                  const Text('⏳ Pendiente por entrenador',
-                      style: TextStyle(
-                          fontSize: 16, fontWeight: FontWeight.bold)),
+                  Row(
+                    children: [
+                      const Icon(Icons.schedule,
+                          color: AppColores.naranja, size: 20),
+                      const SizedBox(width: 8),
+                      const Text('Pendiente por entrenador',
+                          style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold)),
+                    ],
+                  ),
                   const SizedBox(height: 8),
                   if (_pend.isEmpty)
-                    const Card(
-                      child: Padding(
-                        padding: EdgeInsets.all(16),
-                        child: Text(
-                          'Nada pendiente de entregar.',
-                          textAlign: TextAlign.center,
-                        ),
+                    Tarjeta(
+                      child: Text(
+                        'Nada pendiente de entregar.',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                            color: AppColores.textoSecundario(
+                                context)),
                       ),
                     )
                   else
                     for (final t in _pend)
-                      Card(
+                      Tarjeta(
+                        padding: EdgeInsets.zero,
                         child: ListTile(
                           leading: const CircleAvatar(
-                            backgroundColor:
-                                Color(0xFFE8821A),
-                            child: Text('⏳',
-                                style:
-                                    TextStyle(fontSize: 18)),
+                            backgroundColor: AppColores.naranja,
+                            child: Icon(Icons.schedule,
+                                color: Colors.white, size: 20),
                           ),
                           title: Text('${t['nombre']}'),
                           subtitle: Text(

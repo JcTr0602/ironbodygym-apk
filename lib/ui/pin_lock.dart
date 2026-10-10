@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 
 import '../auth.dart';
 import '../perfil.dart';
+import 'componentes.dart';
 import 'diseno.dart';
 import 'login.dart';
 
@@ -58,22 +59,13 @@ class _PinLockScreenState extends State<PinLockScreen> {
   /// No es un bypass: para volver a entrar necesita la contraseña
   /// de su cuenta, y el PIN se puede reconfigurar en Ajustes.
   Future<void> _olvidePin() async {
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Olvidé mi PIN'),
-        content: const Text(
-            'Se cerrará tu sesión en este teléfono. Para volver a entrar '
-            'necesitarás tu contraseña de la cuenta. ¿Continuar?'),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Cancelar')),
-          ElevatedButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('Cerrar sesión')),
-        ],
-      ),
+    final ok = await DialogoApp.confirmar(
+      context,
+      titulo: 'Olvidé mi PIN',
+      mensaje: 'Se cerrará tu sesión en este teléfono. Para volver a entrar '
+          'necesitarás tu contraseña de la cuenta. ¿Continuar?',
+      aceptar: 'Cerrar sesión',
+      icono: Icons.lock_open_outlined,
     );
     if (ok != true || !mounted) return;
     await AuthService().signOut();
@@ -102,12 +94,11 @@ class _PinLockScreenState extends State<PinLockScreen> {
                   size: 64, color: AppColores.naranja),
               const SizedBox(height: 16),
               const Text('App bloqueada',
-                  style: TextStyle(
-                      fontSize: 22,
-                      fontWeight: FontWeight.bold)),
+                  style: AppTexto.displayPequeno),
               const SizedBox(height: 8),
-              const Text('Escribe tu PIN para continuar',
-                  style: TextStyle(color: Colors.grey)),
+              Text('Escribe tu PIN para continuar',
+                  style: AppTexto.secundario.copyWith(
+                      color: AppColores.textoSecundario(context))),
               const SizedBox(height: 24),
               Row(
                 mainAxisAlignment: MainAxisAlignment.center,
@@ -122,7 +113,7 @@ class _PinLockScreenState extends State<PinLockScreen> {
                       shape: BoxShape.circle,
                       color: lleno
                           ? AppColores.naranja
-                          : Colors.grey.shade400,
+                          : AppColores.borde(context),
                     ),
                   );
                 }),
@@ -130,7 +121,7 @@ class _PinLockScreenState extends State<PinLockScreen> {
               if (_error != null) ...[
                 const SizedBox(height: 12),
                 Text(_error!,
-                    style: const TextStyle(color: Colors.red)),
+                    style: const TextStyle(color: AppColores.error)),
               ],
               const SizedBox(height: 24),
               if (_verificando)
@@ -166,7 +157,7 @@ class _PinLockScreenState extends State<PinLockScreen> {
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
                 border: Border.all(
-                    color: Colors.grey.shade400),
+                    color: AppColores.borde(context)),
               ),
               child: icono != null
                   ? Icon(icono, size: 26)

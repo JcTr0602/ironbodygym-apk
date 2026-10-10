@@ -10,6 +10,9 @@ import 'package:flutter/material.dart';
 
 import '../localdb.dart';
 import '../negocio.dart';
+import 'componentes.dart';
+import 'diseno.dart';
+import 'widgets.dart';
 
 class RiesgoScreen extends StatefulWidget {
   const RiesgoScreen({super.key});
@@ -82,7 +85,7 @@ class _RiesgoScreenState extends State<RiesgoScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text(' Clientes en riesgo'),
+        title: const Text('Clientes en riesgo'),
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh),
@@ -92,53 +95,67 @@ class _RiesgoScreenState extends State<RiesgoScreen> {
       ),
       body: _cargando
           ? const Center(child: CircularProgressIndicator())
-          : _riesgo.isEmpty
-              ? const Center(
-                  child: Padding(
-                    padding: EdgeInsets.all(24),
-                    child: Text(
-                      'No hay clientes en riesgo.\n\n'
-                      'Se muestran aquí los inactivos con 3+ pagos '
-                      'cuyo último pago fue hace más de 60 días.',
-                      textAlign: TextAlign.center,
-                    ),
-                  ),
-                )
-              : RefreshIndicator(
-                  onRefresh: _cargar,
-                  child: ListView.builder(
-                    itemCount: _riesgo.length,
-                    itemBuilder: (ctx, i) {
-                      final r = _riesgo[i];
-                      return Card(
-                        margin: const EdgeInsets.symmetric(
-                            horizontal: 12, vertical: 6),
-                        child: ListTile(
-                          leading: const CircleAvatar(
-                            backgroundColor: Colors.orange,
-                            child: Icon(Icons.warning,
-                                color: Colors.white, size: 22),
-                          ),
-                          title: Text('${r['nombre']}',
-                              style: const TextStyle(
-                                  fontWeight: FontWeight.bold)),
-                          subtitle: Column(
-                            crossAxisAlignment:
-                                CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                  'Último pago: ${fmtFecha(r['ultimo_pago'] as String?)} '
-                                  '(hace ${r['hace_dias']} días)'),
-                              Text(
-                                  'Total histórico: ${fmtMonto(r['total'])} CUP '
-                                  '(${r['n_pagos']} pagos)'),
-                            ],
+          : Column(
+              children: [
+                const SyncBanner(),
+                Expanded(
+                  child: _riesgo.isEmpty
+                      ? const EstadoVacio(
+                          icono: Icons.person_off,
+                          titulo: 'No hay clientes en riesgo',
+                          subtitulo: 'Se muestran aquí los inactivos '
+                              'con 3+ pagos cuyo último pago fue hace '
+                              'más de 60 días.',
+                        )
+                      : RefreshIndicator(
+                          onRefresh: _cargar,
+                          child: ListView.builder(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: AppEspacio.md,
+                                vertical: AppEspacio.sm),
+                            itemCount: _riesgo.length,
+                            itemBuilder: (ctx, i) {
+                              final r = _riesgo[i];
+                              return Padding(
+                                padding: const EdgeInsets.only(
+                                    bottom: AppEspacio.sm),
+                                child: Tarjeta(
+                                  padding: EdgeInsets.zero,
+                                  child: ListTile(
+                                    leading: const CircleAvatar(
+                                      backgroundColor:
+                                          AppColores.naranja,
+                                      child: Icon(
+                                          Icons.warning,
+                                          color: Colors.white,
+                                          size: 22),
+                                    ),
+                                    title: Text(
+                                      '${r['nombre']}',
+                                      style: AppTexto.subtitulo,
+                                    ),
+                                    subtitle: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment
+                                              .start,
+                                      children: [
+                                        Text(
+                                            'Último pago: ${fmtFecha(r['ultimo_pago'] as String?)} '
+                                            '(hace ${r['hace_dias']} días)'),
+                                        Text(
+                                            'Total histórico: ${fmtMonto(r['total'])} CUP '
+                                            '(${r['n_pagos']} pagos)'),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              );
+                            },
                           ),
                         ),
-                      );
-                    },
-                  ),
                 ),
+              ],
+            ),
     );
   }
 }

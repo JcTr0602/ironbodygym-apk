@@ -6,6 +6,8 @@ import 'package:flutter/material.dart';
 
 import '../localdb.dart';
 import '../negocio.dart';
+import 'componentes.dart';
+import 'diseno.dart';
 import 'ficha.dart';
 import 'widgets.dart';
 
@@ -115,8 +117,11 @@ class _PagosRealizadosScreenState extends State<PagosRealizadosScreen> {
             child: _cargando
                 ? const Center(child: CircularProgressIndicator())
                 : _clientes.isEmpty
-                    ? const Center(
-                        child: Text('Sin pagos este mes'))
+                    ? const EstadoVacio(
+                        icono: Icons.payments,
+                        titulo: 'Sin pagos este mes',
+                        subtitulo:
+                            'Los pagos registrados aparecerán aquí')
                     : RefreshIndicator(
                         onRefresh: _cargar,
                         child: ListView.builder(
@@ -125,7 +130,7 @@ class _PagosRealizadosScreenState extends State<PagosRealizadosScreen> {
                             final c = _clientes[i];
                             return ListTile(
                               leading: const Icon(Icons.verified,
-                                  color: Colors.green),
+                                  color: AppColores.exito),
                               title: Text('${c['nombre']}'),
                               subtitle: Text(
                                 '${fmtMonto(c['monto'])} CUP · '

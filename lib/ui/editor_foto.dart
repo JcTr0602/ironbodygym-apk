@@ -6,6 +6,9 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 
+import 'componentes.dart';
+import 'diseno.dart';
+
 class EditorFotoDialog extends StatefulWidget {
   final File foto;
 
@@ -30,34 +33,27 @@ class _EditorFotoDialogState extends State<EditorFotoDialog> {
 
   @override
   Widget build(BuildContext context) {
-    return Dialog(
-      insetPadding: const EdgeInsets.all(16),
-      child: Column(
+    return DialogoApp(
+      titulo: 'Ajusta la foto',
+      iconoTitulo: Icons.crop,
+      contenido: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          const Padding(
-            padding: EdgeInsets.all(16),
-            child: Text(
-              'Ajusta la foto',
-              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-            ),
-          ),
-          const Padding(
-            padding: EdgeInsets.symmetric(horizontal: 16),
-            child: Text(
-              'Usa dos dedos para zoom, arrastra para mover. Centra bien la cara.',
-              textAlign: TextAlign.center,
-              style: TextStyle(color: Colors.grey),
-            ),
+          Text(
+            'Usa dos dedos para zoom, arrastra para mover. Centra bien la cara.',
+            textAlign: TextAlign.center,
+            style: AppTexto.secundario.copyWith(
+                color: AppColores.textoSecundario(context)),
           ),
           const SizedBox(height: 12),
           // Área de edición con marco circular (simula recorte de perfil)
           Container(
             height: 300,
-            margin: const EdgeInsets.symmetric(horizontal: 16),
             decoration: BoxDecoration(
-              border: Border.all(color: Colors.orange, width: 2),
-              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                  color: AppColores.naranja, width: 2),
+              borderRadius:
+                  BorderRadius.circular(AppRadio.md),
             ),
             clipBehavior: Clip.hardEdge,
             child: InteractiveViewer(
@@ -72,39 +68,32 @@ class _EditorFotoDialogState extends State<EditorFotoDialog> {
               ),
             ),
           ),
-          const SizedBox(height: 12),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              TextButton.icon(
-                icon: const Icon(Icons.refresh),
-                label: const Text('Restablecer'),
-                onPressed: _reset,
-              ),
-            ],
-          ),
-          Padding(
-            padding: const EdgeInsets.all(16),
-            child: Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton(
-                    onPressed: () => Navigator.of(context).pop(null),
-                    child: const Text('Cancelar'),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: ElevatedButton(
-                    onPressed: () => Navigator.of(context).pop(widget.foto),
-                    child: const Text('Usar foto'),
-                  ),
-                ),
-              ],
-            ),
-          ),
         ],
       ),
+      acciones: [
+        TextButton.icon(
+          icon: const Icon(Icons.refresh),
+          label: const Text('Restablecer'),
+          onPressed: _reset,
+        ),
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(null),
+          child: const Text('Cancelar'),
+        ),
+        ElevatedButton(
+          onPressed: () =>
+              Navigator.of(context).pop(widget.foto),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: AppColores.naranja,
+            foregroundColor: Colors.white,
+            shape: RoundedRectangleBorder(
+              borderRadius:
+                  BorderRadius.circular(AppRadio.md),
+            ),
+          ),
+          child: const Text('Usar foto'),
+        ),
+      ],
     );
   }
 }

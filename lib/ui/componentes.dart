@@ -449,3 +449,91 @@ class CampoTexto extends StatelessWidget {
     );
   }
 }
+
+// ---------------------------------------------------------------------------
+// Encabezado de sección (título + acción opcional "ver todo")
+// ---------------------------------------------------------------------------
+
+class EncabezadoSeccion extends StatelessWidget {
+  final String titulo;
+  final String? accionTexto;
+  final VoidCallback? onAccion;
+  const EncabezadoSeccion(
+      {super.key,
+      required this.titulo,
+      this.accionTexto,
+      this.onAccion});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(
+          AppEspacio.lg, AppEspacio.md, AppEspacio.lg, AppEspacio.sm),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(titulo, style: AppTexto.subtitulo),
+          ),
+          if (accionTexto != null && onAccion != null)
+            TextButton(
+              onPressed: onAccion,
+              style: TextButton.styleFrom(
+                padding: const EdgeInsets.symmetric(
+                    horizontal: AppEspacio.sm),
+                minimumSize: Size.zero,
+                tapTargetSize:
+                    MaterialTapTargetSize.shrinkWrap,
+              ),
+              child: Text(accionTexto!,
+                  style: AppTexto.etiqueta.copyWith(
+                      color: AppColores.naranja)),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Chip de estado (reemplaza chips armados a mano con fondos fijos)
+// ---------------------------------------------------------------------------
+
+class ChipEstado extends StatelessWidget {
+  final String texto;
+  final Color color;
+  final IconData? icono;
+  const ChipEstado(
+      {super.key,
+      required this.texto,
+      required this.color,
+      this.icono});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(
+          horizontal: AppEspacio.sm, vertical: 4),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.14),
+        borderRadius: BorderRadius.circular(AppRadio.lg),
+        border: Border.all(
+            color: color.withValues(alpha: 0.35)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (icono != null) ...[
+            Icon(icono, size: 13, color: color),
+            const SizedBox(width: 4),
+          ],
+          Flexible(
+            child: Text(texto,
+                style: AppTexto.etiqueta
+                    .copyWith(color: color),
+                overflow: TextOverflow.ellipsis),
+          ),
+        ],
+      ),
+    );
+  }
+}

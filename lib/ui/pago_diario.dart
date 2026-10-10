@@ -11,6 +11,8 @@ import 'package:uuid/uuid.dart';
 import '../localdb.dart';
 import '../negocio.dart';
 import '../sync.dart';
+import 'componentes.dart';
+import 'diseno.dart';
 import 'widgets.dart';
 
 class PagoDiarioScreen extends StatefulWidget {
@@ -181,9 +183,10 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
         TextEditingController(text: '${d['nota'] ?? ''}');
     final accion = await showDialog<String>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Editar pago diario'),
-        content: Column(
+      builder: (ctx) => DialogoApp(
+        titulo: 'Editar pago diario',
+        iconoTitulo: Icons.edit,
+        contenido: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             TextField(
@@ -199,17 +202,21 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
             ),
           ],
         ),
-        actions: [
+        acciones: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, 'eliminar'),
             child: const Text('Eliminar',
-                style: TextStyle(color: Colors.red)),
+                style: TextStyle(color: AppColores.error)),
           ),
           TextButton(
               onPressed: () => Navigator.pop(ctx),
               child: const Text('Cancelar')),
           ElevatedButton(
               onPressed: () => Navigator.pop(ctx, 'guardar'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColores.naranja,
+                foregroundColor: Colors.white,
+              ),
               child: const Text('Guardar')),
         ],
       ),
@@ -221,17 +228,18 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
     if (accion == 'eliminar') {
       final ok = await showDialog<bool>(
         context: context,
-        builder: (ctx) => AlertDialog(
-          title: const Text('¿Eliminar?'),
-          content: const Text(
+        builder: (ctx) => DialogoApp(
+          titulo: '¿Eliminar?',
+          iconoTitulo: Icons.delete,
+          contenido: const Text(
               'Se eliminará este registro de pago diario.'),
-          actions: [
+          acciones: [
             TextButton(
                 onPressed: () => Navigator.pop(ctx, false),
                 child: const Text('Cancelar')),
             ElevatedButton(
                 style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.red),
+                    backgroundColor: AppColores.error),
                 onPressed: () => Navigator.pop(ctx, true),
                 child: const Text('Eliminar')),
           ],
@@ -295,7 +303,7 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
       ),
       body: Column(
         children: [
-          const SyncBanner(),
+          const SyncBanner(compact: true),
           Expanded(
             child: _modoReporte
                 ? _vistaReporte()
@@ -312,7 +320,8 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
       padding: const EdgeInsets.all(16),
       children: [
                 Text('(${fmtMonto(_precio)} CUP por turno)',
-                    style: const TextStyle(color: Colors.grey)),
+                    style: TextStyle(
+                        color: AppColores.textoSecundario(context))),
                 const SizedBox(height: 16),
                 const Text('Turno:'),
                 Row(
@@ -332,23 +341,10 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
                 ),
                 const SizedBox(height: 16),
                 // Botón rápido + cantidad
-                Row(
-                  children: [
-                    Expanded(
-                      child: ElevatedButton.icon(
-                        icon: const Icon(Icons.flash_on,
-                            size: 20),
-                        label: const Text('Registrar 1',
-                            style: TextStyle(fontSize: 18)),
-                        style: ElevatedButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(
-                              vertical: 14),
-                        ),
-                        onPressed:
-                            _guardando ? null : _rapido,
-                      ),
-                    ),
-                  ],
+                BotonPrimario(
+                  texto: 'Registrar 1',
+                  icono: Icons.flash_on,
+                  onPressed: _guardando ? null : _rapido,
                 ),
                 const SizedBox(height: 12),
                 const Text('O varios a la vez:'),
@@ -370,26 +366,20 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
                             setState(() => _cantidad++)),
                   ],
                 ),
-                TextField(
+                CampoTexto(
                   controller: _notaCtrl,
-                  decoration: const InputDecoration(
-                    labelText: 'Nota (opcional)',
-                    hintText: 'Ej: grupo de 3',
-                    prefixIcon: Icon(Icons.note_outlined),
-                  ),
+                  etiqueta: 'Nota (opcional)',
+                  hint: 'Ej: grupo de 3',
+                  icono: Icons.note_outlined,
                 ),
                 const SizedBox(height: 8),
                 Text('Total: ${fmtMonto(_precio * _cantidad)} CUP',
                     style: const TextStyle(
                         fontSize: 20, fontWeight: FontWeight.bold)),
                 const SizedBox(height: 12),
-                SizedBox(
-                  width: double.infinity,
-                  child: OutlinedButton(
-                    onPressed: _guardando ? null : _guardar,
-                    child: const Text('Guardar cantidad',
-                        style: TextStyle(fontSize: 16)),
-                  ),
+                BotonSecundario(
+                  texto: 'Guardar cantidad',
+                  onPressed: _guardando ? null : _guardar,
                 ),
                 const SizedBox(height: 24),
                 const Divider(),
@@ -404,34 +394,41 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
                         '${fmtMonto(_totalHoy)} CUP',
                         style: const TextStyle(
                             fontWeight: FontWeight.bold,
-                            color: Color(0xFFE8821A))),
+                            color: AppColores.naranja)),
                   ],
                 ),
                 const SizedBox(height: 8),
                 if (_hoy.isEmpty)
-                  const Text('Nada registrado hoy todavía',
-                      style: TextStyle(color: Colors.grey)),
+                  Text('Nada registrado hoy todavía',
+                      style: TextStyle(
+                          color: AppColores.textoSecundario(context))),
                 for (final d in _hoy)
-                  Card(
-                    child: ListTile(
-                      dense: true,
-                      leading: Text(
-                          d['turno'] == 'mañana' ? 'Mañana' : 'Tarde',
-                          style:
-                              const TextStyle(fontSize: 22)),
-                      title: Text(
-                          '${d['cantidad']} pago(s) — ${fmtMonto(d['total'])} CUP'),
-                      subtitle: Text([
-                        if ((d['nota'] as String?)
-                                ?.isNotEmpty ==
-                            true)
-                          '${d['nota']}',
-                        '${d['registrado_por_nombre'] ?? ''}',
-                      ].join(' · ')),
-                      trailing: const Icon(
-                          Icons.edit_outlined,
-                          size: 20),
-                      onTap: () => _editarRegistro(d),
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: Tarjeta(
+                      padding: EdgeInsets.zero,
+                      child: ListTile(
+                        dense: true,
+                        leading: ChipEstado(
+                          texto: d['turno'] == 'mañana'
+                              ? 'Mañana'
+                              : 'Tarde',
+                          color: AppColores.naranja,
+                        ),
+                        title: Text(
+                            '${d['cantidad']} pago(s) — ${fmtMonto(d['total'])} CUP'),
+                        subtitle: Text([
+                          if ((d['nota'] as String?)
+                                  ?.isNotEmpty ==
+                              true)
+                            '${d['nota']}',
+                          '${d['registrado_por_nombre'] ?? ''}',
+                        ].join(' · ')),
+                        trailing: const Icon(
+                            Icons.edit_outlined,
+                            size: 20),
+                        onTap: () => _editarRegistro(d),
+                      ),
                     ),
                   ),
               ],
@@ -490,7 +487,7 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
                             vertical: 12),
                         decoration: BoxDecoration(
                           border: Border.all(
-                              color: Colors.grey.shade300),
+                              color: AppColores.borde(context)),
                           borderRadius:
                               BorderRadius.circular(12),
                         ),
@@ -526,26 +523,23 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
               ),
               const SizedBox(height: 16),
               // Total del día
-              Card(
-                color: const Color(0xFFE8821A),
-                child: Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Column(
-                    children: [
-                      Text(
-                        '${fmtMonto(total)} CUP',
-                        style: const TextStyle(
-                            fontSize: 28,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.white),
-                      ),
-                      Text(
-                        '${cantMan + cantTar} pagos en el día',
-                        style: const TextStyle(
-                            color: Colors.white70),
-                      ),
-                    ],
-                  ),
+              Tarjeta(
+                color: AppColores.naranja,
+                child: Column(
+                  children: [
+                    Text(
+                      '${fmtMonto(total)} CUP',
+                      style: const TextStyle(
+                          fontSize: 28,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white),
+                    ),
+                    Text(
+                      '${cantMan + cantTar} pagos en el día',
+                      style: const TextStyle(
+                          color: Colors.white70),
+                    ),
+                  ],
                 ),
               ),
               const SizedBox(height: 12),
@@ -564,26 +558,23 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
               const SizedBox(height: 12),
               // Comparativas
               if (ayerTotal > 0 || prom7 > 0)
-                Card(
-                  child: Padding(
-                    padding: const EdgeInsets.all(12),
-                    child: Column(
-                      crossAxisAlignment:
-                          CrossAxisAlignment.start,
-                      children: [
-                        const Text('Comparativa',
-                            style: TextStyle(
-                                fontWeight:
-                                    FontWeight.bold)),
-                        const SizedBox(height: 4),
-                        if (ayerTotal > 0)
-                          Text(
-                              'Ayer: ${fmtMonto(ayerTotal)} CUP'),
-                        if (prom7 > 0)
-                          Text(
-                              'Promedio 7 días: ${fmtMonto(prom7)} CUP/día'),
-                      ],
-                    ),
+                Tarjeta(
+                  child: Column(
+                    crossAxisAlignment:
+                        CrossAxisAlignment.start,
+                    children: [
+                      const Text('Comparativa',
+                          style: TextStyle(
+                              fontWeight:
+                                  FontWeight.bold)),
+                      const SizedBox(height: 4),
+                      if (ayerTotal > 0)
+                        Text(
+                            'Ayer: ${fmtMonto(ayerTotal)} CUP'),
+                      if (prom7 > 0)
+                        Text(
+                            'Promedio 7 días: ${fmtMonto(prom7)} CUP/día'),
+                    ],
                   ),
                 ),
               const SizedBox(height: 12),
@@ -597,10 +588,9 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
                   height: 100,
                   padding: const EdgeInsets.all(8),
                   decoration: BoxDecoration(
-                    color: Theme.of(context).brightness ==
-                            Brightness.dark
-                        ? Colors.grey.shade800
-                        : Colors.grey.shade100,
+                    color: AppColores.superficie(context),
+                    border: Border.all(
+                        color: AppColores.borde(context)),
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: Row(
@@ -628,8 +618,7 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
                             width: 24,
                             height: h,
                             decoration: BoxDecoration(
-                              color:
-                                  const Color(0xFFE8821A),
+                              color: AppColores.naranja,
                               borderRadius:
                                   BorderRadius.circular(4),
                             ),
@@ -654,18 +643,22 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
                       TextStyle(fontWeight: FontWeight.bold)),
               const SizedBox(height: 8),
               if (_reporteDatos.isEmpty)
-                const Text('Sin registros este día',
-                    style: TextStyle(color: Colors.grey)),
+                Text('Sin registros este día',
+                    style: TextStyle(
+                        color: AppColores.textoSecundario(context))),
               for (final d in _reporteDatos)
-                Card(
-                  child: ListTile(
-                    dense: true,
-                    leading: Text(
-                        d['turno'] == 'mañana'
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: Tarjeta(
+                    padding: EdgeInsets.zero,
+                    child: ListTile(
+                      dense: true,
+                      leading: ChipEstado(
+                        texto: d['turno'] == 'mañana'
                             ? 'Mañana'
                             : 'Tarde',
-                        style:
-                            const TextStyle(fontSize: 22)),
+                        color: AppColores.naranja,
+                      ),
                     title: Text(
                         '${d['cantidad']} pago(s) — ${fmtMonto(d['total'])} CUP'),
                     subtitle: Text([
@@ -681,6 +674,7 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
                     ]
                         .where((s) => s.isNotEmpty)
                         .join(' · ')),
+                    ),
                   ),
                 ),
             ],
@@ -688,24 +682,23 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
   }
 
   Widget _tarjetaTurno(String titulo, int cantidad, double total) {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Column(
-          children: [
-            Text(titulo,
-                style: const TextStyle(fontSize: 14)),
-            const SizedBox(height: 4),
-            Text(fmtMonto(total),
-                style: const TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                    color: Color(0xFFE8821A))),
-            Text('$cantidad pagos',
-                style: const TextStyle(
-                    fontSize: 12, color: Colors.grey)),
-          ],
-        ),
+    return Tarjeta(
+      padding: const EdgeInsets.all(12),
+      child: Column(
+        children: [
+          Text(titulo,
+              style: const TextStyle(fontSize: 14)),
+          const SizedBox(height: 4),
+          Text(fmtMonto(total),
+              style: const TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: AppColores.naranja)),
+          Text('$cantidad pagos',
+              style: TextStyle(
+                  fontSize: 12,
+                  color: AppColores.textoSecundario(context))),
+        ],
       ),
     );
   }

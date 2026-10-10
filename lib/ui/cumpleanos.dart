@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 
 import '../negocio.dart';
 import 'buscar.dart';
+import 'diseno.dart';
 import 'ficha.dart';
 import 'widgets.dart';
 
@@ -73,7 +74,8 @@ class _CumpleanosScreenState extends State<CumpleanosScreen> {
               alignment: Alignment.centerLeft,
               child: Text(
                 '${_res.length} cumpleañero(s) este mes',
-                style: const TextStyle(color: Colors.grey, fontSize: 12),
+                style: AppTexto.secundario.copyWith(
+                    color: AppColores.textoSecundario(context)),
               ),
             ),
           ),
@@ -111,9 +113,11 @@ class _CumpleanosScreenState extends State<CumpleanosScreen> {
                                           fontWeight: FontWeight.bold)),
                                   Text(
                                       '${c['_fecha_cumple']} · Cumple ${c['_cumple']}',
-                                      style: const TextStyle(
-                                          color: Colors.grey,
-                                          fontSize: 12)),
+                                      style: AppTexto.secundario
+                                          .copyWith(
+                                              color: AppColores
+                                                  .textoSecundario(
+                                                      context))),
                                 ],
                               ),
                             );

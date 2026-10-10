@@ -192,12 +192,13 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
 
   /// Fila de tendencia con flecha ↑/↓/= (v1.0.16).
   Widget _filaTendencia(String etiqueta, double antes, double ahora) {
+    final textoSuave = AppColores.textoSecundario(context);
     String flecha;
     Color color;
     String pct = '';
     if (antes <= 0 && ahora <= 0) {
       flecha = '=';
-      color = AppColores.textoSecundarioClaro;
+      color = textoSuave;
     } else if (antes <= 0) {
       flecha = '↑';
       color = AppColores.exito;
@@ -211,7 +212,7 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
         color = AppColores.error;
       } else {
         flecha = '=';
-        color = AppColores.textoSecundarioClaro;
+        color = textoSuave;
       }
       pct = ' (${(d * 100).toStringAsFixed(0)}%)';
     }
@@ -260,22 +261,24 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
                   fontWeight: FontWeight.bold, fontSize: 16),
             ),
             const SizedBox(height: 8),
-            const Text(
+            Text(
               'Revisa que todo esté bien antes de irte. '
               'El pendiente solo se reinicia cuando Jc confirme '
               'que recibió el dinero.',
-              style: TextStyle(fontSize: 12, color: Colors.grey),
+              style: TextStyle(
+                  fontSize: 12,
+                  color: AppColores.textoSecundario(ctx)),
             ),
             if (_cerrado) ...[
               const SizedBox(height: 8),
               const Row(
                 children: [
                   Icon(Icons.check_circle,
-                      color: Colors.green, size: 16),
+                      color: AppColores.exito, size: 16),
                   SizedBox(width: 6),
                   Text('Este turno ya está cerrado',
                       style: TextStyle(
-                          color: Colors.green,
+                          color: AppColores.exito,
                           fontWeight: FontWeight.bold)),
                 ],
               ),
@@ -515,12 +518,9 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
                       ),
                     ),
                     if (_pendPorDia.isNotEmpty) ...[
-                      const SizedBox(height: 12),
-                      const Text(
-                          'Detalle del pendiente por día:',
-                          style: TextStyle(
-                              fontWeight: FontWeight.bold)),
-                      const SizedBox(height: 4),
+                      const EncabezadoSeccion(
+                          titulo:
+                              'Detalle del pendiente por día'),
                       for (final e in _pendPorDia.entries)
                         ListTile(
                           dense: true,
@@ -604,10 +604,11 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
                             const SizedBox(
                                 height: AppEspacio.sm),
                             if (_vencimientos.isEmpty)
-                              const Text(
+                              Text(
                                   'Nada por vencer en 7 días.',
                                   style: TextStyle(
-                                      color: Colors.grey,
+                                      color: AppColores
+                                          .textoSecundario(context),
                                       fontSize: 13)),
                             for (final v in _vencimientos
                                 .take(10))
@@ -657,7 +658,7 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
                           ? OutlinedButton.icon(
                               icon: const Icon(
                                   Icons.check_circle,
-                                  color: Colors.green),
+                                  color: AppColores.exito),
                               label: Text(
                                   'Turno cerrado (${_turnoActual().toLowerCase()})'),
                               onPressed: _cierreTurno,
@@ -684,16 +685,15 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
                               fontWeight: FontWeight.bold)),
                     ),
                   ),
-                  const SizedBox(height: 16),
-                  const Text('Historial diario:',
-                      style: TextStyle(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 16)),
                   const SizedBox(height: 4),
+                  const EncabezadoSeccion(
+                      titulo: 'Historial diario'),
                   if (_historial.isEmpty)
-                    const Text(
+                    Text(
                         'Sin cobros registrados en los últimos 60 días.',
-                        style: TextStyle(color: Colors.grey)),
+                        style: TextStyle(
+                            color: AppColores
+                                .textoSecundario(context))),
                   // v1.0.16: agrupado por semana (idea 8)
                   for (final sem
                       in _agruparPorSemana(_historial))

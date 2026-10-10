@@ -13,7 +13,9 @@ import '../sync.dart';
 /// con porcentaje y mensajes en lenguaje humano. Toca para sincronizar
 /// (cuando está en reposo) o para ver el detalle (en curso).
 class SyncBanner extends StatefulWidget {
-  const SyncBanner({super.key});
+  /// Variante compacta de una línea para formularios.
+  final bool compact;
+  const SyncBanner({super.key, this.compact = false});
 
   @override
   State<SyncBanner> createState() => _SyncBannerState();
@@ -170,6 +172,60 @@ class _SyncBannerState extends State<SyncBanner>
         final pct = s.progreso == null
             ? null
             : '${(s.progreso! * 100).round()}%';
+        // Variante compacta: una línea, sin subtítulo ni progreso.
+        if (widget.compact) {
+          return Container(
+            margin: const EdgeInsets.symmetric(
+                horizontal: 12, vertical: 4),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: gradiente,
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: InkWell(
+              borderRadius: BorderRadius.circular(10),
+              onTap: () {
+                if (!enProgreso) SyncEngine.instance.run();
+              },
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 10, vertical: 6),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    RotationTransition(
+                      turns: enProgreso
+                          ? _giro
+                          : const AlwaysStoppedAnimation(0),
+                      child: Icon(icono,
+                          color: Colors.white, size: 16),
+                    ),
+                    const SizedBox(width: 6),
+                    Flexible(
+                      child: Text(titulo,
+                          style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600),
+                          overflow: TextOverflow.ellipsis),
+                    ),
+                    if (pct != null) ...[
+                      const SizedBox(width: 6),
+                      Text(pct,
+                          style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold)),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+          );
+        }
         return Container(
           margin: const EdgeInsets.symmetric(
               horizontal: 12, vertical: 8),
@@ -345,5 +401,74 @@ Future<void> copiar(BuildContext context, String texto) async {
   if (context.mounted) {
     ScaffoldMessenger.of(context)
         .showSnackBar(const SnackBar(content: Text('Copiado')));
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Píldora de sincronización para el encabezado (tocable → ColaScreen).
+// ---------------------------------------------------------------------------
+
+class SyncPill extends StatelessWidget {
+  final VoidCallback onTap;
+  const SyncPill({super.key, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<SyncStatus>(
+      stream: SyncEngine.instance.statusStream,
+      initialData: const SyncStatus(),
+      builder: (ctx, snap) {
+        final s = snap.data!;
+        final enProgreso = s.phase == SyncPhase.uploading ||
+            s.phase == SyncPhase.downloading ||
+            s.phase == SyncPhase.photos;
+        final Color color;
+        final IconData icono;
+        final String texto;
+        if (s.phase == SyncPhase.error) {
+          color = const Color(0xFFEF4444);
+          icono = Icons.error_outline;
+          texto = 'Error';
+        } else if (enProgreso) {
+          color = const Color(0xFFF59E0B);
+          icono = Icons.sync;
+          texto = 'Sincronizando';
+        } else if (s.pending > 0) {
+          color = const Color(0xFFFBBF24);
+          icono = Icons.schedule;
+          texto = '${s.pending} por subir';
+        } else {
+          color = const Color(0xFF22C55E);
+          icono = Icons.check_circle_outline;
+          texto = 'Al día';
+        }
+        return InkWell(
+          borderRadius: BorderRadius.circular(20),
+          onTap: onTap,
+          child: Container(
+            padding: const EdgeInsets.symmetric(
+                horizontal: 10, vertical: 6),
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.15),
+              borderRadius: BorderRadius.circular(20),
+              border:
+                  Border.all(color: color.withValues(alpha: 0.4)),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(icono, size: 14, color: color),
+                const SizedBox(width: 4),
+                Text(texto,
+                    style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                        color: color)),
+              ],
+            ),
+          ),
+        );
+      },
+    );
   }
 }

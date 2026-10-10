@@ -126,4 +126,40 @@ void main() {
       expect(esVersionMayor('', '1.1.1'), false);
     });
   });
+
+  group('totalVentaUsd', () {
+    test('venta USD suma precio por cantidad', () {
+      expect(
+          totalVentaUsd(
+              {'moneda': 'USD', 'precio': 10.0, 'cantidad': 2}),
+          20.0);
+    });
+
+    test('usa el total si viene calculado', () {
+      expect(
+          totalVentaUsd({
+            'moneda': 'USD',
+            'precio': 10.0,
+            'cantidad': 2,
+            'total': 19.5
+          }),
+          19.5);
+    });
+
+    test('venta CUP devuelve 0', () {
+      expect(
+          totalVentaUsd(
+              {'moneda': 'CUP', 'precio': 500.0, 'cantidad': 2}),
+          0);
+    });
+  });
+
+  group('totalVentaCup', () {
+    test('venta USD devuelve 0 (no se mezcla)', () {
+      expect(
+          totalVentaCup(
+              {'moneda': 'USD', 'precio': 10.0, 'cantidad': 2}),
+          0);
+    });
+  });
 }

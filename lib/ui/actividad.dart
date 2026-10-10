@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../localdb.dart';
 import '../negocio.dart';
+import 'componentes.dart';
 import 'diseno.dart';
 import 'ficha.dart';
 
@@ -138,12 +139,12 @@ class _ActividadScreenState extends State<ActividadScreen> {
   }
 
   /// Color semántico por tipo de acción.
-  Color _colorAccion(String accion) {
+  Color _colorAccion(BuildContext context, String accion) {
     if (accion.contains('inscri')) return AppColores.exito;
     if (accion.contains('pago')) return AppColores.naranja;
     if (accion.contains('eliminar')) return AppColores.error;
     if (accion.contains('editar')) return AppColores.info;
-    return AppColores.textoSecundarioClaro;
+    return AppColores.textoSecundario(context);
   }
 
   /// Agrupa por día: devuelve lista de (tituloDia, items).
@@ -230,13 +231,11 @@ class _ActividadScreenState extends State<ActividadScreen> {
             child: _cargando
                 ? const Center(child: CircularProgressIndicator())
                 : filtrados.isEmpty
-                    ? const Center(
-                        child: Text(
-                          'Sin actividad reciente.\n'
-                          'Sincroniza para actualizar.',
-                          textAlign: TextAlign.center,
-                          style: TextStyle(color: Colors.grey),
-                        ),
+                    ? const EstadoVacio(
+                        icono: Icons.history_outlined,
+                        titulo: 'Sin actividad reciente',
+                        subtitulo:
+                            'Sincroniza para actualizar.',
                       )
                     : RefreshIndicator(
                         onRefresh: _cargar,
@@ -253,11 +252,10 @@ class _ActividadScreenState extends State<ActividadScreen> {
                                       16, 12, 16, 4),
                                   child: Text(
                                     grupo.key,
-                                    style: const TextStyle(
-                                      fontWeight: FontWeight.bold,
-                                      fontSize: 14,
-                                      color: Colors.grey,
-                                    ),
+                                    style: AppTexto.subtitulo.copyWith(
+                                        color: AppColores
+                                            .textoSecundario(
+                                                context)),
                                   ),
                                 ),
                                 ...grupo.value.map((a) {
@@ -266,7 +264,7 @@ class _ActividadScreenState extends State<ActividadScreen> {
                                   final tieneCliente =
                                       _clienteIdDe(a) != null;
                                   final color =
-                                      _colorAccion(accion);
+                                      _colorAccion(context, accion);
                                   return Padding(
                                     padding: const EdgeInsets
                                         .symmetric(
@@ -374,12 +372,13 @@ class _ActividadScreenState extends State<ActividadScreen> {
                                               ),
                                             ),
                                             if (tieneCliente)
-                                              const Icon(
+                                              Icon(
                                                   Icons
                                                       .chevron_right,
                                                   size: 20,
-                                                  color: Colors
-                                                      .grey),
+                                                  color: AppColores
+                                                      .textoSecundario(
+                                                          context)),
                                           ],
                                         ),
                                       ),

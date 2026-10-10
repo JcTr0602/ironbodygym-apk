@@ -8,6 +8,8 @@ library;
 import 'package:flutter/material.dart';
 
 import '../negocio.dart';
+import 'componentes.dart';
+import 'diseno.dart';
 import 'ficha.dart';
 import 'widgets.dart';
 
@@ -64,7 +66,7 @@ class _DetallePendienteScreenState extends State<DetallePendienteScreen> {
         _items.fold<double>(0, (s, e) => s + ((e['tipo'] == 'pago' ? e['monto'] : e['total']) as num).toDouble());
     return Scaffold(
       appBar: AppBar(
-        title: Text('⏳ ${widget.nombre}'),
+        title: Text(widget.nombre),
       ),
       body: Column(
         children: [
@@ -76,8 +78,9 @@ class _DetallePendienteScreenState extends State<DetallePendienteScreen> {
               child: Row(
                 children: [
                   Text('${_items.length} movimiento(s)',
-                      style:
-                          const TextStyle(color: Colors.grey)),
+                      style: TextStyle(
+                          color: AppColores
+                              .textoSecundario(context))),
                   const Spacer(),
                   Text('${fmtMonto(total)} CUP',
                       style: const TextStyle(
@@ -91,73 +94,81 @@ class _DetallePendienteScreenState extends State<DetallePendienteScreen> {
                 ? const Center(
                     child: CircularProgressIndicator())
                 : _items.isEmpty
-                    ? const Center(
+                    ? Center(
                         child: Text(
                             'Nada pendiente.',
                             style: TextStyle(
-                                color: Colors.grey)))
+                                color: AppColores
+                                    .textoSecundario(context))))
                     : ListView.builder(
                         padding: const EdgeInsets.all(12),
                         itemCount: _items.length,
                         itemBuilder: (c, i) {
                           final it = _items[i];
                           if (it['tipo'] == 'diario') {
-                            return Card(
-                              child: ListTile(
-                                leading: const Text('',
-                                    style: TextStyle(
-                                        fontSize: 24)),
-                                title: Text(
-                                    'Pago diario — ${it['turno']}'),
-                                subtitle: Text(
-                                    '${fmtFecha(it['fecha'])} · '
-                                    '${it['cantidad']} clientes'
-                                    '${(it['nota'] as String).isNotEmpty ? ' · ${it['nota']}' : ''}'),
-                                trailing: Text(
-                                    '${fmtMonto((it['total'] as num).toDouble())} CUP',
-                                    style: const TextStyle(
-                                        fontWeight:
-                                            FontWeight.bold)),
+                            return Padding(
+                              padding: const EdgeInsets.only(
+                                  bottom: 8),
+                              child: Tarjeta(
+                                padding: EdgeInsets.zero,
+                                child: ListTile(
+                                  title: Text(
+                                      'Pago diario — ${it['turno']}'),
+                                  subtitle: Text(
+                                      '${fmtFecha(it['fecha'])} · '
+                                      '${it['cantidad']} clientes'
+                                      '${(it['nota'] as String).isNotEmpty ? ' · ${it['nota']}' : ''}'),
+                                  trailing: Text(
+                                      '${fmtMonto((it['total'] as num).toDouble())} CUP',
+                                      style: const TextStyle(
+                                          fontWeight:
+                                              FontWeight.bold)),
+                                ),
                               ),
                             );
                           }
                           final esInsc =
                               it['es_inscripcion'] == true;
-                          return Card(
-                            child: ListTile(
-                              leading: Icon(
-                                  esInsc
-                                      ? Icons.person_add
-                                      : Icons.payments,
-                                  color: const Color(0xFFE8821A),
-                                  size: 24),
-                              title: Text(
-                                  '${it['cliente_nombre']}',
-                                  style: const TextStyle(
-                                      fontWeight:
-                                          FontWeight.w500)),
-                              subtitle: Text(
-                                  '${esInsc ? 'Inscripción' : _etiquetaPeriodo(it)} · '
-                                  '${fmtFecha(it['fecha'])}'),
-                              trailing: Text(
-                                  '${fmtMonto((it['monto'] as num).toDouble())} CUP',
-                                  style: const TextStyle(
-                                      fontWeight:
-                                          FontWeight.bold)),
-                              onTap: () {
-                                final cid =
-                                    it['cliente_id'] as int?;
-                                if (cid == null ||
-                                    cid == 0) {
-                                  return;
-                                }
-                                Navigator.of(context)
-                                    .push(MaterialPageRoute(
-                                        builder: (_) =>
-                                            FichaScreen(
-                                                clienteId:
-                                                    cid)));
-                              },
+                          return Padding(
+                            padding:
+                                const EdgeInsets.only(bottom: 8),
+                            child: Tarjeta(
+                              padding: EdgeInsets.zero,
+                              child: ListTile(
+                                leading: Icon(
+                                    esInsc
+                                        ? Icons.person_add
+                                        : Icons.payments,
+                                    color: AppColores.naranja,
+                                    size: 24),
+                                title: Text(
+                                    '${it['cliente_nombre']}',
+                                    style: const TextStyle(
+                                        fontWeight:
+                                            FontWeight.w500)),
+                                subtitle: Text(
+                                    '${esInsc ? 'Inscripción' : _etiquetaPeriodo(it)} · '
+                                    '${fmtFecha(it['fecha'])}'),
+                                trailing: Text(
+                                    '${fmtMonto((it['monto'] as num).toDouble())} CUP',
+                                    style: const TextStyle(
+                                        fontWeight:
+                                            FontWeight.bold)),
+                                onTap: () {
+                                  final cid =
+                                      it['cliente_id'] as int?;
+                                  if (cid == null ||
+                                      cid == 0) {
+                                    return;
+                                  }
+                                  Navigator.of(context)
+                                      .push(MaterialPageRoute(
+                                          builder: (_) =>
+                                              FichaScreen(
+                                                  clienteId:
+                                                      cid)));
+                                },
+                              ),
                             ),
                           );
                         },

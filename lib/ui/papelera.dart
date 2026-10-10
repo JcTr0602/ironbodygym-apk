@@ -14,7 +14,9 @@ import '../localdb.dart';
 import '../negocio.dart';
 import '../sync.dart';
 import 'buscar.dart';
+import 'componentes.dart';
 import 'dialogo_pago.dart';
+import 'diseno.dart';
 import 'ficha.dart';
 import 'widgets.dart';
 
@@ -40,21 +42,13 @@ class _PapeleraScreenState extends State<PapeleraScreen> {
   }
 
   Future<void> _recuperar(Map<String, dynamic> c) async {
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Recuperar cliente'),
-        content: Text(
-            '¿Reactivar a ${c['nombre']}? Volverá a aparecer en las listas.'),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Cancelar')),
-          ElevatedButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('Recuperar')),
-        ],
-      ),
+    final ok = await DialogoApp.confirmar(
+      context,
+      titulo: 'Recuperar cliente',
+      mensaje:
+          '¿Reactivar a ${c['nombre']}? Volverá a aparecer en las listas.',
+      aceptar: 'Recuperar',
+      icono: Icons.restore_from_trash,
     );
     if (ok != true || !mounted) return;
     await LocalDb.instance.queueOp(
@@ -74,21 +68,13 @@ class _PapeleraScreenState extends State<PapeleraScreen> {
 
   /// Recupera y de una vez registra la renovación (punto 30).
   Future<void> _recuperarYRenovar(Map<String, dynamic> c) async {
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Recuperar y renovar'),
-        content: Text(
-            '¿Reactivar a ${c['nombre']} y registrar su pago ahora?'),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Cancelar')),
-          ElevatedButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('Continuar')),
-        ],
-      ),
+    final ok = await DialogoApp.confirmar(
+      context,
+      titulo: 'Recuperar y renovar',
+      mensaje:
+          '¿Reactivar a ${c['nombre']} y registrar su pago ahora?',
+      aceptar: 'Continuar',
+      icono: Icons.autorenew,
     );
     if (ok != true || !mounted) return;
     await LocalDb.instance.queueOp(
@@ -131,44 +117,26 @@ class _PapeleraScreenState extends State<PapeleraScreen> {
     final mas = _seleccionados.length > 3
         ? ' y ${_seleccionados.length - 3} más'
         : '';
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Eliminar definitivamente'),
-        content: Text(
-          '¿Borrar PARA SIEMPRE a $nombres$mas?\n\n'
+    // Primera confirmación
+    final ok = await DialogoApp.confirmar(
+      context,
+      titulo: 'Eliminar definitivamente',
+      mensaje: '¿Borrar PARA SIEMPRE a $nombres$mas?\n\n'
           'Esta acción no se puede deshacer. Solo el dueño puede hacerlo.',
-        ),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Cancelar')),
-          ElevatedButton(
-              style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-              onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('Eliminar para siempre')),
-        ],
-      ),
+      aceptar: 'Eliminar para siempre',
+      icono: Icons.delete_forever,
+      peligro: true,
     );
     if (ok != true || !mounted) return;
     // Segunda confirmación
-    final ok2 = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('¿Seguro?'),
-        content: const Text(
+    final ok2 = await DialogoApp.confirmar(
+      context,
+      titulo: '¿Seguro?',
+      mensaje:
           'Última oportunidad. Los datos se borrarán permanentemente.',
-        ),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Cancelar')),
-          ElevatedButton(
-              style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-              onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('Sí, eliminar')),
-        ],
-      ),
+      aceptar: 'Sí, eliminar',
+      icono: Icons.warning,
+      peligro: true,
     );
     if (ok2 != true || !mounted) return;
     for (final id in _seleccionados) {
@@ -179,8 +147,9 @@ class _PapeleraScreenState extends State<PapeleraScreen> {
       );
     }
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('${_seleccionados.length} eliminados definitivamente')));
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(
+            '${_seleccionados.length} eliminados definitivamente')));
     setState(() => _seleccionados.clear());
     _cargar();
     SyncEngine.instance.push();
@@ -195,9 +164,10 @@ class _PapeleraScreenState extends State<PapeleraScreen> {
         actions: _seleccionados.isNotEmpty
             ? [
                 TextButton(
-                  onPressed: () => setState(() => _seleccionados.clear()),
-                  child: const Text('Limpiar',
-                      style: TextStyle(color: Colors.white)),
+                  onPressed: () =>
+                      setState(() => _seleccionados.clear()),
+                  // Hereda el blanco del AppBarTheme (oscuro en ambos temas).
+                  child: const Text('Limpiar'),
                 ),
               ]
             : null,
@@ -205,29 +175,37 @@ class _PapeleraScreenState extends State<PapeleraScreen> {
       body: Column(
         children: [
           const SyncBanner(),
-          const Padding(
-            padding: EdgeInsets.all(12),
+          Padding(
+            padding: const EdgeInsets.all(AppEspacio.md),
             child: Text(
               'Clientes inactivos. Al recuperarlos no hay que inscribirlos de nuevo.',
-              style: TextStyle(color: Colors.grey, fontSize: 12),
+              style: AppTexto.secundario.copyWith(
+                  color:
+                      AppColores.textoSecundario(context)),
               textAlign: TextAlign.center,
             ),
           ),
           if (_seleccionados.isNotEmpty)
             Container(
-              color: Colors.orange.shade50,
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              color: AppColores.naranja
+                  .withValues(alpha: 0.12),
+              padding: const EdgeInsets.symmetric(
+                  horizontal: AppEspacio.lg,
+                  vertical: AppEspacio.sm),
               child: Row(
                 children: [
                   Text('${_seleccionados.length} seleccionados',
-                      style: const TextStyle(fontWeight: FontWeight.bold)),
+                      style: AppTexto.subtitulo),
                   const Spacer(),
                   if (esDueno)
                     ElevatedButton.icon(
-                      icon: const Icon(Icons.delete_forever, size: 18),
+                      icon: const Icon(Icons.delete_forever,
+                          size: 18),
                       label: const Text('Eliminar'),
                       style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.red),
+                          backgroundColor:
+                              AppColores.error,
+                          foregroundColor: Colors.white),
                       onPressed: _eliminarDefinitivo,
                     ),
                 ],
@@ -235,8 +213,10 @@ class _PapeleraScreenState extends State<PapeleraScreen> {
             ),
           Expanded(
             child: _res.isEmpty
-                ? const Center(
-                    child: Text('Papelera vacía'))
+                ? const EstadoVacio(
+                    icono: Icons.delete_outline,
+                    titulo: 'Papelera vacía',
+                  )
                 : RefreshIndicator(
                     onRefresh: _cargar,
                     child: ListView.builder(
@@ -244,7 +224,8 @@ class _PapeleraScreenState extends State<PapeleraScreen> {
                       itemBuilder: (ctx, i) {
                         final c = _res[i];
                         final id = (c['id'] as int?) ?? 0;
-                        final seleccionado = _seleccionados.contains(id);
+                        final seleccionado =
+                            _seleccionados.contains(id);
                         return FilaCliente(
                           cliente: c,
                           onTap: () {
@@ -290,7 +271,8 @@ class _PapeleraScreenState extends State<PapeleraScreen> {
                             mainAxisSize: MainAxisSize.min,
                             children: [
                               TextButton(
-                                child: const Icon(Icons.restore_from_trash),
+                                child: const Icon(
+                                    Icons.restore_from_trash),
                                 onPressed: () =>
                                     _recuperar(c),
                               ),

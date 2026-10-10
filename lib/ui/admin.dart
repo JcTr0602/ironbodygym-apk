@@ -29,6 +29,8 @@ import 'exportar_excel.dart';
 import 'usuarios.dart';
 import 'widgets.dart';
 import 'detalle_pendiente.dart';
+import 'suplementos.dart';
+import 'historial_ventas.dart';
 
 class AdminScreen extends StatefulWidget {
   const AdminScreen({super.key});
@@ -132,30 +134,18 @@ class _AdminScreenState extends State<AdminScreen> {
           content: Text('No hay montos válidos para guardar')));
       return;
     }
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Cambiar precios'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            for (final e in cambios.entries)
-              Text('• ${_etiqueta(e.key)}: ${fmtMonto(e.value)} CUP'),
-            const SizedBox(height: 8),
-            const Text(
-                'Se aplicará en la próxima sincronización.'),
-          ],
-        ),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Cancelar')),
-          ElevatedButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('Confirmar')),
-        ],
-      ),
+    final mensaje = [
+      for (final e in cambios.entries)
+        '• ${_etiqueta(e.key)}: ${fmtMonto(e.value)} CUP',
+      '',
+      'Se aplicará en la próxima sincronización.',
+    ].join('\n');
+    final ok = await DialogoApp.confirmar(
+      context,
+      titulo: 'Cambiar precios',
+      mensaje: mensaje,
+      aceptar: 'Confirmar',
+      icono: Icons.price_change,
     );
     if (ok != true || !mounted) return;
     for (final e in cambios.entries) {
@@ -213,39 +203,41 @@ class _AdminScreenState extends State<AdminScreen> {
         TextEditingController(text: '${t.dias}');
     final ok = await showDialog<bool>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text('Editar ${t.nombre}'),
-        content: Column(
+      builder: (ctx) => DialogoApp(
+        titulo: 'Editar ${t.nombre}',
+        iconoTitulo: Icons.edit,
+        contenido: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            TextField(
-                controller: nombreCtrl,
-                decoration: const InputDecoration(
-                    labelText: 'Nombre',
-                    border: OutlineInputBorder())),
+            CampoTexto(
+                controller: nombreCtrl, etiqueta: 'Nombre'),
             const SizedBox(height: 8),
-            TextField(
+            CampoTexto(
                 controller: montoCtrl,
-                keyboardType: const TextInputType
-                    .numberWithOptions(decimal: true),
-                decoration: const InputDecoration(
-                    labelText: 'Monto (CUP)',
-                    border: OutlineInputBorder())),
+                etiqueta: 'Monto (CUP)',
+                teclado: const TextInputType
+                    .numberWithOptions(decimal: true)),
             const SizedBox(height: 8),
-            TextField(
+            CampoTexto(
                 controller: diasCtrl,
-                keyboardType: TextInputType.number,
-                decoration: const InputDecoration(
-                    labelText: 'Días que cubre',
-                    border: OutlineInputBorder())),
+                etiqueta: 'Días que cubre',
+                teclado: TextInputType.number),
           ],
         ),
-        actions: [
+        acciones: [
           TextButton(
               onPressed: () => Navigator.pop(ctx, false),
               child: const Text('Cancelar')),
           ElevatedButton(
               onPressed: () => Navigator.pop(ctx, true),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColores.naranja,
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(
+                  borderRadius:
+                      BorderRadius.circular(AppRadio.md),
+                ),
+              ),
               child: const Text('Guardar')),
         ],
       ),
@@ -286,39 +278,42 @@ class _AdminScreenState extends State<AdminScreen> {
     final diasCtrl = TextEditingController(text: '30');
     final ok = await showDialog<bool>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Nuevo tipo de pago'),
-        content: Column(
+      builder: (ctx) => DialogoApp(
+        titulo: 'Nuevo tipo de pago',
+        iconoTitulo: Icons.add,
+        contenido: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            TextField(
+            CampoTexto(
                 controller: nombreCtrl,
-                decoration: const InputDecoration(
-                    labelText: 'Nombre (ej: Trimestre)',
-                    border: OutlineInputBorder())),
+                etiqueta: 'Nombre (ej: Trimestre)'),
             const SizedBox(height: 8),
-            TextField(
+            CampoTexto(
                 controller: montoCtrl,
-                keyboardType: const TextInputType
-                    .numberWithOptions(decimal: true),
-                decoration: const InputDecoration(
-                    labelText: 'Monto (CUP)',
-                    border: OutlineInputBorder())),
+                etiqueta: 'Monto (CUP)',
+                teclado: const TextInputType
+                    .numberWithOptions(decimal: true)),
             const SizedBox(height: 8),
-            TextField(
+            CampoTexto(
                 controller: diasCtrl,
-                keyboardType: TextInputType.number,
-                decoration: const InputDecoration(
-                    labelText: 'Días que cubre',
-                    border: OutlineInputBorder())),
+                etiqueta: 'Días que cubre',
+                teclado: TextInputType.number),
           ],
         ),
-        actions: [
+        acciones: [
           TextButton(
               onPressed: () => Navigator.pop(ctx, false),
               child: const Text('Cancelar')),
           ElevatedButton(
               onPressed: () => Navigator.pop(ctx, true),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColores.naranja,
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(
+                  borderRadius:
+                      BorderRadius.circular(AppRadio.md),
+                ),
+              ),
               child: const Text('Agregar')),
         ],
       ),
@@ -356,21 +351,13 @@ class _AdminScreenState extends State<AdminScreen> {
   }
 
   Future<void> _eliminarTipo(TipoPago t) async {
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Eliminar tipo'),
-        content: Text(
-            '¿Eliminar "${t.nombre}"? Ya no aparecerá al cobrar.'),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Cancelar')),
-          ElevatedButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('Eliminar')),
-        ],
-      ),
+    final ok = await DialogoApp.confirmar(
+      context,
+      titulo: 'Eliminar tipo',
+      mensaje: '¿Eliminar "${t.nombre}"? Ya no aparecerá al cobrar.',
+      aceptar: 'Eliminar',
+      peligro: true,
+      icono: Icons.delete_outline,
     );
     if (ok != true || !mounted) return;
     setState(() {
@@ -379,31 +366,18 @@ class _AdminScreenState extends State<AdminScreen> {
   }
 
   Future<void> _guardarTipos() async {
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Guardar tipos de pago'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            for (final t in _tipos)
-              Text(
-                  '• ${t.nombre}: ${fmtMonto(t.monto)} CUP · ${t.dias} días${t.activo ? '' : ' (inactivo)'}'),
-            const SizedBox(height: 8),
-            const Text(
-                'Se aplicará en la próxima sincronización.'),
-          ],
-        ),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Cancelar')),
-          ElevatedButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('Confirmar')),
-        ],
-      ),
+    final mensaje = [
+      for (final t in _tipos)
+        '• ${t.nombre}: ${fmtMonto(t.monto)} CUP · ${t.dias} días${t.activo ? '' : ' (inactivo)'}',
+      '',
+      'Se aplicará en la próxima sincronización.',
+    ].join('\n');
+    final ok = await DialogoApp.confirmar(
+      context,
+      titulo: 'Guardar tipos de pago',
+      mensaje: mensaje,
+      aceptar: 'Confirmar',
+      icono: Icons.payments,
     );
     if (ok != true || !mounted) return;
     await LocalDb.instance.queueOp(
@@ -426,32 +400,40 @@ class _AdminScreenState extends State<AdminScreen> {
     final notaCtrl = TextEditingController();
     final ok = await showDialog<bool>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Confirmar entrega'),
-        content: Column(
+      builder: (ctx) => DialogoApp(
+        titulo: 'Confirmar entrega',
+        iconoTitulo: Icons.done_all,
+        contenido: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('¿Confirmas que recibiste el dinero pendiente de '
-                '"$nombre"? Su pendiente se pondrá en cero.'),
+            Text(
+                '¿Confirmas que recibiste el dinero pendiente de '
+                '"$nombre"? Su pendiente se pondrá en cero.',
+                style: AppTexto.cuerpo),
             const SizedBox(height: 12),
-            TextField(
+            CampoTexto(
               controller: notaCtrl,
-              decoration: const InputDecoration(
-                labelText: 'Nota (opcional)',
-                hintText: 'Ej: entregó en dos partes',
-                border: OutlineInputBorder(),
-              ),
-              maxLines: 2,
+              etiqueta: 'Nota (opcional)',
+              hint: 'Ej: entregó en dos partes',
+              maxLineas: 2,
             ),
           ],
         ),
-        actions: [
+        acciones: [
           TextButton(
               onPressed: () => Navigator.pop(ctx, false),
               child: const Text('Cancelar')),
           ElevatedButton(
               onPressed: () => Navigator.pop(ctx, true),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColores.naranja,
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(
+                  borderRadius:
+                      BorderRadius.circular(AppRadio.md),
+                ),
+              ),
               child: const Text('Confirmar')),
         ],
       ),
@@ -480,32 +462,37 @@ class _AdminScreenState extends State<AdminScreen> {
     final montoCtrl = TextEditingController();
     final ok = await showDialog<bool>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Agregar gasto'),
-        content: Column(
+      builder: (ctx) => DialogoApp(
+        titulo: 'Agregar gasto',
+        iconoTitulo: Icons.receipt_long,
+        contenido: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            TextField(
+            CampoTexto(
                 controller: conceptoCtrl,
-                decoration: const InputDecoration(
-                    labelText: 'Concepto (ej: pago de la luz)',
-                    border: OutlineInputBorder())),
+                etiqueta: 'Concepto (ej: pago de la luz)'),
             const SizedBox(height: 8),
-            TextField(
+            CampoTexto(
                 controller: montoCtrl,
-                keyboardType:
-                    const TextInputType.numberWithOptions(decimal: true),
-                decoration: const InputDecoration(
-                    labelText: 'Monto (CUP)',
-                    border: OutlineInputBorder())),
+                etiqueta: 'Monto (CUP)',
+                teclado:
+                    const TextInputType.numberWithOptions(decimal: true)),
           ],
         ),
-        actions: [
+        acciones: [
           TextButton(
               onPressed: () => Navigator.pop(ctx, false),
               child: const Text('Cancelar')),
           ElevatedButton(
               onPressed: () => Navigator.pop(ctx, true),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColores.naranja,
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(
+                  borderRadius:
+                      BorderRadius.circular(AppRadio.md),
+                ),
+              ),
               child: const Text('Guardar')),
         ],
       ),
@@ -646,8 +633,9 @@ class _AdminScreenState extends State<AdminScreen> {
                                   const EdgeInsets.only(top: 8),
                               child: Text(
                                 _syncDet.error ?? '',
-                                style: const TextStyle(
-                                    color: Colors.red, fontSize: 13),
+                                style: TextStyle(
+                                    color: AppColores.error,
+                                    fontSize: 13),
                               ),
                             ),
                         ]),
@@ -661,7 +649,8 @@ class _AdminScreenState extends State<AdminScreen> {
                                       fontSize: 14,
                                       color: t.activo
                                           ? null
-                                          : Colors.grey)),
+                                          : AppColores.textoSecundario(
+                                              context))),
                               subtitle: Text(
                                   '${fmtMonto(t.monto)} CUP · ${t.dias} días'
                                   '${t.soloMenores ? ' · solo menores' : ''}',
@@ -684,10 +673,10 @@ class _AdminScreenState extends State<AdminScreen> {
                                   ),
                                   if (!_esTipoFijo(t.id))
                                     IconButton(
-                                      icon: const Icon(
+                                      icon: Icon(
                                           Icons.delete_outline,
                                           size: 20,
-                                          color: Colors.red),
+                                          color: AppColores.error),
                                       onPressed: () =>
                                           _eliminarTipo(t),
                                     ),
@@ -695,20 +684,16 @@ class _AdminScreenState extends State<AdminScreen> {
                               ),
                             ),
                           const SizedBox(height: 4),
-                          OutlinedButton.icon(
-                            icon: const Icon(Icons.add),
-                            label: const Text(
-                                'Agregar tipo de pago'),
+                          BotonSecundario(
+                            texto: 'Agregar tipo de pago',
+                            icono: Icons.add,
                             onPressed: _agregarTipo,
                           ),
                           const SizedBox(height: 8),
-                          SizedBox(
-                            width: double.infinity,
-                            child: ElevatedButton(
-                              onPressed: _guardarTipos,
-                              child: const Text(
-                                  'Guardar tipos de pago'),
-                            ),
+                          BotonPrimario(
+                            texto: 'Guardar tipos de pago',
+                            icono: Icons.save,
+                            onPressed: _guardarTipos,
                           ),
                         ]),
                         _seccion(Icons.price_change, 'Otros precios', [
@@ -716,43 +701,63 @@ class _AdminScreenState extends State<AdminScreen> {
                             Padding(
                               padding:
                                   const EdgeInsets.only(bottom: 8),
-                              child: TextField(
+                              child: CampoTexto(
                                 controller: _montos[clave],
-                                keyboardType: const TextInputType
+                                etiqueta: '$etiqueta (CUP)',
+                                teclado: const TextInputType
                                     .numberWithOptions(decimal: true),
-                                decoration: InputDecoration(
-                                    labelText: '$etiqueta (CUP)',
-                                    border:
-                                        const OutlineInputBorder()),
                               ),
                             ),
-                          SizedBox(
-                            width: double.infinity,
-                            child: ElevatedButton(
-                              onPressed: _guardarMontos,
-                              child: const Text('Guardar precios'),
-                            ),
+                          BotonPrimario(
+                            texto: 'Guardar otros precios',
+                            icono: Icons.save,
+                            onPressed: _guardarMontos,
                           ),
                         ]),
                         if (Permisos().gestionarUsuarios)
                           _seccion(Icons.smartphone, 'Usuarios APK', [
-                          SizedBox(
-                            width: double.infinity,
-                            child: ElevatedButton.icon(
-                              icon:
-                                  const Icon(Icons.manage_accounts),
-                              label: const Text('Gestionar usuarios'),
-                              onPressed: () => Navigator.of(context)
-                                  .push(MaterialPageRoute(
-                                      builder: (_) =>
-                                          const UsuariosScreen())),
-                            ),
+                          BotonPrimario(
+                            texto: 'Gestionar usuarios',
+                            icono: Icons.manage_accounts,
+                            onPressed: () => Navigator.of(context).push(
+                                MaterialPageRoute(
+                                    builder: (_) =>
+                                        const UsuariosScreen())),
                           ),
                           const SizedBox(height: 4),
-                          const Text(
+                          Text(
                             'Ver lista, bloquear, desbloquear, cambiar contraseña o eliminar.',
                             style: TextStyle(
-                                fontSize: 12, color: Colors.grey),
+                                fontSize: 12,
+                                color: AppColores.textoSecundario(
+                                    context)),
+                          ),
+                        ]),
+                        _seccion(Icons.medication, 'Suplementos', [
+                          BotonPrimario(
+                            texto: 'Gestionar catálogo',
+                            icono: Icons.inventory_2,
+                            onPressed: () => Navigator.of(context).push(
+                                MaterialPageRoute(
+                                    builder: (_) =>
+                                        const SuplementosScreen())),
+                          ),
+                          const SizedBox(height: AppEspacio.sm),
+                          BotonSecundario(
+                            texto: 'Historial de ventas',
+                            icono: Icons.receipt_long,
+                            onPressed: () => Navigator.of(context).push(
+                                MaterialPageRoute(
+                                    builder: (_) =>
+                                        const HistorialVentasScreen())),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            'Productos, precios oficiales, stock, promo "mes gratis" y ventas.',
+                            style: TextStyle(
+                                fontSize: 12,
+                                color: AppColores.textoSecundario(
+                                    context)),
                           ),
                         ]),
                         _seccion(
@@ -760,15 +765,14 @@ class _AdminScreenState extends State<AdminScreen> {
                             'Pendiente a entregar (${fmtMonto(totalPend)} CUP)',
                             [
                               if (_pend.isEmpty)
-                                const Text(
+                                Text(
                                     'Nada pendiente. Todo cuadrado.',
-                                    style:
-                                        TextStyle(color: Colors.grey)),
+                                    style: TextStyle(
+                                        color: AppColores.textoSecundario(
+                                            context))),
                               for (final t in _pend)
                                 ListTile(
                                   dense: true,
-                                  leading: const Text('',
-                                      style: TextStyle(fontSize: 22)),
                                   title: Text('${t['nombre']}'),
                                   subtitle: Text(
                                       '${t['n']} movimiento(s) — ${fmtMonto(t['total'])} CUP'),
@@ -817,21 +821,18 @@ class _AdminScreenState extends State<AdminScreen> {
                               '${fmtMonto(neto)} CUP',
                               negrita: true),
                           const SizedBox(height: 8),
-                          SizedBox(
-                            width: double.infinity,
-                            child: OutlinedButton.icon(
-                              icon: const Icon(Icons.add),
-                              label:
-                                  const Text('Agregar gasto'),
-                              onPressed: _agregarGasto,
-                            ),
+                          BotonSecundario(
+                            texto: 'Agregar gasto',
+                            icono: Icons.add,
+                            onPressed: _agregarGasto,
                           ),
                         ]),
                         _seccion(Icons.receipt_long, 'Últimos gastos', [
                           if (_gastos.isEmpty)
-                            const Text('Sin gastos registrados.',
-                                style:
-                                    TextStyle(color: Colors.grey)),
+                            Text('Sin gastos registrados.',
+                                style: TextStyle(
+                                    color: AppColores.textoSecundario(
+                                        context))),
                           for (final g
                               in _gastos.take(10))
                             ListTile(
@@ -848,132 +849,104 @@ class _AdminScreenState extends State<AdminScreen> {
                             ),
                         ]),
                         _seccion(Icons.delete_outline, 'Papelera', [
-                          SizedBox(
-                            width: double.infinity,
-                            child: OutlinedButton.icon(
-                              icon: const Icon(
-                                  Icons.delete_outline),
-                              label: const Text(
-                                  'Abrir papelera'),
-                              onPressed: () =>
-                                  _ir(const PapeleraScreen()),
-                            ),
+                          BotonSecundario(
+                            texto: 'Abrir papelera',
+                            icono: Icons.delete_outline,
+                            onPressed: () =>
+                                _ir(const PapeleraScreen()),
                           ),
                         ]),
                         _seccion(Icons.ac_unit, 'Congelados', [
-                          SizedBox(
-                            width: double.infinity,
-                            child: OutlinedButton.icon(
-                              icon: const Icon(Icons.ac_unit),
-                              label: const Text(
-                                  'Ver congelados'),
-                              onPressed: () =>
-                                  _ir(const CongeladosScreen()),
-                            ),
+                          BotonSecundario(
+                            texto: 'Ver congelados',
+                            icono: Icons.ac_unit,
+                            onPressed: () =>
+                                _ir(const CongeladosScreen()),
                           ),
                         ]),
                         _seccion(Icons.account_balance_wallet, 'Cuentas por cobrar', [
-                          const Text(
+                          Text(
                             'Clientes vencidos ordenados por monto adeudado. El dinero dormido, visible.',
                             style: TextStyle(
-                                color: Colors.grey, fontSize: 12),
+                                color: AppColores.textoSecundario(
+                                    context),
+                                fontSize: 12),
                           ),
                           const SizedBox(height: 8),
-                          SizedBox(
-                            width: double.infinity,
-                            child: ElevatedButton.icon(
-                              icon:
-                                  const Icon(Icons.money_off),
-                              label: const Text(
-                                  'Ver cuentas por cobrar'),
-                              onPressed: () => Navigator.of(context).push(
-                                MaterialPageRoute(
-                                  builder: (_) =>
-                                      const CuentasCobrarScreen(),
-                                ),
+                          BotonPrimario(
+                            texto: 'Ver cuentas por cobrar',
+                            icono: Icons.money_off,
+                            onPressed: () => Navigator.of(context).push(
+                              MaterialPageRoute(
+                                builder: (_) =>
+                                    const CuentasCobrarScreen(),
                               ),
                             ),
                           ),
                         ]),
                         _seccion(Icons.warning, 'Clientes en riesgo', [
-                          const Text(
+                          Text(
                             'Inactivos con 3+ pagos cuyo último pago fue hace más de 60 días. Buenos candidatos para recuperar.',
                             style: TextStyle(
-                                color: Colors.grey, fontSize: 12),
+                                color: AppColores.textoSecundario(
+                                    context),
+                                fontSize: 12),
                           ),
                           const SizedBox(height: 8),
-                          SizedBox(
-                            width: double.infinity,
-                            child: ElevatedButton.icon(
-                              icon:
-                                  const Icon(Icons.warning_amber),
-                              label: const Text(
-                                  'Ver clientes en riesgo'),
-                              onPressed: () => Navigator.of(context).push(
-                                MaterialPageRoute(
-                                  builder: (_) =>
-                                      const RiesgoScreen(),
-                                ),
+                          BotonPrimario(
+                            texto: 'Ver clientes en riesgo',
+                            icono: Icons.warning_amber,
+                            onPressed: () => Navigator.of(context).push(
+                              MaterialPageRoute(
+                                builder: (_) =>
+                                    const RiesgoScreen(),
                               ),
                             ),
                           ),
                         ]),
                         _seccion(Icons.history, 'Historial por entrenador', [
-                          const Text(
+                          Text(
                             'Cobrado, pagos e inscripciones del mes por entrenador.',
                             style: TextStyle(
-                                color: Colors.grey, fontSize: 12),
+                                color: AppColores.textoSecundario(
+                                    context),
+                                fontSize: 12),
                           ),
                           const SizedBox(height: 8),
-                          SizedBox(
-                            width: double.infinity,
-                            child: ElevatedButton.icon(
-                              icon: const Icon(Icons.person_search),
-                              label: const Text(
-                                  'Ver historial por entrenador'),
-                              onPressed: () => Navigator.of(context).push(
-                                MaterialPageRoute(
-                                  builder: (_) =>
-                                      const HistorialEntrenadorScreen(),
-                                ),
+                          BotonPrimario(
+                            texto: 'Ver historial por entrenador',
+                            icono: Icons.person_search,
+                            onPressed: () => Navigator.of(context).push(
+                              MaterialPageRoute(
+                                builder: (_) =>
+                                    const HistorialEntrenadorScreen(),
                               ),
                             ),
                           ),
                         ]),
                         _seccion(Icons.fact_check, 'Auditoría', [
-                          SizedBox(
-                            width: double.infinity,
-                            child: ElevatedButton.icon(
-                              icon: const Icon(Icons.history),
-                              label: const Text(
-                                  'Ver quién hizo qué y cuándo'),
-                              onPressed: () => Navigator.of(context).push(
-                                MaterialPageRoute(
-                                  builder: (_) =>
-                                      const AuditoriaScreen(),
-                                ),
+                          BotonPrimario(
+                            texto: 'Ver quién hizo qué y cuándo',
+                            icono: Icons.history,
+                            onPressed: () => Navigator.of(context).push(
+                              MaterialPageRoute(
+                                builder: (_) =>
+                                    const AuditoriaScreen(),
                               ),
                             ),
                           ),
                         ]),
                         _seccion(Icons.file_download, 'Exportar', [
-                          SizedBox(
-                            width: double.infinity,
-                            child: ElevatedButton.icon(
-                              icon: const Icon(Icons.share),
-                              label: const Text(
-                                  'Compartir CSV (clientes + pagos del mes)'),
-                              onPressed: _exportar,
-                            ),
+                          BotonPrimario(
+                            texto: 'Compartir CSV (clientes + pagos del mes)',
+                            icono: Icons.share,
+                            onPressed: _exportar,
                           ),
                           const SizedBox(height: 8),
-                          SizedBox(
-                            width: double.infinity,
-                            child: ElevatedButton.icon(
-                              icon: const Icon(Icons.table_chart),
-                              label:
-                                  const Text('Exportar Excel'),
-                              onPressed: () async {
+                          BotonPrimario(
+                            texto: 'Exportar Excel',
+                            icono: Icons.table_chart,
+                            onPressed: () async {
                                 final ok = await exportarExcel();
                                 if (context.mounted) {
                                   ScaffoldMessenger.of(context)
@@ -984,7 +957,6 @@ class _AdminScreenState extends State<AdminScreen> {
                                 }
                               },
                             ),
-                          ),
                         ]),
                         const SizedBox(height: 24),
                       ],
@@ -1032,7 +1004,7 @@ class _AdminScreenState extends State<AdminScreen> {
               if (icono != null) ...[
                 Icon(icono,
                     size: 16,
-                    color: AppColores.textoSecundarioClaro),
+                    color: AppColores.textoSecundario(context)),
                 const SizedBox(width: 6),
               ],
               Text(etiqueta),

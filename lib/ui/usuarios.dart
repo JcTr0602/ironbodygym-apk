@@ -13,6 +13,8 @@ import '../fotos.dart';
 import '../localdb.dart';
 import '../negocio.dart';
 import '../sync.dart';
+import 'diseno.dart';
+import 'componentes.dart';
 
 /// Gestión de usuarios APK (v1.0.12, mejoras v1.0.14).
 /// Lista desde sync_estado (publicada por el puente), acciones directas
@@ -62,24 +64,14 @@ class _UsuariosScreenState extends State<UsuariosScreen> {
       String username, String accion, String titulo,
       {String? rol}) async {
     if (accion == 'eliminar') {
-      final ok = await showDialog<bool>(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          title: const Text('️ Eliminar usuario'),
-          content: Text(
-              '¿Eliminar a "$username"? Perderá acceso inmediatamente.'),
-          actions: [
-            TextButton(
-                onPressed: () => Navigator.pop(ctx, false),
-                child: const Text('Cancelar')),
-            ElevatedButton(
-                style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.red,
-                    foregroundColor: Colors.white),
-                onPressed: () => Navigator.pop(ctx, true),
-                child: const Text('Eliminar')),
-          ],
-        ),
+      final ok = await DialogoApp.confirmar(
+        context,
+        titulo: 'Eliminar usuario',
+        mensaje:
+            '¿Eliminar a "$username"? Perderá acceso inmediatamente.',
+        aceptar: 'Eliminar',
+        peligro: true,
+        icono: Icons.delete_outline,
       );
       if (ok != true || !mounted) return;
     }
@@ -88,21 +80,28 @@ class _UsuariosScreenState extends State<UsuariosScreen> {
       final ctrl = TextEditingController();
       final ok = await showDialog<bool>(
         context: context,
-        builder: (ctx) => AlertDialog(
-          title: Text('Nueva contraseña para $username'),
-          content: TextField(
+        builder: (ctx) => DialogoApp(
+          titulo: 'Nueva contraseña para $username',
+          iconoTitulo: Icons.key,
+          contenido: CampoTexto(
             controller: ctrl,
-            decoration: const InputDecoration(
-              labelText: 'Contraseña (mín. 6)',
-              border: OutlineInputBorder(),
-            ),
+            etiqueta: 'Contraseña (mín. 6)',
+            obscure: true,
           ),
-          actions: [
+          acciones: [
             TextButton(
                 onPressed: () => Navigator.pop(ctx, false),
                 child: const Text('Cancelar')),
             ElevatedButton(
                 onPressed: () => Navigator.pop(ctx, true),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColores.naranja,
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(
+                    borderRadius:
+                        BorderRadius.circular(AppRadio.md),
+                  ),
+                ),
                 child: const Text('Cambiar')),
           ],
         ),
@@ -151,10 +150,11 @@ Hola $username, estas son tus credenciales para la app del gym:
 ⚠️ No compartas tu contraseña con nadie.''';
     showDialog<void>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Compartir credenciales'),
-        content: SingleChildScrollView(child: Text(texto)),
-        actions: [
+      builder: (ctx) => DialogoApp(
+        titulo: 'Compartir credenciales',
+        iconoTitulo: Icons.share,
+        contenido: SingleChildScrollView(child: Text(texto)),
+        acciones: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
             child: const Text('Cerrar'),
@@ -162,6 +162,13 @@ Hola $username, estas son tus credenciales para la app del gym:
           ElevatedButton.icon(
             icon: const Icon(Icons.copy),
             label: const Text('Copiar'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColores.naranja,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(AppRadio.md),
+              ),
+            ),
             onPressed: () {
               Clipboard.setData(ClipboardData(text: texto));
               Navigator.pop(ctx);
@@ -182,9 +189,10 @@ Hola $username, estas son tus credenciales para la app del gym:
     final accesos = (u['accesos'] as List?)?.cast<String>() ?? [];
     showDialog<void>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text('Accesos de $username'),
-        content: SizedBox(
+      builder: (ctx) => DialogoApp(
+        titulo: 'Accesos de $username',
+        iconoTitulo: Icons.history,
+        contenido: SizedBox(
           width: double.maxFinite,
           child: accesos.isEmpty
               ? const Text('Sin accesos registrados.''\n'
@@ -204,7 +212,7 @@ Hola $username, estas son tus credenciales para la app del gym:
                   ),
                 ),
         ),
-        actions: [
+        acciones: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
             child: const Text('Cerrar'),
@@ -224,23 +232,23 @@ Hola $username, estas son tus credenciales para la app del gym:
         if (file != null) {
           return CircleAvatar(
             backgroundImage: FileImage(file),
-            backgroundColor: Colors.grey.shade200,
+            backgroundColor: AppColores.borde(ctx),
           );
         }
         return CircleAvatar(
           backgroundColor: bloqueado
-              ? Colors.red.shade100
+              ? AppColores.error.withValues(alpha: 0.15)
               : esAdmin
-                  ? Colors.blue.shade100
-                  : Colors.green.shade100,
+                  ? AppColores.info.withValues(alpha: 0.15)
+                  : AppColores.exito.withValues(alpha: 0.15),
           child: Text(
             username.isNotEmpty ? username[0].toUpperCase() : '?',
             style: TextStyle(
               color: bloqueado
-                  ? Colors.red.shade800
+                  ? AppColores.error
                   : esAdmin
-                      ? Colors.blue.shade800
-                      : Colors.green.shade800,
+                      ? AppColores.info
+                      : AppColores.exito,
               fontWeight: FontWeight.bold,
             ),
           ),
@@ -286,22 +294,13 @@ Hola $username, estas son tus credenciales para la app del gym:
       String username, String rolActual) async {
     final nuevoRol =
         rolActual == 'admin' ? 'entrenador' : 'admin';
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Cambiar rol'),
-        content: Text(
-          '"$username" pasará de "$rolActual" a "$nuevoRol".\n\n'
-          '${nuevoRol == 'admin' ? 'Tendrá acceso a Administración, finanzas y auditoría.' : 'Solo verá las funciones de entrenador.'}'),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Cancelar')),
-          ElevatedButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              child: Text('Cambiar a $nuevoRol')),
-        ],
-      ),
+    final ok = await DialogoApp.confirmar(
+      context,
+      titulo: 'Cambiar rol',
+      mensaje: '"$username" pasará de "$rolActual" a "$nuevoRol".\n\n'
+          '${nuevoRol == 'admin' ? 'Tendrá acceso a Administración, finanzas y auditoría.' : 'Solo verá las funciones de entrenador.'}',
+      aceptar: 'Cambiar a $nuevoRol',
+      icono: Icons.manage_accounts,
     );
     if (ok == true && mounted) {
       await _accion(username, 'cambiar_rol', 'Cambiar rol', rol: nuevoRol);
@@ -314,31 +313,36 @@ Hola $username, estas son tus credenciales para la app del gym:
     final passCtrl = TextEditingController();
     final ok = await showDialog<bool>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Crear usuario APK'),
-        content: Column(
+      builder: (ctx) => DialogoApp(
+        titulo: 'Crear usuario APK',
+        iconoTitulo: Icons.person_add,
+        contenido: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            TextField(
+            CampoTexto(
                 controller: nombreCtrl,
-                decoration: const InputDecoration(
-                    labelText: 'Nombre de usuario',
-                    border: OutlineInputBorder())),
+                etiqueta: 'Nombre de usuario'),
             const SizedBox(height: 8),
-            TextField(
+            CampoTexto(
                 controller: passCtrl,
-                obscureText: true,
-                decoration: const InputDecoration(
-                    labelText: 'Contraseña (mín. 6)',
-                    border: OutlineInputBorder())),
+                etiqueta: 'Contraseña (mín. 6)',
+                obscure: true),
           ],
         ),
-        actions: [
+        acciones: [
           TextButton(
               onPressed: () => Navigator.pop(ctx, false),
               child: const Text('Cancelar')),
           ElevatedButton(
               onPressed: () => Navigator.pop(ctx, true),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColores.naranja,
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(
+                  borderRadius:
+                      BorderRadius.circular(AppRadio.md),
+                ),
+              ),
               child: const Text('Crear')),
         ],
       ),
@@ -385,11 +389,12 @@ Hola $username, estas son tus credenciales para la app del gym:
       body: _cargando
           ? const Center(child: CircularProgressIndicator())
           : _usuarios.isEmpty
-              ? const Center(
-                  child: Text(
-                    'Sin datos.\nSincroniza para ver la lista.',
-                    textAlign: TextAlign.center,
-                  ),
+              ? EstadoVacio(
+                  icono: Icons.people_outline,
+                  titulo: 'Sin datos',
+                  subtitulo: 'Sincroniza para ver la lista.',
+                  textoAccion: 'Actualizar',
+                  onAccion: _cargar,
                 )
               : RefreshIndicator(
                   onRefresh: _cargar,
@@ -412,7 +417,10 @@ Hola $username, estas son tus credenciales para la app del gym:
                         leading: _avatar(username, bloqueado, esAdmin),
                         title: Row(
                           children: [
-                            Expanded(child: Text(username)),
+                            Expanded(
+                                child: Text(username,
+                                    overflow:
+                                        TextOverflow.ellipsis)),
                             if (esDueno)
                               const Chip(
                                 label: Text('Dueño',
@@ -443,8 +451,10 @@ Hola $username, estas son tus credenciales para la app del gym:
                             if (dispositivo.isNotEmpty)
                               Text(
                                 dispositivo,
-                                style: const TextStyle(
-                                    fontSize: 12, color: Colors.grey),
+                                style: TextStyle(
+                                    fontSize: 12,
+                                    color: AppColores.textoSecundario(
+                                        context)),
                               ),
                           ],
                         ),
@@ -508,11 +518,11 @@ Hola $username, estas son tus credenciales para la app del gym:
                                     value: 'reset_pass',
                                     child: Text('Cambiar contraseña'),
                                   ),
-                                  const PopupMenuItem(
+                                  PopupMenuItem(
                                     value: 'eliminar',
-                                    child: Text('️ Eliminar',
-                                        style:
-                                            TextStyle(color: Colors.red)),
+                                    child: Text('Eliminar',
+                                        style: TextStyle(
+                                            color: AppColores.error)),
                                   ),
                                 ],
                               ),

@@ -206,6 +206,70 @@ String previewHastaDias(String? pagadoHasta, int dias,
 
 bool esPendiente(dynamic v) => v == 0 || v == false;
 
+/// Monto en CUP de una venta de suplemento (0 si es en USD u otra moneda).
+/// Las ventas en USD se reportan por separado y no entran a los totales CUP.
+double totalVentaCup(Map<String, dynamic> v) {
+  if ((v['moneda'] as String?) != 'CUP') return 0;
+  final total = (v['total'] as num?)?.toDouble();
+  if (total != null) return total;
+  final precio = (v['precio'] as num?)?.toDouble() ?? 0;
+  final cant = (v['cantidad'] as num?)?.toInt() ?? 0;
+  return precio * cant;
+}
+
+/// Ventas de suplementos en CUP del espejo local.
+Future<List<Map<String, dynamic>>> ventasSuplementosCup() async {
+  final out = <Map<String, dynamic>>[];
+  for (final v in await LocalDb.instance.allMirror('ventas_suplementos')) {
+    if ((v['moneda'] as String?) == 'CUP') out.add(v);
+  }
+  return out;
+}
+
+/// Monto en USD de una venta de suplemento (0 si es en CUP u otra moneda).
+/// Las ventas en USD se reportan por separado y no entran a los totales CUP.
+double totalVentaUsd(Map<String, dynamic> v) {
+  if ((v['moneda'] as String?) != 'USD') return 0;
+  final total = (v['total'] as num?)?.toDouble();
+  if (total != null) return total;
+  final precio = (v['precio'] as num?)?.toDouble() ?? 0;
+  final cant = (v['cantidad'] as num?)?.toInt() ?? 0;
+  return precio * cant;
+}
+
+/// Ventas de suplementos en USD del espejo local.
+Future<List<Map<String, dynamic>>> ventasSuplementosUsd() async {
+  final out = <Map<String, dynamic>>[];
+  for (final v in await LocalDb.instance.allMirror('ventas_suplementos')) {
+    if ((v['moneda'] as String?) == 'USD') out.add(v);
+  }
+  return out;
+}
+
+/// Monto en USD que representa una op encolada (0 si no aplica).
+/// Cuenta las ventas de suplementos en USD aún no sincronizadas.
+double _montoUsdOp(Map<String, dynamic> op) {
+  final tipo = '${op['tipo']}';
+  Map<String, dynamic> payload;
+  try {
+    payload = jsonDecode(op['payload'] as String) as Map<String, dynamic>;
+  } catch (_) {
+    return 0;
+  }
+  Map<String, dynamic>? venta;
+  if (tipo == 'venta_suplemento') {
+    venta = payload;
+  } else if (tipo == 'inscripcion_venta_suplemento') {
+    final v = payload['venta'];
+    if (v is Map<String, dynamic>) venta = v;
+  }
+  if (venta == null) return 0;
+  if ((venta['moneda'] as String?) != 'USD') return 0;
+  final precio = (venta['precio'] as num?)?.toDouble() ?? 0;
+  final cant = (venta['cantidad'] as num?)?.toInt() ?? 0;
+  return precio * cant;
+}
+
 /// Precios vigentes (del espejo de ajustes).
 Future<Map<String, double>> preciosVigentes() async {
   final aj = await LocalDb.instance.getAjustes();
@@ -283,9 +347,36 @@ Future<double> pendienteEntrega(int? telegramId) async {
       total += (d['total'] as num?)?.toDouble() ?? 0;
     }
   }
+  // Ventas de suplementos en CUP en efectivo pendientes de entregar.
+  for (final v in await ventasSuplementosCup()) {
+    if ((v['registrado_por'] as int?) == telegramId &&
+        esPendiente(v['entregado'])) {
+      total += totalVentaCup(v);
+    }
+  }
   final pr = await preciosVigentes();
   for (final op in await LocalDb.instance.pendingOps()) {
     total += _montoEfectivoOp(op, pr);
+  }
+  return total;
+}
+
+/// USD que el entrenador logueado aún no le entrega al dueño.
+///
+/// Decisión de Jc (2026-10-10): las ventas de suplementos en USD también
+/// entran al pendiente ("USD a entregar"), separado del CUP.
+/// Incluye las operaciones encoladas aún no sincronizadas.
+Future<double> pendienteEntregaUsd(int? telegramId) async {
+  if (telegramId == null) return 0;
+  double total = 0;
+  for (final v in await ventasSuplementosUsd()) {
+    if ((v['registrado_por'] as int?) == telegramId &&
+        esPendiente(v['entregado'])) {
+      total += totalVentaUsd(v);
+    }
+  }
+  for (final op in await LocalDb.instance.pendingOps()) {
+    total += _montoUsdOp(op);
   }
   return total;
 }
@@ -309,6 +400,28 @@ Future<double> pendienteRecoger({int? excluirTelegramId}) async {
       final tid = d['registrado_por'] as int?;
       if (excluirTelegramId != null && tid == excluirTelegramId) continue;
       total += (d['total'] as num?)?.toDouble() ?? 0;
+    }
+  }
+  for (final v in await ventasSuplementosCup()) {
+    if (esPendiente(v['entregado'])) {
+      final tid = v['registrado_por'] as int?;
+      if (excluirTelegramId != null && tid == excluirTelegramId) continue;
+      total += totalVentaCup(v);
+    }
+  }
+  return total;
+}
+
+/// v1.1.2: total USD pendiente a recoger por el dueño.
+/// Suma las ventas de suplementos en USD que los entrenadores
+/// tienen pendiente de entregar.
+Future<double> pendienteRecogerUsd({int? excluirTelegramId}) async {
+  double total = 0;
+  for (final v in await ventasSuplementosUsd()) {
+    if (esPendiente(v['entregado'])) {
+      final tid = v['registrado_por'] as int?;
+      if (excluirTelegramId != null && tid == excluirTelegramId) continue;
+      total += totalVentaUsd(v);
     }
   }
   return total;
@@ -651,6 +764,12 @@ Future<(double, double)> miTurnoHoy(int? telegramId) async {
       cobrado += (d['total'] as num?)?.toDouble() ?? 0;
     }
   }
+  for (final v in await ventasSuplementosCup()) {
+    if ((v['registrado_por'] as int?) == telegramId &&
+        (v['fecha'] as String?) == hoy) {
+      cobrado += totalVentaCup(v);
+    }
+  }
   final pendiente = await pendienteEntrega(telegramId);
   return (cobrado, pendiente);
 }
@@ -802,6 +921,12 @@ Future<double> cobradoAyer() async {
     if ('${d['fecha'] ?? ''}'.length >= 10 &&
         '${d['fecha']}'.substring(0, 10) == ayer) {
       total += (d['total'] as num?)?.toDouble() ?? 0;
+    }
+  }
+  for (final v in await ventasSuplementosCup()) {
+    if ('${v['fecha'] ?? ''}'.length >= 10 &&
+        '${v['fecha']}'.substring(0, 10) == ayer) {
+      total += totalVentaCup(v);
     }
   }
   return total;
@@ -1011,6 +1136,12 @@ Future<double> cobradoMes(int? telegramId) async {
       t += (d['total'] as num?)?.toDouble() ?? 0;
     }
   }
+  for (final v in await ventasSuplementosCup()) {
+    if ((v['registrado_por'] as int?) != telegramId) continue;
+    if ('${v['fecha'] ?? ''}'.startsWith(pref)) {
+      t += totalVentaCup(v);
+    }
+  }
   return t;
 }
 
@@ -1134,6 +1265,11 @@ Future<double> ingresosMesAnterior() async {
       t += (d['total'] as num?)?.toDouble() ?? 0;
     }
   }
+  for (final v in await ventasSuplementosCup()) {
+    if ('${v['fecha'] ?? ''}'.startsWith(pref)) {
+      t += totalVentaCup(v);
+    }
+  }
   return t;
 }
 
@@ -1142,7 +1278,7 @@ Future<Map<String, double>> ingresosPorMetodo() async {
   final n = DateTime.now();
   final pref = '${n.year.toString().padLeft(4, '0')}-'
       '${n.month.toString().padLeft(2, '0')}';
-  double efectivo = 0, transferencia = 0;
+  double efectivo = 0, transferencia = 0, suplementos = 0;
   for (final p in await LocalDb.instance.allMirror('pagos')) {
     if ('${p['fecha'] ?? ''}'.startsWith(pref)) {
       final m = (p['monto'] as num?)?.toDouble() ?? 0;
@@ -1158,7 +1294,16 @@ Future<Map<String, double>> ingresosPorMetodo() async {
       efectivo += (d['total'] as num?)?.toDouble() ?? 0;
     }
   }
-  return {'efectivo': efectivo, 'transferencia': transferencia};
+  for (final v in await ventasSuplementosCup()) {
+    if ('${v['fecha'] ?? ''}'.startsWith(pref)) {
+      suplementos += totalVentaCup(v);
+    }
+  }
+  return {
+    'efectivo': efectivo,
+    'transferencia': transferencia,
+    'suplementos': suplementos
+  };
 }
 
 /// v1.0.15: desglose mensualidades vs pago diario.
@@ -1166,7 +1311,7 @@ Future<Map<String, double>> ingresosPorTipo() async {
   final n = DateTime.now();
   final pref = '${n.year.toString().padLeft(4, '0')}-'
       '${n.month.toString().padLeft(2, '0')}';
-  double mensual = 0, diario = 0;
+  double mensual = 0, diario = 0, suplementos = 0;
   for (final p in await LocalDb.instance.allMirror('pagos')) {
     if ('${p['fecha'] ?? ''}'.startsWith(pref)) {
       mensual += (p['monto'] as num?)?.toDouble() ?? 0;
@@ -1177,7 +1322,12 @@ Future<Map<String, double>> ingresosPorTipo() async {
       diario += (d['total'] as num?)?.toDouble() ?? 0;
     }
   }
-  return {'mensual': mensual, 'diario': diario};
+  for (final v in await ventasSuplementosCup()) {
+    if ('${v['fecha'] ?? ''}'.startsWith(pref)) {
+      suplementos += totalVentaCup(v);
+    }
+  }
+  return {'mensual': mensual, 'diario': diario, 'suplementos': suplementos};
 }
 
 /// v1.0.15: proyección de cierre de mes.
@@ -1210,6 +1360,13 @@ Future<Map<String, Map<String, dynamic>>> mejorPeorDia() async {
       final dia = f.substring(0, 10);
       porDia[dia] =
           (porDia[dia] ?? 0) + ((d['total'] as num?)?.toDouble() ?? 0);
+    }
+  }
+  for (final v in await ventasSuplementosCup()) {
+    final f = '${v['fecha'] ?? ''}';
+    if (f.startsWith(pref) && f.length >= 10) {
+      final dia = f.substring(0, 10);
+      porDia[dia] = (porDia[dia] ?? 0) + totalVentaCup(v);
     }
   }
   if (porDia.isEmpty) return {};
@@ -1283,6 +1440,12 @@ Future<List<Map<String, dynamic>>> ingresosUltimos30Dias() async {
         t += (d['total'] as num?)?.toDouble() ?? 0;
       }
     }
+    for (final v in await ventasSuplementosCup()) {
+      final f = '${v['fecha'] ?? ''}';
+      if (f.length >= 10 && f.substring(0, 10) == diaIso) {
+        t += totalVentaCup(v);
+      }
+    }
     res.add({
       'dia': dias[dia.weekday - 1],
       'fecha': diaIso,
@@ -1311,6 +1474,13 @@ Future<List<Map<String, dynamic>>> rankingEntrenadores() async {
       final ent = '${d['entrenador'] ?? d['creado_por'] ?? '?'}';
       porEntrenador[ent] =
           (porEntrenador[ent] ?? 0) + ((d['total'] as num?)?.toDouble() ?? 0);
+    }
+  }
+  for (final v in await ventasSuplementosCup()) {
+    if ('${v['fecha'] ?? ''}'.startsWith(pref)) {
+      final ent =
+          '${v['registrado_por_nombre'] ?? v['registrado_por'] ?? '?'}';
+      porEntrenador[ent] = (porEntrenador[ent] ?? 0) + totalVentaCup(v);
     }
   }
   final res = porEntrenador.entries
@@ -1355,6 +1525,11 @@ Future<double> ingresosMes() async {
       t += (d['total'] as num?)?.toDouble() ?? 0;
     }
   }
+  for (final v in await ventasSuplementosCup()) {
+    if ('${v['fecha'] ?? ''}'.startsWith(pref)) {
+      t += totalVentaCup(v);
+    }
+  }
   return t;
 }
 
@@ -1379,6 +1554,13 @@ Future<Map<String, double>> ingresosPorDia() async {
           (porDia[dia] ?? 0) + ((d['total'] as num?)?.toDouble() ?? 0);
     }
   }
+  for (final v in await ventasSuplementosCup()) {
+    final f = '${v['fecha'] ?? ''}';
+    if (f.length >= 10) {
+      final dia = f.substring(0, 10);
+      porDia[dia] = (porDia[dia] ?? 0) + totalVentaCup(v);
+    }
+  }
   return porDia;
 }
 
@@ -1396,6 +1578,12 @@ Future<double> ingresosHoy() async {
     final f = '${d['fecha'] ?? ''}';
     if (f.length >= 10 && f.substring(0, 10) == hoy) {
       t += (d['total'] as num?)?.toDouble() ?? 0;
+    }
+  }
+  for (final v in await ventasSuplementosCup()) {
+    final f = '${v['fecha'] ?? ''}';
+    if (f.length >= 10 && f.substring(0, 10) == hoy) {
+      t += totalVentaCup(v);
     }
   }
   return t;

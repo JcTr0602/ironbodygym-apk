@@ -165,9 +165,10 @@ class _FichaScreenState extends State<FichaScreen> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setS) => AlertDialog(
-          title: const Text('Editar cliente'),
-          content: SingleChildScrollView(
+        builder: (ctx, setS) => DialogoApp(
+          titulo: 'Editar cliente',
+          iconoTitulo: Icons.edit,
+          contenido: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -195,7 +196,7 @@ class _FichaScreenState extends State<FichaScreen> {
                     IconButton(
                       tooltip: 'Elegir de contactos',
                       icon: const Icon(Icons.contacts,
-                          color: Color(0xFFE8821A)),
+                          color: AppColores.naranja),
                       onPressed: () async {
                         final tel =
                             await _elegirDeContactos(ctx);
@@ -253,7 +254,8 @@ class _FichaScreenState extends State<FichaScreen> {
                     padding: const EdgeInsets.symmetric(
                         horizontal: 12, vertical: 12),
                     decoration: BoxDecoration(
-                      border: Border.all(color: Colors.grey.shade400),
+                      border: Border.all(
+                          color: AppColores.borde(context)),
                       borderRadius: BorderRadius.circular(4),
                     ),
                     child: Row(
@@ -269,8 +271,9 @@ class _FichaScreenState extends State<FichaScreen> {
                           style: const TextStyle(fontSize: 15),
                         ),
                         const Spacer(),
-                        const Icon(Icons.edit,
-                            size: 16, color: Colors.grey),
+                        Icon(Icons.edit,
+                            size: 16,
+                            color: AppColores.textoSecundario(context)),
                       ],
                     ),
                   ),
@@ -278,12 +281,16 @@ class _FichaScreenState extends State<FichaScreen> {
               ],
             ),
           ),
-          actions: [
+          acciones: [
             TextButton(
                 onPressed: () => Navigator.pop(ctx, false),
                 child: const Text('Cancelar')),
             ElevatedButton(
                 onPressed: () => Navigator.pop(ctx, true),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColores.naranja,
+                  foregroundColor: Colors.white,
+                ),
                 child: const Text('Guardar')),
           ],
         ),
@@ -338,21 +345,26 @@ class _FichaScreenState extends State<FichaScreen> {
         TextEditingController(text: '${c['notas'] ?? ''}');
     final ok = await showDialog<bool>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Notas del cliente'),
-        content: TextField(
+      builder: (ctx) => DialogoApp(
+        titulo: 'Notas del cliente',
+        iconoTitulo: Icons.note,
+        contenido: TextField(
           controller: ctrl,
           maxLines: 4,
           decoration: const InputDecoration(
               hintText: 'Ej: lesionado, viene solo mañanas…',
               border: OutlineInputBorder()),
         ),
-        actions: [
+        acciones: [
           TextButton(
               onPressed: () => Navigator.pop(ctx, false),
               child: const Text('Cancelar')),
           ElevatedButton(
               onPressed: () => Navigator.pop(ctx, true),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColores.naranja,
+                foregroundColor: Colors.white,
+              ),
               child: const Text('Guardar')),
         ],
       ),
@@ -445,17 +457,18 @@ class _FichaScreenState extends State<FichaScreen> {
   Future<void> _eliminarFoto() async {
     final ok = await showDialog<bool>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Eliminar foto'),
-        content: const Text(
+      builder: (ctx) => DialogoApp(
+        titulo: 'Eliminar foto',
+        iconoTitulo: Icons.delete,
+        contenido: const Text(
             '¿Eliminar la foto de este cliente? Esta acción se sincronizará.'),
-        actions: [
+        acciones: [
           TextButton(
               onPressed: () => Navigator.pop(ctx, false),
               child: const Text('Cancelar')),
           ElevatedButton(
               style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.red,
+                  backgroundColor: AppColores.error,
                   foregroundColor: Colors.white),
               onPressed: () => Navigator.pop(ctx, true),
               child: const Text('Eliminar')),
@@ -485,9 +498,10 @@ class _FichaScreenState extends State<FichaScreen> {
     final tieneFoto = await _tieneFoto();
     final origen = await showDialog<String>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Foto del cliente'),
-        content: Column(
+      builder: (ctx) => DialogoApp(
+        titulo: 'Foto del cliente',
+        iconoTitulo: Icons.photo_camera,
+        contenido: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             ListTile(
@@ -506,10 +520,10 @@ class _FichaScreenState extends State<FichaScreen> {
             ),
             if (tieneFoto)
               ListTile(
-                leading: const Text('',
-                    style: TextStyle(fontSize: 24)),
+                leading: const Icon(Icons.delete,
+                    size: 24, color: AppColores.error),
                 title: const Text('Eliminar foto',
-                    style: TextStyle(color: Colors.red)),
+                    style: TextStyle(color: AppColores.error)),
                 onTap: () =>
                     Navigator.pop(ctx, 'eliminar'),
               ),
@@ -562,17 +576,22 @@ class _FichaScreenState extends State<FichaScreen> {
     if (!mounted) return;
     final ok = await showDialog<bool>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Renovación rápida'),
-        content: Text('${c['nombre']}\n'
+      builder: (ctx) => DialogoApp(
+        titulo: 'Renovación rápida',
+        iconoTitulo: Icons.autorenew,
+        contenido: Text('${c['nombre']}\n'
             '1 mes — ${fmtMonto(mensual)} CUP en efectivo\n'
             'Nuevo vencimiento: ${fmtFecha(nuevo)}'),
-        actions: [
+        acciones: [
           TextButton(
               onPressed: () => Navigator.pop(ctx, false),
               child: const Text('Cancelar')),
           ElevatedButton(
               onPressed: () => Navigator.pop(ctx, true),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColores.naranja,
+                foregroundColor: Colors.white,
+              ),
               child: const Text('Renovar')),
         ],
       ),
@@ -599,17 +618,22 @@ class _FichaScreenState extends State<FichaScreen> {
 
   Future<void> _aPapelera() async {    final ok = await showDialog<bool>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Enviar a papelera'),
-        content: const Text(
+      builder: (ctx) => DialogoApp(
+        titulo: 'Enviar a papelera',
+        iconoTitulo: Icons.delete,
+        contenido: const Text(
             'El cliente quedará inactivo y no aparecerá en las listas. '
             'Podrás recuperarlo desde la Papelera.'),
-        actions: [
+        acciones: [
           TextButton(
               onPressed: () => Navigator.pop(ctx, false),
               child: const Text('Cancelar')),
           ElevatedButton(
               onPressed: () => Navigator.pop(ctx, true),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColores.naranja,
+                foregroundColor: Colors.white,
+              ),
               child: const Text('Enviar')),
         ],
       ),
@@ -633,17 +657,22 @@ class _FichaScreenState extends State<FichaScreen> {
     final esCongelado = (_c?['estado'] as String?) == 'congelado';
     final ok = await showDialog<bool>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text(esCongelado ? 'Descongelar' : 'Congelar membresía'),
-        content: Text(esCongelado
+      builder: (ctx) => DialogoApp(
+        titulo: esCongelado ? 'Descongelar' : 'Congelar membresía',
+        iconoTitulo: Icons.ac_unit,
+        contenido: Text(esCongelado
             ? '¿Reactivar la membresía de ${_c?['nombre']}? Volverá a contar el vencimiento.'
             : '¿Congelar la membresía de ${_c?['nombre']}? No aparecerá en vencidos mientras esté congelada.'),
-        actions: [
+        acciones: [
           TextButton(
               onPressed: () => Navigator.pop(ctx, false),
               child: const Text('Cancelar')),
           ElevatedButton(
               onPressed: () => Navigator.pop(ctx, true),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColores.naranja,
+                foregroundColor: Colors.white,
+              ),
               child: Text(esCongelado ? 'Descongelar' : 'Congelar')),
         ],
       ),
@@ -673,11 +702,12 @@ class _FichaScreenState extends State<FichaScreen> {
     if (pagoId == null) return;
     final accion = await showDialog<String>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Corregir pago'),
-        content: Text(
+      builder: (ctx) => DialogoApp(
+        titulo: 'Corregir pago',
+        iconoTitulo: Icons.edit,
+        contenido: Text(
             '${fmtMonto(p['monto'])} CUP — ${fmtFecha(p['fecha'] as String?)}'),
-        actions: [
+        acciones: [
           TextButton(
               onPressed: () => Navigator.pop(ctx),
               child: const Text('Cancelar')),
@@ -687,7 +717,7 @@ class _FichaScreenState extends State<FichaScreen> {
           TextButton(
               onPressed: () => Navigator.pop(ctx, 'anular'),
               child: const Text('Anular pago',
-                  style: TextStyle(color: Colors.red))),
+                  style: TextStyle(color: AppColores.error))),
         ],
       ),
     );
@@ -696,18 +726,19 @@ class _FichaScreenState extends State<FichaScreen> {
     if (accion == 'anular') {
       final ok = await showDialog<bool>(
         context: context,
-        builder: (ctx) => AlertDialog(
-          title: const Text('Anular pago'),
-          content: const Text(
+        builder: (ctx) => DialogoApp(
+          titulo: 'Anular pago',
+          iconoTitulo: Icons.cancel,
+          contenido: const Text(
               '¿Seguro? El pago quedará anulado en el sistema. '
               'Esta acción se sincronizará.'),
-          actions: [
+          acciones: [
             TextButton(
                 onPressed: () => Navigator.pop(ctx, false),
                 child: const Text('No')),
             ElevatedButton(
                 style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.red),
+                    backgroundColor: AppColores.error),
                 onPressed: () => Navigator.pop(ctx, true),
                 child: const Text('Sí, anular')),
           ],
@@ -736,9 +767,10 @@ class _FichaScreenState extends State<FichaScreen> {
     final datos = await showDialog<Map<String, String>>(
       context: context,
       builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setS) => AlertDialog(
-          title: const Text('Editar pago'),
-        content: Column(
+        builder: (ctx, setS) => DialogoApp(
+          titulo: 'Editar pago',
+          iconoTitulo: Icons.edit,
+        contenido: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             TextField(
@@ -777,7 +809,7 @@ class _FichaScreenState extends State<FichaScreen> {
             ),
           ],
         ),
-        actions: [
+        acciones: [
           TextButton(
               onPressed: () => Navigator.pop(ctx),
               child: const Text('Cancelar')),
@@ -787,6 +819,10 @@ class _FichaScreenState extends State<FichaScreen> {
                     'fecha': fechaCtrl.text,
                     'metodo': metodo,
                   }),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColores.naranja,
+                foregroundColor: Colors.white,
+              ),
               child: const Text('Continuar')),
         ],
       ),
@@ -804,17 +840,22 @@ class _FichaScreenState extends State<FichaScreen> {
     }
     final confirma = await showDialog<bool>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Confirmar corrección'),
-        content: Text(
+      builder: (ctx) => DialogoApp(
+        titulo: 'Confirmar corrección',
+        iconoTitulo: Icons.check_circle,
+        contenido: Text(
             'De: ${fmtMonto(p['monto'])} CUP — ${fmtFecha(p['fecha'] as String?)} — ${p['metodo'] ?? ''}\n'
             'A: ${fmtMonto(monto)} CUP — $fecha — ${datos['metodo']}'),
-        actions: [
+        acciones: [
           TextButton(
               onPressed: () => Navigator.pop(ctx, false),
               child: const Text('Cancelar')),
           ElevatedButton(
               onPressed: () => Navigator.pop(ctx, true),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColores.naranja,
+                foregroundColor: Colors.white,
+              ),
               child: const Text('Confirmar')),
         ],
       ),
@@ -1100,11 +1141,11 @@ class _FichaScreenState extends State<FichaScreen> {
                             const SizedBox(
                                 height: AppEspacio.sm),
                             if (_pagos.isEmpty)
-                              const Text(
+                              Text(
                                   'Sin pagos registrados',
                                   style: TextStyle(
                                       color:
-                                          Colors.grey)),
+                                          AppColores.textoSecundario(context))),
                             for (final p in _pagos)
                               ListTile(
                                 dense: true,

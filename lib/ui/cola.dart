@@ -9,6 +9,7 @@ import 'package:flutter/material.dart';
 import '../localdb.dart';
 import '../negocio.dart';
 import '../sync.dart';
+import 'componentes.dart';
 import 'diseno.dart';
 
 class ColaScreen extends StatefulWidget {
@@ -57,9 +58,10 @@ class _ColaScreenState extends State<ColaScreen> {
     final error = det.error;
     await showDialog(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Sincronización completada'),
-        content: Column(
+      builder: (ctx) => DialogoApp(
+        titulo: 'Sincronización completada',
+        iconoTitulo: Icons.sync,
+        contenido: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -88,17 +90,19 @@ class _ColaScreenState extends State<ColaScreen> {
               ),
             ],
             if (subidos == 0 && bajados == 0)
-              const Padding(
-                padding: EdgeInsets.only(top: 12),
+              Padding(
+                padding: const EdgeInsets.only(top: 12),
                 child: Text(
                   'No hubo cambios nuevos.',
-                  style: TextStyle(color: Colors.grey),
+                  style: AppTexto.secundario.copyWith(
+                      color: AppColores.textoSecundario(
+                          context)),
                 ),
               ),
           ],
         ),
-        actions: [
-          ElevatedButton(
+        acciones: [
+          TextButton(
             onPressed: () => Navigator.of(ctx).pop(),
             child: const Text('Entendido'),
           ),
@@ -136,21 +140,14 @@ class _ColaScreenState extends State<ColaScreen> {
   }
 
   Future<void> _cancelar(String uuid, String tipo) async {
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Cancelar operación'),
-        content: Text(
-            '¿Cancelar esta operación (${_tipo(tipo)})? No se subirá al sistema.'),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('No')),
-          ElevatedButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('Sí, cancelar')),
-        ],
-      ),
+    final ok = await DialogoApp.confirmar(
+      context,
+      titulo: 'Cancelar operación',
+      mensaje:
+          '¿Cancelar esta operación (${_tipo(tipo)})? No se subirá al sistema.',
+      aceptar: 'Sí, cancelar',
+      peligro: true,
+      icono: Icons.cancel_outlined,
     );
     if (ok != true) return;
     final borrada = await LocalDb.instance.cancelOp(uuid);
@@ -218,6 +215,8 @@ class _ColaScreenState extends State<ColaScreen> {
         return 'Corrección de pago';
       case 'anular_pago':
         return 'Anulación de pago';
+      case 'inscripcion_venta_suplemento':
+        return 'Inscripción + venta';
       default:
         return t;
     }
@@ -263,16 +262,19 @@ class _ColaScreenState extends State<ColaScreen> {
     if (!mounted) return;
     showDialog(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text(tipo),
-        content: Column(
+      builder: (ctx) => DialogoApp(
+        titulo: tipo,
+        iconoTitulo: _iconoEstado(estado),
+        contenido: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
               children: [
-                const Icon(Icons.calendar_today,
-                    size: 14, color: Colors.grey),
+                Icon(Icons.calendar_today,
+                    size: 14,
+                    color:
+                        AppColores.textoSecundario(context)),
                 const SizedBox(width: 6),
                 Text(fecha,
                     style:
@@ -306,7 +308,7 @@ class _ColaScreenState extends State<ColaScreen> {
             ],
           ],
         ),
-        actions: [
+        acciones: [
           if (estado == 'rechazada') ...[
             TextButton(
               onPressed: () async {
@@ -314,7 +316,8 @@ class _ColaScreenState extends State<ColaScreen> {
                 await _reenviar(op);
               },
               child: const Text('Reenviar',
-                  style: TextStyle(color: Colors.orange)),
+                  style:
+                      TextStyle(color: AppColores.naranja)),
             ),
           ],
           TextButton(
@@ -414,7 +417,7 @@ class _ColaScreenState extends State<ColaScreen> {
     final String subtitulo;
     if (conError > 0) {
       estadoSync = 'error';
-      colores = [const Color(0xFFF44336), const Color(0xFFC62828)];
+      colores = [AppColores.error, AppColores.errorOscuro];
       iconoEstado = Icons.warning;
       titulo = 'Atención requerida';
       subtitulo = conError == 1
@@ -422,7 +425,7 @@ class _ColaScreenState extends State<ColaScreen> {
           : '$conError operaciones fallaron y necesitan tu revisión';
     } else if (pendientes > 0) {
       estadoSync = 'pendiente';
-      colores = [const Color(0xFFFF9800), const Color(0xFFF57C00)];
+      colores = [AppColores.alerta, AppColores.alertaOscuro];
       iconoEstado = Icons.schedule;
       titulo = 'Pendiente de sincronizar';
       subtitulo = pendientes == 1
@@ -430,7 +433,7 @@ class _ColaScreenState extends State<ColaScreen> {
           : '$pendientes operaciones esperando conexión';
     } else {
       estadoSync = 'ok';
-      colores = [const Color(0xFF4CAF50), const Color(0xFF2E7D32)];
+      colores = [AppColores.exito, AppColores.exitoOscuro];
       iconoEstado = Icons.check_circle;
       titulo = 'Sincronizado';
       subtitulo = 'Todo al día';
@@ -470,10 +473,8 @@ class _ColaScreenState extends State<ColaScreen> {
                   const SizedBox(height: 8),
                   Text(
                     titulo,
-                    style: const TextStyle(
+                    style: AppTexto.displayPequeno.copyWith(
                       color: Colors.white,
-                      fontSize: 22,
-                      fontWeight: FontWeight.bold,
                     ),
                   ),
                   const SizedBox(height: 4),
@@ -519,7 +520,7 @@ class _ColaScreenState extends State<ColaScreen> {
                     'Bajados',
                     '${_det.bajados}',
                     'Última: ${_hora(_det.ultimaPull)}',
-                    Colors.blue,
+                    AppColores.info,
                   ),
                 ),
                 const SizedBox(width: 12),
@@ -529,48 +530,30 @@ class _ColaScreenState extends State<ColaScreen> {
                     'Subidos',
                     '${_det.subidos}',
                     'Última: ${_hora(_det.ultimaPush)}',
-                    Colors.orange,
+                    AppColores.naranja,
                   ),
                 ),
               ],
             ),
             const SizedBox(height: 16),
             // Botón sincronizar
-            SizedBox(
-              width: double.infinity,
-              height: 52,
-              child: ElevatedButton.icon(
-                icon: _sincronizando
-                    ? const SizedBox(
-                        width: 20,
-                        height: 20,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          color: Colors.white,
-                        ),
-                      )
-                    : const Icon(Icons.sync, size: 20),
-                label: Text(
+            BotonPrimario(
+              texto:
                   _sincronizando ? 'Sincronizando…' : 'Sincronizar ahora',
-                  style: const TextStyle(fontSize: 16),
-                ),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFFE8821A),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(14),
-                  ),
-                ),
-                onPressed: _sincronizando ? null : _sincronizar,
-              ),
+              icono: Icons.sync,
+              onPressed: _sincronizando ? null : _sincronizar,
             ),
             if (_det.error != null && _det.error!.isNotEmpty) ...[
               const SizedBox(height: 12),
               Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: Colors.red.shade50,
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: Colors.red.shade200),
+                  color: AppColores.error
+                      .withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(AppRadio.md),
+                  border: Border.all(
+                      color: AppColores.error
+                          .withValues(alpha: 0.4)),
                 ),
                 child: Row(
                   children: [
@@ -593,16 +576,15 @@ class _ColaScreenState extends State<ColaScreen> {
             const SizedBox(height: 16),
             const Text(
               'Operaciones recientes',
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+              style: AppTexto.titulo,
             ),
             const SizedBox(height: 8),
             if (_ops.isEmpty)
-              const Center(
-                child: Padding(
-                  padding: EdgeInsets.all(24),
-                  child: Text('Sin operaciones todavía',
-                      style: TextStyle(color: Colors.grey)),
-                ),
+              const EstadoVacio(
+                icono: Icons.inbox_outlined,
+                titulo: 'Sin operaciones todavía',
+                subtitulo:
+                    'Las operaciones pendientes aparecerán aquí.',
               )
             else
               ..._ops.map((op) {
@@ -658,18 +640,21 @@ class _ColaScreenState extends State<ColaScreen> {
                             padding: const EdgeInsets.only(top: 4),
                             child: Text(
                               '${op['error']}',
-                              style: TextStyle(
+                              style: const TextStyle(
                                   fontSize: 12,
-                                  color: Colors.red.shade700),
+                                  color: AppColores.error),
                             ),
                           ),
                         if (esPendiente)
-                          const Padding(
-                            padding: EdgeInsets.only(top: 4),
+                          Padding(
+                            padding:
+                                const EdgeInsets.only(top: 4),
                             child: Text(
                               'Se subirá cuando haya conexión',
-                              style: TextStyle(
-                                  fontSize: 12, color: Colors.grey),
+                              style: AppTexto.secundario.copyWith(
+                                  color: AppColores
+                                      .textoSecundario(
+                                          context)),
                             ),
                           ),
                       ],
@@ -682,13 +667,13 @@ class _ColaScreenState extends State<ColaScreen> {
                                 IconButton(
                                   tooltip: 'Reintentar',
                                   icon: const Icon(Icons.refresh,
-                                      color: Colors.blue),
+                                      color: AppColores.info),
                                   onPressed: () => _sincronizar(),
                                 ),
                               IconButton(
                                 tooltip: 'Cancelar',
                                 icon: const Icon(Icons.cancel_outlined,
-                                    color: Colors.red),
+                                    color: AppColores.error),
                                 onPressed: () => _cancelar(
                                     '${op['op_uuid']}',
                                     '${op['tipo']}'),
@@ -710,14 +695,7 @@ class _ColaScreenState extends State<ColaScreen> {
   /// Tarjeta de estadística (v1.0.9.1)
   Widget _tarjetaStat(
       IconData icono, String titulo, String valor, String subtitulo, Color color) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: AppColores.superficie(context),
-        borderRadius: BorderRadius.circular(AppRadio.lg),
-        border: Border.all(color: AppColores.borde(context)),
-        boxShadow: AppSombra.tarjeta(context),
-      ),
+    return Tarjeta(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -725,23 +703,20 @@ class _ColaScreenState extends State<ColaScreen> {
           const SizedBox(height: 8),
           Text(
             valor,
-            style: TextStyle(
-              fontSize: 24,
-              fontWeight: FontWeight.bold,
+            style: AppTexto.displayPequeno.copyWith(
               color: color,
             ),
           ),
           Text(
             titulo,
-            style: const TextStyle(
-              fontSize: 13,
-              fontWeight: FontWeight.w600,
-            ),
+            style: AppTexto.subtitulo,
           ),
           const SizedBox(height: 4),
           Text(
             subtitulo,
-            style: const TextStyle(fontSize: 11, color: Colors.grey),
+            style: AppTexto.minuscula.copyWith(
+                color:
+                    AppColores.textoSecundario(context)),
           ),
         ],
       ),
@@ -750,38 +725,27 @@ class _ColaScreenState extends State<ColaScreen> {
 
   /// Chip de estado para operaciones (v1.0.9.1)
   Widget _estadoChip(String estado) {
-    Color bg;
-    Color fg;
+    Color color;
+    IconData icono;
     String texto;
     if (estado == 'aplicada') {
-      bg = Colors.green.shade100;
-      fg = Colors.green.shade800;
+      color = AppColores.exito;
+      icono = Icons.check_circle;
       texto = 'aplicada';
     } else if (estado == 'rechazada') {
-      bg = Colors.red.shade100;
-      fg = Colors.red.shade800;
+      color = AppColores.error;
+      icono = Icons.block;
       texto = 'rechazada';
     } else if (estado == 'enviada') {
-      bg = Colors.blue.shade100;
-      fg = Colors.blue.shade800;
+      color = AppColores.info;
+      icono = Icons.upload;
       texto = 'enviada';
     } else {
-      bg = Colors.grey.shade200;
-      fg = Colors.grey.shade700;
+      color = AppColores.naranja;
+      icono = Icons.schedule;
       texto = estado;
     }
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-      decoration: BoxDecoration(
-        color: bg,
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Text(
-        texto,
-        style: TextStyle(
-            color: fg, fontSize: 12, fontWeight: FontWeight.w600),
-      ),
-    );
+    return ChipEstado(texto: texto, color: color, icono: icono);
   }
 
 

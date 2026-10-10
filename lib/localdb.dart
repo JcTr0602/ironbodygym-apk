@@ -24,7 +24,7 @@ class LocalDb {
     final dir = await getDatabasesPath();
     _db = await openDatabase(
       p.join(dir, 'ironbody.db'),
-      version: 3,
+      version: 4,
       onCreate: (db, _) async {
         await _crearTablas(db);
       },
@@ -44,13 +44,27 @@ class LocalDb {
           await db.execute(
               'ALTER TABLE fotos_pendientes ADD COLUMN user_id TEXT');
         }
+        // v4: espejos del módulo de suplementos.
+        if (oldV < 4) {
+          await db.execute(
+              'CREATE TABLE IF NOT EXISTS suplementos (id INTEGER PRIMARY KEY, data TEXT NOT NULL, sync_seq INTEGER NOT NULL)');
+          await db.execute(
+              'CREATE TABLE IF NOT EXISTS ventas_suplementos (id INTEGER PRIMARY KEY, data TEXT NOT NULL, sync_seq INTEGER NOT NULL)');
+        }
       },
     );
     return _db!;
   }
 
   static Future<void> _crearTablas(Database db) async {
-    for (final t in ['clientes', 'pagos', 'pagos_diarios', 'gastos']) {
+    for (final t in [
+      'clientes',
+      'pagos',
+      'pagos_diarios',
+      'gastos',
+      'suplementos',
+      'ventas_suplementos'
+    ]) {
       await db.execute(
           'CREATE TABLE $t (id INTEGER PRIMARY KEY, data TEXT NOT NULL, sync_seq INTEGER NOT NULL)');
     }
@@ -112,6 +126,26 @@ class LocalDb {
     data['estado'] = estado;
     await d.update('clientes', {'data': jsonEncode(data)},
         where: 'id=?', whereArgs: [clienteId]);
+  }
+
+  /// Elimina entradas optimistas del espejo vinculadas a una op ya
+  /// aplicada. Las entradas optimistas usan id temporal negativo y
+  /// guardan el op_uuid; al aplicar la op, el registro real llega
+  /// por el pull y el temporal debe desaparecer para no duplicar.
+  Future<void> limpiarOptimista(String tabla, String opUuid) async {
+    final d = await db;
+    final rows = await d.query(tabla);
+    for (final r in rows) {
+      final id = r['id'] as int;
+      if (id >= 0) continue;
+      try {
+        final data =
+            jsonDecode(r['data'] as String) as Map<String, dynamic>;
+        if (data['op_uuid'] == opUuid) {
+          await d.delete(tabla, where: 'id=?', whereArgs: [id]);
+        }
+      } catch (_) {}
+    }
   }
 
   Future<List<Map<String, dynamic>>> allMirror(String tabla) async {

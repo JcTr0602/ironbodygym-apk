@@ -10,6 +10,7 @@ import 'package:flutter/services.dart';
 import '../localdb.dart';
 import '../negocio.dart';
 import '../tipos_pago.dart';
+import 'componentes.dart';
 import 'diseno.dart';
 
 /// Selección de período hecha en el diálogo.
@@ -140,9 +141,10 @@ Future<Map<String, dynamic>?> pagoDialogo(
         final nuevo = previewHastaDias(
             cliente['pagado_hasta'] as String?, _diasDe(s),
             fechaPago: fpIso);
-        return AlertDialog(
-          title: Text('Pago — ${cliente['nombre']}'),
-          content: SingleChildScrollView(
+        return DialogoApp(
+          titulo: 'Pago — ${cliente['nombre']}',
+          iconoTitulo: Icons.payments,
+          contenido: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -245,7 +247,8 @@ Future<Map<String, dynamic>?> pagoDialogo(
                     padding: const EdgeInsets.symmetric(
                         horizontal: 12, vertical: 10),
                     decoration: BoxDecoration(
-                      border: Border.all(color: Colors.grey.shade400),
+                      border: Border.all(
+                          color: AppColores.borde(ctx)),
                       borderRadius: BorderRadius.circular(8),
                     ),
                     child: Row(
@@ -259,7 +262,9 @@ Future<Map<String, dynamic>?> pagoDialogo(
                           style: const TextStyle(fontSize: 15),
                         ),
                         const Spacer(),
-                        const Icon(Icons.edit, size: 16, color: Colors.grey),
+                        Icon(Icons.edit,
+                            size: 16,
+                            color: AppColores.textoSecundario(ctx)),
                       ],
                     ),
                   ),
@@ -370,13 +375,17 @@ Future<Map<String, dynamic>?> pagoDialogo(
               ],
             ),
           ),
-          actions: [
+          acciones: [
             TextButton(
                 onPressed: () => Navigator.pop(ctx),
                 child: const Text('Cancelar')),
             ElevatedButton(
                 onPressed:
                     valido(s) ? () => Navigator.pop(ctx, s) : null,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColores.naranja,
+                  foregroundColor: Colors.white,
+                ),
                 child: const Text('Continuar')),
           ],
         );
@@ -395,9 +404,10 @@ Future<Map<String, dynamic>?> pagoDialogo(
       fechaPago: fpIso2);
   final ok = await showDialog<bool>(
     context: context,
-    builder: (ctx) => AlertDialog(
-      title: const Text('Confirmar pago'),
-      content: Column(
+    builder: (ctx) => DialogoApp(
+      titulo: 'Confirmar pago',
+      iconoTitulo: Icons.check_circle,
+      contenido: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -418,12 +428,16 @@ Future<Map<String, dynamic>?> pagoDialogo(
               style: const TextStyle(fontWeight: FontWeight.bold)),
         ],
       ),
-      actions: [
+      acciones: [
         TextButton(
             onPressed: () => Navigator.pop(ctx, false),
             child: const Text('Cancelar')),
         ElevatedButton(
             onPressed: () => Navigator.pop(ctx, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColores.naranja,
+              foregroundColor: Colors.white,
+            ),
             child: const Text('Confirmar')),
       ],
     ),

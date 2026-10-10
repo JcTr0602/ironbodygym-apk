@@ -246,18 +246,19 @@ class _PagoScreenState extends State<PagoScreen> {
     if (u == null) return;
     final ok = await showDialog<bool>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Deshacer último pago'),
-        content: Text(
+      builder: (ctx) => DialogoApp(
+        titulo: 'Deshacer último pago',
+        iconoTitulo: Icons.undo,
+        contenido: Text(
             '¿Anular el cobro de ${u.nombre} por '
             '${fmtMonto(u.monto)} CUP (${u.hora})?'),
-        actions: [
+        acciones: [
           TextButton(
               onPressed: () => Navigator.pop(ctx, false),
               child: const Text('No')),
           ElevatedButton(
             style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.red),
+                backgroundColor: AppColores.error),
             onPressed: () => Navigator.pop(ctx, true),
             child: const Text('Sí, deshacer'),
           ),
@@ -446,27 +447,27 @@ class _PagoScreenState extends State<PagoScreen> {
       appBar: AppBar(title: const Text('Agregar pago')),
       body: Column(
         children: [
-          const SyncBanner(),
+          const SyncBanner(compact: true),
           _resumenDia(),
           _ultimosCobros(),
           Padding(
             padding: const EdgeInsets.all(12),
             child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Expanded(
-                  child: TextField(
+                  child: CampoTexto(
                     controller: _q,
-                    decoration: const InputDecoration(
-                        labelText: 'Nombre, carnet o teléfono',
-                        border: OutlineInputBorder(),
-                        prefixIcon: Icon(Icons.search)),
+                    hint: 'Nombre, carnet o teléfono',
+                    icono: Icons.search,
                     onChanged: (_) => _buscar(),
-                    onSubmitted: (_) => _buscar(),
                   ),
                 ),
                 const SizedBox(width: 8),
-                ElevatedButton(
-                    onPressed: _buscar, child: const Text('Buscar')),
+                BotonPrimario(
+                    texto: 'Buscar',
+                    onPressed: _buscar,
+                    expandido: false),
               ],
             ),
           ),
@@ -488,10 +489,13 @@ class _PagoScreenState extends State<PagoScreen> {
           const SizedBox(height: 8),
           Expanded(
             child: _res.isEmpty
-                ? Center(
-                    child: Text(_busco
-                        ? 'Sin resultados'
-                        : 'Cargando…'))
+                ? EstadoVacio(
+                    icono: Icons.search_off,
+                    titulo: _busco ? 'Sin resultados' : 'Busca un cliente',
+                    subtitulo: _busco
+                        ? 'Prueba con otro nombre, carnet o teléfono'
+                        : null,
+                  )
                 : ListView.builder(
                     itemCount: _res.length,
                     itemBuilder: (ctx, i) {
@@ -507,11 +511,11 @@ class _PagoScreenState extends State<PagoScreen> {
                         trailing: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            ElevatedButton.icon(
-                              icon: const Icon(Icons.payments,
-                                  size: 18),
-                              label: const Text('Pagar'),
+                            BotonPrimario(
+                              texto: 'Pagar',
+                              icono: Icons.payments,
                               onPressed: () => _pagar(c),
+                              expandido: false,
                             ),
                           ],
                         ),

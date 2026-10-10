@@ -143,14 +143,11 @@ class _BuscarScreenState extends State<BuscarScreen> {
           const SyncBanner(),
           Padding(
             padding: const EdgeInsets.all(12),
-            child: TextField(
+            child: CampoTexto(
               controller: _q,
-              decoration: const InputDecoration(
-                  labelText: 'Nombre, carnet o teléfono',
-                  border: OutlineInputBorder(),
-                  prefixIcon: Icon(Icons.search)),
+              hint: 'Nombre, carnet o teléfono',
+              icono: Icons.search,
               onChanged: (_) => _buscar(),
-              onSubmitted: (_) => _buscar(),
             ),
           ),
           Padding(
@@ -159,8 +156,9 @@ class _BuscarScreenState extends State<BuscarScreen> {
             child: Align(
               alignment: Alignment.centerLeft,
               child: Text('${_res.length} cliente(s)',
-                  style: const TextStyle(
-                      color: Colors.grey, fontSize: 12)),
+                  style: TextStyle(
+                      color: AppColores.textoSecundario(context),
+                      fontSize: 12)),
             ),
           ),
           // v1.0.15: filtros rápidos
@@ -206,8 +204,7 @@ class _BuscarScreenState extends State<BuscarScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     const Text('Rango de edad',
-                        style: TextStyle(
-                            fontSize: 12, color: Colors.grey)),
+                        style: TextStyle(fontSize: 12)),
                     const SizedBox(height: 4),
                     Wrap(
                       spacing: 6,
@@ -226,10 +223,13 @@ class _BuscarScreenState extends State<BuscarScreen> {
           ),
           Expanded(
             child: _res.isEmpty
-                ? Center(
-                    child: Text(_busco
-                        ? 'Sin resultados'
-                        : 'Cargando…'))
+                ? EstadoVacio(
+                    icono: Icons.search_off,
+                    titulo: _busco ? 'Sin resultados' : 'Busca un cliente',
+                    subtitulo: _busco
+                        ? 'Prueba con otro nombre, carnet o teléfono'
+                        : null,
+                  )
                 : RefreshIndicator(
                     onRefresh: _actualizar,
                     child: ListView.builder(
@@ -440,8 +440,8 @@ class _FilaClienteState extends State<_FilaCliente> {
             ),
             // Acción rápida (o chevron por defecto)
             widget.trailing ??
-                const Icon(Icons.chevron_right,
-                    color: Colors.grey),
+                Icon(Icons.chevron_right,
+                    color: AppColores.textoSecundario(context)),
           ],
         ),
       ),

@@ -9,6 +9,8 @@ import 'package:url_launcher/url_launcher.dart';
 import '../config.dart';
 import '../localdb.dart';
 import '../negocio.dart';
+import 'componentes.dart';
+import 'diseno.dart';
 import 'widgets.dart';
 
 class TransferenciaScreen extends StatefulWidget {
@@ -61,7 +63,7 @@ class _TransferenciaScreenState extends State<TransferenciaScreen> {
       appBar: AppBar(title: const Text('Datos de transferencia')),
       body: Column(
         children: [
-          const SyncBanner(),
+          const SyncBanner(compact: true),
           Expanded(
             child: ListView(
               padding: const EdgeInsets.all(16),
@@ -100,9 +102,9 @@ class _TransferenciaScreenState extends State<TransferenciaScreen> {
   /// Tarjeta con número copiable + envío por SMS/WhatsApp a un cliente.
   Widget _tarjeta(BuildContext context, String etiqueta, String valor,
       TextEditingController movilCtrl) {
-    return Card(
-      margin: const EdgeInsets.only(bottom: 12),
-      child: Padding(
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Tarjeta(
         padding: const EdgeInsets.all(12),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -134,36 +136,37 @@ class _TransferenciaScreenState extends State<TransferenciaScreen> {
               ],
             ),
             const Divider(height: 20),
-            const Text('Enviar a un cliente:',
+            Text('Enviar a un cliente:',
                 style: TextStyle(
-                    fontSize: 13, color: Colors.grey)),
+                    fontSize: 13,
+                    color: AppColores.textoSecundario(context))),
             const SizedBox(height: 8),
-            TextField(
-              controller: movilCtrl,
-              keyboardType: TextInputType.phone,
-              maxLength: 8,
-              decoration: InputDecoration(
-                hintText: 'Móvil del cliente',
-                prefixIcon: const Icon(Icons.phone, size: 20),
-                suffixIcon: IconButton(
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: CampoTexto(
+                    controller: movilCtrl,
+                    hint: 'Móvil del cliente',
+                    icono: Icons.phone,
+                    teclado: TextInputType.phone,
+                  ),
+                ),
+                IconButton(
                   icon: const Icon(Icons.contacts),
                   tooltip: 'Elegir de contactos',
                   onPressed: () =>
                       _elegirContacto(context, movilCtrl),
                 ),
-                border: const OutlineInputBorder(),
-                contentPadding: const EdgeInsets.symmetric(
-                    horizontal: 12, vertical: 10),
-                counterText: '',
-              ),
+              ],
             ),
             const SizedBox(height: 8),
             Row(
               children: [
                 Expanded(
-                  child: OutlinedButton.icon(
-                    icon: const Icon(Icons.sms, size: 18),
-                    label: const Text('SMS'),
+                  child: BotonSecundario(
+                    texto: 'SMS',
+                    icono: Icons.sms,
                     onPressed: () => _enviar(
                         context, etiqueta, valor,
                         movilCtrl.text, porWhatsapp: false),
@@ -171,9 +174,9 @@ class _TransferenciaScreenState extends State<TransferenciaScreen> {
                 ),
                 const SizedBox(width: 8),
                 Expanded(
-                  child: OutlinedButton.icon(
-                    icon: const Icon(Icons.chat, size: 18),
-                    label: const Text('WhatsApp'),
+                  child: BotonSecundario(
+                    texto: 'WhatsApp',
+                    icono: Icons.chat,
                     onPressed: () => _enviar(
                         context, etiqueta, valor,
                         movilCtrl.text, porWhatsapp: true),

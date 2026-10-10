@@ -4,6 +4,9 @@ library;
 
 import 'package:flutter/material.dart';
 
+import 'componentes.dart';
+import 'diseno.dart';
+
 class ConfirmacionCobroScreen extends StatelessWidget {
   final String nombreCliente;
   final String monto;
@@ -21,7 +24,7 @@ class ConfirmacionCobroScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: AppColores.fondo(context),
       body: SafeArea(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
@@ -31,50 +34,47 @@ class ConfirmacionCobroScreen extends StatelessWidget {
               width: 120,
               height: 120,
               decoration: BoxDecoration(
-                color: Colors.green.shade50,
+                color:
+                    AppColores.exito.withValues(alpha: 0.12),
                 shape: BoxShape.circle,
               ),
               child: const Icon(
                 Icons.check_circle,
                 size: 80,
-                color: Colors.green,
+                color: AppColores.exito,
               ),
             ),
             const SizedBox(height: 32),
-            const Text(
+            Text(
               '¡Cobro registrado!',
-              style: TextStyle(
-                fontSize: 28,
-                fontWeight: FontWeight.bold,
-              ),
+              style: AppTexto.displayPequeno.copyWith(
+                  color: AppColores.texto(context)),
             ),
             const SizedBox(height: 24),
             // Datos del cobro
-            Card(
-              margin: const EdgeInsets.symmetric(horizontal: 32),
-              child: Padding(
-                padding: const EdgeInsets.all(20),
+            Padding(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 32),
+              child: Tarjeta(
                 child: Column(
                   children: [
-                    _fila('Cliente', nombreCliente),
+                    _fila(context, 'Cliente', nombreCliente),
                     const Divider(),
-                    _fila('Monto', monto),
+                    _fila(context, 'Monto', monto),
                     const Divider(),
-                    _fila('Nuevo vencimiento', nuevoVencimiento),
+                    _fila(context, 'Nuevo vencimiento',
+                        nuevoVencimiento),
                   ],
                 ),
               ),
             ),
             const SizedBox(height: 48),
-            ElevatedButton(
-              onPressed: () => Navigator.of(context).pop(),
-              style: ElevatedButton.styleFrom(
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 48, vertical: 16),
-              ),
-              child: const Text(
-                'Entendido',
-                style: TextStyle(fontSize: 18),
+            Padding(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 48),
+              child: BotonPrimario(
+                texto: 'Entendido',
+                onPressed: () => Navigator.of(context).pop(),
               ),
             ),
           ],
@@ -83,19 +83,22 @@ class ConfirmacionCobroScreen extends StatelessWidget {
     );
   }
 
-  Widget _fila(String etiqueta, String valor) {
+  Widget _fila(BuildContext context, String etiqueta, String valor) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 8),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(etiqueta, style: const TextStyle(color: Colors.grey)),
+          Text(etiqueta,
+              style: TextStyle(
+                  color: AppColores.textoSecundario(context))),
           Flexible(
             child: Text(
               valor,
-              style: const TextStyle(
+              style: TextStyle(
                 fontWeight: FontWeight.bold,
                 fontSize: 16,
+                color: AppColores.texto(context),
               ),
               textAlign: TextAlign.right,
             ),

@@ -140,15 +140,20 @@ class _InscribirScreenState extends State<InscribirScreen> {
           (d) => d['_motivo'] == 'mismo carnet');
       await showDialog<void>(
         context: context,
-        builder: (ctx) => AlertDialog(
-          title: const Text('Carnet duplicado'),
-          content: Text(
+        builder: (ctx) => DialogoApp(
+          titulo: 'Carnet duplicado',
+          iconoTitulo: Icons.badge,
+          contenido: Text(
               'El carnet $carnet ya pertenece a "${dueno['nombre']}".\n'
               'Cada carnet corresponde a un solo cliente: no se puede '
               'inscribir de nuevo.'),
-          actions: [
+          acciones: [
             ElevatedButton(
                 onPressed: () => Navigator.pop(ctx),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColores.naranja,
+                  foregroundColor: Colors.white,
+                ),
                 child: const Text('Entendido')),
           ],
         ),
@@ -158,9 +163,10 @@ class _InscribirScreenState extends State<InscribirScreen> {
     if (dups.isNotEmpty && mounted) {
       final seguir = await showDialog<bool>(
         context: context,
-        builder: (ctx) => AlertDialog(
-          title: const Text(' Posible duplicado'),
-          content: Column(
+        builder: (ctx) => DialogoApp(
+          titulo: 'Posible duplicado',
+          iconoTitulo: Icons.person_search,
+          contenido: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -173,12 +179,16 @@ class _InscribirScreenState extends State<InscribirScreen> {
               const Text('¿Seguro que es un cliente nuevo?'),
             ],
           ),
-          actions: [
+          acciones: [
             TextButton(
                 onPressed: () => Navigator.pop(ctx, false),
                 child: const Text('Revisar')),
             ElevatedButton(
                 onPressed: () => Navigator.pop(ctx, true),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColores.naranja,
+                  foregroundColor: Colors.white,
+                ),
                 child: const Text('Sí, es nuevo')),
           ],
         ),
@@ -194,9 +204,10 @@ class _InscribirScreenState extends State<InscribirScreen> {
     if (!mounted) return;
     final ok = await showDialog<bool>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Confirmar inscripción'),
-        content: Column(
+      builder: (ctx) => DialogoApp(
+        titulo: 'Confirmar inscripción',
+        iconoTitulo: Icons.check_circle,
+        contenido: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -210,12 +221,16 @@ class _InscribirScreenState extends State<InscribirScreen> {
             if (carnet.isNotEmpty) Text('Carnet: $carnet'),
           ],
         ),
-        actions: [
+        acciones: [
           TextButton(
               onPressed: () => Navigator.pop(ctx, false),
               child: const Text('Cancelar')),
           ElevatedButton(
               onPressed: () => Navigator.pop(ctx, true),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColores.naranja,
+                foregroundColor: Colors.white,
+              ),
               child: const Text('Confirmar')),
         ],
       ),
@@ -275,7 +290,7 @@ class _InscribirScreenState extends State<InscribirScreen> {
       appBar: AppBar(title: const Text('Inscribir cliente')),
       body: Column(
         children: [
-          const SyncBanner(),
+          const SyncBanner(compact: true),
           Expanded(
             child: ListView(
               padding: const EdgeInsets.all(AppEspacio.lg),

@@ -8,6 +8,8 @@ import 'package:flutter/material.dart';
 
 import '../fotos.dart';
 import '../negocio.dart';
+import 'componentes.dart';
+import 'diseno.dart';
 import 'widgets.dart';
 
 class CuentasCobrarScreen extends StatefulWidget {
@@ -23,8 +25,6 @@ class _CuentasCobrarScreenState
   bool _cargando = true;
   List<Map<String, dynamic>> _cuentas = [];
   double _total = 0;
-
-  static const naranja = Color(0xFFE8821A);
 
   @override
   void initState() {
@@ -67,6 +67,7 @@ class _CuentasCobrarScreenState
         'pagado_hasta': ph.length >= 10
             ? ph.substring(0, 10)
             : ph,
+        'foto_storage': c['foto_storage'] as String?,
       });
     }
     // Mayor monto primero: el dinero más gordo arriba.
@@ -98,73 +99,72 @@ class _CuentasCobrarScreenState
           : RefreshIndicator(
               onRefresh: _cargar,
               child: ListView(
-                padding: const EdgeInsets.all(16),
+                padding:
+                    const EdgeInsets.all(AppEspacio.lg),
                 children: [
                   const SyncBanner(),
-                  const SizedBox(height: 8),
-                  Card(
-                    color: const Color(0xFF2B2B2B),
-                    shape: RoundedRectangleBorder(
-                        borderRadius:
-                            BorderRadius.circular(16)),
-                    child: Padding(
-                      padding: const EdgeInsets.all(18),
-                      child: Column(
-                        children: [
-                          const Text(
-                              'Dinero dormido en vencidos',
-                              style: TextStyle(
-                                  color: Colors.white70,
-                                  fontSize: 13)),
-                          Text('${fmtMonto(_total)} CUP',
-                              style: const TextStyle(
-                                  color: naranja,
-                                  fontSize: 30,
-                                  fontWeight: FontWeight.bold)),
-                          Text('${_cuentas.length} clientes vencidos',
-                              style: const TextStyle(
-                                  color: Colors.white70,
-                                  fontSize: 12)),
-                        ],
-                      ),
+                  const SizedBox(height: AppEspacio.sm),
+                  // Hero: tarjeta carbón con el total
+                  // (texto claro legible en ambos temas).
+                  Tarjeta(
+                    color: AppColores.carbon,
+                    child: Column(
+                      children: [
+                        Text(
+                          'Dinero dormido en vencidos',
+                          style: AppTexto.secundario.copyWith(
+                              color: Colors.white70),
+                        ),
+                        Text(
+                          '${fmtMonto(_total)} CUP',
+                          style: AppTexto.display.copyWith(
+                              color: AppColores.naranja),
+                        ),
+                        Text(
+                          '${_cuentas.length} clientes vencidos',
+                          style: AppTexto.minuscula.copyWith(
+                              color: Colors.white70),
+                        ),
+                      ],
                     ),
                   ),
-                  const SizedBox(height: 12),
+                  const SizedBox(height: AppEspacio.md),
                   if (_cuentas.isEmpty)
-                    const Card(
-                      child: Padding(
-                        padding: EdgeInsets.all(24),
-                        child: Text(
-                          'Sin cuentas por cobrar.\n\n'
+                    const EstadoVacio(
+                      icono: Icons.check_circle,
+                      titulo: 'Sin cuentas por cobrar',
+                      subtitulo:
                           'Todos los clientes activos están al día.',
-                          textAlign: TextAlign.center,
-                        ),
-                      ),
                     )
                   else
                     for (final c in _cuentas)
-                      Card(
-                        child: ListTile(
-                          leading: _FotoConDias(
-                            fotoStorage:
-                                c['foto_storage'] as String?,
-                            dias: c['dias'] as int,
-                          ),
-                          title:
-                              Text('${c['nombre']}'),
-                          subtitle: Text(
-                            (c['dias'] as int) == 0
-                                ? 'Vence hoy'
-                                : 'Vencido hace ${c['dias']} días\n'
-                                    'Último pago: ${fmtFecha(c['pagado_hasta'] as String?)}',
-                          ),
-                          isThreeLine: true,
-                          trailing: Text(
-                            '${fmtMonto(c['monto'])} CUP',
-                            style: const TextStyle(
-                                fontWeight: FontWeight.bold,
-                                color: naranja,
-                                fontSize: 15),
+                      Padding(
+                        padding: const EdgeInsets.only(
+                            bottom: AppEspacio.sm),
+                        child: Tarjeta(
+                          padding: EdgeInsets.zero,
+                          child: ListTile(
+                            leading: _FotoConDias(
+                              fotoStorage: c['foto_storage']
+                                  as String?,
+                              dias: c['dias'] as int,
+                            ),
+                            title:
+                                Text('${c['nombre']}'),
+                            subtitle: Text(
+                              (c['dias'] as int) == 0
+                                  ? 'Vence hoy'
+                                  : 'Vencido hace ${c['dias']} días\n'
+                                      'Vence: ${fmtFecha(c['pagado_hasta'] as String?)}',
+                            ),
+                            isThreeLine: true,
+                            trailing: Text(
+                              '${fmtMonto(c['monto'])} CUP',
+                              style:
+                                  AppTexto.subtitulo.copyWith(
+                                      color:
+                                          AppColores.naranja),
+                            ),
                           ),
                         ),
                       ),
@@ -179,7 +179,8 @@ class _CuentasCobrarScreenState
 class _FotoConDias extends StatefulWidget {
   final String? fotoStorage;
   final int dias;
-  const _FotoConDias({required this.fotoStorage, required this.dias});
+  const _FotoConDias(
+      {required this.fotoStorage, required this.dias});
 
   @override
   State<_FotoConDias> createState() => _FotoConDiasState();
@@ -202,25 +203,30 @@ class _FotoConDiasState extends State<_FotoConDias> {
 
   @override
   Widget build(BuildContext context) {
-    final color =
-        widget.dias > 30 ? Colors.red : Colors.orange.shade800;
-    final bg =
-        widget.dias > 30 ? Colors.red.shade100 : Colors.orange.shade100;
+    final oscuro =
+        Theme.of(context).brightness == Brightness.dark;
+    final base = widget.dias > 30
+        ? AppColores.errorOscuro
+        : AppColores.alertaOscuro;
+    // En modo oscuro se aclara el frente para mantener contraste.
+    final frente = oscuro
+        ? (Color.lerp(base, Colors.white, 0.35) ?? base)
+        : base;
+    final insignia =
+        widget.dias > 30 ? AppColores.error : AppColores.alerta;
     return Stack(
       children: [
         CircleAvatar(
           radius: 24,
-          backgroundColor: bg,
+          backgroundColor:
+              frente.withValues(alpha: 0.15),
           backgroundImage:
               _foto != null ? FileImage(_foto!) : null,
           child: _foto == null
               ? Text(
                   '${widget.dias}d',
-                  style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.bold,
-                    color: color,
-                  ),
+                  style: AppTexto.etiqueta
+                      .copyWith(color: frente),
                 )
               : null,
         ),
@@ -232,15 +238,15 @@ class _FotoConDiasState extends State<_FotoConDias> {
             padding: const EdgeInsets.symmetric(
                 horizontal: 5, vertical: 2),
             decoration: BoxDecoration(
-              color: color,
-              borderRadius: BorderRadius.circular(8),
+              color: insignia,
+              borderRadius:
+                  BorderRadius.circular(AppRadio.sm),
             ),
             child: Text(
               '${widget.dias}d',
-              style: const TextStyle(
-                fontSize: 9,
-                fontWeight: FontWeight.bold,
+              style: AppTexto.minuscula.copyWith(
                 color: Colors.white,
+                fontWeight: FontWeight.bold,
               ),
             ),
           ),

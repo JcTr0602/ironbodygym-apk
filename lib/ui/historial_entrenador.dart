@@ -7,7 +7,9 @@ import 'package:flutter/material.dart';
 
 import '../localdb.dart';
 import '../negocio.dart';
+import 'componentes.dart';
 import 'detalle_entrenador.dart';
+import 'diseno.dart';
 import 'widgets.dart';
 
 class HistorialEntrenadorScreen extends StatefulWidget {
@@ -116,18 +118,21 @@ class _HistorialEntrenadorScreenState
                           itemCount: _datos.length,
                           itemBuilder: (ctx, i) {
                             final d = _datos[i];
-                            return InkWell(
-                              onTap: () => Navigator.of(context).push(
-                                MaterialPageRoute(
-                                  builder: (_) => DetalleEntrenadorScreen(
-                                      nombre: '${d['nombre']}'),
-                                ),
-                              ),
-                              child: Card(
-                              margin: const EdgeInsets.symmetric(
+                            return Padding(
+                              padding: const EdgeInsets.symmetric(
                                   horizontal: 12, vertical: 6),
-                              child: Padding(
-                                padding: const EdgeInsets.all(12),
+                              child: Tarjeta(
+                                padding:
+                                    const EdgeInsets.all(12),
+                                onTap: () =>
+                                    Navigator.of(context).push(
+                                  MaterialPageRoute(
+                                    builder: (_) =>
+                                        DetalleEntrenadorScreen(
+                                            nombre:
+                                                '${d['nombre']}'),
+                                  ),
+                                ),
                                 child: Column(
                                   crossAxisAlignment:
                                       CrossAxisAlignment.start,
@@ -154,24 +159,30 @@ class _HistorialEntrenadorScreenState
                                     const SizedBox(height: 4),
                                     Row(
                                       children: [
-                                        const Text('⏳ Pendiente por entregar: ',
-                                            style: TextStyle(fontSize: 12)),
+                                        Text('Pendiente por entregar: ',
+                                            style: AppTexto.secundario
+                                                .copyWith(
+                                                    color: AppColores
+                                                        .textoSecundario(
+                                                            context))),
                                         Text(
                                           '${(d['pendiente'] as double).toStringAsFixed(0)} CUP',
                                           style: TextStyle(
                                               fontSize: 12,
-                                              fontWeight: FontWeight.bold,
-                                              color: (d['pendiente'] as double) > 0
-                                                  ? Colors.red
-                                                  : Colors.green),
+                                              fontWeight:
+                                                  FontWeight.bold,
+                                              color: (d['pendiente']
+                                                          as double) >
+                                                      0
+                                                  ? AppColores.error
+                                                  : AppColores.exito),
                                         ),
                                       ],
                                     ),
                                   ],
                                 ),
                               ),
-                            ),
-                          );
+                            );
                           },
                         ),
                       ),
@@ -185,7 +196,10 @@ class _HistorialEntrenadorScreenState
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(etiqueta, style: const TextStyle(fontSize: 11, color: Colors.grey)),
+        Text(etiqueta,
+            style: AppTexto.minuscula.copyWith(
+                color:
+                    AppColores.textoSecundario(context))),
         Text(valor,
             style: const TextStyle(
                 fontSize: 14, fontWeight: FontWeight.bold)),

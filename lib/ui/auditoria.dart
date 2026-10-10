@@ -8,6 +8,9 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 
 import '../localdb.dart';
+import 'diseno.dart';
+import 'componentes.dart';
+import 'widgets.dart';
 
 class AuditoriaScreen extends StatefulWidget {
   const AuditoriaScreen({super.key});
@@ -97,6 +100,8 @@ class _AuditoriaScreenState extends State<AuditoriaScreen> {
         return 'Edición de cliente';
       case 'admin_usuario':
         return 'Gestión de usuario';
+      case 'inscripcion_venta_suplemento':
+        return 'Inscripción + venta';
       default:
         return tipo;
     }
@@ -169,13 +174,22 @@ class _AuditoriaScreenState extends State<AuditoriaScreen> {
           ),
         ],
       ),
-      body: _cargando
-          ? const Center(child: CircularProgressIndicator())
-          : _ops.isEmpty
-              ? const Center(child: Text('Sin operaciones registradas'))
-              : RefreshIndicator(
-                  onRefresh: _cargar,
-                  child: ListView.builder(
+      body: Column(
+        children: [
+          const SyncBanner(),
+          Expanded(
+            child: _cargando
+                ? const Center(child: CircularProgressIndicator())
+                : _ops.isEmpty
+                    ? EstadoVacio(
+                        icono: Icons.fact_check,
+                        titulo: 'Sin operaciones registradas',
+                        textoAccion: 'Actualizar',
+                        onAccion: _cargar,
+                      )
+                    : RefreshIndicator(
+                        onRefresh: _cargar,
+                        child: ListView.builder(
                     itemCount: _ops.length,
                     itemBuilder: (ctx, i) {
                       final op = _ops[i];
@@ -192,10 +206,12 @@ class _AuditoriaScreenState extends State<AuditoriaScreen> {
                           fotoPath.isNotEmpty &&
                           File(fotoPath).existsSync();
 
-                      return Card(
-                        margin: const EdgeInsets.symmetric(
+                      return Padding(
+                        padding: const EdgeInsets.symmetric(
                             horizontal: 12, vertical: 6),
-                        child: ListTile(
+                        child: Tarjeta(
+                          padding: EdgeInsets.zero,
+                          child: ListTile(
                           leading: tieneFoto
                               ? ClipRRect(
                                   borderRadius: BorderRadius.circular(20),
@@ -213,34 +229,47 @@ class _AuditoriaScreenState extends State<AuditoriaScreen> {
                                         : '?',
                                   ),
                                 ),
-                          title: Text(_nombreTipo(tipo)),
+                          title: Text(_nombreTipo(tipo),
+                              style: AppTexto.subtitulo),
                           subtitle: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
+                            crossAxisAlignment:
+                                CrossAxisAlignment.start,
                             children: [
                               if (detalle.isNotEmpty)
                                 Text(detalle,
-                                    style: const TextStyle(
-                                        fontWeight: FontWeight.w500)),
-                              Text(usuario),
-                              Text(fecha),
+                                    style: AppTexto.cuerpo.copyWith(
+                                        fontWeight:
+                                            FontWeight.w500)),
+                              Text(usuario,
+                                  style: AppTexto.secundario),
+                              Text(fecha,
+                                  style: AppTexto.secundario
+                                      .copyWith(
+                                          color: AppColores
+                                              .textoSecundario(
+                                                  ctx))),
                               Text(
                                 'Estado: $estado',
-                                style: TextStyle(
+                                style: AppTexto.etiqueta.copyWith(
                                   color: estado == 'aplicada'
-                                      ? Colors.green
+                                      ? AppColores.exito
                                       : estado == 'rechazada'
-                                          ? Colors.red
-                                          : Colors.orange,
+                                          ? AppColores.error
+                                          : AppColores.alerta,
                                   fontWeight: FontWeight.bold,
                                 ),
                               ),
                             ],
                           ),
                         ),
+                        ),
                       );
                     },
                   ),
                 ),
+              ),
+            ],
+          ),
     );
   }
 }

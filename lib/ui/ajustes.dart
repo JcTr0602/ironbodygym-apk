@@ -23,6 +23,7 @@ import '../novedades.dart';
 import '../perfil.dart';
 import '../theme.dart';
 import 'avisos.dart';
+import 'componentes.dart';
 import 'diseno.dart';
 import 'widgets.dart';
 
@@ -105,9 +106,10 @@ class _AjustesScreenState extends State<AjustesScreen> {
   Future<void> _cambiarAvatar() async {
     final origen = await showDialog<ImageSource>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Foto de perfil'),
-        content: Column(
+      builder: (ctx) => DialogoApp(
+        titulo: 'Foto de perfil',
+        iconoTitulo: Icons.photo_camera,
+        contenido: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             ListTile(
@@ -144,28 +146,33 @@ class _AjustesScreenState extends State<AjustesScreen> {
     required String? valorActual,
     required String etiqueta,
     TextInputType teclado = TextInputType.text,
-    List<TextInputFormatter>? formato,
     required Future<void> Function(String) guardar,
   }) async {
     final ctrl = TextEditingController(text: valorActual ?? '');
     final ok = await showDialog<bool>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text(titulo),
-        content: TextField(
+      builder: (ctx) => DialogoApp(
+        titulo: titulo,
+        iconoTitulo: Icons.edit_outlined,
+        contenido: CampoTexto(
           controller: ctrl,
-          keyboardType: teclado,
-          inputFormatters: formato,
-          decoration: InputDecoration(
-              labelText: etiqueta,
-              border: const OutlineInputBorder()),
+          etiqueta: etiqueta,
+          teclado: teclado,
         ),
-        actions: [
+        acciones: [
           TextButton(
               onPressed: () => Navigator.pop(ctx, false),
               child: const Text('Cancelar')),
           ElevatedButton(
               onPressed: () => Navigator.pop(ctx, true),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColores.naranja,
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(
+                  borderRadius:
+                      BorderRadius.circular(AppRadio.md),
+                ),
+              ),
               child: const Text('Guardar')),
         ],
       ),
@@ -186,9 +193,10 @@ class _AjustesScreenState extends State<AjustesScreen> {
     final ctrl = TextEditingController(text: valorActual ?? '');
     final ok = await showDialog<bool>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text(titulo),
-        content: TextField(
+      builder: (ctx) => DialogoApp(
+        titulo: titulo,
+        iconoTitulo: Icons.edit_outlined,
+        contenido: TextField(
           controller: ctrl,
           keyboardType: TextInputType.number,
           inputFormatters: [
@@ -198,12 +206,20 @@ class _AjustesScreenState extends State<AjustesScreen> {
               labelText: etiqueta,
               border: const OutlineInputBorder()),
         ),
-        actions: [
+        acciones: [
           TextButton(
               onPressed: () => Navigator.pop(ctx, false),
               child: const Text('Cancelar')),
           ElevatedButton(
               onPressed: () => Navigator.pop(ctx, true),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColores.naranja,
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(
+                  borderRadius:
+                      BorderRadius.circular(AppRadio.md),
+                ),
+              ),
               child: const Text('Guardar')),
         ],
       ),
@@ -241,9 +257,10 @@ class _AjustesScreenState extends State<AjustesScreen> {
   Future<void> _elegirTema() async {
     final sel = await showDialog<String>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Tema'),
-        content: Column(
+      builder: (ctx) => DialogoApp(
+        titulo: 'Tema',
+        iconoTitulo: Icons.palette_outlined,
+        contenido: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             _opcionTema(ctx, 'sistema', Icons.brightness_auto,
@@ -281,9 +298,9 @@ class _AjustesScreenState extends State<AjustesScreen> {
               borderRadius: BorderRadius.circular(6),
               color: oscuro
                   ? AppColores.carbonProfundo
-                  : Colors.grey.shade200,
+                  : AppColores.borde(ctx).withValues(alpha: 0.4),
               border: Border.all(
-                  color: Colors.grey.shade500, width: 0.5),
+                  color: AppColores.borde(ctx), width: 0.5),
             ),
             child: Center(
               child: Container(
@@ -344,41 +361,44 @@ class _AjustesScreenState extends State<AjustesScreen> {
     final nueva2 = TextEditingController();
     final ok = await showDialog<bool>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Cambiar contraseña'),
-        content: SingleChildScrollView(
+      builder: (ctx) => DialogoApp(
+        titulo: 'Cambiar contraseña',
+        iconoTitulo: Icons.key_outlined,
+        contenido: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              TextField(
+              CampoTexto(
                   controller: actual,
-                  obscureText: true,
-                  decoration: const InputDecoration(
-                      labelText: 'Contraseña actual',
-                      border: OutlineInputBorder())),
+                  obscure: true,
+                  etiqueta: 'Contraseña actual'),
               const SizedBox(height: 8),
-              TextField(
+              CampoTexto(
                   controller: nueva,
-                  obscureText: true,
-                  decoration: const InputDecoration(
-                      labelText: 'Nueva contraseña',
-                      border: OutlineInputBorder())),
+                  obscure: true,
+                  etiqueta: 'Nueva contraseña'),
               const SizedBox(height: 8),
-              TextField(
+              CampoTexto(
                   controller: nueva2,
-                  obscureText: true,
-                  decoration: const InputDecoration(
-                      labelText: 'Repite la nueva',
-                      border: OutlineInputBorder())),
+                  obscure: true,
+                  etiqueta: 'Repite la nueva'),
             ],
           ),
         ),
-        actions: [
+        acciones: [
           TextButton(
               onPressed: () => Navigator.pop(ctx, false),
               child: const Text('Cancelar')),
           ElevatedButton(
               onPressed: () => Navigator.pop(ctx, true),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColores.naranja,
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(
+                  borderRadius:
+                      BorderRadius.circular(AppRadio.md),
+                ),
+              ),
               child: const Text('Cambiar')),
         ],
       ),
@@ -406,9 +426,10 @@ class _AjustesScreenState extends State<AjustesScreen> {
     final c2 = TextEditingController();
     final accion = await showDialog<String>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text(_tienePin ? 'Cambiar PIN' : 'Crear PIN rápido'),
-        content: Column(
+      builder: (ctx) => DialogoApp(
+        titulo: _tienePin ? 'Cambiar PIN' : 'Crear PIN rápido',
+        iconoTitulo: Icons.pin_outlined,
+        contenido: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             TextField(
@@ -434,7 +455,7 @@ class _AjustesScreenState extends State<AjustesScreen> {
             ),
           ],
         ),
-        actions: [
+        acciones: [
           if (_tienePin)
             TextButton(
               onPressed: () async {
@@ -442,13 +463,21 @@ class _AjustesScreenState extends State<AjustesScreen> {
                 if (ctx.mounted) Navigator.pop(ctx, 'quitar');
               },
               child: const Text('Quitar PIN',
-                  style: TextStyle(color: Colors.red)),
+                  style: TextStyle(color: AppColores.error)),
             ),
           TextButton(
               onPressed: () => Navigator.pop(ctx, null),
               child: const Text('Cancelar')),
           ElevatedButton(
               onPressed: () => Navigator.pop(ctx, 'guardar'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColores.naranja,
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(
+                  borderRadius:
+                      BorderRadius.circular(AppRadio.md),
+                ),
+              ),
               child: const Text('Guardar')),
         ],
       ),
@@ -558,24 +587,14 @@ class _AjustesScreenState extends State<AjustesScreen> {
     );
     final ruta = res?.files.single.path;
     if (ruta == null || !mounted) return;
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Importar respaldo'),
-        content: const Text(
-            'Se reemplazarán todos los datos de este teléfono con el respaldo elegido. '
-            '¿Continuar?'),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Cancelar')),
-          ElevatedButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColores.error),
-              child: const Text('Importar')),
-        ],
-      ),
+    final ok = await DialogoApp.confirmar(
+      context,
+      titulo: 'Importar respaldo',
+      mensaje: 'Se reemplazarán todos los datos de este teléfono con el '
+          'respaldo elegido. ¿Continuar?',
+      aceptar: 'Importar',
+      peligro: true,
+      icono: Icons.cloud_download_outlined,
     );
     if (ok != true || !mounted) return;
     _msg('Validando respaldo…');
@@ -641,12 +660,13 @@ class _AjustesScreenState extends State<AjustesScreen> {
       await showDialog(
         context: context,
         barrierDismissible: false,
-        builder: (ctx) => AlertDialog(
-          title: const Text('Respaldo importado'),
-          content: const Text(
+        builder: (ctx) => DialogoApp(
+          titulo: 'Respaldo importado',
+          iconoTitulo: Icons.check_circle,
+          contenido: const Text(
               'Reinicia la app para que los datos importados se apliquen.'),
-          actions: [
-            ElevatedButton(
+          acciones: [
+            TextButton(
                 onPressed: () => Navigator.pop(ctx),
                 child: const Text('Entendido')),
           ],
@@ -691,10 +711,11 @@ class _AjustesScreenState extends State<AjustesScreen> {
       });
       await showDialog(
         context: context,
-        builder: (ctx) => AlertDialog(
-          title: const Text('Espacio usado'),
-          content: Text(_espacioTexto!),
-          actions: [
+        builder: (ctx) => DialogoApp(
+          titulo: 'Espacio usado',
+          iconoTitulo: Icons.storage_outlined,
+          contenido: Text(_espacioTexto!),
+          acciones: [
             TextButton(
                 onPressed: () => Navigator.pop(ctx),
                 child: const Text('Cerrar')),
@@ -708,22 +729,13 @@ class _AjustesScreenState extends State<AjustesScreen> {
 
   /// Limpiar caché de fotos (item 19).
   Future<void> _limpiarCache() async {
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Limpiar caché de fotos'),
-        content: const Text(
-            'Se borrarán las fotos guardadas en el teléfono. '
-            'Se descargarán de nuevo al sincronizar.'),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Cancelar')),
-          ElevatedButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('Limpiar')),
-        ],
-      ),
+    final ok = await DialogoApp.confirmar(
+      context,
+      titulo: 'Limpiar caché de fotos',
+      mensaje: 'Se borrarán las fotos guardadas en el teléfono. '
+          'Se descargarán de nuevo al sincronizar.',
+      aceptar: 'Limpiar',
+      icono: Icons.cleaning_services_outlined,
     );
     if (ok != true) return;
     try {
@@ -766,12 +778,13 @@ class _AjustesScreenState extends State<AjustesScreen> {
           remota.isNotEmpty && esVersionMayor(remota, actual);
       await showDialog(
         context: context,
-        builder: (ctx) => AlertDialog(
-          title: const Text('Actualizaciones'),
-          content: Text(hayNueva
+        builder: (ctx) => DialogoApp(
+          titulo: 'Actualizaciones',
+          iconoTitulo: Icons.system_update,
+          contenido: Text(hayNueva
               ? 'Hay una nueva versión disponible: $remota\nTu versión: $actual'
               : 'Tienes la última versión ($actual)'),
-          actions: [
+          acciones: [
             TextButton(
                 onPressed: () => Navigator.pop(ctx),
                 child: const Text('Cerrar')),
@@ -789,9 +802,10 @@ class _AjustesScreenState extends State<AjustesScreen> {
   void _verNovedades() {
     showDialog(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Lo nuevo'),
-        content: SizedBox(
+      builder: (ctx) => DialogoApp(
+        titulo: 'Lo nuevo',
+        iconoTitulo: Icons.new_releases_outlined,
+        contenido: SizedBox(
           width: double.maxFinite,
           child: ListView.builder(
             shrinkWrap: true,
@@ -824,7 +838,7 @@ class _AjustesScreenState extends State<AjustesScreen> {
             },
           ),
         ),
-        actions: [
+        acciones: [
           TextButton(
               onPressed: () => Navigator.pop(ctx),
               child: const Text('Cerrar')),
@@ -856,22 +870,13 @@ class _AjustesScreenState extends State<AjustesScreen> {
 
   /// Restablecer ajustes (item 24).
   Future<void> _restablecer() async {
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Restablecer ajustes'),
-        content: const Text(
-            'Se devolverán todos los ajustes a sus valores por defecto. '
-            'No se borran tus datos ni tu PIN.'),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Cancelar')),
-          ElevatedButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('Restablecer')),
-        ],
-      ),
+    final ok = await DialogoApp.confirmar(
+      context,
+      titulo: 'Restablecer ajustes',
+      mensaje: 'Se devolverán todos los ajustes a sus valores por defecto. '
+          'No se borran tus datos ni tu PIN.',
+      aceptar: 'Restablecer',
+      icono: Icons.restart_alt_outlined,
     );
     if (ok != true) return;
     await _perfil.resetAjustes();
@@ -1053,31 +1058,34 @@ class _AjustesScreenState extends State<AjustesScreen> {
                   onTap: _elegirTema,
                 ),
                 Padding(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 16, vertical: 4),
-                  child: Row(
-                    children: [
-                      const Icon(Icons.format_size,
-                          size: 24),
-                      const SizedBox(width: 16),
-                      const Expanded(
-                          child: Text('Tamaño de letra')),
-                      Expanded(
-                        flex: 2,
-                        child: Slider(
-                          value: _tamanoLetra,
-                          min: 0.85,
-                          max: 1.3,
-                          divisions: 9,
-                          label:
-                              '${(_tamanoLetra * 100).round()}%',
-                          onChanged: (v) =>
-                              setState(() => _tamanoLetra = v),
-                          onChangeEnd: (v) =>
-                              ThemeController.setFontScale(v),
+                  padding: const EdgeInsets.only(top: 4),
+                  child: Tarjeta(
+                    child: Row(
+                      children: [
+                        const Icon(Icons.format_size,
+                            size: 24,
+                            color: AppColores.naranja),
+                        const SizedBox(width: 16),
+                        const Expanded(
+                            child: Text('Tamaño de letra',
+                                style: AppTexto.cuerpo)),
+                        Expanded(
+                          flex: 2,
+                          child: Slider(
+                            value: _tamanoLetra,
+                            min: 0.85,
+                            max: 1.3,
+                            divisions: 9,
+                            label:
+                                '${(_tamanoLetra * 100).round()}%',
+                            onChanged: (v) =>
+                                setState(() => _tamanoLetra = v),
+                            onChangeEnd: (v) =>
+                                ThemeController.setFontScale(v),
+                          ),
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
                 ),
 
@@ -1256,11 +1264,11 @@ class _AjustesScreenState extends State<AjustesScreen> {
                   onTap: _restablecer,
                 ),
                 const SizedBox(height: 24),
-                const Center(
+                Center(
                   child: Text('© Creado por JcTr0602',
-                      style: TextStyle(
-                          color: Colors.grey,
-                          fontSize: 12)),
+                      style: AppTexto.minuscula.copyWith(
+                          color: AppColores.textoSecundario(
+                              context))),
                 ),
                 const SizedBox(height: 16),
               ],

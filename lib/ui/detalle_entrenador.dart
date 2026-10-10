@@ -16,6 +16,8 @@ import 'package:flutter/material.dart';
 
 import '../localdb.dart';
 import '../negocio.dart';
+import 'componentes.dart';
+import 'diseno.dart';
 import 'ficha.dart';
 import 'widgets.dart';
 
@@ -288,13 +290,13 @@ class _DetalleEntrenadorScreenState extends State<DetalleEntrenadorScreen> {
                           Text(
                               'Entregado: ${fmtMonto(_entregado)} CUP',
                               style: const TextStyle(
-                                  color: Colors.green,
+                                  color: AppColores.exito,
                                   fontWeight:
                                       FontWeight.w500)),
                           Text(
                               'Pendiente: ${fmtMonto(_pendiente)} CUP',
                               style: const TextStyle(
-                                  color: Colors.orange,
+                                  color: AppColores.alerta,
                                   fontWeight:
                                       FontWeight.w500)),
                           const SizedBox(height: 6),
@@ -305,12 +307,13 @@ class _DetalleEntrenadorScreenState extends State<DetalleEntrenadorScreen> {
                               child: LinearProgressIndicator(
                                 value: (_entregado / _total)
                                     .clamp(0.0, 1.0),
-                                backgroundColor:
-                                    Colors.orange.shade200,
+                                backgroundColor: AppColores
+                                    .alerta
+                                    .withValues(alpha: 0.3),
                                 valueColor:
                                     const AlwaysStoppedAnimation<
                                             Color>(
-                                        Colors.green),
+                                        AppColores.exito),
                                 minHeight: 8,
                               ),
                             ),
@@ -323,10 +326,11 @@ class _DetalleEntrenadorScreenState extends State<DetalleEntrenadorScreen> {
                               _total),
                           const Divider(height: 12),
                           if (_otros.isEmpty)
-                            const Text(
+                            Text(
                                 'Sin otros entrenadores con cobros en el período.',
                                 style: TextStyle(
-                                    color: Colors.grey,
+                                    color: AppColores
+                                        .textoSecundario(context),
                                     fontSize: 13)),
                           for (final o in _otros.take(3))
                             Padding(
@@ -359,11 +363,13 @@ class _DetalleEntrenadorScreenState extends State<DetalleEntrenadorScreen> {
                                         bottom: 6),
                                 child: Row(
                                   children: [
-                                    SizedBox(
-                                      width: 86,
+                                    Flexible(
+                                      flex: 4,
                                       child: Text(
                                         fmtFecha(
                                             d['fecha']),
+                                        overflow: TextOverflow
+                                            .ellipsis,
                                         style: const TextStyle(
                                             fontSize: 12,
                                             fontWeight:
@@ -372,6 +378,7 @@ class _DetalleEntrenadorScreenState extends State<DetalleEntrenadorScreen> {
                                       ),
                                     ),
                                     Expanded(
+                                      flex: 5,
                                       child:
                                           LinearProgressIndicator(
                                         value: _total > 0
@@ -385,14 +392,16 @@ class _DetalleEntrenadorScreenState extends State<DetalleEntrenadorScreen> {
                                       ),
                                     ),
                                     const SizedBox(width: 8),
-                                    SizedBox(
-                                      width: 78,
+                                    Flexible(
+                                      flex: 3,
                                       child: Text(
                                         fmtMonto((d['monto']
                                                 as num)
                                             .toDouble()),
                                         textAlign:
                                             TextAlign.right,
+                                        overflow: TextOverflow
+                                            .ellipsis,
                                         style: const TextStyle(
                                             fontSize: 12),
                                       ),
@@ -405,10 +414,11 @@ class _DetalleEntrenadorScreenState extends State<DetalleEntrenadorScreen> {
                         _seccion(Icons.receipt_long, 'Cobros (${_cobros.length})',
                             [
                               if (_cobros.isEmpty)
-                                const Text(
+                                Text(
                                     'Sin cobros en el período.',
                                     style: TextStyle(
-                                        color: Colors.grey,
+                                        color: AppColores
+                                            .textoSecundario(context),
                                         fontSize: 13)),
                               for (final c
                                   in _cobros.take(50))
@@ -451,18 +461,20 @@ class _DetalleEntrenadorScreenState extends State<DetalleEntrenadorScreen> {
                               if (_cobros.length > 50)
                                 Text(
                                     '…y ${_cobros.length - 50} más',
-                                    style: const TextStyle(
-                                        color: Colors.grey,
+                                    style: TextStyle(
+                                        color: AppColores
+                                            .textoSecundario(context),
                                         fontSize: 12)),
                             ]),
                         // Inscripciones (idea 4)
                         _seccion(Icons.person_add, 'Inscripciones (${_inscripciones.length})',
                             [
                               if (_inscripciones.isEmpty)
-                                const Text(
+                                Text(
                                     'Sin inscripciones en el período.',
                                     style: TextStyle(
-                                        color: Colors.grey,
+                                        color: AppColores
+                                            .textoSecundario(context),
                                         fontSize: 13)),
                               for (final ins
                                   in _inscripciones)
@@ -479,10 +491,11 @@ class _DetalleEntrenadorScreenState extends State<DetalleEntrenadorScreen> {
                                           ins['fecha']),
                                       style: const TextStyle(
                                           fontSize: 12)),
-                                  trailing: const Icon(
+                                  trailing: Icon(
                                       Icons.chevron_right,
                                       size: 18,
-                                      color: Colors.grey),
+                                      color: AppColores
+                                          .textoSecundario(context)),
                                   onTap: () {
                                     final cid = ins[
                                             'cliente_id']
@@ -511,21 +524,19 @@ class _DetalleEntrenadorScreenState extends State<DetalleEntrenadorScreen> {
   }
 
   Widget _seccion(IconData icono, String titulo, List<Widget> hijos) {
-    return Card(
-      margin: const EdgeInsets.only(bottom: 12),
-      child: Padding(
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Tarjeta(
         padding: const EdgeInsets.all(12),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
               children: [
-                Icon(icono, size: 18, color: const Color(0xFFE8821A)),
+                Icon(icono,
+                    size: 18, color: AppColores.naranja),
                 const SizedBox(width: 6),
-                Text(titulo,
-                style: const TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.bold)),
+                Text(titulo, style: AppTexto.subtitulo),
               ],
             ),
             const SizedBox(height: 8),
@@ -538,25 +549,23 @@ class _DetalleEntrenadorScreenState extends State<DetalleEntrenadorScreen> {
 
   Widget _tarjeta(
       String titulo, String valor, String subtitulo) {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(titulo,
-                style: const TextStyle(
-                    fontSize: 12, color: Colors.grey)),
-            const SizedBox(height: 4),
-            Text(valor,
-                style: const TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold)),
-            Text(subtitulo,
-                style: const TextStyle(
-                    fontSize: 12, color: Colors.grey)),
-          ],
-        ),
+    return Tarjeta(
+      padding: const EdgeInsets.all(12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(titulo,
+              style: AppTexto.minuscula.copyWith(
+                  color: AppColores.textoSecundario(context))),
+          const SizedBox(height: 4),
+          Text(valor,
+              style: const TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold)),
+          Text(subtitulo,
+              style: AppTexto.minuscula.copyWith(
+                  color: AppColores.textoSecundario(context))),
+        ],
       ),
     );
   }
@@ -576,26 +585,20 @@ class _DetalleEntrenadorScreenState extends State<DetalleEntrenadorScreen> {
           style: TextStyle(
               fontSize: 14,
               fontWeight: FontWeight.bold,
-              color: sube ? Colors.green : Colors.red),
+              color: sube
+                  ? AppColores.exito
+                  : AppColores.error),
         ),
         const SizedBox(width: 8),
         Text('${fmtMonto(anterior)} → ${fmtMonto(actual)}',
-            style: const TextStyle(
-                fontSize: 12, color: Colors.grey)),
+            style: TextStyle(
+                fontSize: 12,
+                color: AppColores.textoSecundario(context))),
       ],
     );
   }
 
-  String _etiquetaPeriodo(Map<String, dynamic> c) {
-    switch ('${c['periodo']}') {
-      case 'semanal':
-        return 'Semana';
-      case 'quincenal':
-        return 'Quincena';
-      case 'personalizado':
-        return 'Personalizado';
-      default:
-        return 'Mensualidad';
-    }
-  }
+  /// Delegada en la función pública de negocio.dart (misma lógica).
+  String _etiquetaPeriodo(Map<String, dynamic> c) =>
+      etiquetaPeriodo(c);
 }
