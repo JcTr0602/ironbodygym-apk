@@ -1,5 +1,5 @@
-/// 📅 Mi día: lo que el entrenador cobró hoy, lo que falta por
-/// cobrar hoy y botón para cerrar el turno con un resumen.
+/// 📅 Día del gym: vista global del día (todos los cobros), lo que falta por
+/// cobrar hoy. El cierre de turno vive solo en Mi turno.
 library;
 
 import 'package:flutter/material.dart';
@@ -85,73 +85,11 @@ class _MiDiaScreenState extends State<MiDiaScreen> {
         '${n.day.toString().padLeft(2, '0')}';
   }
 
-  Future<void> _cerrarTurno() async {
-    final faltan = _porCobrar.length;
-    final sinMovimientos =
-        _cobrados.isEmpty && _totalHoy == 0;
-    await showDialog<void>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Cierre del turno'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            if (sinMovimientos) ...[
-              const Text(
-                'Turno sin cobros registrados.',
-                style: TextStyle(
-                    fontWeight: FontWeight.bold,
-                    fontSize: 16),
-              ),
-              const SizedBox(height: 6),
-              Text(
-                'Si trabajaste el turno pero nadie pagó, '
-                'queda registrado así.',
-                style: TextStyle(
-                    fontSize: 13,
-                    color:
-                        AppColores.textoSecundario(ctx)),
-              ),
-            ] else ...[
-              Text('Cobrado hoy: ${fmtMonto(_totalHoy)} CUP',
-                  style: const TextStyle(
-                      fontWeight: FontWeight.bold)),
-              const SizedBox(height: 6),
-              Text('• ${_cobrados.length} cobros realizados'),
-              Text('• Efectivo: ${fmtMonto(_efectivo)} CUP'),
-              Text(
-                  '• Transferencia: ${fmtMonto(_transferencia)} CUP'),
-            ],
-            const SizedBox(height: 6),
-            Text(faltan == 0
-                ? 'No quedó nadie por cobrar hoy.'
-                : 'Quedaron $faltan por cobrar hoy.'),
-            const SizedBox(height: 12),
-            Text(
-              'Recuerda: el pendiente a entregar solo se reinicia '
-              'cuando Jc confirma que recibió el dinero.',
-              style: TextStyle(
-                  fontSize: 12,
-                  color: AppColores.textoSecundario(ctx)),
-            ),
-          ],
-        ),
-        actions: [
-          ElevatedButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Entendido'),
-          ),
-        ],
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Mi día'),
+        title: const Text('Día del gym'),
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh),
@@ -272,19 +210,6 @@ class _MiDiaScreenState extends State<MiDiaScreen> {
                           ),
                         ),
                       ),
-                  const SizedBox(height: 20),
-                  SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton.icon(
-                      icon: const Icon(Icons.flag),
-                      label: const Text('Cerrar turno'),
-                      style: ElevatedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(
-                            vertical: 14),
-                      ),
-                      onPressed: _cerrarTurno,
-                    ),
-                  ),
                   const SizedBox(height: 24),
                 ],
               ),

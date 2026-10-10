@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 
 import '../negocio.dart';
 import '../localdb.dart';
+import '../auth.dart';
 import 'diseno.dart';
 import 'componentes.dart';
 import 'buscar.dart';
@@ -41,6 +42,19 @@ class _DashboardScreenState extends State<DashboardScreen> {
   List<Map<String, dynamic>> _ultimos30 = [];
   String _periodoGrafico = '7'; // 7 | 30
 
+  // Vista por rol (v1.2): el entrenador ve solo sus propios números.
+  final _auth = AuthService();
+  bool get _esDueno => _auth.isOwner;
+  // Campos de la vista del entrenador.
+  double _miHoy = 0;
+  double _miSemana = 0;
+  double _miMes = 0;
+  double _miPendCup = 0;
+  double _miPendUsd = 0;
+  Map<String, double> _miPorMetodo = {};
+  Map<String, double> _miPorTipo = {};
+  Map<String, Map<String, dynamic>> _miMejorPeor = {};
+
   static const naranja = AppColores.naranja;
 
   @override
@@ -51,6 +65,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   Future<void> _cargar() async {
     setState(() => _cargando = true);
+    if (!_esDueno) {
+      await _cargarEntrenador();
+      return;
+    }
     final hoy = await ingresosHoy();
     final semana = await ingresosSemana();
     final mes = await ingresosMes();
@@ -85,6 +103,32 @@ class _DashboardScreenState extends State<DashboardScreen> {
         _pend = pend;
         _ultimos7 = ult7;
         _ultimos30 = ult30;
+        _cargando = false;
+      });
+    }
+  }
+
+  /// Carga los números propios del entrenador (dashboard por rol, v1.2).
+  Future<void> _cargarEntrenador() async {
+    final tid = _auth.telegramId;
+    final hoy = await ingresosHoyPorEntrenador(tid);
+    final semana = await ingresosSemanaPorEntrenador(tid);
+    final mes = await cobradoMes(tid);
+    final pendCup = await pendienteEntrega(tid);
+    final pendUsd = await pendienteEntregaUsd(tid);
+    final porMet = await ingresosPorMetodoEntrenador(tid);
+    final porTip = await ingresosPorTipoEntrenador(tid);
+    final mp = await mejorPeorDiaEntrenador(tid);
+    if (mounted) {
+      setState(() {
+        _miHoy = hoy;
+        _miSemana = semana;
+        _miMes = mes;
+        _miPendCup = pendCup;
+        _miPendUsd = pendUsd;
+        _miPorMetodo = porMet;
+        _miPorTipo = porTip;
+        _miMejorPeor = mp;
         _cargando = false;
       });
     }
@@ -154,6 +198,156 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   color: negrita ? naranja : null)),
         ],
       ),
+    );
+  }
+
+  /// Vista del entrenador (v1.2): solo sus propios números.
+  /// Sin ranking, sin totales globales, sin pendiente de otros.
+  Widget _buildEntrenador() {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Mi dashboard'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh),
+            onPressed: _cargar,
+          ),
+        ],
+      ),
+      body: _cargando
+          ? const Center(child: CircularProgressIndicator())
+          : RefreshIndicator(
+              onRefresh: _cargar,
+              child: ListView(
+                padding: const EdgeInsets.all(16),
+                children: [
+                  const SyncBanner(),
+                  const SizedBox(height: 8),
+                  const EncabezadoSeccion(titulo: 'Mis cobros'),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      _tarjetaSimple('Hoy', _miHoy, Icons.today),
+                      const SizedBox(width: 8),
+                      _tarjetaSimple(
+                          '7 días', _miSemana, Icons.date_range),
+                      const SizedBox(width: 8),
+                      _tarjetaSimple('Este mes', _miMes,
+                          Icons.calendar_month),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  const EncabezadoSeccion(
+                      titulo: 'Mi pendiente a entregar'),
+                  const SizedBox(height: 8),
+                  Tarjeta(
+                    child: Column(
+                      children: [
+                        _filaMonto('CUP', _miPendCup, 'CUP'),
+                        if (_miPendUsd > 0) ...[
+                          const Divider(height: 16),
+                          _filaMonto(
+                              'USD a entregar', _miPendUsd, 'USD'),
+                        ],
+                        if (_miPendCup <= 0 && _miPendUsd <= 0)
+                          const Text('Nada pendiente. Todo entregado.',
+                              style: TextStyle(fontSize: 13)),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  const EncabezadoSeccion(
+                      titulo: 'Desglose del mes'),
+                  const SizedBox(height: 8),
+                  Tarjeta(
+                    child: Column(
+                      crossAxisAlignment:
+                          CrossAxisAlignment.start,
+                      children: [
+                        _filaDesglose(
+                            'Efectivo',
+                            _miPorMetodo['efectivo'] ?? 0,
+                            _miMes),
+                        _filaDesglose(
+                            'Transferencia',
+                            _miPorMetodo['transferencia'] ?? 0,
+                            _miMes),
+                        _filaDesglose(
+                            'Suplementos',
+                            _miPorMetodo['suplementos'] ?? 0,
+                            _miMes),
+                        const Divider(height: 16),
+                        _filaDesglose(
+                            'Mensualidades',
+                            _miPorTipo['mensual'] ?? 0,
+                            _miMes),
+                        _filaDesglose(
+                            'Pago diario',
+                            _miPorTipo['diario'] ?? 0,
+                            _miMes),
+                        if (_miMejorPeor.isNotEmpty) ...[
+                          const SizedBox(height: 8),
+                          Text(
+                            'Mi mejor día: ${fmtFecha(_miMejorPeor['mejor']!['dia'] as String?)} '
+                            '(${fmtMonto(_miMejorPeor['mejor']!['monto'] as double)} CUP)',
+                            style: TextStyle(
+                                fontSize: 12,
+                                color:
+                                    AppColores.textoSecundario(
+                                        context)),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+    );
+  }
+
+  /// Tarjeta simple de monto para la vista del entrenador.
+  Widget _tarjetaSimple(String titulo, double valor, IconData icono) {
+    return Expanded(
+      child: Tarjeta(
+        padding:
+            const EdgeInsets.symmetric(vertical: 14, horizontal: 8),
+        child: Column(
+          children: [
+            Icon(icono, color: naranja, size: 26),
+            const SizedBox(height: 6),
+            Text(titulo,
+                style: TextStyle(
+                    fontSize: 11,
+                    color: AppColores.textoSecundario(context))),
+            const SizedBox(height: 2),
+            Text(fmtMonto(valor),
+                style: const TextStyle(
+                    fontSize: 17,
+                    fontWeight: FontWeight.bold,
+                    color: naranja)),
+            Text('CUP',
+                style: TextStyle(
+                    fontSize: 10,
+                    color: AppColores.textoSecundario(context))),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Fila de monto con etiqueta para la vista del entrenador.
+  Widget _filaMonto(String etiqueta, double valor, String moneda) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Text(etiqueta, style: const TextStyle(fontSize: 13)),
+        Text('${fmtMonto(valor)} $moneda',
+            style: const TextStyle(
+                fontSize: 15,
+                fontWeight: FontWeight.bold,
+                color: naranja)),
+      ],
     );
   }
 
@@ -465,6 +659,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // Dashboard por rol (v1.2): el entrenador ve solo sus propios números.
+    if (!_esDueno) return _buildEntrenador();
     final alDia = _activos - _morosos;
     final pctAlDia =
         _activos > 0 ? alDia / _activos : 0.0;

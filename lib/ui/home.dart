@@ -589,7 +589,7 @@ class _HomeScreenState extends State<HomeScreen>
                               inicial: 0))),
                       _botonRapido(
                           Icons.calendar_today,
-                          'Mi día',
+                          'Día del gym',
                           () =>
                               _ir(const MiDiaScreen())),
                     ],

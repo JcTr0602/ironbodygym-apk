@@ -44,22 +44,6 @@ class _DetallePendienteScreenState extends State<DetallePendienteScreen> {
     }
   }
 
-  String _etiquetaPeriodo(Map<String, dynamic> it) {
-    final p = '${it['periodo']}';
-    final meses = (it['meses'] as int?) ?? 1;
-    switch (p) {
-      case 'semanal':
-        return 'Semana';
-      case 'quincenal':
-        return 'Quincena';
-      case 'personalizado':
-        final dias = (it['dias'] as int?) ?? 0;
-        return 'Personalizado ($dias días)';
-      default:
-        return meses == 1 ? 'Mensualidad' : '$meses meses';
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     final total =
@@ -147,7 +131,7 @@ class _DetallePendienteScreenState extends State<DetallePendienteScreen> {
                                         fontWeight:
                                             FontWeight.w500)),
                                 subtitle: Text(
-                                    '${esInsc ? 'Inscripción' : _etiquetaPeriodo(it)} · '
+                                    '${esInsc ? 'Inscripción' : etiquetaPeriodo(it, detallado: true)} · '
                                     '${fmtFecha(it['fecha'])}'),
                                 trailing: Text(
                                     '${fmtMonto((it['monto'] as num).toDouble())} CUP',

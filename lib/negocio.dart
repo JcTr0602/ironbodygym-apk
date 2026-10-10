@@ -108,16 +108,24 @@ String fmtFecha(String? iso) {
 }
 
 /// Etiqueta legible del periodo de un pago: Mensualidad, Semana, etc.
-String etiquetaPeriodo(Map<String, dynamic> p) {
-  switch ('${p['periodo'] ?? 'mensual'}') {
+/// Con [detallado] en true incluye el detalle de meses/días
+/// ("3 meses", "Personalizado (15 días)").
+String etiquetaPeriodo(Map<String, dynamic> p,
+    {bool detallado = false}) {
+  final periodo = '${p['periodo'] ?? 'mensual'}';
+  switch (periodo) {
     case 'semanal':
       return 'Semana';
     case 'quincenal':
       return 'Quincena';
     case 'personalizado':
-      return 'Personalizado';
+      if (!detallado) return 'Personalizado';
+      final dias = (p['dias'] as num?)?.toInt() ?? 0;
+      return 'Personalizado ($dias días)';
     default:
-      return 'Mensualidad';
+      if (!detallado) return 'Mensualidad';
+      final meses = (p['meses'] as num?)?.toInt() ?? 1;
+      return meses == 1 ? 'Mensualidad' : '$meses meses';
   }
 }
 
@@ -1143,6 +1151,203 @@ Future<double> cobradoMes(int? telegramId) async {
     }
   }
   return t;
+}
+
+/// Dashboard por rol (v1.2): ingresos de hoy de un entrenador.
+/// Suma pagos/pagos_diarios/ventas CUP de hoy donde telegram_user_id
+/// o registrado_por == telegramId. Sigue el patrón de cobradoMes.
+Future<double> ingresosHoyPorEntrenador(int? telegramId) async {
+  if (telegramId == null) return 0;
+  final hoy = _hoyIso();
+  double t = 0;
+  for (final p in await LocalDb.instance.allMirror('pagos')) {
+    if ((p['telegram_user_id'] as int?) != telegramId) continue;
+    final f = '${p['fecha'] ?? ''}';
+    if (f.length >= 10 && f.substring(0, 10) == hoy) {
+      t += (p['monto'] as num?)?.toDouble() ?? 0;
+    }
+  }
+  for (final d in await LocalDb.instance.allMirror('pagos_diarios')) {
+    if ((d['registrado_por'] as int?) != telegramId) continue;
+    final f = '${d['fecha'] ?? ''}';
+    if (f.length >= 10 && f.substring(0, 10) == hoy) {
+      t += (d['total'] as num?)?.toDouble() ?? 0;
+    }
+  }
+  for (final v in await ventasSuplementosCup()) {
+    if ((v['registrado_por'] as int?) != telegramId) continue;
+    final f = '${v['fecha'] ?? ''}';
+    if (f.length >= 10 && f.substring(0, 10) == hoy) {
+      t += totalVentaCup(v);
+    }
+  }
+  return t;
+}
+
+/// Dashboard por rol (v1.2): ingresos últimos 7 días de un entrenador.
+Future<double> ingresosSemanaPorEntrenador(int? telegramId) async {
+  if (telegramId == null) return 0;
+  final hoy = DateTime.now();
+  final desde = hoy.subtract(const Duration(days: 6));
+  String iso(DateTime d) => '${d.year.toString().padLeft(4, '0')}-'
+      '${d.month.toString().padLeft(2, '0')}-'
+      '${d.day.toString().padLeft(2, '0')}';
+  final desdeIso = iso(desde);
+  final hoyIso = iso(hoy);
+  double t = 0;
+  for (final p in await LocalDb.instance.allMirror('pagos')) {
+    if ((p['telegram_user_id'] as int?) != telegramId) continue;
+    final f = '${p['fecha'] ?? ''}';
+    if (f.length >= 10) {
+      final dia = f.substring(0, 10);
+      if (dia.compareTo(desdeIso) >= 0 && dia.compareTo(hoyIso) <= 0) {
+        t += (p['monto'] as num?)?.toDouble() ?? 0;
+      }
+    }
+  }
+  for (final d in await LocalDb.instance.allMirror('pagos_diarios')) {
+    if ((d['registrado_por'] as int?) != telegramId) continue;
+    final f = '${d['fecha'] ?? ''}';
+    if (f.length >= 10) {
+      final dia = f.substring(0, 10);
+      if (dia.compareTo(desdeIso) >= 0 && dia.compareTo(hoyIso) <= 0) {
+        t += (d['total'] as num?)?.toDouble() ?? 0;
+      }
+    }
+  }
+  for (final v in await ventasSuplementosCup()) {
+    if ((v['registrado_por'] as int?) != telegramId) continue;
+    final f = '${v['fecha'] ?? ''}';
+    if (f.length >= 10) {
+      final dia = f.substring(0, 10);
+      if (dia.compareTo(desdeIso) >= 0 && dia.compareTo(hoyIso) <= 0) {
+        t += totalVentaCup(v);
+      }
+    }
+  }
+  return t;
+}
+
+/// Dashboard por rol (v1.2): desglose por método del mes de un entrenador.
+/// Claves: 'efectivo', 'transferencia', 'suplementos'.
+Future<Map<String, double>> ingresosPorMetodoEntrenador(
+    int? telegramId) async {
+  if (telegramId == null) {
+    return {'efectivo': 0, 'transferencia': 0, 'suplementos': 0};
+  }
+  final n = DateTime.now();
+  final pref = '${n.year.toString().padLeft(4, '0')}-'
+      '${n.month.toString().padLeft(2, '0')}';
+  double efectivo = 0, transferencia = 0, suplementos = 0;
+  for (final p in await LocalDb.instance.allMirror('pagos')) {
+    if ((p['telegram_user_id'] as int?) != telegramId) continue;
+    if ('${p['fecha'] ?? ''}'.startsWith(pref)) {
+      final m = (p['monto'] as num?)?.toDouble() ?? 0;
+      if ('${p['metodo']}' == 'transferencia') {
+        transferencia += m;
+      } else {
+        efectivo += m;
+      }
+    }
+  }
+  for (final d in await LocalDb.instance.allMirror('pagos_diarios')) {
+    if ((d['registrado_por'] as int?) != telegramId) continue;
+    if ('${d['fecha'] ?? ''}'.startsWith(pref)) {
+      efectivo += (d['total'] as num?)?.toDouble() ?? 0;
+    }
+  }
+  for (final v in await ventasSuplementosCup()) {
+    if ((v['registrado_por'] as int?) != telegramId) continue;
+    if ('${v['fecha'] ?? ''}'.startsWith(pref)) {
+      suplementos += totalVentaCup(v);
+    }
+  }
+  return {
+    'efectivo': efectivo,
+    'transferencia': transferencia,
+    'suplementos': suplementos
+  };
+}
+
+/// Dashboard por rol (v1.2): desglose por tipo del mes de un entrenador.
+/// Claves: 'mensual', 'diario', 'suplementos'.
+Future<Map<String, double>> ingresosPorTipoEntrenador(
+    int? telegramId) async {
+  if (telegramId == null) {
+    return {'mensual': 0, 'diario': 0, 'suplementos': 0};
+  }
+  final n = DateTime.now();
+  final pref = '${n.year.toString().padLeft(4, '0')}-'
+      '${n.month.toString().padLeft(2, '0')}';
+  double mensual = 0, diario = 0, suplementos = 0;
+  for (final p in await LocalDb.instance.allMirror('pagos')) {
+    if ((p['telegram_user_id'] as int?) != telegramId) continue;
+    if ('${p['fecha'] ?? ''}'.startsWith(pref)) {
+      mensual += (p['monto'] as num?)?.toDouble() ?? 0;
+    }
+  }
+  for (final d in await LocalDb.instance.allMirror('pagos_diarios')) {
+    if ((d['registrado_por'] as int?) != telegramId) continue;
+    if ('${d['fecha'] ?? ''}'.startsWith(pref)) {
+      diario += (d['total'] as num?)?.toDouble() ?? 0;
+    }
+  }
+  for (final v in await ventasSuplementosCup()) {
+    if ((v['registrado_por'] as int?) != telegramId) continue;
+    if ('${v['fecha'] ?? ''}'.startsWith(pref)) {
+      suplementos += totalVentaCup(v);
+    }
+  }
+  return {'mensual': mensual, 'diario': diario, 'suplementos': suplementos};
+}
+
+/// Dashboard por rol (v1.2): mejor y peor día del mes de un entrenador.
+/// Misma estructura que mejorPeorDia: {'mejor': {'dia', 'monto'},
+/// 'peor': {'dia', 'monto'}}.
+Future<Map<String, Map<String, dynamic>>> mejorPeorDiaEntrenador(
+    int? telegramId) async {
+  if (telegramId == null) return {};
+  final n = DateTime.now();
+  final pref = '${n.year.toString().padLeft(4, '0')}-'
+      '${n.month.toString().padLeft(2, '0')}';
+  final porDia = <String, double>{};
+  for (final p in await LocalDb.instance.allMirror('pagos')) {
+    if ((p['telegram_user_id'] as int?) != telegramId) continue;
+    final f = '${p['fecha'] ?? ''}';
+    if (f.startsWith(pref) && f.length >= 10) {
+      final dia = f.substring(0, 10);
+      porDia[dia] =
+          (porDia[dia] ?? 0) + ((p['monto'] as num?)?.toDouble() ?? 0);
+    }
+  }
+  for (final d in await LocalDb.instance.allMirror('pagos_diarios')) {
+    if ((d['registrado_por'] as int?) != telegramId) continue;
+    final f = '${d['fecha'] ?? ''}';
+    if (f.startsWith(pref) && f.length >= 10) {
+      final dia = f.substring(0, 10);
+      porDia[dia] =
+          (porDia[dia] ?? 0) + ((d['total'] as num?)?.toDouble() ?? 0);
+    }
+  }
+  for (final v in await ventasSuplementosCup()) {
+    if ((v['registrado_por'] as int?) != telegramId) continue;
+    final f = '${v['fecha'] ?? ''}';
+    if (f.startsWith(pref) && f.length >= 10) {
+      final dia = f.substring(0, 10);
+      porDia[dia] = (porDia[dia] ?? 0) + totalVentaCup(v);
+    }
+  }
+  if (porDia.isEmpty) return {};
+  var mejor = porDia.entries.first;
+  var peor = porDia.entries.first;
+  for (final e in porDia.entries) {
+    if (e.value > mejor.value) mejor = e;
+    if (e.value < peor.value) peor = e;
+  }
+  return {
+    'mejor': {'dia': mejor.key, 'monto': mejor.value},
+    'peor': {'dia': peor.key, 'monto': peor.value},
+  };
 }
 
 /// Pendiente a entregar agrupado por entrenador (vista del admin).

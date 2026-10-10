@@ -19,18 +19,9 @@ import '../sync.dart';
 import '../tipos_pago.dart';
 import 'componentes.dart';
 import 'diseno.dart';
-import 'cuentas_cobrar.dart';
-import 'papelera.dart';
-import 'congelados.dart';
-import 'auditoria.dart';
-import 'riesgo.dart';
-import 'historial_entrenador.dart';
+import 'admin_secciones.dart';
 import 'exportar_excel.dart';
-import 'usuarios.dart';
 import 'widgets.dart';
-import 'detalle_pendiente.dart';
-import 'suplementos.dart';
-import 'historial_ventas.dart';
 
 class AdminScreen extends StatefulWidget {
   const AdminScreen({super.key});
@@ -119,6 +110,13 @@ class _AdminScreenState extends State<AdminScreen> {
     Navigator.of(context)
         .push(MaterialPageRoute(builder: (_) => w))
         .then((_) => _cargar());
+  }
+
+  /// Navega a una subpantalla y recarga al volver (para las secciones).
+  Future<void> _irYRecargar(Widget w) async {
+    await Navigator.of(context)
+        .push(MaterialPageRoute(builder: (_) => w));
+    await _cargar();
   }
 
   // -- montos ----------------------------------------------------------
@@ -585,13 +583,9 @@ class _AdminScreenState extends State<AdminScreen> {
         text: 'Iron Body Gym — clientes y pagos del mes');
   }
 
-  // -- UI ------------------------------------------------------------------
+  // -- UI (hub A–G) ---------------------------------------------------------
   @override
   Widget build(BuildContext context) {
-    final totalPend =
-        _pend.fold<double>(0, (s, e) => s + (e['total'] as double));
-    final cobradoHoy = (_caja['efectivo'] ?? 0) + (_caja['transferencia'] ?? 0);
-    final neto = cobradoHoy - _gastosHoy;
     return Scaffold(
       appBar: AppBar(title: const Text('Administración')),
       body: Column(
@@ -602,363 +596,110 @@ class _AdminScreenState extends State<AdminScreen> {
                 ? const Center(child: CircularProgressIndicator())
                 : RefreshIndicator(
                     onRefresh: _cargar,
-                    child: ListView(
+                    child: GridView.count(
                       padding: const EdgeInsets.all(16),
+                      crossAxisCount: 2,
+                      mainAxisSpacing: AppEspacio.md,
+                      crossAxisSpacing: AppEspacio.md,
+                      childAspectRatio: 1.05,
                       children: [
-                        _seccion(Icons.bar_chart, 'Estadísticas del mes', [
-                          _fila(Icons.payments, 'Ingresos',
-                              '${fmtMonto(_ingresos)} CUP'),
-                          _fila(Icons.person_add, 'Inscripciones', '$_inscMes'),
-                          _fila(Icons.warning, 'Morosos', '$_morosos'),
-                        ]),
-                        if (_inscPorEntrenador.isNotEmpty)
-                          _seccion(Icons.group, 'Inscripciones por entrenador', [
-                            for (final e in _inscPorEntrenador)
-                              _fila(null, '${e['nombre']}',
-                                  '${e['cantidad']}'),
-                          ]),
-                        _seccion(Icons.health_and_safety, 'Salud del sistema', [
-                          _fila(Icons.sync, 'Última sincronización',
-                              _fechaHora(_syncDet.ultimaPush)),
-                          _fila(Icons.download, 'Última bajada',
-                              _fechaHora(_syncDet.ultimaPull)),
-                          _fila(Icons.upload, 'Pendientes por subir',
-                              '$_pendientesSubir'),
-                          _fila(Icons.download, 'Bajados (última vez)',
-                              '${_syncDet.bajados}'),
-                          if (_syncDet.error != null &&
-                              _syncDet.error!.isNotEmpty)
-                            Padding(
-                              padding:
-                                  const EdgeInsets.only(top: 8),
-                              child: Text(
-                                _syncDet.error ?? '',
-                                style: TextStyle(
-                                    color: AppColores.error,
-                                    fontSize: 13),
-                              ),
-                            ),
-                        ]),
-                        _seccion(Icons.payments, 'Tipos de pago', [
-                          for (final t in _tipos)
-                            ListTile(
-                              dense: true,
-                              contentPadding: EdgeInsets.zero,
-                              title: Text(t.nombre,
-                                  style: TextStyle(
-                                      fontSize: 14,
-                                      color: t.activo
-                                          ? null
-                                          : AppColores.textoSecundario(
-                                              context))),
-                              subtitle: Text(
-                                  '${fmtMonto(t.monto)} CUP · ${t.dias} días'
-                                  '${t.soloMenores ? ' · solo menores' : ''}',
-                                  style: const TextStyle(
-                                      fontSize: 12)),
-                              trailing: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Switch(
-                                    value: t.activo,
-                                    onChanged: (v) =>
-                                        _toggleTipo(t, v),
-                                  ),
-                                  IconButton(
-                                    icon: const Icon(
-                                        Icons.edit,
-                                        size: 20),
-                                    onPressed: () =>
-                                        _editarTipo(t),
-                                  ),
-                                  if (!_esTipoFijo(t.id))
-                                    IconButton(
-                                      icon: Icon(
-                                          Icons.delete_outline,
-                                          size: 20,
-                                          color: AppColores.error),
-                                      onPressed: () =>
-                                          _eliminarTipo(t),
-                                    ),
-                                ],
-                              ),
-                            ),
-                          const SizedBox(height: 4),
-                          BotonSecundario(
-                            texto: 'Agregar tipo de pago',
-                            icono: Icons.add,
-                            onPressed: _agregarTipo,
-                          ),
-                          const SizedBox(height: 8),
-                          BotonPrimario(
-                            texto: 'Guardar tipos de pago',
-                            icono: Icons.save,
-                            onPressed: _guardarTipos,
-                          ),
-                        ]),
-                        _seccion(Icons.price_change, 'Otros precios', [
-                          for (final (clave, etiqueta) in _clavesMonto)
-                            Padding(
-                              padding:
-                                  const EdgeInsets.only(bottom: 8),
-                              child: CampoTexto(
-                                controller: _montos[clave],
-                                etiqueta: '$etiqueta (CUP)',
-                                teclado: const TextInputType
-                                    .numberWithOptions(decimal: true),
-                              ),
-                            ),
-                          BotonPrimario(
-                            texto: 'Guardar otros precios',
-                            icono: Icons.save,
-                            onPressed: _guardarMontos,
-                          ),
-                        ]),
-                        if (Permisos().gestionarUsuarios)
-                          _seccion(Icons.smartphone, 'Usuarios APK', [
-                          BotonPrimario(
-                            texto: 'Gestionar usuarios',
-                            icono: Icons.manage_accounts,
-                            onPressed: () => Navigator.of(context).push(
-                                MaterialPageRoute(
-                                    builder: (_) =>
-                                        const UsuariosScreen())),
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            'Ver lista, bloquear, desbloquear, cambiar contraseña o eliminar.',
-                            style: TextStyle(
-                                fontSize: 12,
-                                color: AppColores.textoSecundario(
-                                    context)),
-                          ),
-                        ]),
-                        _seccion(Icons.medication, 'Suplementos', [
-                          BotonPrimario(
-                            texto: 'Gestionar catálogo',
-                            icono: Icons.inventory_2,
-                            onPressed: () => Navigator.of(context).push(
-                                MaterialPageRoute(
-                                    builder: (_) =>
-                                        const SuplementosScreen())),
-                          ),
-                          const SizedBox(height: AppEspacio.sm),
-                          BotonSecundario(
-                            texto: 'Historial de ventas',
-                            icono: Icons.receipt_long,
-                            onPressed: () => Navigator.of(context).push(
-                                MaterialPageRoute(
-                                    builder: (_) =>
-                                        const HistorialVentasScreen())),
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            'Productos, precios oficiales, stock, promo "mes gratis" y ventas.',
-                            style: TextStyle(
-                                fontSize: 12,
-                                color: AppColores.textoSecundario(
-                                    context)),
-                          ),
-                        ]),
-                        _seccion(
-                            Icons.outbox,
-                            'Pendiente a entregar (${fmtMonto(totalPend)} CUP)',
-                            [
-                              if (_pend.isEmpty)
-                                Text(
-                                    'Nada pendiente. Todo cuadrado.',
-                                    style: TextStyle(
-                                        color: AppColores.textoSecundario(
-                                            context))),
-                              for (final t in _pend)
-                                ListTile(
-                                  dense: true,
-                                  title: Text('${t['nombre']}'),
-                                  subtitle: Text(
-                                      '${t['n']} movimiento(s) — ${fmtMonto(t['total'])} CUP'),
-                                  // v1.0.16: tocar abre el detalle
-                                  // (qué cobros componen el pendiente)
-                                  onTap: () => _ir(
-                                      DetallePendienteScreen(
-                                          trainerId:
-                                              t['id'] as int,
-                                          nombre:
-                                              '${t['nombre']}')),
-                                  trailing: TextButton(
-                                    child: const Text('Confirmar'),
-                                    onPressed: () =>
-                                        _confirmarEntrega(
-                                            trainerId:
-                                                t['id'] as int?,
-                                            nombre:
-                                                '${t['nombre']}'),
-                                  ),
-                                ),
-                              if (_pend.isNotEmpty)
-                                Align(
-                                  alignment:
-                                      Alignment.centerRight,
-                                  child: TextButton.icon(
-                                    icon: const Icon(
-                                        Icons.done_all),
-                                    label: const Text(
-                                        'Confirmar todo'),
-                                    onPressed: () =>
-                                        _confirmarEntrega(
-                                            nombre: 'todos'),
-                                  ),
-                                ),
-                            ]),
-                        _seccion(Icons.point_of_sale, 'Cierre de caja (hoy)', [
-                          _fila(Icons.payments, 'Efectivo',
-                              '${fmtMonto(_caja['efectivo'])} CUP'),
-                          _fila(Icons.smartphone, 'Transferencia',
-                              '${fmtMonto(_caja['transferencia'])} CUP'),
-                          _fila(Icons.receipt_long, 'Gastos',
-                              '${fmtMonto(_gastosHoy)} CUP'),
-                          const Divider(),
-                          _fila(Icons.inventory_2, 'Neto',
-                              '${fmtMonto(neto)} CUP',
-                              negrita: true),
-                          const SizedBox(height: 8),
-                          BotonSecundario(
-                            texto: 'Agregar gasto',
-                            icono: Icons.add,
-                            onPressed: _agregarGasto,
-                          ),
-                        ]),
-                        _seccion(Icons.receipt_long, 'Últimos gastos', [
-                          if (_gastos.isEmpty)
-                            Text('Sin gastos registrados.',
-                                style: TextStyle(
-                                    color: AppColores.textoSecundario(
-                                        context))),
-                          for (final g
-                              in _gastos.take(10))
-                            ListTile(
-                              dense: true,
-                              title:
-                                  Text('${g['concepto'] ?? '—'}'),
-                              subtitle: Text(
-                                  fmtFecha(g['fecha'] as String?)),
-                              trailing: Text(
-                                  '${fmtMonto(g['monto'])} CUP',
-                                  style: const TextStyle(
-                                      fontWeight:
-                                          FontWeight.bold)),
-                            ),
-                        ]),
-                        _seccion(Icons.delete_outline, 'Papelera', [
-                          BotonSecundario(
-                            texto: 'Abrir papelera',
-                            icono: Icons.delete_outline,
-                            onPressed: () =>
-                                _ir(const PapeleraScreen()),
-                          ),
-                        ]),
-                        _seccion(Icons.ac_unit, 'Congelados', [
-                          BotonSecundario(
-                            texto: 'Ver congelados',
-                            icono: Icons.ac_unit,
-                            onPressed: () =>
-                                _ir(const CongeladosScreen()),
-                          ),
-                        ]),
-                        _seccion(Icons.account_balance_wallet, 'Cuentas por cobrar', [
-                          Text(
-                            'Clientes vencidos ordenados por monto adeudado. El dinero dormido, visible.',
-                            style: TextStyle(
-                                color: AppColores.textoSecundario(
-                                    context),
-                                fontSize: 12),
-                          ),
-                          const SizedBox(height: 8),
-                          BotonPrimario(
-                            texto: 'Ver cuentas por cobrar',
-                            icono: Icons.money_off,
-                            onPressed: () => Navigator.of(context).push(
-                              MaterialPageRoute(
-                                builder: (_) =>
-                                    const CuentasCobrarScreen(),
-                              ),
-                            ),
-                          ),
-                        ]),
-                        _seccion(Icons.warning, 'Clientes en riesgo', [
-                          Text(
-                            'Inactivos con 3+ pagos cuyo último pago fue hace más de 60 días. Buenos candidatos para recuperar.',
-                            style: TextStyle(
-                                color: AppColores.textoSecundario(
-                                    context),
-                                fontSize: 12),
-                          ),
-                          const SizedBox(height: 8),
-                          BotonPrimario(
-                            texto: 'Ver clientes en riesgo',
-                            icono: Icons.warning_amber,
-                            onPressed: () => Navigator.of(context).push(
-                              MaterialPageRoute(
-                                builder: (_) =>
-                                    const RiesgoScreen(),
-                              ),
-                            ),
-                          ),
-                        ]),
-                        _seccion(Icons.history, 'Historial por entrenador', [
-                          Text(
-                            'Cobrado, pagos e inscripciones del mes por entrenador.',
-                            style: TextStyle(
-                                color: AppColores.textoSecundario(
-                                    context),
-                                fontSize: 12),
-                          ),
-                          const SizedBox(height: 8),
-                          BotonPrimario(
-                            texto: 'Ver historial por entrenador',
-                            icono: Icons.person_search,
-                            onPressed: () => Navigator.of(context).push(
-                              MaterialPageRoute(
-                                builder: (_) =>
-                                    const HistorialEntrenadorScreen(),
-                              ),
-                            ),
-                          ),
-                        ]),
-                        _seccion(Icons.fact_check, 'Auditoría', [
-                          BotonPrimario(
-                            texto: 'Ver quién hizo qué y cuándo',
-                            icono: Icons.history,
-                            onPressed: () => Navigator.of(context).push(
-                              MaterialPageRoute(
-                                builder: (_) =>
-                                    const AuditoriaScreen(),
-                              ),
-                            ),
-                          ),
-                        ]),
-                        _seccion(Icons.file_download, 'Exportar', [
-                          BotonPrimario(
-                            texto: 'Compartir CSV (clientes + pagos del mes)',
-                            icono: Icons.share,
-                            onPressed: _exportar,
-                          ),
-                          const SizedBox(height: 8),
-                          BotonPrimario(
-                            texto: 'Exportar Excel',
-                            icono: Icons.table_chart,
-                            onPressed: () async {
-                                final ok = await exportarExcel();
-                                if (context.mounted) {
-                                  ScaffoldMessenger.of(context)
-                                      .showSnackBar(SnackBar(
-                                          content: Text(ok
-                                              ? 'Archivos listos para compartir'
-                                              : 'No se pudo generar el archivo')));
-                                }
-                              },
-                            ),
-                        ]),
-                        const SizedBox(height: 24),
+                        _tarjetaHub(
+                          'A',
+                          Icons.bar_chart,
+                          'Resumen',
+                          'Estadísticas e inscripciones del mes',
+                          () => _ir(SeccionResumenScreen(
+                            ingresos: _ingresos,
+                            inscMes: _inscMes,
+                            morosos: _morosos,
+                            inscPorEntrenador: _inscPorEntrenador,
+                          )),
+                        ),
+                        _tarjetaHub(
+                          'B',
+                          Icons.point_of_sale,
+                          'Cobros',
+                          'Cierre de caja, pendientes y cuentas',
+                          () => _ir(SeccionCobrosScreen(
+                            getCaja: () => _caja,
+                            getGastosHoy: () => _gastosHoy,
+                            getPend: () => _pend,
+                            onConfirmarEntrega: _confirmarEntrega,
+                            onIr: _irYRecargar,
+                          )),
+                        ),
+                        _tarjetaHub(
+                          'C',
+                          Icons.group,
+                          'Clientes',
+                          'Papelera, congelados y en riesgo',
+                          () => _ir(SeccionClientesScreen(
+                            onIr: _irYRecargar,
+                          )),
+                        ),
+                        _tarjetaHub(
+                          'D',
+                          Icons.health_and_safety,
+                          'Sistema',
+                          'Salud, auditoría y exportar',
+                          () => _ir(SeccionSistemaScreen(
+                            syncDet: _syncDet,
+                            pendientesSubir: _pendientesSubir,
+                            fechaHora: _fechaHora,
+                            onExportar: _exportar,
+                            onExportarExcel: () async {
+                              final ok = await exportarExcel();
+                              if (context.mounted) {
+                                ScaffoldMessenger.of(context)
+                                    .showSnackBar(SnackBar(
+                                        content: Text(ok
+                                            ? 'Archivos listos para compartir'
+                                            : 'No se pudo generar el archivo')));
+                              }
+                            },
+                            onIr: _irYRecargar,
+                          )),
+                        ),
+                        _tarjetaHub(
+                          'E',
+                          Icons.settings,
+                          'Ajustes',
+                          'Tipos de pago, precios y usuarios',
+                          () => _ir(SeccionAjustesScreen(
+                            getTipos: () => _tipos,
+                            onToggleTipo: _toggleTipo,
+                            onEditarTipo: _editarTipo,
+                            onEliminarTipo: _eliminarTipo,
+                            onAgregarTipo: _agregarTipo,
+                            onGuardarTipos: _guardarTipos,
+                            montos: _montos,
+                            clavesMonto: _clavesMonto,
+                            onGuardarMontos: _guardarMontos,
+                            gestionarUsuarios:
+                                Permisos().gestionarUsuarios,
+                            onIr: _irYRecargar,
+                            esTipoFijo: _esTipoFijo,
+                          )),
+                        ),
+                        _tarjetaHub(
+                          'F',
+                          Icons.receipt_long,
+                          'Gastos',
+                          'Últimos gastos registrados',
+                          () => _ir(SeccionGastosScreen(
+                            getGastos: () => _gastos,
+                            onAgregarGasto: _agregarGasto,
+                          )),
+                        ),
+                        _tarjetaHub(
+                          'G',
+                          Icons.medication,
+                          'Suplementos',
+                          'Catálogo y ventas',
+                          () => _ir(SeccionSuplementosScreen(
+                            onIr: _irYRecargar,
+                          )),
+                        ),
                       ],
                     ),
                   ),
@@ -968,52 +709,53 @@ class _AdminScreenState extends State<AdminScreen> {
     );
   }
 
-  /// Sección de administración (v1.1: Tarjeta + icono, sin emojis).
-  Widget _seccion(IconData icono, String titulo, List<Widget> hijos) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: AppEspacio.md),
-      child: Tarjeta(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Icon(icono,
-                    color: AppColores.naranja, size: 20),
-                const SizedBox(width: AppEspacio.sm),
-                Text(titulo, style: AppTexto.subtitulo),
-              ],
-            ),
-            const SizedBox(height: AppEspacio.sm),
-            ...hijos,
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _fila(IconData? icono, String etiqueta, String valor,
-      {bool negrita = false}) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 6),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+  /// Tarjeta del hub (letra + icono + título + subtítulo).
+  Widget _tarjetaHub(String letra, IconData icono, String titulo,
+      String subtitulo, VoidCallback onTap) {
+    return Tarjeta(
+      onTap: onTap,
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              if (icono != null) ...[
-                Icon(icono,
-                    size: 16,
-                    color: AppColores.textoSecundario(context)),
-                const SizedBox(width: 6),
-              ],
-              Text(etiqueta),
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color:
+                      AppColores.naranja.withValues(alpha: 0.15),
+                  borderRadius:
+                      BorderRadius.circular(AppRadio.md),
+                ),
+                child: Center(
+                  child: Text(
+                    letra,
+                    style: const TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
+                      color: AppColores.naranja,
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: AppEspacio.sm),
+              Icon(icono,
+                  color: AppColores.naranja, size: 28),
             ],
           ),
-          Text(valor,
-              style: TextStyle(
-                  fontWeight:
-                      negrita ? FontWeight.bold : FontWeight.w600)),
+          const SizedBox(height: AppEspacio.sm),
+          Text(titulo, style: AppTexto.subtitulo),
+          const SizedBox(height: 2),
+          Text(
+            subtitulo,
+            style: TextStyle(
+                fontSize: 12,
+                color: AppColores.textoSecundario(context)),
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+          ),
         ],
       ),
     );
