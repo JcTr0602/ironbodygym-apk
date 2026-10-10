@@ -2,6 +2,7 @@
 /// estado de pago, edición y registro de pagos.
 library;
 
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -33,6 +34,7 @@ class FichaScreen extends StatefulWidget {
 class _FichaScreenState extends State<FichaScreen> {
   Map<String, dynamic>? _c;
   List<Map<String, dynamic>> _pagos = [];
+  List<Map<String, dynamic>> _suplementos = [];
   File? _foto;
   bool _verificando = false;
 
@@ -45,6 +47,7 @@ class _FichaScreenState extends State<FichaScreen> {
   Future<void> _cargar() async {
     final c = await clientePorId(widget.clienteId);
     final pagos = await pagosDe(widget.clienteId);
+    final suplementos = await _suplementosDe(widget.clienteId);
     File? foto;
     if (c != null) {
       foto = await FotoCache.instance
@@ -54,8 +57,37 @@ class _FichaScreenState extends State<FichaScreen> {
       setState(() {
         _c = c;
         _pagos = pagos;
+        _suplementos = suplementos;
         _foto = foto;
       });
+    }
+  }
+
+  /// v1.2.2: historial de suplementos comprados por el cliente.
+  /// La tabla usa columna data (JSON), se filtra con json_extract.
+  Future<List<Map<String, dynamic>>> _suplementosDe(int clienteId) async {
+    try {
+      final db = await LocalDb.instance.db;
+      final rows = await db.rawQuery('''
+        SELECT id, data FROM ventas_suplementos
+        WHERE json_extract(data, '\$.cliente_id') = ?
+          AND json_extract(data, '\$.anulado') IS NULL
+        ORDER BY json_extract(data, '\$.fecha') DESC
+        LIMIT 20
+      ''', [clienteId]);
+      return rows.map((r) {
+        try {
+          final data = jsonDecode(r['data'] as String) as Map<String, dynamic>;
+          return {
+            'id': r['id'],
+            ...data,
+          };
+        } catch (_) {
+          return <String, dynamic>{};
+        }
+      }).where((m) => m.isNotEmpty).toList();
+    } catch (_) {
+      return [];
     }
   }
 
@@ -1181,6 +1213,43 @@ class _FichaScreenState extends State<FichaScreen> {
                       ),
                       const SizedBox(
                           height: AppEspacio.md),
+                      // v1.2.2: Historial de suplementos comprados
+                      if (_suplementos.isNotEmpty)
+                        Tarjeta(
+                          child: Column(
+                            crossAxisAlignment:
+                                CrossAxisAlignment.start,
+                            children: [
+                              const Text(
+                                  'Suplementos comprados',
+                                  style: AppTexto.titulo),
+                              const SizedBox(
+                                  height: AppEspacio.sm),
+                              for (final s in _suplementos)
+                                ListTile(
+                                  dense: true,
+                                  contentPadding:
+                                      EdgeInsets.zero,
+                                  title: Text(
+                                      '${s['suplemento_nombre'] ?? s['nombre'] ?? 'Suplemento'} x${s['cantidad'] ?? 1}',
+                                      style:
+                                          AppTexto.cuerpo),
+                                  subtitle: Text(
+                                      '${fmtFecha(s['fecha'] as String?)} · ${(s['moneda'] ?? 'CUP')}',
+                                      style: AppTexto
+                                          .secundario),
+                                  trailing: Text(
+                                      '${fmtMonto((s['precio'] as num?)?.toDouble() ?? 0)} ${(s['moneda'] ?? 'CUP')}',
+                                      style: AppTexto.cuerpo.copyWith(
+                                          fontWeight: FontWeight.bold,
+                                          color: AppColores.naranja)),
+                                ),
+                            ],
+                          ),
+                        ),
+                      if (_suplementos.isNotEmpty)
+                        const SizedBox(
+                            height: AppEspacio.md),
                       // Acciones secundarias
                       if (vencido)
                         Padding(
