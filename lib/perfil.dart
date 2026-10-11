@@ -8,6 +8,7 @@ import 'dart:io';
 import 'dart:math';
 
 import 'package:crypto/crypto.dart';
+import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -194,39 +195,71 @@ class PerfilService {
   /// v1.2.5 (4.1): límite persistente con esperas CRECIENTES que sobreviven
   /// reinicios. 5 fallos → bloqueo de 1 min; si vuelve a fallar 5 veces,
   /// 5 min; luego 15, 30, 60. El contador de "ciclos de bloqueo" persiste.
-  /// Limitación honesta: sin reloj monotónico persistente, si el reloj del
-  /// dispositivo retrocede bruscamente se mantiene el bloqueo (no se acorta).
-  /// v1.2.5-rev5: Stopwatch monotónico en memoria para detectar adelantos
-  /// del reloj durante la sesión (no sobrevive reinicios; el wall clock
-  /// con protección de retroceso cubre el resto).
-  static final Stopwatch _mono = Stopwatch()..start();
-  static int _monoAnclaMs = 0;
-  static int _lockoutDurMs = 0;
+  /// v1.2.5-rev6 (Gemini #4): el bloqueo usa reloj monotónico PERSISTENTE
+  /// (elapsedRealtime de Android vía canal nativo: no lo afecta cambiar la
+  /// hora del teléfono y sobrevive reinicios de la app). Si el reloj se
+  /// adelanta para eludir el bloqueo, el tiempo real transcurrido manda y
+  /// se reancla el deadline. Riesgo residual documentado: reiniciar el
+  /// teléfono resetea elapsedRealtime; en ese caso se usa el wall clock
+  /// como fallback (un atacante tendría que reiniciar Y adelantar el reloj).
+  static const _canalSeg = MethodChannel('ironbody/seguridad');
+  static final Stopwatch _monoFallback = Stopwatch()..start();
+
+  /// Milisegundos monotónicos (inmunes a cambios del reloj del sistema).
+  /// En Android: SystemClock.elapsedRealtime(); fallback: Stopwatch.
+  static Future<int> _monoAhora() async {
+    try {
+      final v = await _canalSeg.invokeMethod<int>('elapsedRealtime');
+      if (v != null && v >= 0) return v;
+    } catch (_) {}
+    return _monoFallback.elapsedMilliseconds;
+  }
+
+  /// Limpia todo el estado de bloqueo (expiró o se reinició).
+  Future<void> _limpiarBloqueoPin(SharedPreferences p) async {
+    await p.setInt('seg_pin_bloqueado_hasta', 0);
+    await p.setInt('seg_pin_duracion_ms', 0);
+    await p.setInt('seg_pin_mono_ancla', 0);
+  }
 
   Future<bool> verificarPin(String pin) async {
+    final p = await _p;
     final ahora = DateTime.now().millisecondsSinceEpoch;
-    final hasta = await getPinBloqueadoHasta();
+    final hasta = p.getInt('seg_pin_bloqueado_hasta') ?? 0;
     // v1.2.5 (4.1): si el reloj retrocedió (ahora < última vez visto),
     // mantener el bloqueo por seguridad.
-    final ultimaVez = (await _p).getInt('seg_pin_ultima_vez') ?? 0;
+    final ultimaVez = p.getInt('seg_pin_ultima_vez') ?? 0;
     if (ahora < ultimaVez - 60000 && hasta > 0) {
       // Retroceso >1 min con bloqueo activo: no acortar.
       return false;
     }
-    await (await _p).setInt('seg_pin_ultima_vez', ahora);
-    if (ahora < hasta) return false;
-    // v1.2.5-rev5 (Gemini): si el reloj se ADELANTÓ para eludir el bloqueo,
-    // el wall clock ya pasó 'hasta' pero el tiempo monotónico (Stopwatch,
-    // no manipulable desde ajustes) aún no cubre la duración del bloqueo.
-    // Se reancla 'hasta' al futuro con el tiempo restante real.
-    if (hasta > 0 && _lockoutDurMs > 0) {
-      final transcurridoMono = _mono.elapsedMilliseconds - _monoAnclaMs;
-      if (transcurridoMono < _lockoutDurMs) {
-        final restante = _lockoutDurMs - transcurridoMono;
-        await (await _p).setInt('seg_pin_bloqueado_hasta', ahora + restante);
-        return false;
+    await p.setInt('seg_pin_ultima_vez', ahora);
+    if (hasta > 0) {
+      // Hay bloqueo activo: decidir con el reloj monotónico.
+      final durMs = p.getInt('seg_pin_duracion_ms') ?? 0;
+      final ancla = p.getInt('seg_pin_mono_ancla') ?? 0;
+      final mono = await _monoAhora();
+      if (durMs > 0 && ancla > 0) {
+        final transcurrido = mono - ancla;
+        if (transcurrido >= durMs) {
+          await _limpiarBloqueoPin(p); // expiró en tiempo real
+        } else if (transcurrido < 0) {
+          // elapsedRealtime se reseteó (reinicio del teléfono):
+          // fallback al wall clock.
+          if (ahora < hasta) return false;
+          await _limpiarBloqueoPin(p);
+        } else {
+          // Aún no expira en tiempo real aunque el wall clock diga lo
+          // contrario (adelanto detectado): reanclar el deadline.
+          final restante = durMs - transcurrido;
+          await p.setInt('seg_pin_bloqueado_hasta', ahora + restante);
+          return false;
+        }
+      } else {
+        // Sin ancla monotónica (bloqueo viejo): wall clock + retroceso.
+        if (ahora < hasta) return false;
+        await _limpiarBloqueoPin(p);
       }
-      _lockoutDurMs = 0; // expiró legítimamente
     }
     final guardado = await getPinHash();
     if (guardado == null || guardado.isEmpty) return false;
@@ -239,15 +272,15 @@ class PerfilService {
     await _setPinFallos(fallos);
     if (fallos >= 5) {
       // Esperas crecientes: 1, 5, 15, 30, 60 min según ciclos previos.
-      final ciclos = (await _p).getInt('seg_pin_ciclos_bloqueo') ?? 0;
+      final ciclos = p.getInt('seg_pin_ciclos_bloqueo') ?? 0;
       const minutos = [1, 5, 15, 30, 60];
       final minBloqueo = minutos[ciclos.clamp(0, minutos.length - 1)];
-      await (await _p).setInt(
-          'seg_pin_bloqueado_hasta', ahora + minBloqueo * 60 * 1000);
-      // v1.2.5-rev5: anclar duración monotónica para detectar adelantos.
-      _monoAnclaMs = _mono.elapsedMilliseconds;
-      _lockoutDurMs = minBloqueo * 60 * 1000;
-      await (await _p).setInt('seg_pin_ciclos_bloqueo', ciclos + 1);
+      final durMs = minBloqueo * 60 * 1000;
+      await p.setInt('seg_pin_bloqueado_hasta', ahora + durMs);
+      // v1.2.5-rev6: ancla monotónica persistente (sobrevive reinicios).
+      await p.setInt('seg_pin_duracion_ms', durMs);
+      await p.setInt('seg_pin_mono_ancla', await _monoAhora());
+      await p.setInt('seg_pin_ciclos_bloqueo', ciclos + 1);
       await _setPinFallos(0);
     }
     return false;
@@ -257,14 +290,30 @@ class PerfilService {
   Future<void> reiniciarBloqueoPin() async {
     final p = await _p;
     await p.setInt('seg_pin_fallos', 0);
-    await p.setInt('seg_pin_bloqueado_hasta', 0);
     await p.setInt('seg_pin_ciclos_bloqueo', 0);
-    _lockoutDurMs = 0; // v1.2.5-rev5: limpiar ancla monotónica
+    await _limpiarBloqueoPin(p); // v1.2.5-rev6: también el ancla monotónica
   }
 
   /// Minutos restantes de bloqueo del PIN (0 si no está bloqueado).
+  /// v1.2.5-rev6: usa el reloj monotónico si hay ancla (inmune a adelantos).
   Future<int> pinBloqueoMinutosRestantes() async {
-    final hasta = await getPinBloqueadoHasta();
+    final p = await _p;
+    final hasta = p.getInt('seg_pin_bloqueado_hasta') ?? 0;
+    if (hasta <= 0) return 0;
+    final durMs = p.getInt('seg_pin_duracion_ms') ?? 0;
+    final ancla = p.getInt('seg_pin_mono_ancla') ?? 0;
+    if (durMs > 0 && ancla > 0) {
+      final transcurrido = await _monoAhora() - ancla;
+      if (transcurrido < 0) {
+        // Reinicio: fallback al wall clock.
+        final ahora = DateTime.now().millisecondsSinceEpoch;
+        if (ahora >= hasta) return 0;
+        return ((hasta - ahora) / 60000).ceil();
+      }
+      final restante = durMs - transcurrido;
+      if (restante <= 0) return 0;
+      return (restante / 60000).ceil();
+    }
     final ahora = DateTime.now().millisecondsSinceEpoch;
     if (ahora >= hasta) return 0;
     return ((hasta - ahora) / 60000).ceil();

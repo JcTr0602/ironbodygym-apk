@@ -29,7 +29,7 @@ class LocalDb {
     final dir = await getDatabasesPath();
     _db = await openDatabase(
       p.join(dir, 'ironbody.db'),
-      version: 11,
+      version: 12,
       onCreate: (db, _) async {
         await _crearTablas(db);
       },
@@ -137,9 +137,70 @@ class LocalDb {
           await db.execute(
               'CREATE INDEX IF NOT EXISTS idx_ops_estado ON ops_queue(estado)');
         }
+        // v12 (v1.2.5-rev6): correcciones de esquema detectadas en la
+        // revisión posterior de rev5.
+        if (oldV < 12) {
+          // 1) turnos_cierre con id TEXT (rev5 lo creó INTEGER pero los
+          // ids de Supabase son UUID). Es solo espejo re-descargable:
+          // si existe con otro esquema, se recrea.
+          final info = await db.rawQuery('PRAGMA table_info(turnos_cierre)');
+          final idCol = info.where((c) => '${c['name']}' == 'id').toList();
+          if (idCol.isEmpty) {
+            await db.execute(
+                'CREATE TABLE turnos_cierre (id TEXT PRIMARY KEY, data TEXT NOT NULL, sync_seq INTEGER NOT NULL)');
+          } else if ('${idCol.first['type']}'.toUpperCase() != 'TEXT') {
+            await db.execute('DROP TABLE turnos_cierre');
+            await db.execute(
+                'CREATE TABLE turnos_cierre (id TEXT PRIMARY KEY, data TEXT NOT NULL, sync_seq INTEGER NOT NULL)');
+          }
+          await db.execute(
+              'CREATE INDEX IF NOT EXISTS idx_turnos_cierre_seq ON turnos_cierre(sync_seq)');
+          // 1b) turnos_cierre NUNCA hereda el watermark global: es una tabla
+          // nueva que jamás se bajó bien (en rev5 el pull fallaba). Si
+          // heredara el global, perdería las filas con sync_seq menor.
+          await db.insert('meta', {'k': 'wm_turnos_cierre', 'v': '0'},
+              conflictAlgorithm: ConflictAlgorithm.replace);
+          // 2) columnas de v9 que faltaban en instalaciones limpias hechas
+          // con _crearTablas de rev5 (solo llegaban por upgrade).
+          await _addColumnIfMissing(
+              db, 'ops_queue', 'proximo_reintento', 'TEXT');
+          await _addColumnIfMissing(
+              db, 'ops_queue', 'codigo_error', 'TEXT');
+          // 3) FTS5 con columna de teléfonos: se reconstruye y repuebla.
+          await db.execute('DROP TABLE IF EXISTS clientes_fts');
+          await db.execute(
+              'CREATE VIRTUAL TABLE clientes_fts USING fts5(nombre_norm, telefonos, id UNINDEXED)');
+          final rows = await db.query('clientes', columns: ['id', 'data']);
+          for (final r in rows) {
+            try {
+              final data =
+                  jsonDecode(r['data'] as String) as Map<String, dynamic>;
+              await db.insert('clientes_fts', {
+                'nombre_norm': _normTexto('${data['nombre'] ?? ''}'),
+                'telefonos': _telefonosNorm(data),
+                'id': r['id'],
+              });
+            } catch (_) {}
+          }
+          // 4) v1.2.5-rev6 (Gemini #13): índice de expresión sobre el JSON
+          // para el historial de suplementos de la ficha del cliente.
+          await db.execute(
+              "CREATE INDEX IF NOT EXISTS idx_ventas_cliente ON ventas_suplementos(json_extract(data, '\$.cliente_id'))");
+        }
       },
     );
     return _db!;
+  }
+
+  /// ALTER TABLE ADD COLUMN solo si la columna no existe (SQLite no
+  /// tiene IF NOT EXISTS para ADD COLUMN).
+  static Future<void> _addColumnIfMissing(
+      Database db, String tabla, String columna, String tipo) async {
+    final info = await db.rawQuery('PRAGMA table_info($tabla)');
+    final existe = info.any((c) => '${c['name']}' == columna);
+    if (!existe) {
+      await db.execute('ALTER TABLE $tabla ADD COLUMN $columna $tipo');
+    }
   }
 
   static Future<void> _crearTablas(Database db) async {
@@ -151,28 +212,44 @@ class LocalDb {
       'suplementos',
       'ventas_suplementos',
       'categorias_suplemento', // v1.2.1
-      'turnos_cierre', // v1.2.5-rev5
     ]) {
       await db.execute(
           'CREATE TABLE $t (id INTEGER PRIMARY KEY, data TEXT NOT NULL, sync_seq INTEGER NOT NULL)');
     }
-    // v1.2.5-rev5: FTS5 para búsqueda de clientes.
+    // v1.2.5-rev6: turnos_cierre lleva id TEXT (UUID de Supabase); va
+    // aparte del bucle genérico de ids enteros.
     await db.execute(
-        'CREATE VIRTUAL TABLE IF NOT EXISTS clientes_fts USING fts5(nombre_norm, id UNINDEXED)');
+        'CREATE TABLE turnos_cierre (id TEXT PRIMARY KEY, data TEXT NOT NULL, sync_seq INTEGER NOT NULL)');
+    // v1.2.5-rev6: FTS5 para búsqueda de clientes (nombre + teléfonos).
+    await db.execute(
+        'CREATE VIRTUAL TABLE IF NOT EXISTS clientes_fts USING fts5(nombre_norm, telefonos, id UNINDEXED)');
     // v1.2.5-rev5: índices en sync_seq para descargas incrementales.
     for (final t in [
       'clientes', 'pagos', 'pagos_diarios', 'gastos', 'suplementos',
-      'ventas_suplementos', 'categorias_suplemento',
+      'ventas_suplementos', 'categorias_suplemento', 'turnos_cierre',
     ]) {
       await db.execute('CREATE INDEX IF NOT EXISTS idx_${t}_seq ON $t(sync_seq)');
     }
+    // v1.2.5-rev6 (Gemini #13): índice de expresión sobre el JSON para el
+    // path caliente de la ficha del cliente (ventas por cliente_id).
+    // No se crean columnas generadas para cada campo JSON: con cientos de
+    // filas, el costo de escritura no compensa; los demás filtros ya van
+    // en Dart sobre listas acotadas o por FTS5.
+    await db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_ventas_cliente ON ventas_suplementos(json_extract(data, '\$.cliente_id'))");
+    // v1.2.5-rev6: la tabla ANTES que su índice. En rev5 el índice
+    // idx_ops_estado se creaba primero y la instalación limpia fallaba
+    // con "no such table: ops_queue". También se incluyen aquí las
+    // columnas de v9 (proximo_reintento, codigo_error) que faltaban en
+    // instalaciones limpias (solo llegaban por upgrade).
+    await db.execute('CREATE TABLE ops_queue ('
+        'op_uuid TEXT PRIMARY KEY, tipo TEXT NOT NULL, payload TEXT NOT NULL, '
+        'estado TEXT NOT NULL DEFAULT \'pendiente\', intentos INTEGER NOT NULL DEFAULT 0, '
+        'error TEXT, creada_ts TEXT NOT NULL, foto_path TEXT, '
+        'user_id TEXT, telegram_id INTEGER, '
+        'proximo_reintento TEXT, codigo_error TEXT)');
     await db.execute(
         'CREATE INDEX IF NOT EXISTS idx_ops_estado ON ops_queue(estado)');
-        await db.execute('CREATE TABLE ops_queue ('
-            'op_uuid TEXT PRIMARY KEY, tipo TEXT NOT NULL, payload TEXT NOT NULL, '
-            'estado TEXT NOT NULL DEFAULT \'pendiente\', intentos INTEGER NOT NULL DEFAULT 0, '
-            'error TEXT, creada_ts TEXT NOT NULL, foto_path TEXT, '
-            'user_id TEXT, telegram_id INTEGER)');
         await db.execute('CREATE TABLE fotos_pendientes ('
             'id INTEGER PRIMARY KEY AUTOINCREMENT, op_uuid TEXT NOT NULL, '
             'cliente_id INTEGER, suplemento_id INTEGER, '
@@ -258,12 +335,44 @@ class LocalDb {
         {'id': id, 'data': nuevoJson, 'sync_seq': syncSeq},
         conflictAlgorithm: ConflictAlgorithm.replace);
     // v1.2.5-rev5: mantener el índice FTS5 de clientes.
+    // v1.2.5-rev6: también indexa teléfonos (búsqueda por número sin
+    // cargar el padrón completo).
     if (tabla == 'clientes') {
       final nn = _normTexto('${data['nombre'] ?? ''}');
       await d.delete('clientes_fts', where: 'id=?', whereArgs: [id]);
-      await d.insert('clientes_fts', {'nombre_norm': nn, 'id': id});
+      await d.insert('clientes_fts',
+          {'nombre_norm': nn, 'telefonos': _telefonosNorm(data), 'id': id});
     }
     return true;
+  }
+
+  /// Variante de [upsertMirror] para espejos con id TEXT (turnos_cierre:
+  /// los ids de Supabase son UUID).
+  Future<bool> upsertMirrorTexto(String tabla, String id,
+      Map<String, dynamic> data, int syncSeq) async {
+    final d = await db;
+    final nuevoJson = jsonEncode(data);
+    final rows = await d.query(tabla,
+        columns: ['data'], where: 'id=?', whereArgs: [id], limit: 1);
+    if (rows.isNotEmpty && rows.first['data'] == nuevoJson) return false;
+    await d.insert(tabla, {'id': id, 'data': nuevoJson, 'sync_seq': syncSeq},
+        conflictAlgorithm: ConflictAlgorithm.replace);
+    return true;
+  }
+
+  /// Lee solo las filas pedidas (evita el full scan de [allMirror] en
+  /// rutas calientes como la búsqueda).
+  Future<List<Map<String, dynamic>>> mirrorPorIds(
+      String tabla, List<int> ids) async {
+    if (ids.isEmpty) return [];
+    final d = await db;
+    final ph = List.filled(ids.length, '?').join(',');
+    final rows =
+        await d.query(tabla, where: 'id IN ($ph)', whereArgs: ids);
+    return [
+      for (final r in rows)
+        jsonDecode(r['data'] as String) as Map<String, dynamic>
+    ];
   }
 
   Future<void> deleteMirror(String tabla, int id) async {
@@ -272,6 +381,13 @@ class LocalDb {
     if (tabla == 'clientes') {
       await d.delete('clientes_fts', where: 'id=?', whereArgs: [id]);
     }
+  }
+
+  /// Variante de [deleteMirror] para espejos con id TEXT (turnos_cierre).
+  Future<void> deleteMirrorTexto(String tabla, String id) async {
+    if (id.isEmpty) return;
+    final d = await db;
+    await d.delete(tabla, where: 'id=?', whereArgs: [id]);
   }
 
   /// Normaliza para búsqueda: minúsculas, sin tildes.
@@ -285,10 +401,30 @@ class LocalDb {
     return n;
   }
 
+  /// Teléfonos normalizados (solo dígitos) para la columna FTS.
+  static String _telefonosNorm(Map<String, dynamic> data) {
+    final tel =
+        '${data['telefono'] ?? ''}'.replaceAll(RegExp(r'[^0-9]'), '');
+    final mov = '${data['movil'] ?? ''}'.replaceAll(RegExp(r'[^0-9]'), '');
+    return [if (tel.isNotEmpty) tel, if (mov.isNotEmpty) mov].join(' ');
+  }
+
   /// v1.2.5-rev5: búsqueda rápida por FTS5 (prefijo por token).
   /// Retorna ids ordenados por relevancia FTS.
-  Future<List<int>> buscarClientesFtsIds(String nq) async {
+  /// v1.2.5-rev6: modo [porTelefono] busca en la columna de teléfonos
+  /// (dígitos normalizados), para no escanear el padrón en Dart.
+  Future<List<int>> buscarClientesFtsIds(String nq,
+      {bool porTelefono = false}) async {
     final d = await db;
+    if (porTelefono) {
+      final dig = nq.replaceAll(RegExp(r'[^0-9]'), '');
+      if (dig.length < 3) return [];
+      final rows = await d.rawQuery(
+          'SELECT id FROM clientes_fts WHERE clientes_fts MATCH ? '
+          'ORDER BY rank LIMIT 50',
+          ['telefonos:"$dig"*']);
+      return rows.map((r) => r['id'] as int).toList();
+    }
     final tokens = nq
         .split(RegExp(r'\s+'))
         .where((t) => t.isNotEmpty)
@@ -298,6 +434,22 @@ class LocalDb {
     final rows = await d.rawQuery(
         'SELECT id FROM clientes_fts WHERE clientes_fts MATCH ? ORDER BY rank LIMIT 50',
         [tokens]);
+    return rows.map((r) => r['id'] as int).toList();
+  }
+
+  /// v1.2.5-rev6: candidatos para la tolerancia a typos. En vez de pasar
+  /// Levenshtein sobre todo el padrón en el hilo UI, se acota a las filas
+  /// cuya inicial coincide con la de algún token de la búsqueda.
+  Future<List<int>> buscarClientesCandidatos(Set<String> iniciales) async {
+    final d = await db;
+    final ini = iniciales
+        .where((s) => s.isNotEmpty)
+        .map((s) => '"${s[0].replaceAll('"', '')}"*')
+        .join(' OR ');
+    if (ini.isEmpty) return [];
+    final rows = await d.rawQuery(
+        'SELECT id FROM clientes_fts WHERE clientes_fts MATCH ? LIMIT 600',
+        [ini]);
     return rows.map((r) => r['id'] as int).toList();
   }
 
@@ -688,14 +840,26 @@ class LocalDb {
 
   /// v1.2.5-rev5 (Gemini): historial desde el espejo sincronizado.
   /// El admin ve los cierres de todos los entrenadores.
+  /// v1.2.5-rev6: el orden se hace en Dart (la tabla no tiene columnas
+  /// fecha/turno; el ORDER BY SQL de rev5 fallaba silenciosamente).
   Future<List<Map<String, dynamic>>> historialCierresMirror() async {
     final d = await db;
     try {
-      final rows = await d.query('turnos_cierre', orderBy: 'fecha DESC, turno DESC');
-      return [
+      final rows = await d.query('turnos_cierre');
+      final res = [
         for (final r in rows)
           jsonDecode(r['data'] as String) as Map<String, dynamic>
       ];
+      // Más reciente primero: fecha DESC, y dentro del día el turno
+      // más tardío primero (noche > tarde > mañana).
+      const ordenTurno = {'manana': 0, 'tarde': 1, 'noche': 2};
+      res.sort((a, b) {
+        final f = '${b['fecha'] ?? ''}'.compareTo('${a['fecha'] ?? ''}');
+        if (f != 0) return f;
+        return (ordenTurno['${b['turno']}'] ?? -1)
+            .compareTo(ordenTurno['${a['turno']}'] ?? -1);
+      });
+      return res;
     } catch (_) {
       return [];
     }
@@ -736,8 +900,7 @@ class LocalDb {
     await d.insert('meta', {'k': k, 'v': v},
         conflictAlgorithm: ConflictAlgorithm.replace);
   }
-  Future<String?> getMeta(String k) async {
-    final d = await db;
+  Future<String?> getMeta(String k) async {    final d = await db;
     final rows = await d.query('meta', where: 'k=?', whereArgs: [k]);
     return rows.isEmpty ? null : rows.first['v'] as String;
   }
@@ -763,6 +926,51 @@ class LocalDb {
       int.tryParse(await getMeta('sync_seq') ?? '0') ?? 0;
 
   Future<void> setWatermark(int seq) => setMeta('sync_seq', '$seq');
+
+  /// v1.2.5-rev6 (Gemini #16): watermarks por tabla, de verdad.
+  ///
+  /// Cada espejo avanza su propio cursor (`wm_<tabla>`). El fallo de una
+  /// tabla ya no bloquea a las demás ni obliga a re-descargar todo: el
+  /// cursor de la tabla fallida simplemente no avanza y reintenta en el
+  /// próximo ciclo. Migración perezosa: si la tabla aún no tiene cursor
+  /// propio, hereda el global `sync_seq` (no hay re-descarga masiva al
+  /// actualizar).
+  static const tablasConWatermark = [
+    'clientes',
+    'pagos',
+    'pagos_diarios',
+    'gastos',
+    'suplementos',
+    'ventas_suplementos',
+    'categorias_suplemento',
+    'turnos_cierre',
+    'borrados', // tombstones de sync_borrados
+  ];
+
+  Future<int> getWatermarkTabla(String tabla) async {
+    final v = await getMeta('wm_$tabla');
+    if (v != null) return int.tryParse(v) ?? 0;
+    return getWatermark(); // hereda el global (migración)
+  }
+
+  Future<void> setWatermarkTabla(String tabla, int seq) =>
+      setMeta('wm_$tabla', '$seq');
+
+  /// Mínimo de todos los cursores: "todo lo descargado hasta aquí".
+  /// Se usa para el chequeo de sincronización completa contra server_seq.
+  /// Las tablas marcadas como ausentes (404/400: aún no existen en
+  /// Supabase o el rol no las lee) no bloquean el "completo".
+  Future<int> getWatermarkMinimo() async {
+    var m = 1 << 62;
+    var hay = false;
+    for (final t in tablasConWatermark) {
+      if (await getMeta('wm_${t}_ausente') == '1') continue;
+      final w = await getWatermarkTabla(t);
+      if (w < m) m = w;
+      hay = true;
+    }
+    return hay ? m : 0;
+  }
 
   Future<Map<String, dynamic>> getAjustes() async {
     final raw = await getMeta('ajustes');

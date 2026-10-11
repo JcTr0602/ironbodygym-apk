@@ -15,6 +15,39 @@ class Novedad {
 }
 
 const novedades = [
+  Novedad('1.2.5', [
+    'Cierres de turno sincronizados: el dueño ve los cierres de todos los entrenadores en Historial de caja',
+    'Cierre con desglose: aviso del efectivo pendiente antes de cerrar',
+    'Búsqueda rápida: índice de texto completo (nombres y teléfonos), sin trabas',
+    'Sincronización más robusta: tolera cortes largos y cada tabla avanza a su ritmo',
+    'PIN más seguro: el bloqueo ya no se elude adelantando el reloj del teléfono',
+    'Banner de sincronización más claro y vibración en acciones importantes',
+  ]),
+  Novedad('1.2.4', [
+    'Incidencias bidireccionales: reporta y sigue su estado con el dueño',
+    'Centro de diagnóstico y bandeja de incidencias',
+    'Datos bancarios en Administración',
+    'Seguridad: datos sensibles fuera del repositorio público',
+  ]),
+  Novedad('1.2.3', [
+    'Resincronizar fotos implementado de verdad',
+    'Sección "Sin stock" para el dueño',
+    'Control de reintentos en fotos (sin bucles infinitos)',
+    'Fix USD/CUP según el modelo real del negocio',
+    'Seguridad: sin atajos inseguros para detectar al dueño',
+  ]),
+  Novedad('1.2.2', [
+    'Control de inventario: alerta de stock en 0',
+    'Historial de suplementos en la ficha del cliente',
+    'Tu perfil (móvil/carnet) sobrevive reinstalaciones',
+    'Seguridad: el rol se lee de donde debe',
+    'Fixes: USD/CUP invertido, precio de menores automático',
+  ]),
+  Novedad('1.2.1', [
+    'Categorías de suplementos',
+    '12 bugs corregidos y mejoras en Actividad',
+    'Fixes de auditoría de seguridad',
+  ]),
   Novedad('1.2.0', [
     'Módulo de suplementos: inventario, stock y foto',
     'Ventas de suplementos en CUP y USD con tasa configurable',

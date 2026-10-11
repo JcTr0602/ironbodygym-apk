@@ -2,8 +2,7 @@
 ///
 /// Muestra los cierres de turno por fecha y entrenador, con el cobrado
 /// del día derivado del espejo de pagos.
-import 'dart:convert';
-
+library;
 import 'package:flutter/material.dart';
 
 import '../localdb.dart';
@@ -33,16 +32,17 @@ class _HistorialCajaScreenState extends State<HistorialCajaScreen> {
     // v1.2.5-rev5: desde el espejo sincronizado (admin ve todos los
     // entrenadores). Fallback al meta local si el espejo está vacío.
     var cierres = await LocalDb.instance.historialCierresMirror();
-    cierres ??= [];
     if (cierres.isEmpty) {
       cierres = await LocalDb.instance.historialCierres();
     }
-    // Enriquece con el cobrado del día (del espejo de pagos).
+    // v1.2.5-rev6: cobrado del día en UNA pasada por los espejos
+    // (antes era una query con json_extract por cada cierre).
+    final cobrados = await _cobradosPorDia(cierres);
     final res = <Map<String, dynamic>>[];
     for (final c in cierres) {
-      final cobrado = await _cobradoDia(
-          '${c['fecha']}', '${c['telegram_id'] ?? c['entrenador_id']}');
-      res.add({...c, 'cobrado': cobrado});
+      final tid = _telegramIdDe(c);
+      final key = '${c['fecha']}|$tid';
+      res.add({...c, 'cobrado': cobrados[key] ?? 0.0});
     }
     if (mounted) {
       setState(() {
@@ -52,27 +52,51 @@ class _HistorialCajaScreenState extends State<HistorialCajaScreen> {
     }
   }
 
-  /// Cobrado en la fecha por el entrenador (registrado_por).
-  Future<double> _cobradoDia(String fecha, String telegramId) async {
-    try {
-      final db = await LocalDb.instance.db;
-      final rows = await db.rawQuery('''
-        SELECT data FROM pagos
-        WHERE json_extract(data, '\$.fecha') = ?
-          AND json_extract(data, '\$.registrado_por') = ?
-      ''', [fecha, telegramId]);
-      var total = 0.0;
-      for (final r in rows) {
-        try {
-          final d = Map<String, dynamic>.from(
-              jsonDecode(r['data'] as String) as Map);
-          total += (d['monto'] as num?)?.toDouble() ?? 0;
-        } catch (_) {}
-      }
-      return total;
-    } catch (_) {
-      return 0;
+  static int? _telegramIdDe(Map<String, dynamic> c) {
+    final t = c['telegram_id'];
+    if (t is int) return t;
+    return int.tryParse('$t');
+  }
+
+  /// Suma por (fecha, telegram_id) de pagos + pagos diarios, en una sola
+  /// pasada por los espejos. La atribución (telegram_user_id /
+  /// registrado_por) es la misma que ve el entrenador en "Mi turno".
+  Future<Map<String, double>> _cobradosPorDia(
+      List<Map<String, dynamic>> cierres) async {
+    final pares = <String>{};
+    for (final c in cierres) {
+      final tid = _telegramIdDe(c);
+      if (tid == null) continue;
+      pares.add('${c['fecha']}|$tid');
     }
+    final res = <String, double>{};
+    void suma(String? fecha, int? tid, double monto) {
+      if (fecha == null || fecha.length < 10 || tid == null) return;
+      final k = '${fecha.substring(0, 10)}|$tid';
+      if (!pares.contains(k)) return;
+      res[k] = (res[k] ?? 0) + monto;
+    }
+    for (final p in await LocalDb.instance.allMirror('pagos')) {
+      suma('${p['fecha']}', p['telegram_user_id'] as int?,
+          (p['monto'] as num?)?.toDouble() ?? 0);
+    }
+    for (final d in await LocalDb.instance.allMirror('pagos_diarios')) {
+      suma('${d['fecha']}', d['registrado_por'] as int?,
+          (d['total'] as num?)?.toDouble() ?? 0);
+    }
+    return res;
+  }
+
+  static String _nombreTurno(String? t) => switch (t) {
+        'manana' => 'Mañana',
+        'tarde' => 'Tarde',
+        'noche' => 'Noche',
+        _ => t ?? '—',
+      };
+
+  static String _fmtCerrado(String? iso) {
+    if (iso == null || iso.length < 16) return iso ?? '—';
+    return iso.substring(0, 16).replaceAll('T', ' ');
   }
 
   @override
@@ -117,7 +141,7 @@ class _HistorialCajaScreenState extends State<HistorialCajaScreen> {
                                 ),
                                 Chip(
                                   label: Text(
-                                      '${c['turno']}',
+                                      _nombreTurno(c['turno'] as String?),
                                       style: const TextStyle(
                                           fontSize: 11)),
                                 ),
@@ -125,7 +149,7 @@ class _HistorialCajaScreenState extends State<HistorialCajaScreen> {
                             ),
                             const SizedBox(height: 4),
                             Text(
-                              'Entrenador: ${c['telegram_id']}',
+                              'Entrenador: ${c['entrenador_nombre'] ?? c['telegram_id'] ?? '—'}',
                               style: AppTexto.secundario,
                             ),
                             Text(
@@ -135,7 +159,11 @@ class _HistorialCajaScreenState extends State<HistorialCajaScreen> {
                                       FontWeight.w600),
                             ),
                             Text(
-                              'Cerrado: ${(c['cerrado_en'] as String? ?? '').substring(0, 16).replaceAll('T', ' ')}',
+                              'Operaciones: ${c['pagos_count'] ?? '—'}',
+                              style: AppTexto.secundario,
+                            ),
+                            Text(
+                              'Cerrado: ${_fmtCerrado(c['cerrado_en'] as String?)}',
                               style: AppTexto.secundario,
                             ),
                           ],

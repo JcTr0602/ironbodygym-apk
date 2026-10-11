@@ -5,6 +5,8 @@ library;
 
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
+
 import 'localdb.dart';
 
 String _norm(String s) {
@@ -40,37 +42,45 @@ Future<List<Map<String, dynamic>>> _activos() async {
 /// v1.2.5 (A24): búsqueda tolerante.
 /// - Insensible a tildes/mayúsculas (vía _norm).
 /// - Multi-token: todos los tokens deben aparecer (en cualquier orden).
-/// - Tolerancia a typos: distancia Levenshtein ≤ 2 por token (para tokens
-///   de 4+ letras), para errores de dedo comunes.
-/// - Teléfonos: solo dígitos, match por sufijo (ej. "5819" encuentra
-///   "58191577").
+/// - Teléfonos: solo dígitos, match por prefijo vía FTS (ej. "5819"
+///   encuentra "58191577").
+/// v1.2.5-rev6 (Gemini #5): ya no carga todo el padrón ni corre Levenshtein
+/// sobre él en el hilo UI. La vía rápida FTS trae solo las filas pedidas
+/// por id; la tolerancia a typos corre en un isolate sobre candidatos
+/// acotados (misma inicial que algún token de la búsqueda).
 Future<List<Map<String, dynamic>>> buscarClientes(String q) async {
   final nq = _norm(q);
   if (nq.isEmpty) return [];
+  final db = LocalDb.instance;
+  final porId = <int, Map<String, dynamic>>{};
+  Future<void> cargarPorIds(List<int> ids) async {
+    for (final c in await db.mirrorPorIds('clientes', ids)) {
+      final id = c['id'] as int?;
+      if (id != null) porId[id] = c;
+    }
+  }
+
+  // Si la query es numérica, buscar por teléfono primero (vía FTS).
   final digitos = q.replaceAll(RegExp(r'[^0-9]'), '');
-  final rows = await _activos();
-  // Si la query es numérica, buscar por teléfono primero.
-  if (digitos.isNotEmpty && digitos.length >= 3) {
-    final porTel = rows.where((c) {
-      final tel = '${c['telefono'] ?? ''}'.replaceAll(RegExp(r'[^0-9]'), '');
-      final mov = '${c['movil'] ?? ''}'.replaceAll(RegExp(r'[^0-9]'), '');
-      return tel.endsWith(digitos) || mov.endsWith(digitos);
-    }).toList();
+  if (digitos.length >= 3) {
+    final ids = await db.buscarClientesFtsIds(digitos, porTelefono: true);
+    await cargarPorIds(ids);
+    final porTel =
+        porId.values.where((c) => c['estado'] == 'activo').toList();
     if (porTel.isNotEmpty) {
       porTel.sort((a, b) => '${a['nombre']}'.compareTo('${b['nombre']}'));
       return porTel;
     }
+    // Sin match por teléfono, se sigue a la búsqueda por nombre.
   }
-  // v1.2.5-rev5 (Gemini): vía rápida por FTS5 (índice SQLite, no bloquea la
-  // UI). Solo si devuelve pocos resultados se aplica la tolerancia a typos
-  // (Levenshtein) sobre un conjunto acotado.
-  final porId = {for (final c in rows) c['id']: c};
-  final ftsIds = await LocalDb.instance.buscarClientesFtsIds(nq);
+  // Vía rápida por FTS5 (índice SQLite, no bloquea la UI).
+  final ftsIds = await db.buscarClientesFtsIds(nq);
+  await cargarPorIds(ftsIds);
   final vistos = <int>{};
   final resultado = <Map<String, dynamic>>[];
   for (final id in ftsIds) {
     final c = porId[id];
-    if (c != null && (c['estado'] == 'activo')) {
+    if (c != null && c['estado'] == 'activo') {
       resultado.add(c);
       vistos.add(id);
     }
@@ -79,12 +89,48 @@ Future<List<Map<String, dynamic>>> buscarClientes(String q) async {
     resultado.sort((a, b) => '${a['nombre']}'.compareTo('${b['nombre']}'));
     return resultado;
   }
-  // Tolerancia a typos: solo sobre los no encontrados por FTS.
-  final tokens = nq.split(RegExp(r'\s+')).where((t) => t.isNotEmpty).toList();
-  final scored = <Map<String, dynamic>, int>{};
-  for (final c in rows) {
-    if (vistos.contains(c['id'])) continue;
-    final norm = (c['nombre_norm'] as String?) ?? _norm('${c['nombre']}');
+  // Tolerancia a typos: en un isolate, solo sobre candidatos acotados
+  // (misma inicial que algún token), no sobre todo el padrón.
+  final tokens =
+      nq.split(RegExp(r'\s+')).where((t) => t.isNotEmpty).toList();
+  final iniciales = tokens.map((t) => t[0]).toSet();
+  final candIds = await db.buscarClientesCandidatos(iniciales);
+  final nuevosIds = candIds.where((i) => !vistos.contains(i)).toList();
+  await cargarPorIds(nuevosIds);
+  final rankeados = await compute(_typoFallbackAislado, {
+    'candidatos': [
+      for (final id in nuevosIds)
+        if (porId[id] != null)
+          {
+            'id': id,
+            'nombre': '${porId[id]!['nombre']}',
+            'nombre_norm': (porId[id]!['nombre_norm'] as String?) ??
+                _norm('${porId[id]!['nombre']}'),
+          }
+    ],
+    'vistos': vistos.toList(),
+    'tokens': tokens,
+  });
+  final resto = [
+    for (final id in rankeados) porId[id],
+  ].whereType<Map<String, dynamic>>().toList();
+  return [...resultado, ...resto];
+}
+
+/// Tolerancia a typos para [buscarClientes]. Corre en un isolate (vía
+/// compute): recibe mapas simples y devuelve los ids rankeados.
+/// Debe ser función de nivel superior (requisito de compute).
+List<int> _typoFallbackAislado(Map<String, dynamic> args) {
+  final candidatos =
+      (args['candidatos'] as List).cast<Map<String, dynamic>>();
+  final vistos = (args['vistos'] as List).cast<int>().toSet();
+  final tokens = (args['tokens'] as List).cast<String>();
+  final porNombre = {for (final c in candidatos) c['id'] as int: c};
+  final scored = <int, int>{};
+  for (final c in candidatos) {
+    final id = c['id'] as int;
+    if (vistos.contains(id)) continue;
+    final norm = '${c['nombre_norm']}';
     final palabras = norm.split(RegExp(r'\s+'));
     var ok = true;
     var score = 0;
@@ -106,15 +152,16 @@ Future<List<Map<String, dynamic>>> buscarClientes(String q) async {
       ok = false;
       break;
     }
-    if (ok) scored[c] = score;
+    if (ok) scored[id] = score;
   }
-  final resto = scored.keys.toList();
-  resto.sort((a, b) {
+  final ids = scored.keys.toList();
+  ids.sort((a, b) {
     final s = scored[b]!.compareTo(scored[a]!);
     if (s != 0) return s;
-    return '${a['nombre']}'.compareTo('${b['nombre']}');
+    return '${porNombre[a]!['nombre']}'
+        .compareTo('${porNombre[b]!['nombre']}');
   });
-  return [...resultado, ...resto];
+  return ids;
 }
 
 /// Distancia de Levenshtein (para typos en búsqueda).

@@ -229,7 +229,7 @@ class SyncEngine {
     // v1.0.15: detectar si el servidor tiene cambios sin bajar
     bool novedades = false;
     try {
-      final wm = await _db.getWatermark();
+      final wm = await _db.getWatermarkMinimo();
       final ss =
           int.tryParse(await _db.getMeta('server_seq') ?? '0') ?? 0;
       novedades = ss > wm;
@@ -361,7 +361,7 @@ class SyncEngine {
       bool completo = false;
       for (var i = 0; i < 3; i++) {
         await _doPull();
-        final wm = await _db.getWatermark();
+        final wm = await _db.getWatermarkMinimo();
         final ss = int.tryParse(await _db.getMeta('server_seq') ?? '0') ?? 0;
         if (wm >= ss) {
           completo = true;
@@ -373,7 +373,7 @@ class SyncEngine {
         await _db.setMeta('last_sync_error', '');
       } else {
         // v1.2.4: no ocultar sync incompleto
-        final wm = await _db.getWatermark();
+        final wm = await _db.getWatermarkMinimo();
         final ss = int.tryParse(await _db.getMeta('server_seq') ?? '0') ?? 0;
         final msg = 'Sincronización incompleta: watermark $wm < server_seq $ss tras 3 intentos';
         await _db.setMeta('last_sync_error', msg);
@@ -749,6 +749,49 @@ class SyncEngine {
   }
 
   // -- bajada ------------------------------------------------------------
+  /// Aplica una fila del pull al espejo local según el esquema de la tabla.
+  /// Retorna true si la fila cambió (para métricas honestas).
+  ///
+  /// v1.2.5-rev6: turnos_cierre usa id TEXT (UUID) y columnas planas en
+  /// Supabase; en rev5 el pull pedía `id,data,sync_seq`, respondía 400 y
+  /// se omitía silenciosamente (el admin nunca veía cierres remotos).
+  Future<bool> _aplicarFilaMirror(
+      String tabla, Map<String, dynamic> m, int seq) async {
+    if (tabla == 'turnos_cierre') {
+      final id = '${m['id'] ?? ''}';
+      if (id.isEmpty) return false;
+      final data = <String, dynamic>{
+        'id': id,
+        'entrenador_id': m['entrenador_id'],
+        'entrenador_nombre': m['entrenador_nombre'],
+        'telegram_id': m['telegram_id'],
+        'fecha': m['fecha'],
+        'turno': m['turno'],
+        'total_cobrado': m['total_cobrado'],
+        'total_esperado': m['total_esperado'],
+        'pagos_count': m['pagos_count'],
+        'nota': m['nota'],
+        'cerrado_en': m['cerrado_en'],
+      };
+      return _db.upsertMirrorTexto(tabla, id, data, seq);
+    }
+    final id = (m['id'] as int?) ?? 0;
+    // gastos usa columnas planas en Supabase (sin 'data' JSON)
+    final Map<String, dynamic> data;
+    if (tabla == 'gastos') {
+      data = {
+        'id': id,
+        'fecha': m['fecha'],
+        'concepto': m['concepto'],
+        'monto': m['monto'],
+        'registrado_por': m['registrado_por'],
+      };
+    } else {
+      data = Map<String, dynamic>.from(m['data'] as Map);
+    }
+    return _db.upsertMirror(tabla, id, data, seq);
+  }
+
   /// Devuelve la cantidad de filas nuevas bajadas.
   ///
   /// Invariante del watermark: solo avanza al final del ciclo, después de
@@ -799,12 +842,10 @@ class SyncEngine {
       }
     } catch (_) {}
 
-    var wm = await _db.getWatermark();
-    // `since` queda fijo para todo el ciclo: cada tabla consulta desde el
-    // watermark inicial y solo al final se consolida el máximo. Así ningún
-    // cambio con sync_seq menor que el máximo de otra tabla se omite.
-    final since = wm;
-    var maxSeq = wm;
+    // v1.2.5-rev6 (Gemini #16): watermarks por tabla. Cada espejo tiene su
+    // propio cursor (`wm_<tabla>`); el fallo de una tabla no bloquea a
+    // las demás ni obliga a re-descargar todo.
+    final erroresTablas = <String>[];
     // v1.2.5 (D20): métricas honestas por ámbito.
     var vistas = 0;
     var aplicadas = 0;
@@ -842,24 +883,46 @@ class SyncEngine {
                 'Descargando ${_nombreAmigable(tabla)}… $ti de ${tablas.length}',
             progreso: ti / (tablas.length + 1));
       }
+      // v1.2.5-rev6: cursor propio de la tabla. Si el manifiesto la marcó
+      // divergente, se resetea a 0 (re-descarga solo ella).
+      var cursor = await _db.getWatermarkTabla(tabla);
+      if (tablasReseteadas.contains(tabla)) {
+        cursor = 0;
+        await _db.setWatermarkTabla(tabla, 0);
+      }
+      var pageWm = cursor;
+      var tablaMax = cursor;
+      var tablaOk = true;
       try {
-        // v1.2.5-rev5: si esta tabla divergió (manifiesto), re-descarga
-        // solo ella desde 0; las demás usan el watermark global normal.
-        var pageWm = tablasReseteadas.contains(tabla) ? 0 : since;
         while (true) {
-          // gastos tiene esquema plano en Supabase (sin columna 'data')
-          final select = tabla == 'gastos'
-              ? 'id,fecha,concepto,monto,registrado_por,sync_seq'
-              : 'id,data,sync_seq';
+          // gastos y turnos_cierre tienen esquema plano en Supabase
+          // (sin columna 'data' JSON).
+          final select = switch (tabla) {
+            'gastos' => 'id,fecha,concepto,monto,registrado_por,sync_seq',
+            'turnos_cierre' =>
+              'id,entrenador_id,entrenador_nombre,telegram_id,fecha,'
+                  'turno,total_cobrado,total_esperado,pagos_count,nota,'
+                  'cerrado_en,sync_seq',
+            _ => 'id,data,sync_seq',
+          };
           final r = await _getAuth(Uri.parse(
               '$_base/rest/v1/$supTabla?select=$select'
               '&sync_seq=gt.$pageWm&order=sync_seq.asc&limit=500'));
           if (r.statusCode == 404 || r.statusCode == 400) {
-            // v1.2.1: la tabla no existe en Supabase (p. ej.
-            // sync_categorias_suplemento aún no creada). Se omite
-            // silenciosamente sin abortar el resto del pull.
+            // v1.2.1: la tabla no existe en Supabase o el rol no puede
+            // leerla (p. ej. sync_turnos_cierre antes de aplicar v116,
+            // sync_gastos para entrenadores). Se omite sin abortar el
+            // resto del pull.
+            // v1.2.5-rev6: NO se avanza el cursor (las filas que aparezcan
+            // después —p. ej. al aplicar v116— pueden tener sync_seq
+            // antiguos y se perderían). Se marca "ausente" para que no
+            // bloquee el "sincronizado"; al reaparecer se baja desde el
+            // cursor real.
+            await _db.setMeta('wm_${tabla}_ausente', '1');
             break;
           }
+          // La tabla existe y responde: limpiar marca de ausente.
+          await _db.setMeta('wm_${tabla}_ausente', '');
           if (r.statusCode != 200) {
             throw Exception('bajada $tabla: HTTP ${r.statusCode}');
           }
@@ -870,39 +933,29 @@ class SyncEngine {
             try {
               final m = Map<String, dynamic>.from(row as Map);
               final seq = (m['sync_seq'] as int?) ?? 0;
-              final id = (m['id'] as int?) ?? 0;
-              // gastos usa columnas planas en Supabase (sin 'data' JSON)
-              final Map<String, dynamic> data;
-              if (tabla == 'gastos') {
-                data = {
-                  'id': id,
-                  'fecha': m['fecha'],
-                  'concepto': m['concepto'],
-                  'monto': m['monto'],
-                  'registrado_por': m['registrado_por'],
-                };
-              } else {
-                data = Map<String, dynamic>.from(m['data'] as Map);
-              }
               // v1.2.5 (D20): cuenta aplicadas vs sin cambios de verdad.
-              if (await _db.upsertMirror(tabla, id, data, seq)) {
+              if (await _aplicarFilaMirror(tabla, m, seq)) {
                 aplicadas++;
               } else {
                 sinCambios++;
               }
-              if (seq > maxSeq) maxSeq = seq;
+              if (seq > tablaMax) tablaMax = seq;
             } catch (_) {
               fallidas++;
             }
           }
           if (rows.length < 500) break;
-          pageWm = maxSeq;
+          pageWm = tablaMax;
         }
       } catch (e) {
         // 404/400 ya se manejan con break arriba (tabla no existe).
-        // Cualquier otro error (red, parseo, BD) debe abortar el pull
-        // para no dejar el watermark en estado inconsistente.
-        rethrow;
+        // Otro error: el cursor de esta tabla no avanza y reintenta en
+        // el próximo ciclo; las demás tablas no se bloquean.
+        tablaOk = false;
+        erroresTablas.add('$tabla: $e');
+      }
+      if (tablaOk && tablaMax > cursor) {
+        await _db.setWatermarkTabla(tabla, tablaMax);
       }
     }
     // borrados (tombstones)
@@ -911,34 +964,58 @@ class SyncEngine {
           detalle: 'Descargando eliminados…',
           progreso: tablas.length / (tablas.length + 1));
     }
-    var pageWm = since;
-    while (true) {
-      final r = await _getAuth(Uri.parse('$_base/rest/v1/sync_borrados'
-          '?select=entidad,entidad_id,sync_seq'
-          '&sync_seq=gt.$pageWm&order=sync_seq.asc&limit=500'));
-      if (r.statusCode != 200) {
-        throw Exception('bajada borrados: HTTP ${r.statusCode}');
+    // v1.2.5-rev6: los borrados también llevan cursor propio.
+    var cursorBorrados = await _db.getWatermarkTabla('borrados');
+    var pageWm = cursorBorrados;
+    var borradosMax = cursorBorrados;
+    var borradosOk = true;
+    try {
+      while (true) {
+        final r = await _getAuth(Uri.parse('$_base/rest/v1/sync_borrados'
+            '?select=entidad,entidad_id,sync_seq'
+            '&sync_seq=gt.$pageWm&order=sync_seq.asc&limit=500'));
+        if (r.statusCode != 200) {
+          throw Exception('bajada borrados: HTTP ${r.statusCode}');
+        }
+        final rows = jsonDecode(r.body) as List;
+        if (rows.isEmpty) break;
+        for (final row in rows) {
+          final m = Map<String, dynamic>.from(row as Map);
+          final seq = (m['sync_seq'] as int?) ?? 0;
+          final entidad = '${m['entidad'] ?? ''}';
+          const mapaEntidades = {
+            'clientes': 'clientes',
+            'pagos': 'pagos',
+            'suplementos': 'suplementos',
+            'ventas_suplementos': 'ventas_suplementos',
+            // v1.2.1: categorías de suplementos
+            'categorias_suplemento': 'categorias_suplemento',
+            'categoria_suplemento': 'categorias_suplemento',
+            // v1.2.5-rev6: cierres (id TEXT)
+            'turnos_cierre': 'turnos_cierre',
+          };
+          final tabla = mapaEntidades[entidad];
+          if (tabla == null) {
+            // v1.2.5-rev6: entidad desconocida. Antes caía en
+            // 'pagos_diarios' por defecto y podía borrar un pago real.
+            // Ahora se registra y se avanza sin borrar nada.
+            await _db.setMeta('borrados_entidad_desconocida', entidad);
+          } else if (tabla == 'turnos_cierre') {
+            await _db.deleteMirrorTexto(tabla, '${m['entidad_id'] ?? ''}');
+          } else {
+            await _db.deleteMirror(tabla, (m['entidad_id'] as int?) ?? -1);
+          }
+          if (seq > borradosMax) borradosMax = seq;
+        }
+        if (rows.length < 500) break;
+        pageWm = borradosMax;
       }
-      final rows = jsonDecode(r.body) as List;
-      if (rows.isEmpty) break;
-      for (final row in rows) {
-        final m = Map<String, dynamic>.from(row as Map);
-        final seq = (m['sync_seq'] as int?) ?? 0;
-        final tabla = {
-          'clientes': 'clientes',
-          'pagos': 'pagos',
-          'suplementos': 'suplementos',
-          'ventas_suplementos': 'ventas_suplementos',
-          // v1.2.1: categorías de suplementos
-          'categorias_suplemento': 'categorias_suplemento',
-          'categoria_suplemento': 'categorias_suplemento',
-        }[m['entidad']] ??
-            'pagos_diarios';
-        await _db.deleteMirror(tabla, (m['entidad_id'] as int?) ?? -1);
-        if (seq > maxSeq) maxSeq = seq;
-      }
-      if (rows.length < 500) break;
-      pageWm = maxSeq;
+    } catch (e) {
+      borradosOk = false;
+      erroresTablas.add('borrados: $e');
+    }
+    if (borradosOk && borradosMax > cursorBorrados) {
+      await _db.setWatermarkTabla('borrados', borradosMax);
     }
     // v1.2.4: incidencias (tabla central sync_incidencias)
     try {
@@ -956,8 +1033,11 @@ class SyncEngine {
       final msg = e.toString();
       if (!msg.contains('404') && !msg.contains('400')) rethrow;
     }
-    if (maxSeq > since) {
-      await _db.setWatermark(maxSeq);
+    if (erroresTablas.isNotEmpty) {
+      // Alguna tabla falló: las demás ya guardaron su progreso en sus
+      // cursores propios; se reporta para que run() reintente solo lo
+      // pendiente.
+      throw Exception('bajada incompleta: ${erroresTablas.first}');
     }
     // v1.2.5 (D17): marca por ámbito con HORA DEL SERVIDOR (header Date),
     // no del dispositivo (D18: el reloj local puede estar mal).
@@ -1237,6 +1317,8 @@ class SyncEngine {
   /// El puente lo publica a sync_turnos_cierre; el admin ve el historial
   /// de todos los entrenadores. La marca local en meta se mantiene para
   /// el estado inmediato sin esperar la red.
+  /// v1.2.5-rev6: incluye telegram_id (fallback si el servidor no puede
+  /// resolverlo del dispositivo; los pagos se atribuyen por telegram_id).
   Future<String> registrarCierreTurno({
     required String fecha,
     required String turno,
@@ -1257,6 +1339,7 @@ class SyncEngine {
         'total_esperado': totalEsperado,
         'pagos_count': pagosCount,
         'nota': nota,
+        'telegram_id': _auth.telegramId,
       },
     );
     return id;
