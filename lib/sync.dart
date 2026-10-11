@@ -551,6 +551,14 @@ class SyncEngine {
       final uuid = op['op_uuid'] as String;
       if (await _opAplicada(uuid)) {
         await _db.markOp(uuid, 'aplicada');
+        // v1.2.4: la incidencia local queda confirmada por el servidor
+        if ('${op['tipo']}' == 'incidencia') {
+          try {
+            final pl = jsonDecode(op['payload'] as String);
+            final iid = pl['id'] as String?;
+            if (iid != null) await _db.marcarIncidenciaSincronizada(iid);
+          } catch (_) {}
+        }
         // Limpia la entrada optimista temporal (el registro real
         // llega por el pull) para no duplicar en el historial.
         if ('${op['tipo']}' == 'inscripcion_venta_suplemento') {
@@ -838,12 +846,120 @@ class SyncEngine {
       if (rows.length < 500) break;
       pageWm = maxSeq;
     }
+    // v1.2.4: incidencias (tabla central sync_incidencias)
+    try {
+      await _downloadIncidencias(silencioso: silencioso);
+    } catch (e) {
+      // 404/400 = tabla aún no creada en Supabase: se omite sin abortar.
+      // Otro error sí aborta para no dejar watermark inconsistente.
+      final msg = e.toString();
+      if (!msg.contains('404') && !msg.contains('400')) rethrow;
+    }
     if (maxSeq > since) {
       await _db.setWatermark(maxSeq);
     }
     // Sincronizar estado final de operaciones enviadas (aplicada/rechazada)
     await _syncOpStatus();
     return bajados;
+  }
+
+  /// v1.2.4: descarga incremental de incidencias desde la tabla central.
+  /// Watermark propio (max sync_seq del mirror), independiente del global.
+  Future<void> _downloadIncidencias({bool silencioso = false}) async {
+    var pageWm = await _db.maxIncidenciaSyncSeq();
+    while (true) {
+      final r = await _getAuth(Uri.parse(
+          '$_base/rest/v1/sync_incidencias?select=id,tipo,entidad,entidad_id,'
+          'descripcion,detalle,estado,creada_por,creada_en,resuelta_por,'
+          'resuelta_en,nota_resolucion,version,actualizada_en,sync_seq'
+          '&sync_seq=gt.$pageWm&order=sync_seq.asc&limit=200'));
+      if (r.statusCode == 404 || r.statusCode == 400) {
+        // Tabla aún no existe en Supabase: se omite silenciosamente.
+        return;
+      }
+      if (r.statusCode != 200) {
+        throw Exception('bajada incidencias: HTTP ${r.statusCode}');
+      }
+      final rows = jsonDecode(r.body) as List;
+      if (rows.isEmpty) break;
+      for (final row in rows) {
+        final m = Map<String, dynamic>.from(row as Map);
+        final seq = (m['sync_seq'] as int?) ?? 0;
+        await _db.upsertIncidenciaMirror(m);
+        if (seq > pageWm) pageWm = seq;
+      }
+      if (rows.length < 200) break;
+    }
+  }
+
+  /// v1.2.4: reporta una incidencia (offline-first).
+  /// 1) Guarda local. 2) Encola op 'incidencia' para el servidor.
+  /// Retorna el id local (UUID).
+  Future<String> reportarIncidencia({
+    required String tipo,
+    required String descripcion,
+    String? entidad,
+    int? entidadId,
+    Map<String, dynamic>? detalle,
+  }) async {
+    const tipos = {'stock', 'rechazo', 'sync', 'foto'};
+    if (!tipos.contains(tipo)) throw ArgumentError('tipo inválido');
+    if (descripcion.trim().isEmpty) throw ArgumentError('descripción vacía');
+    final u = _auth.username;
+    final creadaPor =
+        u.isNotEmpty ? u : (_auth.userId ?? 'desconocido');
+    final id = await _db.crearIncidenciaLocal(
+      tipo: tipo,
+      descripcion: descripcion.trim(),
+      creadaPor: creadaPor,
+      entidad: entidad,
+      entidadId: entidadId,
+      detalle: detalle,
+    );
+    await _db.queueOp(
+      opUuid: const Uuid().v4(),
+      tipo: 'incidencia',
+      payload: {
+        'id': id,
+        'tipo': tipo,
+        'descripcion': descripcion.trim(),
+        'entidad': entidad,
+        'entidad_id': entidadId,
+        'detalle': detalle,
+      },
+    );
+    return id;
+  }
+
+  /// v1.2.4: solicita cambio de estado de una incidencia.
+  /// Encola op 'incidencia_estado'; el servidor valida transición,
+  /// permisos y concurrencia. Actualización optimista del mirror local.
+  Future<void> cambiarEstadoIncidencia({
+    required String id,
+    required String nuevoEstado,
+    String? notaResolucion,
+  }) async {
+    final mirror = await _db.incidenciasMirror();
+    final actual = mirror.where((m) => m['id'] == id).toList();
+    if (actual.isEmpty) throw ArgumentError('incidencia no encontrada');
+    final row = actual.first;
+    await _db.queueOp(
+      opUuid: const Uuid().v4(),
+      tipo: 'incidencia_estado',
+      payload: {
+        'id': id,
+        'estado': nuevoEstado,
+        'nota_resolucion': notaResolucion,
+        'version': row['version'],
+      },
+    );
+    // Optimista: refleja el cambio en el mirror; el próximo pull lo
+    // confirma o lo corrige según lo que aplique el servidor.
+    await _db.upsertIncidenciaMirror({
+      ...row,
+      'estado': nuevoEstado,
+      'nota_resolucion': notaResolucion ?? row['nota_resolucion'],
+    });
   }
 
   /// Baja el estado final de las ops enviadas (el puente las marca como

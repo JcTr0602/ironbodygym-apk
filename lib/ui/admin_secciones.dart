@@ -5,10 +5,13 @@
 /// solo se movió de lugar.
 library;
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../negocio.dart';
 import '../localdb.dart';
+import '../permisos.dart';
 import '../sync.dart';
 import '../tipos_pago.dart';
 import 'auditoria.dart';
@@ -783,19 +786,36 @@ class _SeccionDiagnosticoScreenState extends State<SeccionDiagnosticoScreen> {
 
 // -- I · Incidencias (v1.2.4) --------------------------------------------------
 /// Bandeja de incidencias: errores que requieren atención.
+// -- I · Incidencias (v1.2.4, diseño ChatGPT) --------------------------------
+/// Bandeja unificada: incidencias locales (offline, pendientes de subir)
+/// + espejo de la tabla central de Supabase. Crear, filtrar por estado,
+/// cambiar estado con validación del servidor.
 class SeccionIncidenciasScreen extends StatefulWidget {
   const SeccionIncidenciasScreen({super.key});
 
   @override
-  State<SeccionIncidenciasScreen> createState() => _SeccionIncidenciasScreenState();
+  State<SeccionIncidenciasScreen> createState() =>
+      _SeccionIncidenciasScreenState();
 }
 
-class _SeccionIncidenciasScreenState extends State<SeccionIncidenciasScreen> {
-  List<Map<String, dynamic>> _incidencias = [];
+class _SeccionIncidenciasScreenState
+    extends State<SeccionIncidenciasScreen> {
+  List<Map<String, dynamic>> _items = [];
   bool _cargando = true;
-  String _filtro = 'todas'; // todas, pendiente, resuelta
-
   String? _error;
+  String _filtro = 'todas'; // todas, pendiente, en_revision, resuelta
+
+  static const _tipos = {
+    'stock': ('Stock', Icons.inventory_2),
+    'rechazo': ('Rechazo', Icons.block),
+    'sync': ('Sincronización', Icons.sync_problem),
+    'foto': ('Foto', Icons.photo),
+  };
+  static const _estados = {
+    'pendiente': ('Pendiente', 0xFFF57C00),
+    'en_revision': ('En revisión', 0xFF1E88E5),
+    'resuelta': ('Resuelta', 0xFF43A047),
+  };
 
   @override
   void initState() {
@@ -804,58 +824,280 @@ class _SeccionIncidenciasScreenState extends State<SeccionIncidenciasScreen> {
   }
 
   Future<void> _cargar() async {
-    if (mounted) setState(() { _cargando = true; _error = null; });
+    if (mounted) setState(() {
+      _cargando = true;
+      _error = null;
+    });
     try {
       final db = LocalDb.instance;
-      final lista = <Map<String, dynamic>>[];
-      final opsErr = await db.opsByEstado('error');
-      for (final op in opsErr) {
-        lista.add({
-          'tipo': 'sync',
-          'titulo': 'Error de sincronización',
-          'detalle': '${op['tipo']}: ${op['error'] ?? 'Error desconocido'}',
-          'fecha': op['creada_ts'] ?? '',
-          'estado': 'pendiente',
-        });
+      final items = <Map<String, dynamic>>[];
+      // Locales aún no sincronizadas: origen 'local'
+      final locales = await db.incidenciasLocales(sincronizada: false);
+      for (final l in locales) {
+        items.add({...l, '_origen': 'local'});
       }
-      final d = await db.db;
-      final fotosErr = await d.query('fotos_pendientes',
-          where: "estado='error'", orderBy: 'id DESC', limit: 20);
-      for (final f in fotosErr) {
-        lista.add({
-          'tipo': 'foto',
-          'titulo': 'Foto sin sincronizar',
-          'detalle': f['last_error'] ?? 'Error desconocido',
-          'fecha': f['last_retry_at'] ?? '',
-          'estado': 'pendiente',
-        });
+      // Espejo central: origen 'central'
+      final mirror = await db.incidenciasMirror();
+      final idsLocales = locales.map((l) => l['id']).toSet();
+      for (final m in mirror) {
+        if (idsLocales.contains(m['id'])) continue; // evita duplicados
+        items.add({...m, '_origen': 'central'});
       }
+      // Orden: pendientes primero, luego por fecha desc
+      const ordenEstado = {'pendiente': 0, 'en_revision': 1, 'resuelta': 2};
+      items.sort((a, b) {
+        final ea = ordenEstado[a['estado']] ?? 9;
+        final eb = ordenEstado[b['estado']] ?? 9;
+        if (ea != eb) return ea.compareTo(eb);
+        return (b['creada_en'] ?? '').compareTo(a['creada_en'] ?? '');
+      });
       if (!mounted) return;
       setState(() {
-        _incidencias = lista;
+        _items = items;
         _cargando = false;
       });
     } catch (e) {
       if (!mounted) return;
-      setState(() { _cargando = false; _error = e.toString(); });
+      setState(() {
+        _cargando = false;
+        _error = e.toString();
+      });
     }
+  }
+
+  Future<void> _reportar() async {
+    String tipo = 'sync';
+    final descCtrl = TextEditingController();
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Reportar incidencia'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            DropdownButtonFormField<String>(
+              initialValue: tipo,
+              items: [
+                for (final e in _tipos.entries)
+                  DropdownMenuItem(
+                      value: e.key, child: Text(e.value.$1)),
+              ],
+              onChanged: (v) => tipo = v ?? 'sync',
+              decoration: const InputDecoration(labelText: 'Tipo'),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: descCtrl,
+              maxLines: 4,
+              maxLength: 2000,
+              decoration: const InputDecoration(
+                labelText: 'Descripción',
+                hintText: '¿Qué pasó?',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'Se guarda en este dispositivo y se sincroniza '
+              'cuando haya conexión.',
+              style: TextStyle(fontSize: 12, color: Colors.grey),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancelar')),
+          FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Guardar')),
+        ],
+      ),
+    );
+    if (ok != true) {
+      return;
+    }
+    final desc = descCtrl.text.trim();
+    if (desc.isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('La descripción no puede estar vacía')));
+      }
+      return;
+    }
+    try {
+      await SyncEngine.instance
+          .reportarIncidencia(tipo: tipo, descripcion: desc);
+      await _cargar();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('Incidencia guardada ⏳ (se sincronizará)')));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('Error: $e')));
+      }
+    }
+  }
+
+  Future<void> _verDetalle(Map<String, dynamic> inc) async {
+    final esAdmin = Permisos().esAdmin;
+    final estado = inc['estado'] as String? ?? 'pendiente';
+    final tipoInfo = _tipos[inc['tipo']] ?? ('Otro', Icons.help_outline);
+    final accion = await showDialog<String>(
+      context: context,
+      builder: (ctx) {
+        final notaField = TextEditingController();
+        return AlertDialog(
+          title: Row(
+            children: [
+              Icon(tipoInfo.$2, color: AppColores.naranja),
+              const SizedBox(width: 8),
+              Expanded(child: Text(tipoInfo.$1)),
+            ],
+          ),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(inc['descripcion'] ?? '',
+                    style: const TextStyle(fontSize: 15)),
+                const SizedBox(height: 12),
+                _filaDetalle('Estado', _estados[estado]?.$1 ?? estado),
+                _filaDetalle('Reportada por', inc['creada_por'] ?? '—'),
+                _filaDetalle('Fecha', (inc['creada_en'] ?? '').toString().substring(0, 16)),
+                if (inc['_origen'] == 'local')
+                  const Padding(
+                    padding: EdgeInsets.only(top: 4),
+                    child: Text('⏳ En este dispositivo, pendiente de subir',
+                        style: TextStyle(fontSize: 12, color: Colors.grey)),
+                  ),
+                if ((inc['resuelta_por'] ?? '').toString().isNotEmpty) ...[
+                  _filaDetalle('Resuelta por', inc['resuelta_por']),
+                  _filaDetalle('Nota', inc['nota_resolucion'] ?? '—'),
+                ],
+                if (estado == 'en_revision' && esAdmin) ...[
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: notaField,
+                    maxLines: 3,
+                    decoration: const InputDecoration(
+                      labelText: 'Nota de resolución (obligatoria)',
+                      border: OutlineInputBorder(),
+                    ),
+                        ),
+                ],
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(ctx, null),
+                child: const Text('Cerrar')),
+            if (estado == 'pendiente')
+              FilledButton(
+                  onPressed: () => Navigator.pop(ctx, 'en_revision'),
+                  child: const Text('Tomar (en revisión)')),
+            if (estado == 'en_revision' && esAdmin)
+              FilledButton(
+                  onPressed: () => Navigator.pop(
+                      ctx, 'resuelta:${notaField.text}'),
+                  child: const Text('Resolver')),
+            if (estado == 'resuelta' && esAdmin)
+              FilledButton(
+                  onPressed: () => Navigator.pop(ctx, 'reabrir'),
+                  child: const Text('Reabrir')),
+          ],
+        );
+      },
+    );
+    if (accion == null) return;
+    try {
+      if (accion == 'en_revision') {
+        await SyncEngine.instance.cambiarEstadoIncidencia(
+            id: inc['id'] as String, nuevoEstado: 'en_revision');
+      } else if (accion.startsWith('resuelta:')) {
+        final nota = accion.substring('resuelta:'.length).trim();
+        if (nota.isEmpty) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                content: Text('Resolver exige una nota de resolución')));
+          }
+          return;
+        }
+        await SyncEngine.instance.cambiarEstadoIncidencia(
+            id: inc['id'] as String,
+            nuevoEstado: 'resuelta',
+            notaResolucion: nota);
+      } else if (accion == 'reabrir') {
+        await SyncEngine.instance.cambiarEstadoIncidencia(
+            id: inc['id'] as String, nuevoEstado: 'en_revision');
+      }
+      // Sincroniza para que el servidor valide as soon as possible
+      unawaited(SyncEngine.instance.push());
+      await _cargar();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Cambio encolado ⏳')));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('Error: $e')));
+      }
+    }
+  }
+
+  Widget _filaDetalle(String etiqueta, String valor) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 4),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+              width: 110,
+              child: Text(etiqueta,
+                  style:
+                      const TextStyle(fontSize: 12, color: Colors.grey))),
+          Expanded(child: Text(valor, style: const TextStyle(fontSize: 13))),
+        ],
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     final filtradas = _filtro == 'todas'
-        ? _incidencias
-        : _incidencias.where((i) => i['estado'] == _filtro).toList();
+        ? _items
+        : _items.where((i) => i['estado'] == _filtro).toList();
+    final pendientes =
+        _items.where((i) => i['estado'] == 'pendiente').length;
     return Scaffold(
-      appBar: AppBar(title: const Text('I · Incidencias')),
+      appBar: AppBar(
+        title: Text('I · Incidencias${pendientes > 0 ? ' ($pendientes)' : ''}'),
+        actions: [
+          IconButton(
+              icon: const Icon(Icons.refresh),
+              tooltip: 'Recargar',
+              onPressed: _cargar),
+        ],
+      ),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: _reportar,
+        icon: const Icon(Icons.add_alert),
+        label: const Text('Reportar'),
+      ),
       body: Column(
         children: [
           Padding(
-            padding: const EdgeInsets.all(16),
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
             child: SegmentedButton<String>(
               segments: const [
                 ButtonSegment(value: 'todas', label: Text('Todas')),
                 ButtonSegment(value: 'pendiente', label: Text('Pendientes')),
+                ButtonSegment(value: 'en_revision', label: Text('En rev.')),
                 ButtonSegment(value: 'resuelta', label: Text('Resueltas')),
               ],
               selected: {_filtro},
@@ -889,37 +1131,88 @@ class _SeccionIncidenciasScreenState extends State<SeccionIncidenciasScreen> {
                         ),
                       )
                     : filtradas.isEmpty
-                    ? const Center(
-                        child: Text('Sin incidencias 🎉',
-                            style: TextStyle(fontSize: 16)))
-                    : RefreshIndicator(
-                        onRefresh: _cargar,
-                        child: ListView.builder(
-                          padding:
-                              const EdgeInsets.symmetric(horizontal: 16),
-                          itemCount: filtradas.length,
-                          itemBuilder: (ctx, i) {
-                            final inc = filtradas[i];
-                            return Card(
-                              child: ListTile(
-                                leading: Icon(
-                                  inc['tipo'] == 'foto'
-                                      ? Icons.photo
-                                      : Icons.warning,
-                                  color: AppColores.naranja,
-                                ),
-                                title: Text(inc['titulo']),
-                                subtitle: Text(
-                                    '${inc['detalle']}\n${inc['fecha']}'),
-                                isThreeLine: true,
-                              ),
-                            );
-                          },
-                        ),
-                      ),
+                        ? const Center(
+                            child: Text('Sin incidencias 🎉',
+                                style: TextStyle(fontSize: 16)))
+                        : RefreshIndicator(
+                            onRefresh: _cargar,
+                            child: ListView.builder(
+                              padding: const EdgeInsets.fromLTRB(
+                                  16, 8, 16, 80),
+                              itemCount: filtradas.length,
+                              itemBuilder: (ctx, i) {
+                                final inc = filtradas[i];
+                                final est = _estados[inc['estado']] ??
+                                    ('—', 0xFF9E9E9E);
+                                final t =
+                                    _tipos[inc['tipo']] ??
+                                        ('Otro', Icons.help_outline);
+                                final esLocal =
+                                    inc['_origen'] == 'local';
+                                return Card(
+                                  child: ListTile(
+                                    leading: Icon(t.$2,
+                                        color: AppColores.naranja),
+                                    title: Text(
+                                      (inc['descripcion'] ?? '').toString(),
+                                      maxLines: 2,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                    subtitle: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        const SizedBox(height: 4),
+                                        Row(
+                                          children: [
+                                            Container(
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                      horizontal: 8,
+                                                      vertical: 2),
+                                              decoration: BoxDecoration(
+                                                color: Color(est.$2)
+                                                    .withValues(alpha: 0.15),
+                                                borderRadius:
+                                                    BorderRadius.circular(10),
+                                              ),
+                                              child: Text(
+                                                est.$1,
+                                                style: TextStyle(
+                                                    fontSize: 11,
+                                                    color: Color(est.$2),
+                                                    fontWeight:
+                                                        FontWeight.w600),
+                                              ),
+                                            ),
+                                            const SizedBox(width: 8),
+                                            Expanded(
+                                              child: Text(
+                                                '${inc['creada_por'] ?? '—'}'
+                                                '${esLocal ? ' · ⏳ sin subir' : ''}',
+                                                style: const TextStyle(
+                                                    fontSize: 11,
+                                                    color: Colors.grey),
+                                                overflow:
+                                                    TextOverflow.ellipsis,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ],
+                                    ),
+                                    trailing: const Icon(
+                                        Icons.chevron_right),
+                                    onTap: () => _verDetalle(inc),
+                                  ),
+                                );
+                              },
+                            ),
+                          ),
           ),
         ],
       ),
     );
   }
 }
+

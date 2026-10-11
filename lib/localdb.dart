@@ -104,6 +104,25 @@ class LocalDb {
             'last_error TEXT, last_retry_at TEXT)');
         await db.execute(
             'CREATE TABLE meta (k TEXT PRIMARY KEY, v TEXT NOT NULL)');
+        // v1.2.4: incidencias (diseño ChatGPT: bidireccional, offline-first).
+        // incidencias_local: creadas en este dispositivo, pendientes de subir.
+        // incidencias_mirror: copia de la tabla central de Supabase.
+        await db.execute('CREATE TABLE IF NOT EXISTS incidencias_local ('
+            'id TEXT PRIMARY KEY, tipo TEXT NOT NULL, '
+            'entidad TEXT, entidad_id INTEGER, descripcion TEXT NOT NULL, '
+            'detalle TEXT, estado TEXT NOT NULL DEFAULT \'pendiente\', '
+            'creada_por TEXT NOT NULL, creada_en TEXT NOT NULL, '
+            'resuelta_por TEXT, resuelta_en TEXT, nota_resolucion TEXT, '
+            'version INTEGER NOT NULL DEFAULT 1, '
+            'sincronizada INTEGER NOT NULL DEFAULT 0)');
+        await db.execute('CREATE TABLE IF NOT EXISTS incidencias_mirror ('
+            'id TEXT PRIMARY KEY, tipo TEXT NOT NULL, '
+            'entidad TEXT, entidad_id INTEGER, descripcion TEXT NOT NULL, '
+            'detalle TEXT, estado TEXT NOT NULL, '
+            'creada_por TEXT NOT NULL, creada_en TEXT, '
+            'resuelta_por TEXT, resuelta_en TEXT, nota_resolucion TEXT, '
+            'version INTEGER NOT NULL DEFAULT 1, actualizada_en TEXT, '
+            'sync_seq INTEGER NOT NULL)');
   }
 
   // -- espejos ---------------------------------------------------------
@@ -180,6 +199,114 @@ class LocalDb {
       for (final r in rows)
         jsonDecode(r['data'] as String) as Map<String, dynamic>
     ];
+  }
+
+  // -- incidencias v1.2.4 (diseño ChatGPT) -------------------------------
+  static const _incCols = [
+    'id', 'tipo', 'entidad', 'entidad_id', 'descripcion', 'detalle',
+    'estado', 'creada_por', 'creada_en', 'resuelta_por', 'resuelta_en',
+    'nota_resolucion', 'version',
+  ];
+
+  Map<String, dynamic> _incRow(Map<String, dynamic> inc,
+      {int? syncSeq, int? sincronizada, String? actualizadaEn}) {
+    final m = <String, dynamic>{
+      for (final c in _incCols) c: inc[c],
+    };
+    if (syncSeq != null) m['sync_seq'] = syncSeq;
+    if (sincronizada != null) m['sincronizada'] = sincronizada;
+    if (actualizadaEn != null) m['actualizada_en'] = actualizadaEn;
+    if (m['detalle'] is Map) m['detalle'] = jsonEncode(m['detalle']);
+    return m;
+  }
+
+  /// Crea incidencia local (offline-first). Retorna el id (UUID).
+  Future<String> crearIncidenciaLocal({
+    required String tipo,
+    required String descripcion,
+    required String creadaPor,
+    String? entidad,
+    int? entidadId,
+    Map<String, dynamic>? detalle,
+  }) async {
+    final d = await db;
+    final id =
+        'inc_${DateTime.now().millisecondsSinceEpoch}_${creadaPor.hashCode.abs()}';
+    await d.insert('incidencias_local', {
+      'id': id,
+      'tipo': tipo,
+      'entidad': entidad,
+      'entidad_id': entidadId,
+      'descripcion': descripcion,
+      'detalle': detalle != null ? jsonEncode(detalle) : null,
+      'estado': 'pendiente',
+      'creada_por': creadaPor,
+      'creada_en': DateTime.now().toIso8601String(),
+      'version': 1,
+      'sincronizada': 0,
+    });
+    return id;
+  }
+
+  Future<List<Map<String, dynamic>>> incidenciasLocales({
+    String? estado,
+    bool? sincronizada,
+    int limit = 100,
+  }) async {
+    final d = await db;
+    final wh = <String>[];
+    final args = <dynamic>[];
+    if (estado != null) {
+      wh.add('estado=?');
+      args.add(estado);
+    }
+    if (sincronizada != null) {
+      wh.add('sincronizada=?');
+      args.add(sincronizada ? 1 : 0);
+    }
+    return d.query('incidencias_local',
+        where: wh.isEmpty ? null : wh.join(' AND '),
+        whereArgs: args.isEmpty ? null : args,
+        orderBy: 'creada_en DESC',
+        limit: limit);
+  }
+
+  Future<void> marcarIncidenciaSincronizada(String id) async {
+    final d = await db;
+    await d.update('incidencias_local', {'sincronizada': 1},
+        where: 'id=?', whereArgs: [id]);
+  }
+
+  Future<void> upsertIncidenciaMirror(Map<String, dynamic> inc) async {
+    final d = await db;
+    await d.insert(
+      'incidencias_mirror',
+      _incRow(inc,
+          syncSeq: (inc['sync_seq'] as int?) ?? 0,
+          actualizadaEn: inc['actualizada_en'] as String?),
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+  }
+
+  Future<List<Map<String, dynamic>>> incidenciasMirror({
+    String? estado,
+    int limit = 200,
+  }) async {
+    final d = await db;
+    return d.query(
+      'incidencias_mirror',
+      where: estado != null ? 'estado=?' : null,
+      whereArgs: estado != null ? [estado] : null,
+      orderBy: 'sync_seq DESC',
+      limit: limit,
+    );
+  }
+
+  Future<int> maxIncidenciaSyncSeq() async {
+    final d = await db;
+    final r = await d
+        .rawQuery('SELECT MAX(sync_seq) m FROM incidencias_mirror');
+    return (r.first['m'] as int?) ?? 0;
   }
 
   // -- meta (watermark + ajustes) --------------------------------------
