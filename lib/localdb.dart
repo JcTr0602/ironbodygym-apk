@@ -24,7 +24,7 @@ class LocalDb {
     final dir = await getDatabasesPath();
     _db = await openDatabase(
       p.join(dir, 'ironbody.db'),
-      version: 6,
+      version: 7,
       onCreate: (db, _) async {
         await _crearTablas(db);
       },
@@ -62,6 +62,16 @@ class LocalDb {
           await db.execute(
               'ALTER TABLE fotos_pendientes ADD COLUMN suplemento_id INTEGER');
         }
+        // v7 (v1.2.3): control de reintentos para fotos (evita bucle infinito).
+        // Sugerencia de GPT-5.4-mini: retry_count, last_error, last_retry_at.
+        if (oldV < 7) {
+          await db.execute(
+              'ALTER TABLE fotos_pendientes ADD COLUMN retry_count INTEGER NOT NULL DEFAULT 0');
+          await db.execute(
+              'ALTER TABLE fotos_pendientes ADD COLUMN last_error TEXT');
+          await db.execute(
+              'ALTER TABLE fotos_pendientes ADD COLUMN last_retry_at TEXT');
+        }
       },
     );
     return _db!;
@@ -89,7 +99,9 @@ class LocalDb {
             'id INTEGER PRIMARY KEY AUTOINCREMENT, op_uuid TEXT NOT NULL, '
             'cliente_id INTEGER, suplemento_id INTEGER, '
             'local_path TEXT NOT NULL, '
-            'estado TEXT NOT NULL DEFAULT \'pendiente\', user_id TEXT)');
+            'estado TEXT NOT NULL DEFAULT \'pendiente\', user_id TEXT, '
+            'retry_count INTEGER NOT NULL DEFAULT 0, '
+            'last_error TEXT, last_retry_at TEXT)');
         await db.execute(
             'CREATE TABLE meta (k TEXT PRIMARY KEY, v TEXT NOT NULL)');
   }
@@ -396,18 +408,19 @@ class LocalDb {
   /// Retorna la cantidad de fotos re-encoladas.
   Future<int> reencolarFotos({String? tipo}) async {
     final d = await db;
-    String where = "estado != 'lista'";
+    // v1.2.3: solo re-encola si no ha superado el máximo de intentos (5).
+    // Evita bucle infinito con fotos corruptas (sugerencia GPT-5.4-mini).
+    String where = "estado != 'lista' AND retry_count < 5";
     List<dynamic> args = [];
     if (tipo == 'clientes') {
       where += " AND cliente_id IS NOT NULL";
     } else if (tipo == 'suplementos') {
       where += " AND suplemento_id IS NOT NULL";
     }
-    final count = await d.update(
-      'fotos_pendientes',
-      {'estado': 'pendiente'},
-      where: where,
-      whereArgs: args.isEmpty ? null : args,
+    final now = DateTime.now().toIso8601String();
+    final count = await d.rawUpdate(
+      'UPDATE fotos_pendientes SET estado = ?, retry_count = retry_count + 1, last_retry_at = ? WHERE $where',
+      ['pendiente', now, ...args],
     );
     return count;
   }
