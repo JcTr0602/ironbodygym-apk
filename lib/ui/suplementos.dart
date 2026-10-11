@@ -140,11 +140,24 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
               (s['categoria_id'] as int?) == _filtroCategoria)
           .toList();
     }
-    if (_busqueda.isEmpty) return res;
-    final q = _busqueda.toLowerCase();
-    return res
-        .where((s) => '${s['nombre'] ?? ''}'.toLowerCase().contains(q))
-        .toList();
+    if (_busqueda.isNotEmpty) {
+      final q = _busqueda.toLowerCase();
+      res = res
+          .where((s) => '${s['nombre'] ?? ''}'.toLowerCase().contains(q))
+          .toList();
+    }
+    // v1.2.3: para el dueño, ordenar sin-stock al final
+    if (_esDueno) {
+      res = [...res]..sort((a, b) {
+        final sa = (a['stock'] as num?)?.toInt() ?? 0;
+        final sb = (b['stock'] as num?)?.toInt() ?? 0;
+        final aSin = sa <= 0 ? 1 : 0;
+        final bSin = sb <= 0 ? 1 : 0;
+        if (aSin != bSin) return aSin - bSin;
+        return '${a['nombre']}'.compareTo('${b['nombre']}');
+      });
+    }
+    return res;
   }
 
   Future<void> _togglePromo(bool v) async {
@@ -359,13 +372,7 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
         Expanded(
           child: RefreshIndicator(
             onRefresh: _cargar,
-            child: ListView.builder(
-              padding: const EdgeInsets.fromLTRB(
-                  AppEspacio.md, AppEspacio.sm, AppEspacio.md, 96),
-              itemCount: items.length,
-              itemBuilder: (ctx, i) =>
-                  _tarjetaProducto(items[i]),
-            ),
+            child: _listaConSeccionSinStock(items),
           ),
         ),
       ],
@@ -454,6 +461,52 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
           ],
         ),
       ),
+    );
+  }
+
+  /// v1.2.3: Lista con sección "Sin stock" para el dueño.
+  Widget _listaConSeccionSinStock(List<Map<String, dynamic>> items) {
+    if (!_esDueno || items.isEmpty) {
+      return ListView.builder(
+        padding: const EdgeInsets.fromLTRB(
+            AppEspacio.md, AppEspacio.sm, AppEspacio.md, 96),
+        itemCount: items.length,
+        itemBuilder: (ctx, i) => _tarjetaProducto(items[i]),
+      );
+    }
+    // Encontrar índice donde empieza sin-stock
+    int idxSinStock = -1;
+    for (int i = 0; i < items.length; i++) {
+      final stock = (items[i]['stock'] as num?)?.toInt() ?? 0;
+      if (stock <= 0) {
+        idxSinStock = i;
+        break;
+      }
+    }
+    if (idxSinStock == -1) {
+      // No hay sin-stock
+      return ListView.builder(
+        padding: const EdgeInsets.fromLTRB(
+            AppEspacio.md, AppEspacio.sm, AppEspacio.md, 96),
+        itemCount: items.length,
+        itemBuilder: (ctx, i) => _tarjetaProducto(items[i]),
+      );
+    }
+    // Construir lista con header
+    return ListView.builder(
+      padding: const EdgeInsets.fromLTRB(
+          AppEspacio.md, AppEspacio.sm, AppEspacio.md, 96),
+      itemCount: items.length + 1, // +1 por el header
+      itemBuilder: (ctx, i) {
+        if (i == idxSinStock) {
+          return const Padding(
+            padding: EdgeInsets.symmetric(vertical: AppEspacio.md),
+            child: EncabezadoSeccion(titulo: 'Sin stock'),
+          );
+        }
+        final itemIdx = i > idxSinStock ? i - 1 : i;
+        return _tarjetaProducto(items[itemIdx]);
+      },
     );
   }
 
