@@ -179,7 +179,7 @@ class _VentaSuplementoScreenState
     final total = _total;
     final conPromo =
         _promoActiva && _tipoComprador == 'cliente';
-    final lineaMoneda = esUsd
+    final lineaMoneda = !esCup
         ? 'Precio: ${precio.toStringAsFixed(2)} USD'
             ' (tasa ${tasa!.toStringAsFixed(2)} CUP/USD)'
             '${_precioDifiere ? ' — difiere del oficial' : ''}\n'
@@ -212,7 +212,7 @@ class _VentaSuplementoScreenState
           'cantidad': _cantidad,
           'precio': precio,
           'moneda': _moneda,
-          if (esUsd) 'usd_tasa': tasa,
+          if (esCup) 'usd_tasa': tasa,
           // ChatGPT CRÍTICO 2: el servidor solo acepta 'cliente'|'externo'.
           // 'externo_nombre' y 'externo_generico' se mapean a 'externo'.
           'comprador_tipo':
