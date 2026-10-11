@@ -1017,10 +1017,11 @@ class SyncEngine {
           }
           if (r.statusCode != 200) continue;
           final rows = jsonDecode(r.body) as List;
-          // v1.2.5-rev1 (ChatGPT): si el bucket vino truncado (LIMIT 2000
-          // del servidor), no dar falso "todo bien": marcar divergente
-          // para forzar re-descarga (dirección segura).
-          if (rows.length >= 2000) {
+          // v1.2.5-rev2 (ChatGPT): protocolo de saturación. La RPC devuelve
+          // hasta 2001 filas; MÁS de 2000 = truncado. Se marca divergente
+          // (re-descarga, dirección segura) sin comparar. 2000 exactas =
+          // manifiesto completo, se compara normal.
+          if (rows.length > 2000) {
             divergentes++;
             await _db.setMeta('forzar_redescarga_$localTabla', '1');
             continue;
