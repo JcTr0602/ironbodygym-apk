@@ -674,6 +674,8 @@ class _SeccionDiagnosticoScreenState extends State<SeccionDiagnosticoScreen> {
   Map<String, dynamic> _datos = {};
   bool _cargando = true;
 
+  String? _error;
+
   @override
   void initState() {
     super.initState();
@@ -681,21 +683,18 @@ class _SeccionDiagnosticoScreenState extends State<SeccionDiagnosticoScreen> {
   }
 
   Future<void> _cargar() async {
-    setState(() => _cargando = true);
+    if (mounted) setState(() { _cargando = true; _error = null; });
     try {
       final db = LocalDb.instance;
-      // Última sincronización
       final lastOk = await db.getMeta('last_sync_ok');
       final lastErr = await db.getMeta('last_sync_error');
-      // Ops pendientes
       final pendientes = await db.pendingOps();
-      // Fotos pendientes
       final fotosPend = await db.fotosPendientes();
-      // Conteos por entidad (mirrors)
       final clientes = await db.allMirror('clientes');
       final pagos = await db.allMirror('pagos');
       final ventas = await db.allMirror('ventas_suplementos');
       final supl = await db.allMirror('suplementos');
+      if (!mounted) return;
       setState(() {
         _datos = {
           'lastOk': lastOk,
@@ -709,8 +708,9 @@ class _SeccionDiagnosticoScreenState extends State<SeccionDiagnosticoScreen> {
         };
         _cargando = false;
       });
-    } catch (_) {
-      setState(() => _cargando = false);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() { _cargando = false; _error = e.toString(); });
     }
   }
 
@@ -720,7 +720,29 @@ class _SeccionDiagnosticoScreenState extends State<SeccionDiagnosticoScreen> {
       appBar: AppBar(title: const Text('H · Diagnóstico')),
       body: _cargando
           ? const Center(child: CircularProgressIndicator())
-          : RefreshIndicator(
+          : _error != null
+              ? Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(24),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(Icons.error_outline,
+                            size: 48, color: AppColores.error),
+                        const SizedBox(height: 12),
+                        Text('Error al cargar: $_error',
+                            textAlign: TextAlign.center),
+                        const SizedBox(height: 12),
+                        BotonPrimario(
+                          texto: 'Reintentar',
+                          icono: Icons.refresh,
+                          onPressed: _cargar,
+                        ),
+                      ],
+                    ),
+                  ),
+                )
+              : RefreshIndicator(
               onRefresh: _cargar,
               child: ListView(
                 padding: const EdgeInsets.all(16),
@@ -773,6 +795,8 @@ class _SeccionIncidenciasScreenState extends State<SeccionIncidenciasScreen> {
   bool _cargando = true;
   String _filtro = 'todas'; // todas, pendiente, resuelta
 
+  String? _error;
+
   @override
   void initState() {
     super.initState();
@@ -780,11 +804,10 @@ class _SeccionIncidenciasScreenState extends State<SeccionIncidenciasScreen> {
   }
 
   Future<void> _cargar() async {
-    setState(() => _cargando = true);
+    if (mounted) setState(() { _cargando = true; _error = null; });
     try {
       final db = LocalDb.instance;
       final lista = <Map<String, dynamic>>[];
-      // Ops con error (estado='error')
       final opsErr = await db.opsByEstado('error');
       for (final op in opsErr) {
         lista.add({
@@ -795,7 +818,6 @@ class _SeccionIncidenciasScreenState extends State<SeccionIncidenciasScreen> {
           'estado': 'pendiente',
         });
       }
-      // Fotos con error: query directa
       final d = await db.db;
       final fotosErr = await d.query('fotos_pendientes',
           where: "estado='error'", orderBy: 'id DESC', limit: 20);
@@ -808,12 +830,14 @@ class _SeccionIncidenciasScreenState extends State<SeccionIncidenciasScreen> {
           'estado': 'pendiente',
         });
       }
+      if (!mounted) return;
       setState(() {
         _incidencias = lista;
         _cargando = false;
       });
-    } catch (_) {
-      setState(() => _cargando = false);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() { _cargando = false; _error = e.toString(); });
     }
   }
 
@@ -842,7 +866,29 @@ class _SeccionIncidenciasScreenState extends State<SeccionIncidenciasScreen> {
           Expanded(
             child: _cargando
                 ? const Center(child: CircularProgressIndicator())
-                : filtradas.isEmpty
+                : _error != null
+                    ? Center(
+                        child: Padding(
+                          padding: const EdgeInsets.all(24),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Icon(Icons.error_outline,
+                                  size: 48, color: AppColores.error),
+                              const SizedBox(height: 12),
+                              Text('Error al cargar: $_error',
+                                  textAlign: TextAlign.center),
+                              const SizedBox(height: 12),
+                              BotonPrimario(
+                                texto: 'Reintentar',
+                                icono: Icons.refresh,
+                                onPressed: _cargar,
+                              ),
+                            ],
+                          ),
+                        ),
+                      )
+                    : filtradas.isEmpty
                     ? const Center(
                         child: Text('Sin incidencias 🎉',
                             style: TextStyle(fontSize: 16)))

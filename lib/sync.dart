@@ -318,14 +318,28 @@ class SyncEngine {
     try {
       await _doPush();
       // Pull repetido: si llegan cambios durante la descarga, seguir.
+      bool completo = false;
       for (var i = 0; i < 3; i++) {
         await _doPull();
         final wm = await _db.getWatermark();
         final ss = int.tryParse(await _db.getMeta('server_seq') ?? '0') ?? 0;
-        if (wm >= ss) break;
+        if (wm >= ss) {
+          completo = true;
+          break;
+        }
       }
-      await _marcarOk();
-      await _db.setMeta('last_sync_error', '');
+      if (completo) {
+        await _marcarOk();
+        await _db.setMeta('last_sync_error', '');
+      } else {
+        // v1.2.4: no ocultar sync incompleto
+        final wm = await _db.getWatermark();
+        final ss = int.tryParse(await _db.getMeta('server_seq') ?? '0') ?? 0;
+        final msg = 'Sincronización incompleta: watermark $wm < server_seq $ss tras 3 intentos';
+        await _db.setMeta('last_sync_error', msg);
+        _emit(SyncPhase.error, error: msg);
+        return;
+      }
       // v1.0.17: resumen discreto de lo que realmente cambió
       final subidos =
           int.tryParse(await _db.getMeta('last_uploaded') ?? '0') ?? 0;
