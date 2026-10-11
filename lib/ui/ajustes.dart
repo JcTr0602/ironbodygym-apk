@@ -1270,6 +1270,9 @@ class _AjustesScreenState extends State<AjustesScreen> {
                   onTap: _limpiarCache,
                 ),
                 // v1.2.2: resincronizar fotos (solo dueño)
+                // TEMPORALMENTE OCULTO: la funcionalidad no está implementada.
+                // No publicar botones falsos (Hark).
+                /*
                 if (AuthService().isOwner)
                   _opcion(
                     icono: Icons.sync_outlined,
@@ -1286,6 +1289,7 @@ class _AjustesScreenState extends State<AjustesScreen> {
                         'Re-sube fotos que no se sincronizaron',
                     onTap: () => _resincronizarFotos('suplementos'),
                   ),
+                */
 
                 // ----- ACERCA DE -----
                 _seccion('Acerca de'),
