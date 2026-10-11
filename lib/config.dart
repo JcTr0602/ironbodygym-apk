@@ -11,15 +11,14 @@ class AppConfig {
 
   // Datos de transferencia (Transfermóvil/Enzona) — fijos del negocio.
   //
-  // v1.0.16: estos valores están visibles en el repo público de GitHub.
-  // Deben migrarse a la tabla `ajustes` de Supabase (ya sincronizada
-  // vía getAjustes()) y leerse con [datosBancarios] con estos valores
-  // como fallback. NO borrar las constantes hasta completar la migración.
-  static const tarjetaBandec = '9224 0699 9273 2798';
-  static const tarjetaBpa = '9205 1299 7518 5449';
-  static const movilConfirmacion = '58191577';
+  // v1.2.4 (seguridad): los números reales se eliminaron del repo público.
+  // Se leen de la tabla `ajustes` de Supabase vía [datosBancarios].
+  // Si no están configurados, se muestra vacío (no exponer datos bancarios).
+  static const tarjetaBandec = '';
+  static const tarjetaBpa = '';
+  static const movilConfirmacion = '';
   static const telegramContacto = '@Jctr0602';
-  static const whatsappContacto = '58191577';
+  static const whatsappContacto = '';
 
   /// Versión visible en Ayuda/Ajustes (mantener igual que pubspec).
   static const appVersion = '1.2.3';
