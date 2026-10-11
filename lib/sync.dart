@@ -1017,6 +1017,14 @@ class SyncEngine {
           }
           if (r.statusCode != 200) continue;
           final rows = jsonDecode(r.body) as List;
+          // v1.2.5-rev1 (ChatGPT): si el bucket vino truncado (LIMIT 2000
+          // del servidor), no dar falso "todo bien": marcar divergente
+          // para forzar re-descarga (dirección segura).
+          if (rows.length >= 2000) {
+            divergentes++;
+            await _db.setMeta('forzar_redescarga_$localTabla', '1');
+            continue;
+          }
           var coincide = true;
           for (final row in rows) {
             final m = Map<String, dynamic>.from(row as Map);
