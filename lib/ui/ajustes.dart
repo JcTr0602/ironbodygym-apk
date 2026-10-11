@@ -769,6 +769,23 @@ class _AjustesScreenState extends State<AjustesScreen> {
     }
   }
 
+  /// v1.2.2: Resincroniza fotos de clientes o suplementos.
+  Future<void> _resincronizarFotos(String tipo) async {
+    final titulo = tipo == 'clientes'
+        ? 'Resincronizar fotos de clientes'
+        : 'Resincronizar fotos de suplementos';
+    final ok = await DialogoApp.confirmar(
+      context,
+      titulo: titulo,
+      mensaje: 'Se re-encolaran las fotos locales para subirlas. '
+          'Usalo si alguna foto no se sincronizo correctamente.',
+      aceptar: 'Resincronizar',
+      icono: Icons.sync_outlined,
+    );
+    if (ok != true) return;
+    _msg('Funcionalidad en desarrollo para v1.2.2');
+  }
+
   // ---------- Acerca de ----------
 
   /// Buscar actualizaciones en GitHub (item 20).
@@ -1252,6 +1269,23 @@ class _AjustesScreenState extends State<AjustesScreen> {
                       'Libera espacio; se descargan al sincronizar',
                   onTap: _limpiarCache,
                 ),
+                // v1.2.2: resincronizar fotos (solo dueño)
+                if (AuthService().isOwner)
+                  _opcion(
+                    icono: Icons.sync_outlined,
+                    titulo: 'Resincronizar fotos de clientes',
+                    subtitulo:
+                        'Re-sube fotos que no se sincronizaron',
+                    onTap: () => _resincronizarFotos('clientes'),
+                  ),
+                if (AuthService().isOwner)
+                  _opcion(
+                    icono: Icons.sync_outlined,
+                    titulo: 'Resincronizar fotos de suplementos',
+                    subtitulo:
+                        'Re-sube fotos que no se sincronizaron',
+                    onTap: () => _resincronizarFotos('suplementos'),
+                  ),
 
                 // ----- ACERCA DE -----
                 _seccion('Acerca de'),
