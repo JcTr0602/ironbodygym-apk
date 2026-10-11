@@ -80,10 +80,31 @@ class LocalDb {
         // v8 (v1.2.5): visibilidad de incidencias + eventos autoritativos
         // + auditoría local con hash encadenado.
         if (oldV < 8) {
-          await db.execute(
-              "ALTER TABLE incidencias_local ADD COLUMN visibilidad TEXT NOT NULL DEFAULT 'compartida'");
-          await db.execute(
-              "ALTER TABLE incidencias_mirror ADD COLUMN visibilidad TEXT NOT NULL DEFAULT 'compartida'");
+          // HOTFIX v1.2.5-rev7: incidencias_local/_mirror se añadieron en
+          // _crearTablas de v1.2.4 pero SIN migración para quienes
+          // actualizaron desde ≤v1.2.3. En esos teléfonos la tabla no
+          // existe y el ALTER reventaba ("no such table"), dejando la BD
+          // sin abrir y la app vacía. Se crean si faltan.
+          await db.execute('CREATE TABLE IF NOT EXISTS incidencias_local ('
+              'id TEXT PRIMARY KEY, tipo TEXT NOT NULL, '
+              'entidad TEXT, entidad_id INTEGER, descripcion TEXT NOT NULL, '
+              'detalle TEXT, estado TEXT NOT NULL DEFAULT \'pendiente\', '
+              'creada_por TEXT NOT NULL, creada_en TEXT NOT NULL, '
+              'resuelta_por TEXT, resuelta_en TEXT, nota_resolucion TEXT, '
+              'version INTEGER NOT NULL DEFAULT 1, '
+              'sincronizada INTEGER NOT NULL DEFAULT 0)');
+          await db.execute('CREATE TABLE IF NOT EXISTS incidencias_mirror ('
+              'id TEXT PRIMARY KEY, tipo TEXT NOT NULL, '
+              'entidad TEXT, entidad_id INTEGER, descripcion TEXT NOT NULL, '
+              'detalle TEXT, estado TEXT NOT NULL, '
+              'creada_por TEXT NOT NULL, creada_en TEXT, '
+              'resuelta_por TEXT, resuelta_en TEXT, nota_resolucion TEXT, '
+              'version INTEGER NOT NULL DEFAULT 1, actualizada_en TEXT, '
+              'sync_seq INTEGER NOT NULL)');
+          await _addColumnIfMissing(db, 'incidencias_local', 'visibilidad',
+              "TEXT NOT NULL DEFAULT 'compartida'");
+          await _addColumnIfMissing(db, 'incidencias_mirror', 'visibilidad',
+              "TEXT NOT NULL DEFAULT 'compartida'");
           await db.execute(
               'CREATE TABLE IF NOT EXISTS incidencia_eventos_mirror ('
               'id TEXT PRIMARY KEY, incidencia_id TEXT NOT NULL, '
