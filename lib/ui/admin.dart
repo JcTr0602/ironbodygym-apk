@@ -39,6 +39,8 @@ class _AdminScreenState extends State<AdminScreen> {
   Map<String, double> _caja = {'efectivo': 0, 'transferencia': 0};
   double _gastosHoy = 0;
   final Map<String, TextEditingController> _montos = {};
+  // v1.2.4: datos bancarios (strings, no montos)
+  final Map<String, TextEditingController> _bancarios = {};
   bool _cargando = true;
   // Salud del sistema
   SyncDetalle _syncDet = const SyncDetalle();
@@ -105,6 +107,12 @@ class _AdminScreenState extends State<AdminScreen> {
               .putIfAbsent(clave, () => TextEditingController())
               .text = '${(aj[clave] as num?) ?? ''}';
         }
+        // v1.2.4: cargar datos bancarios (strings)
+        for (final clave in ['tarjeta_bandec', 'tarjeta_bpa', 'movil_confirmacion']) {
+          _bancarios
+              .putIfAbsent(clave, () => TextEditingController())
+              .text = '${aj[clave] ?? ''}';
+        }
         _cargando = false;
       });
     }
@@ -160,6 +168,40 @@ class _AdminScreenState extends State<AdminScreen> {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Precios guardados (se sincronizarán)')));
+    SyncEngine.instance.push();
+  }
+
+  /// v1.2.4: Guardar datos bancarios (strings, no montos).
+  Future<void> _guardarBancarios() async {
+    final cambios = <String, String>{};
+    for (final clave in ['tarjeta_bandec', 'tarjeta_bpa', 'movil_confirmacion']) {
+      final v = (_bancarios[clave]?.text ?? '').trim();
+      if (v.isNotEmpty) cambios[clave] = v;
+    }
+    if (cambios.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('No hay datos bancarios para guardar')));
+      return;
+    }
+    final ok = await DialogoApp.confirmar(
+      context,
+      titulo: 'Guardar datos bancarios',
+      mensaje: 'Se actualizarán los datos de transferencia.\n'
+          'Se aplicará en la próxima sincronización.',
+      aceptar: 'Confirmar',
+      icono: Icons.account_balance,
+    );
+    if (ok != true || !mounted) return;
+    for (final e in cambios.entries) {
+      await LocalDb.instance.queueOp(
+        opUuid: const Uuid().v4(),
+        tipo: 'ajuste',
+        payload: {'clave': e.key, 'valor': e.value},
+      );
+    }
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Datos bancarios guardados (se sincronizarán)')));
     SyncEngine.instance.push();
   }
 
@@ -679,6 +721,9 @@ class _AdminScreenState extends State<AdminScreen> {
                             montos: _montos,
                             clavesMonto: _clavesMonto,
                             onGuardarMontos: _guardarMontos,
+                            // v1.2.4: datos bancarios
+                            bancarios: _bancarios,
+                            onGuardarBancarios: _guardarBancarios,
                             gestionarUsuarios:
                                 Permisos().gestionarUsuarios,
                             onIr: _irYRecargar,

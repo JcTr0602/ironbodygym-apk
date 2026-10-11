@@ -383,6 +383,9 @@ class SeccionAjustesScreen extends StatefulWidget {
   final Map<String, TextEditingController> montos;
   final List<(String, String)> clavesMonto;
   final Future<void> Function() onGuardarMontos;
+  // v1.2.4: datos bancarios
+  final Map<String, TextEditingController> bancarios;
+  final Future<void> Function() onGuardarBancarios;
   final bool gestionarUsuarios;
   final Future<void> Function(Widget) onIr;
   final bool Function(String) esTipoFijo;
@@ -398,6 +401,8 @@ class SeccionAjustesScreen extends StatefulWidget {
     required this.montos,
     required this.clavesMonto,
     required this.onGuardarMontos,
+    required this.bancarios,
+    required this.onGuardarBancarios,
     required this.gestionarUsuarios,
     required this.onIr,
     required this.esTipoFijo,
@@ -499,6 +504,36 @@ class _SeccionAjustesScreenState extends State<SeccionAjustesScreen> {
               texto: 'Guardar otros precios',
               icono: Icons.save,
               onPressed: widget.onGuardarMontos,
+            ),
+          ]),
+          // v1.2.4: datos bancarios para transferencias
+          seccionAdmin(context, Icons.account_balance, 'Datos bancarios', [
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: CampoTexto(
+                controller: widget.bancarios['tarjeta_bandec'],
+                etiqueta: 'Tarjeta BANDEC',
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: CampoTexto(
+                controller: widget.bancarios['tarjeta_bpa'],
+                etiqueta: 'Tarjeta BPA',
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: CampoTexto(
+                controller: widget.bancarios['movil_confirmacion'],
+                etiqueta: 'Móvil confirmación',
+                teclado: TextInputType.phone,
+              ),
+            ),
+            BotonPrimario(
+              texto: 'Guardar datos bancarios',
+              icono: Icons.save,
+              onPressed: widget.onGuardarBancarios,
             ),
           ]),
           if (widget.gestionarUsuarios)
