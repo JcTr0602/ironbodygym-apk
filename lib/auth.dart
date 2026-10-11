@@ -83,7 +83,7 @@ class AuthService {
     if (username == 'jctr0602') return true;
     // v1.2.2: leer SOLO de appMetadata (seguro, solo el servidor lo escribe).
     // No usar userMetadata como fallback: el usuario puede modificarlo.
-    final rolApp = session?.user.appMetadata?['rol'];
+    final rolApp = session?.user.appMetadata['rol'];
     return '${rolApp ?? ''}'.toLowerCase() == 'admin';
   }
 

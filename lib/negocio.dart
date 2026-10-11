@@ -227,6 +227,27 @@ String previewHastaDias(String? pagadoHasta, int dias,
 
 bool esPendiente(dynamic v) => v == 0 || v == false;
 
+/// v1.2.4 (Hark): texto de un total de venta con su equivalente en la
+/// otra moneda cuando se conoce la tasa (CUP por 1 USD). Regla única para
+/// venta, inscripción+venta, venta rápida e historial.
+String textoTotalVenta(double total, String moneda, double? tasa) {
+  final hayTasa = tasa != null && tasa > 0;
+  if (moneda == 'USD') {
+    return '${total.toStringAsFixed(2)} USD'
+        '${hayTasa ? ' (≈ ${(total * tasa).toStringAsFixed(0)} CUP)' : ''}';
+  }
+  return '${total.toStringAsFixed(0)} $moneda'
+      '${hayTasa && moneda == 'CUP' ? ' (≈ ${(total / tasa).toStringAsFixed(2)} USD)' : ''}';
+}
+
+/// Precio oficial (USD) expresado en la moneda de la venta.
+/// En CUP se convierte con la tasa y se redondea a la decena.
+double? precioOficialEn(String moneda, double oficialUsd, double? tasa) {
+  if (moneda == 'USD') return oficialUsd;
+  if (tasa == null || tasa <= 0) return null;
+  return ((oficialUsd * tasa) / 10).round() * 10.0;
+}
+
 /// Monto en CUP de una venta de suplemento (0 si es en USD u otra moneda).
 /// Las ventas en USD se reportan por separado y no entran a los totales CUP.
 double totalVentaCup(Map<String, dynamic> v) {

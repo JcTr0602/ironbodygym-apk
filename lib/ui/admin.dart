@@ -173,14 +173,42 @@ class _AdminScreenState extends State<AdminScreen> {
 
   /// v1.2.4: Guardar datos bancarios (strings, no montos).
   Future<void> _guardarBancarios() async {
+    // v1.2.4 (Hark): valida formato y solo envía lo que cambió.
+    final aj = await LocalDb.instance.getAjustes();
+    if (!mounted) return;
     final cambios = <String, String>{};
+    final errores = <String>[];
     for (final clave in ['tarjeta_bandec', 'tarjeta_bpa', 'movil_confirmacion']) {
       final v = (_bancarios[clave]?.text ?? '').trim();
-      if (v.isNotEmpty) cambios[clave] = v;
+      // v1.2.4: vaciar un dato bancario se decide en el servidor
+      // (pendiente de aprobación); la app solo envía valores no vacíos.
+      if (v.isEmpty) continue;
+      final digitos = v.replaceAll(RegExp(r'[\s-]'), '');
+      {
+        if (clave.startsWith('tarjeta') &&
+            !RegExp(r'^\d{16}$').hasMatch(digitos)) {
+          errores.add('${clave == 'tarjeta_bandec' ? 'BANDEC' : 'BPA'}: 16 dígitos');
+          continue;
+        }
+        if (clave == 'movil_confirmacion' &&
+            !RegExp(r'^5\d{7}$').hasMatch(digitos)) {
+          errores.add('Móvil: 8 dígitos, empieza por 5');
+          continue;
+        }
+      }
+      final normal = clave.startsWith('tarjeta') && digitos.length == 16
+          ? [for (var i = 0; i < 16; i += 4) digitos.substring(i, i + 4)].join(' ')
+          : digitos;
+      if (normal != '${aj[clave] ?? ''}'.trim()) cambios[clave] = normal;
+    }
+    if (errores.isNotEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('Revisa: ${errores.join(' · ')}')));
+      return;
     }
     if (cambios.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('No hay datos bancarios para guardar')));
+          content: Text('No hay cambios en los datos bancarios')));
       return;
     }
     final ok = await DialogoApp.confirmar(

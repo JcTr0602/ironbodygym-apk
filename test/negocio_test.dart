@@ -162,4 +162,25 @@ void main() {
           0);
     });
   });
+
+  // v1.2.4 (Hark): regla única USD/CUP.
+  group('textoTotalVenta / precioOficialEn', () {
+    test('USD sin tasa', () {
+      expect(textoTotalVenta(50, 'USD', null), '50.00 USD');
+    });
+    test('USD con tasa muestra CUP', () {
+      expect(textoTotalVenta(50, 'USD', 400), '50.00 USD (≈ 20000 CUP)');
+    });
+    test('CUP con tasa muestra USD', () {
+      expect(textoTotalVenta(20000, 'CUP', 400), '20000 CUP (≈ 50.00 USD)');
+    });
+    test('CUP sin tasa', () {
+      expect(textoTotalVenta(20000, 'CUP', null), '20000 CUP');
+    });
+    test('oficial en CUP redondea a la decena', () {
+      expect(precioOficialEn('CUP', 12.5, 395), 4940.0);
+      expect(precioOficialEn('USD', 12.5, 395), 12.5);
+      expect(precioOficialEn('CUP', 12.5, null), null);
+    });
+  });
 }

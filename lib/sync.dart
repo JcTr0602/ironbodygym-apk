@@ -27,6 +27,7 @@ import 'package:uuid/uuid.dart';
 import 'auth.dart';
 import 'config.dart';
 import 'localdb.dart';
+import 'perfil.dart';
 
 enum SyncPhase { idle, uploading, downloading, photos, error }
 
@@ -317,6 +318,10 @@ class SyncEngine {
     _running = true;
     try {
       await _doPush();
+      // v1.2.4: perfil (móvil/carnet) que no pudo subirse sin conexión.
+      try {
+        await PerfilService.instance.sincronizarSiPendiente();
+      } catch (_) {}
       // Pull repetido: si llegan cambios durante la descarga, seguir.
       bool completo = false;
       for (var i = 0; i < 3; i++) {
@@ -366,6 +371,18 @@ class SyncEngine {
     }
   }
 
+  bool _forzarFotos = false;
+
+  /// v1.2.4 (C17): sube las fotos pendientes aunque esté el ahorro de datos.
+  Future<void> subirFotosAhora() async {
+    _forzarFotos = true;
+    try {
+      await run();
+    } finally {
+      _forzarFotos = false;
+    }
+  }
+
   /// Solo subida (cada hora o manual).
   Future<void> push() async {
     if (_running || !_auth.loggedIn) return;
@@ -394,8 +411,13 @@ class SyncEngine {
     try {
       _emit(SyncPhase.uploading);
       final n = await _uploadOps();
-      _emit(SyncPhase.photos);
-      await _uploadFotos();
+      // v1.2.4 (C17): con ahorro de datos, las fotos solo se suben
+      // cuando el usuario lo pide (subirFotosAhora).
+      final ahorro = await PerfilService.instance.getAhorroDatos();
+      if (!ahorro || _forzarFotos) {
+        _emit(SyncPhase.photos);
+        await _uploadFotos();
+      }
       await _db.setMeta('last_push_ok', DateTime.now().toIso8601String());
       await _db.setMeta('last_uploaded', '$n');
       _emit(SyncPhase.idle);
@@ -1029,6 +1051,8 @@ class SyncEngine {
         headers: {
           'Tus-Resumable': '1.0.0',
           'Upload-Length': '$length',
+          // v1.2.4: permite re-subir (resincronizar) sin chocar con 409.
+          'x-upsert': 'true',
           'Upload-Metadata': [
             meta('filename', objectPath.split('/').last),
             meta('bucketName', AppConfig.bucketFotos),
@@ -1136,7 +1160,10 @@ class SyncEngine {
   }
 
   /// Método simple (un solo PUT): respaldo si tus no está disponible.
-  Future<bool> _subirFotoSimple(String path, Uint8List bytes) async {    for (var intento = 0; intento < 3; intento++) {
+  Future<bool> _subirFotoSimple(String path, Uint8List bytes) async {
+    // v1.2.4 (Hark): antes no se enviaba el cuerpo y quedaban fotos de 0 bytes.
+    if (bytes.isEmpty) return false;
+    for (var intento = 0; intento < 3; intento++) {
       try {
         final r = await _postAuth(
             Uri.parse('$_base/storage/v1/object/'
@@ -1145,6 +1172,7 @@ class SyncEngine {
               'Content-Type': 'image/jpeg',
               'x-upsert': 'true',
             },
+            body: bytes,
             timeout: const Duration(seconds: 120));
         if (r.statusCode == 200 || r.statusCode == 201) return true;
       } catch (_) {}
@@ -1161,16 +1189,28 @@ class SyncEngine {
     }
     final file = File(f['local_path'] as String);
     if (!await file.exists()) {
-      await _db.markFotoLista(fid);
+      // v1.2.4: antes se marcaba 'lista' y la foto se perdía sin aviso.
+      await _db.marcarFotoError(fid, 'Archivo local no encontrado',
+          definitivo: true);
       return;
     }
     final bytes = await file.readAsBytes();
+    if (bytes.isEmpty) {
+      await _db.marcarFotoError(fid, 'Archivo local vacío (0 bytes)',
+          definitivo: true);
+      return;
+    }
     final path =
         await subirFotoSuplemento(f['op_uuid'] as String, bytes);
     _emit(SyncPhase.photos,
         detalle: 'Subiendo fotos… $i de $total',
         progreso: (i - 1) / total);
-    if (path == null) return; // sin conexión: reintenta en el próximo ciclo
+    if (path == null) {
+      // sin conexión o rechazo: cuenta el intento; sigue 'pendiente' y con
+      // 10+ intentos aparece en Incidencias (fotosConProblema).
+      await _db.marcarFotoError(fid, 'No se pudo subir (intento fallido)');
+      return;
+    }
     _emit(SyncPhase.photos,
         detalle: 'Subiendo fotos… $i de $total',
         progreso: i / total);
@@ -1209,10 +1249,17 @@ class SyncEngine {
       }
       final file = File(f['local_path'] as String);
       if (!await file.exists()) {
-        await _db.markFotoLista(fid);
+        // v1.2.4: antes se marcaba 'lista' y la foto se perdía sin aviso.
+        await _db.marcarFotoError(fid, 'Archivo local no encontrado',
+            definitivo: true);
         continue;
       }
       var bytes = await file.readAsBytes();
+      if (bytes.isEmpty) {
+        await _db.marcarFotoError(fid, 'Archivo local vacío (0 bytes)',
+            definitivo: true);
+        continue;
+      }
       bytes = _comprimirFoto(bytes);
       final path = 'pendientes/${f['op_uuid']}.jpg';
       _emit(SyncPhase.photos,
@@ -1222,7 +1269,10 @@ class SyncEngine {
       final tus =
           await _subirFotoTus(f['op_uuid'] as String, path, bytes);
       final ok = tus ?? await _subirFotoSimple(path, bytes);
-      if (!ok) continue;
+      if (!ok) {
+        await _db.marcarFotoError(fid, 'No se pudo subir (intento fallido)');
+        continue;
+      }
       _emit(SyncPhase.photos,
           detalle: 'Subiendo fotos… $i de ${fotos.length}',
           progreso: i / fotos.length);

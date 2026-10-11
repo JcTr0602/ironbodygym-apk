@@ -90,7 +90,8 @@ class _TransferenciaScreenState extends State<TransferenciaScreen> {
                 ),
                 const SizedBox(height: 12),
                 const Text(' Telegram: ${AppConfig.telegramContacto}'),
-                const Text('WhatsApp: ${AppConfig.whatsappContacto}'),
+                // v1.2.4: el número sale del móvil de confirmación (ajustes).
+                if (_movil.isNotEmpty) Text('WhatsApp: $_movil'),
               ],
             ),
           ),
@@ -239,7 +240,7 @@ class _TransferenciaScreenState extends State<TransferenciaScreen> {
         '(${fmtMonto(_transfer)} CUP) por Transfermóvil/Enzona a la '
         'tarjeta $etiqueta $valor. IMPORTANTE: activa la opción para '
         'que se vea tu número y así verificamos el pago. '
-        'Dudas: WhatsApp ${AppConfig.whatsappContacto}';
+        '${_movil.isNotEmpty ? 'Dudas: WhatsApp $_movil' : ''}';
     final uri = porWhatsapp
         ? Uri.parse(
             'https://wa.me/53$movil?text=${Uri.encodeComponent(mensaje)}')

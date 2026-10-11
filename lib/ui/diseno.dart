@@ -189,3 +189,183 @@ class AppSombra {
     ),
   ];
 }
+
+
+/// v1.2.4 (Hark): tema único (claro/oscuro) a partir de los tokens.
+/// Antes estaba duplicado en main.dart. Unifica botones (alto mínimo 48,
+/// estado deshabilitado visible), campos, diálogos y avisos. Diseño rico,
+/// no plano: tarjetas y botones con sombra sutil (AppSombra) y el
+/// gradiente naranja en el botón primario (BotonPrimario).
+class AppTema {
+  AppTema._();
+
+  static ThemeData claro() => _tema(Brightness.light);
+  static ThemeData oscuro() => _tema(Brightness.dark);
+
+  static ThemeData _tema(Brightness b) {
+    final oscuro = b == Brightness.dark;
+    final superficie =
+        oscuro ? AppColores.superficieOscuro : AppColores.superficieClaro;
+    final borde = oscuro ? AppColores.bordeOscuro : AppColores.bordeClaro;
+    final texto = oscuro ? AppColores.textoOscuro : AppColores.textoClaro;
+    final secundario = oscuro
+        ? AppColores.textoSecundarioOscuro
+        : AppColores.textoSecundarioClaro;
+    final deshabilitadoFondo = oscuro ? const Color(0xFF2C2C2C) : const Color(0xFFE6E6E6);
+    final deshabilitadoTexto = oscuro ? const Color(0xFF7A7A7A) : const Color(0xFF9E9E9E);
+    final forma = RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(AppRadio.md));
+    const minimo = Size(64, 48);
+
+    return ThemeData(
+      useMaterial3: true,
+      brightness: b,
+      colorScheme: ColorScheme.fromSeed(
+        seedColor: AppColores.naranja,
+        brightness: b,
+        primary: AppColores.naranja,
+        onPrimary: Colors.white,
+        surface: superficie,
+        error: AppColores.error,
+      ),
+      scaffoldBackgroundColor:
+          oscuro ? AppColores.fondoOscuro : AppColores.fondoClaro,
+      appBarTheme: AppBarTheme(
+        backgroundColor:
+            oscuro ? AppColores.carbonProfundo : AppColores.carbon,
+        foregroundColor: Colors.white,
+        elevation: 2,
+        scrolledUnderElevation: 3,
+        shadowColor: Colors.black.withValues(alpha: 0.35),
+        centerTitle: false,
+        titleTextStyle: AppTexto.titulo.copyWith(color: Colors.white),
+      ),
+      cardTheme: CardThemeData(
+        color: superficie,
+        // Sombra sutil (misma gama que AppSombra.tarjeta).
+        elevation: 2,
+        shadowColor: oscuro
+            ? Colors.black.withValues(alpha: 0.6)
+            : Colors.black.withValues(alpha: 0.18),
+        surfaceTintColor: Colors.transparent,
+        margin: const EdgeInsets.only(bottom: AppEspacio.sm),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(AppRadio.lg),
+          side: BorderSide(color: borde),
+        ),
+      ),
+      dividerTheme: DividerThemeData(color: borde, thickness: 1, space: 1),
+      dialogTheme: DialogThemeData(
+        backgroundColor: superficie,
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(AppRadio.xl)),
+        titleTextStyle: AppTexto.titulo.copyWith(color: texto),
+      ),
+      snackBarTheme: SnackBarThemeData(
+        behavior: SnackBarBehavior.floating,
+        backgroundColor: oscuro ? const Color(0xFF2E2E2E) : AppColores.carbon,
+        contentTextStyle: AppTexto.cuerpo.copyWith(color: Colors.white),
+        actionTextColor: AppColores.naranja,
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(AppRadio.md)),
+      ),
+      elevatedButtonTheme: ElevatedButtonThemeData(
+        style: ElevatedButton.styleFrom(
+          backgroundColor: AppColores.naranja,
+          foregroundColor: Colors.white,
+          disabledBackgroundColor: deshabilitadoFondo,
+          disabledForegroundColor: deshabilitadoTexto,
+          elevation: 2,
+          shadowColor: AppColores.naranja.withValues(alpha: 0.45),
+          minimumSize: minimo,
+          shape: forma,
+          textStyle:
+              const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+        ),
+      ),
+      filledButtonTheme: FilledButtonThemeData(
+        style: FilledButton.styleFrom(
+          backgroundColor: AppColores.naranja,
+          foregroundColor: Colors.white,
+          disabledBackgroundColor: deshabilitadoFondo,
+          disabledForegroundColor: deshabilitadoTexto,
+          minimumSize: minimo,
+          shape: forma,
+        ),
+      ),
+      outlinedButtonTheme: OutlinedButtonThemeData(
+        style: OutlinedButton.styleFrom(
+          foregroundColor: texto,
+          side: BorderSide(color: borde, width: 1.5),
+          minimumSize: minimo,
+          shape: forma,
+          textStyle:
+              const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+        ),
+      ),
+      textButtonTheme: TextButtonThemeData(
+        style: TextButton.styleFrom(
+          foregroundColor: AppColores.naranja,
+          minimumSize: const Size(48, 44),
+          textStyle:
+              const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+        ),
+      ),
+      inputDecorationTheme: InputDecorationTheme(
+        filled: true,
+        fillColor: superficie,
+        labelStyle: TextStyle(color: secundario),
+        floatingLabelStyle: const TextStyle(color: AppColores.naranja),
+        contentPadding: const EdgeInsets.symmetric(
+            horizontal: AppEspacio.md, vertical: AppEspacio.md),
+        border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(AppRadio.md),
+            borderSide: BorderSide(color: borde)),
+        enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(AppRadio.md),
+            borderSide: BorderSide(color: borde)),
+        focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(AppRadio.md),
+            borderSide:
+                const BorderSide(color: AppColores.naranja, width: 2)),
+        errorBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(AppRadio.md),
+            borderSide: const BorderSide(color: AppColores.error)),
+        errorMaxLines: 3,
+      ),
+      chipTheme: ChipThemeData(
+        selectedColor: AppColores.naranja.withValues(alpha: 0.2),
+        side: BorderSide(color: borde),
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(AppRadio.circular)),
+        labelStyle: AppTexto.etiqueta.copyWith(color: texto),
+      ),
+      segmentedButtonTheme: SegmentedButtonThemeData(
+        style: SegmentedButton.styleFrom(
+          selectedBackgroundColor: AppColores.naranja.withValues(alpha: 0.2),
+          selectedForegroundColor: texto,
+          minimumSize: const Size(48, 44),
+        ),
+      ),
+      progressIndicatorTheme:
+          const ProgressIndicatorThemeData(color: AppColores.naranja),
+      listTileTheme: ListTileThemeData(
+        iconColor: secundario,
+        minVerticalPadding: AppEspacio.sm,
+      ),
+      floatingActionButtonTheme: const FloatingActionButtonThemeData(
+        backgroundColor: AppColores.naranja,
+        foregroundColor: Colors.white,
+      ),
+      textTheme: const TextTheme(
+        displayLarge: AppTexto.display,
+        displayMedium: AppTexto.displayPequeno,
+        titleLarge: AppTexto.titulo,
+        titleMedium: AppTexto.subtitulo,
+        bodyLarge: AppTexto.cuerpo,
+        bodyMedium: AppTexto.secundario,
+        labelLarge: AppTexto.etiqueta,
+      ).apply(bodyColor: texto, displayColor: texto),
+    );
+  }
+}

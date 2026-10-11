@@ -528,6 +528,7 @@ class _FichaScreenState extends State<FichaScreen> {
   /// Cambia la foto del cliente: cámara, galería o eliminar (v1.0.15).
   Future<void> _cambiarFoto() async {
     final tieneFoto = await _tieneFoto();
+    if (!mounted) return;
     final origen = await showDialog<String>(
       context: context,
       builder: (ctx) => DialogoApp(

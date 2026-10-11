@@ -84,8 +84,8 @@ class AyudaScreen extends StatelessWidget {
                 const _Seccion(
                   'Cobro por transferencia',
                   'Muestra los datos de las tarjetas para que el cliente '
-                  'transfiera y confirme por WhatsApp al '
-                  '${AppConfig.whatsappContacto}.',
+                  'transfiera y confirme por WhatsApp al móvil de '
+                  'confirmación que aparece en esa pantalla.',
                   icono: Icons.smartphone,
                   color: AppColores.infoOscuro,
                 ),
@@ -136,8 +136,8 @@ class AyudaScreen extends StatelessWidget {
                 ),
                 const _Seccion(
                   'Contacto',
-                  '¿Dudas con la app? Escríbele a Jc por WhatsApp: '
-                  '${AppConfig.whatsappContacto}.',
+                  '¿Dudas con la app? Escríbele a Jc por Telegram: '
+                  '${AppConfig.telegramContacto}.',
                   icono: Icons.phone,
                   color: AppColores.exito,
                 ),

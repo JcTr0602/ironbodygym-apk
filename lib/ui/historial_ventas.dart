@@ -11,6 +11,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:uuid/uuid.dart';
 
+import '../negocio.dart';
 import '../auth.dart';
 import '../localdb.dart';
 import '../sync.dart';
@@ -184,7 +185,6 @@ class _HistorialVentasScreenState
         (precio - oficial).abs() > 0.009;
     final cant = (v['cantidad'] as num?)?.toInt() ?? 0;
     final moneda = '${v['moneda'] ?? 'CUP'}';
-    final esUsd = moneda == 'USD';
     final tasa = (v['usd_tasa'] as num?)?.toDouble();
     final total =
         (v['total'] as num?)?.toDouble() ?? precio * cant;
@@ -200,13 +200,10 @@ class _HistorialVentasScreenState
     // v1.2.1: nota opcional de la venta (ej: "apartado").
     final nota = '${v['nota'] ?? ''}'.trim();
 
-    final lineaTotal = esUsd
-        ? '$cant x ${precio.toStringAsFixed(2)} USD'
-            '${tasa != null ? ' · tasa ${tasa.toStringAsFixed(2)}' : ''}'
-            ' = ${total.toStringAsFixed(2)} USD'
-            '${tasa != null ? ' (≈ ${(total * tasa).toStringAsFixed(0)} CUP)' : ''}'
-        : '$cant x ${precio.toStringAsFixed(2)} $moneda'
-            ' = ${total.toStringAsFixed(2)} $moneda';
+    // v1.2.4: misma regla en todas las pantallas (negocio.textoTotalVenta).
+    final lineaTotal = '$cant x ${precio.toStringAsFixed(2)} $moneda'
+        '${tasa != null && tasa > 0 ? ' · tasa ${tasa.toStringAsFixed(2)}' : ''}'
+        ' = ${textoTotalVenta(total, moneda, tasa)}';
 
     return Padding(
       padding:
@@ -362,11 +359,7 @@ class _HistorialVentasScreenState
               if (esUsd && tasa != null)
                 fila('Tasa',
                     '${tasa.toStringAsFixed(2)} CUP/USD'),
-              fila('Total',
-                  esUsd
-                      ? '${total.toStringAsFixed(2)} USD'
-                          '${tasa != null ? ' (≈ ${(total * tasa).toStringAsFixed(0)} CUP)' : ''}'
-                      : '${total.toStringAsFixed(0)} $moneda'),
+              fila('Total', textoTotalVenta(total, moneda, tasa)),
               fila('Fecha', '${v['fecha'] ?? '—'}'),
               if (conPromo)
                 fila('Promo', '1 mes gratis asignado'),

@@ -6,6 +6,7 @@
 library;
 
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:path/path.dart' as p;
 import 'package:sqflite/sqflite.dart';
@@ -422,7 +423,7 @@ class LocalDb {
   Future<List<Map<String, dynamic>>> unappliedOps() async {
     final d = await db;
     return d.query('ops_queue',
-        where: 'estado NOT IN (\'aplicada\', \'rechazada\')',
+        where: 'estado NOT IN (\'aplicada\', \'rechazada\', \'archivada\')',
         orderBy: 'creada_ts ASC');
   }
 
@@ -531,25 +532,87 @@ class LocalDb {
         where: 'id=?', whereArgs: [fotoId]);
   }
 
-  /// v1.2.3: Re-encola fotos pendientes o fallidas para reintento.
-  /// Retorna la cantidad de fotos re-encoladas.
+  /// v1.2.4 (Hark): registra un fallo de subida de foto.
+  /// - [definitivo]=false: suma un intento y guarda el error, pero la foto
+  ///   sigue 'pendiente' (con mala conexión nunca se abandona sola).
+  /// - [definitivo]=true: pasa a 'error' (p. ej. archivo local borrado) y
+  ///   aparece en Admin → Incidencias.
+  Future<void> marcarFotoError(int fotoId, String error,
+      {bool definitivo = false}) async {
+    final d = await db;
+    await d.rawUpdate(
+      'UPDATE fotos_pendientes SET retry_count = retry_count + 1, '
+      'last_error = ?, last_retry_at = ?'
+      '${definitivo ? ", estado = 'error'" : ''} WHERE id = ?',
+      [error, DateTime.now().toIso8601String(), fotoId],
+    );
+  }
+
+  /// v1.2.4: fotos con problema para la bandeja de incidencias:
+  /// en 'error' o pendientes con 10+ intentos fallidos.
+  Future<List<Map<String, dynamic>>> fotosConProblema() async {
+    final d = await db;
+    return d.query('fotos_pendientes',
+        where: "estado = 'error' OR (estado = 'pendiente' AND retry_count >= 10)",
+        orderBy: 'id DESC',
+        limit: 50);
+  }
+
+  /// v1.2.4: vuelve a poner una foto en cola desde cero.
+  Future<void> reintentarFoto(int fotoId) async {
+    final d = await db;
+    await d.update('fotos_pendientes',
+        {'estado': 'pendiente', 'retry_count': 0, 'last_error': null},
+        where: 'id=?', whereArgs: [fotoId]);
+  }
+
+  /// v1.2.4: descarta una foto (no se volverá a intentar).
+  Future<void> descartarFoto(int fotoId) async {
+    final d = await db;
+    await d.update('fotos_pendientes', {'estado': 'descartada'},
+        where: 'id=?', whereArgs: [fotoId]);
+  }
+
+  /// v1.2.4 (Hark): resincronizar fotos de verdad.
+  /// Vuelve a poner en cola, con el contador a cero, las fotos en 'error'
+  /// y las ya subidas ('lista') cuyo archivo local aún existe, para que se
+  /// re-suban (upsert) y el puente las vuelva a vincular. Devuelve cuántas.
   Future<int> reencolarFotos({String? tipo}) async {
     final d = await db;
-    // v1.2.3: solo re-encola si no ha superado el máximo de intentos (5).
-    // Evita bucle infinito con fotos corruptas (sugerencia GPT-5.4-mini).
-    String where = "estado != 'lista' AND retry_count < 5";
-    List<dynamic> args = [];
+    var where = "estado IN ('lista', 'error', 'pendiente')";
     if (tipo == 'clientes') {
-      where += " AND cliente_id IS NOT NULL";
+      where += ' AND cliente_id IS NOT NULL';
     } else if (tipo == 'suplementos') {
-      where += " AND suplemento_id IS NOT NULL";
+      where += ' AND suplemento_id IS NOT NULL';
     }
-    final now = DateTime.now().toIso8601String();
-    final count = await d.rawUpdate(
-      'UPDATE fotos_pendientes SET estado = ?, retry_count = retry_count + 1, last_retry_at = ? WHERE $where',
-      ['pendiente', now, ...args],
-    );
-    return count;
+    final filas = await d.query('fotos_pendientes',
+        columns: ['id', 'local_path'], where: where);
+    var n = 0;
+    for (final f in filas) {
+      final path = f['local_path'] as String?;
+      if (path == null || !await File(path).exists()) continue;
+      await d.update('fotos_pendientes',
+          {'estado': 'pendiente', 'retry_count': 0, 'last_error': null},
+          where: 'id=?', whereArgs: [f['id']]);
+      n++;
+    }
+    return n;
+  }
+
+  /// v1.2.4: re-intenta una op rechazada o con error (vuelve a la cola).
+  Future<void> reintentarOp(String opUuid) async {
+    final d = await db;
+    await d.update('ops_queue', {'estado': 'pendiente', 'error': null},
+        where: "op_uuid=? AND estado IN ('error','rechazada')",
+        whereArgs: [opUuid]);
+  }
+
+  /// v1.2.4: conteo rápido (sin cargar filas) para el diagnóstico.
+  Future<int> contar(String tabla, {String? where}) async {
+    final d = await db;
+    final r = await d.rawQuery(
+        'SELECT COUNT(*) c FROM $tabla${where == null ? '' : ' WHERE $where'}');
+    return (r.first['c'] as int?) ?? 0;
   }
 
   /// Cierra la base de datos (para reemplazar el archivo al importar).

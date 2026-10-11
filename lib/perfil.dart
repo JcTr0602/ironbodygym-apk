@@ -46,10 +46,14 @@ class PerfilService {
 
   /// v1.2.2: sube móvil/carnet a Supabase (tabla sync_usuarios_perfil).
   /// No bloquea si no hay conexión; se reintenta en el próximo cambio.
-  Future<void> _syncPerfilToSupabase() async {
+  Future<bool> _syncPerfilToSupabase() async {
+    final p0 = await _p;
+    // v1.2.4 (Hark): marca pendiente; se borra solo si la subida funciona.
+    // SyncEngine.run() reintenta con [sincronizarSiPendiente].
+    await p0.setBool(_key('perfil_sucio'), true);
     try {
       final username = AuthService().username;
-      if (username.isEmpty) return;
+      if (username.isEmpty) return false;
       final p = await _p;
       final movil = p.getString(_key('perfil_movil'));
       final carnet = p.getString(_key('perfil_carnet'));
@@ -59,8 +63,19 @@ class PerfilService {
         'carnet': carnet,
         // NOTA: updated_at lo pone el trigger en Supabase, no el teléfono
       }, onConflict: 'username');
+      await p.setBool(_key('perfil_sucio'), false);
+      return true;
     } catch (_) {
-      // Sin conexión o error: se reintenta en el próximo cambio
+      // Sin conexión o error: se reintenta en la próxima sincronización
+      return false;
+    }
+  }
+
+  /// v1.2.4: reintenta subir el perfil si quedó pendiente (sin conexión).
+  Future<void> sincronizarSiPendiente() async {
+    final p = await _p;
+    if (p.getBool(_key('perfil_sucio')) ?? false) {
+      await _syncPerfilToSupabase();
     }
   }
 
@@ -71,11 +86,10 @@ class PerfilService {
       final p = await _p;
       final movilLocal = p.getString(_key('perfil_movil'));
       final carnetLocal = p.getString(_key('perfil_carnet'));
-      // Si ya hay datos locales, no sobrescribir
-      if ((movilLocal?.isNotEmpty ?? false) ||
-          (carnetLocal?.isNotEmpty ?? false)) {
-        return;
-      }
+      // v1.2.4: se rellena campo por campo; nunca se pisa un dato local.
+      final faltaMovil = movilLocal == null || movilLocal.isEmpty;
+      final faltaCarnet = carnetLocal == null || carnetLocal.isEmpty;
+      if (!faltaMovil && !faltaCarnet) return;
       final username = AuthService().username;
       if (username.isEmpty) return;
       final emailPrefix = usernameToEmail(username).split('@').first;
@@ -85,10 +99,10 @@ class PerfilService {
           .eq('username', emailPrefix)
           .maybeSingle();
       if (res != null) {
-        if (res['movil'] != null) {
+        if (faltaMovil && res['movil'] != null) {
           await p.setString(_key('perfil_movil'), res['movil'] as String);
         }
-        if (res['carnet'] != null) {
+        if (faltaCarnet && res['carnet'] != null) {
           await p.setString(_key('perfil_carnet'), res['carnet'] as String);
         }
       }
@@ -275,6 +289,13 @@ class PerfilService {
       (await _p).getBool('auto_sync_abrir') ?? true;
   Future<void> setAutoSync(bool v) async =>
       (await _p).setBool('auto_sync_abrir', v);
+
+  /// v1.2.4 (C17): ahorro de datos — las fotos no se suben solas;
+  /// se suben con "Subir fotos ahora" (p. ej. con Wi-Fi). Por teléfono.
+  Future<bool> getAhorroDatos() async =>
+      (await _p).getBool('ahorro_datos_fotos') ?? false;
+  Future<void> setAhorroDatos(bool v) async =>
+      (await _p).setBool('ahorro_datos_fotos', v);
 
   /// Tema: 'sistema' | 'claro' | 'oscuro' (item 7).
   Future<String> getTema() async =>

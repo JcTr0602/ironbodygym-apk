@@ -21,6 +21,7 @@ import '../localdb.dart';
 import '../negocio.dart';
 import '../novedades.dart';
 import '../perfil.dart';
+import '../sync.dart';
 import '../theme.dart';
 import 'avisos.dart';
 import 'componentes.dart';
@@ -44,6 +45,7 @@ class _AjustesScreenState extends State<AjustesScreen> {
   int _horasAviso = 8;
   bool _avisoFalloSync = true;
   bool _autoSync = true;
+  bool _ahorroDatos = false; // v1.2.4 (C17)
   bool _vincular = false;
   bool _tienePin = false;
   String _tema = 'sistema';
@@ -72,6 +74,7 @@ class _AjustesScreenState extends State<AjustesScreen> {
     final horas = await _perfil.getHorasAviso();
     final fallo = await _perfil.getAvisoFalloSync();
     final auto = await _perfil.getAutoSync();
+    final ahorro = await _perfil.getAhorroDatos();
     final vinc = await _perfil.getVincularDispositivo();
     final pin = await _perfil.getPinHash();
     final tema = await _perfil.getTema();
@@ -86,6 +89,7 @@ class _AjustesScreenState extends State<AjustesScreen> {
         _horasAviso = horas;
         _avisoFalloSync = fallo;
         _autoSync = auto;
+        _ahorroDatos = ahorro;
         _vincular = vinc;
         _tienePin = pin != null;
         _tema = tema;
@@ -777,8 +781,9 @@ class _AjustesScreenState extends State<AjustesScreen> {
     final ok = await DialogoApp.confirmar(
       context,
       titulo: titulo,
-      mensaje: 'Se re-encolaran las fotos locales para subirlas. '
-          'Usalo si alguna foto no se sincronizo correctamente.',
+      mensaje: 'Se volverán a subir las fotos guardadas en este teléfono '
+          '(también las que ya se subieron), reemplazando la copia del '
+          'servidor. Úsalo si alguna foto no se ve bien en otros móviles.',
       aceptar: 'Resincronizar',
       icono: Icons.sync_outlined,
     );
@@ -787,8 +792,9 @@ class _AjustesScreenState extends State<AjustesScreen> {
       final n = await LocalDb.instance.reencolarFotos(tipo: tipo);
       if (!mounted) return;
       _msg(n > 0
-          ? 'Se re-encolaron $n foto(s) para subir.'
-          : 'No hay fotos pendientes de sincronizar.');
+          ? '$n foto(s) en cola. Se suben en la próxima sincronización.'
+          : 'No hay fotos de este tipo guardadas en este teléfono.');
+      if (n > 0) SyncEngine.instance.run();
     } catch (e) {
       if (!mounted) return;
       _msg('Error al resincronizar: $e');
@@ -1200,6 +1206,36 @@ class _AjustesScreenState extends State<AjustesScreen> {
                     }
                   },
                 ),
+                // v1.2.4 (C17): ahorro de datos
+                _switch(
+                  icono: Icons.data_saver_on_outlined,
+                  titulo: 'Ahorro de datos',
+                  subtitulo:
+                      'Las fotos no se suben solas; súbelas con Wi-Fi',
+                  valor: _ahorroDatos,
+                  onChanged: (v) async {
+                    await _perfil.setAhorroDatos(v);
+                    if (mounted) {
+                      setState(() => _ahorroDatos = v);
+                    }
+                  },
+                ),
+                if (_ahorroDatos)
+                  _opcion(
+                    icono: Icons.cloud_upload,
+                    titulo: 'Subir fotos ahora',
+                    subtitulo: 'Envía las fotos pendientes de este teléfono',
+                    onTap: () async {
+                      _msg('Subiendo fotos…');
+                      await SyncEngine.instance.subirFotosAhora();
+                      final n = await LocalDb.instance.contar(
+                          'fotos_pendientes',
+                          where: "estado = 'pendiente'");
+                      _msg(n == 0
+                          ? 'Fotos subidas.'
+                          : 'Quedan $n foto(s) por subir.');
+                    },
+                  ),
 
                 // ----- SEGURIDAD -----
                 _seccion('Seguridad'),

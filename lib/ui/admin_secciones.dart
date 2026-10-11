@@ -8,6 +8,10 @@ library;
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+
+import '../auth.dart';
+import '../config.dart';
 
 import '../negocio.dart';
 import '../localdb.dart';
@@ -666,18 +670,20 @@ class SeccionSuplementosScreen extends StatelessWidget {
 
 // -- H · Diagnóstico (v1.2.4) --------------------------------------------------
 /// Centro de diagnóstico: estado de sincronización, operaciones y entidades.
+/// v1.2.4 (Hark): conteos con COUNT(*) (no carga tablas completas),
+/// watermark vs server_seq, versión y botón "Copiar informe".
 class SeccionDiagnosticoScreen extends StatefulWidget {
   const SeccionDiagnosticoScreen({super.key});
 
   @override
-  State<SeccionDiagnosticoScreen> createState() => _SeccionDiagnosticoScreenState();
+  State<SeccionDiagnosticoScreen> createState() =>
+      _SeccionDiagnosticoScreenState();
 }
 
 class _SeccionDiagnosticoScreenState extends State<SeccionDiagnosticoScreen> {
-  Map<String, dynamic> _datos = {};
+  Map<String, String> _datos = {};
+  String? _ultimoError;
   bool _cargando = true;
-
-  String? _error;
 
   @override
   void initState() {
@@ -686,97 +692,97 @@ class _SeccionDiagnosticoScreenState extends State<SeccionDiagnosticoScreen> {
   }
 
   Future<void> _cargar() async {
-    if (mounted) setState(() { _cargando = true; _error = null; });
+    setState(() => _cargando = true);
     try {
       final db = LocalDb.instance;
       final lastOk = await db.getMeta('last_sync_ok');
       final lastErr = await db.getMeta('last_sync_error');
-      final pendientes = await db.pendingOps();
-      final fotosPend = await db.fotosPendientes();
-      final clientes = await db.allMirror('clientes');
-      final pagos = await db.allMirror('pagos');
-      final ventas = await db.allMirror('ventas_suplementos');
-      final supl = await db.allMirror('suplementos');
+      final wm = await db.getWatermark();
+      final ss = await db.getMeta('server_seq') ?? '?';
+      final datos = <String, String>{
+        'Versión': '${AppConfig.appVersion} (${AuthService().username})',
+        'Última sync correcta': _fmt(lastOk),
+        'Watermark / servidor': '$wm / $ss',
+        'Ops pendientes':
+            '${await db.contar('ops_queue', where: "estado IN ('pendiente','error')")}',
+        'Ops rechazadas':
+            '${await db.contar('ops_queue', where: "estado = 'rechazada'")}',
+        'Fotos pendientes': '${await db.contar('fotos_pendientes', where: "estado = 'pendiente'")}',
+        'Fotos con error': '${await db.contar('fotos_pendientes', where: "estado = 'error'")}',
+        'Clientes': '${await db.contar('clientes')}',
+        'Pagos': '${await db.contar('pagos')}',
+        'Ventas suplementos': '${await db.contar('ventas_suplementos')}',
+        'Suplementos': '${await db.contar('suplementos')}',
+      };
       if (!mounted) return;
       setState(() {
-        _datos = {
-          'lastOk': lastOk,
-          'lastErr': lastErr,
-          'pendientes': pendientes.length,
-          'fotosPend': fotosPend.length,
-          'nClientes': clientes.length,
-          'nPagos': pagos.length,
-          'nVentas': ventas.length,
-          'nSupl': supl.length,
-        };
+        _datos = datos;
+        _ultimoError = (lastErr?.isNotEmpty ?? false) ? lastErr : null;
         _cargando = false;
       });
     } catch (e) {
       if (!mounted) return;
-      setState(() { _cargando = false; _error = e.toString(); });
+      setState(() {
+        _ultimoError = 'No se pudo leer el diagnóstico: $e';
+        _cargando = false;
+      });
     }
+  }
+
+  String _fmt(String? iso) {
+    final d = iso == null ? null : DateTime.tryParse(iso);
+    if (d == null) return 'Nunca';
+    final m = DateTime.now().difference(d).inMinutes;
+    final hace = m < 1
+        ? 'ahora'
+        : m < 60
+            ? 'hace $m min'
+            : m < 1440
+                ? 'hace ${m ~/ 60} h'
+                : 'hace ${m ~/ 1440} d';
+    return '${iso!.substring(0, 16).replaceFirst('T', ' ')} ($hace)';
+  }
+
+  Future<void> _copiar() async {
+    final txt = StringBuffer('Iron Body Gym · diagnóstico\n');
+    _datos.forEach((k, v) => txt.writeln('$k: $v'));
+    if (_ultimoError != null) txt.writeln('Último error: $_ultimoError');
+    await Clipboard.setData(ClipboardData(text: txt.toString()));
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Informe copiado. Pégalo en Telegram o WhatsApp.')));
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('H · Diagnóstico')),
+      appBar: AppBar(
+        title: const Text('H · Diagnóstico'),
+        actions: [
+          IconButton(
+            tooltip: 'Copiar informe',
+            icon: const Icon(Icons.copy_all),
+            onPressed: _cargando ? null : _copiar,
+          ),
+        ],
+      ),
       body: _cargando
-          ? const Center(child: CircularProgressIndicator())
-          : _error != null
-              ? Center(
-                  child: Padding(
-                    padding: const EdgeInsets.all(24),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Icon(Icons.error_outline,
-                            size: 48, color: AppColores.error),
-                        const SizedBox(height: 12),
-                        Text('Error al cargar: $_error',
-                            textAlign: TextAlign.center),
-                        const SizedBox(height: 12),
-                        BotonPrimario(
-                          texto: 'Reintentar',
-                          icono: Icons.refresh,
-                          onPressed: _cargar,
-                        ),
-                      ],
-                    ),
-                  ),
-                )
-              : RefreshIndicator(
+          ? const EstadoCargando(texto: 'Leyendo diagnóstico…')
+          : RefreshIndicator(
               onRefresh: _cargar,
               child: ListView(
                 padding: const EdgeInsets.all(16),
                 children: [
-                  seccionAdmin(context, Icons.sync, 'Sincronización', [
-                    filaAdmin(context, Icons.check_circle, 'Última correcta',
-                        _datos['lastOk'] ?? 'Nunca'),
-                    if ((_datos['lastErr'] as String?)?.isNotEmpty ?? false)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 8),
-                        child: Text(_datos['lastErr'],
-                            style: const TextStyle(
-                                color: AppColores.error, fontSize: 13)),
-                      ),
+                  seccionAdmin(context, Icons.monitor_heart, 'Estado', [
+                    for (final e in _datos.entries)
+                      filaAdmin(context, null, e.key, e.value),
                   ]),
-                  seccionAdmin(context, Icons.pending_actions, 'Operaciones', [
-                    filaAdmin(context, Icons.upload, 'Pendientes por subir',
-                        '${_datos['pendientes']}'),
-                    filaAdmin(context, Icons.photo, 'Fotos pendientes',
-                        '${_datos['fotosPend']}'),
-                  ]),
-                  seccionAdmin(context, Icons.dataset, 'Entidades (local)', [
-                    filaAdmin(context, Icons.group, 'Clientes',
-                        '${_datos['nClientes']}'),
-                    filaAdmin(context, Icons.payments, 'Pagos',
-                        '${_datos['nPagos']}'),
-                    filaAdmin(context, Icons.shopping_cart, 'Ventas',
-                        '${_datos['nVentas']}'),
-                    filaAdmin(context, Icons.medication, 'Suplementos',
-                        '${_datos['nSupl']}'),
-                  ]),
+                  if (_ultimoError != null)
+                    seccionAdmin(context, Icons.error_outline, 'Último error', [
+                      Text(_ultimoError!,
+                          style: const TextStyle(
+                              color: AppColores.error, fontSize: 13)),
+                    ]),
                 ],
               ),
             ),
@@ -784,8 +790,6 @@ class _SeccionDiagnosticoScreenState extends State<SeccionDiagnosticoScreen> {
   }
 }
 
-// -- I · Incidencias (v1.2.4) --------------------------------------------------
-/// Bandeja de incidencias: errores que requieren atención.
 // -- I · Incidencias (v1.2.4, diseño ChatGPT) --------------------------------
 /// Bandeja unificada: incidencias locales (offline, pendientes de subir)
 /// + espejo de la tabla central de Supabase. Crear, filtrar por estado,

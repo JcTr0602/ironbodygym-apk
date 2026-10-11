@@ -13,12 +13,18 @@ import 'diseno.dart';
 // Botones
 // ---------------------------------------------------------------------------
 
-/// Botón primario: naranja sólido con gradiente y sombra sutil.
+/// Botón primario: gradiente naranja con sombra sutil; gris y sin
+/// gradiente cuando está deshabilitado. Con [cargando] muestra un
+/// indicador y bloquea pulsaciones repetidas.
 class BotonPrimario extends StatelessWidget {
   final String texto;
   final VoidCallback? onPressed;
   final IconData? icono;
   final bool expandido;
+
+  /// v1.2.4: muestra un indicador y bloquea pulsaciones repetidas
+  /// mientras la operación está en curso.
+  final bool cargando;
 
   const BotonPrimario({
     super.key,
@@ -26,41 +32,34 @@ class BotonPrimario extends StatelessWidget {
     this.onPressed,
     this.icono,
     this.expandido = true,
+    this.cargando = false,
   });
 
   @override
   Widget build(BuildContext context) {
-    final boton = Container(
+    final activo = onPressed != null && !cargando;
+    final radio = BorderRadius.circular(AppRadio.md);
+    // Gradiente naranja + sombra cuando está activo; gris del tema
+    // (sin gradiente) cuando está deshabilitado o cargando.
+    final boton = DecoratedBox(
       decoration: BoxDecoration(
-        gradient: AppColores.gradienteNaranja,
-        borderRadius: BorderRadius.circular(AppRadio.lg),
-        boxShadow: AppSombra.botonPrimario,
+        borderRadius: radio,
+        gradient: activo ? AppColores.gradienteNaranja : null,
+        boxShadow: activo ? AppSombra.botonPrimario : null,
       ),
       child: ElevatedButton(
-        onPressed: onPressed,
+        onPressed: cargando ? null : onPressed,
         style: ElevatedButton.styleFrom(
-          backgroundColor: Colors.transparent,
+          backgroundColor: activo ? Colors.transparent : null,
           shadowColor: Colors.transparent,
-          foregroundColor: Colors.white,
+          elevation: 0,
           padding: const EdgeInsets.symmetric(
-              vertical: AppEspacio.lg, horizontal: AppEspacio.xl),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(AppRadio.lg),
-          ),
-          textStyle: const TextStyle(
-              fontSize: 16, fontWeight: FontWeight.bold),
+              vertical: AppEspacio.md, horizontal: AppEspacio.xl),
+          minimumSize: const Size(64, 52),
+          shape: RoundedRectangleBorder(borderRadius: radio),
         ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            if (icono != null) ...[
-              Icon(icono, size: 20),
-              const SizedBox(width: AppEspacio.sm),
-            ],
-            Text(texto),
-          ],
-        ),
+        child:
+            _ContenidoBoton(texto: texto, icono: icono, cargando: cargando),
       ),
     );
     if (!expandido) return boton;
@@ -68,7 +67,40 @@ class BotonPrimario extends StatelessWidget {
   }
 }
 
-/// Botón secundario: contorno naranja, fondo transparente.
+class _ContenidoBoton extends StatelessWidget {
+  final String texto;
+  final IconData? icono;
+  final bool cargando;
+  const _ContenidoBoton(
+      {required this.texto, this.icono, this.cargando = false});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        if (cargando) ...[
+          const SizedBox(
+              width: 18,
+              height: 18,
+              child: CircularProgressIndicator(strokeWidth: 2.2)),
+          const SizedBox(width: AppEspacio.sm),
+        ] else if (icono != null) ...[
+          Icon(icono, size: 20),
+          const SizedBox(width: AppEspacio.sm),
+        ],
+        Flexible(
+          child: Text(cargando ? 'Procesando…' : texto,
+              overflow: TextOverflow.ellipsis, maxLines: 1),
+        ),
+      ],
+    );
+  }
+}
+
+/// Botón secundario: contorno neutro, fondo transparente
+/// (cancelar, volver, acciones complementarias).
 class BotonSecundario extends StatelessWidget {
   final String texto;
   final VoidCallback? onPressed;
@@ -88,28 +120,47 @@ class BotonSecundario extends StatelessWidget {
       child: OutlinedButton(
         onPressed: onPressed,
         style: OutlinedButton.styleFrom(
-          foregroundColor: AppColores.naranja,
-          side: const BorderSide(
-              color: AppColores.naranja, width: 1.5),
           padding: const EdgeInsets.symmetric(
-              vertical: AppEspacio.lg, horizontal: AppEspacio.xl),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(AppRadio.lg),
-          ),
-          textStyle: const TextStyle(
-              fontSize: 16, fontWeight: FontWeight.w600),
+              vertical: AppEspacio.md, horizontal: AppEspacio.xl),
+          minimumSize: const Size(64, 52),
         ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            if (icono != null) ...[
-              Icon(icono, size: 20),
-              const SizedBox(width: AppEspacio.sm),
-            ],
-            Text(texto),
-          ],
+        child: _ContenidoBoton(texto: texto, icono: icono),
+      ),
+    );
+  }
+}
+
+/// v1.2.4: acción destructiva (eliminar, anular, borrar). Rojo, para que
+/// nunca se confunda con la acción principal. Pedir confirmación antes.
+class BotonPeligro extends StatelessWidget {
+  final String texto;
+  final VoidCallback? onPressed;
+  final IconData? icono;
+  final bool cargando;
+
+  const BotonPeligro({
+    super.key,
+    required this.texto,
+    this.onPressed,
+    this.icono = Icons.delete_outline,
+    this.cargando = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: double.infinity,
+      child: OutlinedButton(
+        onPressed: cargando ? null : onPressed,
+        style: OutlinedButton.styleFrom(
+          foregroundColor: AppColores.error,
+          side: const BorderSide(color: AppColores.error, width: 1.5),
+          padding: const EdgeInsets.symmetric(
+              vertical: AppEspacio.md, horizontal: AppEspacio.xl),
+          minimumSize: const Size(64, 52),
         ),
+        child: _ContenidoBoton(
+            texto: texto, icono: icono, cargando: cargando),
       ),
     );
   }
@@ -140,8 +191,8 @@ class Tarjeta extends StatelessWidget {
       decoration: BoxDecoration(
         color: color ?? AppColores.superficie(context),
         borderRadius: BorderRadius.circular(AppRadio.lg),
-        boxShadow: AppSombra.tarjeta(context),
         border: Border.all(color: AppColores.borde(context)),
+        boxShadow: AppSombra.tarjeta(context),
       ),
       child: Padding(padding: padding, child: child),
     );
@@ -383,6 +434,75 @@ class EstadoVacio extends StatelessWidget {
             ],
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// v1.2.4: estado de error con explicación y botón Reintentar.
+class EstadoError extends StatelessWidget {
+  final String titulo;
+  final String? detalle;
+  final VoidCallback? onReintentar;
+
+  const EstadoError({
+    super.key,
+    this.titulo = 'No se pudo cargar',
+    this.detalle,
+    this.onReintentar,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(AppEspacio.xxl),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.error_outline,
+                size: 48, color: AppColores.error),
+            const SizedBox(height: AppEspacio.md),
+            Text(titulo,
+                style: AppTexto.subtitulo, textAlign: TextAlign.center),
+            if (detalle != null) ...[
+              const SizedBox(height: AppEspacio.sm),
+              Text(detalle!,
+                  style: AppTexto.secundario.copyWith(
+                      color: AppColores.textoSecundario(context)),
+                  textAlign: TextAlign.center),
+            ],
+            if (onReintentar != null) ...[
+              const SizedBox(height: AppEspacio.lg),
+              BotonSecundario(
+                  texto: 'Reintentar',
+                  icono: Icons.refresh,
+                  onPressed: onReintentar),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// v1.2.4: indicador de carga con texto (para esperas no inmediatas).
+class EstadoCargando extends StatelessWidget {
+  final String texto;
+  const EstadoCargando({super.key, this.texto = 'Cargando…'});
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const CircularProgressIndicator(),
+          const SizedBox(height: AppEspacio.md),
+          Text(texto,
+              style: AppTexto.secundario.copyWith(
+                  color: AppColores.textoSecundario(context))),
+        ],
       ),
     );
   }

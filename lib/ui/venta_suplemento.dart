@@ -13,6 +13,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:uuid/uuid.dart';
 
+import '../negocio.dart';
 import '../localdb.dart';
 import '../sync.dart';
 import 'componentes.dart';
@@ -37,7 +38,8 @@ class _VentaSuplementoScreenState
   final _compradorNombre = TextEditingController();
   // v1.2.1: nota opcional de la venta (ej: "apartado").
   final _nota = TextEditingController();
-  String _moneda = 'CUP';
+  // v1.2.4: USD por defecto (precio oficial en USD).
+  String _moneda = 'USD';
   String _tipoComprador = 'cliente'; // cliente | externo_nombre | externo_generico | inscribir_nuevo
   int? _clienteId;
   String _clienteNombre = '';
@@ -47,10 +49,34 @@ class _VentaSuplementoScreenState
   double get _precioOficial =>
       (widget.suplemento['precio_oficial'] as num?)?.toDouble() ?? 0;
 
+  /// v1.2.4: precio oficial en la moneda elegida (CUP = oficial × tasa).
+  double? get _oficialEnMoneda =>
+      precioOficialEn(_moneda, _precioOficial, _tasaUsd);
+
   bool get _precioDifiere {
     final p =
         double.tryParse(_precio.text.trim().replaceAll(',', '.'));
-    return p != null && (p - _precioOficial).abs() > 0.009;
+    final ref = _oficialEnMoneda;
+    if (p == null || ref == null) return false;
+    return (p - ref).abs() > 0.009;
+  }
+
+  /// v1.2.4: al cambiar de moneda, si el precio no se tocó a mano,
+  /// se rellena con el oficial convertido (evita cobrar 50 CUP por 50 USD).
+  void _cambiarMoneda(String m) {
+    final anterior = precioOficialEn(_moneda, _precioOficial, _tasaUsd);
+    final actual =
+        double.tryParse(_precio.text.trim().replaceAll(',', '.'));
+    final sinTocar = actual == null ||
+        (anterior != null && (actual - anterior).abs() < 0.01);
+    setState(() {
+      _moneda = m;
+      final nuevo = precioOficialEn(m, _precioOficial, _tasaUsd);
+      if (sinTocar && nuevo != null) {
+        _precio.text =
+            m == 'USD' ? nuevo.toStringAsFixed(2) : nuevo.toStringAsFixed(0);
+      }
+    });
   }
 
   double? get _tasaUsd =>
@@ -71,6 +97,11 @@ class _VentaSuplementoScreenState
         setState(() {
           _promoActiva =
               (aj['promo_suplementos'] as num?)?.toInt() != 0;
+          // v1.2.4: tasa del día (Admin) como valor inicial editable.
+          final t = (aj['tasa_usd'] as num?)?.toDouble();
+          if (t != null && t > 0 && _tasa.text.trim().isEmpty) {
+            _tasa.text = t.toStringAsFixed(0);
+          }
         });
       }
     });
@@ -142,9 +173,9 @@ class _VentaSuplementoScreenState
           cancelar: '');
       return;
     }
-    final esCup = _moneda == 'CUP';
     final tasa = _tasaUsd;
-    if (esCup && (tasa == null || tasa <= 0)) {
+    // v1.2.4: tasa obligatoria en USD y CUP (el servidor exige usd_tasa > 0).
+    if (tasa == null || tasa <= 0) {
       await DialogoApp.confirmar(context,
           titulo: 'Revisa la valoración',
           mensaje:
@@ -180,15 +211,10 @@ class _VentaSuplementoScreenState
     final conPromo = _promoActiva &&
         (_tipoComprador == 'cliente' ||
             _tipoComprador == 'inscribir_nuevo');
-    final lineaMoneda = esCup
-        ? 'Precio: ${precio.toStringAsFixed(2)} CUP'
-            ' (tasa ${tasa!.toStringAsFixed(2)} CUP/USD)'
-            '${_precioDifiere ? ' — difiere del oficial' : ''}\n'
-            'Total: ${total.toStringAsFixed(2)} CUP'
-            ' (≈ ${(total / tasa).toStringAsFixed(2)} USD)'
-        : 'Precio: ${precio.toStringAsFixed(2)} USD'
-            '${_precioDifiere ? ' (difiere del oficial)' : ''}\n'
-            'Total: ${total.toStringAsFixed(2)} USD';
+    final lineaMoneda = 'Precio: ${precio.toStringAsFixed(2)} $_moneda'
+        ' (tasa ${tasa.toStringAsFixed(2)} CUP/USD)'
+        '${_precioDifiere ? ' — difiere del oficial' : ''}\n'
+        'Total: ${textoTotalVenta(total, _moneda, tasa)}';
 
     final ok = await DialogoApp.confirmar(
       context,
@@ -213,7 +239,8 @@ class _VentaSuplementoScreenState
           'cantidad': _cantidad,
           'precio': precio,
           'moneda': _moneda,
-          if (esCup) 'usd_tasa': tasa,
+          // v1.2.4: tasa obligatoria (validada arriba) en USD y CUP.
+          'usd_tasa': tasa,
           // ChatGPT CRÍTICO 2: el servidor solo acepta 'cliente'|'externo'.
           // 'externo_nombre' y 'externo_generico' se mapean a 'externo'.
           'comprador_tipo':
@@ -264,7 +291,7 @@ class _VentaSuplementoScreenState
           cancelar: '');
       return;
     }
-    if (_moneda == 'CUP') {
+    {
       final tasa = _tasaUsd;
       if (tasa == null || tasa <= 0) {
         await DialogoApp.confirmar(context,
@@ -341,11 +368,11 @@ class _VentaSuplementoScreenState
           const SizedBox(height: AppEspacio.sm),
           const EncabezadoSeccion(titulo: 'Moneda'),
           _chipsMoneda(),
-          if (_moneda == 'CUP') ...[
+          ...[
             const SizedBox(height: AppEspacio.sm),
             CampoTexto(
               controller: _tasa,
-              etiqueta: 'Valoración USD (CUP por 1 USD)',
+              etiqueta: 'Tasa (CUP por 1 USD) — obligatoria',
               teclado: const TextInputType.numberWithOptions(
                   decimal: true),
               onChanged: (_) => setState(() {}),
@@ -355,8 +382,7 @@ class _VentaSuplementoScreenState
                 padding: const EdgeInsets.only(
                     top: AppEspacio.sm),
                 child: Text(
-                  'Total: ${_total.toStringAsFixed(2)} CUP'
-                  ' (≈ ${(_total / _tasaUsd!).toStringAsFixed(2)} USD)',
+                  'Total: ${textoTotalVenta(_total, _moneda, _tasaUsd)}',
                   style: AppTexto.cuerpo,
                 ),
               ),
@@ -450,8 +476,7 @@ class _VentaSuplementoScreenState
               selected: _moneda == m,
               selectedColor: AppColores.naranja.withValues(
                   alpha: 0.2),
-              onSelected: (_) =>
-                  setState(() => _moneda = m),
+              onSelected: (_) => _cambiarMoneda(m),
             ),
           ),
       ],

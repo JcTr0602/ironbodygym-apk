@@ -2,6 +2,7 @@
 library;
 
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:uuid/uuid.dart';
 
 import '../localdb.dart';
@@ -191,6 +192,64 @@ class _ListasScreenState extends State<ListasScreen>
     );
   }
 
+  /// v1.2.4 (C7): móvil cubano del cliente (8 dígitos) o null.
+  String? _movilCliente(Map<String, dynamic> c) {
+    var t = '${c['telefono'] ?? ''}'.replaceAll(RegExp(r'\D'), '');
+    if (t.startsWith('53') && t.length > 8) t = t.substring(2);
+    return (t.length == 8 && t.startsWith('5')) ? t : null;
+  }
+
+  Future<String?> _elegirAviso(Map<String, dynamic> c) async {
+    if (_movilCliente(c) == null) return 'marcar';
+    return showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.chat, color: AppColores.exito),
+              title: const Text('Avisar por WhatsApp'),
+              subtitle: const Text('Abre WhatsApp con el mensaje escrito'),
+              onTap: () => Navigator.pop(ctx, 'whatsapp'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.check_circle_outline),
+              title: const Text('Solo marcar como avisado'),
+              onTap: () => Navigator.pop(ctx, 'marcar'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<bool> _abrirWhatsapp(Map<String, dynamic> c) async {
+    final movil = _movilCliente(c);
+    if (movil == null) return false;
+    final nombre = '${c['nombre'] ?? ''}'.split(' ').first;
+    final hasta = '${c['pagado_hasta'] ?? ''}';
+    final f = hasta.length >= 10 ? fmtFecha(hasta) : '';
+    final venceTxt = f.isEmpty
+        ? 'tu mensualidad está por vencer'
+        : (hasta.substring(0, 10).compareTo(
+                    DateTime.now().toIso8601String().substring(0, 10)) <
+                0
+            ? 'tu mensualidad venció el $f'
+            : 'tu mensualidad vence el $f');
+    final msg = 'Hola $nombre 👋, te recordamos de Iron Body Gym que '
+        '$venceTxt. ¡Te esperamos para seguir entrenando! 💪';
+    final ok = await launchUrl(
+        Uri.parse('https://wa.me/53$movil?text=${Uri.encodeComponent(msg)}'),
+        mode: LaunchMode.externalApplication);
+    if (!ok && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('No se pudo abrir WhatsApp')));
+    }
+    return ok;
+  }
+
   Widget _lista(List<Map<String, dynamic>> rows, IconData iconoVacio,
       String tituloVacio, String subtituloVacio) {
     if (rows.isEmpty) {
@@ -251,6 +310,14 @@ class _ListasScreenState extends State<ListasScreen>
                             setState(() {});
                           }
                         } else {
+                          // v1.2.4 (C7): avisar por WhatsApp con el
+                          // mensaje ya escrito si tiene teléfono.
+                          final via = await _elegirAviso(c);
+                          if (via == null) return;
+                          if (via == 'whatsapp') {
+                            final ok = await _abrirWhatsapp(c);
+                            if (!ok) return;
+                          }
                           await LocalDb.instance
                               .marcarAvisado(id);
                           if (mounted) {

@@ -37,6 +37,13 @@ Future<bool> ventaRapidaSuplemento(
         content: Text('Sin stock disponible para venta rápida')));
     return false;
   }
+  if (tasaUsd == null || tasaUsd <= 0) {
+    // v1.2.4: el servidor rechaza ventas USD sin tasa.
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Falta la tasa del día (Admin → Ajustes) '
+            'para registrar la venta')));
+    return false;
+  }
   final precio =
       (s['precio_oficial'] as num?)?.toDouble() ?? 0;
   final ok = await DialogoApp.confirmar(
@@ -45,7 +52,7 @@ Future<bool> ventaRapidaSuplemento(
     icono: Icons.flash_on,
     mensaje: '${s['nombre']}\n'
         '1 x ${precio.toStringAsFixed(2)} USD'
-        ' = ${precio.toStringAsFixed(2)} USD\n'
+        ' = ${textoTotalVenta(precio, 'USD', tasaUsd)}\n'
         'Comprador: Cliente externo',
     aceptar: 'Confirmar',
   );
@@ -59,7 +66,7 @@ Future<bool> ventaRapidaSuplemento(
       'precio': precio,
       'moneda': 'USD',
       // ChatGPT CRÍTICO 2: usd_tasa obligatoria para USD, tipo 'externo'.
-      if (tasaUsd != null && tasaUsd > 0) 'usd_tasa': tasaUsd,
+      'usd_tasa': tasaUsd,
       'comprador_tipo': 'externo',
       'comprador_nombre': 'Cliente externo',
       'fecha':

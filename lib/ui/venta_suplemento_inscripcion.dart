@@ -13,6 +13,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:uuid/uuid.dart';
 
+import '../negocio.dart';
 import '../auth.dart';
 import '../localdb.dart';
 import '../sync.dart';
@@ -93,10 +94,7 @@ class _VentaSuplementoInscripcionScreenState
       return;
     }
 
-    final totalTxt = widget.moneda == 'USD'
-        ? '${_total.toStringAsFixed(2)} USD'
-            ' (≈ ${(_total * (widget.usdTasa ?? 0)).toStringAsFixed(0)} CUP)'
-        : '${_total.toStringAsFixed(0)} CUP';
+    final totalTxt = textoTotalVenta(_total, widget.moneda, widget.usdTasa);
     final ok = await DialogoApp.confirmar(
       context,
       titulo: 'Confirmar inscripción + venta',
@@ -130,7 +128,8 @@ class _VentaSuplementoInscripcionScreenState
             'cantidad': widget.cantidad,
             'precio': widget.precio,
             'moneda': widget.moneda,
-            if (widget.moneda == 'USD' && widget.usdTasa != null)
+            // v1.2.4: la tasa se guarda siempre que se conozca (USD y CUP).
+            if (widget.usdTasa != null && widget.usdTasa! > 0)
               'usd_tasa': widget.usdTasa,
           },
           'fecha': hoy,
@@ -152,7 +151,7 @@ class _VentaSuplementoInscripcionScreenState
           'cantidad': widget.cantidad,
           'precio': widget.precio,
           'moneda': widget.moneda,
-          if (widget.moneda == 'USD' && widget.usdTasa != null)
+          if (widget.usdTasa != null && widget.usdTasa! > 0)
             'usd_tasa': widget.usdTasa,
           'total': _total,
           'comprador_tipo': 'cliente',
@@ -336,11 +335,9 @@ class _VentaSuplementoInscripcionScreenState
   String _lineaVenta() {
     final base =
         '${widget.cantidad} x ${widget.precio.toStringAsFixed(2)} ${widget.moneda}';
-    if (widget.moneda == 'USD' && widget.usdTasa != null) {
-      return '$base (tasa ${widget.usdTasa!.toStringAsFixed(2)})\n'
-          'Total: ${_total.toStringAsFixed(2)} USD'
-          ' (≈ ${(_total * widget.usdTasa!).toStringAsFixed(0)} CUP)';
-    }
-    return '$base\nTotal: ${_total.toStringAsFixed(0)} ${widget.moneda}';
+    final t = widget.usdTasa;
+    final tasaTxt = (t != null && t > 0) ? ' (tasa ${t.toStringAsFixed(2)})' : '';
+    return '$base$tasaTxt\n'
+        'Total: ${textoTotalVenta(_total, widget.moneda, widget.usdTasa)}';
   }
 }
