@@ -8,6 +8,7 @@ library;
 import 'package:flutter/material.dart';
 
 import '../negocio.dart';
+import '../localdb.dart';
 import '../sync.dart';
 import '../tipos_pago.dart';
 import 'auditoria.dart';
@@ -654,6 +655,223 @@ class SeccionSuplementosScreen extends StatelessWidget {
                   color: AppColores.textoSecundario(context)),
             ),
           ]),
+        ],
+      ),
+    );
+  }
+}
+
+// -- H · Diagnóstico (v1.2.4) --------------------------------------------------
+/// Centro de diagnóstico: estado de sincronización, operaciones y entidades.
+class SeccionDiagnosticoScreen extends StatefulWidget {
+  const SeccionDiagnosticoScreen({super.key});
+
+  @override
+  State<SeccionDiagnosticoScreen> createState() => _SeccionDiagnosticoScreenState();
+}
+
+class _SeccionDiagnosticoScreenState extends State<SeccionDiagnosticoScreen> {
+  Map<String, dynamic> _datos = {};
+  bool _cargando = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _cargar();
+  }
+
+  Future<void> _cargar() async {
+    setState(() => _cargando = true);
+    try {
+      final db = LocalDb.instance;
+      // Última sincronización
+      final lastOk = await db.getMeta('last_sync_ok');
+      final lastErr = await db.getMeta('last_sync_error');
+      // Ops pendientes
+      final pendientes = await db.pendingOps();
+      // Fotos pendientes
+      final fotosPend = await db.fotosPendientes();
+      // Conteos por entidad (mirrors)
+      final clientes = await db.allMirror('clientes');
+      final pagos = await db.allMirror('pagos');
+      final ventas = await db.allMirror('ventas_suplementos');
+      final supl = await db.allMirror('suplementos');
+      setState(() {
+        _datos = {
+          'lastOk': lastOk,
+          'lastErr': lastErr,
+          'pendientes': pendientes.length,
+          'fotosPend': fotosPend.length,
+          'nClientes': clientes.length,
+          'nPagos': pagos.length,
+          'nVentas': ventas.length,
+          'nSupl': supl.length,
+        };
+        _cargando = false;
+      });
+    } catch (_) {
+      setState(() => _cargando = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('H · Diagnóstico')),
+      body: _cargando
+          ? const Center(child: CircularProgressIndicator())
+          : RefreshIndicator(
+              onRefresh: _cargar,
+              child: ListView(
+                padding: const EdgeInsets.all(16),
+                children: [
+                  seccionAdmin(context, Icons.sync, 'Sincronización', [
+                    filaAdmin(context, Icons.check_circle, 'Última correcta',
+                        _datos['lastOk'] ?? 'Nunca'),
+                    if ((_datos['lastErr'] as String?)?.isNotEmpty ?? false)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 8),
+                        child: Text(_datos['lastErr'],
+                            style: const TextStyle(
+                                color: AppColores.error, fontSize: 13)),
+                      ),
+                  ]),
+                  seccionAdmin(context, Icons.pending_actions, 'Operaciones', [
+                    filaAdmin(context, Icons.upload, 'Pendientes por subir',
+                        '${_datos['pendientes']}'),
+                    filaAdmin(context, Icons.photo, 'Fotos pendientes',
+                        '${_datos['fotosPend']}'),
+                  ]),
+                  seccionAdmin(context, Icons.dataset, 'Entidades (local)', [
+                    filaAdmin(context, Icons.group, 'Clientes',
+                        '${_datos['nClientes']}'),
+                    filaAdmin(context, Icons.payments, 'Pagos',
+                        '${_datos['nPagos']}'),
+                    filaAdmin(context, Icons.shopping_cart, 'Ventas',
+                        '${_datos['nVentas']}'),
+                    filaAdmin(context, Icons.medication, 'Suplementos',
+                        '${_datos['nSupl']}'),
+                  ]),
+                ],
+              ),
+            ),
+    );
+  }
+}
+
+// -- I · Incidencias (v1.2.4) --------------------------------------------------
+/// Bandeja de incidencias: errores que requieren atención.
+class SeccionIncidenciasScreen extends StatefulWidget {
+  const SeccionIncidenciasScreen({super.key});
+
+  @override
+  State<SeccionIncidenciasScreen> createState() => _SeccionIncidenciasScreenState();
+}
+
+class _SeccionIncidenciasScreenState extends State<SeccionIncidenciasScreen> {
+  List<Map<String, dynamic>> _incidencias = [];
+  bool _cargando = true;
+  String _filtro = 'todas'; // todas, pendiente, resuelta
+
+  @override
+  void initState() {
+    super.initState();
+    _cargar();
+  }
+
+  Future<void> _cargar() async {
+    setState(() => _cargando = true);
+    try {
+      final db = LocalDb.instance;
+      final lista = <Map<String, dynamic>>[];
+      // Ops con error (estado='error')
+      final opsErr = await db.opsByEstado('error');
+      for (final op in opsErr) {
+        lista.add({
+          'tipo': 'sync',
+          'titulo': 'Error de sincronización',
+          'detalle': '${op['tipo']}: ${op['error'] ?? 'Error desconocido'}',
+          'fecha': op['creada_ts'] ?? '',
+          'estado': 'pendiente',
+        });
+      }
+      // Fotos con error: query directa
+      final d = await db.db;
+      final fotosErr = await d.query('fotos_pendientes',
+          where: "estado='error'", orderBy: 'id DESC', limit: 20);
+      for (final f in fotosErr) {
+        lista.add({
+          'tipo': 'foto',
+          'titulo': 'Foto sin sincronizar',
+          'detalle': f['last_error'] ?? 'Error desconocido',
+          'fecha': f['last_retry_at'] ?? '',
+          'estado': 'pendiente',
+        });
+      }
+      setState(() {
+        _incidencias = lista;
+        _cargando = false;
+      });
+    } catch (_) {
+      setState(() => _cargando = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final filtradas = _filtro == 'todas'
+        ? _incidencias
+        : _incidencias.where((i) => i['estado'] == _filtro).toList();
+    return Scaffold(
+      appBar: AppBar(title: const Text('I · Incidencias')),
+      body: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.all(16),
+            child: SegmentedButton<String>(
+              segments: const [
+                ButtonSegment(value: 'todas', label: Text('Todas')),
+                ButtonSegment(value: 'pendiente', label: Text('Pendientes')),
+                ButtonSegment(value: 'resuelta', label: Text('Resueltas')),
+              ],
+              selected: {_filtro},
+              onSelectionChanged: (s) =>
+                  setState(() => _filtro = s.first),
+            ),
+          ),
+          Expanded(
+            child: _cargando
+                ? const Center(child: CircularProgressIndicator())
+                : filtradas.isEmpty
+                    ? const Center(
+                        child: Text('Sin incidencias 🎉',
+                            style: TextStyle(fontSize: 16)))
+                    : RefreshIndicator(
+                        onRefresh: _cargar,
+                        child: ListView.builder(
+                          padding:
+                              const EdgeInsets.symmetric(horizontal: 16),
+                          itemCount: filtradas.length,
+                          itemBuilder: (ctx, i) {
+                            final inc = filtradas[i];
+                            return Card(
+                              child: ListTile(
+                                leading: Icon(
+                                  inc['tipo'] == 'foto'
+                                      ? Icons.photo
+                                      : Icons.warning,
+                                  color: AppColores.naranja,
+                                ),
+                                title: Text(inc['titulo']),
+                                subtitle: Text(
+                                    '${inc['detalle']}\n${inc['fecha']}'),
+                                isThreeLine: true,
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+          ),
         ],
       ),
     );
