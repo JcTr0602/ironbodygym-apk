@@ -8,7 +8,9 @@ library;
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:crypto/crypto.dart';
 import 'package:path/path.dart' as p;
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sqflite/sqflite.dart';
 
 import 'auth.dart';
@@ -25,7 +27,7 @@ class LocalDb {
     final dir = await getDatabasesPath();
     _db = await openDatabase(
       p.join(dir, 'ironbody.db'),
-      version: 7,
+      version: 8,
       onCreate: (db, _) async {
         await _crearTablas(db);
       },
@@ -73,6 +75,31 @@ class LocalDb {
           await db.execute(
               'ALTER TABLE fotos_pendientes ADD COLUMN last_retry_at TEXT');
         }
+        // v8 (v1.2.5): visibilidad de incidencias + eventos autoritativos
+        // + auditoría local con hash encadenado.
+        if (oldV < 8) {
+          await db.execute(
+              "ALTER TABLE incidencias_local ADD COLUMN visibilidad TEXT NOT NULL DEFAULT 'compartida'");
+          await db.execute(
+              "ALTER TABLE incidencias_mirror ADD COLUMN visibilidad TEXT NOT NULL DEFAULT 'compartida'");
+          await db.execute(
+              'CREATE TABLE IF NOT EXISTS incidencia_eventos_mirror ('
+              'id TEXT PRIMARY KEY, incidencia_id TEXT NOT NULL, '
+              'actor_id TEXT NOT NULL, actor_nombre TEXT NOT NULL, '
+              'accion TEXT NOT NULL, valor_anterior TEXT, valor_nuevo TEXT, '
+              'nota TEXT, creada_en TEXT, sync_seq INTEGER NOT NULL)');
+          await db.execute(
+              'CREATE INDEX IF NOT EXISTS idx_ev_mirror_inc '
+              'ON incidencia_eventos_mirror(incidencia_id, sync_seq)');
+          await db.execute(
+              'CREATE TABLE IF NOT EXISTS auditoria_local ('
+              'id TEXT PRIMARY KEY, actor_id TEXT NOT NULL, '
+              'actor_nombre TEXT NOT NULL, accion TEXT NOT NULL, '
+              'objeto_tipo TEXT NOT NULL, objeto_id TEXT NOT NULL, '
+              'detalle TEXT, dispositivo_id TEXT NOT NULL, '
+              'hash_previo TEXT, hash_propio TEXT NOT NULL, '
+              'creada_en TEXT NOT NULL, sincronizada INTEGER NOT NULL DEFAULT 0)');
+        }
       },
     );
     return _db!;
@@ -114,6 +141,7 @@ class LocalDb {
             'detalle TEXT, estado TEXT NOT NULL DEFAULT \'pendiente\', '
             'creada_por TEXT NOT NULL, creada_en TEXT NOT NULL, '
             'resuelta_por TEXT, resuelta_en TEXT, nota_resolucion TEXT, '
+            'visibilidad TEXT NOT NULL DEFAULT \'compartida\', '
             'version INTEGER NOT NULL DEFAULT 1, '
             'sincronizada INTEGER NOT NULL DEFAULT 0)');
         await db.execute('CREATE TABLE IF NOT EXISTS incidencias_mirror ('
@@ -122,8 +150,27 @@ class LocalDb {
             'detalle TEXT, estado TEXT NOT NULL, '
             'creada_por TEXT NOT NULL, creada_en TEXT, '
             'resuelta_por TEXT, resuelta_en TEXT, nota_resolucion TEXT, '
+            'visibilidad TEXT NOT NULL DEFAULT \'compartida\', '
             'version INTEGER NOT NULL DEFAULT 1, actualizada_en TEXT, '
             'sync_seq INTEGER NOT NULL)');
+        // v1.2.5: eventos autoritativos + auditoría local.
+        await db.execute(
+            'CREATE TABLE IF NOT EXISTS incidencia_eventos_mirror ('
+            'id TEXT PRIMARY KEY, incidencia_id TEXT NOT NULL, '
+            'actor_id TEXT NOT NULL, actor_nombre TEXT NOT NULL, '
+            'accion TEXT NOT NULL, valor_anterior TEXT, valor_nuevo TEXT, '
+            'nota TEXT, creada_en TEXT, sync_seq INTEGER NOT NULL)');
+        await db.execute(
+            'CREATE INDEX IF NOT EXISTS idx_ev_mirror_inc '
+            'ON incidencia_eventos_mirror(incidencia_id, sync_seq)');
+        await db.execute(
+            'CREATE TABLE IF NOT EXISTS auditoria_local ('
+            'id TEXT PRIMARY KEY, actor_id TEXT NOT NULL, '
+            'actor_nombre TEXT NOT NULL, accion TEXT NOT NULL, '
+            'objeto_tipo TEXT NOT NULL, objeto_id TEXT NOT NULL, '
+            'detalle TEXT, dispositivo_id TEXT NOT NULL, '
+            'hash_previo TEXT, hash_propio TEXT NOT NULL, '
+            'creada_en TEXT NOT NULL, sincronizada INTEGER NOT NULL DEFAULT 0)');
   }
 
   // -- espejos ---------------------------------------------------------
@@ -203,10 +250,11 @@ class LocalDb {
   }
 
   // -- incidencias v1.2.4 (diseño ChatGPT) -------------------------------
+  // v1.2.5: + visibilidad (compartida|privada)
   static const _incCols = [
     'id', 'tipo', 'entidad', 'entidad_id', 'descripcion', 'detalle',
     'estado', 'creada_por', 'creada_en', 'resuelta_por', 'resuelta_en',
-    'nota_resolucion', 'version',
+    'nota_resolucion', 'visibilidad', 'version',
   ];
 
   Map<String, dynamic> _incRow(Map<String, dynamic> inc,
@@ -222,6 +270,7 @@ class LocalDb {
   }
 
   /// Crea incidencia local (offline-first). Retorna el id (UUID).
+  /// v1.2.5: visibilidad ('compartida' por defecto; 'privada' solo admin).
   Future<String> crearIncidenciaLocal({
     required String tipo,
     required String descripcion,
@@ -229,6 +278,7 @@ class LocalDb {
     String? entidad,
     int? entidadId,
     Map<String, dynamic>? detalle,
+    String visibilidad = 'compartida',
   }) async {
     final d = await db;
     final id =
@@ -243,6 +293,7 @@ class LocalDb {
       'estado': 'pendiente',
       'creada_por': creadaPor,
       'creada_en': DateTime.now().toIso8601String(),
+      'visibilidad': visibilidad,
       'version': 1,
       'sincronizada': 0,
     });
@@ -308,6 +359,162 @@ class LocalDb {
     final r = await d
         .rawQuery('SELECT MAX(sync_seq) m FROM incidencias_mirror');
     return (r.first['m'] as int?) ?? 0;
+  }
+
+  // -- eventos autoritativos de incidencias v1.2.5 ----------------------
+  // Los escribe SOLO el puente (derivados de la mutación aceptada).
+  // La APK los descarga al espejo; los eventos locales pendientes se
+  // muestran como "por confirmar" hasta que llega el autoritativo.
+
+  Future<void> upsertEventoMirror(Map<String, dynamic> ev) async {
+    final d = await db;
+    await d.insert(
+      'incidencia_eventos_mirror',
+      {
+        'id': ev['id'],
+        'incidencia_id': ev['incidencia_id'],
+        'actor_id': ev['actor_id'],
+        'actor_nombre': ev['actor_nombre'],
+        'accion': ev['accion'],
+        'valor_anterior': ev['valor_anterior'],
+        'valor_nuevo': ev['valor_nuevo'],
+        'nota': ev['nota'],
+        'creada_en': ev['creada_en'],
+        'sync_seq': (ev['sync_seq'] as int?) ?? 0,
+      },
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+  }
+
+  Future<List<Map<String, dynamic>>> eventosMirror(String incidenciaId,
+      {int limit = 100}) async {
+    final d = await db;
+    return d.query('incidencia_eventos_mirror',
+        where: 'incidencia_id=?',
+        whereArgs: [incidenciaId],
+        orderBy: 'sync_seq ASC',
+        limit: limit);
+  }
+
+  Future<int> maxEventoSyncSeq() async {
+    final d = await db;
+    final r = await d.rawQuery(
+        'SELECT MAX(sync_seq) m FROM incidencia_eventos_mirror');
+    return (r.first['m'] as int?) ?? 0;
+  }
+
+  // -- auditoría local v1.2.5 ------------------------------------------
+  // Append-only con hash encadenado: "evidencia de manipulación", no
+  // prueba inviolable. El registro autoritativo lo genera el puente al
+  // aceptar cada op (tabla central sync_auditoria).
+
+  String _hashAuditoria({
+    required String? previo,
+    required String actorId,
+    required String accion,
+    required String objetoTipo,
+    required String objetoId,
+    required String creadaEn,
+  }) {
+    final bytes = utf8.encode(
+        '${previo ?? ''}|$actorId|$accion|$objetoTipo|$objetoId|$creadaEn');
+    return sha256.convert(bytes).toString();
+  }
+
+  /// Inserta un evento de auditoría local. Retorna el id.
+  Future<String> auditoriaInsert({
+    required String actorId,
+    required String actorNombre,
+    required String accion,
+    required String objetoTipo,
+    required String objetoId,
+    Map<String, dynamic>? detalle,
+    required String dispositivoId,
+  }) async {
+    final d = await db;
+    final id =
+        'aud_${DateTime.now().millisecondsSinceEpoch}_${accion.hashCode.abs()}';
+    final creadaEn = DateTime.now().toIso8601String();
+    final prev = await d.rawQuery(
+        'SELECT hash_propio FROM auditoria_local ORDER BY creada_en DESC, rowid DESC LIMIT 1');
+    final hashPrevio =
+        prev.isEmpty ? null : prev.first['hash_propio'] as String?;
+    final hashPropio = _hashAuditoria(
+      previo: hashPrevio,
+      actorId: actorId,
+      accion: accion,
+      objetoTipo: objetoTipo,
+      objetoId: objetoId,
+      creadaEn: creadaEn,
+    );
+    await d.insert('auditoria_local', {
+      'id': id,
+      'actor_id': actorId,
+      'actor_nombre': actorNombre,
+      'accion': accion,
+      'objeto_tipo': objetoTipo,
+      'objeto_id': objetoId,
+      'detalle': detalle != null ? jsonEncode(detalle) : null,
+      'dispositivo_id': dispositivoId,
+      'hash_previo': hashPrevio,
+      'hash_propio': hashPropio,
+      'creada_en': creadaEn,
+      'sincronizada': 0,
+    });
+    return id;
+  }
+
+  Future<List<Map<String, dynamic>>> auditoriaPendientes(
+      {int limit = 200}) async {
+    final d = await db;
+    return d.query('auditoria_local',
+        where: 'sincronizada=?',
+        whereArgs: [0],
+        orderBy: 'creada_en ASC',
+        limit: limit);
+  }
+
+  Future<void> marcarAuditoriaSincronizada(String id) async {
+    final d = await db;
+    await d.update('auditoria_local', {'sincronizada': 1},
+        where: 'id=?', whereArgs: [id]);
+  }
+
+  // -- purga al cambiar de sesión v1.2.5 --------------------------------
+  // Si el dueño descargó privadas y luego entra un entrenador, SQLite las
+  // conservaría. Al cerrar sesión o cambiar de usuario se purgan los datos
+  // sensibles: privadas (mirror y local), borradores y plantillas.
+
+  /// Borra incidencias privadas y datos sensibles locales. Retorna conteo.
+  Future<int> purgarDatosSensibles() async {
+    final d = await db;
+    var n = 0;
+    n += await d.delete('incidencias_mirror',
+        where: "visibilidad='privada'");
+    n += await d.delete('incidencias_local',
+        where: "visibilidad='privada'");
+    n += await d.delete('incidencia_eventos_mirror',
+        where: 'incidencia_id NOT IN (SELECT id FROM incidencias_mirror)');
+    // borradores y plantillas viven en SharedPreferences (perfil.dart);
+    // se purgan desde AuthService.signOut.
+    return n;
+  }
+
+  /// Purga completa al cerrar sesión o cambiar de usuario.
+  /// Llamar ANTES de AuthService.signOut() en cada punto de salida.
+  static Future<void> purgaAlCerrarSesion() async {
+    try {
+      await LocalDb.instance.purgarDatosSensibles();
+    } catch (_) {}
+    try {
+      final p = await SharedPreferences.getInstance();
+      for (final k in p
+          .getKeys()
+          .where((k) => k.startsWith('borrador_') || k.startsWith('plantilla_'))
+          .toList()) {
+        await p.remove(k);
+      }
+    } catch (_) {}
   }
 
   // -- meta (watermark + ajustes) --------------------------------------

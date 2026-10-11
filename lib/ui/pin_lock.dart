@@ -7,6 +7,7 @@ library;
 import 'package:flutter/material.dart';
 
 import '../auth.dart';
+import '../localdb.dart';
 import '../perfil.dart';
 import 'componentes.dart';
 import 'diseno.dart';
@@ -68,6 +69,8 @@ class _PinLockScreenState extends State<PinLockScreen> {
       icono: Icons.lock_open_outlined,
     );
     if (ok != true || !mounted) return;
+    // v1.2.5: purga de datos sensibles antes de cerrar sesión.
+    await LocalDb.purgaAlCerrarSesion();
     await AuthService().signOut();
     await PerfilService.instance.setPinHash(null);
     if (!mounted) return;

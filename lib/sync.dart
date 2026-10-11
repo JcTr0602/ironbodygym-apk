@@ -306,6 +306,8 @@ class SyncEngine {
   }
 
   void _sesionVencida() {
+    // v1.2.5: purga de datos sensibles (best-effort, sin await).
+    unawaited(LocalDb.purgaAlCerrarSesion());
     _auth.signOut();
     onSessionExpired?.call();
   }
@@ -458,6 +460,8 @@ class SyncEngine {
       final marca = fc is int ? fc : int.tryParse('$fc') ?? 0;
       if (marca > ultimo) {
         await _db.setMeta('forzar_cierre_visto', '$marca');
+        // v1.2.5: purga de datos sensibles antes del cierre forzado.
+        await LocalDb.purgaAlCerrarSesion();
         await _auth.signOut();
         onSessionExpired?.call();
       }
@@ -877,6 +881,13 @@ class SyncEngine {
       final msg = e.toString();
       if (!msg.contains('404') && !msg.contains('400')) rethrow;
     }
+    // v1.2.5: eventos autoritativos de incidencias
+    try {
+      await _downloadIncidenciaEventos(silencioso: silencioso);
+    } catch (e) {
+      final msg = e.toString();
+      if (!msg.contains('404') && !msg.contains('400')) rethrow;
+    }
     if (maxSeq > since) {
       await _db.setWatermark(maxSeq);
     }
@@ -893,7 +904,7 @@ class SyncEngine {
       final r = await _getAuth(Uri.parse(
           '$_base/rest/v1/sync_incidencias?select=id,tipo,entidad,entidad_id,'
           'descripcion,detalle,estado,creada_por,creada_en,resuelta_por,'
-          'resuelta_en,nota_resolucion,version,actualizada_en,sync_seq'
+          'resuelta_en,nota_resolucion,visibilidad,version,actualizada_en,sync_seq'
           '&sync_seq=gt.$pageWm&order=sync_seq.asc&limit=200'));
       if (r.statusCode == 404 || r.statusCode == 400) {
         // Tabla aún no existe en Supabase: se omite silenciosamente.
@@ -914,19 +925,59 @@ class SyncEngine {
     }
   }
 
+  /// v1.2.5: descarga incremental de eventos autoritativos de incidencias.
+  /// Los genera el puente al aceptar cada mutación. RLS en Supabase ya
+  /// filtra por visibilidad para no-admin.
+  Future<void> _downloadIncidenciaEventos({bool silencioso = false}) async {
+    var pageWm = await _db.maxEventoSyncSeq();
+    while (true) {
+      final r = await _getAuth(Uri.parse(
+          '$_base/rest/v1/sync_incidencia_eventos?select=id,incidencia_id,'
+          'actor_id,actor_nombre,accion,valor_anterior,valor_nuevo,nota,'
+          'creada_en,sync_seq'
+          '&sync_seq=gt.$pageWm&order=sync_seq.asc&limit=200'));
+      if (r.statusCode == 404 || r.statusCode == 400) {
+        // Tabla aún no existe en Supabase: se omite silenciosamente.
+        return;
+      }
+      if (r.statusCode != 200) {
+        throw Exception('bajada eventos incidencia: HTTP ${r.statusCode}');
+      }
+      final rows = jsonDecode(r.body) as List;
+      if (rows.isEmpty) break;
+      for (final row in rows) {
+        final m = Map<String, dynamic>.from(row as Map);
+        final seq = (m['sync_seq'] as int?) ?? 0;
+        await _db.upsertEventoMirror(m);
+        if (seq > pageWm) pageWm = seq;
+      }
+      if (rows.length < 200) break;
+    }
+  }
+
   /// v1.2.4: reporta una incidencia (offline-first).
   /// 1) Guarda local. 2) Encola op 'incidencia' para el servidor.
   /// Retorna el id local (UUID).
+  /// v1.2.5: visibilidad ('compartida' por defecto; 'privada' solo admin —
+  /// la UI no ofrece la opción a entrenadores y el puente la valida).
   Future<String> reportarIncidencia({
     required String tipo,
     required String descripcion,
     String? entidad,
     int? entidadId,
     Map<String, dynamic>? detalle,
+    String visibilidad = 'compartida',
   }) async {
     const tipos = {'stock', 'rechazo', 'sync', 'foto'};
     if (!tipos.contains(tipo)) throw ArgumentError('tipo inválido');
     if (descripcion.trim().isEmpty) throw ArgumentError('descripción vacía');
+    if (visibilidad != 'compartida' && visibilidad != 'privada') {
+      throw ArgumentError('visibilidad inválida');
+    }
+    // Defensa en profundidad: solo admin puede crear privadas.
+    if (visibilidad == 'privada' && !_auth.isAdmin) {
+      throw StateError('solo el dueño puede crear incidencias privadas');
+    }
     final u = _auth.username;
     final creadaPor =
         u.isNotEmpty ? u : (_auth.userId ?? 'desconocido');
@@ -937,6 +988,7 @@ class SyncEngine {
       entidad: entidad,
       entidadId: entidadId,
       detalle: detalle,
+      visibilidad: visibilidad,
     );
     await _db.queueOp(
       opUuid: const Uuid().v4(),
@@ -948,6 +1000,7 @@ class SyncEngine {
         'entidad': entidad,
         'entidad_id': entidadId,
         'detalle': detalle,
+        'visibilidad': visibilidad,
       },
     );
     return id;
@@ -956,6 +1009,8 @@ class SyncEngine {
   /// v1.2.4: solicita cambio de estado de una incidencia.
   /// Encola op 'incidencia_estado'; el servidor valida transición,
   /// permisos y concurrencia. Actualización optimista del mirror local.
+  /// v1.2.5 (4.2 adelantado): enforcement en dominio, no solo UI.
+  /// Resolver o reabrir exige admin; el servidor revalida al sincronizar.
   Future<void> cambiarEstadoIncidencia({
     required String id,
     required String nuevoEstado,
@@ -965,6 +1020,14 @@ class SyncEngine {
     final actual = mirror.where((m) => m['id'] == id).toList();
     if (actual.isEmpty) throw ArgumentError('incidencia no encontrada');
     final row = actual.first;
+    final estadoActual = '${row['estado']}';
+    final esResolucion = nuevoEstado == 'resuelta';
+    final esReapertura =
+        estadoActual == 'resuelta' && nuevoEstado != 'resuelta';
+    if ((esResolucion || esReapertura) && !_auth.isAdmin) {
+      throw StateError(
+          'solo el dueño puede ${esResolucion ? 'resolver' : 'reabrir'}');
+    }
     await _db.queueOp(
       opUuid: const Uuid().v4(),
       tipo: 'incidencia_estado',
@@ -982,6 +1045,57 @@ class SyncEngine {
       'estado': nuevoEstado,
       'nota_resolucion': notaResolucion ?? row['nota_resolucion'],
     });
+  }
+
+  /// v1.2.5: registra un evento de auditoría local (hash encadenado) y
+  /// encola la op 'auditoria' para el registro autoritativo del puente.
+  /// "Quién hizo qué": acciones sensibles del dominio.
+  Future<String> registrarAuditoria({
+    required String accion,
+    required String objetoTipo,
+    required String objetoId,
+    Map<String, dynamic>? detalle,
+  }) async {
+    if (accion.trim().isEmpty) throw ArgumentError('acción vacía');
+    final actorId = _auth.userId ?? _auth.username;
+    final actorNombre = _auth.displayName;
+    // v1.2.5: dispositivo_id estable por instalación (perfil.dart).
+    final dispositivoId = await _db.getMeta('device_id') ?? 'desconocido';
+    final id = await _db.auditoriaInsert(
+      actorId: actorId,
+      actorNombre: actorNombre,
+      accion: accion.trim(),
+      objetoTipo: objetoTipo,
+      objetoId: objetoId,
+      detalle: detalle,
+      dispositivoId: dispositivoId,
+    );
+    // El hash previo/propio viajan para verificación cruzada en servidor.
+    final rows = await _db.auditoriaPendientes(limit: 1);
+    final ultimo = rows.isEmpty
+        ? null
+        : rows.firstWhere((r) => r['id'] == id, orElse: () => rows.first);
+    await _db.queueOp(
+      opUuid: const Uuid().v4(),
+      tipo: 'auditoria',
+      payload: {
+        'id': id,
+        'accion': accion.trim(),
+        'objeto_tipo': objetoTipo,
+        'objeto_id': objetoId,
+        'detalle': detalle,
+        'hash_previo': ultimo?['hash_previo'],
+        'hash_propio': ultimo?['hash_propio'],
+      },
+    );
+    return id;
+  }
+
+  /// Marca las auditorías como sincronizadas tras confirmar el servidor.
+  Future<void> confirmarAuditorias(List<String> ids) async {
+    for (final id in ids) {
+      await _db.marcarAuditoriaSincronizada(id);
+    }
   }
 
   /// Baja el estado final de las ops enviadas (el puente las marca como

@@ -355,6 +355,8 @@ class _HomeScreenState extends State<HomeScreen>
       ),
     );
     if (ok != true) return;
+    // v1.2.5: purga de datos sensibles antes de cerrar sesión.
+    await LocalDb.purgaAlCerrarSesion();
     await _auth.signOut();
     if (!mounted) return;
     Navigator.of(context).pushReplacement(
