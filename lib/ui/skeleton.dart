@@ -5,6 +5,7 @@
 library;
 import 'package:flutter/material.dart';
 
+import 'componentes.dart';
 import 'diseno.dart';
 
 /// Una línea de skeleton con ancho configurable.
