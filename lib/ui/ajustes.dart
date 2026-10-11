@@ -783,7 +783,16 @@ class _AjustesScreenState extends State<AjustesScreen> {
       icono: Icons.sync_outlined,
     );
     if (ok != true) return;
-    _msg('Funcionalidad en desarrollo para v1.2.2');
+    try {
+      final n = await LocalDb.instance.reencolarFotos(tipo: tipo);
+      if (!mounted) return;
+      _msg(n > 0
+          ? 'Se re-encolaron $n foto(s) para subir.'
+          : 'No hay fotos pendientes de sincronizar.');
+    } catch (e) {
+      if (!mounted) return;
+      _msg('Error al resincronizar: $e');
+    }
   }
 
   // ---------- Acerca de ----------
@@ -1269,10 +1278,7 @@ class _AjustesScreenState extends State<AjustesScreen> {
                       'Libera espacio; se descargan al sincronizar',
                   onTap: _limpiarCache,
                 ),
-                // v1.2.2: resincronizar fotos (solo dueño)
-                // TEMPORALMENTE OCULTO: la funcionalidad no está implementada.
-                // No publicar botones falsos (Hark).
-                /*
+                // v1.2.3: resincronizar fotos (solo dueño) - implementado
                 if (AuthService().isOwner)
                   _opcion(
                     icono: Icons.sync_outlined,
@@ -1289,7 +1295,6 @@ class _AjustesScreenState extends State<AjustesScreen> {
                         'Re-sube fotos que no se sincronizaron',
                     onTap: () => _resincronizarFotos('suplementos'),
                   ),
-                */
 
                 // ----- ACERCA DE -----
                 _seccion('Acerca de'),

@@ -392,6 +392,26 @@ class LocalDb {
         where: 'id=?', whereArgs: [fotoId]);
   }
 
+  /// v1.2.3: Re-encola fotos pendientes o fallidas para reintento.
+  /// Retorna la cantidad de fotos re-encoladas.
+  Future<int> reencolarFotos({String? tipo}) async {
+    final d = await db;
+    String where = "estado != 'lista'";
+    List<dynamic> args = [];
+    if (tipo == 'clientes') {
+      where += " AND cliente_id IS NOT NULL";
+    } else if (tipo == 'suplementos') {
+      where += " AND suplemento_id IS NOT NULL";
+    }
+    final count = await d.update(
+      'fotos_pendientes',
+      {'estado': 'pendiente'},
+      where: where,
+      whereArgs: args.isEmpty ? null : args,
+    );
+    return count;
+  }
+
   /// Cierra la base de datos (para reemplazar el archivo al importar).
   Future<void> close() async {
     final d = _db;
