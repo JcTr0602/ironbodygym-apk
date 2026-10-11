@@ -142,9 +142,9 @@ class _VentaSuplementoScreenState
           cancelar: '');
       return;
     }
-    final esCup = _moneda == 'CUP';
+    final esUsd = _moneda == 'USD';
     final tasa = _tasaUsd;
-    if (esCup && (tasa == null || tasa <= 0)) {
+    if (esUsd && (tasa == null || tasa <= 0)) {
       await DialogoApp.confirmar(context,
           titulo: 'Revisa la valoración',
           mensaje:
@@ -180,7 +180,7 @@ class _VentaSuplementoScreenState
     final conPromo = _promoActiva &&
         (_tipoComprador == 'cliente' ||
             _tipoComprador == 'inscribir_nuevo');
-    final lineaMoneda = !esCup
+    final lineaMoneda = esUsd
         ? 'Precio: ${precio.toStringAsFixed(2)} USD'
             ' (tasa ${tasa!.toStringAsFixed(2)} CUP/USD)'
             '${_precioDifiere ? ' — difiere del oficial' : ''}\n'
@@ -213,7 +213,7 @@ class _VentaSuplementoScreenState
           'cantidad': _cantidad,
           'precio': precio,
           'moneda': _moneda,
-          if (esCup) 'usd_tasa': tasa,
+          if (esUsd) 'usd_tasa': tasa,
           // ChatGPT CRÍTICO 2: el servidor solo acepta 'cliente'|'externo'.
           // 'externo_nombre' y 'externo_generico' se mapean a 'externo'.
           'comprador_tipo':
