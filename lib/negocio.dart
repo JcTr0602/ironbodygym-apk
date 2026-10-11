@@ -37,16 +37,91 @@ Future<List<Map<String, dynamic>>> _activos() async {
 }
 
 /// Búsqueda por nombre (usa nombre_norm si viene en el espejo).
+/// v1.2.5 (A24): búsqueda tolerante.
+/// - Insensible a tildes/mayúsculas (vía _norm).
+/// - Multi-token: todos los tokens deben aparecer (en cualquier orden).
+/// - Tolerancia a typos: distancia Levenshtein ≤ 2 por token (para tokens
+///   de 4+ letras), para errores de dedo comunes.
+/// - Teléfonos: solo dígitos, match por sufijo (ej. "5819" encuentra
+///   "58191577").
 Future<List<Map<String, dynamic>>> buscarClientes(String q) async {
   final nq = _norm(q);
   if (nq.isEmpty) return [];
+  final digitos =
+      q.replaceAll(RegExp(r'[^0-9]'), '');
   final rows = await _activos();
-  final res = rows.where((c) {
+  // Si la query es numérica, buscar por teléfono primero.
+  if (digitos.isNotEmpty && digitos.length >= 3) {
+    final porTel = rows.where((c) {
+      final tel = '${c['telefono'] ?? ''}'.replaceAll(RegExp(r'[^0-9]'), '');
+      final mov = '${c['movil'] ?? ''}'.replaceAll(RegExp(r'[^0-9]'), '');
+      return tel.endsWith(digitos) || mov.endsWith(digitos);
+    }).toList();
+    if (porTel.isNotEmpty) {
+      porTel.sort((a, b) => '${a['nombre']}'.compareTo('${b['nombre']}'));
+      return porTel;
+    }
+  }
+  final tokens = nq.split(RegExp(r'\s+')).where((t) => t.isNotEmpty).toList();
+  final scored = <Map<String, dynamic>, int>{};
+  for (final c in rows) {
     final norm = (c['nombre_norm'] as String?) ?? _norm('${c['nombre']}');
-    return norm.contains(nq);
-  }).toList();
-  res.sort((a, b) => '${a['nombre']}'.compareTo('${b['nombre']}'));
+    final palabras = norm.split(RegExp(r'\s+'));
+    var ok = true;
+    var score = 0;
+    for (final t in tokens) {
+      // 1) substring exacto (rápido, el caso común).
+      if (norm.contains(t)) {
+        // Bonus si es prefijo de palabra (más relevante).
+        if (palabras.any((p) => p.startsWith(t))) score += 2;
+        continue;
+      }
+      // 2) typo tolerante por token.
+      var mejor = 999;
+      for (final p in palabras) {
+        final d = _levenshtein(t, p);
+        if (d < mejor) mejor = d;
+      }
+      final umbral = t.length >= 6 ? 2 : (t.length >= 4 ? 1 : 0);
+      if (mejor <= umbral) {
+        score += 1;
+        continue;
+      }
+      ok = false;
+      break;
+    }
+    if (ok) scored[c] = score;
+  }
+  final res = scored.keys.toList();
+  // Más score primero, luego alfabético.
+  res.sort((a, b) {
+    final s = scored[b]!.compareTo(scored[a]!);
+    if (s != 0) return s;
+    return '${a['nombre']}'.compareTo('${b['nombre']}');
+  });
   return res;
+}
+
+/// Distancia de Levenshtein (para typos en búsqueda).
+int _levenshtein(String a, String b) {
+  if (a == b) return 0;
+  if (a.isEmpty) return b.length;
+  if (b.isEmpty) return a.length;
+  // Solo necesitamos la fila anterior.
+  var prev = List<int>.generate(b.length + 1, (i) => i);
+  for (var i = 1; i <= a.length; i++) {
+    var curr = <int>[i];
+    for (var j = 1; j <= b.length; j++) {
+      final costo = a[i - 1] == b[j - 1] ? 0 : 1;
+      curr.add([
+        prev[j] + 1, // borrado
+        curr[j - 1] + 1, // inserción
+        prev[j - 1] + costo, // sustitución
+      ].reduce((x, y) => x < y ? x : y));
+    }
+    prev = curr;
+  }
+  return prev[b.length];
 }
 
 /// Clientes al día: activos con pagado_hasta >= hoy (no vencidos).

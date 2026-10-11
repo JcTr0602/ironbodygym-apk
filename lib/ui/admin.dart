@@ -20,6 +20,7 @@ import '../tipos_pago.dart';
 import 'componentes.dart';
 import 'diseno.dart';
 import 'admin_secciones.dart';
+import 'historial_caja.dart';
 import 'exportar_excel.dart';
 import 'widgets.dart';
 
@@ -790,6 +791,14 @@ class _AdminScreenState extends State<AdminScreen> {
                           'Incidencias',
                           'Errores que requieren atención',
                           () => _ir(const SeccionIncidenciasScreen()),
+                        ),
+                        // v1.2.5 (2.5): historial de caja por entrenador.
+                        _tarjetaHub(
+                          'C',
+                          Icons.history_outlined,
+                          'Historial de caja',
+                          'Cierres por entrenador y fecha',
+                          () => _ir(const HistorialCajaScreen()),
                         ),
                       ],
                     ),

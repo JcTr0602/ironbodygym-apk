@@ -10,6 +10,7 @@ import 'package:flutter/material.dart';
 import '../auth.dart';
 import '../localdb.dart';
 import '../negocio.dart';
+import '../sync.dart';
 import 'componentes.dart';
 import 'diseno.dart';
 import 'ficha.dart';
@@ -231,7 +232,11 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
   }
 
   /// Diálogo de cierre de turno con resumen del día (v1.0.16, idea 1).
-  void _cierreTurno() {
+  /// v1.2.5 (2.4): cierre protegido. Antes de cerrar, verifica ops
+  /// pendientes/error; si hay, muestra el detalle con "reintentar" y
+  /// "sincronizar ahora". Permite cerrar con pendientes bajo
+  /// confirmación explícita del riesgo.
+  Future<void> _cierreTurno() async {
     final nOps = _historial.isNotEmpty
         ? ((_historial
                     .firstWhere((h) => h['fecha'] == _hoy(),
@@ -239,6 +244,11 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
                 as List?)?.length ??
             0)
         : 0;
+    // v1.2.5 (2.4): ops del turno sin sincronizar.
+    final pendientes =
+        await LocalDb.instance.pendientesParaEnvio(_auth.userId);
+    final bloqueadas = await LocalDb.instance.opsNecesitanRevision();
+    if (!mounted) return;
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -269,6 +279,61 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
                   fontSize: 12,
                   color: AppColores.textoSecundario(ctx)),
             ),
+            // v1.2.5 (2.4): aviso si hay ops sin sincronizar.
+            if (!_cerrado &&
+                (pendientes.isNotEmpty || bloqueadas.isNotEmpty)) ...[
+              const SizedBox(height: 12),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: AppColores.alerta
+                      .withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                      color: AppColores.alerta
+                          .withValues(alpha: 0.4)),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        const Icon(Icons.warning_amber_rounded,
+                            color: AppColores.alerta,
+                            size: 18),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: Text(
+                            '${pendientes.length + bloqueadas.length} '
+                            'cambio${pendientes.length + bloqueadas.length == 1 ? '' : 's'} '
+                            'sin sincronizar',
+                            style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 13),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    const Text(
+                      'Se guardaron en este teléfono. Si cierras ahora, '
+                      'se enviarán cuando haya conexión.',
+                      style: TextStyle(fontSize: 12),
+                    ),
+                    if (bloqueadas.isNotEmpty) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        '${bloqueadas.length} necesitan revisión manual.',
+                        style: const TextStyle(
+                            fontSize: 12,
+                            color: AppColores.error,
+                            fontWeight: FontWeight.w600),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ],
             if (_cerrado) ...[
               const SizedBox(height: 8),
               const Row(
@@ -291,11 +356,53 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
             child:
                 Text(_cerrado ? 'Cerrar' : 'Cancelar'),
           ),
+          // v1.2.5 (2.4): sincronizar antes de cerrar.
+          if (!_cerrado &&
+              (pendientes.isNotEmpty || bloqueadas.isNotEmpty))
+            TextButton.icon(
+              icon: const Icon(Icons.sync, size: 18),
+              label: const Text('Sincronizar ahora'),
+              onPressed: () async {
+                Navigator.of(ctx).pop();
+                await SyncEngine.instance.run(forzar: true);
+                if (mounted) _cierreTurno();
+              },
+            ),
           if (!_cerrado)
             ElevatedButton.icon(
               icon: const Icon(Icons.done_all, size: 18),
-              label: const Text('Confirmar cierre'),
+              label: Text(pendientes.isNotEmpty || bloqueadas.isNotEmpty
+                  ? 'Cerrar de todos modos'
+                  : 'Confirmar cierre'),
               onPressed: () async {
+                // v1.2.5 (2.4): confirmación explícita del riesgo.
+                if ((pendientes.isNotEmpty ||
+                        bloqueadas.isNotEmpty) &&
+                    ctx.mounted) {
+                  final confirma = await showDialog<bool>(
+                    context: ctx,
+                    builder: (c2) => AlertDialog(
+                      title: const Text('¿Cerrar con pendientes?'),
+                      content: Text(
+                          '${pendientes.length + bloqueadas.length} '
+                          'cambio${pendientes.length + bloqueadas.length == 1 ? '' : 's'} '
+                          'aún no se sincronizaron. Quedarán guardados '
+                          'en este teléfono.'),
+                      actions: [
+                        TextButton(
+                            onPressed: () =>
+                                Navigator.pop(c2, false),
+                            child: const Text('Volver')),
+                        FilledButton(
+                            onPressed: () =>
+                                Navigator.pop(c2, true),
+                            child:
+                                const Text('Sí, cerrar')),
+                      ],
+                    ),
+                  );
+                  if (confirma != true) return;
+                }
                 await LocalDb.instance.setMeta(
                     _claveCierre(),
                     DateTime.now().toIso8601String());

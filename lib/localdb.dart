@@ -576,6 +576,35 @@ class LocalDb {
     }
   }
 
+  /// v1.2.5 (2.5): historial de cierres de turno (para admin).
+  /// Retorna [{fecha, turno, telegram_id, cerrado_en}] ordenado desc.
+  Future<List<Map<String, dynamic>>> historialCierres() async {
+    final d = await db;
+    try {
+      final rows = await d.query('meta',
+          columns: ['k', 'v'],
+          where: "k LIKE 'cierre_turno_%'",
+          orderBy: 'k DESC');
+      final res = <Map<String, dynamic>>[];
+      for (final r in rows) {
+        final k = '${r['k']}';
+        // formato: cierre_turno_YYYY-MM-DD_<turno>_<telegramId>
+        final partes = k.split('_');
+        if (partes.length >= 5) {
+          res.add({
+            'fecha': partes[2],
+            'turno': partes[3],
+            'telegram_id': partes[4],
+            'cerrado_en': r['v'],
+          });
+        }
+      }
+      return res;
+    } catch (_) {
+      return [];
+    }
+  }
+
   /// Purga completa al cerrar sesión o cambiar de usuario.
   /// Llamar ANTES de AuthService.signOut() en cada punto de salida.
   static Future<void> purgaAlCerrarSesion() async {
