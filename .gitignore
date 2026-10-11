@@ -56,3 +56,7 @@ android/*.jks
 # Artefactos de build locales (APKs/ZIPs generados aquí)
 build-artifacts/
 android/build/
+
+# SQL de trabajo local: no versionar
+supabase-estabilizacion-riesgosa.sql
+supabase-estabilizacion-segura.sql

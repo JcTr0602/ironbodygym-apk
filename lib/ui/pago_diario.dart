@@ -11,6 +11,7 @@ import 'package:uuid/uuid.dart';
 import '../localdb.dart';
 import '../negocio.dart';
 import '../sync.dart';
+import '../tiempo.dart';
 import 'componentes.dart';
 import 'diseno.dart';
 import 'widgets.dart';
@@ -122,6 +123,8 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
   void _trasGuardar(String? uuid, int cantidad) {
     _cargarHoy();
     SyncEngine.instance.push();
+    // v1.2.6 (Gemini): confirmación háptica al cobrar.
+    vibrarConfirmacion();
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
       content: Text('$cantidad pago(s) guardado(s)'),

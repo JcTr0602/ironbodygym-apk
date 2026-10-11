@@ -18,6 +18,7 @@ import '../negocio.dart';
 import '../localdb.dart';
 import '../permisos.dart';
 import '../sync.dart';
+import '../tiempo.dart';
 import '../tipos_pago.dart';
 import 'auditoria.dart';
 import 'categorias_suplemento.dart';
@@ -1008,6 +1009,8 @@ class _SeccionIncidenciasScreenState
       await SyncEngine.instance.reportarIncidencia(
           tipo: tipo, descripcion: desc, visibilidad: visibilidad);
       await _cargar();
+      // v1.2.6 (Gemini): confirmación háptica en acción crítica.
+      await vibrarConfirmacion();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
             content: Text('Incidencia guardada ⏳ (se sincronizará)')));

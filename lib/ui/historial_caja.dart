@@ -10,6 +10,7 @@ import '../localdb.dart';
 import '../negocio.dart';
 import 'componentes.dart';
 import 'diseno.dart';
+import 'skeleton.dart';
 
 class HistorialCajaScreen extends StatefulWidget {
   const HistorialCajaScreen({super.key});
@@ -29,12 +30,18 @@ class _HistorialCajaScreenState extends State<HistorialCajaScreen> {
   }
 
   Future<void> _cargar() async {
-    final cierres = await LocalDb.instance.historialCierres();
+    // v1.2.5-rev5: desde el espejo sincronizado (admin ve todos los
+    // entrenadores). Fallback al meta local si el espejo está vacío.
+    var cierres = await LocalDb.instance.historialCierresMirror();
+    cierres ??= [];
+    if (cierres.isEmpty) {
+      cierres = await LocalDb.instance.historialCierres();
+    }
     // Enriquece con el cobrado del día (del espejo de pagos).
     final res = <Map<String, dynamic>>[];
     for (final c in cierres) {
       final cobrado = await _cobradoDia(
-          '${c['fecha']}', '${c['telegram_id']}');
+          '${c['fecha']}', '${c['telegram_id'] ?? c['entrenador_id']}');
       res.add({...c, 'cobrado': cobrado});
     }
     if (mounted) {
@@ -73,7 +80,11 @@ class _HistorialCajaScreenState extends State<HistorialCajaScreen> {
     return Scaffold(
       appBar: AppBar(title: const Text('Historial de caja')),
       body: _cargando
-          ? const Center(child: CircularProgressIndicator())
+          // v1.2.6 (Gemini): skeleton consistente con el resto de listas.
+          ? const Padding(
+              padding: EdgeInsets.all(16),
+              child: SkeletonLista(items: 4),
+            )
           : _cierres.isEmpty
               ? const EstadoVacio(
                   icono: Icons.history_outlined,

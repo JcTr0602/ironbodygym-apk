@@ -47,8 +47,7 @@ Future<List<Map<String, dynamic>>> _activos() async {
 Future<List<Map<String, dynamic>>> buscarClientes(String q) async {
   final nq = _norm(q);
   if (nq.isEmpty) return [];
-  final digitos =
-      q.replaceAll(RegExp(r'[^0-9]'), '');
+  final digitos = q.replaceAll(RegExp(r'[^0-9]'), '');
   final rows = await _activos();
   // Si la query es numérica, buscar por teléfono primero.
   if (digitos.isNotEmpty && digitos.length >= 3) {
@@ -62,21 +61,38 @@ Future<List<Map<String, dynamic>>> buscarClientes(String q) async {
       return porTel;
     }
   }
+  // v1.2.5-rev5 (Gemini): vía rápida por FTS5 (índice SQLite, no bloquea la
+  // UI). Solo si devuelve pocos resultados se aplica la tolerancia a typos
+  // (Levenshtein) sobre un conjunto acotado.
+  final porId = {for (final c in rows) c['id']: c};
+  final ftsIds = await LocalDb.instance.buscarClientesFtsIds(nq);
+  final vistos = <int>{};
+  final resultado = <Map<String, dynamic>>[];
+  for (final id in ftsIds) {
+    final c = porId[id];
+    if (c != null && (c['estado'] == 'activo')) {
+      resultado.add(c);
+      vistos.add(id);
+    }
+  }
+  if (resultado.length >= 5) {
+    resultado.sort((a, b) => '${a['nombre']}'.compareTo('${b['nombre']}'));
+    return resultado;
+  }
+  // Tolerancia a typos: solo sobre los no encontrados por FTS.
   final tokens = nq.split(RegExp(r'\s+')).where((t) => t.isNotEmpty).toList();
   final scored = <Map<String, dynamic>, int>{};
   for (final c in rows) {
+    if (vistos.contains(c['id'])) continue;
     final norm = (c['nombre_norm'] as String?) ?? _norm('${c['nombre']}');
     final palabras = norm.split(RegExp(r'\s+'));
     var ok = true;
     var score = 0;
     for (final t in tokens) {
-      // 1) substring exacto (rápido, el caso común).
       if (norm.contains(t)) {
-        // Bonus si es prefijo de palabra (más relevante).
         if (palabras.any((p) => p.startsWith(t))) score += 2;
         continue;
       }
-      // 2) typo tolerante por token.
       var mejor = 999;
       for (final p in palabras) {
         final d = _levenshtein(t, p);
@@ -92,14 +108,13 @@ Future<List<Map<String, dynamic>>> buscarClientes(String q) async {
     }
     if (ok) scored[c] = score;
   }
-  final res = scored.keys.toList();
-  // Más score primero, luego alfabético.
-  res.sort((a, b) {
+  final resto = scored.keys.toList();
+  resto.sort((a, b) {
     final s = scored[b]!.compareTo(scored[a]!);
     if (s != 0) return s;
     return '${a['nombre']}'.compareTo('${b['nombre']}');
   });
-  return res;
+  return [...resultado, ...resto];
 }
 
 /// Distancia de Levenshtein (para typos en búsqueda).
@@ -439,6 +454,17 @@ double _montoEfectivoOp(
     return cant * pr['diario']!;
   }
   return 0;
+}
+
+/// Monto en efectivo que representan una lista de ops encoladas.
+/// Suma lo cobrado en efectivo según [_montoEfectivoOp].
+Future<double> montoEfectivoOps(List<Map<String, dynamic>> ops) async {
+  final pr = await preciosVigentes();
+  double total = 0;
+  for (final op in ops) {
+    total += _montoEfectivoOp(op, pr);
+  }
+  return total;
 }
 
 /// Dinero en efectivo que el entrenador logueado aún no le entrega al dueño.

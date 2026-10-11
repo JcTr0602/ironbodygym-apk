@@ -172,4 +172,7 @@ Duration backoffReintento(int intentos) {
 }
 
 /// Intentos máximos de transitorios antes de 'necesita_revision'.
-const maxIntentosTransitorio = 5;
+/// v1.2.5-rev5 (Gemini): 5 intentos cubrían ~12 min; en Cuba los cortes de
+/// 20+ min son normales. Con backoff topado a 5 min, 25 intentos ≈ 2 h de
+/// cobertura antes de pedir revisión manual.
+const maxIntentosTransitorio = 25;

@@ -9,6 +9,7 @@ import 'package:flutter/material.dart';
 import '../localdb.dart';
 import '../negocio.dart';
 import '../sync.dart';
+import '../tiempo.dart';
 import 'componentes.dart';
 import 'diseno.dart';
 
@@ -66,6 +67,8 @@ class _ColaScreenState extends State<ColaScreen> {
         'intentos=0 WHERE op_uuid=?',
         [opUuid]);
     await _cargar();
+    // v1.2.6 (Gemini): confirmación háptica en reintento manual.
+    await vibrarConfirmacion();
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
           content: Text('Se reintentará en la próxima sincronización')));

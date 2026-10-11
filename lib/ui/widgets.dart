@@ -131,9 +131,11 @@ class _SyncBannerState extends State<SyncBanner>
                 Color(0xFFD97706)
               ];
               icono = Icons.schedule;
+              // v1.2.6 (Gemini): prioriza lo pendiente sobre el último sync.
+              final nCambios = '${s.pending} cambio${s.pending == 1 ? '' : 's'}';
               subtitulo = s.ultimoSincronizado != null
-                  ? 'Sincronizado ${_hace(s.ultimoSincronizado)} · toca para enviar'
-                  : 'Toca para enviar';
+                  ? '$nCambios listos para subir · Último respaldo ${_hace(s.ultimoSincronizado)}'
+                  : '$nCambios listos para subir';
             } else if (s.hayNovedades) {
               gradiente = const [
                 Color(0xFF60A5FA),

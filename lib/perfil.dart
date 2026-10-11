@@ -196,6 +196,13 @@ class PerfilService {
   /// 5 min; luego 15, 30, 60. El contador de "ciclos de bloqueo" persiste.
   /// Limitación honesta: sin reloj monotónico persistente, si el reloj del
   /// dispositivo retrocede bruscamente se mantiene el bloqueo (no se acorta).
+  /// v1.2.5-rev5: Stopwatch monotónico en memoria para detectar adelantos
+  /// del reloj durante la sesión (no sobrevive reinicios; el wall clock
+  /// con protección de retroceso cubre el resto).
+  static final Stopwatch _mono = Stopwatch()..start();
+  static int _monoAnclaMs = 0;
+  static int _lockoutDurMs = 0;
+
   Future<bool> verificarPin(String pin) async {
     final ahora = DateTime.now().millisecondsSinceEpoch;
     final hasta = await getPinBloqueadoHasta();
@@ -208,6 +215,19 @@ class PerfilService {
     }
     await (await _p).setInt('seg_pin_ultima_vez', ahora);
     if (ahora < hasta) return false;
+    // v1.2.5-rev5 (Gemini): si el reloj se ADELANTÓ para eludir el bloqueo,
+    // el wall clock ya pasó 'hasta' pero el tiempo monotónico (Stopwatch,
+    // no manipulable desde ajustes) aún no cubre la duración del bloqueo.
+    // Se reancla 'hasta' al futuro con el tiempo restante real.
+    if (hasta > 0 && _lockoutDurMs > 0) {
+      final transcurridoMono = _mono.elapsedMilliseconds - _monoAnclaMs;
+      if (transcurridoMono < _lockoutDurMs) {
+        final restante = _lockoutDurMs - transcurridoMono;
+        await (await _p).setInt('seg_pin_bloqueado_hasta', ahora + restante);
+        return false;
+      }
+      _lockoutDurMs = 0; // expiró legítimamente
+    }
     final guardado = await getPinHash();
     if (guardado == null || guardado.isEmpty) return false;
     final ok = _pinCoincide(pin, guardado, await getPinSalt());
@@ -224,6 +244,9 @@ class PerfilService {
       final minBloqueo = minutos[ciclos.clamp(0, minutos.length - 1)];
       await (await _p).setInt(
           'seg_pin_bloqueado_hasta', ahora + minBloqueo * 60 * 1000);
+      // v1.2.5-rev5: anclar duración monotónica para detectar adelantos.
+      _monoAnclaMs = _mono.elapsedMilliseconds;
+      _lockoutDurMs = minBloqueo * 60 * 1000;
       await (await _p).setInt('seg_pin_ciclos_bloqueo', ciclos + 1);
       await _setPinFallos(0);
     }
@@ -236,6 +259,7 @@ class PerfilService {
     await p.setInt('seg_pin_fallos', 0);
     await p.setInt('seg_pin_bloqueado_hasta', 0);
     await p.setInt('seg_pin_ciclos_bloqueo', 0);
+    _lockoutDurMs = 0; // v1.2.5-rev5: limpiar ancla monotónica
   }
 
   /// Minutos restantes de bloqueo del PIN (0 si no está bloqueado).

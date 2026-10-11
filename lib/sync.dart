@@ -758,13 +758,15 @@ class SyncEngine {
   Future<int> _download({bool silencioso = false}) async {
     // v1.2.5 (D19): si el manifiesto marcó algún ámbito divergente,
     // re-descarga completa desde cero en este ciclo.
+    // v1.2.5-rev5 (Gemini): reseteo GRANULAR por tabla, no nuclear global.
+    // Cada flag 'forzar_redescarga_<tabla>' hace que solo esa tabla se
+    // re-descargue desde 0; las demás usan el watermark global normal.
+    final tablasReseteadas = <String>{};
     try {
       final flags = await _db.metasConPrefijo('forzar_redescarga_');
-      if (flags.isNotEmpty) {
-        await _db.setWatermark(0);
-        for (final k in flags) {
-          await _db.setMeta(k, '');
-        }
+      for (final k in flags) {
+        tablasReseteadas.add(k.replaceFirst('forzar_redescarga_', ''));
+        await _db.setMeta(k, '');
       }
     } catch (_) {}
     // ajustes + server_seq (para verificación de sincronización)
@@ -816,6 +818,7 @@ class SyncEngine {
       'suplementos',
       'ventas_suplementos',
       'categorias_suplemento', // v1.2.1
+      'turnos_cierre', // v1.2.5-rev5
     ];
     const supTablas = {
       'clientes': 'sync_clientes',
@@ -826,6 +829,8 @@ class SyncEngine {
       'ventas_suplementos': 'sync_ventas_suplementos',
       // v1.2.1: si el servidor no tiene la tabla, el pull la omite.
       'categorias_suplemento': 'sync_categorias_suplemento',
+      // v1.2.5-rev5: cierres sincronizados (si no existe, se omite).
+      'turnos_cierre': 'sync_turnos_cierre',
     };
     var ti = 0;
     for (final tabla in tablas) {
@@ -838,7 +843,9 @@ class SyncEngine {
             progreso: ti / (tablas.length + 1));
       }
       try {
-        var pageWm = since;
+        // v1.2.5-rev5: si esta tabla divergió (manifiesto), re-descarga
+        // solo ella desde 0; las demás usan el watermark global normal.
+        var pageWm = tablasReseteadas.contains(tabla) ? 0 : since;
         while (true) {
           // gastos tiene esquema plano en Supabase (sin columna 'data')
           final select = tabla == 'gastos'
@@ -1224,6 +1231,35 @@ class SyncEngine {
       'estado': nuevoEstado,
       'nota_resolucion': notaResolucion ?? row['nota_resolucion'],
     });
+  }
+
+  /// v1.2.5-rev5 (Gemini): encola el cierre de turno para sincronizar.
+  /// El puente lo publica a sync_turnos_cierre; el admin ve el historial
+  /// de todos los entrenadores. La marca local en meta se mantiene para
+  /// el estado inmediato sin esperar la red.
+  Future<String> registrarCierreTurno({
+    required String fecha,
+    required String turno,
+    required double totalCobrado,
+    double? totalEsperado,
+    required int pagosCount,
+    String? nota,
+  }) async {
+    final id = const Uuid().v4();
+    await _db.queueOp(
+      opUuid: id,
+      tipo: 'cierre_turno',
+      payload: {
+        'id': id,
+        'fecha': fecha,
+        'turno': turno,
+        'total_cobrado': totalCobrado,
+        'total_esperado': totalEsperado,
+        'pagos_count': pagosCount,
+        'nota': nota,
+      },
+    );
+    return id;
   }
 
   /// v1.2.5: registra un evento de auditoría local (hash encadenado) y

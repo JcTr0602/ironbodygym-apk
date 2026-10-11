@@ -29,7 +29,7 @@ class LocalDb {
     final dir = await getDatabasesPath();
     _db = await openDatabase(
       p.join(dir, 'ironbody.db'),
-      version: 9,
+      version: 11,
       onCreate: (db, _) async {
         await _crearTablas(db);
       },
@@ -109,6 +109,34 @@ class LocalDb {
           await db.execute(
               'ALTER TABLE ops_queue ADD COLUMN codigo_error TEXT');
         }
+        // v10: FTS5 para búsqueda de clientes (rev5 Gemini: Levenshtein en
+        // el hilo UI no escala). Se crea y se rellena desde el espejo.
+        if (oldV < 10) {
+          await db.execute(
+              'CREATE VIRTUAL TABLE IF NOT EXISTS clientes_fts USING fts5(nombre_norm, id UNINDEXED)');
+          final rows = await db.query('clientes', columns: ['id', 'data']);
+          for (final r in rows) {
+            try {
+              final data =
+                  jsonDecode(r['data'] as String) as Map<String, dynamic>;
+              final nn = _normTexto('${data['nombre'] ?? ''}');
+              await db.insert('clientes_fts', {'nombre_norm': nn, 'id': r['id']});
+            } catch (_) {}
+          }
+        }
+        // v11: índices en sync_seq (rev5 Gemini: cada descarga filtra por
+        // sync_seq; sin índice es full scan). También en ops_queue.
+        if (oldV < 11) {
+          for (final t in [
+            'clientes', 'pagos', 'pagos_diarios', 'gastos', 'suplementos',
+            'ventas_suplementos', 'categorias_suplemento',
+          ]) {
+            await db.execute(
+                'CREATE INDEX IF NOT EXISTS idx_${t}_seq ON $t(sync_seq)');
+          }
+          await db.execute(
+              'CREATE INDEX IF NOT EXISTS idx_ops_estado ON ops_queue(estado)');
+        }
       },
     );
     return _db!;
@@ -123,10 +151,23 @@ class LocalDb {
       'suplementos',
       'ventas_suplementos',
       'categorias_suplemento', // v1.2.1
+      'turnos_cierre', // v1.2.5-rev5
     ]) {
       await db.execute(
           'CREATE TABLE $t (id INTEGER PRIMARY KEY, data TEXT NOT NULL, sync_seq INTEGER NOT NULL)');
     }
+    // v1.2.5-rev5: FTS5 para búsqueda de clientes.
+    await db.execute(
+        'CREATE VIRTUAL TABLE IF NOT EXISTS clientes_fts USING fts5(nombre_norm, id UNINDEXED)');
+    // v1.2.5-rev5: índices en sync_seq para descargas incrementales.
+    for (final t in [
+      'clientes', 'pagos', 'pagos_diarios', 'gastos', 'suplementos',
+      'ventas_suplementos', 'categorias_suplemento',
+    ]) {
+      await db.execute('CREATE INDEX IF NOT EXISTS idx_${t}_seq ON $t(sync_seq)');
+    }
+    await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_ops_estado ON ops_queue(estado)');
         await db.execute('CREATE TABLE ops_queue ('
             'op_uuid TEXT PRIMARY KEY, tipo TEXT NOT NULL, payload TEXT NOT NULL, '
             'estado TEXT NOT NULL DEFAULT \'pendiente\', intentos INTEGER NOT NULL DEFAULT 0, '
@@ -216,12 +257,48 @@ class LocalDb {
         tabla,
         {'id': id, 'data': nuevoJson, 'sync_seq': syncSeq},
         conflictAlgorithm: ConflictAlgorithm.replace);
+    // v1.2.5-rev5: mantener el índice FTS5 de clientes.
+    if (tabla == 'clientes') {
+      final nn = _normTexto('${data['nombre'] ?? ''}');
+      await d.delete('clientes_fts', where: 'id=?', whereArgs: [id]);
+      await d.insert('clientes_fts', {'nombre_norm': nn, 'id': id});
+    }
     return true;
   }
 
   Future<void> deleteMirror(String tabla, int id) async {
     final d = await db;
     await d.delete(tabla, where: 'id=?', whereArgs: [id]);
+    if (tabla == 'clientes') {
+      await d.delete('clientes_fts', where: 'id=?', whereArgs: [id]);
+    }
+  }
+
+  /// Normaliza para búsqueda: minúsculas, sin tildes.
+  static String _normTexto(String s) {
+    var n = s.toLowerCase().trim();
+    const conTilde = 'áéíóúüñ';
+    const sinTilde = 'aeiouun';
+    for (var i = 0; i < conTilde.length; i++) {
+      n = n.replaceAll(conTilde[i], sinTilde[i]);
+    }
+    return n;
+  }
+
+  /// v1.2.5-rev5: búsqueda rápida por FTS5 (prefijo por token).
+  /// Retorna ids ordenados por relevancia FTS.
+  Future<List<int>> buscarClientesFtsIds(String nq) async {
+    final d = await db;
+    final tokens = nq
+        .split(RegExp(r'\s+'))
+        .where((t) => t.isNotEmpty)
+        .map((t) => '"${t.replaceAll('"', '')}"*')
+        .join(' AND ');
+    if (tokens.isEmpty) return [];
+    final rows = await d.rawQuery(
+        'SELECT id FROM clientes_fts WHERE clientes_fts MATCH ? ORDER BY rank LIMIT 50',
+        [tokens]);
+    return rows.map((r) => r['id'] as int).toList();
   }
 
   /// Actualización optimista: cambia el estado de un cliente en el espejo
@@ -513,6 +590,10 @@ class LocalDb {
         where: "visibilidad='privada'");
     n += await d.delete('incidencia_eventos_mirror',
         where: 'incidencia_id NOT IN (SELECT id FROM incidencias_mirror)');
+    // v1.2.5-rev5 (Gemini): las ops 'incidencia' privadas encoladas también
+    // contienen el texto sensible en el payload. Se eliminan junto al resto.
+    n += await d.delete('ops_queue',
+        where: "tipo='incidencia' AND json_extract(payload,'\$.visibilidad')='privada'");
     // borradores y plantillas viven en SharedPreferences (perfil.dart);
     // se purgan desde AuthService.signOut.
     return n;
@@ -600,6 +681,21 @@ class LocalDb {
         }
       }
       return res;
+    } catch (_) {
+      return [];
+    }
+  }
+
+  /// v1.2.5-rev5 (Gemini): historial desde el espejo sincronizado.
+  /// El admin ve los cierres de todos los entrenadores.
+  Future<List<Map<String, dynamic>>> historialCierresMirror() async {
+    final d = await db;
+    try {
+      final rows = await d.query('turnos_cierre', orderBy: 'fecha DESC, turno DESC');
+      return [
+        for (final r in rows)
+          jsonDecode(r['data'] as String) as Map<String, dynamic>
+      ];
     } catch (_) {
       return [];
     }
@@ -774,6 +870,22 @@ class LocalDb {
 
   Future<void> markOp(String opUuid, String estado, {String? error}) async {
     final d = await db;
+    // v1.2.5-rev5 (Gemini #10): medir latencia de confirmación. Al marcar
+    // 'aplicada', guardar cuánto tardó desde que se encoló. Con 2-4
+    // entrenadores la latencia del doble salto debería ser de segundos;
+    // si crece, hay datos para decidir una re-arquitectura.
+    if (estado == 'aplicada') {
+      final rows = await d.query('ops_queue',
+          columns: ['creada_en'], where: 'op_uuid=?', whereArgs: [opUuid]);
+      if (rows.isNotEmpty) {
+        try {
+          final creada = DateTime.parse('${rows.first['creada_en']}');
+          final ms =
+              DateTime.now().difference(creada).inMilliseconds.clamp(0, 1 << 31);
+          await setMeta('latencia_op_ms', '$ms');
+        } catch (_) {}
+      }
+    }
     await d.update(
         'ops_queue', {'estado': estado, 'error': error},
         where: 'op_uuid=?', whereArgs: [opUuid]);

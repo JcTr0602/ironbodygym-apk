@@ -249,6 +249,9 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
     final pendientes =
         await LocalDb.instance.pendientesParaEnvio(_auth.userId);
     final bloqueadas = await LocalDb.instance.opsNecesitanRevision();
+    // v1.2.6 (Gemini): desglose financiero de lo pendiente.
+    final montoPendiente =
+        await montoEfectivoOps([...pendientes, ...bloqueadas]);
     if (!mounted) return;
     showDialog(
       context: context,
@@ -307,7 +310,9 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
                           child: Text(
                             '${pendientes.length + bloqueadas.length} '
                             'cambio${pendientes.length + bloqueadas.length == 1 ? '' : 's'} '
-                            'sin sincronizar',
+                            'sin sincronizar'
+                            // v1.2.6 (Gemini): desglose en efectivo.
+                            '${montoPendiente > 0 ? ' por un total de ${fmtMonto(montoPendiente)} CUP' : ''}',
                             style: const TextStyle(
                                 fontWeight: FontWeight.bold,
                                 fontSize: 13),
@@ -387,7 +392,9 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
                       content: Text(
                           '${pendientes.length + bloqueadas.length} '
                           'cambio${pendientes.length + bloqueadas.length == 1 ? '' : 's'} '
-                          'aún no se sincronizaron. Quedarán guardados '
+                          'aún no se sincronizaron'
+                          '${montoPendiente > 0 ? ' (${fmtMonto(montoPendiente)} CUP en efectivo)' : ''}. '
+                          'Quedarán guardados '
                           'en este teléfono.'),
                       actions: [
                         TextButton(
@@ -407,6 +414,16 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
                 await LocalDb.instance.setMeta(
                     _claveCierre(),
                     DateTime.now().toIso8601String());
+                // v1.2.5-rev5 (Gemini): encolar el cierre para sincronizar.
+                // El admin ve el historial de todos los entrenadores.
+                try {
+                  await SyncEngine.instance.registrarCierreTurno(
+                    fecha: _hoy(),
+                    turno: _turnoId(),
+                    totalCobrado: _cobrado,
+                    pagosCount: pendientes.length,
+                  );
+                } catch (_) {}
                 // v1.2.5 (3.2): vibra TRAS la confirmación real.
                 await vibrarConfirmacion();
                 if (ctx.mounted) Navigator.of(ctx).pop();
