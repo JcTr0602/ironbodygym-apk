@@ -177,8 +177,9 @@ class _VentaSuplementoScreenState
             ? _compradorNombre.text.trim()
             : 'Cliente externo';
     final total = _total;
-    final conPromo =
-        _promoActiva && _tipoComprador == 'cliente';
+    final conPromo = _promoActiva &&
+        (_tipoComprador == 'cliente' ||
+            _tipoComprador == 'inscribir_nuevo');
     final lineaMoneda = !esCup
         ? 'Precio: ${precio.toStringAsFixed(2)} USD'
             ' (tasa ${tasa!.toStringAsFixed(2)} CUP/USD)'
@@ -474,11 +475,22 @@ class _VentaSuplementoScreenState
           RadioListTile<String>(
             value: 'cliente',
             activeColor: AppColores.naranja,
-            title: Text(
-                _clienteId == null
-                    ? 'Cliente del gym'
-                    : 'Cliente: $_clienteNombre',
-                style: AppTexto.cuerpo),
+            title: GestureDetector(
+              onTap: _elegirCliente,
+              child: Text(
+                  _clienteId == null
+                      ? 'Cliente del gym — toca para seleccionar'
+                      : 'Cliente: $_clienteNombre — toca para cambiar',
+                  style: AppTexto.cuerpo),
+            ),
+            secondary: _clienteId == null
+                ? IconButton(
+                    icon: const Icon(Icons.person_search,
+                        color: AppColores.naranja),
+                    onPressed: _elegirCliente,
+                    tooltip: 'Seleccionar cliente',
+                  )
+                : null,
           ),
           const RadioListTile<String>(
             value: 'externo_nombre',
