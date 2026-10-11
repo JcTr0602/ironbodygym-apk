@@ -142,9 +142,9 @@ class _VentaSuplementoScreenState
           cancelar: '');
       return;
     }
-    final esUsd = _moneda == 'USD';
+    final esCup = _moneda == 'CUP';
     final tasa = _tasaUsd;
-    if (esUsd && (tasa == null || tasa <= 0)) {
+    if (esCup && (tasa == null || tasa <= 0)) {
       await DialogoApp.confirmar(context,
           titulo: 'Revisa la valoración',
           mensaje:
@@ -180,15 +180,15 @@ class _VentaSuplementoScreenState
     final conPromo = _promoActiva &&
         (_tipoComprador == 'cliente' ||
             _tipoComprador == 'inscribir_nuevo');
-    final lineaMoneda = esUsd
-        ? 'Precio: ${precio.toStringAsFixed(2)} USD'
+    final lineaMoneda = esCup
+        ? 'Precio: ${precio.toStringAsFixed(2)} CUP'
             ' (tasa ${tasa!.toStringAsFixed(2)} CUP/USD)'
             '${_precioDifiere ? ' — difiere del oficial' : ''}\n'
-            'Total: ${total.toStringAsFixed(2)} USD'
-            ' (≈ ${(total * tasa).toStringAsFixed(0)} CUP)'
-        : 'Precio: ${precio.toStringAsFixed(2)} $_moneda'
+            'Total: ${total.toStringAsFixed(2)} CUP'
+            ' (≈ ${(total / tasa).toStringAsFixed(2)} USD)'
+        : 'Precio: ${precio.toStringAsFixed(2)} USD'
             '${_precioDifiere ? ' (difiere del oficial)' : ''}\n'
-            'Total: ${total.toStringAsFixed(2)} $_moneda';
+            'Total: ${total.toStringAsFixed(2)} USD';
 
     final ok = await DialogoApp.confirmar(
       context,
@@ -213,7 +213,7 @@ class _VentaSuplementoScreenState
           'cantidad': _cantidad,
           'precio': precio,
           'moneda': _moneda,
-          if (esUsd) 'usd_tasa': tasa,
+          if (esCup) 'usd_tasa': tasa,
           // ChatGPT CRÍTICO 2: el servidor solo acepta 'cliente'|'externo'.
           // 'externo_nombre' y 'externo_generico' se mapean a 'externo'.
           'comprador_tipo':
@@ -355,8 +355,8 @@ class _VentaSuplementoScreenState
                 padding: const EdgeInsets.only(
                     top: AppEspacio.sm),
                 child: Text(
-                  'Total: ${_total.toStringAsFixed(2)} USD'
-                  ' (≈ ${(_total * _tasaUsd!).toStringAsFixed(0)} CUP)',
+                  'Total: ${_total.toStringAsFixed(2)} CUP'
+                  ' (≈ ${(_total / _tasaUsd!).toStringAsFixed(2)} USD)',
                   style: AppTexto.cuerpo,
                 ),
               ),
