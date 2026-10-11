@@ -113,15 +113,27 @@ class _SyncBannerState extends State<SyncBanner>
             subtitulo = s.lastError;
             break;
           case SyncPhase.idle:
-            if (s.pending > 0) {
+            // v1.2.5 (D11): frase en lenguaje humano según 3 dimensiones.
+            titulo = s.frase;
+            if (!s.enLinea) {
+              gradiente = const [
+                Color(0xFF9CA3AF),
+                Color(0xFF6B7280)
+              ];
+              icono = Icons.cloud_off_outlined;
+              // v1.2.5 (D12): guardado vs sincronizado, sin tecnicismos.
+              subtitulo = s.ultimoGuardado != null
+                  ? 'Guardado en este teléfono ${_hace(s.ultimoGuardado)}'
+                  : 'Toca para intentar de nuevo';
+            } else if (s.pending > 0) {
               gradiente = const [
                 Color(0xFFFBBF24),
                 Color(0xFFD97706)
               ];
               icono = Icons.schedule;
-              titulo =
-                  '${s.pending} cambio${s.pending == 1 ? '' : 's'} pendientes';
-              subtitulo = 'Toca para enviar';
+              subtitulo = s.ultimoSincronizado != null
+                  ? 'Sincronizado ${_hace(s.ultimoSincronizado)} · toca para enviar'
+                  : 'Toca para enviar';
             } else if (s.hayNovedades) {
               gradiente = const [
                 Color(0xFF60A5FA),
@@ -145,7 +157,6 @@ class _SyncBannerState extends State<SyncBanner>
                 Color(0xFF15803D)
               ];
               icono = Icons.check_circle_outline;
-              titulo = 'Todo al día';
               // v1.0.17: resumen discreto de la última sincronización
               final res = s.ultimoResumen;
               final resHora = s.ultimoResumenHora;
@@ -157,7 +168,7 @@ class _SyncBannerState extends State<SyncBanner>
                       10;
               subtitulo = reciente
                   ? 'Última sincronización: $res'
-                  : 'Última sincronización: ${_hace(s.lastOk)}';
+                  : 'Sincronizado ${_hace(s.ultimoSincronizado ?? s.lastOk)}';
             }
             break;
         }

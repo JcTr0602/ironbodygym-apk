@@ -26,6 +26,7 @@ import 'package:uuid/uuid.dart';
 
 import 'auth.dart';
 import 'config.dart';
+import 'errores_sync.dart';
 import 'localdb.dart';
 import 'perfil.dart';
 
@@ -54,6 +55,17 @@ class SyncStatus {
 
   /// Cuándo se generó ultimoResumen (para mostrarlo solo si es reciente).
   final DateTime? ultimoResumenHora;
+
+  // v1.2.5 (D11): tres dimensiones independientes del estado.
+  /// ¿Hay conexión ahora?
+  final bool enLinea;
+
+  /// ¿Cuándo se guardó lo último en este teléfono (COMMIT local)?
+  final DateTime? ultimoGuardado;
+
+  /// ¿Cuándo confirmó el servidor lo último (ack)?
+  final DateTime? ultimoSincronizado;
+
   const SyncStatus(
       {this.phase = SyncPhase.idle,
       this.pending = 0,
@@ -63,7 +75,23 @@ class SyncStatus {
       this.detalle,
       this.hayNovedades = false,
       this.ultimoResumen,
-      this.ultimoResumenHora});
+      this.ultimoResumenHora,
+      this.enLinea = true,
+      this.ultimoGuardado,
+      this.ultimoSincronizado});
+
+  /// v1.2.5 (D11): frase en lenguaje humano según las 3 dimensiones.
+  String get frase {
+    if (!enLinea && pending > 0) {
+      return 'Sin conexión — $pending cambio${pending == 1 ? '' : 's'} '
+          'guardado${pending == 1 ? '' : 's'} en este teléfono';
+    }
+    if (!enLinea) return 'Sin conexión — todo guardado en este teléfono';
+    if (pending > 0) {
+      return '$pending cambio${pending == 1 ? '' : 's'} por enviar';
+    }
+    return 'Todo guardado y sincronizado';
+  }
 }
 
 /// Detalle de la última sincronización (para la pantalla de Sync).
@@ -210,6 +238,19 @@ class SyncEngine {
     final res = resumen ?? _current.ultimoResumen;
     final resHora =
         resumen != null ? DateTime.now() : _current.ultimoResumenHora;
+    // v1.2.5 (D11/D12): 3 dimensiones + marcas de guardado/sincronizado.
+    bool enLinea = true;
+    try {
+      enLinea = await _hayInternet();
+    } catch (_) {}
+    DateTime? guardado;
+    DateTime? sincronizado;
+    try {
+      final g = await _db.getMeta('ultimo_guardado_local');
+      if (g != null) guardado = DateTime.tryParse(g);
+      final s = await _db.getMeta('ultimo_sincronizado');
+      if (s != null) sincronizado = DateTime.tryParse(s);
+    } catch (_) {}
     _current = SyncStatus(
         phase: phase,
         pending: pending,
@@ -219,8 +260,29 @@ class SyncEngine {
         detalle: detalle,
         hayNovedades: novedades,
         ultimoResumen: res,
-        ultimoResumenHora: resHora);
+        ultimoResumenHora: resHora,
+        enLinea: enLinea,
+        ultimoGuardado: guardado,
+        ultimoSincronizado: sincronizado);
     _status.add(_current);
+  }
+
+  /// v1.2.5 (D12): marca "guardado en este teléfono" tras un COMMIT local.
+  /// Llamar solo después de confirmar la escritura, nunca optimista.
+  Future<void> marcarGuardado() async {
+    try {
+      await _db.setMeta(
+          'ultimo_guardado_local', DateTime.now().toIso8601String());
+    } catch (_) {}
+  }
+
+  /// v1.2.5 (D12): marca "sincronizado" cuando el servidor confirma (ack).
+  /// Solo hasta el server_seq confirmado, nunca optimista.
+  Future<void> marcarSincronizado() async {
+    try {
+      await _db.setMeta(
+          'ultimo_sincronizado', DateTime.now().toIso8601String());
+    } catch (_) {}
   }
 
   /// Verifica si hay internet real resolviendo un dominio confiable.
@@ -241,45 +303,15 @@ class SyncEngine {
 
   /// Versión del error visible para el usuario: si parece "sin conexión"
   /// pero sí hay internet, es que el servidor no responde.
-  Future<String> _describeErrorVisible(Object e) async {
-    final msg = _describeError(e);
-    if (msg == 'Sin conexión a internet' && await _hayInternet()) {
-      return 'No se pudo contactar el servidor (reintenta)';
+  /// v1.2.5 (D16): error visible basado en códigos estables, no en texto.
+  /// El mismo fallo siempre muestra el mismo mensaje y acción.
+  Future<String> _describeErrorVisible(Object e, {int? httpStatus}) async {
+    final ec = clasificarError(e, httpStatus: httpStatus);
+    // Sin conexión pero hay internet: el servidor no responde.
+    if (ec.codigo == 'sin_conexion' && await _hayInternet()) {
+      return 'No se pudo contactar el servidor. Tus cambios están a salvo.';
     }
-    return msg;
-  }
-
-  /// Describe un error de red en lenguaje del entrenador (punto 20):
-  /// distingue "sin internet" de "error del servidor".
-  String _describeError(Object e) {
-    final s = e.toString();
-    final l = s.toLowerCase();
-    if (e is SocketException ||
-        l.contains('socketexception') ||
-        l.contains('failed host lookup') ||
-        l.contains('network is unreachable') ||
-        l.contains('no address associated with hostname')) {
-      return 'Sin conexión a internet';
-    }
-    if (e is TimeoutException || l.contains('timeout')) {
-      return 'Conexión muy lenta (tiempo agotado)';
-    }
-    // v1.1.1: ClientException y cortes a mitad de la conexión (típico con
-    // la conexión inestable) en lenguaje del entrenador, no el texto crudo
-    if (l.contains('connection abort') ||
-        l.contains('connection reset') ||
-        l.contains('connection closed') ||
-        l.contains('clientexception') ||
-        l.contains('handshake')) {
-      return 'Conexión interrumpida (reintenta)';
-    }
-    final m51 = RegExp(r'http 5\d\d').firstMatch(l);
-    if (m51 != null) return 'Error del servidor (reintenta luego)';
-    if (l.contains('http 401') || l.contains('401')) {
-      return 'Sesión vencida';
-    }
-    final corto = s.length > 90 ? '${s.substring(0, 90)}…' : s;
-    return 'Error de red: $corto';
+    return ec.mensaje;
   }
 
   Future<DateTime?> _ultimaOk() async {
@@ -315,11 +347,12 @@ class SyncEngine {
   /// Ciclo completo: push + pull (botón "Sincronizar ahora", al entrar).
   /// Repite el pull hasta que el watermark alcance al server_seq
   /// (pueden llegar cambios nuevos mientras se descarga).
-  Future<void> run() async {
+  /// v1.2.5 (D14): [forzar] cancela el backoff ("Sincronizar ahora").
+  Future<void> run({bool forzar = false}) async {
     if (_running || !_auth.loggedIn) return;
     _running = true;
     try {
-      await _doPush();
+      await _doPush(forzar: forzar);
       // v1.2.4: perfil (móvil/carnet) que no pudo subirse sin conexión.
       try {
         await PerfilService.instance.sincronizarSiPendiente();
@@ -409,10 +442,10 @@ class SyncEngine {
   /// Lógica interna de subida (sin guard _running).
   /// P0 (2026-10-08): propaga la excepción para que run() no marque
   /// "sincronizado" si el push falló por dentro.
-  Future<void> _doPush() async {
+  Future<void> _doPush({bool forzar = false}) async {
     try {
       _emit(SyncPhase.uploading);
-      final n = await _uploadOps();
+      final n = await _uploadOps(forzar: forzar);
       // v1.2.4 (C17): con ahorro de datos, las fotos solo se suben
       // cuando el usuario lo pide (subirFotosAhora).
       final ahorro = await PerfilService.instance.getAhorroDatos();
@@ -422,6 +455,8 @@ class SyncEngine {
       }
       await _db.setMeta('last_push_ok', DateTime.now().toIso8601String());
       await _db.setMeta('last_uploaded', '$n');
+      // v1.2.5 (D12): el servidor confirmó (ack real, no optimista).
+      await marcarSincronizado();
       _emit(SyncPhase.idle);
     } on SessionExpired {
       _sesionVencida();
@@ -496,12 +531,13 @@ class SyncEngine {
   /// Envío en lote (punto 19): varias ops por petición PostgREST
   /// (bulk + on_conflict para idempotencia), menos viajes de ida y vuelta
   /// con conexiones de alta latencia.
-  Future<int> _uploadOps() async {
+  Future<int> _uploadOps({bool forzar = false}) async {
     var aplicadas = 0;
     // v1.0.16: solo subir las ops del usuario actual. Las de otro
     // usuario quedan en espera hasta que su dueño vuelva a entrar.
+    // v1.2.5 (D14): respeta el backoff de reintentos.
     final uid = _auth.userId;
-    final ops = await _db.pendingOpsDe(uid);
+    final ops = await _db.pendientesParaEnvio(uid, forzar: forzar);
     final ajenas = await _db.countOpsAjenas(uid);
     if (ajenas > 0) {
       _emit(SyncPhase.uploading,
@@ -559,16 +595,17 @@ class SyncEngine {
           // culpable en vez de atascar el lote entero
           await _uploadUnaPorUna(lote);
         } else {
+          // v1.2.5 (D14/D15): clasifica y aplica backoff o revisión.
           for (final op in lote) {
             await _db.bumpOp(op['op_uuid'] as String,
-                _describeError('HTTP ${r.statusCode}'));
+                'HTTP ${r.statusCode}',
+                httpStatus: r.statusCode);
           }
         }
       } catch (e) {
         if (e is SessionExpired) rethrow;
         for (final op in lote) {
-          await _db.bumpOp(
-              op['op_uuid'] as String, _describeError(e));
+          await _db.bumpOp(op['op_uuid'] as String, e);
         }
       }
     }
@@ -630,20 +667,20 @@ class SyncEngine {
         } else if (r.statusCode == 429 ||
             r.statusCode == 408 ||
             r.statusCode >= 500) {
-          // v1.0.16: errores temporales (rate limit, timeout, servidor)
-          // se reintentan con backoff, no se marcan como rechazadas
-          await _db.bumpOp(
-              uuid, '⏳ Servidor ocupado (HTTP ${r.statusCode}), reintentando…');
+          // v1.2.5 (D14): transitorios con backoff, no se marcan rechazadas.
+          await _db.bumpOp(uuid, 'HTTP ${r.statusCode}',
+              httpStatus: r.statusCode);
         } else if (r.statusCode >= 400 && r.statusCode < 500) {
           await _db.markOp(uuid, 'rechazada',
               error: 'El servidor la rechazó (HTTP ${r.statusCode}). '
                   'Revisa los datos o cancela la operación.');
         } else {
-          await _db.bumpOp(uuid, _describeError('HTTP ${r.statusCode}'));
+          await _db.bumpOp(uuid, 'HTTP ${r.statusCode}',
+              httpStatus: r.statusCode);
         }
       } catch (e) {
         if (e is SessionExpired) rethrow;
-        await _db.bumpOp(uuid, _describeError(e));
+        await _db.bumpOp(uuid, e);
       }
     }
   }
@@ -719,6 +756,17 @@ class SyncEngine {
   /// mueve y la próxima bajada re-aplica (idempotente) desde el mismo
   /// punto. No hay ningún camino donde el watermark avance sin aplicar.
   Future<int> _download({bool silencioso = false}) async {
+    // v1.2.5 (D19): si el manifiesto marcó algún ámbito divergente,
+    // re-descarga completa desde cero en este ciclo.
+    try {
+      final flags = await _db.metasConPrefijo('forzar_redescarga_');
+      if (flags.isNotEmpty) {
+        await _db.setWatermark(0);
+        for (final k in flags) {
+          await _db.setMeta(k, '');
+        }
+      }
+    } catch (_) {}
     // ajustes + server_seq (para verificación de sincronización)
     int? serverSeq;
     try {
@@ -755,7 +803,11 @@ class SyncEngine {
     // cambio con sync_seq menor que el máximo de otra tabla se omite.
     final since = wm;
     var maxSeq = wm;
-    var bajados = 0;
+    // v1.2.5 (D20): métricas honestas por ámbito.
+    var vistas = 0;
+    var aplicadas = 0;
+    var sinCambios = 0;
+    var fallidas = 0;
     const tablas = [
       'clientes',
       'pagos',
@@ -807,25 +859,34 @@ class SyncEngine {
           final rows = jsonDecode(r.body) as List;
           if (rows.isEmpty) break;
           for (final row in rows) {
-            final m = Map<String, dynamic>.from(row as Map);
-            final seq = (m['sync_seq'] as int?) ?? 0;
-            final id = (m['id'] as int?) ?? 0;
-            // gastos usa columnas planas en Supabase (sin 'data' JSON)
-            final Map<String, dynamic> data;
-            if (tabla == 'gastos') {
-              data = {
-                'id': id,
-                'fecha': m['fecha'],
-                'concepto': m['concepto'],
-                'monto': m['monto'],
-                'registrado_por': m['registrado_por'],
-              };
-            } else {
-              data = Map<String, dynamic>.from(m['data'] as Map);
+            vistas++;
+            try {
+              final m = Map<String, dynamic>.from(row as Map);
+              final seq = (m['sync_seq'] as int?) ?? 0;
+              final id = (m['id'] as int?) ?? 0;
+              // gastos usa columnas planas en Supabase (sin 'data' JSON)
+              final Map<String, dynamic> data;
+              if (tabla == 'gastos') {
+                data = {
+                  'id': id,
+                  'fecha': m['fecha'],
+                  'concepto': m['concepto'],
+                  'monto': m['monto'],
+                  'registrado_por': m['registrado_por'],
+                };
+              } else {
+                data = Map<String, dynamic>.from(m['data'] as Map);
+              }
+              // v1.2.5 (D20): cuenta aplicadas vs sin cambios de verdad.
+              if (await _db.upsertMirror(tabla, id, data, seq)) {
+                aplicadas++;
+              } else {
+                sinCambios++;
+              }
+              if (seq > maxSeq) maxSeq = seq;
+            } catch (_) {
+              fallidas++;
             }
-            await _db.upsertMirror(tabla, id, data, seq);
-            if (seq > maxSeq) maxSeq = seq;
-            bajados++;
           }
           if (rows.length < 500) break;
           pageWm = maxSeq;
@@ -891,12 +952,121 @@ class SyncEngine {
     if (maxSeq > since) {
       await _db.setWatermark(maxSeq);
     }
+    // v1.2.5 (D17): marca por ámbito con HORA DEL SERVIDOR (header Date),
+    // no del dispositivo (D18: el reloj local puede estar mal).
+    try {
+      final r = await _getAuth(Uri.parse(
+          '$_base/rest/v1/sync_estado?id=eq.1&select=server_seq'));
+      final dateHdr = r.headers['date'];
+      final horaServidor = dateHdr != null
+          ? HttpDate.parse(dateHdr).toIso8601String()
+          : DateTime.now().toUtc().toIso8601String();
+      for (final tabla in tablas) {
+        await _db.setMeta(
+            'last_remote_sync_ok_$tabla', horaServidor);
+      }
+      await _db.setMeta('last_remote_sync_ok', horaServidor);
+    } catch (_) {}
     // Sincronizar estado final de operaciones enviadas (aplicada/rechazada)
     await _syncOpStatus();
-    return bajados;
+    // v1.2.5 (D20): resumen honesto, no "todo bien".
+    await _db.setMeta('last_download_stats',
+        jsonEncode({
+          'vistas': vistas,
+          'aplicadas': aplicadas,
+          'sinCambios': sinCambios,
+          'fallidas': fallidas,
+        }));
+    return aplicadas;
   }
 
-  /// v1.2.4: descarga incremental de incidencias desde la tabla central.
+  /// v1.2.5 (D19): verificación por manifiesto (buckets sensibles al rol).
+  ///
+  /// Pide al servidor los (id, sync_seq) por bucket y compara contra el
+  /// espejo local. Si falta una fila o el servidor tiene sync_seq mayor,
+  /// el bucket diverge y se fuerza su re-descarga.
+  /// Retorna la cantidad de buckets divergentes (0 = todo coincide).
+  Future<int> verificarManifiesto({int nBuckets = 8}) async {
+    const tablas = {
+      'sync_clientes': 'clientes',
+      'sync_pagos': 'pagos',
+      'sync_pagos_diarios': 'pagos_diarios',
+      'sync_gastos': 'gastos',
+      'sync_suplementos': 'suplementos',
+      'sync_ventas_suplementos': 'ventas_suplementos',
+      'sync_categorias_suplemento': 'categorias_suplemento',
+      'sync_incidencias': 'incidencias_mirror',
+    };
+    var divergentes = 0;
+    for (final entry in tablas.entries) {
+      final supTabla = entry.key;
+      final localTabla = entry.value;
+      for (var b = 0; b < nBuckets; b++) {
+        try {
+          final r = await _postAuth(
+              Uri.parse('$_base/rest/v1/rpc/sync_manifiesto'),
+              headers: {'Content-Type': 'application/json'},
+              body: jsonEncode({
+                'p_tabla': supTabla,
+                'p_bucket': b,
+                'p_n_buckets': nBuckets,
+              }));
+          if (r.statusCode == 404 || r.statusCode == 400) {
+            // RPC aún no aplicado en Supabase: se omite sin abortar.
+            break;
+          }
+          if (r.statusCode != 200) continue;
+          final rows = jsonDecode(r.body) as List;
+          var coincide = true;
+          for (final row in rows) {
+            final m = Map<String, dynamic>.from(row as Map);
+            final rid = m['rid'] as String?;
+            final sseq = (m['sseq'] as int?) ?? 0;
+            if (rid == null) continue;
+            final localSeq = await _db.seqFilaMirror(localTabla, rid);
+            // Falta local o el servidor tiene versión más nueva.
+            if (localSeq == null || localSeq < sseq) {
+              coincide = false;
+              break;
+            }
+          }
+          if (!coincide) {
+            divergentes++;
+            // Fuerza re-descarga del ámbito en el próximo pull.
+            await _db.setMeta('forzar_redescarga_$localTabla', '1');
+          }
+        } catch (_) {
+          // Error de red: no cuenta como divergencia, se reintentará.
+        }
+      }
+    }
+    return divergentes;
+  }
+
+  /// v1.2.5 (D18): verifica que el reloj del dispositivo no esté muy
+  /// desfasado respecto al servidor. El orden SIEMPRE es por server_seq
+  /// (nunca por hora local); esto solo avisa si el desfase es grande.
+  /// Retorna el desfase en minutos (null si no se pudo medir).
+  Future<int?> verificarReloj() async {
+    try {
+      final r = await _getAuth(
+          Uri.parse('$_base/rest/v1/sync_estado?id=eq.1&select=server_seq'));
+      final dateHdr = r.headers['date'];
+      if (dateHdr == null) return null;
+      final serverTime = HttpDate.parse(dateHdr);
+      final diffMin =
+          DateTime.now().toUtc().difference(serverTime).inMinutes.abs();
+      if (diffMin > 5) {
+        await _db.setMeta('reloj_desfasado_min', '$diffMin');
+      } else {
+        await _db.setMeta('reloj_desfasado_min', '');
+      }
+      return diffMin;
+    } catch (_) {
+      return null;
+    }
+  }
+
   /// Watermark propio (max sync_seq del mirror), independiente del global.
   Future<void> _downloadIncidencias({bool silencioso = false}) async {
     var pageWm = await _db.maxIncidenciaSyncSeq();

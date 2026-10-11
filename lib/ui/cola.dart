@@ -20,6 +20,8 @@ class ColaScreen extends StatefulWidget {
 
 class _ColaScreenState extends State<ColaScreen> {
   List<Map<String, dynamic>> _ops = [];
+  // v1.2.5 (D15): ops bloqueadas que necesitan revisión manual.
+  List<Map<String, dynamic>> _bloqueadas = [];
   SyncDetalle _det = const SyncDetalle();
   bool _sincronizando = false;
 
@@ -31,10 +33,12 @@ class _ColaScreenState extends State<ColaScreen> {
 
   Future<void> _cargar() async {
     final ops = await LocalDb.instance.recentOps();
+    final bloqueadas = await LocalDb.instance.opsNecesitanRevision();
     final det = await SyncEngine.instance.detalle();
     if (mounted) {
       setState(() {
         _ops = ops;
+        _bloqueadas = bloqueadas;
         _det = det;
       });
     }
@@ -42,11 +46,30 @@ class _ColaScreenState extends State<ColaScreen> {
 
   Future<void> _sincronizar() async {
     setState(() => _sincronizando = true);
-    await SyncEngine.instance.run();
+    // v1.2.5 (D14): "Sincronizar ahora" cancela el backoff de reintentos.
+    await SyncEngine.instance.run(forzar: true);
     await _cargar();
     if (mounted) setState(() => _sincronizando = false);
     // Resumen post-sync (solo en sincronización manual desde aquí)
     if (mounted) _mostrarResumen();
+  }
+
+  /// v1.2.5 (D15): reintento manual de una bloqueada. La devuelve a
+  /// 'pendiente' (limpia backoff); si vuelve a fallar, se reclasifica.
+  Future<void> _reintentarBloqueada(String opUuid) async {
+    await LocalDb.instance
+        .markOp(opUuid, 'pendiente', error: null);
+    // Limpia el backoff y el código para que salga en el próximo ciclo.
+    final d = await LocalDb.instance.db;
+    await d.rawUpdate(
+        'UPDATE ops_queue SET proximo_reintento=NULL, codigo_error=NULL, '
+        'intentos=0 WHERE op_uuid=?',
+        [opUuid]);
+    await _cargar();
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Se reintentará en la próxima sincronización')));
+    }
   }
 
   /// Muestra un diálogo con el resumen de la sincronización recién hecha.
@@ -579,6 +602,65 @@ class _ColaScreenState extends State<ColaScreen> {
               ),
             ],
             const SizedBox(height: 16),
+            // v1.2.5 (D15): bloqueadas que necesitan revisión manual.
+            if (_bloqueadas.isNotEmpty) ...[
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: AppColores.error.withValues(alpha: 0.08),
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(
+                      color: AppColores.error.withValues(alpha: 0.3)),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        const Icon(Icons.warning_amber_rounded,
+                            color: AppColores.error),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            '${_bloqueadas.length} necesitan revisión',
+                            style: AppTexto.titulo.copyWith(
+                                color: AppColores.error),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    const Text(
+                      'Estas operaciones no se pudieron enviar. '
+                      'No se reintentarán solas.',
+                      style: TextStyle(fontSize: 13),
+                    ),
+                    const SizedBox(height: 8),
+                    for (final b in _bloqueadas)
+                      ListTile(
+                        dense: true,
+                        contentPadding: EdgeInsets.zero,
+                        leading: const Icon(Icons.block, size: 20),
+                        title: Text(
+                            '${b['tipo'] ?? ''}',
+                            style: AppTexto.cuerpo),
+                        subtitle: Text(
+                            '${b['codigo_error'] ?? 'error'} · '
+                            '${(b['error'] as String? ?? '').split('\n').first}',
+                            style: AppTexto.secundario,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis),
+                        trailing: TextButton(
+                          onPressed: () => _reintentarBloqueada(
+                              b['op_uuid'] as String),
+                          child: const Text('Reintentar'),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+            ],
             const Text(
               'Operaciones recientes',
               style: AppTexto.titulo,

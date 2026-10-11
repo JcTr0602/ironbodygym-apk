@@ -13,6 +13,8 @@ import 'package:path/path.dart' as p;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sqflite/sqflite.dart';
 
+import 'errores_sync.dart';
+
 import 'auth.dart';
 import 'fotos.dart';
 
@@ -27,7 +29,7 @@ class LocalDb {
     final dir = await getDatabasesPath();
     _db = await openDatabase(
       p.join(dir, 'ironbody.db'),
-      version: 8,
+      version: 9,
       onCreate: (db, _) async {
         await _crearTablas(db);
       },
@@ -99,6 +101,13 @@ class LocalDb {
               'detalle TEXT, dispositivo_id TEXT NOT NULL, '
               'hash_previo TEXT, hash_propio TEXT NOT NULL, '
               'creada_en TEXT NOT NULL, sincronizada INTEGER NOT NULL DEFAULT 0)');
+        }
+        // v9 (v1.2.5 Fase 2): reintentos inteligentes + cola de bloqueadas.
+        if (oldV < 9) {
+          await db.execute(
+              'ALTER TABLE ops_queue ADD COLUMN proximo_reintento TEXT');
+          await db.execute(
+              'ALTER TABLE ops_queue ADD COLUMN codigo_error TEXT');
         }
       },
     );
@@ -174,14 +183,18 @@ class LocalDb {
   }
 
   // -- espejos ---------------------------------------------------------
-  Future<void> upsertMirror(
+  /// v1.2.5 (D20): retorna true si la fila cambió (insertada o distinta),
+  /// false si ya era idéntica (para métricas honestas).
+  Future<bool> upsertMirror(
       String tabla, int id, Map<String, dynamic> data, int syncSeq) async {
     final d = await db;
+    final nuevoJson = jsonEncode(data);
     // v1.0.9.1: si cambia foto_storage, invalidar caché para forzar re-descarga
     if (tabla == 'clientes') {
       final rows = await d.query(tabla,
           columns: ['data'], where: 'id=?', whereArgs: [id], limit: 1);
       if (rows.isNotEmpty) {
+        if (rows.first['data'] == nuevoJson) return false;
         try {
           final old = jsonDecode(rows.first['data'] as String)
               as Map<String, dynamic>;
@@ -194,11 +207,16 @@ class LocalDb {
           }
         } catch (_) {}
       }
+    } else {
+      final rows = await d.query(tabla,
+          columns: ['data'], where: 'id=?', whereArgs: [id], limit: 1);
+      if (rows.isNotEmpty && rows.first['data'] == nuevoJson) return false;
     }
     await d.insert(
         tabla,
-        {'id': id, 'data': jsonEncode(data), 'sync_seq': syncSeq},
+        {'id': id, 'data': nuevoJson, 'sync_seq': syncSeq},
         conflictAlgorithm: ConflictAlgorithm.replace);
+    return true;
   }
 
   Future<void> deleteMirror(String tabla, int id) async {
@@ -543,6 +561,21 @@ class LocalDb {
     return items.take(limit).toList();
   }
 
+  /// v1.2.5 (D19): sync_seq local de una fila del espejo (null si no existe).
+  /// Para comparar contra el manifiesto del servidor.
+  Future<int?> seqFilaMirror(String tabla, String rid) async {
+    final d = await db;
+    try {
+      final id = int.tryParse(rid) ?? rid;
+      final rows = await d.query(tabla,
+          columns: ['sync_seq'], where: 'id=?', whereArgs: [id], limit: 1);
+      if (rows.isEmpty) return null;
+      return (rows.first['sync_seq'] as int?) ?? 0;
+    } catch (_) {
+      return null;
+    }
+  }
+
   /// Purga completa al cerrar sesión o cambiar de usuario.
   /// Llamar ANTES de AuthService.signOut() en cada punto de salida.
   static Future<void> purgaAlCerrarSesion() async {
@@ -558,6 +591,18 @@ class LocalDb {
         await p.remove(k);
       }
     } catch (_) {}
+  }
+
+  /// Metas cuyo nombre empieza con [prefijo] (no vacías).
+  Future<List<String>> metasConPrefijo(String prefijo) async {
+    final d = await db;
+    try {
+      final rows = await d.query('meta',
+          columns: ['k'], where: 'k LIKE ? AND v != ?', whereArgs: ['$prefijo%', '']);
+      return [for (final r in rows) '${r['k']}'];
+    } catch (_) {
+      return [];
+    }
   }
 
   // -- meta (watermark + ajustes) --------------------------------------
@@ -616,6 +661,14 @@ class LocalDb {
     final d = await db;
     // v1.0.16: guardar autoría para no atribuir ops ajenas al sincronizar
     final auth = AuthService();
+    // v1.2.5 (D13): idempotente ante doble-tap. Si el op_uuid ya existe,
+    // no se duplica (el servidor además valida por payload_hash).
+    final yaExiste = await d.query('ops_queue',
+        columns: ['op_uuid'],
+        where: 'op_uuid=?',
+        whereArgs: [opUuid],
+        limit: 1);
+    if (yaExiste.isNotEmpty) return;
     await d.insert('ops_queue', {
       'op_uuid': opUuid,
       'tipo': tipo,
@@ -626,6 +679,12 @@ class LocalDb {
       'user_id': auth.userId,
       'telegram_id': auth.telegramId,
     });
+    // v1.2.5 (D12): marca COMMIT local real (no optimista).
+    try {
+      await d.rawUpdate(
+          "INSERT OR REPLACE INTO meta(k,v) VALUES('ultimo_guardado_local',?)",
+          [DateTime.now().toIso8601String()]);
+    } catch (_) {}
     // Actualización optimista: refleja el cambio en el espejo local de
     // inmediato, sin esperar al pull del servidor.
     if (tipo == 'cambiar_estado') {
@@ -704,11 +763,74 @@ class LocalDb {
         whereArgs: [opUuid]);
   }
 
-  Future<void> bumpOp(String opUuid, String error) async {
+  /// v1.2.5 Fase 2 (D14/D15): registra un fallo con backoff inteligente.
+  ///
+  /// - Clasifica el error primero (transitorio | permanente | auth |
+  ///   validación).
+  /// - Transitorio: backoff exponencial con jitter (tope 5 min). Tras
+  ///   [maxIntentosTransitorio] intentos -> 'necesita_revision'.
+  /// - Permanente/validación -> 'necesita_revision' directo (no reintenta).
+  /// - Auth -> estado 'error' sin backoff (lo maneja el flujo de sesión).
+  /// Retorna el código de error clasificado.
+  Future<String> bumpOp(String opUuid, Object error,
+      {int? httpStatus}) async {
     final d = await db;
+    final ec = clasificarError(error, httpStatus: httpStatus);
+    final rows = await d.query('ops_queue',
+        columns: ['intentos'], where: 'op_uuid=?', whereArgs: [opUuid]);
+    final intentos = rows.isEmpty
+        ? 0
+        : ((rows.first['intentos'] as int?) ?? 0) + 1;
+    String estado;
+    String? proximo;
+    if (ec.tipo == TipoErrorSync.transitorio) {
+      if (intentos >= maxIntentosTransitorio) {
+        estado = 'necesita_revision';
+      } else {
+        estado = 'error';
+        proximo = DateTime.now()
+            .add(backoffReintento(intentos))
+            .toIso8601String();
+      }
+    } else if (ec.tipo == TipoErrorSync.auth) {
+      estado = 'error';
+    } else {
+      estado = 'necesita_revision';
+    }
     await d.rawUpdate(
-        'UPDATE ops_queue SET intentos=intentos+1, estado=\'error\', error=? WHERE op_uuid=?',
-        [error, opUuid]);
+        'UPDATE ops_queue SET intentos=?, estado=?, error=?, '
+        'codigo_error=?, proximo_reintento=? WHERE op_uuid=?',
+        [intentos, estado, error.toString(), ec.codigo, proximo, opUuid]);
+    return ec.codigo;
+  }
+
+  /// Ops que necesitan revisión manual (bloqueadas).
+  Future<List<Map<String, dynamic>>> opsNecesitanRevision() async {
+    final d = await db;
+    return d.query('ops_queue',
+        where: "estado='necesita_revision'",
+        orderBy: 'creada_ts ASC');
+  }
+
+  /// v1.2.5 (D14): pendientes listas para enviar. Respeta el backoff salvo
+  /// [forzar] ("Sincronizar ahora" cancela el temporizador).
+  Future<List<Map<String, dynamic>>> pendientesParaEnvio(String? userId,
+      {bool forzar = false}) async {
+    final d = await db;
+    final ahora = DateTime.now().toIso8601String();
+    final where = StringBuffer(
+        "estado IN ('pendiente','error')");
+    final args = <dynamic>[];
+    if (!forzar) {
+      where.write(' AND (proximo_reintento IS NULL OR proximo_reintento <= ?)');
+      args.add(ahora);
+    }
+    if (userId != null) {
+      where.write(' AND (user_id = ? OR user_id IS NULL)');
+      args.add(userId);
+    }
+    return d.query('ops_queue',
+        where: where.toString(), whereArgs: args, orderBy: 'creada_ts ASC');
   }
 
   Future<int> countPendingOps() async {
