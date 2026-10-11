@@ -500,6 +500,49 @@ class LocalDb {
     return n;
   }
 
+  /// v1.2.5 (#10): incidencias relacionadas con una entidad.
+  /// Respeta visibilidad: si [soloCompartidas], excluye las privadas
+  /// (defensa en profundidad; RLS ya filtra en la descarga).
+  Future<List<Map<String, dynamic>>> incidenciasRelacionadas(
+    String entidad,
+    int entidadId, {
+    bool soloCompartidas = false,
+    int limit = 20,
+  }) async {
+    final d = await db;
+    final where = StringBuffer("entidad=? AND entidad_id=?");
+    final args = <dynamic>[entidad, entidadId];
+    if (soloCompartidas) {
+      where.write(" AND visibilidad='compartida'");
+    }
+    // Une locales pendientes + espejo, sin duplicar por id.
+    final locales = await d.query('incidencias_local',
+        where: where.toString(),
+        whereArgs: args,
+        orderBy: 'creada_en DESC',
+        limit: limit);
+    final mirror = await d.query('incidencias_mirror',
+        where: where.toString(),
+        whereArgs: args,
+        orderBy: 'sync_seq DESC',
+        limit: limit);
+    final idsLocales = locales.map((l) => l['id']).toSet();
+    final items = <Map<String, dynamic>>[
+      for (final l in locales) {...l, '_origen': 'local'},
+      for (final m in mirror)
+        if (!idsLocales.contains(m['id'])) {...m, '_origen': 'central'},
+    ];
+    // Pendientes primero, luego por fecha desc.
+    const ordenEstado = {'pendiente': 0, 'en_revision': 1, 'resuelta': 2};
+    items.sort((a, b) {
+      final ea = ordenEstado[a['estado']] ?? 9;
+      final eb = ordenEstado[b['estado']] ?? 9;
+      if (ea != eb) return ea.compareTo(eb);
+      return (b['creada_en'] ?? '').compareTo(a['creada_en'] ?? '');
+    });
+    return items.take(limit).toList();
+  }
+
   /// Purga completa al cerrar sesión o cambiar de usuario.
   /// Llamar ANTES de AuthService.signOut() en cada punto de salida.
   static Future<void> purgaAlCerrarSesion() async {

@@ -35,6 +35,8 @@ class _FichaScreenState extends State<FichaScreen> {
   Map<String, dynamic>? _c;
   List<Map<String, dynamic>> _pagos = [];
   List<Map<String, dynamic>> _suplementos = [];
+  // v1.2.5 (#10): incidencias relacionadas con el cliente.
+  List<Map<String, dynamic>> _incidencias = [];
   File? _foto;
   bool _verificando = false;
 
@@ -48,6 +50,10 @@ class _FichaScreenState extends State<FichaScreen> {
     final c = await clientePorId(widget.clienteId);
     final pagos = await pagosDe(widget.clienteId);
     final suplementos = await _suplementosDe(widget.clienteId);
+    // v1.2.5 (#10): incidencias relacionadas (respeta visibilidad).
+    final incidencias = await LocalDb.instance.incidenciasRelacionadas(
+        'cliente', widget.clienteId,
+        soloCompartidas: !AuthService().isAdmin);
     File? foto;
     if (c != null) {
       foto = await FotoCache.instance
@@ -58,6 +64,7 @@ class _FichaScreenState extends State<FichaScreen> {
         _c = c;
         _pagos = pagos;
         _suplementos = suplementos;
+        _incidencias = incidencias;
         _foto = foto;
       });
     }
@@ -1251,6 +1258,48 @@ class _FichaScreenState extends State<FichaScreen> {
                       if (_suplementos.isNotEmpty)
                         const SizedBox(
                             height: AppEspacio.md),
+                      // v1.2.5 (#10): incidencias relacionadas con el cliente.
+                      if (_incidencias.isNotEmpty) ...[
+                        Tarjeta(
+                          child: Column(
+                            crossAxisAlignment:
+                                CrossAxisAlignment.start,
+                            children: [
+                              const Text(
+                                  'Incidencias',
+                                  style: AppTexto.titulo),
+                              const SizedBox(
+                                  height: AppEspacio.sm),
+                              for (final i in _incidencias)
+                                ListTile(
+                                  dense: true,
+                                  contentPadding:
+                                      EdgeInsets.zero,
+                                  leading: Icon(
+                                    i['visibilidad'] == 'privada'
+                                        ? Icons.lock_outline
+                                        : Icons.report_problem_outlined,
+                                    size: 20,
+                                    color: AppColores.naranja,
+                                  ),
+                                  title: Text(
+                                      '${i['descripcion'] ?? ''}',
+                                      style:
+                                          AppTexto.cuerpo,
+                                      maxLines: 2,
+                                      overflow:
+                                          TextOverflow.ellipsis),
+                                  subtitle: Text(
+                                      '${_estadoIncidencia(i['estado'])} · ${fmtFecha((i['creada_en'] as String?)?.substring(0, 10))}',
+                                      style: AppTexto
+                                          .secundario),
+                                ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(
+                            height: AppEspacio.md),
+                      ],
                       // Acciones secundarias
                       if (vencido)
                         Padding(
@@ -1314,8 +1363,17 @@ class _FichaScreenState extends State<FichaScreen> {
   }
 
   /// Iniciales para el placeholder de foto.
-  String _iniciales(String nombre) {
-    final partes =
+  /// v1.2.5: etiqueta legible del estado de incidencia.
+  String _estadoIncidencia(Object? estado) {
+    return switch (estado) {
+      'pendiente' => 'Pendiente',
+      'en_revision' => 'En revisión',
+      'resuelta' => 'Resuelta',
+      _ => '${estado ?? ''}',
+    };
+  }
+
+  String _iniciales(String nombre) {    final partes =
         nombre.trim().split(RegExp(r'\s+'));
     var ini = '';
     if (partes.isNotEmpty && partes[0].isNotEmpty) {

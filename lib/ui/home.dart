@@ -13,6 +13,7 @@ import '../perfil.dart';
 import '../sync.dart';
 import '../theme.dart';
 import 'admin.dart';
+import 'admin_secciones.dart';
 import 'ajustes.dart';
 import 'actividad.dart';
 import 'ayuda.dart';
@@ -723,6 +724,15 @@ class _HomeScreenState extends State<HomeScreen>
                           'Suplementos',
                           () => _ir(
                               const SuplementosScreen())),
+                      // v1.2.5: incidencias para entrenadores (modo
+                      // compartido: reportar + ver compartidas). El admin
+                      // las ve completas en Administración.
+                      if (!_auth.isAdmin)
+                        _herramienta(
+                            Icons.report_problem_outlined,
+                            'Incidencias',
+                            () => _ir(const SeccionIncidenciasScreen(
+                                modoEntrenador: true))),
                       _herramienta(
                           Icons.settings,
                           'Ajustes',

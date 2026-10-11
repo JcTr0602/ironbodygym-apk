@@ -9,6 +9,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../auth.dart';
 import '../config.dart';
@@ -794,8 +795,11 @@ class _SeccionDiagnosticoScreenState extends State<SeccionDiagnosticoScreen> {
 /// Bandeja unificada: incidencias locales (offline, pendientes de subir)
 /// + espejo de la tabla central de Supabase. Crear, filtrar por estado,
 /// cambiar estado con validación del servidor.
+/// v1.2.5: [modoEntrenador] muestra solo compartidas + reportar (sin
+/// resolver/reabrir ni privadas). El admin ve todo.
 class SeccionIncidenciasScreen extends StatefulWidget {
-  const SeccionIncidenciasScreen({super.key});
+  final bool modoEntrenador;
+  const SeccionIncidenciasScreen({super.key, this.modoEntrenador = false});
 
   @override
   State<SeccionIncidenciasScreen> createState() =>
@@ -845,6 +849,9 @@ class _SeccionIncidenciasScreenState
       final idsLocales = locales.map((l) => l['id']).toSet();
       for (final m in mirror) {
         if (idsLocales.contains(m['id'])) continue; // evita duplicados
+        // v1.2.5: en modo entrenador, defensa en profundidad (RLS ya
+        // filtra en la descarga): nunca mostrar privadas.
+        if (widget.modoEntrenador && m['visibilidad'] == 'privada') continue;
         items.add({...m, '_origen': 'central'});
       }
       // Orden: pendientes primero, luego por fecha desc
@@ -871,42 +878,100 @@ class _SeccionIncidenciasScreenState
 
   Future<void> _reportar() async {
     String tipo = 'sync';
+    String visibilidad = 'compartida';
+    final esAdmin = !widget.modoEntrenador && Permisos().esAdmin;
     final descCtrl = TextEditingController();
+    // v1.2.5 (#8): restaura borrador si existe.
+    const borradorKey = 'borrador_incidencia_nueva';
+    try {
+      final p = await SharedPreferences.getInstance();
+      final b = p.getString(borradorKey);
+      if (b != null && b.isNotEmpty) descCtrl.text = b;
+    } catch (_) {}
+    if (!mounted) return;
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Reportar incidencia'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            DropdownButtonFormField<String>(
-              initialValue: tipo,
-              items: [
-                for (final e in _tipos.entries)
-                  DropdownMenuItem(
-                      value: e.key, child: Text(e.value.$1)),
-              ],
-              onChanged: (v) => tipo = v ?? 'sync',
-              decoration: const InputDecoration(labelText: 'Tipo'),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: descCtrl,
-              maxLines: 4,
-              maxLength: 2000,
-              decoration: const InputDecoration(
-                labelText: 'Descripción',
-                hintText: '¿Qué pasó?',
-                border: OutlineInputBorder(),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              DropdownButtonFormField<String>(
+                initialValue: tipo,
+                items: [
+                  for (final e in _tipos.entries)
+                    DropdownMenuItem(
+                        value: e.key, child: Text(e.value.$1)),
+                ],
+                onChanged: (v) => tipo = v ?? 'sync',
+                decoration: const InputDecoration(labelText: 'Tipo'),
               ),
-            ),
-            const SizedBox(height: 8),
-            const Text(
-              'Se guarda en este dispositivo y se sincroniza '
-              'cuando haya conexión.',
-              style: TextStyle(fontSize: 12, color: Colors.grey),
-            ),
-          ],
+              // v1.2.5: visibilidad solo para el dueño.
+              if (esAdmin) ...[
+                const SizedBox(height: 12),
+                DropdownButtonFormField<String>(
+                  initialValue: visibilidad,
+                  items: const [
+                    DropdownMenuItem(
+                        value: 'compartida',
+                        child: Text('Compartida (la ven entrenadores)')),
+                    DropdownMenuItem(
+                        value: 'privada',
+                        child: Text('Privada (solo yo)')),
+                  ],
+                  onChanged: (v) => visibilidad = v ?? 'compartida',
+                  decoration:
+                      const InputDecoration(labelText: 'Visibilidad'),
+                ),
+              ],
+              const SizedBox(height: 12),
+              // v1.2.5 (#7): plantillas de notas.
+              FutureBuilder<List<String>>(
+                future: _plantillas(),
+                builder: (ctx, snap) {
+                  final pls = snap.data ?? const <String>[];
+                  if (pls.isEmpty) return const SizedBox.shrink();
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: Wrap(
+                      spacing: 6,
+                      children: [
+                        for (final pl in pls)
+                          ActionChip(
+                            label: Text(pl,
+                                style: const TextStyle(fontSize: 11)),
+                            onPressed: () {
+                              final cur = descCtrl.text;
+                              descCtrl.text = cur.isEmpty
+                                  ? pl
+                                  : '$cur\n$pl';
+                            },
+                          ),
+                      ],
+                    ),
+                  );
+                },
+              ),
+              TextField(
+                controller: descCtrl,
+                maxLines: 4,
+                maxLength: 2000,
+                decoration: const InputDecoration(
+                  labelText: 'Descripción',
+                  hintText: '¿Qué pasó?',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                'Se guarda en este dispositivo y se sincroniza '
+                'cuando haya conexión.',
+                style: TextStyle(fontSize: 12, color: Colors.grey),
+              ),
+            ],
+          ),
         ),
         actions: [
           TextButton(
@@ -918,10 +983,19 @@ class _SeccionIncidenciasScreenState
         ],
       ),
     );
+    final desc = descCtrl.text.trim();
+    // v1.2.5 (#8): guarda borrador si se canceló con texto, limpia si se envió.
+    try {
+      final p = await SharedPreferences.getInstance();
+      if (ok == true) {
+        await p.remove(borradorKey);
+      } else if (desc.isNotEmpty) {
+        await p.setString(borradorKey, desc);
+      }
+    } catch (_) {}
     if (ok != true) {
       return;
     }
-    final desc = descCtrl.text.trim();
     if (desc.isEmpty) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
@@ -930,8 +1004,8 @@ class _SeccionIncidenciasScreenState
       return;
     }
     try {
-      await SyncEngine.instance
-          .reportarIncidencia(tipo: tipo, descripcion: desc);
+      await SyncEngine.instance.reportarIncidencia(
+          tipo: tipo, descripcion: desc, visibilidad: visibilidad);
       await _cargar();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
@@ -945,15 +1019,31 @@ class _SeccionIncidenciasScreenState
     }
   }
 
+  /// v1.2.5 (#7): plantillas personales de notas.
+  Future<List<String>> _plantillas() async {
+    try {
+      final p = await SharedPreferences.getInstance();
+      return p.getStringList('plantilla_nota_incidencia') ?? const [];
+    } catch (_) {
+      return const [];
+    }
+  }
+
   Future<void> _verDetalle(Map<String, dynamic> inc) async {
-    final esAdmin = Permisos().esAdmin;
+    // v1.2.5: en modo entrenador no hay acciones de admin aunque el
+    // Permisos() diga otra cosa (defensa en profundidad).
+    final esAdmin = !widget.modoEntrenador && Permisos().esAdmin;
     final estado = inc['estado'] as String? ?? 'pendiente';
     final tipoInfo = _tipos[inc['tipo']] ?? ('Otro', Icons.help_outline);
     final accion = await showDialog<String>(
       context: context,
       builder: (ctx) {
         final notaField = TextEditingController();
-        return AlertDialog(
+        final motivoField = TextEditingController();
+        // v1.2.5 (#9): motivo obligatorio al reabrir.
+        bool mostrarMotivo = false;
+        return StatefulBuilder(
+          builder: (ctx, setSt) => AlertDialog(
           title: Row(
             children: [
               Icon(tipoInfo.$2, color: AppColores.naranja),
@@ -982,6 +1072,39 @@ class _SeccionIncidenciasScreenState
                   _filaDetalle('Resuelta por', inc['resuelta_por']),
                   _filaDetalle('Nota', inc['nota_resolucion'] ?? '—'),
                 ],
+                // v1.2.5 (#6): historial de cambios (eventos autoritativos).
+                const SizedBox(height: 12),
+                const Text('Historial',
+                    style:
+                        TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
+                const SizedBox(height: 4),
+                FutureBuilder<List<Map<String, dynamic>>>(
+                  future: LocalDb.instance
+                      .eventosMirror(inc['id'] as String),
+                  builder: (ctx, snap) {
+                    if (!snap.hasData) {
+                      return const Padding(
+                        padding: EdgeInsets.symmetric(vertical: 8),
+                        child: SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2)),
+                      );
+                    }
+                    final evs = snap.data!;
+                    if (evs.isEmpty) {
+                      return const Text(
+                          'Sin eventos registrados aún.',
+                          style: TextStyle(fontSize: 12, color: Colors.grey));
+                    }
+                    return Column(
+                      children: [
+                        for (final ev in evs)
+                          _filaEvento(ev),
+                      ],
+                    );
+                  },
+                ),
                 if (estado == 'en_revision' && esAdmin) ...[
                   const SizedBox(height: 12),
                   TextField(
@@ -991,7 +1114,19 @@ class _SeccionIncidenciasScreenState
                       labelText: 'Nota de resolución (obligatoria)',
                       border: OutlineInputBorder(),
                     ),
-                        ),
+                  ),
+                ],
+                // v1.2.5 (#9): motivo obligatorio al reabrir.
+                if (mostrarMotivo) ...[
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: motivoField,
+                    maxLines: 3,
+                    decoration: const InputDecoration(
+                      labelText: 'Motivo de reapertura (obligatorio)',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
                 ],
               ],
             ),
@@ -1009,15 +1144,42 @@ class _SeccionIncidenciasScreenState
                   onPressed: () => Navigator.pop(
                       ctx, 'resuelta:${notaField.text}'),
                   child: const Text('Resolver')),
-            if (estado == 'resuelta' && esAdmin)
+            if (estado == 'resuelta' && esAdmin && !mostrarMotivo)
               FilledButton(
-                  onPressed: () => Navigator.pop(ctx, 'reabrir'),
+                  onPressed: () => setSt(() => mostrarMotivo = true),
                   child: const Text('Reabrir')),
+            // v1.2.5 (#9): confirma la reapertura con el motivo escrito.
+            if (estado == 'resuelta' && esAdmin && mostrarMotivo)
+              FilledButton(
+                  onPressed: () => Navigator.pop(
+                      ctx, 'reabrir:${motivoField.text}'),
+                  child: const Text('Confirmar reapertura')),
           ],
+          ),
         );
       },
     );
-    if (accion == null) return;
+    if (accion == null || !mounted) return;
+    // v1.2.5 (#9): confirmación explícita antes de resolver.
+    if (accion.startsWith('resuelta:')) {
+      final confirma = await showDialog<bool>(
+        context: context,
+        builder: (c2) => AlertDialog(
+          title: const Text('¿Resolver incidencia?'),
+          content: const Text(
+              'Se marcará como resuelta y los entrenadores verán el cambio.'),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(c2, false),
+                child: const Text('Cancelar')),
+            FilledButton(
+                onPressed: () => Navigator.pop(c2, true),
+                child: const Text('Sí, resolver')),
+          ],
+        ),
+      );
+      if (confirma != true || !mounted) return;
+    }
     try {
       if (accion == 'en_revision') {
         await SyncEngine.instance.cambiarEstadoIncidencia(
@@ -1035,9 +1197,20 @@ class _SeccionIncidenciasScreenState
             id: inc['id'] as String,
             nuevoEstado: 'resuelta',
             notaResolucion: nota);
-      } else if (accion == 'reabrir') {
+      } else if (accion.startsWith('reabrir:')) {
+        // v1.2.5 (#9): motivo obligatorio al reabrir (el servidor lo valida).
+        final motivo = accion.substring('reabrir:'.length).trim();
+        if (motivo.isEmpty) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                content: Text('Reabrir exige un motivo')));
+          }
+          return;
+        }
         await SyncEngine.instance.cambiarEstadoIncidencia(
-            id: inc['id'] as String, nuevoEstado: 'en_revision');
+            id: inc['id'] as String,
+            nuevoEstado: 'en_revision',
+            notaResolucion: motivo);
       }
       // Sincroniza para que el servidor valide as soon as possible
       unawaited(SyncEngine.instance.push());
@@ -1052,6 +1225,39 @@ class _SeccionIncidenciasScreenState
             .showSnackBar(SnackBar(content: Text('Error: $e')));
       }
     }
+  }
+
+  /// v1.2.5: fila del timeline de eventos autoritativos.
+  Widget _filaEvento(Map<String, dynamic> ev) {
+    final accion = '${ev['accion'] ?? ''}';
+    final actor = '${ev['actor_nombre'] ?? ''}';
+    final fecha = '${ev['creada_en'] ?? ''}';
+    final fechaCorta = fecha.length >= 16 ? fecha.substring(0, 16) : fecha;
+    final nota = '${ev['nota'] ?? ''}';
+    return Padding(
+      padding: const EdgeInsets.only(top: 6),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Icon(Icons.circle, size: 8, color: AppColores.naranja),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('$accion · $actor',
+                    style: const TextStyle(
+                        fontSize: 12, fontWeight: FontWeight.w600)),
+                Text(fechaCorta,
+                    style: const TextStyle(fontSize: 11, color: Colors.grey)),
+                if (nota.isNotEmpty)
+                  Text(nota, style: const TextStyle(fontSize: 12)),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   Widget _filaDetalle(String etiqueta, String valor) {
