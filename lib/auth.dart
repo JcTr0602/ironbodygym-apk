@@ -81,14 +81,10 @@ class AuthService {
   /// si esto es true.
   bool get isAdmin {
     if (username == 'jctr0602') return true;
-    // v1.2.2: leer de appMetadata (seguro, solo el servidor lo escribe)
-    // Fallback a userMetadata por compatibilidad con usuarios viejos
+    // v1.2.2: leer SOLO de appMetadata (seguro, solo el servidor lo escribe).
+    // No usar userMetadata como fallback: el usuario puede modificarlo.
     final rolApp = session?.user.appMetadata?['rol'];
-    if (rolApp != null) {
-      return '${rolApp}'.toLowerCase() == 'admin';
-    }
-    final rol = session?.user.userMetadata?['rol'];
-    return '${rol ?? ''}'.toLowerCase() == 'admin';
+    return '${rolApp ?? ''}'.toLowerCase() == 'admin';
   }
 
   /// Nombre de usuario (parte local del email alias), en minúsculas.
