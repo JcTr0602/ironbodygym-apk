@@ -191,12 +191,23 @@ class PerfilService {
 
   /// Verifica un PIN contra el hash guardado.
   ///
-  /// Devuelve true si coincide. Aplica límite de intentos: 5 fallos
-  /// consecutivos bloquean el PIN por 15 minutos. El contador se
-  /// reinicia al acertar.
+  /// v1.2.5 (4.1): límite persistente con esperas CRECIENTES que sobreviven
+  /// reinicios. 5 fallos → bloqueo de 1 min; si vuelve a fallar 5 veces,
+  /// 5 min; luego 15, 30, 60. El contador de "ciclos de bloqueo" persiste.
+  /// Limitación honesta: sin reloj monotónico persistente, si el reloj del
+  /// dispositivo retrocede bruscamente se mantiene el bloqueo (no se acorta).
   Future<bool> verificarPin(String pin) async {
     final ahora = DateTime.now().millisecondsSinceEpoch;
-    if (ahora < await getPinBloqueadoHasta()) return false;
+    final hasta = await getPinBloqueadoHasta();
+    // v1.2.5 (4.1): si el reloj retrocedió (ahora < última vez visto),
+    // mantener el bloqueo por seguridad.
+    final ultimaVez = (await _p).getInt('seg_pin_ultima_vez') ?? 0;
+    if (ahora < ultimaVez - 60000 && hasta > 0) {
+      // Retroceso >1 min con bloqueo activo: no acortar.
+      return false;
+    }
+    await (await _p).setInt('seg_pin_ultima_vez', ahora);
+    if (ahora < hasta) return false;
     final guardado = await getPinHash();
     if (guardado == null || guardado.isEmpty) return false;
     final ok = _pinCoincide(pin, guardado, await getPinSalt());
@@ -207,11 +218,24 @@ class PerfilService {
     final fallos = await getPinFallos() + 1;
     await _setPinFallos(fallos);
     if (fallos >= 5) {
-      await (await _p).setInt('seg_pin_bloqueado_hasta',
-          ahora + 15 * 60 * 1000);
+      // Esperas crecientes: 1, 5, 15, 30, 60 min según ciclos previos.
+      final ciclos = (await _p).getInt('seg_pin_ciclos_bloqueo') ?? 0;
+      const minutos = [1, 5, 15, 30, 60];
+      final minBloqueo = minutos[ciclos.clamp(0, minutos.length - 1)];
+      await (await _p).setInt(
+          'seg_pin_bloqueado_hasta', ahora + minBloqueo * 60 * 1000);
+      await (await _p).setInt('seg_pin_ciclos_bloqueo', ciclos + 1);
       await _setPinFallos(0);
     }
     return false;
+  }
+
+  /// Reinicia los ciclos de bloqueo (al cambiar el PIN o "Olvidé mi PIN").
+  Future<void> reiniciarBloqueoPin() async {
+    final p = await _p;
+    await p.setInt('seg_pin_fallos', 0);
+    await p.setInt('seg_pin_bloqueado_hasta', 0);
+    await p.setInt('seg_pin_ciclos_bloqueo', 0);
   }
 
   /// Minutos restantes de bloqueo del PIN (0 si no está bloqueado).
