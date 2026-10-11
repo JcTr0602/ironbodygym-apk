@@ -21,16 +21,25 @@ class PerfilService {
   Future<SharedPreferences> get _p async =>
       SharedPreferences.getInstance();
 
-  Future<String?> getMovil() async => (await _p).getString('perfil_movil');
+  String _key(String base) {
+    // v1.2.2: guardar por usuario, no por teléfono (Hark #4).
+    // Si otro entrenador inicia sesión en el mismo móvil, no ve los datos del anterior.
+    final username = AuthService().username;
+    return username.isEmpty ? base : '${base}_$username';
+  }
+
+  Future<String?> getMovil() async =>
+      (await _p).getString(_key('perfil_movil'));
   Future<void> setMovil(String v) async {
-    await (await _p).setString('perfil_movil', v);
+    await (await _p).setString(_key('perfil_movil'), v);
     // v1.2.2: sincronizar a Supabase (sobrevive reinstalación)
     _syncPerfilToSupabase();
   }
 
-  Future<String?> getCarnet() async => (await _p).getString('perfil_carnet');
+  Future<String?> getCarnet() async =>
+      (await _p).getString(_key('perfil_carnet'));
   Future<void> setCarnet(String v) async {
-    await (await _p).setString('perfil_carnet', v);
+    await (await _p).setString(_key('perfil_carnet'), v);
     // v1.2.2: sincronizar a Supabase (sobrevive reinstalación)
     _syncPerfilToSupabase();
   }
@@ -42,13 +51,13 @@ class PerfilService {
       final username = AuthService().username;
       if (username.isEmpty) return;
       final p = await _p;
-      final movil = p.getString('perfil_movil');
-      final carnet = p.getString('perfil_carnet');
+      final movil = p.getString(_key('perfil_movil'));
+      final carnet = p.getString(_key('perfil_carnet'));
       await Supabase.instance.client.from('sync_usuarios_perfil').upsert({
         'username': usernameToEmail(username).split('@').first,
         'movil': movil,
         'carnet': carnet,
-        'updated_at': DateTime.now().toIso8601String(),
+        // NOTA: updated_at lo pone el trigger en Supabase, no el teléfono
       }, onConflict: 'username');
     } catch (_) {
       // Sin conexión o error: se reintenta en el próximo cambio
@@ -60,8 +69,8 @@ class PerfilService {
   Future<void> descargarPerfilSiVacio() async {
     try {
       final p = await _p;
-      final movilLocal = p.getString('perfil_movil');
-      final carnetLocal = p.getString('perfil_carnet');
+      final movilLocal = p.getString(_key('perfil_movil'));
+      final carnetLocal = p.getString(_key('perfil_carnet'));
       // Si ya hay datos locales, no sobrescribir
       if ((movilLocal?.isNotEmpty ?? false) ||
           (carnetLocal?.isNotEmpty ?? false)) {
@@ -77,10 +86,10 @@ class PerfilService {
           .maybeSingle();
       if (res != null) {
         if (res['movil'] != null) {
-          await p.setString('perfil_movil', res['movil'] as String);
+          await p.setString(_key('perfil_movil'), res['movil'] as String);
         }
         if (res['carnet'] != null) {
-          await p.setString('perfil_carnet', res['carnet'] as String);
+          await p.setString(_key('perfil_carnet'), res['carnet'] as String);
         }
       }
     } catch (_) {
