@@ -154,7 +154,12 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
         final aSin = sa <= 0 ? 1 : 0;
         final bSin = sb <= 0 ? 1 : 0;
         if (aSin != bSin) return aSin - bSin;
-        return '${a['nombre']}'.compareTo('${b['nombre']}');
+        // v1.2.3: orden estable (sugerencia GPT-5.4-mini)
+        // nombre, luego id como desempate final
+        final cmpNombre =
+            '${a['nombre']}'.compareTo('${b['nombre']}');
+        if (cmpNombre != 0) return cmpNombre;
+        return (a['id'] as int? ?? 0).compareTo(b['id'] as int? ?? 0);
       });
     }
     return res;
