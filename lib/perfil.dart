@@ -297,11 +297,24 @@ class PerfilService {
   Future<void> setAhorroDatos(bool v) async =>
       (await _p).setBool('ahorro_datos_fotos', v);
 
+  /// v1.2.5 (3.2): vibración háptica tras confirmaciones. Opcional,
+  /// respeta los ajustes del sistema. Por defecto activada.
+  Future<bool> getVibracion() async =>
+      (await _p).getBool('vibracion_haptica') ?? true;
+  Future<void> setVibracion(bool v) async =>
+      (await _p).setBool('vibracion_haptica', v);
+
   /// Tema: 'sistema' | 'claro' | 'oscuro' (item 7).
   Future<String> getTema() async =>
       (await _p).getString('tema') ?? 'sistema';
   Future<void> setTema(String v) async =>
       (await _p).setString('tema', v);
+
+  /// v1.2.5 (3.4): alto contraste (objetivo WCAG AA).
+  Future<bool> getAltoContraste() async =>
+      (await _p).getBool('alto_contraste') ?? false;
+  Future<void> setAltoContraste(bool v) async =>
+      (await _p).setBool('alto_contraste', v);
 
   /// Escala de letra 0.85–1.30 (item 8).
   Future<double> getTamanoLetra() async =>

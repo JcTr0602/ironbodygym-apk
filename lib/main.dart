@@ -114,41 +114,49 @@ class _IronBodyAppState extends State<IronBodyApp> {
   Widget build(BuildContext context) {
     return ValueListenableBuilder<ThemeMode>(
       valueListenable: ThemeController.mode,
-      builder: (_, mode, __) =>
-          ValueListenableBuilder<double>(
+      builder: (_, mode, __) => ValueListenableBuilder<double>(
         valueListenable: ThemeController.fontScale,
-        builder: (_, escala, __) => MaterialApp(
-          builder: (ctx, child) {
-            final mq = MediaQuery.of(ctx);
-            // La escala de la app se multiplica por la de accesibilidad
-            // del sistema, en vez de reemplazarla.
-            final sistema = mq.textScaler.scale(1.0);
-            return MediaQuery(
-              data: mq.copyWith(
-                textScaler: TextScaler.linear(escala * sistema),
-              ),
-              child: child!,
-            );
-          },
-        navigatorKey: navigatorKey,
-        title: 'Iron Body Gym',
-        themeMode: mode,
-        // v1.2.4: tema unificado (lib/ui/diseno.dart → AppTema).
-        theme: AppTema.claro(),
-        darkTheme: AppTema.oscuro(),
-        home: FutureBuilder<Widget>(
-          future: _auth.loggedIn
-              ? Future.value(const HomeScreen())
-              : Future.value(const LoginScreen()),
-          builder: (ctx, snap) {
-            if (!snap.hasData) {
-              return const Scaffold(
-                body: Center(child: CircularProgressIndicator()),
+        builder: (_, escala, __) => ValueListenableBuilder<bool>(
+          valueListenable: ThemeController.altoContraste,
+          builder: (_, hc, __) => MaterialApp(
+            builder: (ctx, child) {
+              final mq = MediaQuery.of(ctx);
+              // La escala de la app se multiplica por la de accesibilidad
+              // del sistema, en vez de reemplazarla.
+              final sistema = mq.textScaler.scale(1.0);
+              return MediaQuery(
+                data: mq.copyWith(
+                  textScaler: TextScaler.linear(escala * sistema),
+                ),
+                child: child!,
               );
-            }
-            return snap.data!;
-          },
-        ),
+            },
+            navigatorKey: navigatorKey,
+            title: 'Iron Body Gym',
+            themeMode: mode,
+            // v1.2.4: tema unificado (lib/ui/diseno.dart → AppTema).
+            theme: AppTema.claro(),
+            darkTheme: AppTema.oscuro(),
+            // v1.2.5 (3.4): alto contraste (WCAG AA).
+            highContrastTheme:
+                hc ? AppTema.claroAltoContraste() : null,
+            highContrastDarkTheme:
+                hc ? AppTema.oscuroAltoContraste() : null,
+            home: FutureBuilder<Widget>(
+              future: _auth.loggedIn
+                  ? Future.value(const HomeScreen())
+                  : Future.value(const LoginScreen()),
+              builder: (ctx, snap) {
+                if (!snap.hasData) {
+                  return const Scaffold(
+                    body: Center(
+                        child: CircularProgressIndicator()),
+                  );
+                }
+                return snap.data!;
+              },
+            ),
+          ),
         ),
       ),
     );

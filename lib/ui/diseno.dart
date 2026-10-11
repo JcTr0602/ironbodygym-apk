@@ -202,12 +202,25 @@ class AppTema {
   static ThemeData claro() => _tema(Brightness.light);
   static ThemeData oscuro() => _tema(Brightness.dark);
 
-  static ThemeData _tema(Brightness b) {
+  /// v1.2.5 (3.4): variantes de alto contraste (WCAG AA).
+  static ThemeData claroAltoContraste() =>
+      _tema(Brightness.light, altoContraste: true);
+  static ThemeData oscuroAltoContraste() =>
+      _tema(Brightness.dark, altoContraste: true);
+
+  static ThemeData _tema(Brightness b, {bool altoContraste = false}) {
     final oscuro = b == Brightness.dark;
-    final superficie =
-        oscuro ? AppColores.superficieOscuro : AppColores.superficieClaro;
-    final borde = oscuro ? AppColores.bordeOscuro : AppColores.bordeClaro;
-    final texto = oscuro ? AppColores.textoOscuro : AppColores.textoClaro;
+    final superficie = altoContraste
+        ? (oscuro ? Colors.black : Colors.white)
+        : (oscuro
+            ? AppColores.superficieOscuro
+            : AppColores.superficieClaro);
+    final borde = altoContraste
+        ? (oscuro ? Colors.white : Colors.black)
+        : (oscuro ? AppColores.bordeOscuro : AppColores.bordeClaro);
+    final texto = altoContraste
+        ? (oscuro ? Colors.white : Colors.black)
+        : (oscuro ? AppColores.textoOscuro : AppColores.textoClaro);
     final secundario = oscuro
         ? AppColores.textoSecundarioOscuro
         : AppColores.textoSecundarioClaro;

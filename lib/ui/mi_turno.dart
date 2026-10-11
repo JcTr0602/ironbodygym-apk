@@ -11,6 +11,7 @@ import '../auth.dart';
 import '../localdb.dart';
 import '../negocio.dart';
 import '../sync.dart';
+import '../tiempo.dart';
 import 'componentes.dart';
 import 'diseno.dart';
 import 'ficha.dart';
@@ -406,6 +407,8 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
                 await LocalDb.instance.setMeta(
                     _claveCierre(),
                     DateTime.now().toIso8601String());
+                // v1.2.5 (3.2): vibra TRAS la confirmación real.
+                await vibrarConfirmacion();
                 if (ctx.mounted) Navigator.of(ctx).pop();
                 if (mounted) {
                   setState(() => _cerrado = true);

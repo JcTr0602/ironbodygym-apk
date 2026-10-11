@@ -46,6 +46,8 @@ class _AjustesScreenState extends State<AjustesScreen> {
   bool _avisoFalloSync = true;
   bool _autoSync = true;
   bool _ahorroDatos = false; // v1.2.4 (C17)
+  bool _vibracion = true; // v1.2.5 (3.2)
+  bool _altoContraste = false; // v1.2.5 (3.4)
   bool _vincular = false;
   bool _tienePin = false;
   String _tema = 'sistema';
@@ -75,6 +77,8 @@ class _AjustesScreenState extends State<AjustesScreen> {
     final fallo = await _perfil.getAvisoFalloSync();
     final auto = await _perfil.getAutoSync();
     final ahorro = await _perfil.getAhorroDatos();
+    final vibracion = await _perfil.getVibracion();
+    final altoContraste = await _perfil.getAltoContraste();
     final vinc = await _perfil.getVincularDispositivo();
     final pin = await _perfil.getPinHash();
     final tema = await _perfil.getTema();
@@ -90,6 +94,8 @@ class _AjustesScreenState extends State<AjustesScreen> {
         _avisoFalloSync = fallo;
         _autoSync = auto;
         _ahorroDatos = ahorro;
+        _vibracion = vibracion;
+        _altoContraste = altoContraste;
         _vincular = vinc;
         _tienePin = pin != null;
         _tema = tema;
@@ -1217,6 +1223,34 @@ class _AjustesScreenState extends State<AjustesScreen> {
                     await _perfil.setAhorroDatos(v);
                     if (mounted) {
                       setState(() => _ahorroDatos = v);
+                    }
+                  },
+                ),
+                // v1.2.5 (3.2): vibración háptica tras confirmaciones.
+                _switch(
+                  icono: Icons.vibration_outlined,
+                  titulo: 'Vibración',
+                  subtitulo:
+                      'Vibra suave al confirmar una acción',
+                  valor: _vibracion,
+                  onChanged: (v) async {
+                    await _perfil.setVibracion(v);
+                    if (mounted) {
+                      setState(() => _vibracion = v);
+                    }
+                  },
+                ),
+                // v1.2.5 (3.4): alto contraste.
+                _switch(
+                  icono: Icons.contrast_outlined,
+                  titulo: 'Alto contraste',
+                  subtitulo:
+                      'Texto y bordes más marcados',
+                  valor: _altoContraste,
+                  onChanged: (v) async {
+                    await ThemeController.setAltoContraste(v);
+                    if (mounted) {
+                      setState(() => _altoContraste = v);
                     }
                   },
                 ),

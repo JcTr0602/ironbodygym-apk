@@ -11,6 +11,9 @@ class ThemeController {
       ValueNotifier(ThemeMode.system);
   static final ValueNotifier<double> fontScale =
       ValueNotifier(1.0);
+  // v1.2.5 (3.4): alto contraste (WCAG AA).
+  static final ValueNotifier<bool> altoContraste =
+      ValueNotifier(false);
 
   static ThemeMode _aMode(String tema) {
     switch (tema) {
@@ -42,6 +45,9 @@ class ThemeController {
     mode.value = _aMode(tema ?? 'sistema');
     fontScale.value =
         await PerfilService.instance.getTamanoLetra();
+    // v1.2.5 (3.4): alto contraste.
+    altoContraste.value =
+        await PerfilService.instance.getAltoContraste();
   }
 
   static Future<void> setTema(String tema) async {
@@ -53,6 +59,12 @@ class ThemeController {
     final c = v.clamp(0.85, 1.3);
     await PerfilService.instance.setTamanoLetra(c);
     fontScale.value = c;
+  }
+
+  /// v1.2.5 (3.4): activa/desactiva el alto contraste.
+  static Future<void> setAltoContraste(bool v) async {
+    await PerfilService.instance.setAltoContraste(v);
+    altoContraste.value = v;
   }
 
   /// Rota sistema → claro → oscuro → sistema (botón de la cabecera).

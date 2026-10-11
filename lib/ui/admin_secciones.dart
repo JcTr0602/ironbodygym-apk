@@ -30,6 +30,7 @@ import 'historial_entrenador.dart';
 import 'historial_ventas.dart';
 import 'papelera.dart';
 import 'riesgo.dart';
+import 'skeleton.dart';
 import 'suplementos.dart';
 import 'usuarios.dart';
 
@@ -1317,7 +1318,11 @@ class _SeccionIncidenciasScreenState
           ),
           Expanded(
             child: _cargando
-                ? const Center(child: CircularProgressIndicator())
+                // v1.2.5 (3.1): skeleton en vez de spinner.
+                ? const SingleChildScrollView(
+                    padding: EdgeInsets.all(16),
+                    child: SkeletonLista(items: 4),
+                  )
                 : _error != null
                     ? Center(
                         child: Padding(
