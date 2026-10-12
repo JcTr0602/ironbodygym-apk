@@ -21,6 +21,7 @@ import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
 import 'package:image/image.dart' as img;
+import 'package:sqflite/sqflite.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:uuid/uuid.dart';
 
@@ -750,11 +751,14 @@ class SyncEngine {
   /// v1.2.5-rev6: turnos_cierre usa id TEXT (UUID) y columnas planas en
   /// Supabase; en rev5 el pull pedía `id,data,sync_seq`, respondía 400 y
   /// se omitía silenciosamente (el admin nunca veía cierres remotos).
-  Future<bool> _aplicarFilaMirror(
-      String tabla, Map<String, dynamic> m, int seq) async {
+  /// v1.2.7 (Paso 1 Gemini): prepara los datos de una fila mirror sin
+  /// escribir a la BD. Devuelve {'id', 'dataJson', 'esTexto'} o null si
+  /// la fila es inválida. La escritura se hace en batch transaccional.
+  Map<String, dynamic>? _prepararFilaMirror(
+      String tabla, Map<String, dynamic> m) {
     if (tabla == 'turnos_cierre') {
       final id = '${m['id'] ?? ''}';
-      if (id.isEmpty) return false;
+      if (id.isEmpty) return null;
       final data = <String, dynamic>{
         'id': id,
         'entrenador_id': m['entrenador_id'],
@@ -768,9 +772,10 @@ class SyncEngine {
         'nota': m['nota'],
         'cerrado_en': m['cerrado_en'],
       };
-      return _db.upsertMirrorTexto(tabla, id, data, seq);
+      return {'id': id, 'dataJson': jsonEncode(data), 'esTexto': true};
     }
     final id = (m['id'] as int?) ?? 0;
+    if (id == 0) return null;
     // gastos usa columnas planas en Supabase (sin 'data' JSON)
     final Map<String, dynamic> data;
     if (tabla == 'gastos') {
@@ -782,9 +787,11 @@ class SyncEngine {
         'registrado_por': m['registrado_por'],
       };
     } else {
-      data = Map<String, dynamic>.from(m['data'] as Map);
+      final rawData = m['data'];
+      if (rawData is! Map) return null;
+      data = Map<String, dynamic>.from(rawData);
     }
-    return _db.upsertMirror(tabla, id, data, seq);
+    return {'id': id, 'dataJson': jsonEncode(data), 'esTexto': false};
   }
 
   /// Devuelve la cantidad de filas nuevas bajadas.
@@ -887,7 +894,6 @@ class SyncEngine {
       }
       var pageWm = cursor;
       var tablaMax = cursor;
-      var tablaOk = true;
       try {
         while (true) {
           // gastos y turnos_cierre tienen esquema plano en Supabase
@@ -923,34 +929,79 @@ class SyncEngine {
           }
           final rows = jsonDecode(r.body) as List;
           if (rows.isEmpty) break;
+          // v1.2.7 (Paso 1 Gemini): commit atómico por página.
+          // Se preparan las filas primero (sin escribir), luego en una sola
+          // transacción se hace batch insert + actualización del watermark.
+          // Si la página falla, no se avanza el cursor y se reintenta limpio.
+          final opsPagina = <Map<String, dynamic>>[];
+          var paginaMax = pageWm;
           for (final row in rows) {
             vistas++;
             try {
               final m = Map<String, dynamic>.from(row as Map);
               final seq = (m['sync_seq'] as int?) ?? 0;
-              // v1.2.5 (D20): cuenta aplicadas vs sin cambios de verdad.
-              if (await _aplicarFilaMirror(tabla, m, seq)) {
-                aplicadas++;
+              final prep = _prepararFilaMirror(tabla, m);
+              if (prep != null) {
+                // v1.2.5 (D20): cuenta aplicadas vs sin cambios de verdad.
+                if (await _db.filaMirrorCambio(
+                    tabla, prep['id'], prep['dataJson'])) {
+                  opsPagina.add({
+                    'id': prep['id'],
+                    'dataJson': prep['dataJson'],
+                    'seq': seq,
+                    'esTexto': prep['esTexto'],
+                  });
+                  aplicadas++;
+                } else {
+                  sinCambios++;
+                }
               } else {
                 sinCambios++;
               }
+              if (seq > paginaMax) paginaMax = seq;
               if (seq > tablaMax) tablaMax = seq;
             } catch (_) {
               fallidas++;
             }
           }
+          // Commit atómico: filas + watermark de la página juntos.
+          if (opsPagina.isNotEmpty || paginaMax > pageWm) {
+            final d = await _db.db;
+            await d.transaction((txn) async {
+              final batch = txn.batch();
+              for (final op in opsPagina) {
+                batch.insert(
+                    tabla,
+                    {
+                      'id': op['id'],
+                      'data': op['dataJson'],
+                      'sync_seq': op['seq']
+                    },
+                    conflictAlgorithm: ConflictAlgorithm.replace);
+              }
+              // noResult: true evita instanciar objetos en memoria (Gemini).
+              await batch.commit(noResult: true);
+              await txn.update('meta', {'valor': '$paginaMax'},
+                  where: 'clave = ?', whereArgs: ['wm_$tabla']);
+            });
+            // FTS es derivado y reconstruible: se actualiza fuera de la txn.
+            for (final op in opsPagina) {
+              if (tabla == 'clientes') {
+                await _db.actualizarFtsCliente(
+                    op['id'] as int, op['dataJson'] as String);
+              }
+            }
+          }
           if (rows.length < 500) break;
-          pageWm = tablaMax;
+          pageWm = paginaMax;
         }
       } catch (e) {
         // 404/400 ya se manejan con break arriba (tabla no existe).
         // Otro error: el cursor de esta tabla no avanza y reintenta en
         // el próximo ciclo; las demás tablas no se bloquean.
-        tablaOk = false;
+        // v1.2.7: el watermark ya se actualiza por página dentro de la
+        // transacción atómica, no hace falta actualización final.
         erroresTablas.add('$tabla: $e');
-      }
-      if (tablaOk && tablaMax > cursor) {
-        await _db.setWatermarkTabla(tabla, tablaMax);
       }
     }
     // borrados (tombstones)
