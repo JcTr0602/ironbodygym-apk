@@ -14,6 +14,7 @@ import 'package:uuid/uuid.dart';
 
 import '../auth.dart';
 import '../fotos.dart';
+import '../fotos_cola.dart';
 import '../localdb.dart';
 import '../negocio.dart';
 import '../sync.dart';
@@ -819,16 +820,13 @@ class _EditarSuplementoScreenState
       // suplemento_id en el resultado. Al editar, el id ya se conoce.
       if (_fotoNuevaPath != null) {
         final fotoOpUuid = _editando ? const Uuid().v4() : crearOpUuid;
-        final fid = await LocalDb.instance.addFotoPendiente(
+        // v1.2.9: usar la cola persistente (no fotos_pendientes).
+        final sid = _editando ? widget.suplemento!['id'] as int? : null;
+        await FotosColaService.instance.encolarFoto(
           opUuid: fotoOpUuid,
-          localPath: _fotoNuevaPath!,
+          suplementoId: sid,
+          rutaOriginal: _fotoNuevaPath!,
         );
-        if (_editando) {
-          final sid = widget.suplemento!['id'] as int?;
-          if (sid != null) {
-            await LocalDb.instance.setFotoSuplemento(fid, sid);
-          }
-        }
       }
       unawaited(SyncEngine.instance.push());
       if (mounted) Navigator.pop(context, true);

@@ -165,6 +165,22 @@ class SessionExpired implements Exception {
   String toString() => message;
 }
 
+/// v1.2.9: estado tipado de subida (corrección Gemini #3).
+enum EstadoSubida { subida, reintentable, permanente, permitirFallback }
+
+/// v1.2.9: resultado estructurado (corrección Gemini #3).
+class ResultadoSubidaFoto {
+  final EstadoSubida estado;
+  final String? storagePath;
+  final String? error;
+
+  const ResultadoSubidaFoto({
+    required this.estado,
+    this.storagePath,
+    this.error,
+  });
+}
+
 class SyncEngine {
   SyncEngine._();
   static final SyncEngine instance = SyncEngine._();
@@ -772,6 +788,12 @@ class SyncEngine {
       return false;
     }
   }
+
+  /// v1.2.9: wrapper público para la cola de fotos.
+  Future<int?> clienteDeOp(String uuid) => _clienteDeOp(uuid);
+
+  /// v1.2.9: wrapper público para la cola de fotos.
+  Future<int?> suplementoDeOp(String uuid) => _suplementoDeOp(uuid);
 
   Future<int?> _clienteDeOp(String uuid) async {
     try {
@@ -1579,6 +1601,145 @@ class SyncEngine {
     return ok ? path : null;
   }
 
+  /// v1.2.9: subida para la cola persistente (fotos_cola).
+  /// Envuelve _subirFotoTus con claves compuestas op_uuid+tipo (Gemini #1)
+  /// y política de fallback estricta (Luna #2, Gemini).
+  Future<ResultadoSubidaFoto> subirFotoCola({
+    required String opUuid,
+    required String tipo,
+    required String objectPath,
+    required Uint8List bytes,
+    required String claveTusLoc,
+    required String claveTusOffset,
+  }) async {
+    if (bytes.isEmpty) {
+      return const ResultadoSubidaFoto(
+        estado: EstadoSubida.permanente,
+        error: 'archivo vacío',
+      );
+    }
+    try {
+      final tus = await _subirFotoTusCola(
+        claveTusLoc: claveTusLoc,
+        claveTusOffset: claveTusOffset,
+        objectPath: objectPath,
+        bytes: bytes,
+      );
+      if (tus == true) {
+        // Corrección Gemini #6: limpiar claves TUS exactas tras éxito.
+        await _db.setMeta(claveTusLoc, '');
+        await _db.setMeta(claveTusOffset, '0');
+        return ResultadoSubidaFoto(
+          estado: EstadoSubida.subida,
+          storagePath: objectPath,
+        );
+      }
+      // tus == false: fallo reintentable (el offset quedó guardado).
+      // tus == null: TUS no disponible → fallback permitido.
+      if (tus == null) {
+        final ok = await _subirFotoSimple(objectPath, bytes);
+        if (ok) {
+          return ResultadoSubidaFoto(
+            estado: EstadoSubida.subida,
+            storagePath: objectPath,
+          );
+        }
+        return const ResultadoSubidaFoto(
+          estado: EstadoSubida.permitirFallback,
+          error: 'TUS no disponible y PUT falló',
+        );
+      }
+      return const ResultadoSubidaFoto(
+        estado: EstadoSubida.reintentable,
+        error: 'TUS falló, se reintentará',
+      );
+    } on SessionExpired {
+      // 401: refresh sesión, reintentable (no fallback a PUT).
+      return const ResultadoSubidaFoto(
+        estado: EstadoSubida.reintentable,
+        error: 'sesión expirada',
+      );
+    } catch (e) {
+      return ResultadoSubidaFoto(
+        estado: EstadoSubida.reintentable,
+        error: '$e',
+      );
+    }
+  }
+
+  /// v1.2.9: variante de _subirFotoTus que acepta claves compuestas.
+  /// Copia la lógica existente pero con claves op_uuid+tipo (Gemini #1).
+  Future<bool?> _subirFotoTusCola({
+    required String claveTusLoc,
+    required String claveTusOffset,
+    required String objectPath,
+    required Uint8List bytes,
+  }) async {
+    String? location = await _db.getMeta(claveTusLoc);
+    if (location != null && location.isEmpty) location = null;
+    var offset = int.tryParse(await _db.getMeta(claveTusOffset) ?? '0') ?? 0;
+
+    if (location == null) {
+      location = await _tusCrear(objectPath, bytes.length);
+      if (location == null) return null; // TUS no disponible
+      await _db.setMeta(claveTusLoc, location);
+      offset = 0;
+    } else {
+      final remoto = await _tusOffset(location);
+      if (remoto == -1) {
+        location = await _tusCrear(objectPath, bytes.length);
+        if (location == null) return null;
+        await _db.setMeta(claveTusLoc, location);
+        offset = 0;
+      } else if (remoto >= 0) {
+        offset = remoto;
+      }
+    }
+    if (offset > bytes.length) offset = 0;
+
+    const chunk = 32 * 1024;
+    while (offset < bytes.length) {
+      final fin =
+          (offset + chunk < bytes.length) ? offset + chunk : bytes.length;
+      var okChunk = false;
+      for (var intento = 0; intento < 3 && !okChunk; intento++) {
+        try {
+          final r = await _patchAuth(
+            Uri.parse(location!),
+            headers: {
+              'Tus-Resumable': '1.0.0',
+              'Content-Type': 'application/offset+octet-stream',
+              'Upload-Offset': '$offset',
+            },
+            body: bytes.sublist(offset, fin),
+          );
+          if (r.statusCode == 204 || r.statusCode == 200) {
+            offset = int.tryParse(r.headers['upload-offset'] ?? '') ?? fin;
+            okChunk = true;
+          } else if (r.statusCode == 401) {
+            throw SessionExpired();
+          } else if (r.statusCode == 404 || r.statusCode == 410) {
+            await _db.setMeta(claveTusLoc, '');
+            await _db.setMeta(claveTusOffset, '0');
+            return false;
+          } else if (r.statusCode == 403) {
+            // Permanente: no reintentar ni fallback.
+            return false;
+          }
+        } catch (e) {
+          if (e is SessionExpired) rethrow;
+          okChunk = false;
+        }
+      }
+      if (!okChunk) {
+        await _db.setMeta(claveTusOffset, '$offset');
+        return false;
+      }
+      await _db.setMeta(claveTusOffset, '$offset');
+    }
+    return true;
+  }
+
   Uint8List _comprimirFoto(Uint8List bytes) {
     try {
       final dec = img.decodeImage(bytes);
@@ -1787,6 +1948,11 @@ class SyncEngine {
     final fotos = await _db.fotosPendientes();
     var i = 0;
     for (final f in fotos) {
+      // v1.2.9 (Gemini #4): el flujo viejo IGNORA fotos que tengan fila
+      // en fotos_cola. La cola persistente es el único camino para fotos
+      // nuevas; esto evita doble subida.
+      final enCola = await _db.tieneFilaEnCola(f['op_uuid'] as String);
+      if (enCola) continue;
       i++;
       final fid = f['id'] as int;
       // v1.2.6: cada foto se aísla en try/catch — un error inesperado

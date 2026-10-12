@@ -16,6 +16,7 @@ import 'package:uuid/uuid.dart';
 
 import '../auth.dart';
 import '../fotos.dart';
+import '../fotos_cola.dart';
 import '../localdb.dart';
 import '../negocio.dart';
 import '../sync.dart';
@@ -620,11 +621,13 @@ class _FichaScreenState extends State<FichaScreen> {
       try { await destino.delete(); } catch (_) {}
       return;
     }
-    // Encola la subida (se comprime al subir, punto 16).
+    // v1.2.9: usar la cola persistente (no fotos_pendientes).
     final opUuid = const Uuid().v4();
-    final fid = await LocalDb.instance.addFotoPendiente(
-        opUuid: opUuid, localPath: editada.path);
-    await LocalDb.instance.setFotoCliente(fid, widget.clienteId);
+    await FotosColaService.instance.encolarFoto(
+      opUuid: opUuid,
+      clienteId: widget.clienteId,
+      rutaOriginal: editada.path,
+    );
     if (!mounted) return;
     setState(() => _foto = editada);
     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(

@@ -13,6 +13,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:uuid/uuid.dart';
 
 import '../localdb.dart';
+import '../fotos_cola.dart';
 import '../negocio.dart';
 import '../sync.dart';
 import '../tipos_pago.dart';
@@ -289,8 +290,11 @@ class _InscribirScreenState extends State<InscribirScreen> {
         fotoPath: fotoPath,
       );
       if (fotoPath != null) {
-        await LocalDb.instance
-            .addFotoPendiente(opUuid: opUuid, localPath: fotoPath);
+        // v1.2.9: usar la cola persistente (no fotos_pendientes).
+        await FotosColaService.instance.encolarFoto(
+          opUuid: opUuid,
+          rutaOriginal: fotoPath,
+        );
       }
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(

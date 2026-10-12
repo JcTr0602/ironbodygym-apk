@@ -7,12 +7,15 @@
 ///   nativos en background; compute() rompería los MethodChannels.
 library;
 
+import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_image_compress/flutter_image_compress.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:uuid/uuid.dart';
 import 'localdb.dart';
+import 'sync.dart' show SyncEngine, EstadoSubida, ResultadoSubidaFoto;
 
 /// Genera thumb + display WebP. Corre directo (sin compute): el plugin
 /// ya delega a hilos nativos y compute() no tiene MethodChannels.
@@ -89,6 +92,33 @@ class FotosColaService {
       });
     }
     await batch.commit(noResult: true);
+
+    // v1.2.9 (nota Gemini): persistir foto_uuid en el cliente al encolar,
+    // para que _actualizarMirrorFoto pueda verificar precedencia.
+    if (clienteId != null) {
+      try {
+        final rows = await db.query(
+          'clientes',
+          columns: ['data'],
+          where: 'id = ?',
+          whereArgs: [clienteId],
+          limit: 1,
+        );
+        if (rows.isNotEmpty) {
+          Map<String, dynamic> data;
+          final raw = rows.first['data'];
+          data = Map<String, dynamic>.from(
+              raw is String ? jsonDecode(raw) : raw as Map);
+          data['foto_uuid'] = opUuid;
+          await db.update(
+            'clientes',
+            {'data': jsonEncode(data)},
+            where: 'id = ?',
+            whereArgs: [clienteId],
+          );
+        }
+      } catch (_) {}
+    }
   }
 
   /// Despachador con Network Lock.
@@ -164,7 +194,7 @@ class FotosColaService {
       );
       if (reclamadas != 1) continue; // Otro worker ganó.
 
-      final storagePath = await _subirUna(f);
+      final storagePath = await _subirUna(f, workerId);
       if (storagePath != null) {
         subidas++;
         // Verificar filas afectadas (Luna): si el lease expiró y otro
@@ -184,6 +214,12 @@ class FotosColaService {
         );
         if (completadas != 1) {
           debugPrint('[Fotos] Otro worker tomó la foto $id, omitiendo.');
+        } else {
+          // v1.2.9 (Gemini #5): actualizar mirror solo para variante
+          // 'original', y solo si la foto sigue siendo la vigente.
+          if (f['tipo'] == 'original') {
+            await _actualizarMirrorFoto(f, storagePath);
+          }
         }
       } else {
         // Fix Luna 4: backoff exponencial (30s, 2min, 10min, 30min).
@@ -210,21 +246,117 @@ class FotosColaService {
     return subidas;
   }
 
-  /// Sube una foto con timeout de 25s. Retorna el storage_path en éxito,
-  /// null en fallo. (Punto A: integración TUS/PUT pendiente.)
-  Future<String?> _subirUna(Map<String, dynamic> f) async {
+  /// v1.2.9: sube una foto real vía TUS/PUT. Correcciones Gemini:
+  /// #1: claves TUS compuestas op_uuid+tipo (las 3 variantes comparten op_uuid).
+  /// #2: estado 'subiendo' (no 'procesando').
+  /// #3: retorna ResultadoSubidaFoto con storagePath.
+  /// #4: ruta determinista con entidad/tipo/extensión real.
+  /// #5: timer de lease con cancel() en finally.
+  Future<String?> _subirUna(Map<String, dynamic> f, String workerId) async {
+    final id = f['id'] as int;
+    final opUuid = f['op_uuid'] as String;
+    final tipo = f['tipo'] as String; // original | thumb | display
+    final db = await LocalDb.instance.db;
+
+    // v1.2.9: resolver cliente_id/suplemento_id si aún no se conocen
+    // (la op de creación aún no se aplicó en el servidor).
+    var clienteId = f['cliente_id'] as int?;
+    var suplementoId = f['suplemento_id'] as int?;
+    clienteId ??= await SyncEngine.instance.clienteDeOp(opUuid);
+    suplementoId ??= await SyncEngine.instance.suplementoDeOp(opUuid);
+    if (clienteId == null && suplementoId == null) {
+      // La creación aún no se aplica: reintentable, no error.
+      return null;
+    }
+    // Persistir los IDs resueltos para no consultar de nuevo.
+    if (f['cliente_id'] == null && clienteId != null ||
+        f['suplemento_id'] == null && suplementoId != null) {
+      await db.update(
+        'fotos_cola',
+        {'cliente_id': clienteId, 'suplemento_id': suplementoId},
+        where: 'id = ?',
+        whereArgs: [id],
+      );
+    }
+
+    // Corrección Gemini #4: ruta determinista con entidad, tipo y extensión real.
+    final entidad = clienteId != null
+        ? 'clientes/$clienteId'
+        : 'suplementos/$suplementoId';
+    final ext = (tipo == 'original') ? 'jpg' : 'webp';
+    final objectPath = '$entidad/${opUuid}_$tipo.$ext';
+
+    // Corrección Gemini #1: claves TUS compuestas (op_uuid se comparte
+    // entre las 3 variantes de la misma foto).
+    final claveTusLoc = 'tus_loc_${opUuid}_$tipo';
+    final claveTusOffset = 'tus_offset_${opUuid}_$tipo';
+
+    // Corrección Gemini #5: renovar lease durante la subida, con
+    // cancel() garantizado en finally.
+    Timer? renovadorLease;
     try {
+      renovadorLease = Timer.periodic(const Duration(seconds: 30), (_) async {
+        final afectadas = await db.update(
+          'fotos_cola',
+          {
+            'lease_hasta': DateTime.now()
+                .add(const Duration(minutes: 10))
+                .toIso8601String()
+          },
+          where: "id = ? AND worker_id = ? AND estado = 'subiendo'",
+          whereArgs: [id, workerId],
+        );
+        if (afectadas == 0) {
+          // Otro worker tomó la fila o fue invalidada: abortar.
+          debugPrint('[Fotos] Lease perdido para foto $id, abortando.');
+        }
+      });
+
       final ruta = f['ruta_local'] as String;
       final file = File(ruta);
       if (!await file.exists()) {
-        await _marcarError(f['id'] as int, 'archivo no existe');
+        await _marcarError(id, 'archivo no existe');
         return null;
       }
-      debugPrint('[Fotos] Pendiente integración TUS: $ruta');
-      return null;
+
+      // Corrección Gemini (casos borde): detectar si el archivo cambió
+      // mientras se lee.
+      final tamanoAntes = await file.length();
+      final bytes = await file.readAsBytes();
+      if (bytes.length != tamanoAntes) {
+        await _marcarError(id, 'archivo cambió durante lectura');
+        return null;
+      }
+
+      final res = await SyncEngine.instance.subirFotoCola(
+        opUuid: opUuid,
+        tipo: tipo,
+        objectPath: objectPath,
+        bytes: bytes,
+        claveTusLoc: claveTusLoc,
+        claveTusOffset: claveTusOffset,
+      );
+
+      switch (res.estado) {
+        case EstadoSubida.subida:
+          // Corrección Gemini #6 (limpieza): solo tras éxito definitivo.
+          // subirFotoCola ya limpió las claves TUS exactas.
+          return res.storagePath ?? objectPath;
+        case EstadoSubida.permanente:
+          await _marcarError(id, res.error ?? 'error permanente');
+          return null;
+        case EstadoSubida.reintentable:
+        case EstadoSubida.permitirFallback:
+          // El despachador aplica backoff; no marcar error permanente.
+          debugPrint('[Fotos] Reintentable foto $id: ${res.error}');
+          return null;
+      }
     } catch (e) {
-      await _marcarError(f['id'] as int, '$e');
+      await _marcarError(id, '$e');
       return null;
+    } finally {
+      // Corrección Gemini #5: cancelar siempre el timer.
+      renovadorLease?.cancel();
     }
   }
 
@@ -238,6 +370,54 @@ class FotosColaService {
       },
       where: 'id = ?',
       whereArgs: [id],
+    );
+  }
+
+  /// v1.2.9 (Gemini #5): actualiza foto_storage en el mirror local.
+  /// Solo si el cliente existe y la foto subida sigue siendo la vigente
+  /// (no sobrescribir una foto más nueva).
+  Future<void> _actualizarMirrorFoto(
+      Map<String, dynamic> f, String storagePath) async {
+    final db = await LocalDb.instance.db;
+    final clienteId = f['cliente_id'] as int?;
+    if (clienteId == null) return; // Es de suplemento, no hay mirror.
+
+    final rows = await db.query(
+      'clientes',
+      columns: ['data'],
+      where: 'id = ?',
+      whereArgs: [clienteId],
+      limit: 1,
+    );
+    if (rows.isEmpty) return; // Cliente eliminado.
+
+    Map<String, dynamic> data;
+    try {
+      data = Map<String, dynamic>.from(
+          rows.first['data'] is String
+              ? const JsonDecoder().convert(rows.first['data'] as String)
+              : rows.first['data'] as Map);
+    } catch (_) {
+      return;
+    }
+
+    // Verificar precedencia: no sobrescribir si ya hay una foto más nueva.
+    // El op_uuid de la fila debe coincidir con el foto_uuid vigente,
+    // o no debe haber foto_uuid (primera foto).
+    final fotoUuidVigente = data['foto_uuid'] as String?;
+    final miOpUuid = f['op_uuid'] as String;
+    if (fotoUuidVigente != null && fotoUuidVigente != miOpUuid) {
+      debugPrint('[Fotos] Foto más nueva existe, no sobrescribo mirror.');
+      return;
+    }
+
+    data['foto_storage'] = storagePath;
+    data['foto_uuid'] = miOpUuid;
+    await db.update(
+      'clientes',
+      {'data': const JsonEncoder().convert(data)},
+      where: 'id = ?',
+      whereArgs: [clienteId],
     );
   }
 

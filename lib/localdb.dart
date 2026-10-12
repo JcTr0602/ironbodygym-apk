@@ -1669,6 +1669,20 @@ class LocalDb {
         where: 'estado=\'pendiente\'', orderBy: 'id ASC');
   }
 
+  /// v1.2.9 (Gemini #4): verifica si un op_uuid ya está en la cola
+  /// persistente. El flujo viejo debe ignorar esas fotos.
+  Future<bool> tieneFilaEnCola(String opUuid) async {
+    final d = await db;
+    final r = await d.query(
+      'fotos_cola',
+      columns: ['id'],
+      where: 'op_uuid = ?',
+      whereArgs: [opUuid],
+      limit: 1,
+    );
+    return r.isNotEmpty;
+  }
+
   Future<void> setFotoCliente(int fotoId, int clienteId) async {
     final d = await db;
     await d.update('fotos_pendientes', {'cliente_id': clienteId},
