@@ -886,8 +886,14 @@ Future<List<Map<String, dynamic>>> diariosDeHoy() async {
   // Claves de negocio ya en mirror para deduplicar
   final clavesMirror = <String>{};
   for (final d in res) {
+    // v1.2.7 fix Gemini ronda 2: misma estructura que la clave del op
+    // (incluir hora) o la deduplicación nunca coincidiría.
+    final hora = (d['hora'] as String?) ??
+        (d['creado_en'] as String?) ??
+        (d['creada_ts'] as String?) ??
+        '';
     clavesMirror.add(
-        "${d['fecha']}|${d['turno']}|${d['cantidad']}|${d['registrado_por']}");
+        "${d['fecha']}|$hora|${d['turno']}|${d['cantidad']}|${d['registrado_por']}");
   }
   for (final op in opsPendientes) {
     try {
