@@ -28,6 +28,7 @@ import 'package:uuid/uuid.dart';
 import 'auth.dart';
 import 'config.dart';
 import 'errores_sync.dart';
+import 'fotos_cola.dart';
 import 'localdb.dart';
 import 'perfil.dart';
 
@@ -559,6 +560,10 @@ class SyncEngine {
       if (!ahorro || _forzarFotos) {
         _emit(SyncPhase.photos);
         await _uploadFotos();
+        // FIX (Gemini auditoría funcional): procesar la cola moderna de
+        // fotos (fotos_cola). Antes nadie la llamaba y las fotos quedaban
+        // huérfanas en la cola.
+        await FotosColaService.instance.procesarCola();
       }
       await _db.setMeta('last_push_ok', DateTime.now().toIso8601String());
       await _db.setMeta('last_uploaded', '$n');
@@ -898,6 +903,14 @@ class SyncEngine {
       final rawData = m['data'];
       if (rawData is! Map) return null;
       data = Map<String, dynamic>.from(rawData);
+      // FIX (Gemini auditoría funcional): inyectar id siempre, porque
+      // los lectores del mirror solo decodifican la columna data.
+      data['id'] = id;
+      if (tabla == 'clientes') {
+        // FIX: default 'activo' si viene null (todo cliente sin estado
+        // explícito se considera activo).
+        data['estado'] ??= 'activo';
+      }
     }
     return {'id': id, 'dataJson': jsonEncode(data), 'esTexto': false};
   }
@@ -1117,7 +1130,7 @@ class SyncEngine {
               }
             }
           }
-          if (rows.length < 500) break;
+          if (rows.length < 100) break;
           pageWm = paginaMax;
         }
       } catch (e) {
@@ -1127,6 +1140,17 @@ class SyncEngine {
         // v1.2.7: el watermark ya se actualiza por página dentro de la
         // transacción atómica, no hace falta actualización final.
         erroresTablas.add('$tabla: $e');
+      }
+      // FIX (Gemini auditoría funcional BUG 3): si la tabla se descargó
+      // sin errores, sincronizar su watermark con serverSeq. Evita que
+      // getWatermarkMinimo() devuelva un cursor viejo de una tabla
+      // inactiva y cause "Sincronización incompleta" eterno.
+      if (serverSeq != null &&
+          !erroresTablas.any((e) => e.startsWith('$tabla:'))) {
+        final wmActual = await _db.getWatermarkTabla(tabla);
+        if (wmActual < serverSeq) {
+          await _db.setWatermarkTabla(tabla, serverSeq);
+        }
       }
     }
     // borrados (tombstones)
@@ -1178,7 +1202,7 @@ class SyncEngine {
           }
           if (seq > borradosMax) borradosMax = seq;
         }
-        if (rows.length < 500) break;
+        if (rows.length < 100) break;
         pageWm = borradosMax;
       }
     } catch (e) {

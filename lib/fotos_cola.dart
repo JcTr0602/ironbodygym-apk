@@ -479,6 +479,24 @@ class FotosColaService {
       if (clienteId != null) {
         await _vincularFotoCliente(txn, clienteId, opUuid, storagePath);
       } else if (suplementoId != null) {
+        // FIX (Gemini): actualizar el mirror local del suplemento de
+        // inmediato, igual que se hace con clientes.
+        try {
+          final rows = await txn.query('suplementos',
+              columns: ['data'],
+              where: 'id = ?',
+              whereArgs: [suplementoId],
+              limit: 1);
+          if (rows.isNotEmpty) {
+            final raw = rows.first['data'];
+            final data = Map<String, dynamic>.from(
+                raw is String ? jsonDecode(raw) : raw as Map);
+            data['foto_storage'] = storagePath;
+            data['foto_uuid'] = opUuid;
+            await txn.update('suplementos', {'data': jsonEncode(data)},
+                where: 'id = ?', whereArgs: [suplementoId]);
+          }
+        } catch (_) {}
         await txn.insert('ops_queue', {
           'op_uuid': const Uuid().v4(),
           'tipo': 'foto_suplemento',

@@ -918,11 +918,14 @@ Future<List<Map<String, dynamic>>> diariosDeHoy() async {
       todos.where((d) => (d['fecha'] as String?) == hoy).toList();
 
   // Ops pendientes de pago_diario (aún no en mirror)
+  // FIX (Gemini BUG 6): incluir 'enviada' — si solo se filtra 'pendiente',
+  // el pago desaparece de la pantalla en cuanto se sube pero antes de
+  // que el pull descargue el mirror confirmado.
   final db = await LocalDb.instance.db;
   final opsPendientes = await db.query(
     'ops_queue',
     columns: ['op_uuid', 'payload'],
-    where: "tipo = 'pago_diario' AND estado = 'pendiente'",
+    where: "tipo = 'pago_diario' AND estado IN ('pendiente', 'enviada')",
   );
   // Claves de negocio ya en mirror para deduplicar
   final clavesMirror = <String>{};

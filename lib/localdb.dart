@@ -720,9 +720,13 @@ class LocalDb {
     final ph = List.filled(ids.length, '?').join(',');
     final rows =
         await d.query(tabla, where: 'id IN ($ph)', whereArgs: ids);
+    // FIX (Gemini): garantizar id desde la columna SQL, no solo del JSON.
     return [
       for (final r in rows)
-        jsonDecode(r['data'] as String) as Map<String, dynamic>
+        {
+          ...jsonDecode(r['data'] as String) as Map<String, dynamic>,
+          'id': r['id'],
+        }
     ];
   }
 
@@ -963,14 +967,28 @@ class LocalDb {
   Future<List<Map<String, dynamic>>> mirrorPorEstado(
       String tabla, String estado) async {
     final d = await db;
-    final rows = await d.rawQuery(
-      'SELECT data FROM $tabla WHERE json_extract(data, \'\$.estado\') = ?',
-      [estado],
-    );
-    return [
-      for (final r in rows)
-        jsonDecode(r['data'] as String) as Map<String, dynamic>
-    ];
+    // FIX (Gemini): incluir id desde la columna SQL, y tratar null como
+    // 'activo' (todo cliente sin estado explícito se considera activo).
+    try {
+      final rows = await d.rawQuery(
+        'SELECT id, data FROM $tabla WHERE json_extract(data, \'\$.estado\') = ? '
+        'OR (json_extract(data, \'\$.estado\') IS NULL AND ? = \'activo\')',
+        [estado, estado],
+      );
+      return [
+        for (final r in rows)
+          {
+            ...jsonDecode(r['data'] as String) as Map<String, dynamic>,
+            'id': r['id'],
+          }
+      ];
+    } catch (_) {
+      final todos = await allMirror(tabla);
+      return todos.where((m) {
+        final est = m['estado'];
+        return est == estado || (est == null && estado == 'activo');
+      }).toList();
+    }
   }
 
   /// Consulta filtrada en SQL sobre campos del JSON (evita full scans).
@@ -985,10 +1003,13 @@ class LocalDb {
     final args = filtros.values.toList();
     try {
       final rows =
-          await d.rawQuery('SELECT data FROM $tabla WHERE $where', args);
+          await d.rawQuery('SELECT id, data FROM $tabla WHERE $where', args);
       return [
         for (final r in rows)
-          jsonDecode(r['data'] as String) as Map<String, dynamic>
+          {
+            ...jsonDecode(r['data'] as String) as Map<String, dynamic>,
+            'id': r['id'],
+          }
       ];
     } catch (_) {
       // Si JSON1 no está disponible, fallback al método anterior.
@@ -1010,13 +1031,16 @@ class LocalDb {
     final d = await db;
     try {
       final rows = await d.rawQuery(
-        "SELECT data FROM $tabla WHERE substr(json_extract(data, '\$.$campoFecha'), 1, 10) >= ? "
+        "SELECT id, data FROM $tabla WHERE substr(json_extract(data, '\$.$campoFecha'), 1, 10) >= ? "
         "AND substr(json_extract(data, '\$.$campoFecha'), 1, 10) <= ?",
         [desde, hasta],
       );
       return [
         for (final r in rows)
-          jsonDecode(r['data'] as String) as Map<String, dynamic>
+          {
+            ...jsonDecode(r['data'] as String) as Map<String, dynamic>,
+            'id': r['id'],
+          }
       ];
     } catch (_) {
       final todos = await allMirror(tabla);
@@ -1568,6 +1592,20 @@ class LocalDb {
   // reintenta), 'enviada' (en el servidor, falta confirmar aplicada),
   // 'aplicada' (terminal OK), 'rechazada' (terminal: el servidor la
   // rechazó con 4xx; visible en la cola, no se reintenta ni bloquea).
+  /// Normaliza claves cortas de ajuste a las canónicas del servidor.
+  /// FIX (Gemini auditoría funcional BUG 4): el backend rechaza claves
+  /// como 'mensual' (espera 'mensualidad').
+  static String normalizarClaveAjuste(String k) {
+    const mapa = {
+      'mensual': 'mensualidad',
+      'transfer': 'transferencia',
+      'diario': 'pago_diario',
+      'semanal': 'pago_semanal',
+      'quincenal': 'pago_quincenal',
+    };
+    return mapa[k] ?? k;
+  }
+
   Future<void> queueOp(
       {required String opUuid,
       required String tipo,
@@ -1576,6 +1614,13 @@ class LocalDb {
     final d = await db;
     // v1.0.16: guardar autoría para no atribuir ops ajenas al sincronizar
     final auth = AuthService();
+    // FIX (Gemini BUG 4): normalizar clave de ajuste antes de encolar.
+    var payloadFinal = payload;
+    if (tipo == 'ajuste' && payload['clave'] is String) {
+      payloadFinal = Map<String, dynamic>.from(payload);
+      payloadFinal['clave'] =
+          normalizarClaveAjuste(payload['clave'] as String);
+    }
     // v1.2.5 (D13): idempotente ante doble-tap. Si el op_uuid ya existe,
     // no se duplica (el servidor además valida por payload_hash).
     final yaExiste = await d.query('ops_queue',
@@ -1587,7 +1632,7 @@ class LocalDb {
     await d.insert('ops_queue', {
       'op_uuid': opUuid,
       'tipo': tipo,
-      'payload': jsonEncode(payload),
+      'payload': jsonEncode(payloadFinal),
       'estado': 'pendiente',
       'creada_ts': DateTime.now().toIso8601String(),
       'foto_path': fotoPath,
@@ -1799,11 +1844,16 @@ class LocalDb {
 
   // -- fotos pendientes --------------------------------------------------
   Future<int> addFotoPendiente(
-      {required String opUuid, required String localPath}) async {
+      {required String opUuid,
+      required String localPath,
+      int? clienteId,
+      int? suplementoId}) async {
     final d = await db;
     return d.insert('fotos_pendientes', {
       'op_uuid': opUuid,
       'local_path': localPath,
+      'cliente_id': clienteId,
+      'suplemento_id': suplementoId,
       'estado': 'pendiente',
       // v1.0.16: autoría
       'user_id': AuthService().userId,
