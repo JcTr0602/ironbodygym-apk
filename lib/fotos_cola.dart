@@ -193,8 +193,11 @@ class FotosColaService {
       // existe en el servidor). Pero NO bloquear por ops ajenas — si el
       // sync está fallando por otra op, las fotos no deben quedar
       // bloqueadas indefinidamente.
-      // FIX (2026-10-12): antes bloqueaba si había CUALQUIER op pendiente.
-      if (fotoOpUuid != null && fotoOpUuid.isNotEmpty) {
+      // v1.2.9+42: el lock SOLO aplica si los IDs aún no se conocen.
+      // Si cliente_id/suplemento_id ya están resueltos, la foto puede
+      // subirse aunque la op esté en 'enviada' (el servidor ya la tiene).
+      final tieneIds = f['cliente_id'] != null || f['suplemento_id'] != null;
+      if (!tieneIds && fotoOpUuid != null && fotoOpUuid.isNotEmpty) {
         // FIX (revisión pre-+37): bloquear mientras el op NO esté en estado
         // terminal 'aplicada'. Cubre 'pendiente', 'enviada', 'error', etc.
         // Si solo se filtraba 'pendiente', una op en 'error' dejaba pasar
