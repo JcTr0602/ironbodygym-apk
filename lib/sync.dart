@@ -957,7 +957,11 @@ class SyncEngine {
     var ti = 0;
     for (final tabla in tablas) {
       ti++;
-      final supTabla = supTablas[tabla]!;
+      // Ajuste preventivo Gemini (veredicto final): si un scope futuro
+      // incluye una tabla no declarada en supTablas, saltarla en vez de
+      // pedir a .../rest/v1/null.
+      final supTabla = supTablas[tabla];
+      if (supTabla == null) continue;
       if (!silencioso) {
         _emit(SyncPhase.downloading,
             detalle:

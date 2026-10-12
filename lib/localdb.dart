@@ -435,10 +435,14 @@ class LocalDb {
           await db.execute(
               'CREATE INDEX IF NOT EXISTS idx_fotos_cola_op_uuid ON fotos_cola(op_uuid)');
           // Punto C (Gemini): drenar fotos_pendientes como tipo 'original'.
-          await db.execute(
-              "INSERT INTO fotos_cola (op_uuid, tipo, cliente_id, suplemento_id, ruta_local, estado, intentos, creado_en, actualizado_en) "
-              "SELECT op_uuid, 'original', cliente_id, suplemento_id, local_path, 'pendiente', 0, datetime('now'), datetime('now') "
-              "FROM fotos_pendientes WHERE local_path IS NOT NULL");
+          // Ajuste preventivo (veredicto final): try-catch defensivo por si
+          // la tabla no existe o tiene estructura distinta en algún teléfono.
+          try {
+            await db.execute(
+                "INSERT INTO fotos_cola (op_uuid, tipo, cliente_id, suplemento_id, ruta_local, estado, intentos, creado_en, actualizado_en) "
+                "SELECT op_uuid, 'original', cliente_id, suplemento_id, local_path, 'pendiente', 0, datetime('now'), datetime('now') "
+                "FROM fotos_pendientes WHERE local_path IS NOT NULL");
+          } catch (_) {}
         }
       },
     );
