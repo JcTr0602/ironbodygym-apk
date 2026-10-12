@@ -230,8 +230,7 @@ class SyncEngine {
     bool novedades = false;
     try {
       final wm = await _db.getWatermarkMinimo();
-      final ss =
-          int.tryParse(await _db.getMeta('server_seq') ?? '0') ?? 0;
+      final ss = int.tryParse(await _db.getMeta('server_seq') ?? '0') ?? 0;
       novedades = ss > wm;
     } catch (_) {}
     // v1.0.17: conservar el último resumen salvo que se pase uno nuevo
@@ -375,7 +374,8 @@ class SyncEngine {
         // v1.2.4: no ocultar sync incompleto
         final wm = await _db.getWatermarkMinimo();
         final ss = int.tryParse(await _db.getMeta('server_seq') ?? '0') ?? 0;
-        final msg = 'Sincronización incompleta: watermark $wm < server_seq $ss tras 3 intentos';
+        final msg =
+            'Sincronización incompleta: watermark $wm < server_seq $ss tras 3 intentos';
         await _db.setMeta('last_sync_error', msg);
         _emit(SyncPhase.error, error: msg);
         return;
@@ -489,9 +489,8 @@ class SyncEngine {
       final user = _auth.session?.user;
       final fc = user?.userMetadata?['forzar_cierre'];
       if (fc == null) return;
-      final ultimo = int.tryParse(
-              await _db.getMeta('forzar_cierre_visto') ?? '0') ??
-          0;
+      final ultimo =
+          int.tryParse(await _db.getMeta('forzar_cierre_visto') ?? '0') ?? 0;
       final marca = fc is int ? fc : int.tryParse('$fc') ?? 0;
       if (marca > ultimo) {
         await _db.setMeta('forzar_cierre_visto', '$marca');
@@ -561,8 +560,7 @@ class SyncEngine {
           (i + loteTam < porEnviar.length) ? i + loteTam : porEnviar.length;
       final lote = porEnviar.sublist(i, fin);
       _emit(SyncPhase.uploading,
-          detalle:
-              'Enviando tus cambios… $fin de ${porEnviar.length}',
+          detalle: 'Enviando tus cambios… $fin de ${porEnviar.length}',
           progreso: fin / porEnviar.length);
       final body = jsonEncode([
         for (final op in lote)
@@ -597,8 +595,7 @@ class SyncEngine {
         } else {
           // v1.2.5 (D14/D15): clasifica y aplica backoff o revisión.
           for (final op in lote) {
-            await _db.bumpOp(op['op_uuid'] as String,
-                'HTTP ${r.statusCode}',
+            await _db.bumpOp(op['op_uuid'] as String, 'HTTP ${r.statusCode}',
                 httpStatus: r.statusCode);
           }
         }
@@ -640,8 +637,7 @@ class SyncEngine {
   /// Reintenta un lote op por op: la que falle con 4xx se marca
   /// 'rechazada' (definitiva y visible en la cola) y NO bloquea a las
   /// demás. Los fallos de red siguen siendo transitorios (reintento).
-  Future<void> _uploadUnaPorUna(
-      List<Map<String, dynamic>> lote) async {
+  Future<void> _uploadUnaPorUna(List<Map<String, dynamic>> lote) async {
     for (final op in lote) {
       final uuid = op['op_uuid'] as String;
       final body = jsonEncode({
@@ -655,8 +651,7 @@ class SyncEngine {
             Uri.parse('$_base/rest/v1/sync_ops?on_conflict=op_uuid'),
             headers: {
               'Content-Type': 'application/json',
-              'Prefer':
-                  'resolution=ignore-duplicates,return=minimal',
+              'Prefer': 'resolution=ignore-duplicates,return=minimal',
             },
             body: body);
         if (r.statusCode == 200 ||
@@ -821,18 +816,18 @@ class SyncEngine {
         final rows = jsonDecode(r.body) as List;
         if (rows.isNotEmpty) {
           if (rows.first['ajustes'] is Map) {
-            await _db.setAjustes(
-                Map<String, dynamic>.from(rows.first['ajustes']));
+            await _db
+                .setAjustes(Map<String, dynamic>.from(rows.first['ajustes']));
           }
           // v1.0.12: lista de usuarios APK para gestión
           if (rows.first['usuarios'] is List) {
-            await _db.setMeta('usuarios_apk',
-                jsonEncode(rows.first['usuarios']));
+            await _db.setMeta(
+                'usuarios_apk', jsonEncode(rows.first['usuarios']));
           }
           // v1.0.15: feed de actividad reciente
           if (rows.first['actividad'] is List) {
-            await _db.setMeta('sync_estado_actividad',
-                jsonEncode(rows.first['actividad']));
+            await _db.setMeta(
+                'sync_estado_actividad', jsonEncode(rows.first['actividad']));
           }
           serverSeq = rows.first['server_seq'] as int?;
           if (serverSeq != null) {
@@ -905,9 +900,9 @@ class SyncEngine {
                   'cerrado_en,sync_seq',
             _ => 'id,data,sync_seq',
           };
-          final r = await _getAuth(Uri.parse(
-              '$_base/rest/v1/$supTabla?select=$select'
-              '&sync_seq=gt.$pageWm&order=sync_seq.asc&limit=500'));
+          final r =
+              await _getAuth(Uri.parse('$_base/rest/v1/$supTabla?select=$select'
+                  '&sync_seq=gt.$pageWm&order=sync_seq.asc&limit=500'));
           if (r.statusCode == 404 || r.statusCode == 400) {
             // v1.2.1: la tabla no existe en Supabase o el rol no puede
             // leerla (p. ej. sync_turnos_cierre antes de aplicar v116,
@@ -1042,22 +1037,22 @@ class SyncEngine {
     // v1.2.5 (D17): marca por ámbito con HORA DEL SERVIDOR (header Date),
     // no del dispositivo (D18: el reloj local puede estar mal).
     try {
-      final r = await _getAuth(Uri.parse(
-          '$_base/rest/v1/sync_estado?id=eq.1&select=server_seq'));
+      final r = await _getAuth(
+          Uri.parse('$_base/rest/v1/sync_estado?id=eq.1&select=server_seq'));
       final dateHdr = r.headers['date'];
       final horaServidor = dateHdr != null
           ? HttpDate.parse(dateHdr).toIso8601String()
           : DateTime.now().toUtc().toIso8601String();
       for (final tabla in tablas) {
-        await _db.setMeta(
-            'last_remote_sync_ok_$tabla', horaServidor);
+        await _db.setMeta('last_remote_sync_ok_$tabla', horaServidor);
       }
       await _db.setMeta('last_remote_sync_ok', horaServidor);
     } catch (_) {}
     // Sincronizar estado final de operaciones enviadas (aplicada/rechazada)
     await _syncOpStatus();
     // v1.2.5 (D20): resumen honesto, no "todo bien".
-    await _db.setMeta('last_download_stats',
+    await _db.setMeta(
+        'last_download_stats',
         jsonEncode({
           'vistas': vistas,
           'aplicadas': aplicadas,
@@ -1090,14 +1085,14 @@ class SyncEngine {
       final localTabla = entry.value;
       for (var b = 0; b < nBuckets; b++) {
         try {
-          final r = await _postAuth(
-              Uri.parse('$_base/rest/v1/rpc/sync_manifiesto'),
-              headers: {'Content-Type': 'application/json'},
-              body: jsonEncode({
-                'p_tabla': supTabla,
-                'p_bucket': b,
-                'p_n_buckets': nBuckets,
-              }));
+          final r =
+              await _postAuth(Uri.parse('$_base/rest/v1/rpc/sync_manifiesto'),
+                  headers: {'Content-Type': 'application/json'},
+                  body: jsonEncode({
+                    'p_tabla': supTabla,
+                    'p_bucket': b,
+                    'p_n_buckets': nBuckets,
+                  }));
           if (r.statusCode == 404 || r.statusCode == 400) {
             // RPC aún no aplicado en Supabase: se omite sin abortar.
             break;
@@ -1245,8 +1240,7 @@ class SyncEngine {
       throw StateError('solo el dueño puede crear incidencias privadas');
     }
     final u = _auth.username;
-    final creadaPor =
-        u.isNotEmpty ? u : (_auth.userId ?? 'desconocido');
+    final creadaPor = u.isNotEmpty ? u : (_auth.userId ?? 'desconocido');
     final id = await _db.crearIncidenciaLocal(
       tipo: tipo,
       descripcion: descripcion.trim(),
@@ -1432,12 +1426,13 @@ class SyncEngine {
   /// Sube la foto de un suplemento al bucket y devuelve su storage_path
   /// (`suplementos/<uuid>.jpg`), o null si falla. La op `foto_suplemento`
   /// enlaza esa ruta en el servidor.
-  Future<String?> subirFotoSuplemento(
-      String opUuid, Uint8List bytes) async {
+  Future<String?> subirFotoSuplemento(String opUuid, Uint8List bytes) async {
     final comprimida = _comprimirFoto(bytes);
     final path = 'suplementos/$opUuid.jpg';
     final tus = await _subirFotoTus(opUuid, path, comprimida);
-    final ok = tus ?? await _subirFotoSimple(path, comprimida);
+    // v1.2.6: si TUS falla (false) también se intenta el método simple,
+    // no solo cuando TUS no está disponible (null).
+    final ok = tus == true || await _subirFotoSimple(path, comprimida);
     return ok ? path : null;
   }
 
@@ -1455,8 +1450,7 @@ class SyncEngine {
   /// Crea una subida tus reanudable. Devuelve la URL de subida o null
   /// si tus no está disponible / fue rechazada.
   Future<String?> _tusCrear(String objectPath, int length) async {
-    String meta(String k, String v) =>
-        '$k ${base64Encode(utf8.encode(v))}';
+    String meta(String k, String v) => '$k ${base64Encode(utf8.encode(v))}';
     try {
       final r = await _postAuth(
         Uri.parse('$_base/storage/v1/upload/resumable'),
@@ -1529,7 +1523,10 @@ class SyncEngine {
     if (offset > bytes.length) offset = 0;
     final url = location;
 
-    const chunk = 256 * 1024;
+    // v1.2.6: fragmentos de 32KB para conexiones inestables —
+    // perder un fragmento pequeño duele menos al reintentar.
+    const chunk = 32 * 1024;
+    String? ultimoError;
     while (offset < bytes.length) {
       final fin =
           (offset + chunk < bytes.length) ? offset + chunk : bytes.length;
@@ -1546,21 +1543,29 @@ class SyncEngine {
             body: bytes.sublist(offset, fin),
           );
           if (r.statusCode == 204 || r.statusCode == 200) {
-            offset =
-                int.tryParse(r.headers['upload-offset'] ?? '') ?? fin;
+            offset = int.tryParse(r.headers['upload-offset'] ?? '') ?? fin;
             okChunk = true;
           } else if (r.statusCode == 404 || r.statusCode == 410) {
             // la subida murió en el servidor: recrearla luego
             await _db.setMeta(locKey, '');
             await _db.setMeta(offKey, '0');
             return false;
+          } else {
+            // v1.2.6: registrar el código para diagnóstico
+            ultimoError = 'HTTP ${r.statusCode} en fragmento $offset';
           }
-        } catch (_) {
+        } catch (e) {
+          // v1.2.6: no ocultar el error real
+          ultimoError = 'Fragmento $offset: $e';
           okChunk = false;
         }
       }
       if (!okChunk) {
         await _db.setMeta(offKey, '$offset');
+        // v1.2.6: guardar el motivo para diagnóstico en Incidencias
+        if (ultimoError != null) {
+          await _db.setMeta('tus_err_$opUuid', ultimoError);
+        }
         return false; // se retoma donde quedó
       }
       await _db.setMeta(offKey, '$offset');
@@ -1612,11 +1617,9 @@ class SyncEngine {
           definitivo: true);
       return;
     }
-    final path =
-        await subirFotoSuplemento(f['op_uuid'] as String, bytes);
+    final path = await subirFotoSuplemento(f['op_uuid'] as String, bytes);
     _emit(SyncPhase.photos,
-        detalle: 'Subiendo fotos… $i de $total',
-        progreso: (i - 1) / total);
+        detalle: 'Subiendo fotos… $i de $total', progreso: (i - 1) / total);
     if (path == null) {
       // sin conexión o rechazo: cuenta el intento; sigue 'pendiente' y con
       // 10+ intentos aparece en Incidencias (fotosConProblema).
@@ -1624,14 +1627,13 @@ class SyncEngine {
       return;
     }
     _emit(SyncPhase.photos,
-        detalle: 'Subiendo fotos… $i de $total',
-        progreso: i / total);
+        detalle: 'Subiendo fotos… $i de $total', progreso: i / total);
     final d = await _db.db;
     await d.insert('ops_queue', {
       'op_uuid': const Uuid().v4(),
       'tipo': 'foto_suplemento',
-      'payload': jsonEncode(
-          {'suplemento_id': suplementoId, 'storage_path': path}),
+      'payload':
+          jsonEncode({'suplemento_id': suplementoId, 'storage_path': path}),
       'estado': 'pendiente',
       'creada_ts': DateTime.now().toIso8601String(),
     });
@@ -1644,62 +1646,76 @@ class SyncEngine {
     for (final f in fotos) {
       i++;
       final fid = f['id'] as int;
-      var clienteId = f['cliente_id'] as int?;
-      // v1.2.1 fix auditoría Gemini: fotos de suplementos.
-      var suplementoId = f['suplemento_id'] as int?;
-      clienteId ??= await _clienteDeOp(f['op_uuid'] as String);
-      suplementoId ??= await _suplementoDeOp(f['op_uuid'] as String);
-      if (clienteId == null && suplementoId == null) {
-        continue; // la creación aún no se aplica en el servidor
-      }
-      if (suplementoId != null) {
-        await _uploadFotoSuplemento(f, fid, suplementoId, i, fotos.length);
+      // v1.2.6: cada foto se aísla en try/catch — un error inesperado
+      // en una no aborta la subida de las demás.
+      try {
+        var clienteId = f['cliente_id'] as int?;
+        // v1.2.1 fix auditoría Gemini: fotos de suplementos.
+        var suplementoId = f['suplemento_id'] as int?;
+        clienteId ??= await _clienteDeOp(f['op_uuid'] as String);
+        suplementoId ??= await _suplementoDeOp(f['op_uuid'] as String);
+        if (clienteId == null && suplementoId == null) {
+          continue; // la creación aún no se aplica en el servidor
+        }
+        if (suplementoId != null) {
+          await _uploadFotoSuplemento(f, fid, suplementoId, i, fotos.length);
+          continue;
+        }
+        if (f['cliente_id'] == null) {
+          await _db.setFotoCliente(fid, clienteId!);
+        }
+        final file = File(f['local_path'] as String);
+        if (!await file.exists()) {
+          // v1.2.4: antes se marcaba 'lista' y la foto se perdía sin aviso.
+          await _db.marcarFotoError(fid, 'Archivo local no encontrado',
+              definitivo: true);
+          continue;
+        }
+        var bytes = await file.readAsBytes();
+        if (bytes.isEmpty) {
+          await _db.marcarFotoError(fid, 'Archivo local vacío (0 bytes)',
+              definitivo: true);
+          continue;
+        }
+        bytes = _comprimirFoto(bytes);
+        final path = 'pendientes/${f['op_uuid']}.jpg';
+        _emit(SyncPhase.photos,
+            detalle: 'Subiendo fotos… $i de ${fotos.length}',
+            progreso: (i - 1) / fotos.length);
+        // reanudable primero; si tus falla o no está disponible, método simple
+        final fotoOpUuid = f['op_uuid'] as String;
+        final tus = await _subirFotoTus(fotoOpUuid, path, bytes);
+        // v1.2.6: si TUS falla (false) también se intenta el método simple,
+        // no solo cuando TUS no está disponible (null).
+        final ok = tus == true || await _subirFotoSimple(path, bytes);
+        if (!ok) {
+          // v1.2.6: incluir el detalle del error TUS si existe
+          final detalleTus = await _db.getMeta('tus_err_$fotoOpUuid');
+          final motivo = detalleTus != null
+              ? 'No se pudo subir: $detalleTus'
+              : 'No se pudo subir (intento fallido)';
+          await _db.marcarFotoError(fid, motivo);
+          continue;
+        }
+        _emit(SyncPhase.photos,
+            detalle: 'Subiendo fotos… $i de ${fotos.length}',
+            progreso: i / fotos.length);
+        // encola la op 'foto' para que el puente la guarde en gym.db
+        final d = await _db.db;
+        final opUuid = const Uuid().v4();
+        await d.insert('ops_queue', {
+          'op_uuid': opUuid,
+          'tipo': 'foto',
+          'payload':
+              jsonEncode({'storage_path': path, 'cliente_id': clienteId}),
+          'estado': 'pendiente',
+          'creada_ts': DateTime.now().toIso8601String(),
+        });
+        await _db.markFotoLista(fid);
+      } catch (e) {
+        await _db.marcarFotoError(fid, 'Error inesperado: $e');
         continue;
       }
-      if (f['cliente_id'] == null) {
-        await _db.setFotoCliente(fid, clienteId!);
-      }
-      final file = File(f['local_path'] as String);
-      if (!await file.exists()) {
-        // v1.2.4: antes se marcaba 'lista' y la foto se perdía sin aviso.
-        await _db.marcarFotoError(fid, 'Archivo local no encontrado',
-            definitivo: true);
-        continue;
-      }
-      var bytes = await file.readAsBytes();
-      if (bytes.isEmpty) {
-        await _db.marcarFotoError(fid, 'Archivo local vacío (0 bytes)',
-            definitivo: true);
-        continue;
-      }
-      bytes = _comprimirFoto(bytes);
-      final path = 'pendientes/${f['op_uuid']}.jpg';
-      _emit(SyncPhase.photos,
-          detalle: 'Subiendo fotos… $i de ${fotos.length}',
-          progreso: (i - 1) / fotos.length);
-      // reanudable primero; si tus no está disponible, método simple
-      final tus =
-          await _subirFotoTus(f['op_uuid'] as String, path, bytes);
-      final ok = tus ?? await _subirFotoSimple(path, bytes);
-      if (!ok) {
-        await _db.marcarFotoError(fid, 'No se pudo subir (intento fallido)');
-        continue;
-      }
-      _emit(SyncPhase.photos,
-          detalle: 'Subiendo fotos… $i de ${fotos.length}',
-          progreso: i / fotos.length);
-      // encola la op 'foto' para que el puente la guarde en gym.db
-      final d = await _db.db;
-      final opUuid = const Uuid().v4();
-      await d.insert('ops_queue', {
-        'op_uuid': opUuid,
-        'tipo': 'foto',
-        'payload': jsonEncode(
-            {'storage_path': path, 'cliente_id': clienteId}),
-        'estado': 'pendiente',
-        'creada_ts': DateTime.now().toIso8601String(),
-      });
-      await _db.markFotoLista(fid);
     }
   }
 }
