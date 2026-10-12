@@ -59,7 +59,7 @@ Future<void> _crearEsquemaV7(Database db) async {
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  test('migración 7→14 sin tablas de incidencias (caso Jc)', () async {
+  test('migración 7→15 sin tablas de incidencias (caso Jc)', () async {
     sqfliteFfiInit();
     databaseFactory = databaseFactoryFfi;
     SharedPreferences.setMockInitialValues({});
@@ -76,12 +76,12 @@ void main() {
     await _crearEsquemaV7(v7);
     await v7.close();
 
-    // Abrir con LocalDb dispara el onUpgrade 7→14 real.
+    // Abrir con LocalDb dispara el onUpgrade 7→15 real.
     // Si alguna migración revienta, esto lanza excepción y el test falla.
     final db = await LocalDb.instance.db;
 
     // 1. Versión migrada.
-    expect(await db.getVersion(), 14);
+    expect(await db.getVersion(), 15);
 
     // 2. Datos preservados.
     final clientes = await db.query('clientes', orderBy: 'id');
@@ -245,6 +245,49 @@ void main() {
         .toSet();
     expect(ids, {1, 2},
         reason: 'el índice con IDs ajenos debe reconstruirse limpio');
+
+    await db.close();
+  });
+
+  test('v14 -> v15 crea fotos_cola en upgrade', () async {
+    sqfliteFfiInit();
+    databaseFactory = databaseFactoryFfi;
+    SharedPreferences.setMockInitialValues({});
+
+    final dir = await getDatabasesPath();
+    final dbPath = p.join(dir, 'ironbody.db');
+    try {
+      await File(dbPath).delete();
+    } catch (_) {}
+    await LocalDb.resetParaTest();
+
+    // Simula BD en v14 (sin fotos_cola).
+    final v14 = await databaseFactoryFfi.openDatabase(dbPath,
+        options: OpenDatabaseOptions(version: 14));
+    await v14.execute(
+        'CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT NOT NULL)');
+    await v14.close();
+
+    // Al abrir con LocalDb (v15), el onUpgrade debe crear fotos_cola.
+    final db = await LocalDb.instance.db;
+    final tablas = await db.rawQuery(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='fotos_cola'");
+    expect(tablas.isNotEmpty, true,
+        reason: 'fotos_cola debe existir tras upgrade a v15');
+
+    // Verificar que se puede insertar (el esquema es válido).
+    await db.insert('fotos_cola', {
+      'op_uuid': 'test-uuid',
+      'tipo': 'original',
+      'ruta_local': '/tmp/test.jpg',
+      'estado': 'pendiente',
+      'intentos': 0,
+      'creado_en': DateTime.now().toIso8601String(),
+      'actualizado_en': DateTime.now().toIso8601String(),
+    });
+    final filas = await db
+        .query('fotos_cola', where: 'op_uuid = ?', whereArgs: ['test-uuid']);
+    expect(filas.length, 1);
 
     await db.close();
   });
