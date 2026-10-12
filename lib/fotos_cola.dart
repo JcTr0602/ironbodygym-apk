@@ -63,21 +63,31 @@ class FotosColaService {
     try {
       // Corrección Gemini ronda 2: llamada directa, sin compute().
       variantes = await _generarVariantes(rutaOriginal, base);
-    } catch (_) {
+    } catch (e, st) {
+      // v1.2.9+40 (Gemini): NO tragar la causa raíz, loguearla.
+      debugPrint('ERROR _generarVariantes falló: $e\n$st');
       // Fallback: solo el original.
       final copia = await File(rutaOriginal).copy('$base-original.jpg');
       variantes = {'original': copia.path};
     }
+    // v1.2.9+40 (Gemini): validación defensiva — si variantes está vacío,
+    // el for no insertaría nada silenciosamente.
+    if (variantes.isEmpty) {
+      throw StateError(
+          'encolarFoto: _generarVariantes retornó Map vacío para $rutaOriginal');
+    }
 
     final db = await LocalDb.instance.db;
-    final batch = db.batch();
     final ahora = DateTime.now().toIso8601String();
+    // v1.2.9+40 (Gemini): inserts individuales en vez de batch para
+    // trazabilidad (son 1-3 filas, el costo es despreciable).
+    var n = 0;
     for (final entry in variantes.entries) {
       int? tamano;
       try {
         tamano = await File(entry.value).length();
       } catch (_) {}
-      batch.insert('fotos_cola', {
+      final rowId = await db.insert('fotos_cola', {
         'op_uuid': opUuid,
         'tipo': entry.key,
         'cliente_id': clienteId,
@@ -90,10 +100,17 @@ class FotosColaService {
         'creado_en': ahora,
         'actualizado_en': ahora,
       });
+      debugPrint('DEBUG encolarFoto: variante ${entry.key} rowId=$rowId');
+      n++;
     }
-    await batch.commit(noResult: true);
-    // v1.2.9+40: retornar cantidad de variantes encoladas (diagnóstico).
-    final n = variantes.length;
+    // v1.2.9+40 (Gemini): verificación post-insert concluyente.
+    final count = Sqflite.firstIntValue(await db.rawQuery(
+        'SELECT COUNT(*) FROM fotos_cola WHERE op_uuid = ?', [opUuid]));
+    if (count == 0) {
+      throw StateError(
+          'encolarFoto: inserts no dejaron filas visibles para op $opUuid');
+    }
+    // n ya cuenta los inserts individuales exitosos.
 
     // v1.2.9 (nota Gemini): persistir foto_uuid en el cliente al encolar,
     // para que _actualizarMirrorFoto pueda verificar precedencia.

@@ -2023,16 +2023,27 @@ class LocalDb {
   Future<int> reencolarFotos({String? tipo}) async {
     final d = await db;
     // v1.2.9+40: usa fotos_cola (la tabla nueva), no fotos_pendientes (obsoleta).
-    var where = "estado IN ('pendiente', 'error')";
-    if (tipo == 'clientes') {
-      where += ' AND cliente_id IS NOT NULL';
-    } else if (tipo == 'suplementos') {
-      where += ' AND suplemento_id IS NOT NULL';
-    }
+    // v1.2.9+40 (Gemini): SIN filtro IS NOT NULL temporalmente para revelar
+    // filas huérfanas (suplemento_id null) que antes eran invisibles.
+    var where = "estado IN ('pendiente', 'error', 'subiendo')";
+    // Nota: se incluye 'subiendo' por la carrera con unawaited(push()).
     final filas = await d.query('fotos_cola',
-        columns: ['id', 'ruta_local'], where: where);
+        columns: ['id', 'ruta_local', 'cliente_id', 'suplemento_id', 'estado'],
+        where: where);
     var n = 0;
+    var huerfanas = 0;
     for (final f in filas) {
+      // Filtrar por tipo en Dart para poder contar huérfanas.
+      final cid = f['cliente_id'];
+      final sid = f['suplemento_id'];
+      if (tipo == 'clientes' && cid == null) {
+        if (sid == null) huerfanas++;
+        continue;
+      }
+      if (tipo == 'suplementos' && sid == null) {
+        if (cid == null) huerfanas++;
+        continue;
+      }
       final path = f['ruta_local'] as String?;
       if (path == null || !await File(path).exists()) continue;
       await d.update('fotos_cola',
@@ -2049,6 +2060,8 @@ class LocalDb {
           whereArgs: [f['id']]);
       n++;
     }
+    debugPrint(
+        'reencolarFotos($tipo): $n reencoladas, $huerfanas huérfanas ignoradas');
     return n;
   }
 
