@@ -20,8 +20,9 @@ class AppConfig {
   static const telegramContacto = '@Jctr0602';
   static const whatsappContacto = '';
 
-  /// Versión visible en Ayuda/Ajustes (mantener igual que pubspec).
-  static const appVersion = '1.2.9';
+  /// Versión visible en login/Ajustes (mantener igual que pubspec).
+  /// Incluye el build number para identificar claramente la versión instalada.
+  static const appVersion = '1.2.9+39';
 
   /// Usuarios con permiso de dueño (solo Jc). Comparación en minúsculas
   /// contra la parte local del email alias (nombre@ironbody.gym).
