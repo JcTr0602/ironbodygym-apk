@@ -3,7 +3,8 @@
 /// - storage_path para saber qué actualizar en el mirror tras subir.
 /// - Marcar 'subiendo' en transacción antes de subir (evita doble proceso).
 /// - Timeout 20-30s por archivo.
-/// - Generación de variantes en background (compute) para no congelar UI.
+/// - Corrección ronda 2: SIN compute(). FlutterImageCompress ya usa hilos
+///   nativos en background; compute() rompería los MethodChannels.
 library;
 
 import 'dart:io';
@@ -12,27 +13,22 @@ import 'package:flutter_image_compress/flutter_image_compress.dart';
 import 'package:path_provider/path_provider.dart';
 import 'localdb.dart';
 
-/// Parámetros para generar variantes en un isolate.
-class _VariantesParams {
-  final String rutaOriginal;
-  final String base;
-  _VariantesParams(this.rutaOriginal, this.base);
-}
-
-/// Corre en background: genera thumb + display WebP.
-Future<Map<String, String>> _generarEnBackground(_VariantesParams p) async {
+/// Genera thumb + display WebP. Corre directo (sin compute): el plugin
+/// ya delega a hilos nativos y compute() no tiene MethodChannels.
+Future<Map<String, String>> _generarVariantes(
+    String rutaOriginal, String base) async {
   final thumb = await FlutterImageCompress.compressAndGetFile(
-    p.rutaOriginal, '${p.base}-thumb.webp',
+    rutaOriginal, '$base-thumb.webp',
     minWidth: 200, minHeight: 200,
     quality: 65, format: CompressFormat.webp,
   );
   final display = await FlutterImageCompress.compressAndGetFile(
-    p.rutaOriginal, '${p.base}-display.webp',
+    rutaOriginal, '$base-display.webp',
     minWidth: 800, minHeight: 800,
     quality: 75, format: CompressFormat.webp,
   );
   // Original se copia a persistente (no se deja en caché temporal).
-  final original = await File(p.rutaOriginal).copy('${p.base}-original.jpg');
+  final original = await File(rutaOriginal).copy('$base-original.jpg');
 
   return {
     if (thumb != null) 'thumb': thumb.path,
@@ -60,9 +56,8 @@ class FotosColaService {
 
     Map<String, String> variantes;
     try {
-      // Corrección Gemini: en background para no congelar el hilo UI.
-      variantes = await compute(
-          _generarEnBackground, _VariantesParams(rutaOriginal, base));
+      // Corrección Gemini ronda 2: llamada directa, sin compute().
+      variantes = await _generarVariantes(rutaOriginal, base);
     } catch (_) {
       // Fallback: solo el original.
       final copia = await File(rutaOriginal).copy('$base-original.jpg');
@@ -94,9 +89,21 @@ class FotosColaService {
   /// Despachador con Network Lock.
   /// Corrección Gemini: verifica ops_queue antes de CADA foto, marca
   /// 'subiendo' en transacción, timeout 20-30s por archivo.
+  /// Corrección ronda 2: crash recovery al inicio, marcar 'completada'.
   Future<int> procesarCola() async {
     int subidas = 0;
     final db = await LocalDb.instance.db;
+
+    // Punto A (Gemini): crash recovery — si la app murió con fotos en
+    // 'subiendo', devolverlas a 'pendiente' para reintentar.
+    await db.update(
+      'fotos_cola',
+      {
+        'estado': 'pendiente',
+        'actualizado_en': DateTime.now().toIso8601String(),
+      },
+      where: "estado = 'subiendo'",
+    );
 
     while (true) {
       // NETWORK LOCK: si hay ops de negocio pendientes, las fotos esperan.
@@ -144,9 +151,21 @@ class FotosColaService {
       );
       if (check.isEmpty || check.first['estado'] != 'subiendo') continue;
 
-      final ok = await _subirUna(f);
-      if (ok) {
+      // Punto A (Gemini): _subirUna retorna el storage_path, no solo bool.
+      final storagePath = await _subirUna(f);
+      if (storagePath != null) {
         subidas++;
+        // Fix 3 (Gemini ronda 2): marcar 'completada' con el storage_path.
+        await db.update(
+          'fotos_cola',
+          {
+            'estado': 'completada',
+            'storage_path': storagePath,
+            'actualizado_en': DateTime.now().toIso8601String(),
+          },
+          where: 'id = ?',
+          whereArgs: [id],
+        );
       } else {
         final intentos = (f['intentos'] as int? ?? 0) + 1;
         await db.update(
@@ -164,21 +183,21 @@ class FotosColaService {
     return subidas;
   }
 
-  /// Sube una foto con timeout de 25s (corrección Gemini: 20-30s).
-  /// NOTA: la integración con TUS/PUT se hace en la fase de integración.
-  Future<bool> _subirUna(Map<String, dynamic> f) async {
+  /// Sube una foto con timeout de 25s. Retorna el storage_path en éxito,
+  /// null en fallo. (Punto A: integración TUS/PUT pendiente.)
+  Future<String?> _subirUna(Map<String, dynamic> f) async {
     try {
       final ruta = f['ruta_local'] as String;
       final file = File(ruta);
       if (!await file.exists()) {
         await _marcarError(f['id'] as int, 'archivo no existe');
-        return false;
+        return null;
       }
       debugPrint('[Fotos] Pendiente integración TUS: $ruta');
-      return false;
+      return null;
     } catch (e) {
       await _marcarError(f['id'] as int, '$e');
-      return false;
+      return null;
     }
   }
 

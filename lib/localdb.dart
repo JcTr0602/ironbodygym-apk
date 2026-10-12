@@ -410,8 +410,10 @@ class LocalDb {
         }
         if (oldV < 13) {
           // v1.2.8 (Paso 2): cola persistente de fotos con variantes WebP.
-          // Corrección Gemini: incluye storage_path, tamano_bytes,
-          // actualizado_en, CHECK constraints e índice compuesto.
+          // Corrección Gemini ronda 2: SIN foreign key hacia ops_queue.
+          // ops_queue es transitoria (se borra al subir); un ON DELETE
+          // CASCADE eliminaría la foto antes de poder subirse.
+          // op_uuid es solo identificador de correlación.
           await db.execute('CREATE TABLE IF NOT EXISTS fotos_cola ('
               'id INTEGER PRIMARY KEY AUTOINCREMENT, '
               'op_uuid TEXT NOT NULL, '
@@ -425,12 +427,18 @@ class LocalDb {
               'intentos INTEGER NOT NULL DEFAULT 0, '
               'ultimo_error TEXT, '
               'creado_en TEXT NOT NULL, '
-              'actualizado_en TEXT NOT NULL, '
-              'FOREIGN KEY (op_uuid) REFERENCES ops_queue(op_uuid) ON DELETE CASCADE)');
+              'actualizado_en TEXT NOT NULL)');
           await db.execute(
               'CREATE INDEX IF NOT EXISTS idx_fotos_cola_despachador ON fotos_cola(estado, intentos, creado_en)');
           await db.execute(
               'CREATE INDEX IF NOT EXISTS idx_fotos_cola_op_uuid ON fotos_cola(op_uuid)');
+          // Punto C (Gemini): drenar fotos_pendientes como tipo 'original'.
+          // Sin FK hacia ops_queue, no falla aunque la op ya se haya ido.
+          // La columna en fotos_pendientes es local_path (no ruta_local).
+          await db.execute(
+              "INSERT INTO fotos_cola (op_uuid, tipo, cliente_id, suplemento_id, ruta_local, estado, intentos, creado_en, actualizado_en) "
+              "SELECT op_uuid, 'original', cliente_id, suplemento_id, local_path, 'pendiente', 0, datetime('now'), datetime('now') "
+              "FROM fotos_pendientes WHERE local_path IS NOT NULL");
         }
       },
     );

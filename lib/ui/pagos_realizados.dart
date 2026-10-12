@@ -47,6 +47,9 @@ class _ClienteAvatarThumbState extends State<ClienteAvatarThumb> {
     super.didUpdateWidget(old);
     if (old.fotoStorage != widget.fotoStorage ||
         old.fotoLocal != widget.fotoLocal) {
+      // Corrección Gemini ronda 2: resetear antes de cargar para no
+      // mostrar la foto del cliente anterior durante el I/O.
+      setState(() => _archivo = null);
       _cargar();
     }
   }

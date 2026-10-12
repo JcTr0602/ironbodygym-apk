@@ -9,6 +9,7 @@ library;
 import 'package:flutter/widgets.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'config.dart';
 import 'fotos_cola.dart';
 
 /// Debe llamarse una vez al arrancar la app.
@@ -52,18 +53,23 @@ void _foregroundCallback() {
 }
 
 class _FotosTaskHandler extends TaskHandler {
+  /// Corrección Gemini ronda 2: flag de reentrancia. onRepeatEvent se
+  /// dispara cada 5s; si una subida tarda 15s, habría 3 llamadas
+  /// concurrentes saturando hilos y conexiones HTTP.
+  bool _procesando = false;
+
   @override
   Future<void> onStart(DateTime timestamp, TaskStarter starter) async {
-    // Corrección Gemini: inicializar dependencias DENTRO del isolate.
-    // El isolate secundario no tiene acceso a la memoria del principal.
+    // Corrección Gemini ronda 2: usar Config centralizado, no
+    // String.fromEnvironment (puede evaluar a vacío sin --dart-define).
     WidgetsFlutterBinding.ensureInitialized();
     try {
       await Supabase.initialize(
-        url: const String.fromEnvironment('SUPABASE_URL'),
-        anonKey: const String.fromEnvironment('SUPABASE_ANON_KEY'),
+        url: AppConfig.supabaseUrl,
+        anonKey: AppConfig.anonKey,
       );
     } catch (_) {
-      // Si ya estaba inicializado o fallan las env vars, continuar.
+      // Si ya estaba inicializado, continuar.
     }
   }
 
@@ -74,6 +80,8 @@ class _FotosTaskHandler extends TaskHandler {
   }
 
   Future<void> _procesar() async {
+    if (_procesando) return;
+    _procesando = true;
     try {
       await FotosColaService.instance.procesarCola();
       final pendientes =
@@ -88,6 +96,8 @@ class _FotosTaskHandler extends TaskHandler {
       }
     } catch (e) {
       debugPrint('[Foreground] error: $e');
+    } finally {
+      _procesando = false;
     }
   }
 

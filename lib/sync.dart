@@ -105,7 +105,7 @@ class SyncScope {
     'pagos_diarios': ['clientes'],
     'pagos': ['clientes'],
     'suplementos': ['categorias_suplemento'],
-    'ventas_suplemento': ['clientes', 'suplementos'],
+    'ventas_suplementos': ['clientes', 'suplementos'],
     'incidencias': ['incidencia_tipos'],
     'incidencia_eventos': ['incidencias'],
   };
@@ -117,7 +117,7 @@ class SyncScope {
     'inscribir': ['clientes'],
     'buscar_cliente': ['clientes', 'pagos'],
     'suplementos': ['suplementos'],
-    'ventas': ['ventas_suplemento'],
+    'ventas': ['ventas_suplementos'],
     'incidencias': ['incidencia_eventos'],
     'gastos': ['gastos'],
   };
