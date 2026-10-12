@@ -196,7 +196,11 @@ class FotosColaService {
       // v1.2.9+42: el lock SOLO aplica si los IDs aún no se conocen.
       // Si cliente_id/suplemento_id ya están resueltos, la foto puede
       // subirse aunque la op esté en 'enviada' (el servidor ya la tiene).
-      final tieneIds = f['cliente_id'] != null || f['suplemento_id'] != null;
+      // (Luna: considerar strings vacíos como no resueltos.)
+      final cid = f['cliente_id'];
+      final sid = f['suplemento_id'];
+      final tieneIds = (cid != null && cid.toString().isNotEmpty) ||
+          (sid != null && sid.toString().isNotEmpty);
       if (!tieneIds && fotoOpUuid != null && fotoOpUuid.isNotEmpty) {
         // FIX (revisión pre-+37): bloquear mientras el op NO esté en estado
         // terminal 'aplicada'. Cubre 'pendiente', 'enviada', 'error', etc.
@@ -268,24 +272,34 @@ class FotosColaService {
 
       final storagePath = await _subirUna(f, workerId);
       if (storagePath != null) {
+        // v1.2.9+42 (Luna): re-leer la fila para obtener IDs frescos.
+        // _subirUna pudo resolver y persistir cliente_id/suplemento_id,
+        // pero el objeto f en memoria sigue con los valores viejos.
+        final frescas = await db.query(
+          'fotos_cola',
+          where: 'id = ?',
+          whereArgs: [id],
+          limit: 1,
+        );
+        final fFresco = frescas.isNotEmpty ? frescas.first : f;
         // v1.2.9+42 (Gemini): VINCULAR ANTES de marcar completada.
         // Si la vinculación falla por excepción, la foto no queda huérfana.
         var vinculada = true;
         try {
-          if (f['tipo'] == 'display') {
+          if (fFresco['tipo'] == 'display') {
             vinculada =
-                await _vincularFotoCompletada(id, f, storagePath);
-          } else if (f['tipo'] == 'original') {
+                await _vincularFotoCompletada(id, fFresco, storagePath);
+          } else if (fFresco['tipo'] == 'original') {
             final hayDisplay = await db.query(
               'fotos_cola',
               columns: ['id'],
               where: 'op_uuid = ? AND tipo = ?',
-              whereArgs: [f['op_uuid'], 'display'],
+              whereArgs: [fFresco['op_uuid'], 'display'],
               limit: 1,
             );
             if (hayDisplay.isEmpty) {
               vinculada =
-                  await _vincularFotoCompletada(id, f, storagePath);
+                  await _vincularFotoCompletada(id, fFresco, storagePath);
             }
           }
         } catch (e) {
