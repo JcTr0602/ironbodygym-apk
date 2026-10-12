@@ -43,7 +43,11 @@ class LocalDb {
       await db.execute(
           'CREATE VIRTUAL TABLE IF NOT EXISTS _fts_probe USING fts5(x)');
     } catch (e) {
-      if ('$e'.contains('no such module')) {
+      // El mensaje lo genera el propio SQLite ("no such module: fts5"),
+      // estable entre versiones. Se chequea en minúsculas por si el
+      // driver varía el formato.
+      final msg = '$e'.toLowerCase();
+      if (msg.contains('no such module') && msg.contains('fts5')) {
         _ftsOk = false;
         return false;
       }
@@ -71,43 +75,65 @@ class LocalDb {
 
   /// Tras abrir la BD: si hay FTS5 pero la tabla falta o tiene el esquema
   /// viejo, se crea/reconstruye y se repuebla. Cubre el caso de una
-  /// migración que omitió el índice (soda no concluyente durante el
+  /// migración que omitió el índice (sonda no concluyente durante el
   /// upgrade) sin tener que re-ejecutar migraciones. Corre una vez por
-  /// proceso.
+  /// proceso, pero SOLO se marca como completada cuando el resultado es
+  /// concluyente (índice verificado o ausencia de FTS5 confirmada);
+  /// ante un error transitorio se reintenta en el próximo arranque.
   static bool _ftsReparado = false;
 
   static Future<void> _repararFtsSiHaceFalta(Database db) async {
     if (_ftsReparado) return;
-    _ftsReparado = true;
     bool hayFts;
     try {
       hayFts = await _ftsDisponible(db);
     } catch (_) {
-      return; // Sonda no concluyente ahora; se reintentará al reiniciar.
+      return; // Sonda no concluyente: se reintenta en el próximo arranque.
     }
-    if (!hayFts) return;
+    if (!hayFts) {
+      _ftsReparado = true; // Ausencia confirmada: nada que reparar.
+      return;
+    }
     try {
       final info = await db.rawQuery('PRAGMA table_info(clientes_fts)');
       final cols = info.map((c) => '${c['name']}').toSet();
-      // Esquema esperado (v12): nombre_norm, telefonos, id.
-      if (cols.containsAll({'nombre_norm', 'telefonos', 'id'})) return;
-      await db.execute('DROP TABLE IF EXISTS clientes_fts');
-      await db.execute(
-          'CREATE VIRTUAL TABLE clientes_fts USING fts5(nombre_norm, telefonos, id UNINDEXED)');
-      final rows = await db.query('clientes', columns: ['id', 'data']);
-      final lote = db.batch();
-      for (final r in rows) {
+      var indiceOk = cols.containsAll({'nombre_norm', 'telefonos', 'id'});
+      if (indiceOk) {
+        // Verificación funcional: una consulta de prueba sobre el índice.
+        // Si la tabla virtual está corrupta, esto lanza excepción.
         try {
-          final data = jsonDecode(r['data'] as String) as Map<String, dynamic>;
-          lote.insert('clientes_fts', {
-            'nombre_norm': _normTexto('${data['nombre'] ?? ''}'),
-            'telefonos': _telefonosNorm(data),
-            'id': r['id'],
-          });
-        } catch (_) {}
+          await db.rawQuery(
+              'SELECT id FROM clientes_fts WHERE clientes_fts MATCH ? LIMIT 1',
+              ['"zzzsincoincidencia"']);
+        } catch (_) {
+          indiceOk = false;
+        }
       }
-      await lote.commit(noResult: true);
-    } catch (_) {}
+      if (!indiceOk) {
+        await db.execute('DROP TABLE IF EXISTS clientes_fts');
+        await db.execute(
+            'CREATE VIRTUAL TABLE clientes_fts USING fts5(nombre_norm, telefonos, id UNINDEXED)');
+        final rows = await db.query('clientes', columns: ['id', 'data']);
+        final lote = db.batch();
+        for (final r in rows) {
+          try {
+            final data =
+                jsonDecode(r['data'] as String) as Map<String, dynamic>;
+            lote.insert('clientes_fts', {
+              'nombre_norm': _normTexto('${data['nombre'] ?? ''}'),
+              'telefonos': _telefonosNorm(data),
+              'id': r['id'],
+            });
+          } catch (_) {}
+        }
+        await lote.commit(noResult: true);
+      }
+      _ftsReparado = true; // Índice verificado o reconstruido.
+    } catch (_) {
+      // Fallo en la reconstrucción: NO se marca como reparado; se
+      // reintentará en el próximo arranque. Mientras tanto la búsqueda
+      // usa el fallback sin FTS5.
+    }
   }
 
   Future<Database> get db async {
@@ -549,12 +575,19 @@ class LocalDb {
     return n;
   }
 
+  /// Teléfonos normalizados (solo dígitos), uno por campo. Fuente única
+  /// para el índice FTS y para el fallback sin FTS5: si se añade un
+  /// campo nuevo, se añade aquí y ambos caminos lo ven.
+  static List<String> _telefonosLista(Map<String, dynamic> data) {
+    return [
+      '${data['telefono'] ?? ''}'.replaceAll(RegExp(r'[^0-9]'), ''),
+      '${data['movil'] ?? ''}'.replaceAll(RegExp(r'[^0-9]'), ''),
+    ].where((t) => t.isNotEmpty).toList();
+  }
+
   /// Teléfonos normalizados (solo dígitos) para la columna FTS.
   static String _telefonosNorm(Map<String, dynamic> data) {
-    final tel =
-        '${data['telefono'] ?? ''}'.replaceAll(RegExp(r'[^0-9]'), '');
-    final mov = '${data['movil'] ?? ''}'.replaceAll(RegExp(r'[^0-9]'), '');
-    return [if (tel.isNotEmpty) tel, if (mov.isNotEmpty) mov].join(' ');
+    return _telefonosLista(data).join(' ');
   }
 
   /// v1.2.5-rev5: búsqueda rápida por FTS5 (prefijo por token).
@@ -595,10 +628,10 @@ class LocalDb {
 
   /// Fallback sin FTS5: filtra el espejo de clientes en Dart con
   /// normalización (sin tildes, minúsculas), igual que el índice.
-  /// Aproxima la semántica FTS "prefijo por token": cada token debe ser
-  /// prefijo de alguna palabra del nombre (bonus si es palabra exacta);
-  /// la subcadena a mitad de palabra puntúa peor. Se ordena por
-  /// relevancia antes de aplicar el límite de 50.
+  /// Replica la semántica FTS "prefijo por token": cada token debe ser
+  /// palabra exacta o prefijo de alguna palabra del nombre. NO se aceptan
+  /// subcadenas interiores (FTS tampoco las acepta). Se ordena por
+  /// relevancia (exactas primero) antes de aplicar el límite de 50.
   Future<List<int>> _buscarClientesLikeIds(String nq,
       {bool porTelefono = false}) async {
     final d = await db;
@@ -610,13 +643,11 @@ class LocalDb {
       for (final r in rows) {
         try {
           final data = jsonDecode(r['data'] as String) as Map<String, dynamic>;
-          // Cada teléfono por separado: evita matches a caballo entre
-          // el final de un número y el inicio del siguiente.
-          final tels = [
-            '${data['telefono'] ?? ''}'.replaceAll(RegExp(r'[^0-9]'), ''),
-            '${data['movil'] ?? ''}'.replaceAll(RegExp(r'[^0-9]'), ''),
-          ].where((t) => t.isNotEmpty);
-          if (tels.any((t) => t.contains(dig))) out.add(r['id'] as int);
+          // Cada teléfono por separado (misma fuente que el índice FTS):
+          // evita matches a caballo entre dos números.
+          if (_telefonosLista(data).any((t) => t.contains(dig))) {
+            out.add(r['id'] as int);
+          }
         } catch (_) {}
         if (out.length >= 50) break;
       }
@@ -643,8 +674,6 @@ class LocalDb {
             continue; // palabra exacta: 0 puntos
           } else if (palabras.any((w) => w.startsWith(t))) {
             p += 1; // prefijo de palabra ≈ FTS "t"*
-          } else if (nn.contains(t)) {
-            p += 2; // subcadena interior: coincide pero menos relevante
           } else {
             ok = false;
             break;
