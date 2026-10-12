@@ -571,6 +571,29 @@ class LocalDb {
             'estado TEXT NOT NULL DEFAULT \'pendiente\', user_id TEXT, '
             'retry_count INTEGER NOT NULL DEFAULT 0, '
             'last_error TEXT, last_retry_at TEXT)');
+        // v15: cola persistente de fotos (también en onUpgrade para
+        // quienes actualizan desde versiones anteriores).
+        await db.execute('CREATE TABLE IF NOT EXISTS fotos_cola ('
+            'id INTEGER PRIMARY KEY AUTOINCREMENT, '
+            'op_uuid TEXT NOT NULL, '
+            "tipo TEXT NOT NULL CHECK(tipo IN ('thumb', 'display', 'original')), "
+            'cliente_id INTEGER, '
+            'suplemento_id INTEGER, '
+            'ruta_local TEXT NOT NULL, '
+            'storage_path TEXT, '
+            'tamano_bytes INTEGER, '
+            "estado TEXT NOT NULL DEFAULT 'pendiente' CHECK(estado IN ('pendiente', 'subiendo', 'completada', 'error')), "
+            'intentos INTEGER NOT NULL DEFAULT 0, '
+            'ultimo_error TEXT, '
+            'worker_id TEXT, '
+            'lease_hasta TEXT, '
+            'proximo_intento_en TEXT, '
+            'creado_en TEXT NOT NULL, '
+            'actualizado_en TEXT NOT NULL)');
+        await db.execute(
+            'CREATE INDEX IF NOT EXISTS idx_fotos_cola_despachador ON fotos_cola(estado, intentos, creado_en)');
+        await db.execute(
+            'CREATE INDEX IF NOT EXISTS idx_fotos_cola_op_uuid ON fotos_cola(op_uuid)');
         await db.execute(
             'CREATE TABLE meta (k TEXT PRIMARY KEY, v TEXT NOT NULL)');
         // v1.2.4: incidencias (diseño ChatGPT: bidireccional, offline-first).
