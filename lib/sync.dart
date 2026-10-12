@@ -795,6 +795,41 @@ class SyncEngine {
   /// v1.2.9: wrapper público para la cola de fotos.
   Future<int?> suplementoDeOp(String uuid) => _suplementoDeOp(uuid);
 
+  /// v1.2.9 (Fix crítico 2 Gemini): actualiza foto_storage en Supabase
+  /// para que el próximo pull no borre la foto recién subida.
+  /// foto_storage vive dentro del JSONB `data`, no como columna directa.
+  Future<void> patchClienteFotoStorage(
+      int clienteId, String storagePath, String fotoUuid) async {
+    // Leer el data actual para hacer merge (no reemplazar).
+    final r = await _getAuth(
+      Uri.parse('$_base/rest/v1/sync_clientes?id=eq.$clienteId&select=data'),
+    );
+    if (r.statusCode != 200) {
+      throw Exception('No se pudo leer cliente $clienteId: ${r.statusCode}');
+    }
+    final rows = jsonDecode(r.body) as List;
+    if (rows.isEmpty) throw Exception('Cliente $clienteId no existe');
+    final data = Map<String, dynamic>.from(rows.first['data'] as Map);
+
+    // Verificar precedencia también en el servidor.
+    final fotoUuidRemoto = data['foto_uuid'] as String?;
+    if (fotoUuidRemoto != null && fotoUuidRemoto != fotoUuid) {
+      // Otro dispositivo ya puso una foto más nueva. No sobrescribir.
+      return;
+    }
+
+    data['foto_storage'] = storagePath;
+    data['foto_uuid'] = fotoUuid;
+    final r2 = await _patchAuth(
+      Uri.parse('$_base/rest/v1/sync_clientes?id=eq.$clienteId'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'data': data}),
+    );
+    if (r2.statusCode < 200 || r2.statusCode >= 300) {
+      throw Exception('PATCH foto_storage falló: ${r2.statusCode}');
+    }
+  }
+
   Future<int?> _clienteDeOp(String uuid) async {
     try {
       final r = await _getAuth(

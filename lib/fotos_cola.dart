@@ -218,10 +218,22 @@ class FotosColaService {
           // v1.2.9 (Gemini #5): actualizar mirror solo para variante
           // 'original', y solo si la foto sigue siendo la vigente.
           if (f['tipo'] == 'original') {
-            await _actualizarMirrorFoto(f, storagePath);
+            await _actualizarMirrorFoto(id, f, storagePath);
           }
         }
       } else {
+        // Fix crítico 3: si _subirUna ya marcó 'error' permanente,
+        // no aplicar backoff.
+        final check = await db.query(
+          'fotos_cola',
+          columns: ['estado'],
+          where: 'id = ?',
+          whereArgs: [id],
+        );
+        if (check.isNotEmpty && check.first['estado'] == 'error') {
+          continue; // Error definitivo, no programar reintento.
+        }
+
         // Fix Luna 4: backoff exponencial (30s, 2min, 10min, 30min).
         final intentos = (f['intentos'] as int? ?? 0) + 1;
         final esperaMin = [0.5, 2, 10, 30][(intentos - 1).clamp(0, 3)];
@@ -315,7 +327,8 @@ class FotosColaService {
       final ruta = f['ruta_local'] as String;
       final file = File(ruta);
       if (!await file.exists()) {
-        await _marcarError(id, 'archivo no existe');
+        // Fix crítico 3: archivo inexistente es permanente, no reintentable.
+        await _marcarError(id, 'archivo no existe', permanente: true);
         return null;
       }
 
@@ -324,7 +337,8 @@ class FotosColaService {
       final tamanoAntes = await file.length();
       final bytes = await file.readAsBytes();
       if (bytes.length != tamanoAntes) {
-        await _marcarError(id, 'archivo cambió durante lectura');
+        await _marcarError(id, 'archivo cambió durante lectura',
+            permanente: true);
         return null;
       }
 
@@ -343,7 +357,9 @@ class FotosColaService {
           // subirFotoCola ya limpió las claves TUS exactas.
           return res.storagePath ?? objectPath;
         case EstadoSubida.permanente:
-          await _marcarError(id, res.error ?? 'error permanente');
+          // Fix crítico 3: error permanente, sin backoff.
+          await _marcarError(id, res.error ?? 'error permanente',
+              permanente: true);
           return null;
         case EstadoSubida.reintentable:
         case EstadoSubida.permitirFallback:
@@ -360,11 +376,17 @@ class FotosColaService {
     }
   }
 
-  Future<void> _marcarError(int id, String error) async {
+  /// v1.2.9 (Fix crítico 3 Gemini): permite marcar error permanente
+  /// directo, sin pasar por backoff.
+  Future<void> _marcarError(int id, String error,
+      {bool permanente = false}) async {
     final db = await LocalDb.instance.db;
     await db.update(
       'fotos_cola',
       {
+        if (permanente) 'estado': 'error',
+        if (permanente) 'worker_id': null,
+        if (permanente) 'lease_hasta': null,
         'ultimo_error': error,
         'actualizado_en': DateTime.now().toIso8601String(),
       },
@@ -373,14 +395,30 @@ class FotosColaService {
     );
   }
 
-  /// v1.2.9 (Gemini #5): actualiza foto_storage en el mirror local.
-  /// Solo si el cliente existe y la foto subida sigue siendo la vigente
-  /// (no sobrescribir una foto más nueva).
+  /// v1.2.9 (Gemini #5 + auditoría final): actualiza foto_storage.
+  /// Fix crítico 1: lee el cliente_id RESUELTO de SQLite (f en memoria
+  /// puede tener null si se resolvió dentro de _subirUna).
+  /// Fix crítico 2: propaga a Supabase para que el próximo pull no borre.
   Future<void> _actualizarMirrorFoto(
-      Map<String, dynamic> f, String storagePath) async {
+      int fotoId, Map<String, dynamic> f, String storagePath) async {
     final db = await LocalDb.instance.db;
-    final clienteId = f['cliente_id'] as int?;
-    if (clienteId == null) return; // Es de suplemento, no hay mirror.
+
+    // Fix crítico 1: si f['cliente_id'] era null al inicio, consultar
+    // el resuelto en la BD.
+    var clienteId = f['cliente_id'] as int?;
+    if (clienteId == null) {
+      final row = await db.query(
+        'fotos_cola',
+        columns: ['cliente_id'],
+        where: 'id = ?',
+        whereArgs: [fotoId],
+        limit: 1,
+      );
+      if (row.isNotEmpty) {
+        clienteId = row.first['cliente_id'] as int?;
+      }
+    }
+    if (clienteId == null) return; // Es de suplemento o no resuelto.
 
     final rows = await db.query(
       'clientes',
@@ -395,15 +433,13 @@ class FotosColaService {
     try {
       data = Map<String, dynamic>.from(
           rows.first['data'] is String
-              ? const JsonDecoder().convert(rows.first['data'] as String)
+              ? jsonDecode(rows.first['data'] as String)
               : rows.first['data'] as Map);
     } catch (_) {
       return;
     }
 
     // Verificar precedencia: no sobrescribir si ya hay una foto más nueva.
-    // El op_uuid de la fila debe coincidir con el foto_uuid vigente,
-    // o no debe haber foto_uuid (primera foto).
     final fotoUuidVigente = data['foto_uuid'] as String?;
     final miOpUuid = f['op_uuid'] as String;
     if (fotoUuidVigente != null && fotoUuidVigente != miOpUuid) {
@@ -413,12 +449,24 @@ class FotosColaService {
 
     data['foto_storage'] = storagePath;
     data['foto_uuid'] = miOpUuid;
+
+    // 1. Guardar en SQLite local.
     await db.update(
       'clientes',
-      {'data': const JsonEncoder().convert(data)},
+      {'data': jsonEncode(data)},
       where: 'id = ?',
       whereArgs: [clienteId],
     );
+
+    // 2. Fix crítico 2: notificar a Supabase para que el próximo
+    // pull no borre la foto. La conectividad está garantizada
+    // (acabamos de subir a Storage).
+    try {
+      await SyncEngine.instance.patchClienteFotoStorage(
+          clienteId, storagePath, miOpUuid);
+    } catch (e) {
+      debugPrint('[Fotos] Error actualizando foto_storage en Supabase: $e');
+    }
   }
 
   /// Cuenta fotos pendientes (para el Foreground Service).
