@@ -578,12 +578,14 @@ class SyncEngine {
       final ahorro = await PerfilService.instance.getAhorroDatos();
       if (!ahorro || _forzarFotos) {
         _emit(SyncPhase.photos);
-        // v1.2.9+41: _uploadFotos (flujo viejo) no debe bloquear procesarCola.
-        // Si falla, se loguea y se continúa con la cola moderna.
-        try {
-          await _uploadFotos();
-        } catch (e) {
-          debugPrint('WARN _uploadFotos (viejo) falló: $e');
+        // v1.2.9+43: solo intentar el flujo viejo si hay datos legacy.
+        // v1.2.9+41: _uploadFotos no debe bloquear procesarCola.
+        if (await _db.hayFotosLegacy()) {
+          try {
+            await _uploadFotos();
+          } catch (e) {
+            debugPrint('WARN _uploadFotos (viejo) falló: $e');
+          }
         }
         // v1.2.9+42 (Gemini): procesarCola protegido + segundo _uploadOps
         // para enviar las ops de vinculación generadas por las fotos.

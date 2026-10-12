@@ -2093,4 +2093,20 @@ class LocalDb {
     final dir = await getDatabasesPath();
     return p.join(dir, 'ironbody.db');
   }
+
+  /// v1.2.9+43: retorna true si existe la tabla fotos_pendientes (formato
+  /// viejo) y tiene registros. Verifica sqlite_master primero para no
+  /// lanzar excepción si la tabla no existe.
+  Future<bool> hayFotosLegacy() async {
+    final d = await db;
+    final tablaExiste = await d.rawQuery(
+      "SELECT 1 FROM sqlite_master "
+      "WHERE type = 'table' AND name = 'fotos_pendientes' LIMIT 1",
+    );
+    if (tablaExiste.isEmpty) return false;
+    final r = await d.rawQuery(
+      "SELECT COUNT(*) as n FROM fotos_pendientes LIMIT 1",
+    );
+    return ((r.first['n'] as int?) ?? 0) > 0;
+  }
 }
