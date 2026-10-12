@@ -198,6 +198,10 @@ class SyncEngine {
   final _auth = AuthService();
   final _db = LocalDb.instance;
 
+  /// v1.2.9+43: cliente HTTP singleton para reutilizar conexiones TCP/TLS
+  /// (Keep-Alive). Evita el handshake de 800ms-2s por cada petición.
+  static final _httpClient = http.Client();
+
   String get _base => AppConfig.supabaseUrl;
 
   /// Nombre amigable de cada tabla espejo para los mensajes de progreso.
@@ -245,20 +249,22 @@ class SyncEngine {
 
   Future<http.Response> _getAuth(Uri url,
           {Duration timeout = const Duration(seconds: 30)}) =>
-      _reqAuth((t) => http.get(url, headers: {
+      _reqAuth((t) => _httpClient.get(url, headers: {
             'apikey': AppConfig.anonKey,
             'Authorization': 'Bearer $t',
+            'Accept-Encoding': 'gzip',
           }).timeout(timeout));
 
   Future<http.Response> _postAuth(Uri url,
           {Map<String, String>? headers,
           Object? body,
           Duration timeout = const Duration(seconds: 60)}) =>
-      _reqAuth((t) => http
+      _reqAuth((t) => _httpClient
           .post(url,
               headers: {
                 'apikey': AppConfig.anonKey,
                 'Authorization': 'Bearer $t',
+                'Accept-Encoding': 'gzip',
                 ...?headers,
               },
               body: body)
@@ -266,7 +272,7 @@ class SyncEngine {
 
   Future<http.Response> _headAuth(Uri url,
           {Duration timeout = const Duration(seconds: 30)}) =>
-      _reqAuth((t) => http.head(url, headers: {
+      _reqAuth((t) => _httpClient.head(url, headers: {
             'apikey': AppConfig.anonKey,
             'Authorization': 'Bearer $t',
             'Tus-Resumable': '1.0.0',
@@ -276,7 +282,7 @@ class SyncEngine {
           {required Map<String, String> headers,
           Object? body,
           Duration timeout = const Duration(seconds: 120)}) =>
-      _reqAuth((t) => http
+      _reqAuth((t) => _httpClient
           .patch(url,
               headers: {
                 'apikey': AppConfig.anonKey,
