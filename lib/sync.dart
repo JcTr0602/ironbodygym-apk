@@ -687,10 +687,27 @@ class SyncEngine {
           detalle: '$ajenas cambios de otro usuario en espera…');
     }
     // 1) las ya aplicadas se marcan sin reenviar
+    // v1.2.9+43: batch RPC (1 RTT) en vez de N llamadas individuales.
+    // Con fallback al método viejo si el RPC no existe aún.
     final porEnviar = <Map<String, dynamic>>[];
+    Set<String> aplicadasSet;
+    try {
+      final uuids = ops.map((o) => o['op_uuid'] as String).toList();
+      aplicadasSet = await _opsAplicadasBatch(uuids);
+    } catch (e) {
+      // Fallback: RPC no existe o falló — usar método individual
+      debugPrint('WARN batch RPC falló, usando fallback individual: $e');
+      aplicadasSet = {};
+      for (final op in ops) {
+        final uuid = op['op_uuid'] as String;
+        if (await _opAplicada(uuid)) {
+          aplicadasSet.add(uuid);
+        }
+      }
+    }
     for (final op in ops) {
       final uuid = op['op_uuid'] as String;
-      if (await _opAplicada(uuid)) {
+      if (aplicadasSet.contains(uuid)) {
         await _db.markOp(uuid, 'aplicada');
         aplicadas++;
       } else {
@@ -824,6 +841,34 @@ class SyncEngine {
         await _db.bumpOp(uuid, e);
       }
     }
+  }
+
+  /// v1.2.9+43: verifica múltiples ops en un solo RTT.
+  /// Retorna el set de UUIDs que están en estado 'aplicada'.
+  /// Lanza excepción si el RPC falla (el llamador hace fallback).
+  Future<Set<String>> _opsAplicadasBatch(List<String> uuids) async {
+    if (uuids.isEmpty) return {};
+    const maxPorBatch = 100;
+    final resultado = <String>{};
+    for (var i = 0; i < uuids.length; i += maxPorBatch) {
+      final fin = (i + maxPorBatch < uuids.length)
+          ? i + maxPorBatch
+          : uuids.length;
+      final lote = uuids.sublist(i, fin);
+      final r = await _postAuth(
+        Uri.parse('$_base/rest/v1/rpc/ops_aplicadas_batch'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'p_uuids': lote}),
+        timeout: const Duration(seconds: 20),
+      );
+      if (r.statusCode != 200) {
+        throw StateError(
+            'RPC ops_aplicadas_batch falló: ${r.statusCode}');
+      }
+      final List<dynamic> data = jsonDecode(r.body);
+      resultado.addAll(data.map((e) => e.toString()));
+    }
+    return resultado;
   }
 
   Future<bool> _opAplicada(String uuid) async {
