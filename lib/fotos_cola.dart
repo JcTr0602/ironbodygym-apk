@@ -171,32 +171,54 @@ class FotosColaService {
       // bloqueadas indefinidamente.
       // FIX (2026-10-12): antes bloqueaba si había CUALQUIER op pendiente.
       if (fotoOpUuid != null && fotoOpUuid.isNotEmpty) {
-        final opPendiente = await db.query(
+        // FIX (revisión pre-+37): bloquear mientras el op NO esté en estado
+        // terminal 'aplicada'. Cubre 'pendiente', 'enviada', 'error', etc.
+        // Si solo se filtraba 'pendiente', una op en 'error' dejaba pasar
+        // la foto y se subía a un cliente que jamás se creó en el servidor.
+        // (Nota: Gemini sugirió != 'completada', pero el estado terminal
+        // real en ops_queue es 'aplicada'.)
+        final opRows = await db.query(
           'ops_queue',
-          columns: ['op_uuid'],
-          where: "op_uuid = ? AND estado = 'pendiente' "
-              "AND tipo NOT IN ('foto', 'foto_suplemento')",
+          columns: ['estado'],
+          where: "op_uuid = ? AND tipo NOT IN ('foto', 'foto_suplemento')",
           whereArgs: [fotoOpUuid],
           limit: 1,
         );
-        if (opPendiente.isNotEmpty) {
-          debugPrint(
-              '[Fotos] Lock: el op $fotoOpUuid aún está pendiente, la foto espera.');
-          // Marcar para reintentar después, no bloquear toda la cola.
-          await db.update(
-            'fotos_cola',
-            {
-              'proximo_intento_en': DateTime.now()
-                  .add(const Duration(minutes: 2))
-                  .toIso8601String(),
-              'actualizado_en': DateTime.now().toIso8601String(),
-            },
-            where: 'id = ?',
-            whereArgs: [f['id']],
-          );
-          continue; // Pasar a la siguiente foto, no romper el loop.
+        if (opRows.isNotEmpty) {
+          final estadoOp = opRows.first['estado'] as String?;
+          if (estadoOp == 'rechazada') {
+            // La op fue rechazada por el servidor: el cliente/suplemento
+            // jamás se creó. Marcar la foto como error, no esperar eterno.
+            await db.update(
+              'fotos_cola',
+              {
+                'estado': 'error',
+                'ultimo_error': 'op rechazada por el servidor',
+                'actualizado_en': DateTime.now().toIso8601String(),
+              },
+              where: 'id = ?',
+              whereArgs: [f['id']],
+            );
+            continue;
+          }
+          if (estadoOp != 'aplicada') {
+            debugPrint(
+                '[Fotos] Lock: el op $fotoOpUuid está en $estadoOp, la foto espera.');
+            await db.update(
+              'fotos_cola',
+              {
+                'proximo_intento_en': DateTime.now()
+                    .add(const Duration(minutes: 2))
+                    .toIso8601String(),
+                'actualizado_en': DateTime.now().toIso8601String(),
+              },
+              where: 'id = ?',
+              whereArgs: [f['id']],
+            );
+            continue;
+          }
         }
-      }
+      } // fin if (fotoOpUuid != null)
       final id = f['id'] as int;
 
       // Fix Luna 1: reclamo exclusivo con worker_id. Verifica filas
