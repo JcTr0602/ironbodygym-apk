@@ -159,4 +159,93 @@ void main() {
 
     await db.close();
   });
+
+  /// Simula un fallo DURANTE la reconstrucción: la tabla incompleta debe
+  /// eliminarse y el siguiente intento debe recrearla y poblarla.
+  test('fallo durante reconstrucción FTS: se limpia y reintenta', () async {
+    sqfliteFfiInit();
+    databaseFactory = databaseFactoryFfi;
+    SharedPreferences.setMockInitialValues({});
+
+    final dir = await getDatabasesPath();
+    final dbPath = p.join(dir, 'ironbody.db');
+    try {
+      await File(dbPath).delete();
+    } catch (_) {}
+    await LocalDb.resetParaTest();
+
+    final v7 = await databaseFactoryFfi.openDatabase(dbPath,
+        options: OpenDatabaseOptions(version: 7));
+    await _crearEsquemaV7(v7);
+    await v7.close();
+
+    // Estado inicial sano: índice con los 2 clientes.
+    var db = await LocalDb.instance.db;
+    var tablas = await db.rawQuery(
+        "SELECT name FROM sqlite_master WHERE name='clientes_fts'");
+    expect(tablas.isNotEmpty, isTrue);
+
+    // Se fuerza un índice incompleto y un fallo en la reconstrucción.
+    await db.execute('DELETE FROM clientes_fts');
+    LocalDb.simularFalloReconstruccion = true;
+    try {
+      await LocalDb.resetParaTest();
+      db = await LocalDb.instance.db;
+      // El rebuild falló a la mitad: la tabla incompleta debe haberse
+      // eliminado, no quedar a medias.
+      tablas = await db.rawQuery(
+          "SELECT name FROM sqlite_master WHERE name='clientes_fts'");
+      expect(tablas.isEmpty, isTrue,
+          reason: 'tras un fallo, no debe quedar tabla incompleta');
+    } finally {
+      LocalDb.simularFalloReconstruccion = false;
+    }
+
+    // Siguiente intento: se recrea y se puebla completo.
+    await LocalDb.resetParaTest();
+    db = await LocalDb.instance.db;
+    final ids = (await db.rawQuery('SELECT id FROM clientes_fts'))
+        .map((r) => r['id'] as int)
+        .toSet();
+    expect(ids, {1, 2});
+
+    await db.close();
+  });
+
+  /// Un índice con IDs ajenos o duplicados no se valida como sano.
+  test('índice FTS con IDs incorrectos: se reconstruye', () async {
+    sqfliteFfiInit();
+    databaseFactory = databaseFactoryFfi;
+    SharedPreferences.setMockInitialValues({});
+
+    final dir = await getDatabasesPath();
+    final dbPath = p.join(dir, 'ironbody.db');
+    try {
+      await File(dbPath).delete();
+    } catch (_) {}
+    await LocalDb.resetParaTest();
+
+    final v7 = await databaseFactoryFfi.openDatabase(dbPath,
+        options: OpenDatabaseOptions(version: 7));
+    await _crearEsquemaV7(v7);
+    await v7.close();
+
+    var db = await LocalDb.instance.db;
+
+    // Corrompe el índice: fila con id ajeno (999).
+    await db.insert('clientes_fts',
+        {'nombre_norm': 'x', 'telefonos': 'y', 'id': 999});
+
+    // Reapertura: la correspondencia de IDs ({1,2,999} vs {1,2}) debe
+    // detectarse y forzar la reconstrucción.
+    await LocalDb.resetParaTest();
+    db = await LocalDb.instance.db;
+    final ids = (await db.rawQuery('SELECT id FROM clientes_fts'))
+        .map((r) => r['id'] as int)
+        .toSet();
+    expect(ids, {1, 2},
+        reason: 'el índice con IDs ajenos debe reconstruirse limpio');
+
+    await db.close();
+  });
 }

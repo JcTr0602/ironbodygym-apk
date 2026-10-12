@@ -84,6 +84,11 @@ class LocalDb {
     _ftsReparado = false;
   }
 
+  /// Solo para tests: si es true, [_reconstruirFts] lanza una excepción
+  /// simulada a mitad de la reconstrucción (tras crear la tabla).
+  @visibleForTesting
+  static bool simularFalloReconstruccion = false;
+
   /// Tras abrir la BD: si hay FTS5 pero la tabla falta o tiene el esquema
   /// viejo, se crea/reconstruye y se repuebla. Cubre el caso de una
   /// migración que omitió el índice (sonda no concluyente durante el
@@ -117,9 +122,23 @@ class LocalDb {
     }
   }
 
+  /// IDs de los clientes cuya data se puede decodificar: exactamente
+  /// los que el índice FTS debe contener (ni más, ni menos, ni otros).
+  static Future<Set<int>> _idsClientesDecodificables(Database db) async {
+    final ids = <int>{};
+    final rows = await db.query('clientes', columns: ['id', 'data']);
+    for (final r in rows) {
+      try {
+        jsonDecode(r['data'] as String);
+        ids.add(r['id'] as int);
+      } catch (_) {}
+    }
+    return ids;
+  }
+
   /// ¿El índice FTS existe, tiene el esquema esperado, responde a MATCH
-  /// y contiene tantos registros como clientes decodificables hay?
-  /// Un índice vacío o a medias (resto de un rebuild fallido) NO se
+  /// y contiene exactamente los IDs de los clientes decodificables?
+  /// Un índice vacío, a medias o con filas ajenas/duplicadas NO se
   /// valida como sano aunque las columnas sean correctas.
   static Future<bool> _indiceFtsSano(Database db) async {
     try {
@@ -131,19 +150,14 @@ class LocalDb {
       await db.rawQuery(
           'SELECT id FROM clientes_fts WHERE clientes_fts MATCH ? LIMIT 1',
           ['"zzzsincoincidencia"']);
-      // Verificación de carga: los registros del índice deben ser
-      // tantos como los clientes cuya data se puede decodificar.
-      final clientes = await db.query('clientes', columns: ['data']);
-      var esperados = 0;
-      for (final r in clientes) {
-        try {
-          jsonDecode(r['data'] as String);
-          esperados++;
-        } catch (_) {}
-      }
-      final conteo =
-          await db.rawQuery('SELECT COUNT(*) AS c FROM clientes_fts');
-      return ((conteo.first['c'] as int?) ?? -1) == esperados;
+      // Correspondencia de IDs: el conteo solo no basta (no detecta
+      // filas ajenas o duplicadas).
+      final esperados = await _idsClientesDecodificables(db);
+      final indexados = (await db.rawQuery('SELECT id FROM clientes_fts'))
+          .map((r) => r['id'] as int)
+          .toSet();
+      return indexados.length == esperados.length &&
+          indexados.containsAll(esperados);
     } catch (_) {
       return false;
     }
@@ -157,9 +171,11 @@ class LocalDb {
       await db.execute('DROP TABLE IF EXISTS clientes_fts');
       await db.execute(
           'CREATE VIRTUAL TABLE clientes_fts USING fts5(nombre_norm, telefonos, id UNINDEXED)');
+      if (simularFalloReconstruccion) {
+        throw StateError('fallo simulado de reconstrucción FTS (test)');
+      }
       final rows = await db.query('clientes', columns: ['id', 'data']);
       final lote = db.batch();
-      var esperados = 0;
       for (final r in rows) {
         try {
           final data =
@@ -169,16 +185,18 @@ class LocalDb {
             'telefonos': _telefonosNorm(data),
             'id': r['id'],
           });
-          esperados++;
         } catch (_) {
-          // Fila indecodificable: se omite del índice y no cuenta
-          // como esperada (igual que en _indiceFtsSano).
+          // Fila indecodificable: se omite del índice (igual que en
+          // _idsClientesDecodificables).
         }
       }
       await lote.commit(noResult: true);
-      final conteo =
-          await db.rawQuery('SELECT COUNT(*) AS c FROM clientes_fts');
-      if (((conteo.first['c'] as int?) ?? -1) != esperados) {
+      final esperados = await _idsClientesDecodificables(db);
+      final indexados = (await db.rawQuery('SELECT id FROM clientes_fts'))
+          .map((r) => r['id'] as int)
+          .toSet();
+      if (indexados.length != esperados.length ||
+          !indexados.containsAll(esperados)) {
         throw StateError('índice FTS incompleto tras la reconstrucción');
       }
     } catch (_) {
