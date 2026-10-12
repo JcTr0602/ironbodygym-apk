@@ -789,14 +789,26 @@ class SyncEngine {
   }
 
   Future<bool> _opAplicada(String uuid) async {
+    // v1.2.9+39: usar RPC op_aplicada en vez de GET directo.
+    // El RLS de SELECT en sync_ops no devuelve filas aunque la política
+    // sea correcta; la función SECURITY DEFINER evita el problema.
     try {
-      final r = await _getAuth(
-          Uri.parse('$_base/rest/v1/sync_ops?op_uuid=eq.$uuid'
-              '&select=aplicada'),
+      final r = await _postAuth(
+          Uri.parse('$_base/rest/v1/rpc/op_aplicada'),
+          headers: {'Content-Type': 'application/json'},
+          body: jsonEncode({'p_op_uuid': uuid}),
           timeout: const Duration(seconds: 20));
       if (r.statusCode != 200) return false;
-      final rows = jsonDecode(r.body) as List;
-      return rows.isNotEmpty && rows.first['aplicada'] == true;
+      final result = jsonDecode(r.body);
+      if (result is bool) return result;
+      if (result is List && result.isNotEmpty) {
+        final v = result.first;
+        if (v is bool) return v;
+        if (v is Map && v.containsKey('op_aplicada')) {
+          return v['op_aplicada'] == true;
+        }
+      }
+      return false;
     } catch (e) {
       if (e is SessionExpired) rethrow;
       return false;
