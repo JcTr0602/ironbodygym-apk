@@ -272,9 +272,9 @@ class FotosColaService {
 
       final storagePath = await _subirUna(f, workerId);
       if (storagePath != null) {
-        // v1.2.9+42 (Luna): re-leer la fila para obtener IDs frescos.
-        // _subirUna pudo resolver y persistir cliente_id/suplemento_id,
-        // pero el objeto f en memoria sigue con los valores viejos.
+        // v1.2.9+43 (Gemini): TRANSACCIÓN ATÓMICA para vinculación.
+        // Primero verifica ownership del lease, luego vincula.
+        // Si el lease se perdió, aborta sin mutar mirror ni ops_queue.
         final frescas = await db.query(
           'fotos_cola',
           where: 'id = ?',
@@ -282,35 +282,11 @@ class FotosColaService {
           limit: 1,
         );
         final fFresco = frescas.isNotEmpty ? frescas.first : f;
-        // v1.2.9+42 (Gemini): VINCULAR ANTES de marcar completada.
-        // Si la vinculación falla por excepción, la foto no queda huérfana.
-        var vinculada = true;
-        try {
-          if (fFresco['tipo'] == 'display') {
-            vinculada =
-                await _vincularFotoCompletada(id, fFresco, storagePath);
-          } else if (fFresco['tipo'] == 'original') {
-            final hayDisplay = await db.query(
-              'fotos_cola',
-              columns: ['id'],
-              where: 'op_uuid = ? AND tipo = ?',
-              whereArgs: [fFresco['op_uuid'], 'display'],
-              limit: 1,
-            );
-            if (hayDisplay.isEmpty) {
-              vinculada =
-                  await _vincularFotoCompletada(id, fFresco, storagePath);
-            }
-          }
-        } catch (e) {
-          debugPrint('ERROR en vinculación foto $id: $e');
-          vinculada = false;
-        }
 
-        if (vinculada) {
-          subidas++;
-          // Solo el worker dueño puede completarla.
-          final completadas = await db.update(
+        bool exitoVinculacion = false;
+        await db.transaction((txn) async {
+          // 1. Verificar que el worker sigue siendo dueño del lease
+          final completadas = await txn.update(
             'fotos_cola',
             {
               'estado': 'completada',
@@ -319,30 +295,46 @@ class FotosColaService {
               'lease_hasta': null,
               'actualizado_en': DateTime.now().toIso8601String(),
             },
-            where: 'id = ? AND worker_id = ?',
-            whereArgs: [id, workerId],
+            where: 'id = ? AND worker_id = ? AND estado = ?',
+            whereArgs: [id, workerId, 'subiendo'],
           );
+
           if (completadas != 1) {
-            debugPrint('[Fotos] Otro worker tomó la foto $id, omitiendo.');
-            subidas--;
+            // Lease perdido: abortar sin modificar mirror ni ops_queue
+            return;
           }
+
+          // 2. Determinar si esta variante debe vincularse
+          bool debeVincular = false;
+          final tipo = fFresco['tipo'];
+          if (tipo == 'display') {
+            debeVincular = true;
+          } else if (tipo == 'original') {
+            final disp = await txn.query(
+              'fotos_cola',
+              columns: ['estado'],
+              where: 'op_uuid = ? AND tipo = ?',
+              whereArgs: [fFresco['op_uuid'], 'display'],
+              limit: 1,
+            );
+            // Vincular si no hay display o si el display falló definitivamente
+            // (Fix B2: evita dejar al cliente sin imagen si display falla)
+            if (disp.isEmpty || disp.first['estado'] == 'error') {
+              debeVincular = true;
+            }
+          }
+
+          if (debeVincular) {
+            await _vincularEnTransaccion(txn, id, fFresco, storagePath);
+          }
+          exitoVinculacion = true;
+        });
+
+        if (exitoVinculacion) {
+          subidas++;
         } else {
-          // Revertir a pendiente, PRESERVANDO storage_path para no re-subir.
-          await db.update(
-            'fotos_cola',
-            {
-              'estado': 'pendiente',
-              'storage_path': storagePath,
-              'worker_id': null,
-              'lease_hasta': null,
-              'proximo_intento_en': DateTime.now()
-                  .add(const Duration(minutes: 2))
-                  .toIso8601String(),
-              'actualizado_en': DateTime.now().toIso8601String(),
-            },
-            where: 'id = ? AND worker_id = ?',
-            whereArgs: [id, workerId],
-          );
+          debugPrint(
+              '[Fotos] Foto $id omitida: lease expirado o conflicto.');
         }
       } else {
         // Fix crítico 3: si _subirUna ya marcó 'error' permanente,
@@ -458,7 +450,7 @@ class FotosColaService {
       final file = File(ruta);
       if (!await file.exists()) {
         // Fix crítico 3: archivo inexistente es permanente, no reintentable.
-        await _marcarError(id, 'archivo no existe', permanente: true);
+        await _marcarError(id, 'archivo no existe', permanente: true, workerId: workerId);
         return null;
       }
 
@@ -468,7 +460,7 @@ class FotosColaService {
       final bytes = await file.readAsBytes();
       if (bytes.length != tamanoAntes) {
         await _marcarError(id, 'archivo cambió durante lectura',
-            permanente: true);
+            permanente: true, workerId: workerId);
         return null;
       }
 
@@ -489,7 +481,7 @@ class FotosColaService {
         case EstadoSubida.permanente:
           // Fix crítico 3: error permanente, sin backoff.
           await _marcarError(id, res.error ?? 'error permanente',
-              permanente: true);
+              permanente: true, workerId: workerId);
           return null;
         case EstadoSubida.reintentable:
         case EstadoSubida.permitirFallback:
@@ -498,7 +490,7 @@ class FotosColaService {
           return null;
       }
     } catch (e) {
-      await _marcarError(id, '$e');
+      await _marcarError(id, '$e', workerId: workerId);
       return null;
     } finally {
       // Corrección Gemini #5: cancelar siempre el timer.
@@ -508,20 +500,22 @@ class FotosColaService {
 
   /// v1.2.9 (Fix crítico 3 Gemini): permite marcar error permanente
   /// directo, sin pasar por backoff.
+  /// v1.2.9+43 (Gemini C): filtra por worker_id para no abortar
+  /// la subida activa de otro worker.
   Future<void> _marcarError(int id, String error,
-      {bool permanente = false}) async {
+      {bool permanente = false, String? workerId}) async {
     final db = await LocalDb.instance.db;
     await db.update(
       'fotos_cola',
       {
         if (permanente) 'estado': 'error',
-        if (permanente) 'worker_id': null,
-        if (permanente) 'lease_hasta': null,
+        'worker_id': null,
+        'lease_hasta': null,
         'ultimo_error': error,
         'actualizado_en': DateTime.now().toIso8601String(),
       },
-      where: 'id = ?',
-      whereArgs: [id],
+      where: workerId != null ? 'id = ? AND worker_id = ?' : 'id = ?',
+      whereArgs: workerId != null ? [id, workerId] : [id],
     );
   }
 
@@ -599,6 +593,54 @@ class FotosColaService {
       }
     });
     return true;
+  }
+
+  /// v1.2.9+43 (Gemini): vincula usando una transacción EXISTENTE.
+  /// No crea una nueva transacción (SQLite no permite anidadas).
+  /// Usa UUID determinista para idempotencia (Fix B5).
+  Future<void> _vincularEnTransaccion(
+      dynamic txn, int fotoId, Map<String, dynamic> f, String storagePath) async {
+    final opUuid = f['op_uuid'] as String;
+    var clienteId = f['cliente_id'] as int?;
+    var suplementoId = f['suplemento_id'] as int?;
+
+    if (clienteId == null && suplementoId == null) {
+      return;
+    }
+
+    final opUuidDeterminista = 'foto_$opUuid';
+
+    if (clienteId != null) {
+      await _vincularFotoCliente(txn, clienteId, opUuid, storagePath);
+    } else if (suplementoId != null) {
+      try {
+        final rows = await txn.query('suplementos',
+            columns: ['data'],
+            where: 'id = ?',
+            whereArgs: [suplementoId],
+            limit: 1);
+        if (rows.isNotEmpty) {
+          final raw = rows.first['data'];
+          final data = Map<String, dynamic>.from(
+              raw is String ? jsonDecode(raw) : raw as Map);
+          data['foto_storage'] = storagePath;
+          data['foto_uuid'] = opUuid;
+          await txn.update('suplementos', {'data': jsonEncode(data)},
+              where: 'id = ?', whereArgs: [suplementoId]);
+        }
+      } catch (_) {}
+      await txn.insert('ops_queue', {
+        'op_uuid': opUuidDeterminista,
+        'tipo': 'foto_suplemento',
+        'payload': jsonEncode({
+          'suplemento_id': suplementoId,
+          'storage_path': storagePath,
+          'foto_uuid': opUuid,
+        }),
+        'estado': 'pendiente',
+        'creada_ts': DateTime.now().toIso8601String(),
+      });
+    }
   }
 
   /// Vincula foto a cliente: mirror local + op para Supabase.
@@ -705,11 +747,18 @@ class FotosColaService {
       }
 
       // Archivos en disco no referenciados.
+      // v1.2.9+43 (Gemini B1): no borrar archivos recientes (pueden estar
+      // siendo escritos por encolarFoto concurrente). Umbral: 2 horas.
+      final umbralArchivosViejos =
+          DateTime.now().subtract(const Duration(hours: 2));
       await for (final e in fotosDir.list()) {
         if (e is File && !referenciadas.contains(e.path)) {
           try {
-            await e.delete();
-            borrados++;
+            final modificado = await e.lastModified();
+            if (modificado.isBefore(umbralArchivosViejos)) {
+              await e.delete();
+              borrados++;
+            }
           } catch (_) {}
         }
       }
