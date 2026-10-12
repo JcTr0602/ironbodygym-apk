@@ -283,65 +283,77 @@ class FotosColaService {
         );
         final fFresco = frescas.isNotEmpty ? frescas.first : f;
 
+        // v1.2.9+43 (Gemini Ronda 2): transacción blindada con try/catch.
+        // Verifica ownership ANTES, vincula, y marca completada AL FINAL.
         bool exitoVinculacion = false;
-        await db.transaction((txn) async {
-          // 1. Verificar que el worker sigue siendo dueño del lease
-          final completadas = await txn.update(
-            'fotos_cola',
-            {
-              'estado': 'completada',
-              'storage_path': storagePath,
-              'worker_id': null,
-              'lease_hasta': null,
-              'actualizado_en': DateTime.now().toIso8601String(),
-            },
-            where: 'id = ? AND worker_id = ? AND estado = ?',
-            whereArgs: [id, workerId, 'subiendo'],
-          );
+        try {
+          await db.transaction((txn) async {
+            // 1. Verificar que el worker sigue siendo dueño exclusivo
+            final filasActivas = Sqflite.firstIntValue(await txn.rawQuery(
+              "SELECT COUNT(*) FROM fotos_cola WHERE id = ? AND worker_id = ? AND estado = 'subiendo'",
+              [id, workerId],
+            )) ?? 0;
 
-          if (completadas != 1) {
-            // Lease perdido: abortar sin modificar mirror ni ops_queue
-            return;
-          }
-
-          // 2. Determinar si esta variante debe vincularse
-          bool debeVincular = false;
-          final tipo = fFresco['tipo'];
-          if (tipo == 'display') {
-            debeVincular = true;
-          } else if (tipo == 'original') {
-            final disp = await txn.query(
-              'fotos_cola',
-              columns: ['estado'],
-              where: 'op_uuid = ? AND tipo = ?',
-              whereArgs: [fFresco['op_uuid'], 'display'],
-              limit: 1,
-            );
-            // Vincular si no hay display o si el display falló definitivamente
-            // (Fix B2: evita dejar al cliente sin imagen si display falla)
-            if (disp.isEmpty || disp.first['estado'] == 'error') {
-              debeVincular = true;
+            if (filasActivas != 1) {
+              return; // Lease perdido: abortar sin modificar nada
             }
-          }
 
-          if (debeVincular) {
-            await _vincularEnTransaccion(txn, id, fFresco, storagePath);
-          }
-          exitoVinculacion = true;
-        });
+            // 2. Determinar si esta variante debe vincularse
+            bool debeVincular = false;
+            final tipo = fFresco['tipo'];
+            if (tipo == 'display') {
+              debeVincular = true;
+            } else if (tipo == 'original') {
+              final disp = await txn.query(
+                'fotos_cola',
+                columns: ['estado'],
+                where: 'op_uuid = ? AND tipo = ?',
+                whereArgs: [fFresco['op_uuid'], 'display'],
+                limit: 1,
+              );
+              if (disp.isEmpty || disp.first['estado'] == 'error') {
+                debeVincular = true;
+              }
+            }
+
+            // 3. Vincular primero (si falla, la transacción hace rollback)
+            if (debeVincular) {
+              await _vincularEnTransaccion(txn, id, fFresco, storagePath);
+            }
+
+            // 4. Marcar completada SOLO tras confirmar posesión y vinculación
+            await txn.update(
+              'fotos_cola',
+              {
+                'estado': 'completada',
+                'storage_path': storagePath,
+                'worker_id': null,
+                'lease_hasta': null,
+                'actualizado_en': DateTime.now().toIso8601String(),
+              },
+              where: 'id = ? AND worker_id = ?',
+              whereArgs: [id, workerId],
+            );
+
+            exitoVinculacion = true;
+          });
+        } catch (e) {
+          debugPrint('ERROR en transacción de vinculación foto $id: $e');
+          exitoVinculacion = false;
+        }
 
         if (exitoVinculacion) {
           subidas++;
         } else {
           debugPrint(
-              '[Fotos] Foto $id omitida: lease expirado o conflicto.');
+              '[Fotos] Foto $id no completada (lease expirado o fallo).');
         }
       } else {
-        // Fix crítico 3: si _subirUna ya marcó 'error' permanente,
-        // no aplicar backoff.
+        // v1.2.9+43 (Gemini R2 B3): si falló por IDs no resueltos (no por
+        // fallo de red), NO quemar intentos. Reprogramar sin incrementar.
         final check = await db.query(
           'fotos_cola',
-          columns: ['estado'],
+          columns: ['estado', 'cliente_id', 'suplemento_id'],
           where: 'id = ?',
           whereArgs: [id],
         );
@@ -349,7 +361,30 @@ class FotosColaService {
           continue; // Error definitivo, no programar reintento.
         }
 
-        // Fix Luna 4: backoff exponencial (30s, 2min, 10min, 30min).
+        final bool sinIds = check.isNotEmpty &&
+            check.first['cliente_id'] == null &&
+            check.first['suplemento_id'] == null;
+
+        if (sinIds) {
+          // IDs no resueltos: esperar, no es fallo de red.
+          await db.update(
+            'fotos_cola',
+            {
+              'estado': 'pendiente',
+              'worker_id': null,
+              'lease_hasta': null,
+              'proximo_intento_en': DateTime.now()
+                  .add(const Duration(minutes: 2))
+                  .toIso8601String(),
+              'actualizado_en': DateTime.now().toIso8601String(),
+            },
+            where: 'id = ? AND worker_id = ?',
+            whereArgs: [id, workerId],
+          );
+          continue;
+        }
+
+        // Fallo real de red: aplicar backoff incremental.
         final intentos = (f['intentos'] as int? ?? 0) + 1;
         final esperaMin = [0.5, 2, 10, 30][(intentos - 1).clamp(0, 3)];
         final proximo = DateTime.now()
@@ -368,6 +403,33 @@ class FotosColaService {
           where: 'id = ? AND worker_id = ?',
           whereArgs: [id, workerId],
         );
+
+        // v1.2.9+43 (Gemini R2 B2): si display murió definitivamente,
+        // verificar si original ya está completada y vincularla.
+        if (intentos >= 5 && f['tipo'] == 'display') {
+          final orig = await db.query(
+            'fotos_cola',
+            where: "op_uuid = ? AND tipo = 'original' AND estado = 'completada'",
+            whereArgs: [f['op_uuid']],
+            limit: 1,
+          );
+          if (orig.isNotEmpty && orig.first['storage_path'] != null) {
+            try {
+              await db.transaction((txn) async {
+                await _vincularEnTransaccion(
+                  txn,
+                  orig.first['id'] as int,
+                  orig.first,
+                  orig.first['storage_path'] as String,
+                );
+              });
+              debugPrint(
+                  '[Fotos] Original vinculada tras muerte de display ${f['op_uuid']}');
+            } catch (e) {
+              debugPrint('[Fotos] Error vinculando original fallback: $e');
+            }
+          }
+        }
       }
     }
     return subidas;
@@ -608,7 +670,11 @@ class FotosColaService {
       return;
     }
 
-    final opUuidDeterminista = 'foto_$opUuid';
+    // v1.2.9+43 (Gemini R2): UUID v5 determinista, compatible con RFC 4122.
+    // Si PostgreSQL tiene la columna como tipo uuid nativo, un string
+    // arbitrario fallaría. UUID v5 es determinista y válido.
+    final opUuidDeterminista =
+        const Uuid().v5(Uuid.namespaceUrl, 'foto:${f['op_uuid']}');
 
     if (clienteId != null) {
       await _vincularFotoCliente(txn, clienteId, opUuid, storagePath);
