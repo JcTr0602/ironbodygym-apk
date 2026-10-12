@@ -213,7 +213,7 @@ class LocalDb {
     final dir = await getDatabasesPath();
     _db = await openDatabase(
       p.join(dir, 'ironbody.db'),
-      version: 15,
+      version: 16,
       // v1.3-r4 (Gemini): WAL mode para que lectores (UI) y escritores
       // (Workmanager en otro isolate) no se bloqueen mutuamente.
       // v1.2.9+34 (hotfix): try-catch — si el dispositivo no soporta WAL,
@@ -468,6 +468,32 @@ class LocalDb {
         // pero nunca en onUpgrade — los que actualizaban no tenían la
         // tabla y encolarFoto fallaba con "no such table".
         if (oldV < 15) {
+          await db.execute('CREATE TABLE IF NOT EXISTS fotos_cola ('
+              'id INTEGER PRIMARY KEY AUTOINCREMENT, '
+              'op_uuid TEXT NOT NULL, '
+              "tipo TEXT NOT NULL CHECK(tipo IN ('thumb', 'display', 'original')), "
+              'cliente_id INTEGER, '
+              'suplemento_id INTEGER, '
+              'ruta_local TEXT NOT NULL, '
+              'storage_path TEXT, '
+              'tamano_bytes INTEGER, '
+              "estado TEXT NOT NULL DEFAULT 'pendiente' CHECK(estado IN ('pendiente', 'subiendo', 'completada', 'error')), "
+              'intentos INTEGER NOT NULL DEFAULT 0, '
+              'ultimo_error TEXT, '
+              'worker_id TEXT, '
+              'lease_hasta TEXT, '
+              'proximo_intento_en TEXT, '
+              'creado_en TEXT NOT NULL, '
+              'actualizado_en TEXT NOT NULL)');
+          await db.execute(
+              'CREATE INDEX IF NOT EXISTS idx_fotos_cola_despachador ON fotos_cola(estado, intentos, creado_en)');
+          await db.execute(
+              'CREATE INDEX IF NOT EXISTS idx_fotos_cola_op_uuid ON fotos_cola(op_uuid)');
+        }
+        // v16 (2026-10-12): reparación — si la v15 no creó la tabla
+        // (migración fallida o interrumpida), crearla ahora. Usa
+        // IF NOT EXISTS para ser idempotente.
+        if (oldV < 16) {
           await db.execute('CREATE TABLE IF NOT EXISTS fotos_cola ('
               'id INTEGER PRIMARY KEY AUTOINCREMENT, '
               'op_uuid TEXT NOT NULL, '
@@ -1996,21 +2022,31 @@ class LocalDb {
   /// re-suban (upsert) y el puente las vuelva a vincular. Devuelve cuántas.
   Future<int> reencolarFotos({String? tipo}) async {
     final d = await db;
-    var where = "estado IN ('lista', 'error', 'pendiente')";
+    // v1.2.9+40: usa fotos_cola (la tabla nueva), no fotos_pendientes (obsoleta).
+    var where = "estado IN ('pendiente', 'error')";
     if (tipo == 'clientes') {
       where += ' AND cliente_id IS NOT NULL';
     } else if (tipo == 'suplementos') {
       where += ' AND suplemento_id IS NOT NULL';
     }
-    final filas = await d.query('fotos_pendientes',
-        columns: ['id', 'local_path'], where: where);
+    final filas = await d.query('fotos_cola',
+        columns: ['id', 'ruta_local'], where: where);
     var n = 0;
     for (final f in filas) {
-      final path = f['local_path'] as String?;
+      final path = f['ruta_local'] as String?;
       if (path == null || !await File(path).exists()) continue;
-      await d.update('fotos_pendientes',
-          {'estado': 'pendiente', 'retry_count': 0, 'last_error': null},
-          where: 'id=?', whereArgs: [f['id']]);
+      await d.update('fotos_cola',
+          {
+            'estado': 'pendiente',
+            'intentos': 0,
+            'ultimo_error': null,
+            'worker_id': null,
+            'lease_hasta': null,
+            'proximo_intento_en': null,
+            'actualizado_en': DateTime.now().toIso8601String(),
+          },
+          where: 'id=?',
+          whereArgs: [f['id']]);
       n++;
     }
     return n;
