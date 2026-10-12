@@ -13,6 +13,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_image_compress/flutter_image_compress.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:sqflite/sqflite.dart';
 import 'package:uuid/uuid.dart';
 import 'localdb.dart';
 import 'sync.dart' show SyncEngine, EstadoSubida, ResultadoSubidaFoto;
@@ -82,27 +83,31 @@ class FotosColaService {
     // v1.2.9+40 (Gemini): inserts individuales en vez de batch para
     // trazabilidad (son 1-3 filas, el costo es despreciable).
     var n = 0;
-    for (final entry in variantes.entries) {
-      int? tamano;
-      try {
-        tamano = await File(entry.value).length();
-      } catch (_) {}
-      final rowId = await db.insert('fotos_cola', {
-        'op_uuid': opUuid,
-        'tipo': entry.key,
-        'cliente_id': clienteId,
-        'suplemento_id': suplementoId,
-        'ruta_local': entry.value,
-        'tamano_bytes': tamano,
-        // Fix Luna 5: defaults explícitos, no depender del esquema.
-        'estado': 'pendiente',
-        'intentos': 0,
-        'creado_en': ahora,
-        'actualizado_en': ahora,
-      });
-      debugPrint('DEBUG encolarFoto: variante ${entry.key} rowId=$rowId');
-      n++;
-    }
+    // v1.2.9+40 (Gemini): transacción para atomicidad (todo o nada),
+    // manteniendo trazabilidad de cada rowId.
+    await db.transaction((txn) async {
+      for (final entry in variantes.entries) {
+        int? tamano;
+        try {
+          tamano = await File(entry.value).length();
+        } catch (_) {}
+        final rowId = await txn.insert('fotos_cola', {
+          'op_uuid': opUuid,
+          'tipo': entry.key,
+          'cliente_id': clienteId,
+          'suplemento_id': suplementoId,
+          'ruta_local': entry.value,
+          'tamano_bytes': tamano,
+          // Fix Luna 5: defaults explícitos, no depender del esquema.
+          'estado': 'pendiente',
+          'intentos': 0,
+          'creado_en': ahora,
+          'actualizado_en': ahora,
+        });
+        debugPrint('DEBUG encolarFoto: variante ${entry.key} rowId=$rowId');
+        n++;
+      }
+    });
     // v1.2.9+40 (Gemini): verificación post-insert concluyente.
     final count = Sqflite.firstIntValue(await db.rawQuery(
         'SELECT COUNT(*) FROM fotos_cola WHERE op_uuid = ?', [opUuid]));

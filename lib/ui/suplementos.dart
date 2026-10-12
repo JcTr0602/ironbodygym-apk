@@ -821,12 +821,19 @@ class _EditarSuplementoScreenState
       if (_fotoNuevaPath != null) {
         final fotoOpUuid = _editando ? const Uuid().v4() : crearOpUuid;
         // v1.2.9: usar la cola persistente (no fotos_pendientes).
-        final sid = _editando ? widget.suplemento!['id'] as int? : null;
-        // v1.2.9+40 (Gemini): validación explícita — si _editando pero sid null,
-        // la fila quedaría huérfana y reencolarFotos no la encontraría.
+        // v1.2.9+40 (Gemini): extracción tolerante del ID + bloqueo si null.
+        // No se permite encolar con suplementoId null al editar (crearía
+        // fila huérfana invisible para reencolarFotos).
+        final rawId =
+            widget.suplemento?['id'] ?? widget.suplemento?['suplemento_id'];
+        final sid = _editando
+            ? (rawId is int
+                ? rawId
+                : int.tryParse(rawId?.toString() ?? ''))
+            : null;
         if (_editando && sid == null) {
-          debugPrint(
-              'ALERTA encolarFoto: _editando=true pero sid=null. Map: ${widget.suplemento}');
+          throw StateError(
+              'No se puede encolar foto: _editando=true pero suplemento no tiene ID válido: ${widget.suplemento}');
         }
         final nEncoladas = await FotosColaService.instance.encolarFoto(
           opUuid: fotoOpUuid,
