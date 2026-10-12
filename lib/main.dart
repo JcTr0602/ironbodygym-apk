@@ -81,32 +81,58 @@ class IronBodyApp extends StatefulWidget {
   State<IronBodyApp> createState() => _IronBodyAppState();
 }
 
-class _IronBodyAppState extends State<IronBodyApp> {
+class _IronBodyAppState extends State<IronBodyApp>
+    with WidgetsBindingObserver {
   Timer? _pullTimer;
   Timer? _pushTimer;
+  Timer? _inicioTimer;
   final _auth = AuthService();
+
+  void _iniciarTimers() {
+    _pullTimer ??= Timer.periodic(const Duration(minutes: 2), (_) {
+      if (_auth.loggedIn) SyncEngine.instance.pull();
+    });
+    _pushTimer ??= Timer.periodic(const Duration(minutes: 60), (_) {
+      if (_auth.loggedIn) SyncEngine.instance.push();
+    });
+  }
+
+  void _detenerTimers() {
+    _pullTimer?.cancel();
+    _pullTimer = null;
+    _pushTimer?.cancel();
+    _pushTimer = null;
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.inactive) {
+      _detenerTimers();
+    } else if (state == AppLifecycleState.resumed) {
+      _iniciarTimers();
+    }
+  }
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     // Pull frecuente: ver cambios de otros entrenadores (cada 2 min).
-    _pullTimer = Timer.periodic(const Duration(minutes: 2), (_) {
-      if (_auth.loggedIn) SyncEngine.instance.pull();
-    });
     // Push: subir cambios propios cada hora o manual.
-    _pushTimer = Timer.periodic(const Duration(minutes: 60), (_) {
-      if (_auth.loggedIn) SyncEngine.instance.push();
-    });
+    _iniciarTimers();
     // primer intento al arrancar (si hay sesión guardada)
-    Future.delayed(const Duration(seconds: 2), () {
+    _inicioTimer = Timer(const Duration(seconds: 2), () {
+      if (!mounted) return;
       if (_auth.loggedIn) SyncEngine.instance.run();
     });
   }
 
   @override
   void dispose() {
-    _pullTimer?.cancel();
-    _pushTimer?.cancel();
+    WidgetsBinding.instance.removeObserver(this);
+    _detenerTimers();
+    _inicioTimer?.cancel();
     super.dispose();
   }
 

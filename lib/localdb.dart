@@ -213,7 +213,12 @@ class LocalDb {
     final dir = await getDatabasesPath();
     _db = await openDatabase(
       p.join(dir, 'ironbody.db'),
-      version: 13,
+      version: 14,
+      // v1.3-r4 (Gemini): WAL mode para que lectores (UI) y escritores
+      // (Workmanager en otro isolate) no se bloqueen mutuamente.
+      onConfigure: (db) async {
+        await db.execute('PRAGMA journal_mode = WAL;');
+      },
       onCreate: (db, _) async {
         await _crearTablas(db);
       },
@@ -444,6 +449,16 @@ class LocalDb {
                 "FROM fotos_pendientes WHERE local_path IS NOT NULL");
           } catch (_) {}
         }
+        if (oldV < 14) {
+          // v1.3 (auditoría Gemini 2026-10-12): índice de expresión para
+          // mirrorPorEstado(). Sin esto, SQLite hace full table scan
+          // parseando el JSON fila por fila.
+          // JSON1 puede faltar en algunos teléfonos: try-catch defensivo.
+          try {
+            await db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_clientes_estado ON clientes(json_extract(data, '\$.estado'))");
+          } catch (_) {}
+        }
       },
     );
     // v1.2.5+28: repara el índice FTS si la migración lo omitió y el
@@ -497,6 +512,14 @@ class LocalDb {
     // en Dart sobre listas acotadas o por FTS5.
     await db.execute(
         "CREATE INDEX IF NOT EXISTS idx_ventas_cliente ON ventas_suplementos(json_extract(data, '\$.cliente_id'))");
+    // v1.3 (auditoría Gemini 2026-10-12): índice de expresión para
+    // mirrorPorEstado(). También en onUpgrade(oldV < 14) para upgrades.
+    try {
+      await db.execute(
+          "CREATE INDEX IF NOT EXISTS idx_clientes_estado ON clientes(json_extract(data, '\$.estado'))");
+    } catch (_) {
+      // JSON1 puede faltar en algunos teléfonos.
+    }
     // v1.2.5-rev6: la tabla ANTES que su índice. En rev5 el índice
     // idx_ops_estado se creaba primero y la instalación limpia fallaba
     // con "no such table: ops_queue". También se incluyen aquí las
@@ -931,6 +954,76 @@ class LocalDb {
     ];
   }
 
+  /// Filtra el mirror en SQL por el campo `estado` del JSON, sin cargar
+  /// toda la tabla en memoria. (Optimización v1.3: evita full scans.)
+  Future<List<Map<String, dynamic>>> mirrorPorEstado(
+      String tabla, String estado) async {
+    final d = await db;
+    final rows = await d.rawQuery(
+      'SELECT data FROM $tabla WHERE json_extract(data, \'\$.estado\') = ?',
+      [estado],
+    );
+    return [
+      for (final r in rows)
+        jsonDecode(r['data'] as String) as Map<String, dynamic>
+    ];
+  }
+
+  /// Consulta filtrada en SQL sobre campos del JSON (evita full scans).
+  /// [filtros] es un mapa campo→valor para igualdad exacta.
+  /// Ejemplo: mirrorFiltrado('pagos', {'telegram_user_id': 123})
+  Future<List<Map<String, dynamic>>> mirrorFiltrado(
+      String tabla, Map<String, dynamic> filtros) async {
+    final d = await db;
+    if (filtros.isEmpty) return allMirror(tabla);
+    final where =
+        filtros.keys.map((k) => "json_extract(data, '\$.$k') = ?").join(' AND ');
+    final args = filtros.values.toList();
+    try {
+      final rows =
+          await d.rawQuery('SELECT data FROM $tabla WHERE $where', args);
+      return [
+        for (final r in rows)
+          jsonDecode(r['data'] as String) as Map<String, dynamic>
+      ];
+    } catch (_) {
+      // Si JSON1 no está disponible, fallback al método anterior.
+      final todos = await allMirror(tabla);
+      return todos.where((m) {
+        for (final e in filtros.entries) {
+          if (m[e.key] != e.value) return false;
+        }
+        return true;
+      }).toList();
+    }
+  }
+
+  /// Filtra por rango de fechas en SQL sobre un campo de fecha ISO.
+  /// [campoFecha] es el nombre del campo (ej: 'fecha', 'creado_en').
+  /// Las fechas se comparan como strings ISO (YYYY-MM-DD...).
+  Future<List<Map<String, dynamic>>> mirrorPorFecha(
+      String tabla, String campoFecha, String desde, String hasta) async {
+    final d = await db;
+    try {
+      final rows = await d.rawQuery(
+        "SELECT data FROM $tabla WHERE substr(json_extract(data, '\$.$campoFecha'), 1, 10) >= ? "
+        "AND substr(json_extract(data, '\$.$campoFecha'), 1, 10) <= ?",
+        [desde, hasta],
+      );
+      return [
+        for (final r in rows)
+          jsonDecode(r['data'] as String) as Map<String, dynamic>
+      ];
+    } catch (_) {
+      final todos = await allMirror(tabla);
+      return todos.where((m) {
+        final f = '${m[campoFecha] ?? ''}';
+        final dia = f.length >= 10 ? f.substring(0, 10) : f;
+        return dia.compareTo(desde) >= 0 && dia.compareTo(hasta) <= 0;
+      }).toList();
+    }
+  }
+
   // -- incidencias v1.2.4 (diseño ChatGPT) -------------------------------
   // v1.2.5: + visibilidad (compartida|privada)
   static const _incCols = [
@@ -1338,6 +1431,56 @@ class LocalDb {
   Future<String?> getMeta(String k) async {    final d = await db;
     final rows = await d.query('meta', where: 'k=?', whereArgs: [k]);
     return rows.isEmpty ? null : rows.first['v'] as String;
+  }
+
+  /// Lock de sincronización entre isolates (Gemini auditoría 2026-10-12).
+  /// Workmanager corre en un isolate separado con su propia instancia de
+  /// SyncEngine; la bandera _running en memoria no lo protege.
+  /// Usa la tabla meta con timeout de 5 minutos (si el dueño muere, otro
+  /// isolate puede robar el lock).
+  /// v1.3-r3 (Gemini): el lock lleva owner UUID. liberarSyncLock solo
+  /// borra si el UUID coincide, evitando que un isolate rezagado desmonte
+  /// el lock de otro isolate activo (race condition con red lenta).
+  /// Retorna el owner UUID si se adquirió, null si no.
+  Future<String?> adquirirSyncLock() async {
+    final d = await db;
+    final ahora = DateTime.now().millisecondsSinceEpoch;
+    const timeoutMs = 5 * 60 * 1000; // 5 minutos
+    // UUID simple sin dependencia externa.
+    final owner =
+        '${ahora}_${DateTime.now().microsecondsSinceEpoch % 1000000}';
+    try {
+      final rows =
+          await d.query('meta', where: 'k = ?', whereArgs: ['sync_lock']);
+      if (rows.isNotEmpty) {
+        final v = '${rows.first['v']}';
+        // Formato: "timestamp:owner". Compatibilidad con locks viejos.
+        final partes = v.split(':');
+        final ts = int.tryParse(partes[0]) ?? 0;
+        if (ahora - ts < timeoutMs) return null; // lock vigente
+      }
+      await d.insert('meta', {'k': 'sync_lock', 'v': '$ahora:$owner'},
+          conflictAlgorithm: ConflictAlgorithm.replace);
+      return owner;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Libera el lock solo si el owner coincide.
+  Future<void> liberarSyncLock(String? owner) async {
+    if (owner == null) return;
+    try {
+      final d = await db;
+      final rows =
+          await d.query('meta', where: 'k = ?', whereArgs: ['sync_lock']);
+      if (rows.isEmpty) return;
+      final v = '${rows.first['v']}';
+      // Solo borra si yo soy el dueño actual.
+      if (v.endsWith(':$owner')) {
+        await d.delete('meta', where: 'k = ?', whereArgs: ['sync_lock']);
+      }
+    } catch (_) {}
   }
 
   /// Marca un cliente como avisado (v1.0.8). Solo local, no sincroniza.

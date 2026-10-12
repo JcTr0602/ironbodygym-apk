@@ -15,6 +15,12 @@ class Novedad {
 }
 
 const novedades = [
+  Novedad('1.2.9', [
+    'Fotos con subida reanudable: si se corta el internet, continúa donde quedó',
+    'Sincronización blindada: lock entre procesos, sin bloqueos de base de datos',
+    'Búsquedas y reportes más rápidos: filtros directos en la base de datos',
+    'Fotos optimizadas: la app descarga la versión ligera (WebP), no la original',
+  ]),
   Novedad('1.2.5', [
     'Cierres de turno sincronizados: el dueño ve los cierres de todos los entrenadores en Historial de caja',
     'Cierre con desglose: aviso del efectivo pendiente antes de cerrar',

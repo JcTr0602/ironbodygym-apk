@@ -1,7 +1,7 @@
 /// Prueba de migración real: construye una BD en versión 7 (esquema de
 /// v1.2.4) SIN las tablas de incidencias —el caso exacto del teléfono de
 /// Jc, que actualizó desde ≤v1.2.3 y nunca recibió esas tablas— y la abre
-/// con [LocalDb], disparando el onUpgrade 7→12 de verdad.
+/// con [LocalDb], disparando el onUpgrade 7→14 de verdad.
 ///
 /// Verifica:
 /// 1. La BD abre sin lanzar excepción (antes: "no such table:
@@ -59,7 +59,7 @@ Future<void> _crearEsquemaV7(Database db) async {
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  test('migración 7→12 sin tablas de incidencias (caso Jc)', () async {
+  test('migración 7→14 sin tablas de incidencias (caso Jc)', () async {
     sqfliteFfiInit();
     databaseFactory = databaseFactoryFfi;
     SharedPreferences.setMockInitialValues({});
@@ -76,12 +76,12 @@ void main() {
     await _crearEsquemaV7(v7);
     await v7.close();
 
-    // Abrir con LocalDb dispara el onUpgrade 7→12 real.
+    // Abrir con LocalDb dispara el onUpgrade 7→14 real.
     // Si alguna migración revienta, esto lanza excepción y el test falla.
     final db = await LocalDb.instance.db;
 
     // 1. Versión migrada.
-    expect(await db.getVersion(), 13);
+    expect(await db.getVersion(), 14);
 
     // 2. Datos preservados.
     final clientes = await db.query('clientes', orderBy: 'id');
@@ -132,7 +132,7 @@ void main() {
         'INSERT INTO clientes VALUES (3, \'no-es-json\', 102)');
     await v7.close();
 
-    // Apertura: migración 7→12 + reparación FTS. El índice debe tener
+    // Apertura: migración 7→14 + reparación FTS. El índice debe tener
     // 2 filas (el cliente con JSON corrupto se omite y no cuenta).
     var db = await LocalDb.instance.db;
     var conteo =

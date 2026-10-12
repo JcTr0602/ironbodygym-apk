@@ -33,9 +33,26 @@ String _hace(int dias) {
       '${d.day.toString().padLeft(2, '0')}';
 }
 
+/// Ejecuta [fn] capturando errores de SQLite. Si la BD falla (I/O,
+/// bloqueada, corrupta), retorna [fallback] en vez de propagar la
+/// excepción a la UI. (v1.3: auditoría Gemini 2026-10-12)
+///
+/// ⚠️ NO usar en funciones financieras (ingresos, cobros, pendientes).
+/// Un fallback de 0.0 haría pensar que no hay dinero. Esas funciones
+/// deben propagar el error para que la UI muestre "Error cargando datos".
+Future<T> conBdSegura<T>(Future<T> Function() fn, T fallback) async {
+  try {
+    return await fn();
+  } catch (_) {
+    return fallback;
+  }
+}
+
 Future<List<Map<String, dynamic>>> _activos() async {
-  final todos = await LocalDb.instance.allMirror('clientes');
-  return todos.where((c) => c['estado'] == 'activo').toList();
+  // NOTA (auditoría Gemini): NO usar conBdSegura aquí. Si la BD falla,
+  // la excepción debe propagarse para que la UI muestre "Error cargando"
+  // en vez de una lista vacía que parece "no hay clientes".
+  return LocalDb.instance.mirrorPorEstado('clientes', 'activo');
 }
 
 /// Búsqueda por nombre (usa nombre_norm si viene en el espejo).
@@ -61,8 +78,15 @@ Future<List<Map<String, dynamic>>> buscarClientes(String q) async {
   }
 
   // Si la query es numérica, buscar por teléfono primero (vía FTS).
+  // v1.3 (auditoría Gemini): criterio refinado —
+  // - Cadena estrictamente numérica de 4+ dígitos (permite prefijos como "5819")
+  // - O contiene un segmento que empieza con 5 de 4+ dígitos (móviles Cuba)
+  // Evita falsos positivos con "calle 42" pero preserva búsqueda por prefijo.
   final digitos = q.replaceAll(RegExp(r'[^0-9]'), '');
-  if (digitos.length >= 3) {
+  final esSoloDigitos = RegExp(r'^\d{4,}$').hasMatch(q.trim());
+  final tienePrefijoMovil =
+      digitos.startsWith('5') && digitos.length >= 4;
+  if (esSoloDigitos || tienePrefijoMovil) {
     final ids = await db.buscarClientesFtsIds(digitos, porTelefono: true);
     await cargarPorIds(ids);
     final porTel =
@@ -100,7 +124,7 @@ Future<List<Map<String, dynamic>>> buscarClientes(String q) async {
   final rankeados = await compute(_typoFallbackAislado, {
     'candidatos': [
       for (final id in nuevosIds)
-        if (porId[id] != null)
+        if (porId[id] != null && porId[id]!['estado'] == 'activo')
           {
             'id': id,
             'nombre': '${porId[id]!['nombre']}',
@@ -113,7 +137,10 @@ Future<List<Map<String, dynamic>>> buscarClientes(String q) async {
   });
   final resto = [
     for (final id in rankeados) porId[id],
-  ].whereType<Map<String, dynamic>>().toList();
+  ]
+      .whereType<Map<String, dynamic>>()
+      .where((c) => c['estado'] == 'activo')
+      .toList();
   return [...resultado, ...resto];
 }
 
@@ -234,19 +261,15 @@ Future<List<Map<String, dynamic>>> atrasados({required bool masDe30}) async {
 }
 
 Future<Map<String, dynamic>?> clientePorId(int id) async {
-  final rows = await LocalDb.instance.allMirror('clientes');
-  for (final c in rows) {
-    if ((c['id'] as int?) == id) return c;
-  }
-  return null;
+  final rows = await LocalDb.instance.mirrorPorIds('clientes', [id]);
+  return rows.isEmpty ? null : rows.first;
 }
 
 /// Últimos pagos de un cliente (del espejo `pagos`).
 Future<List<Map<String, dynamic>>> pagosDe(int clienteId,
     {int limit = 10}) async {
-  final todos = await LocalDb.instance.allMirror('pagos');
-  final res =
-      todos.where((p) => (p['cliente_id'] as int?) == clienteId).toList();
+  final res = await LocalDb.instance
+      .mirrorFiltrado('pagos', {'cliente_id': clienteId});
   res.sort((a, b) => '${b['fecha']}'.compareTo('${a['fecha']}'));
   return res.take(limit).toList();
 }
@@ -281,8 +304,20 @@ String etiquetaPeriodo(Map<String, dynamic> p,
 
 /// true si [remota] es una versión semántica superior a [actual].
 /// Compara por componentes numéricos: 1.1.10 > 1.1.2.
+/// Ignora build metadata (+xxx) y trata pre-releases (1.2.3-beta) como
+/// inferiores a la versión final (1.2.3).
 bool esVersionMayor(String remota, String actual) {
-  List<int> partes(String v) => v
+  // Quita build metadata (+...) y separa pre-release (-...)
+  String nucleo(String v) => v.split('+').first;
+  String? preRelease(String v) {
+    final n = nucleo(v);
+    final idx = n.indexOf('-');
+    return idx >= 0 ? n.substring(idx + 1) : null;
+  }
+
+  List<int> partes(String v) => nucleo(v)
+      .split('-')
+      .first
       .split('.')
       .map((p) => int.tryParse(p.replaceAll(RegExp(r'[^0-9]'), '')) ?? 0)
       .toList();
@@ -293,6 +328,11 @@ bool esVersionMayor(String remota, String actual) {
     final av = i < a.length ? a[i] : 0;
     if (rv != av) return rv > av;
   }
+  // Núcleos iguales: una pre-release es menor que la final.
+  final rPre = preRelease(remota);
+  final aPre = preRelease(actual);
+  if (rPre == null && aPre != null) return true;
+  if (rPre != null && aPre == null) return false;
   return false;
 }
 
@@ -524,16 +564,17 @@ Future<double> montoEfectivoOps(List<Map<String, dynamic>> ops) async {
 Future<double> pendienteEntrega(int? telegramId) async {
   if (telegramId == null) return 0;
   double total = 0;
-  for (final p in await LocalDb.instance.allMirror('pagos')) {
-    if ((p['telegram_user_id'] as int?) == telegramId &&
-        (p['metodo'] as String?) == 'efectivo' &&
+  // v1.3-r3 (Gemini): filtrar por telegram_user_id en SQL primero.
+  for (final p in await LocalDb.instance
+      .mirrorFiltrado('pagos', {'telegram_user_id': telegramId})) {
+    if ((p['metodo'] as String?) == 'efectivo' &&
         esPendiente(p['entregado'])) {
       total += (p['monto'] as num?)?.toDouble() ?? 0;
     }
   }
-  for (final d in await LocalDb.instance.allMirror('pagos_diarios')) {
-    if ((d['registrado_por'] as int?) == telegramId &&
-        esPendiente(d['entregado'])) {
+  for (final d in await LocalDb.instance
+      .mirrorFiltrado('pagos_diarios', {'registrado_por': telegramId})) {
+    if (esPendiente(d['entregado'])) {
       total += (d['total'] as num?)?.toDouble() ?? 0;
     }
   }
@@ -1146,17 +1187,13 @@ Future<double> cobradoAyer() async {
   final ayer = _isoDia(
       DateTime.now().subtract(const Duration(days: 1)));
   double total = 0;
-  for (final p in await LocalDb.instance.allMirror('pagos')) {
-    if ('${p['fecha'] ?? ''}'.length >= 10 &&
-        '${p['fecha']}'.substring(0, 10) == ayer) {
-      total += (p['monto'] as num?)?.toDouble() ?? 0;
-    }
+  for (final p in await LocalDb.instance
+      .mirrorPorFecha('pagos', 'fecha', ayer, ayer)) {
+    total += (p['monto'] as num?)?.toDouble() ?? 0;
   }
-  for (final d in await LocalDb.instance.allMirror('pagos_diarios')) {
-    if ('${d['fecha'] ?? ''}'.length >= 10 &&
-        '${d['fecha']}'.substring(0, 10) == ayer) {
-      total += (d['total'] as num?)?.toDouble() ?? 0;
-    }
+  for (final d in await LocalDb.instance
+      .mirrorPorFecha('pagos_diarios', 'fecha', ayer, ayer)) {
+    total += (d['total'] as num?)?.toDouble() ?? 0;
   }
   for (final v in await ventasSuplementosCup()) {
     if ('${v['fecha'] ?? ''}'.length >= 10 &&
@@ -1862,37 +1899,54 @@ Future<List<Map<String, dynamic>>> porVencer7Dias() async {
 /// v1.0.15: ingresos últimos 30 días (para gráfico extendido).
 Future<List<Map<String, dynamic>>> ingresosUltimos30Dias() async {
   final hoy = DateTime.now();
-  final res = <Map<String, dynamic>>[];
   String iso(DateTime d) => '${d.year.toString().padLeft(4, '0')}-'
       '${d.month.toString().padLeft(2, '0')}-'
       '${d.day.toString().padLeft(2, '0')}';
   const dias = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'];
+  // v1.3-r3 (Gemini): UNA sola carga por rango de 30 días, no 60.
+  // Antes: 30 iteraciones × 2 allMirror = 60 full scans.
+  final desdeIso = iso(hoy.subtract(const Duration(days: 29)));
+  final hastaIso = iso(hoy);
+  final pagos = await LocalDb.instance
+      .mirrorPorFecha('pagos', 'fecha', desdeIso, hastaIso);
+  final diarios = await LocalDb.instance
+      .mirrorPorFecha('pagos_diarios', 'fecha', desdeIso, hastaIso);
+  final suplementos = await ventasSuplementosCup();
+  // Agrupar por día en Dart (datasets ya acotados a 30 días).
+  final porDia = <String, double>{};
+  for (final p in pagos) {
+    final f = '${p['fecha'] ?? ''}';
+    if (f.length >= 10) {
+      final dia = f.substring(0, 10);
+      porDia[dia] = (porDia[dia] ?? 0) +
+          ((p['monto'] as num?)?.toDouble() ?? 0);
+    }
+  }
+  for (final d in diarios) {
+    final f = '${d['fecha'] ?? ''}';
+    if (f.length >= 10) {
+      final dia = f.substring(0, 10);
+      porDia[dia] =
+          (porDia[dia] ?? 0) + ((d['total'] as num?)?.toDouble() ?? 0);
+    }
+  }
+  for (final v in suplementos) {
+    final f = '${v['fecha'] ?? ''}';
+    if (f.length >= 10) {
+      final dia = f.substring(0, 10);
+      if (dia.compareTo(desdeIso) >= 0 && dia.compareTo(hastaIso) <= 0) {
+        porDia[dia] = (porDia[dia] ?? 0) + totalVentaCup(v);
+      }
+    }
+  }
+  final res = <Map<String, dynamic>>[];
   for (var i = 29; i >= 0; i--) {
     final dia = hoy.subtract(Duration(days: i));
     final diaIso = iso(dia);
-    double t = 0;
-    for (final p in await LocalDb.instance.allMirror('pagos')) {
-      final f = '${p['fecha'] ?? ''}';
-      if (f.length >= 10 && f.substring(0, 10) == diaIso) {
-        t += (p['monto'] as num?)?.toDouble() ?? 0;
-      }
-    }
-    for (final d in await LocalDb.instance.allMirror('pagos_diarios')) {
-      final f = '${d['fecha'] ?? ''}';
-      if (f.length >= 10 && f.substring(0, 10) == diaIso) {
-        t += (d['total'] as num?)?.toDouble() ?? 0;
-      }
-    }
-    for (final v in await ventasSuplementosCup()) {
-      final f = '${v['fecha'] ?? ''}';
-      if (f.length >= 10 && f.substring(0, 10) == diaIso) {
-        t += totalVentaCup(v);
-      }
-    }
     res.add({
       'dia': dias[dia.weekday - 1],
       'fecha': diaIso,
-      'monto': t,
+      'monto': porDia[diaIso] ?? 0.0,
     });
   }
   return res;
@@ -1957,16 +2011,18 @@ Future<double> ingresosMes() async {
   final n = DateTime.now();
   final pref = '${n.year.toString().padLeft(4, '0')}-'
       '${n.month.toString().padLeft(2, '0')}';
+  // Primer y último día del mes para mirrorPorFecha.
+  final desde = '$pref-01';
+  final ultimoDia = DateTime(n.year, n.month + 1, 0).day;
+  final hasta = '$pref-${ultimoDia.toString().padLeft(2, '0')}';
   double t = 0;
-  for (final p in await LocalDb.instance.allMirror('pagos')) {
-    if ('${p['fecha'] ?? ''}'.startsWith(pref)) {
-      t += (p['monto'] as num?)?.toDouble() ?? 0;
-    }
+  for (final p in await LocalDb.instance
+      .mirrorPorFecha('pagos', 'fecha', desde, hasta)) {
+    t += (p['monto'] as num?)?.toDouble() ?? 0;
   }
-  for (final d in await LocalDb.instance.allMirror('pagos_diarios')) {
-    if ('${d['fecha'] ?? ''}'.startsWith(pref)) {
-      t += (d['total'] as num?)?.toDouble() ?? 0;
-    }
+  for (final d in await LocalDb.instance
+      .mirrorPorFecha('pagos_diarios', 'fecha', desde, hasta)) {
+    t += (d['total'] as num?)?.toDouble() ?? 0;
   }
   for (final v in await ventasSuplementosCup()) {
     if ('${v['fecha'] ?? ''}'.startsWith(pref)) {
@@ -2011,17 +2067,13 @@ Future<Map<String, double>> ingresosPorDia() async {
 Future<double> ingresosHoy() async {
   final hoy = _hoyIso();
   double t = 0;
-  for (final p in await LocalDb.instance.allMirror('pagos')) {
-    final f = '${p['fecha'] ?? ''}';
-    if (f.length >= 10 && f.substring(0, 10) == hoy) {
-      t += (p['monto'] as num?)?.toDouble() ?? 0;
-    }
+  for (final p
+      in await LocalDb.instance.mirrorPorFecha('pagos', 'fecha', hoy, hoy)) {
+    t += (p['monto'] as num?)?.toDouble() ?? 0;
   }
-  for (final d in await LocalDb.instance.allMirror('pagos_diarios')) {
-    final f = '${d['fecha'] ?? ''}';
-    if (f.length >= 10 && f.substring(0, 10) == hoy) {
-      t += (d['total'] as num?)?.toDouble() ?? 0;
-    }
+  for (final d in await LocalDb.instance
+      .mirrorPorFecha('pagos_diarios', 'fecha', hoy, hoy)) {
+    t += (d['total'] as num?)?.toDouble() ?? 0;
   }
   for (final v in await ventasSuplementosCup()) {
     final f = '${v['fecha'] ?? ''}';
@@ -2042,23 +2094,13 @@ Future<double> ingresosSemana() async {
   final desdeIso = iso(desde);
   final hoyIso = iso(hoy);
   double t = 0;
-  for (final p in await LocalDb.instance.allMirror('pagos')) {
-    final f = '${p['fecha'] ?? ''}';
-    if (f.length >= 10) {
-      final dia = f.substring(0, 10);
-      if (dia.compareTo(desdeIso) >= 0 && dia.compareTo(hoyIso) <= 0) {
-        t += (p['monto'] as num?)?.toDouble() ?? 0;
-      }
-    }
+  for (final p in await LocalDb.instance
+      .mirrorPorFecha('pagos', 'fecha', desdeIso, hoyIso)) {
+    t += (p['monto'] as num?)?.toDouble() ?? 0;
   }
-  for (final d in await LocalDb.instance.allMirror('pagos_diarios')) {
-    final f = '${d['fecha'] ?? ''}';
-    if (f.length >= 10) {
-      final dia = f.substring(0, 10);
-      if (dia.compareTo(desdeIso) >= 0 && dia.compareTo(hoyIso) <= 0) {
-        t += (d['total'] as num?)?.toDouble() ?? 0;
-      }
-    }
+  for (final d in await LocalDb.instance
+      .mirrorPorFecha('pagos_diarios', 'fecha', desdeIso, hoyIso)) {
+    t += (d['total'] as num?)?.toDouble() ?? 0;
   }
   return t;
 }

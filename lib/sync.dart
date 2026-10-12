@@ -413,62 +413,60 @@ class SyncEngine {
   /// (pueden llegar cambios nuevos mientras se descarga).
   /// v1.2.5 (D14): [forzar] cancela el backoff ("Sincronizar ahora").
   Future<void> run({bool forzar = false}) async {
-    if (_running || !_auth.loggedIn) return;
-    _running = true;
-    try {
-      await _doPush(forzar: forzar);
-      // v1.2.4: perfil (móvil/carnet) que no pudo subirse sin conexión.
+    await _conLock(() async {
       try {
-        await PerfilService.instance.sincronizarSiPendiente();
-      } catch (_) {}
-      // Pull repetido: si llegan cambios durante la descarga, seguir.
-      bool completo = false;
-      for (var i = 0; i < 3; i++) {
-        await _doPull();
-        final wm = await _db.getWatermarkMinimo();
-        final ss = int.tryParse(await _db.getMeta('server_seq') ?? '0') ?? 0;
-        if (wm >= ss) {
-          completo = true;
-          break;
+        await _doPush(forzar: forzar);
+        // v1.2.4: perfil (móvil/carnet) que no pudo subirse sin conexión.
+        try {
+          await PerfilService.instance.sincronizarSiPendiente();
+        } catch (_) {}
+        // Pull repetido: si llegan cambios durante la descarga, seguir.
+        bool completo = false;
+        for (var i = 0; i < 3; i++) {
+          await _doPull();
+          final wm = await _db.getWatermarkMinimo();
+          final ss = int.tryParse(await _db.getMeta('server_seq') ?? '0') ?? 0;
+          if (wm >= ss) {
+            completo = true;
+            break;
+          }
         }
+        if (completo) {
+          await _marcarOk();
+          await _db.setMeta('last_sync_error', '');
+        } else {
+          // v1.2.4: no ocultar sync incompleto
+          final wm = await _db.getWatermarkMinimo();
+          final ss = int.tryParse(await _db.getMeta('server_seq') ?? '0') ?? 0;
+          final msg =
+              'Sincronización incompleta: watermark $wm < server_seq $ss tras 3 intentos';
+          await _db.setMeta('last_sync_error', msg);
+          _emit(SyncPhase.error, error: msg);
+          return;
+        }
+        // v1.0.17: resumen discreto de lo que realmente cambió
+        final subidos =
+            int.tryParse(await _db.getMeta('last_uploaded') ?? '0') ?? 0;
+        final bajados =
+            int.tryParse(await _db.getMeta('last_downloaded') ?? '0') ?? 0;
+        final resumen = (subidos == 0 && bajados == 0)
+            ? 'Sin cambios'
+            : [
+                if (subidos > 0) '↑ $subidos enviado${subidos == 1 ? '' : 's'}',
+                if (bajados > 0) '↓ $bajados nuevo${bajados == 1 ? '' : 's'}',
+              ].join(' · ');
+        _emit(SyncPhase.idle, resumen: resumen);
+      } on SessionExpired {
+        _sesionVencida();
+        _emit(SyncPhase.idle);
+      } catch (e) {
+        final msgVisible = await _describeErrorVisible(e);
+        await _db.setMeta('last_sync_error', msgVisible);
+        _emit(SyncPhase.error, error: msgVisible);
+        await Future.delayed(const Duration(seconds: 2));
+        _emit(SyncPhase.idle);
       }
-      if (completo) {
-        await _marcarOk();
-        await _db.setMeta('last_sync_error', '');
-      } else {
-        // v1.2.4: no ocultar sync incompleto
-        final wm = await _db.getWatermarkMinimo();
-        final ss = int.tryParse(await _db.getMeta('server_seq') ?? '0') ?? 0;
-        final msg =
-            'Sincronización incompleta: watermark $wm < server_seq $ss tras 3 intentos';
-        await _db.setMeta('last_sync_error', msg);
-        _emit(SyncPhase.error, error: msg);
-        return;
-      }
-      // v1.0.17: resumen discreto de lo que realmente cambió
-      final subidos =
-          int.tryParse(await _db.getMeta('last_uploaded') ?? '0') ?? 0;
-      final bajados =
-          int.tryParse(await _db.getMeta('last_downloaded') ?? '0') ?? 0;
-      final resumen = (subidos == 0 && bajados == 0)
-          ? 'Sin cambios'
-          : [
-              if (subidos > 0) '↑ $subidos enviado${subidos == 1 ? '' : 's'}',
-              if (bajados > 0) '↓ $bajados nuevo${bajados == 1 ? '' : 's'}',
-            ].join(' · ');
-      _emit(SyncPhase.idle, resumen: resumen);
-    } on SessionExpired {
-      _sesionVencida();
-      _emit(SyncPhase.idle);
-    } catch (e) {
-      final msgVisible = await _describeErrorVisible(e);
-      await _db.setMeta('last_sync_error', msgVisible);
-      _emit(SyncPhase.error, error: msgVisible);
-      await Future.delayed(const Duration(seconds: 2));
-      _emit(SyncPhase.idle);
-    } finally {
-      _running = false;
-    }
+    });
   }
 
   bool _forzarFotos = false;
@@ -477,29 +475,27 @@ class SyncEngine {
   /// El Push NO se filtra por scope (corrección Gemini): siempre es global
   /// para no violar FKs en el servidor.
   Future<void> sincronizarScope(String scope) async {
-    if (_running || !_auth.loggedIn) return;
     final tablas = SyncScope.resolver(scope);
     if (tablas.isEmpty) return;
-    _running = true;
-    try {
-      // Push global primero (nunca filtrado por scope).
-      await _doPush();
-      // Pull solo de las tablas del scope.
-      _emit(SyncPhase.downloading);
-      final n = await _download(tablasFiltro: tablas);
-      await _db.setMeta('last_pull_ok', DateTime.now().toIso8601String());
-      await _db.setMeta('last_downloaded', '$n');
-      await _db.setMeta('last_scope', scope);
-      _emit(SyncPhase.idle,
-          resumen: 'Sincronizado: ${tablas.join(', ')}');
-    } catch (e) {
-      final msgVisible = await _describeErrorVisible(e);
-      _emit(SyncPhase.error, error: msgVisible);
-      await Future.delayed(const Duration(seconds: 2));
-      _emit(SyncPhase.idle);
-    } finally {
-      _running = false;
-    }
+    await _conLock(() async {
+      try {
+        // Push global primero (nunca filtrado por scope).
+        await _doPush();
+        // Pull solo de las tablas del scope.
+        _emit(SyncPhase.downloading);
+        final n = await _download(tablasFiltro: tablas);
+        await _db.setMeta('last_pull_ok', DateTime.now().toIso8601String());
+        await _db.setMeta('last_downloaded', '$n');
+        await _db.setMeta('last_scope', scope);
+        _emit(SyncPhase.idle,
+            resumen: 'Sincronizado: ${tablas.join(', ')}');
+      } catch (e) {
+        final msgVisible = await _describeErrorVisible(e);
+        _emit(SyncPhase.error, error: msgVisible);
+        await Future.delayed(const Duration(seconds: 2));
+        _emit(SyncPhase.idle);
+      }
+    });
   }
 
   /// v1.2.4 (C17): sube las fotos pendientes aunque esté el ahorro de datos.
@@ -512,11 +508,32 @@ class SyncEngine {
     }
   }
 
-  /// Solo subida (cada hora o manual).
-  Future<void> push() async {
-    if (_running || !_auth.loggedIn) return;
+  /// Ejecuta [fn] con el lock de sincronización entre isolates.
+  /// Retorna false si otro isolate ya está sincronizando.
+  /// NOTA: Solo los 4 puntos de entrada públicos (run, push, pull,
+  /// sincronizarScope) usan _conLock. Los métodos internos (_doPush,
+  /// _doPull, _download) NUNCA lo adquieren, así evitan auto-bloqueo.
+  /// La bandera _running evita reentrada en el mismo isolate.
+  /// v1.3-r3: el lock lleva owner UUID para evitar race condition al
+  /// liberar (un isolate rezagado no desmonta el lock de otro activo).
+  Future<bool> _conLock(Future<void> Function() fn) async {
+    if (_running || !_auth.loggedIn) return false;
+    // Lock persistente: protege contra Workmanager en otro isolate.
+    final owner = await _db.adquirirSyncLock();
+    if (owner == null) return false;
     _running = true;
     try {
+      await fn();
+      return true;
+    } finally {
+      _running = false;
+      await _db.liberarSyncLock(owner);
+    }
+  }
+
+  /// Solo subida (cada hora o manual).
+  Future<void> push() async {
+    await _conLock(() async {
       await _doPush();
       // v1.0.14: limpiar error viejo si el push tuvo éxito
       await _db.setMeta('last_sync_error', '');
@@ -526,11 +543,7 @@ class SyncEngine {
       try {
         await _doPull(silencioso: true);
       } catch (_) {}
-    } catch (_) {
-      // Llamadas fire-and-forget: el error ya se mostró vía _emit.
-    } finally {
-      _running = false;
-    }
+    });
   }
 
   /// Lógica interna de subida (sin guard _running).
@@ -566,15 +579,11 @@ class SyncEngine {
 
   /// Solo bajada (frecuente: ver cambios de otros entrenadores).
   Future<void> pull() async {
-    if (_running || !_auth.loggedIn) return;
-    _running = true;
-    try {
+    await _conLock(() async {
       // v1.0.12: cierre remoto de sesión (el dueño lo forzó)
       await _verificarCierreForzado();
       await _doPull();
-    } finally {
-      _running = false;
-    }
+    });
   }
 
   /// Si el dueño forzó el cierre, cierra sesión local (v1.0.12).

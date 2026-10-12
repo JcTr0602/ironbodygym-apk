@@ -219,9 +219,19 @@ class FotosColaService {
         } else {
           // v1.2.9: vincular foto completada (mirror + ops_queue).
           // Luna: si los IDs no se resolvieron, NO marcar completada.
+          // v1.3-r4 (Gemini): vincular la variante DISPLAY (WebP 800px),
+          // no el original. El original es respaldo; la app consume display.
           var vinculada = true;
-          if (f['tipo'] == 'original') {
-            vinculada = await _vincularFotoCompletada(id, f, storagePath);
+          if (f['tipo'] == 'display') {
+            // Construir la ruta display desde el opUuid.
+            final fClienteId = f['cliente_id'] as int?;
+            final fSuplId = f['suplemento_id'] as int?;
+            final entidad = fClienteId != null
+                ? 'clientes/$fClienteId'
+                : 'suplementos/$fSuplId';
+            final displayPath = '$entidad/${f['op_uuid']}_display.webp';
+            vinculada =
+                await _vincularFotoCompletada(id, f, displayPath);
           }
           if (!vinculada) {
             // Revertir a pendiente para reintentar cuando se resuelva el ID.
