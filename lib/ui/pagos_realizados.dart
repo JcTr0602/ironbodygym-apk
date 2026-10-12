@@ -3,7 +3,9 @@
 library;
 
 import 'package:flutter/material.dart';
+import 'dart:io';
 
+import '../fotos.dart';
 import '../localdb.dart';
 import '../negocio.dart';
 import 'componentes.dart';
@@ -17,6 +19,58 @@ class PagosRealizadosScreen extends StatefulWidget {
   @override
   State<PagosRealizadosScreen> createState() =>
       _PagosRealizadosScreenState();
+}
+
+/// v1.2.8 (Paso 4/E2): avatar con miniatura de foto.
+/// Corrección Gemini: StatefulWidget dedicado en vez de FutureBuilder
+/// directo en el itemBuilder (evita recrear futures en cada scroll).
+class ClienteAvatarThumb extends StatefulWidget {
+  final String? fotoStorage;
+  final String? fotoLocal;
+  const ClienteAvatarThumb({super.key, this.fotoStorage, this.fotoLocal});
+
+  @override
+  State<ClienteAvatarThumb> createState() => _ClienteAvatarThumbState();
+}
+
+class _ClienteAvatarThumbState extends State<ClienteAvatarThumb> {
+  File? _archivo;
+
+  @override
+  void initState() {
+    super.initState();
+    _cargar();
+  }
+
+  @override
+  void didUpdateWidget(ClienteAvatarThumb old) {
+    super.didUpdateWidget(old);
+    if (old.fotoStorage != widget.fotoStorage ||
+        old.fotoLocal != widget.fotoLocal) {
+      _cargar();
+    }
+  }
+
+  Future<void> _cargar() async {
+    File? f;
+    if (widget.fotoLocal != null && widget.fotoLocal!.isNotEmpty) {
+      final lf = File(widget.fotoLocal!);
+      if (await lf.exists()) f = lf;
+    }
+    f ??= await FotoCache.instance.enCache(widget.fotoStorage);
+    if (mounted) setState(() => _archivo = f);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_archivo != null) {
+      return CircleAvatar(
+        backgroundImage: FileImage(_archivo!),
+        backgroundColor: Colors.transparent,
+      );
+    }
+    return const Icon(Icons.verified, color: AppColores.exito);
+  }
 }
 
 class _PagosRealizadosScreenState extends State<PagosRealizadosScreen> {
@@ -129,8 +183,11 @@ class _PagosRealizadosScreenState extends State<PagosRealizadosScreen> {
                           itemBuilder: (ctx, i) {
                             final c = _clientes[i];
                             return ListTile(
-                              leading: const Icon(Icons.verified,
-                                  color: AppColores.exito),
+                              leading: ClienteAvatarThumb(
+                                fotoLocal: c['foto_local'] as String?,
+                                fotoStorage:
+                                    c['foto_storage'] as String?,
+                              ),
                               title: Text('${c['nombre']}'),
                               subtitle: Text(
                                 '${fmtMonto(c['monto'])} CUP · '

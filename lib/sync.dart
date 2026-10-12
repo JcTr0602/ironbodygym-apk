@@ -95,6 +95,54 @@ class SyncStatus {
   }
 }
 
+/// v1.2.8 (Paso 1): scopes de sincronización contextual con DAG real.
+/// Corrección Gemini: separa el grafo de dependencias entre tablas
+/// (integridad referencial) del catálogo de scopes (agrupación de negocio).
+/// El Push SIEMPRE es global; solo el Pull se filtra por scope.
+class SyncScope {
+  /// Grafo real de dependencias entre tablas (FKs). Para orden topológico.
+  static const Map<String, List<String>> _dependenciasTablas = {
+    'pagos_diarios': ['clientes'],
+    'pagos': ['clientes'],
+    'suplementos': ['categorias_suplemento'],
+    'ventas_suplemento': ['clientes', 'suplementos'],
+    'incidencias': ['incidencia_tipos'],
+    'incidencia_eventos': ['incidencias'],
+  };
+
+  /// Scopes de pantalla: solo declaran sus tablas objetivo.
+  /// Las dependencias se resuelven automáticamente vía _dependenciasTablas.
+  static const Map<String, List<String>> _scopes = {
+    'pago_diario': ['pagos_diarios'],
+    'inscribir': ['clientes'],
+    'buscar_cliente': ['clientes', 'pagos'],
+    'suplementos': ['suplementos'],
+    'ventas': ['ventas_suplemento'],
+    'incidencias': ['incidencia_eventos'],
+    'gastos': ['gastos'],
+  };
+
+  /// Resuelve las tablas del scope en orden topológico (padres primero).
+  static List<String> resolver(String scope) {
+    final visitadas = <String>{};
+    final resultado = <String>[];
+
+    void resolverTopologico(String tabla) {
+      if (visitadas.contains(tabla)) return;
+      visitadas.add(tabla);
+      for (final dep in _dependenciasTablas[tabla] ?? const []) {
+        resolverTopologico(dep);
+      }
+      resultado.add(tabla);
+    }
+
+    for (final tabla in _scopes[scope] ?? const []) {
+      resolverTopologico(tabla);
+    }
+    return resultado;
+  }
+}
+
 /// Detalle de la última sincronización (para la pantalla de Sync).
 class SyncDetalle {
   final DateTime? ultimaPull;
@@ -408,6 +456,35 @@ class SyncEngine {
   }
 
   bool _forzarFotos = false;
+
+  /// v1.2.8 (Paso 1): sincroniza solo las tablas del scope (pull parcial).
+  /// El Push NO se filtra por scope (corrección Gemini): siempre es global
+  /// para no violar FKs en el servidor.
+  Future<void> sincronizarScope(String scope) async {
+    if (_running || !_auth.loggedIn) return;
+    final tablas = SyncScope.resolver(scope);
+    if (tablas.isEmpty) return;
+    _running = true;
+    try {
+      // Push global primero (nunca filtrado por scope).
+      await _doPush();
+      // Pull solo de las tablas del scope.
+      _emit(SyncPhase.downloading);
+      final n = await _download(tablasFiltro: tablas);
+      await _db.setMeta('last_pull_ok', DateTime.now().toIso8601String());
+      await _db.setMeta('last_downloaded', '$n');
+      await _db.setMeta('last_scope', scope);
+      _emit(SyncPhase.idle,
+          resumen: 'Sincronizado: ${tablas.join(', ')}');
+    } catch (e) {
+      final msgVisible = await _describeErrorVisible(e);
+      _emit(SyncPhase.error, error: msgVisible);
+      await Future.delayed(const Duration(seconds: 2));
+      _emit(SyncPhase.idle);
+    } finally {
+      _running = false;
+    }
+  }
 
   /// v1.2.4 (C17): sube las fotos pendientes aunque esté el ahorro de datos.
   Future<void> subirFotosAhora() async {
@@ -800,7 +877,7 @@ class SyncEngine {
   /// aplicar todos los cambios. Si algo falla a mitad, el watermark no se
   /// mueve y la próxima bajada re-aplica (idempotente) desde el mismo
   /// punto. No hay ningún camino donde el watermark avance sin aplicar.
-  Future<int> _download({bool silencioso = false}) async {
+  Future<int> _download({bool silencioso = false, List<String>? tablasFiltro}) async {
     // v1.2.5 (D19): si el manifiesto marcó algún ámbito divergente,
     // re-descarga completa desde cero en este ciclo.
     // v1.2.5-rev5 (Gemini): reseteo GRANULAR por tabla, no nuclear global.
@@ -853,7 +930,8 @@ class SyncEngine {
     var aplicadas = 0;
     var sinCambios = 0;
     var fallidas = 0;
-    const tablas = [
+    // v1.2.8 (Paso 1): si se pasa tablasFiltro (scope), solo esas tablas.
+    final todasTablas = [
       'clientes',
       'pagos',
       'pagos_diarios',
@@ -863,6 +941,7 @@ class SyncEngine {
       'categorias_suplemento', // v1.2.1
       'turnos_cierre', // v1.2.5-rev5
     ];
+    final tablas = tablasFiltro ?? todasTablas;
     const supTablas = {
       'clientes': 'sync_clientes',
       'pagos': 'sync_pagos',
@@ -908,7 +987,7 @@ class SyncEngine {
           };
           final r =
               await _getAuth(Uri.parse('$_base/rest/v1/$supTabla?select=$select'
-                  '&sync_seq=gt.$pageWm&order=sync_seq.asc&limit=500'));
+                  '&sync_seq=gt.$pageWm&order=sync_seq.asc&limit=100'));
           if (r.statusCode == 404 || r.statusCode == 400) {
             // v1.2.1: la tabla no existe en Supabase o el rol no puede
             // leerla (p. ej. sync_turnos_cierre antes de aplicar v116,
@@ -1028,7 +1107,7 @@ class SyncEngine {
       while (true) {
         final r = await _getAuth(Uri.parse('$_base/rest/v1/sync_borrados'
             '?select=entidad,entidad_id,sync_seq'
-            '&sync_seq=gt.$pageWm&order=sync_seq.asc&limit=500'));
+            '&sync_seq=gt.$pageWm&order=sync_seq.asc&limit=100'));
         if (r.statusCode != 200) {
           throw Exception('bajada borrados: HTTP ${r.statusCode}');
         }

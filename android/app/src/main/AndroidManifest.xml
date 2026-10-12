@@ -7,6 +7,11 @@
     <uses-feature android:name="android.hardware.camera" android:required="false"/>
     <!-- Contactos: elegir teléfono desde la agenda (v1.0.11) -->
     <uses-permission android:name="android.permission.READ_CONTACTS"/>
+    <!-- v1.2.8 (Paso 5): Foreground Service para subida de fotos.
+         Corrección Gemini: POST_NOTIFICATIONS para Android 13+. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC"/>
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
     <!-- Huella digital: entrada rápida (v1.0.12) -->
     <application
         android:label="Iron Body Gym"
@@ -34,6 +39,12 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity>
+        <!-- v1.2.8 (Paso 5): servicio foreground para fotos.
+             Corrección Gemini: exported=false para Android 13+. -->
+        <service
+            android:name="com.pravera.flutter_foreground_task.service.ForegroundService"
+            android:foregroundServiceType="dataSync"
+            android:exported="false" />
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data

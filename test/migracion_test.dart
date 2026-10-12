@@ -81,7 +81,7 @@ void main() {
     final db = await LocalDb.instance.db;
 
     // 1. Versión migrada.
-    expect(await db.getVersion(), 12);
+    expect(await db.getVersion(), 13);
 
     // 2. Datos preservados.
     final clientes = await db.query('clientes', orderBy: 'id');

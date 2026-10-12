@@ -213,7 +213,7 @@ class LocalDb {
     final dir = await getDatabasesPath();
     _db = await openDatabase(
       p.join(dir, 'ironbody.db'),
-      version: 12,
+      version: 13,
       onCreate: (db, _) async {
         await _crearTablas(db);
       },
@@ -407,6 +407,30 @@ class LocalDb {
             await db.execute(
                 "CREATE INDEX IF NOT EXISTS idx_ventas_cliente ON ventas_suplementos(json_extract(data, '\$.cliente_id'))");
           } catch (_) {}
+        }
+        if (oldV < 13) {
+          // v1.2.8 (Paso 2): cola persistente de fotos con variantes WebP.
+          // Corrección Gemini: incluye storage_path, tamano_bytes,
+          // actualizado_en, CHECK constraints e índice compuesto.
+          await db.execute('CREATE TABLE IF NOT EXISTS fotos_cola ('
+              'id INTEGER PRIMARY KEY AUTOINCREMENT, '
+              'op_uuid TEXT NOT NULL, '
+              "tipo TEXT NOT NULL CHECK(tipo IN ('thumb', 'display', 'original')), "
+              'cliente_id INTEGER, '
+              'suplemento_id INTEGER, '
+              'ruta_local TEXT NOT NULL, '
+              'storage_path TEXT, '
+              'tamano_bytes INTEGER, '
+              "estado TEXT NOT NULL DEFAULT 'pendiente' CHECK(estado IN ('pendiente', 'subiendo', 'completada', 'error')), "
+              'intentos INTEGER NOT NULL DEFAULT 0, '
+              'ultimo_error TEXT, '
+              'creado_en TEXT NOT NULL, '
+              'actualizado_en TEXT NOT NULL, '
+              'FOREIGN KEY (op_uuid) REFERENCES ops_queue(op_uuid) ON DELETE CASCADE)');
+          await db.execute(
+              'CREATE INDEX IF NOT EXISTS idx_fotos_cola_despachador ON fotos_cola(estado, intentos, creado_en)');
+          await db.execute(
+              'CREATE INDEX IF NOT EXISTS idx_fotos_cola_op_uuid ON fotos_cola(op_uuid)');
         }
       },
     );
