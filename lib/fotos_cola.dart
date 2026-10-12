@@ -221,17 +221,27 @@ class FotosColaService {
           // Luna: si los IDs no se resolvieron, NO marcar completada.
           // v1.3-r4 (Gemini): vincular la variante DISPLAY (WebP 800px),
           // no el original. El original es respaldo; la app consume display.
+          // v1.2.9+35 (hotfix): usar storagePath (ruta real de subida),
+          // no reconstruirla — el f en memoria puede tener IDs null
+          // aunque _subirUna ya los resolvió y persistió.
           var vinculada = true;
           if (f['tipo'] == 'display') {
-            // Construir la ruta display desde el opUuid.
-            final fClienteId = f['cliente_id'] as int?;
-            final fSuplId = f['suplemento_id'] as int?;
-            final entidad = fClienteId != null
-                ? 'clientes/$fClienteId'
-                : 'suplementos/$fSuplId';
-            final displayPath = '$entidad/${f['op_uuid']}_display.webp';
             vinculada =
-                await _vincularFotoCompletada(id, f, displayPath);
+                await _vincularFotoCompletada(id, f, storagePath);
+          } else if (f['tipo'] == 'original') {
+            // Fallback: si no se generó variante display (error en
+            // _generarVariantes), vincular el original para no perder la foto.
+            final hayDisplay = await db.query(
+              'fotos_cola',
+              columns: ['id'],
+              where: 'op_uuid = ? AND tipo = ?',
+              whereArgs: [f['op_uuid'], 'display'],
+              limit: 1,
+            );
+            if (hayDisplay.isEmpty) {
+              vinculada =
+                  await _vincularFotoCompletada(id, f, storagePath);
+            }
           }
           if (!vinculada) {
             // Revertir a pendiente para reintentar cuando se resuelva el ID.
