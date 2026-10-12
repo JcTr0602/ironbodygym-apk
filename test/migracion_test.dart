@@ -17,7 +17,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:ironbody_gym/localdb.dart';
 import 'package:path/path.dart' as p;
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:sqflite/sqflite.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 /// Esquema de _crearTablas de v1.2.4 (DB version 7), copiado verbatim,
@@ -108,6 +107,55 @@ void main() {
     final wm = await db.query('meta',
         where: 'k=?', whereArgs: ['wm_turnos_cierre']);
     expect(wm.isNotEmpty, isTrue);
+
+    await db.close();
+  });
+
+  test('índice FTS vacío tras fallo de carga: se detecta y se repuebla',
+      () async {
+    sqfliteFfiInit();
+    databaseFactory = databaseFactoryFfi;
+    SharedPreferences.setMockInitialValues({});
+
+    final dir = await getDatabasesPath();
+    final dbPath = p.join(dir, 'ironbody.db');
+    try {
+      await File(dbPath).delete();
+    } catch (_) {}
+    await LocalDb.resetParaTest();
+
+    // BD v7 con 2 clientes válidos + 1 con JSON corrupto.
+    final v7 = await databaseFactoryFfi.openDatabase(dbPath,
+        options: OpenDatabaseOptions(version: 7));
+    await _crearEsquemaV7(v7);
+    await v7.execute(
+        'INSERT INTO clientes VALUES (3, \'no-es-json\', 102)');
+    await v7.close();
+
+    // Apertura: migración 7→12 + reparación FTS. El índice debe tener
+    // 2 filas (el cliente con JSON corrupto se omite y no cuenta).
+    var db = await LocalDb.instance.db;
+    var conteo =
+        await db.rawQuery('SELECT COUNT(*) AS c FROM clientes_fts');
+    expect(conteo.first['c'], 2);
+
+    // Simula el resto de un rebuild fallido: columnas correctas pero
+    // tabla VACÍA. Antes del fix, esto se validaba como sano.
+    await db.execute('DELETE FROM clientes_fts');
+    conteo = await db.rawQuery('SELECT COUNT(*) AS c FROM clientes_fts');
+    expect(conteo.first['c'], 0);
+
+    // Reapertura: la reparación debe detectar el índice vacío por la
+    // verificación de carga (0 != 2 esperados) y repoblarlo.
+    await LocalDb.resetParaTest();
+    db = await LocalDb.instance.db;
+    conteo = await db.rawQuery('SELECT COUNT(*) AS c FROM clientes_fts');
+    expect(conteo.first['c'], 2,
+        reason: 'el índice vacío debe reconstruirse y repoblarse');
+
+    // La búsqueda FTS sigue funcionando tras la reparación.
+    final ids = await LocalDb.instance.buscarClientesFtsIds('juan');
+    expect(ids, contains(1));
 
     await db.close();
   });

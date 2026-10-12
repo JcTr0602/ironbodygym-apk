@@ -9,6 +9,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:crypto/crypto.dart';
+import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sqflite/sqflite.dart';
@@ -73,6 +74,16 @@ class LocalDb {
     } catch (_) {}
   }
 
+  /// Solo para tests: reinicia el estado cacheado para poder reabrir
+  /// la BD y re-ejecutar la reparación FTS en el mismo proceso.
+  @visibleForTesting
+  static Future<void> resetParaTest() async {
+    await instance._db?.close();
+    instance._db = null;
+    _ftsOk = null;
+    _ftsReparado = false;
+  }
+
   /// Tras abrir la BD: si hay FTS5 pero la tabla falta o tiene el esquema
   /// viejo, se crea/reconstruye y se repuebla. Cubre el caso de una
   /// migración que omitió el índice (sonda no concluyente durante el
@@ -95,44 +106,86 @@ class LocalDb {
       return;
     }
     try {
-      final info = await db.rawQuery('PRAGMA table_info(clientes_fts)');
-      final cols = info.map((c) => '${c['name']}').toSet();
-      var indiceOk = cols.containsAll({'nombre_norm', 'telefonos', 'id'});
-      if (indiceOk) {
-        // Verificación funcional: una consulta de prueba sobre el índice.
-        // Si la tabla virtual está corrupta, esto lanza excepción.
-        try {
-          await db.rawQuery(
-              'SELECT id FROM clientes_fts WHERE clientes_fts MATCH ? LIMIT 1',
-              ['"zzzsincoincidencia"']);
-        } catch (_) {
-          indiceOk = false;
-        }
-      }
-      if (!indiceOk) {
-        await db.execute('DROP TABLE IF EXISTS clientes_fts');
-        await db.execute(
-            'CREATE VIRTUAL TABLE clientes_fts USING fts5(nombre_norm, telefonos, id UNINDEXED)');
-        final rows = await db.query('clientes', columns: ['id', 'data']);
-        final lote = db.batch();
-        for (final r in rows) {
-          try {
-            final data =
-                jsonDecode(r['data'] as String) as Map<String, dynamic>;
-            lote.insert('clientes_fts', {
-              'nombre_norm': _normTexto('${data['nombre'] ?? ''}'),
-              'telefonos': _telefonosNorm(data),
-              'id': r['id'],
-            });
-          } catch (_) {}
-        }
-        await lote.commit(noResult: true);
+      if (!await _indiceFtsSano(db)) {
+        await _reconstruirFts(db);
       }
       _ftsReparado = true; // Índice verificado o reconstruido.
     } catch (_) {
       // Fallo en la reconstrucción: NO se marca como reparado; se
       // reintentará en el próximo arranque. Mientras tanto la búsqueda
       // usa el fallback sin FTS5.
+    }
+  }
+
+  /// ¿El índice FTS existe, tiene el esquema esperado, responde a MATCH
+  /// y contiene tantos registros como clientes decodificables hay?
+  /// Un índice vacío o a medias (resto de un rebuild fallido) NO se
+  /// valida como sano aunque las columnas sean correctas.
+  static Future<bool> _indiceFtsSano(Database db) async {
+    try {
+      final info = await db.rawQuery('PRAGMA table_info(clientes_fts)');
+      final cols = info.map((c) => '${c['name']}').toSet();
+      if (!cols.containsAll({'nombre_norm', 'telefonos', 'id'})) return false;
+      // La tabla virtual puede existir pero estar corrupta (shadow
+      // tables incompletas): una consulta de prueba lo revela.
+      await db.rawQuery(
+          'SELECT id FROM clientes_fts WHERE clientes_fts MATCH ? LIMIT 1',
+          ['"zzzsincoincidencia"']);
+      // Verificación de carga: los registros del índice deben ser
+      // tantos como los clientes cuya data se puede decodificar.
+      final clientes = await db.query('clientes', columns: ['data']);
+      var esperados = 0;
+      for (final r in clientes) {
+        try {
+          jsonDecode(r['data'] as String);
+          esperados++;
+        } catch (_) {}
+      }
+      final conteo =
+          await db.rawQuery('SELECT COUNT(*) AS c FROM clientes_fts');
+      return ((conteo.first['c'] as int?) ?? -1) == esperados;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Reconstruye el índice FTS desde cero. Si algo falla a la mitad, se
+  /// elimina la tabla incompleta y se relanza: un índice a medias nunca
+  /// debe poder validarse como sano en el siguiente intento.
+  static Future<void> _reconstruirFts(Database db) async {
+    try {
+      await db.execute('DROP TABLE IF EXISTS clientes_fts');
+      await db.execute(
+          'CREATE VIRTUAL TABLE clientes_fts USING fts5(nombre_norm, telefonos, id UNINDEXED)');
+      final rows = await db.query('clientes', columns: ['id', 'data']);
+      final lote = db.batch();
+      var esperados = 0;
+      for (final r in rows) {
+        try {
+          final data =
+              jsonDecode(r['data'] as String) as Map<String, dynamic>;
+          lote.insert('clientes_fts', {
+            'nombre_norm': _normTexto('${data['nombre'] ?? ''}'),
+            'telefonos': _telefonosNorm(data),
+            'id': r['id'],
+          });
+          esperados++;
+        } catch (_) {
+          // Fila indecodificable: se omite del índice y no cuenta
+          // como esperada (igual que en _indiceFtsSano).
+        }
+      }
+      await lote.commit(noResult: true);
+      final conteo =
+          await db.rawQuery('SELECT COUNT(*) AS c FROM clientes_fts');
+      if (((conteo.first['c'] as int?) ?? -1) != esperados) {
+        throw StateError('índice FTS incompleto tras la reconstrucción');
+      }
+    } catch (_) {
+      try {
+        await db.execute('DROP TABLE IF EXISTS clientes_fts');
+      } catch (_) {}
+      rethrow;
     }
   }
 
