@@ -216,8 +216,12 @@ class LocalDb {
       version: 14,
       // v1.3-r4 (Gemini): WAL mode para que lectores (UI) y escritores
       // (Workmanager en otro isolate) no se bloqueen mutuamente.
+      // v1.2.9+34 (hotfix): try-catch — si el dispositivo no soporta WAL,
+      // la app debe abrir igual en modo DELETE, no morir.
       onConfigure: (db) async {
-        await db.execute('PRAGMA journal_mode = WAL;');
+        try {
+          await db.execute('PRAGMA journal_mode = WAL;');
+        } catch (_) {}
       },
       onCreate: (db, _) async {
         await _crearTablas(db);
