@@ -158,20 +158,19 @@ class FotosColaService {
     final workerId = const Uuid().v4();
     final ahora = DateTime.now();
 
-    // Fix Luna 2 (verificación): incluir lease_hasta IS NULL — las filas
-    // antiguas o de la migración pueden no tener lease.
-    final leaseLimite =
-        ahora.subtract(const Duration(minutes: 10)).toIso8601String();
+    // v1.2.9+42 (Gemini): el lease expiró si lease_hasta < ahora.
+    // (Antes comparaba contra ahora-10min, exigiendo 20min para liberar.)
+    final ahoraIso = ahora.toIso8601String();
     await db.update(
       'fotos_cola',
       {
         'estado': 'pendiente',
         'worker_id': null,
         'lease_hasta': null,
-        'actualizado_en': ahora.toIso8601String(),
+        'actualizado_en': ahoraIso,
       },
       where: "estado = 'subiendo' AND (lease_hasta IS NULL OR lease_hasta < ?)",
-      whereArgs: [leaseLimite],
+      whereArgs: [ahoraIso],
     );
 
     while (true) {
@@ -266,39 +265,14 @@ class FotosColaService {
 
       final storagePath = await _subirUna(f, workerId);
       if (storagePath != null) {
-        subidas++;
-        // Verificar filas afectadas (Luna): si el lease expiró y otro
-        // worker tomó la fila, no sobreescribir su trabajo.
-        final completadas = await db.update(
-          'fotos_cola',
-          {
-            'estado': 'completada',
-            'storage_path': storagePath,
-            'worker_id': null,
-            'lease_hasta': null,
-            'actualizado_en': DateTime.now().toIso8601String(),
-          },
-          // Solo el worker dueño puede completarla.
-          where: 'id = ? AND worker_id = ?',
-          whereArgs: [id, workerId],
-        );
-        if (completadas != 1) {
-          debugPrint('[Fotos] Otro worker tomó la foto $id, omitiendo.');
-        } else {
-          // v1.2.9: vincular foto completada (mirror + ops_queue).
-          // Luna: si los IDs no se resolvieron, NO marcar completada.
-          // v1.3-r4 (Gemini): vincular la variante DISPLAY (WebP 800px),
-          // no el original. El original es respaldo; la app consume display.
-          // v1.2.9+35 (hotfix): usar storagePath (ruta real de subida),
-          // no reconstruirla — el f en memoria puede tener IDs null
-          // aunque _subirUna ya los resolvió y persistió.
-          var vinculada = true;
+        // v1.2.9+42 (Gemini): VINCULAR ANTES de marcar completada.
+        // Si la vinculación falla por excepción, la foto no queda huérfana.
+        var vinculada = true;
+        try {
           if (f['tipo'] == 'display') {
             vinculada =
                 await _vincularFotoCompletada(id, f, storagePath);
           } else if (f['tipo'] == 'original') {
-            // Fallback: si no se generó variante display (error en
-            // _generarVariantes), vincular el original para no perder la foto.
             final hayDisplay = await db.query(
               'fotos_cola',
               columns: ['id'],
@@ -311,24 +285,47 @@ class FotosColaService {
                   await _vincularFotoCompletada(id, f, storagePath);
             }
           }
-          if (!vinculada) {
-            // Revertir a pendiente para reintentar cuando se resuelva el ID.
-            await db.update(
-              'fotos_cola',
-              {
-                'estado': 'pendiente',
-                'worker_id': null,
-                'lease_hasta': null,
-                'proximo_intento_en': DateTime.now()
-                    .add(const Duration(minutes: 2))
-                    .toIso8601String(),
-                'actualizado_en': DateTime.now().toIso8601String(),
-              },
-              where: 'id = ?',
-              whereArgs: [id],
-            );
-            subidas--; // No contar como subida.
+        } catch (e) {
+          debugPrint('ERROR en vinculación foto $id: $e');
+          vinculada = false;
+        }
+
+        if (vinculada) {
+          subidas++;
+          // Solo el worker dueño puede completarla.
+          final completadas = await db.update(
+            'fotos_cola',
+            {
+              'estado': 'completada',
+              'storage_path': storagePath,
+              'worker_id': null,
+              'lease_hasta': null,
+              'actualizado_en': DateTime.now().toIso8601String(),
+            },
+            where: 'id = ? AND worker_id = ?',
+            whereArgs: [id, workerId],
+          );
+          if (completadas != 1) {
+            debugPrint('[Fotos] Otro worker tomó la foto $id, omitiendo.');
+            subidas--;
           }
+        } else {
+          // Revertir a pendiente, PRESERVANDO storage_path para no re-subir.
+          await db.update(
+            'fotos_cola',
+            {
+              'estado': 'pendiente',
+              'storage_path': storagePath,
+              'worker_id': null,
+              'lease_hasta': null,
+              'proximo_intento_en': DateTime.now()
+                  .add(const Duration(minutes: 2))
+                  .toIso8601String(),
+              'actualizado_en': DateTime.now().toIso8601String(),
+            },
+            where: 'id = ? AND worker_id = ?',
+            whereArgs: [id, workerId],
+          );
         }
       } else {
         // Fix crítico 3: si _subirUna ya marcó 'error' permanente,
@@ -378,6 +375,13 @@ class FotosColaService {
     final opUuid = f['op_uuid'] as String;
     final tipo = f['tipo'] as String; // original | thumb | display
     final db = await LocalDb.instance.db;
+
+    // v1.2.9+42 (Gemini): si ya se subió antes (solo falló la vinculación),
+    // no re-subir bytes, retornar el path existente.
+    final prevStoragePath = f['storage_path'] as String?;
+    if (prevStoragePath != null && prevStoragePath.isNotEmpty) {
+      return prevStoragePath;
+    }
 
     // v1.2.9: resolver cliente_id/suplemento_id si aún no se conocen
     // (la op de creación aún no se aplicó en el servidor).

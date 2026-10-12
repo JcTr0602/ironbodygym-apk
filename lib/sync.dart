@@ -567,10 +567,19 @@ class SyncEngine {
         } catch (e) {
           debugPrint('WARN _uploadFotos (viejo) falló: $e');
         }
-        // FIX (Gemini auditoría funcional): procesar la cola moderna de
-        // fotos (fotos_cola). Antes nadie la llamaba y las fotos quedaban
-        // huérfanas en la cola.
-        await FotosColaService.instance.procesarCola();
+        // v1.2.9+42 (Gemini): procesarCola protegido + segundo _uploadOps
+        // para enviar las ops de vinculación generadas por las fotos.
+        int fotosSubidas = 0;
+        try {
+          fotosSubidas = await FotosColaService.instance.procesarCola();
+        } catch (e) {
+          debugPrint('ERROR procesarCola falló: $e');
+        }
+        // Si se subieron fotos y se generaron ops de vinculación,
+        // vaciar ops_queue hacia Supabase de inmediato.
+        if (fotosSubidas > 0) {
+          await _uploadOps(forzar: forzar);
+        }
       }
       await _db.setMeta('last_push_ok', DateTime.now().toIso8601String());
       await _db.setMeta('last_uploaded', '$n');
