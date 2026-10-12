@@ -10,6 +10,8 @@ import 'package:flutter/services.dart';
 import 'package:flutter_contacts/flutter_contacts.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:sqflite/sqflite.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:uuid/uuid.dart';
 
 import '../auth.dart';
@@ -100,14 +102,36 @@ class _FichaScreenState extends State<FichaScreen> {
 
   /// Verifica los datos del cliente contra el servidor (v1.0.10).
   /// Descarga la versión actual y compara con la local.
+  /// v1.2.8 (E1): verifica un solo cliente vía RPC, sin pull completo.
+  /// El RPC obtener_estado_cliente está en Supabase (SECURITY INVOKER).
   Future<void> _verificarServidor() async {
     if (_verificando) return;
     setState(() => _verificando = true);
     try {
       final messenger = ScaffoldMessenger.of(context);
-      // Forzar pull y recargar
-      await SyncEngine.instance.pull();
       final antes = _c;
+      // Llamada RPC puntual (no dispara el pipeline de sync).
+      final res = await Supabase.instance.client
+          .rpc('obtener_estado_cliente', params: {'p_id': widget.clienteId});
+      if (res != null) {
+        // Actualizar solo este cliente en el mirror local.
+        final data = res is String ? jsonDecode(res) : Map<String, dynamic>.from(res as Map);
+        final dataJson = jsonEncode(data['data'] ?? data);
+        final db = await LocalDb.instance.db;
+        await db.insert(
+          'clientes',
+          {
+            'id': widget.clienteId,
+            'data': dataJson,
+            'sync_seq': (data['sync_seq'] as int?) ?? 0,
+          },
+          conflictAlgorithm: ConflictAlgorithm.replace,
+        );
+        // Actualizar FTS también.
+        try {
+          await LocalDb.instance.actualizarFtsCliente(widget.clienteId, dataJson, null);
+        } catch (_) {}
+      }
       await _cargar();
       if (!mounted) return;
       final despues = _c;
