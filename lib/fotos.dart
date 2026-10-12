@@ -33,9 +33,13 @@ class FotoCache {
 
   final _auth = AuthService();
   final _memoria = <String, File>{};
+  // Fix Luna 8: lock simple para evitar evicciones concurrentes.
+  bool _evictando = false;
 
   Future<Directory> _dir() async {
     final base = await getApplicationDocumentsDirectory();
+    // NOTA: 'fotos_cache' es distinto de 'fotos/' (cola de subida).
+    // El LRU nunca toca el directorio de la cola (Fix Luna 9).
     final d = Directory('${base.path}/fotos_cache');
     if (!await d.exists()) await d.create(recursive: true);
     return d;
@@ -118,7 +122,11 @@ class FotoCache {
 
   /// Expulsa los archivos más viejos hasta estar bajo maxBytes.
   /// Corrección Gemini: un solo escaneo O(N), sort en memoria sin I/O.
+  /// Fix Luna 8: lock anti-reentrancia. Fix Luna 9: solo archivos .jpg
+  /// del caché (nunca toca otros directorios).
   Future<void> _aplicarLRU() async {
+    if (_evictando) return;
+    _evictando = true;
     try {
       final d = await _dir();
       if (!await d.exists()) return;
@@ -126,9 +134,9 @@ class FotoCache {
       final items = <_CacheItem>[];
       int totalBytes = 0;
 
-      // Escaneo O(N) único de metadatos, fuera del sort.
+      // Escaneo O(N) único. Solo .jpg del caché (Fix Luna 9).
       for (final entity in entities) {
-        if (entity is File) {
+        if (entity is File && entity.path.endsWith('.jpg')) {
           try {
             final stat = await entity.stat();
             totalBytes += stat.size;
@@ -139,18 +147,23 @@ class FotoCache {
 
       if (totalBytes <= maxBytes) return;
 
-      // Sort en memoria, sin I/O.
       items.sort((a, b) => a.lastAccessed.compareTo(b.lastAccessed));
 
       for (final item in items) {
         if (totalBytes <= maxBytes) break;
         totalBytes -= item.size;
         try {
-          await item.file.delete();
+          // Verificar que aún existe antes de borrar (Fix Luna 8:
+          // otro proceso pudo haberlo tocado).
+          if (await item.file.exists()) {
+            await item.file.delete();
+          }
         } catch (_) {}
-        // Limpiar también de la memoria.
         _memoria.removeWhere((k, v) => v.path == item.file.path);
       }
     } catch (_) {}
+    finally {
+      _evictando = false;
+    }
   }
 }

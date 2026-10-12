@@ -11,6 +11,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_image_compress/flutter_image_compress.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:uuid/uuid.dart';
 import 'localdb.dart';
 
 /// Genera thumb + display WebP. Corre directo (sin compute): el plugin
@@ -52,7 +53,8 @@ class FotosColaService {
     final dir = await getApplicationDocumentsDirectory();
     final fotosDir = Directory('${dir.path}/fotos');
     if (!await fotosDir.exists()) await fotosDir.create(recursive: true);
-    final base = '${fotosDir.path}/${DateTime.now().millisecondsSinceEpoch}';
+    // Fix Luna 6: UUID en vez de millisecondsSinceEpoch (evita colisiones).
+    final base = '${fotosDir.path}/${const Uuid().v4()}';
 
     Map<String, String> variantes;
     try {
@@ -79,6 +81,9 @@ class FotosColaService {
         'suplemento_id': suplementoId,
         'ruta_local': entry.value,
         'tamano_bytes': tamano,
+        // Fix Luna 5: defaults explícitos, no depender del esquema.
+        'estado': 'pendiente',
+        'intentos': 0,
         'creado_en': ahora,
         'actualizado_en': ahora,
       });
@@ -87,22 +92,32 @@ class FotosColaService {
   }
 
   /// Despachador con Network Lock.
-  /// Corrección Gemini: verifica ops_queue antes de CADA foto, marca
-  /// 'subiendo' en transacción, timeout 20-30s por archivo.
-  /// Corrección ronda 2: crash recovery al inicio, marcar 'completada'.
+  /// Correcciones Luna:
+  /// - worker_id para reclamo exclusivo (verifica filas afectadas).
+  /// - Crash recovery con lease (no reset incondicional).
+  /// - Backoff exponencial con proximo_intento_en.
   Future<int> procesarCola() async {
     int subidas = 0;
     final db = await LocalDb.instance.db;
+    // Worker ID único para esta instancia del despachador.
+    final workerId = const Uuid().v4();
+    final ahora = DateTime.now();
 
-    // Punto A (Gemini): crash recovery — si la app murió con fotos en
-    // 'subiendo', devolverlas a 'pendiente' para reintentar.
+    // Fix Luna 2: crash recovery con lease — solo resetea las que
+    // llevan más de 10 minutos en 'subiendo' (el worker murió).
+    // No toca las que están activamente subiéndose.
+    final leaseLimite =
+        ahora.subtract(const Duration(minutes: 10)).toIso8601String();
     await db.update(
       'fotos_cola',
       {
         'estado': 'pendiente',
-        'actualizado_en': DateTime.now().toIso8601String(),
+        'worker_id': null,
+        'lease_hasta': null,
+        'actualizado_en': ahora.toIso8601String(),
       },
-      where: "estado = 'subiendo'",
+      where: "estado = 'subiendo' AND lease_hasta < ?",
+      whereArgs: [leaseLimite],
     );
 
     while (true) {
@@ -118,10 +133,13 @@ class FotosColaService {
         break;
       }
 
-      // Tomar la siguiente foto pendiente (una a la vez).
+      // Tomar la siguiente foto pendiente (con backoff respetado).
+      final ahoraIso = DateTime.now().toIso8601String();
       final fotos = await db.query(
         'fotos_cola',
-        where: "estado = 'pendiente' AND intentos < 5",
+        where: "estado = 'pendiente' AND intentos < 5 "
+            "AND (proximo_intento_en IS NULL OR proximo_intento_en <= ?)",
+        whereArgs: [ahoraIso],
         orderBy: 'creado_en ASC',
         limit: 1,
       );
@@ -129,54 +147,59 @@ class FotosColaService {
       final f = fotos.first;
       final id = f['id'] as int;
 
-      // Marcar 'subiendo' en transacción (evita doble procesamiento).
-      await db.transaction((txn) async {
-        await txn.update(
-          'fotos_cola',
-          {
-            'estado': 'subiendo',
-            'actualizado_en': DateTime.now().toIso8601String(),
-          },
-          where: 'id = ? AND estado = ?',
-          whereArgs: [id, 'pendiente'],
-        );
-      });
-
-      // Verificar que el marcado fue efectivo.
-      final check = await db.query(
+      // Fix Luna 1: reclamo exclusivo con worker_id. Verifica filas
+      // afectadas — si es 0, otro worker la reclamó primero.
+      final leaseHasta = DateTime.now()
+          .add(const Duration(minutes: 10))
+          .toIso8601String();
+      final reclamadas = await db.update(
         'fotos_cola',
-        columns: ['estado'],
-        where: 'id = ?',
-        whereArgs: [id],
+        {
+          'estado': 'subiendo',
+          'worker_id': workerId,
+          'lease_hasta': leaseHasta,
+          'actualizado_en': DateTime.now().toIso8601String(),
+        },
+        where: 'id = ? AND estado = ?',
+        whereArgs: [id, 'pendiente'],
       );
-      if (check.isEmpty || check.first['estado'] != 'subiendo') continue;
+      if (reclamadas != 1) continue; // Otro worker ganó.
 
-      // Punto A (Gemini): _subirUna retorna el storage_path, no solo bool.
       final storagePath = await _subirUna(f);
       if (storagePath != null) {
         subidas++;
-        // Fix 3 (Gemini ronda 2): marcar 'completada' con el storage_path.
         await db.update(
           'fotos_cola',
           {
             'estado': 'completada',
             'storage_path': storagePath,
+            'worker_id': null,
+            'lease_hasta': null,
             'actualizado_en': DateTime.now().toIso8601String(),
           },
-          where: 'id = ?',
-          whereArgs: [id],
+          // Solo el worker dueño puede completarla.
+          where: 'id = ? AND worker_id = ?',
+          whereArgs: [id, workerId],
         );
       } else {
+        // Fix Luna 4: backoff exponencial (30s, 2min, 10min, 30min).
         final intentos = (f['intentos'] as int? ?? 0) + 1;
+        final esperaMin = [0.5, 2, 10, 30][(intentos - 1).clamp(0, 3)];
+        final proximo = DateTime.now()
+            .add(Duration(seconds: (esperaMin * 60).toInt()))
+            .toIso8601String();
         await db.update(
           'fotos_cola',
           {
             'estado': intentos >= 5 ? 'error' : 'pendiente',
             'intentos': intentos,
+            'worker_id': null,
+            'lease_hasta': null,
+            'proximo_intento_en': proximo,
             'actualizado_en': DateTime.now().toIso8601String(),
           },
-          where: 'id = ?',
-          whereArgs: [id],
+          where: 'id = ? AND worker_id = ?',
+          whereArgs: [id, workerId],
         );
       }
     }
@@ -217,8 +240,58 @@ class FotosColaService {
   /// Cuenta fotos pendientes (para el Foreground Service).
   Future<int> contarPendientes() async {
     final db = await LocalDb.instance.db;
+    final ahoraIso = DateTime.now().toIso8601String();
     final r = await db.rawQuery(
-        "SELECT COUNT(*) as n FROM fotos_cola WHERE estado = 'pendiente' AND intentos < 5");
+        "SELECT COUNT(*) as n FROM fotos_cola WHERE estado = 'pendiente' "
+        "AND intentos < 5 "
+        "AND (proximo_intento_en IS NULL OR proximo_intento_en <= ?)",
+        [ahoraIso]);
     return (r.first['n'] as int? ?? 0);
+  }
+
+  /// Fix Luna 7: elimina archivos huérfanos (en disco pero no en la cola,
+  /// o de filas en 'error'/'completada' hace más de 7 días).
+  Future<int> limpiarHuerfanos() async {
+    int borrados = 0;
+    try {
+      final dir = await getApplicationDocumentsDirectory();
+      final fotosDir = Directory('${dir.path}/fotos');
+      if (!await fotosDir.exists()) return 0;
+      final db = await LocalDb.instance.db;
+
+      // Rutas referenciadas por la cola.
+      final rows = await db.query('fotos_cola', columns: ['ruta_local']);
+      final referenciadas = rows.map((r) => r['ruta_local'] as String).toSet();
+
+      // Filas viejas completadas/error: borrar archivos y filas.
+      final limite =
+          DateTime.now().subtract(const Duration(days: 7)).toIso8601String();
+      final viejas = await db.query(
+        'fotos_cola',
+        columns: ['id', 'ruta_local'],
+        where: "estado IN ('completada', 'error') AND actualizado_en < ?",
+        whereArgs: [limite],
+      );
+      for (final v in viejas) {
+        try {
+          final f = File(v['ruta_local'] as String);
+          if (await f.exists()) await f.delete();
+          borrados++;
+        } catch (_) {}
+        await db.delete('fotos_cola',
+            where: 'id = ?', whereArgs: [v['id']]);
+      }
+
+      // Archivos en disco no referenciados.
+      await for (final e in fotosDir.list()) {
+        if (e is File && !referenciadas.contains(e.path)) {
+          try {
+            await e.delete();
+            borrados++;
+          } catch (_) {}
+        }
+      }
+    } catch (_) {}
+    return borrados;
   }
 }
