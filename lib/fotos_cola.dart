@@ -150,20 +150,6 @@ class FotosColaService {
     );
 
     while (true) {
-      // NETWORK LOCK: si hay ops de negocio pendientes, las fotos esperan.
-      // Fix Gemini: ignorar ops tipo 'foto'/'foto_suplemento' (son las que
-      // la propia cola encola al vincular; si no, deadlock).
-      final opsPendientes = await db.query(
-        'ops_queue',
-        columns: ['op_uuid'],
-        where: "estado = 'pendiente' AND tipo NOT IN ('foto', 'foto_suplemento')",
-        limit: 1,
-      );
-      if (opsPendientes.isNotEmpty) {
-        debugPrint('[Fotos] Lock: hay ops de negocio pendientes, esperando.');
-        break;
-      }
-
       // Tomar la siguiente foto pendiente (con backoff respetado).
       final ahoraIso = DateTime.now().toIso8601String();
       final fotos = await db.query(
@@ -176,6 +162,41 @@ class FotosColaService {
       );
       if (fotos.isEmpty) break;
       final f = fotos.first;
+      final fotoOpUuid = f['op_uuid'] as String?;
+
+      // NETWORK LOCK (específico): si el op de negocio asociado a ESTA foto
+      // aún está pendiente, la foto espera (el cliente/suplemento aún no
+      // existe en el servidor). Pero NO bloquear por ops ajenas — si el
+      // sync está fallando por otra op, las fotos no deben quedar
+      // bloqueadas indefinidamente.
+      // FIX (2026-10-12): antes bloqueaba si había CUALQUIER op pendiente.
+      if (fotoOpUuid != null && fotoOpUuid.isNotEmpty) {
+        final opPendiente = await db.query(
+          'ops_queue',
+          columns: ['op_uuid'],
+          where: "op_uuid = ? AND estado = 'pendiente' "
+              "AND tipo NOT IN ('foto', 'foto_suplemento')",
+          whereArgs: [fotoOpUuid],
+          limit: 1,
+        );
+        if (opPendiente.isNotEmpty) {
+          debugPrint(
+              '[Fotos] Lock: el op $fotoOpUuid aún está pendiente, la foto espera.');
+          // Marcar para reintentar después, no bloquear toda la cola.
+          await db.update(
+            'fotos_cola',
+            {
+              'proximo_intento_en': DateTime.now()
+                  .add(const Duration(minutes: 2))
+                  .toIso8601String(),
+              'actualizado_en': DateTime.now().toIso8601String(),
+            },
+            where: 'id = ?',
+            whereArgs: [f['id']],
+          );
+          continue; // Pasar a la siguiente foto, no romper el loop.
+        }
+      }
       final id = f['id'] as int;
 
       // Fix Luna 1: reclamo exclusivo con worker_id. Verifica filas
