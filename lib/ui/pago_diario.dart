@@ -112,6 +112,8 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
       tipo: 'pago_diario',
       payload: {
         'fecha': DateTime.now().toIso8601String().substring(0, 10),
+        // v1.2.7: timestamp para deduplicar pagos idénticos (fix Gemini).
+        'creado_en': DateTime.now().toIso8601String(),
         'turno': _turno,
         'cantidad': cantidad,
         if (nota != null && nota.isNotEmpty) 'nota': nota,

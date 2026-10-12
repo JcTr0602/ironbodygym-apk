@@ -895,8 +895,14 @@ Future<List<Map<String, dynamic>>> diariosDeHoy() async {
           jsonDecode(op['payload'] as String) as Map<String, dynamic>;
       final fecha = (payload['fecha'] as String?)?.substring(0, 10) ?? '';
       if (fecha != hoy) continue;
+      // v1.2.7 fix Gemini: incluir hora/timestamp para no colapsar
+      // pagos legítimos idénticos (misma tarifa, mismo turno).
+      final hora = (payload['hora'] as String?) ??
+          (payload['creado_en'] as String?) ??
+          (payload['creada_ts'] as String?) ??
+          '';
       final clave =
-          "$fecha|${payload['turno']}|${payload['cantidad']}|${payload['registrado_por']}";
+          "$fecha|$hora|${payload['turno']}|${payload['cantidad']}|${payload['registrado_por']}";
       if (clavesMirror.contains(clave)) continue; // ya en mirror
       clavesMirror.add(clave);
       payload['op_uuid'] = op['op_uuid'];

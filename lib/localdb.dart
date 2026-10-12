@@ -582,38 +582,51 @@ class LocalDb {
   }
 
   /// v1.2.7 (Paso 1 Gemini): verifica si una fila mirror cambiaría,
-  /// sin escribir. Para el commit atómico por página.
-  Future<bool> filaMirrorCambio(
+  /// sin escribir. Devuelve {'cambio': bool, 'oldFoto': String?}.
+  /// oldFoto se captura AQUÍ (antes del batch) porque después del
+  /// replace la fila ya tiene los datos nuevos (fix revisión Gemini).
+  Future<Map<String, dynamic>> verificarCambioMirror(
       String tabla, dynamic id, String nuevoJson) async {
     final d = await db;
     final rows = await d.query(tabla,
         columns: ['data'], where: 'id=?', whereArgs: [id], limit: 1);
-    if (rows.isEmpty) return true;
-    return rows.first['data'] != nuevoJson;
+    if (rows.isEmpty) return {'cambio': true, 'oldFoto': null};
+    final oldJson = rows.first['data'] as String;
+    String? oldFoto;
+    if (tabla == 'clientes') {
+      try {
+        final oldMap = jsonDecode(oldJson) as Map<String, dynamic>;
+        oldFoto = oldMap['foto_storage'] as String?;
+      } catch (_) {}
+    }
+    return {'cambio': oldJson != nuevoJson, 'oldFoto': oldFoto};
+  }
+
+  /// v1.2.7: verifica si una fila mirror cambiaría (wrapper simple).
+  /// Preferir verificarCambioMirror cuando se necesite oldFoto.
+  Future<bool> filaMirrorCambio(
+      String tabla, dynamic id, String nuevoJson) async {
+    final r = await verificarCambioMirror(tabla, id, nuevoJson);
+    return r['cambio'] as bool;
   }
 
   /// v1.2.7 (Paso 1 Gemini): actualiza el índice FTS de un cliente
   /// fuera de la transacción (el índice es derivado y reconstruible).
-  Future<void> actualizarFtsCliente(int id, String dataJson) async {
+  /// Recibe oldFoto directamente porque la fila ya fue reemplazada
+  /// en el batch (fix revisión Gemini).
+  Future<void> actualizarFtsCliente(
+      int id, String dataJson, String? oldFoto) async {
     final d = await db;
     try {
       if (!await _ftsDisponible(d)) return;
       final data = jsonDecode(dataJson) as Map<String, dynamic>;
-      // v1.2.4 (Hark): antes no se enviaba el cuerpo y quedaban fotos de 0 bytes.
-      // (conservado: invalidar caché si cambia foto_storage)
-      final rows = await d.query('clientes',
-          columns: ['data'], where: 'id=?', whereArgs: [id], limit: 1);
-      if (rows.isNotEmpty) {
-        try {
-          final old = jsonDecode(rows.first['data'] as String)
-              as Map<String, dynamic>;
-          final oldFoto = old['foto_storage'] as String?;
-          final newFoto = data['foto_storage'] as String?;
-          if (oldFoto != newFoto && oldFoto != null && oldFoto.isNotEmpty) {
-            await FotoCache.instance.invalidar(oldFoto);
-          }
-        } catch (_) {}
-      }
+      // Invalidar caché si cambió la foto (oldFoto capturado pre-batch)
+      try {
+        final newFoto = data['foto_storage'] as String?;
+        if (oldFoto != newFoto && oldFoto != null && oldFoto.isNotEmpty) {
+          await FotoCache.instance.invalidar(oldFoto);
+        }
+      } catch (_) {}
       final nn = _normTexto('${data['nombre'] ?? ''}');
       await d.delete('clientes_fts', where: 'id=?', whereArgs: [id]);
       await d.insert('clientes_fts',

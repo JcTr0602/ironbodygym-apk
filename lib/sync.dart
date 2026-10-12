@@ -943,13 +943,16 @@ class SyncEngine {
               final prep = _prepararFilaMirror(tabla, m);
               if (prep != null) {
                 // v1.2.5 (D20): cuenta aplicadas vs sin cambios de verdad.
-                if (await _db.filaMirrorCambio(
-                    tabla, prep['id'], prep['dataJson'])) {
+                // v1.2.7 fix Gemini: capturar oldFoto ANTES del batch.
+                final verif = await _db.verificarCambioMirror(
+                    tabla, prep['id'], prep['dataJson']);
+                if (verif['cambio'] as bool) {
                   opsPagina.add({
                     'id': prep['id'],
                     'dataJson': prep['dataJson'],
                     'seq': seq,
                     'esTexto': prep['esTexto'],
+                    'oldFoto': verif['oldFoto'],
                   });
                   aplicadas++;
                 } else {
@@ -981,14 +984,20 @@ class SyncEngine {
               }
               // noResult: true evita instanciar objetos en memoria (Gemini).
               await batch.commit(noResult: true);
-              await txn.update('meta', {'valor': '$paginaMax'},
-                  where: 'clave = ?', whereArgs: ['wm_$tabla']);
+              // v1.2.7 fix Gemini: usar insert con replace, no update.
+              // update asume que la fila existe; en instalación nueva o
+              // tabla nueva, no afectaría filas y el watermark se perdería.
+              await txn.insert(
+                'meta',
+                {'clave': 'wm_$tabla', 'valor': '$paginaMax'},
+                conflictAlgorithm: ConflictAlgorithm.replace,
+              );
             });
             // FTS es derivado y reconstruible: se actualiza fuera de la txn.
             for (final op in opsPagina) {
               if (tabla == 'clientes') {
-                await _db.actualizarFtsCliente(
-                    op['id'] as int, op['dataJson'] as String);
+                await _db.actualizarFtsCliente(op['id'] as int,
+                    op['dataJson'] as String, op['oldFoto'] as String?);
               }
             }
           }
