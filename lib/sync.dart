@@ -202,6 +202,18 @@ class SyncEngine {
   /// (Keep-Alive). Evita el handshake de 800ms-2s por cada petición.
   static final _httpClient = http.Client();
 
+  /// v1.2.9+43: timeout adaptativo basado en el tamaño del payload.
+  /// Asume throughput mínimo de 2 KB/s (conexión lenta de Cuba).
+  /// Rango: 20s mínimo, 120s máximo.
+  Duration _timeoutPara(int bytes) {
+    const base = Duration(seconds: 20);
+    const throughputMinimo = 2048; // 2 KB/s
+    final extra = Duration(seconds: (bytes / throughputMinimo).ceil());
+    final total = base + extra;
+    const maximo = Duration(seconds: 120);
+    return total > maximo ? maximo : total;
+  }
+
   String get _base => AppConfig.supabaseUrl;
 
   /// Nombre amigable de cada tabla espejo para los mensajes de progreso.
@@ -702,6 +714,7 @@ class SyncEngine {
           }
       ]);
       try {
+        // v1.2.9+43: timeout adaptativo según tamaño del lote
         final r = await _postAuth(
             Uri.parse('$_base/rest/v1/sync_ops?on_conflict=op_uuid'),
             headers: {
@@ -709,7 +722,8 @@ class SyncEngine {
               // duplicados se fusionan: idempotente por op_uuid
               'Prefer': 'resolution=ignore-duplicates,return=minimal',
             },
-            body: body);
+            body: body,
+            timeout: _timeoutPara(utf8.encode(body).length));
         if (r.statusCode == 200 ||
             r.statusCode == 201 ||
             r.statusCode == 204 ||
