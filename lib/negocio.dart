@@ -866,11 +866,47 @@ Future<List<Map<String, dynamic>>> posiblesDuplicados(
 }
 
 /// Pagos diarios de hoy (del espejo).
+/// v1.2.7 (A1): incluye ops en cola (optimistic UI) además del mirror.
+/// Los pendientes llevan flag 'es_optimista' para la UI.
+/// Deduplicación por clave de negocio (fecha+turno+cantidad+registrado_por)
+/// — la solución definitiva con op_uuid requiere migración en servidor.
 Future<List<Map<String, dynamic>>> diariosDeHoy() async {
   final hoy = _hoyIso();
   final todos = await LocalDb.instance.allMirror('pagos_diarios');
   final res =
       todos.where((d) => (d['fecha'] as String?) == hoy).toList();
+
+  // Ops pendientes de pago_diario (aún no en mirror)
+  final db = await LocalDb.instance.db;
+  final opsPendientes = await db.query(
+    'ops_queue',
+    columns: ['op_uuid', 'payload'],
+    where: "tipo = 'pago_diario' AND estado = 'pendiente'",
+  );
+  // Claves de negocio ya en mirror para deduplicar
+  final clavesMirror = <String>{};
+  for (final d in res) {
+    clavesMirror.add(
+        "${d['fecha']}|${d['turno']}|${d['cantidad']}|${d['registrado_por']}");
+  }
+  for (final op in opsPendientes) {
+    try {
+      final payload =
+          jsonDecode(op['payload'] as String) as Map<String, dynamic>;
+      final fecha = (payload['fecha'] as String?)?.substring(0, 10) ?? '';
+      if (fecha != hoy) continue;
+      final clave =
+          "$fecha|${payload['turno']}|${payload['cantidad']}|${payload['registrado_por']}";
+      if (clavesMirror.contains(clave)) continue; // ya en mirror
+      clavesMirror.add(clave);
+      payload['op_uuid'] = op['op_uuid'];
+      payload['es_optimista'] = true;
+      // Normalizar campos que la UI espera del mirror
+      payload['registrado_por_nombre'] ??= 'Tú';
+      res.add(payload);
+    } catch (_) {}
+  }
+
   res.sort((a, b) =>
       '${b['registrado_por_nombre']}'.compareTo('${a['registrado_por_nombre']}'));
   return res;

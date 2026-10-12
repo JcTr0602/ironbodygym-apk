@@ -128,6 +128,8 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
       content: Text('$cantidad pago(s) guardado(s)'),
+      // v1.2.7 (A3): se descarta solo a los 4s, no obliga a interactuar.
+      duration: const Duration(seconds: 4),
       action: uuid == null
           ? null
           : SnackBarAction(
@@ -138,12 +140,17 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
   }
 
   /// Deshace un pago recién guardado (lo elimina de la cola si no subió).
+  /// v1.2.7 (A2): si ya se subió, avisa que no se puede deshacer localmente.
   Future<void> _deshacer(String uuid) async {
-    await LocalDb.instance.cancelOp(uuid);
+    final ok = await LocalDb.instance.cancelOp(uuid);
     _cargarHoy();
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Registro deshecho')));
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(ok
+          ? 'Registro deshecho'
+          : 'Ya se envió al servidor, no se puede deshacer'),
+      duration: const Duration(seconds: 3),
+    ));
   }
 
   Future<void> _guardar() async {
