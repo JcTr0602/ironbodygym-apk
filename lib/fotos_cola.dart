@@ -218,8 +218,28 @@ class FotosColaService {
           debugPrint('[Fotos] Otro worker tomó la foto $id, omitiendo.');
         } else {
           // v1.2.9: vincular foto completada (mirror + ops_queue).
+          // Luna: si los IDs no se resolvieron, NO marcar completada.
+          var vinculada = true;
           if (f['tipo'] == 'original') {
-            await _vincularFotoCompletada(id, f, storagePath);
+            vinculada = await _vincularFotoCompletada(id, f, storagePath);
+          }
+          if (!vinculada) {
+            // Revertir a pendiente para reintentar cuando se resuelva el ID.
+            await db.update(
+              'fotos_cola',
+              {
+                'estado': 'pendiente',
+                'worker_id': null,
+                'lease_hasta': null,
+                'proximo_intento_en': DateTime.now()
+                    .add(const Duration(minutes: 2))
+                    .toIso8601String(),
+                'actualizado_en': DateTime.now().toIso8601String(),
+              },
+              where: 'id = ?',
+              whereArgs: [id],
+            );
+            subidas--; // No contar como subida.
           }
         }
       } else {
@@ -403,8 +423,9 @@ class FotosColaService {
   /// v1.2.9: vincula una foto completada.
   /// - Clientes: actualiza mirror local + encola op 'foto' para Supabase.
   /// - Suplementos: encola op 'foto_suplemento' para Supabase.
-  /// (Fix Gemini: ambos quedaban desconectados.)
-  Future<void> _vincularFotoCompletada(
+  /// Retorna true si se vinculó, false si los IDs aún no se resolvieron
+  /// (Luna: no marcar 'completada' en ese caso, para no huérfana).
+  Future<bool> _vincularFotoCompletada(
       int fotoId, Map<String, dynamic> f, String storagePath) async {
     final db = await LocalDb.instance.db;
     final opUuid = f['op_uuid'] as String;
@@ -426,22 +447,31 @@ class FotosColaService {
       }
     }
 
-    if (clienteId != null) {
-      await _vincularFotoCliente(db, clienteId, opUuid, storagePath);
-    } else if (suplementoId != null) {
-      await db.insert('ops_queue', {
-        'op_uuid': const Uuid().v4(),
-        'tipo': 'foto_suplemento',
-        'payload': jsonEncode({
-          'suplemento_id': suplementoId,
-          'storage_path': storagePath,
-        }),
-        'estado': 'pendiente',
-        'creada_ts': DateTime.now().toIso8601String(),
-      });
+    if (clienteId == null && suplementoId == null) {
+      // IDs aún no resueltos: NO vincular, retornar false para que
+      // procesarCola no marque 'completada' (reintentará después).
+      debugPrint('[Fotos] IDs no resueltos para foto $fotoId, reintentando.');
+      return false;
     }
-    // Si ambos son null: la op de creación aún no se aplicó; la foto
-    // quedará huérfana. Se reintentará cuando se resuelva el ID.
+
+    // Luna: mirror + ops_queue en transacción atómica.
+    await db.transaction((txn) async {
+      if (clienteId != null) {
+        await _vincularFotoCliente(txn, clienteId, opUuid, storagePath);
+      } else if (suplementoId != null) {
+        await txn.insert('ops_queue', {
+          'op_uuid': const Uuid().v4(),
+          'tipo': 'foto_suplemento',
+          'payload': jsonEncode({
+            'suplemento_id': suplementoId,
+            'storage_path': storagePath,
+          }),
+          'estado': 'pendiente',
+          'creada_ts': DateTime.now().toIso8601String(),
+        });
+      }
+    });
+    return true;
   }
 
   /// Vincula foto a cliente: mirror local + op para Supabase.
