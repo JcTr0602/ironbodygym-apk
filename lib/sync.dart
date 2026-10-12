@@ -1101,9 +1101,11 @@ class SyncEngine {
               // v1.2.7 fix Gemini: usar insert con replace, no update.
               // update asume que la fila existe; en instalación nueva o
               // tabla nueva, no afectaría filas y el watermark se perdería.
+              // v1.2.9+36 (hotfix): columnas correctas k/v (era clave/valor,
+              // lo que hacía fallar la transacción y el pull no guardaba nada).
               await txn.insert(
                 'meta',
-                {'clave': 'wm_$tabla', 'valor': '$paginaMax'},
+                {'k': 'wm_$tabla', 'v': '$paginaMax'},
                 conflictAlgorithm: ConflictAlgorithm.replace,
               );
             });
