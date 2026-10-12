@@ -103,9 +103,8 @@ class FotosColaService {
     final workerId = const Uuid().v4();
     final ahora = DateTime.now();
 
-    // Fix Luna 2: crash recovery con lease — solo resetea las que
-    // llevan más de 10 minutos en 'subiendo' (el worker murió).
-    // No toca las que están activamente subiéndose.
+    // Fix Luna 2 (verificación): incluir lease_hasta IS NULL — las filas
+    // antiguas o de la migración pueden no tener lease.
     final leaseLimite =
         ahora.subtract(const Duration(minutes: 10)).toIso8601String();
     await db.update(
@@ -116,7 +115,7 @@ class FotosColaService {
         'lease_hasta': null,
         'actualizado_en': ahora.toIso8601String(),
       },
-      where: "estado = 'subiendo' AND lease_hasta < ?",
+      where: "estado = 'subiendo' AND (lease_hasta IS NULL OR lease_hasta < ?)",
       whereArgs: [leaseLimite],
     );
 
@@ -168,7 +167,9 @@ class FotosColaService {
       final storagePath = await _subirUna(f);
       if (storagePath != null) {
         subidas++;
-        await db.update(
+        // Verificar filas afectadas (Luna): si el lease expiró y otro
+        // worker tomó la fila, no sobreescribir su trabajo.
+        final completadas = await db.update(
           'fotos_cola',
           {
             'estado': 'completada',
@@ -181,6 +182,9 @@ class FotosColaService {
           where: 'id = ? AND worker_id = ?',
           whereArgs: [id, workerId],
         );
+        if (completadas != 1) {
+          debugPrint('[Fotos] Otro worker tomó la foto $id, omitiendo.');
+        }
       } else {
         // Fix Luna 4: backoff exponencial (30s, 2min, 10min, 30min).
         final intentos = (f['intentos'] as int? ?? 0) + 1;
