@@ -822,11 +822,17 @@ class _EditarSuplementoScreenState
         final fotoOpUuid = _editando ? const Uuid().v4() : crearOpUuid;
         // v1.2.9: usar la cola persistente (no fotos_pendientes).
         final sid = _editando ? widget.suplemento!['id'] as int? : null;
-        await FotosColaService.instance.encolarFoto(
+        final nEncoladas = await FotosColaService.instance.encolarFoto(
           opUuid: fotoOpUuid,
           suplementoId: sid,
           rutaOriginal: _fotoNuevaPath!,
         );
+        // v1.2.9+40: diagnóstico visible (temporal).
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Fotos encoladas: $nEncoladas (sid=$sid)')),
+          );
+        }
       }
       unawaited(SyncEngine.instance.push());
       if (mounted) Navigator.pop(context, true);

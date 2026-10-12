@@ -47,7 +47,7 @@ class FotosColaService {
 
   /// Genera variantes WebP en background y las encola.
   /// Si la compresión falla, encola solo el original como fallback.
-  Future<void> encolarFoto({
+  Future<int> encolarFoto({
     required String opUuid,
     int? clienteId,
     int? suplementoId,
@@ -92,6 +92,8 @@ class FotosColaService {
       });
     }
     await batch.commit(noResult: true);
+    // v1.2.9+40: retornar cantidad de variantes encoladas (diagnóstico).
+    final n = variantes.length;
 
     // v1.2.9 (nota Gemini): persistir foto_uuid en el cliente al encolar,
     // para que _actualizarMirrorFoto pueda verificar precedencia.
@@ -119,6 +121,7 @@ class FotosColaService {
         }
       } catch (_) {}
     }
+    return n;
   }
 
   /// Despachador con Network Lock.
