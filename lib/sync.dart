@@ -1629,6 +1629,7 @@ class SyncEngine {
         // Corrección Gemini #6: limpiar claves TUS exactas tras éxito.
         await _db.setMeta(claveTusLoc, '');
         await _db.setMeta(claveTusOffset, '0');
+        await _db.setMeta('${claveTusLoc}_path', '');
         return ResultadoSubidaFoto(
           estado: EstadoSubida.subida,
           storagePath: objectPath,
@@ -1639,6 +1640,11 @@ class SyncEngine {
       if (tus == null) {
         final ok = await _subirFotoSimple(objectPath, bytes);
         if (ok) {
+          // Luna #3: tras fallback PUT exitoso, invalidar estado TUS
+          // para que un reintento no reanude el upload viejo.
+          await _db.setMeta(claveTusLoc, '');
+          await _db.setMeta(claveTusOffset, '0');
+          await _db.setMeta('${claveTusLoc}_path', '');
           return ResultadoSubidaFoto(
             estado: EstadoSubida.subida,
             storagePath: objectPath,
@@ -1652,6 +1658,15 @@ class SyncEngine {
       return const ResultadoSubidaFoto(
         estado: EstadoSubida.reintentable,
         error: 'TUS falló, se reintentará',
+      );
+    } on _TusPermanente catch (e) {
+      // Luna #1: 403/permisos es PERMANENTE, no reintentable.
+      // Limpiar estado TUS para no dejar basura.
+      await _db.setMeta(claveTusLoc, '');
+      await _db.setMeta(claveTusOffset, '0');
+      return ResultadoSubidaFoto(
+        estado: EstadoSubida.permanente,
+        error: e.message,
       );
     } on SessionExpired {
       // 401: refresh sesión, reintentable (no fallback a PUT).
@@ -1668,21 +1683,42 @@ class SyncEngine {
   }
 
   /// v1.2.9: variante de _subirFotoTus que acepta claves compuestas.
-  /// Copia la lógica existente pero con claves op_uuid+tipo (Gemini #1).
+  /// Correcciones Luna (auditoría pre-Gemini):
+  /// - 403 → permanente (no reintentable).
+  /// - Validación estricta del offset de respuesta.
+  /// - offset > bytes.length → descartar URL y crear nueva (no reset a 0).
+  /// - Claves TUS atadas al objectPath (validar antes de reanudar).
+  /// Retorna: true=subida, false=reintentable, null=TUS no disponible,
+  /// lanza _TusPermanente en 403/permisos.
   Future<bool?> _subirFotoTusCola({
     required String claveTusLoc,
     required String claveTusOffset,
     required String objectPath,
     required Uint8List bytes,
   }) async {
+    // Luna #11: atar las claves al objectPath.
+    final claveTusPath = '${claveTusLoc}_path';
+    final pathGuardado = await _db.getMeta(claveTusPath);
+
     String? location = await _db.getMeta(claveTusLoc);
     if (location != null && location.isEmpty) location = null;
+    // Luna #6: normalizar offset local (no negativos, no mayor que bytes).
     var offset = int.tryParse(await _db.getMeta(claveTusOffset) ?? '0') ?? 0;
+    if (offset < 0) offset = 0;
+    if (offset > bytes.length) offset = bytes.length;
+
+    // Si el path guardado no coincide, descartar estado TUS viejo.
+    if (location != null && pathGuardado != objectPath) {
+      location = null;
+      offset = 0;
+    }
 
     if (location == null) {
       location = await _tusCrear(objectPath, bytes.length);
       if (location == null) return null; // TUS no disponible
       await _db.setMeta(claveTusLoc, location);
+      await _db.setMeta(claveTusPath, objectPath);
+      await _db.setMeta(claveTusOffset, '0');
       offset = 0;
     } else {
       final remoto = await _tusOffset(location);
@@ -1690,12 +1726,26 @@ class SyncEngine {
         location = await _tusCrear(objectPath, bytes.length);
         if (location == null) return null;
         await _db.setMeta(claveTusLoc, location);
+        await _db.setMeta(claveTusPath, objectPath);
+        await _db.setMeta(claveTusOffset, '0');
         offset = 0;
       } else if (remoto >= 0) {
         offset = remoto;
+        if (offset < 0) offset = 0;
+        if (offset > bytes.length) offset = bytes.length;
       }
     }
-    if (offset > bytes.length) offset = 0;
+    // Luna #7: si offset > bytes.length, el servidor tiene un upload
+    // con offset mayor. Descartar URL y crear nueva (no reset a 0).
+    if (offset > bytes.length) {
+      await _db.setMeta(claveTusLoc, '');
+      await _db.setMeta(claveTusOffset, '0');
+      location = await _tusCrear(objectPath, bytes.length);
+      if (location == null) return null;
+      await _db.setMeta(claveTusLoc, location);
+      await _db.setMeta(claveTusPath, objectPath);
+      offset = 0;
+    }
 
     const chunk = 32 * 1024;
     while (offset < bytes.length) {
@@ -1714,8 +1764,18 @@ class SyncEngine {
             body: bytes.sublist(offset, fin),
           );
           if (r.statusCode == 204 || r.statusCode == 200) {
-            offset = int.tryParse(r.headers['upload-offset'] ?? '') ?? fin;
-            okChunk = true;
+            // Luna #5: validación estricta del offset de respuesta.
+            final nuevoOffset =
+                int.tryParse(r.headers['upload-offset'] ?? '');
+            if (nuevoOffset == null ||
+                nuevoOffset < offset ||
+                nuevoOffset > bytes.length) {
+              // Respuesta inválida: tratar como error de chunk.
+              okChunk = false;
+            } else {
+              offset = nuevoOffset;
+              okChunk = true;
+            }
           } else if (r.statusCode == 401) {
             throw SessionExpired();
           } else if (r.statusCode == 404 || r.statusCode == 410) {
@@ -1723,11 +1783,11 @@ class SyncEngine {
             await _db.setMeta(claveTusOffset, '0');
             return false;
           } else if (r.statusCode == 403) {
-            // Permanente: no reintentar ni fallback.
-            return false;
+            // Luna #1: 403 es PERMANENTE (RLS/permisos), no reintentable.
+            throw _TusPermanente('403 Forbidden en subida TUS');
           }
         } catch (e) {
-          if (e is SessionExpired) rethrow;
+          if (e is SessionExpired || e is _TusPermanente) rethrow;
           okChunk = false;
         }
       }
@@ -2027,4 +2087,13 @@ class SyncEngine {
       }
     }
   }
+}
+
+/// v1.2.9: excepción para errores TUS permanentes (Luna #1).
+/// Se distingue de los reintentables para no hacer retry infinito.
+class _TusPermanente implements Exception {
+  final String message;
+  _TusPermanente(this.message);
+  @override
+  String toString() => message;
 }
