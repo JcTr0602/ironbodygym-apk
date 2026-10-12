@@ -151,10 +151,12 @@ class FotosColaService {
 
     while (true) {
       // NETWORK LOCK: si hay ops de negocio pendientes, las fotos esperan.
+      // Fix Gemini: ignorar ops tipo 'foto'/'foto_suplemento' (son las que
+      // la propia cola encola al vincular; si no, deadlock).
       final opsPendientes = await db.query(
         'ops_queue',
         columns: ['op_uuid'],
-        where: "estado = 'pendiente'",
+        where: "estado = 'pendiente' AND tipo NOT IN ('foto', 'foto_suplemento')",
         limit: 1,
       );
       if (opsPendientes.isNotEmpty) {
@@ -215,10 +217,9 @@ class FotosColaService {
         if (completadas != 1) {
           debugPrint('[Fotos] Otro worker tomó la foto $id, omitiendo.');
         } else {
-          // v1.2.9 (Gemini #5): actualizar mirror solo para variante
-          // 'original', y solo si la foto sigue siendo la vigente.
+          // v1.2.9: vincular foto completada (mirror + ops_queue).
           if (f['tipo'] == 'original') {
-            await _actualizarMirrorFoto(id, f, storagePath);
+            await _vincularFotoCompletada(id, f, storagePath);
           }
         }
       } else {
@@ -399,27 +400,53 @@ class FotosColaService {
   /// Fix crítico 1: lee el cliente_id RESUELTO de SQLite (f en memoria
   /// puede tener null si se resolvió dentro de _subirUna).
   /// Fix crítico 2: propaga a Supabase para que el próximo pull no borre.
-  Future<void> _actualizarMirrorFoto(
+  /// v1.2.9: vincula una foto completada.
+  /// - Clientes: actualiza mirror local + encola op 'foto' para Supabase.
+  /// - Suplementos: encola op 'foto_suplemento' para Supabase.
+  /// (Fix Gemini: ambos quedaban desconectados.)
+  Future<void> _vincularFotoCompletada(
       int fotoId, Map<String, dynamic> f, String storagePath) async {
     final db = await LocalDb.instance.db;
+    final opUuid = f['op_uuid'] as String;
 
-    // Fix crítico 1: si f['cliente_id'] era null al inicio, consultar
-    // el resuelto en la BD.
+    // Leer IDs resueltos de la BD (f en memoria puede tener null).
     var clienteId = f['cliente_id'] as int?;
-    if (clienteId == null) {
+    var suplementoId = f['suplemento_id'] as int?;
+    if (clienteId == null && suplementoId == null) {
       final row = await db.query(
         'fotos_cola',
-        columns: ['cliente_id'],
+        columns: ['cliente_id', 'suplemento_id'],
         where: 'id = ?',
         whereArgs: [fotoId],
         limit: 1,
       );
       if (row.isNotEmpty) {
         clienteId = row.first['cliente_id'] as int?;
+        suplementoId = row.first['suplemento_id'] as int?;
       }
     }
-    if (clienteId == null) return; // Es de suplemento o no resuelto.
 
+    if (clienteId != null) {
+      await _vincularFotoCliente(db, clienteId, opUuid, storagePath);
+    } else if (suplementoId != null) {
+      await db.insert('ops_queue', {
+        'op_uuid': const Uuid().v4(),
+        'tipo': 'foto_suplemento',
+        'payload': jsonEncode({
+          'suplemento_id': suplementoId,
+          'storage_path': storagePath,
+        }),
+        'estado': 'pendiente',
+        'creada_ts': DateTime.now().toIso8601String(),
+      });
+    }
+    // Si ambos son null: la op de creación aún no se aplicó; la foto
+    // quedará huérfana. Se reintentará cuando se resuelva el ID.
+  }
+
+  /// Vincula foto a cliente: mirror local + op para Supabase.
+  Future<void> _vincularFotoCliente(
+      dynamic db, int clienteId, String opUuid, String storagePath) async {
     final rows = await db.query(
       'clientes',
       columns: ['data'],
@@ -441,14 +468,13 @@ class FotosColaService {
 
     // Verificar precedencia: no sobrescribir si ya hay una foto más nueva.
     final fotoUuidVigente = data['foto_uuid'] as String?;
-    final miOpUuid = f['op_uuid'] as String;
-    if (fotoUuidVigente != null && fotoUuidVigente != miOpUuid) {
+    if (fotoUuidVigente != null && fotoUuidVigente != opUuid) {
       debugPrint('[Fotos] Foto más nueva existe, no sobrescribo mirror.');
       return;
     }
 
     data['foto_storage'] = storagePath;
-    data['foto_uuid'] = miOpUuid;
+    data['foto_uuid'] = opUuid;
 
     // 1. Guardar en SQLite local.
     await db.update(
@@ -458,16 +484,23 @@ class FotosColaService {
       whereArgs: [clienteId],
     );
 
-    // 2. Fix crítico 2: notificar a Supabase para que el próximo
-    // pull no borre la foto. La conectividad está garantizada
-    // (acabamos de subir a Storage).
-    try {
-      await SyncEngine.instance.patchClienteFotoStorage(
-          clienteId, storagePath, miOpUuid);
-    } catch (e) {
-      debugPrint('[Fotos] Error actualizando foto_storage en Supabase: $e');
-    }
+    // 2. Fix Gemini (arquitectura): encolar op en ops_queue en vez de
+    // PATCH directo. Va por el pipeline de sync existente (con reintento,
+    // auth, etc.) y el backend actualiza Supabase. Así el próximo pull
+    // no borra la foto.
+    await db.insert('ops_queue', {
+      'op_uuid': const Uuid().v4(),
+      'tipo': 'foto',
+      'payload': jsonEncode({
+        'storage_path': storagePath,
+        'cliente_id': clienteId,
+        'foto_uuid': opUuid,
+      }),
+      'estado': 'pendiente',
+      'creada_ts': DateTime.now().toIso8601String(),
+    });
   }
+
 
   /// Cuenta fotos pendientes (para el Foreground Service).
   Future<int> contarPendientes() async {

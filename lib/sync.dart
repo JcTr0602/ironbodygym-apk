@@ -795,41 +795,6 @@ class SyncEngine {
   /// v1.2.9: wrapper público para la cola de fotos.
   Future<int?> suplementoDeOp(String uuid) => _suplementoDeOp(uuid);
 
-  /// v1.2.9 (Fix crítico 2 Gemini): actualiza foto_storage en Supabase
-  /// para que el próximo pull no borre la foto recién subida.
-  /// foto_storage vive dentro del JSONB `data`, no como columna directa.
-  Future<void> patchClienteFotoStorage(
-      int clienteId, String storagePath, String fotoUuid) async {
-    // Leer el data actual para hacer merge (no reemplazar).
-    final r = await _getAuth(
-      Uri.parse('$_base/rest/v1/sync_clientes?id=eq.$clienteId&select=data'),
-    );
-    if (r.statusCode != 200) {
-      throw Exception('No se pudo leer cliente $clienteId: ${r.statusCode}');
-    }
-    final rows = jsonDecode(r.body) as List;
-    if (rows.isEmpty) throw Exception('Cliente $clienteId no existe');
-    final data = Map<String, dynamic>.from(rows.first['data'] as Map);
-
-    // Verificar precedencia también en el servidor.
-    final fotoUuidRemoto = data['foto_uuid'] as String?;
-    if (fotoUuidRemoto != null && fotoUuidRemoto != fotoUuid) {
-      // Otro dispositivo ya puso una foto más nueva. No sobrescribir.
-      return;
-    }
-
-    data['foto_storage'] = storagePath;
-    data['foto_uuid'] = fotoUuid;
-    final r2 = await _patchAuth(
-      Uri.parse('$_base/rest/v1/sync_clientes?id=eq.$clienteId'),
-      headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({'data': data}),
-    );
-    if (r2.statusCode < 200 || r2.statusCode >= 300) {
-      throw Exception('PATCH foto_storage falló: ${r2.statusCode}');
-    }
-  }
-
   Future<int?> _clienteDeOp(String uuid) async {
     try {
       final r = await _getAuth(
@@ -1765,21 +1730,22 @@ class SyncEngine {
         await _db.setMeta(claveTusOffset, '0');
         offset = 0;
       } else if (remoto >= 0) {
-        offset = remoto;
-        if (offset < 0) offset = 0;
-        if (offset > bytes.length) offset = bytes.length;
+        // Fix Gemini (dead code): verificar ANTES de truncar.
+        // Si remoto > bytes.length, el servidor tiene un upload con
+        // offset mayor (URL reciclada). Descartar y crear nueva.
+        if (remoto > bytes.length) {
+          await _db.setMeta(claveTusLoc, '');
+          await _db.setMeta(claveTusOffset, '0');
+          location = await _tusCrear(objectPath, bytes.length);
+          if (location == null) return null;
+          await _db.setMeta(claveTusLoc, location);
+          await _db.setMeta(claveTusPath, objectPath);
+          offset = 0;
+        } else {
+          offset = remoto;
+          if (offset < 0) offset = 0;
+        }
       }
-    }
-    // Luna #7: si offset > bytes.length, el servidor tiene un upload
-    // con offset mayor. Descartar URL y crear nueva (no reset a 0).
-    if (offset > bytes.length) {
-      await _db.setMeta(claveTusLoc, '');
-      await _db.setMeta(claveTusOffset, '0');
-      location = await _tusCrear(objectPath, bytes.length);
-      if (location == null) return null;
-      await _db.setMeta(claveTusLoc, location);
-      await _db.setMeta(claveTusPath, objectPath);
-      offset = 0;
     }
 
     const chunk = 32 * 1024;
@@ -1788,6 +1754,10 @@ class SyncEngine {
           (offset + chunk < bytes.length) ? offset + chunk : bytes.length;
       var okChunk = false;
       for (var intento = 0; intento < 3 && !okChunk; intento++) {
+        // Fix Gemini: delay entre reintentos (caídas de torre en Cuba).
+        if (intento > 0) {
+          await Future.delayed(Duration(milliseconds: 400 * intento));
+        }
         try {
           final r = await _patchAuth(
             Uri.parse(location!),
@@ -1862,7 +1832,10 @@ class SyncEngine {
             meta('filename', objectPath.split('/').last),
             meta('bucketName', AppConfig.bucketFotos),
             meta('objectName', objectPath),
-            meta('contentType', 'image/jpeg'),
+            // Fix Gemini: MIME correcto según extensión.
+            meta('contentType', objectPath.endsWith('.webp')
+                ? 'image/webp'
+                : 'image/jpeg'),
           ].join(','),
         },
         timeout: const Duration(seconds: 30),
@@ -1931,6 +1904,10 @@ class SyncEngine {
           (offset + chunk < bytes.length) ? offset + chunk : bytes.length;
       var okChunk = false;
       for (var intento = 0; intento < 3 && !okChunk; intento++) {
+        // Fix Gemini: delay entre reintentos (caídas de torre en Cuba).
+        if (intento > 0) {
+          await Future.delayed(Duration(milliseconds: 400 * intento));
+        }
         try {
           final r = await _patchAuth(
             Uri.parse(url),
@@ -1979,13 +1956,15 @@ class SyncEngine {
   Future<bool> _subirFotoSimple(String path, Uint8List bytes) async {
     // v1.2.4 (Hark): antes no se enviaba el cuerpo y quedaban fotos de 0 bytes.
     if (bytes.isEmpty) return false;
+    // Fix Gemini: MIME correcto según extensión del path.
+    final mime = path.endsWith('.webp') ? 'image/webp' : 'image/jpeg';
     for (var intento = 0; intento < 3; intento++) {
       try {
         final r = await _postAuth(
             Uri.parse('$_base/storage/v1/object/'
                 '${AppConfig.bucketFotos}/$path'),
             headers: {
-              'Content-Type': 'image/jpeg',
+              'Content-Type': mime,
               'x-upsert': 'true',
             },
             body: bytes,
