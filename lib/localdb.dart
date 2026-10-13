@@ -647,6 +647,9 @@ class LocalDb {
           await db.execute(
               'CREATE INDEX IF NOT EXISTS idx_mirror_tipos_seq '
               'ON incidencias_tipos_mirror(sync_seq)');
+
+          // Seed de tipos por defecto (si la tabla está vacía)
+          await _seedTiposIncidencia(db);
         }
       },
     );
@@ -664,6 +667,56 @@ class LocalDb {
     final existe = info.any((c) => '${c['name']}' == columna);
     if (!existe) {
       await db.execute('ALTER TABLE $tabla ADD COLUMN $columna $tipo');
+    }
+  }
+
+  /// Seed de tipos de incidencia por defecto (v1.3.0).
+  /// UUIDs fijos para consistencia entre dispositivos.
+  static Future<void> _seedTiposIncidencia(Database db) async {
+    final existentes = await db.rawQuery(
+        'SELECT COUNT(*) as n FROM incidencias_tipos');
+    if (((existentes.first['n'] as num?)?.toInt() ?? 0) > 0) return;
+
+    const tipos = [
+      {
+        'id': 'a1b2c3d4-0001-4000-8000-000000000001',
+        'nombre': 'Equipos y Poleas',
+        'icono': 'fitness_center',
+        'color': 0xFF2196F3,
+        'orden': 0,
+      },
+      {
+        'id': 'a1b2c3d4-0002-4000-8000-000000000002',
+        'nombre': 'Mantenimiento',
+        'icono': 'build',
+        'color': 0xFFFF9800,
+        'orden': 1,
+      },
+      {
+        'id': 'a1b2c3d4-0003-4000-8000-000000000003',
+        'nombre': 'Limpieza e Higiene',
+        'icono': 'cleaning_services',
+        'color': 0xFF4CAF50,
+        'orden': 2,
+      },
+      {
+        'id': 'a1b2c3d4-0004-4000-8000-000000000004',
+        'nombre': 'General',
+        'icono': 'report',
+        'color': 0xFF9E9E9E,
+        'orden': 3,
+      },
+    ];
+    for (final t in tipos) {
+      await db.insert('incidencias_tipos', {
+        'id': t['id'],
+        'nombre': t['nombre'],
+        'icono': t['icono'],
+        'color': t['color'],
+        'activo': 1,
+        'orden': t['orden'],
+        'sync_estado': 'synced',
+      });
     }
   }
 
