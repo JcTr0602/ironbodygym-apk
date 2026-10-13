@@ -137,7 +137,7 @@ class _InscribirScreenState extends State<InscribirScreen> {
     if (tel.isNotEmpty && !validarTelefono(tel)) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
           content: Text(
-              'Teléfono inválido: 8 dígitos')));
+              'Teléfono inválido: 8 dígitos empezando con 5 o 6')));
       return;
     }
     final carnet = _carnet.text.trim();
