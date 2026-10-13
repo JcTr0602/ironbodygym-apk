@@ -6,6 +6,7 @@ library;
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
+import 'package:uuid/uuid.dart';
 
 import 'localdb.dart';
 
@@ -1683,6 +1684,67 @@ Future<List<Map<String, dynamic>>> detallePendienteEntrenador(
   items.sort((a, b) =>
       '${b['fecha']}'.compareTo('${a['fecha']}'));
   return items;
+}
+
+/// v1.3.0 (Pendiente v2): lista PLANA de pagos individuales pendientes.
+/// Para agrupar en Dart con procesarPendientes().
+Future<List<Map<String, dynamic>>> pagosPendientesDetalle(
+    {int? excluirTid}) async {
+  final lista = <Map<String, dynamic>>[];
+
+  for (final p in await LocalDb.instance.allMirror('pagos')) {
+    if ((p['metodo'] as String?) != 'efectivo') continue;
+    if (!esPendiente(p['entregado'])) continue;
+    final tid = p['telegram_user_id'] as int?;
+    if (tid == null) continue;
+    if (excluirTid != null && tid == excluirTid) continue;
+    lista.add({
+      'id': p['id'],
+      'monto': (p['monto'] as num?)?.toDouble() ?? 0,
+      'moneda': p['moneda'] as String? ?? 'CUP',
+      'creada_en': p['creada_en'] ?? p['fecha'],
+      'tipo': 'mensual',
+      'descripcion': 'Mensualidad',
+      'entrenador_nombre':
+          '${p['registrado_por'] ?? 'Entrenador $tid'}',
+      'trainer_telegram_id': tid,
+    });
+  }
+  for (final d in await LocalDb.instance.allMirror('pagos_diarios')) {
+    if (!esPendiente(d['entregado'])) continue;
+    final tid = d['registrado_por'] as int?;
+    if (tid == null) continue;
+    if (excluirTid != null && tid == excluirTid) continue;
+    lista.add({
+      'id': d['id'],
+      'monto': (d['total'] as num?)?.toDouble() ?? 0,
+      'moneda': 'CUP',
+      'creada_en': d['fecha'],
+      'tipo': 'diario',
+      'descripcion': 'Pago diario',
+      'entrenador_nombre':
+          '${d['registrado_por_nombre'] ?? 'Entrenador $tid'}',
+      'trainer_telegram_id': tid,
+    });
+  }
+  // Orden descendente por fecha.
+  lista.sort((a, b) =>
+      '${b['creada_en']}'.compareTo('${a['creada_en']}'));
+  return lista;
+}
+
+/// v1.3.0 (Pendiente v2): confirma entrega por lista de IDs.
+/// Encola `confirmar_entrega` con pago_ids (backend lo soporta).
+Future<void> confirmarEntregaPorIds(
+    List<int> ids, String entrenadorNombre) async {
+  await LocalDb.instance.queueOp(
+    opUuid: const Uuid().v4(),
+    tipo: 'confirmar_entrega',
+    payload: {
+      'trainer_nombre': entrenadorNombre,
+      'pago_ids': ids,
+    },
+  );
 }
 
 Future<List<Map<String, dynamic>>> pendientePorEntrenador(

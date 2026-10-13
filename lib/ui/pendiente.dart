@@ -13,6 +13,8 @@ import 'package:uuid/uuid.dart';
 import '../auth.dart';
 import '../localdb.dart';
 import '../negocio.dart';
+import '../models/pendiente.dart';
+import 'package:flutter/services.dart';
 import '../sync.dart';
 import 'componentes.dart';
 import 'diseno.dart';
@@ -28,8 +30,9 @@ class _PendienteScreenState extends State<PendienteScreen> {
   // Vista entrenador: su propio pendiente.
   List<Map<String, dynamic>> _mens = [];
   List<Map<String, dynamic>> _diarios = [];
-  // Vista dueño: desglose por entrenador {id, nombre, total, n}.
-  List<Map<String, dynamic>> _porEntrenador = [];
+  // v1.3.0 (Pendiente v2): agrupado Entrenador > Días.
+  List<EntrenadorPendiente> _entrenadores = [];
+  List<Map<String, dynamic>> _crudos = [];
   // Gemini: totales USD separados (no mezclar con CUP).
   double _totalUsd = 0;
   bool _cargando = true;
@@ -47,14 +50,15 @@ class _PendienteScreenState extends State<PendienteScreen> {
     final auth = AuthService();
     if (_esDueno) {
       // El dueño no se cuenta a sí mismo en lo pendiente a recoger.
-      final porEnt = await pendientePorEntrenador(
+      final crudos = await pagosPendientesDetalle(
           excluirTid: auth.telegramId);
       // Gemini: USD separado del CUP.
       final usd = await pendienteRecogerUsd(
           excluirTelegramId: auth.telegramId);
       if (mounted) {
         setState(() {
-          _porEntrenador = porEnt;
+          _crudos = crudos;
+          _entrenadores = procesarPendientes(crudos);
           _totalUsd = usd;
           _cargando = false;
         });
@@ -88,23 +92,23 @@ class _PendienteScreenState extends State<PendienteScreen> {
 
   double get _totalDueno {
     double t = 0;
-    for (final e in _porEntrenador) {
-      t += (e['total'] as num?)?.toDouble() ?? 0;
+    for (final e in _entrenadores) {
+      t += e.totalPorMoneda('CUP');
     }
     return t;
   }
 
-  /// El dueño confirma que recibió el dinero de un entrenador.
-  /// Encola `confirmar_entrega` con ese trainer_telegram_id.
-  Future<void> _confirmarRecibido(
-      int trainerId, String nombre, double total) async {
+  /// v1.3.0 (Pendiente v2): confirma por lista de IDs (día o todo).
+  /// Optimistic UI: actualiza al instante, persiste en background.
+  Future<void> _confirmarPorIds(
+      List<int> ids, String nombre, double total, String etiqueta) async {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: Text('Confirmar recibido de $nombre'),
         content: Text(
             '¿Confirmas que recibiste ${fmtMonto(total)} CUP de $nombre?\n\n'
-            'Se marcarán como entregados todos sus pagos pendientes.'),
+            '$etiqueta'),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(ctx, false),
@@ -116,22 +120,31 @@ class _PendienteScreenState extends State<PendienteScreen> {
       ),
     );
     if (ok != true || !mounted) return;
-    // Gemini-2: bandera anti doble-tap (ya existía _confirmando, se agrega
-    // try-finally para no quedar bloqueado si algo lanza excepción).
     if (_confirmando) return;
-    setState(() => _confirmando = true);
+    // Optimistic UI: quitar de la lista al instante.
+    final crudosAnteriores =
+        List<Map<String, dynamic>>.from(_crudos);
+    setState(() {
+      _crudos.removeWhere((p) =>
+          ids.contains(p['id'] as int? ?? -1));
+      _entrenadores = procesarPendientes(_crudos);
+      _confirmando = true;
+    });
     try {
-      await LocalDb.instance.queueOp(
-        opUuid: const Uuid().v4(),
-        tipo: 'confirmar_entrega',
-        // v1.2.1: incluir nombre del entrenador (antes solo el telegram_id,
-        // que se mostraba como "entrenador 1403501391").
-        payload: {
-          'trainer_telegram_id': trainerId,
-          'trainer_nombre': nombre
-        },
-      );
+      await confirmarEntregaPorIds(ids, nombre);
       SyncEngine.instance.push();
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _crudos = crudosAnteriores;
+          _entrenadores = procesarPendientes(_crudos);
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+                content: Text(
+                    'Error al guardar, intenta de nuevo')));
+      }
+      return;
     } finally {
       if (mounted) setState(() => _confirmando = false);
     }
@@ -140,55 +153,6 @@ class _PendienteScreenState extends State<PendienteScreen> {
         content: Text('Recibido de $nombre confirmado '
             '(se aplicará al sincronizar)')));
     await _cargar();
-  }
-
-  /// Detalle expandible de los pagos pendientes de un entrenador.
-  Widget _detalleEntrenador(int trainerId) {
-    return FutureBuilder<
-        (List<Map<String, dynamic>>, List<Map<String, dynamic>>)>(
-      future: detallePendiente(trainerId),
-      builder: (ctx, snap) {
-        if (!snap.hasData) {
-          return const Padding(
-            padding: EdgeInsets.all(12),
-            child: Center(
-                child: SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: CircularProgressIndicator(
-                        strokeWidth: 2))),
-          );
-        }
-        final (mens, diarios) = snap.data!;
-        if (mens.isEmpty && diarios.isEmpty) {
-          return const Padding(
-            padding: EdgeInsets.all(12),
-            child: Text('Sin detalle disponible.',
-                style: TextStyle(color: Colors.grey, fontSize: 13)),
-          );
-        }
-        return Column(
-          children: [
-            for (final p in mens)
-              ListTile(
-                dense: true,
-                leading: const Text(''),
-                title: Text('${fmtMonto(p['monto'])} CUP'),
-                subtitle: Text(
-                    '${fmtFecha(p['fecha'] as String?)} · ${p['meses'] ?? 1} mes(es)'),
-              ),
-            for (final d in diarios)
-              ListTile(
-                dense: true,
-                leading: const Text(''),
-                title: Text('${fmtMonto(d['total'])} CUP'),
-                subtitle: Text(
-                    '${fmtFecha(d['fecha'] as String?)} · ${d['turno'] ?? ''} x${d['cantidad'] ?? '?'}'),
-              ),
-          ],
-        );
-      },
-    );
   }
 
   @override
@@ -320,9 +284,9 @@ class _PendienteScreenState extends State<PendienteScreen> {
     );
   }
 
-  /// Vista dueño: desglose por entrenador con confirmación individual.
+  /// v1.3.0 (Pendiente v2): Entrenador > Días.
   Widget _listaDueno() {
-    if (_porEntrenador.isEmpty) {
+    if (_entrenadores.isEmpty) {
       return ListView(
         padding: const EdgeInsets.symmetric(horizontal: 16),
         children: const [
@@ -339,60 +303,310 @@ class _PendienteScreenState extends State<PendienteScreen> {
     return ListView.builder(
       padding:
           const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-      itemCount: _porEntrenador.length,
-      itemBuilder: (ctx, i) {
-        final e = _porEntrenador[i];
-        final tid = e['id'] as int;
-        final nombre = '${e['nombre']}';
-        final n = e['n'] as int;
-        final total = (e['total'] as num).toDouble();
-        return Card(
-          margin: const EdgeInsets.only(bottom: 10),
-          child: ExpansionTile(
-            leading: CircleAvatar(
-              backgroundColor: Colors.orange.shade100,
-              child: Text(
-                nombre.isNotEmpty ? nombre[0].toUpperCase() : '?',
-                style: const TextStyle(
-                    fontWeight: FontWeight.bold,
-                    color: Colors.deepOrange),
-              ),
+      itemCount: _entrenadores.length,
+      itemBuilder: (ctx, i) =>
+          _EntrenadorCard(
+        entrenador: _entrenadores[i],
+        confirmando: _confirmando,
+        onConfirmarDia: (dia) => _confirmarPorIds(
+          dia.ids,
+          _entrenadores[i].nombre,
+          dia.totalPorMoneda('CUP'),
+          'Se marcarán como entregados los ${dia.pagos.length} '
+          'pagos del ${dia.etiquetaFecha.toLowerCase()}.',
+        ),
+        onConfirmarTodo: () => _confirmarPorIds(
+          _entrenadores[i].todosLosIds,
+          _entrenadores[i].nombre,
+          _entrenadores[i].totalPorMoneda('CUP'),
+          'Se marcarán como entregados todos sus pagos pendientes.',
+        ),
+        onWhatsApp: () =>
+            _copiarCuadre(_entrenadores[i]),
+      ),
+    );
+  }
+
+  /// Copia el texto de cuadre al portapapeles (Gemini #5).
+  Future<void> _copiarCuadre(
+      EntrenadorPendiente ent) async {
+    final total = ent.totalPorMoneda('CUP');
+    final buf = StringBuffer();
+    buf.writeln(
+        '${ent.nombre}, pendiente a entregar:');
+    for (final dia in ent.dias) {
+      buf.writeln(
+          '• ${dia.etiquetaFecha}: '
+          '${fmtMonto(dia.totalPorMoneda('CUP'))} CUP '
+          '(${dia.pagos.length} pagos)');
+    }
+    buf.write('Total: ${fmtMonto(total)} CUP');
+    await Clipboard.setData(
+        ClipboardData(text: buf.toString()));
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+            content: Text(
+                'Texto copiado, pégalo en WhatsApp')));
+  }
+}
+
+/// Tarjeta de entrenador con sus días (v1.3.0).
+class _EntrenadorCard extends StatelessWidget {
+  final EntrenadorPendiente entrenador;
+  final bool confirmando;
+  final void Function(PendienteDia dia) onConfirmarDia;
+  final VoidCallback onConfirmarTodo;
+  final VoidCallback onWhatsApp;
+
+  const _EntrenadorCard({
+    required this.entrenador,
+    required this.confirmando,
+    required this.onConfirmarDia,
+    required this.onConfirmarTodo,
+    required this.onWhatsApp,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final nombre = entrenador.nombre;
+    final total = entrenador.totalPorMoneda('CUP');
+    final n = entrenador.totalPagos;
+    return Card(
+      margin: const EdgeInsets.only(bottom: 10),
+      child: ExpansionTile(
+        leading: CircleAvatar(
+          backgroundColor: Colors.orange.shade100,
+          child: Text(
+            nombre.isNotEmpty
+                ? nombre[0].toUpperCase()
+                : '?',
+            style: const TextStyle(
+                fontWeight: FontWeight.bold,
+                color: Colors.deepOrange),
+          ),
+        ),
+        title: Row(
+          children: [
+            Flexible(
+              child: Text(nombre,
+                  style: const TextStyle(
+                      fontWeight: FontWeight.bold)),
             ),
-            title: Text(nombre,
-                style:
-                    const TextStyle(fontWeight: FontWeight.bold)),
-            subtitle: Text('$n pago${n == 1 ? '' : 's'} sin entregar'),
-            trailing: Text(
-              '${fmtMonto(total)} CUP',
-              style: const TextStyle(
-                  fontWeight: FontWeight.bold,
-                  color: Colors.deepOrange,
-                  fontSize: 15),
-            ),
-            children: [
-              _detalleEntrenador(tid),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
-                child: SizedBox(
+            if (entrenador.tieneRetraso) ...[
+              const SizedBox(width: 6),
+              const Icon(Icons.warning_amber_rounded,
+                  color: Colors.amber, size: 18),
+            ],
+          ],
+        ),
+        subtitle:
+            Text('$n pago${n == 1 ? '' : 's'} sin entregar'),
+        trailing: Text(
+          '${fmtMonto(total)} CUP',
+          style: const TextStyle(
+              fontWeight: FontWeight.bold,
+              color: Colors.deepOrange,
+              fontSize: 15),
+        ),
+        children: [
+          Padding(
+            padding: const EdgeInsets.symmetric(
+                horizontal: 12, vertical: 4),
+            child: Column(
+              children: [
+                for (final dia in entrenador.dias)
+                  _DiaTile(
+                    dia: dia,
+                    onConfirmar: confirmando
+                        ? null
+                        : () => onConfirmarDia(dia),
+                  ),
+                const SizedBox(height: 8),
+                SizedBox(
                   width: double.infinity,
                   child: ElevatedButton.icon(
-                    icon: const Text(''),
-                    label: const Text('Confirmar recibido'),
-                    onPressed: _confirmando
+                    icon: const Icon(Icons.check_circle_outline,
+                        size: 18),
+                    label: Text(
+                        'Cobrar todo (${fmtMonto(total)} CUP)'),
+                    onPressed: confirmando
                         ? null
-                        : () =>
-                            _confirmarRecibido(tid, nombre, total),
+                        : onConfirmarTodo,
                     style: ElevatedButton.styleFrom(
                       backgroundColor: Colors.green,
                       foregroundColor: Colors.white,
                     ),
                   ),
                 ),
+                const SizedBox(height: 4),
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    icon: const Icon(Icons.share, size: 16),
+                    label:
+                        const Text('Cuadre a WhatsApp'),
+                    onPressed: onWhatsApp,
+                  ),
+                ),
+                const SizedBox(height: 8),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Tarjeta plana de un día (Gemini #4): sin acordeón doble.
+class _DiaTile extends StatefulWidget {
+  final PendienteDia dia;
+  final VoidCallback? onConfirmar;
+
+  const _DiaTile({required this.dia, this.onConfirmar});
+
+  @override
+  State<_DiaTile> createState() => _DiaTileState();
+}
+
+class _DiaTileState extends State<_DiaTile> {
+  bool _mostrarTodos = false;
+
+  Color _badgeBg(int nivel) {
+    if (nivel == 2) return Colors.red.shade100;
+    if (nivel == 1) return Colors.amber.shade100;
+    return Colors.grey.shade200;
+  }
+
+  Color _badgeFg(int nivel) {
+    if (nivel == 2) return Colors.red.shade900;
+    if (nivel == 1) return Colors.amber.shade900;
+    return Colors.black87;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final dia = widget.dia;
+    final total = dia.totalPorMoneda('CUP');
+    final visibles = (_mostrarTodos ||
+            dia.pagos.length <= 3)
+        ? dia.pagos
+        : dia.pagos.take(3).toList();
+    final icono = dia.nivelAlerta == 2
+        ? '🔴 '
+        : dia.nivelAlerta == 1
+            ? '⚠️ '
+            : '';
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 6),
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: Colors.grey.shade50,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(
+            color: Colors.grey.shade300),
+      ),
+      child: Column(
+        crossAxisAlignment:
+            CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color:
+                      _badgeBg(dia.nivelAlerta),
+                  borderRadius:
+                      BorderRadius.circular(6),
+                ),
+                child: Text(
+                  '$icono${dia.etiquetaFecha}',
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                    color: _badgeFg(
+                        dia.nivelAlerta),
+                  ),
+                ),
+              ),
+              const Spacer(),
+              Text(
+                '${fmtMonto(total)} CUP',
+                style: const TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 14),
+              ),
+              IconButton(
+                visualDensity:
+                    VisualDensity.compact,
+                icon: const Icon(Icons.done_all,
+                    color: Colors.teal, size: 20),
+                tooltip: 'Cobrar este día',
+                onPressed: widget.onConfirmar,
               ),
             ],
           ),
-        );
-      },
+          const SizedBox(height: 4),
+          for (final p in visibles)
+            Padding(
+              padding: const EdgeInsets.symmetric(
+                  vertical: 2),
+              child: Row(
+                children: [
+                  Icon(
+                    p.tipo == 'mensual'
+                        ? Icons.calendar_month
+                        : Icons.today,
+                    size: 14,
+                    color: Colors.grey.shade600,
+                  ),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      '${p.descripcion} (${p.tipo})',
+                      style: const TextStyle(
+                          fontSize: 12),
+                      overflow:
+                          TextOverflow.ellipsis,
+                    ),
+                  ),
+                  Text(
+                    '${fmtMonto(p.monto)} ${p.moneda}',
+                    style: const TextStyle(
+                        fontSize: 12,
+                        fontWeight:
+                            FontWeight.w600),
+                  ),
+                ],
+              ),
+            ),
+          if (dia.pagos.length > 3)
+            InkWell(
+              onTap: () => setState(
+                  () => _mostrarTodos =
+                      !_mostrarTodos),
+              child: Padding(
+                padding:
+                    const EdgeInsets.only(top: 4),
+                child: Text(
+                  _mostrarTodos
+                      ? 'Ocultar detalles'
+                      : 'Ver ${dia.pagos.length - 3} pagos más...',
+                  style: TextStyle(
+                      color: Theme.of(context)
+                          .primaryColor,
+                      fontSize: 12,
+                      fontWeight:
+                          FontWeight.w500),
+                ),
+              ),
+            ),
+        ],
+      ),
     );
   }
 }
