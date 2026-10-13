@@ -44,25 +44,59 @@ class _ListaIncidenciasScreenState
     final tiposRows = await d.query('incidencias_tipos',
         where: 'activo = 1', orderBy: 'orden');
     // Incidencias (local + mirror combinados, local tiene prioridad)
-    final incRows = await d.rawQuery('''
-      SELECT * FROM incidencias_local
-      UNION ALL
-      SELECT * FROM incidencias_mirror
-      WHERE id NOT IN (SELECT id FROM incidencias_local)
-      ORDER BY
-        CASE estado
-          WHEN 'pendiente' THEN 0
-          WHEN 'en_proceso' THEN 1
-          WHEN 'bloqueada' THEN 2
-          ELSE 3
-        END,
-        CASE prioridad
-          WHEN 'alta' THEN 0
-          WHEN 'media' THEN 1
-          ELSE 2
-        END,
-        creada_en DESC
-    ''');
+    // Sol #8: sin UNION ALL (esquemas difieren entre tablas).
+    // Se consultan por separado y se mezclan en Dart.
+    final localRows = await d.query('incidencias_local');
+    final localIds =
+        localRows.map((r) => '${r['id']}').toSet();
+    final List<Map<String, dynamic>> mirrorRows;
+    if (localIds.isEmpty) {
+      mirrorRows = await d.query('incidencias_mirror');
+    } else {
+      final ph =
+          List.filled(localIds.length, '?').join(',');
+      mirrorRows = await d.query(
+        'incidencias_mirror',
+        where: 'id NOT IN ($ph)',
+        whereArgs: localIds.toList(),
+      );
+    }
+    final incRows = [...localRows, ...mirrorRows];
+    // Orden: estado > prioridad > fecha (desc).
+    int ordenEstado(String? e) {
+      switch (e) {
+        case 'pendiente':
+          return 0;
+        case 'en_proceso':
+          return 1;
+        case 'bloqueada':
+          return 2;
+        default:
+          return 3;
+      }
+    }
+
+    int ordenPrioridad(String? p) {
+      switch (p) {
+        case 'alta':
+          return 0;
+        case 'media':
+          return 1;
+        default:
+          return 2;
+      }
+    }
+
+    incRows.sort((a, b) {
+      final c1 = ordenEstado('${a['estado']}')
+          .compareTo(ordenEstado('${b['estado']}'));
+      if (c1 != 0) return c1;
+      final c2 = ordenPrioridad('${a['prioridad']}')
+          .compareTo(ordenPrioridad('${b['prioridad']}'));
+      if (c2 != 0) return c2;
+      return '${b['creada_en']}'
+          .compareTo('${a['creada_en']}');
+    });
 
     if (mounted) {
       setState(() {

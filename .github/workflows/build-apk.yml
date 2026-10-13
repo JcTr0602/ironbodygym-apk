@@ -46,7 +46,7 @@ jobs:
 
       - name: Verificar versión
         run: |
-          PUB=$(grep '^version:' pubspec.yaml | awk '{print $2}')
+          PUB=$(grep '^version:' pubspec.yaml | awk '{print $2}' | cut -d+ -f1)
           CFG=$(grep "static const appVersion" lib/config.dart | sed "s/.*'\(.*\)'.*/\1/")
           if [ "$PUB" != "$CFG" ]; then
             echo "❌ Versión desactualizada: pubspec=$PUB pero config.dart=$CFG"

@@ -891,9 +891,70 @@ class LocalDb {
             'detalle TEXT, dispositivo_id TEXT NOT NULL, '
             'hash_previo TEXT, hash_propio TEXT NOT NULL, '
             'creada_en TEXT NOT NULL, sincronizada INTEGER NOT NULL DEFAULT 0)');
+    // v1.3.0 (Sol #4): esquema de Incidencias también en instalación limpia.
+    await _crearEsquemaIncidencias(db);
   }
 
-  // -- espejos ---------------------------------------------------------
+  /// v1.3.0 (Sol #4): DDL de Incidencias v19, idempotente.
+  /// Llamado desde _crearTablas (clean install) y onUpgrade (migración).
+  static Future<void> _crearEsquemaIncidencias(Database db) async {
+    // Tablas base de incidencias (si no existen de versiones viejas).
+    await db.execute('''CREATE TABLE IF NOT EXISTS incidencias_local (
+      id TEXT PRIMARY KEY, titulo TEXT, descripcion TEXT,
+      estado TEXT, tipo_id TEXT, asignado_a TEXT,
+      prioridad TEXT, fecha_limite TEXT, ubicacion TEXT,
+      creado_por TEXT, creado_en TEXT, sync_estado TEXT,
+      version INTEGER DEFAULT 1
+    )''');
+    await db.execute('''CREATE TABLE IF NOT EXISTS incidencias_mirror (
+      id TEXT PRIMARY KEY, titulo TEXT, descripcion TEXT,
+      estado TEXT, tipo_id TEXT, asignado_a TEXT,
+      prioridad TEXT, fecha_limite TEXT, ubicacion TEXT,
+      creado_por TEXT, creado_en TEXT, sync_seq INTEGER
+    )''');
+    // Tipos
+    await db.execute('''CREATE TABLE IF NOT EXISTS incidencias_tipos (
+      id TEXT PRIMARY KEY, nombre TEXT NOT NULL, icono TEXT,
+      color INTEGER, activo INTEGER NOT NULL DEFAULT 1,
+      orden INTEGER NOT NULL DEFAULT 0, actualizado_en TEXT,
+      sync_estado TEXT NOT NULL DEFAULT 'synced'
+    )''');
+    await db.execute('''CREATE TABLE IF NOT EXISTS incidencias_tipos_mirror (
+      id TEXT PRIMARY KEY, nombre TEXT NOT NULL, icono TEXT,
+      color INTEGER, activo INTEGER, orden INTEGER,
+      actualizada_en TEXT, sync_seq INTEGER
+    )''');
+    // Fotos, comentarios, historial
+    await db.execute('''CREATE TABLE IF NOT EXISTS incidencias_fotos (
+      id TEXT PRIMARY KEY,
+      incidencia_id TEXT NOT NULL REFERENCES incidencias_local(id) ON DELETE CASCADE,
+      local_path TEXT NOT NULL, storage_path TEXT,
+      tipo TEXT NOT NULL DEFAULT 'evidencia',
+      sync_estado TEXT NOT NULL DEFAULT 'pending',
+      creado_en TEXT NOT NULL
+    )''');
+    await db.execute('''CREATE TABLE IF NOT EXISTS incidencias_comentarios (
+      id TEXT PRIMARY KEY,
+      incidencia_id TEXT NOT NULL REFERENCES incidencias_local(id) ON DELETE CASCADE,
+      texto TEXT NOT NULL, creado_por TEXT NOT NULL,
+      creado_en TEXT NOT NULL,
+      sync_estado TEXT NOT NULL DEFAULT 'pending'
+    )''');
+    await db.execute('''CREATE TABLE IF NOT EXISTS incidencias_historial (
+      id TEXT PRIMARY KEY,
+      incidencia_id TEXT NOT NULL REFERENCES incidencias_local(id) ON DELETE CASCADE,
+      campo TEXT NOT NULL, valor_anterior TEXT, valor_nuevo TEXT,
+      cambiado_por TEXT NOT NULL, cambiado_en TEXT NOT NULL
+    )''');
+    // Columnas nuevas en app_log (v2.0)
+    await _addColumnIfMissing(db, 'app_log', 'nivel', "TEXT NOT NULL DEFAULT 'info'");
+    await _addColumnIfMissing(db, 'app_log', 'contexto', 'TEXT');
+    await _addColumnIfMissing(db, 'app_log', 'op_id', 'TEXT');
+    await _addColumnIfMissing(db, 'app_log', 'stack', 'TEXT');
+    // Seed de tipos (idempotente)
+    await _seedTiposIncidencia(db);
+  }
+
   /// v1.2.5 (D20): retorna true si la fila cambió (insertada o distinta),
   /// false si ya era idéntica (para métricas honestas).
   Future<bool> upsertMirror(
@@ -1757,8 +1818,9 @@ class LocalDb {
   }
 
   // -- meta (watermark + ajustes) --------------------------------------
-  Future<void> setMeta(String k, String v) async {
-    final d = await db;
+  Future<void> setMeta(String k, String v,
+      {DatabaseExecutor? executor}) async {
+    final d = executor ?? await db;
     await d.insert('meta', {'k': k, 'v': v},
         conflictAlgorithm: ConflictAlgorithm.replace);
   }
@@ -1865,8 +1927,9 @@ class LocalDb {
     return getWatermark(); // hereda el global (migración)
   }
 
-  Future<void> setWatermarkTabla(String tabla, int seq) =>
-      setMeta('wm_$tabla', '$seq');
+  Future<void> setWatermarkTabla(String tabla, int seq,
+          {DatabaseExecutor? executor}) =>
+      setMeta('wm_$tabla', '$seq', executor: executor);
 
   /// Mínimo de todos los cursores: "todo lo descargado hasta aquí".
   /// Se usa para el chequeo de sincronización completa contra server_seq.

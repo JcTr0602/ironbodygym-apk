@@ -2446,7 +2446,8 @@ class SyncEngine {
           }
         }
         await _db.setWatermarkTabla(
-            'incidencias_tipos', maxSeq);
+            'incidencias_tipos', maxSeq,
+            executor: txn);
       });
       AppLog.info('sync', 'pull_tipos_ok',
           d: 'n=${rows.length}');
@@ -2475,7 +2476,6 @@ class SyncEngine {
               Map<String, dynamic>.from(row as Map);
           final seq =
               (m['sync_seq'] as num?)?.toInt() ?? 0;
-          if (seq > maxSeq) maxSeq = seq;
           final local = await txn.query(
               'incidencias_local',
               where: 'id = ?',
@@ -2483,8 +2483,11 @@ class SyncEngine {
           if (local.isNotEmpty &&
               local.first['sync_estado'] ==
                   'pending') {
+            // Sol #6: NO avanzar watermark en conflictos.
             continue;
           }
+          // Solo avanzar si la fila se aplicó.
+          if (seq > maxSeq) maxSeq = seq;
           final vRemota =
               (m['version'] as num?)?.toInt() ?? 1;
           final vLocal = local.isEmpty
@@ -2521,8 +2524,7 @@ class SyncEngine {
                   where: 'id = ?',
                   whereArgs: [m['id']]);
             } else {
-              await txn.insert(
-                  'incidencias_mirror', {
+              final vals = {
                 'id': m['id'],
                 'tipo': m['tipo'] ?? 'sync',
                 'tipo_id': m['tipo_id'],
@@ -2548,17 +2550,33 @@ class SyncEngine {
                 'nota_resolucion':
                     m['nota_resolucion'],
                 'version': vRemota,
-                'actualizada_en':
-                    m['actualizada_en'],
-                'sync_seq': seq,
-              },
+              };
+              await txn.insert(
+                  'incidencias_mirror',
+                  {
+                    ...vals,
+                    'actualizada_en':
+                        m['actualizada_en'],
+                    'sync_seq': seq,
+                  },
+                  conflictAlgorithm:
+                      ConflictAlgorithm.replace);
+              // Sol #7: materializar también en local (synced)
+              // para que las FK de fotos/comentarios funcionen.
+              await txn.insert(
+                  'incidencias_local',
+                  {
+                    ...vals,
+                    'sync_estado': 'synced',
+                  },
                   conflictAlgorithm:
                       ConflictAlgorithm.replace);
             }
           }
         }
         await _db.setWatermarkTabla(
-            'incidencias', maxSeq);
+            'incidencias', maxSeq,
+            executor: txn);
       });
       AppLog.info('sync', 'pull_inc_ok',
           d: 'n=${rows.length}');

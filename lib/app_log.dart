@@ -251,10 +251,13 @@ class AppLog {
       switch ('${f['nivel']}') {
         case 'error':
           nErr++;
+          break;
         case 'aviso':
           nAviso++;
+          break;
         case 'critico':
           nCrit++;
+          break;
       }
     }
 

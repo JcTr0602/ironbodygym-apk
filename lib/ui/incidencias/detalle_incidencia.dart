@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:uuid/uuid.dart';
-import '../../../localdb.dart';
-import '../../../modelos/incidencia.dart';
+import '../../localdb.dart';
+import '../../modelos/incidencia.dart';
 import '../diseno.dart';
 import 'widgets/dialogo_resolver_incidencia.dart';
 
