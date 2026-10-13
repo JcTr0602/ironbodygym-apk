@@ -62,6 +62,10 @@ class _HomeScreenState extends State<HomeScreen>
   /// Evita recargas simultáneas de _cargar().
   bool _cargando = false;
 
+  /// v1.3.0 (Gemini): caché en memoria 30s para evitar recargas
+  /// al volver del background. Bypass con forceRefresh.
+  DateTime? _lastFetch;
+
   /// Aviso "llevas +Xh sin subir" (item 10). Texto listo o null.
   String? _avisoSync;
 
@@ -204,7 +208,13 @@ class _HomeScreenState extends State<HomeScreen>
       PerfilService.instance.setUltimaActividad(
           DateTime.now().millisecondsSinceEpoch);
 
-  Future<void> _cargar() async {
+  Future<void> _cargar({bool forceRefresh = false}) async {
+    // v1.3.0 (Gemini): caché 30s, bypass en pull-to-refresh.
+    if (!forceRefresh && _lastFetch != null) {
+      final diff =
+          DateTime.now().difference(_lastFetch!).inSeconds;
+      if (diff < 30) return;
+    }
     if (_cargando) return;
     _cargando = true;
     try {
@@ -336,6 +346,8 @@ class _HomeScreenState extends State<HomeScreen>
       }
     } finally {
       _cargando = false;
+      // v1.3.0 (Gemini): marcar timestamp del caché.
+      _lastFetch = DateTime.now();
     }
   }
 
@@ -378,7 +390,7 @@ class _HomeScreenState extends State<HomeScreen>
     return Scaffold(
       body: SafeArea(
         child: RefreshIndicator(
-          onRefresh: _cargar,
+          onRefresh: () => _cargar(forceRefresh: true),
           child: SingleChildScrollView(
             physics: const AlwaysScrollableScrollPhysics(),
             child: Column(
