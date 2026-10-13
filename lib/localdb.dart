@@ -213,7 +213,7 @@ class LocalDb {
     final dir = await getDatabasesPath();
     _db = await openDatabase(
       p.join(dir, 'ironbody.db'),
-      version: 16,
+      version: 17,
       // v1.3-r4 (Gemini): WAL mode para que lectores (UI) y escritores
       // (Workmanager en otro isolate) no se bloqueen mutuamente.
       // v1.2.9+34 (hotfix): try-catch — si el dispositivo no soporta WAL,
@@ -516,6 +516,19 @@ class LocalDb {
           await db.execute(
               'CREATE INDEX IF NOT EXISTS idx_fotos_cola_op_uuid ON fotos_cola(op_uuid)');
         }
+        // v17 (2026-10-13): bitácora local para diagnóstico forense
+        // (pedido de Jc). Registra resultados de todas las lógicas.
+        if (oldV < 17) {
+          await db.execute('CREATE TABLE IF NOT EXISTS app_log ('
+              'id INTEGER PRIMARY KEY AUTOINCREMENT, '
+              'ts TEXT NOT NULL, '
+              'modulo TEXT NOT NULL, '
+              'evento TEXT NOT NULL, '
+              'detalle TEXT, '
+              "nivel TEXT NOT NULL DEFAULT 'info')");
+          await db.execute(
+              'CREATE INDEX IF NOT EXISTS idx_app_log_ts ON app_log(ts)');
+        }
       },
     );
     // v1.2.5+28: repara el índice FTS si la migración lo omitió y el
@@ -620,6 +633,16 @@ class LocalDb {
             'CREATE INDEX IF NOT EXISTS idx_fotos_cola_despachador ON fotos_cola(estado, intentos, creado_en)');
         await db.execute(
             'CREATE INDEX IF NOT EXISTS idx_fotos_cola_op_uuid ON fotos_cola(op_uuid)');
+        // v17 (2026-10-13): bitácora local para diagnóstico forense.
+        await db.execute('CREATE TABLE IF NOT EXISTS app_log ('
+            'id INTEGER PRIMARY KEY AUTOINCREMENT, '
+            'ts TEXT NOT NULL, '
+            'modulo TEXT NOT NULL, '
+            'evento TEXT NOT NULL, '
+            'detalle TEXT, '
+            "nivel TEXT NOT NULL DEFAULT 'info')");
+        await db.execute(
+            'CREATE INDEX IF NOT EXISTS idx_app_log_ts ON app_log(ts)');
         await db.execute(
             'CREATE TABLE meta (k TEXT PRIMARY KEY, v TEXT NOT NULL)');
         // v1.2.4: incidencias (diseño ChatGPT: bidireccional, offline-first).

@@ -3,10 +3,12 @@ library;
 
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:workmanager/workmanager.dart';
 
+import 'app_log.dart';
 import 'auth.dart';
 import 'config.dart';
 import 'sync.dart';
@@ -56,10 +58,22 @@ Future<void> _programarSubidaFondo() async {
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // v1.2.9+46 (AppLog): captura global de errores no controlados.
+  FlutterError.onError = (details) {
+    AppLog.error('crash', 'flutter_error',
+        d: details.exceptionAsString());
+    FlutterError.presentError(details);
+  };
+  PlatformDispatcher.instance.onError = (error, stack) {
+    AppLog.error('crash', 'async_error', d: '$error\n$stack');
+    return true;
+  };
   await Supabase.initialize(
     url: AppConfig.supabaseUrl,
     publishableKey: AppConfig.anonKey,
   );
+  // v1.2.9+46 (AppLog): arranque con versión para forense.
+  AppLog.info('app', 'inicio', d: 'IronBody Gym ${AppConfig.appVersion}');
   await ThemeController.load();
   // Subida en segundo plano (punto 21): aunque cierren la app.
   await _programarSubidaFondo();

@@ -16,6 +16,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:uuid/uuid.dart';
 import 'localdb.dart';
+import 'app_log.dart';
 import 'sync.dart' show SyncEngine, EstadoSubida, ResultadoSubidaFoto;
 
 /// Genera thumb + display WebP. Corre directo (sin compute): el plugin
@@ -165,6 +166,9 @@ class FotosColaService {
         }
       } catch (_) {}
     }
+    // v1.2.9+46 (AppLog): bitácora de encolado.
+    AppLog.info('fotos', 'encolada',
+        d: 'op=$opUuid variantes=$n cliente=$clienteId supl=$suplementoId');
     return n;
   }
 
@@ -337,6 +341,9 @@ class FotosColaService {
       );
       if (reclamadas != 1) continue; // Otro worker ganó.
 
+      // v1.2.9+46 (AppLog).
+      AppLog.info('fotos', 'despachada',
+          d: 'id=$id tipo=${f['tipo']} intento=${f['intentos']}');
       final storagePath = await _subirUna(f, workerId);
       if (storagePath != null) {
         // v1.2.9+43 (Gemini R3): BLINDAJE DE RED.
@@ -416,9 +423,14 @@ class FotosColaService {
             );
 
             exitoVinculacion = true;
+            // v1.2.9+46 (AppLog).
+            AppLog.info('fotos', 'completada',
+                d: 'id=$id tipo=${f['tipo']} path=$storagePath');
           });
         } catch (e) {
           debugPrint('ERROR en transacción de vinculación foto $id: $e');
+          // v1.2.9+46 (AppLog).
+          AppLog.error('fotos', 'fallo_vinculacion', d: 'id=$id error=$e');
           exitoVinculacion = false;
         }
 
@@ -644,6 +656,9 @@ class FotosColaService {
           // Fix crítico 3: error permanente, sin backoff.
           await _marcarError(id, res.error ?? 'error permanente',
               permanente: true, workerId: workerId);
+          // v1.2.9+46 (AppLog).
+          AppLog.error('fotos', 'error_permanente',
+              d: 'id=$id error=${res.error}');
           return null;
         case EstadoSubida.reintentable:
         case EstadoSubida.permitirFallback:
@@ -654,10 +669,14 @@ class FotosColaService {
           await _marcarError(id, res.error ?? 'error de red reintentable',
               workerId: workerId);
           debugPrint('[Fotos] Reintentable foto $id: ${res.error}');
+          // v1.2.9+46 (AppLog).
+          AppLog.aviso('fotos', 'reintento', d: 'id=$id error=${res.error}');
           return null;
       }
     } catch (e) {
       await _marcarError(id, '$e', workerId: workerId);
+      // v1.2.9+46 (AppLog).
+      AppLog.error('fotos', 'excepcion_subida', d: 'id=$id error=$e');
       return null;
     } finally {
       // Corrección Gemini #5: cancelar siempre el timer.

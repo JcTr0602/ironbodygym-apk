@@ -26,6 +26,7 @@ import 'package:sqflite/sqflite.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:uuid/uuid.dart';
 
+import 'app_log.dart';
 import 'auth.dart';
 import 'config.dart';
 import 'errores_sync.dart';
@@ -569,9 +570,12 @@ class SyncEngine {
   /// P0 (2026-10-08): propaga la excepción para que run() no marque
   /// "sincronizado" si el push falló por dentro.
   Future<void> _doPush({bool forzar = false}) async {
+    // v1.2.9+46 (AppLog): inicio de push.
+    AppLog.info('sync', 'push_ini');
     try {
       _emit(SyncPhase.uploading);
       final n = await _uploadOps(forzar: forzar);
+      AppLog.info('sync', 'ops_enviadas', d: 'n=$n');
       // v1.2.9+46: las fotos SIEMPRE se suben en cada sincronización,
       // como en v1.2.3. La puerta de ahorro de datos se eliminó por
       // orden de Jc (2026-10-13): hacía que las fotos nunca se intentaran.
@@ -583,6 +587,7 @@ class SyncEngine {
           await _uploadFotos();
         } catch (e) {
           debugPrint('WARN _uploadFotos (viejo) falló: $e');
+          AppLog.aviso('sync', 'fotos_legacy_fallo', d: '$e');
         }
       }
       // v1.2.9+42 (Gemini): procesarCola protegido + segundo _uploadOps
@@ -590,8 +595,10 @@ class SyncEngine {
       int fotosSubidas = 0;
       try {
         fotosSubidas = await FotosColaService.instance.procesarCola();
+        AppLog.info('sync', 'cola_fotos', d: 'subidas=$fotosSubidas');
       } catch (e) {
         debugPrint('ERROR procesarCola falló: $e');
+        AppLog.error('sync', 'cola_fotos_fallo', d: '$e');
       }
       // Si se subieron fotos y se generaron ops de vinculación,
       // vaciar ops_queue hacia Supabase de inmediato.
@@ -603,12 +610,18 @@ class SyncEngine {
       // v1.2.5 (D12): el servidor confirmó (ack real, no optimista).
       await marcarSincronizado();
       _emit(SyncPhase.idle);
+      // v1.2.9+46 (AppLog): push completo.
+      AppLog.info('sync', 'push_fin', d: 'ops=$n fotos=$fotosSubidas');
     } on SessionExpired {
       _sesionVencida();
       _emit(SyncPhase.idle);
+      // v1.2.9+46 (AppLog): caída de sesión.
+      AppLog.error('sync', 'sesion_vencida');
       rethrow;
     } catch (e) {
       _emit(SyncPhase.error, error: await _describeErrorVisible(e));
+      // v1.2.9+46 (AppLog): fallo del push.
+      AppLog.error('sync', 'push_fallo', d: '$e');
       await Future.delayed(const Duration(seconds: 2));
       _emit(SyncPhase.idle);
       rethrow;

@@ -16,6 +16,7 @@ import 'package:sqflite/sqflite.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../auth.dart';
+import '../app_log.dart';
 import '../config.dart';
 import '../localdb.dart';
 import '../negocio.dart';
@@ -584,6 +585,18 @@ class _AjustesScreenState extends State<AjustesScreen> {
           text: 'Respaldo Iron Body Gym $fecha');
     } catch (e) {
       _msg('No se pudo exportar: $e');
+    }
+  }
+
+  /// v1.2.9+46 (AppLog): exportar la bitácora local para diagnóstico.
+  Future<void> _exportarBitacora() async {
+    try {
+      _msg('Generando bitácora…');
+      final path = await AppLog.exportar();
+      await Share.shareXFiles([XFile(path)],
+          text: 'Bitácora Iron Body Gym');
+    } catch (e) {
+      _msg('No se pudo exportar la bitácora: $e');
     }
   }
 
@@ -1330,6 +1343,15 @@ class _AjustesScreenState extends State<AjustesScreen> {
                     subtitulo:
                         'Re-sube fotos que no se sincronizaron',
                     onTap: () => _resincronizarFotos('suplementos'),
+                  ),
+                // v1.2.9+46 (AppLog): exportar bitácora para diagnóstico.
+                if (AuthService().isOwner)
+                  _opcion(
+                    icono: Icons.bug_report_outlined,
+                    titulo: 'Exportar bitácora',
+                    subtitulo:
+                        'Genera un archivo con el registro de la app',
+                    onTap: _exportarBitacora,
                   ),
 
                 // ----- ACERCA DE -----
