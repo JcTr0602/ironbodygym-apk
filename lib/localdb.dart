@@ -213,7 +213,7 @@ class LocalDb {
     final dir = await getDatabasesPath();
     _db = await openDatabase(
       p.join(dir, 'ironbody.db'),
-      version: 17,
+      version: 18,
       // v1.3-r4 (Gemini): WAL mode para que lectores (UI) y escritores
       // (Workmanager en otro isolate) no se bloqueen mutuamente.
       // v1.2.9+34 (hotfix): try-catch — si el dispositivo no soporta WAL,
@@ -528,6 +528,11 @@ class LocalDb {
               "nivel TEXT NOT NULL DEFAULT 'info')");
           await db.execute(
               'CREATE INDEX IF NOT EXISTS idx_app_log_ts ON app_log(ts)');
+        }
+        // v18: memoria de último precio de venta por suplemento.
+        if (oldV < 18) {
+          await db.execute(
+              'ALTER TABLE suplementos ADD COLUMN ultimo_precio REAL');
         }
       },
     );

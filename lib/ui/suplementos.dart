@@ -6,9 +6,11 @@
 library;
 
 import 'dart:async';
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:uuid/uuid.dart';
 
@@ -974,6 +976,339 @@ class _EditarSuplementoScreenState
           ),
         ],
       ),
+    );
+  }
+}
+
+/// Fila compacta de suplemento (76px). Revisado por Gemini 2026-10-13.
+/// - Borde izquierdo condicional por stock (rojo ≤3, naranja ≤5)
+/// - Swipe endToStart: +1 stock (confirmDismiss retorna false)
+/// - LongPress: ajuste manual de stock
+/// - Tap: abre edición. Botón Vender: abre diálogo de venta.
+class FilaSuplementoCompacta extends StatelessWidget {
+  final Map<String, dynamic> sup;
+  final bool tienePendiente;
+  final VoidCallback onVender;
+  final VoidCallback onEditar;
+  final VoidCallback onSumarStock;
+  final VoidCallback onAjusteManual;
+
+  const FilaSuplementoCompacta({
+    super.key,
+    required this.sup,
+    required this.tienePendiente,
+    required this.onVender,
+    required this.onEditar,
+    required this.onSumarStock,
+    required this.onAjusteManual,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final stock = (sup['stock'] as num?)?.toInt() ?? 0;
+    final nombre = (sup['nombre'] ?? '').toString();
+    final precio = (sup['precio'] as num?)?.toDouble() ?? 0.0;
+    final activo = (sup['activo'] as int? ?? 1) == 1;
+
+    Color? bordeColor;
+    if (stock <= 3) {
+      bordeColor = Colors.redAccent;
+    } else if (stock <= 5) {
+      bordeColor = Colors.orangeAccent;
+    }
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+      child: Dismissible(
+        key: ValueKey('sup_${sup['id']}'),
+        direction: DismissDirection.endToStart,
+        movementDuration: const Duration(milliseconds: 200),
+        dismissThresholds: const {DismissDirection.endToStart: 0.35},
+        background: Container(
+          decoration: BoxDecoration(
+            color: Colors.green.withOpacity(0.2),
+            borderRadius: BorderRadius.circular(12),
+          ),
+          alignment: Alignment.centerRight,
+          padding: const EdgeInsets.only(right: 20),
+          child: const Icon(Icons.add, color: Colors.green),
+        ),
+        confirmDismiss: (direction) async {
+          if (direction == DismissDirection.endToStart) {
+            onSumarStock();
+            HapticFeedback.lightImpact();
+          }
+          return false;
+        },
+        child: GestureDetector(
+          onLongPress: onAjusteManual,
+          onTap: onEditar,
+          child: Container(
+            height: 76,
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+            decoration: BoxDecoration(
+              color: AppColores.fondo(context),
+              borderRadius: BorderRadius.circular(12),
+              border: Border(
+                left: BorderSide(
+                  color: bordeColor ?? Colors.transparent,
+                  width: 3.5,
+                ),
+              ),
+            ),
+            child: Row(
+              children: [
+                _miniaturaSuplemento(sup, nombre),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              nombre,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontWeight: FontWeight.w600,
+                                color: activo ? Colors.white : Colors.white38,
+                              ),
+                            ),
+                          ),
+                          if (tienePendiente)
+                            Container(
+                              width: 8,
+                              height: 8,
+                              margin: const EdgeInsets.only(left: 6),
+                              decoration: const BoxDecoration(
+                                color: Colors.orange,
+                                shape: BoxShape.circle,
+                              ),
+                            ),
+                        ],
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        '${precio.toStringAsFixed(2)} USD · $stock disp.',
+                        style: TextStyle(
+                          color: activo ? Colors.orange[300] : Colors.white24,
+                          fontSize: 13,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                ElevatedButton(
+                  onPressed: (stock > 0 && activo) ? onVender : null,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColores.naranja,
+                    foregroundColor: Colors.white,
+                    disabledBackgroundColor: Colors.white10,
+                    disabledForegroundColor: Colors.white24,
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 14, vertical: 8),
+                    minimumSize: Size.zero,
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                  child: const Text('Vender'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _miniaturaSuplemento(
+      Map<String, dynamic> sup, String nombre) {
+    final fotoPath = sup['foto_local'] as String?;
+    if (fotoPath != null && fotoPath.isNotEmpty) {
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(8),
+        child: Image.file(
+          File(fotoPath),
+          width: 56,
+          height: 56,
+          fit: BoxFit.cover,
+          errorBuilder: (_, __, ___) => _placeholderInicial(nombre),
+        ),
+      );
+    }
+    return _placeholderInicial(nombre);
+  }
+
+  Widget _placeholderInicial(String nombre) {
+    final inicial = nombre.isNotEmpty ? nombre[0].toUpperCase() : '?';
+    return Container(
+      width: 56,
+      height: 56,
+      decoration: BoxDecoration(
+        color: AppColores.naranja.withOpacity(0.15),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Center(
+        child: Text(
+          inicial,
+          style: TextStyle(
+            fontSize: 22,
+            fontWeight: FontWeight.bold,
+            color: AppColores.naranja,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Diálogo de venta con confirmación obligatoria. Revisado por Gemini.
+/// - StatefulWidget (no StatefulBuilder) para TextEditingController limpio
+/// - Valida precio > 0, deshabilita Confirmar si inválido
+/// - Evita crash de clamp con stock 0
+Future<Map<String, dynamic>?> mostrarDialogoVenta(
+  BuildContext context,
+  Map<String, dynamic> sup,
+) {
+  return showDialog<Map<String, dynamic>>(
+    context: context,
+    builder: (ctx) => DialogoVenta(sup: sup),
+  );
+}
+
+class DialogoVenta extends StatefulWidget {
+  final Map<String, dynamic> sup;
+  const DialogoVenta({super.key, required this.sup});
+
+  @override
+  State<DialogoVenta> createState() => _DialogoVentaState();
+}
+
+class _DialogoVentaState extends State<DialogoVenta> {
+  late int _stock;
+  late double _precio;
+  late TextEditingController _precioCtrl;
+  int _cantidad = 1;
+  bool _precioValido = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _stock = (widget.sup['stock'] as num?)?.toInt() ?? 0;
+    final precioBase =
+        (widget.sup['precio'] as num?)?.toDouble() ?? 0.0;
+    _precio =
+        (widget.sup['ultimo_precio'] as num?)?.toDouble() ?? precioBase;
+    _precioCtrl =
+        TextEditingController(text: _precio.toStringAsFixed(2));
+  }
+
+  @override
+  void dispose() {
+    _precioCtrl.dispose();
+    super.dispose();
+  }
+
+  void _ajustarCantidad(int nueva) {
+    if (_stock <= 0) return;
+    setState(() {
+      _cantidad = nueva.clamp(1, _stock);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final total = _precioValido ? (_cantidad * _precio) : 0.0;
+
+    return AlertDialog(
+      title: Text('Vender ${widget.sup['nombre']}'),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                IconButton(
+                  icon: const Icon(Icons.remove),
+                  onPressed: _cantidad > 1
+                      ? () => _ajustarCantidad(_cantidad - 1)
+                      : null,
+                ),
+                Text('$_cantidad',
+                    style: const TextStyle(
+                        fontSize: 22, fontWeight: FontWeight.bold)),
+                IconButton(
+                  icon: const Icon(Icons.add),
+                  onPressed: _cantidad < _stock
+                      ? () => _ajustarCantidad(_cantidad + 1)
+                      : null,
+                ),
+              ],
+            ),
+            Wrap(
+              spacing: 8,
+              children: [1, 5, 10].map((n) {
+                return ActionChip(
+                  label: Text('+$n'),
+                  onPressed: _cantidad + n <= _stock
+                      ? () => _ajustarCantidad(_cantidad + n)
+                      : null,
+                );
+              }).toList(),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _precioCtrl,
+              keyboardType:
+                  const TextInputType.numberWithOptions(decimal: true),
+              decoration: InputDecoration(
+                labelText: 'Precio unitario (USD)',
+                prefixText: '\$ ',
+                errorText: _precioValido ? null : 'Precio inválido',
+              ),
+              onChanged: (v) {
+                final p = double.tryParse(v);
+                setState(() {
+                  if (p != null && p > 0) {
+                    _precio = p;
+                    _precioValido = true;
+                  } else {
+                    _precioValido = false;
+                  }
+                });
+              },
+            ),
+            const SizedBox(height: 14),
+            Text(
+              'Total: \$${total.toStringAsFixed(2)}',
+              style: const TextStyle(
+                  fontSize: 18, fontWeight: FontWeight.bold),
+            ),
+            Text(
+              'Stock disponible: $_stock',
+              style: TextStyle(fontSize: 12, color: Colors.grey[400]),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancelar'),
+        ),
+        ElevatedButton(
+          onPressed: (_precioValido && _stock > 0)
+              ? () => Navigator.pop(
+                  context, {'cantidad': _cantidad, 'precio': _precio})
+              : null,
+          style: ElevatedButton.styleFrom(
+              backgroundColor: AppColores.naranja),
+          child: const Text('Confirmar venta'),
+        ),
+      ],
     );
   }
 }
