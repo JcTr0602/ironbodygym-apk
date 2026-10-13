@@ -1743,6 +1743,7 @@ Future<void> confirmarEntregaPorIds({
   required List<int> mensualIds,
   required List<int> diarioIds,
   required String entrenadorNombre,
+  int? trainerTelegramId,
 }) async {
   final db = LocalDb.instance;
   final d = await db.db;
@@ -1772,6 +1773,9 @@ Future<void> confirmarEntregaPorIds({
       'tipo': 'confirmar_entrega',
       'payload': jsonEncode({
         'trainer_nombre': entrenadorNombre,
+        // Argón B3: incluir trainer_telegram_id.
+        if (trainerTelegramId != null)
+          'trainer_telegram_id': trainerTelegramId,
         'pago_ids': mensualIds,
         'pago_diario_ids': diarioIds,
       }),

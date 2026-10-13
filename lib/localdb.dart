@@ -688,6 +688,22 @@ class LocalDb {
               db, 'incidencias_mirror', 'fecha_limite', 'TEXT');
           await _addColumnIfMissing(
               db, 'incidencias_mirror', 'ubicacion', 'TEXT');
+          // Argón B4: copiar incidencias de mirror a local para que
+          // las FK funcionen tras el upgrade.
+          await db.execute('''
+            INSERT OR IGNORE INTO incidencias_local
+              (id, tipo, tipo_id, descripcion, detalle, estado,
+               asignado_a, prioridad, fecha_limite, ubicacion,
+               creada_por, creada_en, resuelta_por, resuelta_en,
+               nota_resolucion, version, sync_estado)
+            SELECT id, tipo, tipo_id, descripcion, detalle, estado,
+               asignado_a, prioridad, fecha_limite, ubicacion,
+               creada_por, creada_en, resuelta_por, resuelta_en,
+               nota_resolucion, version, 'synced'
+            FROM incidencias_mirror
+          ''');
+          // Argón B4: asegurar esquema completo también en upgrade.
+          await _crearEsquemaIncidencias(db);
         }
       },
     );
@@ -1565,8 +1581,23 @@ class LocalDb {
 
   Future<void> marcarIncidenciaSincronizada(String id) async {
     final d = await db;
-    await d.update('incidencias_local', {'sincronizada': 1},
-        where: 'id=?', whereArgs: [id]);
+    // Argón B1: también actualizar sync_estado para que el pull
+    // no lo vea como conflicto perpetuo.
+    await d.update(
+        'incidencias_local',
+        {'sincronizada': 1, 'sync_estado': 'synced'},
+        where: 'id=?',
+        whereArgs: [id]);
+  }
+
+  /// Argón B1: marca tipos y comentarios como sincronizados tras push.
+  Future<void> marcarTiposComentariosSincronizados() async {
+    final d = await db;
+    await d.update('incidencias_tipos', {'sync_estado': 'synced'},
+        where: "sync_estado = 'pending'");
+    await d.update(
+        'incidencias_comentarios', {'sync_estado': 'synced'},
+        where: "sync_estado = 'pending'");
   }
 
   Future<void> upsertIncidenciaMirror(Map<String, dynamic> inc) async {

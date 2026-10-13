@@ -887,6 +887,12 @@ class SyncEngine {
         aplicadas++;
       }
     }
+    // Argón B1: marcar tipos y comentarios como synced tras push.
+    if (aplicadas > 0) {
+      try {
+        await _db.marcarTiposComentariosSincronizados();
+      } catch (_) {}
+    }
     return aplicadas;
   }
 
@@ -2470,6 +2476,8 @@ class SyncEngine {
     } catch (e) {
       AppLog.error(
           'sync', 'pull_tipos_fallo', d: '$e');
+      // Argón B2: rethrow para que pull() detecte el fallo.
+      rethrow;
     }
   }
 
@@ -2639,6 +2647,8 @@ class SyncEngine {
     } catch (e) {
       AppLog.error(
           'sync', 'pull_inc_fallo', d: '$e');
+      // Argón B2: rethrow para que pull() detecte el fallo.
+      rethrow;
     }
   }
 

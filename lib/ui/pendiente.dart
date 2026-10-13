@@ -113,12 +113,18 @@ class _PendienteScreenState extends State<PendienteScreen> {
     // Verificación: todos los pagos del día deben ser de la misma moneda.
     final mixto =
         dia.pagos.any((p) => p.moneda != moneda);
+    // Argón B2: si es mixto, mostrar ambos totales.
+    final totalCup = dia.totalPorMoneda('CUP');
+    final totalUsd = dia.totalPorMoneda('USD');
+    final textoMontos = mixto
+        ? '${fmtMonto(totalCup)} CUP + ${fmtMonto(totalUsd)} USD'
+        : '${fmtMonto(total)} $moneda';
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: Text('Confirmar recibido de $nombre'),
         content: Text(
-            '¿Confirmas que recibiste ${fmtMonto(total)} $moneda de $nombre?\n\n'
+            '¿Confirmas que recibiste $textoMontos de $nombre?\n\n'
             '$etiqueta'
             '${mixto ? '\n\n⚠️ Este grupo mezcla monedas.' : ''}'),
         actions: [
@@ -362,17 +368,25 @@ class _PendienteScreenState extends State<PendienteScreen> {
   /// Copia el texto de cuadre al portapapeles (Gemini #5).
   Future<void> _copiarCuadre(
       EntrenadorPendiente ent) async {
-    final total = ent.totalPorMoneda('CUP');
+    final totalCup = ent.totalPorMoneda('CUP');
+    final totalUsd = ent.totalPorMoneda('USD');
     final buf = StringBuffer();
     buf.writeln(
         '${ent.nombre}, pendiente a entregar:');
     for (final dia in ent.dias) {
+      // Argón B2: usar moneda real del día.
+      final m = dia.pagos.isEmpty
+          ? 'CUP'
+          : dia.pagos.first.moneda;
       buf.writeln(
           '• ${dia.etiquetaFecha}: '
-          '${fmtMonto(dia.totalPorMoneda('CUP'))} CUP '
+          '${fmtMonto(dia.totalPorMoneda(m))} $m '
           '(${dia.pagos.length} pagos)');
     }
-    buf.write('Total: ${fmtMonto(total)} CUP');
+    buf.write('Total: ${fmtMonto(totalCup)} CUP');
+    if (totalUsd > 0) {
+      buf.write(' + ${fmtMonto(totalUsd)} USD');
+    }
     await Clipboard.setData(
         ClipboardData(text: buf.toString()));
     if (!mounted) return;
@@ -402,7 +416,12 @@ class _EntrenadorCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final nombre = entrenador.nombre;
-    final total = entrenador.totalPorMoneda('CUP');
+    // Argón B2: mostrar CUP y USD.
+    final totalCup = entrenador.totalPorMoneda('CUP');
+    final totalUsd = entrenador.totalPorMoneda('USD');
+    final totalTxt = totalUsd > 0
+        ? '${fmtMonto(totalCup)} CUP + ${fmtMonto(totalUsd)} USD'
+        : '${fmtMonto(totalCup)} CUP';
     final n = entrenador.totalPagos;
     return Card(
       margin: const EdgeInsets.only(bottom: 10),
@@ -435,7 +454,7 @@ class _EntrenadorCard extends StatelessWidget {
         subtitle:
             Text('$n pago${n == 1 ? '' : 's'} sin entregar'),
         trailing: Text(
-          '${fmtMonto(total)} CUP',
+          totalTxt,
           style: const TextStyle(
               fontWeight: FontWeight.bold,
               color: Colors.deepOrange,
@@ -461,7 +480,7 @@ class _EntrenadorCard extends StatelessWidget {
                     icon: const Icon(Icons.check_circle_outline,
                         size: 18),
                     label: Text(
-                        'Cobrar todo (${fmtMonto(total)} CUP)'),
+                        'Cobrar todo ($totalTxt)'),
                     onPressed: confirmando
                         ? null
                         : onConfirmarTodo,

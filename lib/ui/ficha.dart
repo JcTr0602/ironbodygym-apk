@@ -385,6 +385,9 @@ class _FichaScreenState extends State<FichaScreen> {
             '${pagadoHasta!.month.toString().padLeft(2, '0')}-'
             '${pagadoHasta!.day.toString().padLeft(2, '0')}';
     // Solo enviar los campos que realmente cambiaron.
+    // Argón B7: el backend (ironbody/sync.py editar_cliente) DEBE
+    // manejar payload parcial sin sobrescribir con NULL las claves
+    // ausentes. Si no lo hace, cambiar a enviar todos los campos.
     final orig = _c ?? {};
     final payload = <String, dynamic>{
       'cliente_id': widget.clienteId,

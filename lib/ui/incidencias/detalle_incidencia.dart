@@ -383,6 +383,8 @@ class _DetalleIncidenciaScreenState
             'actualizado_en': ahora,
             'sync_estado': 'pending',
             'sincronizada': 0,
+            // Argón B4: incrementar versión para OCC.
+            'version': _inc!.version + 1,
           },
           where: 'id = ?',
           whereArgs: [_inc!.id],
@@ -445,6 +447,8 @@ class _DetalleIncidenciaScreenState
           'actualizado_en': ahora,
           'sync_estado': 'pending',
           'sincronizada': 0,
+          // Argón B4: incrementar versión para OCC.
+          'version': _inc!.version + 1,
         },
         where: 'id = ?',
         whereArgs: [_inc!.id],
