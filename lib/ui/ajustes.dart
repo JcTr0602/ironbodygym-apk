@@ -45,7 +45,6 @@ class _AjustesScreenState extends State<AjustesScreen> {
   int _horasAviso = 8;
   bool _avisoFalloSync = true;
   bool _autoSync = true;
-  bool _ahorroDatos = false; // v1.2.4 (C17)
   bool _vibracion = true; // v1.2.5 (3.2)
   bool _altoContraste = false; // v1.2.5 (3.4)
   bool _vincular = false;
@@ -76,7 +75,6 @@ class _AjustesScreenState extends State<AjustesScreen> {
     final horas = await _perfil.getHorasAviso();
     final fallo = await _perfil.getAvisoFalloSync();
     final auto = await _perfil.getAutoSync();
-    final ahorro = await _perfil.getAhorroDatos();
     final vibracion = await _perfil.getVibracion();
     final altoContraste = await _perfil.getAltoContraste();
     final vinc = await _perfil.getVincularDispositivo();
@@ -93,7 +91,6 @@ class _AjustesScreenState extends State<AjustesScreen> {
         _horasAviso = horas;
         _avisoFalloSync = fallo;
         _autoSync = auto;
-        _ahorroDatos = ahorro;
         _vibracion = vibracion;
         _altoContraste = altoContraste;
         _vincular = vinc;
@@ -1212,20 +1209,6 @@ class _AjustesScreenState extends State<AjustesScreen> {
                     }
                   },
                 ),
-                // v1.2.4 (C17): ahorro de datos
-                _switch(
-                  icono: Icons.data_saver_on_outlined,
-                  titulo: 'Ahorro de datos',
-                  subtitulo:
-                      'Las fotos no se suben solas; súbelas con Wi-Fi',
-                  valor: _ahorroDatos,
-                  onChanged: (v) async {
-                    await _perfil.setAhorroDatos(v);
-                    if (mounted) {
-                      setState(() => _ahorroDatos = v);
-                    }
-                  },
-                ),
                 // v1.2.5 (3.2): vibración háptica tras confirmaciones.
                 _switch(
                   icono: Icons.vibration_outlined,
@@ -1254,23 +1237,6 @@ class _AjustesScreenState extends State<AjustesScreen> {
                     }
                   },
                 ),
-                if (_ahorroDatos)
-                  _opcion(
-                    icono: Icons.cloud_upload,
-                    titulo: 'Subir fotos ahora',
-                    subtitulo: 'Envía las fotos pendientes de este teléfono',
-                    onTap: () async {
-                      _msg('Subiendo fotos…');
-                      await SyncEngine.instance.subirFotosAhora();
-                      final n = await LocalDb.instance.contar(
-                          'fotos_pendientes',
-                          where: "estado = 'pendiente'");
-                      _msg(n == 0
-                          ? 'Fotos subidas.'
-                          : 'Quedan $n foto(s) por subir.');
-                    },
-                  ),
-
                 // ----- SEGURIDAD -----
                 _seccion('Seguridad'),
                 _opcion(

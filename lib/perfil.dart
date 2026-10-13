@@ -387,13 +387,6 @@ class PerfilService {
   Future<void> setAutoSync(bool v) async =>
       (await _p).setBool('auto_sync_abrir', v);
 
-  /// v1.2.4 (C17): ahorro de datos — las fotos no se suben solas;
-  /// se suben con "Subir fotos ahora" (p. ej. con Wi-Fi). Por teléfono.
-  Future<bool> getAhorroDatos() async =>
-      (await _p).getBool('ahorro_datos_fotos') ?? false;
-  Future<void> setAhorroDatos(bool v) async =>
-      (await _p).setBool('ahorro_datos_fotos', v);
-
   /// v1.2.5 (3.2): vibración háptica tras confirmaciones. Opcional,
   /// respeta los ajustes del sistema. Por defecto activada.
   Future<bool> getVibracion() async =>

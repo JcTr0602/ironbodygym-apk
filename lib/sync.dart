@@ -500,8 +500,6 @@ class SyncEngine {
     });
   }
 
-  bool _forzarFotos = false;
-
   /// v1.2.8 (Paso 1): sincroniza solo las tablas del scope (pull parcial).
   /// El Push NO se filtra por scope (corrección Gemini): siempre es global
   /// para no violar FKs en el servidor.
@@ -527,16 +525,6 @@ class SyncEngine {
         _emit(SyncPhase.idle);
       }
     });
-  }
-
-  /// v1.2.4 (C17): sube las fotos pendientes aunque esté el ahorro de datos.
-  Future<void> subirFotosAhora() async {
-    _forzarFotos = true;
-    try {
-      await run();
-    } finally {
-      _forzarFotos = false;
-    }
   }
 
   /// Ejecuta [fn] con el lock de sincronización entre isolates.
@@ -584,33 +572,31 @@ class SyncEngine {
     try {
       _emit(SyncPhase.uploading);
       final n = await _uploadOps(forzar: forzar);
-      // v1.2.4 (C17): con ahorro de datos, las fotos solo se suben
-      // cuando el usuario lo pide (subirFotosAhora).
-      final ahorro = await PerfilService.instance.getAhorroDatos();
-      if (!ahorro || _forzarFotos) {
-        _emit(SyncPhase.photos);
-        // v1.2.9+43: solo intentar el flujo viejo si hay datos legacy.
-        // v1.2.9+41: _uploadFotos no debe bloquear procesarCola.
-        if (await _db.hayFotosLegacy()) {
-          try {
-            await _uploadFotos();
-          } catch (e) {
-            debugPrint('WARN _uploadFotos (viejo) falló: $e');
-          }
-        }
-        // v1.2.9+42 (Gemini): procesarCola protegido + segundo _uploadOps
-        // para enviar las ops de vinculación generadas por las fotos.
-        int fotosSubidas = 0;
+      // v1.2.9+46: las fotos SIEMPRE se suben en cada sincronización,
+      // como en v1.2.3. La puerta de ahorro de datos se eliminó por
+      // orden de Jc (2026-10-13): hacía que las fotos nunca se intentaran.
+      _emit(SyncPhase.photos);
+      // v1.2.9+43: solo intentar el flujo viejo si hay datos legacy.
+      // v1.2.9+41: _uploadFotos no debe bloquear procesarCola.
+      if (await _db.hayFotosLegacy()) {
         try {
-          fotosSubidas = await FotosColaService.instance.procesarCola();
+          await _uploadFotos();
         } catch (e) {
-          debugPrint('ERROR procesarCola falló: $e');
+          debugPrint('WARN _uploadFotos (viejo) falló: $e');
         }
-        // Si se subieron fotos y se generaron ops de vinculación,
-        // vaciar ops_queue hacia Supabase de inmediato.
-        if (fotosSubidas > 0) {
-          await _uploadOps(forzar: forzar);
-        }
+      }
+      // v1.2.9+42 (Gemini): procesarCola protegido + segundo _uploadOps
+      // para enviar las ops de vinculación generadas por las fotos.
+      int fotosSubidas = 0;
+      try {
+        fotosSubidas = await FotosColaService.instance.procesarCola();
+      } catch (e) {
+        debugPrint('ERROR procesarCola falló: $e');
+      }
+      // Si se subieron fotos y se generaron ops de vinculación,
+      // vaciar ops_queue hacia Supabase de inmediato.
+      if (fotosSubidas > 0) {
+        await _uploadOps(forzar: forzar);
       }
       await _db.setMeta('last_push_ok', DateTime.now().toIso8601String());
       await _db.setMeta('last_uploaded', '$n');

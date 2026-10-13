@@ -647,7 +647,12 @@ class FotosColaService {
           return null;
         case EstadoSubida.reintentable:
         case EstadoSubida.permitirFallback:
-          // El despachador aplica backoff; no marcar error permanente.
+          // v1.2.9+46: persistir el error para diagnóstico. Antes solo iba
+          // a debugPrint y la BD quedaba con ultimo_error vacío, imposible
+          // saber por qué fallaba la red. No es permanente: el despachador
+          // aplica backoff.
+          await _marcarError(id, res.error ?? 'error de red reintentable',
+              workerId: workerId);
           debugPrint('[Fotos] Reintentable foto $id: ${res.error}');
           return null;
       }
