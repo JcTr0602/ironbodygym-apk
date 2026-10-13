@@ -213,7 +213,7 @@ class LocalDb {
     final dir = await getDatabasesPath();
     _db = await openDatabase(
       p.join(dir, 'ironbody.db'),
-      version: 18,
+      version: 19,
       // v1.3-r4 (Gemini): WAL mode para que lectores (UI) y escritores
       // (Workmanager en otro isolate) no se bloqueen mutuamente.
       // v1.2.9+34 (hotfix): try-catch — si el dispositivo no soporta WAL,
@@ -533,6 +533,120 @@ class LocalDb {
         if (oldV < 18) {
           await db.execute(
               'ALTER TABLE suplementos ADD COLUMN ultimo_precio REAL');
+        }
+        // v19: rediseño de Incidencias v1.3.0 (certificado por Gemini).
+        if (oldV < 19) {
+          // 1. Tipos personalizados
+          await db.execute('''
+            CREATE TABLE IF NOT EXISTS incidencias_tipos (
+              id TEXT PRIMARY KEY,
+              nombre TEXT NOT NULL,
+              icono TEXT,
+              color INTEGER,
+              activo INTEGER NOT NULL DEFAULT 1,
+              orden INTEGER NOT NULL DEFAULT 0,
+              actualizado_en TEXT,
+              sync_estado TEXT NOT NULL DEFAULT 'synced'
+            )
+          ''');
+          await db.execute(
+              'CREATE INDEX IF NOT EXISTS idx_tipos_activos_orden '
+              'ON incidencias_tipos(activo, orden)');
+
+          // 2. Extensión de incidencias_local
+          await _addColumnIfMissing(
+              db, 'incidencias_local', 'tipo_id', 'TEXT');
+          await _addColumnIfMissing(
+              db, 'incidencias_local', 'asignado_a', 'TEXT');
+          await _addColumnIfMissing(db, 'incidencias_local',
+              'prioridad', "TEXT NOT NULL DEFAULT 'media'");
+          await _addColumnIfMissing(
+              db, 'incidencias_local', 'fecha_limite', 'TEXT');
+          await _addColumnIfMissing(
+              db, 'incidencias_local', 'ubicacion', 'TEXT');
+          await _addColumnIfMissing(
+              db, 'incidencias_local', 'actualizado_en', 'TEXT');
+          await _addColumnIfMissing(db, 'incidencias_local',
+              'sync_estado', "TEXT NOT NULL DEFAULT 'synced'");
+          await db.execute(
+              'CREATE INDEX IF NOT EXISTS idx_inc_tipo '
+              'ON incidencias_local(tipo_id)');
+          await db.execute(
+              'CREATE INDEX IF NOT EXISTS idx_inc_asignado_estado '
+              'ON incidencias_local(asignado_a, estado)');
+          await db.execute(
+              'CREATE INDEX IF NOT EXISTS idx_inc_prioridad_limite '
+              'ON incidencias_local(prioridad, fecha_limite)');
+
+          // 3. Fotos (offline-first)
+          await db.execute('''
+            CREATE TABLE IF NOT EXISTS incidencias_fotos (
+              id TEXT PRIMARY KEY,
+              incidencia_id TEXT NOT NULL
+                REFERENCES incidencias_local(id) ON DELETE CASCADE,
+              local_path TEXT NOT NULL,
+              storage_path TEXT,
+              tipo TEXT NOT NULL DEFAULT 'evidencia',
+              sync_estado TEXT NOT NULL DEFAULT 'pending',
+              creado_en TEXT NOT NULL
+            )
+          ''');
+          await db.execute(
+              'CREATE INDEX IF NOT EXISTS idx_fotos_incidencia '
+              'ON incidencias_fotos(incidencia_id)');
+          await db.execute(
+              'CREATE INDEX IF NOT EXISTS idx_fotos_sync '
+              'ON incidencias_fotos(sync_estado)');
+
+          // 4. Comentarios (índice compuesto por fecha)
+          await db.execute('''
+            CREATE TABLE IF NOT EXISTS incidencias_comentarios (
+              id TEXT PRIMARY KEY,
+              incidencia_id TEXT NOT NULL
+                REFERENCES incidencias_local(id) ON DELETE CASCADE,
+              texto TEXT NOT NULL,
+              creado_por TEXT NOT NULL,
+              creado_en TEXT NOT NULL,
+              sync_estado TEXT NOT NULL DEFAULT 'pending'
+            )
+          ''');
+          await db.execute(
+              'CREATE INDEX IF NOT EXISTS idx_comentarios_inc_fecha '
+              'ON incidencias_comentarios(incidencia_id, creado_en)');
+
+          // 5. Historial (índice compuesto por fecha)
+          await db.execute('''
+            CREATE TABLE IF NOT EXISTS incidencias_historial (
+              id TEXT PRIMARY KEY,
+              incidencia_id TEXT NOT NULL
+                REFERENCES incidencias_local(id) ON DELETE CASCADE,
+              campo TEXT NOT NULL,
+              valor_anterior TEXT,
+              valor_nuevo TEXT,
+              cambiado_por TEXT NOT NULL,
+              cambiado_en TEXT NOT NULL
+            )
+          ''');
+          await db.execute(
+              'CREATE INDEX IF NOT EXISTS idx_historial_inc_fecha '
+              'ON incidencias_historial(incidencia_id, cambiado_en)');
+
+          // 6. Espejo de tipos (actualizada_en = convención Supabase)
+          await db.execute('''
+            CREATE TABLE IF NOT EXISTS incidencias_tipos_mirror (
+              id TEXT PRIMARY KEY,
+              nombre TEXT NOT NULL,
+              icono TEXT,
+              color INTEGER,
+              activo INTEGER NOT NULL DEFAULT 1,
+              orden INTEGER NOT NULL DEFAULT 0,
+              actualizada_en TEXT,
+              sync_seq INTEGER NOT NULL
+            )
+          ''');
+          await db.execute(
+              'CREATE INDEX IF NOT EXISTS idx_mirror_tipos_seq '
+              'ON incidencias_tipos_mirror(sync_seq)');
         }
       },
     );
