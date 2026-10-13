@@ -308,19 +308,12 @@ class _HomeScreenState extends State<HomeScreen>
       final pref =
           '${n.year.toString().padLeft(4, '0')}-${n.month.toString().padLeft(2, '0')}';
       final pagaronIds = <int>{};
-      final esDuenoPag = _auth.isOwner;
-      final miTid = _auth.telegramId;
       for (final pg in pagos) {
         final f = pg['fecha'] as String?;
         final cid = pg['cliente_id'] as int?;
         if (f != null && f.startsWith(pref) && cid != null) {
-          // v1.3.0: entrenadores solo ven sus propios cobros
-          // (su paga = 150 CUP x cliente que pagó).
-          if (!esDuenoPag) {
-            final regPor = pg['registrado_por'] as int?;
-            // Si no hay registrado_por, incluir (compatibilidad).
-            if (regPor != null && regPor != miTid) continue;
-          }
+          // v1.3.0 (Jc): la paga del entrenador es 150 CUP x TODOS
+          // los clientes que pagaron el mes, no solo sus cobros.
           pagaronIds.add(cid);
         }
       }
