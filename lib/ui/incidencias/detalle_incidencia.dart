@@ -322,18 +322,30 @@ class _DetalleIncidenciaScreenState
     final texto = _ctrlComentario.text.trim();
     if (texto.isEmpty) return;
     final d = await LocalDb.instance.db;
+    final comId = const Uuid().v4();
+    final ahora =
+        DateTime.now().toIso8601String();
     await d.insert('incidencias_comentarios', {
-      'id': const Uuid().v4(),
+      'id': comId,
       'incidencia_id': widget.incidenciaId,
       'texto': texto,
       'creado_por': 'yo', // TODO: usuario actual
-      'creado_en':
-          DateTime.now().toIso8601String(),
+      'creado_en': ahora,
       'sync_estado': 'pending',
     });
+    await LocalDb.instance.queueOp(
+      opUuid: const Uuid().v4(),
+      tipo: 'agregar_comentario_incidencia',
+      payload: {
+        'id': comId,
+        'incidencia_id': widget.incidenciaId,
+        'texto': texto,
+        'creado_por': 'yo',
+        'creado_en': ahora,
+      },
+    );
     _ctrlComentario.clear();
     _cargar();
-    // TODO: encolar op sync
   }
 
   Future<void> _cambiarEstado(
@@ -397,8 +409,21 @@ class _DetalleIncidenciaScreenState
         });
       });
 
+      await LocalDb.instance.queueOp(
+        opUuid: const Uuid().v4(),
+        tipo: 'cambiar_estado_incidencia',
+        payload: {
+          'id': _inc!.id,
+          'estado_anterior': anterior,
+          'estado_nuevo': 'resuelta',
+          'nota_resolucion': nota,
+          'resuelta_por':
+              'yo', // TODO: usuario auth
+          'resuelta_en': ahora,
+          'version': _inc!.version + 1,
+        },
+      );
       _cargar();
-      // TODO: encolar op sync
       return;
     }
 
@@ -428,7 +453,16 @@ class _DetalleIncidenciaScreenState
       });
     });
 
+    await LocalDb.instance.queueOp(
+      opUuid: const Uuid().v4(),
+      tipo: 'cambiar_estado_incidencia',
+      payload: {
+        'id': _inc!.id,
+        'estado_anterior': anterior,
+        'estado_nuevo': nuevo,
+        'version': _inc!.version + 1,
+      },
+    );
     _cargar();
-    // TODO: encolar op sync
   }
 }

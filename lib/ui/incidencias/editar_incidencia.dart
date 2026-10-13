@@ -283,10 +283,19 @@ class _EditarIncidenciaScreenState
             datos,
             where: 'id = ?',
             whereArgs: [id]);
+        await LocalDb.instance.queueOp(
+          opUuid: const Uuid().v4(),
+          tipo: 'editar_incidencia',
+          payload: datos,
+        );
       } else {
         await d.insert(
             'incidencias_local', datos);
-        // TODO: encolar op sync
+        await LocalDb.instance.queueOp(
+          opUuid: const Uuid().v4(),
+          tipo: 'crear_incidencia',
+          payload: datos,
+        );
       }
       if (mounted) Navigator.pop(context, true);
     } finally {

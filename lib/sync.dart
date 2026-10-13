@@ -693,6 +693,8 @@ class SyncEngine {
         AppLog.error(
             'sync', 'pull_incidencias_fallo', d: '$e');
       }
+      // v1.3.0: fotos en segundo plano (no bloquea metadatos).
+      unawaited(subirFotosIncidencias());
       await _db.setMeta('last_pull_ok', DateTime.now().toIso8601String());
       await _db.setMeta('last_downloaded', '$n');
       _emit(SyncPhase.idle);
@@ -2505,6 +2507,12 @@ class SyncEngine {
                 'detalle': m['detalle'],
                 'estado':
                     m['estado'] ?? 'pendiente',
+                'asignado_a': m['asignado_a'],
+                'prioridad':
+                    m['prioridad'] ?? 'media',
+                'fecha_limite':
+                    m['fecha_limite'],
+                'ubicacion': m['ubicacion'],
                 'creada_por':
                     m['creada_por'],
                 'creada_en':
