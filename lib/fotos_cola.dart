@@ -20,26 +20,48 @@ import 'sync.dart' show SyncEngine, EstadoSubida, ResultadoSubidaFoto;
 
 /// Genera thumb + display WebP. Corre directo (sin compute): el plugin
 /// ya delega a hilos nativos y compute() no tiene MethodChannels.
+/// v1.2.9+43 (Gemini R3): escritura temporal + rename atómico.
+/// Escribe a .tmp y renombra al final. En Android (ext4/f2fs), el rename
+/// es atómico a nivel de inodo. Evita que limpiarHuerfanos borre archivos
+/// a medio escribir.
 Future<Map<String, String>> _generarVariantes(
     String rutaOriginal, String base) async {
-  final thumb = await FlutterImageCompress.compressAndGetFile(
-    rutaOriginal, '$base-thumb.webp',
+  final variantes = <String, String>{};
+
+  // Thumb
+  final thumbTmp = '$base-thumb.webp.tmp';
+  final thumbFinal = '$base-thumb.webp';
+  final thumbRes = await FlutterImageCompress.compressAndGetFile(
+    rutaOriginal, thumbTmp,
     minWidth: 200, minHeight: 200,
     quality: 65, format: CompressFormat.webp,
   );
-  final display = await FlutterImageCompress.compressAndGetFile(
-    rutaOriginal, '$base-display.webp',
+  if (thumbRes != null) {
+    await File(thumbTmp).rename(thumbFinal);
+    variantes['thumb'] = thumbFinal;
+  }
+
+  // Display
+  final displayTmp = '$base-display.webp.tmp';
+  final displayFinal = '$base-display.webp';
+  final displayRes = await FlutterImageCompress.compressAndGetFile(
+    rutaOriginal, displayTmp,
     minWidth: 800, minHeight: 800,
     quality: 75, format: CompressFormat.webp,
   );
-  // Original se copia a persistente (no se deja en caché temporal).
-  final original = await File(rutaOriginal).copy('$base-original.jpg');
+  if (displayRes != null) {
+    await File(displayTmp).rename(displayFinal);
+    variantes['display'] = displayFinal;
+  }
 
-  return {
-    if (thumb != null) 'thumb': thumb.path,
-    if (display != null) 'display': display.path,
-    'original': original.path,
-  };
+  // Original se copia a persistente (no se deja en caché temporal).
+  final origTmp = '$base-original.jpg.tmp';
+  final origFinal = '$base-original.jpg';
+  await File(rutaOriginal).copy(origTmp);
+  await File(origTmp).rename(origFinal);
+  variantes['original'] = origFinal;
+
+  return variantes;
 }
 
 class FotosColaService {
@@ -174,6 +196,22 @@ class FotosColaService {
     );
 
     while (true) {
+      // v1.2.9+43 (Gemini R3): limpieza continua de leases expirados.
+      // Si el proceso corre en segundo plano, los leases que expiran
+      // durante la ejecución se liberan sin reiniciar la app.
+      final ahoraCiclo = DateTime.now().toIso8601String();
+      await db.update(
+        'fotos_cola',
+        {
+          'estado': 'pendiente',
+          'worker_id': null,
+          'lease_hasta': null,
+          'actualizado_en': ahoraCiclo,
+        },
+        where: "estado = 'subiendo' AND (lease_hasta IS NULL OR lease_hasta < ?)",
+        whereArgs: [ahoraCiclo],
+      );
+
       // Tomar la siguiente foto pendiente (con backoff respetado).
       final ahoraIso = DateTime.now().toIso8601String();
       final fotos = await db.query(
@@ -201,6 +239,35 @@ class FotosColaService {
       final sid = f['suplemento_id'];
       final tieneIds = (cid != null && cid.toString().isNotEmpty) ||
           (sid != null && sid.toString().isNotEmpty);
+      // v1.2.9+43 (Gemini R3): verificación detallada de operación padre.
+      // Si no hay IDs, verificar el estado del padre en ops_queue.
+      if (!tieneIds && fotoOpUuid != null && fotoOpUuid.isNotEmpty) {
+        final opPadre = await db.query(
+          'ops_queue',
+          columns: ['estado'],
+          where: "op_uuid = ? AND tipo NOT IN ('foto', 'foto_suplemento')",
+          whereArgs: [fotoOpUuid],
+          limit: 1,
+        );
+
+        if (opPadre.isEmpty) {
+          // La operación padre no existe: foto huérfana corrupta.
+          await _marcarError(
+              f['id'] as int, 'op padre no existe en ops_queue',
+              permanente: true);
+          continue;
+        }
+
+        final estadoPadre = opPadre.first['estado'] as String?;
+        if (estadoPadre == 'rechazada') {
+          // La entidad fue rechazada por el servidor: nunca existirá.
+          await _marcarError(f['id'] as int,
+              'op padre rechazada por el servidor', permanente: true);
+          continue;
+        }
+        // Si está pendiente/enviada/error: esperar (el lock de abajo lo maneja).
+      }
+
       if (!tieneIds && fotoOpUuid != null && fotoOpUuid.isNotEmpty) {
         // FIX (revisión pre-+37): bloquear mientras el op NO esté en estado
         // terminal 'aplicada'. Cubre 'pendiente', 'enviada', 'error', etc.
@@ -272,6 +339,19 @@ class FotosColaService {
 
       final storagePath = await _subirUna(f, workerId);
       if (storagePath != null) {
+        // v1.2.9+43 (Gemini R3): BLINDAJE DE RED.
+        // Persistir storage_path INMEDIATAMENTE después de la subida HTTP.
+        // Si la vinculación falla después, los bytes YA NO se re-suben.
+        await db.update(
+          'fotos_cola',
+          {
+            'storage_path': storagePath,
+            'actualizado_en': DateTime.now().toIso8601String(),
+          },
+          where: 'id = ? AND worker_id = ?',
+          whereArgs: [id, workerId],
+        );
+
         // v1.2.9+43 (Gemini): TRANSACCIÓN ATÓMICA para vinculación.
         // Primero verifica ownership del lease, luego vincula.
         // Si el lease se perdió, aborta sin mutar mirror ni ops_queue.
@@ -562,27 +642,44 @@ class FotosColaService {
 
   /// v1.2.9 (Fix crítico 3 Gemini): permite marcar error permanente
   /// directo, sin pasar por backoff.
-  /// v1.2.9+43 (Gemini C + Luna R3): filtra por worker_id para no abortar
-  /// la subida activa de otro worker. Si 0 filas afectadas, otro worker
-  /// ya tomó la foto — no hacer nada (evita dejarla atascada en 'subiendo').
+  /// v1.2.9+43 (Gemini R3): errores permanentes son incondicionales.
+  /// Si el archivo no existe o es irrecuperable, la foto debe morir
+  /// aunque otro worker la haya tomado (evita reintentos infinitos).
+  /// Errores transitorios solo los marca el worker dueño.
   Future<void> _marcarError(int id, String error,
       {bool permanente = false, String? workerId}) async {
     final db = await LocalDb.instance.db;
-    final afectadas = await db.update(
-      'fotos_cola',
-      {
-        if (permanente) 'estado': 'error',
-        'worker_id': null,
-        'lease_hasta': null,
-        'ultimo_error': error,
-        'actualizado_en': DateTime.now().toIso8601String(),
-      },
-      where: workerId != null ? 'id = ? AND worker_id = ?' : 'id = ?',
-      whereArgs: workerId != null ? [id, workerId] : [id],
-    );
-    if (afectadas == 0 && workerId != null) {
-      debugPrint(
-          '[Fotos] _marcarError: foto $id ya tomada por otro worker, omitiendo.');
+    final ahora = DateTime.now().toIso8601String();
+
+    if (permanente) {
+      await db.update(
+        'fotos_cola',
+        {
+          'estado': 'error',
+          'worker_id': null,
+          'lease_hasta': null,
+          'ultimo_error': error,
+          'actualizado_en': ahora,
+        },
+        where: "id = ? AND estado != 'completada'",
+        whereArgs: [id],
+      );
+    } else {
+      final afectadas = await db.update(
+        'fotos_cola',
+        {
+          'worker_id': null,
+          'lease_hasta': null,
+          'ultimo_error': error,
+          'actualizado_en': ahora,
+        },
+        where: workerId != null ? 'id = ? AND worker_id = ?' : 'id = ?',
+        whereArgs: workerId != null ? [id, workerId] : [id],
+      );
+      if (afectadas == 0 && workerId != null) {
+        debugPrint(
+            '[Fotos] _marcarError: foto $id ya tomada por otro worker.');
+      }
     }
   }
 
@@ -614,22 +711,31 @@ class FotosColaService {
       await _vincularFotoCliente(
           txn, clienteId, opUuid, storagePath, opUuidDeterminista);
     } else if (suplementoId != null) {
-      try {
-        final rows = await txn.query('suplementos',
-            columns: ['data'],
-            where: 'id = ?',
-            whereArgs: [suplementoId],
-            limit: 1);
-        if (rows.isNotEmpty) {
-          final raw = rows.first['data'];
-          final data = Map<String, dynamic>.from(
-              raw is String ? jsonDecode(raw) : raw as Map);
-          data['foto_storage'] = storagePath;
-          data['foto_uuid'] = opUuid;
-          await txn.update('suplementos', {'data': jsonEncode(data)},
-              where: 'id = ?', whereArgs: [suplementoId]);
+      // v1.2.9+43 (Gemini R3): sin catch silencioso. Si falla, la
+      // transacción hace rollback. Verificar precedencia antes de mutar.
+      final rows = await txn.query('suplementos',
+          columns: ['data'],
+          where: 'id = ?',
+          whereArgs: [suplementoId],
+          limit: 1);
+      if (rows.isNotEmpty) {
+        final raw = rows.first['data'];
+        final data = Map<String, dynamic>.from(
+            raw is String ? jsonDecode(raw) : raw as Map);
+
+        // Verificar precedencia: no sobrescribir foto más nueva.
+        final fotoUuidVigente = data['foto_uuid'] as String?;
+        if (fotoUuidVigente != null && fotoUuidVigente != opUuid) {
+          debugPrint(
+              '[Fotos] Suplemento $suplementoId ya tiene foto más nueva.');
+          return;
         }
-      } catch (_) {}
+
+        data['foto_storage'] = storagePath;
+        data['foto_uuid'] = opUuid;
+        await txn.update('suplementos', {'data': jsonEncode(data)},
+            where: 'id = ?', whereArgs: [suplementoId]);
+      }
       await txn.insert('ops_queue', {
         'op_uuid': opUuidDeterminista,
         'tipo': 'foto_suplemento',
@@ -747,16 +853,23 @@ class FotosColaService {
             where: 'id = ?', whereArgs: [v['id']]);
       }
 
-      // Archivos en disco no referenciados.
-      // v1.2.9+43 (Gemini B1): no borrar archivos recientes (pueden estar
-      // siendo escritos por encolarFoto concurrente). Umbral: 2 horas.
-      final umbralArchivosViejos =
-          DateTime.now().subtract(const Duration(hours: 2));
+      // v1.2.9+43 (Gemini R3): manejo de .tmp + archivos finales.
+      // Los .tmp son escrituras en progreso (rename atómico pendiente).
+      // Solo se borran si tienen más de 24h (proceso colgado).
+      // Los archivos finales se borran si no están referenciados y tienen +2h.
+      final umbralTmp = DateTime.now().subtract(const Duration(hours: 24));
+      final umbralFinal = DateTime.now().subtract(const Duration(hours: 2));
       await for (final e in fotosDir.list()) {
-        if (e is File && !referenciadas.contains(e.path)) {
+        if (e is File) {
           try {
             final modificado = await e.lastModified();
-            if (modificado.isBefore(umbralArchivosViejos)) {
+            if (e.path.endsWith('.tmp')) {
+              if (modificado.isBefore(umbralTmp)) {
+                await e.delete();
+                borrados++;
+              }
+            } else if (!referenciadas.contains(e.path) &&
+                modificado.isBefore(umbralFinal)) {
               await e.delete();
               borrados++;
             }
