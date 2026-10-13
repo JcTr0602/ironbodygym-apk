@@ -7,7 +7,6 @@
 library;
 
 import 'dart:async';
-import 'dart:io';
 
 /// Categoría del error: decide el tratamiento.
 enum TipoErrorSync {
@@ -210,8 +209,8 @@ ErrorSync traducirErrorSync(Object error, {int? httpStatus, StackTrace? stack}) 
     return ErrorSync(
       codigo: 'sin_permiso_rol',
       tipo: TipoErrorSync.auth,
-      mensaje: 'No tienes permiso para hacer este cambio.',
-      accionTexto: 'Habla con el administrador del gimnasio.',
+      mensaje: 'No puedes hacer esta acción con tu cuenta.',
+      accionTexto: 'Consulta al responsable de tu organización.',
       accionBoton: AccionBoton.entendido,
       datosGuardadosLocalmente: true,
       detalleTecnicoOculto: error.toString(),
@@ -219,8 +218,8 @@ ErrorSync traducirErrorSync(Object error, {int? httpStatus, StackTrace? stack}) 
   }
 
   // 6. Red y conexión
-  if (error is SocketException ||
-      raw.contains('socketexception') ||
+  if (raw.contains('socketexception') ||
+      raw.contains('socket') && raw.contains('exception') ||
       raw.contains('failed host lookup') ||
       raw.contains('network is unreachable') ||
       raw.contains('sin internet') ||
@@ -235,8 +234,7 @@ ErrorSync traducirErrorSync(Object error, {int? httpStatus, StackTrace? stack}) 
       detalleTecnicoOculto: error.toString(),
     );
   }
-  if (error is TimeoutException ||
-      raw.contains('timeout') ||
+  if (raw.contains('timeout') ||
       raw.contains('timed out') ||
       httpStatus == 408) {
     return ErrorSync(
@@ -300,8 +298,8 @@ ErrorSync traducirErrorSync(Object error, {int? httpStatus, StackTrace? stack}) 
       return ErrorSync(
         codigo: 'no_encontrado',
         tipo: TipoErrorSync.permanente,
-        mensaje: 'No se encontró lo que buscabas en el servidor.',
-        accionTexto: 'Actualiza la lista y vuelve a intentarlo.',
+        mensaje: 'No se encontró esta información en el servidor.',
+        accionTexto: 'Toca el botón para actualizar todos los datos.',
         accionBoton: AccionBoton.refrescarTodo,
         datosGuardadosLocalmente: true,
         detalleTecnicoOculto: 'HTTP 404',
@@ -309,14 +307,15 @@ ErrorSync traducirErrorSync(Object error, {int? httpStatus, StackTrace? stack}) 
     }
   }
 
-  // 8. Fallback seguro: nunca mostrar el error crudo
+  // 8. Fallback seguro: nunca mostrar el error crudo.
+  // No afirmar que los datos están guardados sin confirmación.
   return ErrorSync(
     codigo: 'desconocido',
     tipo: TipoErrorSync.transitorio,
     mensaje: 'Hubo un problema al sincronizar.',
-    accionTexto: 'Tus datos están guardados. Se reintentará automáticamente.',
+    accionTexto: 'Inténtalo de nuevo. Si el problema sigue, contacta al soporte.',
     accionBoton: AccionBoton.reintentar,
-    datosGuardadosLocalmente: true,
+    datosGuardadosLocalmente: false,
     detalleTecnicoOculto: error.toString(),
   );
 }
