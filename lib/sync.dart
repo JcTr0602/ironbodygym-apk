@@ -446,7 +446,15 @@ class SyncEngine {
   Future<void> run({bool forzar = false}) async {
     await _conLock(() async {
       try {
-        await _doPush(forzar: forzar);
+        // v1.2.9+47: errores de push y pull por separado (Gemini).
+        String? errPush;
+        String? errPull;
+        try {
+          await _doPush(forzar: forzar);
+        } catch (e) {
+          errPush = (await _describeErrorVisible(e)).mensaje;
+          AppLog.error('sync', 'push_fallo', d: '$e');
+        }
         // v1.2.4: perfil (móvil/carnet) que no pudo subirse sin conexión.
         try {
           await PerfilService.instance.sincronizarSiPendiente();
@@ -454,7 +462,14 @@ class SyncEngine {
         // Pull repetido: si llegan cambios durante la descarga, seguir.
         bool completo = false;
         for (var i = 0; i < 3; i++) {
-          await _doPull();
+          try {
+            await _doPull();
+          } catch (e) {
+            errPull = (await _describeErrorVisible(e)).mensaje;
+            AppLog.error(
+                'sync', 'pull_fallo', d: 'intento=$i error=$e');
+            continue;
+          }
           final wm = await _db.getWatermarkMinimo();
           final ss = int.tryParse(await _db.getMeta('server_seq') ?? '0') ?? 0;
           if (wm >= ss) {
@@ -462,19 +477,22 @@ class SyncEngine {
             break;
           }
         }
+        // v1.2.9+47: guardar estados separados (Gemini: manejar los 3 casos).
+        await _db.setMeta('last_push_error', errPush ?? '');
+        await _db.setMeta('last_pull_error', errPull ?? '');
         if (completo) {
           await _marcarOk();
           await _db.setMeta('last_sync_error', '');
-        } else {
-          // v1.2.4: no ocultar sync incompleto
-          final wm = await _db.getWatermarkMinimo();
-          final ss = int.tryParse(await _db.getMeta('server_seq') ?? '0') ?? 0;
-          // v1.2.9+43: usar traducirErrorSync, nunca strings técnicos.
-          final errSync = traducirErrorSync(
-              'watermark $wm < server_seq $ss tras 3 intentos');
-          await _db.setMeta('last_sync_error', errSync.mensaje);
-          _emit(SyncPhase.error, error: errSync);
+        } else if (errPush != null) {
+          await _db.setMeta('last_sync_error', errPush);
+          _emit(SyncPhase.error,
+              error: traducirErrorSync(errPush));
           return;
+        } else {
+          // Push OK pero pull incompleto.
+          await _db.setMeta('last_sync_error',
+              'Subida al día · Descarga pendiente');
+          // No emitir error crítico: la subida funcionó.
         }
         // v1.0.17: resumen discreto de lo que realmente cambió
         final subidos =
@@ -662,6 +680,8 @@ class SyncEngine {
   /// Si [silencioso] es true, no emite fases de progreso (pull de
   /// mantenimiento tras un push; el usuario no pidió ver el proceso).
   Future<void> _doPull({bool silencioso = false}) async {
+    // v1.2.9+47 (AppLog): instrumentación del pull.
+    AppLog.info('sync', 'pull_ini');
     try {
       if (!silencioso) _emit(SyncPhase.downloading);
       final n = await _download(silencioso: silencioso);
@@ -673,6 +693,7 @@ class SyncEngine {
       _emit(SyncPhase.idle);
       rethrow;
     } catch (e) {
+      AppLog.error('sync', 'pull_fallo', d: '$e');
       _emit(SyncPhase.error, error: await _describeErrorVisible(e));
       await Future.delayed(const Duration(seconds: 2));
       _emit(SyncPhase.idle);
@@ -1062,6 +1083,8 @@ class SyncEngine {
     try {
       final r = await _getAuth(Uri.parse('$_base/rest/v1/sync_estado?id=eq.1'
           '&select=server_seq,ajustes,usuarios,actividad'));
+      // v1.2.9+47 (AppLog): estado del servidor.
+      AppLog.info('sync', 'pull_estado', d: 'http=${r.statusCode}');
       if (r.statusCode == 200) {
         final rows = jsonDecode(r.body) as List;
         if (rows.isNotEmpty) {
@@ -1085,7 +1108,9 @@ class SyncEngine {
           }
         }
       }
-    } catch (_) {}
+    } catch (e) {
+      AppLog.error('sync', 'pull_estado_fallo', d: '$e');
+    }
 
     // v1.2.5-rev6 (Gemini #16): watermarks por tabla. Cada espejo tiene su
     // propio cursor (`wm_<tabla>`); el fallo de una tabla no bloquea a
@@ -1155,10 +1180,20 @@ class SyncEngine {
                   'cerrado_en,sync_seq',
             _ => 'id,data,sync_seq',
           };
+          // v1.2.9+47 (AppLog): medir latencia del lote.
+          final t0 = DateTime.now();
           final r =
               await _getAuth(Uri.parse('$_base/rest/v1/$supTabla?select=$select'
                   '&sync_seq=gt.$pageWm&order=sync_seq.asc&limit=100'));
+          final latencia =
+              DateTime.now().difference(t0).inMilliseconds;
+          // v1.2.9+47 (AppLog): log por lote.
+          AppLog.info('sync', 'pull_lote',
+              d: '$tabla wm=$pageWm http=${r.statusCode} '
+                  'bytes=${r.body.length} ms=$latencia');
           if (r.statusCode == 404 || r.statusCode == 400) {
+            AppLog.aviso('sync', 'pull_tabla_ausente',
+                d: '$tabla http=${r.statusCode}');
             // v1.2.1: la tabla no existe en Supabase o el rol no puede
             // leerla (p. ej. sync_turnos_cierre antes de aplicar v116,
             // sync_gastos para entrenadores). Se omite sin abortar el
@@ -1174,9 +1209,20 @@ class SyncEngine {
           // La tabla existe y responde: limpiar marca de ausente.
           await _db.setMeta('wm_${tabla}_ausente', '');
           if (r.statusCode != 200) {
-            throw Exception('bajada $tabla: HTTP ${r.statusCode}');
+            // v1.2.9+47 (AppLog): fallo HTTP con fragmento sanitizado.
+            final frag = r.body.length > 200
+                ? r.body.substring(0, 200)
+                : r.body;
+            AppLog.error('sync', 'pull_lote_fallo',
+                d: '$tabla http=${r.statusCode} '
+                    'body=${frag.replaceAll('\n', ' ')}');
+            throw Exception(
+                'bajada $tabla: HTTP ${r.statusCode}');
           }
           final rows = jsonDecode(r.body) as List;
+          // v1.2.9+47 (AppLog): lote OK.
+          AppLog.info('sync', 'pull_lote_ok',
+              d: '$tabla filas=${rows.length}');
           if (rows.isEmpty) break;
           // v1.2.7 (Paso 1 Gemini): commit atómico por página.
           // Se preparan las filas primero (sin escribir), luego en una sola
@@ -1261,6 +1307,9 @@ class SyncEngine {
         // el próximo ciclo; las demás tablas no se bloquean.
         // v1.2.7: el watermark ya se actualiza por página dentro de la
         // transacción atómica, no hace falta actualización final.
+        // v1.2.9+47 (AppLog): fallo por tabla.
+        AppLog.error(
+            'sync', 'pull_tabla_fallo', d: '$tabla error=$e');
         erroresTablas.add('$tabla: $e');
       }
       // FIX (Gemini auditoría funcional BUG 3): si la tabla se descargó
@@ -1272,8 +1321,13 @@ class SyncEngine {
         final wmActual = await _db.getWatermarkTabla(tabla);
         if (wmActual < serverSeq) {
           await _db.setWatermarkTabla(tabla, serverSeq);
+          // v1.2.9+47 (AppLog): watermark persistido.
+          AppLog.info('sync', 'pull_wm_guardado',
+              d: '$tabla $wmActual->$serverSeq');
         }
       }
+      // v1.2.9+47 (AppLog): tabla completa.
+      AppLog.info('sync', 'pull_tabla_fin', d: tabla);
     }
     // borrados (tombstones)
     if (!silencioso) {
@@ -1381,6 +1435,10 @@ class SyncEngine {
           'sinCambios': sinCambios,
           'fallidas': fallidas,
         }));
+    // v1.2.9+47 (AppLog): pull completo.
+    AppLog.info('sync', 'pull_fin',
+        d: 'vistas=$vistas aplicadas=$aplicadas '
+            'sinCambios=$sinCambios fallidas=$fallidas');
     return aplicadas;
   }
 
