@@ -2703,6 +2703,8 @@ class SyncEngine {
               'estado': 'pendiente',
               'creada_ts':
                   DateTime.now().toIso8601String(),
+              'user_id': AuthService().userId,
+              'telegram_id': AuthService().telegramId,
             });
             await txn.update(
                 'incidencias_fotos', {

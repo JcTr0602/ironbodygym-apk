@@ -8,6 +8,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:uuid/uuid.dart';
 
+import 'auth.dart';
 import 'localdb.dart';
 
 String _norm(String s) {
@@ -1776,6 +1777,8 @@ Future<void> confirmarEntregaPorIds({
       }),
       'estado': 'pendiente',
       'creada_ts': ahora,
+      'user_id': AuthService().userId,
+      'telegram_id': AuthService().telegramId,
     });
   });
 }

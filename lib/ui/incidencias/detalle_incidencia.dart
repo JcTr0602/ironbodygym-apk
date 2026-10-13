@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:uuid/uuid.dart';
+import '../../auth.dart';
 import '../../localdb.dart';
 import '../../modelos/incidencia.dart';
 import '../diseno.dart';
@@ -427,6 +428,8 @@ class _DetalleIncidenciaScreenState
           }),
           'estado': 'pendiente',
           'creada_ts': ahora,
+          'user_id': AuthService().userId,
+          'telegram_id': AuthService().telegramId,
         });
       });
       _cargar();
@@ -470,6 +473,8 @@ class _DetalleIncidenciaScreenState
         }),
         'estado': 'pendiente',
         'creada_ts': ahora,
+        'user_id': AuthService().userId,
+        'telegram_id': AuthService().telegramId,
       });
     });
     _cargar();

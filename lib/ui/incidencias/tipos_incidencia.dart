@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:uuid/uuid.dart';
+import '../../auth.dart';
 import '../../localdb.dart';
 import '../../modelos/incidencia.dart';
 import '../diseno.dart';
@@ -180,6 +181,8 @@ class _TiposIncidenciaScreenState
         'estado': 'pendiente',
         'creada_ts':
             DateTime.now().toIso8601String(),
+        'user_id': AuthService().userId,
+        'telegram_id': AuthService().telegramId,
       });
     });
     setState(() {});
