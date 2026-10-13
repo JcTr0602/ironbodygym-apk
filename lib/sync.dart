@@ -426,8 +426,8 @@ class SyncEngine {
     return SyncDetalle(
       ultimaPull: pull,
       ultimaPush: push,
-      subidos: int.tryParse(await _db.getMeta('last_uploaded') ?? '0') ?? 0,
-      bajados: int.tryParse(await _db.getMeta('last_downloaded') ?? '0') ?? 0,
+      subidos: int.tryParse(await _db.getMeta('total_subidos') ?? '0') ?? 0,
+      bajados: int.tryParse(await _db.getMeta('total_bajados') ?? '0') ?? 0,
       error: await _db.getMeta('last_sync_error'),
     );
   }
@@ -626,6 +626,11 @@ class SyncEngine {
         totalOps += await _uploadOps(forzar: forzar);
       }
       await _db.setMeta('last_push_ok', DateTime.now().toIso8601String());
+      // v1.3.0: acumulativo (no solo última sincronización).
+      final prevSubidos =
+          int.tryParse(await _db.getMeta('total_subidos') ?? '0') ?? 0;
+      await _db.setMeta(
+          'total_subidos', '${prevSubidos + totalOps}');
       await _db.setMeta('last_uploaded', '$totalOps');
       // v1.2.5 (D12): el servidor confirmó (ack real, no optimista).
       await marcarSincronizado();
@@ -685,6 +690,10 @@ class SyncEngine {
     try {
       if (!silencioso) _emit(SyncPhase.downloading);
       final n = await _download(silencioso: silencioso);
+      // v1.3.0: acumulativo para bajados.
+      final prevBajados =
+          int.tryParse(await _db.getMeta('total_bajados') ?? '0') ?? 0;
+      await _db.setMeta('total_bajados', '${prevBajados + n}');
       // v1.3.0: pull de incidencias (tipos → incidencias, orden por FK).
       try {
         await _pullTiposIncidencia();
