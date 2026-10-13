@@ -377,7 +377,8 @@ class PerfilService {
       (await _p).setInt('horas_aviso_sync', h);
 
   /// v1.3.0 (Jc): pago por cliente al entrenador. Por defecto 150 CUP.
-  /// Fix #20 (Sol): usa tabla config_negocio sincronizada;
+  /// Fix #20 (Sol): usa tabla config_negocio (preparada para sync;
+  /// el push/pull completo viene en próxima iteración).
   /// SharedPreferences queda como caché offline.
   Future<int> getPagoEntrenador() async {
     // 1. Intentar desde la tabla sincronizada.

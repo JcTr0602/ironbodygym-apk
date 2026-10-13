@@ -2732,10 +2732,15 @@ class SyncEngine {
               'foto_inc_http', d: 'fallo subida');
         }
       } catch (e) {
-        // Reintentable: no marcar 'error' permanente de inmediato.
+        // Terra #13: respetar límite de intentos también en catch.
+        final intentosCatch =
+            ((f['intentos'] as num?)?.toInt() ?? 0) + 1;
         await d.update(
             'incidencias_fotos',
-            {'sync_estado': 'retry'},
+            {
+              'sync_estado':
+                  intentosCatch >= 5 ? 'error' : 'retry',
+            },
             where: 'id = ?',
             whereArgs: [fid]);
         AppLog.error(
