@@ -384,42 +384,32 @@ class _FichaScreenState extends State<FichaScreen> {
         : '${pagadoHasta!.year.toString().padLeft(4, '0')}-'
             '${pagadoHasta!.month.toString().padLeft(2, '0')}-'
             '${pagadoHasta!.day.toString().padLeft(2, '0')}';
-    // Solo enviar los campos que realmente cambiaron.
-    // Argón B7: el backend (ironbody/sync.py editar_cliente) DEBE
-    // manejar payload parcial sin sobrescribir con NULL las claves
-    // ausentes. Si no lo hace, cambiar a enviar todos los campos.
+    // Argón B7: enviar SIEMPRE todos los campos (como v1.2.9) para
+    // no depender de que el backend maneje payload parcial.
     final orig = _c ?? {};
-    final payload = <String, dynamic>{
-      'cliente_id': widget.clienteId,
-    };
     final nuevoNombre = nombre.text.trim();
-    if (nuevoNombre != '${orig['nombre'] ?? ''}') {
-      payload['nombre'] = nuevoNombre;
-    }
     final nuevoTel = tel.isEmpty ? null : tel;
-    final origTel = orig['telefono'] as String?;
-    if (nuevoTel != origTel) {
-      payload['telefono'] = nuevoTel;
-    }
     final nuevoCar = car.isEmpty ? null : car;
-    final origCar = orig['carnet'] as String?;
-    if (nuevoCar != origCar) {
-      payload['carnet'] = nuevoCar;
-    }
-    if (sexo != orig['sexo']) {
-      payload['sexo'] = sexo;
-    }
-    final origPh = orig['pagado_hasta'] as String?;
-    if (phStr != origPh) {
-      payload['pagado_hasta'] = phStr;
-    }
     // Si no cambió nada, no encolar.
-    if (payload.length <= 1) {
+    final huboCambios = nuevoNombre != '${orig['nombre'] ?? ''}' ||
+        nuevoTel != (orig['telefono'] as String?) ||
+        nuevoCar != (orig['carnet'] as String?) ||
+        sexo != orig['sexo'] ||
+        phStr != (orig['pagado_hasta'] as String?);
+    if (!huboCambios) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Sin cambios')));
       return;
     }
+    final payload = <String, dynamic>{
+      'cliente_id': widget.clienteId,
+      'nombre': nuevoNombre,
+      'telefono': nuevoTel,
+      'carnet': nuevoCar,
+      'sexo': sexo,
+      'pagado_hasta': phStr,
+    };
     await LocalDb.instance.queueOp(
       opUuid: const Uuid().v4(),
       tipo: 'editar_cliente',

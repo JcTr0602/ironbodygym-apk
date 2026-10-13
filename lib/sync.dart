@@ -607,6 +607,15 @@ class SyncEngine {
     AppLog.info('sync', 'push_ini');
     try {
       _emit(SyncPhase.uploading);
+      // A3 (Argón): fotos en push() (no en pull), y rescatar
+      // las que quedaron en 'uploading' por cierre forzoso.
+      try {
+        final db = await _db.db;
+        await db.update('incidencias_fotos',
+            {'sync_estado': 'retry'},
+            where: "sync_estado = 'uploading'");
+      } catch (_) {}
+      await subirFotosIncidencias();
       // v1.2.9+46 (Gemini): acumular ambos lotes para last_uploaded.
       var totalOps = await _uploadOps(forzar: forzar);
       AppLog.info('sync', 'ops_enviadas', d: 'n=$totalOps');
@@ -724,8 +733,7 @@ class SyncEngine {
         await _db.setMeta(
             'last_pull_incidencias_error', '$e');
       }
-      // v1.3.0: fotos en segundo plano (no bloquea metadatos).
-      unawaited(subirFotosIncidencias());
+
       // Fix #11: solo marcar OK si todo (incl. incidencias) funcionó.
       if (incidenciasOk) {
         await _db.setMeta(

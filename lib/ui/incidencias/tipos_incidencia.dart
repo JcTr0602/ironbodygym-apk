@@ -246,7 +246,7 @@ class _TiposIncidenciaScreenState
         'activo': 1,
         'orden': orden,
       },
-      esInsert: true,
+      esInsert: existente == null,
     );
     _cargar();
   }

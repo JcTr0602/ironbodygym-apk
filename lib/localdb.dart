@@ -696,9 +696,14 @@ class LocalDb {
                asignado_a, prioridad, fecha_limite, ubicacion,
                creada_por, creada_en, resuelta_por, resuelta_en,
                nota_resolucion, version, sync_estado)
-            SELECT id, tipo, tipo_id, descripcion, detalle, estado,
-               asignado_a, prioridad, fecha_limite, ubicacion,
-               creada_por, creada_en, resuelta_por, resuelta_en,
+            SELECT id, tipo,
+               COALESCE(tipo_id, 'a1b2c3d4-0004-4000-8000-000000000004'),
+               descripcion, detalle, estado,
+               asignado_a, COALESCE(prioridad, 'media'),
+               fecha_limite, ubicacion,
+               creada_por,
+               COALESCE(creada_en, actualizada_en, datetime('now')),
+               resuelta_por, resuelta_en,
                nota_resolucion, version, 'synced'
             FROM incidencias_mirror
           ''');
@@ -1012,6 +1017,31 @@ class LocalDb {
     await _addColumnIfMissing(db, 'app_log', 'contexto', 'TEXT');
     await _addColumnIfMissing(db, 'app_log', 'op_id', 'TEXT');
     await _addColumnIfMissing(db, 'app_log', 'stack', 'TEXT');
+    // A5 (Argón): índices también en clean install.
+    await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_tipos_activos_orden '
+        'ON incidencias_tipos(activo, orden)');
+    await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_inc_tipo '
+        'ON incidencias_local(tipo_id)');
+    await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_inc_asignado_estado '
+        'ON incidencias_local(asignado_a, estado)');
+    await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_inc_prioridad_limite '
+        'ON incidencias_local(prioridad, fecha_limite)');
+    await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_fotos_incidencia '
+        'ON incidencias_fotos(incidencia_id)');
+    await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_fotos_sync '
+        'ON incidencias_fotos(sync_estado)');
+    await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_comentarios_inc_fecha '
+        'ON incidencias_comentarios(incidencia_id, creado_en)');
+    await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_historial_inc_fecha '
+        'ON incidencias_historial(incidencia_id, cambiado_en)');
     // Seed de tipos (idempotente)
     await _seedTiposIncidencia(db);
 
@@ -1591,8 +1621,13 @@ class LocalDb {
   }
 
   /// Argón B1: marca tipos y comentarios como sincronizados tras push.
+  /// Argón B1: marca como synced todo lo que subió por ops_queue.
+  /// Incluye incidencias_local (crear/editar/cambiar_estado van por
+  /// _uploadOps y no por marcarIncidenciaSincronizada).
   Future<void> marcarTiposComentariosSincronizados() async {
     final d = await db;
+    await d.update('incidencias_local', {'sync_estado': 'synced'},
+        where: "sync_estado = 'pending'");
     await d.update('incidencias_tipos', {'sync_estado': 'synced'},
         where: "sync_estado = 'pending'");
     await d.update(

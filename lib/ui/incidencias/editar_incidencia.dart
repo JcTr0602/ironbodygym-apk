@@ -3,6 +3,7 @@ import 'package:uuid/uuid.dart';
 import '../../localdb.dart';
 import '../../modelos/incidencia.dart';
 import '../diseno.dart';
+import '../../auth.dart';
 
 /// Crear / editar incidencia.
 /// v1.3.0
@@ -270,7 +271,7 @@ class _EditarIncidenciaScreenState
             widget.existente?.estado ??
                 'pendiente',
         'creada_por':
-            'yo', // TODO: usuario actual
+            AuthService().userId ?? 'desconocido',
         'creada_en': widget
                 .existente?.creadaEn
                 ?.toIso8601String() ??

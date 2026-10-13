@@ -38,6 +38,7 @@ import 'pendiente.dart';
 import 'pin_lock.dart';
 import 'transferencia.dart';
 import 'widgets.dart';
+import '../app_log.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -363,8 +364,9 @@ class _HomeScreenState extends State<HomeScreen>
       }
     } catch (e) {
       // Fix #29 (Sol): NO actualizar _lastFetch si falló.
-      // Así el próximo _cargar reintentará en vez de esperar 30s.
-      rethrow;
+      // M4 (Argón): loguear y retornar en vez de rethrow.
+      AppLog.error('home', 'cargar_fallo', d: '$e');
+      return;
     } finally {
       _cargando = false;
     }

@@ -333,7 +333,7 @@ class _DetalleIncidenciaScreenState
         'id': comId,
         'incidencia_id': widget.incidenciaId,
         'texto': texto,
-        'creado_por': 'yo', // TODO: usuario actual
+        'creado_por': AuthService().userId ?? 'desconocido', // TODO: usuario actual
         'creado_en': ahora,
         'sync_estado': 'pending',
       },
@@ -344,7 +344,7 @@ class _DetalleIncidenciaScreenState
         'id': comId,
         'incidencia_id': widget.incidenciaId,
         'texto': texto,
-        'creado_por': 'yo',
+        'creado_por': AuthService().userId ?? 'desconocido',
         'creado_en': ahora,
       },
       esInsert: true,
@@ -411,7 +411,7 @@ class _DetalleIncidenciaScreenState
           'campo': 'estado',
           'valor_anterior': anterior,
           'valor_nuevo': 'resuelta',
-          'cambiado_por': 'yo',
+          'cambiado_por': AuthService().userId ?? 'desconocido',
           'cambiado_en': ahora,
         });
 
@@ -424,7 +424,7 @@ class _DetalleIncidenciaScreenState
             'estado_anterior': anterior,
             'estado_nuevo': 'resuelta',
             'nota_resolucion': nota,
-            'resuelta_por': 'yo',
+            'resuelta_por': AuthService().userId ?? 'desconocido',
             'resuelta_en': ahora,
             'version': _inc!.version + 1,
           }),
@@ -461,7 +461,7 @@ class _DetalleIncidenciaScreenState
         'campo': 'estado',
         'valor_anterior': anterior,
         'valor_nuevo': nuevo,
-        'cambiado_por': 'yo',
+        'cambiado_por': AuthService().userId ?? 'desconocido',
         'cambiado_en': ahora,
       });
 

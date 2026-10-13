@@ -102,8 +102,8 @@ class _PendienteScreenState extends State<PendienteScreen> {
 
   /// v1.3.0 (Pendiente v2): confirma por lista de IDs (día o todo).
   /// Optimistic UI: actualiza al instante, persiste en background.
-  Future<void> _confirmarPorIds(
-      PendienteDia dia, String nombre, String etiqueta) async {
+  Future<void> _confirmarPorIds(PendienteDia dia, String nombre,
+      String etiqueta, String trainerTelegramId) async {
     // Fix #15 (Sol): el día ya viene separado por moneda (ver
     // procesarPendientes), pero mostramos la moneda real por seguridad.
     final moneda = dia.pagos.isEmpty
@@ -151,6 +151,9 @@ class _PendienteScreenState extends State<PendienteScreen> {
         return uids.contains('${tipo}_$id');
       });
       _entrenadores = procesarPendientes(_crudos);
+      // Argón B2: recalcular _totalUsd en el setState optimista.
+      _totalUsd = _entrenadores.fold(
+          0.0, (acc, e) => acc + e.totalPorMoneda('USD'));
       _confirmando = true;
     });
     try {
@@ -159,12 +162,15 @@ class _PendienteScreenState extends State<PendienteScreen> {
         mensualIds: dia.mensualIds,
         diarioIds: dia.diarioIds,
         entrenadorNombre: nombre,
+        trainerTelegramId: int.tryParse(trainerTelegramId),
       );
     } catch (e) {
       if (mounted) {
         setState(() {
           _crudos = crudosAnteriores;
           _entrenadores = procesarPendientes(_crudos);
+          _totalUsd = _entrenadores.fold(
+              0.0, (acc, e) => acc + e.totalPorMoneda('USD'));
         });
         ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
@@ -345,6 +351,7 @@ class _PendienteScreenState extends State<PendienteScreen> {
           _entrenadores[i].nombre,
           'Se marcarán como entregados los ${dia.pagos.length} '
           'pagos del ${dia.etiquetaFecha.toLowerCase()}.',
+          _entrenadores[i].trainerTelegramId,
         ),
         onConfirmarTodo: () {
           // Combinar todos los días en un pseudo-día.
@@ -357,6 +364,7 @@ class _PendienteScreenState extends State<PendienteScreen> {
             pseudo,
             _entrenadores[i].nombre,
             'Se marcarán como entregados todos sus pagos pendientes.',
+            _entrenadores[i].trainerTelegramId,
           );
         },
         onWhatsApp: () =>

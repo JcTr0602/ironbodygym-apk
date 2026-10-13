@@ -133,6 +133,11 @@ class AppLog {
         RegExp(r'Bearer\s+\S+',
             caseSensitive: false),
         'Bearer ***');
+    // M1 (Argón): también ocultar token/api_key/password en texto.
+    v = v.replaceAll(
+        RegExp(r'(token|api_key|password)\s*[:=]\s*\S+',
+            caseSensitive: false),
+        r'\1=***');
     return v;
   }
 
@@ -154,8 +159,14 @@ class AppLog {
   /// crecimiento infinito si la BD está rota).
   static int _fallosFlush = 0;
 
+  static bool _flushing = false;
+
   static Future<void> _flush() async {
-    _flushTimer?.cancel();
+    // M2 (Argón): evitar ejecuciones concurrentes.
+    if (_flushing) return;
+    _flushing = true;
+    try {
+      _flushTimer?.cancel();
     _flushTimer = null;
     if (_buffer.isEmpty) return;
     final lote =
@@ -195,6 +206,9 @@ class AppLog {
       if (kDebugMode) {
         debugPrint('[AppLog flush error]: $e');
       }
+    }
+    } finally {
+      _flushing = false;
     }
   }
 
@@ -243,13 +257,15 @@ class AppLog {
   static Future<void> podar([Database? db]) async {
     try {
       final b = db ?? await LocalDb.instance.db;
-      await b.execute("""
-        DELETE FROM app_log
-        WHERE ts < datetime('now', '-7 days')
-           OR id NOT IN (
-             SELECT id FROM app_log ORDER BY id DESC LIMIT 5000
-           )
-      """);
+      // M3 (Argón): corte ISO desde Dart (no datetime('now') UTC).
+      final corte = DateTime.now()
+          .subtract(const Duration(days: 7))
+          .toIso8601String();
+      await b.execute(
+        'DELETE FROM app_log WHERE ts < ? '
+        'OR id NOT IN (SELECT id FROM app_log ORDER BY id DESC LIMIT 5000)',
+        [corte],
+      );
     } catch (_) {}
   }
 

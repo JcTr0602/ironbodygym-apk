@@ -6,6 +6,7 @@ import '../diseno.dart';
 import 'widgets/tarjeta_incidencia.dart';
 import 'detalle_incidencia.dart';
 import 'editar_incidencia.dart';
+import '../../auth.dart';
 
 /// Lista de incidencias con filtros, buscador y SLA visual.
 /// v1.3.0
@@ -114,7 +115,7 @@ class _ListaIncidenciasScreenState
 
   List<Incidencia> get _filtradas {
     // TODO: obtener idUsuarioActual de la sesión
-    const idUsuarioActual = 'yo';
+    final idUsuarioActual = AuthService().userId ?? 'desconocido';
     return _todas.where((inc) {
       if (_soloMias &&
           inc.asignadoA != idUsuarioActual) {
