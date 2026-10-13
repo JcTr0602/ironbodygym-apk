@@ -685,6 +685,14 @@ class SyncEngine {
     try {
       if (!silencioso) _emit(SyncPhase.downloading);
       final n = await _download(silencioso: silencioso);
+      // v1.3.0: pull de incidencias (tipos → incidencias, orden por FK).
+      try {
+        await _pullTiposIncidencia();
+        await _pullIncidencias();
+      } catch (e) {
+        AppLog.error(
+            'sync', 'pull_incidencias_fallo', d: '$e');
+      }
       await _db.setMeta('last_pull_ok', DateTime.now().toIso8601String());
       await _db.setMeta('last_downloaded', '$n');
       _emit(SyncPhase.idle);
@@ -2334,6 +2342,267 @@ class SyncEngine {
       }
     }
   }
+
+  /// v1.3.0: Pull de tipos de incidencia (antes que incidencias, por FK).
+  Future<void> _pullTiposIncidencia() async {
+    final wm =
+        await _db.getWatermarkTabla('incidencias_tipos');
+    try {
+      final r = await _getAuth(Uri.parse(
+          '$_base/rest/v1/sync_incidencias_tipos?sync_seq=gt.$wm'
+          '&order=sync_seq&limit=100'));
+      if (r.statusCode != 200) return;
+      final rows = jsonDecode(r.body) as List;
+      if (rows.isEmpty) return;
+      final d = await _db.db;
+      await d.transaction((txn) async {
+        var maxSeq = wm;
+        for (final row in rows) {
+          final m =
+              Map<String, dynamic>.from(row as Map);
+          final seq =
+              (m['sync_seq'] as num?)?.toInt() ?? 0;
+          if (seq > maxSeq) maxSeq = seq;
+          await txn.insert(
+              'incidencias_tipos_mirror', {
+            'id': m['id'],
+            'nombre': m['nombre'],
+            'icono': m['icono'],
+            'color': m['color'],
+            'activo':
+                (m['activo'] == true) ? 1 : 0,
+            'orden':
+                (m['orden'] as num?)?.toInt() ??
+                    0,
+            'actualizada_en':
+                m['actualizada_en'],
+            'sync_seq': seq,
+          },
+              conflictAlgorithm:
+                  ConflictAlgorithm.replace);
+          final local = await txn.query(
+              'incidencias_tipos',
+              where: 'id = ?',
+              whereArgs: [m['id']]);
+          if (local.isEmpty) {
+            await txn
+                .insert('incidencias_tipos', {
+              'id': m['id'],
+              'nombre': m['nombre'],
+              'icono': m['icono'],
+              'color': m['color'],
+              'activo':
+                  (m['activo'] == true) ? 1 : 0,
+              'orden': (m['orden'] as num?)
+                      ?.toInt() ??
+                  0,
+              'actualizado_en':
+                  m['actualizada_en'],
+              'sync_estado': 'synced',
+            });
+          } else if (local.first['sync_estado'] ==
+              'synced') {
+            await txn.update(
+                'incidencias_tipos', {
+              'nombre': m['nombre'],
+              'icono': m['icono'],
+              'color': m['color'],
+              'activo':
+                  (m['activo'] == true) ? 1 : 0,
+              'orden': (m['orden'] as num?)
+                      ?.toInt() ??
+                  0,
+              'actualizado_en':
+                  m['actualizada_en'],
+            },
+                where: 'id = ?',
+                whereArgs: [m['id']]);
+          }
+        }
+        await _db.setWatermarkTabla(
+            'incidencias_tipos', maxSeq);
+      });
+      AppLog.info('sync', 'pull_tipos_ok',
+          d: 'n=${rows.length}');
+    } catch (e) {
+      AppLog.error(
+          'sync', 'pull_tipos_fallo', d: '$e');
+    }
+  }
+
+  /// v1.3.0: Pull de incidencias con OCC por version.
+  Future<void> _pullIncidencias() async {
+    final wm =
+        await _db.getWatermarkTabla('incidencias');
+    try {
+      final r = await _getAuth(Uri.parse(
+          '$_base/rest/v1/sync_incidencias?sync_seq=gt.$wm'
+          '&order=sync_seq&limit=100'));
+      if (r.statusCode != 200) return;
+      final rows = jsonDecode(r.body) as List;
+      if (rows.isEmpty) return;
+      final d = await _db.db;
+      await d.transaction((txn) async {
+        var maxSeq = wm;
+        for (final row in rows) {
+          final m =
+              Map<String, dynamic>.from(row as Map);
+          final seq =
+              (m['sync_seq'] as num?)?.toInt() ?? 0;
+          if (seq > maxSeq) maxSeq = seq;
+          final local = await txn.query(
+              'incidencias_local',
+              where: 'id = ?',
+              whereArgs: [m['id']]);
+          if (local.isNotEmpty &&
+              local.first['sync_estado'] ==
+                  'pending') {
+            continue;
+          }
+          final vRemota =
+              (m['version'] as num?)?.toInt() ?? 1;
+          final vLocal = local.isEmpty
+              ? 0
+              : ((local.first['version'] as num?)
+                      ?.toInt() ??
+                  1);
+          if (vRemota > vLocal) {
+            if (local.isNotEmpty) {
+              await txn.update(
+                  'incidencias_local', {
+                'tipo_id': m['tipo_id'],
+                'descripcion':
+                    m['descripcion'],
+                'detalle': m['detalle'],
+                'estado':
+                    m['estado'] ?? 'pendiente',
+                'asignado_a': m['asignado_a'],
+                'prioridad': m['prioridad'],
+                'fecha_limite':
+                    m['fecha_limite'],
+                'ubicacion': m['ubicacion'],
+                'resuelta_por':
+                    m['resuelta_por'],
+                'resuelta_en':
+                    m['resuelta_en'],
+                'nota_resolucion':
+                    m['nota_resolucion'],
+                'version': vRemota,
+                'actualizado_en':
+                    m['actualizada_en'],
+                'sync_estado': 'synced',
+              },
+                  where: 'id = ?',
+                  whereArgs: [m['id']]);
+            } else {
+              await txn.insert(
+                  'incidencias_mirror', {
+                'id': m['id'],
+                'tipo': m['tipo'] ?? 'sync',
+                'tipo_id': m['tipo_id'],
+                'descripcion':
+                    m['descripcion'],
+                'detalle': m['detalle'],
+                'estado':
+                    m['estado'] ?? 'pendiente',
+                'creada_por':
+                    m['creada_por'],
+                'creada_en':
+                    m['creada_en'],
+                'resuelta_por':
+                    m['resuelta_por'],
+                'resuelta_en':
+                    m['resuelta_en'],
+                'nota_resolucion':
+                    m['nota_resolucion'],
+                'version': vRemota,
+                'actualizada_en':
+                    m['actualizada_en'],
+                'sync_seq': seq,
+              },
+                  conflictAlgorithm:
+                      ConflictAlgorithm.replace);
+            }
+          }
+        }
+        await _db.setWatermarkTabla(
+            'incidencias', maxSeq);
+      });
+      AppLog.info('sync', 'pull_inc_ok',
+          d: 'n=${rows.length}');
+    } catch (e) {
+      AppLog.error(
+          'sync', 'pull_inc_fallo', d: '$e');
+    }
+  }
+
+  /// v1.3.0: Worker de fotos de incidencias (desacoplado).
+  /// Se llama con unawaited() tras el push de metadatos.
+  Future<void> subirFotosIncidencias() async {
+    final d = await _db.db;
+    final pendientes = await d.query(
+        'incidencias_fotos',
+        where: 'sync_estado = ?',
+        whereArgs: ['pending'],
+        limit: 5);
+    for (final f in pendientes) {
+      try {
+        final fid = '${f['id']}';
+        final incidenciaId =
+            '${f['incidencia_id']}';
+        final localPath =
+            '${f['local_path']}';
+        final storagePath =
+            'incidencias/$incidenciaId/$fid.jpg';
+        final file = File(localPath);
+        if (!await file.exists()) {
+          await d.update(
+              'incidencias_fotos',
+              {'sync_estado': 'error'},
+              where: 'id = ?',
+              whereArgs: [fid]);
+          continue;
+        }
+        final bytes =
+            await file.readAsBytes();
+        final ok = await _subirFotoSimple(
+            storagePath, bytes);
+        if (ok) {
+          await d.update(
+              'incidencias_fotos', {
+            'storage_path': storagePath,
+            'sync_estado': 'synced',
+          },
+              where: 'id = ?',
+              whereArgs: [fid]);
+          await _db.queueOp(
+            opUuid: const Uuid().v4(),
+            tipo: 'registrar_foto_incidencia',
+            payload: {
+              'id': fid,
+              'incidencia_id': incidenciaId,
+              'storage_path': storagePath,
+              'tipo': '${f['tipo']}',
+            },
+          );
+          AppLog.info('sync',
+              'foto_inc_ok', d: fid);
+        } else {
+          await d.update(
+              'incidencias_fotos',
+              {'sync_estado': 'error'},
+              where: 'id = ?',
+              whereArgs: [fid]);
+          AppLog.error('sync',
+              'foto_inc_http', d: 'fallo subida');
+        }
+      } catch (e) {
+        AppLog.error(
+            'sync', 'foto_inc_fallo', d: '$e');
+      }
+    }
+  }
+
 }
 
 /// v1.2.9: excepción para errores TUS permanentes (Luna #1).

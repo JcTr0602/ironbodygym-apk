@@ -650,6 +650,12 @@ class LocalDb {
 
           // Seed de tipos por defecto (si la tabla está vacía)
           await _seedTiposIncidencia(db);
+
+          // Caso b Gemini: asignar tipo 'General' a incidencias sin tipo_id
+          await db.execute(
+              "UPDATE incidencias_local SET tipo_id = "
+              "'a1b2c3d4-0004-4000-8000-000000000004' "
+              "WHERE tipo_id IS NULL");
         }
       },
     );
