@@ -1810,10 +1810,10 @@ class LocalDb {
     // si crece, hay datos para decidir una re-arquitectura.
     if (estado == 'aplicada') {
       final rows = await d.query('ops_queue',
-          columns: ['creada_en'], where: 'op_uuid=?', whereArgs: [opUuid]);
+          columns: ['creada_ts'], where: 'op_uuid=?', whereArgs: [opUuid]);
       if (rows.isNotEmpty) {
         try {
-          final creada = DateTime.parse('${rows.first['creada_en']}');
+          final creada = DateTime.parse('${rows.first['creada_ts']}');
           final ms =
               DateTime.now().difference(creada).inMilliseconds.clamp(0, 1 << 31);
           await setMeta('latencia_op_ms', '$ms');
