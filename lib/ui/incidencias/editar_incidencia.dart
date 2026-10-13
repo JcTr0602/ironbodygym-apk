@@ -245,6 +245,8 @@ class _EditarIncidenciaScreenState
           DateTime.now().toIso8601String();
       final id = widget.existente?.id ??
           const Uuid().v4();
+      // Fix #10: version base para precondición OCC en el backend.
+      final versionBase = widget.existente?.version ?? 0;
       final datos = {
         'id': id,
         'tipo': 'sync', // legacy (compatible con CHECK de Supabase)
@@ -275,26 +277,33 @@ class _EditarIncidenciaScreenState
             ahora,
         'actualizado_en': ahora,
         'sync_estado': 'pending',
-        'version': 1,
+        // Fix #10 (Sol): preservar version para OCC, no resetear a 1.
+        'version': (widget.existente?.version ?? 0) + 1,
         'sincronizada': 0,
       };
+      // Fix #9 (Sol): mutación + encolado en una transacción.
+      // Fix #10: incluir version_base como precondición OCC.
+      final payloadOp = Map<String, dynamic>.from(datos);
+      payloadOp['version_base'] = versionBase;
+      final opUuid = const Uuid().v4();
       if (widget.existente != null) {
-        await d.update('incidencias_local',
-            datos,
-            where: 'id = ?',
-            whereArgs: [id]);
-        await LocalDb.instance.queueOp(
-          opUuid: const Uuid().v4(),
-          tipo: 'editar_incidencia',
-          payload: datos,
+        await LocalDb.instance.mutarYEncolar(
+          tabla: 'incidencias_local',
+          datos: datos,
+          whereId: id,
+          opUuid: opUuid,
+          opTipo: 'editar_incidencia',
+          opPayload: payloadOp,
         );
       } else {
-        await d.insert(
-            'incidencias_local', datos);
-        await LocalDb.instance.queueOp(
-          opUuid: const Uuid().v4(),
-          tipo: 'crear_incidencia',
-          payload: datos,
+        await LocalDb.instance.mutarYEncolar(
+          tabla: 'incidencias_local',
+          datos: datos,
+          whereId: id,
+          opUuid: opUuid,
+          opTipo: 'crear_incidencia',
+          opPayload: payloadOp,
+          esInsert: true,
         );
       }
       if (mounted) Navigator.pop(context, true);

@@ -710,16 +710,27 @@ class SyncEngine {
           int.tryParse(await _db.getMeta('total_bajados') ?? '0') ?? 0;
       await _db.setMeta('total_bajados', '${prevBajados + n}');
       // v1.3.0: pull de incidencias (tipos → incidencias, orden por FK).
+      // Fix #11 (Sol): si falla, no se marca last_pull_ok general.
+      var incidenciasOk = true;
       try {
         await _pullTiposIncidencia();
         await _pullIncidencias();
+        await _db.setMeta('last_pull_incidencias_ok',
+            DateTime.now().toIso8601String());
       } catch (e) {
+        incidenciasOk = false;
         AppLog.error(
             'sync', 'pull_incidencias_fallo', d: '$e');
+        await _db.setMeta(
+            'last_pull_incidencias_error', '$e');
       }
       // v1.3.0: fotos en segundo plano (no bloquea metadatos).
       unawaited(subirFotosIncidencias());
-      await _db.setMeta('last_pull_ok', DateTime.now().toIso8601String());
+      // Fix #11: solo marcar OK si todo (incl. incidencias) funcionó.
+      if (incidenciasOk) {
+        await _db.setMeta(
+            'last_pull_ok', DateTime.now().toIso8601String());
+      }
       await _db.setMeta('last_downloaded', '$n');
       _emit(SyncPhase.idle);
     } on SessionExpired {
@@ -2370,6 +2381,8 @@ class SyncEngine {
   }
 
   /// v1.3.0: Pull de tipos de incidencia (antes que incidencias, por FK).
+  /// Fix #11 (Sol): no silenciar errores; lanzar para que el pull
+  /// exterior no marque last_pull_ok.
   Future<void> _pullTiposIncidencia() async {
     final wm =
         await _db.getWatermarkTabla('incidencias_tipos');
@@ -2377,7 +2390,10 @@ class SyncEngine {
       final r = await _getAuth(Uri.parse(
           '$_base/rest/v1/sync_incidencias_tipos?sync_seq=gt.$wm'
           '&order=sync_seq&limit=100'));
-      if (r.statusCode != 200) return;
+      if (r.statusCode != 200) {
+        throw Exception(
+            'pull_tipos_incidencia HTTP ${r.statusCode}');
+      }
       final rows = jsonDecode(r.body) as List;
       if (rows.isEmpty) return;
       final d = await _db.db;
@@ -2458,6 +2474,7 @@ class SyncEngine {
   }
 
   /// v1.3.0: Pull de incidencias con OCC por version.
+  /// Fix #11 (Sol): no silenciar errores HTTP.
   Future<void> _pullIncidencias() async {
     final wm =
         await _db.getWatermarkTabla('incidencias');
@@ -2465,12 +2482,16 @@ class SyncEngine {
       final r = await _getAuth(Uri.parse(
           '$_base/rest/v1/sync_incidencias?sync_seq=gt.$wm'
           '&order=sync_seq&limit=100'));
-      if (r.statusCode != 200) return;
+      if (r.statusCode != 200) {
+        throw Exception(
+            'pull_incidencias HTTP ${r.statusCode}');
+      }
       final rows = jsonDecode(r.body) as List;
       if (rows.isEmpty) return;
       final d = await _db.db;
       await d.transaction((txn) async {
         var maxSeq = wm;
+        var huboConflicto = false;
         for (final row in rows) {
           final m =
               Map<String, dynamic>.from(row as Map);
@@ -2483,12 +2504,15 @@ class SyncEngine {
           if (local.isNotEmpty &&
               local.first['sync_estado'] ==
                   'pending') {
-            // Sol #6 (Gemini): detener el pull aquí para que el
-            // watermark NO sobrepase el conflicto.
-            break;
+            // Argón: congelar avance de maxSeq ante conflicto,
+            // pero seguir aplicando las demás filas.
+            huboConflicto = true;
+            continue;
           }
-          // Solo avanzar si la fila se aplicó.
-          if (seq > maxSeq) maxSeq = seq;
+          if (!huboConflicto &&
+              seq > maxSeq) {
+            maxSeq = seq;
+          }
           final vRemota =
               (m['version'] as num?)?.toInt() ?? 1;
           final vLocal = local.isEmpty
@@ -2498,6 +2522,37 @@ class SyncEngine {
                   1);
           if (vRemota > vLocal) {
             if (local.isNotEmpty) {
+              // Argón: actualizar también el mirror para no dejarlo
+              // desactualizado.
+              await txn.insert(
+                  'incidencias_mirror',
+                  {
+                    'id': m['id'],
+                    'tipo_id': m['tipo_id'],
+                    'descripcion': m['descripcion'],
+                    'detalle': m['detalle'],
+                    'estado':
+                        m['estado'] ?? 'pendiente',
+                    'asignado_a': m['asignado_a'],
+                    'prioridad': m['prioridad'],
+                    'fecha_limite':
+                        m['fecha_limite'],
+                    'ubicacion': m['ubicacion'],
+                    'creada_por': m['creada_por'],
+                    'creada_en': m['creada_en'],
+                    'resuelta_por':
+                        m['resuelta_por'],
+                    'resuelta_en':
+                        m['resuelta_en'],
+                    'nota_resolucion':
+                        m['nota_resolucion'],
+                    'version': vRemota,
+                    'actualizada_en':
+                        m['actualizada_en'],
+                    'sync_seq': seq,
+                  },
+                  conflictAlgorithm:
+                      ConflictAlgorithm.replace);
               await txn.update(
                   'incidencias_local', {
                 'tipo_id': m['tipo_id'],
@@ -2589,16 +2644,29 @@ class SyncEngine {
 
   /// v1.3.0: Worker de fotos de incidencias (desacoplado).
   /// Se llama con unawaited() tras el push de metadatos.
+  /// Fix #13 (Sol): claim atómico, encolado antes de marcar synced,
+  /// y reintentos con backoff en vez de 'error' permanente.
   Future<void> subirFotosIncidencias() async {
     final d = await _db.db;
     final pendientes = await d.query(
         'incidencias_fotos',
-        where: 'sync_estado = ?',
-        whereArgs: ['pending'],
+        where: "sync_estado IN ('pending', 'retry')",
+        whereArgs: [],
         limit: 5);
     for (final f in pendientes) {
+      final fid = '${f['id']}';
+      // Claim atómico: solo si sigue en pending/retry.
+      final reclamadas = await d.update(
+          'incidencias_fotos',
+          {
+            'sync_estado': 'uploading',
+            'intentos':
+                ((f['intentos'] as num?)?.toInt() ?? 0) + 1,
+          },
+          where: "id = ? AND sync_estado IN ('pending', 'retry')",
+          whereArgs: [fid]);
+      if (reclamadas == 0) continue; // otro worker la tomó
       try {
-        final fid = '${f['id']}';
         final incidenciaId =
             '${f['incidencia_id']}';
         final localPath =
@@ -2607,6 +2675,7 @@ class SyncEngine {
             'incidencias/$incidenciaId/$fid.jpg';
         final file = File(localPath);
         if (!await file.exists()) {
+          // Archivo perdido: marcar error definitivo.
           await d.update(
               'incidencias_fotos',
               {'sync_estado': 'error'},
@@ -2619,35 +2688,54 @@ class SyncEngine {
         final ok = await _subirFotoSimple(
             storagePath, bytes);
         if (ok) {
-          await d.update(
-              'incidencias_fotos', {
-            'storage_path': storagePath,
-            'sync_estado': 'synced',
-          },
-              where: 'id = ?',
-              whereArgs: [fid]);
-          await _db.queueOp(
-            opUuid: const Uuid().v4(),
-            tipo: 'registrar_foto_incidencia',
-            payload: {
-              'id': fid,
-              'incidencia_id': incidenciaId,
+          // Fix #13: encolar metadatos ANTES de marcar synced,
+          // todo en una transacción.
+          await d.transaction((txn) async {
+            await txn.insert('ops_queue', {
+              'op_uuid': const Uuid().v4(),
+              'tipo': 'registrar_foto_incidencia',
+              'payload': jsonEncode({
+                'id': fid,
+                'incidencia_id': incidenciaId,
+                'storage_path': storagePath,
+                'tipo': '${f['tipo']}',
+              }),
+              'estado': 'pendiente',
+              'creada_ts':
+                  DateTime.now().toIso8601String(),
+            });
+            await txn.update(
+                'incidencias_fotos', {
               'storage_path': storagePath,
-              'tipo': '${f['tipo']}',
+              'sync_estado': 'synced',
             },
-          );
+                where: 'id = ?',
+                whereArgs: [fid]);
+          });
           AppLog.info('sync',
               'foto_inc_ok', d: fid);
         } else {
+          // Reintentable: volver a pending (con límite).
+          final intentos =
+              ((f['intentos'] as num?)?.toInt() ?? 0) + 1;
           await d.update(
               'incidencias_fotos',
-              {'sync_estado': 'error'},
+              {
+                'sync_estado':
+                    intentos >= 5 ? 'error' : 'retry',
+              },
               where: 'id = ?',
               whereArgs: [fid]);
           AppLog.error('sync',
               'foto_inc_http', d: 'fallo subida');
         }
       } catch (e) {
+        // Reintentable: no marcar 'error' permanente de inmediato.
+        await d.update(
+            'incidencias_fotos',
+            {'sync_estado': 'retry'},
+            where: 'id = ?',
+            whereArgs: [fid]);
         AppLog.error(
             'sync', 'foto_inc_fallo', d: '$e');
       }

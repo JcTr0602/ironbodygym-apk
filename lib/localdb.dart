@@ -597,6 +597,9 @@ class LocalDb {
           await db.execute(
               'CREATE INDEX IF NOT EXISTS idx_fotos_sync '
               'ON incidencias_fotos(sync_estado)');
+          // Fix #13: columna intentos para reintentos.
+          await _addColumnIfMissing(db, 'incidencias_fotos',
+              'intentos', 'INTEGER NOT NULL DEFAULT 0');
 
           // 4. Comentarios (índice compuesto por fecha)
           await db.execute('''
@@ -898,47 +901,57 @@ class LocalDb {
   /// v1.3.0 (Sol #4): DDL de Incidencias v19, idempotente.
   /// Llamado desde _crearTablas (clean install) y onUpgrade (migración).
   static Future<void> _crearEsquemaIncidencias(Database db) async {
-    // Tablas base de incidencias (esquema v19 real).
+    // Tablas base de incidencias (esquema v19 real, Argón).
     await db.execute('''CREATE TABLE IF NOT EXISTS incidencias_local (
-      id TEXT PRIMARY KEY,
-      tipo TEXT NOT NULL DEFAULT 'sync',
-      tipo_id TEXT,
-      descripcion TEXT,
-      detalle TEXT,
+      id TEXT PRIMARY KEY, tipo TEXT NOT NULL DEFAULT 'sync',
+      entidad TEXT, entidad_id INTEGER,
+      tipo_id TEXT, descripcion TEXT, detalle TEXT,
       estado TEXT NOT NULL DEFAULT 'pendiente',
-      asignado_a TEXT,
-      prioridad TEXT DEFAULT 'media',
-      fecha_limite TEXT,
-      ubicacion TEXT,
-      creada_por TEXT,
-      creada_en TEXT,
-      resuelta_por TEXT,
-      resuelta_en TEXT,
-      nota_resolucion TEXT,
+      asignado_a TEXT, prioridad TEXT DEFAULT 'media',
+      fecha_limite TEXT, ubicacion TEXT,
+      creada_por TEXT, creada_en TEXT,
+      resuelta_por TEXT, resuelta_en TEXT, nota_resolucion TEXT,
       actualizado_en TEXT,
-      sync_estado TEXT NOT NULL DEFAULT 'synced',
-      version INTEGER DEFAULT 1
+      version INTEGER NOT NULL DEFAULT 1,
+      sincronizada INTEGER NOT NULL DEFAULT 0,
+      visibilidad TEXT NOT NULL DEFAULT 'compartida',
+      sync_estado TEXT NOT NULL DEFAULT 'synced'
     )''');
     await db.execute('''CREATE TABLE IF NOT EXISTS incidencias_mirror (
-      id TEXT PRIMARY KEY,
-      tipo TEXT,
-      tipo_id TEXT,
-      descripcion TEXT,
-      detalle TEXT,
-      estado TEXT,
-      asignado_a TEXT,
-      prioridad TEXT,
-      fecha_limite TEXT,
-      ubicacion TEXT,
-      creada_por TEXT,
-      creada_en TEXT,
-      resuelta_por TEXT,
-      resuelta_en TEXT,
-      nota_resolucion TEXT,
-      version INTEGER DEFAULT 1,
-      actualizada_en TEXT,
-      sync_seq INTEGER
+      id TEXT PRIMARY KEY, tipo TEXT,
+      entidad TEXT, entidad_id INTEGER,
+      tipo_id TEXT, descripcion TEXT, detalle TEXT,
+      estado TEXT, asignado_a TEXT, prioridad TEXT,
+      fecha_limite TEXT, ubicacion TEXT,
+      creada_por TEXT, creada_en TEXT,
+      resuelta_por TEXT, resuelta_en TEXT, nota_resolucion TEXT,
+      version INTEGER NOT NULL DEFAULT 1,
+      actualizada_en TEXT, sync_seq INTEGER,
+      visibilidad TEXT NOT NULL DEFAULT 'compartida'
     )''');
+    // Garantizar columnas v19 si las tablas ya existían (Argón).
+    for (final col in [
+      ['tipo_id', 'TEXT'],
+      ['asignado_a', 'TEXT'],
+      ['prioridad', "TEXT DEFAULT 'media'"],
+      ['fecha_limite', 'TEXT'],
+      ['ubicacion', 'TEXT'],
+      ['actualizado_en', 'TEXT'],
+      ['sync_estado', "TEXT NOT NULL DEFAULT 'synced'"],
+    ]) {
+      await _addColumnIfMissing(
+          db, 'incidencias_local', col[0], col[1]);
+    }
+    for (final col in [
+      ['tipo_id', 'TEXT'],
+      ['asignado_a', 'TEXT'],
+      ['prioridad', 'TEXT'],
+      ['fecha_limite', 'TEXT'],
+      ['ubicacion', 'TEXT'],
+    ]) {
+      await _addColumnIfMissing(
+          db, 'incidencias_mirror', col[0], col[1]);
+    }
     // Tipos
     await db.execute('''CREATE TABLE IF NOT EXISTS incidencias_tipos (
       id TEXT PRIMARY KEY, nombre TEXT NOT NULL, icono TEXT,
@@ -958,8 +971,13 @@ class LocalDb {
       local_path TEXT NOT NULL, storage_path TEXT,
       tipo TEXT NOT NULL DEFAULT 'evidencia',
       sync_estado TEXT NOT NULL DEFAULT 'pending',
+      intentos INTEGER NOT NULL DEFAULT 0,
       creado_en TEXT NOT NULL
     )''');
+    // Fix #13: columna intentos para reintentos (si la tabla ya existía).
+    await _addColumnIfMissing(
+        db, 'incidencias_fotos', 'intentos',
+        'INTEGER NOT NULL DEFAULT 0');
     await db.execute('''CREATE TABLE IF NOT EXISTS incidencias_comentarios (
       id TEXT PRIMARY KEY,
       incidencia_id TEXT NOT NULL REFERENCES incidencias_local(id) ON DELETE CASCADE,
@@ -2050,6 +2068,51 @@ class LocalDb {
         await updateMirrorEstado(cid, est);
       }
     }
+  }
+
+  /// Fix #9 (Sol): mutación local + encolado en UNA transacción.
+  /// Evita que quede un cambio local sin op de sync (o viceversa)
+  /// si la app falla entre ambas operaciones.
+  Future<void> mutarYEncolar({
+    required String tabla,
+    required Map<String, dynamic> datos,
+    required String whereId,
+    required String opUuid,
+    required String opTipo,
+    required Map<String, dynamic> opPayload,
+    String? fotoPath,
+    bool esInsert = false,
+  }) async {
+    final d = await db;
+    final auth = AuthService();
+    final ahora = DateTime.now().toIso8601String();
+    await d.transaction((txn) async {
+      if (esInsert) {
+        await txn.insert(tabla, datos,
+            conflictAlgorithm: ConflictAlgorithm.replace);
+      } else {
+        await txn.update(tabla, datos,
+            where: 'id = ?', whereArgs: [whereId]);
+      }
+      // Encolado idempotente (mismo criterio que queueOp)
+      final yaExiste = await txn.query('ops_queue',
+          columns: ['op_uuid'],
+          where: 'op_uuid=?',
+          whereArgs: [opUuid],
+          limit: 1);
+      if (yaExiste.isEmpty) {
+        await txn.insert('ops_queue', {
+          'op_uuid': opUuid,
+          'tipo': opTipo,
+          'payload': jsonEncode(opPayload),
+          'estado': 'pendiente',
+          'creada_ts': ahora,
+          'foto_path': fotoPath,
+          'user_id': auth.userId,
+          'telegram_id': auth.telegramId,
+        });
+      }
+    });
   }
 
   Future<List<Map<String, dynamic>>> pendingOps() async {

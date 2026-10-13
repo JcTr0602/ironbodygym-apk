@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:uuid/uuid.dart';
 import '../../localdb.dart';
@@ -321,28 +322,31 @@ class _DetalleIncidenciaScreenState
   Future<void> _enviarComentario() async {
     final texto = _ctrlComentario.text.trim();
     if (texto.isEmpty) return;
-    final d = await LocalDb.instance.db;
     final comId = const Uuid().v4();
     final ahora =
         DateTime.now().toIso8601String();
-    await d.insert('incidencias_comentarios', {
-      'id': comId,
-      'incidencia_id': widget.incidenciaId,
-      'texto': texto,
-      'creado_por': 'yo', // TODO: usuario actual
-      'creado_en': ahora,
-      'sync_estado': 'pending',
-    });
-    await LocalDb.instance.queueOp(
+    // Fix #9 (Sol): insert + encolado en una transacción.
+    await LocalDb.instance.mutarYEncolar(
+      tabla: 'incidencias_comentarios',
+      datos: {
+        'id': comId,
+        'incidencia_id': widget.incidenciaId,
+        'texto': texto,
+        'creado_por': 'yo', // TODO: usuario actual
+        'creado_en': ahora,
+        'sync_estado': 'pending',
+      },
+      whereId: comId,
       opUuid: const Uuid().v4(),
-      tipo: 'agregar_comentario_incidencia',
-      payload: {
+      opTipo: 'agregar_comentario_incidencia',
+      opPayload: {
         'id': comId,
         'incidencia_id': widget.incidenciaId,
         'texto': texto,
         'creado_por': 'yo',
         'creado_en': ahora,
       },
+      esInsert: true,
     );
     _ctrlComentario.clear();
     _cargar();
@@ -407,22 +411,24 @@ class _DetalleIncidenciaScreenState
           'cambiado_por': 'yo',
           'cambiado_en': ahora,
         });
-      });
 
-      await LocalDb.instance.queueOp(
-        opUuid: const Uuid().v4(),
-        tipo: 'cambiar_estado_incidencia',
-        payload: {
-          'id': _inc!.id,
-          'estado_anterior': anterior,
-          'estado_nuevo': 'resuelta',
-          'nota_resolucion': nota,
-          'resuelta_por':
-              'yo', // TODO: usuario auth
-          'resuelta_en': ahora,
-          'version': _inc!.version + 1,
-        },
-      );
+        // 4. Fix #9 (Sol): encolar dentro de la transacción.
+        await txn.insert('ops_queue', {
+          'op_uuid': const Uuid().v4(),
+          'tipo': 'cambiar_estado_incidencia',
+          'payload': jsonEncode({
+            'id': _inc!.id,
+            'estado_anterior': anterior,
+            'estado_nuevo': 'resuelta',
+            'nota_resolucion': nota,
+            'resuelta_por': 'yo',
+            'resuelta_en': ahora,
+            'version': _inc!.version + 1,
+          }),
+          'estado': 'pendiente',
+          'creada_ts': ahora,
+        });
+      });
       _cargar();
       return;
     }
@@ -451,18 +457,21 @@ class _DetalleIncidenciaScreenState
         'cambiado_por': 'yo',
         'cambiado_en': ahora,
       });
-    });
 
-    await LocalDb.instance.queueOp(
-      opUuid: const Uuid().v4(),
-      tipo: 'cambiar_estado_incidencia',
-      payload: {
-        'id': _inc!.id,
-        'estado_anterior': anterior,
-        'estado_nuevo': nuevo,
-        'version': _inc!.version + 1,
-      },
-    );
+      // Fix #9 (Sol): encolar dentro de la transacción.
+      await txn.insert('ops_queue', {
+        'op_uuid': const Uuid().v4(),
+        'tipo': 'cambiar_estado_incidencia',
+        'payload': jsonEncode({
+          'id': _inc!.id,
+          'estado_anterior': anterior,
+          'estado_nuevo': nuevo,
+          'version': _inc!.version + 1,
+        }),
+        'estado': 'pendiente',
+        'creada_ts': ahora,
+      });
+    });
     _cargar();
   }
 }

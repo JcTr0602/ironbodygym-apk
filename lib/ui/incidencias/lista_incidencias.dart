@@ -94,8 +94,9 @@ class _ListaIncidenciasScreenState
       final c2 = ordenPrioridad('${a['prioridad']}')
           .compareTo(ordenPrioridad('${b['prioridad']}'));
       if (c2 != 0) return c2;
-      return '${b['creada_en']}'
-          .compareTo('${a['creada_en']}');
+      return (b['creada_en'] as String? ?? '')
+          .compareTo(
+              a['creada_en'] as String? ?? '');
     });
 
     if (mounted) {

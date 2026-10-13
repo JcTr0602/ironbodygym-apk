@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:uuid/uuid.dart';
@@ -145,6 +146,7 @@ class _TiposIncidenciaScreenState
       newIndex -= 1;
     }
     final d = await LocalDb.instance.db;
+    // Fix #9 (Sol): reorden + encolado en una transacción.
     await d.transaction((txn) async {
       final item =
           _tipos.removeAt(oldIndex);
@@ -163,39 +165,39 @@ class _TiposIncidenciaScreenState
           whereArgs: [_tipos[i].id],
         );
       }
+      // Op consolidada dentro de la transacción
+      await txn.insert('ops_queue', {
+        'op_uuid': const Uuid().v4(),
+        'tipo': 'reordenar_tipos_incidencia',
+        'payload': jsonEncode({
+          'orden': [
+            for (var i = 0;
+                i < _tipos.length;
+                i++)
+              {'id': _tipos[i].id, 'orden': i}
+          ],
+        }),
+        'estado': 'pendiente',
+        'creada_ts':
+            DateTime.now().toIso8601String(),
+      });
     });
     setState(() {});
-    // Op consolidada (una sola, no una por salto)
-    await LocalDb.instance.queueOp(
-      opUuid: const Uuid().v4(),
-      tipo: 'reordenar_tipos_incidencia',
-      payload: {
-        'orden': [
-          for (var i = 0;
-              i < _tipos.length;
-              i++)
-            {'id': _tipos[i].id, 'orden': i}
-        ],
-      },
-    );
   }
 
   Future<void> _cambiarActivo(
       TipoIncidencia t, bool activo) async {
-    final d = await LocalDb.instance.db;
-    await d.update(
-      'incidencias_tipos',
-      {
+    // Fix #9 (Sol): mutación + encolado atómicos.
+    await LocalDb.instance.mutarYEncolar(
+      tabla: 'incidencias_tipos',
+      datos: {
         'activo': activo ? 1 : 0,
         'sync_estado': 'pending'
       },
-      where: 'id = ?',
-      whereArgs: [t.id],
-    );
-    await LocalDb.instance.queueOp(
+      whereId: t.id,
       opUuid: const Uuid().v4(),
-      tipo: 'upsert_tipo_incidencia',
-      payload: {
+      opTipo: 'upsert_tipo_incidencia',
+      opPayload: {
         ...t.toMap(),
         'activo': activo ? 1 : 0,
       },
@@ -214,36 +216,34 @@ class _TiposIncidenciaScreenState
       ),
     );
     if (res == null || !mounted) return;
-    final d = await LocalDb.instance.db;
     final id =
         existente?.id ?? const Uuid().v4();
-    await d.insert(
-      'incidencias_tipos',
-      {
+    final orden =
+        existente?.orden ?? _tipos.length;
+    // Fix #9 (Sol): insert + encolado atómicos.
+    await LocalDb.instance.mutarYEncolar(
+      tabla: 'incidencias_tipos',
+      datos: {
         'id': id,
         'nombre': res['nombre'],
         'icono': res['icono'],
         'color': res['color'],
         'activo': 1,
-        'orden': existente?.orden ??
-            _tipos.length,
+        'orden': orden,
         'sync_estado': 'pending',
       },
-      conflictAlgorithm:
-          ConflictAlgorithm.replace,
-    );
-    await LocalDb.instance.queueOp(
+      whereId: id,
       opUuid: const Uuid().v4(),
-      tipo: 'upsert_tipo_incidencia',
-      payload: {
+      opTipo: 'upsert_tipo_incidencia',
+      opPayload: {
         'id': id,
         'nombre': res['nombre'],
         'icono': res['icono'],
         'color': res['color'],
         'activo': 1,
-        'orden': existente?.orden ??
-            _tipos.length,
+        'orden': orden,
       },
+      esInsert: true,
     );
     _cargar();
   }
