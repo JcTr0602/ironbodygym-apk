@@ -78,7 +78,13 @@ class _ListaIncidenciasScreenState
   }
 
   List<Incidencia> get _filtradas {
+    // TODO: obtener idUsuarioActual de la sesión
+    const idUsuarioActual = 'yo';
     return _todas.where((inc) {
+      if (_soloMias &&
+          inc.asignadoA != idUsuarioActual) {
+        return false;
+      }
       if (_filtroEstado != null &&
           inc.estado != _filtroEstado) return false;
       if (_filtroTipoId != null &&

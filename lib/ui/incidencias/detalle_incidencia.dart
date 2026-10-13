@@ -338,15 +338,97 @@ class _DetalleIncidenciaScreenState
 
   Future<void> _cambiarEstado(
       String nuevo) async {
+    final d = await LocalDb.instance.db;
+    final ahora =
+        DateTime.now().toIso8601String();
+    final anterior = _inc!.estado;
+
     if (nuevo == 'resuelta') {
-      final res = await mostrarDialogoResolver(
-          context, _inc!);
+      final res =
+          await mostrarDialogoResolver(
+              context, _inc!);
       if (res == null || !mounted) return;
-      // TODO: aplicar resolución con nota + foto
+
+      final nota = res['nota'] as String;
+      final fotoPath =
+          res['foto'] as String?;
+
+      await d.transaction((txn) async {
+        // 1. Actualizar incidencia
+        await txn.update(
+          'incidencias_local',
+          {
+            'estado': 'resuelta',
+            'nota_resolucion': nota,
+            'resuelta_por':
+                'yo', // TODO: usuario auth
+            'resuelta_en': ahora,
+            'actualizado_en': ahora,
+            'sync_estado': 'pending',
+            'sincronizada': 0,
+          },
+          where: 'id = ?',
+          whereArgs: [_inc!.id],
+        );
+
+        // 2. Si tomó foto, registrarla
+        if (fotoPath != null) {
+          await txn.insert(
+              'incidencias_fotos', {
+            'id': const Uuid().v4(),
+            'incidencia_id': _inc!.id,
+            'local_path': fotoPath,
+            'tipo': 'resolucion',
+            'sync_estado': 'pending',
+            'creado_en': ahora,
+          });
+        }
+
+        // 3. Registrar en historial
+        await txn.insert(
+            'incidencias_historial', {
+          'id': const Uuid().v4(),
+          'incidencia_id': _inc!.id,
+          'campo': 'estado',
+          'valor_anterior': anterior,
+          'valor_nuevo': 'resuelta',
+          'cambiado_por': 'yo',
+          'cambiado_en': ahora,
+        });
+      });
+
       _cargar();
+      // TODO: encolar op sync
       return;
     }
-    // TODO: transición simple con historial
+
+    // Transición directa (en_proceso, bloqueada, etc.)
+    await d.transaction((txn) async {
+      await txn.update(
+        'incidencias_local',
+        {
+          'estado': nuevo,
+          'actualizado_en': ahora,
+          'sync_estado': 'pending',
+          'sincronizada': 0,
+        },
+        where: 'id = ?',
+        whereArgs: [_inc!.id],
+      );
+
+      await txn.insert(
+          'incidencias_historial', {
+        'id': const Uuid().v4(),
+        'incidencia_id': _inc!.id,
+        'campo': 'estado',
+        'valor_anterior': anterior,
+        'valor_nuevo': nuevo,
+        'cambiado_por': 'yo',
+        'cambiado_en': ahora,
+      });
+    });
+
     _cargar();
+    // TODO: encolar op sync
   }
 }

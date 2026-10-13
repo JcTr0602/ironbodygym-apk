@@ -247,7 +247,7 @@ class _EditarIncidenciaScreenState
           const Uuid().v4();
       final datos = {
         'id': id,
-        'tipo': 'general', // legacy
+        'tipo': 'sync', // legacy (compatible con CHECK de Supabase)
         'tipo_id': _tipoId,
         'descripcion':
             _ctrlDesc.text.trim(),

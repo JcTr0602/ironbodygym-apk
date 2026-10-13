@@ -19,10 +19,10 @@ class _DialogoResolverState
   final _ctrlNota = TextEditingController();
   String? _fotoPath;
 
-  /// ¿Foto obligatoria? Solo para mantenimiento de máquinas.
+  /// ¿Foto obligatoria? Solo para Mantenimiento (UUID fijo del seed).
   bool get _fotoObligatoria {
-    // TODO: verificar tipo_id contra 'mantenimiento'
-    return false;
+    return widget.incidencia.tipoId ==
+        'a1b2c3d4-0002-4000-8000-000000000002';
   }
 
   bool get _puedeConfirmar {
