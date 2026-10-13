@@ -6,6 +6,7 @@
 library;
 
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -225,32 +226,45 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
       final nuevoStock = stockActual - cantidad;
       if (nuevoStock < 0) throw Exception('Stock insuficiente');
 
-      // 1. Registro local (para banner y reportes)
+      // v1.2.9+47 (Gemini): transacción atómica. Si el móvil se bloquea
+      // o la app crashea a mitad, no quedan datos inconsistentes.
       final d = await db.db;
-      await d.rawInsert(
-          'INSERT INTO ventas_suplementos '
-          '(suplemento_id, cantidad, precio, total, creada_en) '
-          'VALUES (?, ?, ?, ?, ?)',
-          [s['id'], cantidad, precio, cantidad * precio, ahoraIso]);
+      final opUuid = const Uuid().v4();
+      final payload = {
+        'suplemento_id': s['id'],
+        'cantidad': cantidad,
+        'precio': precio,
+        'total': cantidad * precio,
+        'creada_en': ahoraIso,
+      };
+      final auth = AuthService();
+      await d.transaction((txn) async {
+        // 1. Registro local (para banner y reportes)
+        await txn.rawInsert(
+            'INSERT INTO ventas_suplementos '
+            '(suplemento_id, cantidad, precio, total, creada_en) '
+            'VALUES (?, ?, ?, ?, ?)',
+            [s['id'], cantidad, precio, cantidad * precio, ahoraIso]);
 
-      // 2. Descontar stock + memoria de precio
-      await db.actualizarSuplemento(s['id'] as int, {
-        'stock': nuevoStock,
-        'ultimo_precio': precio,
+        // 2. Descontar stock + memoria de precio
+        await txn.update(
+          'suplementos',
+          {'stock': nuevoStock, 'ultimo_precio': precio},
+          where: 'id = ?',
+          whereArgs: [s['id']],
+        );
+
+        // 3. Encolar op con timestamp real (campos de queueOp)
+        await txn.insert('ops_queue', {
+          'op_uuid': opUuid,
+          'tipo': 'venta_suplemento',
+          'payload': jsonEncode(payload),
+          'estado': 'pendiente',
+          'creada_ts': ahoraIso,
+          'user_id': auth.userId,
+          'telegram_id': auth.telegramId,
+        });
       });
-
-      // 3. Encolar op con timestamp real
-      await db.queueOp(
-        opUuid: const Uuid().v4(),
-        tipo: 'venta_suplemento',
-        payload: {
-          'suplemento_id': s['id'],
-          'cantidad': cantidad,
-          'precio': precio,
-          'total': cantidad * precio,
-          'creada_en': ahoraIso,
-        },
-      );
       unawaited(SyncEngine.instance.push());
       if (mounted) {
         setState(() {
