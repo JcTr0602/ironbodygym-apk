@@ -656,6 +656,19 @@ class LocalDb {
               "UPDATE incidencias_local SET tipo_id = "
               "'a1b2c3d4-0004-4000-8000-000000000004' "
               "WHERE tipo_id IS NULL");
+
+          // Auditoría final Gemini: incidencias_mirror puede existir
+          // de versiones viejas sin las columnas nuevas.
+          await _addColumnIfMissing(
+              db, 'incidencias_mirror', 'tipo_id', 'TEXT');
+          await _addColumnIfMissing(
+              db, 'incidencias_mirror', 'asignado_a', 'TEXT');
+          await _addColumnIfMissing(db, 'incidencias_mirror',
+              'prioridad', "TEXT NOT NULL DEFAULT 'media'");
+          await _addColumnIfMissing(
+              db, 'incidencias_mirror', 'fecha_limite', 'TEXT');
+          await _addColumnIfMissing(
+              db, 'incidencias_mirror', 'ubicacion', 'TEXT');
         }
       },
     );
