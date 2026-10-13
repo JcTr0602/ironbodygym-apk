@@ -971,7 +971,7 @@ class SyncEngine {
         body: jsonEncode({'p_uuids': lote}),
         timeout: const Duration(seconds: 20),
       );
-      if (r.statusCode == 404) return; // Argón: tabla aún no desplegada
+     
     if (r.statusCode != 200) {
         throw StateError(
             'RPC ops_aplicadas_batch falló: ${r.statusCode}');
@@ -1271,7 +1271,7 @@ class SyncEngine {
           }
           // La tabla existe y responde: limpiar marca de ausente.
           await _db.setMeta('wm_${tabla}_ausente', '');
-          if (r.statusCode == 404) return; // Argón: tabla aún no desplegada
+         
     if (r.statusCode != 200) {
             // v1.2.9+47 (AppLog): fallo HTTP con fragmento sanitizado.
             final frag = r.body.length > 200
@@ -1409,7 +1409,7 @@ class SyncEngine {
         final r = await _getAuth(Uri.parse('$_base/rest/v1/sync_borrados'
             '?select=entidad,entidad_id,sync_seq'
             '&sync_seq=gt.$pageWm&order=sync_seq.asc&limit=100'));
-        if (r.statusCode == 404) return; // Argón: tabla aún no desplegada
+       
     if (r.statusCode != 200) {
           throw Exception('bajada borrados: HTTP ${r.statusCode}');
         }
@@ -1616,7 +1616,7 @@ class SyncEngine {
         // Tabla aún no existe en Supabase: se omite silenciosamente.
         return;
       }
-      if (r.statusCode == 404) return; // Argón: tabla aún no desplegada
+     
     if (r.statusCode != 200) {
         throw Exception('bajada incidencias: HTTP ${r.statusCode}');
       }
@@ -1647,7 +1647,7 @@ class SyncEngine {
         // Tabla aún no existe en Supabase: se omite silenciosamente.
         return;
       }
-      if (r.statusCode == 404) return; // Argón: tabla aún no desplegada
+     
     if (r.statusCode != 200) {
         throw Exception('bajada eventos incidencia: HTTP ${r.statusCode}');
       }
@@ -2412,7 +2412,7 @@ class SyncEngine {
       final r = await _getAuth(Uri.parse(
           '$_base/rest/v1/sync_incidencias_tipos?sync_seq=gt.$wm'
           '&order=sync_seq&limit=100'));
-      if (r.statusCode == 404) return; // Argón: tabla aún no desplegada
+     
     if (r.statusCode != 200) {
         throw Exception(
             'pull_tipos_incidencia HTTP ${r.statusCode}');
@@ -2507,7 +2507,7 @@ class SyncEngine {
       final r = await _getAuth(Uri.parse(
           '$_base/rest/v1/sync_incidencias?sync_seq=gt.$wm'
           '&order=sync_seq&limit=100'));
-      if (r.statusCode == 404) return; // Argón: tabla aún no desplegada
+     
     if (r.statusCode != 200) {
         throw Exception(
             'pull_incidencias HTTP ${r.statusCode}');
@@ -2678,7 +2678,7 @@ class SyncEngine {
       final r = await _getAuth(Uri.parse(
           '$_base/rest/v1/sync_incidencias_comentarios?sync_seq=gt.$wm'
           '&order=sync_seq&limit=100'));
-      if (r.statusCode == 404) return; // Argón: tabla aún no desplegada
+      if (r.statusCode == 404) return; // Argón: tabla no desplegada
     if (r.statusCode != 200) {
         throw Exception(
             'pull_inc_comentarios HTTP ${r.statusCode}');
@@ -2732,7 +2732,7 @@ class SyncEngine {
       final r = await _getAuth(Uri.parse(
           '$_base/rest/v1/sync_incidencias_historial?sync_seq=gt.$wm'
           '&order=sync_seq&limit=100'));
-      if (r.statusCode == 404) return; // Argón: tabla aún no desplegada
+      if (r.statusCode == 404) return; // Argón: tabla no desplegada
     if (r.statusCode != 200) {
         throw Exception(
             'pull_inc_historial HTTP ${r.statusCode}');
