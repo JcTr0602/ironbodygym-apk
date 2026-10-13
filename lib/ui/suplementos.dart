@@ -370,6 +370,147 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
     return false;
   }
 
+  /// v1.2.9+47: selector de vista (compacta vs tarjeta).
+  Widget _itemSuplemento(Map<String, dynamic> s) {
+    if (_vistaCompacta) {
+      return FilaSuplementoCompacta(
+        sup: s,
+        tienePendiente: _tieneOpPendiente(s['id']),
+        onVender: () => _venderConDialogo(s),
+        onEditar: () => _irDetalle(s),
+        onSumarStock: () => _sumarStockRapido(s),
+        onAjusteManual: () => _ajusteManualStock(s),
+      );
+    }
+    return _tarjetaProducto(s);
+  }
+
+  /// v1.2.9+47: tarjeta del carrusel "Más vendidos" con venta directa.
+  Widget _tarjetaMasVendido(Map<String, dynamic> s) {
+    final nombre = (s['nombre'] ?? '').toString();
+    final precio = (s['precio'] as num?)?.toDouble() ?? 0.0;
+    final stock = (s['stock'] as num?)?.toInt() ?? 0;
+    final activo = (s['activo'] as int? ?? 1) == 1;
+    final fotoPath = s['foto_local'] as String?;
+
+    return Container(
+      width: 148,
+      margin: const EdgeInsets.only(right: 12),
+      decoration: BoxDecoration(
+        color: AppColores.fondo(context),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.white.withOpacity(0.08)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          ClipRRect(
+            borderRadius: const BorderRadius.vertical(
+                top: Radius.circular(12)),
+            child: fotoPath != null && fotoPath.isNotEmpty
+                ? Image.file(
+                    File(fotoPath),
+                    height: 90,
+                    fit: BoxFit.cover,
+                    errorBuilder: (_, __, ___) =>
+                        PlaceholderFotoSuplemento(
+                      nombre: nombre,
+                      width: double.infinity,
+                      height: 90,
+                      borderRadius:
+                          const BorderRadius.vertical(
+                              top: Radius.circular(12)),
+                    ),
+                  )
+                : PlaceholderFotoSuplemento(
+                    nombre: nombre,
+                    width: double.infinity,
+                    height: 90,
+                    borderRadius:
+                        const BorderRadius.vertical(
+                            top: Radius.circular(12)),
+                  ),
+          ),
+          Padding(
+            padding: const EdgeInsets.all(8),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  nombre,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                      fontSize: 13, fontWeight: FontWeight.w600),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  '${precio.toStringAsFixed(2)} USD',
+                  style: TextStyle(
+                      fontSize: 12, color: Colors.orange[300]),
+                ),
+                const SizedBox(height: 6),
+                SizedBox(
+                  height: 30,
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    onPressed: (stock > 0 && activo)
+                        ? () => _venderConDialogo(s)
+                        : null,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColores.naranja,
+                      padding: EdgeInsets.zero,
+                    ),
+                    child: const Text('Vender',
+                        style: TextStyle(fontSize: 12)),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// v1.2.9+47: banner HUD de ventas del día.
+  Widget _bannerVentasHoy() {
+    final n = _ventasHoy['n'] as int;
+    if (n <= 0) return const SizedBox.shrink();
+    final total = (_ventasHoy['total'] as num).toDouble();
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+      padding: const EdgeInsets.symmetric(
+          horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [
+            AppColores.naranja.withOpacity(0.25),
+            AppColores.naranja.withOpacity(0.08),
+          ],
+        ),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+            color: AppColores.naranja.withOpacity(0.3)),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.today,
+              color: AppColores.naranja, size: 20),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              'Hoy: $n ventas · '
+              '\$${total.toStringAsFixed(2)} USD',
+              style: const TextStyle(
+                  fontWeight: FontWeight.w600, fontSize: 14),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   /// v1.2.1: ficha del producto al tocar la tarjeta.
   void _irDetalle(Map<String, dynamic> s) {
     Navigator.push<bool>(
@@ -1313,32 +1454,18 @@ class FilaSuplementoCompacta extends StatelessWidget {
           width: 56,
           height: 56,
           fit: BoxFit.cover,
-          errorBuilder: (_, __, ___) => _placeholderInicial(nombre),
+          errorBuilder: (_, __, ___) => PlaceholderFotoSuplemento(
+            nombre: nombre,
+            width: 56,
+            height: 56,
+          ),
         ),
       );
     }
-    return _placeholderInicial(nombre);
-  }
-
-  Widget _placeholderInicial(String nombre) {
-    final inicial = nombre.isNotEmpty ? nombre[0].toUpperCase() : '?';
-    return Container(
+    return PlaceholderFotoSuplemento(
+      nombre: nombre,
       width: 56,
       height: 56,
-      decoration: BoxDecoration(
-        color: AppColores.naranja.withOpacity(0.15),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Center(
-        child: Text(
-          inicial,
-          style: TextStyle(
-            fontSize: 22,
-            fontWeight: FontWeight.bold,
-            color: AppColores.naranja,
-          ),
-        ),
-      ),
     );
   }
 }
@@ -1488,6 +1615,50 @@ class _DialogoVentaState extends State<DialogoVenta> {
           child: const Text('Confirmar venta'),
         ),
       ],
+    );
+  }
+}
+
+/// Placeholder unificado con inicial para lista compacta y carrusel.
+/// Revisado por Gemini 2026-10-13: evita duplicar lógica.
+class PlaceholderFotoSuplemento extends StatelessWidget {
+  final String nombre;
+  final double width;
+  final double height;
+  final double fontSize;
+  final BorderRadius? borderRadius;
+
+  const PlaceholderFotoSuplemento({
+    super.key,
+    required this.nombre,
+    required this.width,
+    required this.height,
+    this.fontSize = 22,
+    this.borderRadius,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final inicial = nombre.trim().isNotEmpty
+        ? nombre.trim()[0].toUpperCase()
+        : '?';
+    return Container(
+      width: width,
+      height: height,
+      decoration: BoxDecoration(
+        color: AppColores.naranja.withOpacity(0.15),
+        borderRadius: borderRadius ?? BorderRadius.circular(8),
+      ),
+      child: Center(
+        child: Text(
+          inicial,
+          style: TextStyle(
+            fontSize: fontSize,
+            fontWeight: FontWeight.bold,
+            color: AppColores.naranja,
+          ),
+        ),
+      ),
     );
   }
 }
