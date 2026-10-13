@@ -527,19 +527,39 @@ class FotosColaService {
     final tipo = f['tipo'] as String; // original | thumb | display
     final db = await LocalDb.instance.db;
 
-    // v1.2.9+42 (Gemini): si ya se subió antes (solo falló la vinculación),
-    // no re-subir bytes, retornar el path existente.
-    final prevStoragePath = f['storage_path'] as String?;
-    if (prevStoragePath != null && prevStoragePath.isNotEmpty) {
-      return prevStoragePath;
-    }
-
-    // v1.2.9: resolver cliente_id/suplemento_id si aún no se conocen
-    // (la op de creación aún no se aplicó en el servidor).
+    // v1.2.9+45 (Gemini): SIEMPRE resolver IDs primero, incluso si
+    // storage_path ya existe. Si no, una foto subida pero no vinculada
+    // entra en bucle infinito (retorna path sin IDs resueltos).
     var clienteId = f['cliente_id'] as int?;
     var suplementoId = f['suplemento_id'] as int?;
     clienteId ??= await SyncEngine.instance.clienteDeOp(opUuid);
     suplementoId ??= await SyncEngine.instance.suplementoDeOp(opUuid);
+
+    if ((f['cliente_id'] == null && clienteId != null) ||
+        (f['suplemento_id'] == null && suplementoId != null)) {
+      await db.update(
+        'fotos_cola',
+        {'cliente_id': clienteId, 'suplemento_id': suplementoId},
+        where: 'id = ?',
+        whereArgs: [id],
+      );
+    }
+
+    // v1.2.9+42 (Gemini): si ya se subió antes (solo falló la vinculación),
+    // no re-subir bytes, retornar el path existente.
+    final prevStoragePath = f['storage_path'] as String?;
+    if (prevStoragePath != null && prevStoragePath.isNotEmpty) {
+      // Si los IDs siguen sin resolverse, esperar sin vincular a ciegas.
+      if (clienteId == null && suplementoId == null) {
+        debugPrint(
+            '[Fotos] Foto $id ya subida pero IDs aún no resueltos. Esperando op padre.');
+        return null;
+      }
+      return prevStoragePath;
+    }
+
+    // v1.2.9: si aún no se conocen los IDs (la op de creación aún no se
+    // aplicó en el servidor), diferir sin quemar intentos.
     if (clienteId == null && suplementoId == null) {
       // La creación aún no se aplica: reintentable, no error.
       return null;
