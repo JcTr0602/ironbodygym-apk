@@ -1997,6 +1997,19 @@ class LocalDb {
         where: 'id=?', whereArgs: [fotoId]);
   }
 
+  /// Actualiza campos de un suplemento (stock, ultimo_precio, etc).
+  /// Agregado v1.2.9+47 para las mejoras de la pantalla Suplementos.
+  Future<int> actualizarSuplemento(
+      int id, Map<String, dynamic> campos) async {
+    final d = await db;
+    return await d.update(
+      'suplementos',
+      campos,
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+  }
+
   Future<void> markFotoLista(int fotoId) async {
     final d = await db;
     await d.update('fotos_pendientes', {'estado': 'lista'},

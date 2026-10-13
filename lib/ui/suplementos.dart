@@ -46,13 +46,25 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
   // v1.2.1: tasa USD del día + ids de los más vendidos.
   double? _tasaUsd;
   List<int> _topIds = [];
+  // v1.2.9+47: vista compacta (decisión Jc).
+  bool _vistaCompacta = true;
+  // v1.2.9+47: ventas del día para el banner.
+  Map<String, dynamic> _ventasHoy = {'n': 0, 'total': 0.0};
 
   bool get _esDueno => _auth.isOwner;
 
   @override
   void initState() {
     super.initState();
+    _cargarPreferenciaVista();
     _cargar();
+  }
+
+  Future<void> _cargarPreferenciaVista() async {
+    final v = await LocalDb.instance.getMeta('suplementos_vista');
+    if (mounted) {
+      setState(() => _vistaCompacta = v != 'tarjetas');
+    }
   }
 
   Future<void> _cargar() async {
@@ -85,6 +97,7 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
       _topIds = _topVendidos(ventas);
       _cargando = false;
     });
+    _cargarVentasHoy();
   }
 
   /// v1.2.1: ids de los 4 productos más vendidos (por cantidad).
@@ -189,6 +202,172 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
         builder: (_) => VentaSuplementoScreen(suplemento: s),
       ),
     ).then((_) => _cargar());
+  }
+
+  /// v1.2.9+47: vende usando el nuevo diálogo con confirmación obligatoria.
+  /// Guarda en ventas_suplementos local, descuenta stock, actualiza
+  /// ultimo_precio y encola la op con creada_en (corrección Gemini).
+  Future<void> _venderConDialogo(Map<String, dynamic> s) async {
+    final resultado = await mostrarDialogoVenta(context, s);
+    if (resultado == null || !mounted) return;
+
+    final cantidad = resultado['cantidad'] as int;
+    final precio = resultado['precio'] as double;
+    final db = LocalDb.instance;
+    final ahoraIso = DateTime.now().toIso8601String();
+
+    try {
+      final stockActual = (s['stock'] as num?)?.toInt() ?? 0;
+      final nuevoStock = stockActual - cantidad;
+      if (nuevoStock < 0) throw Exception('Stock insuficiente');
+
+      // 1. Registro local (para banner y reportes)
+      final d = await db.db;
+      await d.rawInsert(
+          'INSERT INTO ventas_suplementos '
+          '(suplemento_id, cantidad, precio, total, creada_en) '
+          'VALUES (?, ?, ?, ?, ?)',
+          [s['id'], cantidad, precio, cantidad * precio, ahoraIso]);
+
+      // 2. Descontar stock + memoria de precio
+      await db.actualizarSuplemento(s['id'] as int, {
+        'stock': nuevoStock,
+        'ultimo_precio': precio,
+      });
+
+      // 3. Encolar op con timestamp real
+      await db.queueOp(
+        opUuid: const Uuid().v4(),
+        tipo: 'venta_suplemento',
+        payload: {
+          'suplemento_id': s['id'],
+          'cantidad': cantidad,
+          'precio': precio,
+          'total': cantidad * precio,
+          'creada_en': ahoraIso,
+        },
+      );
+      unawaited(SyncEngine.instance.push());
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text('Venta: $cantidad x '
+                '\$${precio.toStringAsFixed(2)}')));
+        _cargar();
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('Error: $e')));
+      }
+    }
+  }
+
+  /// v1.2.9+47: suma +1 al stock con opción Deshacer.
+  Future<void> _sumarStockRapido(Map<String, dynamic> s) async {
+    final db = LocalDb.instance;
+    final stockActual = (s['stock'] as num?)?.toInt() ?? 0;
+    final nuevoStock = stockActual + 1;
+
+    await db.actualizarSuplemento(
+        s['id'] as int, {'stock': nuevoStock});
+    await db.queueOp(
+      opUuid: const Uuid().v4(),
+      tipo: 'editar_suplemento',
+      payload: {'id': s['id'], 'stock': nuevoStock},
+    );
+    unawaited(SyncEngine.instance.push());
+    _cargar();
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('${s['nombre']}: stock $nuevoStock'),
+          action: SnackBarAction(
+            label: 'Deshacer',
+            onPressed: () async {
+              await db.actualizarSuplemento(
+                  s['id'] as int, {'stock': stockActual});
+              await db.queueOp(
+                opUuid: const Uuid().v4(),
+                tipo: 'editar_suplemento',
+                payload: {'id': s['id'], 'stock': stockActual},
+              );
+              unawaited(SyncEngine.instance.push());
+              _cargar();
+            },
+          ),
+        ),
+      );
+    }
+  }
+
+  /// v1.2.9+47: ajuste manual de stock (long-press).
+  Future<void> _ajusteManualStock(Map<String, dynamic> s) async {
+    final ctrl =
+        TextEditingController(text: '${s['stock'] ?? 0}');
+    final nuevo = await showDialog<int>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Stock: ${s['nombre']}'),
+        content: TextField(
+          controller: ctrl,
+          keyboardType: TextInputType.number,
+          decoration:
+              const InputDecoration(labelText: 'Nuevo stock'),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancelar'),
+          ),
+          ElevatedButton(
+            onPressed: () =>
+                Navigator.pop(ctx, int.tryParse(ctrl.text)),
+            child: const Text('Guardar'),
+          ),
+        ],
+      ),
+    );
+    ctrl.dispose();
+    if (nuevo == null || nuevo < 0 || !mounted) return;
+
+    final db = LocalDb.instance;
+    await db.actualizarSuplemento(s['id'] as int, {'stock': nuevo});
+    await db.queueOp(
+      opUuid: const Uuid().v4(),
+      tipo: 'editar_suplemento',
+      payload: {'id': s['id'], 'stock': nuevo},
+    );
+    unawaited(SyncEngine.instance.push());
+    _cargar();
+  }
+
+  /// v1.2.9+47: ventas del día para el banner.
+  Future<void> _cargarVentasHoy() async {
+    try {
+      final d = await LocalDb.instance.db;
+      final hoy =
+          DateTime.now().toIso8601String().substring(0, 10);
+      final r = await d.rawQuery(
+          'SELECT COUNT(*) as n, SUM(total) as total '
+          'FROM ventas_suplementos WHERE date(creada_en) = ?',
+          [hoy]);
+      if (mounted) {
+        setState(() {
+          _ventasHoy = {
+            'n': r.first['n'] ?? 0,
+            'total': (r.first['total'] as num?)?.toDouble() ?? 0.0,
+          };
+        });
+      }
+    } catch (_) {}
+  }
+
+  /// v1.2.9+47: ¿tiene ops pendientes este suplemento?
+  bool _tieneOpPendiente(dynamic id) {
+    // TODO: implementar chequeo real contra ops_queue
+    return false;
   }
 
   /// v1.2.1: ficha del producto al tocar la tarjeta.
