@@ -15,6 +15,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:uuid/uuid.dart';
 
 import '../auth.dart';
+import '../app_log.dart';
 import '../fotos.dart';
 import '../fotos_cola.dart';
 import '../localdb.dart';
@@ -721,6 +722,109 @@ class _FichaScreenState extends State<FichaScreen> {
     SyncEngine.instance.push();
   }
 
+  /// Elimina definitivamente sin pasar por papelera (solo dueño).
+  /// Doble confirmación: advertencia + escribir "ELIMINAR".
+  /// Revisado por Gemini 2026-10-13. Backend lo maneja directo.
+  Future<void> _eliminarDefinitivo() async {
+    final nombre = '${_c?['nombre'] ?? ''}';
+    // Primera confirmación
+    final ok1 = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => DialogoApp(
+        titulo: 'Eliminar definitivamente',
+        iconoTitulo: Icons.warning,
+        contenido: Text(
+          'Se eliminará a "$nombre" de forma PERMANENTE.\n\n'
+          'Esta acción NO se puede deshacer y NO pasa por la papelera.\n'
+          'Se borrarán sus datos, pagos e historial.',
+        ),
+        acciones: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancelar')),
+          ElevatedButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.red,
+                foregroundColor: Colors.white,
+              ),
+              child: const Text('Continuar')),
+        ],
+      ),
+    );
+    if (ok1 != true || !mounted) return;
+
+    // Segunda confirmación: escribir ELIMINAR
+    // (Gemini: palabra fija evita problemas de acentos/mayúsculas)
+    final ctrl = TextEditingController();
+    var coincide = false;
+    final ok2 = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setState) => AlertDialog(
+          title: const Text('Confirmación final'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text(
+                'Escribe ELIMINAR en mayúsculas para confirmar.',
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: ctrl,
+                textCapitalization:
+                    TextCapitalization.characters,
+                decoration: const InputDecoration(
+                  labelText: 'ELIMINAR',
+                  border: OutlineInputBorder(),
+                ),
+                onChanged: (v) => setState(
+                    () => coincide = v.trim() == 'ELIMINAR'),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+                onPressed: () =>
+                    Navigator.pop(ctx, false),
+                child: const Text('Cancelar')),
+            ElevatedButton(
+                // Gemini: deshabilitar hasta que coincida
+                onPressed: coincide
+                    ? () => Navigator.pop(ctx, true)
+                    : null,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.red,
+                  foregroundColor: Colors.white,
+                ),
+                child: const Text('Eliminar')),
+          ],
+        ),
+      ),
+    );
+    ctrl.dispose();
+    if (ok2 != true || !mounted) return;
+
+    await LocalDb.instance.queueOp(
+      opUuid: const Uuid().v4(),
+      tipo: 'eliminar_cliente',
+      payload: {
+        'cliente_id': widget.clienteId,
+        'definitivo': true
+      },
+    );
+    AppLog.info('clientes', 'eliminar_definitivo',
+        d: 'id=${widget.clienteId} nombre=$nombre');
+
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+            content: Text(
+                'Cliente eliminado definitivamente')));
+    Navigator.of(context).pop();
+    SyncEngine.instance.push();
+  }
+
   /// Congelar/descongelar membresía (v1.0.9).
   /// El cliente congelado no aparece en vencidos.
   Future<void> _congelar() async {
@@ -960,6 +1064,31 @@ class _FichaScreenState extends State<FichaScreen> {
         title: Text(nombre),
         actions: [
           if (c != null) ...[
+            // v1.2.9+47: menú overflow con eliminar definitivo (solo dueño)
+            if (AuthService().isOwner)
+              PopupMenuButton<String>(
+                icon: const Icon(Icons.more_vert),
+                onSelected: (v) {
+                  if (v == 'eliminar') {
+                    _eliminarDefinitivo();
+                  }
+                },
+                itemBuilder: (ctx) => [
+                  const PopupMenuItem(
+                    value: 'eliminar',
+                    child: Row(
+                      children: [
+                        Icon(Icons.delete_forever,
+                            color: Colors.red, size: 20),
+                        SizedBox(width: 8),
+                        Text('Eliminar definitivamente',
+                            style:
+                                TextStyle(color: Colors.red)),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
             IconButton(
                 tooltip: 'Verificar con servidor',
                 icon: _verificando
