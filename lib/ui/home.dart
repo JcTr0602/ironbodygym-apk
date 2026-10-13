@@ -55,6 +55,8 @@ class _HomeScreenState extends State<HomeScreen>
   int _noLeidas = 0;
   double _cobradoHoy = 0; // v1.1: para la tarjeta de resumen
   int _pagaronMes = 0; // v1.1.1: clientes que pagaron el mes en curso
+  /// v1.3.0: paga estimada del entrenador (150 CUP x cliente que pagó).
+  int get _pagaEstimada => _pagaronMes * 150;
   int _alDia = 0; // v1.1.1: activos con mensualidad vigente
   StreamSubscription? _sub;
   final _auth = AuthService();
@@ -84,6 +86,14 @@ class _HomeScreenState extends State<HomeScreen>
     'atrasados',
     'aldia'
   ];
+
+  /// v1.3.0: métricas por defecto para entrenadores (sin 'aldia').
+  List<String> get _metricasEntrenador => const [
+        'clientes',
+        'pagaron',
+        'cobrado',
+        'paga',
+      ];
   double _cobradoAyer = 0;
   List<Map<String, dynamic>> _ultimos7 = [];
   // Mejoras 12-16, 20 del Home.
@@ -298,10 +308,19 @@ class _HomeScreenState extends State<HomeScreen>
       final pref =
           '${n.year.toString().padLeft(4, '0')}-${n.month.toString().padLeft(2, '0')}';
       final pagaronIds = <int>{};
+      final esDuenoPag = _auth.isOwner;
+      final miTid = _auth.telegramId;
       for (final pg in pagos) {
         final f = pg['fecha'] as String?;
         final cid = pg['cliente_id'] as int?;
         if (f != null && f.startsWith(pref) && cid != null) {
+          // v1.3.0: entrenadores solo ven sus propios cobros
+          // (su paga = 150 CUP x cliente que pagó).
+          if (!esDuenoPag) {
+            final regPor = pg['registrado_por'] as int?;
+            // Si no hay registrado_por, incluir (compatibilidad).
+            if (regPor != null && regPor != miTid) continue;
+          }
           pagaronIds.add(cid);
         }
       }
@@ -920,13 +939,15 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   /// Tarjeta de resumen con métricas configurables (items 5, 6, 7, 8).
+  /// v1.3.0: entrenadores usan _metricasEntrenador (sin 'aldia', con 'paga').
   Widget _tarjetaResumen() {
+    final metricas = _auth.isOwner ? _metricas : _metricasEntrenador;
     final filas = <Widget>[];
-    for (var i = 0; i < _metricas.length; i += 3) {
+    for (var i = 0; i < metricas.length; i += 3) {
       final celdas = <Widget>[];
-      for (var j = i; j < i + 3 && j < _metricas.length; j++) {
+      for (var j = i; j < i + 3 && j < metricas.length; j++) {
         if (celdas.isNotEmpty) celdas.add(_divisorVertical());
-        celdas.add(Expanded(child: _celdaMetrica(_metricas[j])));
+        celdas.add(Expanded(child: _celdaMetrica(metricas[j])));
       }
       if (filas.isNotEmpty) filas.add(_divisorHorizontal());
       filas.add(Row(children: celdas));
@@ -983,6 +1004,10 @@ class _HomeScreenState extends State<HomeScreen>
         // v1.2.1: abre la lista filtrada "Al día", no todos los clientes.
         return _celdaResumen('$_alDia', 'Al día',
             Icons.check_circle, () => _ir(const ListasScreen(inicial: 4)));
+      case 'paga':
+        // v1.3.0: paga estimada del entrenador (150 x cliente).
+        return _celdaResumen('${fmtMonto(_pagaEstimada.toDouble())}', 'Mi paga',
+            Icons.payments, null);
       default:
         return const SizedBox();
     }
@@ -1084,6 +1109,7 @@ class _HomeScreenState extends State<HomeScreen>
       'vencen': 'Vencen hoy',
       'atrasados': 'Atrasados',
       'aldia': 'Al día',
+      'paga': 'Mi paga (estimada)',
     };
     var sel = List<String>.from(_metricas);
     final ok = await showDialog<bool>(
@@ -1132,7 +1158,8 @@ class _HomeScreenState extends State<HomeScreen>
         'cobrado',
         'vencen',
         'atrasados',
-        'aldia'
+        'aldia',
+        'paga'
       ];
       sel.sort((a, b) =>
           orden.indexOf(a).compareTo(orden.indexOf(b)));
