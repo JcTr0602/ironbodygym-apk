@@ -574,8 +574,9 @@ class SyncEngine {
     AppLog.info('sync', 'push_ini');
     try {
       _emit(SyncPhase.uploading);
-      final n = await _uploadOps(forzar: forzar);
-      AppLog.info('sync', 'ops_enviadas', d: 'n=$n');
+      // v1.2.9+46 (Gemini): acumular ambos lotes para last_uploaded.
+      var totalOps = await _uploadOps(forzar: forzar);
+      AppLog.info('sync', 'ops_enviadas', d: 'n=$totalOps');
       // v1.2.9+46: las fotos SIEMPRE se suben en cada sincronización,
       // como en v1.2.3. La puerta de ahorro de datos se eliminó por
       // orden de Jc (2026-10-13): hacía que las fotos nunca se intentaran.
@@ -603,15 +604,16 @@ class SyncEngine {
       // Si se subieron fotos y se generaron ops de vinculación,
       // vaciar ops_queue hacia Supabase de inmediato.
       if (fotosSubidas > 0) {
-        await _uploadOps(forzar: forzar);
+        // v1.2.9+46 (Gemini): sumar al total para last_uploaded.
+        totalOps += await _uploadOps(forzar: forzar);
       }
       await _db.setMeta('last_push_ok', DateTime.now().toIso8601String());
-      await _db.setMeta('last_uploaded', '$n');
+      await _db.setMeta('last_uploaded', '$totalOps');
       // v1.2.5 (D12): el servidor confirmó (ack real, no optimista).
       await marcarSincronizado();
       _emit(SyncPhase.idle);
       // v1.2.9+46 (AppLog): push completo.
-      AppLog.info('sync', 'push_fin', d: 'ops=$n fotos=$fotosSubidas');
+      AppLog.info('sync', 'push_fin', d: 'ops=$totalOps fotos=$fotosSubidas');
     } on SessionExpired {
       _sesionVencida();
       _emit(SyncPhase.idle);

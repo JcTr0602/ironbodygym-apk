@@ -66,7 +66,9 @@ Future<void> main() async {
   };
   PlatformDispatcher.instance.onError = (error, stack) {
     AppLog.error('crash', 'async_error', d: '$error\n$stack');
-    return true;
+    // v1.2.9+46 (Gemini): en debug, no absorber — dejar que la consola
+    // muestre la excepción. En release, sí absorber (ya quedó en AppLog).
+    return !kDebugMode;
   };
   await Supabase.initialize(
     url: AppConfig.supabaseUrl,

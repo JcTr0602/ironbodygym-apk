@@ -69,10 +69,16 @@ class AppLog {
 
   /// Exporta la bitácora a un archivo .txt en el directorio temporal.
   /// Retorna la ruta del archivo.
+  /// v1.2.9+46 (Gemini): extraer en DESC y revertir — si hay más de 5000
+  /// registros, el archivo debe contener los MÁS RECIENTES (los que
+  /// explican un crash), no los más viejos.
   static Future<String> exportar() async {
     final db = await LocalDb.instance.db;
     await podar(db);
-    final filas = await db.query('app_log', orderBy: 'id ASC', limit: 10000);
+    final filas = (await db.query('app_log',
+            orderBy: 'id DESC', limit: 5000))
+        .reversed
+        .toList();
     final sb = StringBuffer();
     sb.writeln('BITÁCORA IRONBODY GYM');
     sb.writeln('Exportado: ${DateTime.now().toIso8601String()}');
