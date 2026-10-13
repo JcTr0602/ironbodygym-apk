@@ -12,6 +12,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:share_plus/share_plus.dart';
 import 'package:uuid/uuid.dart';
 
 import '../auth.dart';
@@ -50,6 +51,8 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
   bool _vistaCompacta = true;
   // v1.2.9+47: ventas del día para el banner.
   Map<String, dynamic> _ventasHoy = {'n': 0, 'total': 0.0};
+  // v1.2.9+47: ids con ops pendientes (badge naranja).
+  Set<int> _idsPendientes = {};
 
   bool get _esDueno => _auth.isOwner;
 
@@ -98,6 +101,7 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
       _cargando = false;
     });
     _cargarVentasHoy();
+    _cargarIdsPendientes();
   }
 
   /// v1.2.1: ids de los 4 productos más vendidos (por cantidad).
@@ -248,6 +252,11 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
         },
       );
       unawaited(SyncEngine.instance.push());
+      if (mounted) {
+        setState(() {
+          _idsPendientes.add(s['id'] as int);
+        });
+      }
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
@@ -277,6 +286,11 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
       payload: {'id': s['id'], 'stock': nuevoStock},
     );
     unawaited(SyncEngine.instance.push());
+    if (mounted) {
+      setState(() {
+        _idsPendientes.add(s['id'] as int);
+      });
+    }
     _cargar();
 
     if (mounted) {
@@ -366,8 +380,30 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
 
   /// v1.2.9+47: ¿tiene ops pendientes este suplemento?
   bool _tieneOpPendiente(dynamic id) {
-    // TODO: implementar chequeo real contra ops_queue
-    return false;
+    final i = (id as num?)?.toInt();
+    return i != null && _idsPendientes.contains(i);
+  }
+
+  /// v1.2.9+47: precarga ids con ops pendientes (filtro por tipo).
+  Future<void> _cargarIdsPendientes() async {
+    try {
+      final d = await LocalDb.instance.db;
+      final rows = await d.query(
+        'ops_queue',
+        columns: ['tipo', 'payload'],
+        where: "estado IN ('pendiente', 'enviada') "
+            "AND tipo IN ('venta_suplemento', 'editar_suplemento')",
+      );
+      final ids = <int>{};
+      for (final r in rows) {
+        final p = r['payload'] as String?;
+        if (p == null) continue;
+        final m = RegExp(r'"(?:suplemento_id|id)":\s*(\d+)')
+            .firstMatch(p);
+        if (m != null) ids.add(int.parse(m.group(1)!));
+      }
+      if (mounted) setState(() => _idsPendientes = ids);
+    } catch (_) {}
   }
 
   /// v1.2.9+47: selector de vista (compacta vs tarjeta).
@@ -477,7 +513,8 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
   Widget _bannerVentasHoy() {
     final n = _ventasHoy['n'] as int;
     if (n <= 0) return const SizedBox.shrink();
-    final total = (_ventasHoy['total'] as num).toDouble();
+    final total =
+        (_ventasHoy['total'] as num?)?.toDouble() ?? 0.0;
     return Container(
       margin: const EdgeInsets.fromLTRB(16, 4, 16, 8),
       padding: const EdgeInsets.symmetric(
@@ -509,6 +546,42 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
         ],
       ),
     );
+  }
+
+  /// v1.2.9+47: comparte catálogo como texto para WhatsApp.
+  Future<void> _compartirCatalogo() async {
+    final d = await LocalDb.instance.db;
+    final rows = await d.query('suplementos',
+        columns: ['nombre', 'precio'],
+        where: 'activo = 1 AND stock > 0',
+        orderBy: 'nombre');
+
+    if (rows.isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+              content: Text(
+                  'No hay productos activos con stock')),
+        );
+      }
+      return;
+    }
+
+    final buf = StringBuffer();
+    buf.writeln('🏋️ *IRON BODY GYM*');
+    buf.writeln('Catálogo de suplementos');
+    buf.writeln('');
+    for (final r in rows) {
+      final nombre = r['nombre'];
+      final precio =
+          (r['precio'] as num?)?.toDouble() ?? 0;
+      buf.writeln(
+          '• $nombre — \$${precio.toStringAsFixed(2)} USD');
+    }
+    buf.writeln('');
+    buf.writeln('_Precios en USD. Stock limitado._');
+
+    await Share.share(buf.toString());
   }
 
   /// v1.2.1: ficha del producto al tocar la tarjeta.
@@ -799,7 +872,7 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
         padding: const EdgeInsets.fromLTRB(
             AppEspacio.md, AppEspacio.sm, AppEspacio.md, 96),
         itemCount: items.length,
-        itemBuilder: (ctx, i) => _tarjetaProducto(items[i]),
+        itemBuilder: (ctx, i) => _itemSuplemento(items[i]),
       );
     }
     // Encontrar índice donde empieza sin-stock
@@ -817,7 +890,7 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
         padding: const EdgeInsets.fromLTRB(
             AppEspacio.md, AppEspacio.sm, AppEspacio.md, 96),
         itemCount: items.length,
-        itemBuilder: (ctx, i) => _tarjetaProducto(items[i]),
+        itemBuilder: (ctx, i) => _itemSuplemento(items[i]),
       );
     }
     // Construir lista con header
@@ -833,7 +906,7 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
           );
         }
         final itemIdx = i > idxSinStock ? i - 1 : i;
-        return _tarjetaProducto(items[itemIdx]);
+        return _itemSuplemento(items[itemIdx]);
       },
     );
   }
