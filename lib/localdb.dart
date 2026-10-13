@@ -1626,7 +1626,12 @@ class LocalDb {
   /// _uploadOps y no por marcarIncidenciaSincronizada).
   Future<void> marcarTiposComentariosSincronizados() async {
     final d = await db;
-    await d.update('incidencias_local', {'sync_estado': 'synced'},
+    // Argón: solo si no quedan ops pendientes.
+    final pend = await d.rawQuery(
+        "SELECT COUNT(*) as n FROM ops_queue WHERE estado = 'pendiente'");
+    if (((pend.first['n'] as num?)?.toInt() ?? 0) > 0) return;
+    await d.update('incidencias_local',
+        {'sync_estado': 'synced', 'sincronizada': 1},
         where: "sync_estado = 'pending'");
     await d.update('incidencias_tipos', {'sync_estado': 'synced'},
         where: "sync_estado = 'pending'");

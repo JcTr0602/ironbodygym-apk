@@ -1453,22 +1453,9 @@ class SyncEngine {
     if (borradosOk && borradosMax > cursorBorrados) {
       await _db.setWatermarkTabla('borrados', borradosMax);
     }
-    // v1.2.4: incidencias (tabla central sync_incidencias)
-    try {
-      await _downloadIncidencias(silencioso: silencioso);
-    } catch (e) {
-      // 404/400 = tabla aún no creada en Supabase: se omite sin abortar.
-      // Otro error sí aborta para no dejar watermark inconsistente.
-      final msg = e.toString();
-      if (!msg.contains('404') && !msg.contains('400')) rethrow;
-    }
-    // v1.2.5: eventos autoritativos de incidencias
-    try {
-      await _downloadIncidenciaEventos(silencioso: silencioso);
-    } catch (e) {
-      final msg = e.toString();
-      if (!msg.contains('404') && !msg.contains('400')) rethrow;
-    }
+    // Argón v1.3.0: bajadas viejas v1.2.4/v1.2.5 DESACTIVADAS.
+    // Ahora se usan _pullTiposIncidencia(), _pullIncidencias(),
+    // _pullIncidenciasComentarios(), _pullIncidenciasHistorial().
     if (erroresTablas.isNotEmpty) {
       // Alguna tabla falló: las demás ya guardaron su progreso en sus
       // cursores propios; se reporta para que run() reintente solo lo

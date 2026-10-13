@@ -63,8 +63,10 @@ class _EditarIncidenciaScreenState
             .map((m) =>
                 TipoIncidencia.fromMap(m))
             .toList();
-        if (_tipoId == null &&
-            _tipos.isNotEmpty) {
+        // Argón: no crashear si el tipo está inactivo.
+        if (_tipos.isNotEmpty &&
+            (_tipoId == null ||
+                !_tipos.any((t) => t.id == _tipoId))) {
           _tipoId = _tipos.first.id;
         }
       });

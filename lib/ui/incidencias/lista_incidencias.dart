@@ -45,6 +45,11 @@ class _ListaIncidenciasScreenState
     // Tipos activos
     final tiposRows = await d.query('incidencias_tipos',
         where: 'activo = 1', orderBy: 'orden');
+    // Argón: resetear filtro si el tipo fue desactivado.
+    if (_filtroTipoId != null &&
+        !tiposRows.any((r) => '${r['id']}' == _filtroTipoId)) {
+      _filtroTipoId = null;
+    }
     // Incidencias (local + mirror combinados, local tiene prioridad)
     // Sol #8: sin UNION ALL (esquemas difieren entre tablas).
     // Se consultan por separado y se mezclan en Dart.
