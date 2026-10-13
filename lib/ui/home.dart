@@ -103,7 +103,7 @@ class _HomeScreenState extends State<HomeScreen>
             await PerfilService.instance.getAvisoFalloSync();
         if (quiere && mounted) {
           setState(() => _falloSync =
-              s.lastError ?? 'Error de sincronización');
+              s.lastError?.mensaje ?? 'Error de sincronización');
         }
       }
     });

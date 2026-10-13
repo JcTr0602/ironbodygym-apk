@@ -110,7 +110,7 @@ class _SyncBannerState extends State<SyncBanner>
             ];
             icono = Icons.error_outline;
             titulo = 'No se pudo sincronizar';
-            subtitulo = s.lastError;
+            subtitulo = s.lastError?.mensaje;
             break;
           case SyncPhase.idle:
             // v1.2.5 (D11): frase en lenguaje humano según 3 dimensiones.

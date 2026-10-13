@@ -39,7 +39,8 @@ class SyncStatus {
   final SyncPhase phase;
   final int pending;
   final DateTime? lastOk;
-  final String? lastError;
+  /// v1.2.9+43: ErrorSync en vez de String crudo (blindaje anti-fugas).
+  final ErrorSync? lastError;
 
   /// Progreso 0..1 de la fase actual (null = indeterminado).
   final double? progreso;
@@ -305,7 +306,7 @@ class SyncEngine {
           .timeout(timeout));
 
   void _emit(SyncPhase phase,
-      {String? error,
+      {ErrorSync? error,
       double? progreso,
       String? detalle,
       String? resumen}) async {
@@ -389,13 +390,22 @@ class SyncEngine {
   /// pero sí hay internet, es que el servidor no responde.
   /// v1.2.5 (D16): error visible basado en códigos estables, no en texto.
   /// El mismo fallo siempre muestra el mismo mensaje y acción.
-  Future<String> _describeErrorVisible(Object e, {int? httpStatus}) async {
-    final ec = clasificarError(e, httpStatus: httpStatus);
+  /// v1.2.9+43: retorna ErrorSync (no String) para blindaje anti-fugas.
+  Future<ErrorSync> _describeErrorVisible(Object e, {int? httpStatus}) async {
+    final ec = traducirErrorSync(e, httpStatus: httpStatus);
     // Sin conexión pero hay internet: el servidor no responde.
     if (ec.codigo == 'sin_conexion' && await _hayInternet()) {
-      return 'No se pudo contactar el servidor. Tus cambios están a salvo.';
+      return ErrorSync(
+        codigo: 'servidor_no_responde',
+        tipo: TipoErrorSync.transitorio,
+        mensaje: 'No se pudo contactar el servidor.',
+        accionTexto: 'Tus cambios están guardados en el teléfono.',
+        accionBoton: AccionBoton.reintentar,
+        datosGuardadosLocalmente: true,
+        detalleTecnicoOculto: e.toString(),
+      );
     }
-    return ec.mensaje;
+    return ec;
   }
 
   Future<DateTime?> _ultimaOk() async {
@@ -458,10 +468,11 @@ class SyncEngine {
           // v1.2.4: no ocultar sync incompleto
           final wm = await _db.getWatermarkMinimo();
           final ss = int.tryParse(await _db.getMeta('server_seq') ?? '0') ?? 0;
-          final msg =
-              'Sincronización incompleta: watermark $wm < server_seq $ss tras 3 intentos';
-          await _db.setMeta('last_sync_error', msg);
-          _emit(SyncPhase.error, error: msg);
+          // v1.2.9+43: usar traducirErrorSync, nunca strings técnicos.
+          final errSync = traducirErrorSync(
+              'watermark $wm < server_seq $ss tras 3 intentos');
+          await _db.setMeta('last_sync_error', errSync.mensaje);
+          _emit(SyncPhase.error, error: errSync);
           return;
         }
         // v1.0.17: resumen discreto de lo que realmente cambió
@@ -480,9 +491,9 @@ class SyncEngine {
         _sesionVencida();
         _emit(SyncPhase.idle);
       } catch (e) {
-        final msgVisible = await _describeErrorVisible(e);
-        await _db.setMeta('last_sync_error', msgVisible);
-        _emit(SyncPhase.error, error: msgVisible);
+        final errSync = await _describeErrorVisible(e);
+        await _db.setMeta('last_sync_error', errSync.mensaje);
+        _emit(SyncPhase.error, error: errSync);
         await Future.delayed(const Duration(seconds: 2));
         _emit(SyncPhase.idle);
       }
@@ -510,8 +521,8 @@ class SyncEngine {
         _emit(SyncPhase.idle,
             resumen: 'Sincronizado: ${tablas.join(', ')}');
       } catch (e) {
-        final msgVisible = await _describeErrorVisible(e);
-        _emit(SyncPhase.error, error: msgVisible);
+        final errSync = await _describeErrorVisible(e);
+        _emit(SyncPhase.error, error: errSync);
         await Future.delayed(const Duration(seconds: 2));
         _emit(SyncPhase.idle);
       }

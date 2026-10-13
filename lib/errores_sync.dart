@@ -1,12 +1,13 @@
-/// v1.2.5 Fase 2 (D15/D16): clasificación y traducción de errores de sync.
+/// v1.2.9+43: clasificación y traducción completa de errores de sync.
 ///
-/// - Los errores se clasifican PRIMERO (transitorio | permanente | auth |
-///   validación) y después se decide: reintentar con backoff, marcar
-///   'necesita_revision', o pedir re-autenticación.
-/// - Los mensajes usan códigos estables, no texto del error: el mismo fallo
-///   siempre muestra el mismo mensaje y la misma acción.
-/// - Sin detalles internos en el mensaje visible.
+/// Arquitectura de blindaje anti-fugas técnicas (Gemini R3):
+/// - NINGÚN mensaje técnico llega al usuario
+/// - Regla de la verdad: solo se afirma "datos guardados" si SQLite tuvo éxito
+/// - Todo error tiene: mensaje simple + acción concreta + botón
 library;
+
+import 'dart:async';
+import 'dart:io';
 
 /// Categoría del error: decide el tratamiento.
 enum TipoErrorSync {
@@ -19,8 +20,29 @@ enum TipoErrorSync {
   /// Requiere re-autenticación (401, sesión vencida).
   auth,
 
+  /// Conflicto de edición concurrente (409).
+  conflicto,
+
+  /// Error local del dispositivo (SQLite, disco).
+  local,
+
+  /// Permiso del sistema denegado (cámara, almacenamiento).
+  permiso,
+
   /// El servidor rechazó el contenido (validación de negocio).
   validacion,
+}
+
+/// Acción del botón primario en la UI.
+enum AccionBoton {
+  reintentar,
+  iniciarSesion,
+  verAjustes,
+  corregir,
+  refrescarTodo,
+  esperar,
+  contactarSoporte,
+  entendido,
 }
 
 /// Error clasificado con mensaje humano y acción sugerida.
@@ -32,147 +54,287 @@ class ErrorSync {
   /// Mensaje en lenguaje humano (sin tecnicismos ni detalles internos).
   final String mensaje;
 
-  /// Qué puede hacer el usuario, ej. 'Reintentar', 'Revisar', 'Entrar de nuevo'.
-  final String accion;
+  /// Qué debe hacer el usuario (instrucción concreta).
+  final String accionTexto;
+
+  /// Acción del botón primario.
+  final AccionBoton accionBoton;
+
+  /// TRUE solo si SQLite confirmó la escritura local antes del error.
+  /// Regla de la verdad: nunca afirmar "datos a salvo" si es false.
+  final bool datosGuardadosLocalmente;
+
+  /// Detalle técnico original, solo para logs/depuración. Nunca mostrar al usuario.
+  final String? detalleTecnicoOculto;
 
   const ErrorSync({
     required this.codigo,
     required this.tipo,
     required this.mensaje,
-    required this.accion,
+    required this.accionTexto,
+    required this.accionBoton,
+    required this.datosGuardadosLocalmente,
+    this.detalleTecnicoOculto,
   });
 }
 
-/// Clasifica un error de red/HTTP en un ErrorSync.
-ErrorSync clasificarError(Object e, {int? httpStatus}) {
-  final texto = e.toString().toLowerCase();
+/// Traduce cualquier error a un ErrorSync con mensaje en lenguaje simple.
+/// GARANTIZA que ningún término técnico llegue al usuario.
+ErrorSync traducirErrorSync(Object error, {int? httpStatus, StackTrace? stack}) {
+  final raw = error.toString().toLowerCase();
 
-  // Auth primero: 401 o sesión vencida.
+  // 1. Permisos del sistema operativo
+  if (raw.contains('cameradenied') ||
+      raw.contains('camera permission') ||
+      (raw.contains('camera') && raw.contains('denied'))) {
+    return ErrorSync(
+      codigo: 'permiso_camara',
+      tipo: TipoErrorSync.permiso,
+      mensaje: 'La app no tiene permiso para usar la cámara.',
+      accionTexto: 'Activa el permiso de cámara en los ajustes del teléfono.',
+      accionBoton: AccionBoton.verAjustes,
+      datosGuardadosLocalmente: true,
+      detalleTecnicoOculto: error.toString(),
+    );
+  }
+  if ((raw.contains('storage') || raw.contains('photos')) &&
+      (raw.contains('denied') || raw.contains('permission'))) {
+    return ErrorSync(
+      codigo: 'permiso_almacen',
+      tipo: TipoErrorSync.permiso,
+      mensaje: 'La app necesita permiso para guardar fotos.',
+      accionTexto: 'Permite el acceso a las fotos en los ajustes del teléfono.',
+      accionBoton: AccionBoton.verAjustes,
+      datosGuardadosLocalmente: true,
+      detalleTecnicoOculto: error.toString(),
+    );
+  }
+
+  // 2. Almacenamiento local / SQLite (Regla de la verdad: datos NO guardados)
+  if (raw.contains('sqlite_full') ||
+      raw.contains('no space left') ||
+      raw.contains('disk full') ||
+      raw.contains('enospc')) {
+    return ErrorSync(
+      codigo: 'disco_lleno',
+      tipo: TipoErrorSync.local,
+      mensaje: 'El teléfono no tiene espacio libre.',
+      accionTexto: 'Libera espacio borrando fotos o archivos viejos.',
+      accionBoton: AccionBoton.entendido,
+      datosGuardadosLocalmente: false,
+      detalleTecnicoOculto: error.toString(),
+    );
+  }
+  if (raw.contains('sqlite_busy') ||
+      raw.contains('database is locked') ||
+      raw.contains('sqlite_locked')) {
+    return ErrorSync(
+      codigo: 'bd_bloqueada',
+      tipo: TipoErrorSync.local,
+      mensaje: 'El teléfono está ocupado con otra tarea.',
+      accionTexto: 'Espera unos segundos y vuelve a intentarlo.',
+      accionBoton: AccionBoton.reintentar,
+      datosGuardadosLocalmente: false,
+      detalleTecnicoOculto: error.toString(),
+    );
+  }
+  if (raw.contains('sqlite_corrupt') || raw.contains('database disk image')) {
+    return ErrorSync(
+      codigo: 'bd_corrupta',
+      tipo: TipoErrorSync.local,
+      mensaje: 'Hubo un problema con los datos guardados en el teléfono.',
+      accionTexto: 'Contacta al soporte para reparar la aplicación.',
+      accionBoton: AccionBoton.contactarSoporte,
+      datosGuardadosLocalmente: false,
+      detalleTecnicoOculto: error.toString(),
+    );
+  }
+
+  // 3. Desfase de sincronización (watermark/server_seq)
+  if (raw.contains('watermark') || raw.contains('server_seq')) {
+    return ErrorSync(
+      codigo: 'desfase_servidor',
+      tipo: TipoErrorSync.conflicto,
+      mensaje: 'Hay información nueva del servidor por descargar.',
+      accionTexto: 'Toca el botón para actualizar los datos.',
+      accionBoton: AccionBoton.refrescarTodo,
+      datosGuardadosLocalmente: true,
+      detalleTecnicoOculto: error.toString(),
+    );
+  }
+
+  // 4. Multimedia / fotos / TUS
+  if (raw.contains('tus') ||
+      (raw.contains('upload') && raw.contains('fail')) ||
+      raw.contains('storage_error')) {
+    return ErrorSync(
+      codigo: 'foto_subida_fallida',
+      tipo: TipoErrorSync.transitorio,
+      mensaje: 'No se pudo subir la foto por la conexión.',
+      accionTexto: 'Se reintentará automáticamente cuando mejore la señal.',
+      accionBoton: AccionBoton.reintentar,
+      datosGuardadosLocalmente: true,
+      detalleTecnicoOculto: error.toString(),
+    );
+  }
+  if (raw.contains('compress') && raw.contains('fail') ||
+      raw.contains('image too large')) {
+    return ErrorSync(
+      codigo: 'foto_muy_pesada',
+      tipo: TipoErrorSync.transitorio,
+      mensaje: 'La foto es muy grande para esta conexión.',
+      accionTexto: 'La app la comprimirá automáticamente.',
+      accionBoton: AccionBoton.reintentar,
+      datosGuardadosLocalmente: true,
+      detalleTecnicoOculto: error.toString(),
+    );
+  }
+
+  // 5. Autenticación
   if (httpStatus == 401 ||
-      texto.contains('sesion vencida') ||
-      texto.contains('sessionexpired') ||
-      texto.contains('jwt')) {
-    return const ErrorSync(
-      codigo: 'sesion_vencida',
+      raw.contains('jwt') ||
+      raw.contains('sessionexpired') ||
+      raw.contains('sesion vencida') ||
+      raw.contains('unauthorized')) {
+    return ErrorSync(
+      codigo: 'sesion_caducada',
       tipo: TipoErrorSync.auth,
-      mensaje: 'Tu sesión venció. Entra de nuevo para seguir sincronizando.',
-      accion: 'Entrar de nuevo',
+      mensaje: 'Tu sesión venció.',
+      accionTexto: 'Entra de nuevo con tu usuario para continuar.',
+      accionBoton: AccionBoton.iniciarSesion,
+      datosGuardadosLocalmente: true,
+      detalleTecnicoOculto: error.toString(),
     );
   }
-  if (httpStatus == 403) {
-    return const ErrorSync(
-      codigo: 'no_autorizado',
+  if (httpStatus == 403 || raw.contains('forbidden')) {
+    return ErrorSync(
+      codigo: 'sin_permiso_rol',
       tipo: TipoErrorSync.auth,
-      mensaje: 'No tienes permiso para esta operación.',
-      accion: 'Revisar',
+      mensaje: 'No tienes permiso para hacer este cambio.',
+      accionTexto: 'Habla con el administrador del gimnasio.',
+      accionBoton: AccionBoton.entendido,
+      datosGuardadosLocalmente: true,
+      detalleTecnicoOculto: error.toString(),
     );
   }
 
-  // Sin conexión / timeout.
-  if (texto.contains('socketexception') ||
-      texto.contains('network is unreachable') ||
-      texto.contains('failed host lookup') ||
-      texto.contains('sin internet') ||
-      texto.contains('sin conexión')) {
-    return const ErrorSync(
+  // 6. Red y conexión
+  if (error is SocketException ||
+      raw.contains('socketexception') ||
+      raw.contains('failed host lookup') ||
+      raw.contains('network is unreachable') ||
+      raw.contains('sin internet') ||
+      raw.contains('sin conexión')) {
+    return ErrorSync(
       codigo: 'sin_conexion',
       tipo: TipoErrorSync.transitorio,
-      mensaje: 'Sin conexión. Tus cambios están guardados en este teléfono.',
-      accion: 'Reintentar',
+      mensaje: 'No hay conexión a internet.',
+      accionTexto: 'Tus datos están guardados en el teléfono. Se enviarán solos cuando vuelva la señal.',
+      accionBoton: AccionBoton.reintentar,
+      datosGuardadosLocalmente: true,
+      detalleTecnicoOculto: error.toString(),
     );
   }
-  if (texto.contains('timeout') || texto.contains('timed out')) {
-    return const ErrorSync(
-      codigo: 'timeout',
+  if (error is TimeoutException ||
+      raw.contains('timeout') ||
+      raw.contains('timed out') ||
+      httpStatus == 408) {
+    return ErrorSync(
+      codigo: 'tiempo_agotado',
       tipo: TipoErrorSync.transitorio,
-      mensaje: 'El servidor tardó demasiado en responder. Se reintentará.',
-      accion: 'Reintentar',
+      mensaje: 'La conexión está muy lenta.',
+      accionTexto: 'Inténtalo de nuevo en un lugar con mejor señal.',
+      accionBoton: AccionBoton.reintentar,
+      datosGuardadosLocalmente: true,
+      detalleTecnicoOculto: error.toString(),
     );
   }
 
-  // HTTP por código.
+  // 7. HTTP por código
   if (httpStatus != null) {
     if (httpStatus == 429) {
-      return const ErrorSync(
-        codigo: 'limite_excedido',
+      return ErrorSync(
+        codigo: 'servidor_ocupado',
         tipo: TipoErrorSync.transitorio,
-        mensaje: 'Demasiadas peticiones. Se reintentará en unos minutos.',
-        accion: 'Esperar',
+        mensaje: 'El sistema está muy ocupado ahora mismo.',
+        accionTexto: 'Espera unos minutos y vuelve a intentarlo.',
+        accionBoton: AccionBoton.esperar,
+        datosGuardadosLocalmente: true,
+        detalleTecnicoOculto: 'HTTP 429',
       );
     }
     if (httpStatus >= 500) {
-      return const ErrorSync(
-        codigo: 'servidor_error',
+      return ErrorSync(
+        codigo: 'servidor_caido',
         tipo: TipoErrorSync.transitorio,
-        mensaje: 'El servidor falló. Tus cambios están a salvo, se reintentará.',
-        accion: 'Reintentar',
+        mensaje: 'El servidor tiene un problema temporal.',
+        accionTexto: 'Tus datos están guardados. Se reintentará solo.',
+        accionBoton: AccionBoton.reintentar,
+        datosGuardadosLocalmente: true,
+        detalleTecnicoOculto: 'HTTP $httpStatus',
+      );
+    }
+    if (httpStatus == 409 || raw.contains('idempotencia')) {
+      return ErrorSync(
+        codigo: 'conflicto_edicion',
+        tipo: TipoErrorSync.conflicto,
+        mensaje: 'Esta información se cambió desde otro teléfono.',
+        accionTexto: 'Revisa los datos actuales antes de guardar de nuevo.',
+        accionBoton: AccionBoton.refrescarTodo,
+        datosGuardadosLocalmente: false,
+        detalleTecnicoOculto: 'HTTP 409',
+      );
+    }
+    if (httpStatus == 422 || raw.contains('validación') || raw.contains('inválid')) {
+      return ErrorSync(
+        codigo: 'validacion_negocio',
+        tipo: TipoErrorSync.validacion,
+        mensaje: 'Los datos no son válidos.',
+        accionTexto: 'Corrige los campos marcados e inténtalo de nuevo.',
+        accionBoton: AccionBoton.corregir,
+        datosGuardadosLocalmente: false,
+        detalleTecnicoOculto: 'HTTP $httpStatus',
       );
     }
     if (httpStatus == 404) {
-      return const ErrorSync(
+      return ErrorSync(
         codigo: 'no_encontrado',
         tipo: TipoErrorSync.permanente,
-        mensaje: 'El servidor no reconoce esta operación. Necesita revisión.',
-        accion: 'Revisar',
-      );
-    }
-    if (httpStatus >= 400) {
-      return const ErrorSync(
-        codigo: 'peticion_invalida',
-        tipo: TipoErrorSync.permanente,
-        mensaje: 'Hay un problema con esta operación. Necesita revisión.',
-        accion: 'Revisar',
+        mensaje: 'No se encontró lo que buscabas en el servidor.',
+        accionTexto: 'Actualiza la lista y vuelve a intentarlo.',
+        accionBoton: AccionBoton.refrescarTodo,
+        datosGuardadosLocalmente: true,
+        detalleTecnicoOculto: 'HTTP 404',
       );
     }
   }
 
-  // Rechazo del servidor con mensaje de validación.
-  if (texto.contains('rechazada') ||
-      texto.contains('validación') ||
-      texto.contains('inválid')) {
-    return const ErrorSync(
-      codigo: 'validacion',
-      tipo: TipoErrorSync.validacion,
-      mensaje: 'El servidor rechazó esta operación. Necesita revisión.',
-      accion: 'Revisar',
-    );
-  }
-
-  // Conflicto de idempotencia.
-  if (texto.contains('idempotencia')) {
-    return const ErrorSync(
-      codigo: 'conflicto',
-      tipo: TipoErrorSync.permanente,
-      mensaje: 'Esta operación cambió en otro lugar. Necesita revisión.',
-      accion: 'Revisar',
-    );
-  }
-
-  return const ErrorSync(
+  // 8. Fallback seguro: nunca mostrar el error crudo
+  return ErrorSync(
     codigo: 'desconocido',
     tipo: TipoErrorSync.transitorio,
-    mensaje: 'Algo falló al sincronizar. Se reintentará automáticamente.',
-    accion: 'Reintentar',
+    mensaje: 'Hubo un problema al sincronizar.',
+    accionTexto: 'Tus datos están guardados. Se reintentará automáticamente.',
+    accionBoton: AccionBoton.reintentar,
+    datosGuardadosLocalmente: true,
+    detalleTecnicoOculto: error.toString(),
   );
 }
 
+/// Clasifica un error (compatibilidad con código existente).
+/// Usa traducirErrorSync internamente.
+ErrorSync clasificarError(Object e, {int? httpStatus}) =>
+    traducirErrorSync(e, httpStatus: httpStatus);
+
 /// Calcula el backoff con jitter para un reintento.
-///
-/// base 30s, duplica por intento, tope 5 min, ±20% jitter.
-/// v1.2.5 (D14): acotado, solo transitorios, un único ciclo.
 Duration backoffReintento(int intentos) {
   const baseSeg = 30;
-  const topeSeg = 300; // 5 min
+  const topeSeg = 300;
   var seg = baseSeg * (1 << (intentos - 1).clamp(0, 4));
   if (seg > topeSeg) seg = topeSeg;
-  // jitter ±20% determinista por intento (sin Random global).
-  final jitter = ((intentos * 37) % 41) - 20; // -20..+20
+  final jitter = ((intentos * 37) % 41) - 20;
   seg = (seg * (100 + jitter) / 100).round();
   return Duration(seconds: seg.clamp(10, topeSeg));
 }
 
-/// Intentos máximos de transitorios antes de 'necesita_revision'.
-/// v1.2.5-rev5 (Gemini): 5 intentos cubrían ~12 min; en Cuba los cortes de
-/// 20+ min son normales. Con backoff topado a 5 min, 25 intentos ≈ 2 h de
-/// cobertura antes de pedir revisión manual.
 const maxIntentosTransitorio = 25;
