@@ -337,3 +337,18 @@ Duration backoffReintento(int intentos) {
 }
 
 const maxIntentosTransitorio = 25;
+
+/// v1.2.9+46 (Gemini): función pura para la UI. Traduce cualquier error
+/// a lenguaje natural usando traducirErrorSync. Si no se reconoce,
+/// sugiere exportar la bitácora.
+String describirError(Object error) {
+  try {
+    final e = traducirErrorSync(error);
+    var msg = e.mensaje;
+    if (e.accionTexto.isNotEmpty) msg += ' ${e.accionTexto}';
+    return msg;
+  } catch (_) {
+    return 'Hubo un problema al sincronizar. Exporta la bitácora '
+        'desde Ajustes y envíala para revisión.';
+  }
+}

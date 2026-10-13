@@ -688,6 +688,21 @@ class SyncEngine {
   /// con conexiones de alta latencia.
   Future<int> _uploadOps({bool forzar = false}) async {
     var aplicadas = 0;
+    // v1.2.9+46 (Gemini): las ops en 'enviada' por más de 2 minutos
+    // vuelven a 'pendiente' para reintento idempotente. Evita que
+    // queden en limbo perpetuo si la confirmación falló.
+    try {
+      final db = await _db.db;
+      final corte = DateTime.now()
+          .subtract(const Duration(minutes: 2))
+          .toIso8601String();
+      await db.update(
+        'ops_queue',
+        {'estado': 'pendiente', 'error': null},
+        where: "estado = 'enviada' AND creada_ts < ?",
+        whereArgs: [corte],
+      );
+    } catch (_) {}
     // v1.0.16: solo subir las ops del usuario actual. Las de otro
     // usuario quedan en espera hasta que su dueño vuelva a entrar.
     // v1.2.5 (D14): respeta el backoff de reintentos.

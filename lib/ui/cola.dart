@@ -2,14 +2,18 @@
 /// y cola de operaciones (con opción de cancelar las pendientes).
 library;
 
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:sqflite/sqflite.dart';
 
+import '../errores_sync.dart';
 import '../localdb.dart';
 import '../negocio.dart';
 import '../sync.dart';
 import '../tiempo.dart';
+import '../tipos_operacion.dart';
 import 'componentes.dart';
 import 'diseno.dart';
 
@@ -25,22 +29,54 @@ class _ColaScreenState extends State<ColaScreen> {
   List<Map<String, dynamic>> _bloqueadas = [];
   SyncDetalle _det = const SyncDetalle();
   bool _sincronizando = false;
+  // v1.2.9+46: contadores de la cola de fotos.
+  int _fotosPendientes = 0;
+  int _fotosSubiendo = 0;
+  int _fotosError = 0;
+  StreamSubscription<SyncStatus>? _syncSub;
 
   @override
   void initState() {
     super.initState();
     _cargar();
+    // v1.2.9+46 (Gemini): refresco reactivo al terminar un push/pull.
+    _syncSub = SyncEngine.instance.statusStream.listen((s) {
+      if (s.phase == SyncPhase.idle) _cargar();
+    });
+  }
+
+  @override
+  void dispose() {
+    _syncSub?.cancel();
+    super.dispose();
   }
 
   Future<void> _cargar() async {
     final ops = await LocalDb.instance.recentOps();
     final bloqueadas = await LocalDb.instance.opsNecesitanRevision();
     final det = await SyncEngine.instance.detalle();
+    // v1.2.9+46: contadores de fotos.
+    int fPend = 0, fSub = 0, fErr = 0;
+    try {
+      final db = await LocalDb.instance.db;
+      fPend = Sqflite.firstIntValue(await db.rawQuery(
+              "SELECT COUNT(*) FROM fotos_cola WHERE estado='pendiente'")) ??
+          0;
+      fSub = Sqflite.firstIntValue(await db.rawQuery(
+              "SELECT COUNT(*) FROM fotos_cola WHERE estado='subiendo'")) ??
+          0;
+      fErr = Sqflite.firstIntValue(await db.rawQuery(
+              "SELECT COUNT(*) FROM fotos_cola WHERE estado='error'")) ??
+          0;
+    } catch (_) {}
     if (mounted) {
       setState(() {
         _ops = ops;
         _bloqueadas = bloqueadas;
         _det = det;
+        _fotosPendientes = fPend;
+        _fotosSubiendo = fSub;
+        _fotosError = fErr;
       });
     }
   }
@@ -191,7 +227,8 @@ class _ColaScreenState extends State<ColaScreen> {
       case 'aplicada':
         return Icons.check_circle;
       case 'enviada':
-        return Icons.upload;
+        // v1.2.9+46: ámbar = confirmación pendiente.
+        return Icons.sync_problem;
       case 'rechazada':
         return Icons.block;
       case 'error':
@@ -206,7 +243,8 @@ class _ColaScreenState extends State<ColaScreen> {
       case 'aplicada':
         return AppColores.exito;
       case 'enviada':
-        return AppColores.info;
+        // v1.2.9+46: ámbar = confirmación pendiente.
+        return AppColores.alerta;
       case 'rechazada':
       case 'error':
         return AppColores.error;
@@ -215,48 +253,133 @@ class _ColaScreenState extends State<ColaScreen> {
     }
   }
 
-  String _tipo(String t) {
-    switch (t) {
-      case 'inscribir':
-        return 'Inscripción';
-      case 'pago_mensual':
-        return 'Pago mensual';
-      case 'pago_diario':
-        return 'Pago diario';
-      case 'foto':
-        return 'Foto';
-      case 'editar_cliente':
-        return 'Edición de cliente';
-      case 'cambiar_estado':
-        return 'Cambio de estado';
-      case 'ajuste':
-        return 'Cambio de precio';
-      case 'admin_usuario':
-        return 'Usuario APK';
-      case 'confirmar_entrega':
-        return 'Confirmar entrega';
-      case 'gasto':
-        return 'Gasto';
-      case 'editar_pago':
-        return 'Corrección de pago';
-      case 'anular_pago':
-        return 'Anulación de pago';
-      case 'inscripcion_venta_suplemento':
-        return 'Inscripción + venta';
-      // v1.2.1: categorías de suplementos.
-      case 'crear_categoria':
-        return 'Nueva categoría';
-      case 'editar_categoria':
-        return 'Edición de categoría';
+  /// v1.2.9+46: etiqueta legible del estado (no el identificador técnico).
+  String _etiquetaEstado(String estado) {
+    switch (estado) {
+      case 'aplicada':
+        return 'Confirmada';
+      case 'enviada':
+        return 'Confirmación pendiente';
+      case 'pendiente':
+        return 'Pendiente';
+      case 'rechazada':
+        return 'Rechazada';
+      case 'error':
+        return 'Falló';
       default:
-        return t;
+        return estado;
     }
   }
+
+  /// v1.2.9+46 (Gemini): delega al mapa centralizado.
+  String _tipo(String t) => describirTipoOp(t);
 
   String _hora(DateTime? d) {
     if (d == null) return '—';
     return '${d.day.toString().padLeft(2, '0')}/${d.month.toString().padLeft(2, '0')} '
         '${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}';
+  }
+
+  /// v1.2.9+46 (Gemini): tarjeta compacta con el estado de la cola de fotos.
+  /// Si hay errores, se torna ámbar/roja con botón para ver el detalle.
+  Widget _tarjetaFotos(BuildContext context) {
+    final total = _fotosPendientes + _fotosSubiendo + _fotosError;
+    final hayError = _fotosError > 0;
+    final color = hayError
+        ? AppColores.error
+        : (total > 0 ? AppColores.alerta : AppColores.exito);
+    return Tarjeta(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.photo_library,
+                  size: 24, color: AppColores.naranja),
+              const SizedBox(width: 12),
+              const Expanded(
+                child: Text('Fotos', style: AppTexto.subtitulo),
+              ),
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: color.withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Text(
+                  total == 0
+                      ? 'Al día'
+                      : '$_fotosPendientes pendientes · '
+                          '$_fotosSubiendo subiendo',
+                  style: TextStyle(
+                      color: color,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600),
+                ),
+              ),
+            ],
+          ),
+          if (hayError) ...[
+            const SizedBox(height: 8),
+            Text(
+              '$_fotosError ${_fotosError == 1 ? 'foto falló' : 'fotos fallaron'}',
+              style: const TextStyle(
+                  color: AppColores.error, fontSize: 13),
+            ),
+            const SizedBox(height: 4),
+            TextButton.icon(
+              icon: const Icon(Icons.visibility_outlined, size: 18),
+              label: const Text('Ver fallos'),
+              onPressed: () => _verFallosFotos(context),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  /// Muestra el detalle de las fotos con error permanente.
+  Future<void> _verFallosFotos(BuildContext context) async {
+    List<Map<String, dynamic>> fallos = [];
+    try {
+      final db = await LocalDb.instance.db;
+      fallos = await db.query(
+        'fotos_cola',
+        columns: ['id', 'tipo', 'intentos', 'ultimo_error', 'actualizado_en'],
+        where: "estado = 'error'",
+        orderBy: 'actualizado_en DESC',
+        limit: 20,
+      );
+    } catch (_) {}
+    if (!context.mounted) return;
+    await showDialog(
+      context: context,
+      builder: (ctx) => DialogoApp(
+        titulo: 'Fotos con error',
+        iconoTitulo: Icons.error_outline,
+        contenido: fallos.isEmpty
+            ? const Text('No hay fotos con error.')
+            : Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  for (final f in fallos)
+                    ListTile(
+                      dense: true,
+                      leading: const Icon(Icons.photo,
+                          color: AppColores.error),
+                      title: Text(
+                          'Foto ${f['id']} (${f['tipo']}) — '
+                          '${f['intentos']} intentos'),
+                      subtitle: Text(
+                        '${f['ultimo_error'] ?? 'sin detalle'}',
+                        style: const TextStyle(fontSize: 12),
+                      ),
+                    ),
+                ],
+              ),
+      ),
+    );
   }
 
   /// Muestra el detalle completo de una operación al tocarla.
@@ -439,8 +562,13 @@ class _ColaScreenState extends State<ColaScreen> {
         _ops.where((o) => o['estado'] == 'pendiente').length;
     final conError =
         _ops.where((o) => o['estado'] == 'error').length;
+    // v1.2.9+46 (Gemini): 'enviada' = confirmación pendiente (ámbar).
+    final enLimbo =
+        _ops.where((o) => o['estado'] == 'enviada').length;
+    final errorReciente = _det.error;
     // v1.0.14: tres estados claros en vez de binario ok/error
     // v1.1: icono Material en vez de emoji
+    // v1.2.9+46: cinco estados (error, limbo, error reciente, pendiente, ok)
     final String estadoSync;
     final List<Color> colores;
     final IconData iconoEstado;
@@ -454,6 +582,21 @@ class _ColaScreenState extends State<ColaScreen> {
       subtitulo = conError == 1
           ? '1 operación falló y necesita tu revisión'
           : '$conError operaciones fallaron y necesitan tu revisión';
+    } else if (enLimbo > 0) {
+      estadoSync = 'limbo';
+      colores = [AppColores.alerta, AppColores.alertaOscuro];
+      iconoEstado = Icons.sync_problem;
+      titulo = 'Confirmación pendiente';
+      subtitulo = enLimbo == 1
+          ? '1 operación se envió pero no se confirmó'
+          : '$enLimbo operaciones se enviaron pero no se confirmaron';
+    } else if (errorReciente != null && errorReciente.isNotEmpty) {
+      estadoSync = 'error';
+      colores = [AppColores.error, AppColores.errorOscuro];
+      iconoEstado = Icons.warning;
+      titulo = 'Falló la última sincronización';
+      // v1.2.9+46: mensaje en lenguaje natural, no genérico.
+      subtitulo = describirError(errorReciente);
     } else if (pendientes > 0) {
       estadoSync = 'pendiente';
       colores = [AppColores.alerta, AppColores.alertaOscuro];
@@ -664,6 +807,9 @@ class _ColaScreenState extends State<ColaScreen> {
               ),
               const SizedBox(height: 16),
             ],
+            // v1.2.9+46 (Gemini): visibilidad de la cola de fotos.
+            _tarjetaFotos(context),
+            const SizedBox(height: 16),
             const Text(
               'Operaciones recientes',
               style: AppTexto.titulo,
@@ -821,15 +967,24 @@ class _ColaScreenState extends State<ColaScreen> {
     if (estado == 'aplicada') {
       color = AppColores.exito;
       icono = Icons.check_circle;
-      texto = 'aplicada';
+      texto = 'Confirmada';
     } else if (estado == 'rechazada') {
       color = AppColores.error;
       icono = Icons.block;
-      texto = 'rechazada';
+      texto = 'Rechazada';
     } else if (estado == 'enviada') {
-      color = AppColores.info;
-      icono = Icons.upload;
-      texto = 'enviada';
+      // v1.2.9+46: ámbar + etiqueta legible.
+      color = AppColores.alerta;
+      icono = Icons.sync_problem;
+      texto = 'Confirmación pendiente';
+    } else if (estado == 'pendiente') {
+      color = AppColores.naranja;
+      icono = Icons.schedule;
+      texto = 'Pendiente';
+    } else if (estado == 'error') {
+      color = AppColores.error;
+      icono = Icons.warning;
+      texto = 'Falló';
     } else {
       color = AppColores.naranja;
       icono = Icons.schedule;
