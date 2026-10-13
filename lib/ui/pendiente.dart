@@ -520,7 +520,10 @@ class _DiaTileState extends State<_DiaTile> {
   @override
   Widget build(BuildContext context) {
     final dia = widget.dia;
-    final total = dia.totalPorMoneda('CUP');
+    // Argón #15: usar la moneda real del día, no 'CUP' fijo.
+    final monedaDia =
+        dia.pagos.isEmpty ? 'CUP' : dia.pagos.first.moneda;
+    final total = dia.totalPorMoneda(monedaDia);
     final visibles = (_mostrarTodos ||
             dia.pagos.length <= 3)
         ? dia.pagos
@@ -567,7 +570,7 @@ class _DiaTileState extends State<_DiaTile> {
               ),
               const Spacer(),
               Text(
-                '${fmtMonto(total)} CUP',
+                '${fmtMonto(total)} $monedaDia',
                 style: const TextStyle(
                     fontWeight: FontWeight.bold,
                     fontSize: 14),

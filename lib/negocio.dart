@@ -1753,7 +1753,7 @@ Future<void> confirmarEntregaPorIds({
     for (final id in mensualIds) {
       await txn.update(
         'pagos',
-        {'entregado': 'entregado', 'actualizado_en': ahora},
+        {'entregado': 'entregado'},
         where: 'id = ?',
         whereArgs: [id],
       );
@@ -1761,7 +1761,7 @@ Future<void> confirmarEntregaPorIds({
     for (final id in diarioIds) {
       await txn.update(
         'pagos_diarios',
-        {'entregado': 'entregado', 'actualizado_en': ahora},
+        {'entregado': 'entregado'},
         where: 'id = ?',
         whereArgs: [id],
       );
