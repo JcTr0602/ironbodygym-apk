@@ -761,10 +761,12 @@ Future<int> pagosRealizadosMes() async {
   return ids.length;
 }
 
-/// Teléfono cubano válido: 8 dígitos empezando con 5.
+/// Teléfono cubano válido: 8 dígitos (cualquier dígito inicial).
+/// v1.2.9+46: se eliminó el requisito de empezar con 5 — ETECSA ya
+/// asigna móviles empezando con 6.
 bool validarTelefono(String v) {
   final d = v.replaceAll(RegExp(r'[^0-9]'), '');
-  return d.length == 8 && d.startsWith('5');
+  return d.length == 8;
 }
 
 /// Carnet: 6 a 11 dígitos (6 = fecha de nacimiento para menores sin carnet).

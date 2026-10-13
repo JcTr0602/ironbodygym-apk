@@ -365,7 +365,7 @@ class _FichaScreenState extends State<FichaScreen> {
     final car = carnet.text.trim();
     if (tel.isNotEmpty && !validarTelefono(tel)) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('Teléfono inválido: 8 dígitos empezando con 5')));
+          content: Text('Teléfono inválido: 8 dígitos')));
       return;
     }
     if (car.isNotEmpty && !validarCarnet(car)) {

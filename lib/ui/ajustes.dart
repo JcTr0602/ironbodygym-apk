@@ -1106,7 +1106,7 @@ class _AjustesScreenState extends State<AjustesScreen> {
                     etiqueta: 'Móvil (8 dígitos)',
                     validar: validarTelefono,
                     errorMsg:
-                        'Móvil inválido: 8 dígitos empezando con 5',
+                        'Móvil inválido: 8 dígitos',
                     guardar: _perfil.setMovil,
                   ),
                 ),
