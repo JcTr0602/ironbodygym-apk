@@ -1734,15 +1734,19 @@ Future<List<Map<String, dynamic>>> pagosPendientesDetalle(
 }
 
 /// v1.3.0 (Pendiente v2): confirma entrega por lista de IDs.
-/// Encola `confirmar_entrega` con pago_ids (backend lo soporta).
-Future<void> confirmarEntregaPorIds(
-    List<int> ids, String entrenadorNombre) async {
+/// Gemini: IDs separados por tipo para evitar colisión.
+Future<void> confirmarEntregaPorIds({
+  required List<int> mensualIds,
+  required List<int> diarioIds,
+  required String entrenadorNombre,
+}) async {
   await LocalDb.instance.queueOp(
     opUuid: const Uuid().v4(),
     tipo: 'confirmar_entrega',
     payload: {
       'trainer_nombre': entrenadorNombre,
-      'pago_ids': ids,
+      'pago_ids': mensualIds,
+      'pago_diario_ids': diarioIds,
     },
   );
 }

@@ -7,6 +7,8 @@
 /// sincronizar; el espejo local se actualiza en el siguiente pull.
 library;
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:uuid/uuid.dart';
 
@@ -101,7 +103,8 @@ class _PendienteScreenState extends State<PendienteScreen> {
   /// v1.3.0 (Pendiente v2): confirma por lista de IDs (día o todo).
   /// Optimistic UI: actualiza al instante, persiste en background.
   Future<void> _confirmarPorIds(
-      List<int> ids, String nombre, double total, String etiqueta) async {
+      PendienteDia dia, String nombre, String etiqueta) async {
+    final total = dia.totalPorMoneda('CUP');
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -121,18 +124,27 @@ class _PendienteScreenState extends State<PendienteScreen> {
     );
     if (ok != true || !mounted) return;
     if (_confirmando) return;
+    // Gemini: UIDs compuestos para evitar colisión de IDs.
+    final uids = dia.pagos.map((p) => p.uid).toSet();
     // Optimistic UI: quitar de la lista al instante.
     final crudosAnteriores =
         List<Map<String, dynamic>>.from(_crudos);
     setState(() {
-      _crudos.removeWhere((p) =>
-          ids.contains(p['id'] as int? ?? -1));
+      _crudos.removeWhere((p) {
+        final tipo = '${p['tipo']}';
+        final id = p['id'] as int? ?? -1;
+        return uids.contains('${tipo}_$id');
+      });
       _entrenadores = procesarPendientes(_crudos);
       _confirmando = true;
     });
     try {
-      await confirmarEntregaPorIds(ids, nombre);
-      SyncEngine.instance.push();
+      // Gemini: solo el guardado local va en el try.
+      await confirmarEntregaPorIds(
+        mensualIds: dia.mensualIds,
+        diarioIds: dia.diarioIds,
+        entrenadorNombre: nombre,
+      );
     } catch (e) {
       if (mounted) {
         setState(() {
@@ -148,6 +160,9 @@ class _PendienteScreenState extends State<PendienteScreen> {
     } finally {
       if (mounted) setState(() => _confirmando = false);
     }
+    // Gemini: push fuera del try — si falla por red, queda en cola
+    // y NO revierte la UI (ya está guardado localmente).
+    unawaited(SyncEngine.instance.push());
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
         content: Text('Recibido de $nombre confirmado '
@@ -309,18 +324,24 @@ class _PendienteScreenState extends State<PendienteScreen> {
         entrenador: _entrenadores[i],
         confirmando: _confirmando,
         onConfirmarDia: (dia) => _confirmarPorIds(
-          dia.ids,
+          dia,
           _entrenadores[i].nombre,
-          dia.totalPorMoneda('CUP'),
           'Se marcarán como entregados los ${dia.pagos.length} '
           'pagos del ${dia.etiquetaFecha.toLowerCase()}.',
         ),
-        onConfirmarTodo: () => _confirmarPorIds(
-          _entrenadores[i].todosLosIds,
-          _entrenadores[i].nombre,
-          _entrenadores[i].totalPorMoneda('CUP'),
-          'Se marcarán como entregados todos sus pagos pendientes.',
-        ),
+        onConfirmarTodo: () {
+          // Combinar todos los días en un pseudo-día.
+          final todos = _entrenadores[i].dias
+              .expand((d) => d.pagos)
+              .toList();
+          final pseudo = PendienteDia(
+              fecha: DateTime.now(), pagos: todos);
+          _confirmarPorIds(
+            pseudo,
+            _entrenadores[i].nombre,
+            'Se marcarán como entregados todos sus pagos pendientes.',
+          );
+        },
         onWhatsApp: () =>
             _copiarCuadre(_entrenadores[i]),
       ),

@@ -55,8 +55,9 @@ class _HomeScreenState extends State<HomeScreen>
   int _noLeidas = 0;
   double _cobradoHoy = 0; // v1.1: para la tarjeta de resumen
   int _pagaronMes = 0; // v1.1.1: clientes que pagaron el mes en curso
-  /// v1.3.0: paga estimada del entrenador (150 CUP x cliente que pagó).
-  int get _pagaEstimada => _pagaronMes * 150;
+  /// v1.3.0: paga estimada del entrenador (configurable x cliente).
+  int _pagoPorCliente = 150;
+  int get _pagaEstimada => _pagaronMes * _pagoPorCliente;
   int _alDia = 0; // v1.1.1: activos con mensualidad vigente
   StreamSubscription? _sub;
   final _auth = AuthService();
@@ -281,6 +282,9 @@ class _HomeScreenState extends State<HomeScreen>
       final acts = res[21] as Map<String, DateTime>;
       final porRecoger = res[22] as double;
       final insc = todos.where((c) => c['estado'] == 'activo').length;
+      // v1.3.0: cargar pago configurable fuera del setState.
+      final pagoCli =
+          await PerfilService.instance.getPagoEntrenador();
       // Alerta de entrenadores sin actividad reciente (item 13, solo dueño).
       final sinSync = <Map<String, dynamic>>[];
       if (_auth.isOwner) {
@@ -339,6 +343,7 @@ class _HomeScreenState extends State<HomeScreen>
           _avisoSync = aviso;
           _nombreVisible = nombreVisible;
           _metricas = metricas;
+          _pagoPorCliente = pagoCli;
           _cobradoAyer = ayer;
           _ultimos7 = ult7;
           // Bug 14 (v1.2.1): los entrenadores solo ven SUS propias

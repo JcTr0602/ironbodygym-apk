@@ -28,8 +28,11 @@ class PagoPendiente {
       monto: (map['monto'] as num?)?.toDouble() ?? 0,
       // Gemini: fallback seguro, sin migraciones de BD.
       moneda: map['moneda'] as String? ?? 'CUP',
-      fecha: DateTime.tryParse('${map['creada_en'] ?? map['fecha']}') ??
-          DateTime.now(),
+      // Gemini: toLocal() para agrupar por fecha de Cuba, no UTC.
+      fecha: (DateTime.tryParse(
+                  '${map['creada_en'] ?? map['fecha']}') ??
+              DateTime.now())
+          .toLocal(),
       tipo: map['tipo'] as String? ?? 'mensual',
       descripcion: map['descripcion'] as String? ?? '',
       entrenador:
@@ -50,9 +53,12 @@ class PendienteDia {
       .fold(0.0, (acc, p) => acc + p.monto);
 
   int get diasDeAntiguedad {
+    // Gemini: usar UTC para evitar problemas con DST.
     final hoy = DateTime.now();
-    final f = DateTime(fecha.year, fecha.month, fecha.day);
-    final h = DateTime(hoy.year, hoy.month, hoy.day);
+    final f =
+        DateTime.utc(fecha.year, fecha.month, fecha.day);
+    final h =
+        DateTime.utc(hoy.year, hoy.month, hoy.day);
     return h.difference(f).inDays;
   }
 
@@ -74,6 +80,21 @@ class PendienteDia {
   }
 
   List<int> get ids => pagos.map((p) => p.id).toList();
+
+  /// IDs separados por tipo (Gemini: evita colisión pagos/pagos_diarios).
+  List<int> get mensualIds => pagos
+      .where((p) => p.tipo == 'mensual')
+      .map((p) => p.id)
+      .toList();
+  List<int> get diarioIds => pagos
+      .where((p) => p.tipo == 'diario')
+      .map((p) => p.id)
+      .toList();
+}
+
+/// UID único para optimistic UI (tipo + id).
+extension PagoPendienteUid on PagoPendiente {
+  String get uid => '${tipo}_$id';
 }
 
 /// Todo lo pendiente de un entrenador, agrupado por días.

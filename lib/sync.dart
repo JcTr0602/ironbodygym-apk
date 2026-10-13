@@ -148,18 +148,27 @@ class SyncScope {
 }
 
 /// Detalle de la última sincronización (para la pantalla de Sync).
+/// v1.3.0 (Gemini): separados último ciclo vs acumulado histórico.
 class SyncDetalle {
   final DateTime? ultimaPull;
   final DateTime? ultimaPush;
-  final int subidos;
-  final int bajados;
+  final int subidosUltimo;
+  final int bajadosUltimo;
+  final int totalSubidos;
+  final int totalBajados;
   final String? error;
   const SyncDetalle(
       {this.ultimaPull,
       this.ultimaPush,
-      this.subidos = 0,
-      this.bajados = 0,
+      this.subidosUltimo = 0,
+      this.bajadosUltimo = 0,
+      this.totalSubidos = 0,
+      this.totalBajados = 0,
       this.error});
+
+  /// Compatibilidad: subidos/bajados = último ciclo.
+  int get subidos => subidosUltimo;
+  int get bajados => bajadosUltimo;
 }
 
 class SessionExpired implements Exception {
@@ -426,8 +435,14 @@ class SyncEngine {
     return SyncDetalle(
       ultimaPull: pull,
       ultimaPush: push,
-      subidos: int.tryParse(await _db.getMeta('total_subidos') ?? '0') ?? 0,
-      bajados: int.tryParse(await _db.getMeta('total_bajados') ?? '0') ?? 0,
+      subidosUltimo:
+          int.tryParse(await _db.getMeta('last_uploaded') ?? '0') ?? 0,
+      bajadosUltimo:
+          int.tryParse(await _db.getMeta('last_downloaded') ?? '0') ?? 0,
+      totalSubidos:
+          int.tryParse(await _db.getMeta('total_subidos') ?? '0') ?? 0,
+      totalBajados:
+          int.tryParse(await _db.getMeta('total_bajados') ?? '0') ?? 0,
       error: await _db.getMeta('last_sync_error'),
     );
   }
