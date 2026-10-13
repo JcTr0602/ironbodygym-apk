@@ -167,7 +167,9 @@ class _PendienteScreenState extends State<PendienteScreen> {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
         content: Text('Recibido de $nombre confirmado '
             '(se aplicará al sincronizar)')));
-    await _cargar();
+    // Gemini: NO llamar _cargar() aquí — el estado optimista ya está
+    // actualizado. Recargar ahora haría reaparecer los pagos porque
+    // el mirror aún no se actualizó (el push va en background).
   }
 
   @override

@@ -397,7 +397,10 @@ class _HomeScreenState extends State<HomeScreen>
   void _ir(Widget w) {
     Navigator.of(context)
         .push(MaterialPageRoute(builder: (_) => w))
-        .then((_) => _cargar());
+        // Gemini: forzar refresh al volver (bypass caché 30s).
+        .then((_) {
+      if (mounted) _cargar(forceRefresh: true);
+    });
   }
 
   @override

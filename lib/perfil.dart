@@ -375,6 +375,12 @@ class PerfilService {
   Future<void> setHorasAviso(int h) async =>
       (await _p).setInt('horas_aviso_sync', h);
 
+  /// v1.3.0 (Jc): pago por cliente al entrenador. Por defecto 150 CUP.
+  Future<int> getPagoEntrenador() async =>
+      (await _p).getInt('pago_entrenador') ?? 150;
+  Future<void> setPagoEntrenador(int monto) async =>
+      (await _p).setInt('pago_entrenador', monto);
+
   /// Avisar cuando una sincronización falla (item 11).
   Future<bool> getAvisoFalloSync() async =>
       (await _p).getBool('aviso_fallo_sync') ?? true;
