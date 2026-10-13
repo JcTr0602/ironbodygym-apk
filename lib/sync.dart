@@ -2483,8 +2483,9 @@ class SyncEngine {
           if (local.isNotEmpty &&
               local.first['sync_estado'] ==
                   'pending') {
-            // Sol #6: NO avanzar watermark en conflictos.
-            continue;
+            // Sol #6 (Gemini): detener el pull aquí para que el
+            // watermark NO sobrepase el conflicto.
+            break;
           }
           // Solo avanzar si la fila se aplicó.
           if (seq > maxSeq) maxSeq = seq;

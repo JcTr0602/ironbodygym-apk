@@ -898,19 +898,46 @@ class LocalDb {
   /// v1.3.0 (Sol #4): DDL de Incidencias v19, idempotente.
   /// Llamado desde _crearTablas (clean install) y onUpgrade (migración).
   static Future<void> _crearEsquemaIncidencias(Database db) async {
-    // Tablas base de incidencias (si no existen de versiones viejas).
+    // Tablas base de incidencias (esquema v19 real).
     await db.execute('''CREATE TABLE IF NOT EXISTS incidencias_local (
-      id TEXT PRIMARY KEY, titulo TEXT, descripcion TEXT,
-      estado TEXT, tipo_id TEXT, asignado_a TEXT,
-      prioridad TEXT, fecha_limite TEXT, ubicacion TEXT,
-      creado_por TEXT, creado_en TEXT, sync_estado TEXT,
+      id TEXT PRIMARY KEY,
+      tipo TEXT NOT NULL DEFAULT 'sync',
+      tipo_id TEXT,
+      descripcion TEXT,
+      detalle TEXT,
+      estado TEXT NOT NULL DEFAULT 'pendiente',
+      asignado_a TEXT,
+      prioridad TEXT DEFAULT 'media',
+      fecha_limite TEXT,
+      ubicacion TEXT,
+      creada_por TEXT,
+      creada_en TEXT,
+      resuelta_por TEXT,
+      resuelta_en TEXT,
+      nota_resolucion TEXT,
+      actualizado_en TEXT,
+      sync_estado TEXT NOT NULL DEFAULT 'synced',
       version INTEGER DEFAULT 1
     )''');
     await db.execute('''CREATE TABLE IF NOT EXISTS incidencias_mirror (
-      id TEXT PRIMARY KEY, titulo TEXT, descripcion TEXT,
-      estado TEXT, tipo_id TEXT, asignado_a TEXT,
-      prioridad TEXT, fecha_limite TEXT, ubicacion TEXT,
-      creado_por TEXT, creado_en TEXT, sync_seq INTEGER
+      id TEXT PRIMARY KEY,
+      tipo TEXT,
+      tipo_id TEXT,
+      descripcion TEXT,
+      detalle TEXT,
+      estado TEXT,
+      asignado_a TEXT,
+      prioridad TEXT,
+      fecha_limite TEXT,
+      ubicacion TEXT,
+      creada_por TEXT,
+      creada_en TEXT,
+      resuelta_por TEXT,
+      resuelta_en TEXT,
+      nota_resolucion TEXT,
+      version INTEGER DEFAULT 1,
+      actualizada_en TEXT,
+      sync_seq INTEGER
     )''');
     // Tipos
     await db.execute('''CREATE TABLE IF NOT EXISTS incidencias_tipos (
