@@ -4,11 +4,13 @@ library;
 
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:sqflite/sqflite.dart';
 
 import '../errores_sync.dart';
+import '../app_log.dart';
 import '../localdb.dart';
 import '../negocio.dart';
 import '../sync.dart';
@@ -33,6 +35,9 @@ class _ColaScreenState extends State<ColaScreen> {
   int _fotosPendientes = 0;
   int _fotosSubiendo = 0;
   int _fotosError = 0;
+  // v1.2.9+46: detalle de fotos pendientes/error para gestión.
+  List<Map<String, dynamic>> _fotosDetalle = [];
+  bool _fotosExpandido = false;
   StreamSubscription<SyncStatus>? _syncSub;
 
   @override
@@ -55,8 +60,9 @@ class _ColaScreenState extends State<ColaScreen> {
     final ops = await LocalDb.instance.recentOps();
     final bloqueadas = await LocalDb.instance.opsNecesitanRevision();
     final det = await SyncEngine.instance.detalle();
-    // v1.2.9+46: contadores de fotos.
+    // v1.2.9+46: contadores y detalle de fotos.
     int fPend = 0, fSub = 0, fErr = 0;
+    List<Map<String, dynamic>> fDet = [];
     try {
       final db = await LocalDb.instance.db;
       fPend = Sqflite.firstIntValue(await db.rawQuery(
@@ -68,6 +74,25 @@ class _ColaScreenState extends State<ColaScreen> {
       fErr = Sqflite.firstIntValue(await db.rawQuery(
               "SELECT COUNT(*) FROM fotos_cola WHERE estado='error'")) ??
           0;
+      // v1.2.9+46: detalle para gestión (pendientes y con error).
+      fDet = await db.query(
+        'fotos_cola',
+        columns: [
+          'id',
+          'tipo',
+          'cliente_id',
+          'suplemento_id',
+          'ruta_local',
+          'estado',
+          'intentos',
+          'ultimo_error',
+          'creado_en',
+          'proximo_intento_en'
+        ],
+        where: "estado IN ('pendiente', 'subiendo', 'error')",
+        orderBy: 'creado_en DESC',
+        limit: 50,
+      );
     } catch (_) {}
     if (mounted) {
       setState(() {
@@ -77,7 +102,72 @@ class _ColaScreenState extends State<ColaScreen> {
         _fotosPendientes = fPend;
         _fotosSubiendo = fSub;
         _fotosError = fErr;
+        _fotosDetalle = fDet;
       });
+    }
+  }
+
+  /// v1.2.9+46: reintenta una foto específica (resetea backoff).
+  Future<void> _reintentarFoto(int id) async {
+    try {
+      final db = await LocalDb.instance.db;
+      await db.update(
+        'fotos_cola',
+        {
+          'estado': 'pendiente',
+          'intentos': 0,
+          'ultimo_error': null,
+          'proximo_intento_en': null,
+          'worker_id': null,
+          'lease_hasta': null,
+        },
+        where: 'id = ?',
+        whereArgs: [id],
+      );
+      AppLog.info('fotos', 'reintento_manual', d: 'id=$id');
+      await _cargar();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('Foto marcada para reintento')));
+      }
+      // Disparar sincronización para procesarla de inmediato.
+      unawaited(SyncEngine.instance.push());
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('No se pudo reintentar: $e')));
+      }
+    }
+  }
+
+  /// v1.2.9+46: reintenta todas las fotos pendientes/con error.
+  Future<void> _reintentarTodasFotos() async {
+    try {
+      final db = await LocalDb.instance.db;
+      await db.update(
+        'fotos_cola',
+        {
+          'estado': 'pendiente',
+          'intentos': 0,
+          'ultimo_error': null,
+          'proximo_intento_en': null,
+          'worker_id': null,
+          'lease_hasta': null,
+        },
+        where: "estado IN ('pendiente', 'error')",
+      );
+      AppLog.info('fotos', 'reintento_manual_todas');
+      await _cargar();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('Todas las fotos marcadas para reintento')));
+      }
+      unawaited(SyncEngine.instance.push());
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('No se pudo reintentar: $e')));
+      }
     }
   }
 
@@ -280,8 +370,9 @@ class _ColaScreenState extends State<ColaScreen> {
         '${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}';
   }
 
-  /// v1.2.9+46 (Gemini): tarjeta compacta con el estado de la cola de fotos.
-  /// Si hay errores, se torna ámbar/roja con botón para ver el detalle.
+  /// v1.2.9+46: tarjeta expandible con gestión completa de fotos.
+  /// Muestra cada foto pendiente: miniatura, entidad, cuándo se solicitó,
+  /// intentos, error exacto, y botones para reintentar una o todas.
   Widget _tarjetaFotos(BuildContext context) {
     final total = _fotosPendientes + _fotosSubiendo + _fotosError;
     final hayError = _fotosError > 0;
@@ -292,48 +383,184 @@ class _ColaScreenState extends State<ColaScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              Icon(Icons.photo_library,
-                  size: 24, color: AppColores.naranja),
-              const SizedBox(width: 12),
-              const Expanded(
-                child: Text('Fotos', style: AppTexto.subtitulo),
-              ),
-              Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                decoration: BoxDecoration(
-                  color: color.withValues(alpha: 0.15),
-                  borderRadius: BorderRadius.circular(12),
+          InkWell(
+            onTap: total > 0
+                ? () => setState(
+                    () => _fotosExpandido = !_fotosExpandido)
+                : null,
+            borderRadius: BorderRadius.circular(8),
+            child: Row(
+              children: [
+                Icon(Icons.photo_library,
+                    size: 24, color: AppColores.naranja),
+                const SizedBox(width: 12),
+                const Expanded(
+                  child: Text('Fotos', style: AppTexto.subtitulo),
                 ),
-                child: Text(
-                  total == 0
-                      ? 'Al día'
-                      : '$_fotosPendientes pendientes · '
-                          '$_fotosSubiendo subiendo',
-                  style: TextStyle(
-                      color: color,
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: color.withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Text(
+                    total == 0
+                        ? 'Al día'
+                        : '$_fotosPendientes pendientes · '
+                            '$_fotosSubiendo subiendo',
+                    style: TextStyle(
+                        color: color,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600),
+                  ),
                 ),
-              ),
-            ],
+                if (total > 0)
+                  Icon(
+                    _fotosExpandido
+                        ? Icons.expand_less
+                        : Icons.expand_more,
+                    color: AppColores.textoSecundario(context),
+                  ),
+              ],
+            ),
           ),
-          if (hayError) ...[
+          if (_fotosExpandido && _fotosDetalle.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            const Divider(height: 1),
+            for (final f in _fotosDetalle) _filaFoto(context, f),
+            const SizedBox(height: 8),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                icon: const Icon(Icons.refresh, size: 18),
+                label: const Text('Reintentar todas'),
+                onPressed: _reintentarTodasFotos,
+              ),
+            ),
+          ],
+          if (hayError && !_fotosExpandido) ...[
             const SizedBox(height: 8),
             Text(
-              '$_fotosError ${_fotosError == 1 ? 'foto falló' : 'fotos fallaron'}',
+              '$_fotosError ${_fotosError == 1 ? 'foto falló' : 'fotos fallaron'} — toca para ver detalle',
               style: const TextStyle(
                   color: AppColores.error, fontSize: 13),
             ),
-            const SizedBox(height: 4),
-            TextButton.icon(
-              icon: const Icon(Icons.visibility_outlined, size: 18),
-              label: const Text('Ver fallos'),
-              onPressed: () => _verFallosFotos(context),
-            ),
           ],
+        ],
+      ),
+    );
+  }
+
+  /// Fila de una foto pendiente: miniatura, entidad, fecha, intentos, error.
+  Widget _filaFoto(BuildContext context, Map<String, dynamic> f) {
+    final id = f['id'] as int;
+    final tipo = '${f['tipo']}';
+    final estado = '${f['estado']}';
+    final intentos = f['intentos'] as int? ?? 0;
+    final error = f['ultimo_error'] as String?;
+    final ruta = f['ruta_local'] as String?;
+    final creadoEn = DateTime.tryParse('${f['creado_en']}');
+    // Entidad: cliente o suplemento.
+    String entidad = '—';
+    if (f['cliente_id'] != null) {
+      entidad = 'Cliente ${f['cliente_id']}';
+    } else if (f['suplemento_id'] != null) {
+      entidad = 'Suplemento ${f['suplemento_id']}';
+    }
+    final colorEstado = estado == 'error'
+        ? AppColores.error
+        : estado == 'subiendo'
+            ? AppColores.info
+            : AppColores.alerta;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Miniatura.
+          ClipRRect(
+            borderRadius: BorderRadius.circular(8),
+            child: ruta != null
+                ? Image.file(
+                    File(ruta),
+                    width: 48,
+                    height: 48,
+                    fit: BoxFit.cover,
+                    errorBuilder: (_, __, ___) => Container(
+                      width: 48,
+                      height: 48,
+                      color: AppColores.fondo(context),
+                      child: const Icon(Icons.broken_image, size: 24),
+                    ),
+                  )
+                : Container(
+                    width: 48,
+                    height: 48,
+                    color: AppColores.fondo(context),
+                    child: const Icon(Icons.image, size: 24),
+                  ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        '$entidad · $tipo',
+                        style: const TextStyle(
+                            fontWeight: FontWeight.w600, fontSize: 13),
+                      ),
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: colorEstado.withValues(alpha: 0.15),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Text(
+                        estado == 'error'
+                            ? 'Falló'
+                            : estado == 'subiendo'
+                                ? 'Subiendo'
+                                : 'Pendiente',
+                        style: TextStyle(
+                            color: colorEstado,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  'Solicitada: ${_hora(creadoEn)} · $intentos ${intentos == 1 ? 'intento' : 'intentos'}',
+                  style: TextStyle(
+                      fontSize: 11,
+                      color: AppColores.textoSecundario(context)),
+                ),
+                if (error != null && error.isNotEmpty) ...[
+                  const SizedBox(height: 2),
+                  Text(
+                    'Error: $error',
+                    style: const TextStyle(
+                        fontSize: 11, color: AppColores.error),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ],
+            ),
+          ),
+          IconButton(
+            icon: const Icon(Icons.refresh, size: 20),
+            tooltip: 'Reintentar',
+            onPressed: () => _reintentarFoto(id),
+          ),
         ],
       ),
     );
