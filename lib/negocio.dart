@@ -1735,20 +1735,49 @@ Future<List<Map<String, dynamic>>> pagosPendientesDetalle(
 
 /// v1.3.0 (Pendiente v2): confirma entrega por lista de IDs.
 /// Gemini: IDs separados por tipo para evitar colisión.
+/// Fix #14 (Sol): confirmar entrega actualiza los mirrors en BD
+/// (no solo listas en memoria) en la misma transacción que encola la op.
+/// Así el optimismo persiste al salir/volver a la pantalla.
 Future<void> confirmarEntregaPorIds({
   required List<int> mensualIds,
   required List<int> diarioIds,
   required String entrenadorNombre,
 }) async {
-  await LocalDb.instance.queueOp(
-    opUuid: const Uuid().v4(),
-    tipo: 'confirmar_entrega',
-    payload: {
-      'trainer_nombre': entrenadorNombre,
-      'pago_ids': mensualIds,
-      'pago_diario_ids': diarioIds,
-    },
-  );
+  final db = LocalDb.instance;
+  final d = await db.db;
+  final opUuid = const Uuid().v4();
+  final ahora = DateTime.now().toIso8601String();
+  await d.transaction((txn) async {
+    // 1. Marcar mirrors como entregados (optimismo persistente).
+    for (final id in mensualIds) {
+      await txn.update(
+        'pagos',
+        {'entregado': 'entregado', 'actualizado_en': ahora},
+        where: 'id = ?',
+        whereArgs: [id],
+      );
+    }
+    for (final id in diarioIds) {
+      await txn.update(
+        'pagos_diarios',
+        {'entregado': 'entregado', 'actualizado_en': ahora},
+        where: 'id = ?',
+        whereArgs: [id],
+      );
+    }
+    // 2. Encolar la op en la misma transacción.
+    await txn.insert('ops_queue', {
+      'op_uuid': opUuid,
+      'tipo': 'confirmar_entrega',
+      'payload': jsonEncode({
+        'trainer_nombre': entrenadorNombre,
+        'pago_ids': mensualIds,
+        'pago_diario_ids': diarioIds,
+      }),
+      'estado': 'pendiente',
+      'creada_ts': ahora,
+    });
+  });
 }
 
 Future<List<Map<String, dynamic>>> pendientePorEntrenador(

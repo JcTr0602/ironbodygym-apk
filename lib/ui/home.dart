@@ -361,11 +361,15 @@ class _HomeScreenState extends State<HomeScreen>
           _entrenadoresSinSync = sinSync;
         });
       }
+    } catch (e) {
+      // Fix #29 (Sol): NO actualizar _lastFetch si falló.
+      // Así el próximo _cargar reintentará en vez de esperar 30s.
+      rethrow;
     } finally {
       _cargando = false;
-      // v1.3.0 (Gemini): marcar timestamp del caché.
-      _lastFetch = DateTime.now();
     }
+    // Fix #29: solo marcar caché si llegamos aquí (éxito).
+    _lastFetch = DateTime.now();
   }
 
   Future<void> _salir() async {

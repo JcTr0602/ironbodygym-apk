@@ -11,6 +11,7 @@ import 'package:crypto/crypto.dart';
 import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'localdb.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'auth.dart';
@@ -376,10 +377,37 @@ class PerfilService {
       (await _p).setInt('horas_aviso_sync', h);
 
   /// v1.3.0 (Jc): pago por cliente al entrenador. Por defecto 150 CUP.
-  Future<int> getPagoEntrenador() async =>
-      (await _p).getInt('pago_entrenador') ?? 150;
-  Future<void> setPagoEntrenador(int monto) async =>
-      (await _p).setInt('pago_entrenador', monto);
+  /// Fix #20 (Sol): usa tabla config_negocio sincronizada;
+  /// SharedPreferences queda como caché offline.
+  Future<int> getPagoEntrenador() async {
+    // 1. Intentar desde la tabla sincronizada.
+    try {
+      final v = await LocalDb.instance
+          .getConfigNegocio('pago_entrenador_por_cliente');
+      if (v != null) {
+        final n = int.tryParse(v);
+        if (n != null && n > 0) {
+          // Actualizar caché.
+          (await _p).setInt('pago_entrenador', n);
+          return n;
+        }
+      }
+    } catch (_) {}
+    // 2. Fallback a caché local.
+    return (await _p).getInt('pago_entrenador') ?? 150;
+  }
+
+  Future<void> setPagoEntrenador(int monto) async {
+    // Guardar en ambos: tabla (para sync) y prefs (caché).
+    try {
+      await LocalDb.instance.setConfigNegocio(
+        'pago_entrenador_por_cliente',
+        '$monto',
+        'dueno',
+      );
+    } catch (_) {}
+    await (await _p).setInt('pago_entrenador', monto);
+  }
 
   /// Avisar cuando una sincronización falla (item 11).
   Future<bool> getAvisoFalloSync() async =>

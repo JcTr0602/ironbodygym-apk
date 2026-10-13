@@ -79,7 +79,8 @@ class Incidencia {
   final DateTime? fechaLimite;
   final String? ubicacion;
   final String creadaPor;
-  final DateTime creadaEn;
+  // Fix #24 (Sol): nullable para no inventar fechas.
+  final DateTime? creadaEn;
   // Resolución
   final String? resueltaPor;
   final DateTime? resueltaEn;
@@ -131,8 +132,8 @@ class Incidencia {
       fechaLimite: _dt(m['fecha_limite']),
       ubicacion: m['ubicacion'] as String?,
       creadaPor: '${m['creada_por'] ?? ''}',
-      creadaEn:
-          _dt(m['creada_en']) ?? DateTime.now(),
+      // Fix #24: null si inválida, no DateTime.now().
+      creadaEn: _dt(m['creada_en']),
       resueltaPor: m['resuelta_por'] as String?,
       resueltaEn: _dt(m['resuelta_en']),
       notaResolucion:
@@ -155,7 +156,7 @@ class Incidencia {
       'fecha_limite': fechaLimite?.toIso8601String(),
       'ubicacion': ubicacion,
       'creada_por': creadaPor,
-      'creada_en': creadaEn.toIso8601String(),
+      'creada_en': creadaEn?.toIso8601String(),
       'resuelta_por': resueltaPor,
       'resuelta_en': resueltaEn?.toIso8601String(),
       'nota_resolucion': notaResolucion,
@@ -169,11 +170,14 @@ class Incidencia {
   /// Días abierta (congelado si está resuelta).
   /// Corrección Gemini: no sigue contando tras resolver.
   int get diasAbierta {
+    // Fix #24: si creadaEn es null (fecha inválida), retornar 0.
+    final inicio = creadaEn;
+    if (inicio == null) return 0;
     final fin = (estado == 'resuelta' &&
             resueltaEn != null)
         ? resueltaEn!
         : DateTime.now();
-    return fin.difference(creadaEn).inDays;
+    return fin.difference(inicio).inDays;
   }
 
   bool get vencida =>

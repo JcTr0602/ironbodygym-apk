@@ -273,7 +273,7 @@ class _EditarIncidenciaScreenState
             'yo', // TODO: usuario actual
         'creada_en': widget
                 .existente?.creadaEn
-                .toIso8601String() ??
+                ?.toIso8601String() ??
             ahora,
         'actualizado_en': ahora,
         'sync_estado': 'pending',

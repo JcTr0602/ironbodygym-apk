@@ -212,10 +212,9 @@ class TarjetaIncidencia extends StatelessWidget {
                   ),
                   const SizedBox(width: 4),
                   Text(
-                    incidencia.prioridad[0]
-                            .toUpperCase() +
-                        incidencia.prioridad
-                            .substring(1),
+                    // Fix #24 (Sol): mapa seguro, sin [0] directo.
+                    _etiquetaPrioridad(
+                        incidencia.prioridad),
                     style: const TextStyle(
                         fontSize: 12),
                   ),
@@ -227,4 +226,18 @@ class TarjetaIncidencia extends StatelessWidget {
       ),
     );
   }
+}
+
+/// Fix #24 (Sol): etiqueta segura para prioridad.
+/// Evita RangeError con strings vacíos.
+String _etiquetaPrioridad(String p) {
+  const mapa = {
+    'alta': 'Alta',
+    'media': 'Media',
+    'baja': 'Baja',
+  };
+  final v = mapa[p.toLowerCase()];
+  if (v != null) return v;
+  if (p.isEmpty) return 'Sin prioridad';
+  return p[0].toUpperCase() + p.substring(1);
 }

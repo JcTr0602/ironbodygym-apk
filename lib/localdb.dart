@@ -998,6 +998,31 @@ class LocalDb {
     await _addColumnIfMissing(db, 'app_log', 'stack', 'TEXT');
     // Seed de tipos (idempotente)
     await _seedTiposIncidencia(db);
+
+    // Fix #20 (Sol): configuración de negocio sincronizada.
+    // El pago por cliente a entrenadores debe ser global, no por dispositivo.
+    // Por ahora se crea la estructura; el sync completo viene después.
+    await db.execute('''CREATE TABLE IF NOT EXISTS config_negocio (
+      clave TEXT PRIMARY KEY,
+      valor TEXT NOT NULL,
+      actualizado_en TEXT NOT NULL,
+      actualizado_por TEXT,
+      sync_estado TEXT NOT NULL DEFAULT 'synced',
+      version INTEGER NOT NULL DEFAULT 1
+    )''');
+    // Valor por defecto: 150 CUP por cliente (si no existe).
+    await db.insert(
+      'config_negocio',
+      {
+        'clave': 'pago_entrenador_por_cliente',
+        'valor': '150',
+        'actualizado_en':
+            DateTime.now().toIso8601String(),
+        'sync_estado': 'synced',
+        'version': 1,
+      },
+      conflictAlgorithm: ConflictAlgorithm.ignore,
+    );
   }
 
   /// v1.2.5 (D20): retorna true si la fila cambió (insertada o distinta),
@@ -2113,6 +2138,38 @@ class LocalDb {
         });
       }
     });
+  }
+
+  /// Fix #20 (Sol): lee configuración de negocio sincronizada.
+  /// Retorna null si no existe la clave.
+  Future<String?> getConfigNegocio(String clave) async {
+    final d = await db;
+    final rows = await d.query('config_negocio',
+        columns: ['valor'],
+        where: 'clave = ?',
+        whereArgs: [clave],
+        limit: 1);
+    if (rows.isEmpty) return null;
+    return rows.first['valor'] as String?;
+  }
+
+  /// Fix #20: escribe configuración (marca pending para sync futuro).
+  Future<void> setConfigNegocio(
+      String clave, String valor, String? actualizadoPor) async {
+    final d = await db;
+    await d.insert(
+      'config_negocio',
+      {
+        'clave': clave,
+        'valor': valor,
+        'actualizado_en':
+            DateTime.now().toIso8601String(),
+        'actualizado_por': actualizadoPor,
+        'sync_estado': 'pending',
+        'version': 1,
+      },
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
   }
 
   Future<List<Map<String, dynamic>>> pendingOps() async {

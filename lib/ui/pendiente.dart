@@ -104,14 +104,23 @@ class _PendienteScreenState extends State<PendienteScreen> {
   /// Optimistic UI: actualiza al instante, persiste en background.
   Future<void> _confirmarPorIds(
       PendienteDia dia, String nombre, String etiqueta) async {
-    final total = dia.totalPorMoneda('CUP');
+    // Fix #15 (Sol): el día ya viene separado por moneda (ver
+    // procesarPendientes), pero mostramos la moneda real por seguridad.
+    final moneda = dia.pagos.isEmpty
+        ? 'CUP'
+        : dia.pagos.first.moneda;
+    final total = dia.totalPorMoneda(moneda);
+    // Verificación: todos los pagos del día deben ser de la misma moneda.
+    final mixto =
+        dia.pagos.any((p) => p.moneda != moneda);
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: Text('Confirmar recibido de $nombre'),
         content: Text(
-            '¿Confirmas que recibiste ${fmtMonto(total)} CUP de $nombre?\n\n'
-            '$etiqueta'),
+            '¿Confirmas que recibiste ${fmtMonto(total)} $moneda de $nombre?\n\n'
+            '$etiqueta'
+            '${mixto ? '\n\n⚠️ Este grupo mezcla monedas.' : ''}'),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(ctx, false),

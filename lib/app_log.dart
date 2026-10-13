@@ -149,6 +149,11 @@ class AppLog {
     }
   }
 
+  /// Fix #21 (Sol): no descartar el lote si falla el insert.
+  /// Se reencola al inicio del buffer (con límite para evitar
+  /// crecimiento infinito si la BD está rota).
+  static int _fallosFlush = 0;
+
   static Future<void> _flush() async {
     _flushTimer?.cancel();
     _flushTimer = null;
@@ -164,11 +169,29 @@ class AppLog {
       }
       await batch.commit(noResult: true);
       _contador += lote.length;
+      _fallosFlush = 0; // éxito: resetear contador
       if (_contador >= 100) {
         _contador = 0;
         unawaited(podar(db));
       }
     } catch (e) {
+      _fallosFlush++;
+      // Reencolar al inicio (máx 3 reintentos, luego descartar
+      // para no bloquear el buffer con logs imposibles de guardar).
+      if (_fallosFlush <= 3) {
+        _buffer.insertAll(0, lote);
+        // Reintentar en 10 segundos.
+        _flushTimer ??= Timer(
+            const Duration(seconds: 10), () {
+          unawaited(_flush());
+        });
+      } else {
+        _fallosFlush = 0;
+        if (kDebugMode) {
+          debugPrint(
+              '[AppLog] lote descartado tras 3 fallos: $e');
+        }
+      }
       if (kDebugMode) {
         debugPrint('[AppLog flush error]: $e');
       }
