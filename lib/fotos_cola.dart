@@ -562,12 +562,13 @@ class FotosColaService {
 
   /// v1.2.9 (Fix crítico 3 Gemini): permite marcar error permanente
   /// directo, sin pasar por backoff.
-  /// v1.2.9+43 (Gemini C): filtra por worker_id para no abortar
-  /// la subida activa de otro worker.
+  /// v1.2.9+43 (Gemini C + Luna R3): filtra por worker_id para no abortar
+  /// la subida activa de otro worker. Si 0 filas afectadas, otro worker
+  /// ya tomó la foto — no hacer nada (evita dejarla atascada en 'subiendo').
   Future<void> _marcarError(int id, String error,
       {bool permanente = false, String? workerId}) async {
     final db = await LocalDb.instance.db;
-    await db.update(
+    final afectadas = await db.update(
       'fotos_cola',
       {
         if (permanente) 'estado': 'error',
@@ -579,83 +580,16 @@ class FotosColaService {
       where: workerId != null ? 'id = ? AND worker_id = ?' : 'id = ?',
       whereArgs: workerId != null ? [id, workerId] : [id],
     );
+    if (afectadas == 0 && workerId != null) {
+      debugPrint(
+          '[Fotos] _marcarError: foto $id ya tomada por otro worker, omitiendo.');
+    }
   }
 
   /// v1.2.9 (Gemini #5 + auditoría final): actualiza foto_storage.
   /// Fix crítico 1: lee el cliente_id RESUELTO de SQLite (f en memoria
   /// puede tener null si se resolvió dentro de _subirUna).
   /// Fix crítico 2: propaga a Supabase para que el próximo pull no borre.
-  /// v1.2.9: vincula una foto completada.
-  /// - Clientes: actualiza mirror local + encola op 'foto' para Supabase.
-  /// - Suplementos: encola op 'foto_suplemento' para Supabase.
-  /// Retorna true si se vinculó, false si los IDs aún no se resolvieron
-  /// (Luna: no marcar 'completada' en ese caso, para no huérfana).
-  Future<bool> _vincularFotoCompletada(
-      int fotoId, Map<String, dynamic> f, String storagePath) async {
-    final db = await LocalDb.instance.db;
-    final opUuid = f['op_uuid'] as String;
-
-    // Leer IDs resueltos de la BD (f en memoria puede tener null).
-    var clienteId = f['cliente_id'] as int?;
-    var suplementoId = f['suplemento_id'] as int?;
-    if (clienteId == null && suplementoId == null) {
-      final row = await db.query(
-        'fotos_cola',
-        columns: ['cliente_id', 'suplemento_id'],
-        where: 'id = ?',
-        whereArgs: [fotoId],
-        limit: 1,
-      );
-      if (row.isNotEmpty) {
-        clienteId = row.first['cliente_id'] as int?;
-        suplementoId = row.first['suplemento_id'] as int?;
-      }
-    }
-
-    if (clienteId == null && suplementoId == null) {
-      // IDs aún no resueltos: NO vincular, retornar false para que
-      // procesarCola no marque 'completada' (reintentará después).
-      debugPrint('[Fotos] IDs no resueltos para foto $fotoId, reintentando.');
-      return false;
-    }
-
-    // Luna: mirror + ops_queue en transacción atómica.
-    await db.transaction((txn) async {
-      if (clienteId != null) {
-        await _vincularFotoCliente(txn, clienteId, opUuid, storagePath);
-      } else if (suplementoId != null) {
-        // FIX (Gemini): actualizar el mirror local del suplemento de
-        // inmediato, igual que se hace con clientes.
-        try {
-          final rows = await txn.query('suplementos',
-              columns: ['data'],
-              where: 'id = ?',
-              whereArgs: [suplementoId],
-              limit: 1);
-          if (rows.isNotEmpty) {
-            final raw = rows.first['data'];
-            final data = Map<String, dynamic>.from(
-                raw is String ? jsonDecode(raw) : raw as Map);
-            data['foto_storage'] = storagePath;
-            data['foto_uuid'] = opUuid;
-            await txn.update('suplementos', {'data': jsonEncode(data)},
-                where: 'id = ?', whereArgs: [suplementoId]);
-          }
-        } catch (_) {}
-        await txn.insert('ops_queue', {
-          'op_uuid': const Uuid().v4(),
-          'tipo': 'foto_suplemento',
-          'payload': jsonEncode({
-            'suplemento_id': suplementoId,
-            'storage_path': storagePath,
-          }),
-          'estado': 'pendiente',
-          'creada_ts': DateTime.now().toIso8601String(),
-        });
-      }
-    });
-    return true;
-  }
 
   /// v1.2.9+43 (Gemini): vincula usando una transacción EXISTENTE.
   /// No crea una nueva transacción (SQLite no permite anidadas).
@@ -674,7 +608,7 @@ class FotosColaService {
     // Si PostgreSQL tiene la columna como tipo uuid nativo, un string
     // arbitrario fallaría. UUID v5 es determinista y válido.
     final opUuidDeterminista =
-        const Uuid().v5(Uuid.namespaceUrl, 'foto:${f['op_uuid']}');
+        const Uuid().v5('6ba7b811-9dad-11d1-80b4-00c04fd430c8', 'foto:${f['op_uuid']}');
 
     if (clienteId != null) {
       await _vincularFotoCliente(txn, clienteId, opUuid, storagePath);
