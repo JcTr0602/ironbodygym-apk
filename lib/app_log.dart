@@ -1,97 +1,342 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sqflite/sqflite.dart';
 
 import 'localdb.dart';
 
-/// Bitácora local de la app (v1.2.9+46, pedido de Jc 2026-10-13).
-/// Registra resultados de todas las lógicas y procesos para
-/// diagnóstico forense. Exportable desde Ajustes.
+/// Bitácora local v2.0 (v1.3.0).
+/// Telemetría robusta y desacoplada para diagnóstico forense.
 ///
-/// Diseño certificado por Gemini con ajustes:
-/// - Contador secuencial para poda (no millisecond % 50).
-/// - Llamadas fire-and-forget desde la lógica de negocio (unawaited).
-/// - debugPrint en modo debug si el insert falla.
+/// Mejoras Gemini:
+/// - 5 niveles (debug/info/aviso/error/critico)
+/// - Contexto estructurado JSON + stack recortado
+/// - Correlación por opId
+/// - Métricas automáticas (medir)
+/// - Buffer asíncrono con flush por lotes
+/// - Poda por cuota rígida (tiempo + 5000 filas)
+/// - Interceptores globales (main.dart)
+/// - Centinela de crash previo
+/// - Sanitización de tokens
 class AppLog {
   AppLog._();
 
+  // --- Buffer asíncrono (Gemini #1) ---
+  static final List<Map<String, dynamic>> _buffer = [];
+  static Timer? _flushTimer;
   static int _contador = 0;
 
-  /// Registra un evento. No lanza: si falla, se ignora en silencio
-  /// en release (debugPrint en debug). La bitácora nunca rompe la app.
-  static Future<void> registrar(
-    String modulo,
-    String evento, {
-    String? detalle,
-    String nivel = 'info', // info | aviso | error
-  }) async {
+  /// Niveles: debug < info < aviso < error < critico
+  static void debug(String m, String e,
+          {String? d,
+          Map<String, dynamic>? contexto,
+          String? opId}) {
+    if (kReleaseMode) return; // debug no se guarda en release
+    _encolar(_crear(
+        m, e, 'debug', d, contexto, null, opId));
+  }
+
+  static void info(String m, String e,
+          {String? d,
+          Map<String, dynamic>? contexto,
+          String? opId}) =>
+      _encolar(
+          _crear(m, e, 'info', d, contexto, null, opId));
+
+  static void aviso(String m, String e,
+          {String? d,
+          Map<String, dynamic>? contexto,
+          String? opId}) =>
+      _encolar(
+          _crear(m, e, 'aviso', d, contexto, null, opId));
+
+  static void error(String m, String e,
+          {String? d,
+          Map<String, dynamic>? contexto,
+          StackTrace? stack,
+          String? opId}) =>
+      _encolar(
+          _crear(m, e, 'error', d, contexto, stack, opId),
+          inmediato: true);
+
+  static void critico(String m, String e,
+          {String? d,
+          Map<String, dynamic>? contexto,
+          StackTrace? stack,
+          String? opId}) =>
+      _encolar(
+          _crear(m, e, 'critico', d, contexto, stack, opId),
+          inmediato: true);
+
+  static Map<String, dynamic> _crear(
+      String modulo,
+      String evento,
+      String nivel,
+      String? detalle,
+      Map<String, dynamic>? contexto,
+      StackTrace? stack,
+      String? opId) {
+    // Sanitizar (Gemini #8)
+    final ctxSan = contexto != null
+        ? _sanitizar(contexto)
+        : null;
+    final detSan = detalle != null
+        ? _sanitizarTexto(detalle)
+        : null;
+    // Stack recortado a 12 líneas (Gemini #2)
+    String? stackStr;
+    if (stack != null) {
+      final lineas =
+          stack.toString().split('\n').take(12);
+      stackStr = lineas.join('\n');
+    }
+    return {
+      'ts': DateTime.now().toIso8601String(),
+      'modulo': modulo,
+      'evento': evento,
+      'detalle': detSan,
+      'nivel': nivel,
+      'contexto': ctxSan != null
+          ? jsonEncode(ctxSan)
+          : null,
+      'op_id': opId,
+      'stack': stackStr,
+    };
+  }
+
+  /// Sanitiza tokens y passwords (Gemini #8).
+  static Map<String, dynamic> _sanitizar(
+      Map<String, dynamic> ctx) {
+    final out = <String, dynamic>{};
+    for (final e in ctx.entries) {
+      var v = '${e.value}';
+      v = v.replaceAll(
+          RegExp(r'Bearer\s+\S+',
+              caseSensitive: false),
+          'Bearer ***');
+      v = v.replaceAll(
+          RegExp(r'(token|api_key|password)=([^&\s]+)',
+              caseSensitive: false),
+          r'$1=***');
+      out[e.key] = v;
+    }
+    return out;
+  }
+
+  static String _sanitizarTexto(String t) {
+    var v = t;
+    v = v.replaceAll(
+        RegExp(r'Bearer\s+\S+',
+            caseSensitive: false),
+        'Bearer ***');
+    return v;
+  }
+
+  static void _encolar(Map<String, dynamic> log,
+      {bool inmediato = false}) {
+    _buffer.add(log);
+    if (inmediato || _buffer.length >= 25) {
+      unawaited(_flush());
+    } else {
+      _flushTimer ??=
+          Timer(const Duration(seconds: 3), () {
+        unawaited(_flush());
+      });
+    }
+  }
+
+  static Future<void> _flush() async {
+    _flushTimer?.cancel();
+    _flushTimer = null;
+    if (_buffer.isEmpty) return;
+    final lote =
+        List<Map<String, dynamic>>.from(_buffer);
+    _buffer.clear();
     try {
       final db = await LocalDb.instance.db;
-      await db.insert('app_log', {
-        'ts': DateTime.now().toIso8601String(),
-        'modulo': modulo,
-        'evento': evento,
-        'detalle': detalle,
-        'nivel': nivel,
-      });
-      _contador++;
+      final batch = db.batch();
+      for (final item in lote) {
+        batch.insert('app_log', item);
+      }
+      await batch.commit(noResult: true);
+      _contador += lote.length;
       if (_contador >= 100) {
         _contador = 0;
         unawaited(podar(db));
       }
     } catch (e) {
       if (kDebugMode) {
-        debugPrint('[AppLog Error]: $e');
+        debugPrint('[AppLog flush error]: $e');
       }
     }
   }
 
-  static void info(String m, String e, {String? d}) =>
-      unawaited(registrar(m, e, detalle: d, nivel: 'info'));
-  static void aviso(String m, String e, {String? d}) =>
-      unawaited(registrar(m, e, detalle: d, nivel: 'aviso'));
-  static void error(String m, String e, {String? d}) =>
-      unawaited(registrar(m, e, detalle: d, nivel: 'error'));
+  /// Genera un ID corto para correlación (Gemini #3).
+  static String nuevoOpId(String prefijo) =>
+      '${prefijo}_${DateTime.now().millisecondsSinceEpoch.toRadixString(36)}';
 
-  /// Borra registros de más de 7 días. Idempotente.
+  /// Mide duración automáticamente (Gemini #4).
+  static Future<T> medir<T>(
+    String modulo,
+    String evento,
+    Future<T> Function() accion, {
+    String? opId,
+    Map<String, dynamic>? contexto,
+  }) async {
+    final reloj = Stopwatch()..start();
+    info(modulo, '${evento}_ini',
+        opId: opId, contexto: contexto);
+    try {
+      final resultado = await accion();
+      reloj.stop();
+      info(modulo, '${evento}_ok',
+          opId: opId,
+          contexto: {
+            ...?contexto,
+            'duracion_ms':
+                reloj.elapsedMilliseconds
+          });
+      return resultado;
+    } catch (e, st) {
+      reloj.stop();
+      error(modulo, '${evento}_fallo',
+          opId: opId,
+          contexto: {
+            ...?contexto,
+            'duracion_ms':
+                reloj.elapsedMilliseconds,
+            'error': e.toString()
+          },
+          stack: st);
+      rethrow;
+    }
+  }
+
+  /// Poda dual: por tiempo Y por cuota rígida (Gemini #2).
   static Future<void> podar([Database? db]) async {
     try {
       final b = db ?? await LocalDb.instance.db;
-      final corte = DateTime.now()
-          .subtract(const Duration(days: 7))
-          .toIso8601String();
-      await b.delete('app_log', where: 'ts < ?', whereArgs: [corte]);
+      await b.execute("""
+        DELETE FROM app_log
+        WHERE ts < datetime('now', '-7 days')
+           OR id NOT IN (
+             SELECT id FROM app_log ORDER BY id DESC LIMIT 5000
+           )
+      """);
     } catch (_) {}
   }
 
-  /// Exporta la bitácora a un archivo .txt en el directorio temporal.
-  /// Retorna la ruta del archivo.
-  /// v1.2.9+46 (Gemini): extraer en DESC y revertir — si hay más de 5000
-  /// registros, el archivo debe contener los MÁS RECIENTES (los que
-  /// explican un crash), no los más viejos.
+  /// Exporta en Markdown con resumen (Gemini #6).
   static Future<String> exportar() async {
+    await _flush(); // vaciar buffer antes
     final db = await LocalDb.instance.db;
     await podar(db);
     final filas = (await db.query('app_log',
             orderBy: 'id DESC', limit: 5000))
         .reversed
         .toList();
-    final sb = StringBuffer();
-    sb.writeln('BITÁCORA IRONBODY GYM');
-    sb.writeln('Exportado: ${DateTime.now().toIso8601String()}');
-    sb.writeln('Registros: ${filas.length}');
-    sb.writeln('=' * 60);
+
+    // Resumen 24h
+    final hace24h = DateTime.now()
+        .subtract(const Duration(hours: 24))
+        .toIso8601String();
+    var nErr = 0, nAviso = 0, nCrit = 0;
     for (final f in filas) {
-      sb.writeln("[${f['ts']}] [${f['nivel']}] ${f['modulo']}.${f['evento']}");
-      if (f['detalle'] != null) sb.writeln('  ${f['detalle']}');
+      if ('${f['ts']}' .compareTo(hace24h) < 0)
+        continue;
+      switch ('${f['nivel']}') {
+        case 'error':
+          nErr++;
+        case 'aviso':
+          nAviso++;
+        case 'critico':
+          nCrit++;
+      }
+    }
+
+    final sb = StringBuffer();
+    sb.writeln('# Bitácora IronBody Gym');
+    sb.writeln('');
+    sb.writeln(
+        'Exportado: ${DateTime.now().toIso8601String()}');
+    sb.writeln('Registros: ${filas.length}');
+    sb.writeln('');
+    sb.writeln('## Resumen últimas 24h');
+    sb.writeln('');
+    sb.writeln('- Críticos: $nCrit');
+    sb.writeln('- Errores: $nErr');
+    sb.writeln('- Avisos: $nAviso');
+    sb.writeln('');
+    sb.writeln('## Eventos');
+    sb.writeln('');
+    String? opActual;
+    for (final f in filas) {
+      final opId = f['op_id'] as String?;
+      if (opId != null && opId != opActual) {
+        opActual = opId;
+        sb.writeln('### Operación `$opId`');
+        sb.writeln('');
+      }
+      sb.writeln(
+          '- `[${f['ts']}]` **[${f['nivel']}]** `${f['modulo']}.${f['evento']}`');
+      if (f['detalle'] != null) {
+        sb.writeln('  ${f['detalle']}');
+      }
+      if (f['contexto'] != null) {
+        sb.writeln('  ```json');
+        sb.writeln('  ${f['contexto']}');
+        sb.writeln('  ```');
+      }
+      if (f['stack'] != null) {
+        sb.writeln('  ```');
+        sb.writeln('  ${f['stack']}');
+        sb.writeln('  ```');
+      }
     }
     final dir = await getTemporaryDirectory();
     final path =
-        '${dir.path}/bitacora-ironbody-${DateTime.now().millisecondsSinceEpoch}.txt';
+        '${dir.path}/bitacora-ironbody-${DateTime.now().millisecondsSinceEpoch}.md';
     await File(path).writeAsString(sb.toString());
     return path;
+  }
+}
+
+/// Centinela de crash previo (Gemini #4).
+class CentinelaApp {
+  static const _key = 'tarea_activa';
+
+  static Future<void> marcarInicio(
+      String tarea) async {
+    final prefs =
+        await SharedPreferences.getInstance();
+    await prefs.setString(_key,
+        '$tarea|${DateTime.now().toIso8601String()}');
+  }
+
+  static Future<void> marcarFin() async {
+    final prefs =
+        await SharedPreferences.getInstance();
+    await prefs.remove(_key);
+  }
+
+  static Future<void> verificarArranque() async {
+    final prefs =
+        await SharedPreferences.getInstance();
+    final pendiente = prefs.getString(_key);
+    if (pendiente != null) {
+      final partes = pendiente.split('|');
+      AppLog.aviso('sistema',
+          'cierre_anormal_detectado',
+          contexto: {
+            'tarea_inconclusa': partes[0],
+            'iniciada_en':
+                partes.length > 1 ? partes[1] : '?',
+          });
+      await prefs.remove(_key);
+    }
   }
 }

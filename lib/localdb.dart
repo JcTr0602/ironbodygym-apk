@@ -657,6 +657,22 @@ class LocalDb {
               "'a1b2c3d4-0004-4000-8000-000000000004' "
               "WHERE tipo_id IS NULL");
 
+          // AppLog v2.0 (v1.3.0, Gemini): columnas nuevas.
+          await _addColumnIfMissing(
+              db, 'app_log', 'nivel', "TEXT NOT NULL DEFAULT 'info'");
+          await _addColumnIfMissing(
+              db, 'app_log', 'contexto', 'TEXT');
+          await _addColumnIfMissing(
+              db, 'app_log', 'op_id', 'TEXT');
+          await _addColumnIfMissing(
+              db, 'app_log', 'stack', 'TEXT');
+          await db.execute(
+              'CREATE INDEX IF NOT EXISTS idx_applog_op '
+              'ON app_log(op_id)');
+          await db.execute(
+              'CREATE INDEX IF NOT EXISTS idx_applog_nivel '
+              'ON app_log(nivel)');
+
           // Auditoría final Gemini: incidencias_mirror puede existir
           // de versiones viejas sin las columnas nuevas.
           await _addColumnIfMissing(

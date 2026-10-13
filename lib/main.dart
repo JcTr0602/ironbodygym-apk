@@ -58,18 +58,23 @@ Future<void> _programarSubidaFondo() async {
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  // v1.2.9+46 (AppLog): captura global de errores no controlados.
+  // v1.3.0 (AppLog v2.0, Gemini #3): interceptores globales.
   FlutterError.onError = (details) {
-    AppLog.error('crash', 'flutter_error',
-        d: details.exceptionAsString());
     FlutterError.presentError(details);
+    AppLog.critico('ui', 'flutter_uncaught',
+        contexto: {
+          'libreria': '${details.library}',
+          'resumen': details.summary.toString(),
+        },
+        stack: details.stack);
   };
   PlatformDispatcher.instance.onError = (error, stack) {
-    AppLog.error('crash', 'async_error', d: '$error\n$stack');
-    // v1.2.9+46 (Gemini): en debug, no absorber — dejar que la consola
-    // muestre la excepción. En release, sí absorber (ya quedó en AppLog).
+    AppLog.critico('app', 'async_uncaught',
+        contexto: {'error': '$error'}, stack: stack);
     return !kDebugMode;
   };
+  // v1.3.0 (Gemini #4): verificar cierre anormal previo.
+  await CentinelaApp.verificarArranque();
   await Supabase.initialize(
     url: AppConfig.supabaseUrl,
     publishableKey: AppConfig.anonKey,
