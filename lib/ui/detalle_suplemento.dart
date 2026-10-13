@@ -15,6 +15,7 @@ import 'package:flutter/material.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:uuid/uuid.dart';
 
+import '../app_log.dart';
 import '../fotos.dart';
 import '../localdb.dart';
 import '../negocio.dart';
@@ -200,6 +201,12 @@ class DetalleSuplementoScreen extends StatelessWidget {
             onPressed: () =>
                 compartirSuplemento(context, suplemento, tasaUsd),
           ),
+          IconButton(
+            icon: const Icon(Icons.delete_outline),
+            tooltip: 'Eliminar suplemento',
+            onPressed: () =>
+                _eliminarSuplemento(context, suplemento),
+          ),
         ],
       ),
       body: ListView(
@@ -309,4 +316,37 @@ class DetalleSuplementoScreen extends StatelessWidget {
       ),
     );
   }
+}
+
+/// Elimina un suplemento (v1.3.1).
+/// Pide confirmación, lo marca como eliminado localmente y encola la op.
+Future<void> _eliminarSuplemento(
+    BuildContext context, Map<String, dynamic> s) async {
+  final nombre = '${s['nombre'] ?? 'suplemento'}';
+  final ok = await DialogoApp.confirmar(
+    context,
+    titulo: 'Eliminar suplemento',
+    mensaje: '¿Eliminar "$nombre" del catálogo? Esta acción no se puede deshacer.',
+    aceptar: 'Eliminar',
+  );
+  if (ok != true || !context.mounted) return;
+
+  final db = LocalDb.instance;
+  final id = s['id'];
+  // Marcar como eliminado localmente.
+  final d = await db.db;
+  await d.delete('suplementos', where: 'id = ?', whereArgs: [id]);
+
+  await db.queueOp(
+    opUuid: const Uuid().v4(),
+    tipo: 'eliminar_suplemento',
+    payload: {'suplemento_id': id},
+  );
+  AppLog.info('suplementos', 'eliminar', d: 'id=$id nombre=$nombre');
+
+  if (!context.mounted) return;
+  ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Suplemento eliminado')));
+  Navigator.of(context).pop();
+  SyncEngine.instance.push();
 }
