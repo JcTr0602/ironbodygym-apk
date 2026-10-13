@@ -611,7 +611,8 @@ class FotosColaService {
         const Uuid().v5('6ba7b811-9dad-11d1-80b4-00c04fd430c8', 'foto:${f['op_uuid']}');
 
     if (clienteId != null) {
-      await _vincularFotoCliente(txn, clienteId, opUuid, storagePath);
+      await _vincularFotoCliente(
+          txn, clienteId, opUuid, storagePath, opUuidDeterminista);
     } else if (suplementoId != null) {
       try {
         final rows = await txn.query('suplementos',
@@ -644,8 +645,8 @@ class FotosColaService {
   }
 
   /// Vincula foto a cliente: mirror local + op para Supabase.
-  Future<void> _vincularFotoCliente(
-      dynamic db, int clienteId, String opUuid, String storagePath) async {
+  Future<void> _vincularFotoCliente(dynamic db, int clienteId,
+      String opUuid, String storagePath, String opUuidDeterminista) async {
     final rows = await db.query(
       'clientes',
       columns: ['data'],
@@ -688,7 +689,7 @@ class FotosColaService {
     // auth, etc.) y el backend actualiza Supabase. Así el próximo pull
     // no borra la foto.
     await db.insert('ops_queue', {
-      'op_uuid': const Uuid().v4(),
+      'op_uuid': opUuidDeterminista,
       'tipo': 'foto',
       'payload': jsonEncode({
         'storage_path': storagePath,
