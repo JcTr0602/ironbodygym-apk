@@ -329,8 +329,15 @@ class _ListaIncidenciasScreenState
                   ..._tipos.map((t) =>
                       DropdownMenuItem(
                         value: t.id,
-                        child: Text(
-                            '${t.icono} ${t.nombre}'),
+                        child: Row(
+                          children: [
+                            Icon(t.iconoData,
+                                size: 18,
+                                color: t.colorData),
+                            const SizedBox(width: 8),
+                            Text(t.nombre),
+                          ],
+                        ),
                       )),
                 ],
                 onChanged: (v) =>

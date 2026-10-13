@@ -339,15 +339,8 @@ class _DetalleIncidenciaScreenState
         'sync_estado': 'pending',
         'creado_en': ahora,
       });
-      // Encolar para subir.
-      await db.queueOp(
-        opUuid: const Uuid().v4(),
-        tipo: 'registrar_foto_incidencia',
-        payload: {
-          'id': id,
-          'incidencia_id': _inc!.id,
-        },
-      );
+      // Argón: no encolar aquí. subirFotosIncidencias() lo hace
+      // tras subir el archivo a Storage (con storage_path).
       await _cargar();
       if (mounted) {
         ScaffoldMessenger.of(context)
