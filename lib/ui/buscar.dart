@@ -347,6 +347,12 @@ class _FilaClienteState extends State<_FilaCliente> {
   /// el estado y el initState no se repite).
   Future<void> _resolverFoto() async {
     final sp = widget.cliente['foto_storage'] as String?;
+    // Fix: si no hay foto, limpiar la anterior (widget reciclado).
+    if (sp == null || sp.isEmpty) {
+      if (_foto != null && mounted) setState(() => _foto = null);
+      _resueltoPara = sp;
+      return;
+    }
     _resueltoPara = sp;
     final enCache =
         await FotoCache.instance.enCache(sp);
