@@ -1997,11 +1997,21 @@ class SyncEngine {
         },
         timeout: const Duration(seconds: 30),
       );
-      if (r.statusCode != 200 && r.statusCode != 201) return null;
+      if (r.statusCode != 200 && r.statusCode != 201) {
+        // v1.2.9+46: loguear el código real para diagnóstico.
+        AppLog.aviso('fotos', 'tus_rechazado',
+            d: 'path=$objectPath status=${r.statusCode} body=${r.body.length > 200 ? r.body.substring(0, 200) : r.body}');
+        return null;
+      }
       final loc = r.headers['location'];
-      if (loc == null || loc.isEmpty) return null;
+      if (loc == null || loc.isEmpty) {
+        AppLog.aviso('fotos', 'tus_sin_location', d: 'path=$objectPath');
+        return null;
+      }
       return loc.startsWith('http') ? loc : '$_base$loc';
-    } catch (_) {
+    } catch (e) {
+      // v1.2.9+46: loguear la excepción real.
+      AppLog.aviso('fotos', 'tus_excepcion', d: 'path=$objectPath error=$e');
       return null;
     }
   }
@@ -2127,7 +2137,15 @@ class SyncEngine {
             body: bytes,
             timeout: const Duration(seconds: 120));
         if (r.statusCode == 200 || r.statusCode == 201) return true;
-      } catch (_) {}
+        // v1.2.9+46: loguear el código real para diagnóstico.
+        AppLog.aviso('fotos', 'put_rechazado',
+            d: 'path=$path intento=$intento status=${r.statusCode} '
+                'body=${r.body.length > 200 ? r.body.substring(0, 200) : r.body}');
+      } catch (e) {
+        // v1.2.9+46: loguear la excepción real.
+        AppLog.aviso('fotos', 'put_excepcion',
+            d: 'path=$path intento=$intento error=$e');
+      }
     }
     return false;
   }
