@@ -665,11 +665,15 @@ class FotosColaService {
         whereArgs: [id],
       );
     } else {
+      // v1.2.9+44 (Gemini): en errores transitorios NO limpiar worker_id
+      // ni lease_hasta aquí. Si lo hacemos, el backoff de procesarCola
+      // (where: id = ? AND worker_id = ?) actualiza 0 filas y los
+      // intentos nunca se incrementan -> bucle infinito sin backoff.
+      // Solo registrar el error; procesarCola aplica el backoff y
+      // libera el worker limpiamente.
       final afectadas = await db.update(
         'fotos_cola',
         {
-          'worker_id': null,
-          'lease_hasta': null,
           'ultimo_error': error,
           'actualizado_en': ahora,
         },
@@ -746,7 +750,7 @@ class FotosColaService {
         }),
         'estado': 'pendiente',
         'creada_ts': DateTime.now().toIso8601String(),
-      });
+      }, conflictAlgorithm: ConflictAlgorithm.replace);
     }
   }
 
@@ -804,7 +808,7 @@ class FotosColaService {
       }),
       'estado': 'pendiente',
       'creada_ts': DateTime.now().toIso8601String(),
-    });
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
   }
 
 
