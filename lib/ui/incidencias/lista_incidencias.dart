@@ -5,6 +5,7 @@ import '../../modelos/incidencia.dart';
 import '../diseno.dart';
 import 'widgets/tarjeta_incidencia.dart';
 import 'detalle_incidencia.dart';
+import 'tipos_incidencia.dart';
 import 'editar_incidencia.dart';
 import '../../auth.dart';
 
@@ -170,6 +171,22 @@ class _ListaIncidenciasScreenState
       appBar: AppBar(
         title: const Text('Incidencias'),
         actions: [
+          if (AuthService().isOwner)
+            IconButton(
+              icon: const Icon(
+                  Icons.category_outlined),
+              tooltip: 'Tipos',
+              onPressed: () async {
+                await Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) =>
+                        const TiposIncidenciaScreen(),
+                  ),
+                );
+                _cargar();
+              },
+            ),
           IconButton(
             icon: const Icon(Icons.filter_list),
             tooltip: 'Filtros',
@@ -281,8 +298,110 @@ class _ListaIncidenciasScreenState
   }
 
   void _mostrarFiltros() {
-    // TODO: bottom sheet con filtros avanzados
-    // (tipo, prioridad, asignado, fecha)
+    // Argón A4: filtros por tipo, prioridad y "solo mías".
+    showModalBottomSheet(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setB) => Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment:
+                CrossAxisAlignment.start,
+            children: [
+              const Text('Filtros',
+                  style: TextStyle(
+                      fontSize: 18,
+                      fontWeight:
+                          FontWeight.bold)),
+              const SizedBox(height: 12),
+              const Text('Tipo:'),
+              DropdownButton<String?>(
+                value: _filtroTipoId,
+                isExpanded: true,
+                hint:
+                    const Text('Todos los tipos'),
+                items: [
+                  const DropdownMenuItem(
+                      value: null,
+                      child:
+                          Text('Todos')),
+                  ..._tipos.map((t) =>
+                      DropdownMenuItem(
+                        value: t.id,
+                        child: Text(
+                            '${t.icono} ${t.nombre}'),
+                      )),
+                ],
+                onChanged: (v) =>
+                    setB(() => _filtroTipoId = v),
+              ),
+              const SizedBox(height: 8),
+              const Text('Prioridad:'),
+              DropdownButton<String?>(
+                value: _filtroPrioridad,
+                isExpanded: true,
+                hint: const Text(
+                    'Todas las prioridades'),
+                items: const [
+                  DropdownMenuItem(
+                      value: null,
+                      child: Text('Todas')),
+                  DropdownMenuItem(
+                      value: 'alta',
+                      child: Text('Alta')),
+                  DropdownMenuItem(
+                      value: 'media',
+                      child: Text('Media')),
+                  DropdownMenuItem(
+                      value: 'baja',
+                      child: Text('Baja')),
+                ],
+                onChanged: (v) =>
+                    setB(() => _filtroPrioridad = v),
+              ),
+              SwitchListTile(
+                title:
+                    const Text('Solo mías'),
+                value: _soloMias,
+                onChanged: (v) =>
+                    setB(() => _soloMias = v),
+              ),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () {
+                        setState(() {
+                          _filtroTipoId = null;
+                          _filtroPrioridad = null;
+                          _soloMias = false;
+                        });
+                        Navigator.pop(ctx);
+                      },
+                      child: const Text(
+                          'Limpiar filtros'),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: ElevatedButton(
+                      onPressed: () {
+                        setState(() {});
+                        Navigator.pop(ctx);
+                      },
+                      child:
+                          const Text('Aplicar'),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   void _irDetalle(Incidencia inc) {

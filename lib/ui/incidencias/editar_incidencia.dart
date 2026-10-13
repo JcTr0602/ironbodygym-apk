@@ -270,8 +270,9 @@ class _EditarIncidenciaScreenState
         'estado':
             widget.existente?.estado ??
                 'pendiente',
-        'creada_por':
-            AuthService().userId ?? 'desconocido',
+        'creada_por': widget.existente?.creadaPor ??
+            AuthService().userId ??
+            'desconocido',
         'creada_en': widget
                 .existente?.creadaEn
                 ?.toIso8601String() ??

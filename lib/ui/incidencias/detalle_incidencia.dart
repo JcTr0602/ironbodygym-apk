@@ -1,11 +1,14 @@
 import 'dart:convert';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:uuid/uuid.dart';
+import 'package:image_picker/image_picker.dart';
 import '../../auth.dart';
 import '../../localdb.dart';
 import '../../modelos/incidencia.dart';
 import '../diseno.dart';
 import 'widgets/dialogo_resolver_incidencia.dart';
+import 'editar_incidencia.dart';
 
 /// Detalle de incidencia: info + comentarios + fotos + historial.
 /// v1.3.0
@@ -108,12 +111,37 @@ class _DetalleIncidenciaScreenState
       appBar: AppBar(
         title: Text(inc?.descripcion ?? 'Incidencia'),
         actions: [
-          if (inc != null && !inc.estaResuelta)
+          if (inc != null)
+            IconButton(
+              icon: const Icon(Icons.edit),
+              tooltip: 'Editar',
+              onPressed: () async {
+                await Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) =>
+                        EditarIncidenciaScreen(
+                            existente: inc),
+                  ),
+                );
+                _cargar();
+              },
+            ),
+          if (inc != null &&
+              (!inc.estaResuelta ||
+                  AuthService().isOwner))
             PopupMenuButton<String>(
               icon: const Icon(Icons.more_vert),
               onSelected: _cambiarEstado,
               itemBuilder: (ctx) {
                 final items = <PopupMenuItem<String>>[];
+                if (inc.puedeTransicionarA(
+                    'pendiente')) {
+                  items.add(const PopupMenuItem(
+                    value: 'pendiente',
+                    child: Text('Pendiente'),
+                  ));
+                }
                 if (inc.puedeTransicionarA(
                     'en_proceso')) {
                   items.add(const PopupMenuItem(
@@ -240,17 +268,100 @@ class _DetalleIncidenciaScreenState
       crossAxisAlignment:
           CrossAxisAlignment.start,
       children: [
-        const Text('Fotos',
-            style: TextStyle(
-                fontWeight: FontWeight.bold)),
+        Row(
+          children: [
+            const Text('Fotos',
+                style: TextStyle(
+                    fontWeight: FontWeight.bold)),
+            const Spacer(),
+            TextButton.icon(
+              icon: const Icon(
+                  Icons.add_a_photo,
+                  size: 18),
+              label: const Text('Agregar'),
+              onPressed: _agregarFoto,
+            ),
+          ],
+        ),
         const SizedBox(height: 8),
         if (_fotos.isEmpty)
           const Text('Sin fotos',
               style: TextStyle(
-                  color: Colors.grey)),
-        // TODO: grid de fotos + botón agregar
+                  color: Colors.grey))
+        else
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: _fotos.map((f) {
+              final file = File(f.localPath);
+              return ClipRRect(
+                borderRadius:
+                    BorderRadius.circular(8),
+                child: file.existsSync()
+                    ? Image.file(
+                        file,
+                        width: 100,
+                        height: 100,
+                        fit: BoxFit.cover,
+                      )
+                    : Container(
+                        width: 100,
+                        height: 100,
+                        color: Colors.grey.shade300,
+                        child: const Icon(
+                            Icons.broken_image),
+                      ),
+              );
+            }).toList(),
+          ),
       ],
     );
+  }
+
+  /// Agrega una foto a la incidencia (Argón A4).
+  Future<void> _agregarFoto() async {
+    try {
+      final picker = ImagePicker();
+      final xfile = await picker.pickImage(
+          source: ImageSource.camera,
+          maxWidth: 1280);
+      if (xfile == null) return;
+      final db = LocalDb.instance;
+      final d = await db.db;
+      final id = const Uuid().v4();
+      final ahora =
+          DateTime.now().toIso8601String();
+      await d.insert('incidencias_fotos', {
+        'id': id,
+        'incidencia_id': _inc!.id,
+        'local_path': xfile.path,
+        'tipo': 'evidencia',
+        'sync_estado': 'pending',
+        'creado_en': ahora,
+      });
+      // Encolar para subir.
+      await db.queueOp(
+        opUuid: const Uuid().v4(),
+        tipo: 'registrar_foto_incidencia',
+        payload: {
+          'id': id,
+          'incidencia_id': _inc!.id,
+        },
+      );
+      await _cargar();
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(const SnackBar(
+                content:
+                    Text('Foto agregada')));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(
+                content: Text('Error: $e')));
+      }
+    }
   }
 
   Widget _seccionComentarios() {
@@ -378,7 +489,8 @@ class _DetalleIncidenciaScreenState
             'estado': 'resuelta',
             'nota_resolucion': nota,
             'resuelta_por':
-                'yo', // TODO: usuario auth
+                AuthService().userId ??
+                    'desconocido',
             'resuelta_en': ahora,
             'actualizado_en': ahora,
             'sync_estado': 'pending',

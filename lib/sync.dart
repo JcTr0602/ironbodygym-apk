@@ -724,6 +724,9 @@ class SyncEngine {
       try {
         await _pullTiposIncidencia();
         await _pullIncidencias();
+        // Argón A2: pull de tablas hijas de incidencias.
+        await _pullIncidenciasComentarios();
+        await _pullIncidenciasHistorial();
         await _db.setMeta('last_pull_incidencias_ok',
             DateTime.now().toIso8601String());
       } catch (e) {
@@ -2656,6 +2659,115 @@ class SyncEngine {
       AppLog.error(
           'sync', 'pull_inc_fallo', d: '$e');
       // Argón B2: rethrow para que pull() detecte el fallo.
+      rethrow;
+    }
+  }
+
+  /// Argón A2: descarga comentarios de incidencias desde Supabase.
+  Future<void> _pullIncidenciasComentarios() async {
+    final wm = await _db.getWatermarkTabla(
+        'incidencias_comentarios');
+    try {
+      final r = await _getAuth(Uri.parse(
+          '$_base/rest/v1/sync_incidencias_comentarios?sync_seq=gt.$wm'
+          '&order=sync_seq&limit=100'));
+      if (r.statusCode != 200) {
+        throw Exception(
+            'pull_inc_comentarios HTTP ${r.statusCode}');
+      }
+      final rows = jsonDecode(r.body) as List;
+      if (rows.isEmpty) return;
+      final d = await _db.db;
+      await d.transaction((txn) async {
+        var maxSeq = wm;
+        for (final row in rows) {
+          final m =
+              Map<String, dynamic>.from(
+                  row as Map);
+          final seq =
+              (m['sync_seq'] as num?)
+                      ?.toInt() ??
+                  0;
+          if (seq > maxSeq) maxSeq = seq;
+          await txn.insert(
+            'incidencias_comentarios',
+            {
+              'id': m['id'],
+              'incidencia_id':
+                  m['incidencia_id'],
+              'texto': m['texto'],
+              'creado_por': m['creado_por'],
+              'creado_en': m['creado_en'],
+              'sync_estado': 'synced',
+            },
+            conflictAlgorithm:
+                ConflictAlgorithm.replace,
+          );
+        }
+        await _db.setWatermarkTabla(
+            'incidencias_comentarios', maxSeq,
+            executor: txn);
+      });
+    } catch (e) {
+      AppLog.error(
+          'sync', 'pull_inc_com_fallo',
+          d: '$e');
+      rethrow;
+    }
+  }
+
+  /// Argón A2: descarga historial de incidencias desde Supabase.
+  Future<void> _pullIncidenciasHistorial() async {
+    final wm = await _db.getWatermarkTabla(
+        'incidencias_historial');
+    try {
+      final r = await _getAuth(Uri.parse(
+          '$_base/rest/v1/sync_incidencias_historial?sync_seq=gt.$wm'
+          '&order=sync_seq&limit=100'));
+      if (r.statusCode != 200) {
+        throw Exception(
+            'pull_inc_historial HTTP ${r.statusCode}');
+      }
+      final rows = jsonDecode(r.body) as List;
+      if (rows.isEmpty) return;
+      final d = await _db.db;
+      await d.transaction((txn) async {
+        var maxSeq = wm;
+        for (final row in rows) {
+          final m =
+              Map<String, dynamic>.from(
+                  row as Map);
+          final seq =
+              (m['sync_seq'] as num?)
+                      ?.toInt() ??
+                  0;
+          if (seq > maxSeq) maxSeq = seq;
+          await txn.insert(
+            'incidencias_historial',
+            {
+              'id': m['id'],
+              'incidencia_id':
+                  m['incidencia_id'],
+              'campo': m['campo'],
+              'valor_anterior':
+                  m['valor_anterior'],
+              'valor_nuevo': m['valor_nuevo'],
+              'cambiado_por':
+                  m['cambiado_por'],
+              'cambiado_en': m['cambiado_en'],
+            },
+            conflictAlgorithm:
+                ConflictAlgorithm.replace,
+          );
+        }
+        await _db.setWatermarkTabla(
+            'incidencias_historial', maxSeq,
+            executor: txn);
+      });
+    } catch (e) {
+      AppLog.error(
+          'sync', 'pull_inc_hist_fallo',
+          d: '$e');
       rethrow;
     }
   }
