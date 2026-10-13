@@ -384,17 +384,43 @@ class _FichaScreenState extends State<FichaScreen> {
         : '${pagadoHasta!.year.toString().padLeft(4, '0')}-'
             '${pagadoHasta!.month.toString().padLeft(2, '0')}-'
             '${pagadoHasta!.day.toString().padLeft(2, '0')}';
+    // Solo enviar los campos que realmente cambiaron.
+    final orig = _c ?? {};
+    final payload = <String, dynamic>{
+      'cliente_id': widget.clienteId,
+    };
+    final nuevoNombre = nombre.text.trim();
+    if (nuevoNombre != '${orig['nombre'] ?? ''}') {
+      payload['nombre'] = nuevoNombre;
+    }
+    final nuevoTel = tel.isEmpty ? null : tel;
+    final origTel = orig['telefono'] as String?;
+    if (nuevoTel != origTel) {
+      payload['telefono'] = nuevoTel;
+    }
+    final nuevoCar = car.isEmpty ? null : car;
+    final origCar = orig['carnet'] as String?;
+    if (nuevoCar != origCar) {
+      payload['carnet'] = nuevoCar;
+    }
+    if (sexo != orig['sexo']) {
+      payload['sexo'] = sexo;
+    }
+    final origPh = orig['pagado_hasta'] as String?;
+    if (phStr != origPh) {
+      payload['pagado_hasta'] = phStr;
+    }
+    // Si no cambió nada, no encolar.
+    if (payload.length <= 1) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Sin cambios')));
+      return;
+    }
     await LocalDb.instance.queueOp(
       opUuid: const Uuid().v4(),
       tipo: 'editar_cliente',
-      payload: {
-        'cliente_id': widget.clienteId,
-        'nombre': nombre.text.trim(),
-        'telefono': tel.isEmpty ? null : tel,
-        'carnet': car.isEmpty ? null : car,
-        'sexo': sexo,
-        if (phStr != null) 'pagado_hasta': phStr,
-      },
+      payload: payload,
     );
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
