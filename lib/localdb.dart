@@ -213,7 +213,7 @@ class LocalDb {
     final dir = await getDatabasesPath();
     _db = await openDatabase(
       p.join(dir, 'ironbody.db'),
-      version: 19,
+      version: 20,
       // v1.3-r4 (Gemini): WAL mode para que lectores (UI) y escritores
       // (Workmanager en otro isolate) no se bloqueen mutuamente.
       // v1.2.9+34 (hotfix): try-catch — si el dispositivo no soporta WAL,
@@ -533,6 +533,11 @@ class LocalDb {
         if (oldV < 18) {
           await db.execute(
               'ALTER TABLE suplementos ADD COLUMN ultimo_precio REAL');
+        }
+        // v20 (v1.3.1, B2): asegurar ultimo_precio en suplementos
+        // para quienes instalaron v1.3.0 desde cero (sin la columna).
+        if (oldV < 20) {
+          await _addColumnIfMissing(db, 'suplementos', 'ultimo_precio', 'REAL');
         }
         // v19: rediseño de Incidencias v1.3.0 (certificado por Gemini).
         if (oldV < 19) {
@@ -1444,7 +1449,12 @@ class LocalDb {
     final rows = await d.query(tabla);
     return [
       for (final r in rows)
-        jsonDecode(r['data'] as String) as Map<String, dynamic>
+        {
+          ...jsonDecode(r['data'] as String) as Map<String, dynamic>,
+          // v1.3.1 (B2): inyectar ultimo_precio (columna SQL, no JSON).
+          if (tabla == 'suplementos' && r['ultimo_precio'] != null)
+            'ultimo_precio': (r['ultimo_precio'] as num).toDouble(),
+        }
     ];
   }
 
@@ -1633,7 +1643,7 @@ class LocalDb {
     // Las ops 'enviada' esperan al puente y las 'error' están en backoff;
     // marcar como synced antes sería perder cambios locales.
     final pend = await d.rawQuery(
-        "SELECT COUNT(*) as n FROM ops_queue WHERE estado IN ('pendiente', 'enviada', 'error')");
+        "SELECT COUNT(*) as n FROM ops_queue WHERE estado IN ('pendiente', 'enviada', 'error', 'necesita_revision')");
     if (((pend.first['n'] as num?)?.toInt() ?? 0) > 0) return;
     await d.update('incidencias_local',
         {'sync_estado': 'synced', 'sincronizada': 1},

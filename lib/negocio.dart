@@ -6,6 +6,7 @@ library;
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
+import 'package:sqflite/sqflite.dart';
 import 'package:uuid/uuid.dart';
 
 import 'auth.dart';
@@ -1725,6 +1726,28 @@ Future<List<Map<String, dynamic>>> pagosPendientesDetalle(
       'descripcion': 'Pago diario',
       'entrenador_nombre':
           '${d['registrado_por_nombre'] ?? 'Entrenador $tid'}',
+      'trainer_telegram_id': tid,
+    });
+  }
+  // v1.3.1 (B1): ventas de suplementos pendientes de entrega.
+  for (final s in await LocalDb.instance.allMirror('ventas_suplementos')) {
+    if (!esPendiente(s['entregado'])) continue;
+    final tid = s['registrado_por'] as int?;
+    if (tid == null) continue;
+    if (excluirTid != null && tid == excluirTid) continue;
+    final moneda = s['moneda'] as String? ?? 'CUP';
+    final monto = moneda == 'USD'
+        ? (s['precio_usd'] as num?)?.toDouble() ?? 0
+        : (s['precio_cup'] as num?)?.toDouble() ?? 0;
+    lista.add({
+      'id': s['id'],
+      'monto': monto,
+      'moneda': moneda,
+      'creada_en': s['creada_en'] ?? s['fecha'],
+      'tipo': 'suplemento',
+      'descripcion': 'Venta suplemento: ${s['suplemento_nombre'] ?? ''}',
+      'entrenador_nombre':
+          '${s['registrado_por_nombre'] ?? 'Entrenador $tid'}',
       'trainer_telegram_id': tid,
     });
   }
