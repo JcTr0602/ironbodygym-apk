@@ -279,7 +279,7 @@ Future<Map<String, dynamic>?> pagoDialogo(
                       DropdownMenuItem(
                           value: t.id,
                           child: Text(
-                              '${t.nombre} (${fmtMonto(t.monto)} CUP)')),
+                              '${t.nombre} (${fmtMonto((metodo == 'transferencia' && t.id == 'mensual') ? transfer : t.monto)} CUP)')),
                     const DropdownMenuItem(
                         value: 'personalizado',
                         child: Text('Personalizado…')),
