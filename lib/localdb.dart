@@ -1674,6 +1674,25 @@ class LocalDb {
         whereArgs: [id]);
   }
 
+  /// v1.3.1 (Alto #4): actualiza el op_uuid de una incidencia local al
+  /// encolar una nueva operación sobre ella (ej. cambio de estado).
+  /// Sin esto, la fila conserva el UUID viejo (ya aplicado) y el marcado
+  /// selectivo la daría como synced aunque la nueva op siga pendiente.
+  Future<void> actualizarOpUuidIncidencia(
+      String id, String opUuid) async {
+    final d = await db;
+    await d.update(
+      'incidencias_local',
+      {
+        'op_uuid': opUuid,
+        'sync_estado': 'pending',
+        'sincronizada': 0,
+      },
+      where: 'id=?',
+      whereArgs: [id],
+    );
+  }
+
   /// Argón B1: marca tipos y comentarios como sincronizados tras push.
   /// Argón B1: marca como synced todo lo que subió por ops_queue.
   /// Incluye incidencias_local (crear/editar/cambiar_estado van por

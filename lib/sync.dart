@@ -1775,8 +1775,10 @@ class SyncEngine {
       throw StateError(
           'solo el dueño puede ${esResolucion ? 'resolver' : 'reabrir'}');
     }
+    // v1.3.1 (Alto #4): generar opUuid antes para actualizar la fila local.
+    final opUuid = const Uuid().v4();
     await _db.queueOp(
-      opUuid: const Uuid().v4(),
+      opUuid: opUuid,
       tipo: 'incidencia_estado',
       payload: {
         'id': id,
@@ -1785,6 +1787,11 @@ class SyncEngine {
         'version': row['version'],
       },
     );
+    // v1.3.1 (Alto #4): si la incidencia existe en local, actualizar su
+    // op_uuid al nuevo (el viejo ya no está en ops_queue). Si no se hace,
+    // marcarTiposComentariosSincronizados la marcaría como synced
+    // inmediatamente aunque esta operación siga pendiente.
+    await _db.actualizarOpUuidIncidencia(id, opUuid);
     // Optimista: refleja el cambio en el mirror; el próximo pull lo
     // confirma o lo corrige según lo que aplique el servidor.
     await _db.upsertIncidenciaMirror({
