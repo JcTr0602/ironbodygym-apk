@@ -35,13 +35,19 @@ class _BuscarScreenState extends State<BuscarScreen> {
     _buscar(); // lista completa por defecto
   }
 
+  int _gen = 0;
+
   Future<void> _buscar() async {
-    var r = await listaClientes(_q.text);
+    // v1.3.1: descartar resultados obsoletos (race condition).
+    final gen = ++_gen;
     final q = _q.text.trim();
+    var r = await listaClientes(q);
+    if (gen != _gen) return;
     // v1.0.15: búsqueda avanzada — también en notas.
     if (_enNotas && q.isNotEmpty) {
       final nq = q.toLowerCase();
       final todos = await listaClientes('');
+      if (gen != _gen) return;
       final vistos = <dynamic>{for (final c in r) c['id']};
       final extra = todos.where((c) =>
           !vistos.contains(c['id']) &&
@@ -51,16 +57,17 @@ class _BuscarScreenState extends State<BuscarScreen> {
           (a, b) => '${a['nombre']}'.compareTo('${b['nombre']}'));
     }
     // Filtros de estado de mensualidad.
+    // v1.3.1: sin fecha = vencido (no "al día").
     if (_filtro != 'todos' && _filtro != 'sinfoto') {
       r = r.where((c) {
-        final dias = _diasRestantes(c);
+        final dias = diasRestantes(c['pagado_hasta'] as String?);
         switch (_filtro) {
           case 'aldia':
-            return dias > 7;
+            return dias != null && dias > 7;
           case 'vencidos':
-            return dias < 0;
+            return dias == null || dias < 0;
           case 'porvencer':
-            return dias >= 0 && dias <= 7;
+            return dias != null && dias >= 0 && dias <= 7;
           default:
             return true;
         }
@@ -94,7 +101,7 @@ class _BuscarScreenState extends State<BuscarScreen> {
         return ref == null || ref.isEmpty;
       }).toList();
     }
-    if (mounted) {
+    if (mounted && gen == _gen) {
       setState(() {
         _res = r;
         _busco = true;
@@ -102,27 +109,27 @@ class _BuscarScreenState extends State<BuscarScreen> {
     }
   }
 
-  int _diasRestantes(Map<String, dynamic> c) {
+  /// Botón "Actualizar": baja cambios del servidor y recarga la lista.
+  Future<void> _actualizar() async {
+    // v1.3.1: manejar fallo de red (offline-first en Cuba).
     try {
-      final ph = '${c['pagado_hasta'] ?? ''}';
-      if (ph.length < 10) return 999;
-      final v = DateTime.parse(ph.substring(0, 10));
-      final hoy = DateTime.now();
-      final hoyDia = DateTime(hoy.year, hoy.month, hoy.day);
-      return v.difference(hoyDia).inDays;
+      await SyncEngine.instance.pull();
+      await _buscar();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Lista actualizada')));
     } catch (_) {
-      return 999;
+      await _buscar();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Sin conexión: mostrando datos locales')));
     }
   }
 
-  /// Botón "Actualizar": baja cambios del servidor y recarga la lista.
-  Future<void> _actualizar() async {
-    await SyncEngine.instance.pull();
-    await _buscar();
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Lista actualizada')));
-    }
+  @override
+  void dispose() {
+    _q.dispose();
+    super.dispose();
   }
 
   @override
@@ -239,14 +246,22 @@ class _BuscarScreenState extends State<BuscarScreen> {
                         // v1.0.15: Buscar es consulta/gestión — el tap abre
                         // la ficha. Sin cobro rápido (eso vive en
                         // "Agregar pago").
-                        return _FilaCliente(
+                        // v1.3.1: usar wrapper público (ValueKey por id).
+                        return FilaCliente(
                           cliente: c,
-                          onTap: () => Navigator.of(context)
-                              .push(MaterialPageRoute(
-                                  builder: (_) => FichaScreen(
-                                      clienteId:
-                                          (c['id'] as int?) ?? 0)))
-                              .then((_) => _buscar()),
+                          onTap: () {
+                            final id = c['id'];
+                            final cid =
+                                id is int ? id : int.tryParse('$id');
+                            if (cid == null) return;
+                            Navigator.of(context)
+                                .push(MaterialPageRoute(
+                                    builder: (_) =>
+                                        FichaScreen(clienteId: cid)))
+                                .then((_) {
+                              if (mounted) _buscar();
+                            });
+                          },
                         );
                       },
                     ),
