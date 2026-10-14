@@ -8,6 +8,7 @@ library;
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'config.dart';
+import 'localdb.dart';
 
 String usernameToEmail(String username) {
   var n = username.trim().toLowerCase();
@@ -105,5 +106,9 @@ class AuthService {
     await _c.auth.updateUser(UserAttributes(password: nueva));
   }
 
-  Future<void> signOut() => _c.auth.signOut();
+  Future<void> signOut() async {
+    // v1.3.1 (M3): purgar datos sensibles antes de cerrar sesión.
+    await LocalDb.purgaAlCerrarSesion();
+    await _c.auth.signOut();
+  }
 }

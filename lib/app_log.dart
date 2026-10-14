@@ -262,10 +262,10 @@ class AppLog {
           RegExp(r'Bearer\s+\S+',
               caseSensitive: false),
           'Bearer ***');
-      v = v.replaceAll(
+      v = v.replaceAllMapped(
           RegExp(r'(token|api_key|password)=([^&\s]+)',
               caseSensitive: false),
-          r'$1=***');
+          (m) => '${m[1]}=***');
       out[e.key] = v;
     }
     return out;
@@ -278,10 +278,10 @@ class AppLog {
             caseSensitive: false),
         'Bearer ***');
     // M1 (Argón): también ocultar token/api_key/password en texto.
-    v = v.replaceAll(
+    v = v.replaceAllMapped(
         RegExp(r'(token|api_key|password)\s*[:=]\s*\S+',
             caseSensitive: false),
-        r'\1=***');
+        (m) => '${m[1]}=***');
     return v;
   }
 
@@ -353,6 +353,10 @@ class AppLog {
     }
     } finally {
       _flushing = false;
+      // v1.3.1 (M2): si llegaron logs durante el flush, reprogramar.
+      if (_buffer.isNotEmpty && _flushTimer == null) {
+        _flushTimer = Timer(const Duration(seconds: 2), _flush);
+      }
     }
   }
 

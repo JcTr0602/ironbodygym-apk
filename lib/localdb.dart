@@ -222,6 +222,10 @@ class LocalDb {
         try {
           await db.execute('PRAGMA journal_mode = WAL;');
         } catch (_) {}
+        // v1.3.1 (M3): activar FKs para que ON DELETE CASCADE funcione.
+        try {
+          await db.execute('PRAGMA foreign_keys = ON;');
+        } catch (_) {}
       },
       onCreate: (db, _) async {
         await _crearTablas(db);
@@ -534,10 +538,12 @@ class LocalDb {
           await db.execute(
               'ALTER TABLE suplementos ADD COLUMN ultimo_precio REAL');
         }
-        // v20 (v1.3.1, B2): asegurar ultimo_precio en suplementos
-        // para quienes instalaron v1.3.0 desde cero (sin la columna).
+        // v20 (v1.3.1, B2+M4): asegurar ultimo_precio en suplementos
+        // para quienes instalaron v1.3.0 desde cero (sin la columna),
+        // y crear esquema de incidencias (config_negocio) si falta.
         if (oldV < 20) {
           await _addColumnIfMissing(db, 'suplementos', 'ultimo_precio', 'REAL');
+          await _crearEsquemaIncidencias(db);
         }
         // v19: rediseño de Incidencias v1.3.0 (certificado por Gemini).
         if (oldV < 19) {

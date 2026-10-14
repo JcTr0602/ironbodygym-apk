@@ -15,6 +15,19 @@ class Novedad {
 }
 
 const novedades = [
+  Novedad('1.3.1', [
+    'Confirmar entregas sin crashes: corrección crítica de base de datos',
+    'Suplementos: precio recordado se preserva en sincronización',
+    'Incidencias: no se pierden cambios locales pendientes',
+    'Ventas en USD: tasa opcional, validación robusta',
+    'Pago a entrenadores movido a Administración',
+  ]),
+  Novedad('1.3.0', [
+    'Módulo de Incidencias: reporta y sigue problemas del gym',
+    'Eliminar suplementos (solo dueño, con validación contable)',
+    'Fotos: botón para descartar fotos atascadas en la cola',
+    'Diagnóstico de sincronización mejorado',
+  ]),
   Novedad('1.2.9', [
     'Fotos con subida reanudable: si se corta el internet, continúa donde quedó',
     'Sincronización blindada: lock entre procesos, sin bloqueos de base de datos',
