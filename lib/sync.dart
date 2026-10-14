@@ -1450,8 +1450,13 @@ class SyncEngine {
       borradosOk = false;
       erroresTablas.add('borrados: $e');
     }
-    if (borradosOk && borradosMax > cursorBorrados) {
-      await _db.setWatermarkTabla('borrados', borradosMax);
+    if (borradosOk) {
+      // v1.3.1: si no hubo borrados, avanzar al serverSeq para no
+      // dejar el watermark en 0 (el diagnóstico muestra el mínimo).
+      final nuevoWm = borradosMax > cursorBorrados ? borradosMax : (serverSeq ?? cursorBorrados);
+      if (nuevoWm > cursorBorrados) {
+        await _db.setWatermarkTabla('borrados', nuevoWm);
+      }
     }
     // Argón v1.3.0: bajadas viejas v1.2.4/v1.2.5 DESACTIVADAS.
     // Ahora se usan _pullTiposIncidencia(), _pullIncidencias(),
