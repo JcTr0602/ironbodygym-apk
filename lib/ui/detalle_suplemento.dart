@@ -324,6 +324,28 @@ class DetalleSuplementoScreen extends StatelessWidget {
 /// Pide confirmación, lo marca como eliminado localmente y encola la op.
 Future<void> _eliminarSuplemento(
     BuildContext context, Map<String, dynamic> s) async {
+  final db = LocalDb.instance;
+  final d = await db.db;
+  final id = s['id'];
+
+  // Argón: verificar localmente que no tenga ventas antes de borrar.
+  final ventas = await d.rawQuery(
+    'SELECT COUNT(*) as n FROM ventas_suplementos WHERE suplemento_id = ?',
+    [id],
+  );
+  final nVentas = (ventas.first['n'] as int?) ?? 0;
+  if (nVentas > 0) {
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+            'No se puede eliminar: tiene $nVentas venta(s) registrada(s).'),
+      ),
+    );
+    return;
+  }
+
+  if (!context.mounted) return;
   final nombre = '${s['nombre'] ?? 'suplemento'}';
   final ok = await DialogoApp.confirmar(
     context,
@@ -333,10 +355,7 @@ Future<void> _eliminarSuplemento(
   );
   if (ok != true || !context.mounted) return;
 
-  final db = LocalDb.instance;
-  final id = s['id'];
   // Marcar como eliminado localmente.
-  final d = await db.db;
   await d.delete('suplementos', where: 'id = ?', whereArgs: [id]);
 
   await db.queueOp(
