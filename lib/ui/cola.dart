@@ -56,6 +56,39 @@ class _ColaScreenState extends State<ColaScreen> {
     super.dispose();
   }
 
+
+  /// v1.3.1: permite descartar una foto pendiente (ej: sin cliente asociado).
+  Future<void> _cancelarFoto(int id) async {
+    final ok = await DialogoApp.confirmar(
+      context,
+      titulo: 'Descartar foto',
+      mensaje: '¿Descartar esta foto pendiente? No se subirá al sistema.',
+      aceptar: 'Sí, descartar',
+      peligro: true,
+      icono: Icons.delete_outline,
+    );
+    if (ok != true) return;
+    try {
+      final db = await LocalDb.instance.db;
+      await db.delete(
+        'fotos_cola',
+        where: 'id = ?',
+        whereArgs: [id],
+      );
+      AppLog.info('fotos', 'descartada_manual', d: 'id=$id');
+      await _cargar();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('Foto descartada')));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Error: $e')));
+      }
+    }
+  }
+
   Future<void> _cargar() async {
     final ops = await LocalDb.instance.recentOps();
     final bloqueadas = await LocalDb.instance.opsNecesitanRevision();
@@ -560,6 +593,11 @@ class _ColaScreenState extends State<ColaScreen> {
             icon: const Icon(Icons.refresh, size: 20),
             tooltip: 'Reintentar',
             onPressed: () => _reintentarFoto(id),
+          ),
+          IconButton(
+            icon: const Icon(Icons.close, size: 20),
+            tooltip: 'Descartar',
+            onPressed: () => _cancelarFoto(id),
           ),
         ],
       ),

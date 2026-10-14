@@ -174,8 +174,9 @@ class _VentaSuplementoScreenState
       return;
     }
     final tasa = _tasaUsd;
-    // v1.2.4: tasa obligatoria en USD y CUP (el servidor exige usd_tasa > 0).
-    if (tasa == null || tasa <= 0) {
+    // v1.3.1: tasa solo obligatoria en CUP (para el equivalente USD).
+    // En ventas USD es irrelevante, no se exige.
+    if (_moneda == 'CUP' && (tasa == null || tasa <= 0)) {
       await DialogoApp.confirmar(context,
           titulo: 'Revisa la valoración',
           mensaje:
@@ -212,7 +213,7 @@ class _VentaSuplementoScreenState
         (_tipoComprador == 'cliente' ||
             _tipoComprador == 'inscribir_nuevo');
     final lineaMoneda = 'Precio: ${precio.toStringAsFixed(2)} $_moneda'
-        ' (tasa ${tasa.toStringAsFixed(2)} CUP/USD)'
+        '${tasa != null ? ' (tasa ${tasa.toStringAsFixed(2)} CUP/USD)' : ''}'
         '${_precioDifiere ? ' — difiere del oficial' : ''}\n'
         'Total: ${textoTotalVenta(total, _moneda, tasa)}';
 
@@ -239,8 +240,9 @@ class _VentaSuplementoScreenState
           'cantidad': _cantidad,
           'precio': precio,
           'moneda': _moneda,
-          // v1.2.4: tasa obligatoria (validada arriba) en USD y CUP.
-          'usd_tasa': tasa,
+          // v1.3.1: en USD la tasa es irrelevante; se envía 1.0 si no hay.
+          // En CUP es obligatoria (validada arriba).
+          'usd_tasa': tasa ?? 1.0,
           // ChatGPT CRÍTICO 2: el servidor solo acepta 'cliente'|'externo'.
           // 'externo_nombre' y 'externo_generico' se mapean a 'externo'.
           'comprador_tipo':
@@ -372,7 +374,9 @@ class _VentaSuplementoScreenState
             const SizedBox(height: AppEspacio.sm),
             CampoTexto(
               controller: _tasa,
-              etiqueta: 'Tasa (CUP por 1 USD) — obligatoria',
+              etiqueta: _moneda == 'CUP'
+                  ? 'Tasa (CUP por 1 USD) — obligatoria'
+                  : 'Tasa (CUP por 1 USD) — opcional',
               teclado: const TextInputType.numberWithOptions(
                   decimal: true),
               onChanged: (_) => setState(() {}),
