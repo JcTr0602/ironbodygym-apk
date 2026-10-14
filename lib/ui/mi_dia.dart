@@ -237,9 +237,21 @@ class _FotoMiniState extends State<_FotoMini> {
     _cargar();
   }
 
+  @override
+  void didUpdateWidget(covariant _FotoMini oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.fotoStorage != widget.fotoStorage) {
+      setState(() => _foto = null);
+      _cargar();
+    }
+  }
+
   Future<void> _cargar() async {
-    final f = await FotoCache.instance.enCache(widget.fotoStorage);
-    if (mounted) setState(() => _foto = f);
+    final rutaObjetivo = widget.fotoStorage;
+    final f = await FotoCache.instance.enCache(rutaObjetivo);
+    if (mounted && widget.fotoStorage == rutaObjetivo) {
+      setState(() => _foto = f);
+    }
   }
 
   @override
