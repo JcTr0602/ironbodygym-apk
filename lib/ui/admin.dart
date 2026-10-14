@@ -555,24 +555,22 @@ class _AdminScreenState extends State<AdminScreen> {
   }
 
   /// v1.3.1: marca como entregado en SQLite local (optimismo).
+  /// Filtra en Dart con esPendiente() (seguro sin JSON1 y con NULLs).
   Future<void> _marcarEntregadoLocal(int? trainerId) async {
-    final db = LocalDb.instance;
-    final d = await db.db;
+    final d = await LocalDb.instance.db;
     final ahora = DateTime.now().toIso8601String();
     await d.transaction((txn) async {
       for (final tabla in ['pagos', 'pagos_diarios', 'ventas_suplementos']) {
-        final col = tabla == 'pagos'
-            ? 'telegram_user_id'
-            : 'registrado_por';
-        final where = trainerId != null
-            ? "json_extract(data, '\$.$col') = ? AND json_extract(data, '\$.entregado') != 1"
-            : "json_extract(data, '\$.entregado') != 1";
-        final args = trainerId != null ? [trainerId] : <Object>[];
-        final rows = await txn.query(tabla,
-            columns: ['id', 'data'], where: where, whereArgs: args);
+        final col =
+            tabla == 'pagos' ? 'telegram_user_id' : 'registrado_por';
+        final rows =
+            await txn.query(tabla, columns: ['id', 'data']);
         for (final r in rows) {
           final data = Map<String, dynamic>.from(
-              jsonDecode(r['data'] as String));
+              jsonDecode(r['data'] as String) as Map);
+          if (!esPendiente(data['entregado'])) continue;
+          if (tabla == 'pagos' && data['metodo'] != 'efectivo') continue;
+          if (trainerId != null && data[col] != trainerId) continue;
           data['entregado'] = 1;
           data['entregado_ts'] = ahora;
           await txn.update(tabla, {'data': jsonEncode(data)},
