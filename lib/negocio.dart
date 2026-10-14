@@ -929,7 +929,7 @@ Future<List<Map<String, dynamic>>> diariosDeHoy() async {
   final db = await LocalDb.instance.db;
   final opsPendientes = await db.query(
     'ops_queue',
-    columns: ['op_uuid', 'payload'],
+    columns: ['op_uuid', 'payload', 'telegram_id'],
     where: "tipo = 'pago_diario' AND estado IN ('pendiente', 'enviada')",
   );
   // Claves de negocio ya en mirror para deduplicar
@@ -957,6 +957,8 @@ Future<List<Map<String, dynamic>>> diariosDeHoy() async {
           (payload['creado_en'] as String?) ??
           (payload['creada_ts'] as String?) ??
           '';
+      // v1.3.1: registrado_por antes de armar la clave.
+      payload['registrado_por'] ??= op['telegram_id'];
       final clave =
           "$fecha|$hora|${payload['turno']}|${payload['cantidad']}|${payload['registrado_por']}";
       if (clavesMirror.contains(clave)) continue; // ya en mirror
@@ -965,7 +967,6 @@ Future<List<Map<String, dynamic>>> diariosDeHoy() async {
       payload['es_optimista'] = true;
       // Normalizar campos que la UI espera del mirror
       payload['registrado_por_nombre'] ??= 'Tú';
-      payload['registrado_por'] ??= op['telegram_id'];
       // v1.3.1: calcular total si no viene en el payload.
       if (payload['total'] == null) {
         final cant = (payload['cantidad'] as num?)?.toInt() ?? 0;

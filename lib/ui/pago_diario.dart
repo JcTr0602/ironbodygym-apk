@@ -220,11 +220,13 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
         ),
       );
       if (ok == true) {
-        await LocalDb.instance.cancelOp(opUuid);
+        final cancelado = await LocalDb.instance.cancelOp(opUuid);
         _cargarHoy();
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('Registro eliminado')));
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+              content: Text(cancelado
+                  ? 'Registro eliminado'
+                  : 'Ya se envió al servidor, espera a que sincronice')));
         }
       }
       return;
@@ -273,6 +275,9 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
         ],
       ),
     );
+    // v1.3.1: capturar antes del dispose (evita used after disposed).
+    final cantTexto = cantCtrl.text.trim();
+    final notaTexto = notaCtrl.text.trim();
     cantCtrl.dispose();
     notaCtrl.dispose();
     if (accion == null || !mounted) return;
@@ -314,7 +319,7 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
     }
 
     // Guardar edición
-    final cantidad = int.tryParse(cantCtrl.text.trim()) ?? 0;
+    final cantidad = int.tryParse(cantTexto) ?? 0;
     if (cantidad < 1) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
@@ -330,7 +335,7 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
           jsonDecode(rows.first['data'] as String) as Map);
       data['cantidad'] = cantidad;
       data['total'] = cantidad * _precio;
-      data['nota'] = notaCtrl.text.trim();
+      data['nota'] = notaTexto;
       await db.update('pagos_diarios', {'data': jsonEncode(data)},
           where: 'id = ?', whereArgs: [id]);
     }
@@ -340,7 +345,7 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
       payload: {
         'pago_diario_id': id,
         'cantidad': cantidad,
-        'nota': notaCtrl.text.trim(),
+        'nota': notaTexto,
       },
     );
     _cargarHoy();
