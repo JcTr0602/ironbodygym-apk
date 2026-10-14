@@ -2715,7 +2715,6 @@ class SyncEngine {
               (m['sync_seq'] as num?)
                       ?.toInt() ??
                   0;
-          if (seq > maxSeq) maxSeq = seq;
           // v1.3.1 (C3): verificar que el padre exista (FK con PRAGMA ON).
           final padre = await txn.query('incidencias_local',
               columns: ['id'],
@@ -2723,6 +2722,7 @@ class SyncEngine {
               whereArgs: [m['incidencia_id']],
               limit: 1);
           if (padre.isEmpty) continue;
+          if (seq > maxSeq) maxSeq = seq;
           await txn.insert(
             'incidencias_comentarios',
             {
@@ -2776,7 +2776,6 @@ class SyncEngine {
               (m['sync_seq'] as num?)
                       ?.toInt() ??
                   0;
-          if (seq > maxSeq) maxSeq = seq;
           // v1.3.1 (C3): verificar que el padre exista (FK con PRAGMA ON).
           final padreH = await txn.query('incidencias_local',
               columns: ['id'],
@@ -2784,6 +2783,7 @@ class SyncEngine {
               whereArgs: [m['incidencia_id']],
               limit: 1);
           if (padreH.isEmpty) continue;
+          if (seq > maxSeq) maxSeq = seq;
           await txn.insert(
             'incidencias_historial',
             {

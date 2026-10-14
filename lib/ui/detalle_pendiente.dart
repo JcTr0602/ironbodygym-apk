@@ -46,8 +46,17 @@ class _DetallePendienteScreenState extends State<DetallePendienteScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final total =
-        _items.fold<double>(0, (s, e) => s + ((e['tipo'] == 'pago' ? e['monto'] : e['total']) as num).toDouble());
+    // v1.3.1: total CUP (los USD van aparte).
+    final total = _items.fold<double>(
+        0,
+        (s, e) => s +
+            (((e['tipo'] == 'pago' ? e['monto'] : e['total']) as num).toDouble() *
+                ((e['moneda'] as String? ?? 'CUP') == 'USD' ? 0 : 1)));
+    final totalUsd = _items.fold<double>(
+        0,
+        (s, e) => s +
+            (((e['tipo'] == 'pago' ? e['monto'] : e['total']) as num).toDouble() *
+                ((e['moneda'] as String? ?? 'CUP') == 'USD' ? 1 : 0)));
     return Scaffold(
       appBar: AppBar(
         title: Text(widget.nombre),
@@ -66,7 +75,8 @@ class _DetallePendienteScreenState extends State<DetallePendienteScreen> {
                           color: AppColores
                               .textoSecundario(context))),
                   const Spacer(),
-                  Text('${fmtMonto(total)} CUP',
+                  Text(
+                      '${fmtMonto(total)} CUP${totalUsd > 0 ? ' + ${fmtMonto(totalUsd)} USD' : ''}',
                       style: const TextStyle(
                           fontSize: 18,
                           fontWeight: FontWeight.bold)),
@@ -89,6 +99,31 @@ class _DetallePendienteScreenState extends State<DetallePendienteScreen> {
                         itemCount: _items.length,
                         itemBuilder: (c, i) {
                           final it = _items[i];
+                          if (it['tipo'] == 'suplemento') {
+                            return Padding(
+                              padding: const EdgeInsets.only(
+                                  bottom: 8),
+                              child: Tarjeta(
+                                padding: EdgeInsets.zero,
+                                child: ListTile(
+                                  leading: const Icon(
+                                      Icons.shopping_bag,
+                                      color: AppColores.naranja,
+                                      size: 24),
+                                  title: Text(
+                                      '${it['suplemento_nombre']} x${it['cantidad']}'),
+                                  subtitle: Text(
+                                      '${fmtFecha(it['fecha'])}'
+                                      '${(it['nota'] as String).isNotEmpty ? ' · ${it['nota']}' : ''}'),
+                                  trailing: Text(
+                                      '${fmtMonto((it['total'] as num).toDouble())} ${it['moneda']}',
+                                      style: const TextStyle(
+                                          fontWeight:
+                                              FontWeight.bold)),
+                                ),
+                              ),
+                            );
+                          }
                           if (it['tipo'] == 'diario') {
                             return Padding(
                               padding: const EdgeInsets.only(
