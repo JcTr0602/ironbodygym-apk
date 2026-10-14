@@ -986,6 +986,7 @@ class _SeccionIncidenciasScreenState
       ),
     );
     final desc = descCtrl.text.trim();
+    descCtrl.dispose();
     // v1.2.5 (#8): guarda borrador si se canceló con texto, limpia si se envió.
     try {
       final p = await SharedPreferences.getInstance();
@@ -1039,13 +1040,13 @@ class _SeccionIncidenciasScreenState
     final esAdmin = !widget.modoEntrenador && Permisos().esAdmin;
     final estado = inc['estado'] as String? ?? 'pendiente';
     final tipoInfo = _tipos[inc['tipo']] ?? ('Otro', Icons.help_outline);
+    final notaField = TextEditingController();
+    final motivoField = TextEditingController();
+    // v1.2.5 (#9): motivo obligatorio al reabrir.
+    bool mostrarMotivo = false;
     final accion = await showDialog<String>(
       context: context,
       builder: (ctx) {
-        final notaField = TextEditingController();
-        final motivoField = TextEditingController();
-        // v1.2.5 (#9): motivo obligatorio al reabrir.
-        bool mostrarMotivo = false;
         return StatefulBuilder(
           builder: (ctx, setSt) => AlertDialog(
           title: Row(
@@ -1163,6 +1164,8 @@ class _SeccionIncidenciasScreenState
         );
       },
     );
+    notaField.dispose();
+    motivoField.dispose();
     if (accion == null || !mounted) return;
     // v1.2.5 (#9): confirmación explícita antes de resolver.
     if (accion.startsWith('resuelta:')) {

@@ -70,6 +70,9 @@ class _AdminScreenState extends State<AdminScreen> {
     for (final c in _montos.values) {
       c.dispose();
     }
+    for (final c in _bancarios.values) {
+      c.dispose();
+    }
     super.dispose();
   }
 
@@ -251,7 +254,18 @@ class _AdminScreenState extends State<AdminScreen> {
   };
   bool _esTipoFijo(String id) => _tiposFijos.contains(id);
 
-  void _toggleTipo(TipoPago t, bool v) {
+  Future<void> _persistirTipos() async {
+    await LocalDb.instance.queueOp(
+      opUuid: const Uuid().v4(),
+      tipo: 'guardar_tipos_pago',
+      payload: {
+        'tipos': [for (final t in _tipos) t.toJson()],
+      },
+    );
+    SyncEngine.instance.push();
+  }
+
+  Future<void> _toggleTipo(TipoPago t, bool v) async {
     setState(() {
       _tipos = [
         for (final x in _tipos)
@@ -267,6 +281,7 @@ class _AdminScreenState extends State<AdminScreen> {
             x,
       ];
     });
+    await _persistirTipos();
   }
 
   Future<void> _editarTipo(TipoPago t) async {
@@ -344,6 +359,10 @@ class _AdminScreenState extends State<AdminScreen> {
             x,
       ];
     });
+    await _persistirTipos();
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Tipo de pago actualizado (se sincronizará)')));
   }
 
   Future<void> _agregarTipo() async {
@@ -422,6 +441,10 @@ class _AdminScreenState extends State<AdminScreen> {
             id: id, nombre: nombre, monto: monto, dias: dias),
       ];
     });
+    await _persistirTipos();
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Tipo de pago agregado (se sincronizará)')));
   }
 
   Future<void> _eliminarTipo(TipoPago t) async {
@@ -437,6 +460,10 @@ class _AdminScreenState extends State<AdminScreen> {
     setState(() {
       _tipos = [for (final x in _tipos) if (x.id != t.id) x];
     });
+    await _persistirTipos();
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Tipo de pago eliminado (se sincronizará)')));
   }
 
   Future<void> _guardarTipos() async {
@@ -526,7 +553,7 @@ class _AdminScreenState extends State<AdminScreen> {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Entrega confirmada (se sincronizará)')));
-    _cargar();
+    await _cargar();
     SyncEngine.instance.push();
   }
 
@@ -571,10 +598,13 @@ class _AdminScreenState extends State<AdminScreen> {
         ],
       ),
     );
+    final concepto = conceptoCtrl.text.trim();
+    final montoTexto = montoCtrl.text.replaceAll(',', '.');
+    conceptoCtrl.dispose();
+    montoCtrl.dispose();
     if (ok != true || !mounted) return;
-    final monto =
-        double.tryParse(montoCtrl.text.replaceAll(',', '.'));
-    if (conceptoCtrl.text.trim().isEmpty || monto == null || monto <= 0) {
+    final monto = double.tryParse(montoTexto);
+    if (concepto.isEmpty || monto == null || monto <= 0) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
           content: Text('Concepto o monto inválidos')));
       return;
@@ -588,14 +618,14 @@ class _AdminScreenState extends State<AdminScreen> {
       tipo: 'gasto',
       payload: {
         'fecha': fecha,
-        'concepto': conceptoCtrl.text.trim(),
+        'concepto': concepto,
         'monto': monto,
       },
     );
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Gasto guardado (se sincronizará)')));
-    _cargar();
+    await _cargar();
     SyncEngine.instance.push();
   }
 
@@ -803,7 +833,7 @@ class _AdminScreenState extends State<AdminScreen> {
                         ),
                         // v1.2.5 (2.5): historial de caja por entrenador.
                         _tarjetaHub(
-                          'C',
+                          'J',
                           Icons.history_outlined,
                           'Historial de caja',
                           'Cierres por entrenador y fecha',
