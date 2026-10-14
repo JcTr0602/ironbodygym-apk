@@ -2733,6 +2733,15 @@ class SyncEngine {
               (m['sync_seq'] as num?)
                       ?.toInt() ??
                   0;
+          // v1.3.1 (Alto #3, corrección Argón): descartar comentarios
+          // privados en teléfonos no-dueño. OJO: actualizar maxSeq ANTES
+          // del continue para que el watermark avance — si no, el cursor
+          // se congela en este registro para siempre.
+          final esPrivado = m['es_privado'] == true || m['es_privado'] == 1;
+          if (esPrivado && !_auth.isAdmin) {
+            if (seq > maxSeq) maxSeq = seq;
+            continue;
+          }
           // v1.3.1 (C3): verificar que el padre exista (FK con PRAGMA ON).
           final padre = await txn.query('incidencias_local',
               columns: ['id'],

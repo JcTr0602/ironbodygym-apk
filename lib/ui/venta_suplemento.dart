@@ -169,8 +169,10 @@ class _VentaSuplementoScreenState
 
   Future<void> _confirmar() async {
     // v1.3.1: guarda de reentrada (evita venta duplicada).
+    // Argón (regresión 1): _guardando solo se activa DESPUÉS de pasar todas
+    // las validaciones y el diálogo de confirmación. Activarlo antes dejaba
+    // el botón muerto si una validación fallaba.
     if (_guardando) return;
-    setState(() => _guardando = true);
     final precio =
         double.tryParse(_precio.text.trim().replaceAll(',', '.'));
     if (precio == null || precio <= 0) {
@@ -238,10 +240,12 @@ class _VentaSuplementoScreenState
       aceptar: 'Confirmar venta',
     );
     if (!ok) {
-      setState(() => _guardando = false);
       return;
     }
 
+    // v1.3.1 (Argón regresión 1): activar _guardando solo aquí, después de
+    // validaciones y confirmación. El finally lo restaura siempre.
+    setState(() => _guardando = true);
     try {
       await LocalDb.instance.queueOp(
         opUuid: const Uuid().v4(),
@@ -267,39 +271,42 @@ class _VentaSuplementoScreenState
             'nota': _nota.text.trim(),
         },
       );
+      // v1.3.1: stock optimista aislado (no crítico, el pull corrige).
+      try {
+        final db = await LocalDb.instance.db;
+        final sid = widget.suplemento['id'] as int?;
+        if (sid != null) {
+          final rows = await db.query('suplementos',
+              columns: ['data'], where: 'id = ?', whereArgs: [sid]);
+          if (rows.isNotEmpty) {
+            final data = jsonDecode(rows.first['data'] as String)
+                as Map<String, dynamic>;
+            final stockActual = (data['stock'] as num?)?.toInt() ?? 0;
+            data['stock'] = (stockActual - _cantidad).clamp(0, 999999);
+            await db.update('suplementos', {'data': jsonEncode(data)},
+                where: 'id = ?', whereArgs: [sid]);
+          }
+        }
+      } catch (_) {
+        // El pull sincronizará el valor canónico.
+      }
+      // v1.3.1 (Argón): push y pop DENTRO del try, al final.
+      // Solo se disparan si el encolado tuvo éxito.
+      unawaited(SyncEngine.instance.push().catchError((_) {}));
+      if (mounted) Navigator.pop(context, true);
     } catch (e) {
       // v1.3.1: si falla el encolado, avisar y NO cerrar (evita duplicado).
       if (mounted) {
-        setState(() => _guardando = false);
         await DialogoApp.confirmar(context,
             titulo: 'No se registró la venta',
             mensaje: 'Inténtalo de nuevo. ($e)',
             aceptar: 'Entendido',
             cancelar: '');
       }
-      return;
+    } finally {
+      // v1.3.1 (Argón regresión 1): restaura _guardando siempre.
+      if (mounted) setState(() => _guardando = false);
     }
-    // v1.3.1: stock optimista aislado (no crítico, el pull corrige).
-    try {
-      final db = await LocalDb.instance.db;
-      final sid = widget.suplemento['id'] as int?;
-      if (sid != null) {
-        final rows = await db.query('suplementos',
-            columns: ['data'], where: 'id = ?', whereArgs: [sid]);
-        if (rows.isNotEmpty) {
-          final data =
-              jsonDecode(rows.first['data'] as String) as Map<String, dynamic>;
-          final stockActual = (data['stock'] as num?)?.toInt() ?? 0;
-          data['stock'] = (stockActual - _cantidad).clamp(0, 999999);
-          await db.update('suplementos', {'data': jsonEncode(data)},
-              where: 'id = ?', whereArgs: [sid]);
-        }
-      }
-    } catch (_) {
-      // El pull sincronizará el valor canónico.
-    }
-    unawaited(SyncEngine.instance.push().catchError((_) {}));
-    if (mounted) Navigator.pop(context, true);
   }
 
   /// Abre la pantalla combinada inscripción + venta con los datos

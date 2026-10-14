@@ -413,8 +413,11 @@ bool esPendiente(dynamic v) => v == 0 || v == false;
 String textoTotalVenta(double total, String moneda, double? tasa) {
   final hayTasa = tasa != null && tasa > 0;
   if (moneda == 'USD') {
+    // v1.3.1 (Medio #6): si la tasa es 1.0 o menor es la normalización por
+    // defecto (tasa no indicada), no mostrar equivalencia falsa "≈ 1 CUP".
+    final mostrarCup = hayTasa && tasa! > 1.0;
     return '${total.toStringAsFixed(2)} USD'
-        '${hayTasa ? ' (≈ ${(total * tasa).toStringAsFixed(0)} CUP)' : ''}';
+        '${mostrarCup ? ' (≈ ${(total * tasa).toStringAsFixed(0)} CUP)' : ''}';
   }
   return '${total.toStringAsFixed(0)} $moneda'
       '${hayTasa && moneda == 'CUP' ? ' (≈ ${(total / tasa).toStringAsFixed(2)} USD)' : ''}';

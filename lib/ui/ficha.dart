@@ -362,9 +362,9 @@ class _FichaScreenState extends State<FichaScreen> {
       ),
     );
     if (ok != true || !mounted) {
-      nombre.dispose();
-      telefono.dispose();
-      carnet.dispose();
+      // v1.3.1 (Argón regresión 2): sin dispose. Son controllers locales de
+      // _editar(); el GC los recoge. El dispose tras showDialog causaba
+      // "TextEditingController was used after being disposed".
       return;
     }
     final tel = telefono.text.trim();
@@ -420,9 +420,7 @@ class _FichaScreenState extends State<FichaScreen> {
       tipo: 'editar_cliente',
       payload: payload,
     );
-    nombre.dispose();
-    telefono.dispose();
-    carnet.dispose();
+    // v1.3.1 (Argón regresión 2): sin dispose. Controllers locales de _editar().
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Cambios guardados (se sincronizarán)')));
@@ -1029,6 +1027,10 @@ class _FichaScreenState extends State<FichaScreen> {
       ),
       ),
     );
+    // v1.3.1 (Argón regresión 2): sin dispose tras showDialog. Son controllers
+    // locales del método; el GC los recoge. El dispose síncrono causaba
+    // "TextEditingController was used after being disposed" durante la
+    // animación de cierre del diálogo.
     if (datos == null || !mounted) return;
     final monto =
         double.tryParse(datos['monto']!.replaceAll(',', '.'));

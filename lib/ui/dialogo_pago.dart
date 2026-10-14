@@ -82,7 +82,10 @@ Future<Map<String, dynamic>?> pagoDialogo(
   final diasCtrl = TextEditingController();
   final montoCtrl = TextEditingController();
   DateTime fechaPago = DateTime.now(); // v1.1: permite elegir fecha del pago
-  try {
+  // v1.3.1 (Argón regresión 2): sin try/finally con dispose. Esta es una
+  // función global, no un StatefulWidget; los controllers locales los
+  // recoge el GC. El dispose tras showDialog causaba
+  // "TextEditingController was used after being disposed".
 
   /// Mapea el tipo elegido al período del motor del servidor.
   /// Los 4 fijos usan su período nativo; los personalizados van como
@@ -467,8 +470,4 @@ Future<Map<String, dynamic>?> pagoDialogo(
         '${fechaPago.month.toString().padLeft(2, '0')}-'
         '${fechaPago.day.toString().padLeft(2, '0')}',
   };
-  } finally {
-    diasCtrl.dispose();
-    montoCtrl.dispose();
-  }
 }

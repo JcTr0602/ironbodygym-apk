@@ -161,6 +161,8 @@ class _PendienteScreenState extends State<PendienteScreen> {
       await confirmarEntregaPorIds(
         mensualIds: dia.mensualIds,
         diarioIds: dia.diarioIds,
+        // v1.3.1 (Alto #1): incluir ventas de suplementos o reaparecen.
+        suplementoIds: dia.suplementoIds,
         entrenadorNombre: nombre,
         trainerTelegramId: int.tryParse(trainerTelegramId),
       );

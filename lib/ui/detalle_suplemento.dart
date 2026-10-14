@@ -61,8 +61,9 @@ Future<bool> ventaRapidaSuplemento(
       'cantidad': 1,
       'precio': precio,
       'moneda': 'USD',
-      // v1.3.1: usd_tasa opcional en USD (null = irrelevante).
-      'usd_tasa': (tasaUsd != null && tasaUsd > 0) ? tasaUsd : null,
+      // v1.3.1 (Medio #6, corrección Argón): normalizar a 1.0 igual que la
+      // venta normal. Enviar null hacía que el servidor rechazara la venta.
+      'usd_tasa': (tasaUsd != null && tasaUsd > 0) ? tasaUsd : 1.0,
       'comprador_tipo': 'externo',
       'comprador_nombre': 'Cliente externo',
       'fecha':

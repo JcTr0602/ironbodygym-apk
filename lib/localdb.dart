@@ -213,7 +213,7 @@ class LocalDb {
     final dir = await getDatabasesPath();
     _db = await openDatabase(
       p.join(dir, 'ironbody.db'),
-      version: 21,
+      version: 22,
       // v1.3-r4 (Gemini): WAL mode para que lectores (UI) y escritores
       // (Workmanager en otro isolate) no se bloqueen mutuamente.
       // v1.2.9+34 (hotfix): try-catch — si el dispositivo no soporta WAL,
@@ -548,6 +548,22 @@ class LocalDb {
         // v21 (v1.3.1): timestamp de envío para el reset de 'enviada'.
         if (oldV < 21) {
           await _addColumnIfMissing(db, 'ops_queue', 'enviada_ts', 'TEXT');
+        }
+        // v22 (v1.3.1, Alto #4): op_uuid en tablas de incidencias para el
+        // marcado selectivo de synced (una op atascada no bloquea todo).
+        // v22 (v1.3.1, Medio #5): reset de watermarks de incidencias para
+        // forzar redescarga completa (teléfonos que ya estaban en v20/v21).
+        if (oldV < 22) {
+          await _addColumnIfMissing(
+              db, 'incidencias_local', 'op_uuid', 'TEXT');
+          await _addColumnIfMissing(
+              db, 'incidencias_tipos', 'op_uuid', 'TEXT');
+          await _addColumnIfMissing(
+              db, 'incidencias_comentarios', 'op_uuid', 'TEXT');
+          await db.delete('watermarks', where: "tabla = 'incidencias'");
+          await db.delete('watermarks',
+              where: "tabla = 'incidencias_comentarios'");
+          await db.delete('watermarks', where: "tabla = 'incidencias_tipos'");
         }
         // v19: rediseño de Incidencias v1.3.0 (certificado por Gemini).
         if (oldV < 19) {
@@ -1655,22 +1671,42 @@ class LocalDb {
   /// Argón B1: marca como synced todo lo que subió por ops_queue.
   /// Incluye incidencias_local (crear/editar/cambiar_estado van por
   /// _uploadOps y no por marcarIncidenciaSincronizada).
+  /// v1.3.1 (Alto #4, corrección Argón): marcado SELECTIVO por op_uuid.
+  /// Una op atascada solo retiene sus propios registros, no toda la tabla.
   Future<void> marcarTiposComentariosSincronizados() async {
     final d = await db;
-    // v1.3.1 (B3): solo si no quedan ops sin confirmar.
-    // Las ops 'enviada' esperan al puente y las 'error' están en backoff;
-    // marcar como synced antes sería perder cambios locales.
-    final pend = await d.rawQuery(
-        "SELECT COUNT(*) as n FROM ops_queue WHERE estado IN ('pendiente', 'enviada', 'error', 'necesita_revision')");
-    if (((pend.first['n'] as num?)?.toInt() ?? 0) > 0) return;
-    await d.update('incidencias_local',
-        {'sync_estado': 'synced', 'sincronizada': 1},
-        where: "sync_estado = 'pending'");
-    await d.update('incidencias_tipos', {'sync_estado': 'synced'},
-        where: "sync_estado = 'pending'");
-    await d.update(
-        'incidencias_comentarios', {'sync_estado': 'synced'},
-        where: "sync_estado = 'pending'");
+    // Tipos de ops_queue que pertenecen a incidencias: una op atascada de
+    // cliente/pago/suplemento no debe bloquear jamás las incidencias.
+    const tiposIncidencia = "'incidencia','incidencia_estado',"
+        "'incidencia_tipo','incidencia_comentario'";
+    const estadosPend =
+        "'pendiente','enviada','error','necesita_revision'";
+    // v1.3.1 (Argón): dos ramas — con op_uuid se cruza por op_uuid; sin
+    // op_uuid (filas previas a la migración v22) se verifica que no haya
+    // ninguna op de incidencias pendiente en la cola.
+    Future<void> marcarSelectivo(String tabla) async {
+      await d.rawUpdate('''
+        UPDATE $tabla SET sync_estado='synced'
+          ${tabla == 'incidencias_local' ? ', sincronizada=1' : ''}
+        WHERE sync_estado='pending' AND (
+          (op_uuid IS NOT NULL AND NOT EXISTS (
+            SELECT 1 FROM ops_queue
+            WHERE ops_queue.op_uuid = $tabla.op_uuid
+              AND ops_queue.estado IN ($estadosPend)
+          ))
+          OR
+          (op_uuid IS NULL AND NOT EXISTS (
+            SELECT 1 FROM ops_queue
+            WHERE ops_queue.tipo IN ($tiposIncidencia)
+              AND ops_queue.estado IN ($estadosPend)
+          ))
+        )
+      ''');
+    }
+
+    await marcarSelectivo('incidencias_local');
+    await marcarSelectivo('incidencias_tipos');
+    await marcarSelectivo('incidencias_comentarios');
   }
 
   Future<void> upsertIncidenciaMirror(Map<String, dynamic> inc) async {

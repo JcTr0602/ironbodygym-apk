@@ -118,6 +118,12 @@ class PendienteDia {
       .where((p) => p.tipo == 'diario')
       .map((p) => p.id)
       .toList();
+
+  /// v1.3.1 (Alto #1): IDs de ventas de suplementos para confirmar entrega.
+  List<int> get suplementoIds => pagos
+      .where((p) => p.tipo == 'suplemento')
+      .map((p) => p.id)
+      .toList();
 }
 
 /// UID único para optimistic UI (tipo + id).
