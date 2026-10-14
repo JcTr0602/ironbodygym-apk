@@ -361,7 +361,12 @@ class _FichaScreenState extends State<FichaScreen> {
         ),
       ),
     );
-    if (ok != true || !mounted) return;
+    if (ok != true || !mounted) {
+      nombre.dispose();
+      telefono.dispose();
+      carnet.dispose();
+      return;
+    }
     final tel = telefono.text.trim();
     final car = carnet.text.trim();
     if (tel.isNotEmpty && !validarTelefono(tel)) {
@@ -415,6 +420,9 @@ class _FichaScreenState extends State<FichaScreen> {
       tipo: 'editar_cliente',
       payload: payload,
     );
+    nombre.dispose();
+    telefono.dispose();
+    carnet.dispose();
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Cambios guardados (se sincronizarán)')));
