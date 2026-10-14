@@ -72,9 +72,14 @@ class _VentaSuplementoScreenState
     setState(() {
       _moneda = m;
       final nuevo = precioOficialEn(m, _precioOficial, _tasaUsd);
-      if (sinTocar && nuevo != null) {
-        _precio.text =
-            m == 'USD' ? nuevo.toStringAsFixed(2) : nuevo.toStringAsFixed(0);
+      if (sinTocar || nuevo == null) {
+        // v1.3.1: sin conversión posible, no arrastrar el importe
+        // de la otra moneda (evita 50 USD -> 50 CUP).
+        _precio.text = nuevo == null
+            ? ''
+            : (m == 'USD'
+                ? nuevo.toStringAsFixed(2)
+                : nuevo.toStringAsFixed(0));
       }
     });
   }
@@ -163,6 +168,9 @@ class _VentaSuplementoScreenState
   }
 
   Future<void> _confirmar() async {
+    // v1.3.1: guarda de reentrada (evita venta duplicada).
+    if (_guardando) return;
+    setState(() => _guardando = true);
     final precio =
         double.tryParse(_precio.text.trim().replaceAll(',', '.'));
     if (precio == null || precio <= 0) {
@@ -229,9 +237,11 @@ class _VentaSuplementoScreenState
           '${conPromo ? '\n\nSe le asignará 1 mes de mensualidad gratis (promo activa).' : ''}',
       aceptar: 'Confirmar venta',
     );
-    if (!ok) return;
+    if (!ok) {
+      setState(() => _guardando = false);
+      return;
+    }
 
-    setState(() => _guardando = true);
     try {
       await LocalDb.instance.queueOp(
         opUuid: const Uuid().v4(),
@@ -257,9 +267,20 @@ class _VentaSuplementoScreenState
             'nota': _nota.text.trim(),
         },
       );
-      // Gemini: reducción optimista de stock local (evita sobreventa offline).
-      // La tabla espejo usa columna data (JSON); no hay columna stock directa.
-      // Si el servidor rechaza la op, el pull sincronizará el valor canónico.
+    } catch (e) {
+      // v1.3.1: si falla el encolado, avisar y NO cerrar (evita duplicado).
+      if (mounted) {
+        setState(() => _guardando = false);
+        await DialogoApp.confirmar(context,
+            titulo: 'No se registró la venta',
+            mensaje: 'Inténtalo de nuevo. ($e)',
+            aceptar: 'Entendido',
+            cancelar: '');
+      }
+      return;
+    }
+    // v1.3.1: stock optimista aislado (no crítico, el pull corrige).
+    try {
       final db = await LocalDb.instance.db;
       final sid = widget.suplemento['id'] as int?;
       if (sid != null) {
@@ -274,11 +295,11 @@ class _VentaSuplementoScreenState
               where: 'id = ?', whereArgs: [sid]);
         }
       }
-      unawaited(SyncEngine.instance.push());
-      if (mounted) Navigator.pop(context, true);
-    } finally {
-      if (mounted) setState(() => _guardando = false);
+    } catch (_) {
+      // El pull sincronizará el valor canónico.
     }
+    unawaited(SyncEngine.instance.push().catchError((_) {}));
+    if (mounted) Navigator.pop(context, true);
   }
 
   /// Abre la pantalla combinada inscripción + venta con los datos
