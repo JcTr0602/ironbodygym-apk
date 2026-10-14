@@ -12,6 +12,7 @@ import 'app_log.dart';
 import 'auth.dart';
 import 'config.dart';
 import 'sync.dart';
+import 'fotos_foreground.dart';
 import 'theme.dart';
 import 'ui/diseno.dart';
 import 'ui/home.dart';
@@ -93,6 +94,8 @@ Future<void> main() async {
       (_) => false,
     );
   };
+  // v1.3.1 (B4): inicializar servicio foreground de fotos.
+  initForegroundFotos();
   runApp(const IronBodyApp());
 }
 

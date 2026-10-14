@@ -785,13 +785,16 @@ class LocalDb {
       'pagos',
       'pagos_diarios',
       'gastos',
-      'suplementos',
       'ventas_suplementos',
       'categorias_suplemento', // v1.2.1
     ]) {
       await db.execute(
           'CREATE TABLE $t (id INTEGER PRIMARY KEY, data TEXT NOT NULL, sync_seq INTEGER NOT NULL)');
     }
+    // v1.3.1: suplementos lleva ultimo_precio como columna (no en JSON)
+    // para no perderlo en cada pull con INSERT OR REPLACE.
+    await db.execute(
+        'CREATE TABLE suplementos (id INTEGER PRIMARY KEY, data TEXT NOT NULL, sync_seq INTEGER NOT NULL, ultimo_precio REAL)');
     // v1.2.5-rev6: turnos_cierre lleva id TEXT (UUID de Supabase); va
     // aparte del bucle genérico de ids enteros.
     await db.execute(
@@ -1626,9 +1629,11 @@ class LocalDb {
   /// _uploadOps y no por marcarIncidenciaSincronizada).
   Future<void> marcarTiposComentariosSincronizados() async {
     final d = await db;
-    // Argón: solo si no quedan ops pendientes.
+    // v1.3.1 (B3): solo si no quedan ops sin confirmar.
+    // Las ops 'enviada' esperan al puente y las 'error' están en backoff;
+    // marcar como synced antes sería perder cambios locales.
     final pend = await d.rawQuery(
-        "SELECT COUNT(*) as n FROM ops_queue WHERE estado = 'pendiente'");
+        "SELECT COUNT(*) as n FROM ops_queue WHERE estado IN ('pendiente', 'enviada', 'error')");
     if (((pend.first['n'] as num?)?.toInt() ?? 0) > 0) return;
     await d.update('incidencias_local',
         {'sync_estado': 'synced', 'sincronizada': 1},
@@ -2480,14 +2485,37 @@ class LocalDb {
         where: 'id=?', whereArgs: [fotoId]);
   }
 
-  /// Actualiza campos de un suplemento (stock, ultimo_precio, etc).
-  /// Agregado v1.2.9+47 para las mejoras de la pantalla Suplementos.
+  /// Actualiza campos de un suplemento.
+  /// - Columnas SQL (ultimo_precio): van directo.
+  /// - Campos del JSON (stock, etc.): se fusionan en data.
+  /// Agregado v1.2.9+47; corregido v1.3.1 (B2).
   Future<int> actualizarSuplemento(
       int id, Map<String, dynamic> campos) async {
     final d = await db;
+    const columnasSql = {'ultimo_precio'};
+    final sqlCampos = <String, dynamic>{};
+    final jsonCampos = <String, dynamic>{};
+    for (final e in campos.entries) {
+      if (columnasSql.contains(e.key)) {
+        sqlCampos[e.key] = e.value;
+      } else {
+        jsonCampos[e.key] = e.value;
+      }
+    }
+    if (jsonCampos.isNotEmpty) {
+      final rows = await d.query('suplementos',
+          columns: ['data'], where: 'id = ?', whereArgs: [id], limit: 1);
+      if (rows.isNotEmpty) {
+        final data =
+            Map<String, dynamic>.from(jsonDecode(rows.first['data'] as String));
+        data.addAll(jsonCampos);
+        sqlCampos['data'] = jsonEncode(data);
+      }
+    }
+    if (sqlCampos.isEmpty) return 0;
     return await d.update(
       'suplementos',
-      campos,
+      sqlCampos,
       where: 'id = ?',
       whereArgs: [id],
     );

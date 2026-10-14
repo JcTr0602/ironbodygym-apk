@@ -1742,6 +1742,7 @@ Future<List<Map<String, dynamic>>> pagosPendientesDetalle(
 Future<void> confirmarEntregaPorIds({
   required List<int> mensualIds,
   required List<int> diarioIds,
+  List<int> suplementoIds = const [],
   required String entrenadorNombre,
   int? trainerTelegramId,
 }) async {
@@ -1749,24 +1750,33 @@ Future<void> confirmarEntregaPorIds({
   final d = await db.db;
   final opUuid = const Uuid().v4();
   final ahora = DateTime.now().toIso8601String();
+
+  /// Marca como entregado actualizando el JSON data (las tablas espejo
+  /// solo tienen id, data, sync_seq — no hay columna 'entregado').
+  Future<void> marcarEntregados(
+      Transaction txn, String tabla, List<int> ids) async {
+    for (final id in ids) {
+      final rows = await txn.query(tabla,
+          columns: ['data'], where: 'id = ?', whereArgs: [id], limit: 1);
+      if (rows.isEmpty) continue;
+      final data =
+          Map<String, dynamic>.from(jsonDecode(rows.first['data'] as String));
+      data['entregado'] = 1;
+      data['entregado_ts'] = ahora;
+      await txn.update(
+        tabla,
+        {'data': jsonEncode(data)},
+        where: 'id = ?',
+        whereArgs: [id],
+      );
+    }
+  }
+
   await d.transaction((txn) async {
     // 1. Marcar mirrors como entregados (optimismo persistente).
-    for (final id in mensualIds) {
-      await txn.update(
-        'pagos',
-        {'entregado': 'entregado'},
-        where: 'id = ?',
-        whereArgs: [id],
-      );
-    }
-    for (final id in diarioIds) {
-      await txn.update(
-        'pagos_diarios',
-        {'entregado': 'entregado'},
-        where: 'id = ?',
-        whereArgs: [id],
-      );
-    }
+    await marcarEntregados(txn, 'pagos', mensualIds);
+    await marcarEntregados(txn, 'pagos_diarios', diarioIds);
+    await marcarEntregados(txn, 'ventas_suplementos', suplementoIds);
     // 2. Encolar la op en la misma transacción.
     await txn.insert('ops_queue', {
       'op_uuid': opUuid,
@@ -1778,6 +1788,7 @@ Future<void> confirmarEntregaPorIds({
           'trainer_telegram_id': trainerTelegramId,
         'pago_ids': mensualIds,
         'pago_diario_ids': diarioIds,
+        'suplemento_ids': suplementoIds,
       }),
       'estado': 'pendiente',
       'creada_ts': ahora,

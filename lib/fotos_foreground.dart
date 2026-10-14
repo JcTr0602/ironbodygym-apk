@@ -66,7 +66,7 @@ class _FotosTaskHandler extends TaskHandler {
     try {
       await Supabase.initialize(
         url: AppConfig.supabaseUrl,
-        anonKey: AppConfig.anonKey,
+        publishableKey: AppConfig.anonKey,
       );
     } catch (_) {
       // Si ya estaba inicializado, continuar.

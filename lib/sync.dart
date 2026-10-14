@@ -546,7 +546,25 @@ class SyncEngine {
         await _doPush();
         // Pull solo de las tablas del scope.
         _emit(SyncPhase.downloading);
-        final n = await _download(tablasFiltro: tablas);
+        // v1.3.1 (B5): las incidencias usan métodos dedicados, no _download.
+        const tablasIncidencias = {
+          'incidencia_tipos',
+          'incidencias',
+          'incidencia_eventos',
+        };
+        var n = 0;
+        if (tablas.any(tablasIncidencias.contains)) {
+          await _pullTiposIncidencia();
+          await _pullIncidencias();
+          await _pullIncidenciasComentarios();
+          await _pullIncidenciasHistorial();
+        }
+        // Tablas normales vía _download.
+        final tablasNormales =
+            tablas.where((t) => !tablasIncidencias.contains(t)).toList();
+        if (tablasNormales.isNotEmpty) {
+          n = await _download(tablasFiltro: tablasNormales);
+        }
         await _db.setMeta('last_pull_ok', DateTime.now().toIso8601String());
         await _db.setMeta('last_downloaded', '$n');
         await _db.setMeta('last_scope', scope);
@@ -1332,14 +1350,23 @@ class SyncEngine {
             await d.transaction((txn) async {
               final batch = txn.batch();
               for (final op in opsPagina) {
-                batch.insert(
-                    tabla,
-                    {
-                      'id': op['id'],
-                      'data': op['dataJson'],
-                      'sync_seq': op['seq']
-                    },
-                    conflictAlgorithm: ConflictAlgorithm.replace);
+                if (tabla == 'suplementos') {
+                  // v1.3.1 (B2): preservar ultimo_precio local en el pull.
+                  // INSERT OR REPLACE borraría la columna; usar UPSERT.
+                  batch.rawInsert(
+                      'INSERT INTO suplementos (id, data, sync_seq) VALUES (?, ?, ?)'
+                      ' ON CONFLICT(id) DO UPDATE SET data=excluded.data, sync_seq=excluded.sync_seq',
+                      [op['id'], op['dataJson'], op['seq']]);
+                } else {
+                  batch.insert(
+                      tabla,
+                      {
+                        'id': op['id'],
+                        'data': op['dataJson'],
+                        'sync_seq': op['seq']
+                      },
+                      conflictAlgorithm: ConflictAlgorithm.replace);
+                }
               }
               // noResult: true evita instanciar objetos en memoria (Gemini).
               await batch.commit(noResult: true);
