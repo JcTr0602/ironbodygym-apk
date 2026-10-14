@@ -82,6 +82,7 @@ Future<Map<String, dynamic>?> pagoDialogo(
   final diasCtrl = TextEditingController();
   final montoCtrl = TextEditingController();
   DateTime fechaPago = DateTime.now(); // v1.1: permite elegir fecha del pago
+  try {
 
   /// Mapea el tipo elegido al período del motor del servidor.
   /// Los 4 fijos usan su período nativo; los personalizados van como
@@ -285,6 +286,10 @@ Future<Map<String, dynamic>?> pagoDialogo(
                         child: Text('Personalizado…')),
                   ],
                   onChanged: (v) => setS(() {
+                    // v1.3.1: resetear meses/días al cambiar de tipo.
+                    meses = 1;
+                    diasCtrl.clear();
+                    montoCtrl.clear();
                     if (v == 'personalizado') {
                       tipoSel = const TipoPago(
                           id: 'personalizado',
@@ -292,8 +297,8 @@ Future<Map<String, dynamic>?> pagoDialogo(
                           monto: 0,
                           dias: 0);
                     } else {
-                      tipoSel = tipos
-                          .firstWhere((t) => t.id == v);
+                      tipoSel = tipos.firstWhere((t) => t.id == v,
+                          orElse: () => tipos.first);
                     }
                   }),
                 ),
@@ -447,7 +452,11 @@ Future<Map<String, dynamic>?> pagoDialogo(
   return {
     'cliente_id': (cliente['id'] as int?) ?? 0,
     'periodo': s.periodo,
-    'meses': s.meses,
+    // v1.3.1: tipo_id para que el servidor aplique el precio correcto
+    // (ej. 2500 con transferencia en vez de 2000).
+    if (s.tipoId != null) 'tipo_id': s.tipoId,
+    // v1.3.1: meses solo tiene sentido en mensual.
+    if (s.periodo == 'mensual') 'meses': s.meses,
     if (s.periodo == 'personalizado') 'dias': s.dias,
     // Monto calculado y vencimiento previsto: los usa la pantalla de
     // confirmación. El servidor los ignora (recalcula él mismo).
@@ -458,4 +467,8 @@ Future<Map<String, dynamic>?> pagoDialogo(
         '${fechaPago.month.toString().padLeft(2, '0')}-'
         '${fechaPago.day.toString().padLeft(2, '0')}',
   };
+  } finally {
+    diasCtrl.dispose();
+    montoCtrl.dispose();
+  }
 }
