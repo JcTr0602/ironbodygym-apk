@@ -58,8 +58,6 @@ Future<void> _programarSubidaFondo() async {
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  // v1.3.1 (AppLog v3.0): init con ring buffer, crash handler y modo diagnóstico.
-  await AppLog.init();
   // v1.3.0 (AppLog v2.0, Gemini #3): interceptores globales.
   FlutterError.onError = (details) {
     FlutterError.presentError(details);
@@ -75,6 +73,10 @@ Future<void> main() async {
         contexto: {'error': '$error'}, stack: stack);
     return !kDebugMode;
   };
+  // v1.3.1 (AppLog v3.0, Argón Fix A): init DESPUÉS de los handlers
+  // de main.dart, para que el encadenamiento de _instalarManejadores()
+  // los envuelva en lugar de ser sobrescrito por ellos.
+  await AppLog.init();
   // v1.3.0 (Gemini #4): verificar cierre anormal previo.
   await CentinelaApp.verificarArranque();
   await Supabase.initialize(

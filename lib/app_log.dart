@@ -24,11 +24,13 @@ import 'localdb.dart';
 ///
 /// Mejoras Argón (v3.0):
 /// - Ring Buffer en RAM (50 eventos): todo entra aquí primero;
-///   los breadcrumbs se adjuntan automáticamente a WARN/ERROR/CRITICO/FATAL
-/// - Crash Handler: volcado SÍNCRONO a last_crash.json (sin SQLite
-///   ni buffer asíncrono); ingesta como FATAL al reiniciar
-/// - Poda por severidad: ERROR/CRITICO/FATAL solo por antigüedad (30d);
-///   DEBUG/INFO/AVISO rotan en 4000 filas + 7 días
+///   breadcrumbs completos en ERROR/CRITICO/FATAL, últimos 5 en
+///   avisos no-perf, nada en debug (cero costo en release)
+/// - Crash Handler: solo errores async no manejados vuelcan
+///   SÍNCRONO a last_crash.json; se ingesta como FATAL al reiniciar
+///   y el archivo se borra solo tras insert exitoso
+/// - Poda por severidad: ERROR/CRITICO/FATAL con corte 30d + tope
+///   1000 filas; DEBUG/INFO/AVISO con corte 7d + cuota 4000
 /// - Métricas por umbral: medirLento() solo registra si supera el umbral
 /// - Modo Diagnóstico 24h: DEBUG persistente en release bajo demanda
 class AppLog {
@@ -53,24 +55,25 @@ class AppLog {
   static DateTime? _diagHasta;
 
   static void _ringAdd(String nivel, String modulo, String mensaje,
-      [Map<String, dynamic>? contexto]) {
+      {String? detalle, Map<String, dynamic>? ctxSanitizado}) {
     _ring.add({
       'ts': DateTime.now().toIso8601String(),
       'nivel': nivel,
       'modulo': modulo,
       'mensaje': _sanitizarTexto(mensaje),
-      if (contexto != null) 'contexto': _sanitizar(contexto),
+      if (detalle != null) 'detalle': detalle,
+      if (ctxSanitizado != null && ctxSanitizado.isNotEmpty)
+        'contexto': ctxSanitizado,
     });
     if (_ring.length > _ringCapacidad) {
       _ring.removeRange(0, _ring.length - _ringCapacidad);
     }
   }
 
+  // Solo error, critico y fatal arrastran los 50 breadcrumbs completos
+  // (Argón: aviso ya no, para no inflar el disco con medirLento).
   static bool _esNivelAlto(String nivel) =>
-      nivel == 'aviso' ||
-      nivel == 'error' ||
-      nivel == 'critico' ||
-      nivel == 'fatal';
+      nivel == 'error' || nivel == 'critico' || nivel == 'fatal';
 
   /// v3.0: ¿debe persistir en SQLite este nivel?
   /// Release sin diagnóstico: desde INFO. En diagnóstico o debug: desde DEBUG.
@@ -117,8 +120,8 @@ class AppLog {
           Map<String, dynamic>? contexto,
           String? opId}) {
     final log = _crear(m, e, 'debug', d, contexto, null, opId);
-    // v3.0: en release sin modo diagnóstico no se persiste.
-    if (_deberiaPersistir('debug')) _encolar(log);
+    // v3.0: _crear retorna null si no debe persistir (ej. debug en release).
+    if (log != null) _encolar(log);
   }
 
   static void info(String m, String e,
@@ -126,7 +129,7 @@ class AppLog {
           Map<String, dynamic>? contexto,
           String? opId}) {
     final log = _crear(m, e, 'info', d, contexto, null, opId);
-    if (_deberiaPersistir('info')) _encolar(log);
+    if (log != null) _encolar(log);
   }
 
   static void aviso(String m, String e,
@@ -134,7 +137,7 @@ class AppLog {
           Map<String, dynamic>? contexto,
           String? opId}) {
     final log = _crear(m, e, 'aviso', d, contexto, null, opId);
-    if (_deberiaPersistir('aviso')) _encolar(log);
+    if (log != null) _encolar(log);
   }
 
   static void error(String m, String e,
@@ -143,7 +146,7 @@ class AppLog {
           StackTrace? stack,
           String? opId}) {
     final log = _crear(m, e, 'error', d, contexto, stack, opId);
-    if (_deberiaPersistir('error')) _encolar(log, inmediato: true);
+    if (log != null) _encolar(log, inmediato: true);
   }
 
   static void critico(String m, String e,
@@ -152,16 +155,18 @@ class AppLog {
           StackTrace? stack,
           String? opId}) {
     final log = _crear(m, e, 'critico', d, contexto, stack, opId);
-    if (_deberiaPersistir('critico')) {
+    if (log != null) {
       _encolar(log, inmediato: true);
     }
   }
 
   /// v3.0: breadcrumb de navegación/acción UI. Solo RAM, nunca disco.
-  /// Se adjunta automáticamente al contexto de WARN/ERROR/CRITICO/FATAL.
+  /// Se adjunta automáticamente al contexto de ERROR/CRITICO/FATAL.
   static void breadcrumb(String mensaje,
       [Map<String, dynamic>? contexto]) {
-    _ringAdd('debug', 'ui', mensaje, contexto);
+    _ringAdd('debug', 'ui', mensaje,
+        ctxSanitizado:
+            contexto != null ? _sanitizar(contexto) : null);
   }
 
   /// v3.0 (Argón): registra AVISO solo si [duracionMs] supera [umbralMs].
@@ -191,7 +196,7 @@ class AppLog {
         contexto: {'hasta': hasta.toIso8601String()});
   }
 
-  static Map<String, dynamic> _crear(
+  static Map<String, dynamic>? _crear(
       String modulo,
       String evento,
       String nivel,
@@ -199,39 +204,49 @@ class AppLog {
       Map<String, dynamic>? contexto,
       StackTrace? stack,
       String? opId) {
-    // v3.0: todo evento entra primero al ring buffer en RAM.
-    _ringAdd(nivel, modulo, evento, contexto);
-    // Sanitizar (Gemini #8)
+    // 1. Sanitizar UNA sola vez (Argón: antes había doble sanitización).
+    final detSan =
+        detalle != null ? _sanitizarTexto(detalle) : null;
     final ctxSan = contexto != null
-        ? _sanitizar(contexto)
+        ? Map<String, dynamic>.from(_sanitizar(contexto))
         : <String, dynamic>{};
-    // v3.0 (Argón): adjuntar copia del ring buffer en niveles altos.
-    // Así un WARN/ERROR trae el "lujo de detalles" en 1 sola fila.
+
+    // 2. Siempre entra al Ring Buffer en RAM (ya sanitizado).
+    _ringAdd(nivel, modulo, evento,
+        detalle: detSan, ctxSanitizado: ctxSan);
+
+    // 3. Si no debe persistir en disco (ej. debug en release),
+    //    salir sin jsonEncode ni construir el payload (Argón: cero costo).
+    if (!_deberiaPersistir(nivel)) return null;
+
+    // 4. Breadcrumbs: 50 completos solo en error/critico/fatal;
+    //    en aviso (no perf) solo los últimos 5 (Argón: evitar explosión
+    //    de almacenamiento con medirLento).
     if (_esNivelAlto(nivel)) {
       ctxSan['breadcrumbs'] =
           List<Map<String, dynamic>>.from(_ring);
+    } else if (nivel == 'aviso' && modulo != 'perf') {
+      final skip = _ring.length > 5 ? _ring.length - 5 : 0;
+      ctxSan['breadcrumbs'] = _ring.sublist(skip);
     }
-    final detSan = detalle != null
-        ? _sanitizarTexto(detalle)
-        : null;
-    // Stack recortado a 12 líneas (Gemini #2)
-    String? stackStr;
-    if (stack != null) {
-      final lineas =
-          stack.toString().split('\n').take(12);
-      stackStr = lineas.join('\n');
-    }
+
+    // Stack recortado a 15 líneas.
+    final stackRecortado = stack
+        ?.toString()
+        .split('\n')
+        .take(15)
+        .join('\n');
+
     return {
       'ts': DateTime.now().toIso8601String(),
       'modulo': modulo,
       'evento': evento,
       'detalle': detSan,
       'nivel': nivel,
-      'contexto': ctxSan.isNotEmpty
-          ? jsonEncode(ctxSan)
-          : null,
+      'contexto':
+          ctxSan.isNotEmpty ? jsonEncode(ctxSan) : null,
       'op_id': opId,
-      'stack': stackStr,
+      'stack': stackRecortado,
     };
   }
 
@@ -350,8 +365,11 @@ class AppLog {
   static void _instalarManejadores() {
     final previoFlutter = FlutterError.onError;
     FlutterError.onError = (details) {
-      _volcarCrashSync('flutter_error',
-          details.exceptionAsString(), details.stack);
+      // Fix C (Argón): errores de Flutter (renderizado, recursos) NO
+      // son crashes fatales. No llamar _volcarCrashSync aquí: haría
+      // escritura síncrona en el hilo principal (jank) y generaría
+      // falsos FATAL al reiniciar. El handler encadenado (main.dart)
+      // los registra por el flujo normal.
       if (previoFlutter != null) {
         previoFlutter(details);
       } else {
@@ -412,9 +430,14 @@ class AppLog {
       final f = File('$dir/last_crash.json');
       if (!await f.exists()) return;
       final raw = await f.readAsString();
-      await f.delete();
-      final data =
-          jsonDecode(raw) as Map<String, dynamic>;
+      Map<String, dynamic> data;
+      try {
+        data = jsonDecode(raw) as Map<String, dynamic>;
+      } catch (_) {
+        // JSON corrupto: borrar para no ciclar y salir.
+        await f.delete();
+        return;
+      }
       final db = await LocalDb.instance.db;
       await db.insert('app_log', {
         'ts':
@@ -431,6 +454,10 @@ class AppLog {
         'op_id': null,
         'stack': data['stack'] as String?,
       });
+      // Fix B (Argón): borrar SOLO después de haber insertado
+      // con éxito en SQLite. Si el insert falla, el archivo queda
+      // para el próximo arranque.
+      await f.delete();
     } catch (_) {}
   }
 
@@ -472,20 +499,25 @@ class AppLog {
   }
 
   /// Poda por severidad (v3.0, Argón):
-  /// - ERROR/CRITICO/FATAL: solo por antigüedad (30 días), nunca por cuota.
-  ///   Una ráfaga de INFO ya no puede purgar errores críticos.
-  /// - DEBUG/INFO/AVISO: por antigüedad (7 días) + cuota de 4000 filas.
+  /// - ERROR/CRITICO/FATAL: corte 30 días + tope de seguridad de 1000
+  ///   filas (una tormenta de errores no puede crecer sin límite).
+  /// - DEBUG/INFO/AVISO: corte 7 días + cuota de 4000 filas.
   static Future<void> podar([Database? db]) async {
     try {
       final b = db ?? await LocalDb.instance.db;
-      // M3 (Argón): corte ISO desde Dart (no datetime('now') UTC).
+      // Corte ISO desde Dart (no datetime('now') UTC).
       final corte30 = DateTime.now()
           .subtract(const Duration(days: 30))
           .toIso8601String();
-      await b.delete('app_log',
-          where:
-              "nivel IN ('error','critico','fatal') AND ts < ?",
-          whereArgs: [corte30]);
+      await b.execute(
+        "DELETE FROM app_log "
+        "WHERE nivel IN ('error','critico','fatal') "
+        "AND (ts < ? OR id NOT IN ("
+        "SELECT id FROM app_log "
+        "WHERE nivel IN ('error','critico','fatal') "
+        "ORDER BY id DESC LIMIT 1000))",
+        [corte30],
+      );
       final corte7 = DateTime.now()
           .subtract(const Duration(days: 7))
           .toIso8601String();
