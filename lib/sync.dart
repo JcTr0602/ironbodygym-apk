@@ -106,7 +106,8 @@ class SyncStatus {
 class SyncScope {
   /// Grafo real de dependencias entre tablas (FKs). Para orden topológico.
   static const Map<String, List<String>> _dependenciasTablas = {
-    'pagos_diarios': ['clientes'],
+    // v1.3.1: pagos_diarios son anónimos (sin cliente_id), no necesitan clientes.
+    'pagos_diarios': [],
     'pagos': ['clientes'],
     'suplementos': ['categorias_suplemento'],
     'ventas_suplementos': ['clientes', 'suplementos'],

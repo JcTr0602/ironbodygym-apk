@@ -5,9 +5,11 @@
 /// editar/eliminar registros.
 library;
 
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:uuid/uuid.dart';
 
+import '../auth.dart';
 import '../localdb.dart';
 import '../negocio.dart';
 import '../sync.dart';
@@ -47,6 +49,8 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
   @override
   void initState() {
     super.initState();
+    // v1.3.1: turno por defecto según la hora del día.
+    _turno = DateTime.now().hour >= 12 ? 'tarde' : 'mañana';
     LocalDb.instance.getAjustes().then((aj) {
       if (mounted) {
         setState(() =>
@@ -116,6 +120,9 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
         'creado_en': DateTime.now().toIso8601String(),
         'turno': _turno,
         'cantidad': cantidad,
+        // v1.3.1: total calculado + registrado_por para deduplicación.
+        'total': cantidad * _precio,
+        'registrado_por': AuthService().telegramId,
         if (nota != null && nota.isNotEmpty) 'nota': nota,
       },
     );
@@ -159,15 +166,16 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
     if (_guardando) return;
     setState(() => _guardando = true);
     try {
+      final cantGuardada = _cantidad;
       final uuid = await _guardarOp(
-        cantidad: _cantidad,
+        cantidad: cantGuardada,
         nota: _notaCtrl.text.trim().isEmpty
             ? null
             : _notaCtrl.text.trim(),
       );
       _notaCtrl.clear();
       setState(() => _cantidad = 1);
-      _trasGuardar(uuid, _cantidad);
+      _trasGuardar(uuid, cantGuardada);
     } finally {
       if (mounted) setState(() => _guardando = false);
     }
@@ -188,7 +196,39 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
   /// Editar o eliminar un registro del día.
   Future<void> _editarRegistro(Map<String, dynamic> d) async {
     final id = d['id'] as int?;
-    if (id == null) return;
+    final opUuid = d['op_uuid'] as String?;
+    // v1.3.1: si es optimista (sin id), solo permite eliminar de la cola.
+    if (id == null) {
+      if (opUuid == null) return;
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => DialogoApp(
+          titulo: '¿Eliminar?',
+          iconoTitulo: Icons.delete,
+          contenido: const Text(
+              'Se eliminará este registro pendiente (aún no sincronizado).'),
+          acciones: [
+            TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('Cancelar')),
+            ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColores.error),
+                onPressed: () => Navigator.pop(ctx, true),
+                child: const Text('Eliminar')),
+          ],
+        ),
+      );
+      if (ok == true) {
+        await LocalDb.instance.cancelOp(opUuid);
+        _cargarHoy();
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Registro eliminado')));
+        }
+      }
+      return;
+    }
     final cantCtrl = TextEditingController(
         text: '${d['cantidad'] ?? 1}');
     final notaCtrl =
@@ -258,6 +298,8 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
         ),
       );
       if (ok != true) return;
+      // v1.3.1: borrado optimista local.
+      await LocalDb.instance.deleteMirror('pagos_diarios', id);
       await LocalDb.instance.queueOp(
         opUuid: const Uuid().v4(),
         tipo: 'anular_pago_diario',
@@ -278,6 +320,19 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
           content: Text('La cantidad debe ser al menos 1')));
       return;
+    }
+    // v1.3.1: actualización optimista local.
+    final db = await LocalDb.instance.db;
+    final rows = await db.query('pagos_diarios',
+        columns: ['data'], where: 'id = ?', whereArgs: [id], limit: 1);
+    if (rows.isNotEmpty) {
+      final data = Map<String, dynamic>.from(
+          jsonDecode(rows.first['data'] as String) as Map);
+      data['cantidad'] = cantidad;
+      data['total'] = cantidad * _precio;
+      data['nota'] = notaCtrl.text.trim();
+      await db.update('pagos_diarios', {'data': jsonEncode(data)},
+          where: 'id = ?', whereArgs: [id]);
     }
     await LocalDb.instance.queueOp(
       opUuid: const Uuid().v4(),

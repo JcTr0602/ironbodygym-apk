@@ -944,6 +944,7 @@ Future<List<Map<String, dynamic>>> diariosDeHoy() async {
     clavesMirror.add(
         "${d['fecha']}|$hora|${d['turno']}|${d['cantidad']}|${d['registrado_por']}");
   }
+  final pr = await preciosVigentes();
   for (final op in opsPendientes) {
     try {
       final payload =
@@ -964,6 +965,12 @@ Future<List<Map<String, dynamic>>> diariosDeHoy() async {
       payload['es_optimista'] = true;
       // Normalizar campos que la UI espera del mirror
       payload['registrado_por_nombre'] ??= 'Tú';
+      payload['registrado_por'] ??= op['telegram_id'];
+      // v1.3.1: calcular total si no viene en el payload.
+      if (payload['total'] == null) {
+        final cant = (payload['cantidad'] as num?)?.toInt() ?? 0;
+        payload['total'] = cant * (pr['diario'] ?? 200);
+      }
       res.add(payload);
     } catch (_) {}
   }
@@ -989,14 +996,22 @@ Future<List<Map<String, dynamic>>> diariosDeFecha(
 /// Devuelve {mañana: {cantidad, total}, tarde: {cantidad, total}}.
 Future<Map<String, Map<String, double>>> resumenDiarioPorTurno(
     String fechaIso) async {
-  final datos = await diariosDeFecha(fechaIso);
+  // v1.3.1: para hoy, incluir pagos optimistas en cola.
+  final datos = fechaIso == _hoyIso()
+      ? await diariosDeHoy()
+      : await diariosDeFecha(fechaIso);
   final res = {
     'mañana': {'cantidad': 0.0, 'total': 0.0},
     'tarde': {'cantidad': 0.0, 'total': 0.0},
+    'noche': {'cantidad': 0.0, 'total': 0.0},
   };
   for (final d in datos) {
-    final turno = '${d['turno'] ?? 'mañana'}';
-    final key = turno == 'tarde' ? 'tarde' : 'mañana';
+    final turno = '${d['turno'] ?? 'mañana'}'.toLowerCase();
+    final key = turno == 'tarde'
+        ? 'tarde'
+        : turno == 'noche'
+            ? 'noche'
+            : 'mañana';
     res[key]!['cantidad'] =
         res[key]!['cantidad']! + ((d['cantidad'] as num?)?.toDouble() ?? 0);
     res[key]!['total'] =
@@ -1053,6 +1068,18 @@ Future<(double, double)> miTurnoHoy(int? telegramId) async {
         (v['fecha'] as String?) == hoy) {
       cobrado += totalVentaCup(v);
     }
+  }
+  // v1.3.1: incluir ops pendientes de hoy en cobrado (offline).
+  final pr = await preciosVigentes();
+  for (final op in await LocalDb.instance.pendingOps()) {
+    if (op['telegram_id'] != telegramId) continue;
+    try {
+      final payload =
+          jsonDecode(op['payload'] as String) as Map<String, dynamic>;
+      final fecha = (payload['fecha'] as String?)?.substring(0, 10) ?? '';
+      if (fecha != hoy) continue;
+      cobrado += _montoEfectivoOp(op, pr);
+    } catch (_) {}
   }
   final pendiente = await pendienteEntrega(telegramId);
   return (cobrado, pendiente);
@@ -2116,14 +2143,16 @@ Future<List<Map<String, dynamic>>> rankingEntrenadores() async {
   final nombres = <String, String>{};
   for (final p in await LocalDb.instance.allMirror('pagos')) {
     if ('${p['fecha'] ?? ''}'.startsWith(pref)) {
-      final ent = '${p['entrenador'] ?? p['creado_por'] ?? '?'}';
+      final ent =
+          '${p['registrado_por_nombre'] ?? p['registrado_por'] ?? '?'}';
       porEntrenador[ent] =
           (porEntrenador[ent] ?? 0) + ((p['monto'] as num?)?.toDouble() ?? 0);
     }
   }
   for (final d in await LocalDb.instance.allMirror('pagos_diarios')) {
     if ('${d['fecha'] ?? ''}'.startsWith(pref)) {
-      final ent = '${d['entrenador'] ?? d['creado_por'] ?? '?'}';
+      final ent =
+          '${d['registrado_por_nombre'] ?? d['registrado_por'] ?? '?'}';
       porEntrenador[ent] =
           (porEntrenador[ent] ?? 0) + ((d['total'] as num?)?.toDouble() ?? 0);
     }
