@@ -540,7 +540,8 @@ class _AdminScreenState extends State<AdminScreen> {
         ],
       ),
     );
-    ctrl.dispose();
+    // v1.3.1: no hacer dispose aquí — el TextField sigue montado durante
+    // la animación de salida del diálogo (error "used after being disposed").
     if (sel != null) {
       await PerfilService.instance.setPagoEntrenador(sel);
       if (mounted) {

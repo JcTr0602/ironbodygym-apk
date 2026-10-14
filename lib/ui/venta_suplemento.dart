@@ -174,9 +174,10 @@ class _VentaSuplementoScreenState
       return;
     }
     final tasa = _tasaUsd;
-    // v1.3.1: tasa solo obligatoria en CUP (para el equivalente USD).
-    // En ventas USD es irrelevante, no se exige.
-    if (_moneda == 'CUP' && (tasa == null || tasa <= 0)) {
+    // v1.3.1: tasa obligatoria en CUP. En USD es opcional, pero si el
+    // usuario escribió algo debe ser > 0 (el servidor exige usd_tasa > 0).
+    if ((_moneda == 'CUP' && (tasa == null || tasa <= 0)) ||
+        (tasa != null && tasa <= 0)) {
       await DialogoApp.confirmar(context,
           titulo: 'Revisa la valoración',
           mensaje:
@@ -240,9 +241,9 @@ class _VentaSuplementoScreenState
           'cantidad': _cantidad,
           'precio': precio,
           'moneda': _moneda,
-          // v1.3.1: en USD la tasa es irrelevante; se envía 1.0 si no hay.
-          // En CUP es obligatoria (validada arriba).
-          'usd_tasa': tasa ?? 1.0,
+          // v1.3.1: en USD la tasa es irrelevante; se normaliza a 1.0 si
+          // no hay o es inválida. En CUP es obligatoria (validada arriba).
+          'usd_tasa': (tasa != null && tasa > 0) ? tasa : 1.0,
           // ChatGPT CRÍTICO 2: el servidor solo acepta 'cliente'|'externo'.
           // 'externo_nombre' y 'externo_generico' se mapean a 'externo'.
           'comprador_tipo':
