@@ -280,6 +280,10 @@ class _AdminScreenState extends State<AdminScreen> {
         'tipos': [for (final t in _tipos) t.toJson()],
       },
     );
+    // v1.3.1: optimismo local (tipos visibles al instante al cobrar).
+    final aj = await LocalDb.instance.getAjustes();
+    aj['tipos_pago'] = [for (final t in _tipos) t.toJson()];
+    await LocalDb.instance.setAjustes(aj);
     SyncEngine.instance.push();
   }
 
