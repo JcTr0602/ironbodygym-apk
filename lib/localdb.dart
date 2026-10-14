@@ -213,7 +213,7 @@ class LocalDb {
     final dir = await getDatabasesPath();
     _db = await openDatabase(
       p.join(dir, 'ironbody.db'),
-      version: 20,
+      version: 21,
       // v1.3-r4 (Gemini): WAL mode para que lectores (UI) y escritores
       // (Workmanager en otro isolate) no se bloqueen mutuamente.
       // v1.2.9+34 (hotfix): try-catch — si el dispositivo no soporta WAL,
@@ -545,6 +545,10 @@ class LocalDb {
           await _addColumnIfMissing(db, 'suplementos', 'ultimo_precio', 'REAL');
           await _crearEsquemaIncidencias(db);
         }
+        // v21 (v1.3.1): timestamp de envío para el reset de 'enviada'.
+        if (oldV < 21) {
+          await _addColumnIfMissing(db, 'ops_queue', 'enviada_ts', 'TEXT');
+        }
         // v19: rediseño de Incidencias v1.3.0 (certificado por Gemini).
         if (oldV < 19) {
           // 1. Tipos personalizados
@@ -843,7 +847,7 @@ class LocalDb {
     await db.execute('CREATE TABLE ops_queue ('
         'op_uuid TEXT PRIMARY KEY, tipo TEXT NOT NULL, payload TEXT NOT NULL, '
         'estado TEXT NOT NULL DEFAULT \'pendiente\', intentos INTEGER NOT NULL DEFAULT 0, '
-        'error TEXT, creada_ts TEXT NOT NULL, foto_path TEXT, '
+        'error TEXT, creada_ts TEXT NOT NULL, enviada_ts TEXT, foto_path TEXT, '
         'user_id TEXT, telegram_id INTEGER, '
         'proximo_reintento TEXT, codigo_error TEXT)');
     await db.execute(
@@ -2340,8 +2344,12 @@ class LocalDb {
         } catch (_) {}
       }
     }
-    await d.update(
-        'ops_queue', {'estado': estado, 'error': error},
+    final update = <String, Object?>{'estado': estado, 'error': error};
+    // v1.3.1 (E4): registrar cuándo se envió para el reset de 'enviada'.
+    if (estado == 'enviada') {
+      update['enviada_ts'] = DateTime.now().toIso8601String();
+    }
+    await d.update('ops_queue', update,
         where: 'op_uuid=?', whereArgs: [opUuid]);
   }
 
@@ -2456,7 +2464,8 @@ class LocalDb {
   Future<bool> cancelOp(String opUuid) async {
     final d = await db;
     final n = await d.delete('ops_queue',
-        where: 'op_uuid=? AND estado IN (\'pendiente\', \'error\', \'rechazada\')',
+        // v1.3.1 (E6): también se puede descartar una bloqueada.
+        where: 'op_uuid=? AND estado IN (\'pendiente\', \'error\', \'rechazada\', \'necesita_revision\')',
         whereArgs: [opUuid]);
     return n > 0;
   }

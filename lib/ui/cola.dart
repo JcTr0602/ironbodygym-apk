@@ -650,11 +650,24 @@ class _ColaScreenState extends State<ColaScreen> {
   /// Muestra el detalle completo de una operación al tocarla.
   Future<void> _reenviar(Map<String, dynamic> op) async {
     final uuid = op['op_uuid'] as String;
-    // Marca como pendiente para que se reintente en el próximo push
-    await LocalDb.instance.markOp(uuid, 'pendiente', error: null);
+    // v1.3.1 (E6): limpiar campos de error y disparar sync inmediatamente.
+    final db = await LocalDb.instance.db;
+    await db.update(
+      'ops_queue',
+      {
+        'estado': 'pendiente',
+        'error': null,
+        'intentos': 0,
+        'proximo_reintento': null,
+        'codigo_error': null,
+      },
+      where: 'op_uuid=?',
+      whereArgs: [uuid],
+    );
+    unawaited(SyncEngine.instance.push());
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Operación marcada para reenviar')),
+        const SnackBar(content: Text('Reenviando operación...')),
       );
       _cargar();
     }
@@ -817,12 +830,62 @@ class _ColaScreenState extends State<ColaScreen> {
       if (payload['monto'] != null) {
         detalles.add('Monto: ${payload['monto']} CUP');
       }
+    } else if (tipo == 'venta_suplemento') {
+      // v1.3.1 (E7): detalles de venta de suplemento.
+      if (payload['suplemento_nombre'] != null) {
+        detalles.add('Suplemento: ${payload['suplemento_nombre']}');
+      }
+      if (payload['cantidad'] != null) {
+        detalles.add('Cantidad: ${payload['cantidad']}');
+      }
+      if (payload['total'] != null) {
+        final moneda = payload['moneda'] ?? 'CUP';
+        detalles.add('Total: ${payload['total']} $moneda');
+      }
+      final n = await nombreCliente(payload['cliente_id']);
+      if (n != null) detalles.add('Cliente: $n');
+    } else if (tipo == 'crear_suplemento' || tipo == 'editar_suplemento') {
+      if (payload['nombre'] != null) {
+        detalles.add('Suplemento: ${payload['nombre']}');
+      }
+      if (payload['precio'] != null) {
+        detalles.add('Precio: ${payload['precio']} CUP');
+      }
+    } else if (tipo == 'eliminar_suplemento') {
+      if (payload['suplemento_nombre'] != null) {
+        detalles.add('Suplemento: ${payload['suplemento_nombre']}');
+      }
+      detalles.add('Acción: Eliminar');
+    } else if (tipo == 'incidencia' || tipo == 'incidencia_estado') {
+      // v1.3.1 (E7): detalles de incidencia.
+      if (payload['titulo'] != null) {
+        detalles.add('Incidencia: ${payload['titulo']}');
+      }
+      if (payload['tipo_nombre'] != null) {
+        detalles.add('Tipo: ${payload['tipo_nombre']}');
+      }
+      if (payload['estado'] != null) {
+        detalles.add('Estado: ${payload['estado']}');
+      }
+    } else if (tipo == 'cierre_turno') {
+      if (payload['fecha'] != null) {
+        detalles.add('Fecha: ${payload['fecha']}');
+      }
+      if (payload['total'] != null) {
+        detalles.add('Total: ${payload['total']} CUP');
+      }
+    } else if (tipo == 'foto_suplemento') {
+      if (payload['suplemento_nombre'] != null) {
+        detalles.add('Suplemento: ${payload['suplemento_nombre']}');
+      }
     }
     return detalles;
   }
 
   @override
   Widget build(BuildContext context) {
+    // v1.3.1 (E2): conteos reales incluyendo bloqueadas y fotos.
+    // _ops tiene limit 30, así que sumar las bloqueadas cargadas por separado.
     final pendientes =
         _ops.where((o) => o['estado'] == 'pendiente').length;
     final conError =
@@ -830,6 +893,10 @@ class _ColaScreenState extends State<ColaScreen> {
     // v1.2.9+46 (Gemini): 'enviada' = confirmación pendiente (ámbar).
     final enLimbo =
         _ops.where((o) => o['estado'] == 'enviada').length;
+    // v1.3.1 (E2): bloqueadas (necesita_revision/rechazada) van a rojo.
+    final bloqueadas = _bloqueadas.length;
+    final totalError = conError + bloqueadas + _fotosError;
+    final totalPendiente = pendientes + _fotosPendientes + _fotosSubiendo;
     final errorReciente = _det.error;
     // v1.0.14: tres estados claros en vez de binario ok/error
     // v1.1: icono Material en vez de emoji
@@ -839,14 +906,14 @@ class _ColaScreenState extends State<ColaScreen> {
     final IconData iconoEstado;
     final String titulo;
     final String subtitulo;
-    if (conError > 0) {
+    if (totalError > 0) {
       estadoSync = 'error';
       colores = [AppColores.error, AppColores.errorOscuro];
       iconoEstado = Icons.warning;
       titulo = 'Atención requerida';
-      subtitulo = conError == 1
-          ? '1 operación falló y necesita tu revisión'
-          : '$conError operaciones fallaron y necesitan tu revisión';
+      subtitulo = totalError == 1
+          ? '1 elemento falló y necesita tu revisión'
+          : '$totalError elementos fallaron y necesitan tu revisión';
     } else if (enLimbo > 0) {
       estadoSync = 'limbo';
       colores = [AppColores.alerta, AppColores.alertaOscuro];
@@ -862,14 +929,14 @@ class _ColaScreenState extends State<ColaScreen> {
       titulo = 'Falló la última sincronización';
       // v1.2.9+46: mensaje en lenguaje natural, no genérico.
       subtitulo = describirError(errorReciente);
-    } else if (pendientes > 0) {
+    } else if (totalPendiente > 0) {
       estadoSync = 'pendiente';
       colores = [AppColores.alerta, AppColores.alertaOscuro];
       iconoEstado = Icons.schedule;
       titulo = 'Pendiente de sincronizar';
-      subtitulo = pendientes == 1
-          ? '1 operación esperando conexión'
-          : '$pendientes operaciones esperando conexión';
+      subtitulo = totalPendiente == 1
+          ? '1 elemento esperando conexión'
+          : '$totalPendiente elementos esperando conexión';
     } else {
       estadoSync = 'ok';
       colores = [AppColores.exito, AppColores.exitoOscuro];
@@ -1092,7 +1159,11 @@ class _ColaScreenState extends State<ColaScreen> {
                 final estado = '${op['estado']}';
                 final esPendiente = estado == 'pendiente';
                 final esError = estado == 'error';
-                final cancelable = esPendiente || esError;
+                // v1.3.1 (E6): rechazada y necesita_revision también
+                // son reintentables/cancelables.
+                final esBloqueada =
+                    estado == 'rechazada' || estado == 'necesita_revision';
+                final cancelable = esPendiente || esError || esBloqueada;
                 // v1.0.14: tiempo relativo para saber hace cuánto espera
                 final creada = '${op['creada_ts'] ?? ''}';
                 final hace = tiempoRelativo(creada);
@@ -1164,12 +1235,12 @@ class _ColaScreenState extends State<ColaScreen> {
                         ? Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              if (esError)
+                              if (esError || esBloqueada)
                                 IconButton(
                                   tooltip: 'Reintentar',
                                   icon: const Icon(Icons.refresh,
                                       color: AppColores.info),
-                                  onPressed: () => _sincronizar(),
+                                  onPressed: () => _reenviar(op),
                                 ),
                               IconButton(
                                 tooltip: 'Cancelar',

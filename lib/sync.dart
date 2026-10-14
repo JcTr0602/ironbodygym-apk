@@ -460,6 +460,14 @@ class SyncEngine {
   /// (pueden llegar cambios nuevos mientras se descarga).
   /// v1.2.5 (D14): [forzar] cancela el backoff ("Sincronizar ahora").
   Future<void> run({bool forzar = false}) async {
+    // v1.3.1 (E1): si es manual y hay un ciclo en curso, esperar hasta 30s.
+    if (forzar) {
+      var espera = 0;
+      while (_running && espera < 30) {
+        await Future.delayed(const Duration(seconds: 1));
+        espera++;
+      }
+    }
     await _conLock(() async {
       try {
         // v1.2.9+47: errores de push y pull por separado (Gemini).
@@ -496,6 +504,8 @@ class SyncEngine {
         // v1.2.9+47: guardar estados separados (Gemini: manejar los 3 casos).
         await _db.setMeta('last_push_error', errPush ?? '');
         await _db.setMeta('last_pull_error', errPull ?? '');
+        // v1.3.1 (E3): solo registrar error real, nunca un estado
+        // informativo que la UI interpreta como fallo.
         if (completo) {
           await _marcarOk();
           await _db.setMeta('last_sync_error', '');
@@ -504,11 +514,11 @@ class SyncEngine {
           _emit(SyncPhase.error,
               error: traducirErrorSync(errPush));
           return;
+        } else if (errPull != null) {
+          await _db.setMeta('last_sync_error', errPull);
         } else {
-          // Push OK pero pull incompleto.
-          await _db.setMeta('last_sync_error',
-              'Subida al día · Descarga pendiente');
-          // No emitir error crítico: la subida funcionó.
+          // Push OK y pull sin excepciones: limpiar cualquier error previo.
+          await _db.setMeta('last_sync_error', '');
         }
         // v1.0.17: resumen discreto de lo que realmente cambió
         final subidos =
@@ -567,7 +577,10 @@ class SyncEngine {
           n = await _download(tablasFiltro: tablasNormales);
         }
         await _db.setMeta('last_pull_ok', DateTime.now().toIso8601String());
-        await _db.setMeta('last_downloaded', '$n');
+        // v1.3.1 (E5): no pisar con 0.
+        if (n > 0) {
+          await _db.setMeta('last_downloaded', '$n');
+        }
         await _db.setMeta('last_scope', scope);
         _emit(SyncPhase.idle,
             resumen: 'Sincronizado: ${tablas.join(', ')}');
@@ -761,7 +774,10 @@ class SyncEngine {
         await _db.setMeta(
             'last_pull_ok', DateTime.now().toIso8601String());
       }
-      await _db.setMeta('last_downloaded', '$n');
+      // v1.3.1 (E5): no pisar con 0 en pulls vacíos/silenciosos.
+      if (n > 0) {
+        await _db.setMeta('last_downloaded', '$n');
+      }
       _emit(SyncPhase.idle);
     } on SessionExpired {
       _sesionVencida();
@@ -795,7 +811,8 @@ class SyncEngine {
       await db.update(
         'ops_queue',
         {'estado': 'pendiente', 'error': null},
-        where: "estado = 'enviada' AND creada_ts < ?",
+        // v1.3.1 (E4): comparar contra enviada_ts, no creada_ts.
+        where: "estado = 'enviada' AND enviada_ts < ?",
         whereArgs: [corte],
       );
     } catch (_) {}
