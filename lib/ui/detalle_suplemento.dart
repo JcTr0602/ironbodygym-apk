@@ -329,8 +329,9 @@ Future<void> _eliminarSuplemento(
   final id = s['id'];
 
   // Argón: verificar localmente que no tenga ventas antes de borrar.
+  // La tabla local usa JSON (data TEXT), no columnas.
   final ventas = await d.rawQuery(
-    'SELECT COUNT(*) as n FROM ventas_suplementos WHERE suplemento_id = ?',
+    "SELECT COUNT(*) as n FROM ventas_suplementos WHERE json_extract(data, '\$.suplemento_id') = ?",
     [id],
   );
   final nVentas = (ventas.first['n'] as int?) ?? 0;
