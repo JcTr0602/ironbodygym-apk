@@ -700,7 +700,7 @@ class _SeccionDiagnosticoScreenState extends State<SeccionDiagnosticoScreen> {
       final db = LocalDb.instance;
       final lastOk = await db.getMeta('last_sync_ok');
       final lastErr = await db.getMeta('last_sync_error');
-      final wm = await db.getWatermark();
+      final wm = await db.getWatermarkMinimo();
       final ss = await db.getMeta('server_seq') ?? '?';
       final datos = <String, String>{
         'Versión': '${AppConfig.appVersion} (${AuthService().username})',
@@ -710,8 +710,8 @@ class _SeccionDiagnosticoScreenState extends State<SeccionDiagnosticoScreen> {
             '${await db.contar('ops_queue', where: "estado IN ('pendiente','error')")}',
         'Ops rechazadas':
             '${await db.contar('ops_queue', where: "estado = 'rechazada'")}',
-        'Fotos pendientes': '${await db.contar('fotos_pendientes', where: "estado = 'pendiente'")}',
-        'Fotos con error': '${await db.contar('fotos_pendientes', where: "estado = 'error'")}',
+        'Fotos pendientes': '${await db.contar('fotos_cola', where: "estado = 'pendiente'")}',
+        'Fotos con error': '${await db.contar('fotos_cola', where: "estado = 'error'")}',
         'Clientes': '${await db.contar('clientes')}',
         'Pagos': '${await db.contar('pagos')}',
         'Ventas suplementos': '${await db.contar('ventas_suplementos')}',

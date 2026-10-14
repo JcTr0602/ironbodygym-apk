@@ -1683,6 +1683,22 @@ Future<List<Map<String, dynamic>>> detallePendienteEntrenador(
       'nota': '${d['nota'] ?? ''}',
     });
   }
+  // v1.3.1 (UI2): ventas de suplementos pendientes del entrenador.
+  for (final s in await LocalDb.instance.allMirror('ventas_suplementos')) {
+    if (!esPendiente(s['entregado'])) continue;
+    if ((s['registrado_por'] as int?) != tid) continue;
+    final moneda = s['moneda'] as String? ?? 'CUP';
+    items.add({
+      'tipo': 'suplemento',
+      'suplemento_id': (s['id'] as num?)?.toInt(),
+      'fecha': '${s['creada_en'] ?? s['fecha'] ?? ''}',
+      'suplemento_nombre': '${s['suplemento_nombre'] ?? ''}',
+      'cantidad': (s['cantidad'] as num?)?.toInt() ?? 1,
+      'total': moneda == 'USD' ? totalVentaUsd(s) : totalVentaCup(s),
+      'moneda': moneda,
+      'nota': '${s['nota'] ?? ''}',
+    });
+  }
   items.sort((a, b) =>
       '${b['fecha']}'.compareTo('${a['fecha']}'));
   return items;
@@ -1736,9 +1752,7 @@ Future<List<Map<String, dynamic>>> pagosPendientesDetalle(
     if (tid == null) continue;
     if (excluirTid != null && tid == excluirTid) continue;
     final moneda = s['moneda'] as String? ?? 'CUP';
-    final monto = moneda == 'USD'
-        ? (s['precio_usd'] as num?)?.toDouble() ?? 0
-        : (s['precio_cup'] as num?)?.toDouble() ?? 0;
+    final monto = moneda == 'USD' ? totalVentaUsd(s) : totalVentaCup(s);
     lista.add({
       'id': s['id'],
       'monto': monto,

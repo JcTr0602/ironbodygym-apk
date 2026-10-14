@@ -39,13 +39,7 @@ Future<bool> ventaRapidaSuplemento(
         content: Text('Sin stock disponible para venta rápida')));
     return false;
   }
-  if (tasaUsd == null || tasaUsd <= 0) {
-    // v1.2.4: el servidor rechaza ventas USD sin tasa.
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text('Falta la tasa del día (Admin → Ajustes) '
-            'para registrar la venta')));
-    return false;
-  }
+  // v1.3.1: tasa opcional en USD (se normaliza a 1.0 si no hay).
   final precio =
       (s['precio_oficial'] as num?)?.toDouble() ?? 0;
   final ok = await DialogoApp.confirmar(
@@ -67,8 +61,8 @@ Future<bool> ventaRapidaSuplemento(
       'cantidad': 1,
       'precio': precio,
       'moneda': 'USD',
-      // ChatGPT CRÍTICO 2: usd_tasa obligatoria para USD, tipo 'externo'.
-      'usd_tasa': tasaUsd,
+      // v1.3.1: usd_tasa opcional en USD (null = irrelevante).
+      'usd_tasa': (tasaUsd != null && tasaUsd > 0) ? tasaUsd : null,
       'comprador_tipo': 'externo',
       'comprador_nombre': 'Cliente externo',
       'fecha':
@@ -154,16 +148,7 @@ class DetalleSuplementoScreen extends StatelessWidget {
   }
 
   Future<void> _ventaRapida(BuildContext context) async {
-    // Gemini-2: confirmación previa (riesgo de toques accidentales).
-    final confirmar = await DialogoApp.confirmar(
-      context,
-      titulo: 'Venta rápida',
-      mensaje: '¿Registrar venta de 1 unidad de ${suplemento['nombre']} '
-          'a precio oficial?',
-      aceptar: 'Vender',
-      icono: Icons.flash_on,
-    );
-    if (!confirmar || !context.mounted) return;
+    // v1.3.1: un solo diálogo (el de ventaRapidaSuplemento).
     final ok =
         await ventaRapidaSuplemento(context, suplemento, tasaUsd);
     if (!context.mounted) return;

@@ -2086,6 +2086,9 @@ class LocalDb {
   Future<int> getWatermarkTabla(String tabla) async {
     final v = await getMeta('wm_$tabla');
     if (v != null) return int.tryParse(v) ?? 0;
+    // v1.3.1 (C3): las tablas de incidencias NO heredan el watermark
+    // global; si no, en teléfonos viejos se saltan registros.
+    if (tabla.startsWith('incidencias')) return 0;
     return getWatermark(); // hereda el global (migración)
   }
 
