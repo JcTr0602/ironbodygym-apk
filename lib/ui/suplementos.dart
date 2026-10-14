@@ -934,8 +934,9 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
     final catNombre =
         _nombreCategoria(s['categoria_id'] as int?);
     // v1.2.1: equivalente en CUP según la tasa del día.
+    // v1.3.1 (Medio #6): solo si la tasa es real (> 1.0).
     final cup =
-        _tasaUsd != null && _tasaUsd! > 0 && precio > 0
+        _tasaUsd != null && _tasaUsd! > 1.0 && precio > 0
             ? '≈ ${fmtMonto(precio * _tasaUsd!)} CUP'
             : null;
     return Padding(

@@ -970,7 +970,8 @@ class LocalDb {
       version INTEGER NOT NULL DEFAULT 1,
       sincronizada INTEGER NOT NULL DEFAULT 0,
       visibilidad TEXT NOT NULL DEFAULT 'compartida',
-      sync_estado TEXT NOT NULL DEFAULT 'synced'
+      sync_estado TEXT NOT NULL DEFAULT 'synced',
+      op_uuid TEXT
     )''');
     await db.execute('''CREATE TABLE IF NOT EXISTS incidencias_mirror (
       id TEXT PRIMARY KEY, tipo TEXT,
@@ -1012,7 +1013,8 @@ class LocalDb {
       id TEXT PRIMARY KEY, nombre TEXT NOT NULL, icono TEXT,
       color INTEGER, activo INTEGER NOT NULL DEFAULT 1,
       orden INTEGER NOT NULL DEFAULT 0, actualizado_en TEXT,
-      sync_estado TEXT NOT NULL DEFAULT 'synced'
+      sync_estado TEXT NOT NULL DEFAULT 'synced',
+      op_uuid TEXT
     )''');
     await db.execute('''CREATE TABLE IF NOT EXISTS incidencias_tipos_mirror (
       id TEXT PRIMARY KEY, nombre TEXT NOT NULL, icono TEXT,
@@ -1038,7 +1040,8 @@ class LocalDb {
       incidencia_id TEXT NOT NULL REFERENCES incidencias_local(id) ON DELETE CASCADE,
       texto TEXT NOT NULL, creado_por TEXT NOT NULL,
       creado_en TEXT NOT NULL,
-      sync_estado TEXT NOT NULL DEFAULT 'pending'
+      sync_estado TEXT NOT NULL DEFAULT 'pending',
+      op_uuid TEXT
     )''');
     await db.execute('''CREATE TABLE IF NOT EXISTS incidencias_historial (
       id TEXT PRIMARY KEY,
@@ -1604,6 +1607,7 @@ class LocalDb {
 
   /// Crea incidencia local (offline-first). Retorna el id (UUID).
   /// v1.2.5: visibilidad ('compartida' por defecto; 'privada' solo admin).
+  /// v1.3.1 (Alto #4): opUuid para el marcado selectivo de synced.
   Future<String> crearIncidenciaLocal({
     required String tipo,
     required String descripcion,
@@ -1612,6 +1616,7 @@ class LocalDb {
     int? entidadId,
     Map<String, dynamic>? detalle,
     String visibilidad = 'compartida',
+    String? opUuid,
   }) async {
     final d = await db;
     final id =
@@ -1629,6 +1634,8 @@ class LocalDb {
       'visibilidad': visibilidad,
       'version': 1,
       'sincronizada': 0,
+      // v1.3.1 (Alto #4): para el marcado selectivo de synced.
+      if (opUuid != null) 'op_uuid': opUuid,
     });
     return id;
   }
@@ -1675,16 +1682,14 @@ class LocalDb {
   /// Una op atascada solo retiene sus propios registros, no toda la tabla.
   Future<void> marcarTiposComentariosSincronizados() async {
     final d = await db;
-    // Tipos de ops_queue que pertenecen a incidencias: una op atascada de
-    // cliente/pago/suplemento no debe bloquear jamás las incidencias.
-    const tiposIncidencia = "'incidencia','incidencia_estado',"
-        "'incidencia_tipo','incidencia_comentario'";
     const estadosPend =
         "'pendiente','enviada','error','necesita_revision'";
     // v1.3.1 (Argón): dos ramas — con op_uuid se cruza por op_uuid; sin
     // op_uuid (filas previas a la migración v22) se verifica que no haya
-    // ninguna op de incidencias pendiente en la cola.
-    Future<void> marcarSelectivo(String tabla) async {
+    // ninguna op del TIPO correspondiente pendiente en la cola.
+    // Cada tabla usa solo sus tipos: un comentario atascado no bloquea
+    // las incidencias ni los tipos.
+    Future<void> marcarSelectivo(String tabla, String tiposTabla) async {
       await d.rawUpdate('''
         UPDATE $tabla SET sync_estado='synced'
           ${tabla == 'incidencias_local' ? ', sincronizada=1' : ''}
@@ -1697,16 +1702,18 @@ class LocalDb {
           OR
           (op_uuid IS NULL AND NOT EXISTS (
             SELECT 1 FROM ops_queue
-            WHERE ops_queue.tipo IN ($tiposIncidencia)
+            WHERE ops_queue.tipo IN ($tiposTabla)
               AND ops_queue.estado IN ($estadosPend)
           ))
         )
       ''');
     }
 
-    await marcarSelectivo('incidencias_local');
-    await marcarSelectivo('incidencias_tipos');
-    await marcarSelectivo('incidencias_comentarios');
+    await marcarSelectivo(
+        'incidencias_local', "'incidencia','incidencia_estado'");
+    await marcarSelectivo('incidencias_tipos', "'incidencia_tipo'");
+    await marcarSelectivo(
+        'incidencias_comentarios', "'incidencia_comentario'");
   }
 
   Future<void> upsertIncidenciaMirror(Map<String, dynamic> inc) async {

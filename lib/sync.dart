@@ -1724,6 +1724,9 @@ class SyncEngine {
     }
     final u = _auth.username;
     final creadaPor = u.isNotEmpty ? u : (_auth.userId ?? 'desconocido');
+    // v1.3.1 (Alto #4): generar el opUuid ANTES y guardarlo en la fila local
+    // para el marcado selectivo de synced.
+    final opUuid = const Uuid().v4();
     final id = await _db.crearIncidenciaLocal(
       tipo: tipo,
       descripcion: descripcion.trim(),
@@ -1732,9 +1735,10 @@ class SyncEngine {
       entidadId: entidadId,
       detalle: detalle,
       visibilidad: visibilidad,
+      opUuid: opUuid,
     );
     await _db.queueOp(
-      opUuid: const Uuid().v4(),
+      opUuid: opUuid,
       tipo: 'incidencia',
       payload: {
         'id': id,
@@ -2749,6 +2753,14 @@ class SyncEngine {
               whereArgs: [m['incidencia_id']],
               limit: 1);
           if (padre.isEmpty) {
+            // v1.3.1 (Alto #3, corrección Argón): si el usuario no es dueño
+            // y el padre no está en local, es una incidencia privada que el
+            // servidor debió filtrar. NO retener el watermark (congelaría el
+            // pull para siempre); avanzar el cursor y descartar.
+            if (!_auth.isAdmin) {
+              if (seq > maxSeq) maxSeq = seq;
+              continue;
+            }
             huboHuerfano = true;
             continue;
           }

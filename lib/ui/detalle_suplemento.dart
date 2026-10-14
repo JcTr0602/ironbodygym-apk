@@ -97,7 +97,7 @@ Future<void> compartirSuplemento(BuildContext context,
   final nombre = '${s['nombre'] ?? 'Suplemento'}';
   final precio =
       (s['precio_oficial'] as num?)?.toDouble() ?? 0;
-  final cup = tasaUsd != null && tasaUsd > 0
+  final cup = tasaUsd != null && tasaUsd > 1.0
       ? ' (≈ ${fmtMonto(precio * tasaUsd)} CUP)'
       : '';
   final stock = (s['stock'] as num?)?.toInt() ?? 0;
@@ -173,7 +173,7 @@ class DetalleSuplementoScreen extends StatelessWidget {
         (suplemento['stock'] as num?)?.toInt() ?? 0;
     final inactivo = (suplemento['activo'] as int?) != 1;
     final foto = suplemento['foto_storage'] as String?;
-    final cup = tasaUsd != null && tasaUsd! > 0
+    final cup = tasaUsd != null && tasaUsd! > 1.0
         ? '≈ ${fmtMonto(precio * tasaUsd!)} CUP'
         : null;
 
