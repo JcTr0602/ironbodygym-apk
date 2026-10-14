@@ -1114,10 +1114,18 @@ class LocalDb {
           columns: ['data'], where: 'id=?', whereArgs: [id], limit: 1);
       if (rows.isNotEmpty && rows.first['data'] == nuevoJson) return false;
     }
-    await d.insert(
-        tabla,
-        {'id': id, 'data': nuevoJson, 'sync_seq': syncSeq},
-        conflictAlgorithm: ConflictAlgorithm.replace);
+    if (tabla == 'suplementos') {
+      // v1.3.1: preservar ultimo_precio (columna SQL, no JSON).
+      await d.rawInsert(
+          'INSERT INTO suplementos (id, data, sync_seq) VALUES (?, ?, ?)'
+          ' ON CONFLICT(id) DO UPDATE SET data=excluded.data, sync_seq=excluded.sync_seq',
+          [id, nuevoJson, syncSeq]);
+    } else {
+      await d.insert(
+          tabla,
+          {'id': id, 'data': nuevoJson, 'sync_seq': syncSeq},
+          conflictAlgorithm: ConflictAlgorithm.replace);
+    }
     // v1.2.5-rev5: mantener el índice FTS5 de clientes.
     // v1.2.5-rev6: también indexa teléfonos (búsqueda por número sin
     // cargar el padrón completo).
@@ -2521,13 +2529,17 @@ class LocalDb {
         jsonCampos[e.key] = e.value;
       }
     }
-    if (jsonCampos.isNotEmpty) {
+    if (jsonCampos.isNotEmpty || sqlCampos.containsKey('ultimo_precio')) {
       final rows = await d.query('suplementos',
           columns: ['data'], where: 'id = ?', whereArgs: [id], limit: 1);
       if (rows.isNotEmpty) {
         final data =
             Map<String, dynamic>.from(jsonDecode(rows.first['data'] as String));
         data.addAll(jsonCampos);
+        // v1.3.1: espejar ultimo_precio en JSON para lecturas directas.
+        if (sqlCampos.containsKey('ultimo_precio')) {
+          data['ultimo_precio'] = sqlCampos['ultimo_precio'];
+        }
         sqlCampos['data'] = jsonEncode(data);
       }
     }
@@ -2656,6 +2668,8 @@ class LocalDb {
   Future<void> close() async {
     final d = _db;
     _db = null;
+    // v1.3.1: resetear flags FTS para que se reconstruyan al reabrir.
+    _ftsReparado = false;
     await d?.close();
   }
 

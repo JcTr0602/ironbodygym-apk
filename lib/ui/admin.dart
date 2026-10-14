@@ -7,6 +7,7 @@ library;
 
 import 'dart:io';
 
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
@@ -553,6 +554,34 @@ class _AdminScreenState extends State<AdminScreen> {
     }
   }
 
+  /// v1.3.1: marca como entregado en SQLite local (optimismo).
+  Future<void> _marcarEntregadoLocal(int? trainerId) async {
+    final db = LocalDb.instance;
+    final d = await db.db;
+    final ahora = DateTime.now().toIso8601String();
+    await d.transaction((txn) async {
+      for (final tabla in ['pagos', 'pagos_diarios', 'ventas_suplementos']) {
+        final col = tabla == 'pagos'
+            ? 'telegram_user_id'
+            : 'registrado_por';
+        final where = trainerId != null
+            ? "json_extract(data, '\$.$col') = ? AND json_extract(data, '\$.entregado') != 1"
+            : "json_extract(data, '\$.entregado') != 1";
+        final args = trainerId != null ? [trainerId] : <Object>[];
+        final rows = await txn.query(tabla,
+            columns: ['id', 'data'], where: where, whereArgs: args);
+        for (final r in rows) {
+          final data = Map<String, dynamic>.from(
+              jsonDecode(r['data'] as String));
+          data['entregado'] = 1;
+          data['entregado_ts'] = ahora;
+          await txn.update(tabla, {'data': jsonEncode(data)},
+              where: 'id = ?', whereArgs: [r['id']]);
+        }
+      }
+    });
+  }
+
   Future<void> _confirmarEntrega(
       {int? trainerId, required String nombre}) async {
     final notaCtrl = TextEditingController();
@@ -599,6 +628,8 @@ class _AdminScreenState extends State<AdminScreen> {
     final nota = notaCtrl.text.trim();
     notaCtrl.dispose();
     if (ok != true || !mounted) return;
+    // v1.3.1: actualización optimista local (la UI se pone en 0 al instante).
+    await _marcarEntregadoLocal(trainerId);
     await LocalDb.instance.queueOp(
       opUuid: const Uuid().v4(),
       tipo: 'confirmar_entrega',

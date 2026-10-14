@@ -2707,6 +2707,7 @@ class SyncEngine {
       final d = await _db.db;
       await d.transaction((txn) async {
         var maxSeq = wm;
+        var huboHuerfano = false;
         for (final row in rows) {
           final m =
               Map<String, dynamic>.from(
@@ -2721,8 +2722,11 @@ class SyncEngine {
               where: 'id = ?',
               whereArgs: [m['incidencia_id']],
               limit: 1);
-          if (padre.isEmpty) continue;
-          if (seq > maxSeq) maxSeq = seq;
+          if (padre.isEmpty) {
+            huboHuerfano = true;
+            continue;
+          }
+          if (!huboHuerfano && seq > maxSeq) maxSeq = seq;
           await txn.insert(
             'incidencias_comentarios',
             {
@@ -2768,6 +2772,7 @@ class SyncEngine {
       final d = await _db.db;
       await d.transaction((txn) async {
         var maxSeq = wm;
+        var huboHuerfano = false;
         for (final row in rows) {
           final m =
               Map<String, dynamic>.from(
@@ -2782,8 +2787,11 @@ class SyncEngine {
               where: 'id = ?',
               whereArgs: [m['incidencia_id']],
               limit: 1);
-          if (padreH.isEmpty) continue;
-          if (seq > maxSeq) maxSeq = seq;
+          if (padreH.isEmpty) {
+            huboHuerfano = true;
+            continue;
+          }
+          if (!huboHuerfano && seq > maxSeq) maxSeq = seq;
           await txn.insert(
             'incidencias_historial',
             {

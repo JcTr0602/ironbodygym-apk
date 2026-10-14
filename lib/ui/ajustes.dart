@@ -658,11 +658,13 @@ class _AjustesScreenState extends State<AjustesScreen> {
           'pagos_diarios',
           'gastos',
           'ops_queue',
-          'fotos_pendientes',
           'meta'
         };
+        // v1.3.1: fotos_cola es la tabla actual (fotos_pendientes es obsoleta).
+        final tieneFotos = nombres.contains('fotos_cola') ||
+            nombres.contains('fotos_pendientes');
         final faltan = requeridas.difference(nombres);
-        if (faltan.isNotEmpty) {
+        if (faltan.isNotEmpty || !tieneFotos) {
           throw 'no es un respaldo válido (faltan: ${faltan.join(', ')})';
         }
       } finally {
