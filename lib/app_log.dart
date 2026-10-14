@@ -9,19 +9,28 @@ import 'package:sqflite/sqflite.dart';
 
 import 'localdb.dart';
 
-/// Bitácora local v2.0 (v1.3.0).
+/// Bitácora local v3.0 (v1.3.1).
 /// Telemetría robusta y desacoplada para diagnóstico forense.
 ///
-/// Mejoras Gemini:
+/// Mejoras Gemini (v2.0):
 /// - 5 niveles (debug/info/aviso/error/critico)
 /// - Contexto estructurado JSON + stack recortado
 /// - Correlación por opId
 /// - Métricas automáticas (medir)
 /// - Buffer asíncrono con flush por lotes
-/// - Poda por cuota rígida (tiempo + 5000 filas)
 /// - Interceptores globales (main.dart)
 /// - Centinela de crash previo
 /// - Sanitización de tokens
+///
+/// Mejoras Argón (v3.0):
+/// - Ring Buffer en RAM (50 eventos): todo entra aquí primero;
+///   los breadcrumbs se adjuntan automáticamente a WARN/ERROR/CRITICO/FATAL
+/// - Crash Handler: volcado SÍNCRONO a last_crash.json (sin SQLite
+///   ni buffer asíncrono); ingesta como FATAL al reiniciar
+/// - Poda por severidad: ERROR/CRITICO/FATAL solo por antigüedad (30d);
+///   DEBUG/INFO/AVISO rotan en 4000 filas + 7 días
+/// - Métricas por umbral: medirLento() solo registra si supera el umbral
+/// - Modo Diagnóstico 24h: DEBUG persistente en release bajo demanda
 class AppLog {
   AppLog._();
 
@@ -30,47 +39,157 @@ class AppLog {
   static Timer? _flushTimer;
   static int _contador = 0;
 
-  /// Niveles: debug < info < aviso < error < critico
+  // === v3.0: Ring Buffer en RAM (Argón) ===
+  // FIFO circular de los últimos 50 eventos. Todo evento (incluso
+  // DEBUG) entra aquí primero. Solo RAM, nunca disco directamente.
+  static const int _ringCapacidad = 50;
+  static final List<Map<String, dynamic>> _ring = [];
+
+  // Ruta de documentos cacheada (para el volcado síncrono de crash).
+  static String? _docsPath;
+
+  // v3.0: modo diagnóstico (cache en memoria de applog_diag_hasta).
+  static const String _keyDiag = 'applog_diag_hasta';
+  static DateTime? _diagHasta;
+
+  static void _ringAdd(String nivel, String modulo, String mensaje,
+      [Map<String, dynamic>? contexto]) {
+    _ring.add({
+      'ts': DateTime.now().toIso8601String(),
+      'nivel': nivel,
+      'modulo': modulo,
+      'mensaje': _sanitizarTexto(mensaje),
+      if (contexto != null) 'contexto': _sanitizar(contexto),
+    });
+    if (_ring.length > _ringCapacidad) {
+      _ring.removeRange(0, _ring.length - _ringCapacidad);
+    }
+  }
+
+  static bool _esNivelAlto(String nivel) =>
+      nivel == 'aviso' ||
+      nivel == 'error' ||
+      nivel == 'critico' ||
+      nivel == 'fatal';
+
+  /// v3.0: ¿debe persistir en SQLite este nivel?
+  /// Release sin diagnóstico: desde INFO. En diagnóstico o debug: desde DEBUG.
+  static bool _deberiaPersistir(String nivel) {
+    const orden = [
+      'debug',
+      'info',
+      'aviso',
+      'error',
+      'critico',
+      'fatal'
+    ];
+    final idx = orden.indexOf(nivel);
+    if (idx < 0) return true; // nivel desconocido: no filtrar
+    final enDiag =
+        _diagHasta != null && DateTime.now().isBefore(_diagHasta!);
+    final minimo = (enDiag || !kReleaseMode) ? 0 : 1;
+    return idx >= minimo;
+  }
+
+  /// v3.0: inicialización. Carga el modo diagnóstico, cachea la ruta
+  /// de documentos, ingesta un crash previo (last_crash.json) y
+  /// engancha los manejadores globales de error.
+  /// Llamar una vez desde main() al arrancar.
+  static Future<void> init() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final ts = prefs.getInt(_keyDiag);
+      if (ts != null) {
+        final hasta = DateTime.fromMillisecondsSinceEpoch(ts);
+        if (hasta.isAfter(DateTime.now())) _diagHasta = hasta;
+      }
+    } catch (_) {}
+    try {
+      _docsPath = (await getApplicationDocumentsDirectory()).path;
+    } catch (_) {}
+    await _ingerirCrashPrevio();
+    _instalarManejadores();
+  }
+
+  /// Niveles: debug < info < aviso < error < critico < fatal
   static void debug(String m, String e,
           {String? d,
           Map<String, dynamic>? contexto,
           String? opId}) {
-    if (kReleaseMode) return; // debug no se guarda en release
-    _encolar(_crear(
-        m, e, 'debug', d, contexto, null, opId));
+    final log = _crear(m, e, 'debug', d, contexto, null, opId);
+    // v3.0: en release sin modo diagnóstico no se persiste.
+    if (_deberiaPersistir('debug')) _encolar(log);
   }
 
   static void info(String m, String e,
           {String? d,
           Map<String, dynamic>? contexto,
-          String? opId}) =>
-      _encolar(
-          _crear(m, e, 'info', d, contexto, null, opId));
+          String? opId}) {
+    final log = _crear(m, e, 'info', d, contexto, null, opId);
+    if (_deberiaPersistir('info')) _encolar(log);
+  }
 
   static void aviso(String m, String e,
           {String? d,
           Map<String, dynamic>? contexto,
-          String? opId}) =>
-      _encolar(
-          _crear(m, e, 'aviso', d, contexto, null, opId));
+          String? opId}) {
+    final log = _crear(m, e, 'aviso', d, contexto, null, opId);
+    if (_deberiaPersistir('aviso')) _encolar(log);
+  }
 
   static void error(String m, String e,
           {String? d,
           Map<String, dynamic>? contexto,
           StackTrace? stack,
-          String? opId}) =>
-      _encolar(
-          _crear(m, e, 'error', d, contexto, stack, opId),
-          inmediato: true);
+          String? opId}) {
+    final log = _crear(m, e, 'error', d, contexto, stack, opId);
+    if (_deberiaPersistir('error')) _encolar(log, inmediato: true);
+  }
 
   static void critico(String m, String e,
           {String? d,
           Map<String, dynamic>? contexto,
           StackTrace? stack,
-          String? opId}) =>
-      _encolar(
-          _crear(m, e, 'critico', d, contexto, stack, opId),
-          inmediato: true);
+          String? opId}) {
+    final log = _crear(m, e, 'critico', d, contexto, stack, opId);
+    if (_deberiaPersistir('critico')) {
+      _encolar(log, inmediato: true);
+    }
+  }
+
+  /// v3.0: breadcrumb de navegación/acción UI. Solo RAM, nunca disco.
+  /// Se adjunta automáticamente al contexto de WARN/ERROR/CRITICO/FATAL.
+  static void breadcrumb(String mensaje,
+      [Map<String, dynamic>? contexto]) {
+    _ringAdd('debug', 'ui', mensaje, contexto);
+  }
+
+  /// v3.0 (Argón): registra AVISO solo si [duracionMs] supera [umbralMs].
+  /// Para detectar queries/operaciones lentas sin ruido en la bitácora.
+  static void medirLento(String nombre, int duracionMs,
+      {int umbralMs = 300}) {
+    if (duracionMs < umbralMs) return;
+    aviso('perf', 'lento_$nombre', contexto: {
+      'duracion_ms': duracionMs,
+      'umbral_ms': umbralMs,
+    });
+  }
+
+  /// v3.0: activa persistencia de DEBUG en release por 24h.
+  /// Se desactiva solo por TTL.
+  static Future<void> activarModoDiagnostico() async {
+    final hasta =
+        DateTime.now().add(const Duration(hours: 24));
+    _diagHasta = hasta;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setInt(
+          _keyDiag, hasta.millisecondsSinceEpoch);
+    } catch (_) {}
+    info('app', 'modo_diagnostico_activado',
+        d: 'DEBUG persistente por 24h',
+        contexto: {'hasta': hasta.toIso8601String()});
+  }
 
   static Map<String, dynamic> _crear(
       String modulo,
@@ -80,10 +199,18 @@ class AppLog {
       Map<String, dynamic>? contexto,
       StackTrace? stack,
       String? opId) {
+    // v3.0: todo evento entra primero al ring buffer en RAM.
+    _ringAdd(nivel, modulo, evento, contexto);
     // Sanitizar (Gemini #8)
     final ctxSan = contexto != null
         ? _sanitizar(contexto)
-        : null;
+        : <String, dynamic>{};
+    // v3.0 (Argón): adjuntar copia del ring buffer en niveles altos.
+    // Así un WARN/ERROR trae el "lujo de detalles" en 1 sola fila.
+    if (_esNivelAlto(nivel)) {
+      ctxSan['breadcrumbs'] =
+          List<Map<String, dynamic>>.from(_ring);
+    }
     final detSan = detalle != null
         ? _sanitizarTexto(detalle)
         : null;
@@ -100,7 +227,7 @@ class AppLog {
       'evento': evento,
       'detalle': detSan,
       'nivel': nivel,
-      'contexto': ctxSan != null
+      'contexto': ctxSan.isNotEmpty
           ? jsonEncode(ctxSan)
           : null,
       'op_id': opId,
@@ -216,6 +343,97 @@ class AppLog {
   static String nuevoOpId(String prefijo) =>
       '${prefijo}_${DateTime.now().millisecondsSinceEpoch.toRadixString(36)}';
 
+  // === v3.0: Crash Handler (Argón) ===
+  // Engancha los manejadores globales ENCADENANDO los previos
+  // (p. ej. los de main.dart), para no romper su comportamiento.
+
+  static void _instalarManejadores() {
+    final previoFlutter = FlutterError.onError;
+    FlutterError.onError = (details) {
+      _volcarCrashSync('flutter_error',
+          details.exceptionAsString(), details.stack);
+      if (previoFlutter != null) {
+        previoFlutter(details);
+      } else {
+        FlutterError.presentError(details);
+      }
+    };
+    try {
+      final previoAsync =
+          PlatformDispatcher.instance.onError;
+      PlatformDispatcher.instance.onError =
+          (error, stack) {
+        _volcarCrashSync(
+            'async_error', '$error', stack);
+        if (previoAsync != null) {
+          return previoAsync(error, stack);
+        }
+        return true;
+      };
+    } catch (_) {}
+  }
+
+  /// Volcado SÍNCRONO del crash a last_crash.json.
+  /// No usa SQLite ni el buffer asíncrono: el SO puede matar
+  /// el proceso en milisegundos y el buffer nunca se vaciaría.
+  static void _volcarCrashSync(
+      String tipo, String error, StackTrace? stack) {
+    try {
+      final dir = _docsPath;
+      if (dir == null) return;
+      final err = error.length > 2000
+          ? error.substring(0, 2000)
+          : error;
+      final mapa = <String, dynamic>{
+        'ts': DateTime.now().toIso8601String(),
+        'tipo': tipo,
+        'error': _sanitizarTexto(err),
+        'stack': stack
+            ?.toString()
+            .split('\n')
+            .take(25)
+            .join('\n'),
+        'breadcrumbs':
+            List<Map<String, dynamic>>.from(_ring),
+      };
+      File('$dir/last_crash.json')
+          .writeAsStringSync(jsonEncode(mapa));
+    } catch (_) {
+      // Nunca propagar desde el manejador de crash.
+    }
+  }
+
+  /// Al iniciar: si existe last_crash.json de una corrida previa,
+  /// insertarlo como FATAL y borrar el archivo.
+  static Future<void> _ingerirCrashPrevio() async {
+    try {
+      final dir = _docsPath;
+      if (dir == null) return;
+      final f = File('$dir/last_crash.json');
+      if (!await f.exists()) return;
+      final raw = await f.readAsString();
+      await f.delete();
+      final data =
+          jsonDecode(raw) as Map<String, dynamic>;
+      final db = await LocalDb.instance.db;
+      await db.insert('app_log', {
+        'ts':
+            '${data['ts'] ?? DateTime.now().toIso8601String()}',
+        'modulo': 'app',
+        'evento':
+            "crash_${data['tipo'] ?? 'desconocido'}",
+        'detalle':
+            _sanitizarTexto('${data['error'] ?? '?'}'),
+        'nivel': 'fatal',
+        'contexto': jsonEncode({
+          'breadcrumbs': data['breadcrumbs'],
+        }),
+        'op_id': null,
+        'stack': data['stack'] as String?,
+      });
+    } catch (_) {}
+  }
+
   /// Mide duración automáticamente (Gemini #4).
   static Future<T> medir<T>(
     String modulo,
@@ -253,18 +471,32 @@ class AppLog {
     }
   }
 
-  /// Poda dual: por tiempo Y por cuota rígida (Gemini #2).
+  /// Poda por severidad (v3.0, Argón):
+  /// - ERROR/CRITICO/FATAL: solo por antigüedad (30 días), nunca por cuota.
+  ///   Una ráfaga de INFO ya no puede purgar errores críticos.
+  /// - DEBUG/INFO/AVISO: por antigüedad (7 días) + cuota de 4000 filas.
   static Future<void> podar([Database? db]) async {
     try {
       final b = db ?? await LocalDb.instance.db;
       // M3 (Argón): corte ISO desde Dart (no datetime('now') UTC).
-      final corte = DateTime.now()
+      final corte30 = DateTime.now()
+          .subtract(const Duration(days: 30))
+          .toIso8601String();
+      await b.delete('app_log',
+          where:
+              "nivel IN ('error','critico','fatal') AND ts < ?",
+          whereArgs: [corte30]);
+      final corte7 = DateTime.now()
           .subtract(const Duration(days: 7))
           .toIso8601String();
       await b.execute(
-        'DELETE FROM app_log WHERE ts < ? '
-        'OR id NOT IN (SELECT id FROM app_log ORDER BY id DESC LIMIT 5000)',
-        [corte],
+        "DELETE FROM app_log "
+        "WHERE nivel NOT IN ('error','critico','fatal') "
+        'AND (ts < ? OR id NOT IN ('
+        'SELECT id FROM app_log '
+        "WHERE nivel NOT IN ('error','critico','fatal') "
+        'ORDER BY id DESC LIMIT 4000))',
+        [corte7],
       );
     } catch (_) {}
   }
@@ -285,8 +517,9 @@ class AppLog {
         .toIso8601String();
     var nErr = 0, nAviso = 0, nCrit = 0;
     for (final f in filas) {
-      if ('${f['ts']}' .compareTo(hace24h) < 0)
+      if ('${f['ts']}'.compareTo(hace24h) < 0) {
         continue;
+      }
       switch ('${f['nivel']}') {
         case 'error':
           nErr++;
@@ -295,6 +528,7 @@ class AppLog {
           nAviso++;
           break;
         case 'critico':
+        case 'fatal': // v3.0
           nCrit++;
           break;
       }

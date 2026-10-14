@@ -58,6 +58,8 @@ Future<void> _programarSubidaFondo() async {
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // v1.3.1 (AppLog v3.0): init con ring buffer, crash handler y modo diagnóstico.
+  await AppLog.init();
   // v1.3.0 (AppLog v2.0, Gemini #3): interceptores globales.
   FlutterError.onError = (details) {
     FlutterError.presentError(details);
