@@ -204,30 +204,32 @@ class AppLog {
       Map<String, dynamic>? contexto,
       StackTrace? stack,
       String? opId) {
-    // 1. Sanitizar UNA sola vez (Argón: antes había doble sanitización).
+    // 1. Sanitizar UNA sola vez.
     final detSan =
         detalle != null ? _sanitizarTexto(detalle) : null;
-    final ctxSan = contexto != null
+    final ctxLimpio = contexto != null
         ? Map<String, dynamic>.from(_sanitizar(contexto))
         : <String, dynamic>{};
 
-    // 2. Siempre entra al Ring Buffer en RAM (ya sanitizado).
+    // 2. Ring Buffer recibe copia limpia (sin breadcrumbs) para no
+    //    contaminar RAM ni crear referencia circular.
     _ringAdd(nivel, modulo, evento,
-        detalle: detSan, ctxSanitizado: ctxSan);
+        detalle: detSan,
+        ctxSanitizado: ctxLimpio.isNotEmpty
+            ? Map<String, dynamic>.from(ctxLimpio)
+            : null);
 
-    // 3. Si no debe persistir en disco (ej. debug en release),
-    //    salir sin jsonEncode ni construir el payload (Argón: cero costo).
+    // 3. Si no debe persistir en disco, salir sin jsonEncode.
     if (!_deberiaPersistir(nivel)) return null;
 
-    // 4. Breadcrumbs: 50 completos solo en error/critico/fatal;
-    //    en aviso (no perf) solo los últimos 5 (Argón: evitar explosión
-    //    de almacenamiento con medirLento).
+    // 4. Contexto exclusivo para SQLite (sin mutar lo del ring).
+    final ctxDb = Map<String, dynamic>.from(ctxLimpio);
     if (_esNivelAlto(nivel)) {
-      ctxSan['breadcrumbs'] =
+      ctxDb['breadcrumbs'] =
           List<Map<String, dynamic>>.from(_ring);
     } else if (nivel == 'aviso' && modulo != 'perf') {
       final skip = _ring.length > 5 ? _ring.length - 5 : 0;
-      ctxSan['breadcrumbs'] = _ring.sublist(skip);
+      ctxDb['breadcrumbs'] = _ring.sublist(skip);
     }
 
     // Stack recortado a 15 líneas.
@@ -244,7 +246,7 @@ class AppLog {
       'detalle': detSan,
       'nivel': nivel,
       'contexto':
-          ctxSan.isNotEmpty ? jsonEncode(ctxSan) : null,
+          ctxDb.isNotEmpty ? jsonEncode(ctxDb) : null,
       'op_id': opId,
       'stack': stackRecortado,
     };

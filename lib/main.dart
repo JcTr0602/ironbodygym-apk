@@ -68,11 +68,7 @@ Future<void> main() async {
         },
         stack: details.stack);
   };
-  PlatformDispatcher.instance.onError = (error, stack) {
-    AppLog.critico('app', 'async_uncaught',
-        contexto: {'error': '$error'}, stack: stack);
-    return !kDebugMode;
-  };
+  // v1.3.1 (AppLog v3.0): PlatformDispatcher lo maneja AppLog.init().
   // v1.3.1 (AppLog v3.0, Argón Fix A): init DESPUÉS de los handlers
   // de main.dart, para que el encadenamiento de _instalarManejadores()
   // los envuelva en lugar de ser sobrescrito por ellos.
