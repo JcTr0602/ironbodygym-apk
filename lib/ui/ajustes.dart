@@ -44,7 +44,6 @@ class _AjustesScreenState extends State<AjustesScreen> {
   String? _carnet;
   bool _recordatorio = true;
   int _horasAviso = 8;
-  int _pagoEntrenador = 150; // v1.3.0 (Jc): configurable.
   bool _avisoFalloSync = true;
   bool _autoSync = true;
   bool _vibracion = true; // v1.2.5 (3.2)
@@ -75,7 +74,6 @@ class _AjustesScreenState extends State<AjustesScreen> {
     final carnet = await _perfil.getCarnet();
     final rec = await _perfil.getRecordatorioSync();
     final horas = await _perfil.getHorasAviso();
-    final pagoEnt = await _perfil.getPagoEntrenador();
     final fallo = await _perfil.getAvisoFalloSync();
     final auto = await _perfil.getAutoSync();
     final vibracion = await _perfil.getVibracion();
@@ -92,7 +90,6 @@ class _AjustesScreenState extends State<AjustesScreen> {
         _carnet = carnet;
         _recordatorio = rec;
         _horasAviso = horas;
-        _pagoEntrenador = pagoEnt;
         _avisoFalloSync = fallo;
         _autoSync = auto;
         _vibracion = vibracion;
@@ -363,61 +360,6 @@ class _AjustesScreenState extends State<AjustesScreen> {
     if (sel != null) {
       await _perfil.setHorasAviso(sel);
       if (mounted) setState(() => _horasAviso = sel);
-    }
-  }
-
-  /// v1.3.0 (Jc): elegir cuánto se paga por cliente a entrenadores.
-  Future<void> _elegirPagoEntrenador() async {
-    final ctrl = TextEditingController(
-        text: '$_pagoEntrenador');
-    final sel = await showDialog<int>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title:
-            const Text('Pago a entrenadores'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment:
-              CrossAxisAlignment.start,
-          children: [
-            const Text(
-                'CUP por cada cliente que pagó su mensualidad:'),
-            const SizedBox(height: 12),
-            TextField(
-              controller: ctrl,
-              keyboardType: TextInputType.number,
-              decoration: const InputDecoration(
-                suffixText: 'CUP',
-                border: OutlineInputBorder(),
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-              onPressed: () =>
-                  Navigator.pop(ctx),
-              child: const Text('Cancelar')),
-          ElevatedButton(
-              onPressed: () {
-                final v =
-                    int.tryParse(ctrl.text);
-                Navigator.pop(
-                    ctx, v != null && v > 0 ? v : null);
-              },
-              child: const Text('Guardar')),
-        ],
-      ),
-    );
-    if (sel != null) {
-      await _perfil.setPagoEntrenador(sel);
-      if (mounted) {
-        setState(() => _pagoEntrenador = sel);
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(
-                content: Text(
-                    'Pago actualizado: $sel CUP por cliente')));
-      }
     }
   }
 
@@ -1410,15 +1352,6 @@ class _AjustesScreenState extends State<AjustesScreen> {
                     subtitulo:
                         'Genera un archivo con el registro de la app',
                     onTap: _exportarBitacora,
-                  ),
-                // v1.3.0 (Jc): pago por cliente a entrenadores.
-                if (AuthService().isOwner)
-                  _opcion(
-                    icono: Icons.payments_outlined,
-                    titulo: 'Pago a entrenadores',
-                    subtitulo:
-                        '$_pagoEntrenador CUP por cliente que pagó',
-                    onTap: _elegirPagoEntrenador,
                   ),
 
                 // ----- ACERCA DE -----

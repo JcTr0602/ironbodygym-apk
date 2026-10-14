@@ -12,8 +12,10 @@ import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:uuid/uuid.dart';
 
+import '../auth.dart';
 import '../localdb.dart';
 import '../negocio.dart';
+import '../perfil.dart';
 import '../permisos.dart';
 import '../sync.dart';
 import '../tipos_pago.dart';
@@ -49,6 +51,8 @@ class _AdminScreenState extends State<AdminScreen> {
   int _pendientesSubir = 0;
 
   List<TipoPago> _tipos = [];
+  // v1.3.1: pago por cliente a entrenadores (movido desde Ajustes, solo dueño).
+  int _pagoEntrenador = 150;
 
   static const _clavesMonto = [
     ('transferencia', 'Mensualidad por transferencia'),
@@ -91,6 +95,7 @@ class _AdminScreenState extends State<AdminScreen> {
     final gh = await gastosDe(hoyIso);
     final aj = await LocalDb.instance.getAjustes();
     final tipos = await getTiposPago(soloActivos: false);
+    final pagoEnt = await PerfilService.instance.getPagoEntrenador();
     // Salud del sistema
     final det = await SyncEngine.instance.detalle();
     final pendSubir = await LocalDb.instance.countPendingOps();
@@ -107,6 +112,7 @@ class _AdminScreenState extends State<AdminScreen> {
         _syncDet = det;
         _pendientesSubir = pendSubir;
         _tipos = tipos;
+        _pagoEntrenador = pagoEnt;
         for (final (clave, _) in _clavesMonto) {
           _montos
               .putIfAbsent(clave, () => TextEditingController())
@@ -496,6 +502,56 @@ class _AdminScreenState extends State<AdminScreen> {
   }
 
   // -- pendiente a entrega ----------------------------------------------
+  /// v1.3.1: elegir cuánto se paga por cliente a entrenadores.
+  /// Movido desde Ajustes (solo dueño).
+  Future<void> _elegirPagoEntrenador() async {
+    final ctrl = TextEditingController(text: '$_pagoEntrenador');
+    final sel = await showDialog<int>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Pago a entrenadores'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+                'CUP por cada cliente que pagó su mensualidad:'),
+            const SizedBox(height: 12),
+            TextField(
+              controller: ctrl,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(
+                suffixText: 'CUP',
+                border: OutlineInputBorder(),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cancelar')),
+          ElevatedButton(
+              onPressed: () {
+                final v = int.tryParse(ctrl.text);
+                Navigator.pop(ctx, v != null && v > 0 ? v : null);
+              },
+              child: const Text('Guardar')),
+        ],
+      ),
+    );
+    ctrl.dispose();
+    if (sel != null) {
+      await PerfilService.instance.setPagoEntrenador(sel);
+      if (mounted) {
+        setState(() => _pagoEntrenador = sel);
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content:
+                Text('Pago actualizado: $sel CUP por cliente')));
+      }
+    }
+  }
+
   Future<void> _confirmarEntrega(
       {int? trainerId, required String nombre}) async {
     final notaCtrl = TextEditingController();
@@ -839,6 +895,15 @@ class _AdminScreenState extends State<AdminScreen> {
                           'Cierres por entrenador y fecha',
                           () => _ir(const HistorialCajaScreen()),
                         ),
+                        // v1.3.1: pago por cliente a entrenadores (solo dueño).
+                        if (AuthService().isOwner)
+                          _tarjetaHub(
+                            'K',
+                            Icons.payments_outlined,
+                            'Pago a entrenadores',
+                            '$_pagoEntrenador CUP por cliente que pagó',
+                            _elegirPagoEntrenador,
+                          ),
                       ],
                     ),
                   ),
