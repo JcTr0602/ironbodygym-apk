@@ -471,10 +471,13 @@ class PerfilService {
       'tamano_letra',
       'bloqueo_minutos',
       'ultima_actividad',
-      'perfil_movil',
-      'perfil_carnet',
+      // v1.3.1: usar _key() para claves por usuario.
+      _key('perfil_movil'),
+      _key('perfil_carnet'),
       'pref_recordatorio_sync',
       'metricas_home',
+      'vibracion_haptica',
+      'alto_contraste',
     ]) {
       await p.remove(k);
     }

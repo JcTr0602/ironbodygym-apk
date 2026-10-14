@@ -177,6 +177,12 @@ class _AdminScreenState extends State<AdminScreen> {
         payload: {'clave': e.key, 'valor': e.value},
       );
     }
+    // v1.3.1: actualización optimista del espejo local.
+    final aj = await LocalDb.instance.getAjustes();
+    for (final e in cambios.entries) {
+      aj[e.key] = e.value;
+    }
+    await LocalDb.instance.setAjustes(aj);
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Precios guardados (se sincronizarán)')));
@@ -203,8 +209,8 @@ class _AdminScreenState extends State<AdminScreen> {
           continue;
         }
         if (clave == 'movil_confirmacion' &&
-            !RegExp(r'^5\d{7}$').hasMatch(digitos)) {
-          errores.add('Móvil: 8 dígitos, empieza por 5');
+            !RegExp(r'^[56]\d{7}$').hasMatch(digitos)) {
+          errores.add('Móvil: 8 dígitos, empieza por 5 o 6');
           continue;
         }
       }
@@ -239,6 +245,11 @@ class _AdminScreenState extends State<AdminScreen> {
         payload: {'clave': e.key, 'valor': e.value},
       );
     }
+    // v1.3.1: actualización optimista del espejo local.
+    for (final e in cambios.entries) {
+      aj[e.key] = e.value;
+    }
+    await LocalDb.instance.setAjustes(aj);
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
         content: Text('Datos bancarios guardados (se sincronizarán)')));

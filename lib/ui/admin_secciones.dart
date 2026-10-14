@@ -506,7 +506,7 @@ class _SeccionAjustesScreenState extends State<SeccionAjustesScreen> {
                 padding: const EdgeInsets.only(bottom: 8),
                 child: CampoTexto(
                   controller: widget.montos[clave],
-                  etiqueta: '$etiqueta (CUP)',
+                  etiqueta: etiqueta.contains('CUP') ? etiqueta : '$etiqueta (CUP)',
                   teclado: const TextInputType.numberWithOptions(
                       decimal: true),
                 ),

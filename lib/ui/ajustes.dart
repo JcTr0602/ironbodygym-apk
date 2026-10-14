@@ -18,6 +18,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../auth.dart';
 import '../app_log.dart';
 import '../config.dart';
+import '../fotos_cola.dart';
 import '../localdb.dart';
 import '../negocio.dart';
 import '../novedades.dart';
@@ -148,6 +149,8 @@ class _AjustesScreenState extends State<AjustesScreen> {
     final destino = await _perfil.avatarFile();
     await File(img.path).copy(destino.path);
     if (!mounted) return;
+    // v1.3.1: invalidar caché de Flutter (misma ruta, imagen nueva).
+    await FileImage(destino).evict();
     setState(() => _avatar = destino);
     _msg('Foto de perfil actualizada');
   }
@@ -497,6 +500,8 @@ class _AjustesScreenState extends State<AjustesScreen> {
     if (accion == 'quitar') {
       // PIN eliminado: actualizar estado y desactivar el bloqueo.
       await _perfil.setBloqueoMinutos(0);
+      // v1.3.1: limpiar ciclos de bloqueo acumulados.
+      await _perfil.reiniciarBloqueoPin();
       setState(() {
         _tienePin = false;
         _bloqueoMinutos = 0;
@@ -517,6 +522,8 @@ class _AjustesScreenState extends State<AjustesScreen> {
     }
     final hash = await _perfil.hashPinNuevo(p1);
     await _perfil.setPinHash(hash);
+    // v1.3.1: limpiar ciclos de bloqueo acumulados.
+    await _perfil.reiniciarBloqueoPin();
     if (mounted) {
       setState(() => _tienePin = true);
       _msg('PIN configurado');
@@ -742,11 +749,14 @@ class _AjustesScreenState extends State<AjustesScreen> {
       final docs = await getApplicationDocumentsDirectory();
       final fotosBytes =
           await _tamanoDir(Directory('${docs.path}/fotos_cache'));
-      final total = dbBytes + fotosBytes;
+      // v1.3.1: incluir cola de subida (fotos/ con 3 variantes por foto).
+      final colaBytes =
+          await _tamanoDir(Directory('${docs.path}/fotos'));
+      final total = dbBytes + fotosBytes + colaBytes;
       if (!mounted) return;
       setState(() {
         _espacioTexto =
-            'Base de datos: ${_fmtTamano(dbBytes)}\nFotos: ${_fmtTamano(fotosBytes)}\nTotal: ${_fmtTamano(total)}';
+            'Base de datos: ${_fmtTamano(dbBytes)}\nFotos: ${_fmtTamano(fotosBytes)}\nCola de subida: ${_fmtTamano(colaBytes)}\nTotal: ${_fmtTamano(total)}';
       });
       await showDialog(
         context: context,
@@ -785,6 +795,8 @@ class _AjustesScreenState extends State<AjustesScreen> {
           await e.delete(recursive: true);
         }
       }
+      // v1.3.1: limpiar también huérfanos de la cola de subida.
+      await FotosColaService.instance.limpiarHuerfanos();
       _msg('Caché de fotos limpiado');
     } catch (e) {
       _msg('No se pudo limpiar: $e');
@@ -960,6 +972,8 @@ class _AjustesScreenState extends State<AjustesScreen> {
     await _perfil.resetAjustes();
     await ThemeController.setTema('sistema');
     await ThemeController.setFontScale(1.0);
+    // v1.3.1: resetear alto contraste.
+    await ThemeController.setAltoContraste(false);
     _cargar();
     _msg('Ajustes restablecidos');
   }
