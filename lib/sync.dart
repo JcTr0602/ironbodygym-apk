@@ -517,7 +517,8 @@ class SyncEngine {
         } else if (errPull != null) {
           await _db.setMeta('last_sync_error', errPull);
         } else {
-          // Push OK y pull sin excepciones: limpiar cualquier error previo.
+          // Push OK y pull sin excepciones: limpiar error y marcar OK.
+          await _marcarOk();
           await _db.setMeta('last_sync_error', '');
         }
         // v1.0.17: resumen discreto de lo que realmente cambió
@@ -577,10 +578,8 @@ class SyncEngine {
           n = await _download(tablasFiltro: tablasNormales);
         }
         await _db.setMeta('last_pull_ok', DateTime.now().toIso8601String());
-        // v1.3.1 (E5): no pisar con 0.
-        if (n > 0) {
-          await _db.setMeta('last_downloaded', '$n');
-        }
+        // v1.3.1 (E5): scope sync es manual, siempre refleja el ciclo real.
+        await _db.setMeta('last_downloaded', '$n');
         await _db.setMeta('last_scope', scope);
         _emit(SyncPhase.idle,
             resumen: 'Sincronizado: ${tablas.join(', ')}');
@@ -774,8 +773,8 @@ class SyncEngine {
         await _db.setMeta(
             'last_pull_ok', DateTime.now().toIso8601String());
       }
-      // v1.3.1 (E5): no pisar con 0 en pulls vacíos/silenciosos.
-      if (n > 0) {
+      // v1.3.1 (E5): el pull silencioso del push no pisa el contador.
+      if (!silencioso) {
         await _db.setMeta('last_downloaded', '$n');
       }
       _emit(SyncPhase.idle);
@@ -811,8 +810,8 @@ class SyncEngine {
       await db.update(
         'ops_queue',
         {'estado': 'pendiente', 'error': null},
-        // v1.3.1 (E4): comparar contra enviada_ts, no creada_ts.
-        where: "estado = 'enviada' AND enviada_ts < ?",
+        // v1.3.1 (E4): comparar contra enviada_ts (NULL = antes de v21).
+        where: "estado = 'enviada' AND (enviada_ts IS NULL OR enviada_ts < ?)",
         whereArgs: [corte],
       );
     } catch (_) {}

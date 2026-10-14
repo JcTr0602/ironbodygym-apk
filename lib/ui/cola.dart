@@ -226,11 +226,13 @@ class _ColaScreenState extends State<ColaScreen> {
         'intentos=0 WHERE op_uuid=?',
         [opUuid]);
     await _cargar();
+    // v1.3.1 (E6): sincronizar al instante.
+    unawaited(SyncEngine.instance.push());
     // v1.2.6 (Gemini): confirmación háptica en reintento manual.
     await vibrarConfirmacion();
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('Se reintentará en la próxima sincronización')));
+          content: Text('Reintentando sincronización...')));
     }
   }
 
@@ -831,52 +833,55 @@ class _ColaScreenState extends State<ColaScreen> {
         detalles.add('Monto: ${payload['monto']} CUP');
       }
     } else if (tipo == 'venta_suplemento') {
-      // v1.3.1 (E7): detalles de venta de suplemento.
       if (payload['suplemento_nombre'] != null) {
         detalles.add('Suplemento: ${payload['suplemento_nombre']}');
       }
-      if (payload['cantidad'] != null) {
-        detalles.add('Cantidad: ${payload['cantidad']}');
-      }
-      if (payload['total'] != null) {
-        final moneda = payload['moneda'] ?? 'CUP';
-        detalles.add('Total: ${payload['total']} $moneda');
-      }
+      final cant = (payload['cantidad'] as num?) ?? 1;
+      detalles.add('Cantidad: $cant');
+      final total = (payload['total'] as num?) ??
+          (((payload['precio'] as num?) ?? 0) * cant);
+      final moneda = payload['moneda'] ?? 'CUP';
+      if (total > 0) detalles.add('Total: ${fmtMonto(total)} $moneda');
       final n = await nombreCliente(payload['cliente_id']);
-      if (n != null) detalles.add('Cliente: $n');
+      if (n != null) {
+        detalles.add('Cliente: $n');
+      } else if (payload['comprador_nombre'] != null) {
+        detalles.add('Comprador: ${payload['comprador_nombre']}');
+      }
     } else if (tipo == 'crear_suplemento' || tipo == 'editar_suplemento') {
       if (payload['nombre'] != null) {
         detalles.add('Suplemento: ${payload['nombre']}');
       }
-      if (payload['precio'] != null) {
-        detalles.add('Precio: ${payload['precio']} CUP');
-      }
+      final p = payload['precio_oficial'] ?? payload['precio'];
+      if (p != null) detalles.add('Precio: $p USD');
     } else if (tipo == 'eliminar_suplemento') {
-      if (payload['suplemento_nombre'] != null) {
-        detalles.add('Suplemento: ${payload['suplemento_nombre']}');
-      }
+      detalles.add('ID suplemento: ${payload['suplemento_id'] ?? '—'}');
       detalles.add('Acción: Eliminar');
     } else if (tipo == 'incidencia' || tipo == 'incidencia_estado') {
-      // v1.3.1 (E7): detalles de incidencia.
-      if (payload['titulo'] != null) {
-        detalles.add('Incidencia: ${payload['titulo']}');
+      if (payload['descripcion'] != null) {
+        detalles.add('Descripción: ${payload['descripcion']}');
       }
-      if (payload['tipo_nombre'] != null) {
-        detalles.add('Tipo: ${payload['tipo_nombre']}');
+      if (payload['tipo'] != null) {
+        detalles.add('Tipo: ${payload['tipo']}');
       }
       if (payload['estado'] != null) {
         detalles.add('Estado: ${payload['estado']}');
+      }
+      if (payload['nota_resolucion'] != null) {
+        detalles.add('Nota: ${payload['nota_resolucion']}');
       }
     } else if (tipo == 'cierre_turno') {
       if (payload['fecha'] != null) {
         detalles.add('Fecha: ${payload['fecha']}');
       }
-      if (payload['total'] != null) {
-        detalles.add('Total: ${payload['total']} CUP');
+      if (payload['turno'] != null) {
+        detalles.add('Turno: ${payload['turno']}');
       }
+      final tc = payload['total_cobrado'] ?? payload['total'];
+      if (tc != null) detalles.add('Total cobrado: ${fmtMonto(tc)} CUP');
     } else if (tipo == 'foto_suplemento') {
-      if (payload['suplemento_nombre'] != null) {
-        detalles.add('Suplemento: ${payload['suplemento_nombre']}');
+      if (payload['suplemento_id'] != null) {
+        detalles.add('Suplemento ID: ${payload['suplemento_id']}');
       }
     }
     return detalles;
@@ -895,7 +900,9 @@ class _ColaScreenState extends State<ColaScreen> {
         _ops.where((o) => o['estado'] == 'enviada').length;
     // v1.3.1 (E2): bloqueadas (necesita_revision/rechazada) van a rojo.
     final bloqueadas = _bloqueadas.length;
-    final totalError = conError + bloqueadas + _fotosError;
+    final rechazadas =
+        _ops.where((o) => o['estado'] == 'rechazada').length;
+    final totalError = conError + bloqueadas + rechazadas + _fotosError;
     final totalPendiente = pendientes + _fotosPendientes + _fotosSubiendo;
     final errorReciente = _det.error;
     // v1.0.14: tres estados claros en vez de binario ok/error
@@ -1025,7 +1032,8 @@ class _ColaScreenState extends State<ColaScreen> {
                     Icons.download,
                     'Bajados',
                     '${_det.bajados}',
-                    'Última: ${_hora(_det.ultimaPull)}',
+                    // v1.3.1 (E5): acumulado histórico + última sync.
+                    'Total: ${_det.totalBajados} · ${_hora(_det.ultimaPull)}',
                     AppColores.info,
                   ),
                 ),
@@ -1035,7 +1043,8 @@ class _ColaScreenState extends State<ColaScreen> {
                     Icons.upload,
                     'Subidos',
                     '${_det.subidos}',
-                    'Última: ${_hora(_det.ultimaPush)}',
+                    // v1.3.1 (E5): acumulado histórico + última sync.
+                    'Total: ${_det.totalSubidos} · ${_hora(_det.ultimaPush)}',
                     AppColores.naranja,
                   ),
                 ),
