@@ -16,6 +16,7 @@ import 'package:share_plus/share_plus.dart';
 import 'package:uuid/uuid.dart';
 
 import '../app_log.dart';
+import '../auth.dart';
 import '../fotos.dart';
 import '../localdb.dart';
 import '../negocio.dart';
@@ -201,12 +202,13 @@ class DetalleSuplementoScreen extends StatelessWidget {
             onPressed: () =>
                 compartirSuplemento(context, suplemento, tasaUsd),
           ),
-          IconButton(
-            icon: const Icon(Icons.delete_outline),
-            tooltip: 'Eliminar suplemento',
-            onPressed: () =>
-                _eliminarSuplemento(context, suplemento),
-          ),
+          if (AuthService().isOwner)
+            IconButton(
+              icon: const Icon(Icons.delete_outline),
+              tooltip: 'Eliminar suplemento',
+              onPressed: () =>
+                  _eliminarSuplemento(context, suplemento),
+            ),
         ],
       ),
       body: ListView(

@@ -305,8 +305,13 @@ class FilaCliente extends StatelessWidget {
       this.leading});
 
   @override
-  Widget build(BuildContext context) =>
-      _FilaCliente(cliente: cliente, onTap: onTap, onLongPress: onLongPress, trailing: trailing, leading: leading);
+  Widget build(BuildContext context) => _FilaCliente(
+      key: ValueKey(cliente['id']),
+      cliente: cliente,
+      onTap: onTap,
+      onLongPress: onLongPress,
+      trailing: trailing,
+      leading: leading);
 }
 
 class _FilaCliente extends StatefulWidget {
@@ -316,7 +321,12 @@ class _FilaCliente extends StatefulWidget {
   final Widget? trailing;
   final Widget? leading;
   const _FilaCliente(
-      {required this.cliente, this.onTap, this.onLongPress, this.trailing, this.leading});
+      {super.key,
+      required this.cliente,
+      this.onTap,
+      this.onLongPress,
+      this.trailing,
+      this.leading});
 
   @override
   State<_FilaCliente> createState() => _FilaClienteState();
@@ -347,13 +357,12 @@ class _FilaClienteState extends State<_FilaCliente> {
   /// el estado y el initState no se repite).
   Future<void> _resolverFoto() async {
     final sp = widget.cliente['foto_storage'] as String?;
-    // Fix: si no hay foto, limpiar la anterior (widget reciclado).
-    if (sp == null || sp.isEmpty) {
-      if (_foto != null && mounted) setState(() => _foto = null);
-      _resueltoPara = sp;
-      return;
+    // Argón: limpiar siempre que cambie el cliente, antes de async.
+    if (sp != _resueltoPara && _foto != null && mounted) {
+      setState(() => _foto = null);
     }
     _resueltoPara = sp;
+    if (sp == null || sp.isEmpty) return;
     final enCache =
         await FotoCache.instance.enCache(sp);
     if (!mounted || _resueltoPara != sp) return;
