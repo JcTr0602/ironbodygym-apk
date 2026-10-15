@@ -989,11 +989,23 @@ class LocalDb {
         'hora_apertura TEXT NOT NULL, '
         'hora_cierre TEXT, '
         'telegram_id INTEGER NOT NULL, '
-        'estado TEXT NOT NULL)');
+        'estado TEXT NOT NULL, '
+        // v1.3.3 (auditoría ChatGPT #12): UUID estable de la op de cierre
+        // para reintentos idempotentes; snapshot JSON de lo verificado
+        // al cerrar (auditoría #8).
+        'cierre_op_uuid TEXT, '
+        'cierre_snapshot TEXT)');
     await db.execute(
         'CREATE INDEX IF NOT EXISTS idx_turnos_fecha ON turnos(fecha_turno, telegram_id)');
     await db.execute(
         'CREATE UNIQUE INDEX IF NOT EXISTS idx_turnos_unico ON turnos(fecha_turno, turno, telegram_id)');
+    // v24 nunca se publicó en APK: las columnas nuevas van en el DDL.
+    // Por si algún dispositivo la tuviera, migración tolerante:
+    for (final col in ['cierre_op_uuid TEXT', 'cierre_snapshot TEXT']) {
+      try {
+        await db.execute('ALTER TABLE turnos ADD COLUMN $col');
+      } catch (_) {}
+    }
   }
 
   /// v1.3.0 (Sol #4): DDL de Incidencias v19, idempotente.
@@ -2315,7 +2327,9 @@ class LocalDb {
   /// Inserta un turno abierto. Idempotente por (fecha_turno, turno,
   /// telegram_id): si ya existe, devuelve el turno_id existente sin
   /// duplicar (protección ante doble tap).
-  Future<String> insertarTurno({
+  /// Retorna (turno_id, creado): creado=false si ya existía (el
+  /// llamador NO debe encolar otra apertura en ese caso).
+  Future<(String, bool)> insertarTurno({
     required String turnoId,
     required String fechaTurno,
     required String turno,
@@ -2329,18 +2343,29 @@ class LocalDb {
         whereArgs: [fechaTurno, turno, telegramId],
         limit: 1);
     if (existente.isNotEmpty) {
-      return existente.first['turno_id'] as String;
+      return (existente.first['turno_id'] as String, false);
     }
-    await d.insert('turnos', {
-      'turno_id': turnoId,
-      'fecha_turno': fechaTurno,
-      'turno': turno,
-      'hora_apertura': horaApertura,
-      'hora_cierre': null,
-      'telegram_id': telegramId,
-      'estado': 'abierto_local',
-    });
-    return turnoId;
+    try {
+      await d.insert('turnos', {
+        'turno_id': turnoId,
+        'fecha_turno': fechaTurno,
+        'turno': turno,
+        'hora_apertura': horaApertura,
+        'hora_cierre': null,
+        'telegram_id': telegramId,
+        'estado': 'abierto_local',
+      });
+    } catch (_) {
+      // Carrera entre dos llamadas: el índice único ganó la otra.
+      final otro = await d.query('turnos',
+          columns: ['turno_id'],
+          where: 'fecha_turno=? AND turno=? AND telegram_id=?',
+          whereArgs: [fechaTurno, turno, telegramId],
+          limit: 1);
+      if (otro.isNotEmpty) return (otro.first['turno_id'] as String, false);
+      rethrow;
+    }
+    return (turnoId, true);
   }
 
   /// Turno por id (o null).
@@ -2348,6 +2373,21 @@ class LocalDb {
     final d = await db;
     final rows = await d.query('turnos',
         where: 'turno_id=?', whereArgs: [turnoId], limit: 1);
+    return rows.isEmpty ? null : rows.first;
+  }
+
+  /// Último turno registrado para un entrenador en una fecha+franja,
+  /// SIN filtrar por estado (el más reciente). Para que el Home muestre
+  /// también los estados cerrado_*/con_incidencias/no_cerrado y no
+  /// vuelva a ofrecer "Abrir turno" tras cerrar (auditoría ChatGPT #1).
+  Future<Map<String, dynamic>?> ultimoTurno(
+      String fechaTurno, String turno, int telegramId) async {
+    final d = await db;
+    final rows = await d.query('turnos',
+        where: 'fecha_turno=? AND turno=? AND telegram_id=?',
+        whereArgs: [fechaTurno, turno, telegramId],
+        orderBy: 'rowid DESC',
+        limit: 1);
     return rows.isEmpty ? null : rows.first;
   }
 
@@ -2365,6 +2405,42 @@ class LocalDb {
     return rows.isEmpty ? null : rows.first;
   }
 
+  /// Orden canónico de franjas para comparar "anterioridad".
+  static int _ordenTurno(String turno) {
+    switch (turno) {
+      case 'manana':
+        return 0;
+      case 'tarde':
+        return 1;
+      case 'noche':
+        return 2;
+      default:
+        return 99;
+    }
+  }
+
+  /// Turnos abiertos (abierto_local | abierto_sincronizado) cuya
+  /// (fecha_turno, turno) es ANTERIOR a la actual: fecha anterior, o
+  /// misma fecha con franja anterior. Para la sección "Turnos
+  /// pendientes" del Home (auditoría ChatGPT #2). NO cambia estados.
+  Future<List<Map<String, dynamic>>> turnosSinResolver(
+      int telegramId, String fechaActual, String turnoActual) async {
+    final d = await db;
+    final rows = await d.query('turnos',
+        where: 'telegram_id=? AND estado IN (?,?)',
+        whereArgs: [telegramId, 'abierto_local', 'abierto_sincronizado'],
+        orderBy: 'fecha_turno DESC');
+    final ordenActual = _ordenTurno(turnoActual);
+    return rows.where((t) {
+      final f = '${t['fecha_turno']}';
+      if (f.compareTo(fechaActual) < 0) return true;
+      if (f == fechaActual) {
+        return _ordenTurno('${t['turno']}') < ordenActual;
+      }
+      return false;
+    }).toList();
+  }
+
   /// Turnos abiertos de fechas ANTERIORES a hoy (para marcar no_cerrado).
   Future<List<Map<String, dynamic>>> turnosAbiertosAnteriores(
       String hoyIso, int telegramId) async {
@@ -2376,43 +2452,60 @@ class LocalDb {
         orderBy: 'fecha_turno DESC');
   }
 
-  /// Cambia el estado de un turno (opcionalmente fija hora_cierre).
+  /// Cambia el estado de un turno (opcionalmente fija hora_cierre,
+  /// cierre_op_uuid y/o snapshot JSON de auditoría).
   Future<void> marcarEstadoTurno(String turnoId, String estado,
-      {String? horaCierre}) async {
+      {String? horaCierre, String? cierreOpUuid, String? snapshot}) async {
     final d = await db;
     final vals = <String, dynamic>{'estado': estado};
     if (horaCierre != null) vals['hora_cierre'] = horaCierre;
+    if (cierreOpUuid != null) vals['cierre_op_uuid'] = cierreOpUuid;
+    if (snapshot != null) vals['cierre_snapshot'] = snapshot;
     await d.update('turnos', vals,
         where: 'turno_id=?', whereArgs: [turnoId]);
+  }
+
+  /// Estado de la op de turno (apertura_turno/cierre_turno) con este
+  /// turno_id: 'pendiente' | 'error' | 'enviada' | 'aplicada' |
+  /// 'rechazada' | 'necesita_revision' | null (sin registro).
+  /// Evidencia POSITIVA: solo 'aplicada' confirma que el servidor la
+  /// procesó (auditoría ChatGPT #3/#5). La ausencia de registro NO es
+  /// confirmación.
+  Future<String?> estadoOpTurno(String tipo, String turnoId) async {
+    final d = await db;
+    try {
+      final rows = await d.rawQuery(
+          "SELECT estado FROM ops_queue WHERE tipo=? AND "
+          "json_extract(payload, '\$.turno_id')=? "
+          "ORDER BY rowid DESC LIMIT 1",
+          [tipo, turnoId]);
+      if (rows.isEmpty) return null;
+      return '${rows.first['estado']}';
+    } catch (_) {
+      // JSON1 puede faltar: fallback decodificando el payload.
+      final rows = await d.query('ops_queue',
+          columns: ['estado', 'payload'],
+          where: 'tipo=?',
+          whereArgs: [tipo],
+          orderBy: 'rowid DESC');
+      for (final r in rows) {
+        try {
+          final p =
+              jsonDecode(r['payload'] as String) as Map<String, dynamic>;
+          if ('${p['turno_id']}' == turnoId) {
+            return '${r['estado']}';
+          }
+        } catch (_) {}
+      }
+      return null;
+    }
   }
 
   /// ¿Hay alguna op de este tipo con este turno_id aún en cola
   /// (pendiente/error/necesita_revision)?
   Future<bool> hayOpTurnoEnCola(String tipo, String turnoId) async {
-    final d = await db;
-    try {
-      final rows = await d.rawQuery(
-          "SELECT 1 FROM ops_queue WHERE tipo=? AND estado IN "
-          "('pendiente','error','necesita_revision') AND "
-          "json_extract(payload, '\$.turno_id')=? LIMIT 1",
-          [tipo, turnoId]);
-      return rows.isNotEmpty;
-    } catch (_) {
-      // JSON1 puede faltar en algunos teléfonos: fallback con LIKE.
-      final rows = await d.query('ops_queue',
-          columns: ['payload'],
-          where: "tipo=? AND estado IN "
-              "('pendiente','error','necesita_revision')",
-          whereArgs: [tipo]);
-      for (final r in rows) {
-        try {
-          final p =
-              jsonDecode(r['payload'] as String) as Map<String, dynamic>;
-          if ('${p['turno_id']}' == turnoId) return true;
-        } catch (_) {}
-      }
-      return false;
-    }
+    final e = await estadoOpTurno(tipo, turnoId);
+    return e == 'pendiente' || e == 'error' || e == 'necesita_revision';
   }
 
   /// Lock de sincronización entre isolates (Gemini auditoría 2026-10-12).

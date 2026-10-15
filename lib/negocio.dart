@@ -1307,6 +1307,52 @@ Future<(double, double)> miTurnoHoy(int? telegramId) async {
   return (cobrado, pendiente);
 }
 
+/// Conteo de pagos del DÍA de un entrenador (no solo de la franja):
+/// espejo (pagos, pagos_diarios, ventas) + ops pendientes de hoy.
+/// Misma cobertura que miTurnoHoy() pero contando registros en vez de
+/// sumar montos. Para el pagos_count del cierre de turno (auditoría
+/// ChatGPT #6): NO se calcula sobre la cola después de sincronizar,
+/// porque tras un sync exitoso daría 0 aunque hubo pagos.
+/// NOTA: pagos_count y total_cobrado son movimientos del DÍA del
+/// entrenador (lo que devuelve miTurnoHoy), no solo de la franja que
+/// se cierra. Las franjas del gym son informativas; el cuadre es diario.
+Future<int> conteoPagosDia(int? telegramId) async {
+  if (telegramId == null) return 0;
+  final hoy = _hoyIso();
+  final pr = await preciosVigentes();
+  var n = 0;
+  for (final p in await LocalDb.instance.allMirror('pagos')) {    if ((p['telegram_user_id'] as int?) == telegramId &&
+        (p['fecha'] as String?) == hoy) {
+      n++;
+    }
+  }
+  for (final d in await LocalDb.instance.allMirror('pagos_diarios')) {
+    if ((d['registrado_por'] as int?) == telegramId &&
+        (d['fecha'] as String?) == hoy) {
+      n++;
+    }
+  }
+  for (final v in await LocalDb.instance.allMirror('ventas_suplementos')) {
+    if ((v['registrado_por'] as int?) == telegramId &&
+        (v['fecha'] as String?) == hoy) {
+      n++;
+    }
+  }
+  for (final op in await LocalDb.instance.pendingOps()) {
+    if (op['telegram_id'] != telegramId) continue;
+    try {
+      final payload =
+          jsonDecode(op['payload'] as String) as Map<String, dynamic>;
+      final fecha = (payload['fecha'] as String?)?.substring(0, 10) ?? '';
+      if (fecha != hoy) continue;
+      // Solo tipos que representan un cobro (igual que _montoEfectivoOp
+      // cubre); el resto no cuenta como "pago".
+      if (_montoEfectivoOp(op, pr) > 0) n++;
+    } catch (_) {}
+  }
+  return n;
+}
+
 /// Desglose del pendiente: (mensualidades, diarios).
 Future<
     (

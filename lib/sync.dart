@@ -1941,7 +1941,7 @@ class SyncEngine {
   Future<String> registrarCierreTurno({
     required String fecha,
     required String turno,
-    required double totalCobrado,
+    double? totalCobrado,
     double? totalEsperado,
     required int pagosCount,
     String? nota,
@@ -1952,8 +1952,13 @@ class SyncEngine {
     double? pendientesCup,
     double? pendientesUsd,
     int? revisionCount,
+    // v1.3.3 (auditoría ChatGPT #12): UUID estable para reintentos. Si se
+    // provee, se reusa en vez de generar uno nuevo (idempotencia local).
+    String? opUuid,
   }) async {
-    final id = const Uuid().v4();
+    // v1.3.3 (auditoría ChatGPT #7): totalCobrado null = "no calculable",
+    // se OMITE del payload (no se envía 0). El servidor lo guarda NULL.
+    final id = opUuid ?? const Uuid().v4();
     await _db.queueOp(
       opUuid: id,
       tipo: 'cierre_turno',
@@ -1961,7 +1966,7 @@ class SyncEngine {
         'id': id,
         'fecha': fecha,
         'turno': turno,
-        'total_cobrado': totalCobrado,
+        if (totalCobrado != null) 'total_cobrado': totalCobrado,
         'total_esperado': totalEsperado,
         'pagos_count': pagosCount,
         'nota': nota,

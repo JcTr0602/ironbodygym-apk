@@ -79,8 +79,12 @@ class _HomeScreenState extends State<HomeScreen>
   String? _nombreVisible;
 
   /// v1.3.3: turno actual del entrenador (abrir/cerrar turno).
-  /// null = sin turno abierto hoy.
+  /// Cualquier estado (abierto/cerrado/incidencias): lo que se muestra.
   Map<String, dynamic>? _turnoActual;
+
+  /// v1.3.3: turnos abiertos sin resolver (fecha/franja anteriores).
+  /// Sección "Turnos pendientes" (auditoría ChatGPT #2).
+  List<Map<String, dynamic>> _turnosPendientes = [];
 
   /// v1.3.3: evita dobles taps mientras se abre/cierra el turno.
   bool _procesandoTurno = false;
@@ -170,12 +174,21 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   /// v1.3.3: recarga solo el estado del turno (ligero, sin bypass de caché).
+  /// Usa turnoVisible() (cualquier estado) para no volver a ofrecer
+  /// "Abrir turno" tras cerrar (auditoría ChatGPT #1).
   Future<void> _refrescarTurno() async {
     if (_auth.isOwner || !mounted) return;
     try {
       await TurnoService.instance.reconciliarTurnos();
-      final t = await TurnoService.instance.turnoActual();
-      if (mounted) setState(() => _turnoActual = t);
+      final t = await TurnoService.instance.turnoVisible();
+      final pendientes =
+          await TurnoService.instance.turnosSinResolver();
+      if (mounted) {
+        setState(() {
+          _turnoActual = t;
+          _turnosPendientes = pendientes;
+        });
+      }
     } catch (_) {}
   }
 
@@ -335,12 +348,15 @@ class _HomeScreenState extends State<HomeScreen>
           ? (cobrado['efectivo'] ?? 0) + (cobrado['transferencia'] ?? 0)
           : (await miTurnoHoy(_auth.telegramId)).$1;
       // v1.3.3: estado del turno del entrenador (abrir/cerrar turno).
-      // Reconcilia turnos viejos sin cerrar antes de leer el actual.
+      // turnoVisible() trae cualquier estado (no solo abierto) para
+      // mostrar el chip correcto tras cerrar (auditoría ChatGPT #1).
       Map<String, dynamic>? turnoAct;
+      List<Map<String, dynamic>> turnosPend = [];
       if (!_auth.isOwner) {
         try {
           await TurnoService.instance.reconciliarTurnos();
-          turnoAct = await TurnoService.instance.turnoActual();
+          turnoAct = await TurnoService.instance.turnoVisible();
+          turnosPend = await TurnoService.instance.turnosSinResolver();
         } catch (_) {}
       }
       // Aviso "llevas +Xh sin subir" (item 10: horas configurables)
@@ -367,6 +383,7 @@ class _HomeScreenState extends State<HomeScreen>
           _entrenadoresSinSync = sinSync;
           _turnosSinReporte = turnosSinRep;
           _turnoActual = turnoAct;
+          _turnosPendientes = turnosPend;
         });
       }
     } catch (e) {
@@ -891,6 +908,8 @@ class _HomeScreenState extends State<HomeScreen>
             const SizedBox(height: AppEspacio.sm),
             // v1.3.3: abrir/cerrar turno (botones rápidos con estado real).
             _botonesTurno(),
+            // v1.3.3: turnos abiertos sin resolver (auditoría ChatGPT #2).
+            _turnosPendientesCard(),
           ],
         ),
       );
@@ -971,16 +990,19 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   /// v1.3.3: botones Abrir/Cerrar turno según el estado real del turno.
-  /// - Sin turno abierto → "🟢 Abrir turno".
+  /// - Sin turno hoy → "🟢 Abrir turno".
   /// - Abierto → "Turno abierto ✓ HH:mm" + "🔴 Cerrar turno".
-  /// - Cerrado local / con incidencias → estado pendiente de sync.
-  /// - Cerrado confirmado → "Turno cerrado ✓".
+  /// - cerrado_sincronizado → "Turno cerrado ✓".
+  /// - cerrado_local → "Turno cerrado ⏳ (pendiente de sincronizar)".
+  /// - con_incidencias → "Turno cerrado con incidencias ⚠️".
+  /// - no_cerrado → chip informativo (ver sección Turnos pendientes).
+  /// - Estado desconocido → chip explícito (nunca cae al botón de cierre).
   Widget _botonesTurno() {
     final t = _turnoActual;
     final estado = '${t?['estado'] ?? ''}';
     final procesando = _procesandoTurno;
 
-    // Sin turno abierto hoy: botón verde de apertura.
+    // Sin turno hoy: botón verde de apertura.
     if (t == null) {
       return SizedBox(
         width: double.infinity,
@@ -997,34 +1019,99 @@ class _HomeScreenState extends State<HomeScreen>
     }
 
     final horaAp = horaCorta('${t['hora_apertura'] ?? ''}');
-    // Cerrado (cualquier variante): mostrar estado, sin botones.
-    if (estado == 'cerrado_sincronizado') {
-      return _estadoTurnoChip(
-          Icons.check_circle, 'Turno cerrado ✓', AppColores.exito);
+    switch (estado) {
+      case 'cerrado_sincronizado':
+        return _estadoTurnoChip(
+            Icons.check_circle, 'Turno cerrado ✓', AppColores.exito);
+      case 'cerrado_local':
+        return _estadoTurnoChip(Icons.hourglass_bottom,
+            'Turno cerrado ⏳ (pendiente de sincronizar)',
+            AppColores.alerta);
+      case 'con_incidencias':
+        return _estadoTurnoChip(Icons.warning,
+            'Turno cerrado con incidencias ⚠️', AppColores.alerta);
+      case 'no_cerrado':
+        return _estadoTurnoChip(Icons.history,
+            'Turno anterior sin cerrar — ver abajo', AppColores.alerta);
+      case 'abierto_local':
+      case 'abierto_sincronizado':
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            _estadoTurnoChip(Icons.check_circle,
+                'Turno abierto ✓ $horaAp', AppColores.exito),
+            const SizedBox(height: 8),
+            OutlinedButton.icon(
+              icon: const Icon(Icons.lock_open, size: 18),
+              label: Text(procesando ? 'Procesando…' : 'Cerrar turno'),
+              onPressed: procesando ? null : _cierreRapido,
+            ),
+          ],
+        );
+      default:
+        // Estado desconocido: chip explícito, nunca botón de cierre.
+        AppLog.error('home', 'turno_estado_desconocido', d: estado);
+        return _estadoTurnoChip(Icons.help_outline,
+            'Estado de turno desconocido', AppColores.alerta);
     }
-    if (estado == 'cerrado_local') {
-      return _estadoTurnoChip(Icons.hourglass_bottom,
-          'Turno cerrado ⏳ (pendiente de sincronizar)',
-          AppColores.alerta);
-    }
-    if (estado == 'con_incidencias') {
-      return _estadoTurnoChip(Icons.warning,
-          'Turno cerrado con incidencias ⚠️', AppColores.alerta);
-    }
-    // Abierto: info + botón de cierre rápido.
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        _estadoTurnoChip(Icons.check_circle,
-            'Turno abierto ✓ $horaAp', AppColores.exito),
-        const SizedBox(height: 8),
-        OutlinedButton.icon(
-          icon: const Icon(Icons.lock_open, size: 18),
-          label: Text(procesando ? 'Procesando…' : 'Cerrar turno'),
-          onPressed: procesando ? null : _cierreRapido,
-        ),
-      ],
+  }
+
+  /// v1.3.3: sección "Turnos pendientes" (auditoría ChatGPT #2).
+  /// Turnos abiertos de fecha/franja anteriores sin resolver.
+  Widget _turnosPendientesCard() {
+    final pend = _turnosPendientes;
+    if (pend.isEmpty) return const SizedBox.shrink();
+    return Container(
+      margin: const EdgeInsets.only(top: 8),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppColores.alerta.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(12),
+        border:
+            Border.all(color: AppColores.alerta.withValues(alpha: 0.4)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.warning_amber,
+                  size: 18, color: AppColores.alerta),
+              const SizedBox(width: 8),
+              Text('${pend.length} turno(s) sin cerrar',
+                  style: const TextStyle(fontWeight: FontWeight.w700)),
+            ],
+          ),
+          const SizedBox(height: 8),
+          for (final t in pend)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 4),
+              child: Text(
+                  '• ${t['fecha_turno']} · ${_nombreTurno('${t['turno']}')} '
+                  '· abierto ${horaCorta('${t['hora_apertura']}')}',
+                  style: const TextStyle(fontSize: 13)),
+            ),
+          const SizedBox(height: 4),
+          const Text(
+            'Se marcarán como "no cerrado" al abrir el turno actual.',
+            style: TextStyle(fontSize: 12),
+          ),
+        ],
+      ),
     );
+  }
+
+  String _nombreTurno(String t) {
+    switch (t) {
+      case 'manana':
+        return 'mañana';
+      case 'tarde':
+        return 'tarde';
+      case 'noche':
+        return 'noche';
+      default:
+        return t;
+    }
   }
 
   Widget _estadoTurnoChip(IconData icono, String texto, Color color) {
@@ -1074,125 +1161,136 @@ class _HomeScreenState extends State<HomeScreen>
   /// v1.3.3: cierre rápido en dos pasos (preparar → confirmar).
   /// Si hay pendientes, muestra el desglose honesto (CUP + USD por
   /// separado) con [Reintentar] y [Cerrar de todos modos].
+  /// El reintento usa un bucle controlado (no recursión) porque
+  /// _procesandoTurno bloquea la reentrada (auditoría ChatGPT #4).
   Future<void> _cierreRapido() async {
     if (_procesandoTurno) return;
     setState(() => _procesandoTurno = true);
-    try {
-      // Diálogo "Sincronizando…" no cancelable.
-      if (mounted) {
-        showDialog(
-          context: context,
-          barrierDismissible: false,
-          builder: (ctx) => const AlertDialog(
-            content: Row(
-              children: [
-                CircularProgressIndicator(),
-                SizedBox(width: 16),
-                Text('Sincronizando…'),
-              ],
-            ),
-          ),
-        );
-      }
-      final prep =
-          await TurnoService.instance.prepararCierre();
-      if (mounted) Navigator.of(context).pop(); // cierra "Sincronizando"
-      if (!mounted) return;
-
-      if (prep['ok'] != true) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-            content: Text('No hay turno abierto.')));
-        return;
-      }
-
-      final limpio = prep['limpio'] as bool? ?? false;
-      final nPend = prep['pendientesCount'] as int? ?? 0;
-      final cup = (prep['pendientesCup'] as num?)?.toDouble() ?? 0;
-      final usd = (prep['pendientesUsd'] as num?)?.toDouble() ?? 0;
-      final nRev = prep['revisionCount'] as int? ?? 0;
-
-      bool forzar = false;
-      if (!limpio) {
-        // Diálogo con desglose honesto por moneda.
-        final partes = <String>[];
-        if (cup > 0) partes.add('${fmtMonto(cup)} CUP');
-        if (usd > 0) partes.add('${fmtMonto(usd)} USD');
-        final montos =
-            partes.isEmpty ? 'monto por calcular' : partes.join(' + ');
-        final decision = await showDialog<bool>(
-          context: context,
-          builder: (ctx) => AlertDialog(
-            title: const Text('Cerrar turno'),
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('Quedan $nPend operaciones sin subir '
-                    '($montos).'),
-                if (nRev > 0)
-                  Text('$nRev necesitan revisión.'),
-                const SizedBox(height: 8),
-                const Text(
-                  'Cerrar de todos modos registra el cierre con '
-                  'incidencias; no significa que los pagos estén '
-                  'confirmados.',
-                  style: TextStyle(fontSize: 12),
-                ),
-              ],
-            ),
-            actions: [
-              TextButton(
-                  onPressed: () => Navigator.pop(ctx, false),
-                  child: const Text('Reintentar')),
-              ElevatedButton(
-                  onPressed: () => Navigator.pop(ctx, true),
-                  child: const Text('Cerrar de todos modos')),
-            ],
-          ),
-        );
-        if (decision == null) return; // cerró el diálogo sin elegir
-        if (!decision) {
-          // Reintentar: vuelve a empezar el flujo.
-          if (mounted) {
-            setState(() => _procesandoTurno = false);
-            _cierreRapido();
-          }
-          return;
-        }
-        forzar = true;
-      }
-
-      final res = await TurnoService.instance.confirmarCierre(
-        turnoId: '${prep['turnoId']}',
-        fechaTurno: '${prep['fechaTurno']}',
-        turno: '${prep['turno']}',
-        horaApertura: prep['horaApertura'] as String?,
-        pendientesCount: nPend,
-        pendientesCup: cup,
-        pendientesUsd: usd,
-        revisionCount: nRev,
-        pagosCount: prep['pagosCount'] as int? ?? 0,
-        forzado: forzar,
-      );
-      if (!mounted) return;
-      final estado = '${res['estado'] ?? ''}';
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text(estado == 'cerrado_sincronizado'
-              ? 'Turno cerrado ✓'
-              : estado == 'con_incidencias'
-                  ? 'Turno cerrado con incidencias ⚠️'
-                  : 'Turno cerrado ⏳ (pendiente de sincronizar)')));
-      await _cargar(forceRefresh: true);
-    } catch (e) {
-      if (mounted) {
-        // Cierra el diálogo de "Sincronizando" si sigue abierto.
+    // Seguridad del diálogo "Sincronizando": solo se cierra si somos
+    // nosotros quienes lo abrimos (auditoría ChatGPT: otros riesgos).
+    var dialogoSyncAbierto = false;
+    void cerrarDialogoSync() {
+      if (dialogoSyncAbierto && mounted && Navigator.canPop(context)) {
         try {
           Navigator.of(context).pop();
         } catch (_) {}
+        dialogoSyncAbierto = false;
+      }
+    }
+
+    try {
+      // Bucle de reintento: cada iteración sincroniza de nuevo.
+      while (mounted) {
+        // Diálogo "Sincronizando…" no cancelable.
+        if (mounted) {
+          showDialog(
+            context: context,
+            barrierDismissible: false,
+            builder: (ctx) => const AlertDialog(
+              content: Row(
+                children: [
+                  CircularProgressIndicator(),
+                  SizedBox(width: 16),
+                  Text('Sincronizando…'),
+                ],
+              ),
+            ),
+          );
+          dialogoSyncAbierto = true;
+        }
+        final prep = await TurnoService.instance.prepararCierre();
+        cerrarDialogoSync();
+        if (!mounted) return;
+
+        if (prep['ok'] != true) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+              content: Text('No hay turno abierto.')));
+          return;
+        }
+
+        final limpio = prep['limpio'] as bool? ?? false;
+        final nPend = prep['pendientesCount'] as int? ?? 0;
+        final cup = (prep['pendientesCup'] as num?)?.toDouble() ?? 0;
+        final usd = (prep['pendientesUsd'] as num?)?.toDouble() ?? 0;
+        final nRev = prep['revisionCount'] as int? ?? 0;
+        final incompleto = prep['incompleto'] as bool? ?? false;
+        final noCalc = prep['noCalculados'] as int? ?? 0;
+
+        // 0=reintentar (continúa el loop), 1=forzar, 2=cancelar.
+        var accion = 1;
+        if (!limpio) {
+          // Diálogo con desglose honesto por moneda.
+          final partes = <String>[];
+          if (cup > 0) partes.add('${fmtMonto(cup)} CUP');
+          if (usd > 0) partes.add('${fmtMonto(usd)} USD');
+          final montos =
+              partes.isEmpty ? 'monto por calcular' : partes.join(' + ');
+          final decision = await showDialog<int>(
+            context: context,
+            builder: (ctx) => AlertDialog(
+              title: const Text('Cerrar turno'),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Quedan $nPend operaciones sin subir '
+                      '($montos).'),
+                  if (nRev > 0) Text('$nRev necesitan revisión.'),
+                  if (incompleto)
+                    Text('⚠️ $noCalc no se pudieron valorar: '
+                        'el total puede estar incompleto.'),
+                  const SizedBox(height: 8),
+                  const Text(
+                    'Cerrar de todos modos registra el cierre con '
+                    'incidencias; no significa que los pagos estén '
+                    'confirmados.',
+                    style: TextStyle(fontSize: 12),
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                    onPressed: () => Navigator.pop(ctx, 0),
+                    child: const Text('Reintentar')),
+                TextButton(
+                    onPressed: () => Navigator.pop(ctx, 2),
+                    child: const Text('Cancelar')),
+                ElevatedButton(
+                    onPressed: () => Navigator.pop(ctx, 1),
+                    child: const Text('Cerrar de todos modos')),
+              ],
+            ),
+          );
+          if (decision == null || decision == 2) return; // cancelar
+          if (decision == 0) continue; // reintentar: otra vuelta real
+          accion = 1;
+        }
+
+        // confirmarCierre() re-calcula el desglose fresco justo antes
+        // de encolar (auditoría ChatGPT #8) y usa UUID estable.
+        final res = await TurnoService.instance.confirmarCierre(
+          turnoId: '${prep['turnoId']}',
+          forzado: accion == 1 && !limpio,
+        );
+        if (!mounted) return;
+        final estado = '${res['estado'] ?? ''}';
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text(estado == 'cerrado_sincronizado'
+                ? 'Turno cerrado ✓'
+                : estado == 'con_incidencias'
+                    ? 'Turno cerrado con incidencias ⚠️'
+                    : 'Turno cerrado ⏳ (pendiente de sincronizar)')));
+        await _cargar(forceRefresh: true);
+        return; // fin del flujo
+      }
+    } catch (e) {
+      cerrarDialogoSync();
+      if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
             content: Text('Error al cerrar el turno: $e')));
       }
     } finally {
+      cerrarDialogoSync();
       if (mounted) setState(() => _procesandoTurno = false);
     }
   }
