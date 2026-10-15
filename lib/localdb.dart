@@ -1504,6 +1504,9 @@ class LocalDb {
       for (final r in rows)
         {
           ...jsonDecode(r['data'] as String) as Map<String, dynamic>,
+          // v1.3.2 (Argón #17): garantizar id desde la columna SQL,
+          // como hacen mirrorPorIds y mirrorPorEstado.
+          'id': r['id'],
           // v1.3.1 (B2): inyectar ultimo_precio (columna SQL, no JSON).
           if (tabla == 'suplementos' && r['ultimo_precio'] != null)
             'ultimo_precio': (r['ultimo_precio'] as num).toDouble(),
@@ -1717,6 +1720,27 @@ class LocalDb {
   /// - El sync se dispara una sola vez al terminar (offline-first:
   ///   no se espera red).
   /// Retorna la cantidad de incidencias efectivamente cambiadas.
+  /// v1.3.2 (Argón #13): valida transición de estado (espejo de
+  /// Incidencia.puedeTransicionarA, sin instanciar el modelo).
+  bool _transicionValida(String anterior, String nuevo) {
+    switch (anterior) {
+      case 'pendiente':
+        return nuevo == 'en_proceso' ||
+            nuevo == 'bloqueada' ||
+            nuevo == 'resuelta';
+      case 'en_proceso':
+        return nuevo == 'bloqueada' ||
+            nuevo == 'resuelta' ||
+            nuevo == 'pendiente';
+      case 'bloqueada':
+        return nuevo == 'en_proceso' || nuevo == 'pendiente';
+      case 'resuelta':
+        return nuevo == 'en_proceso';
+      default:
+        return false;
+    }
+  }
+
   Future<int> cambiarEstadoIncidenciasLote({
     required List<String> ids,
     required String nuevoEstado,
@@ -1762,7 +1786,7 @@ class LocalDb {
         }
         final rows = await txn.query(
           'incidencias_local',
-          columns: ['id', 'estado', 'version'],
+          columns: ['id', 'estado', 'version', 'tipo'],
           where: 'id = ?',
           whereArgs: [id],
           limit: 1,
@@ -1771,6 +1795,19 @@ class LocalDb {
         final anterior = '${rows.first['estado']}';
         // Filtro no-op: ya está en el estado destino.
         if (anterior == nuevoEstado) continue;
+        // v1.3.2 (Argón #13): validar transición permitida.
+        if (!_transicionValida(anterior, nuevoEstado)) continue;
+        // v1.3.2 (Argón #13): Mantenimiento exige foto para resolver.
+        if (nuevoEstado == 'resuelta' &&
+            '${rows.first['tipo']}' ==
+                'a1b2c3d4-0002-4000-8000-000000000002') {
+          final fotos = await txn.query('incidencias_fotos',
+              columns: ['id'],
+              where: 'incidencia_id = ?',
+              whereArgs: [id],
+              limit: 1);
+          if (fotos.isEmpty) continue;
+        }
         final version =
             (rows.first['version'] as num?)?.toInt() ?? 1;
         // Argón (bloqueante): un solo op_uuid para el UPDATE y la op.
@@ -1868,11 +1905,12 @@ class LocalDb {
       ''');
     }
 
+    await marcarSelectivo('incidencias_local',
+        "'crear_incidencia','editar_incidencia','cambiar_estado_incidencia'");
+    await marcarSelectivo('incidencias_tipos',
+        "'upsert_tipo_incidencia','reordenar_tipos_incidencia'");
     await marcarSelectivo(
-        'incidencias_local', "'incidencia','incidencia_estado'");
-    await marcarSelectivo('incidencias_tipos', "'incidencia_tipo'");
-    await marcarSelectivo(
-        'incidencias_comentarios', "'incidencia_comentario'");
+        'incidencias_comentarios', "'agregar_comentario_incidencia'");
   }
 
   Future<void> upsertIncidenciaMirror(Map<String, dynamic> inc) async {
@@ -2045,6 +2083,12 @@ class LocalDb {
     // contienen el texto sensible en el payload. Se eliminan junto al resto.
     n += await d.delete('ops_queue',
         where: "tipo='incidencia' AND json_extract(payload,'\$.visibilidad')='privada'");
+    // v1.3.2 (Argón #19): al cerrar sesión, limpiar también gastos,
+    // auditoría local y la caché de usuarios APK (un entrenador no debe
+    // ver datos del dueño tras el cambio de sesión).
+    n += await d.delete('gastos');
+    n += await d.delete('auditoria_local');
+    n += await d.delete('meta', where: "k = 'usuarios_apk'");
     // borradores y plantillas viven en SharedPreferences (perfil.dart);
     // se purgan desde AuthService.signOut.
     return n;
@@ -2221,19 +2265,23 @@ class LocalDb {
     // UUID simple sin dependencia externa.
     final owner =
         '${ahora}_${DateTime.now().microsecondsSinceEpoch % 1000000}';
+    // v1.3.2 (Argón #18): leer+escribir en una transacción para que dos
+    // isolates no adquieran el lock a la vez (carrera).
     try {
-      final rows =
-          await d.query('meta', where: 'k = ?', whereArgs: ['sync_lock']);
-      if (rows.isNotEmpty) {
-        final v = '${rows.first['v']}';
-        // Formato: "timestamp:owner". Compatibilidad con locks viejos.
-        final partes = v.split(':');
-        final ts = int.tryParse(partes[0]) ?? 0;
-        if (ahora - ts < timeoutMs) return null; // lock vigente
-      }
-      await d.insert('meta', {'k': 'sync_lock', 'v': '$ahora:$owner'},
-          conflictAlgorithm: ConflictAlgorithm.replace);
-      return owner;
+      return await d.transaction<String?>((txn) async {
+        final rows = await txn
+            .query('meta', where: 'k = ?', whereArgs: ['sync_lock']);
+        if (rows.isNotEmpty) {
+          final v = '${rows.first['v']}';
+          // Formato: "timestamp:owner". Compatibilidad con locks viejos.
+          final partes = v.split(':');
+          final ts = int.tryParse(partes[0]) ?? 0;
+          if (ahora - ts < timeoutMs) return null; // lock vigente
+        }
+        await txn.insert('meta', {'k': 'sync_lock', 'v': '$ahora:$owner'},
+            conflictAlgorithm: ConflictAlgorithm.replace);
+        return owner;
+      });
     } catch (_) {
       return null;
     }
@@ -2456,11 +2504,19 @@ class LocalDb {
     final auth = AuthService();
     final ahora = DateTime.now().toIso8601String();
     await d.transaction((txn) async {
+      // v1.3.2 (Argón #12): persistir op_uuid en la fila local para que
+      // marcarSelectivo no la marque como synced prematuramente.
+      final datosFinal = Map<String, dynamic>.from(datos);
+      if (tabla == 'incidencias_local' ||
+          tabla == 'incidencias_tipos' ||
+          tabla == 'incidencias_comentarios') {
+        datosFinal['op_uuid'] = opUuid;
+      }
       if (esInsert) {
-        await txn.insert(tabla, datos,
+        await txn.insert(tabla, datosFinal,
             conflictAlgorithm: ConflictAlgorithm.replace);
       } else {
-        await txn.update(tabla, datos,
+        await txn.update(tabla, datosFinal,
             where: 'id = ?', whereArgs: [whereId]);
       }
       // Encolado idempotente (mismo criterio que queueOp)

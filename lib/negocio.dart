@@ -1102,10 +1102,26 @@ String fechaCorta(dynamic v, int n) {
 /// no implica que el turno mañana reportó su caja).
 /// Retorna la lista de turnos esperados sin registro ('mañana', 'tarde').
 Future<List<String>> turnosSinReporte(String fechaIso) async {
-  final datos = await diariosDeFecha(fechaIso);
+  // v1.3.2 (Argón #15): para hoy usar diariosDeHoy (incluye la cola
+  // optimista offline); normalizar 'manana'; cruzar con turnos_cierre
+  // (un turno cerrado sin pagos diarios también cuenta como reportado).
+  final datos = fechaIso == _hoyIso()
+      ? await diariosDeHoy()
+      : await diariosDeFecha(fechaIso);
   final turnos = datos
-      .map((d) => '${d['turno'] ?? ''}'.toLowerCase())
+      .map((d) =>
+          '${d['turno'] ?? ''}'.toLowerCase().replaceAll('manana', 'mañana'))
       .toSet();
+  try {
+    final cierres = await LocalDb.instance.allMirror('turnos_cierre');
+    for (final c in cierres) {
+      if ('${c['fecha'] ?? ''}'.substring(0, 10) == fechaIso) {
+        turnos.add('${c['turno'] ?? ''}'
+            .toLowerCase()
+            .replaceAll('manana', 'mañana'));
+      }
+    }
+  } catch (_) {}
   return [
     if (!turnos.contains('mañana')) 'mañana',
     if (!turnos.contains('tarde')) 'tarde',

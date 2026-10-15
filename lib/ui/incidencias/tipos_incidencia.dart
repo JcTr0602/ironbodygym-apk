@@ -223,6 +223,8 @@ class _TiposIncidenciaScreenState
         existente?.id ?? const Uuid().v4();
     final orden =
         existente?.orden ?? _tipos.length;
+    // v1.3.2 (Argón #14): conservar activo/inactivo al editar.
+    final activo = (existente?.activo ?? true) ? 1 : 0;
     // Fix #9 (Sol): insert + encolado atómicos.
     await LocalDb.instance.mutarYEncolar(
       tabla: 'incidencias_tipos',
@@ -231,7 +233,7 @@ class _TiposIncidenciaScreenState
         'nombre': res['nombre'],
         'icono': res['icono'],
         'color': res['color'],
-        'activo': 1,
+        'activo': activo,
         'orden': orden,
         'plantilla_descripcion': res['plantilla_descripcion'],
         'sync_estado': 'pending',
@@ -244,7 +246,7 @@ class _TiposIncidenciaScreenState
         'nombre': res['nombre'],
         'icono': res['icono'],
         'color': res['color'],
-        'activo': 1,
+        'activo': activo,
         'orden': orden,
         'plantilla_descripcion': res['plantilla_descripcion'],
       },

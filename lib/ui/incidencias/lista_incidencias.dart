@@ -335,12 +335,14 @@ class _ListaIncidenciasScreenState
                     child:
                         const Text('Bloquear'),
                   ),
-                  TextButton(
-                    onPressed: () =>
-                        _accionLote('resuelta'),
-                    child:
-                        const Text('Resolver'),
-                  ),
+                  // v1.3.2 (Argón #13): resolver en lote solo el dueño.
+                  if (AuthService().isOwner)
+                    TextButton(
+                      onPressed: () =>
+                          _accionLote('resuelta'),
+                      child:
+                          const Text('Resolver'),
+                    ),
                 ],
               ),
             )

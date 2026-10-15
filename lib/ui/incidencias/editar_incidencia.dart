@@ -68,6 +68,12 @@ class _EditarIncidenciaScreenState
             (_tipoId == null ||
                 !_tipos.any((t) => t.id == _tipoId))) {
           _tipoId = _tipos.first.id;
+          // v1.3.2 (Argón #14): al abrir "Nueva", aplicar la plantilla
+          // del tipo seleccionado por defecto.
+          if (widget.existente == null) {
+            _ctrlDesc.text =
+                _tipos.first.plantillaDescripcion ?? '';
+          }
         }
       });
     }

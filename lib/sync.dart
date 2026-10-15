@@ -20,6 +20,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:http/http.dart' as http;
 import 'package:image/image.dart' as img;
 import 'package:sqflite/sqflite.dart';
@@ -666,9 +667,16 @@ class SyncEngine {
       }
       // v1.2.9+42 (Gemini): procesarCola protegido + segundo _uploadOps
       // para enviar las ops de vinculación generadas por las fotos.
+      // v1.3.2 (Argón #18): si el Foreground Service ya está procesando
+      // fotos, no duplicar el trabajo (carrera entre isolates).
       int fotosSubidas = 0;
       try {
-        fotosSubidas = await FotosColaService.instance.procesarCola();
+        final fgCorriendo =
+            await FlutterForegroundTask.isRunningService;
+        if (!fgCorriendo) {
+          fotosSubidas =
+              await FotosColaService.instance.procesarCola();
+        }
         AppLog.info('sync', 'cola_fotos', d: 'subidas=$fotosSubidas');
       } catch (e) {
         debugPrint('ERROR procesarCola falló: $e');

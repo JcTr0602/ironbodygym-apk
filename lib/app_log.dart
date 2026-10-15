@@ -282,6 +282,11 @@ class AppLog {
         RegExp(r'(token|api_key|password)\s*[:=]\s*\S+',
             caseSensitive: false),
         (m) => '${m[1]}=***');
+    // v1.3.2 (Argón #19): también con comillas JSON ("password": "...").
+    v = v.replaceAllMapped(
+        RegExp(r'"(token|api_key|password)"\s*:\s*"[^"]*"',
+            caseSensitive: false),
+        (m) => '"${m[1]}":"***"');
     return v;
   }
 

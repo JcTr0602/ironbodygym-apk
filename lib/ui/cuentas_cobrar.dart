@@ -41,6 +41,8 @@ class _CuentasCobrarScreenState
     ];
     final res = <Map<String, dynamic>>[];
     double total = 0;
+    // v1.3.2 (Argón #16): tarifa vigente una sola vez (fuera del loop).
+    final pr = await preciosVigentes();
     for (final c in todos) {
       final ph = '${c['pagado_hasta'] ?? ''}';
       int dias = 0;
@@ -54,11 +56,11 @@ class _CuentasCobrarScreenState
           if (dias < 0) dias = 0;
         }
       }
-      // Monto mensual del cliente (si el espejo lo trae).
-      final monto =
-          (c['monto_mensualidad'] as num?)?.toDouble() ??
-              (c['monto'] as num?)?.toDouble() ??
-              0;
+      // v1.3.2 (Argón #16): el espejo clientes no trae monto_mensualidad;
+      // usar la tarifa vigente (menores si aplica).
+      final monto = esMenor(c['carnet'] as String?)
+          ? pr['menores']!
+          : pr['mensual']!;
       total += monto;
       res.add({
         'nombre': '${c['nombre'] ?? '—'}',

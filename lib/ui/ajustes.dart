@@ -436,6 +436,7 @@ class _AjustesScreenState extends State<AjustesScreen> {
 
   /// Configura o cambia el PIN rápido (4 dígitos).
   Future<void> _configurarPin() async {
+    final c0 = TextEditingController(); // PIN actual (si existe)
     final c1 = TextEditingController();
     final c2 = TextEditingController();
     final accion = await showDialog<String>(
@@ -446,6 +447,20 @@ class _AjustesScreenState extends State<AjustesScreen> {
         contenido: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
+            // v1.3.2 (Argón #19): pedir el PIN actual antes de
+            // cambiarlo o quitarlo.
+            if (_tienePin)
+              TextField(
+                controller: c0,
+                keyboardType: TextInputType.number,
+                maxLength: 4,
+                obscureText: true,
+                decoration: const InputDecoration(
+                  labelText: 'PIN actual',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+            if (_tienePin) const SizedBox(height: 8),
             TextField(
               controller: c1,
               keyboardType: TextInputType.number,
@@ -473,6 +488,17 @@ class _AjustesScreenState extends State<AjustesScreen> {
           if (_tienePin)
             TextButton(
               onPressed: () async {
+                // v1.3.2 (Argón #19): verificar PIN actual antes de quitar.
+                final okPin = await _perfil.verificarPin(c0.text.trim());
+                if (!okPin) {
+                  if (ctx.mounted) {
+                    ScaffoldMessenger.of(ctx).showSnackBar(
+                        const SnackBar(
+                            content: Text(
+                                'PIN actual incorrecto')));
+                  }
+                  return;
+                }
                 await _perfil.setPinHash(null);
                 if (ctx.mounted) Navigator.pop(ctx, 'quitar');
               },
@@ -483,7 +509,23 @@ class _AjustesScreenState extends State<AjustesScreen> {
               onPressed: () => Navigator.pop(ctx, null),
               child: const Text('Cancelar')),
           ElevatedButton(
-              onPressed: () => Navigator.pop(ctx, 'guardar'),
+              onPressed: () async {
+                // v1.3.2 (Argón #19): verificar PIN actual antes de guardar.
+                if (_tienePin) {
+                  final okPin =
+                      await _perfil.verificarPin(c0.text.trim());
+                  if (!okPin) {
+                    if (ctx.mounted) {
+                      ScaffoldMessenger.of(ctx).showSnackBar(
+                          const SnackBar(
+                              content: Text(
+                                  'PIN actual incorrecto')));
+                    }
+                    return;
+                  }
+                }
+                if (ctx.mounted) Navigator.pop(ctx, 'guardar');
+              },
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppColores.naranja,
                 foregroundColor: Colors.white,

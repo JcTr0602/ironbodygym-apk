@@ -157,13 +157,13 @@ class PerfilService {
   /// reconoce por no tener el prefijo `v2$`; al configurar un PIN nuevo
   /// siempre se usa el esquema nuevo.
   Future<String?> getPinHash() async =>
-      (await _p).getString('seg_pin_hash');
+      (await _p).getString(_key('seg_pin_hash'));
   Future<void> setPinHash(String? h) async {
     final p = await _p;
     if (h == null) {
-      await p.remove('seg_pin_hash');
+      await p.remove(_key('seg_pin_hash'));
     } else {
-      await p.setString('seg_pin_hash', h);
+      await p.setString(_key('seg_pin_hash'), h);
     }
   }
 
@@ -171,25 +171,25 @@ class PerfilService {
   /// por instalación y se reutiliza.
   Future<String> getPinSalt() async {
     final p = await _p;
-    var salt = p.getString('seg_pin_salt');
+    var salt = p.getString(_key('seg_pin_salt'));
     if (salt == null || salt.isEmpty) {
       final rnd = Random.secure();
       final bytes = List<int>.generate(16, (_) => rnd.nextInt(256));
       salt = bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
-      await p.setString('seg_pin_salt', salt);
+      await p.setString(_key('seg_pin_salt'), salt);
     }
     return salt;
   }
 
   /// Intentos fallidos consecutivos del PIN.
   Future<int> getPinFallos() async =>
-      (await _p).getInt('seg_pin_fallos') ?? 0;
+      (await _p).getInt(_key('seg_pin_fallos')) ?? 0;
   Future<void> _setPinFallos(int n) async =>
-      (await _p).setInt('seg_pin_fallos', n);
+      (await _p).setInt(_key('seg_pin_fallos'), n);
 
   /// Timestamp (ms) hasta el que el PIN está bloqueado. 0 = no bloqueado.
   Future<int> getPinBloqueadoHasta() async =>
-      (await _p).getInt('seg_pin_bloqueado_hasta') ?? 0;
+      (await _p).getInt(_key('seg_pin_bloqueado_hasta')) ?? 0;
 
   /// Verifica un PIN contra el hash guardado.
   ///
@@ -218,27 +218,28 @@ class PerfilService {
 
   /// Limpia todo el estado de bloqueo (expiró o se reinició).
   Future<void> _limpiarBloqueoPin(SharedPreferences p) async {
-    await p.setInt('seg_pin_bloqueado_hasta', 0);
-    await p.setInt('seg_pin_duracion_ms', 0);
-    await p.setInt('seg_pin_mono_ancla', 0);
+    // v1.3.2 (Argón #19): claves por usuario.
+    await p.setInt(_key('seg_pin_bloqueado_hasta'), 0);
+    await p.setInt(_key('seg_pin_duracion_ms'), 0);
+    await p.setInt(_key('seg_pin_mono_ancla'), 0);
   }
 
   Future<bool> verificarPin(String pin) async {
     final p = await _p;
     final ahora = DateTime.now().millisecondsSinceEpoch;
-    final hasta = p.getInt('seg_pin_bloqueado_hasta') ?? 0;
+    final hasta = p.getInt(_key('seg_pin_bloqueado_hasta')) ?? 0;
     // v1.2.5 (4.1): si el reloj retrocedió (ahora < última vez visto),
     // mantener el bloqueo por seguridad.
-    final ultimaVez = p.getInt('seg_pin_ultima_vez') ?? 0;
+    final ultimaVez = p.getInt(_key('seg_pin_ultima_vez')) ?? 0;
     if (ahora < ultimaVez - 60000 && hasta > 0) {
       // Retroceso >1 min con bloqueo activo: no acortar.
       return false;
     }
-    await p.setInt('seg_pin_ultima_vez', ahora);
+    await p.setInt(_key('seg_pin_ultima_vez'), ahora);
     if (hasta > 0) {
       // Hay bloqueo activo: decidir con el reloj monotónico.
-      final durMs = p.getInt('seg_pin_duracion_ms') ?? 0;
-      final ancla = p.getInt('seg_pin_mono_ancla') ?? 0;
+      final durMs = p.getInt(_key('seg_pin_duracion_ms')) ?? 0;
+      final ancla = p.getInt(_key('seg_pin_mono_ancla')) ?? 0;
       final mono = await _monoAhora();
       if (durMs > 0 && ancla > 0) {
         final transcurrido = mono - ancla;
@@ -253,7 +254,7 @@ class PerfilService {
           // Aún no expira en tiempo real aunque el wall clock diga lo
           // contrario (adelanto detectado): reanclar el deadline.
           final restante = durMs - transcurrido;
-          await p.setInt('seg_pin_bloqueado_hasta', ahora + restante);
+          await p.setInt(_key('seg_pin_bloqueado_hasta', ahora + restante);
           return false;
         }
       } else {
@@ -273,15 +274,15 @@ class PerfilService {
     await _setPinFallos(fallos);
     if (fallos >= 5) {
       // Esperas crecientes: 1, 5, 15, 30, 60 min según ciclos previos.
-      final ciclos = p.getInt('seg_pin_ciclos_bloqueo') ?? 0;
+      final ciclos = p.getInt(_key('seg_pin_ciclos_bloqueo') ?? 0;
       const minutos = [1, 5, 15, 30, 60];
       final minBloqueo = minutos[ciclos.clamp(0, minutos.length - 1)];
       final durMs = minBloqueo * 60 * 1000;
-      await p.setInt('seg_pin_bloqueado_hasta', ahora + durMs);
+      await p.setInt(_key('seg_pin_bloqueado_hasta', ahora + durMs);
       // v1.2.5-rev6: ancla monotónica persistente (sobrevive reinicios).
-      await p.setInt('seg_pin_duracion_ms', durMs);
-      await p.setInt('seg_pin_mono_ancla', await _monoAhora());
-      await p.setInt('seg_pin_ciclos_bloqueo', ciclos + 1);
+      await p.setInt(_key('seg_pin_duracion_ms', durMs);
+      await p.setInt(_key('seg_pin_mono_ancla', await _monoAhora());
+      await p.setInt(_key('seg_pin_ciclos_bloqueo', ciclos + 1);
       await _setPinFallos(0);
     }
     return false;
@@ -290,8 +291,8 @@ class PerfilService {
   /// Reinicia los ciclos de bloqueo (al cambiar el PIN o "Olvidé mi PIN").
   Future<void> reiniciarBloqueoPin() async {
     final p = await _p;
-    await p.setInt('seg_pin_fallos', 0);
-    await p.setInt('seg_pin_ciclos_bloqueo', 0);
+    await p.setInt(_key('seg_pin_fallos', 0);
+    await p.setInt(_key('seg_pin_ciclos_bloqueo', 0);
     await _limpiarBloqueoPin(p); // v1.2.5-rev6: también el ancla monotónica
   }
 
@@ -299,10 +300,10 @@ class PerfilService {
   /// v1.2.5-rev6: usa el reloj monotónico si hay ancla (inmune a adelantos).
   Future<int> pinBloqueoMinutosRestantes() async {
     final p = await _p;
-    final hasta = p.getInt('seg_pin_bloqueado_hasta') ?? 0;
+    final hasta = p.getInt(_key('seg_pin_bloqueado_hasta')) ?? 0;
     if (hasta <= 0) return 0;
-    final durMs = p.getInt('seg_pin_duracion_ms') ?? 0;
-    final ancla = p.getInt('seg_pin_mono_ancla') ?? 0;
+    final durMs = p.getInt(_key('seg_pin_duracion_ms')) ?? 0;
+    final ancla = p.getInt(_key('seg_pin_mono_ancla')) ?? 0;
     if (durMs > 0 && ancla > 0) {
       final transcurrido = await _monoAhora() - ancla;
       if (transcurrido < 0) {
