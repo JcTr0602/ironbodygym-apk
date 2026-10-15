@@ -597,13 +597,93 @@ double _montoEfectivoOp(
 /// Monto en efectivo que representan una lista de ops encoladas.
 /// Suma lo cobrado en efectivo según [_montoEfectivoOp].
 Future<double> montoEfectivoOps(List<Map<String, dynamic>> ops) async {
-  final pr = await preciosVigentes();
-  double total = 0;
+  final pr = await preciosVigentes();  double total = 0;
   for (final op in ops) {
     total += _montoEfectivoOp(op, pr);
   }
   return total;
 }
+
+/// v1.3.3: monto en CUP cobrado que representa una op encolada.
+/// Como [_montoEfectivoOp] pero SIN filtrar por método de pago ni por
+/// entrega: para el KPI "Total cobrado" de Actividad reciente.
+/// Sigue la misma regla de precios que el servidor (_precio_metodo).
+Future<double> montoCobradoCupOp(Map<String, dynamic> op) async {
+  final pr = await preciosVigentes();
+  final tipo = '${op['tipo']}';
+  Map<String, dynamic> payload;
+  try {
+    payload =
+        jsonDecode(op['payload'] as String) as Map<String, dynamic>;
+  } catch (_) {
+    return 0;
+  }
+
+  double mensualidad(String periodo, int meses, String metodo,
+      double? montoManual, String? tipoId) {
+    if (periodo == 'personalizado') return montoManual ?? 0;
+    if (periodo == 'semanal') return pr['semanal']!;
+    if (periodo == 'quincenal') return pr['quincenal']!;
+    // v1.3.1: tarifa de menores (igual que el servidor).
+    if (tipoId == 'menores') return pr['menores']! * meses;
+    final unit =
+        metodo == 'transferencia' ? pr['transfer']! : pr['mensual']!;
+    return unit * meses;
+  }
+
+  if (tipo == 'pago_mensual' || tipo == 'pago' || tipo == 'mensual') {
+    return mensualidad(
+        '${payload['periodo'] ?? 'mensual'}',
+        (payload['meses'] as num?)?.toInt() ?? 1,
+        '${payload['metodo'] ?? 'efectivo'}',
+        (payload['monto'] as num?)?.toDouble(),
+        payload['tipo_id'] as String?);
+  }
+  if (tipo == 'inscribir') {
+    return mensualidad(
+        '${payload['periodo'] ?? 'mensual'}',
+        (payload['meses'] as num?)?.toInt() ?? 1,
+        'efectivo',
+        (payload['monto'] as num?)?.toDouble(),
+        payload['tipo_id'] as String?);
+  }
+  if (tipo == 'pago_diario' || tipo == 'diario') {
+    final cant = (payload['cantidad'] as num?)?.toInt() ?? 0;
+    return cant * pr['diario']!;
+  }
+  if (tipo == 'venta_suplemento') {
+    if ('${payload['moneda'] ?? 'CUP'}'.toUpperCase() != 'CUP') return 0;
+    final cant = (payload['cantidad'] as num?)?.toDouble() ?? 0;
+    final precio = (payload['precio'] as num?)?.toDouble() ?? 0;
+    return cant * precio;
+  }
+  if (tipo == 'inscripcion_venta_suplemento') {
+    double t = 0;
+    final c = payload['cliente'];
+    if (c is Map<String, dynamic>) {
+      t += mensualidad(
+          '${c['periodo'] ?? 'mensual'}',
+          (c['meses'] as num?)?.toInt() ?? 1,
+          'efectivo',
+          (c['monto'] as num?)?.toDouble(),
+          c['tipo_id'] as String?);
+    }
+    final v = payload['venta'];
+    if (v is Map<String, dynamic>) {
+      if ('${v['moneda'] ?? 'CUP'}'.toUpperCase() == 'CUP') {
+        final cant = (v['cantidad'] as num?)?.toDouble() ?? 0;
+        final precio = (v['precio'] as num?)?.toDouble() ?? 0;
+        t += cant * precio;
+      }
+    }
+    return t;
+  }
+  return 0;
+}
+
+/// v1.3.3: monto en USD cobrado que representa una op encolada
+/// (ventas de suplementos). Para el KPI "Total cobrado" de Actividad.
+double montoCobradoUsdOp(Map<String, dynamic> op) => _montoUsdOp(op);
 
 /// Dinero en efectivo que el entrenador logueado aún no le entrega al dueño.
 ///

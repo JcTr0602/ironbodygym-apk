@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../auth.dart';
 import '../fotos.dart';
 import '../localdb.dart';
 import '../negocio.dart';
@@ -24,7 +25,9 @@ class ActividadScreen extends StatefulWidget {
 class _ActividadScreenState extends State<ActividadScreen> {
   List<Map<String, dynamic>> _items = [];
   bool _cargando = true;
-  String _filtro = 'todo'; // todo | inscripcion | pago
+  // v1.3.3: 6 filtros de categoría (diseño Argón).
+  String _filtro =
+      'todo'; // todo | mensualidades | inscripciones | diarios | suplementos | entregas
   String _filtroActor = 'todos'; // todos | nombre del actor
   // v1.2.1: mejoras de actividad
   String _filtroFecha = 'todo'; // todo | hoy | ayer | 7dias | mes | rango
@@ -54,6 +57,41 @@ class _ActividadScreenState extends State<ActividadScreen> {
         }
       } catch (_) {}
     }
+    // v1.3.3: fusión híbrida — ops locales aún no aplicadas.
+    // El servidor NO trae op_uuid; para no duplicar solo se toman las
+    // ops en estado pendiente/error/necesita_revision (las 'aplicada'
+    // ya vienen en sync_estado_actividad).
+    try {
+      final db = await LocalDb.instance.db;
+      final opsPend = await db.query('ops_queue',
+          where: "estado IN ('pendiente', 'error', 'necesita_revision')",
+          orderBy: 'creada_ts DESC');
+      final actorLocal = AuthService().displayName;
+      for (final op in opsPend) {
+        final tipo = '${op['tipo'] ?? ''}';
+        Map<String, dynamic> payload = {};
+        try {
+          payload =
+              jsonDecode(op['payload'] as String) as Map<String, dynamic>;
+        } catch (_) {}
+        final cup = await montoCobradoCupOp(op);
+        final usd = montoCobradoUsdOp(op);
+        lista.add({
+          'ts': '${op['creada_ts'] ?? ''}',
+          'actor': actorLocal,
+          'rol': '',
+          'accion': tipo,
+          'detalle': _detalleOpLocal(tipo, payload, cup, usd),
+          'cliente_id': _clienteIdDePayload(payload),
+          '_en_cola': true,
+          '_monto_cup': cup,
+          '_monto_usd': usd,
+        });
+      }
+      // Reordenar la fusión por ts descendente.
+      lista.sort(
+          (a, b) => '${b['ts'] ?? ''}'.compareTo('${a['ts'] ?? ''}'));
+    } catch (_) {}
     // v1.2.1: resolver nombres y fotos de clientes para cada item.
     _nombres.clear();
     _fotos.clear();
@@ -95,14 +133,9 @@ class _ActividadScreenState extends State<ActividadScreen> {
   List<Map<String, dynamic>> get _filtrados {
     final q = _busqueda.trim().toLowerCase();
     return _items.where((a) {
-      // Filtro por tipo
+      // v1.3.3: filtro por categoría (diseño Argón).
       if (_filtro != 'todo') {
-        final acc = '${a['accion'] ?? ''}';
-        if (_filtro == 'inscripcion' && !acc.contains('inscri')) {
-          return false;
-        }
-        if (_filtro == 'pago' &&
-            !(acc.contains('pago') && !acc.contains('diario'))) {
+        if (_categoriaDe('${a['accion'] ?? ''}') != _filtro) {
           return false;
         }
       }
@@ -191,6 +224,114 @@ class _ActividadScreenState extends State<ActividadScreen> {
     return null;
   }
 
+  /// v1.3.3: extrae cliente_id del payload de una op local.
+  int? _clienteIdDePayload(Map<String, dynamic> payload) {
+    for (final k in ['cliente_id', 'id']) {
+      final v = payload[k];
+      if (v is int) return v;
+      if (v is String) {
+        final n = int.tryParse(v);
+        if (n != null) return n;
+      }
+    }
+    final c = payload['cliente'];
+    if (c is Map<String, dynamic>) {
+      final v = c['id'];
+      if (v is int) return v;
+      if (v is String) return int.tryParse(v);
+    }
+    return null;
+  }
+
+  /// v1.3.3: detalle legible para una op local en cola.
+  String _detalleOpLocal(String tipo, Map<String, dynamic> payload,
+      double cup, double usd) {
+    final montoTxt = usd > 0
+        ? '${fmtMonto(usd)} USD'
+        : (cup > 0 ? '${fmtMonto(cup)} CUP' : '');
+    switch (tipo) {
+      case 'pago_mensual':
+      case 'pago':
+      case 'mensual':
+        final per = '${payload['periodo'] ?? 'mensual'}';
+        final met = '${payload['metodo'] ?? 'efectivo'}';
+        return 'Pago mensual ($per, $met)${montoTxt.isNotEmpty ? ' — $montoTxt' : ''}';
+      case 'pago_diario':
+      case 'diario':
+        final cant = payload['cantidad'] ?? '';
+        return 'Pago diario x$cant${montoTxt.isNotEmpty ? ' — $montoTxt' : ''}';
+      case 'inscribir':
+        return 'Inscripción${montoTxt.isNotEmpty ? ' — $montoTxt' : ''}';
+      case 'inscripcion_venta_suplemento':
+        return 'Inscripción + venta${montoTxt.isNotEmpty ? ' — $montoTxt' : ''}';
+      case 'venta_suplemento':
+        final nombre = '${payload['nombre'] ?? 'Suplemento'}';
+        final cant = payload['cantidad'] ?? '';
+        final moneda = '${payload['moneda'] ?? 'CUP'}';
+        return '$nombre x$cant — $montoTxt $moneda'.trim();
+      case 'confirmar_entrega':
+        return 'Confirmar entrega de cobros';
+      case 'regalar_mes_cumpleanos':
+      case 'regalo_cumpleanos':
+        return 'Mes gratis (cumpleaños)';
+      case 'foto':
+        return 'Foto de cliente';
+      case 'foto_suplemento':
+        return 'Foto de suplemento';
+      default:
+        return tipo.replaceAll('_', ' ');
+    }
+  }
+
+  /// v1.3.3: categoría de la actividad según la acción
+  /// (diseño Argón, 6 filtros).
+  String _categoriaDe(String accion) {
+    final a = accion.toLowerCase();
+    if (a.contains('inscri')) return 'inscripciones';
+    if (a.contains('pago_diario') || a == 'diario') return 'diarios';
+    if (a.contains('suplemento') || a.contains('categoria')) {
+      return 'suplementos';
+    }
+    if (a.contains('confirmar_entrega') || a.contains('entrega')) {
+      return 'entregas';
+    }
+    if (a.contains('regalo_cumpleanos') ||
+        a.contains('regalar_mes')) {
+      return 'mensualidades';
+    }
+    if (a.contains('pago') && !a.contains('diario')) {
+      return 'mensualidades';
+    }
+    if (a == 'mensual') return 'mensualidades';
+    return 'otra';
+  }
+
+  /// v1.3.3: ¿la acción del servidor representa un cobro real?
+  /// Solo cobros suman al KPI (no anulaciones, ediciones, gastos,
+  /// entregas ni ajustes de precios).
+  bool _esCobroServidor(String accion) {
+    final a = accion.toLowerCase();
+    if (a.contains('anular_')) return false;
+    if (a.contains('editar_')) return false;
+    if (a.contains('gasto')) return false;
+    if (a.contains('entrega')) return false;
+    if (a.contains('ajuste')) return false;
+    if (a.contains('regalo_cumpleanos')) return false;
+    return a.contains('pago') ||
+        a.contains('inscri') ||
+        a.contains('venta_suplemento');
+  }
+
+  /// v1.3.3: extrae (monto, moneda) del detalle del servidor.
+  /// Devuelve null si no hay monto.
+  (double, String)? _montoServidor(String detalle) {
+    final m =
+        RegExp(r'(\d+(?:\.\d+)?)\s*(CUP|USD)').firstMatch(detalle);
+    if (m == null) return null;
+    final v = double.tryParse(m.group(1)!) ?? 0;
+    return (v, m.group(2)!);
+  }
+
   Future<void> _abrirFicha(Map<String, dynamic> a) async {
     final id = _clienteIdDe(a);
     if (id == null) return;
@@ -257,6 +398,16 @@ class _ActividadScreenState extends State<ActividadScreen> {
     if (accion.contains('inscri')) return Icons.person_add;
     if (accion.contains('pago_diario')) return Icons.receipt_long;
     if (accion.contains('pago')) return Icons.payments;
+    // v1.3.3: iconos por categoría (diseño Argón).
+    if (accion.contains('regalo_cumpleanos') ||
+        accion.contains('regalar_mes')) {
+      return Icons.card_giftcard;
+    }
+    if (accion.contains('suplemento') || accion.contains('categoria')) {
+      return Icons.medication;
+    }
+    if (accion.contains('entrega')) return Icons.delivery_dining;
+    if (accion.contains('incidencia')) return Icons.report_problem_outlined;
     if (accion.contains('foto')) return Icons.photo_camera;
     if (accion.contains('editar')) return Icons.edit;
     if (accion.contains('eliminar')) return Icons.delete_outline;
@@ -270,6 +421,15 @@ class _ActividadScreenState extends State<ActividadScreen> {
   Color _colorAccion(BuildContext context, String accion) {
     if (accion.contains('inscri')) return AppColores.exito;
     if (accion.contains('pago')) return AppColores.naranja;
+    // v1.3.3: colores por categoría (diseño Argón).
+    if (accion.contains('suplemento') || accion.contains('categoria')) {
+      return AppColores.info;
+    }
+    if (accion.contains('entrega')) return AppColores.exito;
+    if (accion.contains('regalo_cumpleanos') ||
+        accion.contains('regalar_mes')) {
+      return AppColores.alerta;
+    }
     if (accion.contains('eliminar')) return AppColores.error;
     if (accion.contains('editar')) return AppColores.info;
     return AppColores.textoSecundario(context);
@@ -441,7 +601,7 @@ class _ActividadScreenState extends State<ActividadScreen> {
                   setState(() => _busqueda = v),
             ),
           ),
-          // Filtros por tipo
+          // v1.3.3: 6 filtros de categoría (diseño Argón).
           SingleChildScrollView(
             scrollDirection: Axis.horizontal,
             padding:
@@ -450,12 +610,20 @@ class _ActividadScreenState extends State<ActividadScreen> {
               children: [
                 _chipFiltro('todo', 'Todo'),
                 const SizedBox(width: 8),
-                _chipFiltro('inscripcion', 'Inscripciones'),
+                _chipFiltro('mensualidades', 'Mensualidades'),
                 const SizedBox(width: 8),
-                _chipFiltro('pago', 'Pagos'),
+                _chipFiltro('inscripciones', 'Inscripciones'),
+                const SizedBox(width: 8),
+                _chipFiltro('diarios', 'Diarios'),
+                const SizedBox(width: 8),
+                _chipFiltro('suplementos', 'Suplementos'),
+                const SizedBox(width: 8),
+                _chipFiltro('entregas', 'Entregas'),
               ],
             ),
           ),
+          // v1.3.3: cinta de resumen financiero (KPI bar).
+          _kpiBar(filtrados),
           // v1.2.1: filtro por fecha
           SingleChildScrollView(
             scrollDirection: Axis.horizontal,
@@ -570,6 +738,37 @@ class _ActividadScreenState extends State<ActividadScreen> {
                                   // montos resaltados.
                                   final detalle =
                                       _detalleConNombre(a);
+                                  // v1.3.3: chip "En cola" y badge de
+                                  // monto (diseño Argón).
+                                  final enCola =
+                                      a['_en_cola'] == true;
+                                  double badgeCup = 0, badgeUsd = 0;
+                                  if (enCola) {
+                                    badgeCup =
+                                        (a['_monto_cup'] as num?)
+                                                ?.toDouble() ??
+                                            0;
+                                    badgeUsd =
+                                        (a['_monto_usd'] as num?)
+                                                ?.toDouble() ??
+                                            0;
+                                  } else if (_esCobroServidor(
+                                      accion)) {
+                                    final m = _montoServidor(
+                                        '${a['detalle'] ?? ''}');
+                                    if (m != null) {
+                                      if (m.$2 == 'USD') {
+                                        badgeUsd = m.$1;
+                                      } else {
+                                        badgeCup = m.$1;
+                                      }
+                                    }
+                                  }
+                                  final titulo = (nombreCli != null &&
+                                          !nombreCli.startsWith(
+                                              'Cliente '))
+                                      ? nombreCli
+                                      : _tituloAccion(accion);
                                   return Padding(
                                     padding: const EdgeInsets
                                         .symmetric(
@@ -612,31 +811,44 @@ class _ActividadScreenState extends State<ActividadScreen> {
                                                     CrossAxisAlignment
                                                         .start,
                                                 children: [
-                                                  // v1.2.1: nombre del
-                                                  // cliente en la fila.
-                                                  if (nombreCli !=
-                                                          null &&
-                                                      !nombreCli
-                                                          .startsWith(
-                                                              'Cliente ')) ...[
-                                                    Text(
-                                                      nombreCli,
-                                                      style: AppTexto
-                                                          .subtitulo
-                                                          .copyWith(
-                                                              fontWeight:
-                                                                  FontWeight
-                                                                      .bold),
-                                                      maxLines:
-                                                          1,
-                                                      overflow:
-                                                          TextOverflow
-                                                              .ellipsis,
-                                                    ),
-                                                    const SizedBox(
-                                                        height:
-                                                            2),
-                                                  ],
+                                                  // v1.3.3: título +
+                                                  // badge de monto +
+                                                  // chip "En cola".
+                                                  Row(
+                                                    children: [
+                                                      Expanded(
+                                                        child: Text(
+                                                          titulo,
+                                                          style: AppTexto
+                                                              .subtitulo
+                                                              .copyWith(
+                                                                  fontWeight:
+                                                                      FontWeight
+                                                                          .bold),
+                                                          maxLines:
+                                                              1,
+                                                          overflow:
+                                                              TextOverflow
+                                                                  .ellipsis,
+                                                        ),
+                                                      ),
+                                                      if (badgeCup > 0 ||
+                                                          badgeUsd >
+                                                              0)
+                                                        _badgeMonto(
+                                                            badgeCup,
+                                                            badgeUsd),
+                                                      if (enCola) ...[
+                                                        const SizedBox(
+                                                            width:
+                                                                6),
+                                                        _chipEnCola(),
+                                                      ],
+                                                    ],
+                                                  ),
+                                                  const SizedBox(
+                                                      height:
+                                                          2),
                                                   RichText(
                                                     maxLines: 3,
                                                     overflow:
@@ -674,7 +886,8 @@ class _ActividadScreenState extends State<ActividadScreen> {
                                                       Expanded(
                                                         child:
                                                             Text(
-                                                          '${a['actor'] ?? '—'} · ${tiempoRelativo(a['ts'] as String?)}',
+                                                          _subtituloActividad(
+                                                              a),
                                                           style:
                                                               AppTexto
                                                                   .etiqueta
@@ -716,6 +929,162 @@ class _ActividadScreenState extends State<ActividadScreen> {
         ],
       ),
     );
+  }
+
+  /// v1.3.3: calcula (n_acciones, total_cup, total_usd) sobre los
+  /// items filtrados. Servidor: regex sobre detalle (solo cobros
+  /// reales). Local: montos del payload ya calculados al cargar.
+  (int, double, double) _kpi(List<Map<String, dynamic>> items) {
+    double cup = 0, usd = 0;
+    for (final a in items) {
+      if (a['_en_cola'] == true) {
+        cup += (a['_monto_cup'] as num?)?.toDouble() ?? 0;
+        usd += (a['_monto_usd'] as num?)?.toDouble() ?? 0;
+      } else {
+        final accion = '${a['accion'] ?? ''}';
+        if (!_esCobroServidor(accion)) continue;
+        final m = _montoServidor('${a['detalle'] ?? ''}');
+        if (m != null) {
+          if (m.$2 == 'USD') {
+            usd += m.$1;
+          } else {
+            cup += m.$1;
+          }
+        }
+      }
+    }
+    return (items.length, cup, usd);
+  }
+
+  /// v1.3.3: cinta de resumen financiero debajo de los filtros.
+  Widget _kpiBar(List<Map<String, dynamic>> filtrados) {
+    final kpi = _kpi(filtrados);
+    final n = kpi.$1;
+    final cup = kpi.$2;
+    final usd = kpi.$3;
+    final totalTxt = StringBuffer('${fmtMonto(cup)} CUP');
+    if (usd > 0) totalTxt.write(' (+ ${fmtMonto(usd)} USD)');
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 0, 12, 4),
+      child: Tarjeta(
+        padding: const EdgeInsets.symmetric(
+            horizontal: 14, vertical: 10),
+        child: Row(
+          children: [
+            const Icon(Icons.analytics_outlined,
+                size: 20, color: AppColores.naranja),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('$n acciones',
+                      style: AppTexto.etiqueta.copyWith(
+                          color: AppColores.textoSecundario(
+                              context))),
+                  const SizedBox(height: 2),
+                  Text('Total cobrado: $totalTxt',
+                      style: AppTexto.subtitulo.copyWith(
+                          fontWeight: FontWeight.bold,
+                          color: AppColores.exito)),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// v1.3.3: título legible a partir de la acción
+  /// ("pago_sync" -> "Pago mensual", "venta_suplemento" -> "Venta").
+  String _tituloAccion(String accion) {
+    final a = accion.toLowerCase();
+    if (a.contains('inscripcion_venta')) return 'Inscripción + venta';
+    if (a.contains('inscri')) return 'Inscripción';
+    if (a.contains('pago_diario') || a == 'diario') {
+      return 'Pago diario';
+    }
+    if (a.contains('regalo_cumpleanos') ||
+        a.contains('regalar_mes')) {
+      return 'Mes gratis (cumpleaños)';
+    }
+    if (a.contains('pago') && !a.contains('diario')) {
+      return 'Pago mensual';
+    }
+    if (a.contains('venta_suplemento')) return 'Venta suplemento';
+    if (a.contains('suplemento')) return 'Suplemento';
+    if (a.contains('confirmar_entrega')) return 'Entrega confirmada';
+    if (a.contains('categoria')) return 'Categoría';
+    final t =
+        accion.replaceAll('_sync', '').replaceAll('_', ' ').trim();
+    if (t.isEmpty) return 'Actividad';
+    return t[0].toUpperCase() + t.substring(1);
+  }
+
+  /// v1.3.3: chip ámbar "⏳ En cola" para ops locales.
+  Widget _chipEnCola() {
+    return Container(
+      padding: const EdgeInsets.symmetric(
+          horizontal: 8, vertical: 2),
+      decoration: BoxDecoration(
+        color: AppColores.alerta.withValues(alpha: 0.15),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(
+            color: AppColores.alerta.withValues(alpha: 0.5)),
+      ),
+      child: const Text(
+        '⏳ En cola',
+        style: TextStyle(
+            color: AppColores.alerta,
+            fontSize: 10,
+            fontWeight: FontWeight.bold),
+      ),
+    );
+  }
+
+  /// v1.3.3: badge de monto a la derecha (+2,000 CUP).
+  Widget _badgeMonto(double cup, double usd) {
+    final txt = usd > 0
+        ? '+${fmtMonto(usd)} USD'
+        : '+${fmtMonto(cup)} CUP';
+    return Container(
+      padding: const EdgeInsets.symmetric(
+          horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: AppColores.exito.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Text(
+        txt,
+        style: const TextStyle(
+            color: AppColores.exito,
+            fontSize: 12,
+            fontWeight: FontWeight.bold),
+      ),
+    );
+  }
+
+  /// v1.3.3: subtítulo "actor · HH:mm (hace X min)".
+  String _subtituloActividad(Map<String, dynamic> a) {
+    final actor = '${a['actor'] ?? '—'}';
+    final ts = a['ts'] as String?;
+    final hora = _horaCorta(ts);
+    final rel = tiempoRelativo(ts);
+    final horaTxt = hora.isNotEmpty ? ' · $hora' : '';
+    return '$actor$horaTxt ($rel)';
+  }
+
+  /// v1.3.3: "HH:mm" local a partir del ts.
+  String _horaCorta(String? ts) {
+    if (ts == null || ts.isEmpty) return '';
+    try {
+      final dt = DateTime.parse(ts).toLocal();
+      return '${dt.hour.toString().padLeft(2, '0')}:'
+          '${dt.minute.toString().padLeft(2, '0')}';
+    } catch (_) {
+      return '';
+    }
   }
 
   Widget _chipFiltro(String valor, String etiqueta) {
