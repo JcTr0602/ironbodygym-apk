@@ -345,8 +345,9 @@ class _ListaIncidenciasScreenState
               ),
             )
           : null,
-      floatingActionButton:
-          FloatingActionButton.extended(
+      floatingActionButton: _modoSeleccion
+          ? null
+          : FloatingActionButton.extended(
         onPressed: _crearNueva,
         icon: const Icon(Icons.add),
         label: const Text('Nueva'),
@@ -507,44 +508,41 @@ class _ListaIncidenciasScreenState
   }
 
   /// v1.3.2: pide la nota de resolución única para un lote a "resuelta".
-  /// Valida que no esté vacía (corrección Argón).
-  Future<String?> _pedirNotaLote() async {
-    final ctrl = TextEditingController();
-    try {
-      return await showDialog<String>(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          title: const Text('Nota de resolución'),
-          content: TextField(
-            controller: ctrl,
-            maxLines: 3,
-            autofocus: true,
-            decoration: const InputDecoration(
-              hintText:
-                  'Se aplicará a todas las incidencias del lote',
-              border: OutlineInputBorder(),
-            ),
+  /// Valida que no esté vacía (corrección Argón). Usa variable local con
+  /// onChanged en vez de TextEditingController: el dispose en el finally
+  /// disparaba "used after being disposed" durante la animación de salida.
+  Future<String?> _pedirNotaLote() {
+    var nota = '';
+    return showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Nota de resolución'),
+        content: TextField(
+          maxLines: 3,
+          autofocus: true,
+          onChanged: (v) => nota = v,
+          decoration: const InputDecoration(
+            hintText:
+                'Se aplicará a todas las incidencias del lote',
+            border: OutlineInputBorder(),
           ),
-          actions: [
-            TextButton(
-              onPressed: () =>
-                  Navigator.pop(ctx),
-              child: const Text('Cancelar'),
-            ),
-            FilledButton(
-              onPressed: () {
-                final t = ctrl.text.trim();
-                if (t.isEmpty) return;
-                Navigator.pop(ctx, t);
-              },
-              child: const Text('Aplicar'),
-            ),
-          ],
         ),
-      );
-    } finally {
-      ctrl.dispose();
-    }
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () {
+              final t = nota.trim();
+              if (t.isEmpty) return;
+              Navigator.pop(ctx, t);
+            },
+            child: const Text('Aplicar'),
+          ),
+        ],
+      ),
+    );
   }
 
   /// v1.3.2: aplica un cambio de estado a las incidencias seleccionadas.

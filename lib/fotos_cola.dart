@@ -200,15 +200,8 @@ class FotosColaService {
       whereArgs: [ahoraIso],
     );
 
+    var redVerificada = false;
     while (true) {
-      // v1.3.2 (Argón): no quemar intentos del backoff sin red real.
-      // HEAD a Supabase (cualquier HTTP, incluso 401/404, = hay ruta).
-      // DNS solo puede mentir con caché local en portales cautivos.
-      if (!await _hayRed()) {
-        AppLog.aviso(
-            'fotos', 'sin_red', d: 'cola pausada hasta próximo ciclo');
-        break;
-      }
       // v1.2.9+43 (Gemini R3): limpieza continua de leases expirados.
       // Si el proceso corre en segundo plano, los leases que expiran
       // durante la ejecución se liberan sin reiniciar la app.
@@ -241,6 +234,18 @@ class FotosColaService {
       if (fotos.isEmpty) break;
       final f = fotos.first;
       final fotoOpUuid = f['op_uuid'] as String?;
+
+      // v1.3.2 (Argón): verificar red UNA vez por lote, y solo después
+      // de confirmar en SQLite que hay fotos pendientes (costo 0 de red
+      // cuando la cola está vacía, que es el 99% de los ciclos).
+      if (!redVerificada) {
+        if (!await _hayRed()) {
+          AppLog.aviso('fotos', 'sin_red',
+              d: 'cola pausada hasta próximo ciclo');
+          break;
+        }
+        redVerificada = true;
+      }
 
       // NETWORK LOCK (específico): si el op de negocio asociado a ESTA foto
       // aún está pendiente, la foto espera (el cliente/suplemento aún no
@@ -953,17 +958,19 @@ class FotosColaService {
   /// HEAD a la base de Supabase con timeout 5s. Cualquier código HTTP
   /// recibido (incluso 401/404) significa que hay ruta hasta el backend.
   Future<bool> _hayRed() async {
+    final client = HttpClient()
+      ..connectionTimeout = const Duration(seconds: 5);
     try {
-      final client = HttpClient();
-      client.connectionTimeout = const Duration(seconds: 5);
       final req = await client
           .headUrl(Uri.parse(AppConfig.supabaseUrl))
           .timeout(const Duration(seconds: 5));
-      final res = await req.close().timeout(const Duration(seconds: 5));
-      client.close();
+      final res =
+          await req.close().timeout(const Duration(seconds: 5));
       return res.statusCode > 0;
     } catch (_) {
       return false;
+    } finally {
+      client.close(force: true);
     }
   }
 }

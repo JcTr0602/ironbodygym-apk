@@ -566,14 +566,6 @@ class LocalDb {
               where: "tabla = 'incidencias_comentarios'");
           await db.delete('watermarks', where: "tabla = 'incidencias_tipos'");
         }
-        // v23 (v1.3.2): plantilla de descripción por tipo de incidencia
-        // (Opción A de Argón: columna en incidencias_tipos, ya sincronizada).
-        if (oldV < 23) {
-          await _addColumnIfMissing(db, 'incidencias_tipos',
-              'plantilla_descripcion', 'TEXT');
-          await _addColumnIfMissing(db, 'incidencias_tipos_mirror',
-              'plantilla_descripcion', 'TEXT');
-        }
         // v19: rediseño de Incidencias v1.3.0 (certificado por Gemini).
         if (oldV < 19) {
           // 1. Tipos personalizados
@@ -749,6 +741,18 @@ class LocalDb {
           ''');
           // Argón B4: asegurar esquema completo también en upgrade.
           await _crearEsquemaIncidencias(db);
+        }
+        // v23 (v1.3.2): plantilla de descripción por tipo de incidencia
+        // (Opción A de Argón: columna en incidencias_tipos, ya sincronizada).
+        // Va después de v19 (que crea las tablas). El reset del watermark
+        // fuerza el pull de las plantillas al actualizar.
+        if (oldV < 23) {
+          await _addColumnIfMissing(db, 'incidencias_tipos',
+              'plantilla_descripcion', 'TEXT');
+          await _addColumnIfMissing(db, 'incidencias_tipos_mirror',
+              'plantilla_descripcion', 'TEXT');
+          await db.delete('watermarks',
+              where: "tabla = 'incidencias_tipos'");
         }
       },
     );

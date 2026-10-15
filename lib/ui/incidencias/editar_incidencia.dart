@@ -135,11 +135,13 @@ class _EditarIncidenciaScreenState
                     (nuevoTipo.plantillaDescripcion ?? '')
                         .trim();
                 setState(() {
-                  if ((textoActual.isEmpty ||
-                          (plantillaAnterior.isNotEmpty &&
-                              textoActual ==
-                                  plantillaAnterior)) &&
-                      plantillaNueva.isNotEmpty) {
+                  // v1.3.2 (Argón): reemplaza si está vacío o si sigue
+                  // siendo la plantilla del tipo anterior (incluso si el
+                  // nuevo tipo no tiene plantilla: limpia el texto viejo).
+                  if (textoActual.isEmpty ||
+                      (plantillaAnterior.isNotEmpty &&
+                          textoActual ==
+                              plantillaAnterior)) {
                     _ctrlDesc.text = plantillaNueva;
                   }
                   _tipoId = v;
