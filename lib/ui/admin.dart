@@ -806,7 +806,9 @@ class _AdminScreenState extends State<AdminScreen> {
                       crossAxisCount: 2,
                       mainAxisSpacing: AppEspacio.md,
                       crossAxisSpacing: AppEspacio.md,
-                      childAspectRatio: 1.05,
+                      // v1.3.2 (Argón #22): celdas más altas para que el
+                      // subtítulo no desborde en pantallas angostas.
+                      childAspectRatio: 0.92,
                       children: [
                         _tarjetaHub(
                           'A',

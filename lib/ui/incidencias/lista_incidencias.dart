@@ -313,37 +313,42 @@ class _ListaIncidenciasScreenState
         ],
       ),
       // v1.3.2: barra de acciones en lote (solo en modo selección).
+      // v1.3.2 (Argón #22): SingleChildScrollView horizontal para que no
+      // haya overflow en pantallas angostas.
       bottomNavigationBar: _modoSeleccion
           ? BottomAppBar(
-              child: Row(
-                children: [
-                  IconButton(
-                    icon: const Icon(Icons.close),
-                    tooltip: 'Limpiar selección',
-                    onPressed: () => setState(
-                        () => _seleccionadas.clear()),
-                  ),
-                  TextButton(
-                    onPressed: () =>
-                        _accionLote('en_proceso'),
-                    child:
-                        const Text('En proceso'),
-                  ),
-                  TextButton(
-                    onPressed: () =>
-                        _accionLote('bloqueada'),
-                    child:
-                        const Text('Bloquear'),
-                  ),
-                  // v1.3.2 (Argón #13): resolver en lote solo el dueño.
-                  if (AuthService().isOwner)
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Row(
+                  children: [
+                    IconButton(
+                      icon: const Icon(Icons.close),
+                      tooltip: 'Limpiar selección',
+                      onPressed: () => setState(
+                          () => _seleccionadas.clear()),
+                    ),
                     TextButton(
                       onPressed: () =>
-                          _accionLote('resuelta'),
+                          _accionLote('en_proceso'),
                       child:
-                          const Text('Resolver'),
+                          const Text('En proceso'),
                     ),
-                ],
+                    TextButton(
+                      onPressed: () =>
+                          _accionLote('bloqueada'),
+                      child:
+                          const Text('Bloquear'),
+                    ),
+                    // v1.3.2 (Argón #13): resolver en lote solo el dueño.
+                    if (AuthService().isOwner)
+                      TextButton(
+                        onPressed: () =>
+                            _accionLote('resuelta'),
+                        child:
+                            const Text('Resolver'),
+                      ),
+                  ],
+                ),
               ),
             )
           : null,

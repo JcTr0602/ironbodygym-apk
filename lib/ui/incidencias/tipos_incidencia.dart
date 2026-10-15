@@ -469,18 +469,25 @@ class _DialogoTipoState
                         color: Color(c),
                         shape:
                             BoxShape.circle,
+                        // v1.3.2 (Argón #20): borde del tema, no negro fijo
+                        // (invisible en modo oscuro).
                         border: sel
                             ? Border.all(
-                                color: Colors
-                                    .black,
+                                color: Theme.of(context)
+                                    .colorScheme
+                                    .onSurface,
                                 width: 3)
                             : null,
                       ),
                       child: sel
-                          ? const Icon(
+                          ? Icon(
                               Icons.check,
-                              color: Colors
-                                  .white,
+                              // v1.3.2 (Argón #20): check según luminancia
+                              // (blanco sobre amarillo es ilegible).
+                              color: Color(c).computeLuminance() >
+                                      0.5
+                                  ? Colors.black
+                                  : Colors.white,
                               size: 18)
                           : null,
                     ),

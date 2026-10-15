@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:uuid/uuid.dart';
 import 'package:image_picker/image_picker.dart';
 import '../../auth.dart';
+import '../../fotos.dart';
 import '../../localdb.dart';
 import '../../modelos/incidencia.dart';
 import '../diseno.dart';
@@ -294,23 +295,57 @@ class _DetalleIncidenciaScreenState
             runSpacing: 8,
             children: _fotos.map((f) {
               final file = File(f.localPath);
+              // v1.3.2 (Argón #21): si el archivo local no existe pero hay
+              // storage_path (foto de otro móvil), descargarla vía FotoCache.
+              final Widget imagen = file.existsSync()
+                  ? Image.file(
+                      file,
+                      width: 100,
+                      height: 100,
+                      fit: BoxFit.cover,
+                    )
+                  : (f.storagePath != null && f.storagePath!.isNotEmpty)
+                      ? FutureBuilder<File?>(
+                          future: FotoCache.instance
+                              .obtener(f.storagePath),
+                          builder: (ctx, snap) {
+                            if (snap.hasData && snap.data != null) {
+                              return Image.file(
+                                snap.data!,
+                                width: 100,
+                                height: 100,
+                                fit: BoxFit.cover,
+                              );
+                            }
+                            return Container(
+                              width: 100,
+                              height: 100,
+                              color: Theme.of(context)
+                                  .colorScheme
+                                  .surfaceContainerHighest,
+                              child: snap.connectionState ==
+                                      ConnectionState.waiting
+                                  ? const Center(
+                                      child:
+                                          CircularProgressIndicator())
+                                  : const Icon(
+                                      Icons.broken_image),
+                            );
+                          },
+                        )
+                      : Container(
+                          width: 100,
+                          height: 100,
+                          color: Theme.of(context)
+                              .colorScheme
+                              .surfaceContainerHighest,
+                          child: const Icon(
+                              Icons.broken_image),
+                        );
               return ClipRRect(
                 borderRadius:
                     BorderRadius.circular(8),
-                child: file.existsSync()
-                    ? Image.file(
-                        file,
-                        width: 100,
-                        height: 100,
-                        fit: BoxFit.cover,
-                      )
-                    : Container(
-                        width: 100,
-                        height: 100,
-                        color: Colors.grey.shade300,
-                        child: const Icon(
-                            Icons.broken_image),
-                      ),
+                child: imagen,
               );
             }).toList(),
           ),

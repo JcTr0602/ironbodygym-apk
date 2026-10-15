@@ -254,7 +254,8 @@ class PerfilService {
           // Aún no expira en tiempo real aunque el wall clock diga lo
           // contrario (adelanto detectado): reanclar el deadline.
           final restante = durMs - transcurrido;
-          await p.setInt(_key('seg_pin_bloqueado_hasta', ahora + restante);
+          await p.setInt(
+              _key('seg_pin_bloqueado_hasta'), ahora + restante);
           return false;
         }
       } else {
@@ -274,15 +275,15 @@ class PerfilService {
     await _setPinFallos(fallos);
     if (fallos >= 5) {
       // Esperas crecientes: 1, 5, 15, 30, 60 min según ciclos previos.
-      final ciclos = p.getInt(_key('seg_pin_ciclos_bloqueo') ?? 0;
+      final ciclos = p.getInt(_key('seg_pin_ciclos_bloqueo')) ?? 0;
       const minutos = [1, 5, 15, 30, 60];
       final minBloqueo = minutos[ciclos.clamp(0, minutos.length - 1)];
       final durMs = minBloqueo * 60 * 1000;
-      await p.setInt(_key('seg_pin_bloqueado_hasta', ahora + durMs);
+      await p.setInt(_key('seg_pin_bloqueado_hasta'), ahora + durMs);
       // v1.2.5-rev6: ancla monotónica persistente (sobrevive reinicios).
-      await p.setInt(_key('seg_pin_duracion_ms', durMs);
-      await p.setInt(_key('seg_pin_mono_ancla', await _monoAhora());
-      await p.setInt(_key('seg_pin_ciclos_bloqueo', ciclos + 1);
+      await p.setInt(_key('seg_pin_duracion_ms'), durMs);
+      await p.setInt(_key('seg_pin_mono_ancla'), await _monoAhora());
+      await p.setInt(_key('seg_pin_ciclos_bloqueo'), ciclos + 1);
       await _setPinFallos(0);
     }
     return false;
@@ -291,8 +292,8 @@ class PerfilService {
   /// Reinicia los ciclos de bloqueo (al cambiar el PIN o "Olvidé mi PIN").
   Future<void> reiniciarBloqueoPin() async {
     final p = await _p;
-    await p.setInt(_key('seg_pin_fallos', 0);
-    await p.setInt(_key('seg_pin_ciclos_bloqueo', 0);
+    await p.setInt(_key('seg_pin_fallos'), 0);
+    await p.setInt(_key('seg_pin_ciclos_bloqueo'), 0);
     await _limpiarBloqueoPin(p); // v1.2.5-rev6: también el ancla monotónica
   }
 
