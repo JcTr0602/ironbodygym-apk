@@ -517,6 +517,9 @@ class _DetalleIncidenciaScreenState
           res['foto'] as String?;
 
       await d.transaction((txn) async {
+        // v1.3.2 (Argón post-fix): generar el op_uuid antes para
+        // guardarlo también en la fila local.
+        final opUuidEstado = const Uuid().v4();
         // 1. Actualizar incidencia
         await txn.update(
           'incidencias_local',
@@ -530,6 +533,7 @@ class _DetalleIncidenciaScreenState
             'actualizado_en': ahora,
             'sync_estado': 'pending',
             'sincronizada': 0,
+            'op_uuid': opUuidEstado,
             // Argón B4: incrementar versión para OCC.
             'version': _inc!.version + 1,
           },
@@ -564,7 +568,7 @@ class _DetalleIncidenciaScreenState
 
         // 4. Fix #9 (Sol): encolar dentro de la transacción.
         await txn.insert('ops_queue', {
-          'op_uuid': const Uuid().v4(),
+          'op_uuid': opUuidEstado,
           'tipo': 'cambiar_estado_incidencia',
           'payload': jsonEncode({
             'id': _inc!.id,
@@ -587,6 +591,8 @@ class _DetalleIncidenciaScreenState
 
     // Transición directa (en_proceso, bloqueada, etc.)
     await d.transaction((txn) async {
+      // v1.3.2 (Argón post-fix): op_uuid en la fila local también.
+      final opUuidDirecto = const Uuid().v4();
       await txn.update(
         'incidencias_local',
         {
@@ -594,6 +600,7 @@ class _DetalleIncidenciaScreenState
           'actualizado_en': ahora,
           'sync_estado': 'pending',
           'sincronizada': 0,
+          'op_uuid': opUuidDirecto,
           // Argón B4: incrementar versión para OCC.
           'version': _inc!.version + 1,
         },
@@ -614,7 +621,7 @@ class _DetalleIncidenciaScreenState
 
       // Fix #9 (Sol): encolar dentro de la transacción.
       await txn.insert('ops_queue', {
-        'op_uuid': const Uuid().v4(),
+        'op_uuid': opUuidDirecto,
         'tipo': 'cambiar_estado_incidencia',
         'payload': jsonEncode({
           'id': _inc!.id,

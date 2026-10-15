@@ -1769,6 +1769,13 @@ class LocalDb {
           await txn.insert('incidencias_local', {
             'id': r['id'],
             'tipo': r['tipo'],
+            // v1.3.2 (Argón post-fix): no perder estas columnas al copiar.
+            'tipo_id': r['tipo_id'],
+            'prioridad': r['prioridad'],
+            'fecha_limite': r['fecha_limite'],
+            'ubicacion': r['ubicacion'],
+            'asignado_a': r['asignado_a'],
+            'actualizado_en': r['actualizada_en'],
             'entidad': r['entidad'],
             'entidad_id': r['entidad_id'],
             'descripcion': r['descripcion'],
@@ -1786,7 +1793,8 @@ class LocalDb {
         }
         final rows = await txn.query(
           'incidencias_local',
-          columns: ['id', 'estado', 'version', 'tipo'],
+          // v1.3.2 (Argón post-fix): tipo_id, no tipo, para Mantenimiento.
+          columns: ['id', 'estado', 'version', 'tipo_id'],
           where: 'id = ?',
           whereArgs: [id],
           limit: 1,
@@ -1799,7 +1807,7 @@ class LocalDb {
         if (!_transicionValida(anterior, nuevoEstado)) continue;
         // v1.3.2 (Argón #13): Mantenimiento exige foto para resolver.
         if (nuevoEstado == 'resuelta' &&
-            '${rows.first['tipo']}' ==
+            '${rows.first['tipo_id']}' ==
                 'a1b2c3d4-0002-4000-8000-000000000002') {
           final fotos = await txn.query('incidencias_fotos',
               columns: ['id'],
@@ -2471,6 +2479,13 @@ class LocalDb {
     await d.insert('incidencias_local', {
       'id': r['id'],
       'tipo': r['tipo'],
+      // v1.3.2 (Argón post-fix): no perder estas columnas al copiar.
+      'tipo_id': r['tipo_id'],
+      'prioridad': r['prioridad'],
+      'fecha_limite': r['fecha_limite'],
+      'ubicacion': r['ubicacion'],
+      'asignado_a': r['asignado_a'],
+      'actualizado_en': r['actualizada_en'],
       'entidad': r['entidad'],
       'entidad_id': r['entidad_id'],
       'descripcion': r['descripcion'],

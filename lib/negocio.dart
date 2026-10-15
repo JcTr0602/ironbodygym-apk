@@ -712,9 +712,11 @@ Future<double> pendienteRecogerUsd({int? excluirTelegramId}) async {
 /// Días restantes de vigencia (negativo si vencido, null si sin pagos).
 int? diasRestantes(String? pagadoHasta) {
   if (pagadoHasta == null || pagadoHasta.length < 10) return null;
-  // v1.3.2 (Argón #3): UTC para que el cambio de horario (DST) de Cuba
-  // no reste un día al cruzar noviembre.
-  final hoy = DateTime.now().toUtc();
+  // v1.3.2 (Argón post-fix): NO usar .toUtc() antes de extraer la fecha.
+  // En Cuba (UTC-4/UTC-5), a las 8pm local ya es medianoche UTC del día
+  // siguiente y restaría 1 día a todas las membresías por la noche.
+  // Se extrae la fecha local y se compara en UTC.
+  final hoy = DateTime.now();
   final hoyDia = DateTime.utc(hoy.year, hoy.month, hoy.day);
   final p = pagadoHasta.substring(0, 10).split('-').map(int.parse).toList();
   final ph = DateTime.utc(p[0], p[1], p[2]);

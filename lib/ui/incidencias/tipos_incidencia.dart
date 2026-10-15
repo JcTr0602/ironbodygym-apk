@@ -152,6 +152,8 @@ class _TiposIncidenciaScreenState
       final item =
           _tipos.removeAt(oldIndex);
       _tipos.insert(newIndex, item);
+      // v1.3.2 (Argón post-fix): un solo op_uuid para las filas y la op.
+      final opUuidReorden = const Uuid().v4();
       // Actualizar 'orden' de todos en una transacción
       for (var i = 0;
           i < _tipos.length;
@@ -160,7 +162,8 @@ class _TiposIncidenciaScreenState
           'incidencias_tipos',
           {
             'orden': i,
-            'sync_estado': 'pending'
+            'sync_estado': 'pending',
+            'op_uuid': opUuidReorden,
           },
           where: 'id = ?',
           whereArgs: [_tipos[i].id],
@@ -168,7 +171,7 @@ class _TiposIncidenciaScreenState
       }
       // Op consolidada dentro de la transacción
       await txn.insert('ops_queue', {
-        'op_uuid': const Uuid().v4(),
+        'op_uuid': opUuidReorden,
         'tipo': 'reordenar_tipos_incidencia',
         'payload': jsonEncode({
           'orden': [
