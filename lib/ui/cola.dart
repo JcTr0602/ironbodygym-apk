@@ -678,7 +678,8 @@ class _ColaScreenState extends State<ColaScreen> {
   void _verDetalle(Map<String, dynamic> op) async {
     final tipo = _tipo('${op['tipo']}');
     final estado = '${op['estado']}';
-    final fecha = '${op['creada_ts']}'.substring(0, 16).replaceAll('T', ' ');
+    final fecha =
+        fechaCorta(op['creada_ts'], 16).replaceAll('T', ' ');
     final error = '${op['error'] ?? ''}';
     // Traduce errores técnicos a lenguaje claro
     String errorClaro = error;

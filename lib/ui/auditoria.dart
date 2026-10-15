@@ -8,6 +8,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 
 import '../localdb.dart';
+import '../negocio.dart';
 import 'diseno.dart';
 import 'componentes.dart';
 import 'widgets.dart';
@@ -195,8 +196,9 @@ class _AuditoriaScreenState extends State<AuditoriaScreen> {
                       final op = _ops[i];
                       final tipo = '${op['tipo']}';
                       final estado = '${op['estado']}';
-                      final fecha =
-                          '${op['creada_ts']}'.substring(0, 16).replaceAll('T', ' ');
+                      final fecha = fechaCorta(
+                              op['creada_ts'], 16)
+                          .replaceAll('T', ' ');
                       final detalle = _detalle(op);
                       final usuario = _usuario(op);
                       final p = _payload(op);

@@ -128,7 +128,7 @@ class _CategoriasSuplementoScreenState
       ),
     );
     final nombre = ctrl.text.trim();
-    ctrl.dispose();
+    // v1.3.2 (Argón #11): sin dispose tras showDialog.
     if (ok == true && nombre.isNotEmpty && mounted) {
       await _guardar(nombre,
           id: categoria?['id'] as int?);

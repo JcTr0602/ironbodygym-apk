@@ -331,6 +331,9 @@ class _DetalleIncidenciaScreenState
       final id = const Uuid().v4();
       final ahora =
           DateTime.now().toIso8601String();
+      // v1.3.2 (Argón #8): la incidencia puede venir de otro móvil
+      // (solo en mirror); copiarla a local antes del hijo (FK).
+      await db.asegurarIncidenciaLocal(_inc!.id);
       await d.insert('incidencias_fotos', {
         'id': id,
         'incidencia_id': _inc!.id,
@@ -430,6 +433,8 @@ class _DetalleIncidenciaScreenState
     final comId = const Uuid().v4();
     final ahora =
         DateTime.now().toIso8601String();
+    // v1.3.2 (Argón #8): asegurar la incidencia en local antes del hijo.
+    await LocalDb.instance.asegurarIncidenciaLocal(widget.incidenciaId);
     // Fix #9 (Sol): insert + encolado en una transacción.
     await LocalDb.instance.mutarYEncolar(
       tabla: 'incidencias_comentarios',
@@ -463,6 +468,8 @@ class _DetalleIncidenciaScreenState
     final ahora =
         DateTime.now().toIso8601String();
     final anterior = _inc!.estado;
+    // v1.3.2 (Argón #8): puede venir de otro móvil (solo mirror).
+    await LocalDb.instance.asegurarIncidenciaLocal(_inc!.id);
 
     if (nuevo == 'resuelta') {
       final res =

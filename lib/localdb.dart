@@ -539,33 +539,6 @@ class LocalDb {
           await db.execute(
               'ALTER TABLE suplementos ADD COLUMN ultimo_precio REAL');
         }
-        // v20 (v1.3.1, B2+M4): asegurar ultimo_precio en suplementos
-        // para quienes instalaron v1.3.0 desde cero (sin la columna),
-        // y crear esquema de incidencias (config_negocio) si falta.
-        if (oldV < 20) {
-          await _addColumnIfMissing(db, 'suplementos', 'ultimo_precio', 'REAL');
-          await _crearEsquemaIncidencias(db);
-        }
-        // v21 (v1.3.1): timestamp de envío para el reset de 'enviada'.
-        if (oldV < 21) {
-          await _addColumnIfMissing(db, 'ops_queue', 'enviada_ts', 'TEXT');
-        }
-        // v22 (v1.3.1, Alto #4): op_uuid en tablas de incidencias para el
-        // marcado selectivo de synced (una op atascada no bloquea todo).
-        // v22 (v1.3.1, Medio #5): reset de watermarks de incidencias para
-        // forzar redescarga completa (teléfonos que ya estaban en v20/v21).
-        if (oldV < 22) {
-          await _addColumnIfMissing(
-              db, 'incidencias_local', 'op_uuid', 'TEXT');
-          await _addColumnIfMissing(
-              db, 'incidencias_tipos', 'op_uuid', 'TEXT');
-          await _addColumnIfMissing(
-              db, 'incidencias_comentarios', 'op_uuid', 'TEXT');
-          await db.delete('watermarks', where: "tabla = 'incidencias'");
-          await db.delete('watermarks',
-              where: "tabla = 'incidencias_comentarios'");
-          await db.delete('watermarks', where: "tabla = 'incidencias_tipos'");
-        }
         // v19: rediseño de Incidencias v1.3.0 (certificado por Gemini).
         if (oldV < 19) {
           // 1. Tipos personalizados
@@ -742,6 +715,35 @@ class LocalDb {
           // Argón B4: asegurar esquema completo también en upgrade.
           await _crearEsquemaIncidencias(db);
         }
+        // v20 (v1.3.1, B2+M4): asegurar ultimo_precio en suplementos
+        // para quienes instalaron v1.3.0 desde cero (sin la columna),
+        // y crear esquema de incidencias (config_negocio) si falta.
+        if (oldV < 20) {
+          await _addColumnIfMissing(db, 'suplementos', 'ultimo_precio', 'REAL');
+          await _crearEsquemaIncidencias(db);
+        }
+        // v21 (v1.3.1): timestamp de envío para el reset de 'enviada'.
+        if (oldV < 21) {
+          await _addColumnIfMissing(db, 'ops_queue', 'enviada_ts', 'TEXT');
+        }
+        // v22 (v1.3.1, Alto #4): op_uuid en tablas de incidencias para el
+        // marcado selectivo de synced (una op atascada no bloquea todo).
+        // v22 (v1.3.1, Medio #5): reset de watermarks de incidencias para
+        // forzar redescarga completa (teléfonos que ya estaban en v20/v21).
+        if (oldV < 22) {
+          await _addColumnIfMissing(
+              db, 'incidencias_local', 'op_uuid', 'TEXT');
+          await _addColumnIfMissing(
+              db, 'incidencias_tipos', 'op_uuid', 'TEXT');
+          await _addColumnIfMissing(
+              db, 'incidencias_comentarios', 'op_uuid', 'TEXT');
+          // v1.3.2 (Argón #1): los watermarks viven en meta como wm_<tabla>,
+          // no existe tabla 'watermarks'.
+          await db.delete('meta', where: "k = 'wm_incidencias'");
+          await db.delete('meta',
+              where: "k = 'wm_incidencias_comentarios'");
+          await db.delete('meta', where: "k = 'wm_incidencias_tipos'");
+        }
         // v23 (v1.3.2): plantilla de descripción por tipo de incidencia
         // (Opción A de Argón: columna en incidencias_tipos, ya sincronizada).
         // Va después de v19 (que crea las tablas). El reset del watermark
@@ -751,8 +753,7 @@ class LocalDb {
               'plantilla_descripcion', 'TEXT');
           await _addColumnIfMissing(db, 'incidencias_tipos_mirror',
               'plantilla_descripcion', 'TEXT');
-          await db.delete('watermarks',
-              where: "tabla = 'incidencias_tipos'");
+          await db.delete('meta', where: "k = 'wm_incidencias_tipos'");
         }
       },
     );
@@ -1730,6 +1731,35 @@ class LocalDb {
 
     await d.transaction((txn) async {
       for (final id in ids) {
+        // v1.3.2 (Argón #8): puede venir de otro móvil (solo mirror).
+        final yaLocal = await txn.query('incidencias_local',
+            columns: ['id'],
+            where: 'id = ?',
+            whereArgs: [id],
+            limit: 1);
+        if (yaLocal.isEmpty) {
+          final m = await txn.query('incidencias_mirror',
+              where: 'id = ?', whereArgs: [id], limit: 1);
+          if (m.isEmpty) continue;
+          final r = m.first;
+          await txn.insert('incidencias_local', {
+            'id': r['id'],
+            'tipo': r['tipo'],
+            'entidad': r['entidad'],
+            'entidad_id': r['entidad_id'],
+            'descripcion': r['descripcion'],
+            'detalle': r['detalle'],
+            'estado': r['estado'],
+            'creada_por': r['creada_por'],
+            'creada_en': r['creada_en'],
+            'resuelta_por': r['resuelta_por'],
+            'resuelta_en': r['resuelta_en'],
+            'nota_resolucion': r['nota_resolucion'],
+            'version': r['version'],
+            'sincronizada': 1,
+            'visibilidad': r['visibilidad'] ?? 'compartida',
+          });
+        }
         final rows = await txn.query(
           'incidencias_local',
           columns: ['id', 'estado', 'version'],
@@ -2375,6 +2405,38 @@ class LocalDb {
         await updateMirrorEstado(cid, est);
       }
     }
+  }
+
+  /// v1.3.2 (Argón #8): asegura que la incidencia exista en
+  /// incidencias_local antes de agregarle hijos (fotos, comentarios).
+  /// Si vino de otro móvil (solo está en incidencias_mirror), la copia.
+  /// Evita FOREIGN KEY constraint failed con foreign_keys = ON.
+  Future<void> asegurarIncidenciaLocal(String id) async {
+    final d = await db;
+    final ya = await d.query('incidencias_local',
+        columns: ['id'], where: 'id = ?', whereArgs: [id], limit: 1);
+    if (ya.isNotEmpty) return;
+    final m = await d.query('incidencias_mirror',
+        where: 'id = ?', whereArgs: [id], limit: 1);
+    if (m.isEmpty) return;
+    final r = m.first;
+    await d.insert('incidencias_local', {
+      'id': r['id'],
+      'tipo': r['tipo'],
+      'entidad': r['entidad'],
+      'entidad_id': r['entidad_id'],
+      'descripcion': r['descripcion'],
+      'detalle': r['detalle'],
+      'estado': r['estado'],
+      'creada_por': r['creada_por'],
+      'creada_en': r['creada_en'],
+      'resuelta_por': r['resuelta_por'],
+      'resuelta_en': r['resuelta_en'],
+      'nota_resolucion': r['nota_resolucion'],
+      'version': r['version'],
+      'sincronizada': 1,
+      'visibilidad': r['visibilidad'] ?? 'compartida',
+    });
   }
 
   /// Fix #9 (Sol): mutación local + encolado en UNA transacción.

@@ -403,8 +403,11 @@ String previewHastaDias(String? pagadoHasta, int dias,
       ((pagadoHasta != null && pagadoHasta.compareTo(fp) > 0)
           ? pagadoHasta
           : fp);
-  final p = b.split('-').map(int.parse).toList();
-  final d = DateTime(p[0], p[1], p[2]).add(Duration(days: dias));
+  // v1.3.2 (Argón #3): UTC para que el cambio de horario (DST) de Cuba
+  // no reste un día al cruzar noviembre.
+  final p = b.substring(0, 10).split('-').map(int.parse).toList();
+  final d =
+      DateTime.utc(p[0], p[1], p[2]).add(Duration(days: dias));
   return '${d.year.toString().padLeft(4, '0')}-'
       '${d.month.toString().padLeft(2, '0')}-'
       '${d.day.toString().padLeft(2, '0')}';
@@ -505,6 +508,7 @@ Future<Map<String, double>> preciosVigentes() async {
   final aj = await LocalDb.instance.getAjustes();
   return {
     'mensual': (aj['mensualidad'] as num?)?.toDouble() ?? 2000,
+    'menores': (aj['mensualidad_menores'] as num?)?.toDouble() ?? 1500,
     'transfer': (aj['transferencia'] as num?)?.toDouble() ?? 2500,
     'diario': (aj['pago_diario'] as num?)?.toDouble() ?? 200,
     'semanal': (aj['pago_semanal'] as num?)?.toDouble() ?? 600,
@@ -523,12 +527,18 @@ double _montoEfectivoOp(
   } catch (_) {
     return 0;
   }
+  // v1.3.2 (Argón #4): si ya está entregado (dueño), no suma al pendiente.
+  if (payload['entregado'] == true || payload['entregado'] == 1) {
+    return 0;
+  }
   double mensualidad(String periodo, int meses, String metodo,
-      double? montoManual) {
+      double? montoManual, String? tipoId) {
     if (metodo != 'efectivo') return 0;
     if (periodo == 'personalizado') return montoManual ?? 0;
     if (periodo == 'semanal') return pr['semanal']!;
     if (periodo == 'quincenal') return pr['quincenal']!;
+    // v1.3.2 (Argón #4): tarifa de menores.
+    if (tipoId == 'menores') return pr['menores']! * meses;
     return pr['mensual']! * meses;
   }
 
@@ -537,7 +547,8 @@ double _montoEfectivoOp(
         '${payload['periodo'] ?? 'mensual'}',
         (payload['meses'] as num?)?.toInt() ?? 1,
         '${payload['metodo'] ?? 'efectivo'}',
-        (payload['monto'] as num?)?.toDouble());
+        (payload['monto'] as num?)?.toDouble(),
+        payload['tipo_id'] as String?);
   }
   if (tipo == 'inscribir') {
     // la inscripción inicial se cobra en efectivo
@@ -545,11 +556,40 @@ double _montoEfectivoOp(
         '${payload['periodo'] ?? 'mensual'}',
         (payload['meses'] as num?)?.toInt() ?? 1,
         'efectivo',
-        (payload['monto'] as num?)?.toDouble());
+        (payload['monto'] as num?)?.toDouble(),
+        payload['tipo_id'] as String?);
   }
   if (tipo == 'pago_diario') {
     final cant = (payload['cantidad'] as num?)?.toInt() ?? 0;
     return cant * pr['diario']!;
+  }
+  // v1.3.2 (Argón #4): ventas de suplementos en CUP suman al pendiente.
+  if (tipo == 'venta_suplemento') {
+    if ('${payload['moneda'] ?? 'CUP'}'.toUpperCase() != 'CUP') return 0;
+    final cant = (payload['cantidad'] as num?)?.toDouble() ?? 0;
+    final precio = (payload['precio'] as num?)?.toDouble() ?? 0;
+    return cant * precio;
+  }
+  if (tipo == 'inscripcion_venta_suplemento') {
+    double t = 0;
+    final c = payload['cliente'];
+    if (c is Map<String, dynamic>) {
+      t += mensualidad(
+          '${c['periodo'] ?? 'mensual'}',
+          (c['meses'] as num?)?.toInt() ?? 1,
+          'efectivo',
+          (c['monto'] as num?)?.toDouble(),
+          c['tipo_id'] as String?);
+    }
+    final v = payload['venta'];
+    if (v is Map<String, dynamic>) {
+      if ('${v['moneda'] ?? 'CUP'}'.toUpperCase() == 'CUP') {
+        final cant = (v['cantidad'] as num?)?.toDouble() ?? 0;
+        final precio = (v['precio'] as num?)?.toDouble() ?? 0;
+        t += cant * precio;
+      }
+    }
+    return t;
   }
   return 0;
 }
@@ -672,10 +712,12 @@ Future<double> pendienteRecogerUsd({int? excluirTelegramId}) async {
 /// Días restantes de vigencia (negativo si vencido, null si sin pagos).
 int? diasRestantes(String? pagadoHasta) {
   if (pagadoHasta == null || pagadoHasta.length < 10) return null;
-  final hoy = DateTime.now();
-  final hoyDia = DateTime(hoy.year, hoy.month, hoy.day);
+  // v1.3.2 (Argón #3): UTC para que el cambio de horario (DST) de Cuba
+  // no reste un día al cruzar noviembre.
+  final hoy = DateTime.now().toUtc();
+  final hoyDia = DateTime.utc(hoy.year, hoy.month, hoy.day);
   final p = pagadoHasta.substring(0, 10).split('-').map(int.parse).toList();
-  final ph = DateTime(p[0], p[1], p[2]);
+  final ph = DateTime.utc(p[0], p[1], p[2]);
   return ph.difference(hoyDia).inDays;
 }
 
@@ -1047,6 +1089,13 @@ Future<Map<String, dynamic>> resumenMensualDiarios(
     'total': porDia.values.fold(0.0, (a, b) => a + b),
   };
 }
+/// v1.3.2 (Argón #11): substring seguro para fechas.
+/// Retorna los primeros N caracteres o el string completo si es más corto.
+String fechaCorta(dynamic v, int n) {
+  final s = '$v';
+  return s.length >= n ? s.substring(0, n) : s;
+}
+
 /// v1.3.2 (Argón): turnos sin reporte explícito en pagos_diarios.
 /// Se basa SOLO en el campo `turno` declarado, no en la hora de pagos
 /// sueltos (evita falsos positivos: un pago de mensualidad por la tarde
@@ -2357,6 +2406,16 @@ Future<double> ingresosSemana() async {
       .mirrorPorFecha('pagos_diarios', 'fecha', desdeIso, hoyIso)) {
     t += (d['total'] as num?)?.toDouble() ?? 0;
   }
+  // v1.3.2 (Argón #5): incluir suplementos en CUP como en ingresosHoy/Mes.
+  for (final v in await ventasSuplementosCup()) {
+    final f = '${v['fecha'] ?? ''}';
+    if (f.length >= 10) {
+      final dia = f.substring(0, 10);
+      if (dia.compareTo(desdeIso) >= 0 && dia.compareTo(hoyIso) <= 0) {
+        t += totalVentaCup(v);
+      }
+    }
+  }
   return t;
 }
 
@@ -2402,6 +2461,20 @@ Future<List<Map<String, dynamic>>> pagosDelPeriodo(
           dia.compareTo(hastaIso) <= 0) {
         out.add({
           'monto': (d['total'] as num?)?.toDouble() ?? 0,
+          'metodo': 'efectivo',
+        });
+      }
+    }
+  }
+  // v1.3.2 (Argón #5): incluir suplementos en CUP en el desglose.
+  for (final v in await ventasSuplementosCup()) {
+    final f = '${v['fecha'] ?? ''}';
+    if (f.length >= 10) {
+      final dia = f.substring(0, 10);
+      if (dia.compareTo(desdeIso) >= 0 &&
+          dia.compareTo(hastaIso) <= 0) {
+        out.add({
+          'monto': totalVentaCup(v),
           'metodo': 'efectivo',
         });
       }
@@ -2519,6 +2592,13 @@ Future<Map<String, double>> cobradoHoyPorMetodo() async {
     if ('${d['fecha'] ?? ''}'.length >= 10 &&
         '${d['fecha']}'.substring(0, 10) == hoy) {
       ef += (d['total'] as num?)?.toDouble() ?? 0;
+    }
+  }
+  // v1.3.2 (Argón #5): suplementos en CUP van a efectivo.
+  for (final v in await ventasSuplementosCup()) {
+    final f = '${v['fecha'] ?? ''}';
+    if (f.length >= 10 && f.substring(0, 10) == hoy) {
+      ef += totalVentaCup(v);
     }
   }
   return {'efectivo': ef, 'transferencia': tr};

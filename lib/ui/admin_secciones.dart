@@ -1060,7 +1060,7 @@ class _SeccionIncidenciasScreenState
       ),
     );
     final desc = descCtrl.text.trim();
-    descCtrl.dispose();
+    // v1.3.2 (Argón #11): sin dispose tras showDialog.
     // v1.2.5 (#8): guarda borrador si se canceló con texto, limpia si se envió.
     try {
       final p = await SharedPreferences.getInstance();
@@ -1238,8 +1238,7 @@ class _SeccionIncidenciasScreenState
         );
       },
     );
-    notaField.dispose();
-    motivoField.dispose();
+    // v1.3.2 (Argón #11): sin dispose tras showDialog.
     if (accion == null || !mounted) return;
     // v1.2.5 (#9): confirmación explícita antes de resolver.
     if (accion.startsWith('resuelta:')) {

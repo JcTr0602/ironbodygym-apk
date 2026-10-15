@@ -778,8 +778,12 @@ class FotosColaService {
     // v1.2.9+43 (Gemini R2): UUID v5 determinista, compatible con RFC 4122.
     // Si PostgreSQL tiene la columna como tipo uuid nativo, un string
     // arbitrario fallaría. UUID v5 es determinista y válido.
-    final opUuidDeterminista =
-        const Uuid().v5('6ba7b811-9dad-11d1-80b4-00c04fd430c8', 'foto:${f['op_uuid']}');
+    // v1.3.2 (Argón #10): incluir la variante (tipo) para que thumb,
+    // display y original no colisionen entre sí.
+    final tipoVariante = f['tipo'] as String? ?? 'original';
+    final opUuidDeterminista = const Uuid().v5(
+        '6ba7b811-9dad-11d1-80b4-00c04fd430c8',
+        'foto:${f['op_uuid']}:$tipoVariante');
 
     if (clienteId != null) {
       await _vincularFotoCliente(

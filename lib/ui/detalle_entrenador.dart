@@ -121,7 +121,7 @@ class _DetalleEntrenadorScreenState extends State<DetalleEntrenadorScreen> {
     final porEntrenador = <String, double>{};
 
     for (final p in pagos) {
-      final fecha = '${p['fecha'] ?? ''}'.substring(0, 10);
+      final fecha = fechaCorta(p['fecha'] ?? '', 10);
       final nombre = ('${p['registrado_por_nombre'] ?? ''}'.trim().isEmpty)
           ? '${p['registrado_por'] ?? ''}'
           : '${p['registrado_por_nombre']}'.trim();
@@ -154,7 +154,7 @@ class _DetalleEntrenadorScreenState extends State<DetalleEntrenadorScreen> {
     }
     // Pagos diarios del entrenador (idea 2)
     for (final d in diarios) {
-      final fecha = '${d['fecha'] ?? ''}'.substring(0, 10);
+      final fecha = fechaCorta(d['fecha'] ?? '', 10);
       final nombre = '${d['registrado_por_nombre'] ?? ''}'.trim();
       final total = (d['total'] as num?)?.toDouble() ?? 0;
       if (!_esMio(nombre)) continue;
@@ -182,7 +182,7 @@ class _DetalleEntrenadorScreenState extends State<DetalleEntrenadorScreen> {
       _inscripciones.add({
         'cliente_id': id,
         'nombre': '${c['nombre'] ?? 'Cliente $id'}',
-        'fecha': fecha.substring(0, 10),
+        'fecha': fechaCorta(fecha, 10),
       });
     }
     _cobros.sort((a, b) =>

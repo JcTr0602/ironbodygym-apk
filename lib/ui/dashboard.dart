@@ -601,6 +601,16 @@ class _DashboardScreenState extends State<DashboardScreen> {
         efectivo += m;
       }
     }
+    // v1.3.2 (Argón #5): suplementos en CUP.
+    double suplementos = 0;
+    for (final v in await ventasSuplementosCup()) {
+      final f = '${v['fecha'] ?? ''}';
+      if (f.length >= 10 && f.substring(0, 10) == fechaIso) {
+        final m = totalVentaCup(v);
+        suplementos += m;
+        efectivo += m;
+      }
+    }
     if (!mounted) return;
     showModalBottomSheet(
       context: context,
@@ -618,6 +628,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
             _filaDetalle('Efectivo', efectivo),
             _filaDetalle('Transferencia', transferencia),
             _filaDetalle('Pago diario', diario),
+            if (suplementos > 0)
+              _filaDetalle('Suplementos', suplementos),
             const Divider(),
             _filaDetalle('Total', monto, negrita: true),
             const SizedBox(height: 8),

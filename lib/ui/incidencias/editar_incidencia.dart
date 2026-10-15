@@ -324,6 +324,9 @@ class _EditarIncidenciaScreenState
       payloadOp['version_base'] = versionBase;
       final opUuid = const Uuid().v4();
       if (widget.existente != null) {
+        // v1.3.2 (Argón #8): puede venir de otro móvil (solo mirror).
+        await LocalDb.instance
+            .asegurarIncidenciaLocal(widget.existente!.id);
         await LocalDb.instance.mutarYEncolar(
           tabla: 'incidencias_local',
           datos: datos,

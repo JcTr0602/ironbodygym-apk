@@ -357,9 +357,9 @@ class _AdminScreenState extends State<AdminScreen> {
     final monto = double.tryParse(
         montoCtrl.text.trim().replaceAll(',', '.'));
     final dias = int.tryParse(diasCtrl.text.trim());
-    nombreCtrl.dispose();
-    montoCtrl.dispose();
-    diasCtrl.dispose();
+    // v1.3.2 (Argón #11): NO hacer dispose tras showDialog; el diálogo
+    // sigue animando su cierre y el controller aún está en uso.
+    // Los controllers locales los recoge el GC (igual que dialogo_pago).
     if (ok != true || !mounted) return;
     if (nombre.isEmpty || monto == null || monto <= 0) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
@@ -437,9 +437,7 @@ class _AdminScreenState extends State<AdminScreen> {
     final monto = double.tryParse(
         montoCtrl.text.trim().replaceAll(',', '.'));
     final dias = int.tryParse(diasCtrl.text.trim()) ?? 30;
-    nombreCtrl.dispose();
-    montoCtrl.dispose();
-    diasCtrl.dispose();
+    // v1.3.2 (Argón #11): sin dispose tras showDialog (ver arriba).
     if (ok != true || !mounted) return;
     if (nombre.isEmpty || monto == null || monto <= 0 || dias <= 0) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
