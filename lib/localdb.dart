@@ -2179,6 +2179,9 @@ class LocalDb {
     var hay = false;
     for (final t in tablasConWatermark) {
       if (await getMeta('wm_${t}_ausente') == '1') continue;
+      // v1.3.1 (Argón pull): las tablas sin permiso (403 para entrenadores)
+      // tampoco bloquean el "completo".
+      if (await getMeta('wm_${t}_sin_permiso') == '1') continue;
       final w = await getWatermarkTabla(t);
       if (w < m) m = w;
       hay = true;

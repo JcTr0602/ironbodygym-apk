@@ -717,6 +717,42 @@ class _SeccionDiagnosticoScreenState extends State<SeccionDiagnosticoScreen> {
         'Ventas suplementos': '${await db.contar('ventas_suplementos')}',
         'Suplementos': '${await db.contar('suplementos')}',
       };
+      // v1.3.1 (Argón pull): desglose por tabla — watermark, filas
+      // locales y estado. Es lo que permite identificar qué tabla deja
+      // el mínimo en 0.
+      const tablasDiag = [
+        'clientes',
+        'pagos',
+        'pagos_diarios',
+        'gastos',
+        'suplementos',
+        'ventas_suplementos',
+        'categorias_suplemento',
+        'turnos_cierre',
+        'borrados',
+        'incidencias',
+        'incidencias_tipos',
+        'incidencias_comentarios',
+      ];
+      for (final t in tablasDiag) {
+        final wmt = await db.getWatermarkTabla(t);
+        var estado = 'OK';
+        final err = await db.getMeta('wm_err_$t');
+        if (err != null && err.isNotEmpty) {
+          estado = 'ERROR: $err';
+        } else if (await db.getMeta('wm_${t}_sin_permiso') == '1') {
+          estado = 'sin_permiso';
+        } else if (await db.getMeta('wm_${t}_ausente') == '1') {
+          estado = 'ausente';
+        }
+        String filas;
+        try {
+          filas = '${await db.contar(t)}';
+        } catch (_) {
+          filas = '?';
+        }
+        datos['wm_$t'] = '$wmt · filas=$filas · $estado';
+      }
       if (!mounted) return;
       setState(() {
         _datos = datos;

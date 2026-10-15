@@ -1306,7 +1306,23 @@ class SyncEngine {
           }
           // La tabla existe y responde: limpiar marca de ausente.
           await _db.setMeta('wm_${tabla}_ausente', '');
-         
+          // v1.3.1 (Argón pull): 403 = falta GRANT SELECT a nivel de tabla.
+          // (Si fuera RLS filtrando filas, PostgREST devuelve 200 con [].)
+          // Entrenador: se marca sin_permiso y no bloquea el mínimo.
+          // Dueño: es un error grave de permisos, debe fallar visible.
+          if (r.statusCode == 403) {
+            if (!_auth.isOwner) {
+              AppLog.aviso('sync', 'pull_tabla_sin_permiso',
+                  d: '$tabla http=403');
+              await _db.setMeta('wm_${tabla}_sin_permiso', '1');
+              break;
+            }
+            AppLog.error('sync', 'pull_tabla_403_dueno', d: '$tabla');
+            throw Exception(
+                'bajada $tabla: HTTP 403 (revisar GRANT SELECT en Supabase)');
+          }
+          // La tabla responde con permiso: limpiar marca de sin_permiso.
+          await _db.setMeta('wm_${tabla}_sin_permiso', '');
     if (r.statusCode != 200) {
             // v1.2.9+47 (AppLog): fallo HTTP con fragmento sanitizado.
             final frag = r.body.length > 200
@@ -1419,6 +1435,11 @@ class SyncEngine {
         AppLog.error(
             'sync', 'pull_tabla_fallo', d: '$tabla error=$e');
         erroresTablas.add('$tabla: $e');
+        // v1.3.1 (Argón pull): guardar el error por tabla para el
+        // diagnóstico (el last_pull_error global se pierde).
+        final errTxt = '$e';
+        await _db.setMeta('wm_err_$tabla',
+            errTxt.length > 200 ? errTxt.substring(0, 200) : errTxt);
       }
       // FIX (Gemini auditoría funcional BUG 3): si la tabla se descargó
       // sin errores, sincronizar su watermark con serverSeq. Evita que
@@ -1426,12 +1447,33 @@ class SyncEngine {
       // inactiva y cause "Sincronización incompleta" eterno.
       if (serverSeq != null &&
           !erroresTablas.any((e) => e.startsWith('$tabla:'))) {
+        // v1.3.1 (Argón pull): la tabla completó sin errores: limpiar
+        // su error guardado.
+        await _db.setMeta('wm_err_$tabla', '');
         final wmActual = await _db.getWatermarkTabla(tabla);
         if (wmActual < serverSeq) {
-          await _db.setWatermarkTabla(tabla, serverSeq);
-          // v1.2.9+47 (AppLog): watermark persistido.
-          AppLog.info('sync', 'pull_wm_guardado',
-              d: '$tabla $wmActual->$serverSeq');
+          // v1.3.1 (Argón pull): NO forzar el watermark si la tabla es
+          // troncal, el cursor estaba en 0, el servidor devolvió 0 filas
+          // y la tabla local está vacía. En producción esas tablas nunca
+          // están vacías: forzar aquí escondería un RLS roto que devuelve
+          // 200 con [] y se perdería el historial al corregirlo.
+          var forzar = true;
+          if (cursor == 0 &&
+              const {'clientes', 'pagos', 'suplementos'}
+                  .contains(tabla)) {
+            final filasLocales = await _db.contar(tabla);
+            if (tablaMax == 0 && filasLocales == 0) {
+              forzar = false;
+              AppLog.aviso('sync', 'pull_wm_no_forzado',
+                  d: '$tabla cursor=0 servidor=0 filas=0');
+            }
+          }
+          if (forzar) {
+            await _db.setWatermarkTabla(tabla, serverSeq);
+            // v1.2.9+47 (AppLog): watermark persistido.
+            AppLog.info('sync', 'pull_wm_guardado',
+                d: '$tabla $wmActual->$serverSeq');
+          }
         }
       }
       // v1.2.9+47 (AppLog): tabla completa.
@@ -1453,7 +1495,23 @@ class SyncEngine {
         final r = await _getAuth(Uri.parse('$_base/rest/v1/sync_borrados'
             '?select=entidad,entidad_id,sync_seq'
             '&sync_seq=gt.$pageWm&order=sync_seq.asc&limit=100'));
-       
+        // v1.3.1 (Argón pull): mismo tratamiento que las tablas de datos.
+        if (r.statusCode == 404 || r.statusCode == 400) {
+          await _db.setMeta('wm_borrados_ausente', '1');
+          break;
+        }
+        await _db.setMeta('wm_borrados_ausente', '');
+        if (r.statusCode == 403) {
+          if (!_auth.isOwner) {
+            AppLog.aviso(
+                'sync', 'pull_tabla_sin_permiso', d: 'borrados http=403');
+            await _db.setMeta('wm_borrados_sin_permiso', '1');
+            break;
+          }
+          throw Exception(
+              'bajada borrados: HTTP 403 (revisar GRANT SELECT en Supabase)');
+        }
+        await _db.setMeta('wm_borrados_sin_permiso', '');
     if (r.statusCode != 200) {
           throw Exception('bajada borrados: HTTP ${r.statusCode}');
         }
@@ -1493,8 +1551,13 @@ class SyncEngine {
     } catch (e) {
       borradosOk = false;
       erroresTablas.add('borrados: $e');
+      // v1.3.1 (Argón pull): error por tabla para el diagnóstico.
+      final errTxt = '$e';
+      await _db.setMeta('wm_err_borrados',
+          errTxt.length > 200 ? errTxt.substring(0, 200) : errTxt);
     }
     if (borradosOk) {
+      await _db.setMeta('wm_err_borrados', '');
       // v1.3.1: si no hubo borrados, avanzar al serverSeq para no
       // dejar el watermark en 0 (el diagnóstico muestra el mínimo).
       final nuevoWm = borradosMax > cursorBorrados ? borradosMax : (serverSeq ?? cursorBorrados);
