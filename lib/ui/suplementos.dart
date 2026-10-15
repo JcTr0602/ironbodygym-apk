@@ -839,7 +839,7 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            if (fotoLocal != null && fotoLocal.isNotEmpty)
+            if (fotoLocal != null && fotoLocal.isNotEmpty && File(fotoLocal).existsSync())
               ClipRRect(
                 borderRadius:
                     BorderRadius.circular(AppRadio.md),
@@ -1095,7 +1095,7 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
               color: AppColores.naranja),
         );
     final fotoLocal = s['foto_local'] as String?;
-    if (fotoLocal != null && fotoLocal.isNotEmpty) {
+    if (fotoLocal != null && fotoLocal.isNotEmpty && File(fotoLocal).existsSync()) {
       return ClipRRect(
         borderRadius: BorderRadius.circular(AppRadio.md),
         child: Image.file(File(fotoLocal),

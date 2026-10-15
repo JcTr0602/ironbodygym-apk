@@ -233,7 +233,7 @@ class DetalleSuplementoScreen extends StatelessWidget {
           // Foto grande.
           // v1.3.3: foto local recién tomada (offline) tiene prioridad
           // sobre la remota (aún no subida o sin descargar).
-          if (fotoLocal != null && fotoLocal.isNotEmpty)
+          if (fotoLocal != null && fotoLocal.isNotEmpty && File(fotoLocal).existsSync())
             ClipRRect(
               borderRadius:
                   BorderRadius.circular(AppRadio.lg),

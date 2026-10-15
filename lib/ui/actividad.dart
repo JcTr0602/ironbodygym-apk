@@ -265,10 +265,11 @@ class _ActividadScreenState extends State<ActividadScreen> {
       case 'inscripcion_venta_suplemento':
         return 'Inscripción + venta${montoTxt.isNotEmpty ? ' — $montoTxt' : ''}';
       case 'venta_suplemento':
-        final nombre = '${payload['nombre'] ?? 'Suplemento'}';
+        // v1.3.3 (Argón): montoTxt ya trae la moneda; no repetir $moneda.
+        final nombre =
+            '${payload['suplemento_nombre'] ?? payload['nombre'] ?? 'Suplemento'}';
         final cant = payload['cantidad'] ?? '';
-        final moneda = '${payload['moneda'] ?? 'CUP'}';
-        return '$nombre x$cant — $montoTxt $moneda'.trim();
+        return '$nombre x$cant${montoTxt.isNotEmpty ? ' — $montoTxt' : ''}';
       case 'confirmar_entrega':
         return 'Confirmar entrega de cobros';
       case 'regalar_mes_cumpleanos':
@@ -322,14 +323,23 @@ class _ActividadScreenState extends State<ActividadScreen> {
         a.contains('venta_suplemento');
   }
 
-  /// v1.3.3: extrae (monto, moneda) del detalle del servidor.
-  /// Devuelve null si no hay monto.
-  (double, String)? _montoServidor(String detalle) {
-    final m =
-        RegExp(r'(\d+(?:\.\d+)?)\s*(CUP|USD)').firstMatch(detalle);
-    if (m == null) return null;
-    final v = double.tryParse(m.group(1)!) ?? 0;
-    return (v, m.group(2)!);
+  /// v1.3.3: extrae (cup, usd) del detalle del servidor.
+  /// Suma TODOS los montos encontrados: una inscripcion_venta_suplemento
+  /// trae el de la inscripción en CUP y el de la venta (CUP o USD).
+  /// v1.3.3 (Argón): allMatches en vez de firstMatch.
+  (double, double) _montoServidor(String detalle) {
+    var cup = 0.0;
+    var usd = 0.0;
+    for (final m
+        in RegExp(r'(\d+(?:\.\d+)?)\s*(CUP|USD)').allMatches(detalle)) {
+      final v = double.tryParse(m.group(1)!) ?? 0;
+      if (m.group(2) == 'USD') {
+        usd += v;
+      } else {
+        cup += v;
+      }
+    }
+    return (cup, usd);
   }
 
   Future<void> _abrirFicha(Map<String, dynamic> a) async {
@@ -756,13 +766,8 @@ class _ActividadScreenState extends State<ActividadScreen> {
                                       accion)) {
                                     final m = _montoServidor(
                                         '${a['detalle'] ?? ''}');
-                                    if (m != null) {
-                                      if (m.$2 == 'USD') {
-                                        badgeUsd = m.$1;
-                                      } else {
-                                        badgeCup = m.$1;
-                                      }
-                                    }
+                                    badgeCup = m.$1;
+                                    badgeUsd = m.$2;
                                   }
                                   final titulo = (nombreCli != null &&
                                           !nombreCli.startsWith(
@@ -944,13 +949,8 @@ class _ActividadScreenState extends State<ActividadScreen> {
         final accion = '${a['accion'] ?? ''}';
         if (!_esCobroServidor(accion)) continue;
         final m = _montoServidor('${a['detalle'] ?? ''}');
-        if (m != null) {
-          if (m.$2 == 'USD') {
-            usd += m.$1;
-          } else {
-            cup += m.$1;
-          }
-        }
+        cup += m.$1;
+        usd += m.$2;
       }
     }
     return (items.length, cup, usd);

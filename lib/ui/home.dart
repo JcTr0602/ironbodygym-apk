@@ -80,6 +80,9 @@ class _HomeScreenState extends State<HomeScreen>
   /// v1.3.3: entrenadores sin actividad reciente (alerta "turnos sin
   /// reporte" en la tarjeta Pulso del Día del dueño).
   List<Map<String, dynamic>> _entrenadoresSinSync = [];
+  // v1.3.3 (Argón): turnos de hoy sin reporte real (para el chip de
+  // "Pulso del Día"; _entrenadoresSinSync medía otra cosa).
+  List<String> _turnosSinReporte = [];
 
   @override
   void initState() {
@@ -201,15 +204,30 @@ class _HomeScreenState extends State<HomeScreen>
   /// más las locales aún no sincronizadas.
   Future<int> _contarIncidenciasAbiertas() async {
     try {
-      final mirror = await LocalDb.instance.incidenciasMirror();
-      var n = mirror
-          .where((i) => '${i['estado']}' != 'resuelta')
-          .length;
-      final locales = await LocalDb.instance
-          .incidenciasLocales(sincronizada: false);
-      n += locales
-          .where((i) => '${i['estado']}' != 'resuelta')
-          .length;
+      // v1.3.3 (Argón): deduplicar por id con prioridad a incidencias_local
+      // sobre incidencias_mirror (igual que ListaIncidenciasScreen._cargar).
+      // Sin esto, una incidencia editada/resuelta en local se cuenta doble
+      // o como abierta aunque ya esté resuelta.
+      final db = await LocalDb.instance.db;
+      final localRows = await db.query('incidencias_local');
+      final localIds =
+          localRows.map((r) => '${r['id']}').toSet();
+      final List<Map<String, dynamic>> mirrorRows;
+      if (localIds.isEmpty) {
+        mirrorRows = await db.query('incidencias_mirror');
+      } else {
+        final ph =
+            List.filled(localIds.length, '?').join(',');
+        mirrorRows = await db.query(
+          'incidencias_mirror',
+          where: 'id NOT IN ($ph)',
+          whereArgs: localIds.toList(),
+        );
+      }
+      var n = 0;
+      for (final i in [...localRows, ...mirrorRows]) {
+        if ('${i['estado']}' != 'resuelta') n++;
+      }
       return n;
     } catch (_) {
       return 0;
@@ -264,8 +282,14 @@ class _HomeScreenState extends State<HomeScreen>
       final porRecoger = res[12] as double;
       final cumple = res[13] as List;
       final incidAbiertas = res[14] as int;
+      // v1.3.3 (Argón): turnos de hoy sin reporte real (solo dueño).
+      // Antes el chip usaba _entrenadoresSinSync, que mide inactividad
+      // de +24h en el feed, no turnos sin reporte.
+      final turnosSinRep = _auth.isOwner
+          ? await turnosSinReporte(
+              DateTime.now().toIso8601String().substring(0, 10))
+          : <String>[];
       // Alerta de entrenadores sin actividad reciente (solo dueño).
-      // v1.3.3: se muestra como "turnos sin reporte" en Pulso del Día.
       final sinSync = <Map<String, dynamic>>[];
       if (_auth.isOwner) {
         final ahora = DateTime.now();
@@ -283,8 +307,12 @@ class _HomeScreenState extends State<HomeScreen>
         sinSync.sort((a, b) =>
             (b['horas'] as int).compareTo(a['horas'] as int));
       }
-      final cobradoHoy =
-          (cobrado['efectivo'] ?? 0) + (cobrado['transferencia'] ?? 0);
+      // v1.3.3 (Argón): el entrenador ve SU cobrado (filtrado por él e
+      // incluye su cola offline), no el global del gym (privacidad y
+      // cuadre con MiTurnoScreen). El dueño sigue con el total global.
+      final cobradoHoy = _auth.isOwner
+          ? (cobrado['efectivo'] ?? 0) + (cobrado['transferencia'] ?? 0)
+          : (await miTurnoHoy(_auth.telegramId)).$1;
       // Aviso "llevas +Xh sin subir" (item 10: horas configurables)
       String? aviso;
       if (quiereAviso && porSubir > 0 && det.ultimaPush != null) {
@@ -307,6 +335,7 @@ class _HomeScreenState extends State<HomeScreen>
           _avisoSync = aviso;
           _nombreVisible = nombreVisible;
           _entrenadoresSinSync = sinSync;
+          _turnosSinReporte = turnosSinRep;
         });
       }
     } catch (e) {
@@ -877,13 +906,13 @@ class _HomeScreenState extends State<HomeScreen>
                           _ir(const PendienteScreen()))),
             ],
           ),
-          if (_entrenadoresSinSync.isNotEmpty) ...[
+          if (_turnosSinReporte.isNotEmpty) ...[
             const SizedBox(height: AppEspacio.sm),
             InkWell(
               borderRadius:
                   BorderRadius.circular(AppRadio.md),
               onTap: () =>
-                  _ir(const ActividadScreen()),
+                  _ir(const MiDiaScreen()),
               child: Container(
                 padding: const EdgeInsets.symmetric(
                     horizontal: AppEspacio.md,
@@ -905,7 +934,7 @@ class _HomeScreenState extends State<HomeScreen>
                         width: AppEspacio.sm),
                     Expanded(
                       child: Text(
-                        '⚠️ ${_entrenadoresSinSync.length} turno(s) sin reporte',
+                        '⚠️ ${_turnosSinReporte.length} turno(s) sin reporte: ${_turnosSinReporte.join(' y ')}',
                         style: AppTexto.secundario,
                       ),
                     ),
