@@ -572,7 +572,11 @@ class _DiaTileState extends State<_DiaTile> {
         border: Border.all(
             color: Colors.grey.shade300),
       ),
-      child: Column(
+      // v1.3.2 (Argón): el fondo es claro fijo; blindar el color del texto
+      // para que ningún Text herede el blanco del tema oscuro.
+      child: DefaultTextStyle.merge(
+        style: const TextStyle(color: Colors.black87),
+        child: Column(
         crossAxisAlignment:
             CrossAxisAlignment.start,
         children: [
@@ -602,7 +606,8 @@ class _DiaTileState extends State<_DiaTile> {
                 '${fmtMonto(total)} $monedaDia',
                 style: const TextStyle(
                     fontWeight: FontWeight.bold,
-                    fontSize: 14),
+                    fontSize: 14,
+                    color: Colors.black87),
               ),
               IconButton(
                 visualDensity:
@@ -633,7 +638,8 @@ class _DiaTileState extends State<_DiaTile> {
                     child: Text(
                       '${p.descripcion} (${p.tipo})',
                       style: const TextStyle(
-                          fontSize: 12),
+                          fontSize: 12,
+                          color: Colors.black54),
                       overflow:
                           TextOverflow.ellipsis,
                     ),
@@ -643,7 +649,8 @@ class _DiaTileState extends State<_DiaTile> {
                     style: const TextStyle(
                         fontSize: 12,
                         fontWeight:
-                            FontWeight.w600),
+                            FontWeight.w600,
+                        color: Colors.black87),
                   ),
                 ],
               ),
@@ -670,6 +677,7 @@ class _DiaTileState extends State<_DiaTile> {
               ),
             ),
         ],
+        ),
       ),
     );
   }
