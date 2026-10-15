@@ -13,6 +13,7 @@ import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sqflite/sqflite.dart';
+import 'package:uuid/uuid.dart';
 
 import 'errores_sync.dart';
 
@@ -213,7 +214,7 @@ class LocalDb {
     final dir = await getDatabasesPath();
     _db = await openDatabase(
       p.join(dir, 'ironbody.db'),
-      version: 22,
+      version: 23,
       // v1.3-r4 (Gemini): WAL mode para que lectores (UI) y escritores
       // (Workmanager en otro isolate) no se bloqueen mutuamente.
       // v1.2.9+34 (hotfix): try-catch — si el dispositivo no soporta WAL,
@@ -564,6 +565,14 @@ class LocalDb {
           await db.delete('watermarks',
               where: "tabla = 'incidencias_comentarios'");
           await db.delete('watermarks', where: "tabla = 'incidencias_tipos'");
+        }
+        // v23 (v1.3.2): plantilla de descripción por tipo de incidencia
+        // (Opción A de Argón: columna en incidencias_tipos, ya sincronizada).
+        if (oldV < 23) {
+          await _addColumnIfMissing(db, 'incidencias_tipos',
+              'plantilla_descripcion', 'TEXT');
+          await _addColumnIfMissing(db, 'incidencias_tipos_mirror',
+              'plantilla_descripcion', 'TEXT');
         }
         // v19: rediseño de Incidencias v1.3.0 (certificado por Gemini).
         if (oldV < 19) {
@@ -1014,12 +1023,14 @@ class LocalDb {
       color INTEGER, activo INTEGER NOT NULL DEFAULT 1,
       orden INTEGER NOT NULL DEFAULT 0, actualizado_en TEXT,
       sync_estado TEXT NOT NULL DEFAULT 'synced',
-      op_uuid TEXT
+      op_uuid TEXT,
+      plantilla_descripcion TEXT
     )''');
     await db.execute('''CREATE TABLE IF NOT EXISTS incidencias_tipos_mirror (
       id TEXT PRIMARY KEY, nombre TEXT NOT NULL, icono TEXT,
       color INTEGER, activo INTEGER, orden INTEGER,
-      actualizada_en TEXT, sync_seq INTEGER
+      actualizada_en TEXT, sync_seq INTEGER,
+      plantilla_descripcion TEXT
     )''');
     // Fotos, comentarios, historial
     await db.execute('''CREATE TABLE IF NOT EXISTS incidencias_fotos (
@@ -1691,6 +1702,101 @@ class LocalDb {
       where: 'id=?',
       whereArgs: [id],
     );
+  }
+
+  /// v1.3.2: cambio de estado en lote para incidencias.
+  /// - Filtra las que ya están en el estado destino (no-ops).
+  /// - Todo (UPDATEs + historial + ops_queue) en UNA transacción.
+  /// - Cada ítem guarda su op_uuid en incidencias_local (crítico para
+  ///   marcarSelectivo de la v1.3.1; corrección Argón).
+  /// - El sync se dispara una sola vez al terminar (offline-first:
+  ///   no se espera red).
+  /// Retorna la cantidad de incidencias efectivamente cambiadas.
+  Future<int> cambiarEstadoIncidenciasLote({
+    required List<String> ids,
+    required String nuevoEstado,
+    String? notaResolucion,
+    required String userId,
+    int? telegramId,
+  }) async {
+    if (ids.isEmpty) return 0;
+    final d = await db;
+    final ahora = DateTime.now().toIso8601String();
+    var cambiadas = 0;
+
+    await d.transaction((txn) async {
+      for (final id in ids) {
+        final rows = await txn.query(
+          'incidencias_local',
+          columns: ['id', 'estado', 'version'],
+          where: 'id = ?',
+          whereArgs: [id],
+          limit: 1,
+        );
+        if (rows.isEmpty) continue;
+        final anterior = '${rows.first['estado']}';
+        // Filtro no-op: ya está en el estado destino.
+        if (anterior == nuevoEstado) continue;
+        final version =
+            (rows.first['version'] as num?)?.toInt() ?? 1;
+        // Argón (bloqueante): un solo op_uuid para el UPDATE y la op.
+        final opUuid = const Uuid().v4();
+
+        await txn.update(
+          'incidencias_local',
+          {
+            'estado': nuevoEstado,
+            'actualizado_en': ahora,
+            'sync_estado': 'pending',
+            'sincronizada': 0,
+            'op_uuid': opUuid,
+            'version': version + 1,
+            if (nuevoEstado == 'resuelta') ...{
+              'nota_resolucion': notaResolucion ?? '',
+              'resuelta_por': userId,
+              'resuelta_en': ahora,
+            },
+          },
+          where: 'id = ?',
+          whereArgs: [id],
+        );
+
+        await txn.insert('incidencias_historial', {
+          'id': const Uuid().v4(),
+          'incidencia_id': id,
+          'campo': 'estado',
+          'valor_anterior': anterior,
+          'valor_nuevo': nuevoEstado,
+          'cambiado_por': userId,
+          'cambiado_en': ahora,
+        });
+
+        await txn.insert('ops_queue', {
+          'op_uuid': opUuid,
+          'tipo': 'cambiar_estado_incidencia',
+          'payload': jsonEncode({
+            'id': id,
+            'estado_anterior': anterior,
+            'estado_nuevo': nuevoEstado,
+            if (nuevoEstado == 'resuelta') ...{
+              'nota_resolucion': notaResolucion ?? '',
+              'resuelta_por': userId,
+              'resuelta_en': ahora,
+            },
+            'version': version + 1,
+          }),
+          'estado': 'pendiente',
+          'creada_ts': ahora,
+          'user_id': userId,
+          'telegram_id': telegramId,
+        });
+        cambiadas++;
+      }
+    });
+
+    // Nota: el sync lo dispara el llamador (esta capa no puede importar
+    // sync.dart por dependencia circular). El worker recoge ops_queue.
+    return cambiadas;
   }
 
   /// Argón B1: marca tipos y comentarios como sincronizados tras push.

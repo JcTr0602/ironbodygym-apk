@@ -17,6 +17,7 @@ import 'package:sqflite/sqflite.dart';
 import 'package:uuid/uuid.dart';
 import 'localdb.dart';
 import 'app_log.dart';
+import 'config.dart';
 import 'sync.dart' show SyncEngine, EstadoSubida, ResultadoSubidaFoto;
 
 /// Genera thumb + display WebP. Corre directo (sin compute): el plugin
@@ -200,6 +201,14 @@ class FotosColaService {
     );
 
     while (true) {
+      // v1.3.2 (Argón): no quemar intentos del backoff sin red real.
+      // HEAD a Supabase (cualquier HTTP, incluso 401/404, = hay ruta).
+      // DNS solo puede mentir con caché local en portales cautivos.
+      if (!await _hayRed()) {
+        AppLog.aviso(
+            'fotos', 'sin_red', d: 'cola pausada hasta próximo ciclo');
+        break;
+      }
       // v1.2.9+43 (Gemini R3): limpieza continua de leases expirados.
       // Si el proceso corre en segundo plano, los leases que expiran
       // durante la ejecución se liberan sin reiniciar la app.
@@ -217,13 +226,16 @@ class FotosColaService {
       );
 
       // Tomar la siguiente foto pendiente (con backoff respetado).
+      // v1.3.2 (Argón): priorizar thumb → display → original para que el
+      // usuario vea la miniatura rápido aunque la conexión se caiga después.
       final ahoraIso = DateTime.now().toIso8601String();
       final fotos = await db.query(
         'fotos_cola',
         where: "estado = 'pendiente' AND intentos < 5 "
             "AND (proximo_intento_en IS NULL OR proximo_intento_en <= ?)",
         whereArgs: [ahoraIso],
-        orderBy: 'creado_en ASC',
+        orderBy: "CASE tipo WHEN 'thumb' THEN 0 "
+            "WHEN 'display' THEN 1 ELSE 2 END, creado_en ASC",
         limit: 1,
       );
       if (fotos.isEmpty) break;
@@ -935,5 +947,23 @@ class FotosColaService {
       }
     } catch (_) {}
     return borrados;
+  }
+
+  /// v1.3.2 (Argón): chequeo barato de conectividad real.
+  /// HEAD a la base de Supabase con timeout 5s. Cualquier código HTTP
+  /// recibido (incluso 401/404) significa que hay ruta hasta el backend.
+  Future<bool> _hayRed() async {
+    try {
+      final client = HttpClient();
+      client.connectionTimeout = const Duration(seconds: 5);
+      final req = await client
+          .headUrl(Uri.parse(AppConfig.supabaseUrl))
+          .timeout(const Duration(seconds: 5));
+      final res = await req.close().timeout(const Duration(seconds: 5));
+      client.close();
+      return res.statusCode > 0;
+    } catch (_) {
+      return false;
+    }
   }
 }

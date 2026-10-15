@@ -2156,7 +2156,10 @@ class SyncEngine {
       }
     }
 
-    const chunk = 32 * 1024;
+    // v1.3.2 (Argón): chunk fijo de 128 KB. 32 KB generaba demasiados
+    // round-trips en conexiones decentes; el chunk adaptativo se
+    // sabotearía con el timeout en redes lentas.
+    const chunk = 128 * 1024;
     while (offset < bytes.length) {
       final fin =
           (offset + chunk < bytes.length) ? offset + chunk : bytes.length;
@@ -2175,6 +2178,10 @@ class SyncEngine {
               'Upload-Offset': '$offset',
             },
             body: bytes.sublist(offset, fin),
+            // v1.3.2 (Argón): 20s por chunk. 120s colgaba el worker en
+            // conexiones moribundas; 15s cortaría chunks de 128 KB
+            // a ~85 KB/s (típico en datos móviles lentos de Cuba).
+            timeout: const Duration(seconds: 20),
           );
           if (r.statusCode == 204 || r.statusCode == 200) {
             // Luna #5: validación estricta del offset de respuesta.
@@ -2326,9 +2333,10 @@ class SyncEngine {
     if (offset > bytes.length) offset = 0;
     final url = location;
 
-    // v1.2.6: fragmentos de 32KB para conexiones inestables —
-    // perder un fragmento pequeño duele menos al reintentar.
-    const chunk = 32 * 1024;
+    // v1.3.2 (Argón): fragmentos de 128KB (antes 32KB) —
+    // menos round-trips; el timeout de 20s por chunk lo protege
+    // en redes lentas.
+    const chunk = 128 * 1024;
     String? ultimoError;
     while (offset < bytes.length) {
       final fin =
@@ -2348,6 +2356,8 @@ class SyncEngine {
               'Upload-Offset': '$offset',
             },
             body: bytes.sublist(offset, fin),
+            // v1.3.2 (Argón): 20s por chunk.
+            timeout: const Duration(seconds: 20),
           );
           if (r.statusCode == 204 || r.statusCode == 200) {
             offset = int.tryParse(r.headers['upload-offset'] ?? '') ?? fin;
@@ -2580,6 +2590,8 @@ class SyncEngine {
                     0,
             'actualizada_en':
                 m['actualizada_en'],
+            'plantilla_descripcion':
+                m['plantilla_descripcion'],
             'sync_seq': seq,
           },
               conflictAlgorithm:
@@ -2602,6 +2614,8 @@ class SyncEngine {
                   0,
               'actualizado_en':
                   m['actualizada_en'],
+              'plantilla_descripcion':
+                  m['plantilla_descripcion'],
               'sync_estado': 'synced',
             });
           } else if (local.first['sync_estado'] ==
@@ -2618,6 +2632,8 @@ class SyncEngine {
                   0,
               'actualizado_en':
                   m['actualizada_en'],
+              'plantilla_descripcion':
+                  m['plantilla_descripcion'],
             },
                 where: 'id = ?',
                 whereArgs: [m['id']]);

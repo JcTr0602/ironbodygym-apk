@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:uuid/uuid.dart';
+import 'dart:async';
 import '../../localdb.dart';
 import '../../modelos/incidencia.dart';
+import '../../sync.dart';
 import '../diseno.dart';
 import 'widgets/tarjeta_incidencia.dart';
 import 'detalle_incidencia.dart';
@@ -31,6 +33,10 @@ class _ListaIncidenciasScreenState
   String? _filtroTipoId;
   String? _filtroPrioridad;
   bool _soloMias = false;
+
+  // v1.3.2: selección múltiple para acciones en lote.
+  final Set<String> _seleccionadas = {};
+  bool get _modoSeleccion => _seleccionadas.isNotEmpty;
 
   @override
   void initState() {
@@ -172,9 +178,20 @@ class _ListaIncidenciasScreenState
         .where((i) => i.estado == 'bloqueada')
         .length;
 
-    return Scaffold(
+    // v1.3.2 (Argón): el gesto Atrás limpia la selección en vez de
+    // cerrar la pantalla cuando el modo selección está activo.
+    return PopScope(
+      canPop: !_modoSeleccion,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop && _modoSeleccion) {
+          setState(() => _seleccionadas.clear());
+        }
+      },
+      child: Scaffold(
       appBar: AppBar(
-        title: const Text('Incidencias'),
+        title: _modoSeleccion
+            ? Text('${_seleccionadas.length} seleccionadas')
+            : const Text('Incidencias'),
         actions: [
           if (AuthService().isOwner)
             IconButton(
@@ -266,22 +283,74 @@ class _ListaIncidenciasScreenState
                           final tipo =
                               _tiposMap[
                                   inc.tipoId];
+                          final sel = _seleccionadas
+                              .contains(inc.id);
                           return TarjetaIncidencia(
                             incidencia: inc,
                             tipo: tipo,
-                            onTap: () =>
-                                _irDetalle(inc),
+                            seleccionada: sel,
+                            onTap: () {
+                              if (_modoSeleccion) {
+                                setState(() {
+                                  sel
+                                      ? _seleccionadas
+                                          .remove(inc.id)
+                                      : _seleccionadas
+                                          .add(inc.id);
+                                });
+                              } else {
+                                _irDetalle(inc);
+                              }
+                            },
+                            onLongPress: () {
+                              setState(() => _seleccionadas
+                                  .add(inc.id));
+                            },
                           );
                         },
                       ),
           ),
         ],
       ),
+      // v1.3.2: barra de acciones en lote (solo en modo selección).
+      bottomNavigationBar: _modoSeleccion
+          ? BottomAppBar(
+              child: Row(
+                children: [
+                  IconButton(
+                    icon: const Icon(Icons.close),
+                    tooltip: 'Limpiar selección',
+                    onPressed: () => setState(
+                        () => _seleccionadas.clear()),
+                  ),
+                  TextButton(
+                    onPressed: () =>
+                        _accionLote('en_proceso'),
+                    child:
+                        const Text('En proceso'),
+                  ),
+                  TextButton(
+                    onPressed: () =>
+                        _accionLote('bloqueada'),
+                    child:
+                        const Text('Bloquear'),
+                  ),
+                  TextButton(
+                    onPressed: () =>
+                        _accionLote('resuelta'),
+                    child:
+                        const Text('Resolver'),
+                  ),
+                ],
+              ),
+            )
+          : null,
       floatingActionButton:
           FloatingActionButton.extended(
         onPressed: _crearNueva,
         icon: const Icon(Icons.add),
         label: const Text('Nueva'),
+      ),
       ),
     );
   }
@@ -435,5 +504,99 @@ class _ListaIncidenciasScreenState
             const EditarIncidenciaScreen(),
       ),
     ).then((_) => _cargar());
+  }
+
+  /// v1.3.2: pide la nota de resolución única para un lote a "resuelta".
+  /// Valida que no esté vacía (corrección Argón).
+  Future<String?> _pedirNotaLote() async {
+    final ctrl = TextEditingController();
+    try {
+      return await showDialog<String>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Nota de resolución'),
+          content: TextField(
+            controller: ctrl,
+            maxLines: 3,
+            autofocus: true,
+            decoration: const InputDecoration(
+              hintText:
+                  'Se aplicará a todas las incidencias del lote',
+              border: OutlineInputBorder(),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () =>
+                  Navigator.pop(ctx),
+              child: const Text('Cancelar'),
+            ),
+            FilledButton(
+              onPressed: () {
+                final t = ctrl.text.trim();
+                if (t.isEmpty) return;
+                Navigator.pop(ctx, t);
+              },
+              child: const Text('Aplicar'),
+            ),
+          ],
+        ),
+      );
+    } finally {
+      ctrl.dispose();
+    }
+  }
+
+  /// v1.3.2: aplica un cambio de estado a las incidencias seleccionadas.
+  /// El lote se aplica en local al instante (offline-first); el worker
+  /// sincroniza en segundo plano.
+  Future<void> _accionLote(String destino) async {
+    final ids = _seleccionadas.toList();
+    if (ids.isEmpty) return;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Cambiar ${ids.length} a "$destino"?'),
+        content: const Text(
+            'Se aplicará en este teléfono al instante y se '
+            'sincronizará cuando haya conexión.'),
+        actions: [
+          TextButton(
+              onPressed: () =>
+                  Navigator.pop(ctx, false),
+              child: const Text('Cancelar')),
+          FilledButton(
+              onPressed: () =>
+                  Navigator.pop(ctx, true),
+              child: const Text('Aplicar')),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+
+    String? nota;
+    if (destino == 'resuelta') {
+      nota = await _pedirNotaLote();
+      if (nota == null || !mounted) return;
+    }
+
+    final cambiadas = await LocalDb.instance
+        .cambiarEstadoIncidenciasLote(
+      ids: ids,
+      nuevoEstado: destino,
+      notaResolucion: nota,
+      userId: AuthService().userId ?? 'desconocido',
+      telegramId: AuthService().telegramId,
+    );
+    // v1.3.2: un solo disparo de sync al terminar el lote.
+    unawaited(SyncEngine.instance.push());
+    if (!mounted) return;
+    setState(() => _seleccionadas.clear());
+    _cargar();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+          content: Text(
+              '$cambiadas de ${ids.length} pasaron a "$destino"')),
+    );
   }
 }

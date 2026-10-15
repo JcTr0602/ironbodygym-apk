@@ -112,8 +112,39 @@ class _EditarIncidenciaScreenState
                         ),
                       ))
                   .toList(),
-              onChanged: (v) =>
-                  setState(() => _tipoId = v),
+              onChanged: (v) {
+                if (v == null) return;
+                // v1.3.2 (Argón): autocompletar descripción desde la
+                // plantilla del tipo. Reemplaza si el campo está vacío
+                // o si sigue siendo idéntico a la plantilla del tipo
+                // anterior (cambio de tipo en caliente).
+                final nuevoTipo = _tipos.firstWhere(
+                  (t) => t.id == v,
+                  orElse: () => _tipos.first,
+                );
+                final textoActual =
+                    _ctrlDesc.text.trim();
+                final plantillaAnterior = _tipos
+                    .where((t) => t.id == _tipoId)
+                    .map((t) =>
+                        (t.plantillaDescripcion ?? '')
+                            .trim())
+                    .firstOrNull ??
+                    '';
+                final plantillaNueva =
+                    (nuevoTipo.plantillaDescripcion ?? '')
+                        .trim();
+                setState(() {
+                  if ((textoActual.isEmpty ||
+                          (plantillaAnterior.isNotEmpty &&
+                              textoActual ==
+                                  plantillaAnterior)) &&
+                      plantillaNueva.isNotEmpty) {
+                    _ctrlDesc.text = plantillaNueva;
+                  }
+                  _tipoId = v;
+                });
+              },
             ),
             const SizedBox(height: 12),
             // Descripción

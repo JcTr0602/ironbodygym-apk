@@ -8,12 +8,16 @@ class TarjetaIncidencia extends StatelessWidget {
   final Incidencia incidencia;
   final TipoIncidencia? tipo;
   final VoidCallback onTap;
+  final VoidCallback? onLongPress;
+  final bool seleccionada;
 
   const TarjetaIncidencia({
     super.key,
     required this.incidencia,
     this.tipo,
     required this.onTap,
+    this.onLongPress,
+    this.seleccionada = false,
   });
 
   Color get _colorPrioridad {
@@ -71,19 +75,30 @@ class TarjetaIncidencia extends StatelessWidget {
           horizontal: 12, vertical: 4),
       child: InkWell(
         onTap: onTap,
+        onLongPress: onLongPress,
         borderRadius: BorderRadius.circular(12),
         child: Container(
           padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
-            color: AppColores.fondo(context),
+            color: seleccionada
+                ? Theme.of(context)
+                    .colorScheme
+                    .primaryContainer
+                : AppColores.fondo(context),
             borderRadius:
                 BorderRadius.circular(12),
-            border: Border(
-              left: BorderSide(
-                color: _colorPrioridad,
-                width: 3.5,
-              ),
-            ),
+            border: seleccionada
+                ? Border.all(
+                    color: Theme.of(context)
+                        .colorScheme
+                        .primary,
+                    width: 2.5)
+                : Border(
+                    left: BorderSide(
+                      color: _colorPrioridad,
+                      width: 3.5,
+                    ),
+                  ),
           ),
           child: Column(
             crossAxisAlignment:

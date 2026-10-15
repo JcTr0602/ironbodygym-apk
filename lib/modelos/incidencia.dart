@@ -9,6 +9,7 @@ class TipoIncidencia {
   final int? color;
   final bool activo;
   final int orden;
+  final String? plantillaDescripcion;
 
   const TipoIncidencia({
     required this.id,
@@ -17,6 +18,7 @@ class TipoIncidencia {
     this.color,
     this.activo = true,
     this.orden = 0,
+    this.plantillaDescripcion,
   });
 
   factory TipoIncidencia.fromMap(Map<String, dynamic> m) {
@@ -27,6 +29,7 @@ class TipoIncidencia {
       color: (m['color'] as num?)?.toInt(),
       activo: (m['activo'] as num?)?.toInt() == 1,
       orden: (m['orden'] as num?)?.toInt() ?? 0,
+      plantillaDescripcion: m['plantilla_descripcion'] as String?,
     );
   }
 
@@ -39,6 +42,7 @@ class TipoIncidencia {
       'color': color,
       'activo': activo ? 1 : 0,
       'orden': orden,
+      'plantilla_descripcion': plantillaDescripcion,
     };
   }
 

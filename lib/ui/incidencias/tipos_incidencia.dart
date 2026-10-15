@@ -233,6 +233,7 @@ class _TiposIncidenciaScreenState
         'color': res['color'],
         'activo': 1,
         'orden': orden,
+        'plantilla_descripcion': res['plantilla_descripcion'],
         'sync_estado': 'pending',
       },
       whereId: id,
@@ -245,6 +246,7 @@ class _TiposIncidenciaScreenState
         'color': res['color'],
         'activo': 1,
         'orden': orden,
+        'plantilla_descripcion': res['plantilla_descripcion'],
       },
       esInsert: existente == null,
     );
@@ -271,6 +273,7 @@ class _DialogoTipoState
     extends State<DialogoTipo> {
   final _formKey = GlobalKey<FormState>();
   late TextEditingController _ctrlNombre;
+  late TextEditingController _ctrlPlantilla;
   String _icono = 'label';
   int _color = 0xFF9E9E9E;
 
@@ -307,6 +310,8 @@ class _DialogoTipoState
     final e = widget.existente;
     _ctrlNombre =
         TextEditingController(text: e?.nombre ?? '');
+    _ctrlPlantilla = TextEditingController(
+        text: e?.plantillaDescripcion ?? '');
     _icono = e?.icono ?? 'label';
     _color = e?.color ?? 0xFF9E9E9E;
   }
@@ -314,6 +319,7 @@ class _DialogoTipoState
   @override
   void dispose() {
     _ctrlNombre.dispose();
+    _ctrlPlantilla.dispose();
     super.dispose();
   }
 
@@ -479,6 +485,25 @@ class _DialogoTipoState
                   );
                 }).toList(),
               ),
+              const SizedBox(height: 16),
+              const Text('Plantilla de descripción',
+                  style: TextStyle(
+                      fontWeight:
+                          FontWeight.w600)),
+              const SizedBox(height: 8),
+              TextFormField(
+                controller: _ctrlPlantilla,
+                maxLines: 3,
+                decoration:
+                    const InputDecoration(
+                  labelText:
+                      'Texto predefinido (opcional)',
+                  hintText:
+                      'Se autocompletará al crear una incidencia de este tipo',
+                  border:
+                      OutlineInputBorder(),
+                ),
+              ),
             ],
           ),
         ),
@@ -499,6 +524,8 @@ class _DialogoTipoState
                     .trim(),
                 'icono': _icono,
                 'color': _color,
+                'plantilla_descripcion':
+                    _ctrlPlantilla.text.trim(),
               });
             }
           },
