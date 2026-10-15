@@ -724,16 +724,11 @@ class _SeccionDiagnosticoScreenState extends State<SeccionDiagnosticoScreen> {
       datos['Precio menores'] = '${aj['mensualidad_menores'] ?? 1500}';
       datos['Precio transferencia'] = '${aj['transferencia'] ?? 2500}';
       // v1.3.1 (Argón): detalle de fotos atascadas en la cola.
+      // Nota: sin lista columns (SELECT *) y con fallbacks por si el
+      // esquema varía entre versiones.
       try {
         final fotosAtascadas = await db.db.then((d) => d.query(
               'fotos_cola',
-              columns: [
-                'id',
-                'cliente_id',
-                'estado',
-                'intentos',
-                'ultimo_error'
-              ],
               where: "estado IN ('pendiente','error','subiendo')",
               orderBy: 'id ASC',
               limit: 20,
@@ -745,9 +740,9 @@ class _SeccionDiagnosticoScreenState extends State<SeccionDiagnosticoScreen> {
           for (final f in fotosAtascadas) {
             i++;
             datos['Foto cola #$i'] =
-                'id=${f['id']} cliente=${f['cliente_id']} '
+                'id=${f['id']} cliente=${f['cliente_id'] ?? f['suplemento_id'] ?? '-'} '
                 'estado=${f['estado']} intentos=${f['intentos']} '
-                'error=${f['ultimo_error'] ?? '-'}';
+                'error=${f['ultimo_error'] ?? f['error'] ?? '-'}';
           }
         }
       } catch (_) {

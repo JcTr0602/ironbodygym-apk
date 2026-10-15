@@ -2192,8 +2192,11 @@ class SyncEngine {
           } else if (r.statusCode == 401) {
             throw SessionExpired();
           } else if (r.statusCode == 404 || r.statusCode == 410) {
+            // v1.3.1 (Argón r2): limpiar también claveTusPath para no
+            // dejar estado huérfano.
             await _db.setMeta(claveTusLoc, '');
             await _db.setMeta(claveTusOffset, '0');
+            await _db.setMeta(claveTusPath, '');
             return false;
           } else if (r.statusCode == 400 ||
               r.statusCode == 409 ||

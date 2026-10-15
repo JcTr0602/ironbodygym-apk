@@ -279,11 +279,15 @@ Future<Map<String, dynamic>?> pagoDialogo(
                   value: tipoSel.id,
                   isExpanded: true,
                   items: [
+                    // v1.3.1 (Argón): guardarraíl explícito — un menor
+                    // detectado por carnet nunca puede seleccionar la
+                    // tarifa de adulto, aunque venga en la lista.
                     for (final t in tipos)
-                      DropdownMenuItem(
-                          value: t.id,
-                          child: Text(
-                              '${t.nombre} (${fmtMonto((metodo == 'transferencia' && t.id == 'mensual') ? transfer : t.monto)} CUP)')),
+                      if (!(menor && t.id == 'mensual'))
+                        DropdownMenuItem(
+                            value: t.id,
+                            child: Text(
+                                '${t.nombre} (${fmtMonto((metodo == 'transferencia' && t.id == 'mensual') ? transfer : t.monto)} CUP)')),
                     const DropdownMenuItem(
                         value: 'personalizado',
                         child: Text('Personalizado…')),
