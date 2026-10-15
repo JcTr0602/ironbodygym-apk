@@ -717,6 +717,42 @@ class _SeccionDiagnosticoScreenState extends State<SeccionDiagnosticoScreen> {
         'Ventas suplementos': '${await db.contar('ventas_suplementos')}',
         'Suplementos': '${await db.contar('suplementos')}',
       };
+      // v1.3.1 (Argón): valores de precios en ajustes para auditar
+      // discrepancias (menores 1500 vs 2000).
+      final aj = await db.getAjustes();
+      datos['Precio mensual'] = '${aj['mensualidad'] ?? 2000}';
+      datos['Precio menores'] = '${aj['mensualidad_menores'] ?? 1500}';
+      datos['Precio transferencia'] = '${aj['transferencia'] ?? 2500}';
+      // v1.3.1 (Argón): detalle de fotos atascadas en la cola.
+      try {
+        final fotosAtascadas = await db.db.then((d) => d.query(
+              'fotos_cola',
+              columns: [
+                'id',
+                'cliente_id',
+                'estado',
+                'intentos',
+                'ultimo_error'
+              ],
+              where: "estado IN ('pendiente','error','subiendo')",
+              orderBy: 'id ASC',
+              limit: 20,
+            ));
+        if (fotosAtascadas.isEmpty) {
+          datos['Fotos en cola'] = 'ninguna atascada';
+        } else {
+          var i = 0;
+          for (final f in fotosAtascadas) {
+            i++;
+            datos['Foto cola #$i'] =
+                'id=${f['id']} cliente=${f['cliente_id']} '
+                'estado=${f['estado']} intentos=${f['intentos']} '
+                'error=${f['ultimo_error'] ?? '-'}';
+          }
+        }
+      } catch (_) {
+        datos['Fotos en cola'] = 'no se pudo leer';
+      }
       // v1.3.1 (Argón pull): desglose por tabla — watermark, filas
       // locales y estado. Es lo que permite identificar qué tabla deja
       // el mínimo en 0.

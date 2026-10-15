@@ -2195,6 +2195,16 @@ class SyncEngine {
             await _db.setMeta(claveTusLoc, '');
             await _db.setMeta(claveTusOffset, '0');
             return false;
+          } else if (r.statusCode == 400 ||
+              r.statusCode == 409 ||
+              r.statusCode == 412) {
+            // v1.3.1 (Argón): URL TUS muerta (offset inválido, precondición
+            // fallida). Limpiar claves para que el próximo ciclo empiece
+            // desde 0 en vez de reintentar contra la URL muerta en bucle.
+            await _db.setMeta(claveTusLoc, '');
+            await _db.setMeta(claveTusOffset, '0');
+            await _db.setMeta(claveTusPath, '');
+            return false;
           } else if (r.statusCode == 403) {
             // Luna #1: 403 es PERMANENTE (RLS/permisos), no reintentable.
             throw _TusPermanente('403 Forbidden en subida TUS');

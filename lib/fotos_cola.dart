@@ -630,10 +630,19 @@ class FotosColaService {
 
       // Corrección Gemini (casos borde): detectar si el archivo cambió
       // mientras se lee.
-      final tamanoAntes = await file.length();
-      final bytes = await file.readAsBytes();
-      if (bytes.length != tamanoAntes) {
-        await _marcarError(id, 'archivo cambió durante lectura',
+      // v1.3.1 (Argón): FileSystemException en la lectura (archivo borrado
+      // entre exists() y readAsBytes) es permanente, no reintentable.
+      Uint8List bytes;
+      try {
+        final tamanoAntes = await file.length();
+        bytes = await file.readAsBytes();
+        if (bytes.length != tamanoAntes) {
+          await _marcarError(id, 'archivo cambió durante lectura',
+              permanente: true, workerId: workerId);
+          return null;
+        }
+      } on FileSystemException catch (e) {
+        await _marcarError(id, 'archivo ilegible: ${e.message}',
             permanente: true, workerId: workerId);
         return null;
       }
