@@ -74,9 +74,14 @@ Future<Map<String, dynamic>?> pagoDialogo(
   }
 
   // Tipo inicial: 'mensual' (o 'menores' si es menor)
+  // v1.3.1 (Argón): filtrar tipos arriba del todo para que tipoSel,
+  // DropdownButton y orElse trabajen sobre el mismo conjunto.
+  final tiposDisp = menor
+      ? tipos.where((t) => t.id != 'mensual').toList()
+      : tipos;
   TipoPago tipoSel =
-      tipos.firstWhere((t) => t.id == (menor ? 'menores' : 'mensual'),
-          orElse: () => tipos.first);
+      tiposDisp.firstWhere((t) => t.id == (menor ? 'menores' : 'mensual'),
+          orElse: () => tiposDisp.first);
   int meses = 1;
   String metodo = 'efectivo';
   final diasCtrl = TextEditingController();
@@ -279,13 +284,11 @@ Future<Map<String, dynamic>?> pagoDialogo(
                   value: tipoSel.id,
                   isExpanded: true,
                   items: [
-                    // v1.3.1 (Argón): guardarraíl explícito — un menor
-                    // detectado por carnet nunca puede seleccionar la
-                    // tarifa de adulto, aunque venga en la lista.
-                    for (final t in tipos)
-                      if (!(menor && t.id == 'mensual'))
-                        DropdownMenuItem(
-                            value: t.id,
+                    // v1.3.1 (Argón): tiposDisp ya excluye 'mensual' si
+                    // menor == true; value y items siempre coinciden.
+                    for (final t in tiposDisp)
+                      DropdownMenuItem(
+                          value: t.id,
                             child: Text(
                                 '${t.nombre} (${fmtMonto((metodo == 'transferencia' && t.id == 'mensual') ? transfer : t.monto)} CUP)')),
                     const DropdownMenuItem(
@@ -304,8 +307,8 @@ Future<Map<String, dynamic>?> pagoDialogo(
                           monto: 0,
                           dias: 0);
                     } else {
-                      tipoSel = tipos.firstWhere((t) => t.id == v,
-                          orElse: () => tipos.first);
+                      tipoSel = tiposDisp.firstWhere((t) => t.id == v,
+                          orElse: () => tiposDisp.first);
                     }
                   }),
                 ),
