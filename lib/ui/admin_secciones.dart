@@ -746,10 +746,17 @@ class _SeccionDiagnosticoScreenState extends State<SeccionDiagnosticoScreen> {
           estado = 'ausente';
         }
         String filas;
-        try {
-          filas = '${await db.contar(t)}';
-        } catch (_) {
-          filas = '?';
+        // v1.3.1 (Argón pull r2): 'borrados' no es tabla local;
+        // 'incidencias' en SQLite se llama incidencias_local.
+        if (t == 'borrados') {
+          filas = '-';
+        } else {
+          final tablaSql = t == 'incidencias' ? 'incidencias_local' : t;
+          try {
+            filas = '${await db.contar(tablaSql)}';
+          } catch (_) {
+            filas = '?';
+          }
         }
         datos['wm_$t'] = '$wmt · filas=$filas · $estado';
       }

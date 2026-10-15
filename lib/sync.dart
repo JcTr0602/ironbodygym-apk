@@ -1445,7 +1445,17 @@ class SyncEngine {
       // sin errores, sincronizar su watermark con serverSeq. Evita que
       // getWatermarkMinimo() devuelva un cursor viejo de una tabla
       // inactiva y cause "Sincronización incompleta" eterno.
+      // v1.3.1 (Argón pull r2): NO forzar si la tabla quedó marcada como
+      // ausente o sin_permiso (el break no lanza excepción, así que no
+      // está en erroresTablas). Si se forzara, al recuperar el permiso
+      // o crearse la tabla el teléfono no descargaría el historial.
+      final ausente =
+          await _db.getMeta('wm_${tabla}_ausente') == '1';
+      final sinPermiso =
+          await _db.getMeta('wm_${tabla}_sin_permiso') == '1';
       if (serverSeq != null &&
+          !ausente &&
+          !sinPermiso &&
           !erroresTablas.any((e) => e.startsWith('$tabla:'))) {
         // v1.3.1 (Argón pull): la tabla completó sin errores: limpiar
         // su error guardado.
@@ -1556,7 +1566,13 @@ class SyncEngine {
       await _db.setMeta('wm_err_borrados',
           errTxt.length > 200 ? errTxt.substring(0, 200) : errTxt);
     }
-    if (borradosOk) {
+    // v1.3.1 (Argón pull r2): no avanzar si quedó ausente o sin_permiso
+    // (mismo motivo que en el bucle principal).
+    final borradosAusente =
+        await _db.getMeta('wm_borrados_ausente') == '1';
+    final borradosSinPermiso =
+        await _db.getMeta('wm_borrados_sin_permiso') == '1';
+    if (borradosOk && !borradosAusente && !borradosSinPermiso) {
       await _db.setMeta('wm_err_borrados', '');
       // v1.3.1: si no hubo borrados, avanzar al serverSeq para no
       // dejar el watermark en 0 (el diagnóstico muestra el mínimo).
@@ -2600,9 +2616,15 @@ class SyncEngine {
       });
       AppLog.info('sync', 'pull_tipos_ok',
           d: 'n=${rows.length}');
+      // v1.3.1 (Argón pull r2): limpiar error por tabla.
+      await _db.setMeta('wm_err_incidencias_tipos', '');
     } catch (e) {
       AppLog.error(
           'sync', 'pull_tipos_fallo', d: '$e');
+      // v1.3.1 (Argón pull r2): guardar error por tabla para el diagnóstico.
+      final errTxt = '$e';
+      await _db.setMeta('wm_err_incidencias_tipos',
+          errTxt.length > 200 ? errTxt.substring(0, 200) : errTxt);
       // Argón B2: rethrow para que pull() detecte el fallo.
       rethrow;
     }
@@ -2772,9 +2794,15 @@ class SyncEngine {
       });
       AppLog.info('sync', 'pull_inc_ok',
           d: 'n=${rows.length}');
+      // v1.3.1 (Argón pull r2): limpiar error por tabla.
+      await _db.setMeta('wm_err_incidencias', '');
     } catch (e) {
       AppLog.error(
           'sync', 'pull_inc_fallo', d: '$e');
+      // v1.3.1 (Argón pull r2): guardar error por tabla para el diagnóstico.
+      final errTxt = '$e';
+      await _db.setMeta('wm_err_incidencias',
+          errTxt.length > 200 ? errTxt.substring(0, 200) : errTxt);
       // Argón B2: rethrow para que pull() detecte el fallo.
       rethrow;
     }
@@ -2854,10 +2882,16 @@ class SyncEngine {
             'incidencias_comentarios', maxSeq,
             executor: txn);
       });
+      // v1.3.1 (Argón pull r2): limpiar error por tabla.
+      await _db.setMeta('wm_err_incidencias_comentarios', '');
     } catch (e) {
       AppLog.error(
           'sync', 'pull_inc_com_fallo',
           d: '$e');
+      // v1.3.1 (Argón pull r2): guardar error por tabla para el diagnóstico.
+      final errTxt = '$e';
+      await _db.setMeta('wm_err_incidencias_comentarios',
+          errTxt.length > 200 ? errTxt.substring(0, 200) : errTxt);
       rethrow;
     }
   }
