@@ -16,6 +16,7 @@ import '../sync.dart';
 import '../tiempo.dart';
 import 'componentes.dart';
 import 'diseno.dart';
+import 'reporte_mensual_diarios.dart';
 import 'widgets.dart';
 
 class PagoDiarioScreen extends StatefulWidget {
@@ -538,6 +539,25 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
         : ListView(
             padding: const EdgeInsets.all(16),
             children: [
+              // v1.3.2: acceso al resumen mensual.
+              Padding(
+                padding:
+                    const EdgeInsets.only(bottom: 12),
+                child: OutlinedButton.icon(
+                  icon: const Icon(
+                      Icons.calendar_month),
+                  label: const Text(
+                      'Ver resumen mensual'),
+                  onPressed: () =>
+                      Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) =>
+                          const ReporteMensualDiariosScreen(),
+                    ),
+                  ),
+                ),
+              ),
               // Selector de fecha
               Row(
                 children: [

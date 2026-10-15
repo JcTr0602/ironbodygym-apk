@@ -92,6 +92,58 @@ Future<Map<String, dynamic>?> pagoDialogo(
   // recoge el GC. El dispose tras showDialog causaba
   // "TextEditingController was used after being disposed".
 
+  // v1.3.2 (Argón): si el cliente está vencido, preguntar ANTES del paso 1
+  // si siguió viniendo. La respuesta define la base del período nuevo:
+  // - Sí → se cuenta desde el vencimiento anterior (base = pagado_hasta).
+  // - No → comportamiento actual (desde la fecha del pago).
+  String? basePago; // null = desde fechaPago (comportamiento actual)
+  {
+    final pagadoHasta = cliente['pagado_hasta'] as String?;
+    final fpIso = '${fechaPago.year.toString().padLeft(4, '0')}-'
+        '${fechaPago.month.toString().padLeft(2, '0')}-'
+        '${fechaPago.day.toString().padLeft(2, '0')}';
+    final vencido =
+        pagadoHasta != null && pagadoHasta.compareTo(fpIso) < 0;
+    if (vencido && context.mounted) {
+      final diasVencido = DateTime.parse(fpIso)
+          .difference(DateTime.parse(pagadoHasta!))
+          .inDays;
+      // Preview con el período por defecto (mensual 30 días) para mostrar
+      // la consecuencia de cada opción. El preview exacto se recalcula
+      // en el paso 1 con el período elegido.
+      final hastaSi = previewHastaDias(pagadoHasta, 30,
+          fechaPago: fpIso, base: pagadoHasta);
+      final hastaNo =
+          previewHastaDias(pagadoHasta, 30, fechaPago: fpIso);
+      final r = await showDialog<bool>(
+        context: context,
+        barrierDismissible: false,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Cliente vencido'),
+          content: Text(
+            'Venció el ${fmtFecha(pagadoHasta)} '
+            '(hace $diasVencido día${diasVencido == 1 ? '' : 's'}).\n'
+            '¿Siguió viniendo después del vencimiento?\n\n'
+            'Sí → nuevo vencimiento: ${fmtFecha(hastaSi)}\n'
+            'No → nuevo vencimiento: ${fmtFecha(hastaNo)}',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('No, dejó de venir'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Sí, siguió viniendo'),
+            ),
+          ],
+        ),
+      );
+      if (r == null || !context.mounted) return null;
+      if (r) basePago = pagadoHasta;
+    }
+  }
+
   /// Mapea el tipo elegido al período del motor del servidor.
   /// Los 4 fijos usan su período nativo; los personalizados van como
   /// 'personalizado' (días + monto), sin cambios en el servidor.
@@ -149,7 +201,7 @@ Future<Map<String, dynamic>?> pagoDialogo(
             '${fechaPago.day.toString().padLeft(2, '0')}';
         final nuevo = previewHastaDias(
             cliente['pagado_hasta'] as String?, _diasDe(s),
-            fechaPago: fpIso);
+            fechaPago: fpIso, base: basePago);
         return DialogoApp(
           titulo: 'Pago — ${cliente['nombre']}',
           iconoTitulo: Icons.payments,
@@ -416,7 +468,7 @@ Future<Map<String, dynamic>?> pagoDialogo(
       '${fechaPago.day.toString().padLeft(2, '0')}';
   final nuevo = previewHastaDias(
       cliente['pagado_hasta'] as String?, _diasDe(s),
-      fechaPago: fpIso2);
+      fechaPago: fpIso2, base: basePago);
   final ok = await showDialog<bool>(
     context: context,
     builder: (ctx) => DialogoApp(
@@ -473,6 +525,10 @@ Future<Map<String, dynamic>?> pagoDialogo(
     'monto': s.monto,
     'pagado_hasta': nuevo,
     'metodo': metodo,
+    // v1.3.2: base explícita si el cliente siguió viniendo vencido.
+    // El servidor la respeta en record_payment.
+    if (basePago != null) 'base': basePago,
+    'siguio_viniendo': basePago != null,
     'fecha': '${fechaPago.year.toString().padLeft(4, '0')}-'
         '${fechaPago.month.toString().padLeft(2, '0')}-'
         '${fechaPago.day.toString().padLeft(2, '0')}',

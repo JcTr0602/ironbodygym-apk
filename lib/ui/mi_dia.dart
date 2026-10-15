@@ -27,6 +27,10 @@ class _MiDiaScreenState extends State<MiDiaScreen> {
   double _totalHoy = 0;
   double _efectivo = 0;
   double _transferencia = 0;
+  // v1.3.2: desglose por entrenador y turnos.
+  Map<String, Map<String, dynamic>> _porEntrenador = {};
+  Map<String, Map<String, double>> _diariosPorTurno = {};
+  List<String> _turnosSinReporte = [];
 
   @override
   void initState() {
@@ -60,12 +64,26 @@ class _MiDiaScreenState extends State<MiDiaScreen> {
         'metodo': '${p['metodo'] ?? 'efectivo'}',
         'periodo': '${p['periodo'] ?? 'mensual'}',
         'foto_storage': fotos[p['cliente_id'] as int?],
+        // v1.3.2: quién cobró (viene del servidor en data).
+        'registrado_por': '${p['registrado_por'] ?? '—'}',
       });
     }
     cobrados.sort((a, b) =>
         (b['monto'] as double).compareTo(a['monto'] as double));
+    // v1.3.2: agrupar por entrenador.
+    final porEntrenador = <String, Map<String, dynamic>>{};
+    for (final c in cobrados) {
+      final quien = c['registrado_por'] as String;
+      final g = porEntrenador.putIfAbsent(
+          quien, () => {'total': 0.0, 'items': <Map<String, dynamic>>[]});
+      g['total'] = (g['total'] as double) + (c['monto'] as double);
+      (g['items'] as List<Map<String, dynamic>>).add(c);
+    }
     final porCobrar = await vencenHoy();
     final porMetodo = await cobradoHoyPorMetodo();
+    // v1.3.2: pagos diarios por turno y turnos sin reporte.
+    final diariosPorTurno = await resumenDiarioPorTurno(hoy);
+    final sinReporte = await turnosSinReporte(hoy);
     if (mounted) {
       setState(() {
         _cobrados = cobrados;
@@ -73,6 +91,9 @@ class _MiDiaScreenState extends State<MiDiaScreen> {
         _totalHoy = total;
         _efectivo = porMetodo['efectivo'] ?? 0;
         _transferencia = porMetodo['transferencia'] ?? 0;
+        _porEntrenador = porEntrenador;
+        _diariosPorTurno = diariosPorTurno;
+        _turnosSinReporte = sinReporte;
         _cargando = false;
       });
     }
@@ -129,6 +150,130 @@ class _MiDiaScreenState extends State<MiDiaScreen> {
                       ],
                     ),
                   ),
+                  const SizedBox(height: 16),
+                  // v1.3.2: aviso de turnos sin reporte de caja.
+                  if (_turnosSinReporte.isNotEmpty)
+                    Padding(
+                      padding:
+                          const EdgeInsets.only(bottom: 12),
+                      child: Tarjeta(
+                        color: AppColores.alerta,
+                        child: Row(
+                          children: [
+                            const Icon(Icons.warning_amber,
+                                color: Colors.white),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                'Sin reporte de caja: turno ${_turnosSinReporte.join(' y ')}.',
+                                style: const TextStyle(
+                                    color: Colors.white,
+                                    fontWeight:
+                                        FontWeight.w600),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  // v1.3.2: pagos diarios por turno.
+                  const Text('Pagos diarios por turno',
+                      style: AppTexto.subtitulo),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      for (final t in ['mañana', 'tarde'])
+                        Expanded(
+                          child: Padding(
+                            padding: EdgeInsets.only(
+                                right: t == 'mañana'
+                                    ? 8
+                                    : 0),
+                            child: Tarjeta(
+                              child: Column(
+                                crossAxisAlignment:
+                                    CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                      t == 'mañana'
+                                          ? 'Mañana'
+                                          : 'Tarde',
+                                      style: AppTexto
+                                          .secundario),
+                                  Text(
+                                    '${fmtMonto(_diariosPorTurno[t]?['total'] ?? 0)} CUP',
+                                    style: const TextStyle(
+                                        fontWeight:
+                                            FontWeight.bold,
+                                        fontSize: 18),
+                                  ),
+                                  Text(
+                                      '${(_diariosPorTurno[t]?['cantidad'] ?? 0).toInt()} pagos'),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  // v1.3.2: cobrado por entrenador.
+                  const Text('Cobrado por entrenador',
+                      style: AppTexto.subtitulo),
+                  const SizedBox(height: 8),
+                  if (_porEntrenador.isEmpty)
+                    Tarjeta(
+                      child: Text(
+                          'Sin cobros por entrenador hoy.',
+                          textAlign: TextAlign.center,
+                          style: AppTexto.secundario.copyWith(
+                              color: AppColores
+                                  .textoSecundario(context))),
+                    )
+                  else
+                    for (final e
+                        in _porEntrenador.entries)
+                      Padding(
+                        padding:
+                            const EdgeInsets.only(bottom: 8),
+                        child: Tarjeta(
+                          child: ExpansionTile(
+                            tilePadding: EdgeInsets.zero,
+                            title: Text(
+                              e.key,
+                              style: const TextStyle(
+                                  fontWeight:
+                                      FontWeight.w600),
+                            ),
+                            trailing: Text(
+                              '${fmtMonto(e.value['total'] as double)} CUP',
+                              style: const TextStyle(
+                                  fontWeight:
+                                      FontWeight.bold,
+                                  color:
+                                      AppColores.naranja),
+                            ),
+                            children: [
+                              for (final c in (e.value['items']
+                                      as List<
+                                          Map<String,
+                                              dynamic>>))
+                                ListTile(
+                                  dense: true,
+                                  contentPadding:
+                                      EdgeInsets.zero,
+                                  title: Text(
+                                      '${c['nombre']}'),
+                                  subtitle: Text(
+                                      etiquetaPeriodo(
+                                          c)),
+                                  trailing: Text(
+                                      '${fmtMonto(c['monto'])} CUP'),
+                                ),
+                            ],
+                          ),
+                        ),
+                      ),
                   const SizedBox(height: 16),
                   const Text('Cobros realizados hoy',
                       style: AppTexto.subtitulo),

@@ -392,13 +392,18 @@ String previewHasta(String? pagadoHasta, int meses) =>
 /// v1.0.14: la base es lo más lejano entre el pagado_hasta actual y la
 /// fecha del pago (no "hoy"). Así, si el cliente paga por adelantado,
 /// los días restantes no se pierden.
+///
+/// v1.3.2: parámetro `base` explícito ("siguió viniendo"). Si el cliente
+/// estaba vencido y siguió entrenando, el período nuevo se cuenta desde
+/// el vencimiento anterior, no desde hoy.
 String previewHastaDias(String? pagadoHasta, int dias,
-    {String? fechaPago}) {
+    {String? fechaPago, String? base}) {
   final fp = fechaPago ?? _hoyIso();
-  final base = (pagadoHasta != null && pagadoHasta.compareTo(fp) > 0)
-      ? pagadoHasta
-      : fp;
-  final p = base.split('-').map(int.parse).toList();
+  final b = base ??
+      ((pagadoHasta != null && pagadoHasta.compareTo(fp) > 0)
+          ? pagadoHasta
+          : fp);
+  final p = b.split('-').map(int.parse).toList();
   final d = DateTime(p[0], p[1], p[2]).add(Duration(days: dias));
   return '${d.year.toString().padLeft(4, '0')}-'
       '${d.month.toString().padLeft(2, '0')}-'
@@ -994,6 +999,68 @@ Future<List<Map<String, dynamic>>> diariosDeFecha(
   res.sort((a, b) =>
       '${b['registrado_por_nombre']}'.compareTo('${a['registrado_por_nombre']}'));
   return res;
+}
+
+/// v1.3.2: resumen mensual de pagos diarios.
+/// Agrupa por turno y por entrenador. Solo pagos diarios (las
+/// mensualidades tienen sus propios reportes).
+/// Retorna {porTurno, porEntrenador, porDia, total}.
+Future<Map<String, dynamic>> resumenMensualDiarios(
+    int year, int month) async {
+  final todos = await LocalDb.instance.allMirror('pagos_diarios');
+  final porTurno = {
+    'mañana': {'cantidad': 0.0, 'total': 0.0},
+    'tarde': {'cantidad': 0.0, 'total': 0.0},
+    'noche': {'cantidad': 0.0, 'total': 0.0},
+  };
+  final porEntrenador = <String, Map<String, double>>{};
+  final porDia = <String, double>{};
+  for (final d in todos) {
+    final f = '${d['fecha'] ?? ''}';
+    if (f.length < 10) continue;
+    final dia = f.substring(0, 10);
+    final partes = dia.split('-');
+    if (partes.length < 3) continue;
+    if (int.tryParse(partes[0]) != year ||
+        int.tryParse(partes[1]) != month) {
+      continue;
+    }
+    final total = (d['total'] as num?)?.toDouble() ?? 0;
+    final cantidad = (d['cantidad'] as num?)?.toDouble() ?? 0;
+    final t = '${d['turno'] ?? 'mañana'}'.toLowerCase();
+    final key =
+        t == 'tarde' ? 'tarde' : t == 'noche' ? 'noche' : 'mañana';
+    porTurno[key]!['total'] = porTurno[key]!['total']! + total;
+    porTurno[key]!['cantidad'] =
+        porTurno[key]!['cantidad']! + cantidad;
+    final quien = '${d['registrado_por_nombre'] ?? '—'}';
+    final g = porEntrenador.putIfAbsent(
+        quien, () => {'total': 0.0, 'cantidad': 0.0});
+    g['total'] = g['total']! + total;
+    g['cantidad'] = g['cantidad']! + cantidad;
+    porDia[dia] = (porDia[dia] ?? 0) + total;
+  }
+  return {
+    'porTurno': porTurno,
+    'porEntrenador': porEntrenador,
+    'porDia': porDia,
+    'total': porDia.values.fold(0.0, (a, b) => a + b),
+  };
+}
+/// v1.3.2 (Argón): turnos sin reporte explícito en pagos_diarios.
+/// Se basa SOLO en el campo `turno` declarado, no en la hora de pagos
+/// sueltos (evita falsos positivos: un pago de mensualidad por la tarde
+/// no implica que el turno mañana reportó su caja).
+/// Retorna la lista de turnos esperados sin registro ('mañana', 'tarde').
+Future<List<String>> turnosSinReporte(String fechaIso) async {
+  final datos = await diariosDeFecha(fechaIso);
+  final turnos = datos
+      .map((d) => '${d['turno'] ?? ''}'.toLowerCase())
+      .toSet();
+  return [
+    if (!turnos.contains('mañana')) 'mañana',
+    if (!turnos.contains('tarde')) 'tarde',
+  ];
 }
 
 /// v1.0.15: resumen de pagos diarios por turno para una fecha.
