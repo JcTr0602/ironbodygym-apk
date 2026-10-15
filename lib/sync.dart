@@ -1904,12 +1904,40 @@ class SyncEngine {
     });
   }
 
+  /// v1.3.3: encola la apertura de turno para sincronizar.
+  /// El turno_id (UUID estable generado al abrir) vincula apertura y
+  /// cierre aunque lleguen al servidor fuera de orden. Idempotente en
+  /// el servidor por (entrenador, fecha_turno, turno).
+  Future<String> registrarAperturaTurno({
+    required String turnoId,
+    required String fechaTurno,
+    required String turno,
+    required String horaApertura,
+  }) async {
+    final id = const Uuid().v4();
+    await _db.queueOp(
+      opUuid: id,
+      tipo: 'apertura_turno',
+      payload: {
+        'id': id,
+        'turno_id': turnoId,
+        'fecha_turno': fechaTurno,
+        'turno': turno,
+        'hora_apertura': horaApertura,
+        'telegram_id': _auth.telegramId,
+      },
+    );
+    return id;
+  }
+
   /// v1.2.5-rev5 (Gemini): encola el cierre de turno para sincronizar.
   /// El puente lo publica a sync_turnos_cierre; el admin ve el historial
   /// de todos los entrenadores. La marca local en meta se mantiene para
   /// el estado inmediato sin esperar la red.
   /// v1.2.5-rev6: incluye telegram_id (fallback si el servidor no puede
   /// resolverlo del dispositivo; los pagos se atribuyen por telegram_id).
+  /// v1.3.3: parámetros opcionales del flujo rápido de cierre (turno_id
+  /// estable, horas, desglose de pendientes). Solo viajan si no son null.
   Future<String> registrarCierreTurno({
     required String fecha,
     required String turno,
@@ -1917,6 +1945,13 @@ class SyncEngine {
     double? totalEsperado,
     required int pagosCount,
     String? nota,
+    String? turnoId,
+    String? horaApertura,
+    String? horaCierre,
+    int? pendientesCount,
+    double? pendientesCup,
+    double? pendientesUsd,
+    int? revisionCount,
   }) async {
     final id = const Uuid().v4();
     await _db.queueOp(
@@ -1931,6 +1966,13 @@ class SyncEngine {
         'pagos_count': pagosCount,
         'nota': nota,
         'telegram_id': _auth.telegramId,
+        if (turnoId != null) 'turno_id': turnoId,
+        if (horaApertura != null) 'hora_apertura': horaApertura,
+        if (horaCierre != null) 'hora_cierre': horaCierre,
+        if (pendientesCount != null) 'pendientes_count': pendientesCount,
+        if (pendientesCup != null) 'pendientes_cup': pendientesCup,
+        if (pendientesUsd != null) 'pendientes_usd': pendientesUsd,
+        if (revisionCount != null) 'revision_count': revisionCount,
       },
     );
     return id;

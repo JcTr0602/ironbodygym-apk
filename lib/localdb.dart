@@ -214,7 +214,7 @@ class LocalDb {
     final dir = await getDatabasesPath();
     _db = await openDatabase(
       p.join(dir, 'ironbody.db'),
-      version: 23,
+      version: 24,
       // v1.3-r4 (Gemini): WAL mode para que lectores (UI) y escritores
       // (Workmanager en otro isolate) no se bloqueen mutuamente.
       // v1.2.9+34 (hotfix): try-catch — si el dispositivo no soporta WAL,
@@ -755,6 +755,13 @@ class LocalDb {
               'plantilla_descripcion', 'TEXT');
           await db.delete('meta', where: "k = 'wm_incidencias_tipos'");
         }
+        // v24 (v1.3.3): registro local de turnos con máquina de estados
+        // (abrir/cerrar turno desde el Home). Fuente de verdad para la
+        // tarjeta "Mi Turno Hoy"; la meta cierre_turno_... se mantiene
+        // por compatibilidad con MiTurnoScreen.
+        if (oldV < 24) {
+          await _crearTablaTurnos(db);
+        }
       },
     );
     // v1.2.5+28: repara el índice FTS si la migración lo omitió y el
@@ -844,6 +851,9 @@ class LocalDb {
     // aparte del bucle genérico de ids enteros.
     await db.execute(
         'CREATE TABLE turnos_cierre (id TEXT PRIMARY KEY, data TEXT NOT NULL, sync_seq INTEGER NOT NULL)');
+    // v1.3.3 (v24): registro local de turnos con máquina de estados
+    // (abrir/cerrar turno desde el Home del entrenador).
+    await _crearTablaTurnos(db);
     // v1.2.5-rev6: FTS5 para búsqueda de clientes (nombre + teléfonos).
     // v1.2.5+28: opcional; no revienta si el teléfono no trae el módulo.
     await _crearFtsClientes(db);
@@ -965,6 +975,25 @@ class LocalDb {
             'creada_en TEXT NOT NULL, sincronizada INTEGER NOT NULL DEFAULT 0)');
     // v1.3.0 (Sol #4): esquema de Incidencias también en instalación limpia.
     await _crearEsquemaIncidencias(db);
+  }
+
+  /// v1.3.3 (v24): DDL de la tabla local de turnos, idempotente.
+  /// Llamado desde _crearTablas (clean install) y onUpgrade (migración).
+  /// Máquina de estados: abierto_local | abierto_sincronizado |
+  /// cerrado_local | cerrado_sincronizado | no_cerrado | con_incidencias.
+  static Future<void> _crearTablaTurnos(Database db) async {
+    await db.execute('CREATE TABLE IF NOT EXISTS turnos ('
+        'turno_id TEXT PRIMARY KEY, '
+        'fecha_turno TEXT NOT NULL, '
+        'turno TEXT NOT NULL, '
+        'hora_apertura TEXT NOT NULL, '
+        'hora_cierre TEXT, '
+        'telegram_id INTEGER NOT NULL, '
+        'estado TEXT NOT NULL)');
+    await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_turnos_fecha ON turnos(fecha_turno, telegram_id)');
+    await db.execute(
+        'CREATE UNIQUE INDEX IF NOT EXISTS idx_turnos_unico ON turnos(fecha_turno, turno, telegram_id)');
   }
 
   /// v1.3.0 (Sol #4): DDL de Incidencias v19, idempotente.
@@ -2275,6 +2304,115 @@ class LocalDb {
   Future<String?> getMeta(String k) async {    final d = await db;
     final rows = await d.query('meta', where: 'k=?', whereArgs: [k]);
     return rows.isEmpty ? null : rows.first['v'] as String;
+  }
+
+  // ============================================================
+  // v1.3.3: registro local de turnos (abrir/cerrar turno, Home).
+  // Máquina de estados: abierto_local | abierto_sincronizado |
+  // cerrado_local | cerrado_sincronizado | no_cerrado | con_incidencias.
+  // ============================================================
+
+  /// Inserta un turno abierto. Idempotente por (fecha_turno, turno,
+  /// telegram_id): si ya existe, devuelve el turno_id existente sin
+  /// duplicar (protección ante doble tap).
+  Future<String> insertarTurno({
+    required String turnoId,
+    required String fechaTurno,
+    required String turno,
+    required String horaApertura,
+    required int telegramId,
+  }) async {
+    final d = await db;
+    final existente = await d.query('turnos',
+        columns: ['turno_id'],
+        where: 'fecha_turno=? AND turno=? AND telegram_id=?',
+        whereArgs: [fechaTurno, turno, telegramId],
+        limit: 1);
+    if (existente.isNotEmpty) {
+      return existente.first['turno_id'] as String;
+    }
+    await d.insert('turnos', {
+      'turno_id': turnoId,
+      'fecha_turno': fechaTurno,
+      'turno': turno,
+      'hora_apertura': horaApertura,
+      'hora_cierre': null,
+      'telegram_id': telegramId,
+      'estado': 'abierto_local',
+    });
+    return turnoId;
+  }
+
+  /// Turno por id (o null).
+  Future<Map<String, dynamic>?> getTurno(String turnoId) async {
+    final d = await db;
+    final rows = await d.query('turnos',
+        where: 'turno_id=?', whereArgs: [turnoId], limit: 1);
+    return rows.isEmpty ? null : rows.first;
+  }
+
+  /// Turno abierto (abierto_local | abierto_sincronizado) para un
+  /// entrenador en una fecha+franja, o null.
+  Future<Map<String, dynamic>?> turnoAbierto(
+      String fechaTurno, String turno, int telegramId) async {
+    final d = await db;
+    final rows = await d.query('turnos',
+        where: 'fecha_turno=? AND turno=? AND telegram_id=? AND '
+            'estado IN (?,?)',
+        whereArgs: [fechaTurno, turno, telegramId,
+            'abierto_local', 'abierto_sincronizado'],
+        limit: 1);
+    return rows.isEmpty ? null : rows.first;
+  }
+
+  /// Turnos abiertos de fechas ANTERIORES a hoy (para marcar no_cerrado).
+  Future<List<Map<String, dynamic>>> turnosAbiertosAnteriores(
+      String hoyIso, int telegramId) async {
+    final d = await db;
+    return d.query('turnos',
+        where: 'telegram_id=? AND fecha_turno<? AND estado IN (?,?)',
+        whereArgs: [telegramId, hoyIso,
+            'abierto_local', 'abierto_sincronizado'],
+        orderBy: 'fecha_turno DESC');
+  }
+
+  /// Cambia el estado de un turno (opcionalmente fija hora_cierre).
+  Future<void> marcarEstadoTurno(String turnoId, String estado,
+      {String? horaCierre}) async {
+    final d = await db;
+    final vals = <String, dynamic>{'estado': estado};
+    if (horaCierre != null) vals['hora_cierre'] = horaCierre;
+    await d.update('turnos', vals,
+        where: 'turno_id=?', whereArgs: [turnoId]);
+  }
+
+  /// ¿Hay alguna op de este tipo con este turno_id aún en cola
+  /// (pendiente/error/necesita_revision)?
+  Future<bool> hayOpTurnoEnCola(String tipo, String turnoId) async {
+    final d = await db;
+    try {
+      final rows = await d.rawQuery(
+          "SELECT 1 FROM ops_queue WHERE tipo=? AND estado IN "
+          "('pendiente','error','necesita_revision') AND "
+          "json_extract(payload, '\$.turno_id')=? LIMIT 1",
+          [tipo, turnoId]);
+      return rows.isNotEmpty;
+    } catch (_) {
+      // JSON1 puede faltar en algunos teléfonos: fallback con LIKE.
+      final rows = await d.query('ops_queue',
+          columns: ['payload'],
+          where: "tipo=? AND estado IN "
+              "('pendiente','error','necesita_revision')",
+          whereArgs: [tipo]);
+      for (final r in rows) {
+        try {
+          final p =
+              jsonDecode(r['payload'] as String) as Map<String, dynamic>;
+          if ('${p['turno_id']}' == turnoId) return true;
+        } catch (_) {}
+      }
+      return false;
+    }
   }
 
   /// Lock de sincronización entre isolates (Gemini auditoría 2026-10-12).
