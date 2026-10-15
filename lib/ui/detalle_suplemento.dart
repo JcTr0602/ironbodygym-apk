@@ -10,6 +10,7 @@ library;
 
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:share_plus/share_plus.dart';
@@ -107,8 +108,15 @@ Future<void> compartirSuplemento(BuildContext context,
       'Precio: ${precio.toStringAsFixed(2)} USD$cup\n'
       'Disponibles: $stock';
   try {
-    final foto = s['foto_storage'] as String?;
-    final archivo = await FotoCache.instance.obtener(foto);
+    // v1.3.3: preferir la foto local recién tomada (offline) si existe.
+    File? archivo;
+    final fotoLocal = s['foto_local'] as String?;
+    if (fotoLocal != null && fotoLocal.isNotEmpty) {
+      final f = File(fotoLocal);
+      if (await f.exists()) archivo = f;
+    }
+    archivo ??=
+        await FotoCache.instance.obtener(s['foto_storage'] as String?);
     if (archivo != null) {
       await Share.shareXFiles([XFile(archivo.path)],
           text: texto);
@@ -174,6 +182,8 @@ class DetalleSuplementoScreen extends StatelessWidget {
         (suplemento['stock'] as num?)?.toInt() ?? 0;
     final inactivo = (suplemento['activo'] as int?) != 1;
     final foto = suplemento['foto_storage'] as String?;
+    // v1.3.3: foto local recién tomada (offline) tiene prioridad.
+    final fotoLocal = suplemento['foto_local'] as String?;
     final cup = tasaUsd != null && tasaUsd! > 1.0
         ? '≈ ${fmtMonto(precio * tasaUsd!)} CUP'
         : null;
@@ -221,27 +231,51 @@ class DetalleSuplementoScreen extends StatelessWidget {
           const SyncBanner(compact: true),
           const SizedBox(height: AppEspacio.md),
           // Foto grande.
-          FutureBuilder(
-            future: FotoCache.instance.obtener(foto),
-            builder: (ctx, snap) {
-              final f = snap.data;
-              if (f == null) {
-                return Container(
+          // v1.3.3: foto local recién tomada (offline) tiene prioridad
+          // sobre la remota (aún no subida o sin descargar).
+          if (fotoLocal != null && fotoLocal.isNotEmpty)
+            ClipRRect(
+              borderRadius:
+                  BorderRadius.circular(AppRadio.lg),
+              child: Image.file(File(fotoLocal),
                   height: 200,
-                  decoration: BoxDecoration(
-                    color: AppColores.fondo(context),
-                    borderRadius:
-                        BorderRadius.circular(AppRadio.lg),
-                  ),
-                  child: const Icon(
-                      Icons.medication_outlined,
-                      size: 72,
-                      color: AppColores.naranja),
-                );
-              }
-              return ClipRRect(
-                borderRadius:
-                    BorderRadius.circular(AppRadio.lg),
+                  width: double.infinity,
+                  fit: BoxFit.cover,
+                  errorBuilder: (_, __, ___) => Container(
+                    height: 200,
+                    decoration: BoxDecoration(
+                      color: AppColores.fondo(context),
+                      borderRadius:
+                          BorderRadius.circular(AppRadio.lg),
+                    ),
+                    child: const Icon(
+                        Icons.medication_outlined,
+                        size: 72,
+                        color: AppColores.naranja),
+                  )),
+            )
+          else
+            FutureBuilder(
+              future: FotoCache.instance.obtener(foto),
+              builder: (ctx, snap) {
+                final f = snap.data;
+                if (f == null) {
+                  return Container(
+                    height: 200,
+                    decoration: BoxDecoration(
+                      color: AppColores.fondo(context),
+                      borderRadius:
+                          BorderRadius.circular(AppRadio.lg),
+                    ),
+                    child: const Icon(
+                        Icons.medication_outlined,
+                        size: 72,
+                        color: AppColores.naranja),
+                  );
+                }
+                return ClipRRect(
+                  borderRadius:
+                      BorderRadius.circular(AppRadio.lg),
                 child: Image.file(f,
                     height: 220,
                     width: double.infinity,

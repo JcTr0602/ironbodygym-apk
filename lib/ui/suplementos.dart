@@ -826,6 +826,9 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
 
   Widget _miniTop(Map<String, dynamic> s) {
     final foto = s['foto_storage'] as String?;
+    // v1.3.3: foto local recién tomada (offline) tiene prioridad sobre
+    // la remota (aún no subida o sin descargar).
+    final fotoLocal = s['foto_local'] as String?;
     final precio =
         (s['precio_oficial'] as num?)?.toDouble() ?? 0;
     return SizedBox(
@@ -836,34 +839,56 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            FutureBuilder(
-              future: FotoCache.instance.obtener(foto),
-              builder: (ctx, snap) {
-                final f = snap.data;
-                if (f == null) {
-                  return Container(
+            if (fotoLocal != null && fotoLocal.isNotEmpty)
+              ClipRRect(
+                borderRadius:
+                    BorderRadius.circular(AppRadio.md),
+                child: Image.file(File(fotoLocal),
                     height: 64,
                     width: double.infinity,
-                    decoration: BoxDecoration(
-                      color: AppColores.fondo(context),
-                      borderRadius: BorderRadius.circular(
-                          AppRadio.md),
-                    ),
-                    child: const Icon(
-                        Icons.medication_outlined,
-                        color: AppColores.naranja),
-                  );
-                }
-                return ClipRRect(
-                  borderRadius:
-                      BorderRadius.circular(AppRadio.md),
-                  child: Image.file(f,
+                    fit: BoxFit.cover,
+                    errorBuilder: (_, __, ___) => Container(
                       height: 64,
                       width: double.infinity,
-                      fit: BoxFit.cover),
-                );
-              },
-            ),
+                      decoration: BoxDecoration(
+                        color: AppColores.fondo(context),
+                        borderRadius: BorderRadius.circular(
+                            AppRadio.md),
+                      ),
+                      child: const Icon(
+                          Icons.medication_outlined,
+                          color: AppColores.naranja),
+                    )),
+              )
+            else
+              FutureBuilder(
+                future: FotoCache.instance.obtener(foto),
+                builder: (ctx, snap) {
+                  final f = snap.data;
+                  if (f == null) {
+                    return Container(
+                      height: 64,
+                      width: double.infinity,
+                      decoration: BoxDecoration(
+                        color: AppColores.fondo(context),
+                        borderRadius: BorderRadius.circular(
+                            AppRadio.md),
+                      ),
+                      child: const Icon(
+                          Icons.medication_outlined,
+                          color: AppColores.naranja),
+                    );
+                  }
+                  return ClipRRect(
+                    borderRadius:
+                        BorderRadius.circular(AppRadio.md),
+                    child: Image.file(f,
+                        height: 64,
+                        width: double.infinity,
+                        fit: BoxFit.cover),
+                  );
+                },
+              ),
             const SizedBox(height: 4),
             Text('${s['nombre'] ?? 'Sin nombre'}',
                 maxLines: 1,
@@ -928,7 +953,6 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
   Widget _tarjetaProducto(Map<String, dynamic> s) {
     final stock = (s['stock'] as num?)?.toInt() ?? 0;
     final precio = (s['precio_oficial'] as num?)?.toDouble() ?? 0;
-    final foto = s['foto_storage'] as String?;
     final inactivo = (s['activo'] as int?) != 1;
     // v1.2.1: mostrar categoría del suplemento.
     final catNombre =
@@ -947,7 +971,7 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
         onTap: () => _irDetalle(s),
         child: Row(
           children: [
-            _fotoProducto(foto),
+            _fotoProducto(s),
             const SizedBox(width: AppEspacio.md),
             Expanded(
               child: Column(
@@ -1055,7 +1079,9 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
     );
   }
 
-  Widget _fotoProducto(String? storagePath) {
+  /// v1.3.3: acepta el mapa completo para priorizar foto_local
+  /// (foto recién tomada, offline) sobre la remota del caché.
+  Widget _fotoProducto(Map<String, dynamic> s) {
     const tam = 56.0;
     Widget placeholder() => Container(
           width: tam,
@@ -1068,6 +1094,18 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
           child: const Icon(Icons.medication_outlined,
               color: AppColores.naranja),
         );
+    final fotoLocal = s['foto_local'] as String?;
+    if (fotoLocal != null && fotoLocal.isNotEmpty) {
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(AppRadio.md),
+        child: Image.file(File(fotoLocal),
+            width: tam,
+            height: tam,
+            fit: BoxFit.cover,
+            errorBuilder: (_, __, ___) => placeholder()),
+      );
+    }
+    final storagePath = s['foto_storage'] as String?;
     if (storagePath == null || storagePath.isEmpty) {
       return placeholder();
     }

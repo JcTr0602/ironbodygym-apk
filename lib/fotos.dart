@@ -48,6 +48,20 @@ class FotoCache {
   String _nombreArchivo(String storagePath) =>
       storagePath.replaceAll(RegExp(r'[^a-zA-Z0-9]'), '_');
 
+  /// v1.3.3: extrae la extensión real del storagePath (.webp, .png).
+  /// Por defecto .jpg para rutas sin extensión reconocible.
+  String _extDeStorage(String storagePath) {
+    final p = storagePath.toLowerCase();
+    if (p.endsWith('.webp')) return '.webp';
+    if (p.endsWith('.png')) return '.png';
+    return '.jpg';
+  }
+
+  /// v1.3.3: construye el File del caché preservando la extensión
+  /// original (no fuerza .jpg, para no romper con archivos .webp).
+  File _archivoCache(Directory d, String storagePath) =>
+      File('${d.path}/${_nombreArchivo(storagePath)}${_extDeStorage(storagePath)}');
+
   /// Foto ya descargada (sin red). Null si no está en caché.
   /// v1.2.8: hace touch para LRU real.
   Future<File?> enCache(String? storagePath) async {
@@ -58,7 +72,7 @@ class FotoCache {
       return mem;
     }
     final d = await _dir();
-    final f = File('${d.path}/${_nombreArchivo(storagePath)}.jpg');
+    final f = _archivoCache(d, storagePath);
     if (await f.exists()) {
       _memoria[storagePath] = f;
       await _tocar(f);
@@ -90,7 +104,8 @@ class FotoCache {
         return null;
       }
       final d = await _dir();
-      final f = File('${d.path}/${_nombreArchivo(storagePath)}.jpg');
+      // v1.3.3: preservar la extensión original (el servidor sube .webp).
+      final f = _archivoCache(d, storagePath);
       await f.writeAsBytes(r.bodyBytes);
       _memoria[storagePath] = f;
       await _aplicarLRU();
@@ -103,12 +118,13 @@ class FotoCache {
   }
 
   /// Invalida el caché para una ruta (fuerza re-descarga).
+  /// v1.3.3: preserva la extensión original al buscar el archivo.
   Future<void> invalidar(String? storagePath) async {
     if (storagePath == null || storagePath.isEmpty) return;
     _memoria.remove(storagePath);
     try {
       final d = await _dir();
-      final f = File('${d.path}/${_nombreArchivo(storagePath)}.jpg');
+      final f = _archivoCache(d, storagePath);
       if (await f.exists()) await f.delete();
     } catch (_) {}
   }
@@ -122,8 +138,8 @@ class FotoCache {
 
   /// Expulsa los archivos más viejos hasta estar bajo maxBytes.
   /// Corrección Gemini: un solo escaneo O(N), sort en memoria sin I/O.
-  /// Fix Luna 8: lock anti-reentrancia. Fix Luna 9: solo archivos .jpg
-  /// del caché (nunca toca otros directorios).
+  /// Fix Luna 8: lock anti-reentrancia. Fix Luna 9: solo archivos del
+  /// caché (nunca toca otros directorios). v1.3.3: .jpg, .webp y .png.
   Future<void> _aplicarLRU() async {
     if (_evictando) return;
     _evictando = true;
@@ -134,9 +150,13 @@ class FotoCache {
       final items = <_CacheItem>[];
       int totalBytes = 0;
 
-      // Escaneo O(N) único. Solo .jpg del caché (Fix Luna 9).
+      // Escaneo O(N) único. Solo archivos del caché (Fix Luna 9).
+      // v1.3.3: también .webp y .png (preservamos la extensión original).
       for (final entity in entities) {
-        if (entity is File && entity.path.endsWith('.jpg')) {
+        if (entity is File &&
+            (entity.path.endsWith('.jpg') ||
+                entity.path.endsWith('.webp') ||
+                entity.path.endsWith('.png'))) {
           try {
             final stat = await entity.stat();
             totalBytes += stat.size;

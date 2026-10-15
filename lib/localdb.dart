@@ -1130,8 +1130,9 @@ class LocalDb {
       String tabla, int id, Map<String, dynamic> data, int syncSeq) async {
     final d = await db;
     final nuevoJson = jsonEncode(data);
-    // v1.0.9.1: si cambia foto_storage, invalidar caché para forzar re-descarga
-    if (tabla == 'clientes') {
+    // v1.0.9.1: si cambia foto_storage, invalidar caché para forzar re-descarga.
+    // v1.3.3: también para 'suplementos' (antes solo 'clientes').
+    if (tabla == 'clientes' || tabla == 'suplementos') {
       final rows = await d.query(tabla,
           columns: ['data'], where: 'id=?', whereArgs: [id], limit: 1);
       if (rows.isNotEmpty) {
@@ -1200,7 +1201,9 @@ class LocalDb {
     if (rows.isEmpty) return {'cambio': true, 'oldFoto': null};
     final oldJson = rows.first['data'] as String;
     String? oldFoto;
-    if (tabla == 'clientes') {
+    // v1.3.3: también capturar oldFoto para 'suplementos' (ambos usan
+    // el campo foto_storage en el JSON).
+    if (tabla == 'clientes' || tabla == 'suplementos') {
       try {
         final oldMap = jsonDecode(oldJson) as Map<String, dynamic>;
         oldFoto = oldMap['foto_storage'] as String?;

@@ -31,6 +31,7 @@ import 'app_log.dart';
 import 'auth.dart';
 import 'config.dart';
 import 'errores_sync.dart';
+import 'fotos.dart';
 import 'fotos_cola.dart';
 import 'localdb.dart';
 import 'perfil.dart';
@@ -1427,6 +1428,21 @@ class SyncEngine {
               if (tabla == 'clientes') {
                 await _db.actualizarFtsCliente(op['id'] as int,
                     op['dataJson'] as String, op['oldFoto'] as String?);
+              }
+              // v1.3.3: invalidar caché si cambió la foto del suplemento
+              // (el pull no pasa por upsertMirror, usa el batch directo).
+              if (tabla == 'suplementos') {
+                final oldFoto = op['oldFoto'] as String?;
+                if (oldFoto != null && oldFoto.isNotEmpty) {
+                  try {
+                    final nuevo = (jsonDecode(op['dataJson'] as String)
+                            as Map<String, dynamic>)['foto_storage']
+                        as String?;
+                    if (oldFoto != nuevo) {
+                      await FotoCache.instance.invalidar(oldFoto);
+                    }
+                  } catch (_) {}
+                }
               }
             }
           }

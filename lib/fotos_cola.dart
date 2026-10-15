@@ -17,6 +17,7 @@ import 'package:sqflite/sqflite.dart';
 import 'package:uuid/uuid.dart';
 import 'localdb.dart';
 import 'app_log.dart';
+import 'auth.dart';
 import 'config.dart';
 import 'sync.dart' show SyncEngine, EstadoSubida, ResultadoSubidaFoto;
 
@@ -69,6 +70,20 @@ Future<Map<String, String>> _generarVariantes(
 class FotosColaService {
   FotosColaService._();
   static final FotosColaService instance = FotosColaService._();
+
+  /// v1.3.3 (Argón): lee user_id/telegram_id sin romper si procesarCola()
+  /// corre en el isolate del Foreground Service o en un test donde
+  /// Supabase Auth no tiene sesión activa (devuelve null en ese caso).
+  static Map<String, dynamic> _identidadSegura() {
+    try {
+      return {
+        'user_id': AuthService().userId,
+        'telegram_id': AuthService().telegramId,
+      };
+    } catch (_) {
+      return {'user_id': null, 'telegram_id': null};
+    }
+  }
 
   /// Genera variantes WebP en background y las encola.
   /// Si la compresión falla, encola solo el original como fallback.
@@ -163,6 +178,39 @@ class FotosColaService {
             {'data': jsonEncode(data)},
             where: 'id = ?',
             whereArgs: [clienteId],
+          );
+        }
+      } catch (_) {}
+    }
+    // v1.3.3 (Argón): persistir foto_uuid y foto_local en el suplemento
+    // al encolar (igual que se hace con clientes arriba):
+    // - foto_uuid: para que _vincularEnTransaccion verifique precedencia.
+    // - foto_local: para que la lista muestre la foto al instante (offline).
+    // Se guarda fuera del loop de variantes (una sola ruta preferida).
+    // El pull del servidor reemplaza data y limpia foto_local solo.
+    if (suplementoId != null) {
+      try {
+        final rows = await db.query(
+          'suplementos',
+          columns: ['data'],
+          where: 'id = ?',
+          whereArgs: [suplementoId],
+          limit: 1,
+        );
+        if (rows.isNotEmpty) {
+          Map<String, dynamic> data;
+          final raw = rows.first['data'];
+          data = Map<String, dynamic>.from(
+              raw is String ? jsonDecode(raw) : raw as Map);
+          data['foto_uuid'] = opUuid;
+          data['foto_local'] = variantes['display'] ??
+              variantes['thumb'] ??
+              variantes['original'];
+          await db.update(
+            'suplementos',
+            {'data': jsonEncode(data)},
+            where: 'id = ?',
+            whereArgs: [suplementoId],
           );
         }
       } catch (_) {}
@@ -824,6 +872,8 @@ class FotosColaService {
         }),
         'estado': 'pendiente',
         'creada_ts': DateTime.now().toIso8601String(),
+        // v1.3.3 (Argón): no dejar la op huérfana si cambia la sesión.
+        ..._identidadSegura(),
       }, conflictAlgorithm: ConflictAlgorithm.replace);
     }
   }
@@ -882,6 +932,8 @@ class FotosColaService {
       }),
       'estado': 'pendiente',
       'creada_ts': DateTime.now().toIso8601String(),
+      // v1.3.3 (Argón): no dejar la op huérfana si cambia la sesión.
+      ..._identidadSegura(),
     }, conflictAlgorithm: ConflictAlgorithm.replace);
   }
 
