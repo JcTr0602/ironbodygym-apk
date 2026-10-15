@@ -15,6 +15,14 @@ class Novedad {
 }
 
 const novedades = [
+  Novedad('1.3.2', [
+    'Plantillas de descripción por tipo de incidencia',
+    'Acciones en lote para incidencias (cambiar estado de varias a la vez)',
+    '"¿Siguió viniendo?": elige la base al cobrar un pago vencido',
+    'Reportes diarios por entrenador y turnos sin reporte',
+    'Resumen mensual de pagos diarios por turno y entrenador',
+    'Correcciones de sincronización, dinero y permisos (auditoría completa)',
+  ]),
   Novedad('1.3.1', [
     'Confirmar entregas sin crashes: corrección crítica de base de datos',
     'Suplementos: precio recordado se preserva en sincronización',
