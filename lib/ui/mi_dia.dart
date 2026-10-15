@@ -136,7 +136,7 @@ class _MiDiaScreenState extends State<MiDiaScreen> {
       final hoy = await diariosDeHoy();
       var totalHoy = 0.0;
       for (final d in hoy) {
-        totalHoy += (d['monto'] as num?)?.toDouble() ?? 0;
+        totalHoy += (d['total'] as num?)?.toDouble() ?? 0;
       }
       final anterior = diasMes[hoyIso] ?? 0;
       diasMes[hoyIso] = totalHoy;
