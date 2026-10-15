@@ -258,7 +258,16 @@ class _FichaScreenState extends State<FichaScreen> {
     if (!mounted) return;
     _cargar();
     // d) Mostrar INMEDIATAMENTE el diálogo de WhatsApp.
-    final telefono = _normalizarTelefono('${c['telefono'] ?? ''}');
+    // v1.3.3 (Argón): priorizar c['movil'] sobre c['telefono'] — muchos
+    // clientes tienen el carnet (11 dígitos) en 'telefono'. Solo usar si
+    // pasa validarTelefono; si no, telefono='' (solo botón Copiar).
+    String telefono = '';
+    for (final raw in ['${c['movil'] ?? ''}', '${c['telefono'] ?? ''}']) {
+      if (validarTelefono(raw)) {
+        telefono = _normalizarTelefono(raw);
+        break;
+      }
+    }
     final mensaje =
         '🎂 ¡Feliz cumpleaños, $nombre! Iron Body Gym te regala 1 mes de '
         'membresía (válida hasta el $hastaFmt). — Mensaje enviado por el '

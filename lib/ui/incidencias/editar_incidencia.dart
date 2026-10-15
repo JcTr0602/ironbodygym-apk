@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:uuid/uuid.dart';
 import '../../localdb.dart';
+import '../../negocio.dart';
 import '../../modelos/incidencia.dart';
 import '../diseno.dart';
 import '../../auth.dart';
@@ -86,15 +87,9 @@ class _EditarIncidenciaScreenState
       setState(() => _sugerenciasCliente = []);
       return;
     }
-    final d = await LocalDb.instance.db;
-    final rows = await d.query(
-      'clientes',
-      columns: ['id', 'nombre'],
-      where: 'nombre LIKE ?',
-      whereArgs: ['%${q.trim()}%'],
-      orderBy: 'nombre ASC',
-      limit: 8,
-    );
+    // v1.3.3 (Argón): usar buscarClientes de negocio.dart en vez de query
+    // directa — la tabla espejo clientes no tiene columna 'nombre'.
+    final rows = (await buscarClientes(q.trim())).take(8).toList();
     if (mounted) {
       setState(() => _sugerenciasCliente = rows);
     }

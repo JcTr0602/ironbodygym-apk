@@ -122,13 +122,30 @@ class _MiDiaScreenState extends State<MiDiaScreen> {
   }
 
   /// v1.3.3: carga el resumen mensual para la vista por mes.
+  /// v1.3.3 (Argón): si es el mes actual, fusionar los pagos optimistas de
+  /// hoy (diariosDeHoy, incluye ops_queue) para que el total del día en la
+  /// lista coincida con el detalle.
   Future<void> _cargarMes() async {
     setState(() => _cargando = true);
     final res = await resumenMensualDiarios(_mesAnio, _mesMes);
+    final diasMes = Map<String, double>.from(res['porDia'] as Map? ?? {});
+    var totalMes = (res['total'] as num?)?.toDouble() ?? 0;
+    final ahora = DateTime.now();
+    if (_mesAnio == ahora.year && _mesMes == ahora.month) {
+      final hoyIso = _hoyCorto();
+      final hoy = await diariosDeHoy();
+      var totalHoy = 0.0;
+      for (final d in hoy) {
+        totalHoy += (d['monto'] as num?)?.toDouble() ?? 0;
+      }
+      final anterior = diasMes[hoyIso] ?? 0;
+      diasMes[hoyIso] = totalHoy;
+      totalMes = totalMes - anterior + totalHoy;
+    }
     if (mounted) {
       setState(() {
-        _diasMes = Map<String, double>.from(res['porDia'] as Map? ?? {});
-        _totalMes = (res['total'] as num?)?.toDouble() ?? 0;
+        _diasMes = diasMes;
+        _totalMes = totalMes;
         _cargando = false;
       });
     }

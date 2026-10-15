@@ -19,6 +19,8 @@ const Map<String, TipoOperacionInfo> kTiposOperacion = {
   'pago_mensual': TipoOperacionInfo('Pago mensual', Icons.payments),
   'pago_mensualidad':
       TipoOperacionInfo('Pago de mensualidad', Icons.payments),
+  'regalar_mes_cumpleanos':
+      TipoOperacionInfo('Regalo de cumpleaños', Icons.card_giftcard),
   'pago_diario': TipoOperacionInfo('Pago diario', Icons.payments),
   'editar_pago':
       TipoOperacionInfo('Corrección de pago', Icons.edit_note),
