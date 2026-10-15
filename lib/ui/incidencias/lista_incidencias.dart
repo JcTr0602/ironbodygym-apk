@@ -126,11 +126,15 @@ class _ListaIncidenciasScreenState
   }
 
   List<Incidencia> get _filtradas {
-    // TODO: obtener idUsuarioActual de la sesión
-    final idUsuarioActual = AuthService().userId ?? 'desconocido';
+    // v1.3.3: "Solo mías" compara contra el formato compuesto
+    // 'entrenador:<username>:<Nombre>' (no contra el UUID).
+    final usernameActual = AuthService().username;
     return _todas.where((inc) {
       if (_soloMias &&
-          inc.asignadoA != idUsuarioActual) {
+          !(inc.asignadoA
+                  ?.startsWith(
+                      'entrenador:$usernameActual:') ??
+              false)) {
         return false;
       }
       if (_filtroEstado != null &&

@@ -801,6 +801,8 @@ Future<Map<String, List<Map<String, dynamic>>>> clientesPorEntrenador() async {
 
 /// Nº de clientes distintos con al menos un pago con fecha en el mes
 /// calendario actual (espejo `pagos`).
+/// v1.3.3: excluye pagos con monto 0 (regalos de cumpleaños, promos) para
+/// que no inflen el conteo que alimenta la comisión de entrenadores.
 Future<int> pagosRealizadosMes() async {
   final n = DateTime.now();
   final pref = '${n.year.toString().padLeft(4, '0')}-'
@@ -809,6 +811,8 @@ Future<int> pagosRealizadosMes() async {
   for (final p in await LocalDb.instance.allMirror('pagos')) {
     final f = p['fecha'] as String?;
     if (f != null && f.startsWith(pref)) {
+      // v1.3.3: los regalos/promos (monto 0) no cuentan como pago cobrado.
+      if ((p['monto'] as num? ?? 0) <= 0) continue;
       final cid = p['cliente_id'] as int?;
       if (cid != null) ids.add(cid);
     }

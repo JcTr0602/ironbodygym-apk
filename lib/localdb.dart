@@ -1477,6 +1477,22 @@ class LocalDb {
         where: 'id=?', whereArgs: [clienteId]);
   }
 
+  /// Actualización optimista: extiende pagado_hasta de un cliente en el
+  /// espejo local sin esperar al servidor. Se usa al regalar un mes
+  /// de cumpleaños (v1.3.3).
+  Future<void> updateMirrorPagadoHasta(
+      int clienteId, String pagadoHasta) async {
+    final d = await db;
+    final rows = await d.query('clientes',
+        where: 'id=?', whereArgs: [clienteId], limit: 1);
+    if (rows.isEmpty) return;
+    final data =
+        jsonDecode(rows.first['data'] as String) as Map<String, dynamic>;
+    data['pagado_hasta'] = pagadoHasta;
+    await d.update('clientes', {'data': jsonEncode(data)},
+        where: 'id=?', whereArgs: [clienteId]);
+  }
+
   /// Elimina entradas optimistas del espejo vinculadas a una op ya
   /// aplicada. Las entradas optimistas usan id temporal negativo y
   /// guardan el op_uuid; al aplicar la op, el registro real llega

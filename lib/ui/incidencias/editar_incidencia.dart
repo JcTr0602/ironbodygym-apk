@@ -30,6 +30,76 @@ class _EditarIncidenciaScreenState
   DateTime? _fechaLimite;
   bool _guardando = false;
 
+  // v1.3.3: responsable de la incidencia.
+  // Formato: 'entrenador:<username>:<Nombre>' | 'cliente:<id>:<Nombre>' | null
+  String _tipoResponsable = 'ninguno'; // ninguno | entrenador | cliente
+  String? _responsable;
+  String? _entrenadorUsername; // 'duany' | 'gabriel'
+  int? _clienteId;
+  String? _clienteNombre;
+  final _ctrlBuscarCliente = TextEditingController();
+  List<Map<String, dynamic>> _sugerenciasCliente = [];
+
+  /// Parsea un asignado_a existente y restaura el estado del selector.
+  void _restaurarResponsable(String? asignadoA) {
+    _responsable = asignadoA;
+    if (asignadoA == null || asignadoA.isEmpty) {
+      _tipoResponsable = 'ninguno';
+      return;
+    }
+    final partes = asignadoA.split(':');
+    if (partes.length < 3) {
+      _tipoResponsable = 'ninguno';
+      _responsable = null;
+      return;
+    }
+    if (partes[0] == 'entrenador') {
+      _tipoResponsable = 'entrenador';
+      _entrenadorUsername = partes[1];
+    } else if (partes[0] == 'cliente') {
+      _tipoResponsable = 'cliente';
+      _clienteId = int.tryParse(partes[1]);
+      _clienteNombre = partes.skip(2).join(':');
+      _ctrlBuscarCliente.text = _clienteNombre ?? '';
+    } else {
+      _tipoResponsable = 'ninguno';
+      _responsable = null;
+    }
+  }
+
+  /// Reconstruye el string compuesto de responsable desde la selección.
+  void _actualizarResponsable() {
+    if (_tipoResponsable == 'entrenador' && _entrenadorUsername != null) {
+      final nombre = _entrenadorUsername == 'duany' ? 'Duany' : 'Gabriel';
+      _responsable = 'entrenador:$_entrenadorUsername:$nombre';
+    } else if (_tipoResponsable == 'cliente' &&
+        _clienteId != null &&
+        _clienteNombre != null) {
+      _responsable = 'cliente:$_clienteId:$_clienteNombre';
+    } else {
+      _responsable = null;
+    }
+  }
+
+  Future<void> _buscarClientes(String q) async {
+    if (q.trim().length < 2) {
+      setState(() => _sugerenciasCliente = []);
+      return;
+    }
+    final d = await LocalDb.instance.db;
+    final rows = await d.query(
+      'clientes',
+      columns: ['id', 'nombre'],
+      where: 'nombre LIKE ?',
+      whereArgs: ['%${q.trim()}%'],
+      orderBy: 'nombre ASC',
+      limit: 8,
+    );
+    if (mounted) {
+      setState(() => _sugerenciasCliente = rows);
+    }
+  }
+
   @override
   void initState() {
     super.initState();
@@ -41,6 +111,8 @@ class _EditarIncidenciaScreenState
       _tipoId = e.tipoId;
       _prioridad = e.prioridad;
       _fechaLimite = e.fechaLimite;
+      // v1.3.3: restaurar responsable existente.
+      _restaurarResponsable(e.asignadoA);
     }
     _cargarTipos();
   }
@@ -50,6 +122,7 @@ class _EditarIncidenciaScreenState
     _ctrlDesc.dispose();
     _ctrlDetalle.dispose();
     _ctrlUbicacion.dispose();
+    _ctrlBuscarCliente.dispose();
     super.dispose();
   }
 
@@ -196,6 +269,131 @@ class _EditarIncidenciaScreenState
               ),
             ),
             const SizedBox(height: 12),
+            // v1.3.3: Responsable de la incidencia
+            const Text('Responsable',
+                style: TextStyle(
+                    fontWeight:
+                        FontWeight.w600)),
+            const SizedBox(height: 4),
+            SegmentedButton<String>(
+              segments: const [
+                ButtonSegment(
+                    value: 'ninguno',
+                    label: Text('Sin asignar')),
+                ButtonSegment(
+                    value: 'entrenador',
+                    label: Text('Entrenador')),
+                ButtonSegment(
+                    value: 'cliente',
+                    label: Text('Cliente')),
+              ],
+              selected: {_tipoResponsable},
+              onSelectionChanged: (s) => setState(() {
+                _tipoResponsable = s.first;
+                _entrenadorUsername = null;
+                _clienteId = null;
+                _clienteNombre = null;
+                _ctrlBuscarCliente.clear();
+                _sugerenciasCliente = [];
+                _actualizarResponsable();
+              }),
+            ),
+            if (_tipoResponsable == 'entrenador') ...[
+              const SizedBox(height: 8),
+              DropdownButtonFormField<String>(
+                value: _entrenadorUsername,
+                decoration: const InputDecoration(
+                  labelText: 'Entrenador',
+                  border: OutlineInputBorder(),
+                ),
+                items: const [
+                  DropdownMenuItem(
+                      value: 'duany',
+                      child: Text('Duany')),
+                  DropdownMenuItem(
+                      value: 'gabriel',
+                      child: Text('Gabriel')),
+                ],
+                onChanged: (v) => setState(() {
+                  _entrenadorUsername = v;
+                  _actualizarResponsable();
+                }),
+              ),
+            ],
+            if (_tipoResponsable == 'cliente') ...[
+              const SizedBox(height: 8),
+              TextFormField(
+                controller: _ctrlBuscarCliente,
+                decoration: const InputDecoration(
+                  labelText: 'Buscar cliente',
+                  hintText:
+                      'Escribe al menos 2 letras',
+                  prefixIcon:
+                      Icon(Icons.person_search),
+                  border: OutlineInputBorder(),
+                ),
+                onChanged: _buscarClientes,
+              ),
+              if (_sugerenciasCliente.isNotEmpty)
+                Container(
+                  margin:
+                      const EdgeInsets.only(top: 4),
+                  decoration: BoxDecoration(
+                    border: Border.all(
+                        color: Colors.grey[700]!),
+                    borderRadius:
+                        BorderRadius.circular(8),
+                  ),
+                  child: Column(
+                    children:
+                        _sugerenciasCliente.map((c) {
+                      final sel = _clienteId ==
+                          (c['id'] as int);
+                      return ListTile(
+                        dense: true,
+                        title: Text(
+                            '${c['nombre']}'),
+                        trailing: sel
+                            ? const Icon(
+                                Icons.check,
+                                color: Colors.green)
+                            : null,
+                        onTap: () => setState(() {
+                          _clienteId =
+                              c['id'] as int;
+                          _clienteNombre =
+                              '${c['nombre']}';
+                          _ctrlBuscarCliente.text =
+                              _clienteNombre!;
+                          _sugerenciasCliente =
+                              [];
+                          _actualizarResponsable();
+                        }),
+                      );
+                    }).toList(),
+                  ),
+                ),
+              if (_clienteNombre != null)
+                Padding(
+                  padding:
+                      const EdgeInsets.only(
+                          top: 4),
+                  child: Chip(
+                    avatar: const Icon(
+                        Icons.person,
+                        size: 16),
+                    label: Text(_clienteNombre!),
+                    onDeleted: () =>
+                        setState(() {
+                      _clienteId = null;
+                      _clienteNombre = null;
+                      _ctrlBuscarCliente.clear();
+                      _actualizarResponsable();
+                    }),
+                  ),
+                ),
+            ],
+            const SizedBox(height: 12),
             // Prioridad
             const Text('Prioridad',
                 style: TextStyle(
@@ -308,6 +506,9 @@ class _EditarIncidenciaScreenState
         'prioridad': _prioridad,
         'fecha_limite': _fechaLimite
             ?.toIso8601String(),
+        // v1.3.3: responsable (entrenador:<username>:<Nombre> |
+        // cliente:<id>:<Nombre> | null).
+        'asignado_a': _responsable,
         'estado':
             widget.existente?.estado ??
                 'pendiente',

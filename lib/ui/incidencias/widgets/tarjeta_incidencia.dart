@@ -61,6 +61,18 @@ class TarjetaIncidencia extends StatelessWidget {
     }
   }
 
+  /// v1.3.3: nombre del responsable desde el formato compuesto
+  /// 'entrenador:<username>:<Nombre>' | 'cliente:<id>:<Nombre>'.
+  /// Usa skip(2).join(':') por seguridad (el nombre podría llevar ':').
+  String? get _nombreResponsable {
+    final a = incidencia.asignadoA;
+    if (a == null || a.isEmpty) return null;
+    final partes = a.split(':');
+    if (partes.length < 3) return null;
+    final nombre = partes.skip(2).join(':').trim();
+    return nombre.isEmpty ? null : nombre;
+  }
+
   @override
   Widget build(BuildContext context) {
     final dias = incidencia.diasAbierta;
@@ -215,6 +227,28 @@ class TarjetaIncidencia extends StatelessWidget {
                               : null,
                     ),
                   ),
+                  // v1.3.3: responsable
+                  if (_nombreResponsable != null) ...[
+                    const SizedBox(width: 10),
+                    Icon(
+                      Icons.person,
+                      size: 14,
+                      color: Colors.grey[500],
+                    ),
+                    const SizedBox(width: 2),
+                    Flexible(
+                      child: Text(
+                        '👤 $_nombreResponsable',
+                        maxLines: 1,
+                        overflow:
+                            TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Colors.grey[500],
+                        ),
+                      ),
+                    ),
+                  ],
                   const Spacer(),
                   // Prioridad
                   Container(

@@ -2,6 +2,7 @@
 /// estado de pago, edición y registro de pagos.
 library;
 
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -12,6 +13,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:uuid/uuid.dart';
 
 import '../auth.dart';
@@ -210,6 +212,97 @@ class _FichaScreenState extends State<FichaScreen> {
     if (!mounted) return;
     _cargar();
     SyncEngine.instance.push();
+  }
+
+  /// v1.3.3: Regala 1 mes de membresía por cumpleaños (solo dueño).
+  /// Offline-first: actualiza el espejo local de forma optimista, encola
+  /// la operación y muestra el diálogo de WhatsApp INMEDIATAMENTE sin
+  /// esperar a la sincronización.
+  Future<void> _regalarMes() async {
+    final c = _c;
+    if (c == null || !mounted) return;
+    final nombre = '${c['nombre'] ?? ''}';
+    final pagadoHastaActual = c['pagado_hasta'] as String?;
+    // Calcula el nuevo vencimiento localmente (30 días desde lo vigente).
+    final nuevoHasta = previewHastaDias(pagadoHastaActual, 30);
+    final hastaFmt = fmtFecha(nuevoHasta);
+    final confirmar = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('🎁 Regalar mensualidad'),
+        content: Text('¿Regalar 1 mes a $nombre?\nVálido hasta $hastaFmt.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancelar'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Regalar'),
+          ),
+        ],
+      ),
+    );
+    if (confirmar != true || !mounted) return;
+    // a) Actualización optimista en el espejo local.
+    await LocalDb.instance
+        .updateMirrorPagadoHasta(widget.clienteId, nuevoHasta);
+    // b) Encolar la operación para el servidor.
+    await LocalDb.instance.queueOp(
+      opUuid: const Uuid().v4(),
+      tipo: 'regalar_mes_cumpleanos',
+      payload: {'cliente_id': widget.clienteId},
+    );
+    // c) Disparar sincronización sin esperar.
+    unawaited(SyncEngine.instance.push());
+    if (!mounted) return;
+    _cargar();
+    // d) Mostrar INMEDIATAMENTE el diálogo de WhatsApp.
+    final telefono = _normalizarTelefono('${c['telefono'] ?? ''}');
+    final mensaje =
+        '🎂 ¡Feliz cumpleaños, $nombre! Iron Body Gym te regala 1 mes de '
+        'membresía (válida hasta el $hastaFmt). — Mensaje enviado por el '
+        'sistema de gestión de Iron Body Gym';
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('📱 Notificar por WhatsApp'),
+        content: Text(mensaje),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Clipboard.setData(ClipboardData(text: mensaje));
+              Navigator.of(ctx).pop();
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Mensaje copiado')),
+              );
+            },
+            child: const Text('Copiar mensaje'),
+          ),
+          if (telefono.isNotEmpty)
+            ElevatedButton(
+              onPressed: () async {
+                final url = Uri.parse(
+                    'https://wa.me/$telefono?text=${Uri.encodeComponent(mensaje)}');
+                await launchUrl(url,
+                    mode: LaunchMode.externalApplication);
+                if (ctx.mounted) Navigator.of(ctx).pop();
+              },
+              child: const Text('Enviar por WhatsApp'),
+            ),
+        ],
+      ),
+    );
+  }
+
+  /// Normaliza un teléfono cubano para wa.me: quita espacios/guiones y
+  /// antepone 53 si tiene 8 dígitos.
+  String _normalizarTelefono(String tel) {
+    var t = tel.replaceAll(RegExp(r'[\s\-()]'), '');
+    if (t.length == 8) t = '53$t';
+    // Quitar + inicial si lo trae.
+    if (t.startsWith('+')) t = t.substring(1);
+    return t;
   }
 
   Future<void> _editar() async {
@@ -1220,6 +1313,22 @@ class _FichaScreenState extends State<FichaScreen> {
                           ),
                         ],
                       ),
+                      const SizedBox(
+                          height: AppEspacio.lg),
+                      // v1.3.3: regalar mensualidad de cumpleaños (solo dueño).
+                      if (AuthService().isOwner)
+                        Padding(
+                          padding: const EdgeInsets.only(
+                              bottom: AppEspacio.sm),
+                          child: SizedBox(
+                            width: double.infinity,
+                            child: BotonSecundario(
+                              texto: '🎁 Regalar mensualidad',
+                              icono: Icons.card_giftcard,
+                              onPressed: _regalarMes,
+                            ),
+                          ),
+                        ),
                       const SizedBox(
                           height: AppEspacio.lg),
                       // Información personal

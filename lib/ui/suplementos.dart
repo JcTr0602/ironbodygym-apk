@@ -297,7 +297,7 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
     await db.queueOp(
       opUuid: const Uuid().v4(),
       tipo: 'editar_suplemento',
-      payload: {'id': s['id'], 'stock': nuevoStock},
+      payload: {'suplemento_id': s['id'], 'stock': nuevoStock},
     );
     unawaited(SyncEngine.instance.push());
     if (mounted) {
@@ -319,7 +319,7 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
               await db.queueOp(
                 opUuid: const Uuid().v4(),
                 tipo: 'editar_suplemento',
-                payload: {'id': s['id'], 'stock': stockActual},
+                payload: {'suplemento_id': s['id'], 'stock': stockActual},
               );
               unawaited(SyncEngine.instance.push());
               _cargar();
@@ -365,7 +365,7 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
     await db.queueOp(
       opUuid: const Uuid().v4(),
       tipo: 'editar_suplemento',
-      payload: {'id': s['id'], 'stock': nuevo},
+      payload: {'suplemento_id': s['id'], 'stock': nuevo},
     );
     unawaited(SyncEngine.instance.push());
     _cargar();

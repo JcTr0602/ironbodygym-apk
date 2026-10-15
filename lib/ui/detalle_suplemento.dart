@@ -23,6 +23,7 @@ import '../negocio.dart';
 import '../sync.dart';
 import 'componentes.dart';
 import 'diseno.dart';
+import 'suplementos.dart';
 import 'venta_suplemento.dart';
 import 'widgets.dart';
 
@@ -188,6 +189,23 @@ class DetalleSuplementoScreen extends StatelessWidget {
             onPressed: () =>
                 compartirSuplemento(context, suplemento, tasaUsd),
           ),
+          if (AuthService().isOwner)
+            IconButton(
+              icon: const Icon(Icons.edit_outlined),
+              tooltip: 'Editar suplemento',
+              onPressed: () async {
+                final editado = await Navigator.push<bool>(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) =>
+                        EditarSuplementoScreen(suplemento: suplemento),
+                  ),
+                );
+                if (editado == true && context.mounted) {
+                  Navigator.pop(context, true);
+                }
+              },
+            ),
           if (AuthService().isOwner)
             IconButton(
               icon: const Icon(Icons.delete_outline),

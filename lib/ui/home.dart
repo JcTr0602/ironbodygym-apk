@@ -758,11 +758,8 @@ class _HomeScreenState extends State<HomeScreen>
                           'Ayuda',
                           () =>
                               _ir(const AyudaScreen())),
-                      _herramienta(
-                          Icons.medication,
-                          'Suplementos',
-                          () => _ir(
-                              const SuplementosScreen())),
+                      // v1.3.3: botón duplicado de Suplementos eliminado
+                      // (se conserva el de ancho completo de arriba).
                       // v1.2.5: incidencias para entrenadores (modo
                       // compartido: reportar + ver compartidas). El admin
                       // las ve completas en Administración.

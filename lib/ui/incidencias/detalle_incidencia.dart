@@ -8,6 +8,7 @@ import '../../fotos.dart';
 import '../../localdb.dart';
 import '../../modelos/incidencia.dart';
 import '../diseno.dart';
+import '../ficha.dart';
 import 'widgets/dialogo_resolver_incidencia.dart';
 import 'editar_incidencia.dart';
 
@@ -225,6 +226,10 @@ class _DetalleIncidenciaScreenState
             if (inc.ubicacion != null)
               _filaInfo(
                   'Ubicación', inc.ubicacion!),
+            // v1.3.3: responsable (tocable si es cliente).
+            if (_nombreResponsable(inc) !=
+                null)
+              _filaResponsable(inc),
             if (inc.fechaLimite != null)
               _filaInfo('Límite',
                   '${inc.fechaLimite!.day}/${inc.fechaLimite!.month}'),
@@ -259,6 +264,65 @@ class _DetalleIncidenciaScreenState
                     fontSize: 13)),
           ),
           Expanded(child: Text(valor)),
+        ],
+      ),
+    );
+  }
+
+  /// v1.3.3: extrae el nombre del responsable del formato compuesto.
+  String? _nombreResponsable(Incidencia inc) {
+    final a = inc.asignadoA;
+    if (a == null || a.isEmpty) return null;
+    final partes = a.split(':');
+    if (partes.length < 3) return null;
+    final nombre = partes.skip(2).join(':').trim();
+    return nombre.isEmpty ? null : nombre;
+  }
+
+  /// v1.3.3: fila de responsable; si es cliente, abre su ficha al tocar.
+  Widget _filaResponsable(Incidencia inc) {
+    final a = inc.asignadoA ?? '';
+    final nombre = _nombreResponsable(inc) ?? '-';
+    final esCliente = a.startsWith('cliente:');
+    final clienteId = esCliente
+        ? int.tryParse(a.split(':').elementAtOrNull(1) ?? '')
+        : null;
+    return Padding(
+      padding: const EdgeInsets.symmetric(
+          vertical: 2),
+      child: Row(
+        children: [
+          SizedBox(
+            width: 110,
+            child: Text('Responsable',
+                style: TextStyle(
+                    color:
+                        Colors.grey[500],
+                    fontSize: 13)),
+          ),
+          Expanded(
+            child: esCliente && clienteId != null
+                ? InkWell(
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => FichaScreen(
+                              clienteId: clienteId),
+                        ),
+                      );
+                    },
+                    child: Text(
+                      '👤 $nombre',
+                      style: const TextStyle(
+                        color: Colors.blue,
+                        decoration:
+                            TextDecoration.underline,
+                      ),
+                    ),
+                  )
+                : Text('👤 $nombre'),
+          ),
         ],
       ),
     );
