@@ -248,10 +248,15 @@ class _FichaScreenState extends State<FichaScreen> {
     await LocalDb.instance
         .updateMirrorPagadoHasta(widget.clienteId, nuevoHasta);
     // b) Encolar la operación para el servidor.
+    // v1.3.3 (Argón): incluir 'fecha' para que el servidor use el día del
+    // regalo, no el día de la sincronización (desfase si se regala offline).
     await LocalDb.instance.queueOp(
       opUuid: const Uuid().v4(),
       tipo: 'regalar_mes_cumpleanos',
-      payload: {'cliente_id': widget.clienteId},
+      payload: {
+        'cliente_id': widget.clienteId,
+        'fecha': DateTime.now().toIso8601String().substring(0, 10),
+      },
     );
     // c) Disparar sincronización sin esperar.
     unawaited(SyncEngine.instance.push());

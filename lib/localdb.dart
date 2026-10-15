@@ -1629,6 +1629,7 @@ class LocalDb {
     'id', 'tipo', 'entidad', 'entidad_id', 'descripcion', 'detalle',
     'estado', 'creada_por', 'creada_en', 'resuelta_por', 'resuelta_en',
     'nota_resolucion', 'visibilidad', 'version',
+    'tipo_id', 'prioridad', 'fecha_limite', 'ubicacion', 'asignado_a',
   ];
 
   Map<String, dynamic> _incRow(Map<String, dynamic> inc,

@@ -56,7 +56,10 @@ class _EditarIncidenciaScreenState
     }
     if (partes[0] == 'entrenador') {
       _tipoResponsable = 'entrenador';
-      _entrenadorUsername = partes[1];
+      // v1.3.3 (Argón): normalizar y validar; un valor inesperado
+      // crashea el DropdownButtonFormField.
+      final u = partes[1].toLowerCase();
+      _entrenadorUsername = (u == 'duany' || u == 'gabriel') ? u : 'duany';
     } else if (partes[0] == 'cliente') {
       _tipoResponsable = 'cliente';
       _clienteId = int.tryParse(partes[1]);
@@ -285,7 +288,10 @@ class _EditarIncidenciaScreenState
               selected: {_tipoResponsable},
               onSelectionChanged: (s) => setState(() {
                 _tipoResponsable = s.first;
-                _entrenadorUsername = null;
+                // v1.3.3 (Argón): al elegir 'entrenador', inicializar con
+                // 'duany' para que Guardar directo no deje null.
+                _entrenadorUsername =
+                    _tipoResponsable == 'entrenador' ? 'duany' : null;
                 _clienteId = null;
                 _clienteNombre = null;
                 _ctrlBuscarCliente.clear();
