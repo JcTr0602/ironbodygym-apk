@@ -472,6 +472,8 @@ class SyncEngine {
     }
     await _conLock(() async {
       try {
+        // v1.3.3: reportar versión de la app (throttle interno; barato).
+        unawaited(_auth.reportAppVersion());
         // v1.2.9+47: errores de push y pull por separado (Gemini).
         String? errPush;
         String? errPull;

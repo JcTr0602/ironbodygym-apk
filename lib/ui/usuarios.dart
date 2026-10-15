@@ -411,6 +411,8 @@ Hola $username, estas son tus credenciales para la app del gym:
                           tiempoRelativo('${u['ultimo_acceso'] ?? ''}');
                       final dispositivo =
                           '${u['dispositivo'] ?? ''}';
+                      // v1.3.3: versión de la app instalada por el usuario.
+                      final appVersion = '${u['app_version'] ?? ''}';
                       final rol = '${u['rol'] ?? 'entrenador'}';
                       final esAdmin = rol == 'admin';
                       final esDueno = username.toLowerCase() == 'jctr0602';
@@ -452,6 +454,15 @@ Hola $username, estas son tus credenciales para la app del gym:
                             if (dispositivo.isNotEmpty)
                               Text(
                                 dispositivo,
+                                style: TextStyle(
+                                    fontSize: 12,
+                                    color: AppColores.textoSecundario(
+                                        context)),
+                              ),
+                            // v1.3.3: versión de la app del usuario.
+                            if (appVersion.isNotEmpty)
+                              Text(
+                                'App: v$appVersion',
                                 style: TextStyle(
                                     fontSize: 12,
                                     color: AppColores.textoSecundario(

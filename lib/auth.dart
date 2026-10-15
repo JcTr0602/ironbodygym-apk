@@ -5,6 +5,8 @@
 /// se hace signInWithPassword contra Supabase Auth.
 library;
 
+import 'dart:async';
+
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'config.dart';
@@ -67,6 +69,24 @@ class AuthService {
   Future<void> signIn(String username, String password) async {
     final email = usernameToEmail(username);
     await _c.auth.signInWithPassword(email: email, password: password);
+    // v1.3.3: reportar la versión de la app para que el dueño la vea
+    // en "Usuarios APK" (no bloquea el login si falla).
+    unawaited(reportAppVersion());
+  }
+
+  /// Informa al servidor qué versión de la app está instalada.
+  /// Se guarda en user_metadata (el puente lo lee para "Usuarios APK").
+  /// Throttle: solo se envía si cambió desde el último reporte.
+  Future<void> reportAppVersion() async {
+    try {
+      const v = AppConfig.appVersion;
+      final actual = session?.user.userMetadata?['app_version'];
+      if ('$actual' == v) return;
+      final reportada = await LocalDb.instance.getMeta('app_version_reportada');
+      if (reportada == v) return;
+      await _c.auth.updateUser(UserAttributes(data: {'app_version': v}));
+      await LocalDb.instance.setMeta('app_version_reportada', v);
+    } catch (_) {}
   }
 
   /// ¿Es el dueño? Solo Jc tiene acciones restringidas (ej. borrado
