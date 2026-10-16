@@ -908,6 +908,19 @@ bool validarTelefono(String v) {
   return d.length == 8 && (d.startsWith('5') || d.startsWith('6'));
 }
 
+/// Normaliza un teléfono cubano para wa.me (v1.3.3, Argón spec 3):
+/// quita todo lo no numérico; 8 dígitos empezando con 5/6 → antepone
+/// 53; 10 dígitos empezando con 53 → tal cual.
+/// Retorna '' si no es un móvil cubano válido.
+String normalizarTelefonoWaMe(String tel) {
+  final t = tel.replaceAll(RegExp(r'[^0-9]'), '');
+  if (t.length == 8 && (t.startsWith('5') || t.startsWith('6'))) {
+    return '53$t';
+  }
+  if (t.length == 10 && t.startsWith('53')) return t;
+  return '';
+}
+
 /// Carnet: 6 a 11 dígitos (6 = fecha de nacimiento para menores sin carnet).
 bool validarCarnet(String v) {
   final d = v.replaceAll(RegExp(r'[^0-9]'), '');
@@ -1326,7 +1339,12 @@ Future<int> conteoPagosDia(int? telegramId, {String? fecha}) async {
   final hoy = fecha ?? _hoyIso();
   final pr = await preciosVigentes();
   var n = 0;
-  for (final p in await LocalDb.instance.allMirror('pagos')) {    if ((p['telegram_user_id'] as int?) == telegramId &&
+  for (final p in await LocalDb.instance.allMirror('pagos')) {
+    // v1.3.3 (Argón spec 1): los regalos de cumpleaños (metodo
+    // 'cortesia', monto 0) no cuentan como cobro: no inflan el
+    // pagos_count del cierre ni generan comisión.
+    if ((p['metodo'] as String?) == 'cortesia') continue;
+    if ((p['telegram_user_id'] as int?) == telegramId &&
         (p['fecha'] as String?) == hoy) {
       n++;
     }

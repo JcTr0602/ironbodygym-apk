@@ -18,6 +18,7 @@ import 'package:uuid/uuid.dart';
 
 import '../auth.dart';
 import '../app_log.dart';
+import '../turno_service.dart';
 import '../fotos.dart';
 import '../fotos_cola.dart';
 import '../localdb.dart';
@@ -45,6 +46,9 @@ class _FichaScreenState extends State<FichaScreen> {
   List<Map<String, dynamic>> _incidencias = [];
   File? _foto;
   bool _verificando = false;
+  // v1.3.3 (Argón spec 2): regalo de cumpleaños del año en curso, si ya
+  // se otorgó. Candado anual + botón "Reenviar WhatsApp".
+  Map<String, dynamic>? _regaloAnio;
 
   @override
   void initState() {
@@ -65,6 +69,8 @@ class _FichaScreenState extends State<FichaScreen> {
       foto = await FotoCache.instance
           .obtener(c['foto_storage'] as String?);
     }
+    // v1.3.3 (Argón spec 2): ¿ya se regaló este año?
+    final regaloAnio = await _regaloDelAnio(widget.clienteId);
     if (mounted) {
       setState(() {
         _c = c;
@@ -72,8 +78,52 @@ class _FichaScreenState extends State<FichaScreen> {
         _suplementos = suplementos;
         _incidencias = incidencias;
         _foto = foto;
+        _regaloAnio = regaloAnio;
       });
     }
+  }
+
+  /// Regalo de cumpleaños del año en curso (Argón spec 2): candado anual.
+  /// Retorna {'anterior': ..., 'nuevo': ...} o null si no se ha regalado.
+  /// Fuentes: 1) meta local (inmediata, offline); 2) espejo de pagos con
+  /// metodo='cortesia' del año actual, hora de La Habana (autoritativo
+  /// tras sincronizar).
+  Future<Map<String, dynamic>?> _regaloDelAnio(int clienteId) async {
+    final anio = '${ahoraHabana().year}';
+    try {
+      final meta = await LocalDb.instance
+          .getMeta('regalo_cumple_${clienteId}_$anio');
+      if (meta != null) {
+        final m = jsonDecode(meta) as Map<String, dynamic>;
+        return {'anterior': m['anterior'], 'nuevo': m['nuevo']};
+      }
+    } catch (_) {}
+    try {
+      Map<String, dynamic>? mejor;
+      for (final p in await LocalDb.instance.allMirror('pagos')) {
+        if ((p['cliente_id'] as int?) == clienteId &&
+            (p['metodo'] as String?) == 'cortesia' &&
+            ('${p['fecha'] ?? ''}').startsWith(anio)) {
+          if (mejor == null ||
+              '${p['fecha']}'.compareTo('${mejor['fecha']}') > 0) {
+            mejor = p;
+          }
+        }
+      }
+      if (mejor != null) {
+        final nuevo = '${mejor['pagado_hasta'] ?? ''}';
+        String? anterior;
+        try {
+          final d = DateTime.parse(nuevo.substring(0, 10))
+              .subtract(const Duration(days: 30));
+          anterior = '${d.year.toString().padLeft(4, '0')}-'
+              '${d.month.toString().padLeft(2, '0')}-'
+              '${d.day.toString().padLeft(2, '0')}';
+        } catch (_) {}
+        return {'anterior': anterior, 'nuevo': nuevo};
+      }
+    } catch (_) {}
+    return null;
   }
 
   /// v1.2.2: historial de suplementos comprados por el cliente.
@@ -218,9 +268,26 @@ class _FichaScreenState extends State<FichaScreen> {
   /// Offline-first: actualiza el espejo local de forma optimista, encola
   /// la operación y muestra el diálogo de WhatsApp INMEDIATAMENTE sin
   /// esperar a la sincronización.
+  /// Regala 1 mes de membresía por cumpleaños (solo dueño).
+  /// Offline-first: actualiza el espejo local de forma optimista, encola
+  /// la operación y muestra el diálogo de WhatsApp INMEDIATAMENTE sin
+  /// esperar a la sincronización.
+  ///
+  /// v1.3.3 (Argón specs):
+  /// - spec 2: candado anual — un regalo por año. Si ya se otorgó este
+  ///   año, se va directo al reenvío del mensaje (sin regalar de nuevo).
+  /// - spec 6: 1 mes = 30 días (regla del gym, igual que previewHasta
+  ///   para las renovaciones normales; NO mes calendario).
+  /// - spec 3: prioriza c['movil'] sobre c['telefono'] — muchos clientes
+  ///   tienen el carnet (11 dígitos) en 'telefono'.
   Future<void> _regalarMes() async {
     final c = _c;
     if (c == null || !mounted) return;
+    // Candado anual: si ya se regaló este año, solo reenviar el mensaje.
+    if (_regaloAnio != null) {
+      await _reenviarWhatsApp();
+      return;
+    }
     final nombre = '${c['nombre'] ?? ''}';
     final pagadoHastaActual = c['pagado_hasta'] as String?;
     // Calcula el nuevo vencimiento localmente (30 días desde lo vigente).
@@ -258,66 +325,189 @@ class _FichaScreenState extends State<FichaScreen> {
         'fecha': DateTime.now().toIso8601String().substring(0, 10),
       },
     );
+    // b2) Guardar datos del mensaje para reenvíos futuros (candado local).
+    final anio = '${ahoraHabana().year}';
+    await LocalDb.instance.setMeta(
+        'regalo_cumple_${widget.clienteId}_$anio',
+        jsonEncode(
+            {'anterior': pagadoHastaActual, 'nuevo': nuevoHasta}));
     // c) Disparar sincronización sin esperar.
     unawaited(SyncEngine.instance.push());
     if (!mounted) return;
     _cargar();
     // d) Mostrar INMEDIATAMENTE el diálogo de WhatsApp.
-    // v1.3.3 (Argón): priorizar c['movil'] sobre c['telefono'] — muchos
-    // clientes tienen el carnet (11 dígitos) en 'telefono'. Solo usar si
-    // pasa validarTelefono; si no, telefono='' (solo botón Copiar).
+    await _mostrarDialogoWhatsApp(
+      nombre: nombre,
+      hastaFmt: _fmtFechaLarga(nuevoHasta),
+      anteriorFmt: (pagadoHastaActual != null &&
+              pagadoHastaActual.length >= 10)
+          ? _fmtFechaLarga(pagadoHastaActual)
+          : null,
+    );
+  }
+
+  /// Reenvía el mensaje de WhatsApp del regalo ya otorgado este año
+  /// (Argón spec 2): no aplica otro mes, solo reabre el diálogo.
+  Future<void> _reenviarWhatsApp() async {
+    final c = _c;
+    if (c == null || !mounted) return;
+    final r = _regaloAnio;
+    String? anterior = r?['anterior'] as String?;
+    var nuevo = r?['nuevo'] as String?;
+    nuevo ??= c['pagado_hasta'] as String?;
+    if (nuevo == null || nuevo.length < 10) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('No hay datos del regalo para reenviar')));
+      return;
+    }
+    await _mostrarDialogoWhatsApp(
+      nombre: '${c['nombre'] ?? ''}',
+      hastaFmt: _fmtFechaLarga(nuevo),
+      anteriorFmt:
+          (anterior != null && anterior.length >= 10) ? _fmtFechaLarga(anterior) : null,
+    );
+  }
+
+  /// Diálogo de WhatsApp para el regalo (nuevo o reenvío).
+  /// Argón spec 4: incluye campo de teléfono editable; si no hay número
+  /// válido, permite escribirlo, guardarlo en la ficha y abrir WhatsApp.
+  Future<void> _mostrarDialogoWhatsApp({
+    required String nombre,
+    required String hastaFmt,
+    required String? anteriorFmt,
+  }) async {
+    final c = _c;
     String telefono = '';
-    for (final raw in ['${c['movil'] ?? ''}', '${c['telefono'] ?? ''}']) {
-      if (validarTelefono(raw)) {
-        telefono = _normalizarTelefono(raw);
+    for (final raw in ['${c?['movil'] ?? ''}', '${c?['telefono'] ?? ''}']) {
+      final norm = _normalizarTelefono(raw);
+      if (norm.isNotEmpty) {
+        telefono = norm;
         break;
       }
     }
-    final mensaje =
-        '🎂 ¡Feliz cumpleaños, $nombre! Iron Body Gym te regala 1 mes de '
-        'membresía (válida hasta el $hastaFmt). — Mensaje enviado por el '
-        'sistema de gestión de Iron Body Gym';
+    final telCtrl = TextEditingController(text: telefono);
+    final mensaje = _mensajeRegalo(
+        nombre: nombre, hastaFmt: hastaFmt, anteriorFmt: anteriorFmt);
+    if (!mounted) return;
+    final outerContext = context;
     await showDialog<void>(
-      context: context,
+      context: outerContext,
       builder: (ctx) => AlertDialog(
         title: const Text('📱 Notificar por WhatsApp'),
-        content: Text(mensaje),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              SelectableText(mensaje),
+              const SizedBox(height: 12),
+              TextField(
+                controller: telCtrl,
+                keyboardType: TextInputType.phone,
+                decoration: const InputDecoration(
+                  labelText: 'Teléfono',
+                  hintText: 'Ej. 58123456',
+                  prefixText: '+',
+                ),
+              ),
+            ],
+          ),
+        ),
         actions: [
           TextButton(
             onPressed: () {
               Clipboard.setData(ClipboardData(text: mensaje));
               Navigator.of(ctx).pop();
-              ScaffoldMessenger.of(context).showSnackBar(
+              ScaffoldMessenger.of(outerContext).showSnackBar(
                 const SnackBar(content: Text('Mensaje copiado')),
               );
             },
             child: const Text('Copiar mensaje'),
           ),
-          if (telefono.isNotEmpty)
-            ElevatedButton(
-              onPressed: () async {
-                final url = Uri.parse(
-                    'https://wa.me/$telefono?text=${Uri.encodeComponent(mensaje)}');
-                await launchUrl(url,
-                    mode: LaunchMode.externalApplication);
-                if (ctx.mounted) Navigator.of(ctx).pop();
-              },
-              child: const Text('Enviar por WhatsApp'),
-            ),
+          ElevatedButton(
+            onPressed: () async {
+              final tel = _normalizarTelefono(telCtrl.text);
+              if (tel.isEmpty) {
+                ScaffoldMessenger.of(ctx).showSnackBar(const SnackBar(
+                    content: Text(
+                        'Teléfono inválido: 8 dígitos empezando con 5 o 6')));
+                return;
+              }
+              // Guardar el teléfono en la ficha si cambió (Argón spec 4).
+              final actual = _normalizarTelefono('${c?['telefono'] ?? ''}');
+              if (tel != actual) {
+                await LocalDb.instance.updateMirrorTelefono(
+                    widget.clienteId, telCtrl.text.trim());
+                await LocalDb.instance.queueOp(
+                  opUuid: const Uuid().v4(),
+                  tipo: 'editar_cliente',
+                  payload: {
+                    'cliente_id': widget.clienteId,
+                    'telefono': telCtrl.text.trim(),
+                  },
+                );
+                unawaited(SyncEngine.instance.push());
+              }
+              final url = Uri.parse(
+                  'https://wa.me/$tel?text=${Uri.encodeComponent(mensaje)}');
+              await launchUrl(url, mode: LaunchMode.externalApplication);
+              if (ctx.mounted) Navigator.of(ctx).pop();
+            },
+            child: const Text('Abrir WhatsApp'),
+          ),
         ],
       ),
     );
   }
 
-  /// Normaliza un teléfono cubano para wa.me: quita espacios/guiones y
-  /// antepone 53 si tiene 8 dígitos.
-  String _normalizarTelefono(String tel) {
-    var t = tel.replaceAll(RegExp(r'[\s\-()]'), '');
-    if (t.length == 8) t = '53$t';
-    // Quitar + inicial si lo trae.
-    if (t.startsWith('+')) t = t.substring(1);
-    return t;
+  /// Mensaje de felicitación con formato WhatsApp (Argón spec 5):
+  /// fechas anterior/nueva, saltos de línea y *negritas*.
+  String _mensajeRegalo({
+    required String nombre,
+    required String hastaFmt,
+    required String? anteriorFmt,
+  }) {
+    final b = StringBuffer();
+    b.writeln('📩 Mensaje enviado por el sistema de gestión de Iron Body Gym:');
+    b.writeln('¡Feliz cumpleaños, *$nombre*! 🎂🎉');
+    b.writeln('Te hemos regalado 1 mensualidad por tu día.');
+    if (anteriorFmt != null) {
+      b.writeln('📅 Vencía el: *$anteriorFmt*');
+      b.writeln('✅ Nuevo vencimiento: *$hastaFmt*');
+      b.writeln('¡A seguir dándole duro! — Iron Body Gym 💪🔥');
+    } else {
+      b.writeln('✅ Válida hasta el: *$hastaFmt*');
+      b.writeln('¡Te esperamos para entrenar! — Iron Body Gym 💪🔥');
+    }
+    return b.toString();
   }
+
+  /// "2026-12-05" → "5 de diciembre".
+  String _fmtFechaLarga(String? iso) {
+    if (iso == null || iso.length < 10) return '—';
+    const meses = [
+      '',
+      'enero',
+      'febrero',
+      'marzo',
+      'abril',
+      'mayo',
+      'junio',
+      'julio',
+      'agosto',
+      'septiembre',
+      'octubre',
+      'noviembre',
+      'diciembre'
+    ];
+    final p = iso.substring(0, 10).split('-');
+    final m = int.tryParse(p[1]) ?? 0;
+    return '${int.tryParse(p[2]) ?? p[2]} de ${m >= 1 && m <= 12 ? meses[m] : p[1]}';
+  }
+
+  /// Normaliza un teléfono cubano para wa.me (Argón spec 3).
+  /// Implementación en negocio.dart (probada).
+  String _normalizarTelefono(String tel) => normalizarTelefonoWaMe(tel);
 
   Future<void> _editar() async {
     final c = _c;
@@ -1330,6 +1520,8 @@ class _FichaScreenState extends State<FichaScreen> {
                       const SizedBox(
                           height: AppEspacio.lg),
                       // v1.3.3: regalar mensualidad de cumpleaños (solo dueño).
+                      // Argón spec 2: si ya se regaló este año, el botón
+                      // pasa a "Reenviar WhatsApp" (no aplica otro mes).
                       if (AuthService().isOwner)
                         Padding(
                           padding: const EdgeInsets.only(
@@ -1337,8 +1529,12 @@ class _FichaScreenState extends State<FichaScreen> {
                           child: SizedBox(
                             width: double.infinity,
                             child: BotonSecundario(
-                              texto: '🎁 Regalar mensualidad',
-                              icono: Icons.card_giftcard,
+                              texto: _regaloAnio != null
+                                  ? '📲 Reenviar WhatsApp'
+                                  : '🎁 Regalar mensualidad',
+                              icono: _regaloAnio != null
+                                  ? Icons.send
+                                  : Icons.card_giftcard,
                               onPressed: _regalarMes,
                             ),
                           ),

@@ -1553,6 +1553,20 @@ class LocalDb {
         where: 'id=?', whereArgs: [clienteId]);
   }
 
+  /// Actualización optimista del teléfono en el espejo local
+  /// (v1.3.3, Argón spec 4: guardar el número al regalar sin fricción).
+  Future<void> updateMirrorTelefono(int clienteId, String telefono) async {
+    final d = await db;
+    final rows = await d.query('clientes',
+        where: 'id=?', whereArgs: [clienteId], limit: 1);
+    if (rows.isEmpty) return;
+    final data =
+        jsonDecode(rows.first['data'] as String) as Map<String, dynamic>;
+    data['telefono'] = telefono;
+    await d.update('clientes', {'data': jsonEncode(data)},
+        where: 'id=?', whereArgs: [clienteId]);
+  }
+
   /// Actualización optimista: extiende pagado_hasta de un cliente en el
   /// espejo local sin esperar al servidor. Se usa al regalar un mes
   /// de cumpleaños (v1.3.3).
