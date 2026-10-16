@@ -434,16 +434,20 @@ class _FichaScreenState extends State<FichaScreen> {
                 return;
               }
               // Guardar el teléfono en la ficha si cambió (Argón spec 4).
+              // Veredicto de Argón: guardar SIEMPRE los 8 dígitos (sin el
+              // 53), porque validarTelefono() en el resto de la app exige
+              // d.length == 8; 10 dígitos romperían el formulario normal.
               final actual = _normalizarTelefono('${c?['telefono'] ?? ''}');
               if (tel != actual) {
+                final tel8 = tel.length == 10 ? tel.substring(2) : tel;
                 await LocalDb.instance.updateMirrorTelefono(
-                    widget.clienteId, telCtrl.text.trim());
+                    widget.clienteId, tel8);
                 await LocalDb.instance.queueOp(
                   opUuid: const Uuid().v4(),
                   tipo: 'editar_cliente',
                   payload: {
                     'cliente_id': widget.clienteId,
-                    'telefono': telCtrl.text.trim(),
+                    'telefono': tel8,
                   },
                 );
                 unawaited(SyncEngine.instance.push());

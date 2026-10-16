@@ -910,14 +910,17 @@ bool validarTelefono(String v) {
 
 /// Normaliza un teléfono cubano para wa.me (v1.3.3, Argón spec 3):
 /// quita todo lo no numérico; 8 dígitos empezando con 5/6 → antepone
-/// 53; 10 dígitos empezando con 53 → tal cual.
+/// 53; 10 dígitos empezando con 535/536 → tal cual (veredicto de Argón:
+/// un 53XXXXXXXX genérico podría ser un fijo de La Habana o un error).
 /// Retorna '' si no es un móvil cubano válido.
 String normalizarTelefonoWaMe(String tel) {
   final t = tel.replaceAll(RegExp(r'[^0-9]'), '');
   if (t.length == 8 && (t.startsWith('5') || t.startsWith('6'))) {
     return '53$t';
   }
-  if (t.length == 10 && t.startsWith('53')) return t;
+  if (t.length == 10 && (t.startsWith('535') || t.startsWith('536'))) {
+    return t;
+  }
   return '';
 }
 

@@ -305,14 +305,17 @@ class TurnoService {
               where: 'turno_id=?', whereArgs: [localId]);
           continue;
         }
-        final conflicto =
-            await SyncEngine.instance.conflictoTurno(opUuid);
-        if (conflicto == null) {
+        // v1.3.3 (veredicto de Argón): triestado. Si la lectura FALLÓ
+        // (ok: false), NO marcar reconciliado: se reintenta en la
+        // próxima pasada. Solo se marca con lectura válida sin conflicto.
+        final res = await SyncEngine.instance.conflictoTurno(opUuid);
+        if (!res.ok) continue;
+        if (res.local == null || res.canonico == null) {
           await db.update('turnos', {'turno_id_reconciliado': 1},
               where: 'turno_id=?', whereArgs: [localId]);
           continue;
         }
-        final (lid, canonico) = conflicto;
+        final (lid, canonico) = (res.local!, res.canonico!);
         if (lid != localId) continue; // Resultado de otra vuelta; ignorar.
         // 1) Reescribir el PK local (sin FK que lo referencien).
         final ok = await _db.reconciliarTurnoIdLocal(localId, canonico);

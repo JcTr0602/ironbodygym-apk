@@ -1085,40 +1085,45 @@ class SyncEngine {
   }
 
   /// v1.3.3 (Argón P1): lee el resultado de una op `apertura_turno` para
-  /// detectar conflicto de turno_id. Si el servidor respondió
-  /// {"conflicto": true, "turno_id_canonico": "<uuid>"}, devuelve
-  /// (turnoIdLocal, turnoIdCanonico); null si no hay conflicto o no se
-  /// pudo leer el resultado.
-  Future<(String, String)?> conflictoTurno(String opUuid) async {
+  /// detectar conflicto de turno_id. TRIESTADO (veredicto de Argón):
+  /// - (ok: false, ...): falló la lectura (red, timeout, 500). El
+  ///   llamador NO debe marcar turno_id_reconciliado: reintenta luego.
+  /// - (ok: true, local: null, canonico: null): lectura válida SIN
+  ///   conflicto. El llamador SÍ marca turno_id_reconciliado.
+  /// - (ok: true, local, canonico): conflicto válido a reconciliar.
+  Future<({bool ok, String? local, String? canonico})> conflictoTurno(
+      String opUuid) async {
     try {
       final r = await _getAuth(
           Uri.parse('$_base/rest/v1/sync_ops?op_uuid=eq.$opUuid'
               '&select=resultado'),
           timeout: const Duration(seconds: 20));
-      if (r.statusCode != 200) return null;
+      if (r.statusCode != 200) return (ok: false, local: null, canonico: null);
       final rows = jsonDecode(r.body) as List;
-      if (rows.isEmpty) return null;
+      if (rows.isEmpty) return (ok: false, local: null, canonico: null);
       final res = rows.first['resultado'];
-      if (res is! Map) return null;
+      if (res is! Map) return (ok: true, local: null, canonico: null);
       // El puente guarda el envelope {"ok":..., "resultado": {...}}.
       final inner = res['resultado'];
       final src = inner is Map ? inner : res;
-      if (src['conflicto'] != true) return null;
+      if (src['conflicto'] != true) {
+        return (ok: true, local: null, canonico: null);
+      }
       final canonico = '${src['turno_id_canonico'] ?? ''}';
       final local = '${src['turno_id'] ?? ''}';
       if (canonico.isEmpty || local.isEmpty || canonico == local) {
-        return null;
+        return (ok: true, local: null, canonico: null);
       }
       // Validar que ambos sean UUID antes de devolverlos.
       try {
         Uuid.parse(canonico);
         Uuid.parse(local);
       } catch (_) {
-        return null;
+        return (ok: true, local: null, canonico: null);
       }
-      return (local, canonico);
+      return (ok: true, local: local, canonico: canonico);
     } catch (_) {
-      return null;
+      return (ok: false, local: null, canonico: null);
     }
   }
 

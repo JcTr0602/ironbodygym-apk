@@ -17,8 +17,15 @@ void main() {
       expect(normalizarTelefonoWaMe('61234567'), '5361234567');
     });
 
-    test('10 dígitos empezando con 53 → tal cual', () {
+    test('10 dígitos empezando con 535/536 → tal cual', () {
       expect(normalizarTelefonoWaMe('5358123456'), '5358123456');
+      expect(normalizarTelefonoWaMe('5361234567'), '5361234567');
+    });
+
+    test('10 dígitos con 53 pero tercer dígito inválido → vacío', () {
+      // Fijo de La Habana (537) o número mal escrito (531).
+      expect(normalizarTelefonoWaMe('5371234567'), '');
+      expect(normalizarTelefonoWaMe('5312345678'), '');
     });
 
     test('quita todo lo no numérico', () {

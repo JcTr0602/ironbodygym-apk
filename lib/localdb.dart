@@ -2522,6 +2522,10 @@ class LocalDb {
   /// UUID de la op (apertura_turno/cierre_turno) más reciente para este
   /// turno_id, o null si no hay registro. Para leer el `resultado` que
   /// guarda el puente (p. ej. conflicto de turno_id canónico, Argón P1).
+  /// op_uuid de la op en cola de [tipo] cuyo payload.turno_id sea
+  /// [turnoId] (la más reciente). Veredicto de Argón: fallback sin
+  /// json_extract (módulos SQLite opcionales) igual que en
+  /// reescribirTurnoIdEnCola().
   Future<String?> opUuidTurno(String tipo, String turnoId) async {
     final d = await db;
     try {
@@ -2531,7 +2535,24 @@ class LocalDb {
           "ORDER BY rowid DESC LIMIT 1",
           [tipo, turnoId]);
       if (rows.isNotEmpty) return '${rows.first['op_uuid']}';
-    } catch (_) {}
+    } catch (_) {
+      // Fallback sin JSON1: filtrar en Dart.
+      try {
+        final rows = await d.query('ops_queue',
+            columns: ['op_uuid', 'payload'],
+            where: 'tipo=?',
+            whereArgs: [tipo],
+            orderBy: 'rowid DESC');
+        for (final r in rows) {
+          try {
+            final p = jsonDecode('${r['payload']}') as Map<String, dynamic>;
+            if ('${p['turno_id']}' == turnoId) {
+              return '${r['op_uuid']}';
+            }
+          } catch (_) {}
+        }
+      } catch (_) {}
+    }
     return null;
   }
 
