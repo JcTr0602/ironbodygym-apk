@@ -214,7 +214,7 @@ class LocalDb {
     final dir = await getDatabasesPath();
     _db = await openDatabase(
       p.join(dir, 'ironbody.db'),
-      version: 24,
+      version: 25,
       // v1.3-r4 (Gemini): WAL mode para que lectores (UI) y escritores
       // (Workmanager en otro isolate) no se bloqueen mutuamente.
       // v1.2.9+34 (hotfix): try-catch — si el dispositivo no soporta WAL,
@@ -535,9 +535,13 @@ class LocalDb {
               'CREATE INDEX IF NOT EXISTS idx_app_log_ts ON app_log(ts)');
         }
         // v18: memoria de último precio de venta por suplemento.
+        // Tolerante: si la tabla no existe en algún teléfono, no debe
+        // reventar el onUpgrade completo.
         if (oldV < 18) {
-          await db.execute(
-              'ALTER TABLE suplementos ADD COLUMN ultimo_precio REAL');
+          try {
+            await db.execute(
+                'ALTER TABLE suplementos ADD COLUMN ultimo_precio REAL');
+          } catch (_) {}
         }
         // v19: rediseño de Incidencias v1.3.0 (certificado por Gemini).
         if (oldV < 19) {
@@ -762,6 +766,21 @@ class LocalDb {
         if (oldV < 24) {
           await _crearTablaTurnos(db);
         }
+        // v25 (Argón P1/P2): separar tiene_incidencias del ciclo de
+        // sincronización + marca de reconciliación del turno_id.
+        // Migra filas viejas 'con_incidencias' → cerrado_local con el
+        // flag en 1 (el valor deja de existir como estado).
+        if (oldV < 25) {
+          await _addColumnIfMissing(
+              db, 'turnos', 'tiene_incidencias', 'INTEGER NOT NULL DEFAULT 0');
+          await _addColumnIfMissing(db, 'turnos', 'turno_id_reconciliado',
+              'INTEGER NOT NULL DEFAULT 0');
+          try {
+            await db.execute(
+                "UPDATE turnos SET estado='cerrado_local', tiene_incidencias=1 "
+                "WHERE estado='con_incidencias'");
+          } catch (_) {}
+        }
       },
     );
     // v1.2.5+28: repara el índice FTS si la migración lo omitió y el
@@ -771,14 +790,21 @@ class LocalDb {
   }
 
   /// ALTER TABLE ADD COLUMN solo si la columna no existe (SQLite no
-  /// tiene IF NOT EXISTS para ADD COLUMN).
+  /// tiene IF NOT EXISTS para ADD COLUMN). Tolerante: si la tabla no
+  /// existe, no hace nada (no debe reventar el onUpgrade).
   static Future<void> _addColumnIfMissing(
       Database db, String tabla, String columna, String tipo) async {
-    final info = await db.rawQuery('PRAGMA table_info($tabla)');
-    final existe = info.any((c) => '${c['name']}' == columna);
-    if (!existe) {
-      await db.execute('ALTER TABLE $tabla ADD COLUMN $columna $tipo');
-    }
+    try {
+      final t = await db.rawQuery(
+          "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
+          [tabla]);
+      if (t.isEmpty) return;
+      final info = await db.rawQuery('PRAGMA table_info($tabla)');
+      final existe = info.any((c) => '${c['name']}' == columna);
+      if (!existe) {
+        await db.execute('ALTER TABLE $tabla ADD COLUMN $columna $tipo');
+      }
+    } catch (_) {}
   }
 
   /// Seed de tipos de incidencia por defecto (v1.3.0).
@@ -980,7 +1006,7 @@ class LocalDb {
   /// v1.3.3 (v24): DDL de la tabla local de turnos, idempotente.
   /// Llamado desde _crearTablas (clean install) y onUpgrade (migración).
   /// Máquina de estados: abierto_local | abierto_sincronizado |
-  /// cerrado_local | cerrado_sincronizado | no_cerrado | con_incidencias.
+  /// cerrado_local | cerrado_sincronizado | no_cerrado.
   static Future<void> _crearTablaTurnos(Database db) async {
     await db.execute('CREATE TABLE IF NOT EXISTS turnos ('
         'turno_id TEXT PRIMARY KEY, '
@@ -994,7 +1020,13 @@ class LocalDb {
         // para reintentos idempotentes; snapshot JSON de lo verificado
         // al cerrar (auditoría #8).
         'cierre_op_uuid TEXT, '
-        'cierre_snapshot TEXT)');
+        'cierre_snapshot TEXT, '
+        // v1.3.3 (Argón P2): incidencias como propiedad de negocio,
+        // separada del ciclo local/sincronizado de `estado`.
+        'tiene_incidencias INTEGER NOT NULL DEFAULT 0, '
+        // v1.3.3 (Argón P1): 1 = el turno_id ya se reconcilió contra el
+        // turno_id_canonico del servidor (no re-leer el resultado).
+        'turno_id_reconciliado INTEGER NOT NULL DEFAULT 0)');
     await db.execute(
         'CREATE INDEX IF NOT EXISTS idx_turnos_fecha ON turnos(fecha_turno, telegram_id)');
     await db.execute(
@@ -2321,7 +2353,9 @@ class LocalDb {
   // ============================================================
   // v1.3.3: registro local de turnos (abrir/cerrar turno, Home).
   // Máquina de estados: abierto_local | abierto_sincronizado |
-  // cerrado_local | cerrado_sincronizado | no_cerrado | con_incidencias.
+  // cerrado_local | cerrado_sincronizado | no_cerrado.
+  // (v25, Argón P2): `tiene_incidencias` es columna aparte; el estado
+  // solo describe el ciclo local/sincronizado.
   // ============================================================
 
   /// Inserta un turno abierto. Idempotente por (fecha_turno, turno,
@@ -2378,7 +2412,7 @@ class LocalDb {
 
   /// Último turno registrado para un entrenador en una fecha+franja,
   /// SIN filtrar por estado (el más reciente). Para que el Home muestre
-  /// también los estados cerrado_*/con_incidencias/no_cerrado y no
+  /// también los estados cerrado_*/no_cerrado y no
   /// vuelva a ofrecer "Abrir turno" tras cerrar (auditoría ChatGPT #1).
   Future<Map<String, dynamic>?> ultimoTurno(
       String fechaTurno, String turno, int telegramId) async {
@@ -2455,14 +2489,97 @@ class LocalDb {
   /// Cambia el estado de un turno (opcionalmente fija hora_cierre,
   /// cierre_op_uuid y/o snapshot JSON de auditoría).
   Future<void> marcarEstadoTurno(String turnoId, String estado,
-      {String? horaCierre, String? cierreOpUuid, String? snapshot}) async {
+      {String? horaCierre,
+      String? cierreOpUuid,
+      String? snapshot,
+      int? tieneIncidencias}) async {
     final d = await db;
     final vals = <String, dynamic>{'estado': estado};
     if (horaCierre != null) vals['hora_cierre'] = horaCierre;
     if (cierreOpUuid != null) vals['cierre_op_uuid'] = cierreOpUuid;
     if (snapshot != null) vals['cierre_snapshot'] = snapshot;
+    if (tieneIncidencias != null) {
+      vals['tiene_incidencias'] = tieneIncidencias;
+    }
     await d.update('turnos', vals,
         where: 'turno_id=?', whereArgs: [turnoId]);
+  }
+
+  /// UUID de la op (apertura_turno/cierre_turno) más reciente para este
+  /// turno_id, o null si no hay registro. Para leer el `resultado` que
+  /// guarda el puente (p. ej. conflicto de turno_id canónico, Argón P1).
+  Future<String?> opUuidTurno(String tipo, String turnoId) async {
+    final d = await db;
+    try {
+      final rows = await d.rawQuery(
+          "SELECT op_uuid FROM ops_queue WHERE tipo=? AND "
+          "json_extract(payload, '\$.turno_id')=? "
+          "ORDER BY rowid DESC LIMIT 1",
+          [tipo, turnoId]);
+      if (rows.isNotEmpty) return '${rows.first['op_uuid']}';
+    } catch (_) {}
+    return null;
+  }
+
+  /// Reescribe turno_id en el payload de las ops en cola
+  /// (pendiente/error/enviada) de [tipo] cuyo payload.turno_id sea
+  /// [viejoId]. Para la reconciliación con el turno_id canónico
+  /// (Argón P1). Retorna cuántas ops se actualizaron.
+  Future<int> reescribirTurnoIdEnCola(
+      String tipo, String viejoId, String nuevoId) async {
+    final d = await db;
+    var n = 0;
+    try {
+      final rows = await d.rawQuery(
+          "SELECT op_uuid, payload FROM ops_queue WHERE tipo=? AND "
+          "json_extract(payload, '\$.turno_id')=? AND "
+          "estado IN ('pendiente','error','enviada')",
+          [tipo, viejoId]);
+      for (final r in rows) {
+        try {
+          final p =
+              jsonDecode(r['payload'] as String) as Map<String, dynamic>;
+          p['turno_id'] = nuevoId;
+          n += await d.update(
+              'ops_queue', {'payload': jsonEncode(p)},
+              where: 'op_uuid=?', whereArgs: [r['op_uuid']]);
+        } catch (_) {}
+      }
+    } catch (_) {
+      // JSON1 ausente: fallback decodificando en Dart.
+      final rows = await d.query('ops_queue',
+          columns: ['op_uuid', 'payload'],
+          where: 'tipo=?',
+          whereArgs: [tipo],
+          orderBy: 'rowid DESC');
+      for (final r in rows) {
+        try {
+          final p =
+              jsonDecode(r['payload'] as String) as Map<String, dynamic>;
+          if ('${p['turno_id']}' == viejoId) {
+            p['turno_id'] = nuevoId;
+            n += await d.update(
+                'ops_queue', {'payload': jsonEncode(p)},
+                where: 'op_uuid=?', whereArgs: [r['op_uuid']]);
+          }
+        } catch (_) {}
+      }
+    }
+    return n;
+  }
+
+  /// Cambia el PK turno_id de un turno al canónico del servidor
+  /// (Argón P1). Retorna true si se actualizó alguna fila.
+  Future<bool> reconciliarTurnoIdLocal(String viejoId, String nuevoId) async {
+    final d = await db;
+    try {
+      final n = await d.update('turnos',
+          {'turno_id': nuevoId, 'turno_id_reconciliado': 1},
+          where: 'turno_id=?', whereArgs: [viejoId]);
+      return n > 0;
+    } catch (_) {
+      return false;
+    }
   }
 
   /// Estado de la op de turno (apertura_turno/cierre_turno) con este

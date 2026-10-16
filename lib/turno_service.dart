@@ -117,7 +117,7 @@ class TurnoService {
   }
 
   /// Último turno de hoy (cualquier estado: abierto, cerrado,
-  /// con_incidencias, no_cerrado). Para que el Home muestre el estado
+  /// cerrado, no_cerrado). Para que el Home muestre el estado
   /// real y no vuelva a ofrecer "Abrir turno" tras cerrar
   /// (auditoría ChatGPT #1).
   Future<Map<String, dynamic>?> turnoVisible() async {
@@ -191,6 +191,9 @@ class TurnoService {
   ///   registro de op apertura_turno (ni pendiente ni aplicada). Si la
   ///   op existe como 'aplicada', se promueve a abierto_sincronizado
   ///   (evidencia positiva, nunca por ausencia en cola).
+  /// - (v25, Argón P2): promueve cierres huérfanos: turno en
+  ///   cerrado_local cuya op de cierre ya está 'aplicada' (el sync del
+  ///   paso 3 de confirmarCierre falló y se completó después).
   Future<void> reconciliarTurnos() async {
     final tid = _auth.telegramId;
     if (tid == null) return;
@@ -218,11 +221,27 @@ class TurnoService {
         // pendiente/error/enviada/necesita_revision/rechazada: se deja
         // como está; el ciclo normal de sync la procesará.
       }
+      final cerrados = await db.query('turnos',
+          columns: ['turno_id'],
+          where: 'telegram_id=? AND estado=?',
+          whereArgs: [tid, 'cerrado_local']);
+      for (final t in cerrados) {
+        final turnoId = t['turno_id'] as String;
+        if (await _db.estadoOpTurno('cierre_turno', turnoId) == 'aplicada') {
+          await _db.marcarEstadoTurno(turnoId, 'cerrado_sincronizado');
+        }
+      }
     } catch (_) {}
   }
 
-  /// Tras cada run(): promueve a abierto_sincronizado los turnos cuya
-  /// apertura fue confirmada como 'aplicada' (evidencia positiva).
+  /// Tras cada run(): promueve estados con evidencia positiva
+  /// (op en 'aplicada', nunca por ausencia en cola).
+  /// - abierto_local → abierto_sincronizado (apertura confirmada).
+  /// - cerrado_local → cerrado_sincronizado (cierre confirmado).
+  ///   (v25, Argón P2): la promoción tardía cubre el caso en que el
+  ///   sync del paso 3 de confirmarCierre() falló y se completa después.
+  ///   `tiene_incidencias` no bloquea la promoción: es una propiedad de
+  ///   negocio independiente del estado de red.
   /// Llamar después de SyncEngine.run().
   Future<void> marcarTurnosSincronizados() async {
     final tid = _auth.telegramId;
@@ -239,6 +258,104 @@ class TurnoService {
             'aplicada') {
           await _db.marcarEstadoTurno(turnoId, 'abierto_sincronizado');
         }
+      }
+      final cerrados = await db.query('turnos',
+          columns: ['turno_id'],
+          where: 'telegram_id=? AND estado=?',
+          whereArgs: [tid, 'cerrado_local']);
+      for (final t in cerrados) {
+        final turnoId = t['turno_id'] as String;
+        if (await _db.estadoOpTurno('cierre_turno', turnoId) == 'aplicada') {
+          await _db.marcarEstadoTurno(turnoId, 'cerrado_sincronizado');
+        }
+      }
+    } catch (_) {}
+    // v1.3.3 (Argón P1): reconciliar turno_id canónicos al final.
+    await reconciliarTurnoIdCanonico();
+  }
+
+  /// Reconcilia el turno_id local con el canónico del servidor
+  /// (Argón P1). Para cada turno no reconciliado cuya apertura ya está
+  /// 'aplicada', lee el resultado guardado por el puente: si trae
+  /// {"conflicto": true, "turno_id_canonico": ...}, reescribe el PK
+  /// local, actualiza las ops de cierre en cola y, si el cierre ya se
+  /// había enviado desvinculado, encola una correctiva con NUEVO
+  /// cierre_op_uuid (el servidor deduplica por op id: reutilizar el
+  /// viejo devolvería sin_cambios sin reparar la fila).
+  Future<void> reconciliarTurnoIdCanonico() async {
+    final tid = _auth.telegramId;
+    if (tid == null) return;
+    try {
+      final db = await _db.db;
+      final pendientes = await db.query('turnos',
+          where: 'telegram_id=? AND turno_id_reconciliado=0 AND '
+              "estado IN ('abierto_sincronizado','cerrado_local',"
+              "'cerrado_sincronizado')",
+          whereArgs: [tid]);
+      for (final t in pendientes) {
+        final localId = '${t['turno_id']}';
+        // Solo con evidencia positiva de la apertura.
+        if (await _db.estadoOpTurno('apertura_turno', localId) !=
+            'aplicada') {
+          continue;
+        }
+        final opUuid = await _db.opUuidTurno('apertura_turno', localId);
+        if (opUuid == null) {
+          await db.update('turnos', {'turno_id_reconciliado': 1},
+              where: 'turno_id=?', whereArgs: [localId]);
+          continue;
+        }
+        final conflicto =
+            await SyncEngine.instance.conflictoTurno(opUuid);
+        if (conflicto == null) {
+          await db.update('turnos', {'turno_id_reconciliado': 1},
+              where: 'turno_id=?', whereArgs: [localId]);
+          continue;
+        }
+        final (lid, canonico) = conflicto;
+        if (lid != localId) continue; // Resultado de otra vuelta; ignorar.
+        // 1) Reescribir el PK local (sin FK que lo referencien).
+        final ok = await _db.reconciliarTurnoIdLocal(localId, canonico);
+        if (!ok) continue;
+        // 2) Reescribir payload.turno_id en cierres aún en cola.
+        await _db.reescribirTurnoIdEnCola(
+            'cierre_turno', localId, canonico);
+        // 3) Si el cierre ya se envió desvinculado (aplicada con el id
+        // viejo), encolar correctiva con NUEVO cierre_op_uuid: el
+        // servidor hace upsert por (entrenador, fecha, turno) y repara
+        // la fila sin duplicarla.
+        final estCierre =
+            await _db.estadoOpTurno('cierre_turno', localId);
+        if (estCierre == 'aplicada') {
+          try {
+            final snap = jsonDecode('${t['cierre_snapshot'] ?? '{}'}')
+                as Map<String, dynamic>;
+            final nuevoUuid = const Uuid().v4();
+            await SyncEngine.instance.registrarCierreTurno(
+              opUuid: nuevoUuid,
+              fecha: '${t['fecha_turno']}',
+              turno: '${t['turno']}',
+              totalCobrado: (snap['total_cobrado'] as num?)?.toDouble(),
+              pagosCount: (snap['pagos_count'] as num?)?.toInt() ?? 0,
+              turnoId: canonico,
+              horaApertura: t['hora_apertura'] as String?,
+              horaCierre: t['hora_cierre'] as String?,
+              pendientesCount:
+                  (snap['pendientes_count'] as num?)?.toInt(),
+              pendientesCup:
+                  (snap['pendientes_cup'] as num?)?.toDouble(),
+              pendientesUsd:
+                  (snap['pendientes_usd'] as num?)?.toDouble(),
+              revisionCount:
+                  (snap['revision_count'] as num?)?.toInt(),
+            );
+            await _db.marcarEstadoTurno(canonico, '${t['estado']}',
+                cierreOpUuid: nuevoUuid);
+          } catch (_) {}
+        }
+        try {
+          await SyncEngine.instance.run(forzar: true);
+        } catch (_) {}
       }
     } catch (_) {}
   }
@@ -318,31 +435,40 @@ class TurnoService {
   /// Paso 2 del cierre rápido: registra el cierre.
   /// [forzado] = true cuando el usuario elige "Cerrar de todos modos".
   ///
-  /// Secuencia (auditoría ChatGPT #5/#8/#12):
+  /// Secuencia (auditoría ChatGPT #5/#8/#12; ajustes Argón P1/P2):
   /// - Re-calcula el desglose JUSTO antes de encolar (fresco, no el del
   ///   diálogo que el usuario pudo leer durante minutos).
   /// - Genera cierre_op_uuid UNA vez y lo persiste en el turno; los
   ///   reintentos reusan el mismo UUID.
   /// - Encola cierre → sync de nuevo → marca cerrado_sincronizado SOLO
   ///   con evidencia positiva (op en 'aplicada'); si no, cerrado_local
-  ///   (pendiente de confirmación).
+  ///   (pendiente de confirmación). `tiene_incidencias` es independiente
+  ///   del estado de red (v25, Argón P2).
   /// - Guarda cierre_snapshot JSON con lo verificado (auditoría).
-  /// - Si totalCobrado no es calculable → null (no 0) + con_incidencias.
+  /// - Si totalCobrado no es calculable → null (no 0) + tiene_incidencias.
+  /// - El dinero contado es el del día del turno (fecha_turno), no el
+  ///   del momento del cierre (fix medianoche).
   Future<Map<String, dynamic>> confirmarCierre({
     required String turnoId,
     required bool forzado,
   }) async {
     final tid = _auth.telegramId;
-    // Doble cierre del mismo turno: no hace nada.
-    final actual = await _db.getTurno(turnoId);
-    final est = '${actual?['estado'] ?? ''}';
-    if (est == 'cerrado_local' ||
-        est == 'cerrado_sincronizado' ||
-        est == 'con_incidencias') {
-      return {'ok': true, 'estado': est, 'duplicado': true};
-    }
+    // Defensa en profundidad (Argón P1): el PK turno_id pudo
+    // reconciliarse al canónico entre que la UI leyó el id y este punto.
+    // Si no se encuentra por id, fallback a la fila visible actual.
+    var actual = await _db.getTurno(turnoId);
+    var idEfectivo = turnoId;
     if (actual == null) {
-      return {'ok': false, 'error': 'turno_no_existe'};
+      actual = await turnoVisible();
+      if (actual == null) {
+        return {'ok': false, 'error': 'turno_no_existe'};
+      }
+      idEfectivo = '${actual['turno_id']}';
+    }
+    // Doble cierre del mismo turno: no hace nada.
+    final est = '${actual['estado'] ?? ''}';
+    if (est == 'cerrado_local' || est == 'cerrado_sincronizado') {
+      return {'ok': true, 'estado': est, 'duplicado': true};
     }
     final fechaTurno = '${actual['fecha_turno']}';
     final turno = '${actual['turno']}';
@@ -353,17 +479,18 @@ class TurnoService {
 
     final ahora = ahoraHabana();
     final horaCierre = isoHabana(ahora);
-    // Total del día (auditoría #7): si no es calculable → null, nunca 0.
+    // Total del día del turno (auditoría #7 + fix medianoche): si no es
+    // calculable → null, nunca 0.
     double? cobrado;
     var totalIncierto = false;
     try {
-      final mt = await miTurnoHoy(tid);
+      final mt = await miTurnoHoy(tid, fecha: fechaTurno);
       cobrado = mt.$1;
     } catch (_) {
       cobrado = null;
       totalIncierto = true;
     }
-    final pagosCount = await conteoPagosDia(tid);
+    final pagosCount = await conteoPagosDia(tid, fecha: fechaTurno);
 
     // UUID estable del cierre: se genera una vez y se persiste.
     var cierreOpUuid = actual['cierre_op_uuid'] as String?;
@@ -376,7 +503,7 @@ class TurnoService {
       turno: turno,
       totalCobrado: cobrado,
       pagosCount: pagosCount,
-      turnoId: turnoId,
+      turnoId: idEfectivo,
       horaApertura: horaApertura,
       horaCierre: horaCierre,
       pendientesCount: d['count'] as int,
@@ -385,8 +512,9 @@ class TurnoService {
       revisionCount: d['revisionCount'] as int,
     );
     // 2) Estado local + snapshot de auditoría + marca legacy.
-    final estadoLocal =
-        (forzado || totalIncierto) ? 'con_incidencias' : 'cerrado_local';
+    // (v25, Argón P2): el estado solo describe el ciclo de red;
+    // tiene_incidencias es la propiedad de negocio.
+    final tieneIncidencias = (forzado || totalIncierto) ? 1 : 0;
     final snapshot = jsonEncode({
       'hora_cierre': horaCierre,
       'forzado': forzado,
@@ -401,10 +529,11 @@ class TurnoService {
       'no_calculados': d['noCalculados'],
       'cierre_op_uuid': cierreOpUuid,
     });
-    await _db.marcarEstadoTurno(turnoId, estadoLocal,
+    await _db.marcarEstadoTurno(idEfectivo, 'cerrado_local',
         horaCierre: horaCierre,
         cierreOpUuid: cierreOpUuid,
-        snapshot: snapshot);
+        snapshot: snapshot,
+        tieneIncidencias: tieneIncidencias);
     try {
       await _db.setMeta(
           'cierre_turno_${fechaTurno}_${turno}_$tid', horaCierre);
@@ -414,18 +543,26 @@ class TurnoService {
       await SyncEngine.instance.run(forzar: true);
     } catch (_) {}
     await marcarTurnosSincronizados();
+    // El PK pudo reconciliarse al canónico durante el run (Argón P1):
+    // re-leer por clave natural antes del paso 4.
+    final relectura =
+        tid == null ? null : await _db.ultimoTurno(fechaTurno, turno, tid);
+    final idFinal = '${relectura?['turno_id'] ?? idEfectivo}';
     // 4) Confirmación con evidencia positiva (auditoría #5): solo
     // 'aplicada' confirma; la ausencia en cola no basta.
-    String estadoFinal = estadoLocal;
+    // (v25, Argón P2): tiene_incidencias NO bloquea la promoción.
+    String estadoFinal = 'cerrado_local';
     try {
-      final estOp = await _db.estadoOpTurno('cierre_turno', turnoId);
-      if (estOp == 'aplicada' && !forzado && !totalIncierto) {
+      final estOp = await _db.estadoOpTurno('cierre_turno', idFinal);
+      if (estOp == 'aplicada') {
         estadoFinal = 'cerrado_sincronizado';
-        await _db.marcarEstadoTurno(turnoId, estadoFinal);
+        await _db.marcarEstadoTurno(idFinal, estadoFinal);
       }
-      // Con incidencias o total incierto: se mantiene la marca para que
-      // el dueño lo vea, aunque la op ya esté aplicada.
     } catch (_) {}
-    return {'ok': true, 'estado': estadoFinal};
+    return {
+      'ok': true,
+      'estado': estadoFinal,
+      'tiene_incidencias': tieneIncidencias,
+    };
   }
 }

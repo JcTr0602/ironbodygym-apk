@@ -341,12 +341,6 @@ class _HomeScreenState extends State<HomeScreen>
         sinSync.sort((a, b) =>
             (b['horas'] as int).compareTo(a['horas'] as int));
       }
-      // v1.3.3 (Argón): el entrenador ve SU cobrado (filtrado por él e
-      // incluye su cola offline), no el global del gym (privacidad y
-      // cuadre con MiTurnoScreen). El dueño sigue con el total global.
-      final cobradoHoy = _auth.isOwner
-          ? (cobrado['efectivo'] ?? 0) + (cobrado['transferencia'] ?? 0)
-          : (await miTurnoHoy(_auth.telegramId)).$1;
       // v1.3.3: estado del turno del entrenador (abrir/cerrar turno).
       // turnoVisible() trae cualquier estado (no solo abierto) para
       // mostrar el chip correcto tras cerrar (auditoría ChatGPT #1).
@@ -359,6 +353,23 @@ class _HomeScreenState extends State<HomeScreen>
           turnosPend = await TurnoService.instance.turnosSinResolver();
         } catch (_) {}
       }
+      // v1.3.3 (Argón): el entrenador ve SU cobrado (filtrado por él e
+      // incluye su cola offline), no el global del gym (privacidad y
+      // cuadre con MiTurnoScreen). El dueño sigue con el total global.
+      // (fix medianoche, Argón): si hay un turno ABIERTO que cruzó la
+      // medianoche, el cobrado se cuenta con fecha_turno para que lo que
+      // ve en pantalla coincida con lo que va a cerrar.
+      String? fechaCobro;
+      if (turnoAct != null) {
+        final estAbierto = '${turnoAct['estado']}';
+        if (estAbierto == 'abierto_local' ||
+            estAbierto == 'abierto_sincronizado') {
+          fechaCobro = '${turnoAct['fecha_turno']}';
+        }
+      }
+      final cobradoHoy = _auth.isOwner
+          ? (cobrado['efectivo'] ?? 0) + (cobrado['transferencia'] ?? 0)
+          : (await miTurnoHoy(_auth.telegramId, fecha: fechaCobro)).$1;
       // Aviso "llevas +Xh sin subir" (item 10: horas configurables)
       String? aviso;
       if (quiereAviso && porSubir > 0 && det.ultimaPush != null) {
@@ -992,14 +1003,16 @@ class _HomeScreenState extends State<HomeScreen>
   /// v1.3.3: botones Abrir/Cerrar turno según el estado real del turno.
   /// - Sin turno hoy → "🟢 Abrir turno".
   /// - Abierto → "Turno abierto ✓ HH:mm" + "🔴 Cerrar turno".
-  /// - cerrado_sincronizado → "Turno cerrado ✓".
+  /// - cerrado_sincronizado → "Turno cerrado ✓" (+ ⚠️ si tiene_incidencias).
   /// - cerrado_local → "Turno cerrado ⏳ (pendiente de sincronizar)".
-  /// - con_incidencias → "Turno cerrado con incidencias ⚠️".
+  /// - (v25) tiene_incidencias es columna aparte: el ⚠️ se combina con
+  ///   el chip de estado, no es un estado propio.
   /// - no_cerrado → chip informativo (ver sección Turnos pendientes).
   /// - Estado desconocido → chip explícito (nunca cae al botón de cierre).
   Widget _botonesTurno() {
     final t = _turnoActual;
     final estado = '${t?['estado'] ?? ''}';
+    final tieneIncidencias = (t?['tiene_incidencias'] as int?) == 1;
     final procesando = _procesandoTurno;
 
     // Sin turno hoy: botón verde de apertura.
@@ -1019,17 +1032,17 @@ class _HomeScreenState extends State<HomeScreen>
     }
 
     final horaAp = horaCorta('${t['hora_apertura'] ?? ''}');
+    // (v25) El ⚠️ de incidencias se combina con el chip de estado.
+    final sufijoInc = tieneIncidencias ? ' con incidencias ⚠️' : '';
     switch (estado) {
       case 'cerrado_sincronizado':
-        return _estadoTurnoChip(
-            Icons.check_circle, 'Turno cerrado ✓', AppColores.exito);
+        return _estadoTurnoChip(Icons.check_circle,
+            'Turno cerrado ✓$sufijoInc', AppColores.exito);
       case 'cerrado_local':
-        return _estadoTurnoChip(Icons.hourglass_bottom,
-            'Turno cerrado ⏳ (pendiente de sincronizar)',
+        return _estadoTurnoChip(
+            Icons.hourglass_bottom,
+            'Turno cerrado ⏳ (pendiente de sincronizar)$sufijoInc',
             AppColores.alerta);
-      case 'con_incidencias':
-        return _estadoTurnoChip(Icons.warning,
-            'Turno cerrado con incidencias ⚠️', AppColores.alerta);
       case 'no_cerrado':
         return _estadoTurnoChip(Icons.history,
             'Turno anterior sin cerrar — ver abajo', AppColores.alerta);
@@ -1274,12 +1287,14 @@ class _HomeScreenState extends State<HomeScreen>
         );
         if (!mounted) return;
         final estado = '${res['estado'] ?? ''}';
+        final conInc = res['tiene_incidencias'] == 1;
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
             content: Text(estado == 'cerrado_sincronizado'
-                ? 'Turno cerrado ✓'
-                : estado == 'con_incidencias'
-                    ? 'Turno cerrado con incidencias ⚠️'
-                    : 'Turno cerrado ⏳ (pendiente de sincronizar)')));
+                ? (conInc
+                    ? 'Turno cerrado ✓ con incidencias ⚠️'
+                    : 'Turno cerrado ✓')
+                : 'Turno cerrado ⏳ (pendiente de sincronizar)'
+                    '${conInc ? ' con incidencias ⚠️' : ''}')));
         await _cargar(forceRefresh: true);
         return; // fin del flujo
       }

@@ -1084,6 +1084,44 @@ class SyncEngine {
     }
   }
 
+  /// v1.3.3 (Argón P1): lee el resultado de una op `apertura_turno` para
+  /// detectar conflicto de turno_id. Si el servidor respondió
+  /// {"conflicto": true, "turno_id_canonico": "<uuid>"}, devuelve
+  /// (turnoIdLocal, turnoIdCanonico); null si no hay conflicto o no se
+  /// pudo leer el resultado.
+  Future<(String, String)?> conflictoTurno(String opUuid) async {
+    try {
+      final r = await _getAuth(
+          Uri.parse('$_base/rest/v1/sync_ops?op_uuid=eq.$opUuid'
+              '&select=resultado'),
+          timeout: const Duration(seconds: 20));
+      if (r.statusCode != 200) return null;
+      final rows = jsonDecode(r.body) as List;
+      if (rows.isEmpty) return null;
+      final res = rows.first['resultado'];
+      if (res is! Map) return null;
+      // El puente guarda el envelope {"ok":..., "resultado": {...}}.
+      final inner = res['resultado'];
+      final src = inner is Map ? inner : res;
+      if (src['conflicto'] != true) return null;
+      final canonico = '${src['turno_id_canonico'] ?? ''}';
+      final local = '${src['turno_id'] ?? ''}';
+      if (canonico.isEmpty || local.isEmpty || canonico == local) {
+        return null;
+      }
+      // Validar que ambos sean UUID antes de devolverlos.
+      try {
+        Uuid.parse(canonico);
+        Uuid.parse(local);
+      } catch (_) {
+        return null;
+      }
+      return (local, canonico);
+    } catch (_) {
+      return null;
+    }
+  }
+
   /// v1.2.1 fix auditoría Gemini: resuelve el suplemento_id creado por
   /// una op `crear_suplemento` leyendo el resultado que guarda el puente.
   Future<int?> _suplementoDeOp(String uuid) async {

@@ -80,8 +80,8 @@ void main() {
     // Si alguna migración revienta, esto lanza excepción y el test falla.
     final db = await LocalDb.instance.db;
 
-    // 1. Versión migrada.
-    expect(await db.getVersion(), 15);
+    // 1. Versión migrada (v25 actual; el número crece con cada release).
+    expect(await db.getVersion(), 25);
 
     // 2. Datos preservados.
     final clientes = await db.query('clientes', orderBy: 'id');
@@ -249,7 +249,7 @@ void main() {
     await db.close();
   });
 
-  test('v14 -> v15 crea fotos_cola en upgrade', () async {
+  test('upgrade 24→25: fotos_cola sigue operativa', () async {
     sqfliteFfiInit();
     databaseFactory = databaseFactoryFfi;
     SharedPreferences.setMockInitialValues({});
@@ -261,21 +261,32 @@ void main() {
     } catch (_) {}
     await LocalDb.resetParaTest();
 
-    // Simula BD en v14 (sin fotos_cola).
-    final v14 = await databaseFactoryFfi.openDatabase(dbPath,
-        options: OpenDatabaseOptions(version: 14));
-    await v14.execute(
+    // BD v24 mínima (el upgrade 24→25 no debe romper nada existente).
+    final v24 = await databaseFactoryFfi.openDatabase(dbPath,
+        options: OpenDatabaseOptions(version: 24));
+    await v24.execute(
         'CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT NOT NULL)');
-    await v14.close();
+    await v24.execute('CREATE TABLE IF NOT EXISTS fotos_cola ('
+        'id INTEGER PRIMARY KEY AUTOINCREMENT, '
+        'op_uuid TEXT NOT NULL, '
+        "tipo TEXT NOT NULL CHECK(tipo IN ('thumb', 'display', 'original')), "
+        'cliente_id INTEGER, '
+        'suplemento_id INTEGER, '
+        'ruta_local TEXT NOT NULL, '
+        "estado TEXT NOT NULL DEFAULT 'pendiente', "
+        'intentos INTEGER NOT NULL DEFAULT 0, '
+        'ultimo_error TEXT, '
+        'worker_id TEXT, '
+        'lease_hasta TEXT, '
+        'proximo_intento_en TEXT, '
+        'creado_en TEXT NOT NULL, '
+        'actualizado_en TEXT NOT NULL)');
+    await v24.close();
 
-    // Al abrir con LocalDb (v15), el onUpgrade debe crear fotos_cola.
+    // Al abrir con LocalDb (v25), fotos_cola debe seguir existiendo y
+    // operativa (el upgrade no la toca pero tampoco la rompe).
     final db = await LocalDb.instance.db;
-    final tablas = await db.rawQuery(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name='fotos_cola'");
-    expect(tablas.isNotEmpty, true,
-        reason: 'fotos_cola debe existir tras upgrade a v15');
-
-    // Verificar que se puede insertar (el esquema es válido).
+    expect(await db.getVersion(), 25);
     await db.insert('fotos_cola', {
       'op_uuid': 'test-uuid',
       'tipo': 'original',

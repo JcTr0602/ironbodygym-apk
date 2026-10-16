@@ -1269,9 +1269,13 @@ Future<List<Map<String, dynamic>>> totalesDiariosUltimos(
 }
 
 /// Resumen del turno del entrenador: (cobrado hoy, pendiente a entregar).
-Future<(double, double)> miTurnoHoy(int? telegramId) async {
+/// [fecha] opcional (YYYY-MM-DD): si se omite usa hoy. El cierre de
+/// turno la fija a fecha_turno para que el dinero contado coincida con
+/// el día que declara el payload aunque se cierre pasada la medianoche
+/// (fix medianoche, Argón).
+Future<(double, double)> miTurnoHoy(int? telegramId, {String? fecha}) async {
   if (telegramId == null) return (0.0, 0.0);
-  final hoy = _hoyIso();
+  final hoy = fecha ?? _hoyIso();
   double cobrado = 0;
   for (final p in await LocalDb.instance.allMirror('pagos')) {
     if ((p['telegram_user_id'] as int?) == telegramId &&
@@ -1316,9 +1320,10 @@ Future<(double, double)> miTurnoHoy(int? telegramId) async {
 /// NOTA: pagos_count y total_cobrado son movimientos del DÍA del
 /// entrenador (lo que devuelve miTurnoHoy), no solo de la franja que
 /// se cierra. Las franjas del gym son informativas; el cuadre es diario.
-Future<int> conteoPagosDia(int? telegramId) async {
+/// [fecha] opcional (YYYY-MM-DD): si se omite usa hoy. Ver [miTurnoHoy].
+Future<int> conteoPagosDia(int? telegramId, {String? fecha}) async {
   if (telegramId == null) return 0;
-  final hoy = _hoyIso();
+  final hoy = fecha ?? _hoyIso();
   final pr = await preciosVigentes();
   var n = 0;
   for (final p in await LocalDb.instance.allMirror('pagos')) {    if ((p['telegram_user_id'] as int?) == telegramId &&
