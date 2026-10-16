@@ -6,7 +6,7 @@
 ///
 /// Verifica:
 /// 1. La BD abre sin lanzar excepción.
-/// 2. La versión queda en 25.
+/// 2. La versión queda en 26 (v25 actual; el número crece con cada release).
 /// 3. Las columnas nuevas existen con DEFAULT 0.
 /// 4. Las filas en estado 'con_incidencias' migran a 'cerrado_local'
 ///    con tiene_incidencias=1 (el estado deja de existir).
@@ -74,7 +74,7 @@ void main() {
     final db = await LocalDb.instance.db;
 
     // 1. Versión migrada.
-    expect(await db.getVersion(), 25);
+    expect(await db.getVersion(), 26);
 
     // 2. Columnas nuevas existen.
     final info = await db.rawQuery('PRAGMA table_info(turnos)');
@@ -108,7 +108,7 @@ void main() {
     await db.close();
   });
 
-  test('instalación limpia v25 trae las columnas en el DDL', () async {
+  test('instalación limpia v26 trae las columnas v25 en el DDL', () async {
     sqfliteFfiInit();
     databaseFactory = databaseFactoryFfi;
     SharedPreferences.setMockInitialValues({});
@@ -121,7 +121,7 @@ void main() {
     await LocalDb.resetParaTest();
 
     final db = await LocalDb.instance.db;
-    expect(await db.getVersion(), 25);
+    expect(await db.getVersion(), 26);
     final info = await db.rawQuery('PRAGMA table_info(turnos)');
     final cols = info.map((c) => '${c['name']}').toSet();
     expect(cols.contains('tiene_incidencias'), isTrue);

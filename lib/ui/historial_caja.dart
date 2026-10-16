@@ -76,8 +76,16 @@ class _HistorialCajaScreenState extends State<HistorialCajaScreen> {
       if (!pares.contains(k)) return;
       res[k] = (res[k] ?? 0) + monto;
     }
-    for (final p in await LocalDb.instance.allMirror('pagos')) {
-      suma('${p['fecha']}', p['telegram_user_id'] as int?,
+    // v1.3.4 (ítem 2): columnas indexadas (fecha, telegram_user_id)
+    // en vez de allMirror. La pertenencia exacta al par la sigue
+    // aplicando suma() con `pares`.
+    for (final p in await LocalDb.instance.pagosPorParesDiaEntrenador(pares)) {
+      // v1.3.4 (Argón, luz roja condicional): normalizar fecha a 10 chars.
+      // Si el JSON trae hora ('2026-10-16T14:30:00'), la clave 'fecha|tid'
+      // no coincidiría con pares (que usa YYYY-MM-DD) y el pago se perdía.
+      final f = '${p['fecha'] ?? ''}';
+      final fecha10 = f.length >= 10 ? f.substring(0, 10) : f;
+      suma(fecha10, LocalDb.normalizarTelegramId(p['telegram_user_id']),
           (p['monto'] as num?)?.toDouble() ?? 0);
     }
     for (final d in await LocalDb.instance.allMirror('pagos_diarios')) {

@@ -1,9 +1,14 @@
 /// Motor de sincronización offline-first.
 ///
 /// Subida (push): ops de `ops_queue` -> POST /rest/v1/sync_ops (idempotente
-///           por op_uuid; un 409 se trata como "ya encolada").
-///           Luego consulta `aplicada` de cada op propia (policy
-///           "ver propias ops") y marca la cola.
+///           por op_uuid; un 409 se trata como "ya encolada"), en lotes
+///           adaptativos (base 20, baja a 10 en fallo, sube a 30/50 en
+///           racha; v1.3.4 Ítem 4).
+///           Luego captura en lote el estado + resultado de cada op
+///           (RPC op_aplicada_con_resultado_batch o un solo GET por lote;
+///           v1.3.4 Ítem 1, sin N+1) y lo guarda en
+///           `ops_queue.resultado_servidor`; las rechazadas por el
+///           servidor quedan 'rechazada' con el motivo en `error`.
 /// Bajada (pull): espejos + borrados con sync_seq > watermark local, aplica
 ///           y guarda el watermark. También trae `ajustes` (precios).
 /// Fotos:    las fotos de inscripciones se suben cuando la op de
@@ -35,6 +40,7 @@ import 'fotos.dart';
 import 'fotos_cola.dart';
 import 'localdb.dart';
 import 'perfil.dart';
+import 'tiempo.dart';
 
 enum SyncPhase { idle, uploading, downloading, photos, error }
 
@@ -197,6 +203,183 @@ class ResultadoSubidaFoto {
   });
 }
 
+// ---------------------------------------------------------------------------
+// v1.3.4 Ítem 1 (Argón): captura en lote del resultado del servidor (sin N+1)
+// e Ítem 4: batching adaptativo. Funciones puras y públicas para que los
+// tests las cubran sin red ni BD.
+// ---------------------------------------------------------------------------
+
+/// Resultado del servidor para una op, capturado en lote.
+/// `estado` es el estado normalizado ('aplicada' | 'rechazada' |
+/// 'necesita_revision' | 'pendiente'); `resultado` es el jsonb que el
+/// puente guarda en `sync_ops.resultado` (envelope
+/// {"ok":..., "resultado": {...}}); `error` el motivo de rechazo cuando
+/// el RPC lo trae en columna propia.
+typedef ResultadoOpServidor = ({
+  String estado,
+  dynamic resultado,
+  String? error,
+});
+
+/// v1.3.4 Ítem 4 (Argón): tamaño de lote adaptativo para el push.
+/// Base 20; en fallo de lote baja a 10; tras 3 lotes OK seguidos sube
+/// a 30 y luego a 50 (tope). Estado en memoria, no persiste.
+class LoteAdaptativo {
+  static const int base = 20;
+  static const int minimo = 10;
+  static const int intermedio = 30;
+  static const int maximo = 50;
+  static const int rachaParaSubir = 3;
+
+  int _tam = base;
+  int _racha = 0;
+
+  int get tam => _tam;
+  int get racha => _racha;
+
+  /// Un lote se envió bien: acumula racha y sube de nivel cada
+  /// [rachaParaSubir] éxitos consecutivos (20 → 30 → 50).
+  void exito() {
+    _racha++;
+    if (_racha >= rachaParaSubir) {
+      _racha = 0;
+      if (_tam < intermedio) {
+        _tam = intermedio;
+      } else if (_tam < maximo) {
+        _tam = maximo;
+      }
+    }
+  }
+
+  /// Un lote falló (red, 5xx o 4xx del lote): vuelve al mínimo y la
+  /// racha se pierde.
+  void fallo() {
+    _racha = 0;
+    _tam = minimo;
+  }
+}
+
+/// Normaliza una fila del RPC `op_aplicada_con_resultado_batch`
+/// (TABLE(op_uuid text, estado text, resultado jsonb, error text)) o del
+/// GET de fallback (op_uuid, aplicada boolean, resultado) a un
+/// [ResultadoOpServidor]. Desconocido + aplicada=true → 'aplicada';
+/// desconocido + aplicada=false → 'pendiente' (en vuelo, no tocar).
+ResultadoOpServidor normalizarFilaResultado(Map<String, dynamic> fila) {
+  final crudo = '${fila['estado'] ?? ''}'.trim().toLowerCase();
+  final aplicada = fila['aplicada'] == true;
+  final String estado;
+  switch (crudo) {
+    case 'aplicada':
+    case 'aplicado':
+    case 'ok':
+      estado = 'aplicada';
+    case 'rechazada':
+    case 'rechazado':
+    case 'rejected':
+      estado = 'rechazada';
+    case 'necesita_revision':
+    case 'revision':
+    case 'error':
+      estado = 'necesita_revision';
+    default:
+      // '' (GET fallback), 'pendiente', 'enviada' u otro: en vuelo.
+      estado = aplicada ? 'aplicada' : 'pendiente';
+  }
+  final err = fila['error'];
+  return (
+    estado: estado,
+    resultado: fila['resultado'],
+    error: err == null ? null : '$err',
+  );
+}
+
+/// true si el puente procesó la op pero la RECHAZÓ: la fila quedó con
+/// aplicada=true pero el envelope trae ok=false (ver sync_bridge.py:
+/// "se marca aplicada para no reintentarla infinitamente").
+bool esRechazoServidor(dynamic resultado) {
+  if (resultado is! Map) return false;
+  return resultado['ok'] == false;
+}
+
+/// Motivo legible del rechazo: primero la columna `error` del RPC si
+/// existe, si no el campo `error` del envelope. null si no hay motivo.
+String? motivoRechazo(dynamic resultado, String? errorServidor) {
+  final e = errorServidor?.trim();
+  if (e != null && e.isNotEmpty) return e;
+  if (resultado is Map) {
+    final m = '${resultado['error'] ?? ''}'.trim();
+    if (m.isNotEmpty) return m;
+  }
+  return null;
+}
+
+/// Extrae el "núcleo" del resultado que guarda el puente: el envelope
+/// es {"ok":..., "resultado": {...}} y los ids útiles (cliente_id,
+/// suplemento_id, turno_id_canonico…) viven en el mapa interno.
+Map<String, dynamic>? nucleoResultado(dynamic res) {
+  Map<String, dynamic> comoMapa(Map m) =>
+      m.map((k, v) => MapEntry('$k', v));
+  if (res is Map<String, dynamic>) {
+    final inner = res['resultado'];
+    if (inner is Map) return comoMapa(inner);
+    return res;
+  }
+  if (res is Map) {
+    final m = comoMapa(res);
+    final inner = m['resultado'];
+    if (inner is Map) return comoMapa(inner);
+    return m;
+  }
+  return null;
+}
+
+/// Extrae un id entero del resultado del servidor (acepta int o
+/// string numérico). null si no está.
+int? extraerIdDeResultado(dynamic res, String clave) {
+  final src = nucleoResultado(res);
+  if (src == null) return null;
+  final v = src[clave];
+  if (v == null) return null;
+  return v is int ? v : int.tryParse('$v');
+}
+
+/// Analiza el resultado de una op `apertura_turno` para detectar
+/// conflicto de turno_id. Lógica pura extraída de
+/// [SyncEngine.conflictoTurno]: (ok:true, null, null) = lectura válida
+/// sin conflicto; con local+canonico = conflicto a reconciliar.
+({bool ok, String? local, String? canonico}) analizarConflictoTurno(
+    dynamic res) {
+  final src = nucleoResultado(res);
+  if (src == null) return (ok: true, local: null, canonico: null);
+  if (src['conflicto'] != true) {
+    return (ok: true, local: null, canonico: null);
+  }
+  final canonico = '${src['turno_id_canonico'] ?? ''}';
+  final local = '${src['turno_id'] ?? ''}';
+  if (canonico.isEmpty || local.isEmpty || canonico == local) {
+    return (ok: true, local: null, canonico: null);
+  }
+  // Validar que ambos sean UUID antes de devolverlos.
+  try {
+    Uuid.parse(canonico);
+    Uuid.parse(local);
+  } catch (_) {
+    return (ok: true, local: null, canonico: null);
+  }
+  return (ok: true, local: local, canonico: canonico);
+}
+
+/// Construye la URI del GET en lote (Opción B del Ítem 1): UN solo GET
+/// con `op_uuid=in.("u1","u2",...)&select=op_uuid,aplicada,resultado`.
+/// Jamás un GET por op.
+Uri uriSyncOpsBatch(List<String> uuids, String base) {
+  final filtro = 'in.(${uuids.map((u) => '"$u"').join(',')})';
+  return Uri.parse('$base/rest/v1/sync_ops').replace(queryParameters: {
+    'op_uuid': filtro,
+    'select': 'op_uuid,aplicada,resultado',
+  });
+}
+
 class SyncEngine {
   SyncEngine._();
   static final SyncEngine instance = SyncEngine._();
@@ -215,6 +398,15 @@ class SyncEngine {
   /// v1.2.9+43: cliente HTTP singleton para reutilizar conexiones TCP/TLS
   /// (Keep-Alive). Evita el handshake de 800ms-2s por cada petición.
   static final _httpClient = http.Client();
+
+  /// v1.3.4 Ítem 4 (Argón): tamaño de lote adaptativo del push.
+  /// Vive en memoria durante la sesión (no persiste).
+  final _loteAdaptativo = LoteAdaptativo();
+
+  /// v1.3.4 Ítem 1 (Argón): ¿existe el RPC
+  /// `op_aplicada_con_resultado_batch`? null = aún no probado; en 404 se
+  /// fija a false y se usa el GET en lote directamente (Opción B).
+  bool? _rpcConResultadoOk;
 
   /// v1.2.9+43: timeout adaptativo basado en el tamaño del payload.
   /// Asume throughput mínimo de 2 KB/s (conexión lenta de Cuba).
@@ -513,6 +705,10 @@ class SyncEngine {
         if (completo) {
           await _marcarOk();
           await _db.setMeta('last_sync_error', '');
+          // v1.3.4 (Ítem 6 Capa 1, Argón): reconciliación silenciosa
+          // diaria por manifiesto, en background: 1 vez/día, solo con
+          // la cola limpia; nunca bloquea ni lanza.
+          unawaited(manifiestoDiarioSiToca());
         } else if (errPush != null) {
           await _db.setMeta('last_sync_error', errPush);
           _emit(SyncPhase.error,
@@ -815,9 +1011,11 @@ class SyncEngine {
     // queden en limbo perpetuo si la confirmación falló.
     try {
       final db = await _db.db;
-      final corte = DateTime.now()
-          .subtract(const Duration(minutes: 2))
-          .toIso8601String();
+      // v1.3.4 (Argón, veredicto final): corte en hora de La Habana, porque
+      // enviada_ts se guarda con isoHabana() y la comparación en SQLite es
+      // lexicográfica (DateTime.now() crudo fallaba con otra zona horaria).
+      final corte =
+          isoHabana(ahoraHabana().subtract(const Duration(minutes: 2)));
       await db.update(
         'ops_queue',
         {'estado': 'pendiente', 'error': null},
@@ -837,38 +1035,39 @@ class SyncEngine {
           detalle: '$ajenas cambios de otro usuario en espera…');
     }
     // 1) las ya aplicadas se marcan sin reenviar
-    // v1.2.9+43: batch RPC (1 RTT) en vez de N llamadas individuales.
-    // Con fallback al método viejo si el RPC no existe aún.
+    // v1.3.4 (Argón Ítem 1): verificación en lote CON resultado, sin N+1.
+    // Opción A (preferida): RPC op_aplicada_con_resultado_batch;
+    // Opción B (fallback): un solo GET por lote con op_uuid=in.(...).
+    // Si la verificación falla (red), se reenvía todo: el POST es
+    // idempotente por op_uuid.
     final porEnviar = <Map<String, dynamic>>[];
-    Set<String> aplicadasSet;
+    Map<String, ResultadoOpServidor> estados = {};
     try {
-      final uuids = ops.map((o) => o['op_uuid'] as String).toList();
-      aplicadasSet = await _opsAplicadasBatch(uuids);
+      estados = await _resultadosOpsBatch(
+          [for (final o in ops) o['op_uuid'] as String]);
     } catch (e) {
-      // Fallback: RPC no existe o falló — usar método individual
-      debugPrint('WARN batch RPC falló, usando fallback individual: $e');
-      aplicadasSet = {};
-      for (final op in ops) {
-        final uuid = op['op_uuid'] as String;
-        if (await _opAplicada(uuid)) {
-          aplicadasSet.add(uuid);
-        }
-      }
+      debugPrint('WARN verificación batch falló, se reenvía todo: $e');
     }
     for (final op in ops) {
       final uuid = op['op_uuid'] as String;
-      if (aplicadasSet.contains(uuid)) {
-        await _db.markOp(uuid, 'aplicada');
-        aplicadas++;
-      } else {
+      final rec = estados[uuid];
+      if (rec == null || rec.estado == 'pendiente') {
+        // Sin evidencia del servidor (o aún en vuelo): se reenvía.
         porEnviar.add(op);
+        continue;
       }
+      if (await _aplicarEstadoServidor(op, rec)) aplicadas++;
     }
-    // 2) envío en lotes de 50
-    const loteTam = 50;
-    for (var i = 0; i < porEnviar.length; i += loteTam) {
+    // 2) envío en lotes adaptativos (v1.3.4 Ítem 4, Argón): base 20,
+    // baja a 10 en fallo de lote, sube a 30 y luego a 50 en racha de
+    // 3 lotes OK. Commit local de avance entre lote y lote (markOp /
+    // bumpOp por lote, no todo al final).
+    // NOTA: gzip en subida DESCARTADO (Supabase devuelve HTTP 400).
+    var i = 0;
+    while (i < porEnviar.length) {
+      final tam = _loteAdaptativo.tam;
       final fin =
-          (i + loteTam < porEnviar.length) ? i + loteTam : porEnviar.length;
+          (i + tam < porEnviar.length) ? i + tam : porEnviar.length;
       final lote = porEnviar.sublist(i, fin);
       _emit(SyncPhase.uploading,
           detalle: 'Enviando tus cambios… $fin de ${porEnviar.length}',
@@ -882,6 +1081,7 @@ class SyncEngine {
             'payload': jsonDecode(op['payload'] as String),
           }
       ]);
+      var loteOk = false;
       try {
         // v1.2.9+43: timeout adaptativo según tamaño del lote
         final r = await _postAuth(
@@ -901,6 +1101,7 @@ class SyncEngine {
           for (final op in lote) {
             await _db.markOp(op['op_uuid'] as String, 'enviada');
           }
+          loteOk = true;
         } else if (r.statusCode >= 400 && r.statusCode < 500) {
           // error de cliente: reintenta op por op para aislar la
           // culpable en vez de atascar el lote entero
@@ -918,30 +1119,44 @@ class SyncEngine {
           await _db.bumpOp(op['op_uuid'] as String, e);
         }
       }
+      // Ítem 4: el lote cuenta como éxito solo si el POST del lote
+      // completo fue aceptado; cualquier otro desenlace baja a 10.
+      if (loteOk) {
+        _loteAdaptativo.exito();
+      } else {
+        _loteAdaptativo.fallo();
+      }
+      i = fin;
     }
-    // 3) segunda pasada: marcar aplicadas (incluye las 'enviada')
-    for (final op in await _db.unappliedOps()) {
-      final uuid = op['op_uuid'] as String;
-      if (await _opAplicada(uuid)) {
-        await _db.markOp(uuid, 'aplicada');
-        // v1.2.4: la incidencia local queda confirmada por el servidor
-        if ('${op['tipo']}' == 'incidencia') {
-          try {
-            final pl = jsonDecode(op['payload'] as String);
-            final iid = pl['id'] as String?;
-            if (iid != null) await _db.marcarIncidenciaSincronizada(iid);
-          } catch (_) {}
+    // 3) segunda pasada: confirmar en lote (sin N+1) y capturar el
+    // resultado del servidor en ops_queue.resultado_servidor.
+    // TRIESTADO (veredicto de Argón): si la lectura en lote falla, no
+    // se marca nada; se reintenta en la próxima pasada.
+    final sinConfirmar = await _db.unappliedOps();
+    if (sinConfirmar.isNotEmpty) {
+      Map<String, ResultadoOpServidor> confirmados = {};
+      try {
+        confirmados = await _resultadosOpsBatch(
+            [for (final o in sinConfirmar) o['op_uuid'] as String]);
+      } catch (e) {
+        debugPrint('WARN confirmación batch falló, se reintenta luego: $e');
+      }
+      for (final op in sinConfirmar) {
+        final uuid = op['op_uuid'] as String;
+        final rec = confirmados[uuid];
+        if (rec == null || rec.estado == 'pendiente') continue;
+        if (await _aplicarEstadoServidor(op, rec)) {
+          // v1.2.4: la incidencia local queda confirmada por el servidor
+          if ('${op['tipo']}' == 'incidencia') {
+            try {
+              final pl = jsonDecode(op['payload'] as String);
+              final iid = pl['id'] as String?;
+              if (iid != null) await _db.marcarIncidenciaSincronizada(iid);
+            } catch (_) {}
+          }
+          await _limpiarOptimistaDeOp(op);
+          aplicadas++;
         }
-        // Limpia la entrada optimista temporal (el registro real
-        // llega por el pull) para no duplicar en el historial.
-        if ('${op['tipo']}' == 'inscripcion_venta_suplemento') {
-          await _db.limpiarOptimista('ventas_suplementos', uuid);
-        } else if ('${op['tipo']}' == 'crear_categoria') {
-          // v1.2.1: la categoría real llega por el pull; sin esto la
-          // fila temporal (id negativo) queda duplicada.
-          await _db.limpiarOptimista('categorias_suplemento', uuid);
-        }
-        aplicadas++;
       }
     }
     // Argón B1: marcar tipos y comentarios como synced tras push.
@@ -999,59 +1214,172 @@ class SyncEngine {
     }
   }
 
-  /// v1.2.9+43: verifica múltiples ops en un solo RTT.
-  /// Retorna el set de UUIDs que están en estado 'aplicada'.
-  /// Lanza excepción si el RPC falla (el llamador hace fallback).
-  Future<Set<String>> _opsAplicadasBatch(List<String> uuids) async {
-    if (uuids.isEmpty) return {};
-    const maxPorBatch = 100;
-    final resultado = <String>{};
-    for (var i = 0; i < uuids.length; i += maxPorBatch) {
-      final fin = (i + maxPorBatch < uuids.length)
-          ? i + maxPorBatch
-          : uuids.length;
-      final lote = uuids.sublist(i, fin);
-      final r = await _postAuth(
-        Uri.parse('$_base/rest/v1/rpc/ops_aplicadas_batch'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'p_uuids': lote}),
-        timeout: const Duration(seconds: 20),
-      );
-     
-    if (r.statusCode != 200) {
-        throw StateError(
-            'RPC ops_aplicadas_batch falló: ${r.statusCode}');
+  /// v1.3.4 Ítem 1 (Argón): captura en lote del estado + resultado del
+  /// servidor, SIN N+1.
+  ///
+  /// Opción A (preferida): RPC `op_aplicada_con_resultado_batch` que
+  /// devuelve TABLE(op_uuid text, estado text, resultado jsonb,
+  /// error text). Si el RPC no existe (404) se recuerda en la sesión y
+  /// se usa la Opción B directamente.
+  ///
+  /// Opción B (fallback): UN solo GET por lote con
+  /// `op_uuid=in.("u1","u2",...)&select=op_uuid,aplicada,resultado`
+  /// (jamás un GET por op).
+  ///
+  /// Lanza si la lectura falla: el llamador respeta el triestado y no
+  /// marca nada con lectura inválida.
+  Future<Map<String, ResultadoOpServidor>> _resultadosOpsBatch(
+      List<String> uuids) async {
+    final out = <String, ResultadoOpServidor>{};
+    if (uuids.isEmpty) return out;
+
+    void agregar(dynamic fila) {
+      if (fila is Map) {
+        final m = fila.map((k, v) => MapEntry('$k', v));
+        final uuid = '${m['op_uuid'] ?? ''}';
+        if (uuid.isNotEmpty) out[uuid] = normalizarFilaResultado(m);
       }
-      final List<dynamic> data = jsonDecode(r.body);
-      resultado.addAll(data.map((e) => e.toString()));
     }
-    return resultado;
+
+    // Opción A: RPC con resultado en lote.
+    if (_rpcConResultadoOk != false) {
+      var rpcOk = true;
+      try {
+        const maxPorLote = 100;
+        for (var i = 0; i < uuids.length; i += maxPorLote) {
+          final fin = (i + maxPorLote < uuids.length)
+              ? i + maxPorLote
+              : uuids.length;
+          final r = await _postAuth(
+            Uri.parse('$_base/rest/v1/rpc/op_aplicada_con_resultado_batch'),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode({'p_uuids': uuids.sublist(i, fin)}),
+            timeout: const Duration(seconds: 20),
+          );
+          if (r.statusCode == 404) {
+            // El RPC no existe: a la Opción B, y no reintentarlo en
+            // esta sesión.
+            _rpcConResultadoOk = false;
+            rpcOk = false;
+            break;
+          }
+          if (r.statusCode != 200) {
+            throw StateError(
+                'RPC op_aplicada_con_resultado_batch: ${r.statusCode}');
+          }
+          final List<dynamic> rows = jsonDecode(r.body);
+          for (final row in rows) {
+            agregar(row);
+          }
+        }
+        if (rpcOk) {
+          _rpcConResultadoOk = true;
+          return out;
+        }
+      } catch (e) {
+        if (e is SessionExpired) rethrow;
+        debugPrint('WARN RPC con resultado falló, fallback a GET batch: $e');
+      }
+    }
+    // Opción B: un GET por lote (nunca uno por op). La policy
+    // "ver propias ops" deja ver solo las del usuario actual.
+    const maxPorGet = 40;
+    for (var i = 0; i < uuids.length; i += maxPorGet) {
+      final fin =
+          (i + maxPorGet < uuids.length) ? i + maxPorGet : uuids.length;
+      final r = await _getAuth(uriSyncOpsBatch(uuids.sublist(i, fin), _base),
+          timeout: const Duration(seconds: 20));
+      if (r.statusCode != 200) {
+        throw StateError('GET batch sync_ops: ${r.statusCode}');
+      }
+      final List<dynamic> rows = jsonDecode(r.body);
+      for (final row in rows) {
+        agregar(row);
+      }
+    }
+    return out;
   }
 
-  Future<bool> _opAplicada(String uuid) async {
-    // v1.2.9+39: usar RPC op_aplicada en vez de GET directo.
-    // El RLS de SELECT en sync_ops no devuelve filas aunque la política
-    // sea correcta; la función SECURITY DEFINER evita el problema.
+  /// Aplica a la cola local el estado que reportó el servidor para una op.
+  /// Guarda el JSON del resultado en `ops_queue.resultado_servidor`.
+  /// Retorna true si la op quedó 'aplicada' (para el contador del push).
+  Future<bool> _aplicarEstadoServidor(
+      Map<String, dynamic> op, ResultadoOpServidor rec) async {
+    final uuid = op['op_uuid'] as String;
+    final rechazadaPorPuente = esRechazoServidor(rec.resultado);
+    if (rec.estado == 'aplicada' && !rechazadaPorPuente) {
+      await _db.markOp(uuid, 'aplicada');
+      await _guardarResultadoServidor(uuid, rec.resultado);
+      return true;
+    }
+    if (rec.estado == 'rechazada' ||
+        (rec.estado == 'aplicada' && rechazadaPorPuente)) {
+      await _marcarRechazadaServidor(uuid, rec);
+      return false;
+    }
+    if (rec.estado == 'necesita_revision') {
+      await _db.markOp(uuid, 'necesita_revision',
+          error: motivoRechazo(rec.resultado, rec.error) ??
+              'El servidor pidió revisión manual de esta operación.');
+      await _guardarResultadoServidor(uuid, rec.resultado);
+      return false;
+    }
+    return false; // 'pendiente' u otro: en vuelo, no tocar.
+  }
+
+  /// Marca una op como rechazada por el SERVIDOR (el puente la procesó
+  /// con ok=false, o el RPC la reportó 'rechazada'). El motivo va a la
+  /// columna `error` (convención ya usada en `_uploadUnaPorUna`) y el
+  /// JSON completo a `resultado_servidor`.
+  Future<void> _marcarRechazadaServidor(
+      String uuid, ResultadoOpServidor rec) async {
+    final motivo = motivoRechazo(rec.resultado, rec.error) ??
+        'El servidor rechazó la operación.';
+    await _db.markOp(uuid, 'rechazada', error: motivo);
+    await _guardarResultadoServidor(uuid, rec.resultado);
+  }
+
+  /// Guarda el JSON del resultado del servidor en la caché local
+  /// (`ops_queue.resultado_servidor`). Solo escribe; nunca borra.
+  Future<void> _guardarResultadoServidor(
+      String uuid, dynamic resultado) async {
+    if (resultado == null) return;
     try {
-      final r = await _postAuth(
-          Uri.parse('$_base/rest/v1/rpc/op_aplicada'),
-          headers: {'Content-Type': 'application/json'},
-          body: jsonEncode({'p_op_uuid': uuid}),
-          timeout: const Duration(seconds: 20));
-      if (r.statusCode != 200) return false;
-      final result = jsonDecode(r.body);
-      if (result is bool) return result;
-      if (result is List && result.isNotEmpty) {
-        final v = result.first;
-        if (v is bool) return v;
-        if (v is Map && v.containsKey('op_aplicada')) {
-          return v['op_aplicada'] == true;
-        }
-      }
-      return false;
-    } catch (e) {
-      if (e is SessionExpired) rethrow;
-      return false;
+      final s = jsonEncode(resultado);
+      final db = await _db.db;
+      await db.update('ops_queue', {'resultado_servidor': s},
+          where: 'op_uuid=?', whereArgs: [uuid]);
+    } catch (_) {}
+  }
+
+  /// Lee `resultado_servidor` de la cola local.
+  /// TRIESTADO: (ok:false) = falló la lectura (no usar el valor);
+  /// (ok:true, valor:null) = sin caché (el llamador decide el fallback).
+  Future<({bool ok, String? valor})> _leerResultadoLocal(String uuid) async {
+    try {
+      final db = await _db.db;
+      final rows = await db.query('ops_queue',
+          columns: ['resultado_servidor'],
+          where: 'op_uuid=?',
+          whereArgs: [uuid],
+          limit: 1);
+      if (rows.isEmpty) return (ok: true, valor: null);
+      return (ok: true, valor: rows.first['resultado_servidor'] as String?);
+    } catch (_) {
+      return (ok: false, valor: null);
+    }
+  }
+
+  /// Limpia la entrada optimista temporal de una op aplicada (el
+  /// registro real llega por el pull) para no duplicar en el historial.
+  Future<void> _limpiarOptimistaDeOp(Map<String, dynamic> op) async {
+    final uuid = op['op_uuid'] as String;
+    if ('${op['tipo']}' == 'inscripcion_venta_suplemento') {
+      await _db.limpiarOptimista('ventas_suplementos', uuid);
+    } else if ('${op['tipo']}' == 'crear_categoria') {
+      // v1.2.1: la categoría real llega por el pull; sin esto la
+      // fila temporal (id negativo) queda duplicada.
+      await _db.limpiarOptimista('categorias_suplemento', uuid);
     }
   }
 
@@ -1062,6 +1390,18 @@ class SyncEngine {
   Future<int?> suplementoDeOp(String uuid) => _suplementoDeOp(uuid);
 
   Future<int?> _clienteDeOp(String uuid) async {
+    // v1.3.4 Ítem 1: caché local primero; GET solo si no hay caché.
+    final cache = await _leerResultadoLocal(uuid);
+    if (cache.ok && cache.valor != null) {
+      try {
+        // La caché solo existe si el servidor ya confirmó la op: el
+        // servidor tiene exactamente este mismo resultado, el GET no
+        // aportaría nada.
+        return extraerIdDeResultado(jsonDecode(cache.valor!), 'cliente_id');
+      } catch (_) {
+        // Caché corrupta: cae al GET.
+      }
+    }
     try {
       final r = await _getAuth(
           Uri.parse('$_base/rest/v1/sync_ops?op_uuid=eq.$uuid'
@@ -1070,15 +1410,7 @@ class SyncEngine {
       if (r.statusCode != 200) return null;
       final rows = jsonDecode(r.body) as List;
       if (rows.isEmpty) return null;
-      final res = rows.first['resultado'];
-      if (res is Map) {
-        // El puente guarda el envelope {"ok":..., "resultado": {...}}.
-        final inner = res['resultado'];
-        final src = inner is Map ? inner : res;
-        final cid = src['cliente_id'];
-        return cid is int ? cid : int.tryParse('$cid');
-      }
-      return null;
+      return extraerIdDeResultado(rows.first['resultado'], 'cliente_id');
     } catch (_) {
       return null;
     }
@@ -1086,13 +1418,29 @@ class SyncEngine {
 
   /// v1.3.3 (Argón P1): lee el resultado de una op `apertura_turno` para
   /// detectar conflicto de turno_id. TRIESTADO (veredicto de Argón):
-  /// - (ok: false, ...): falló la lectura (red, timeout, 500). El
+  /// - (ok: false, ...): falló la lectura (local o red). El
   ///   llamador NO debe marcar turno_id_reconciliado: reintenta luego.
   /// - (ok: true, local: null, canonico: null): lectura válida SIN
   ///   conflicto. El llamador SÍ marca turno_id_reconciliado.
   /// - (ok: true, local, canonico): conflicto válido a reconciliar.
+  ///
+  /// v1.3.4 (Ítem 1): lee `resultado_servidor` local PRIMERO; el GET a
+  /// /rest/v1/sync_ops queda solo como fallback si la caché es NULL
+  /// (o está corrupta).
   Future<({bool ok, String? local, String? canonico})> conflictoTurno(
       String opUuid) async {
+    final cache = await _leerResultadoLocal(opUuid);
+    // Lectura local FALLIDA → ok:false sin intentar el GET.
+    if (!cache.ok) return (ok: false, local: null, canonico: null);
+    if (cache.valor != null) {
+      dynamic res;
+      try {
+        res = jsonDecode(cache.valor!);
+      } catch (_) {
+        res = null; // caché corrupta → fallback al GET
+      }
+      if (res != null) return analizarConflictoTurno(res);
+    }
     try {
       final r = await _getAuth(
           Uri.parse('$_base/rest/v1/sync_ops?op_uuid=eq.$opUuid'
@@ -1101,27 +1449,7 @@ class SyncEngine {
       if (r.statusCode != 200) return (ok: false, local: null, canonico: null);
       final rows = jsonDecode(r.body) as List;
       if (rows.isEmpty) return (ok: false, local: null, canonico: null);
-      final res = rows.first['resultado'];
-      if (res is! Map) return (ok: true, local: null, canonico: null);
-      // El puente guarda el envelope {"ok":..., "resultado": {...}}.
-      final inner = res['resultado'];
-      final src = inner is Map ? inner : res;
-      if (src['conflicto'] != true) {
-        return (ok: true, local: null, canonico: null);
-      }
-      final canonico = '${src['turno_id_canonico'] ?? ''}';
-      final local = '${src['turno_id'] ?? ''}';
-      if (canonico.isEmpty || local.isEmpty || canonico == local) {
-        return (ok: true, local: null, canonico: null);
-      }
-      // Validar que ambos sean UUID antes de devolverlos.
-      try {
-        Uuid.parse(canonico);
-        Uuid.parse(local);
-      } catch (_) {
-        return (ok: true, local: null, canonico: null);
-      }
-      return (ok: true, local: local, canonico: canonico);
+      return analizarConflictoTurno(rows.first['resultado']);
     } catch (_) {
       return (ok: false, local: null, canonico: null);
     }
@@ -1129,7 +1457,17 @@ class SyncEngine {
 
   /// v1.2.1 fix auditoría Gemini: resuelve el suplemento_id creado por
   /// una op `crear_suplemento` leyendo el resultado que guarda el puente.
+  /// v1.3.4 Ítem 1: caché local primero; GET solo si no hay caché.
   Future<int?> _suplementoDeOp(String uuid) async {
+    final cache = await _leerResultadoLocal(uuid);
+    if (cache.ok && cache.valor != null) {
+      try {
+        return extraerIdDeResultado(
+            jsonDecode(cache.valor!), 'suplemento_id');
+      } catch (_) {
+        // Caché corrupta: cae al GET.
+      }
+    }
     try {
       final r = await _getAuth(
           Uri.parse('$_base/rest/v1/sync_ops?op_uuid=eq.$uuid'
@@ -1138,15 +1476,7 @@ class SyncEngine {
       if (r.statusCode != 200) return null;
       final rows = jsonDecode(r.body) as List;
       if (rows.isEmpty) return null;
-      final res = rows.first['resultado'];
-      if (res is Map) {
-        // El puente guarda el envelope {"ok":..., "resultado": {...}}.
-        final inner = res['resultado'];
-        final src = inner is Map ? inner : res;
-        final sid = src['suplemento_id'];
-        return sid is int ? sid : int.tryParse('$sid');
-      }
-      return null;
+      return extraerIdDeResultado(rows.first['resultado'], 'suplemento_id');
     } catch (_) {
       return null;
     }
@@ -1445,13 +1775,13 @@ class SyncEngine {
                       ' ON CONFLICT(id) DO UPDATE SET data=excluded.data, sync_seq=excluded.sync_seq',
                       [op['id'], op['dataJson'], op['seq']]);
                 } else {
+                  // v1.3.4 (ítem 2): para 'pagos' incluye las 4 columnas
+                  // indexadas extraídas del JSON (LocalDb.filaParaBatchMirror);
+                  // el resto de las tablas queda igual que antes.
                   batch.insert(
                       tabla,
-                      {
-                        'id': op['id'],
-                        'data': op['dataJson'],
-                        'sync_seq': op['seq']
-                      },
+                      LocalDb.filaParaBatchMirror(tabla, op['id'] as Object,
+                          op['dataJson'] as String, op['seq'] as int),
                       conflictAlgorithm: ConflictAlgorithm.replace);
                 }
               }
@@ -1689,6 +2019,40 @@ class SyncEngine {
         d: 'vistas=$vistas aplicadas=$aplicadas '
             'sinCambios=$sinCambios fallidas=$fallidas');
     return aplicadas;
+  }
+
+  /// v1.3.4 (Ítem 6 Capa 1, veredicto de Argón): reconciliación
+  /// silenciosa diaria por manifiesto.
+  ///
+  /// Ejecuta [verificarManifiesto] como máximo 1 vez al día y SOLO con
+  /// ops_queue limpia (sin pendientes). Si el manifiesto detecta
+  /// divergencia, [verificarManifiesto] ya setea la meta
+  /// `forzar_redescarga_<tabla>`, que el próximo pull consume
+  /// (re-descarga granular desde 0 de la tabla afectada).
+  ///
+  /// Diseñada para lanzarse con `unawaited(...)` tras un sync exitoso:
+  /// nunca lanza (toda excepción se loguea y se continúa) y no bloquea
+  /// el sync ni el arranque. La última ejecución queda en la meta
+  /// 'ultimo_manifiesto' como fecha ISO (yyyy-MM-dd) de La Habana,
+  /// mismo patrón que `podaOpsDiariaSiToca` en localdb.dart.
+  ///
+  /// [verificar] es un seam de testeo: en producción se usa el
+  /// [verificarManifiesto] real (con red); en tests se inyecta un fake.
+  Future<void> manifiestoDiarioSiToca({
+    Future<int> Function()? verificar,
+  }) async {
+    try {
+      final hoy = hoyHabanaIso();
+      if (await _db.getMeta('ultimo_manifiesto') == hoy) return;
+      if (await _db.countPendingOps() > 0) return; // cola no limpia
+      final divergentes = await (verificar ?? verificarManifiesto)();
+      await _db.setMeta('ultimo_manifiesto', hoy);
+      AppLog.info('sync', 'manifiesto_diario',
+          d: 'divergentes=$divergentes dia=$hoy');
+    } catch (e) {
+      // Defensiva: la reconciliación jamás debe tumbar el sync/arranque.
+      AppLog.error('sync', 'manifiesto_fallo', d: '$e');
+    }
   }
 
   /// v1.2.5 (D19): verificación por manifiesto (buckets sensibles al rol).
@@ -2081,27 +2445,22 @@ class SyncEngine {
 
   /// Baja el estado final de las ops enviadas (el puente las marca como
   /// aplicada/rechazada en Supabase). Actualiza la cola local.
+  /// v1.3.4 (Argón, veredicto final): ANTES hacía un GET individual por cada
+  /// op en 'enviada' pidiendo select=estado,error — columnas que NO existen
+  /// en sync_ops (las reales son aplicada,resultado) → HTTP 400 en cada
+  /// llamada, N+1, y nunca guardaba resultado_servidor. Ahora reutiliza
+  /// _resultadosOpsBatch + _aplicarEstadoServidor (igual que el paso 3 de
+  /// _uploadOps): un solo viaje por lote y captura del resultado.
   Future<void> _syncOpStatus() async {
     try {
       final enviadas = await _db.opsByEstado('enviada');
       if (enviadas.isEmpty) return;
+      final confirmados = await _resultadosOpsBatch(
+          [for (final o in enviadas) o['op_uuid'] as String]);
       for (final op in enviadas) {
-        final uuid = op['op_uuid'] as String;
-        final r = await _getAuth(Uri.parse(
-            '$_base/rest/v1/sync_ops?select=estado,error&op_uuid=eq.$uuid'));
-        if (r.statusCode == 200) {
-          final rows = jsonDecode(r.body) as List;
-          if (rows.isNotEmpty) {
-            final estado = rows.first['estado'] as String?;
-            final error = rows.first['error'] as String?;
-            if (estado == 'aplicada') {
-              await _db.markOp(uuid, 'aplicada');
-            } else if (estado == 'rechazada') {
-              await _db.markOp(uuid, 'rechazada',
-                  error: error ?? 'Rechazada por el servidor.');
-            }
-          }
-        }
+        final rec = confirmados[op['op_uuid'] as String];
+        if (rec == null || rec.estado == 'pendiente') continue;
+        await _aplicarEstadoServidor(op, rec);
       }
     } catch (_) {
       // No bloquea la sincronización si falla
@@ -2578,7 +2937,7 @@ class SyncEngine {
       'payload':
           jsonEncode({'suplemento_id': suplementoId, 'storage_path': path}),
       'estado': 'pendiente',
-      'creada_ts': DateTime.now().toIso8601String(),
+      'creada_ts': isoHabana(ahoraHabana()), // v1.3.4 (Argón): formato Habana homogéneo en ops_queue
     });
     await _db.markFotoLista(fid);
   }
@@ -2657,7 +3016,7 @@ class SyncEngine {
           'payload':
               jsonEncode({'storage_path': path, 'cliente_id': clienteId}),
           'estado': 'pendiente',
-          'creada_ts': DateTime.now().toIso8601String(),
+          'creada_ts': isoHabana(ahoraHabana()), // v1.3.4 (Argón): formato Habana homogéneo en ops_queue
         });
         await _db.markFotoLista(fid);
       } catch (e) {
@@ -3169,7 +3528,7 @@ class SyncEngine {
               }),
               'estado': 'pendiente',
               'creada_ts':
-                  DateTime.now().toIso8601String(),
+                  isoHabana(ahoraHabana()), // v1.3.4 (Argón)
               'user_id': AuthService().userId,
               'telegram_id': AuthService().telegramId,
             });

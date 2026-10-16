@@ -16,9 +16,21 @@ import 'package:sqflite/sqflite.dart';
 import 'package:uuid/uuid.dart';
 
 import 'errores_sync.dart';
+import 'tiempo.dart';
 
 import 'auth.dart';
 import 'fotos.dart';
+
+/// Una condición de [LocalDb.pagosPorFiltro]: fragmento SQL con su
+/// argumento ligado, más el predicado equivalente en Dart para el
+/// fallback de filas con columnas NULL.
+class _CondicionPago {
+  final String columna;
+  final String sql;
+  final Object? arg;
+  final bool Function(Map<String, dynamic>) dart;
+  const _CondicionPago(this.columna, this.sql, this.arg, this.dart);
+}
 
 class LocalDb {
   LocalDb._();
@@ -214,7 +226,7 @@ class LocalDb {
     final dir = await getDatabasesPath();
     _db = await openDatabase(
       p.join(dir, 'ironbody.db'),
-      version: 25,
+      version: 26,
       // v1.3-r4 (Gemini): WAL mode para que lectores (UI) y escritores
       // (Workmanager en otro isolate) no se bloqueen mutuamente.
       // v1.2.9+34 (hotfix): try-catch — si el dispositivo no soporta WAL,
@@ -781,6 +793,20 @@ class LocalDb {
                 "WHERE estado='con_incidencias'");
           } catch (_) {}
         }
+        // v26 (v1.3.4, ítems 1+2): columnas indexadas en el espejo pagos
+        // (elimina los escaneos completos de allMirror('pagos')) +
+        // resultado_servidor en ops_queue (caché del push, ítem 1).
+        if (oldV < 26) {
+          await _addColumnIfMissing(db, 'pagos', 'fecha', 'TEXT');
+          await _addColumnIfMissing(db, 'pagos', 'cliente_id', 'INTEGER');
+          await _addColumnIfMissing(
+              db, 'pagos', 'telegram_user_id', 'INTEGER');
+          await _addColumnIfMissing(db, 'pagos', 'metodo', 'TEXT');
+          await _crearIndicesPagosSiExiste(db);
+          await _addColumnIfMissing(
+              db, 'ops_queue', 'resultado_servidor', 'TEXT');
+          await _backfillColumnasPagos(db);
+        }
       },
     );
     // v1.2.5+28: repara el índice FTS si la migración lo omitió y el
@@ -805,6 +831,170 @@ class LocalDb {
         await db.execute('ALTER TABLE $tabla ADD COLUMN $columna $tipo');
       }
     } catch (_) {}
+  }
+
+  /// v1.3.4 (ítem 2, veredicto de Argón): normaliza un id de Telegram
+  /// que puede llegar como String desde Supabase. Sin esto, la columna
+  /// INTEGER del índice quedaría con texto y el WHERE no matchearía.
+  static int? normalizarTelegramId(dynamic v) {
+    if (v == null) return null;
+    if (v is int) return v;
+    if (v is num) return v.toInt();
+    return int.tryParse(v.toString().trim());
+  }
+
+  /// La columna `fecha` solo se indexa si empieza con YYYY-MM-DD
+  /// (el formato que usan los filtros); el resto queda en NULL y se
+  /// cuenta como anómala en el backfill.
+  static bool _fechaCortaValida(String f) =>
+      RegExp(r'^\d{4}-\d{2}-\d{2}').hasMatch(f);
+
+  /// v1.3.4 (ítem 2): extrae las columnas indexadas del espejo `pagos`
+  /// desde el Map ya decodificado en Dart, sin depender del módulo
+  /// JSON1 del teléfono. Se usa en los dos caminos de escritura
+  /// ([upsertMirror] y el batch del pull vía [filaParaBatchMirror]) y
+  /// en el backfill de la migración v26: un solo punto de verdad para
+  /// la extracción.
+  ///
+  /// v1.3.4 (bug A3): la columna `fecha` guarda solo los primeros 10
+  /// caracteres (YYYY-MM-DD). El servidor puede enviar fecha+hora
+  /// ('2026-10-16T14:20:00') y los lectores comparan con fecha corta
+  /// ([pagosPorDiaYEntrenador]: WHERE fecha = 'YYYY-MM-DD'), asi que
+  /// el string completo quedaba invisible. El JSON intacto sigue en
+  /// `data` para la UI.
+  static Map<String, Object?> columnasPagos(Map<String, dynamic> data) {
+    final f = data['fecha'];
+    final fs = f is String ? f.trim() : null;
+    return {
+      'fecha': (fs != null && fs.length >= 10 && _fechaCortaValida(fs))
+          ? fs.substring(0, 10)
+          : null,
+      'cliente_id': normalizarTelegramId(data['cliente_id']),
+      'telegram_user_id': normalizarTelegramId(data['telegram_user_id']),
+      'metodo': data['metodo'] is String ? data['metodo'] as String : null,
+    };
+  }
+
+  /// v1.3.4 (ítem 2): construye el mapa de columnas para el INSERT del
+  /// batch del pull (sync.dart). Para `pagos` incluye las 4 columnas
+  /// indexadas extraídas del JSON; las demás tablas quedan igual.
+  /// Si se olvida este camino, el índice queda vacío para las filas
+  /// del pull (el camino caliente real).
+  static Map<String, Object?> filaParaBatchMirror(
+      String tabla, Object id, String dataJson, int seq) {
+    final fila = <String, Object?>{
+      'id': id,
+      'data': dataJson,
+      'sync_seq': seq,
+    };
+    if (tabla == 'pagos') {
+      try {
+        fila.addAll(
+            columnasPagos(jsonDecode(dataJson) as Map<String, dynamic>));
+      } catch (_) {}
+    }
+    return fila;
+  }
+
+  /// v1.3.4 (ítem 2): crea los índices del espejo `pagos` solo si la
+  /// tabla existe. Tolerante como [_addColumnIfMissing]: el onUpgrade
+  /// no debe reventar en BDs mínimas (tests) donde el espejo nunca se
+  /// creó.
+  static Future<void> _crearIndicesPagosSiExiste(Database db) async {
+    try {
+      final t = await db.rawQuery(
+          "SELECT name FROM sqlite_master WHERE type='table' AND name='pagos'");
+      if (t.isEmpty) return;
+      await db.execute(
+          'CREATE INDEX IF NOT EXISTS idx_pagos_fecha ON pagos(fecha)');
+      await db.execute(
+          'CREATE INDEX IF NOT EXISTS idx_pagos_cliente ON pagos(cliente_id, fecha)');
+      await db.execute(
+          'CREATE INDEX IF NOT EXISTS idx_pagos_telegram ON pagos(telegram_user_id, fecha)');
+    } catch (_) {}
+  }
+
+  /// v1.3.4 (ítem 2): backfill de las columnas indexadas de `pagos` en
+  /// la migración v26. Intenta un único UPDATE con json_extract; si el
+  /// módulo JSON1 no responde, fallback en Dart puro (jsonDecode) por
+  /// lotes. Las fechas anómalas quedan en NULL y se cuentan en app_log.
+  static Future<void> _backfillColumnasPagos(Database db) async {
+    // Sin la tabla no hay nada que rellenar (BD mínima de test).
+    try {
+      final t = await db.rawQuery(
+          "SELECT name FROM sqlite_master WHERE type='table' AND name='pagos'");
+      if (t.isEmpty) return;
+    } catch (_) {
+      return;
+    }
+    var anomalas = 0;
+
+    Future<void> viaDart() async {
+      final rows = await db.rawQuery('SELECT id, data FROM pagos');
+      final batch = db.batch();
+      for (final r in rows) {
+        try {
+          final data = jsonDecode(r['data'] as String) as Map<String, dynamic>;
+          final cols = columnasPagos(data);
+          if (data['fecha'] != null && cols['fecha'] == null) anomalas++;
+          batch.rawUpdate(
+              'UPDATE pagos SET fecha = ?, cliente_id = ?, '
+              'telegram_user_id = ?, metodo = ? WHERE id = ?',
+              [
+                cols['fecha'],
+                cols['cliente_id'],
+                cols['telegram_user_id'],
+                cols['metodo'],
+                r['id'],
+              ]);
+        } catch (_) {
+          anomalas++;
+        }
+      }
+      await batch.commit(noResult: true);
+    }
+
+    try {
+      await db.execute(
+          "UPDATE pagos SET "
+          // v1.3.4 (bug A3): substr(...,1,10) guarda solo YYYY-MM-DD;
+          // el string completo con hora queda invisible para
+          // pagosPorDiaYEntrenador (WHERE fecha = 'YYYY-MM-DD').
+          "fecha = CASE WHEN json_extract(data, '\$.fecha') "
+          "GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]*' "
+          "THEN substr(json_extract(data, '\$.fecha'), 1, 10) ELSE NULL END, "
+          "cliente_id = CASE "
+          "WHEN json_extract(data, '\$.cliente_id') IS NULL THEN NULL "
+          "WHEN CAST(json_extract(data, '\$.cliente_id') AS TEXT) "
+          "GLOB '*[^0-9]*' THEN NULL "
+          "ELSE CAST(json_extract(data, '\$.cliente_id') AS INTEGER) END, "
+          "telegram_user_id = CASE "
+          "WHEN json_extract(data, '\$.telegram_user_id') IS NULL THEN NULL "
+          "WHEN CAST(json_extract(data, '\$.telegram_user_id') AS TEXT) "
+          "GLOB '*[^0-9]*' THEN NULL "
+          "ELSE CAST(json_extract(data, '\$.telegram_user_id') AS INTEGER) END, "
+          "metodo = CASE WHEN typeof(json_extract(data, '\$.metodo')) = 'text' "
+          "THEN json_extract(data, '\$.metodo') ELSE NULL END");
+      final c = await db.rawQuery(
+          "SELECT COUNT(*) AS n FROM pagos WHERE fecha IS NULL AND "
+          "json_extract(data, '\$.fecha') IS NOT NULL");
+      anomalas = (c.first['n'] as num?)?.toInt() ?? 0;
+    } catch (_) {
+      // Sin JSON1 (u otro fallo): fallback en Dart puro.
+      await viaDart();
+    }
+    if (anomalas > 0) {
+      try {
+        await db.insert('app_log', {
+          'ts': isoHabana(ahoraHabana()),
+          'modulo': 'migracion',
+          'evento': 'backfill_pagos_v26',
+          'detalle':
+              '$anomalas filas con fecha anómala (columna fecha en NULL)',
+          'nivel': 'aviso',
+        });
+      } catch (_) {}
+    }
   }
 
   /// Seed de tipos de incidencia por defecto (v1.3.0).
@@ -860,7 +1050,6 @@ class LocalDb {
   static Future<void> _crearTablas(Database db) async {
     for (final t in [
       'clientes',
-      'pagos',
       'pagos_diarios',
       'gastos',
       'ventas_suplementos',
@@ -869,6 +1058,19 @@ class LocalDb {
       await db.execute(
           'CREATE TABLE $t (id INTEGER PRIMARY KEY, data TEXT NOT NULL, sync_seq INTEGER NOT NULL)');
     }
+    // v1.3.4 (v26, ítem 2): el espejo `pagos` lleva 4 columnas dedicadas
+    // (fecha, cliente_id, telegram_user_id, metodo) con índices, para
+    // eliminar los escaneos completos en memoria de allMirror('pagos').
+    // Se pueblan en Dart al escribir (upsertMirror y el batch del pull),
+    // sin depender del módulo JSON1 del teléfono.
+    await db.execute('CREATE TABLE pagos ('
+        'id INTEGER PRIMARY KEY, data TEXT NOT NULL, sync_seq INTEGER NOT NULL, '
+        'fecha TEXT, cliente_id INTEGER, telegram_user_id INTEGER, metodo TEXT)');
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_pagos_fecha ON pagos(fecha)');
+    await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_pagos_cliente ON pagos(cliente_id, fecha)');
+    await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_pagos_telegram ON pagos(telegram_user_id, fecha)');
     // v1.3.1: suplementos lleva ultimo_precio como columna (no en JSON)
     // para no perderlo en cada pull con INSERT OR REPLACE.
     await db.execute(
@@ -915,7 +1117,10 @@ class LocalDb {
         'estado TEXT NOT NULL DEFAULT \'pendiente\', intentos INTEGER NOT NULL DEFAULT 0, '
         'error TEXT, creada_ts TEXT NOT NULL, enviada_ts TEXT, foto_path TEXT, '
         'user_id TEXT, telegram_id INTEGER, '
-        'proximo_reintento TEXT, codigo_error TEXT)');
+        'proximo_reintento TEXT, codigo_error TEXT, '
+        // v1.3.4 (v26, ítem 1): caché del resultado del servidor tras el
+        // push (evita GETs a sync_ops; el GET queda como fallback).
+        'resultado_servidor TEXT)');
     await db.execute(
         'CREATE INDEX IF NOT EXISTS idx_ops_estado ON ops_queue(estado)');
         await db.execute('CREATE TABLE fotos_pendientes ('
@@ -1189,7 +1394,7 @@ class LocalDb {
         'clave': 'pago_entrenador_por_cliente',
         'valor': '150',
         'actualizado_en':
-            DateTime.now().toIso8601String(),
+            isoHabana(ahoraHabana()), // v1.3.4 (Argón): reloj Habana
         'sync_estado': 'synced',
         'version': 1,
       },
@@ -1234,9 +1439,17 @@ class LocalDb {
           ' ON CONFLICT(id) DO UPDATE SET data=excluded.data, sync_seq=excluded.sync_seq',
           [id, nuevoJson, syncSeq]);
     } else {
-      await d.insert(
-          tabla,
-          {'id': id, 'data': nuevoJson, 'sync_seq': syncSeq},
+      final fila = <String, Object?>{
+        'id': id,
+        'data': nuevoJson,
+        'sync_seq': syncSeq,
+      };
+      // v1.3.4 (ítem 2): poblar las columnas indexadas del espejo pagos.
+      // (El otro camino de escritura —batch del pull— lo hace vía
+      // filaParaBatchMirror en sync.dart; si se olvida uno, el índice
+      // queda vacío.)
+      if (tabla == 'pagos') fila.addAll(columnasPagos(data));
+      await d.insert(tabla, fila,
           conflictAlgorithm: ConflictAlgorithm.replace);
     }
     // v1.2.5-rev5: mantener el índice FTS5 de clientes.
@@ -1620,6 +1833,572 @@ class LocalDb {
     ];
   }
 
+  /// v1.3.4 (ítem 2): pagos del día de un entrenador usando las columnas
+  /// indexadas (fecha, telegram_user_id) en vez de escanear todo el
+  /// espejo con allMirror + filtro en Dart. Devuelve los mismos mapas
+  /// que allMirror (JSON decodificado + id).
+  ///
+  /// Fallback defensivo: las filas con alguna columna indexada en NULL
+  /// (escritura vieja o fecha anómala) se filtran en Dart con la misma
+  /// semántica. Tras el backfill de v26 no debería haber ninguna, pero
+  /// un índice vacío es peor que un escaneo parcial.
+  Future<List<Map<String, dynamic>>> pagosPorDiaYEntrenador(
+      String fecha, int telegramId) async {
+    final d = await db;
+    final res = <Map<String, dynamic>>[];
+    final rows = await d.rawQuery(
+        'SELECT id, data FROM pagos WHERE fecha = ? AND telegram_user_id = ?',
+        [fecha, telegramId]);
+    for (final r in rows) {
+      try {
+        res.add({
+          ...jsonDecode(r['data'] as String) as Map<String, dynamic>,
+          'id': r['id'],
+        });
+      } catch (_) {}
+    }
+    final nulos = await d.rawQuery(
+        'SELECT id, data FROM pagos WHERE fecha IS NULL OR telegram_user_id IS NULL');
+    for (final r in nulos) {
+      try {
+        final p = jsonDecode(r['data'] as String) as Map<String, dynamic>;
+        if ('${p['fecha'] ?? ''}' == fecha &&
+            normalizarTelegramId(p['telegram_user_id']) == telegramId) {
+          res.add({...p, 'id': r['id']});
+        }
+      } catch (_) {}
+    }
+    return res;
+  }
+
+  /// v1.3.4 (ítem 2): pagos con metodo='cortesia' de un cliente en un año
+  /// (regalo de cumpleaños, _regaloDelAnio). Usa el índice compuesto
+  /// (cliente_id, fecha) + filtro por metodo; con fallback en Dart para
+  /// filas con columnas NULL, igual que [pagosPorDiaYEntrenador].
+  Future<List<Map<String, dynamic>>> pagosCortesiaClienteAnio(
+      int clienteId, String anio) async {
+    final d = await db;
+    final res = <Map<String, dynamic>>[];
+    final rows = await d.rawQuery(
+        'SELECT id, data FROM pagos WHERE cliente_id = ? AND metodo = ? '
+        'AND fecha LIKE ?',
+        [clienteId, 'cortesia', '$anio%']);
+    for (final r in rows) {
+      try {
+        res.add({
+          ...jsonDecode(r['data'] as String) as Map<String, dynamic>,
+          'id': r['id'],
+        });
+      } catch (_) {}
+    }
+    final nulos = await d.rawQuery(
+        'SELECT id, data FROM pagos WHERE cliente_id IS NULL OR metodo IS NULL OR fecha IS NULL');
+    for (final r in nulos) {
+      try {
+        final p = jsonDecode(r['data'] as String) as Map<String, dynamic>;
+        if (normalizarTelegramId(p['cliente_id']) == clienteId &&
+            p['metodo'] == 'cortesia' &&
+            '${p['fecha'] ?? ''}'.startsWith(anio)) {
+          res.add({...p, 'id': r['id']});
+        }
+      } catch (_) {}
+    }
+    return res;
+  }
+
+  /// v1.3.4 (B2): lector genérico del espejo `pagos` sobre las columnas
+  /// indexadas de la migración v26 (fecha, cliente_id, telegram_user_id,
+  /// metodo). Construye el WHERE dinámicamente con los filtros dados y
+  /// mantiene el fallback de filas con columnas NULL (filtradas en Dart
+  /// con la misma semántica), igual que [pagosPorDiaYEntrenador].
+  ///
+  /// Los filtros son opcionales y se combinan con AND:
+  /// - [telegramId]: `telegram_user_id = ?` (en el fallback se compara
+  ///   con [normalizarTelegramId]; jamás `as int?`).
+  /// - [metodo]: `metodo = ?`.
+  /// - [fecha]: igualdad exacta (columna = 10 chars yyyy-MM-dd).
+  /// - [fechaPrefijo]: `fecha LIKE 'yyyy-MM%'`.
+  /// - [fechaDesde]: `fecha >= 'yyyy-MM-dd'`.
+  ///
+  /// Devuelve los mismos mapas que [allMirror] (JSON decodificado + id).
+  /// El llamador aplica en Dart los filtros que no tienen columna
+  /// indexada (p.ej. `entregado`, `monto`) y el orden que necesite.
+  Future<List<Map<String, dynamic>>> pagosPorFiltro({
+    int? telegramId,
+    String? metodo,
+    String? fecha,
+    String? fechaPrefijo,
+    String? fechaDesde,
+  }) async {
+    final conds = <_CondicionPago>[];
+    if (telegramId != null) {
+      conds.add(_CondicionPago(
+        'telegram_user_id',
+        'telegram_user_id = ?',
+        telegramId,
+        (p) => normalizarTelegramId(p['telegram_user_id']) == telegramId,
+      ));
+    }
+    if (metodo != null) {
+      conds.add(_CondicionPago(
+        'metodo',
+        'metodo = ?',
+        metodo,
+        (p) => p['metodo'] == metodo,
+      ));
+    }
+    if (fecha != null) {
+      conds.add(_CondicionPago(
+        'fecha',
+        'fecha = ?',
+        fecha,
+        (p) => '${p['fecha'] ?? ''}' == fecha,
+      ));
+    }
+    if (fechaPrefijo != null) {
+      conds.add(_CondicionPago(
+        'fecha',
+        'fecha LIKE ?',
+        '$fechaPrefijo%',
+        (p) => '${p['fecha'] ?? ''}'.startsWith(fechaPrefijo),
+      ));
+    }
+    if (fechaDesde != null) {
+      conds.add(_CondicionPago(
+        'fecha',
+        'fecha >= ?',
+        fechaDesde,
+        (p) {
+          final f = '${p['fecha'] ?? ''}';
+          return f.length >= 10 &&
+              f.substring(0, 10).compareTo(fechaDesde) >= 0;
+        },
+      ));
+    }
+    // Sin filtros no hay nada que indexar: full scan como antes.
+    if (conds.isEmpty) return allMirror('pagos');
+
+    final d = await db;
+    final res = <Map<String, dynamic>>[];
+    final rows = await d.rawQuery(
+      'SELECT id, data FROM pagos WHERE '
+      '${conds.map((c) => c.sql).join(' AND ')}',
+      conds.map((c) => c.arg).toList(),
+    );
+    for (final r in rows) {
+      try {
+        res.add({
+          ...jsonDecode(r['data'] as String) as Map<String, dynamic>,
+          'id': r['id'],
+        });
+      } catch (_) {}
+    }
+    // Fallback: filas con alguna columna filtrada en NULL (escritura
+    // vieja o backfill incompleto). Disjunto de la consulta anterior
+    // por construcción (aquí alguna es NULL, allá ninguna lo es).
+    final nulos = await d.rawQuery(
+      'SELECT id, data FROM pagos WHERE '
+      '${conds.map((c) => '${c.columna} IS NULL').join(' OR ')}',
+    );
+    // v1.3.4 (Argón, luz roja condicional): anti-duplicados. Aunque el
+    // fallback es disjunto por construcción, en SQLite con escrituras
+    // concurrentes de pulls no se asume disyunción pura sin un Set vistos.
+    final vistos = res.map((p) => p['id']).toSet();
+    for (final r in nulos) {
+      if (vistos.contains(r['id'])) continue;
+      try {
+        final p = jsonDecode(r['data'] as String) as Map<String, dynamic>;
+        if (conds.every((c) => c.dart(p))) {
+          res.add({...p, 'id': r['id']});
+          vistos.add(r['id']);
+        }
+      } catch (_) {}
+    }
+    return res;
+  }
+
+  /// v1.3.4 (ítem 2): pagos de un mes ('YYYY-MM') usando la columna
+  /// indexada `fecha` (LIKE 'YYYY-MM%', idx_pagos_fecha) en vez de
+  /// allMirror + startsWith en Dart. Fallback en Dart para filas con
+  /// `fecha` NULL, igual que [pagosPorDiaYEntrenador].
+  Future<List<Map<String, dynamic>>> pagosDelMes(String pref) async {
+    final d = await db;
+    final res = <Map<String, dynamic>>[];
+    final rows = await d.rawQuery(
+        'SELECT id, data FROM pagos WHERE fecha LIKE ?', ['$pref%']);
+    for (final r in rows) {
+      try {
+        res.add({
+          ...jsonDecode(r['data'] as String) as Map<String, dynamic>,
+          'id': r['id'],
+        });
+      } catch (_) {}
+    }
+    final nulos =
+        await d.rawQuery('SELECT id, data FROM pagos WHERE fecha IS NULL');
+    for (final r in nulos) {
+      try {
+        final p = jsonDecode(r['data'] as String) as Map<String, dynamic>;
+        if ('${p['fecha'] ?? ''}'.startsWith(pref)) {
+          res.add({...p, 'id': r['id']});
+        }
+      } catch (_) {}
+    }
+    return res;
+  }
+
+  /// v1.3.4 (ítem 2): pagos de un día exacto ('YYYY-MM-DD') usando la
+  /// columna indexada `fecha` en vez de allMirror + filtro en Dart.
+  /// Fallback en Dart para filas con `fecha` NULL, igual que
+  /// [pagosPorDiaYEntrenador].
+  Future<List<Map<String, dynamic>>> pagosDelDia(String fechaIso) async {
+    final d = await db;
+    final res = <Map<String, dynamic>>[];
+    final rows = await d.rawQuery(
+        'SELECT id, data FROM pagos WHERE fecha = ?', [fechaIso]);
+    for (final r in rows) {
+      try {
+        res.add({
+          ...jsonDecode(r['data'] as String) as Map<String, dynamic>,
+          'id': r['id'],
+        });
+      } catch (_) {}
+    }
+    final nulos =
+        await d.rawQuery('SELECT id, data FROM pagos WHERE fecha IS NULL');
+    for (final r in nulos) {
+      try {
+        final p = jsonDecode(r['data'] as String) as Map<String, dynamic>;
+        final f = '${p['fecha'] ?? ''}';
+        if (f.length >= 10 && f.substring(0, 10) == fechaIso) {
+          res.add({...p, 'id': r['id']});
+        }
+      } catch (_) {}
+    }
+    return res;
+  }
+
+  /// v1.3.4 (ítem 2): pagos desde una fecha ('YYYY-MM-DD', inclusive)
+  /// usando la columna indexada `fecha` en vez de allMirror + filtro
+  /// en Dart. Fallback en Dart para filas con `fecha` NULL, igual que
+  /// [pagosPorDiaYEntrenador].
+  Future<List<Map<String, dynamic>>> pagosDesde(String desdeIso) async {
+    final d = await db;
+    final res = <Map<String, dynamic>>[];
+    final rows = await d.rawQuery(
+        'SELECT id, data FROM pagos WHERE fecha >= ?', [desdeIso]);
+    for (final r in rows) {
+      try {
+        res.add({
+          ...jsonDecode(r['data'] as String) as Map<String, dynamic>,
+          'id': r['id'],
+        });
+      } catch (_) {}
+    }
+    final nulos =
+        await d.rawQuery('SELECT id, data FROM pagos WHERE fecha IS NULL');
+    for (final r in nulos) {
+      try {
+        final p = jsonDecode(r['data'] as String) as Map<String, dynamic>;
+        // Misma semántica que fechaCorta(p['fecha'], 10) + compareTo
+        // (negocio.dart): primeros 10 chars o el string completo.
+        final s = '${p['fecha'] ?? ''}';
+        final f = s.length >= 10 ? s.substring(0, 10) : s;
+        if (f.compareTo(desdeIso) >= 0) {
+          res.add({...p, 'id': r['id']});
+        }
+      } catch (_) {}
+    }
+    return res;
+  }
+
+  /// v1.3.4 (ítem 2): todos los pagos de un cliente usando la columna
+  /// indexada `cliente_id` (idx_pagos_cliente) en vez de allMirror +
+  /// filtro en Dart. Fallback en Dart para filas con `cliente_id` NULL.
+  Future<List<Map<String, dynamic>>> pagosPorCliente(int clienteId) async {
+    final d = await db;
+    final res = <Map<String, dynamic>>[];
+    final rows = await d.rawQuery(
+        'SELECT id, data FROM pagos WHERE cliente_id = ?', [clienteId]);
+    for (final r in rows) {
+      try {
+        res.add({
+          ...jsonDecode(r['data'] as String) as Map<String, dynamic>,
+          'id': r['id'],
+        });
+      } catch (_) {}
+    }
+    final nulos = await d.rawQuery(
+        'SELECT id, data FROM pagos WHERE cliente_id IS NULL');
+    for (final r in nulos) {
+      try {
+        final p = jsonDecode(r['data'] as String) as Map<String, dynamic>;
+        if (normalizarTelegramId(p['cliente_id']) == clienteId) {
+          res.add({...p, 'id': r['id']});
+        }
+      } catch (_) {}
+    }
+    return res;
+  }
+
+  /// v1.3.4 (ítem 2): todos los pagos registrados por un entrenador
+  /// (telegram_user_id) usando la columna indexada (idx_pagos_telegram)
+  /// en vez de allMirror + filtro en Dart. Fallback en Dart para filas
+  /// con `telegram_user_id` NULL.
+  Future<List<Map<String, dynamic>>> pagosPorEntrenador(
+      int telegramId) async {
+    final d = await db;
+    final res = <Map<String, dynamic>>[];
+    final rows = await d.rawQuery(
+        'SELECT id, data FROM pagos WHERE telegram_user_id = ?',
+        [telegramId]);
+    for (final r in rows) {
+      try {
+        res.add({
+          ...jsonDecode(r['data'] as String) as Map<String, dynamic>,
+          'id': r['id'],
+        });
+      } catch (_) {}
+    }
+    final nulos = await d.rawQuery(
+        'SELECT id, data FROM pagos WHERE telegram_user_id IS NULL');
+    for (final r in nulos) {
+      try {
+        final p = jsonDecode(r['data'] as String) as Map<String, dynamic>;
+        if (normalizarTelegramId(p['telegram_user_id']) == telegramId) {
+          res.add({...p, 'id': r['id']});
+        }
+      } catch (_) {}
+    }
+    return res;
+  }
+
+  /// v1.3.4 (ítem 2): pagos candidatos para pares ('fecha|tid') de
+  /// (cierre de turno, entrenador) usando las columnas indexadas
+  /// (WHERE fecha IN + telegram_user_id IN) en vez de escanear todo el
+  /// espejo. El llamador sigue aplicando la pertenencia exacta al par
+  /// ('${fecha10}|$tid') como antes. Fallback en Dart para filas con
+  /// alguna columna NULL.
+  Future<List<Map<String, dynamic>>> pagosPorParesDiaEntrenador(
+      Set<String> pares) async {
+    final d = await db;
+    final res = <Map<String, dynamic>>[];
+    if (pares.isNotEmpty) {
+      final dias = <String>{};
+      final tids = <int>{};
+      for (final par in pares) {
+        final i = par.lastIndexOf('|');
+        if (i < 0) continue;
+        dias.add(par.substring(0, i));
+        final t = int.tryParse(par.substring(i + 1));
+        if (t != null) tids.add(t);
+      }
+      if (dias.isNotEmpty && tids.isNotEmpty) {
+        final q = List.filled(dias.length, '?').join(',');
+        final r = List.filled(tids.length, '?').join(',');
+        final rows = await d.rawQuery(
+            'SELECT id, data FROM pagos WHERE fecha IN ($q) '
+            'AND telegram_user_id IN ($r)',
+            [...dias, ...tids]);
+        for (final row in rows) {
+          try {
+            res.add({
+              ...jsonDecode(row['data'] as String) as Map<String, dynamic>,
+              'id': row['id'],
+            });
+          } catch (_) {}
+        }
+      }
+    }
+    final nulos = await d.rawQuery('SELECT id, data FROM pagos WHERE '
+        'fecha IS NULL OR telegram_user_id IS NULL');
+    for (final r in nulos) {
+      try {
+        final p = jsonDecode(r['data'] as String) as Map<String, dynamic>;
+        final f = '${p['fecha'] ?? ''}';
+        final tid = normalizarTelegramId(p['telegram_user_id']);
+        if (f.length < 10 || tid == null) continue;
+        if (pares.contains('${f.substring(0, 10)}|$tid')) {
+          res.add({...p, 'id': r['id']});
+        }
+      } catch (_) {}
+    }
+    return res;
+  }
+
+  /// v1.3.4 (ítem 2): pagos de un mes calendario ('YYYY-MM') de un
+  /// entrenador, usando el índice compuesto (telegram_user_id, fecha).
+  /// Misma semántica que allMirror + filtro en Dart por
+  /// telegram_user_id normalizado y startsWith(prefijoMes), con
+  /// fallback en Dart para filas con columnas en NULL.
+  Future<List<Map<String, dynamic>>> pagosMesPorEntrenador(
+      int telegramId, String prefijoMes) async {
+    final d = await db;
+    final res = <Map<String, dynamic>>[];
+    final rows = await d.rawQuery(
+        'SELECT id, data FROM pagos WHERE telegram_user_id = ? '
+        'AND fecha LIKE ?',
+        [telegramId, '$prefijoMes%']);
+    for (final r in rows) {
+      try {
+        res.add({
+          ...jsonDecode(r['data'] as String) as Map<String, dynamic>,
+          'id': r['id'],
+        });
+      } catch (_) {}
+    }
+    final nulos = await d.rawQuery(
+        'SELECT id, data FROM pagos WHERE telegram_user_id IS NULL '
+        'OR fecha IS NULL');
+    for (final r in nulos) {
+      try {
+        final p = jsonDecode(r['data'] as String) as Map<String, dynamic>;
+        if (normalizarTelegramId(p['telegram_user_id']) == telegramId &&
+            '${p['fecha'] ?? ''}'.startsWith(prefijoMes)) {
+          res.add({...p, 'id': r['id']});
+        }
+      } catch (_) {}
+    }
+    return res;
+  }
+
+  /// v1.3.4 (ítem 2): pagos de un entrenador en un rango de días
+  /// [desde]..[hasta] (ambos 'YYYY-MM-DD', inclusivos), usando el
+  /// índice compuesto (telegram_user_id, fecha). Misma semántica que
+  /// allMirror + filtro en Dart, con fallback para columnas en NULL.
+  Future<List<Map<String, dynamic>>> pagosRangoPorEntrenador(
+      int telegramId, String desde, String hasta) async {
+    final d = await db;
+    final res = <Map<String, dynamic>>[];
+    final rows = await d.rawQuery(
+        'SELECT id, data FROM pagos WHERE telegram_user_id = ? '
+        'AND fecha >= ? AND fecha <= ?',
+        [telegramId, desde, hasta]);
+    for (final r in rows) {
+      try {
+        res.add({
+          ...jsonDecode(r['data'] as String) as Map<String, dynamic>,
+          'id': r['id'],
+        });
+      } catch (_) {}
+    }
+    final nulos = await d.rawQuery(
+        'SELECT id, data FROM pagos WHERE telegram_user_id IS NULL '
+        'OR fecha IS NULL');
+    for (final r in nulos) {
+      try {
+        final p = jsonDecode(r['data'] as String) as Map<String, dynamic>;
+        if (normalizarTelegramId(p['telegram_user_id']) != telegramId) {
+          continue;
+        }
+        final f = '${p['fecha'] ?? ''}';
+        if (f.length < 10) continue;
+        final dia = f.substring(0, 10);
+        if (dia.compareTo(desde) >= 0 && dia.compareTo(hasta) <= 0) {
+          res.add({...p, 'id': r['id']});
+        }
+      } catch (_) {}
+    }
+    return res;
+  }
+
+  /// v1.3.4 (ítem 2): pagos con metodo='efectivo', opcionalmente de un
+  /// entrenador ([telegramId] null = todos). Filtra por la columna
+  /// `metodo` (+ `telegram_user_id` si se da) en vez de escanear todo
+  /// el espejo; el flag de negocio `entregado`/pendiente sigue
+  /// filtrándose en Dart en cada llamada. Con fallback para columnas
+  /// en NULL.
+  Future<List<Map<String, dynamic>>> pagosEfectivoPorEntrenador(
+      int? telegramId) async {
+    final d = await db;
+    final res = <Map<String, dynamic>>[];
+    final List<Map<String, Object?>> rows;
+    final List<Map<String, Object?>> nulos;
+    if (telegramId != null) {
+      rows = await d.rawQuery(
+          'SELECT id, data FROM pagos WHERE metodo = ? '
+          'AND telegram_user_id = ?',
+          ['efectivo', telegramId]);
+      nulos = await d.rawQuery(
+          'SELECT id, data FROM pagos WHERE metodo IS NULL '
+          'OR telegram_user_id IS NULL');
+    } else {
+      rows = await d.rawQuery(
+          'SELECT id, data FROM pagos WHERE metodo = ?', ['efectivo']);
+      nulos = await d
+          .rawQuery('SELECT id, data FROM pagos WHERE metodo IS NULL');
+    }
+    for (final r in rows) {
+      try {
+        res.add({
+          ...jsonDecode(r['data'] as String) as Map<String, dynamic>,
+          'id': r['id'],
+        });
+      } catch (_) {}
+    }
+    for (final r in nulos) {
+      try {
+        final p = jsonDecode(r['data'] as String) as Map<String, dynamic>;
+        if (p['metodo'] != 'efectivo') continue;
+        if (telegramId != null &&
+            normalizarTelegramId(p['telegram_user_id']) != telegramId) {
+          continue;
+        }
+        res.add({...p, 'id': r['id']});
+      } catch (_) {}
+    }
+    return res;
+  }
+
+  /// v1.3.4 (ítem 2): pagos de un día ('YYYY-MM-DD') con un método dado,
+  /// opcionalmente de un entrenador ([telegramId] null = todos). Usa
+  /// las columnas indexadas `fecha` (+ `telegram_user_id` si se da) y
+  /// la columna `metodo`. Con fallback en Dart para columnas en NULL.
+  Future<List<Map<String, dynamic>>> pagosPorDiaMetodo(
+      String fecha, String metodo, int? telegramId) async {
+    final d = await db;
+    final res = <Map<String, dynamic>>[];
+    final List<Map<String, Object?>> rows;
+    final List<Map<String, Object?>> nulos;
+    if (telegramId != null) {
+      rows = await d.rawQuery(
+          'SELECT id, data FROM pagos WHERE fecha = ? AND metodo = ? '
+          'AND telegram_user_id = ?',
+          [fecha, metodo, telegramId]);
+      nulos = await d.rawQuery(
+          'SELECT id, data FROM pagos WHERE fecha IS NULL '
+          'OR metodo IS NULL OR telegram_user_id IS NULL');
+    } else {
+      rows = await d.rawQuery(
+          'SELECT id, data FROM pagos WHERE fecha = ? AND metodo = ?',
+          [fecha, metodo]);
+      nulos = await d.rawQuery(
+          'SELECT id, data FROM pagos WHERE fecha IS NULL OR metodo IS NULL');
+    }
+    for (final r in rows) {
+      try {
+        res.add({
+          ...jsonDecode(r['data'] as String) as Map<String, dynamic>,
+          'id': r['id'],
+        });
+      } catch (_) {}
+    }
+    for (final r in nulos) {
+      try {
+        final p = jsonDecode(r['data'] as String) as Map<String, dynamic>;
+        final f = '${p['fecha'] ?? ''}';
+        if (f.length < 10 || f.substring(0, 10) != fecha) continue;
+        if (p['metodo'] != metodo) continue;
+        if (telegramId != null &&
+            normalizarTelegramId(p['telegram_user_id']) != telegramId) {
+          continue;
+        }
+        res.add({...p, 'id': r['id']});
+      } catch (_) {}
+    }
+    return res;
+  }
+
   /// Filtra el mirror en SQL por el campo `estado` del JSON, sin cargar
   /// toda la tabla en memoria. (Optimización v1.3: evita full scans.)
   Future<List<Map<String, dynamic>>> mirrorPorEstado(
@@ -1687,6 +2466,40 @@ class LocalDb {
   Future<List<Map<String, dynamic>>> mirrorPorFecha(
       String tabla, String campoFecha, String desde, String hasta) async {
     final d = await db;
+    // v1.3.4 (ítem 2): el espejo `pagos` tiene la columna indexada
+    // `fecha` (YYYY-MM-DD, 10 chars o NULL, poblada desde los primeros
+    // 10 chars del JSON); usar el índice en vez de
+    // substr(json_extract(...)). Semántica idéntica al camino de abajo:
+    // la columna guarda exactamente lo que substr(JSON,1,10) devolvería
+    // para fechas válidas, y las filas anómalas (columna NULL) se
+    // filtran en Dart con el mismo criterio del catch.
+    if (tabla == 'pagos' && campoFecha == 'fecha') {
+      final res = <Map<String, dynamic>>[];
+      final rows = await d.rawQuery(
+          'SELECT id, data FROM pagos WHERE fecha >= ? AND fecha <= ?',
+          [desde, hasta]);
+      for (final r in rows) {
+        try {
+          res.add({
+            ...jsonDecode(r['data'] as String) as Map<String, dynamic>,
+            'id': r['id'],
+          });
+        } catch (_) {}
+      }
+      final nulos =
+          await d.rawQuery('SELECT id, data FROM pagos WHERE fecha IS NULL');
+      for (final r in nulos) {
+        try {
+          final m = jsonDecode(r['data'] as String) as Map<String, dynamic>;
+          final f = '${m[campoFecha] ?? ''}';
+          final dia = f.length >= 10 ? f.substring(0, 10) : f;
+          if (dia.compareTo(desde) >= 0 && dia.compareTo(hasta) <= 0) {
+            res.add({...m, 'id': r['id']});
+          }
+        } catch (_) {}
+      }
+      return res;
+    }
     try {
       final rows = await d.rawQuery(
         "SELECT id, data FROM $tabla WHERE substr(json_extract(data, '\$.$campoFecha'), 1, 10) >= ? "
@@ -1756,7 +2569,7 @@ class LocalDb {
       'detalle': detalle != null ? jsonEncode(detalle) : null,
       'estado': 'pendiente',
       'creada_por': creadaPor,
-      'creada_en': DateTime.now().toIso8601String(),
+      'creada_en': isoHabana(ahoraHabana()), // v1.3.4 (Argón): reloj Habana
       'visibilidad': visibilidad,
       'version': 1,
       'sincronizada': 0,
@@ -1857,7 +2670,7 @@ class LocalDb {
   }) async {
     if (ids.isEmpty) return 0;
     final d = await db;
-    final ahora = DateTime.now().toIso8601String();
+    final ahora = isoHabana(ahoraHabana()); // v1.3.4 (Argón)
     var cambiadas = 0;
 
     await d.transaction((txn) async {
@@ -2133,7 +2946,7 @@ class LocalDb {
     final d = await db;
     final id =
         'aud_${DateTime.now().millisecondsSinceEpoch}_${accion.hashCode.abs()}';
-    final creadaEn = DateTime.now().toIso8601String();
+    final creadaEn = isoHabana(ahoraHabana()); // v1.3.4 (Argón)
     final prev = await d.rawQuery(
         'SELECT hash_propio FROM auditoria_local ORDER BY creada_en DESC, rowid DESC LIMIT 1');
     final hashPrevio =
@@ -2716,7 +3529,7 @@ class LocalDb {
 
   /// Marca un cliente como avisado (v1.0.8). Solo local, no sincroniza.
   Future<void> marcarAvisado(int clienteId) async {
-    final ahora = DateTime.now().toIso8601String();
+    final ahora = isoHabana(ahoraHabana()); // v1.3.4 (Argón)
     await setMeta('avisado_$clienteId', ahora);
   }
 
@@ -2844,7 +3657,7 @@ class LocalDb {
       'tipo': tipo,
       'payload': jsonEncode(payloadFinal),
       'estado': 'pendiente',
-      'creada_ts': DateTime.now().toIso8601String(),
+      'creada_ts': isoHabana(ahoraHabana()), // v1.3.4 (Argón): creada_ts normalizada a Habana
       'foto_path': fotoPath,
       'user_id': auth.userId,
       'telegram_id': auth.telegramId,
@@ -2853,7 +3666,7 @@ class LocalDb {
     try {
       await d.rawUpdate(
           "INSERT OR REPLACE INTO meta(k,v) VALUES('ultimo_guardado_local',?)",
-          [DateTime.now().toIso8601String()]);
+          [isoHabana(ahoraHabana())]); // v1.3.4 (Argón)
     } catch (_) {}
     // Actualización optimista: refleja el cambio en el espejo local de
     // inmediato, sin esperar al pull del servidor.
@@ -2920,7 +3733,7 @@ class LocalDb {
   }) async {
     final d = await db;
     final auth = AuthService();
-    final ahora = DateTime.now().toIso8601String();
+    final ahora = isoHabana(ahoraHabana()); // v1.3.4 (Argón)
     await d.transaction((txn) async {
       // v1.3.2 (Argón #12): persistir op_uuid en la fila local para que
       // marcarSelectivo no la marque como synced prematuramente.
@@ -2981,7 +3794,7 @@ class LocalDb {
         'clave': clave,
         'valor': valor,
         'actualizado_en':
-            DateTime.now().toIso8601String(),
+            isoHabana(ahoraHabana()), // v1.3.4 (Argón)
         'actualizado_por': actualizadoPor,
         'sync_estado': 'pending',
         'version': 1,
@@ -3049,8 +3862,15 @@ class LocalDb {
       if (rows.isNotEmpty) {
         try {
           final creada = DateTime.parse('${rows.first['creada_ts']}');
-          final ms =
-              DateTime.now().difference(creada).inMilliseconds.clamp(0, 1 << 31);
+          // v1.3.4 (Argón, veredicto final): creada_ts trae offset explícito
+          // (-04:00), así que DateTime.parse devuelve UTC real. Comparar
+          // contra UTC real también (antes: ahoraHabana() con bandera UTC
+          // falsa daba siempre -4h → clamp a 0).
+          final ms = DateTime.now()
+              .toUtc()
+              .difference(creada.toUtc())
+              .inMilliseconds
+              .clamp(0, 1 << 31);
           await setMeta('latencia_op_ms', '$ms');
         } catch (_) {}
       }
@@ -3058,7 +3878,7 @@ class LocalDb {
     final update = <String, Object?>{'estado': estado, 'error': error};
     // v1.3.1 (E4): registrar cuándo se envió para el reset de 'enviada'.
     if (estado == 'enviada') {
-      update['enviada_ts'] = DateTime.now().toIso8601String();
+      update['enviada_ts'] = isoHabana(ahoraHabana()); // v1.3.4 (Argón): formato Habana para la poda
     }
     await d.update('ops_queue', update,
         where: 'op_uuid=?', whereArgs: [opUuid]);
@@ -3102,9 +3922,7 @@ class LocalDb {
         estado = 'necesita_revision';
       } else {
         estado = 'error';
-        proximo = DateTime.now()
-            .add(backoffReintento(intentos))
-            .toIso8601String();
+        proximo = isoHabana(ahoraHabana().add(backoffReintento(intentos))); // v1.3.4 (Argón)
       }
     } else if (ec.tipo == TipoErrorSync.auth) {
       estado = 'error';
@@ -3131,7 +3949,7 @@ class LocalDb {
   Future<List<Map<String, dynamic>>> pendientesParaEnvio(String? userId,
       {bool forzar = false}) async {
     final d = await db;
-    final ahora = DateTime.now().toIso8601String();
+    final ahora = isoHabana(ahoraHabana()); // v1.3.4 (Argón)
     final where = StringBuffer(
         "estado IN ('pendiente','error')");
     final args = <dynamic>[];
@@ -3147,10 +3965,29 @@ class LocalDb {
         where: where.toString(), whereArgs: args, orderBy: 'creada_ts ASC');
   }
 
+  /// v1.3.4 Ítem 5 (Argón): incluye 'enviada' — una op enviada pero no
+  /// confirmada sigue en vuelo y usando la red; las fotos no deben
+  /// competir con ella (Regla de Hierro de fotos_cola). NO incluye
+  /// estados terminales: 'aplicada', 'rechazada', 'necesita_revision'.
   Future<int> countPendingOps() async {
     final d = await db;
     final r = await d.rawQuery(
-        'SELECT COUNT(*) c FROM ops_queue WHERE estado IN (\'pendiente\', \'error\')');
+        'SELECT COUNT(*) c FROM ops_queue WHERE estado IN (\'pendiente\', \'enviada\', \'error\')');
+    return (r.first['c'] as int?) ?? 0;
+  }
+
+  /// v1.3.4 Ítem 5 (Argón, Bug A1.2): pendientes excluyendo las ops
+  /// 'foto'/'foto_suplemento'. Esas ops las genera el propio
+  /// FotosColaService al vincular variantes subidas: son consecuencia
+  /// del trabajo de fotos, no trabajo transaccional del usuario, así
+  /// que NO deben disparar la Regla de Hierro ni reiniciar el reloj de
+  /// holgura de fotos_cola (contarlas auto-saboteaba la regla: la
+  /// propia foto bloqueaba la cola de fotos para siempre).
+  Future<int> countPendingOpsNoFoto() async {
+    final d = await db;
+    final r = await d.rawQuery(
+        "SELECT COUNT(*) c FROM ops_queue WHERE estado IN ('pendiente', 'enviada', 'error') "
+        "AND tipo NOT IN ('foto', 'foto_suplemento')");
     return (r.first['c'] as int?) ?? 0;
   }
 
@@ -3179,6 +4016,79 @@ class LocalDb {
         where: 'op_uuid=? AND estado IN (\'pendiente\', \'error\', \'rechazada\', \'necesita_revision\')',
         whereArgs: [opUuid]);
     return n > 0;
+  }
+
+  // -- poda de ops_queue (v1.3.4, item 3) -------------------------------
+
+  /// Poda segura de operaciones aplicadas viejas (v1.3.4, item 3:
+  /// veredicto de Argon).
+  ///
+  /// Borra SOLO filas con estado='aplicada' cuya fecha de envio
+  /// (`enviada_ts`, o `creada_ts` si aun no tiene enviada) sea
+  /// anterior al corte: la hora de La Habana actual menos 60 dias.
+  /// El corte se calcula en Dart con [ahoraHabana]/[isoHabana];
+  /// NUNCA con datetime('now') de SQLite (el reloj del telefono
+  /// puede estar mal).
+  ///
+  /// Seguridad (verificada dos veces):
+  /// 1. El WHERE exige estado='aplicada': pendiente / enviada /
+  ///    error / rechazada / necesita_revision jamas se tocan.
+  /// 2. La subquery NOT IN (filtrada a 'aplicada' y ordenada por
+  ///    coalesce(enviada_ts, creada_ts)) protege SIEMPRE las ultimas
+  ///    200 aplicadas, aunque tengan fecha vieja.
+  ///
+  /// PROHIBIDO VACUUM en produccion: SQLite reutiliza las paginas
+  /// liberadas sin necesidad de compactar.
+  ///
+  /// Devuelve cuantas filas borro. Si la tabla no existe o el SQL
+  /// falla, lo loguea y devuelve 0: la poda es mantenimiento de
+  /// fondo y jamas debe tumbar el arranque ni el sync.
+  Future<int> purgarOpsAplicadas() async {
+    final d = await db;
+    try {
+      final corte =
+          isoHabana(ahoraHabana().subtract(const Duration(days: 60)));
+      final n = await d.rawDelete(
+        'DELETE FROM ops_queue '
+        "WHERE estado = 'aplicada' "
+        'AND coalesce(enviada_ts, creada_ts) < ? '
+        'AND op_uuid NOT IN ('
+        'SELECT op_uuid FROM ops_queue '
+        "WHERE estado = 'aplicada' "
+        'ORDER BY coalesce(enviada_ts, creada_ts) DESC '
+        'LIMIT 200'
+        ')',
+        [corte],
+      );
+      debugPrint('[poda_ops] aplicadas borradas=$n corte=$corte');
+      return n;
+    } catch (e) {
+      // Defensiva: "no such table" u otro fallo de SQLite -> log y
+      // continua sin borrar nada.
+      debugPrint('[poda_ops] fallo (no fatal): $e');
+      return 0;
+    }
+  }
+
+  /// Ejecuta [purgarOpsAplicadas] como maximo 1 vez al dia (v1.3.4,
+  /// item 3).
+  ///
+  /// Disenada para lanzarse desde el arranque con `unawaited(...)`:
+  /// nunca lanza (todo error interno se loguea) y no bloquea la UI.
+  /// La ultima ejecucion queda en meta 'ultima_poda_ops' como fecha
+  /// ISO (yyyy-MM-dd) de La Habana; si ya se podo hoy, se salta.
+  Future<void> podaOpsDiariaSiToca() async {
+    try {
+      final hoy = hoyHabanaIso();
+      final ultima = await getMeta('ultima_poda_ops');
+      if (ultima == hoy) return; // Ya se podo hoy.
+      final borradas = await purgarOpsAplicadas();
+      await setMeta('ultima_poda_ops', hoy);
+      debugPrint('[poda_ops] diaria ok: borradas=$borradas dia=$hoy');
+    } catch (e) {
+      // Defensiva: la poda jamas debe impedir el arranque.
+      debugPrint('[poda_ops] diaria fallo (no fatal): $e');
+    }
   }
 
   // -- fotos pendientes --------------------------------------------------
@@ -3290,7 +4200,7 @@ class LocalDb {
       'UPDATE fotos_pendientes SET retry_count = retry_count + 1, '
       'last_error = ?, last_retry_at = ?'
       '${definitivo ? ", estado = 'error'" : ''} WHERE id = ?',
-      [error, DateTime.now().toIso8601String(), fotoId],
+      [error, isoHabana(ahoraHabana()), fotoId], // v1.3.4 (Argón)
     );
   }
 
@@ -3357,7 +4267,7 @@ class LocalDb {
             'worker_id': null,
             'lease_hasta': null,
             'proximo_intento_en': null,
-            'actualizado_en': DateTime.now().toIso8601String(),
+            'actualizado_en': isoHabana(ahoraHabana()), // v1.3.4 (Argón)
           },
           where: 'id=?',
           whereArgs: [f['id']]);

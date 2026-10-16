@@ -92,11 +92,10 @@ class _PagosRealizadosScreenState extends State<PagosRealizadosScreen> {
         '${n.month.toString().padLeft(2, '0')}';
 
     // Clientes con pago este mes
-    final pagos = await LocalDb.instance.allMirror('pagos');
+    // v1.3.4 (ítem 2): columna `fecha` indexada en vez de allMirror.
+    final pagos = await LocalDb.instance.pagosDelMes(pref);
     final porCliente = <int, Map<String, dynamic>>{};
     for (final p in pagos) {
-      final f = p['fecha'] as String?;
-      if (f == null || !f.startsWith(pref)) continue;
       final cid = p['cliente_id'] as int?;
       if (cid == null) continue;
       // Quedarse con el pago más reciente por cliente

@@ -45,16 +45,15 @@ class _RiesgoScreenState extends State<RiesgoScreen> {
   /// Inactivos con 3+ pagos cuyo último pago fue hace más de 60 días.
   Future<List<Map<String, dynamic>>> _clientesEnRiesgo() async {
     final clientes = await LocalDb.instance.allMirror('clientes');
-    final pagos = await LocalDb.instance.allMirror('pagos');
     final hoy = DateTime.now();
     final res = <Map<String, dynamic>>[];
     for (final c in clientes) {
       if (c['estado'] != 'inactivo') continue;
       final cid = c['id'] as int?;
       if (cid == null) continue;
-      final hp = pagos
-          .where((p) => (p['cliente_id'] as int?) == cid)
-          .toList();
+      // v1.3.4 (ítem 2): columna `cliente_id` indexada en vez de
+      // allMirror + filtro en Dart.
+      final hp = await LocalDb.instance.pagosPorCliente(cid);
       if (hp.length < 3) continue;
       hp.sort(
           (a, b) => '${b['fecha']}'.compareTo('${a['fecha']}'));

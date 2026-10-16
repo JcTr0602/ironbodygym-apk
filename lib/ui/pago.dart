@@ -97,9 +97,8 @@ class _PagoScreenState extends State<PagoScreen> {
     final cobros = <_Cobro>[];
 
     // 1) Espejo: pagos con fecha de hoy (ya pasaron por el servidor).
-    for (final p in await LocalDb.instance.allMirror('pagos')) {
-      final f = '${p['fecha'] ?? ''}';
-      if (!f.startsWith(hoyStr)) continue;
+    // v1.3.4 (ítem 2): columna `fecha` indexada en vez de allMirror.
+    for (final p in await LocalDb.instance.pagosDelDia(hoyStr)) {
       final cid = (p['cliente_id'] as int?) ?? 0;
       String nombre = '¿?';
       try {

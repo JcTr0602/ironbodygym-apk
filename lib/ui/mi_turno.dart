@@ -115,11 +115,11 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
         if (id != null) mios.add(id);
       }
     }
-    for (final p in await LocalDb.instance.allMirror('pagos')) {
-      if ((p['telegram_user_id'] as int?) == tid) {
-        final id = (p['cliente_id'] as num?)?.toInt();
-        if (id != null) mios.add(id);
-      }
+    // v1.3.4 (ítem 2): columna `telegram_user_id` indexada en vez
+    // de allMirror + filtro en Dart.
+    for (final p in await LocalDb.instance.pagosPorEntrenador(tid)) {
+      final id = LocalDb.normalizarTelegramId(p['cliente_id']);
+      if (id != null) mios.add(id);
     }
     final out = <Map<String, dynamic>>[];
     for (final c in await LocalDb.instance.allMirror('clientes')) {

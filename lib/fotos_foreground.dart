@@ -84,9 +84,17 @@ class _FotosTaskHandler extends TaskHandler {
     _procesando = true;
     try {
       await FotosColaService.instance.procesarCola();
+      // v1.3.4 (veredicto de Argón, Bug A1.4): la decisión de detener
+      // usa pendientes RECLAMABLES. Si solo quedan variantes 'original'
+      // diferidas por QoS (no reclamables ahora), el servicio se detiene
+      // en vez de mantenerse vivo con WakeLock cada 5 s sin trabajo
+      // real. El 'original' diferido se reclama en un ciclo posterior
+      // (próximo encolado o push periódico del isolate de UI).
       final pendientes =
           await FotosColaService.instance.contarPendientes();
-      if (pendientes == 0) {
+      final reclamables =
+          await FotosColaService.instance.contarPendientesReclamables();
+      if (reclamables == 0) {
         await FlutterForegroundTask.stopService();
       } else {
         await FlutterForegroundTask.updateService(

@@ -49,7 +49,8 @@ Future<bool> exportarExcel() async {
     final n = DateTime.now();
     final pref = '${n.year.toString().padLeft(4, '0')}-'
         '${n.month.toString().padLeft(2, '0')}';
-    final pagos = await LocalDb.instance.allMirror('pagos');
+    // v1.3.4 (ítem 2): columna `fecha` indexada en vez de allMirror.
+    final pagos = await LocalDb.instance.pagosDelMes(pref);
     final nombreCliente = <int, String>{
       for (final c in clientes)
         if (c['id'] is int) c['id'] as int: '${c['nombre'] ?? ''}'

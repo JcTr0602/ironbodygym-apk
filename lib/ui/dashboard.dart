@@ -581,17 +581,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
   Future<void> _detalleDia(String fechaIso, double monto) async {
     double efectivo = 0, transferencia = 0, diario = 0;
     int n = 0;
-    for (final p in await LocalDb.instance.allMirror('pagos')) {
-      final f = '${p['fecha'] ?? ''}';
-      if (f.length >= 10 && f.substring(0, 10) == fechaIso) {
-        final m = (p['monto'] as num?)?.toDouble() ?? 0;
-        if ('${p['metodo']}' == 'transferencia') {
-          transferencia += m;
-        } else {
-          efectivo += m;
-        }
-        n++;
+    // v1.3.4 (ítem 2): columna `fecha` indexada en vez de allMirror.
+    for (final p in await LocalDb.instance.pagosDelDia(fechaIso)) {
+      final m = (p['monto'] as num?)?.toDouble() ?? 0;
+      if ('${p['metodo']}' == 'transferencia') {
+        transferencia += m;
+      } else {
+        efectivo += m;
       }
+      n++;
     }
     for (final d in await LocalDb.instance.allMirror('pagos_diarios')) {
       final f = '${d['fecha'] ?? ''}';

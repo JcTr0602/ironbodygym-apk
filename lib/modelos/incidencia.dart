@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../tiempo.dart';
+
 /// Tipo personalizado de incidencia.
 /// Revisado por Gemini 2026-10-13.
 class TipoIncidencia {
@@ -180,13 +182,15 @@ class Incidencia {
     final fin = (estado == 'resuelta' &&
             resueltaEn != null)
         ? resueltaEn!
-        : DateTime.now();
+        // v1.3.4: hora de La Habana, no la del dispositivo.
+        : ahoraHabana();
     return fin.difference(inicio).inDays;
   }
 
+  // v1.3.4: hora de La Habana, no la del dispositivo.
   bool get vencida =>
       fechaLimite != null &&
-      DateTime.now().isAfter(fechaLimite!) &&
+      ahoraHabana().isAfter(fechaLimite!) &&
       estado != 'resuelta';
 
   bool get estaResuelta => estado == 'resuelta';

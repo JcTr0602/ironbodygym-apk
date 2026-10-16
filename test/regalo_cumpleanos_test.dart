@@ -4,9 +4,12 @@
 /// - Argón spec 1: el regalo (metodo='cortesia') no cuenta en
 ///   conteoPagosDia (no infla pagos_count del cierre ni genera comisión).
 /// - Argón spec 3: normalización de teléfonos cubanos para wa.me.
+import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ironbody_gym/negocio.dart';
 import 'package:ironbody_gym/localdb.dart';
+import 'package:path/path.dart' as p;
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -51,6 +54,12 @@ void main() {
       sqfliteFfiInit();
       databaseFactory = databaseFactoryFfi;
       SharedPreferences.setMockInitialValues({});
+      // Hermético: borrar el archivo para no heredar el esquema de otro
+      // test (algunos fixtures crean BDs mínimas sin la tabla pagos).
+      final dir = await getDatabasesPath();
+      try {
+        await File(p.join(dir, 'ironbody.db')).delete();
+      } catch (_) {}
       await LocalDb.resetParaTest();
 
       final db = await LocalDb.instance.db;

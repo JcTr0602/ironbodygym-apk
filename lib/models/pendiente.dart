@@ -2,6 +2,8 @@
 /// Agrupación Entrenador > Días. Testeable sin SQLite.
 library;
 
+import '../tiempo.dart';
+
 /// Un pago individual pendiente de entrega.
 class PagoPendiente {
   final int id;
@@ -82,7 +84,8 @@ class PendienteDia {
 
   int get diasDeAntiguedad {
     // Gemini: usar UTC para evitar problemas con DST.
-    final hoy = DateTime.now();
+    // v1.3.4: hora de La Habana, no la del dispositivo.
+    final hoy = ahoraHabana();
     final f =
         DateTime.utc(fecha.year, fecha.month, fecha.day);
     final h =

@@ -81,7 +81,7 @@ void main() {
     final db = await LocalDb.instance.db;
 
     // 1. Versión migrada (v25 actual; el número crece con cada release).
-    expect(await db.getVersion(), 25);
+    expect(await db.getVersion(), 26);
 
     // 2. Datos preservados.
     final clientes = await db.query('clientes', orderBy: 'id');
@@ -286,7 +286,7 @@ void main() {
     // Al abrir con LocalDb (v25), fotos_cola debe seguir existiendo y
     // operativa (el upgrade no la toca pero tampoco la rompe).
     final db = await LocalDb.instance.db;
-    expect(await db.getVersion(), 25);
+    expect(await db.getVersion(), 26);
     await db.insert('fotos_cola', {
       'op_uuid': 'test-uuid',
       'tipo': 'original',

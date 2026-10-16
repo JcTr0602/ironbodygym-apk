@@ -18,7 +18,7 @@ import 'package:uuid/uuid.dart';
 
 import '../auth.dart';
 import '../app_log.dart';
-import '../turno_service.dart';
+import '../tiempo.dart';
 import '../fotos.dart';
 import '../fotos_cola.dart';
 import '../localdb.dart';
@@ -100,14 +100,14 @@ class _FichaScreenState extends State<FichaScreen> {
     } catch (_) {}
     try {
       Map<String, dynamic>? mejor;
-      for (final p in await LocalDb.instance.allMirror('pagos')) {
-        if ((p['cliente_id'] as int?) == clienteId &&
-            (p['metodo'] as String?) == 'cortesia' &&
-            ('${p['fecha'] ?? ''}').startsWith(anio)) {
-          if (mejor == null ||
-              '${p['fecha']}'.compareTo('${mejor['fecha']}') > 0) {
-            mejor = p;
-          }
+      // v1.3.4 (ítem 2): lectura indexada (cliente_id, fecha) + metodo,
+      // en vez de allMirror('pagos') + filtro en Dart. Incluye fallback
+      // para filas con columnas NULL.
+      for (final p in await LocalDb.instance
+          .pagosCortesiaClienteAnio(clienteId, anio)) {
+        if (mejor == null ||
+            '${p['fecha']}'.compareTo('${mejor['fecha']}') > 0) {
+          mejor = p;
         }
       }
       if (mejor != null) {
@@ -322,7 +322,7 @@ class _FichaScreenState extends State<FichaScreen> {
       tipo: 'regalar_mes_cumpleanos',
       payload: {
         'cliente_id': widget.clienteId,
-        'fecha': DateTime.now().toIso8601String().substring(0, 10),
+        'fecha': isoHabana(ahoraHabana()).substring(0, 10), // v1.3.3 (Argón): fecha de negocio en hora de La Habana, no DateTime.now() crudo
       },
     );
     // b2) Guardar datos del mensaje para reenvíos futuros (candado local).
@@ -1003,7 +1003,7 @@ class _FichaScreenState extends State<FichaScreen> {
         'meses': 1,
         'metodo': 'efectivo',
         'fecha':
-            DateTime.now().toIso8601String().substring(0, 10),
+            isoHabana(ahoraHabana()).substring(0, 10), // v1.3.3 (Argón): hora de La Habana
       },
     );
     if (!mounted) return;

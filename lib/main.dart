@@ -11,6 +11,7 @@ import 'package:workmanager/workmanager.dart';
 import 'app_log.dart';
 import 'auth.dart';
 import 'config.dart';
+import 'localdb.dart';
 import 'sync.dart';
 import 'fotos_foreground.dart';
 import 'theme.dart';
@@ -96,6 +97,10 @@ Future<void> main() async {
   };
   // v1.3.1 (B4): inicializar servicio foreground de fotos.
   initForegroundFotos();
+  // v1.3.4 (item 3): poda diaria de ops aplicadas viejas en
+  // background, guardada por fecha (meta 'ultima_poda_ops');
+  // no bloquea el arranque.
+  unawaited(LocalDb.instance.podaOpsDiariaSiToca());
   runApp(const IronBodyApp());
 }
 

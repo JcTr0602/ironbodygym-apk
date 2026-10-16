@@ -19,7 +19,9 @@ import 'localdb.dart';
 import 'app_log.dart';
 import 'auth.dart';
 import 'config.dart';
-import 'sync.dart' show SyncEngine, EstadoSubida, ResultadoSubidaFoto;
+import 'fotos_qos.dart';
+import 'tiempo.dart';
+import 'sync.dart' show SyncEngine, EstadoSubida;
 
 /// Genera thumb + display WebP. Corre directo (sin compute): el plugin
 /// ya delega a hilos nativos y compute() no tiene MethodChannels.
@@ -85,6 +87,19 @@ class FotosColaService {
     }
   }
 
+  /// v1.3.4 Ítem 5 (QoS, Argón): reloj de holgura de ops_queue.
+  /// Instante (hora Habana) en que ops_queue se observó vacía por última
+  /// vez. Se resetea a null cuando vuelve a haber pendientes. En memoria
+  /// por actor (el isolate principal y el foreground service tienen cada
+  /// uno el suyo): tras un reinicio se exige de nuevo la holgura completa,
+  /// conservador por diseño.
+  static DateTime? _opsVaciaDesde;
+
+  /// v1.3.4 Ítem 5: ¿el último chunk de 'display' medido en este actor
+  /// subió rápido (< 5 s para 128 KB)? Default false = conservador: el
+  /// 'original' espera hasta ver una subida rápida real.
+  static bool _ultimoDisplayRapido = false;
+
   /// Genera variantes WebP en background y las encola.
   /// Si la compresión falla, encola solo el original como fallback.
   Future<int> encolarFoto({
@@ -118,7 +133,8 @@ class FotosColaService {
     }
 
     final db = await LocalDb.instance.db;
-    final ahora = DateTime.now().toIso8601String();
+    // v1.3.4 (Argón): hora Habana, estándar obligatorio (no DateTime.now()).
+    final ahora = isoHabana(ahoraHabana());
     // v1.2.9+40 (Gemini): inserts individuales en vez de batch para
     // trazabilidad (son 1-3 filas, el costo es despreciable).
     var n = 0;
@@ -231,29 +247,43 @@ class FotosColaService {
     final db = await LocalDb.instance.db;
     // Worker ID único para esta instancia del despachador.
     final workerId = const Uuid().v4();
-    final ahora = DateTime.now();
 
-    // v1.2.9+42 (Gemini): el lease expiró si lease_hasta < ahora.
-    // (Antes comparaba contra ahora-10min, exigiendo 20min para liberar.)
-    final ahoraIso = ahora.toIso8601String();
-    await db.update(
-      'fotos_cola',
-      {
-        'estado': 'pendiente',
-        'worker_id': null,
-        'lease_hasta': null,
-        'actualizado_en': ahoraIso,
-      },
-      where: "estado = 'subiendo' AND (lease_hasta IS NULL OR lease_hasta < ?)",
-      whereArgs: [ahoraIso],
-    );
+    AppLog.info('fotos', 'qos_ciclo',
+        d: 'inicio despachador; display_rapido=$_ultimoDisplayRapido');
 
     var redVerificada = false;
     while (true) {
+      // v1.3.4 Ítem 5 (Argón, Bug A1.1+A1.2) — REGLA DE HIERRO por
+      // iteración: las operaciones transaccionales (pagos, turnos,
+      // clientes) son sagradas y nunca compiten con fotos por ancho de
+      // banda. Se verifica al inicio de CADA iteración (no solo al
+      // entrar): si el entrenador registra algo a mitad del lote, el
+      // loop cede la red de inmediato. Incluye 'enviada': el push está
+      // usando la red en este momento.
+      // Las ops 'foto'/'foto_suplemento' se EXCLUYEN del conteo: las
+      // genera el propio despachador al vincular variantes; contarlas
+      // auto-saboteaba la regla (la propia foto reiniciaba la holgura
+      // y bloqueaba la cola para siempre). Tampoco reinician
+      // _opsVaciaDesde: no son trabajo transaccional del usuario.
+      final opsPendientes = await LocalDb.instance.countPendingOpsNoFoto();
+      if (opsPendientes > 0) {
+        _opsVaciaDesde = null; // vuelve a haber trabajo: la holgura se reinicia
+        AppLog.aviso('fotos', 'pausa_qos',
+            d: 'ops_queue con $opsPendientes pendientes (sin foto): '
+                'fotos en pausa');
+        break;
+      }
+      // ops_queue (sin foto) vacía: arrancar o mantener el reloj de
+      // holgura (hora Habana, estándar v1.3.4).
+      _opsVaciaDesde ??= ahoraHabana();
+
       // v1.2.9+43 (Gemini R3): limpieza continua de leases expirados.
       // Si el proceso corre en segundo plano, los leases que expiran
       // durante la ejecución se liberan sin reiniciar la app.
-      final ahoraCiclo = DateTime.now().toIso8601String();
+      // v1.2.9+42 (Gemini): el lease expiró si lease_hasta < ahora.
+      // (Antes comparaba contra ahora-10min, exigiendo 20min para liberar.)
+      // v1.3.4 (Argón): hora Habana, estándar obligatorio.
+      final ahoraCiclo = isoHabana(ahoraHabana());
       await db.update(
         'fotos_cola',
         {
@@ -269,11 +299,28 @@ class FotosColaService {
       // Tomar la siguiente foto pendiente (con backoff respetado).
       // v1.3.2 (Argón): priorizar thumb → display → original para que el
       // usuario vea la miniatura rápido aunque la conexión se caiga después.
-      final ahoraIso = DateTime.now().toIso8601String();
+      // v1.3.4 Ítem 5 (Argón) — DEGRADACIÓN ELEGANTE de 'original' (sin
+      // connectivity_plus, prohibido: con VPN reporta 'vpn'/'other'
+      // inconsistente). Heurística 100% agnóstica a VPN: 'original' se
+      // reclama si (a) ops_queue lleva vacía > 5 min Y (b) el último
+      // chunk de 'display' subió rápido (< 5 s para 128 KB); o como
+      // fallback (Bug A1.3), tras 15 min de holgura aunque no haya
+      // medición de velocidad (reinicio reciente o sin 'display' por
+      // subir para medir). Se recalcula por iteración: un 'display'
+      // subido en este mismo ciclo puede desbloquear al 'original' sin
+      // esperar al próximo.
+      final puedeOriginal = originalPermitidoFallback(
+        opsVaciaDesde: _opsVaciaDesde,
+        ultimoDisplayRapido: _ultimoDisplayRapido,
+        ahora: ahoraHabana(),
+      );
+      // v1.3.4 (Argón): hora Habana, estándar obligatorio.
+      final ahoraIso = isoHabana(ahoraHabana());
       final fotos = await db.query(
         'fotos_cola',
         where: "estado = 'pendiente' AND intentos < 5 "
-            "AND (proximo_intento_en IS NULL OR proximo_intento_en <= ?)",
+            "AND (proximo_intento_en IS NULL OR proximo_intento_en <= ?)"
+            "${puedeOriginal ? '' : " AND tipo != 'original'"}",
         whereArgs: [ahoraIso],
         orderBy: "CASE tipo WHEN 'thumb' THEN 0 "
             "WHEN 'display' THEN 1 ELSE 2 END, creado_en ASC",
@@ -361,7 +408,7 @@ class FotosColaService {
               {
                 'estado': 'error',
                 'ultimo_error': 'op rechazada por el servidor',
-                'actualizado_en': DateTime.now().toIso8601String(),
+                'actualizado_en': isoHabana(ahoraHabana()),
               },
               where: 'id = ?',
               whereArgs: [f['id']],
@@ -374,10 +421,9 @@ class FotosColaService {
             await db.update(
               'fotos_cola',
               {
-                'proximo_intento_en': DateTime.now()
-                    .add(const Duration(minutes: 2))
-                    .toIso8601String(),
-                'actualizado_en': DateTime.now().toIso8601String(),
+                'proximo_intento_en':
+                    isoHabana(ahoraHabana().add(const Duration(minutes: 2))),
+                'actualizado_en': isoHabana(ahoraHabana()),
               },
               where: 'id = ?',
               whereArgs: [f['id']],
@@ -390,16 +436,15 @@ class FotosColaService {
 
       // Fix Luna 1: reclamo exclusivo con worker_id. Verifica filas
       // afectadas — si es 0, otro worker la reclamó primero.
-      final leaseHasta = DateTime.now()
-          .add(const Duration(minutes: 10))
-          .toIso8601String();
+      final leaseHasta =
+          isoHabana(ahoraHabana().add(const Duration(minutes: 10)));
       final reclamadas = await db.update(
         'fotos_cola',
         {
           'estado': 'subiendo',
           'worker_id': workerId,
           'lease_hasta': leaseHasta,
-          'actualizado_en': DateTime.now().toIso8601String(),
+          'actualizado_en': isoHabana(ahoraHabana()),
         },
         where: 'id = ? AND estado = ?',
         whereArgs: [id, 'pendiente'],
@@ -418,7 +463,7 @@ class FotosColaService {
           'fotos_cola',
           {
             'storage_path': storagePath,
-            'actualizado_en': DateTime.now().toIso8601String(),
+            'actualizado_en': isoHabana(ahoraHabana()),
           },
           where: 'id = ? AND worker_id = ?',
           whereArgs: [id, workerId],
@@ -481,7 +526,7 @@ class FotosColaService {
                 'storage_path': storagePath,
                 'worker_id': null,
                 'lease_hasta': null,
-                'actualizado_en': DateTime.now().toIso8601String(),
+                'actualizado_en': isoHabana(ahoraHabana()),
               },
               where: 'id = ? AND worker_id = ?',
               whereArgs: [id, workerId],
@@ -530,10 +575,9 @@ class FotosColaService {
               'estado': 'pendiente',
               'worker_id': null,
               'lease_hasta': null,
-              'proximo_intento_en': DateTime.now()
-                  .add(const Duration(minutes: 2))
-                  .toIso8601String(),
-              'actualizado_en': DateTime.now().toIso8601String(),
+              'proximo_intento_en':
+                  isoHabana(ahoraHabana().add(const Duration(minutes: 2))),
+              'actualizado_en': isoHabana(ahoraHabana()),
             },
             where: 'id = ? AND worker_id = ?',
             whereArgs: [id, workerId],
@@ -544,9 +588,8 @@ class FotosColaService {
         // Fallo real de red: aplicar backoff incremental.
         final intentos = (f['intentos'] as int? ?? 0) + 1;
         final esperaMin = [0.5, 2, 10, 30][(intentos - 1).clamp(0, 3)];
-        final proximo = DateTime.now()
-            .add(Duration(seconds: (esperaMin * 60).toInt()))
-            .toIso8601String();
+        final proximo = isoHabana(
+            ahoraHabana().add(Duration(seconds: (esperaMin * 60).toInt())));
         await db.update(
           'fotos_cola',
           {
@@ -555,7 +598,7 @@ class FotosColaService {
             'worker_id': null,
             'lease_hasta': null,
             'proximo_intento_en': proximo,
-            'actualizado_en': DateTime.now().toIso8601String(),
+            'actualizado_en': isoHabana(ahoraHabana()),
           },
           where: 'id = ? AND worker_id = ?',
           whereArgs: [id, workerId],
@@ -672,9 +715,8 @@ class FotosColaService {
         final afectadas = await db.update(
           'fotos_cola',
           {
-            'lease_hasta': DateTime.now()
-                .add(const Duration(minutes: 10))
-                .toIso8601String()
+            'lease_hasta': isoHabana(
+                ahoraHabana().add(const Duration(minutes: 10)))
           },
           where: "id = ? AND worker_id = ? AND estado = 'subiendo'",
           whereArgs: [id, workerId],
@@ -712,6 +754,11 @@ class FotosColaService {
         return null;
       }
 
+      // v1.3.4 Ítem 5: medir la velocidad del último chunk de 'display'
+      // (heurística de QoS agnóstica a VPN; sin connectivity_plus).
+      // Solo cuenta si la subida fue exitosa: un fallo descalifica al
+      // 'original' (red degradada → la variante pesada espera).
+      final inicioChunk = ahoraHabana();
       final res = await SyncEngine.instance.subirFotoCola(
         opUuid: opUuid,
         tipo: tipo,
@@ -720,6 +767,11 @@ class FotosColaService {
         claveTusLoc: claveTusLoc,
         claveTusOffset: claveTusOffset,
       );
+      final finChunk = ahoraHabana();
+      if (tipo == 'display') {
+        _ultimoDisplayRapido = res.estado == EstadoSubida.subida &&
+            chunkDisplayRapido(bytes.length, inicioChunk, finChunk);
+      }
 
       switch (res.estado) {
         case EstadoSubida.subida:
@@ -748,6 +800,9 @@ class FotosColaService {
           return null;
       }
     } catch (e) {
+      // v1.3.4 Ítem 5: una excepción a mitad de subida invalida la
+      // medición de velocidad (el último display no subió rápido).
+      if (tipo == 'display') _ultimoDisplayRapido = false;
       await _marcarError(id, '$e', workerId: workerId);
       // v1.2.9+46 (AppLog).
       AppLog.error('fotos', 'excepcion_subida', d: 'id=$id error=$e');
@@ -767,7 +822,7 @@ class FotosColaService {
   Future<void> _marcarError(int id, String error,
       {bool permanente = false, String? workerId}) async {
     final db = await LocalDb.instance.db;
-    final ahora = DateTime.now().toIso8601String();
+    final ahora = isoHabana(ahoraHabana());
 
     if (permanente) {
       await db.update(
@@ -813,6 +868,16 @@ class FotosColaService {
   /// v1.2.9+43 (Gemini): vincula usando una transacción EXISTENTE.
   /// No crea una nueva transacción (SQLite no permite anidadas).
   /// Usa UUID determinista para idempotencia (Fix B5).
+  /// v1.3.4 (Argón, Bug A1.2 — decisión): tras vincular NO se dispara
+  /// push() para drenar las ops 'foto'/'foto_suplemento' generadas.
+  /// Razones: (1) el Foreground Service corre en otro isolate y
+  /// SyncEngine.push() no comparte el lock del isolate de UI → pushes
+  /// concurrentes y tormentas de push en background (un push completo
+  /// con pull por cada foto); (2) las ops son diminutas e idempotentes
+  /// (UUID v5 determinista + ConflictAlgorithm.replace) y no bloquean
+  /// nada: drenan en el próximo push normal (timer 60 min o cualquier
+  /// acción del usuario que lo dispare); en el path de UI, sync.dart
+  /// ya hace un segundo _uploadOps tras procesarCola si subidas > 0.
   Future<void> _vincularEnTransaccion(
       dynamic txn, int fotoId, Map<String, dynamic> f, String storagePath) async {
     final opUuid = f['op_uuid'] as String;
@@ -871,7 +936,7 @@ class FotosColaService {
           'foto_uuid': opUuid,
         }),
         'estado': 'pendiente',
-        'creada_ts': DateTime.now().toIso8601String(),
+        'creada_ts': isoHabana(ahoraHabana()),
         // v1.3.3 (Argón): no dejar la op huérfana si cambia la sesión.
         ..._identidadSegura(),
       }, conflictAlgorithm: ConflictAlgorithm.replace);
@@ -931,7 +996,7 @@ class FotosColaService {
         'foto_uuid': opUuid,
       }),
       'estado': 'pendiente',
-      'creada_ts': DateTime.now().toIso8601String(),
+      'creada_ts': isoHabana(ahoraHabana()),
       // v1.3.3 (Argón): no dejar la op huérfana si cambia la sesión.
       ..._identidadSegura(),
     }, conflictAlgorithm: ConflictAlgorithm.replace);
@@ -941,11 +1006,39 @@ class FotosColaService {
   /// Cuenta fotos pendientes (para el Foreground Service).
   Future<int> contarPendientes() async {
     final db = await LocalDb.instance.db;
-    final ahoraIso = DateTime.now().toIso8601String();
+    // v1.3.4 (Argón): hora Habana, estándar obligatorio.
+    final ahoraIso = isoHabana(ahoraHabana());
     final r = await db.rawQuery(
         "SELECT COUNT(*) as n FROM fotos_cola WHERE estado = 'pendiente' "
         "AND intentos < 5 "
         "AND (proximo_intento_en IS NULL OR proximo_intento_en <= ?)",
+        [ahoraIso]);
+    return (r.first['n'] as int? ?? 0);
+  }
+
+  /// v1.3.4 (veredicto de Argón, Bug A1.4): pendientes que la QoS
+  /// permitiría reclamar AHORA. Excluye las variantes 'original'
+  /// diferidas por QoS (holgura/velocidad insuficiente): contarlas
+  /// mantendría el Foreground Service vivo con WakeLock cada 5 s sin
+  /// trabajo real que hacer. El Foreground Service debe detenerse
+  /// cuando esto es 0; el 'original' diferido se reclama en un ciclo
+  /// posterior (próximo encolado que reinicie el servicio, o el push
+  /// periódico del isolate de UI, cuya holgura propia sí alcanza los
+  /// 15 min del fallback).
+  Future<int> contarPendientesReclamables() async {
+    final db = await LocalDb.instance.db;
+    final ahora = ahoraHabana();
+    final puedeOriginal = originalPermitidoFallback(
+      opsVaciaDesde: _opsVaciaDesde,
+      ultimoDisplayRapido: _ultimoDisplayRapido,
+      ahora: ahora,
+    );
+    final ahoraIso = isoHabana(ahora);
+    final r = await db.rawQuery(
+        "SELECT COUNT(*) as n FROM fotos_cola WHERE estado = 'pendiente' "
+        "AND intentos < 5 "
+        "AND (proximo_intento_en IS NULL OR proximo_intento_en <= ?)"
+        "${puedeOriginal ? '' : " AND tipo != 'original'"}",
         [ahoraIso]);
     return (r.first['n'] as int? ?? 0);
   }
@@ -966,7 +1059,7 @@ class FotosColaService {
 
       // Filas viejas completadas/error: borrar archivos y filas.
       final limite =
-          DateTime.now().subtract(const Duration(days: 7)).toIso8601String();
+          isoHabana(ahoraHabana().subtract(const Duration(days: 7)));
       final viejas = await db.query(
         'fotos_cola',
         columns: ['id', 'ruta_local'],

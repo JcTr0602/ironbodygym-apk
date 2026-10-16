@@ -38,8 +38,8 @@ class _HistorialEntrenadorScreenState
     // Pagos del mes agrupados por entrenador (por nombre).
     final cobrado = <String, double>{};
     final numPagos = <String, int>{};
-    for (final p in await LocalDb.instance.allMirror('pagos')) {
-      if (!'${p['fecha'] ?? ''}'.startsWith(pref)) continue;
+    // v1.3.4 (ítem 2): columna `fecha` indexada en vez de allMirror.
+    for (final p in await LocalDb.instance.pagosDelMes(pref)) {
       final nombre = ('${p['registrado_por_nombre'] ?? ''}'.trim().isEmpty)
           ? '${p['registrado_por'] ?? 'Desconocido'}'
           : '${p['registrado_por_nombre']}'.trim();

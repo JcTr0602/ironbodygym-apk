@@ -14,6 +14,7 @@ import '../novedades.dart';
 import '../perfil.dart';
 import '../sync.dart';
 import '../theme.dart';
+import '../tiempo.dart';
 import 'admin.dart';
 import 'incidencias/lista_incidencias.dart';
 import 'ajustes.dart';
@@ -321,7 +322,7 @@ class _HomeScreenState extends State<HomeScreen>
       // de +24h en el feed, no turnos sin reporte.
       final turnosSinRep = _auth.isOwner
           ? await turnosSinReporte(
-              DateTime.now().toIso8601String().substring(0, 10))
+              hoyHabanaIso()) // v1.3.4 (Argón): fecha de negocio en La Habana
           : <String>[];
       // Alerta de entrenadores sin actividad reciente (solo dueño).
       final sinSync = <Map<String, dynamic>>[];
@@ -581,7 +582,7 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   String _fechaHoy() {
-    final h = DateTime.now();
+    final h = ahoraHabana(); // v1.3.4 (Argón): cabecera en hora de La Habana
     const meses = [
       'ene', 'feb', 'mar', 'abr', 'may', 'jun',
       'jul', 'ago', 'sep', 'oct', 'nov', 'dic'

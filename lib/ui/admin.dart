@@ -761,9 +761,8 @@ class _AdminScreenState extends State<AdminScreen> {
     final n = DateTime.now();
     final pref = '${n.year.toString().padLeft(4, '0')}-'
         '${n.month.toString().padLeft(2, '0')}';
-    final pagos = await LocalDb.instance.allMirror('pagos');
-    final pagosMes =
-        pagos.where((p) => '${p['fecha'] ?? ''}'.startsWith(pref)).toList();
+    // v1.3.4 (ítem 2): columna `fecha` indexada en vez de allMirror.
+    final pagosMes = await LocalDb.instance.pagosDelMes(pref);
     final csvPagos = _csv(
       ['id', 'cliente_id', 'fecha', 'monto', 'metodo', 'periodo'],
       [

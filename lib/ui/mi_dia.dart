@@ -68,9 +68,8 @@ class _MiDiaScreenState extends State<MiDiaScreen> {
     };
     final cobrados = <Map<String, dynamic>>[];
     double total = 0;
-    for (final p in await LocalDb.instance.allMirror('pagos')) {
-      final f = '${p['fecha'] ?? ''}';
-      if (f.length < 10 || f.substring(0, 10) != hoy) continue;
+    // v1.3.4 (ítem 2): columna `fecha` indexada en vez de allMirror.
+    for (final p in await LocalDb.instance.pagosDelDia(hoy)) {
       final monto = (p['monto'] as num?)?.toDouble() ?? 0;
       total += monto;
       cobrados.add({

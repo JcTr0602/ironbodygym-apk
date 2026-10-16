@@ -25,55 +25,11 @@ import 'auth.dart';
 import 'localdb.dart';
 import 'negocio.dart';
 import 'sync.dart';
+import 'tiempo.dart';
 
-/// Offset de America/Havana respecto a UTC para un instante dado.
-///
-/// Cuba: UTC-4 en horario de verano (segundo domingo de marzo 02:00 →
-/// primer domingo de noviembre 01:00, hora local), UTC-5 el resto.
-/// Sin el paquete `timezone` (no está en pubspec y descargarlo rompería
-/// el build offline): se calcula por fecha. La hora sirve para estimar
-/// la jornada, no como marca infalible (el reloj del teléfono puede
-/// estar mal).
-Duration offsetHabana(DateTime utc) {
-  bool enHorario(DateTime u, int year) {
-    // Segundo domingo de marzo, 06:00 UTC (= 01:00 EST).
-    var d = DateTime.utc(year, 3, 8);
-    while (d.weekday != DateTime.sunday) {
-      d = d.add(const Duration(days: 1));
-    }
-    final inicio = DateTime.utc(year, 3, d.day, 6);
-    // Primer domingo de noviembre, 05:00 UTC (= 01:00 EDT).
-    var e = DateTime.utc(year, 11, 1);
-    while (e.weekday != DateTime.sunday) {
-      e = e.add(const Duration(days: 1));
-    }
-    final fin = DateTime.utc(year, 11, e.day, 5);
-    return !u.isBefore(inicio) && u.isBefore(fin);
-  }
-
-  return enHorario(utc, utc.year)
-      ? const Duration(hours: -4)
-      : const Duration(hours: -5);
-}
-
-/// Instante actual expresado en hora de La Habana (DateTime con el
-/// offset aplicado; para fechaIsoDe/turnoIdDe solo importan y/m/d/h).
-DateTime ahoraHabana() {
-  final utc = DateTime.now().toUtc();
-  return utc.add(offsetHabana(utc));
-}
-
-/// ISO-8601 con offset explícito (p. ej. 2026-10-15T14:30:00-04:00),
-/// coherente con la fecha/franja calculadas en hora de La Habana
-/// (auditoría ChatGPT #13).
-String isoHabana(DateTime habana) {
-  final off = offsetHabana(habana.toUtc());
-  final sign = off.isNegative ? '-' : '+';
-  final h = off.inHours.abs().toString().padLeft(2, '0');
-  final m = (off.inMinutes.abs() % 60).toString().padLeft(2, '0');
-  final base = habana.toIso8601String().split('.').first;
-  return '$base$sign$h:$m';
-}
+// Reloj oficial (offsetHabana, ahoraHabana, isoHabana, hoyHabanaIso):
+// movido a lib/tiempo.dart (v1.3.4, estándar de Argón) para evitar
+// import circular (este archivo importa negocio.dart y localdb.dart).
 
 String fechaIsoDe(DateTime d) =>
     '${d.year.toString().padLeft(4, '0')}-'

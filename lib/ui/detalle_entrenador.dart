@@ -98,7 +98,11 @@ class _DetalleEntrenadorScreenState extends State<DetalleEntrenadorScreen> {
         fecha.compareTo(_iso(inicioAnterior)) >= 0 &&
         fecha.compareTo(_iso(finAnterior)) <= 0;
 
-    final pagos = await LocalDb.instance.allMirror('pagos');
+    // v1.3.4 (ítem 2): columna `fecha` indexada en vez de allMirror;
+    // trae desde el inicio del período anterior (los filtros enRango /
+    // enAnterior se aplican en Dart como antes).
+    final pagos =
+        await LocalDb.instance.pagosDesde(_iso(inicioAnterior));
     final diarios = await LocalDb.instance.allMirror('pagos_diarios');
     final clientes = await LocalDb.instance.allMirror('clientes');
     final nombrePorId = <int, String>{};
