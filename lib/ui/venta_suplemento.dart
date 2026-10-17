@@ -16,10 +16,12 @@
 library;
 
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../localdb.dart';
 import '../negocio.dart';
 import '../permisos.dart';
+import '../tiempo.dart';
 import 'componentes.dart';
 import 'diseno.dart';
 import 'venta_suplemento_inscripcion.dart';
@@ -290,7 +292,17 @@ class _VentaSuplementoScreenState
         esFiado: _esFiado && _tipoComprador == 'cliente',
       );
       // v1.3.1 (Argón): pop solo si el registro tuvo éxito.
-      if (mounted) Navigator.pop(context, true);
+      // v1.3.7: antes de cerrar, muestra el comprobante con opción
+      // de enviarlo por WhatsApp (pedido de Jc).
+      if (mounted) {
+        await _mostrarComprobante(
+          nombreComprador: nombreComprador,
+          total: total,
+          conPromo: conPromo,
+          precio: precio,
+        );
+        if (mounted) Navigator.pop(context, true);
+      }
     } catch (e) {
       // v1.3.1: si falla el registro, avisar y NO cerrar (evita duplicado).
       if (mounted) {
@@ -304,6 +316,92 @@ class _VentaSuplementoScreenState
       // v1.3.1 (Argón regresión 1): restaura _guardando siempre.
       if (mounted) setState(() => _guardando = false);
     }
+  }
+
+  /// v1.3.7: muestra el comprobante de la venta con opción de enviarlo
+  /// por WhatsApp al cliente (si tiene móvil en su ficha).
+  /// Pedido de Jc: comprobante + detalles de la promo (mes gratis).
+  Future<void> _mostrarComprobante({
+    required String nombreComprador,
+    required double total,
+    required bool conPromo,
+    required double precio,
+  }) async {
+    final nombreProd = '${widget.suplemento['nombre'] ?? ''}';
+    final fecha = hoyHabanaIso();
+    // Teléfono del cliente (solo si es cliente del gym).
+    String? waNum;
+    if (_tipoComprador == 'cliente' && _clienteId != null) {
+      final clientes = await LocalDb.instance.allMirror('clientes');
+      final cli = clientes.cast<Map<String, dynamic>?>().firstWhere(
+            (c) => (c?['id'] as num?)?.toInt() == _clienteId,
+            orElse: () => null,
+          );
+      final tel = '${cli?['telefono'] ?? ''}'.trim();
+      if (tel.isNotEmpty) waNum = normalizarTelefonoWaMe(tel);
+    }
+    // Texto del comprobante.
+    final buf = StringBuffer()
+      ..writeln('*Iron Body Gym* — Comprobante de compra')
+      ..writeln('Producto: $nombreProd')
+      ..writeln('Cantidad: $_cantidad')
+      ..writeln('Precio: ${precio.toStringAsFixed(2)} $_moneda')
+      ..writeln('Total: ${total.toStringAsFixed(2)} $_moneda')
+      ..writeln('Comprador: $nombreComprador')
+      ..writeln('Fecha: $fecha');
+    if (conPromo) {
+      buf.writeln('');
+      buf.writeln('🎁 *Promo aplicada:* 1 mes de mensualidad GRATIS');
+      buf.writeln('asignado a tu cuenta por esta compra.');
+    }
+    final textoComprobante = buf.toString().trim();
+    if (!mounted) return;
+    await showDialog(
+      context: context,
+      builder: (ctx) => DialogoApp(
+        titulo: 'Venta registrada',
+        iconoTitulo: Icons.receipt_long,
+        contenido: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(textoComprobante.replaceAll('*', '')),
+            if (waNum != null) ...[
+              const SizedBox(height: 12),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton.icon(
+                  icon: const Icon(Icons.send),
+                  label: const Text('Enviar por WhatsApp'),
+                  onPressed: () async {
+                    final url = Uri.parse(
+                        'https://wa.me/$waNum?text=${Uri.encodeComponent(textoComprobante)}');
+                    try {
+                      await launchUrl(url,
+                          mode: LaunchMode.externalApplication);
+                    } catch (_) {
+                      if (ctx.mounted) {
+                        ScaffoldMessenger.of(ctx).showSnackBar(
+                          const SnackBar(
+                              content:
+                                  Text('No se pudo abrir WhatsApp')),
+                        );
+                      }
+                    }
+                  },
+                ),
+              ),
+            ],
+          ],
+        ),
+        acciones: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cerrar'),
+          ),
+        ],
+      ),
+    );
   }
 
   /// Abre la pantalla combinada inscripción + venta con los datos
