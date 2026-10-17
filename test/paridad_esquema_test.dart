@@ -42,7 +42,7 @@ void main() {
 
     // BD-A: instalación limpia (onCreate → v26).
     final dbA = await LocalDb.instance.db;
-    expect(await dbA.getVersion(), 27);
+    expect(await dbA.getVersion(), 28);
     final mapaA = await esquemaComoMapa(dbA);
     await LocalDb.resetParaTest();
 
@@ -71,7 +71,7 @@ void main() {
 
     // Reabrir con LocalDb dispara el onUpgrade 24→25→26 real.
     final dbB = await LocalDb.instance.db;
-    expect(await dbB.getVersion(), 27);
+    expect(await dbB.getVersion(), 28);
     final mapaB = await esquemaComoMapa(dbB);
 
     final diffs = diffEsquemas(mapaA, mapaB);

@@ -125,6 +125,9 @@ class _PagosRealizadosScreenState extends State<PagosRealizadosScreen> {
         'fecha': pago['fecha'],
         'pagado_hasta': c['pagado_hasta'],
         'foto_local': c['foto_local'],
+        // v1.3.6 (Jc): miniaturas en lugar del check verde. enCache solo
+        // lee disco/memoria (no descarga), así que no hay tormenta de red.
+        'foto_storage': c['foto_storage'],
       });
     }
     // Ordenar por fecha de pago (más reciente primero)

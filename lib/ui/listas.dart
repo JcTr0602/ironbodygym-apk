@@ -124,7 +124,7 @@ class _ListasScreenState extends State<ListasScreen>
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Listas'),
+        title: const Text('Vencimientos'), // v1.3.6: renombrado (era 'Listas')
         bottom: TabBar(
           controller: _tab,
           isScrollable: true,

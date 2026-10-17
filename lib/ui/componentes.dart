@@ -674,3 +674,66 @@ class ChipEstado extends StatelessWidget {
     );
   }
 }
+
+/// v1.3.6 (Argón, diseño): badge squircle tinted del sistema de iconos.
+/// 38×38 px, borderRadius 11. En oscuro: fondo del tinte al 14% + borde
+/// sutil de 1px al 22%; en claro: fondo al 12% sin borde. El icono usa la
+/// variante _rounded a 21 px por defecto.
+class IconoModuloBadge extends StatelessWidget {
+  final IconData icono;
+  final Color tinte;
+  final Color iconoOscuro;
+  final Color iconoClaro;
+  final double tamanoIcono;
+
+  const IconoModuloBadge({
+    super.key,
+    required this.icono,
+    required this.tinte,
+    required this.iconoOscuro,
+    required this.iconoClaro,
+    this.tamanoIcono = 21,
+  });
+
+  /// Atajo naranja (módulos y acciones).
+  factory IconoModuloBadge.naranja(IconData icono,
+      {double tamanoIcono = 21}) {
+    return IconoModuloBadge(
+      icono: icono,
+      tinte: AppColores.naranja,
+      iconoOscuro: const Color(0xFFFB923C),
+      iconoClaro: const Color(0xFFEA580C),
+      tamanoIcono: tamanoIcono,
+    );
+  }
+
+  /// Atajo verde esmeralda (bandeja de WhatsApp).
+  factory IconoModuloBadge.verde(IconData icono,
+      {double tamanoIcono = 21}) {
+    return IconoModuloBadge(
+      icono: icono,
+      tinte: const Color(0xFF22C55E),
+      iconoOscuro: const Color(0xFF4ADE80),
+      iconoClaro: const Color(0xFF16A34A),
+      tamanoIcono: tamanoIcono,
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final oscuro = Theme.of(context).brightness == Brightness.dark;
+    return Container(
+      width: 38,
+      height: 38,
+      decoration: BoxDecoration(
+        color: tinte.withValues(alpha: oscuro ? 0.14 : 0.12),
+        borderRadius: BorderRadius.circular(11),
+        border: oscuro
+            ? Border.all(color: tinte.withValues(alpha: 0.22), width: 1)
+            : null,
+      ),
+      child: Icon(icono,
+          size: tamanoIcono, color: oscuro ? iconoOscuro : iconoClaro),
+    );
+  }
+}

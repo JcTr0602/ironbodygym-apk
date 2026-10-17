@@ -28,6 +28,8 @@ import 'cuentas_cobrar.dart';
 import 'detalle_pendiente.dart';
 import 'diseno.dart';
 import 'historial_entrenador.dart';
+import 'incidencias_sync.dart';
+import 'arqueo.dart';
 import 'historial_ventas.dart';
 import 'papelera.dart';
 import 'riesgo.dart';
@@ -36,6 +38,8 @@ import 'suplementos.dart';
 import 'usuarios.dart';
 
 /// Tarjeta de sección (mismo diseño que la antigua administración).
+/// v1.3.6 (Argón, diseño): el icono del encabezado usa el badge squircle
+/// del sistema (igual que Home) para no dejar dos estilos conviviendo.
 Widget seccionAdmin(
     BuildContext context, IconData icono, String titulo, List<Widget> hijos) {
   return Padding(
@@ -46,9 +50,9 @@ Widget seccionAdmin(
         children: [
           Row(
             children: [
-              Icon(icono, color: AppColores.naranja, size: 20),
+              IconoModuloBadge.naranja(icono, tamanoIcono: 20),
               const SizedBox(width: AppEspacio.sm),
-              Text(titulo, style: AppTexto.subtitulo),
+              Expanded(child: Text(titulo, style: AppTexto.subtitulo)),
             ],
           ),
           const SizedBox(height: AppEspacio.sm),
@@ -227,8 +231,24 @@ class _SeccionCobrosScreenState extends State<SeccionCobrosScreen> {
                     ),
                   ),
               ]),
+          // v1.3.6 (ítem 1B): arqueo de caja con liquidaciones.
+          seccionAdmin(context, Icons.point_of_sale, 'Arqueo de caja', [
+            Text(
+              'Liquida el pendiente de cada entrenador con monto esperado '
+              'vs entregado. Las parciales dejan saldo de arrastre.',
+              style: TextStyle(
+                  color: AppColores.textoSecundario(context),
+                  fontSize: 12),
+            ),
+            const SizedBox(height: 8),
+            BotonPrimario(
+              texto: 'Abrir arqueo de caja',
+              icono: Icons.account_balance_wallet_rounded,
+              onPressed: () => _irYActualizar(const ArqueoScreen()),
+            ),
+          ]),
           seccionAdmin(
-              context, Icons.account_balance_wallet, 'Cuentas por cobrar', [
+              context, Icons.account_balance_wallet_rounded, 'Cuentas por cobrar', [
             Text(
               'Clientes vencidos ordenados por monto adeudado. El dinero dormido, visible.',
               style: TextStyle(
@@ -764,6 +784,8 @@ class _SeccionDiagnosticoScreenState extends State<SeccionDiagnosticoScreen> {
         'incidencias',
         'incidencias_tipos',
         'incidencias_comentarios',
+        'liquidaciones_caja', // v1.3.6 (v28, ítem 1B)
+        'incidencias_sync', // v1.3.6 (v28, ítem 1C)
       ];
       for (final t in tablasDiag) {
         final wmt = await db.getWatermarkTabla(t);
@@ -860,6 +882,27 @@ class _SeccionDiagnosticoScreenState extends State<SeccionDiagnosticoScreen> {
                           style: const TextStyle(
                               color: AppColores.error, fontSize: 13)),
                     ]),
+                  // v1.3.6 (ítem 1C): cola de incidencias de sync del dueño.
+                  seccionAdmin(
+                      context, Icons.sync_problem_rounded, 'Incidencias de sync', [
+                    Text(
+                      'Operaciones rechazadas por el servidor, con '
+                      'Aprobar/Descartar.',
+                      style: TextStyle(
+                          color: AppColores.textoSecundario(context),
+                          fontSize: 12),
+                    ),
+                    const SizedBox(height: 8),
+                    BotonPrimario(
+                      texto: 'Revisar incidencias de sync',
+                      icono: Icons.sync_problem,
+                      onPressed: () => Navigator.of(context).push(
+                        MaterialPageRoute(
+                            builder: (_) =>
+                                const IncidenciasSyncScreen()),
+                      ),
+                    ),
+                  ]),
                 ],
               ),
             ),

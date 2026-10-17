@@ -64,11 +64,6 @@ class _FichaScreenState extends State<FichaScreen> {
     final incidencias = await LocalDb.instance.incidenciasRelacionadas(
         'cliente', widget.clienteId,
         soloCompartidas: !AuthService().isAdmin);
-    File? foto;
-    if (c != null) {
-      foto = await FotoCache.instance
-          .obtener(c['foto_storage'] as String?);
-    }
     // v1.3.3 (Argón spec 2): ¿ya se regaló este año?
     final regaloAnio = await _regaloDelAnio(widget.clienteId);
     if (mounted) {
@@ -77,9 +72,21 @@ class _FichaScreenState extends State<FichaScreen> {
         _pagos = pagos;
         _suplementos = suplementos;
         _incidencias = incidencias;
-        _foto = foto;
+        _foto = null;
         _regaloAnio = regaloAnio;
       });
+    }
+    // v1.3.6 (reporte de campo): la foto carga en SEGUNDO PLANO sin
+    // bloquear la ficha. Con red lenta, el await de FotoCache.obtener
+    // (descarga) dejaba la pantalla en spinner indefinido. Ahora los
+    // datos se muestran de inmediato con el avatar de iniciales y,
+    // al llegar la foto, solo se actualiza ese widget.
+    if (c != null) {
+      final foto = await FotoCache.instance
+          .obtener(c['foto_storage'] as String?);
+      if (mounted && foto != null) {
+        setState(() => _foto = foto);
+      }
     }
   }
 

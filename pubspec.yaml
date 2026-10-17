@@ -1,7 +1,7 @@
 name: ironbody_gym
 description: APK offline-first para entrenadores de Iron Body Gym (Trinidad, Cuba).
 publish_to: "none"
-version: 1.3.5+53
+version: 1.3.6+54
 
 environment:
   sdk: ">=3.2.0 <4.0.0"

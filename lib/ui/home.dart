@@ -21,6 +21,7 @@ import 'ajustes.dart';
 import 'actividad.dart';
 import 'ayuda.dart';
 import 'buscar.dart';
+import 'bandeja_whatsapp.dart';
 import 'cola.dart';
 import 'componentes.dart';
 import 'cumpleanos.dart';
@@ -60,6 +61,8 @@ class _HomeScreenState extends State<HomeScreen>
   int _pendientesSync = 0; // v1.3.3: badge de sincronización
   int _cumpleHoy = 0; // v1.3.3: chip de cumpleaños
   int _incidenciasAbiertas = 0; // v1.3.3: chip de incidencias
+  int _avisosPendientes = 0; // v1.3.6 (Argón, diseño): contador del botón
+  // de WhatsApp (solo dueño).
   StreamSubscription? _sub;
   final _auth = AuthService();
 
@@ -96,6 +99,18 @@ class _HomeScreenState extends State<HomeScreen>
   // v1.3.3 (Argón): turnos de hoy sin reporte real (para el chip de
   // "Pulso del Día"; _entrenadoresSinSync medía otra cosa).
   List<String> _turnosSinReporte = [];
+  // v1.3.6 (ítem 4, Jc): turnos sin reporte descartados por el usuario.
+  // SOLO en memoria por sesión (nunca persistido). Clave "fecha:turno":
+  // si aparece un turno NUEVO sin reporte, el banner reaparece solo.
+  final Set<String> _turnosSinReporteDescartados = {};
+
+  /// Turnos sin reporte visibles (excluye los descartados en la sesión).
+  List<String> get _turnosSinReporteVisibles {
+    final hoy = hoyHabanaIso();
+    return _turnosSinReporte
+        .where((t) => !_turnosSinReporteDescartados.contains('$hoy:$t'))
+        .toList();
+  }
 
   @override
   void initState() {
@@ -301,6 +316,10 @@ class _HomeScreenState extends State<HomeScreen>
             : Future.value(0.0), // 12
         cumpleanosProximos(dias: 0), // 13
         _contarIncidenciasAbiertas(), // 14
+        // v1.3.6 (Argón, diseño): contador del botón de WhatsApp.
+        _auth.isOwner
+            ? avisosWhatsappHoy().then((l) => l.length)
+            : Future.value(0), // 15
       ]);
       final v = res[0] as List;
       final a = res[1] as List;
@@ -390,6 +409,7 @@ class _HomeScreenState extends State<HomeScreen>
           _pendientesSync = porSubir;
           _cumpleHoy = cumple.length;
           _incidenciasAbiertas = incidAbiertas;
+          _avisosPendientes = res[15] as int;
           _avisoSync = aviso;
           _nombreVisible = nombreVisible;
           _entrenadoresSinSync = sinSync;
@@ -449,10 +469,14 @@ class _HomeScreenState extends State<HomeScreen>
   Widget build(BuildContext context) {
     final esDueno = _auth.isOwner;
     return Scaffold(
-      // v1.3.5 (dock inferior, veredicto Argón Opción A): acciones
-      // críticas siempre al alcance del pulgar. El scroll principal
-      // queda intacto.
-      bottomNavigationBar: _dockInferior(),
+      // v1.3.6 (Jc): el dock fijo de abajo se reemplaza por un botón
+      // flotante de acciones rápidas (speed dial): al tocarlo despliega
+      // en horizontal Cobrar / Pago diario / Inscribir.
+      floatingActionButton: _FabAccionesRapidas(
+        onCobrar: () => _ir(const PagoScreen()),
+        onPagoDiario: () => _ir(const PagoDiarioScreen()),
+        onInscribir: () => _ir(const InscribirScreen()),
+      ),
       body: SafeArea(
         child: RefreshIndicator(
           onRefresh: () => _cargar(forceRefresh: true),
@@ -527,9 +551,9 @@ class _HomeScreenState extends State<HomeScreen>
                       ),
                     ),
                   ),
-                // v1.3.5: el dock principal ahora es inferior fijo
-                // (_dockInferior en bottomNavigationBar); se elimina del
-                // scroll para no duplicar las acciones.
+                // v1.3.6: el dock fijo se reemplazó por el botón flotante de
+                // acciones rápidas (speed dial); se elimina del scroll para
+                // no duplicar las acciones.
                 // v1.3.3: tarjeta financiera por rol
                 Padding(
                   padding: const EdgeInsets.fromLTRB(
@@ -546,7 +570,24 @@ class _HomeScreenState extends State<HomeScreen>
                 Padding(
                   padding: const EdgeInsets.symmetric(
                       horizontal: AppEspacio.lg),
-                  child: _gridModulos(),
+                  child: Column(
+                    children: [
+                      _gridModulos(),
+                      // v1.3.6 (Jc): Buscar cliente como botón horizontal de
+                      // ancho completo al cierre de la sección (función muy
+                      // usada; así no queda espacio vacío en el grid).
+                      const SizedBox(height: AppEspacio.sm),
+                      _botonBuscarCliente(),
+                      // v1.3.6 (ítem 1A, auditoría Argón): la bandeja es
+                      // SOLO del dueño (abre su WhatsApp y el check vive
+                      // en su teléfono; si un entrenador la usara, el
+                      // dueño re-escribiría al mismo cliente sin saberlo).
+                      if (_auth.isOwner) ...[
+                        const SizedBox(height: AppEspacio.sm),
+                        _botonBandejaWhatsapp(),
+                      ],
+                    ],
+                  ),
                 ),
                 // v1.3.3: resto de herramientas (ninguna pantalla se pierde)
                 const EncabezadoSeccion(titulo: 'MÁS'),
@@ -563,7 +604,9 @@ class _HomeScreenState extends State<HomeScreen>
                           fontSize: 12,
                           fontWeight: FontWeight.bold)),
                 ),
-                const SizedBox(height: AppEspacio.lg),
+                // v1.3.6: aire inferior para que el FAB de acciones rápidas
+                // no tape el pie al llegar al final del scroll.
+                const SizedBox(height: 96),
               ],
             ),
           ),
@@ -641,15 +684,9 @@ class _HomeScreenState extends State<HomeScreen>
               ),
               _iconoSync(),
               _campana(),
-              // v1.3.5: buscar cliente (antes en el dock del scroll).
-              IconButton(
-                tooltip: 'Buscar cliente',
-                color: Colors.white70,
-                icon: const Icon(Icons.search),
-                onPressed: () =>
-                    _ir(const BuscarScreen()),
-              ),
-              IconButton(
+              // v1.3.6 (Jc): la lupa salió del banner; Buscar cliente vive como
+        // botón horizontal al final de la sección MÓDULOS.
+        IconButton(
                 tooltip: 'Ayuda',
                 color: Colors.white70,
                 icon: const Icon(Icons.help_outline),
@@ -777,93 +814,6 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
-  /// v1.3.5: dock inferior fijo (Opción A de Argón). Una fila compacta
-  /// (56-64px) con las 3 acciones críticas al alcance del pulgar:
-  /// Cobrar (destacado), Pago diario, Inscribir. Buscar queda en la
-  /// cabecera (ícono de lupa).
-  Widget _dockInferior() {
-    return SafeArea(
-      top: false,
-      child: Container(
-        decoration: BoxDecoration(
-          color: Theme.of(context).scaffoldBackgroundColor,
-          // Sombra sutil superior para separar del contenido.
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.12),
-              blurRadius: 8,
-              offset: const Offset(0, -2),
-            ),
-          ],
-        ),
-        padding: const EdgeInsets.symmetric(
-            horizontal: AppEspacio.md, vertical: 8),
-        child: Row(
-          children: [
-            Expanded(child: _botonDock(Icons.payments, 'Cobrar',
-                () => _ir(const PagoScreen()),
-                destacado: true)),
-            const SizedBox(width: AppEspacio.sm),
-            Expanded(child: _botonDock(Icons.receipt_long, 'Pago diario',
-                () => _ir(const PagoDiarioScreen()))),
-            const SizedBox(width: AppEspacio.sm),
-            Expanded(child: _botonDock(Icons.person_add_alt, 'Inscribir',
-                () => _ir(const InscribirScreen()))),
-          ],
-        ),
-      ),
-    );
-  }
-
-  /// Botón compacto del dock inferior: ícono + etiqueta en una fila.
-  Widget _botonDock(
-      IconData icono, String texto, VoidCallback onTap,
-      {bool destacado = false}) {
-    final fondo =
-        destacado ? AppColores.gradienteNaranja : null;
-    final colorTexto =
-        destacado ? Colors.white : AppColores.naranja;
-    return InkWell(
-      borderRadius: BorderRadius.circular(AppRadio.md),
-      onTap: onTap,
-      child: Container(
-        height: 48,
-        decoration: fondo == null
-            ? BoxDecoration(
-                borderRadius: BorderRadius.circular(AppRadio.md),
-                border: Border.all(
-                    color: AppColores.naranja.withValues(alpha: 0.4)),
-              )
-            : BoxDecoration(
-                gradient: fondo,
-                borderRadius: BorderRadius.circular(AppRadio.md),
-                boxShadow: AppSombra.tarjeta(context),
-              ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(icono, color: colorTexto, size: 22),
-            const SizedBox(width: 6),
-            // v1.3.5 (auditoría 2026-10-16): FittedBox en vez de ellipsis
-            // para que "Pago diario" no se trunque en móviles estrechos o
-            // con texto ampliado; en pantallas normales no cambia nada.
-            Flexible(
-              child: FittedBox(
-                fit: BoxFit.scaleDown,
-                alignment: Alignment.centerLeft,
-                child: Text(texto,
-                    style: TextStyle(
-                        color: colorTexto,
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600)),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
   /// v1.3.3: tarjeta financiera contextual por rol.
   /// Entrenador: "Mi Turno Hoy" (tocable -> MiTurnoScreen) con
   /// cobrado hoy + pendiente a entregar + botón "Cerrar turno".
@@ -946,7 +896,10 @@ class _HomeScreenState extends State<HomeScreen>
                           _ir(const PendienteScreen()))),
             ],
           ),
-          if (_turnosSinReporte.isNotEmpty) ...[
+          // v1.3.6 (ítem 4): el banner se puede descartar (X). El descarte
+          // es solo en memoria por sesión; si aparece un turno NUEVO sin
+          // reporte, el banner reaparece solo.
+          if (_turnosSinReporteVisibles.isNotEmpty) ...[
             const SizedBox(height: AppEspacio.sm),
             InkWell(
               borderRadius:
@@ -974,8 +927,28 @@ class _HomeScreenState extends State<HomeScreen>
                         width: AppEspacio.sm),
                     Expanded(
                       child: Text(
-                        '⚠️ ${_turnosSinReporte.length} turno(s) sin reporte: ${_turnosSinReporte.join(' y ')}',
+                        '⚠️ ${_turnosSinReporteVisibles.length} turno(s) sin reporte: ${_turnosSinReporteVisibles.join(' y ')}',
                         style: AppTexto.secundario,
+                      ),
+                    ),
+                    InkWell(
+                      borderRadius: BorderRadius.circular(16),
+                      onTap: () {
+                        // Descarta solo los visibles ahora; los nuevos
+                        // reaparecen solos.
+                        final hoy = hoyHabanaIso();
+                        setState(() {
+                          _turnosSinReporteDescartados.addAll(
+                            _turnosSinReporteVisibles
+                                .map((t) => '$hoy:$t'),
+                          );
+                        });
+                      },
+                      child: const Padding(
+                        padding: EdgeInsets.all(4),
+                        child: Icon(Icons.close,
+                            size: 16,
+                            color: AppColores.alertaOscuro),
                       ),
                     ),
                   ],
@@ -1427,35 +1400,105 @@ class _HomeScreenState extends State<HomeScreen>
       crossAxisSpacing: AppEspacio.sm,
       childAspectRatio: 2.4,
       children: [
-        _modulo(Icons.calendar_today, 'Día del gym',
+        _modulo(Icons.insights_rounded, 'Día del gym',
             () => _ir(const MiDiaScreen())),
-        _modulo(Icons.medication, 'Suplementos',
+        _modulo(Icons.inventory_2_rounded, 'Suplementos',
             () => _ir(const SuplementosScreen())),
-        _modulo(Icons.list_alt, 'Listas',
+        _modulo(Icons.event_busy_rounded, 'Vencimientos',
             () => _ir(const ListasScreen())),
-        _modulo(Icons.report_problem_outlined,
+        _modulo(Icons.report_rounded,
             'Incidencias',
             () =>
                 _ir(const ListaIncidenciasScreen())),
-        _modulo(Icons.dashboard, 'Dashboard',
+        _modulo(Icons.dashboard_rounded, 'Dashboard',
             () => _ir(const DashboardScreen())),
         if (_auth.isAdmin)
-          _modulo(Icons.admin_panel_settings,
+          _modulo(Icons.admin_panel_settings_rounded,
               'Administración',
-              () => _ir(const AdminScreen()),
-              color: AppColores.naranja)
+              () => _ir(const AdminScreen()))
         else
-          _modulo(Icons.badge, 'Mi turno',
+          _modulo(Icons.badge_rounded, 'Mi turno',
               () => _ir(const MiTurnoScreen())),
       ],
     );
   }
 
-  /// Módulo del grid (icono + etiqueta).
-  Widget _modulo(IconData icono, String texto,
-      VoidCallback onTap,
-      {Color? color}) {
-    final c = color ?? AppColores.naranja;
+  /// v1.3.6 (Jc): botón horizontal de ancho completo para Buscar cliente
+  /// al cierre de la sección MÓDULOS. v1.3.6 (Argón, diseño): badge
+  /// squircle de acción + chevron_rounded al extremo.
+  Widget _botonBuscarCliente() {
+    return Tarjeta(
+      onTap: () => _ir(const BuscarScreen()),
+      padding: const EdgeInsets.symmetric(
+          horizontal: AppEspacio.md, vertical: AppEspacio.md),
+      child: Row(
+        children: [
+          IconoModuloBadge.naranja(Icons.person_search_rounded,
+              tamanoIcono: 22),
+          const SizedBox(width: AppEspacio.sm),
+          Expanded(
+            child: Text('Buscar cliente',
+                style: AppTexto.secundario
+                    .copyWith(fontWeight: FontWeight.w600)),
+          ),
+          Icon(Icons.chevron_right_rounded,
+              size: 20,
+              color: AppColores.naranja.withValues(alpha: 0.5)),
+        ],
+      ),
+    );
+  }
+
+  /// v1.3.6 (ítem 1A): botón horizontal de ancho completo para la bandeja
+  /// de avisos de WhatsApp del día. v1.3.6 (Argón, diseño): badge squircle
+  /// verde semántico + contador si hay pendientes. Solo visible para el
+  /// dueño (auditoría Argón, Fix 1a).
+  Widget _botonBandejaWhatsapp() {
+    final pendientes = _avisosPendientes;
+    return Tarjeta(
+      onTap: () => _ir(const BandejaWhatsappScreen()),
+      padding: const EdgeInsets.symmetric(
+          horizontal: AppEspacio.md, vertical: AppEspacio.md),
+      child: Row(
+        children: [
+          IconoModuloBadge.verde(
+              pendientes > 0
+                  ? Icons.mark_chat_unread_rounded
+                  : Icons.chat_rounded,
+              tamanoIcono: 21),
+          const SizedBox(width: AppEspacio.sm),
+          Expanded(
+            child: Text('Avisos WhatsApp de hoy',
+                style: AppTexto.secundario
+                    .copyWith(fontWeight: FontWeight.w600)),
+          ),
+          if (pendientes > 0) ...[
+            Container(
+              padding: const EdgeInsets.symmetric(
+                  horizontal: 8, vertical: 2),
+              decoration: BoxDecoration(
+                color: const Color(0xFF22C55E).withValues(alpha: 0.15),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Text('$pendientes',
+                  style: const TextStyle(
+                      color: Color(0xFF16A34A),
+                      fontWeight: FontWeight.w700,
+                      fontSize: 12)),
+            ),
+            const SizedBox(width: 4),
+          ],
+          Icon(Icons.chevron_right_rounded,
+              size: 20,
+              color: AppColores.naranja.withValues(alpha: 0.5)),
+        ],
+      ),
+    );
+  }
+
+  /// Módulo del grid (badge squircle + etiqueta). v1.3.6 (Argón, diseño):
+  /// iconos _rounded dentro del badge tinted naranja.
+  Widget _modulo(IconData icono, String texto, VoidCallback onTap) {
     return Tarjeta(
       onTap: onTap,
       padding: const EdgeInsets.symmetric(
@@ -1463,7 +1506,7 @@ class _HomeScreenState extends State<HomeScreen>
           vertical: AppEspacio.sm),
       child: Row(
         children: [
-          Icon(icono, color: c, size: 26),
+          IconoModuloBadge.naranja(icono),
           const SizedBox(width: AppEspacio.sm),
           Expanded(
             child: Text(texto,
@@ -1488,43 +1531,250 @@ class _HomeScreenState extends State<HomeScreen>
       crossAxisSpacing: AppEspacio.sm,
       childAspectRatio: 1.4,
       children: [
-        _herramienta(Icons.verified, 'Pagos realizados',
+        _herramienta(Icons.verified_rounded, 'Pagos realizados',
             () => _ir(const PagosRealizadosScreen())),
-        _herramienta(Icons.delete_outline, 'Papelera',
+        _herramienta(Icons.delete_rounded, 'Papelera',
             () => _ir(const PapeleraScreen())),
-        _herramienta(Icons.account_balance,
+        _herramienta(Icons.account_balance_rounded,
             'Transferencia',
             () => _ir(const TransferenciaScreen())),
-        _herramienta(Icons.cake, 'Cumpleaños',
+        _herramienta(Icons.cake_rounded, 'Cumpleaños',
             () => _ir(const CumpleanosScreen())),
         if (_auth.isAdmin)
-          _herramienta(Icons.badge, 'Mis cobros',
+          _herramienta(Icons.badge_rounded, 'Mis cobros',
               () => _ir(const MiTurnoScreen())),
-        _herramienta(Icons.logout, 'Salir', _salir,
+        _herramienta(Icons.logout_rounded, 'Salir', _salir,
             color: AppColores.error),
       ],
     );
   }
 
-  /// Herramienta pequeña (icono + etiqueta).
+  /// Herramienta pequeña (badge + etiqueta). v1.3.6 (Argón, diseño): mismo
+  /// badge squircle que los módulos para no dejar dos estilos conviviendo
+  /// en el mismo scroll.
   Widget _herramienta(IconData icono, String texto,
       VoidCallback onTap,
       {Color? color}) {
-    final c = color ?? AppColores.textoSecundario(context);
+    final esAlerta = color != null;
     return Tarjeta(
       padding: const EdgeInsets.symmetric(
           vertical: AppEspacio.md,
           horizontal: AppEspacio.xs),
       onTap: onTap,
       child: Column(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icono, color: c, size: 22),
-          const SizedBox(height: 4),
+          esAlerta
+              ? IconoModuloBadge(
+                  icono: icono,
+                  tinte: color,
+                  iconoOscuro: const Color(0xFFF87171),
+                  iconoClaro: color,
+                  tamanoIcono: 20)
+              : IconoModuloBadge.naranja(icono, tamanoIcono: 20),
+          const SizedBox(height: 6),
           Text(texto,
-              style: AppTexto.minuscula
-                  .copyWith(color: c),
+              style: AppTexto.minuscula.copyWith(
+                  color: esAlerta
+                      ? color
+                      : AppColores.textoSecundario(context)),
               textAlign: TextAlign.center),
         ],
+      ),
+    );
+  }
+}
+
+/// v1.3.6 (Jc): botón flotante de acciones rápidas (speed dial) que
+/// reemplaza al dock inferior fijo de la v1.3.5. Cerrado muestra un solo
+/// FAB naranja (rayo); al tocarlo despliega en horizontal las 3 acciones
+/// más usadas del día a día: Cobrar (destacada), Pago diario, Inscribir.
+/// Elegir una acción (o el botón Atrás del sistema) lo cierra.
+class _FabAccionesRapidas extends StatefulWidget {
+  final VoidCallback onCobrar;
+  final VoidCallback onPagoDiario;
+  final VoidCallback onInscribir;
+
+  const _FabAccionesRapidas({
+    required this.onCobrar,
+    required this.onPagoDiario,
+    required this.onInscribir,
+  });
+
+  @override
+  State<_FabAccionesRapidas> createState() => _FabAccionesRapidasState();
+}
+
+class _FabAccionesRapidasState extends State<_FabAccionesRapidas>
+    with SingleTickerProviderStateMixin {
+  bool _abierto = false;
+  late final AnimationController _ctrl;
+  late final Animation<double> _anim;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 220),
+    );
+    _anim = CurvedAnimation(parent: _ctrl, curve: Curves.easeOut);
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  void _toggle() {
+    setState(() => _abierto = !_abierto);
+    if (_abierto) {
+      _ctrl.forward();
+    } else {
+      _ctrl.reverse();
+    }
+  }
+
+  void _irCerrando(VoidCallback accion) {
+    _toggle();
+    accion();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return PopScope(
+      canPop: !_abierto,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop && _abierto) _toggle();
+      },
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          // Fila de acciones: aparece con fade + despliegue hacia arriba.
+          ClipRect(
+            child: SizeTransition(
+              sizeFactor: _anim,
+              alignment: Alignment.bottomCenter,
+              child: FadeTransition(
+                opacity: _anim,
+                child: Container(
+                  // Ancho de pantalla menos los márgenes laterales del FAB.
+                  width: MediaQuery.of(context).size.width - 32,
+                  margin: const EdgeInsets.only(bottom: 12),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: _pildora(Icons.payments_rounded, 'Cobrar',
+                            () => _irCerrando(widget.onCobrar)),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: _pildora(
+                            Icons.today_rounded,
+                            'Pago diario',
+                            () =>
+                                _irCerrando(widget.onPagoDiario)),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: _pildora(
+                            Icons.person_add_alt_1_rounded,
+                            'Inscribir',
+                            () => _irCerrando(widget.onInscribir)),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+          // v1.3.6 (Argón, diseño): FAB con gradiente lineal reservado
+          // para el speed dial + sombra naranja.
+          Container(
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              gradient: const LinearGradient(
+                colors: [Color(0xFFFF8A00), Color(0xFFEA580C)],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color:
+                      AppColores.naranja.withValues(alpha: 0.35),
+                  blurRadius: 12,
+                  offset: const Offset(0, 4),
+                ),
+              ],
+            ),
+            child: FloatingActionButton(
+              tooltip: _abierto ? 'Cerrar' : 'Acciones rápidas',
+              backgroundColor: Colors.transparent,
+              elevation: 0,
+              highlightElevation: 0,
+              onPressed: _toggle,
+              child: AnimatedRotation(
+                turns: _abierto ? 0.125 : 0.0,
+                duration: const Duration(milliseconds: 220),
+                child: Icon(
+                  _abierto ? Icons.close_rounded : Icons.bolt_rounded,
+                  color: Colors.white,
+                  size: 26,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Píldora de acción. v1.3.6 (Argón, diseño): superficie de tarjeta con
+  /// borde sutil + mini-círculo interno (28×28, naranja 15%) para el icono
+  /// _rounded a 17 px. Sin destacado: el protagonismo es del FAB.
+  Widget _pildora(IconData icono, String texto, VoidCallback onTap) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(AppRadio.md),
+      onTap: onTap,
+      child: Container(
+        height: 48,
+        decoration: BoxDecoration(
+          color: Theme.of(context).cardColor,
+          borderRadius: BorderRadius.circular(AppRadio.md),
+          border: Border.all(
+              color: AppColores.naranja.withValues(alpha: 0.25)),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Container(
+              width: 28,
+              height: 28,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: AppColores.naranja.withValues(alpha: 0.15),
+              ),
+              child: Icon(icono,
+                  color: AppColores.naranja, size: 17),
+            ),
+            const SizedBox(width: 6),
+            // FittedBox en vez de ellipsis para que "Pago diario" no se
+            // trunque en móviles estrechos o con texto ampliado.
+            Flexible(
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.centerLeft,
+                child: Text(texto,
+                    style: TextStyle(
+                        color: AppColores.naranja,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600)),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

@@ -9,6 +9,7 @@ import 'dart:io';
 import '../fotos.dart';
 import '../localdb.dart';
 import '../negocio.dart';
+import '../auth.dart';
 import 'componentes.dart';
 import 'diseno.dart';
 import 'widgets.dart';
@@ -53,9 +54,18 @@ class _MiDiaScreenState extends State<MiDiaScreen> {
     _cargar();
   }
 
+  /// v1.3.6 (Argón): telegramId del entrenador actual, o null si es el
+  /// dueño (ve todo). Se normaliza para comparar contra registrado_por.
+  int? get _filtroEntrenador {
+    final auth = AuthService();
+    if (auth.isOwner) return null;
+    return LocalDb.normalizarTelegramId(auth.telegramId);
+  }
+
   Future<void> _cargar() async {
     setState(() => _cargando = true);
     final hoy = _hoyCorto();
+    final soloTid = _filtroEntrenador;
     final clientes = await LocalDb.instance.allMirror('clientes');
     final nombres = <int, String>{
       for (final c in clientes)
@@ -69,7 +79,7 @@ class _MiDiaScreenState extends State<MiDiaScreen> {
     final cobrados = <Map<String, dynamic>>[];
     double total = 0;
     // v1.3.4 (ítem 2): columna `fecha` indexada en vez de allMirror.
-    for (final p in await LocalDb.instance.pagosDelDia(hoy)) {
+    for (final p in await LocalDb.instance.pagosDelDia(hoy, soloTelegramId: soloTid)) {
       final monto = (p['monto'] as num?)?.toDouble() ?? 0;
       total += monto;
       cobrados.add({
@@ -94,10 +104,10 @@ class _MiDiaScreenState extends State<MiDiaScreen> {
       (g['items'] as List<Map<String, dynamic>>).add(c);
     }
     final porCobrar = await vencenHoy();
-    final porMetodo = await cobradoHoyPorMetodo();
+    final porMetodo = await cobradoHoyPorMetodo(soloTelegramId: soloTid);
     // v1.3.2: pagos diarios por turno y turnos sin reporte.
-    final diariosPorTurno = await resumenDiarioPorTurno(hoy);
-    final sinReporte = await turnosSinReporte(hoy);
+    final diariosPorTurno = await resumenDiarioPorTurno(hoy, soloTelegramId: soloTid);
+    final sinReporte = await turnosSinReporte(hoy, soloTelegramId: soloTid);
     if (mounted) {
       setState(() {
         _cobrados = cobrados;
@@ -126,13 +136,16 @@ class _MiDiaScreenState extends State<MiDiaScreen> {
   /// lista coincida con el detalle.
   Future<void> _cargarMes() async {
     setState(() => _cargando = true);
-    final res = await resumenMensualDiarios(_mesAnio, _mesMes);
+    // v1.3.6: filtro por entrenador (null = dueño, ve todo).
+    final soloTid = _filtroEntrenador;
+    final res = await resumenMensualDiarios(_mesAnio, _mesMes,
+        soloTelegramId: soloTid);
     final diasMes = Map<String, double>.from(res['porDia'] as Map? ?? {});
     var totalMes = (res['total'] as num?)?.toDouble() ?? 0;
     final ahora = DateTime.now();
     if (_mesAnio == ahora.year && _mesMes == ahora.month) {
       final hoyIso = _hoyCorto();
-      final hoy = await diariosDeHoy();
+      final hoy = await diariosDeHoy(soloTelegramId: soloTid);
       var totalHoy = 0.0;
       for (final d in hoy) {
         totalHoy += (d['total'] as num?)?.toDouble() ?? 0;
@@ -159,7 +172,11 @@ class _MiDiaScreenState extends State<MiDiaScreen> {
       _diaDetalle = fechaIso;
     });
     final esHoy = fechaIso == _hoyCorto();
-    final datos = esHoy ? await diariosDeHoy() : await diariosDeFecha(fechaIso);
+    // v1.3.6: filtro por entrenador (null = dueño, ve todo).
+    final soloTid = _filtroEntrenador;
+    final datos = esHoy
+        ? await diariosDeHoy(soloTelegramId: soloTid)
+        : await diariosDeFecha(fechaIso, soloTelegramId: soloTid);
     // Agrupar por turno explícito.
     final porTurno = <String, List<Map<String, dynamic>>>{
       'mañana': [],

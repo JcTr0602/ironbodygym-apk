@@ -823,9 +823,301 @@ Future<double> pendienteRecogerUsd({int? excluirTelegramId}) async {
   return total;
 }
 
+// =====================================================================
+// v1.3.6 (ítems 1B+1C): arqueo de caja e incidencias de sync.
+// =====================================================================
+
+/// IDs de operaciones ya incluidas en alguna liquidación (por entrenador).
+/// Se usa para no contar dos veces: un pago en op_ids de una liquidación
+/// ya está saldado aunque su fila espejo aún no traiga entregado=1
+/// (ventana entre pulls de tablas distintas).
+Future<Set<String>> _idsLiquidados(int telegramId) async {
+  final cubiertos = <String>{};
+  for (final l
+      in await LocalDb.instance.allMirror('liquidaciones_caja')) {
+    if (LocalDb.normalizarTelegramId(l['entrenador_telegram_id']) !=
+        telegramId) {
+      continue;
+    }
+    try {
+      final raw = l['op_ids'];
+      final opIds = raw is String
+          ? jsonDecode(raw) as Map<String, dynamic>
+          : Map<String, dynamic>.from(raw as Map);
+      for (final tabla in ['pagos', 'pagos_diarios', 'ventas_suplementos']) {
+        for (final x in (opIds[tabla] as List?) ?? const []) {
+          cubiertos.add('$tabla:$x');
+        }
+      }
+    } catch (_) {}
+  }
+  return cubiertos;
+}
+
+/// Pendiente CONFIRMADO de un entrenador (invariante 2 de Argón, ítem 1B):
+/// solo filas espejo con sync_seq, IGNORANDO ops_queue. Es la base del
+/// monto_esperado de una liquidación: lo que el servidor ya vio.
+/// Incluye el saldo de arrastre de liquidaciones parciales.
+Future<({double cup, double usd})> pendienteArqueo(int? telegramId) async {
+  if (telegramId == null) return (cup: 0.0, usd: 0.0);
+  final cubiertos = await _idsLiquidados(telegramId);
+  var cup = 0.0;
+  var usd = 0.0;
+  for (final p in await LocalDb.instance
+      .mirrorFiltrado('pagos', {'telegram_user_id': telegramId})) {
+    if (cubiertos.contains('pagos:${p['id']}')) continue;
+    if ((p['metodo'] as String?) == 'efectivo' &&
+        esPendiente(p['entregado'])) {
+      cup += (p['monto'] as num?)?.toDouble() ?? 0;
+    }
+  }
+  for (final d in await LocalDb.instance
+      .mirrorFiltrado('pagos_diarios', {'registrado_por': telegramId})) {
+    if (cubiertos.contains('pagos_diarios:${d['id']}')) continue;
+    if (esPendiente(d['entregado'])) {
+      cup += (d['total'] as num?)?.toDouble() ?? 0;
+    }
+  }
+  for (final v in await ventasSuplementosCup()) {
+    if (LocalDb.normalizarTelegramId(v['registrado_por']) != telegramId) {
+      continue;
+    }
+    if (cubiertos.contains('ventas_suplementos:${v['id']}')) continue;
+    if (esPendiente(v['entregado'])) cup += totalVentaCup(v);
+  }
+  for (final v in await ventasSuplementosUsd()) {
+    if (LocalDb.normalizarTelegramId(v['registrado_por']) != telegramId) {
+      continue;
+    }
+    if (cubiertos.contains('ventas_suplementos:${v['id']}')) continue;
+    if (esPendiente(v['entregado'])) usd += totalVentaUsd(v);
+  }
+  // Saldo de arrastre de liquidaciones parciales (sin partir ops).
+  for (final l
+      in await LocalDb.instance.allMirror('liquidaciones_caja')) {
+    if (LocalDb.normalizarTelegramId(l['entrenador_telegram_id']) !=
+        telegramId) {
+      continue;
+    }
+    if ((l['estado'] as String?) != 'parcial') continue;
+    final arrastre = (l['saldo_arrastre'] as num?)?.toDouble() ?? 0;
+    if ((l['moneda'] as String?) == 'USD') {
+      usd += arrastre;
+    } else {
+      cup += arrastre;
+    }
+  }
+  return (cup: cup, usd: usd);
+}
+
+/// IDs que componen el pendiente confirmado (para op_ids de la liquidación).
+Future<Map<String, List<int>>> idsPendienteArqueo(int? telegramId,
+    {String moneda = 'CUP'}) async {
+  final res = <String, List<int>>{
+    'pagos': [],
+    'pagos_diarios': [],
+    'ventas_suplementos': [],
+  };
+  if (telegramId == null) return res;
+  final cubiertos = await _idsLiquidados(telegramId);
+  final esUsd = moneda == 'USD';
+  for (final p in await LocalDb.instance
+      .mirrorFiltrado('pagos', {'telegram_user_id': telegramId})) {
+    if (esUsd) continue; // los pagos siempre son CUP
+    if (cubiertos.contains('pagos:${p['id']}')) continue;
+    if ((p['metodo'] as String?) == 'efectivo' &&
+        esPendiente(p['entregado'])) {
+      final id = (p['id'] as num?)?.toInt();
+      if (id != null) res['pagos']!.add(id);
+    }
+  }
+  for (final d in await LocalDb.instance
+      .mirrorFiltrado('pagos_diarios', {'registrado_por': telegramId})) {
+    if (esUsd) continue; // los pagos diarios siempre son CUP
+    if (cubiertos.contains('pagos_diarios:${d['id']}')) continue;
+    if (esPendiente(d['entregado'])) {
+      final id = (d['id'] as num?)?.toInt();
+      if (id != null) res['pagos_diarios']!.add(id);
+    }
+  }
+  final ventas = esUsd ? await ventasSuplementosUsd() : await ventasSuplementosCup();
+  for (final v in ventas) {
+    if (LocalDb.normalizarTelegramId(v['registrado_por']) != telegramId) {
+      continue;
+    }
+    if (cubiertos.contains('ventas_suplementos:${v['id']}')) continue;
+    if (esPendiente(v['entregado'])) {
+      final id = (v['id'] as num?)?.toInt();
+      if (id != null) res['ventas_suplementos']!.add(id);
+    }
+  }
+  return res;
+}
+
+/// Entrenadores con pendiente de arqueo: [{telegram_id, nombre, cup, usd}].
+/// Solo para el dueño.
+Future<List<Map<String, dynamic>>> entrenadoresConPendiente() async {
+  final porEntrenador = <int, Map<String, dynamic>>{};
+  Future<void> acumular(int? tid, String? nombre, double cup, double usd) async {
+    if (tid == null || (cup <= 0 && usd <= 0)) return;
+    final e = porEntrenador.putIfAbsent(
+        tid, () => {'telegram_id': tid, 'nombre': nombre ?? '—', 'cup': 0.0, 'usd': 0.0});
+    e['cup'] = (e['cup'] as double) + cup;
+    e['usd'] = (e['usd'] as double) + usd;
+    if (nombre != null && nombre.isNotEmpty && e['nombre'] == '—') {
+      e['nombre'] = nombre;
+    }
+  }
+
+  // Se itera por entrenador conocido: los que tienen pagos/ventas.
+  final tids = <int>{};
+  for (final p in await LocalDb.instance.pagosPorFiltro(metodo: 'efectivo')) {
+    final tid = LocalDb.normalizarTelegramId(p['telegram_user_id']);
+    if (tid != null) tids.add(tid);
+  }
+  for (final d in await LocalDb.instance.allMirror('pagos_diarios')) {
+    final tid = LocalDb.normalizarTelegramId(d['registrado_por']);
+    if (tid != null) tids.add(tid);
+  }
+  for (final v in await ventasSuplementosCup()) {
+    final tid = LocalDb.normalizarTelegramId(v['registrado_por']);
+    if (tid != null) tids.add(tid);
+  }
+  for (final v in await ventasSuplementosUsd()) {
+    final tid = LocalDb.normalizarTelegramId(v['registrado_por']);
+    if (tid != null) tids.add(tid);
+  }
+  // Nombre de cada entrenador (del primer pago/venta que aparezca).
+  for (final tid in tids) {
+    String? nombre;
+    for (final p in await LocalDb.instance
+        .mirrorFiltrado('pagos', {'telegram_user_id': tid})) {
+      nombre = p['registrado_por'] as String?;
+      if (nombre != null && nombre.isNotEmpty) break;
+    }
+    final pend = await pendienteArqueo(tid);
+    await acumular(tid, nombre, pend.cup, pend.usd);
+  }
+  final lista = porEntrenador.values.toList()
+    ..sort((a, b) =>
+        ((b['cup'] as double) + (b['usd'] as double))
+            .compareTo((a['cup'] as double) + (a['usd'] as double)));
+  return lista;
+}
+
+/// Historial de liquidaciones de un entrenador (más recientes primero).
+Future<List<Map<String, dynamic>>> liquidacionesDeEntrenador(
+    int telegramId) async {
+  final res = <Map<String, dynamic>>[];
+  for (final l
+      in await LocalDb.instance.allMirror('liquidaciones_caja')) {
+    if (LocalDb.normalizarTelegramId(l['entrenador_telegram_id']) ==
+        telegramId) {
+      res.add(l);
+    }
+  }
+  res.sort((a, b) =>
+      '${b['creada_en']}'.compareTo('${a['creada_en']}'));
+  return res;
+}
+
+/// Crea una liquidación de caja (solo dueño). Encola la op `liquidar_caja`
+/// con UUID idempotente y dispara el push en segundo plano.
+/// Devuelve el UUID de la liquidación.
+Future<String> crearLiquidacion({
+  required int entrenadorTelegramId,
+  required String entrenadorNombre,
+  required double montoEsperado,
+  required double montoEntregado,
+  required Map<String, List<int>> opIds,
+  String moneda = 'CUP',
+  String? nota,
+}) async {
+  if (!AuthService().isOwner) {
+    throw Exception('Solo el dueño puede liquidar caja');
+  }
+  if (montoEsperado < 0 || montoEntregado < 0) {
+    throw Exception('Montos no pueden ser negativos');
+  }
+  if (montoEntregado - montoEsperado > 0.01) {
+    throw Exception('Lo entregado no puede superar lo esperado');
+  }
+  final liqId = const Uuid().v4();
+  final db = LocalDb.instance;
+  await db.queueOp(
+    opUuid: liqId,
+    tipo: 'liquidar_caja',
+    payload: {
+      'liquidacion_id': liqId,
+      'entrenador_telegram_id': entrenadorTelegramId,
+      'entrenador_nombre': entrenadorNombre,
+      'monto_esperado': montoEsperado,
+      'monto_entregado': montoEntregado,
+      'moneda': moneda,
+      'op_ids': opIds,
+      if (nota != null && nota.isNotEmpty) 'nota': nota,
+      'creada_en': isoHabana(ahoraHabana()),
+    },
+  );
+  // Push en segundo plano; el pull silencioso posterior trae la fila
+  // espejo (invariante 1C: _download inmediato tras el 200 OK).
+  unawaited(SyncEngine.instance.push().catchError((_) {}));
+  return liqId;
+}
+
+/// Incidencias de sync pendientes de revisión (solo dueño).
+Future<List<Map<String, dynamic>>> incidenciasSyncPendientes() async {
+  final res = <Map<String, dynamic>>[];
+  for (final i in await LocalDb.instance.allMirror('incidencias_sync')) {
+    if ((i['estado'] as String?) == 'pendiente') res.add(i);
+  }
+  res.sort((a, b) => '${a['creada_en']}'.compareTo('${b['creada_en']}'));
+  return res;
+}
+
+/// Historial de incidencias de sync ya resueltas (solo dueño).
+Future<List<Map<String, dynamic>>> incidenciasSyncResueltas() async {
+  final res = <Map<String, dynamic>>[];
+  for (final i in await LocalDb.instance.allMirror('incidencias_sync')) {
+    if ((i['estado'] as String?) != 'pendiente') res.add(i);
+  }
+  res.sort((a, b) => '${b['creada_en']}'.compareTo('${a['creada_en']}'));
+  return res;
+}
+
+/// Aprueba una incidencia: el servidor aplica la op original a su tabla
+/// destino. Solo dueño.
+Future<void> aprobarIncidenciaSync(String incidenciaId) async {
+  if (!AuthService().isOwner) {
+    throw Exception('Solo el dueño puede aprobar incidencias');
+  }
+  await LocalDb.instance.queueOp(
+    opUuid: const Uuid().v4(),
+    tipo: 'aprobar_incidencia_sync',
+    payload: {'incidencia_id': incidenciaId},
+  );
+  unawaited(SyncEngine.instance.push().catchError((_) {}));
+}
+
+/// Descarta una incidencia de sync. Solo dueño.
+Future<void> descartarIncidenciaSync(String incidenciaId,
+    {String? nota}) async {
+  if (!AuthService().isOwner) {
+    throw Exception('Solo el dueño puede descartar incidencias');
+  }
+  await LocalDb.instance.queueOp(
+    opUuid: const Uuid().v4(),
+    tipo: 'descartar_incidencia_sync',
+    payload: {
+      'incidencia_id': incidenciaId,
+      if (nota != null && nota.isNotEmpty) 'nota': nota,
+    },
+  );
+  unawaited(SyncEngine.instance.push().catchError((_) {}));
+}
+
 /// Días restantes de vigencia (negativo si vencido, null si sin pagos).
-int? diasRestantes(String? pagadoHasta) {
-  if (pagadoHasta == null || pagadoHasta.length < 10) return null;
+int? diasRestantes(String? pagadoHasta) {  if (pagadoHasta == null || pagadoHasta.length < 10) return null;
   // v1.3.2 (Argón post-fix): NO usar .toUtc() antes de extraer la fecha.
   // En Cuba (UTC-4/UTC-5), a las 8pm local ya es medianoche UTC del día
   // siguiente y restaría 1 día a todas las membresías por la noche.
@@ -888,6 +1180,110 @@ Future<List<Map<String, dynamic>>> porVencer({int dias = 3}) async {
   }).toList();
   res.sort((a, b) => '${a['pagado_hasta']}'.compareTo('${b['pagado_hasta']}'));
   return res;
+}
+
+// =====================================================================
+// v1.3.6 (ítem 1A): bandeja "Avisos WhatsApp de Hoy".
+// =====================================================================
+
+/// Arma la bandeja de avisos de WhatsApp del día: cumpleañeros, vencen hoy,
+/// por vencer (3 días) y recibos de pagos de hoy. Cada mapa trae:
+/// tipo, cliente_id, nombre, telefono, detalle y mensaje (texto pre-rellenado
+/// para wa.me).
+///
+/// Privacidad: los recibos se filtran por el entrenador logueado (si no es
+/// dueño); las secciones por cliente son las mismas que ya ve en Listas.
+Future<List<Map<String, dynamic>>> avisosWhatsappHoy() async {
+  final esDueno = AuthService().isOwner;
+  final tid = AuthService().telegramId;
+  final hoy = hoyHabanaIso();
+  final avisos = <Map<String, dynamic>>[];
+
+  String nombreDe(Map<String, dynamic> c) =>
+      '${c['nombre'] ?? 'Cliente'}'.trim();
+  String telDe(Map<String, dynamic> c) => '${c['telefono'] ?? ''}';
+
+  // 1) Cumpleaños hoy.
+  for (final c in await cumpleanosProximos(dias: 0)) {
+    if ((c['_dias_para'] as int?) != 0) continue;
+    avisos.add({
+      'tipo': 'cumple',
+      'cliente_id': (c['id'] as num?)?.toInt() ?? 0,
+      'nombre': nombreDe(c),
+      'telefono': telDe(c),
+      'detalle': 'Cumple ${c['_cumple']} años',
+      'mensaje': '¡Feliz cumpleaños, ${nombreDe(c)}! 🎂\n'
+          'De parte de todo el equipo de Iron Body Gym, '
+          'que tengas un día excelente 💪',
+    });
+  }
+
+  // 2) Vencen hoy.
+  final idsVenceHoy = <int>{};
+  for (final c in await vencenHoy()) {
+    final cid = (c['id'] as num?)?.toInt() ?? 0;
+    idsVenceHoy.add(cid);
+    avisos.add({
+      'tipo': 'vence_hoy',
+      'cliente_id': cid,
+      'nombre': nombreDe(c),
+      'telefono': telDe(c),
+      'detalle': 'Su mensualidad vence hoy',
+      'mensaje': 'Hola ${nombreDe(c)}, te escribe Iron Body Gym.\n'
+          'Tu mensualidad vence hoy. Puedes renovarla pasando por el gym. '
+          '¡Te esperamos! 💪',
+    });
+  }
+
+  // 3) Por vencer (próximos 3 días, sin los que vencen hoy).
+  for (final c in await porVencer(dias: 3)) {
+    final cid = (c['id'] as num?)?.toInt() ?? 0;
+    if (idsVenceHoy.contains(cid)) continue;
+    final ph = '${c['pagado_hasta'] ?? ''}';
+    final fechaCorta =
+        ph.length >= 10 ? '${ph.substring(8, 10)}/${ph.substring(5, 7)}' : ph;
+    avisos.add({
+      'tipo': 'por_vencer',
+      'cliente_id': cid,
+      'nombre': nombreDe(c),
+      'telefono': telDe(c),
+      'detalle': 'Vence el $fechaCorta',
+      'mensaje': 'Hola ${nombreDe(c)}, te escribe Iron Body Gym.\n'
+          'Tu mensualidad vence el $fechaCorta. ¡No olvides renovar a tiempo! 💪',
+    });
+  }
+
+  // 4) Recibos de pagos de hoy.
+  final pagosHoy = (!esDueno && tid != null)
+      ? await LocalDb.instance.pagosPorDiaYEntrenador(hoy, tid)
+      : await LocalDb.instance.mirrorFiltrado('pagos', {'fecha': hoy});
+  // Nombres de clientes (una sola carga).
+  final clientes = <int, Map<String, dynamic>>{};
+  for (final c in await LocalDb.instance.allMirror('clientes')) {
+    final cid = (c['id'] as num?)?.toInt();
+    if (cid != null) clientes[cid] = c;
+  }
+  for (final p in pagosHoy) {
+    final cid = (p['cliente_id'] as num?)?.toInt() ?? 0;
+    final c = clientes[cid];
+    final nombre = c != null ? nombreDe(c) : 'Cliente $cid';
+    final monto = (p['monto'] as num?)?.toDouble() ?? 0;
+    if (monto <= 0) continue;
+    avisos.add({
+      'tipo': 'recibo',
+      'cliente_id': cid,
+      'nombre': nombre,
+      'telefono': c != null ? telDe(c) : '',
+      'detalle': 'Recibo: ${fmtMonto(monto)} CUP',
+      'mensaje': '*Iron Body Gym* — Recibo\n'
+          'Cliente: $nombre\n'
+          'Monto: ${fmtMonto(monto)} CUP\n'
+          'Fecha: $hoy\n'
+          'Cobrado por: ${p['registrado_por'] ?? ''}'.trim(),
+    });
+  }
+
+  return avisos;
 }
 
 /// Clientes inactivos (papelera de reciclaje).
@@ -1105,11 +1501,24 @@ Future<List<Map<String, dynamic>>> posiblesDuplicados(
 /// Los pendientes llevan flag 'es_optimista' para la UI.
 /// Deduplicación por clave de negocio (fecha+turno+cantidad+registrado_por)
 /// — la solución definitiva con op_uuid requiere migración en servidor.
-Future<List<Map<String, dynamic>>> diariosDeHoy() async {
+Future<List<Map<String, dynamic>>> diariosDeHoy(
+    {int? soloTelegramId}) async {
   final hoy = _hoyIso();
-  final todos = await LocalDb.instance.allMirror('pagos_diarios');
-  final res =
-      todos.where((d) => (d['fecha'] as String?) == hoy).toList();
+  // v1.3.6 (Argón): filtro SQL cuando no es el dueño.
+  final todos = soloTelegramId == null
+      ? await LocalDb.instance.allMirror('pagos_diarios')
+      : await LocalDb.instance.mirrorFiltrado(
+          'pagos_diarios', {'registrado_por': soloTelegramId});
+  final res = todos.where((d) {
+    if ((d['fecha'] as String?) != hoy) return false;
+    // v1.3.6 (Argón): verificación de normalización post-SQL.
+    if (soloTelegramId != null &&
+        LocalDb.normalizarTelegramId(d['registrado_por']) !=
+            soloTelegramId) {
+      return false;
+    }
+    return true;
+  }).toList();
 
   // Ops pendientes de pago_diario (aún no en mirror)
   // FIX (Gemini BUG 6): incluir 'enviada' — si solo se filtra 'pendiente',
@@ -1148,6 +1557,14 @@ Future<List<Map<String, dynamic>>> diariosDeHoy() async {
           '';
       // v1.3.1: registrado_por antes de armar la clave.
       payload['registrado_por'] ??= op['telegram_id'];
+      // v1.3.6 (Argón): NO asumir que toda ops_queue es del usuario
+      // actual. Verificar registrado_por del payload contra el filtro
+      // (un entrenador pudo cambiar de cuenta antes de sincronizar).
+      if (soloTelegramId != null &&
+          LocalDb.normalizarTelegramId(payload['registrado_por']) !=
+              soloTelegramId) {
+        continue;
+      }
       final clave =
           "$fecha|$hora|${payload['turno']}|${payload['cantidad']}|${payload['registrado_por']}";
       if (clavesMirror.contains(clave)) continue; // ya en mirror
@@ -1172,11 +1589,21 @@ Future<List<Map<String, dynamic>>> diariosDeHoy() async {
 
 /// v1.0.15: pagos diarios de una fecha específica (para reporte).
 Future<List<Map<String, dynamic>>> diariosDeFecha(
-    String fechaIso) async {
-  final todos = await LocalDb.instance.allMirror('pagos_diarios');
-  final res = todos
-      .where((d) => (d['fecha'] as String?) == fechaIso)
-      .toList();
+    String fechaIso, {int? soloTelegramId}) async {
+  // v1.3.6 (Argón): filtro SQL cuando no es el dueño.
+  final todos = soloTelegramId == null
+      ? await LocalDb.instance.allMirror('pagos_diarios')
+      : await LocalDb.instance.mirrorFiltrado(
+          'pagos_diarios', {'registrado_por': soloTelegramId});
+  final res = todos.where((d) {
+    if ((d['fecha'] as String?) != fechaIso) return false;
+    if (soloTelegramId != null &&
+        LocalDb.normalizarTelegramId(d['registrado_por']) !=
+            soloTelegramId) {
+      return false;
+    }
+    return true;
+  }).toList();
   res.sort((a, b) =>
       '${b['registrado_por_nombre']}'.compareTo('${a['registrado_por_nombre']}'));
   return res;
@@ -1187,8 +1614,13 @@ Future<List<Map<String, dynamic>>> diariosDeFecha(
 /// mensualidades tienen sus propios reportes).
 /// Retorna {porTurno, porEntrenador, porDia, total}.
 Future<Map<String, dynamic>> resumenMensualDiarios(
-    int year, int month) async {
-  final todos = await LocalDb.instance.allMirror('pagos_diarios');
+    int year, int month, {int? soloTelegramId}) async {
+  // v1.3.6 (Argón): si soloTelegramId != null, filtrar en SQL por
+  // registrado_por (normalizado). El dueño pasa null y ve todo.
+  final todos = soloTelegramId == null
+      ? await LocalDb.instance.allMirror('pagos_diarios')
+      : await LocalDb.instance.mirrorFiltrado(
+          'pagos_diarios', {'registrado_por': soloTelegramId});
   final porTurno = {
     'mañana': {'cantidad': 0.0, 'total': 0.0},
     'tarde': {'cantidad': 0.0, 'total': 0.0},
@@ -1197,6 +1629,15 @@ Future<Map<String, dynamic>> resumenMensualDiarios(
   final porEntrenador = <String, Map<String, double>>{};
   final porDia = <String, double>{};
   for (final d in todos) {
+    // v1.3.6 (Argón): verificación de normalización post-SQL. El
+    // mirrorFiltrado compara el valor crudo del JSON; si registrado_por
+    // viene como String y soloTelegramId es int (o viceversa), el SQL
+    // puede no matchear. Esta verificación garantiza el filtro.
+    if (soloTelegramId != null &&
+        LocalDb.normalizarTelegramId(d['registrado_por']) !=
+            soloTelegramId) {
+      continue;
+    }
     final f = '${d['fecha'] ?? ''}';
     if (f.length < 10) continue;
     final dia = f.substring(0, 10);
@@ -1240,13 +1681,15 @@ String fechaCorta(dynamic v, int n) {
 /// sueltos (evita falsos positivos: un pago de mensualidad por la tarde
 /// no implica que el turno mañana reportó su caja).
 /// Retorna la lista de turnos esperados sin registro ('mañana', 'tarde').
-Future<List<String>> turnosSinReporte(String fechaIso) async {
+Future<List<String>> turnosSinReporte(String fechaIso,
+    {int? soloTelegramId}) async {
   // v1.3.2 (Argón #15): para hoy usar diariosDeHoy (incluye la cola
   // optimista offline); normalizar 'manana'; cruzar con turnos_cierre
   // (un turno cerrado sin pagos diarios también cuenta como reportado).
+  // v1.3.6: propagar el filtro por entrenador.
   final datos = fechaIso == _hoyIso()
-      ? await diariosDeHoy()
-      : await diariosDeFecha(fechaIso);
+      ? await diariosDeHoy(soloTelegramId: soloTelegramId)
+      : await diariosDeFecha(fechaIso, soloTelegramId: soloTelegramId);
   final turnos = datos
       .map((d) =>
           '${d['turno'] ?? ''}'.toLowerCase().replaceAll('manana', 'mañana'))
@@ -1270,11 +1713,12 @@ Future<List<String>> turnosSinReporte(String fechaIso) async {
 /// v1.0.15: resumen de pagos diarios por turno para una fecha.
 /// Devuelve {mañana: {cantidad, total}, tarde: {cantidad, total}}.
 Future<Map<String, Map<String, double>>> resumenDiarioPorTurno(
-    String fechaIso) async {
+    String fechaIso, {int? soloTelegramId}) async {
   // v1.3.1: para hoy, incluir pagos optimistas en cola.
+  // v1.3.6: propagar el filtro por entrenador.
   final datos = fechaIso == _hoyIso()
-      ? await diariosDeHoy()
-      : await diariosDeFecha(fechaIso);
+      ? await diariosDeHoy(soloTelegramId: soloTelegramId)
+      : await diariosDeFecha(fechaIso, soloTelegramId: soloTelegramId);
   final res = {
     'mañana': {'cantidad': 0.0, 'total': 0.0},
     'tarde': {'cantidad': 0.0, 'total': 0.0},
@@ -2761,10 +3205,13 @@ Future<double> gastosDe(String fechaIso) async {
 }
 
 /// Cobrado hoy por método (cierre de caja): {efectivo, transferencia}.
-Future<Map<String, double>> cobradoHoyPorMetodo() async {
+Future<Map<String, double>> cobradoHoyPorMetodo(
+    {int? soloTelegramId}) async {
   final hoy = _hoyIso();
   double ef = 0, tr = 0;
-  for (final p in await LocalDb.instance.pagosDelDia(hoy)) {
+  // v1.3.6: propagar el filtro por entrenador (usa columna indexada).
+  for (final p
+      in await LocalDb.instance.pagosDelDia(hoy, soloTelegramId: soloTelegramId)) {
     final m = (p['monto'] as num?)?.toDouble() ?? 0;
     if ('${p['metodo']}' == 'transferencia') {
       tr += m;
@@ -2772,7 +3219,17 @@ Future<Map<String, double>> cobradoHoyPorMetodo() async {
       ef += m;
     }
   }
-  for (final d in await LocalDb.instance.allMirror('pagos_diarios')) {
+  // v1.3.6 (Argón): filtro SQL + verificación de normalización.
+  final diarios = soloTelegramId == null
+      ? await LocalDb.instance.allMirror('pagos_diarios')
+      : await LocalDb.instance.mirrorFiltrado(
+          'pagos_diarios', {'registrado_por': soloTelegramId});
+  for (final d in diarios) {
+    if (soloTelegramId != null &&
+        LocalDb.normalizarTelegramId(d['registrado_por']) !=
+            soloTelegramId) {
+      continue;
+    }
     if ('${d['fecha'] ?? ''}'.length >= 10 &&
         '${d['fecha']}'.substring(0, 10) == hoy) {
       ef += (d['total'] as num?)?.toDouble() ?? 0;

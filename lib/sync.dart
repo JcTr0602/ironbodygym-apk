@@ -148,6 +148,14 @@ class SyncScope {
     'ventas': ['ventas_suplementos'],
     'incidencias': ['incidencia_eventos'],
     'gastos': ['gastos'],
+    // v1.3.6 (ítems 1B+1C): arqueo de caja e incidencias de sync.
+    'arqueo': [
+      'liquidaciones_caja',
+      'pagos',
+      'pagos_diarios',
+      'ventas_suplementos'
+    ],
+    'incidencias_sync': ['incidencias_sync'],
   };
 
   /// Resuelve las tablas del scope en orden topológico (padres primero).
@@ -882,6 +890,8 @@ class SyncEngine {
           'pagos': 'pagos',
           'cobrar': 'cobros',
           'suplementos': 'suplementos',
+          'arqueo': 'arqueo de caja', // v1.3.6
+          'incidencias_sync': 'incidencias de sync', // v1.3.6
         }[scope] ?? scope;
         _emit(SyncPhase.idle,
             resumen: n == 0
@@ -1664,6 +1674,19 @@ class SyncEngine {
   /// v1.2.7 (Paso 1 Gemini): prepara los datos de una fila mirror sin
   /// escribir a la BD. Devuelve {'id', 'dataJson', 'esTexto'} o null si
   /// la fila es inválida. La escritura se hace en batch transaccional.
+  /// v1.3.6 (v28): normaliza un campo que puede llegar como Map (jsonb de
+  /// PostgREST), String (JSON ya serializado) o null. Devuelve String
+  /// JSON o null, para guardar homogéneo en el espejo.
+  String? _jsonONulo(dynamic v) {
+    if (v == null) return null;
+    if (v is String) return v;
+    try {
+      return jsonEncode(v);
+    } catch (_) {
+      return '$v';
+    }
+  }
+
   Map<String, dynamic>? _prepararFilaMirror(
       String tabla, Map<String, dynamic> m) {
     if (tabla == 'turnos_cierre') {
@@ -1681,6 +1704,41 @@ class SyncEngine {
         'pagos_count': m['pagos_count'],
         'nota': m['nota'],
         'cerrado_en': m['cerrado_en'],
+      };
+      return {'id': id, 'dataJson': jsonEncode(data), 'esTexto': true};
+    }
+    // v1.3.6 (v28): tablas planas con id TEXT (UUID). jsonb de Postgres
+    // (op_ids, payload) llega como Map: se normaliza a String JSON.
+    if (tabla == 'liquidaciones_caja' || tabla == 'incidencias_sync') {
+      final id = '${m['id'] ?? ''}';
+      if (id.isEmpty) return null;
+      final data = <String, dynamic>{
+        'id': id,
+        if (tabla == 'liquidaciones_caja') ...{
+          'entrenador_telegram_id': m['entrenador_telegram_id'],
+          'entrenador_nombre': m['entrenador_nombre'],
+          'monto_esperado': m['monto_esperado'],
+          'monto_entregado': m['monto_entregado'],
+          'saldo_arrastre': m['saldo_arrastre'],
+          'moneda': m['moneda'],
+          'estado': m['estado'],
+          'op_ids': _jsonONulo(m['op_ids']),
+          'creada_por': m['creada_por'],
+          'creada_en': m['creada_en'],
+          'nota': m['nota'],
+        } else ...{
+          'op_uuid': m['op_uuid'],
+          'tipo': m['tipo'],
+          'payload': _jsonONulo(m['payload']),
+          'error': m['error'],
+          'dispositivo': m['dispositivo'],
+          'user_id': m['user_id'],
+          'creada_en': m['creada_en'],
+          'estado': m['estado'],
+          'resuelta_por': m['resuelta_por'],
+          'resuelta_en': m['resuelta_en'],
+          'nota_resolucion': m['nota_resolucion'],
+        },
       };
       return {'id': id, 'dataJson': jsonEncode(data), 'esTexto': true};
     }
@@ -1730,6 +1788,8 @@ class SyncEngine {
       'ventas_suplementos',
       'categorias_suplemento', // v1.2.1
       'turnos_cierre', // v1.2.5-rev5
+      'liquidaciones_caja', // v1.3.6 (v28, ítem 1B)
+      'incidencias_sync', // v1.3.6 (v28, ítem 1C)
     ];
     final tablas = tablasFiltro ?? todasTablas;
     // v1.2.5 (D19): si el manifiesto marcó algún ámbito divergente,
@@ -1747,7 +1807,10 @@ class SyncEngine {
         final tablaFlag = k.replaceFirst('forzar_redescarga_', '');
         if (tablas.contains(tablaFlag)) {
           tablasReseteadas.add(tablaFlag);
-          await _db.setMeta(k, '');
+          // v1.3.6 (Argón): NO limpiar el flag aquí. Se limpia al final
+          // exitoso de cada tabla (ver abajo): si el pull cae a mitad de
+          // tabla, el flag sobrevive y el próximo ciclo reintenta la
+          // re-descarga completa.
         }
       }
     } catch (_) {}
@@ -1808,6 +1871,9 @@ class SyncEngine {
       'categorias_suplemento': 'sync_categorias_suplemento',
       // v1.2.5-rev5: cierres sincronizados (si no existe, se omite).
       'turnos_cierre': 'sync_turnos_cierre',
+      // v1.3.6 (v28): arqueo de caja e incidencias de sync.
+      'liquidaciones_caja': 'sync_liquidaciones_caja',
+      'incidencias_sync': 'sync_incidencias_sync',
     };
     var ti = 0;
     for (final tabla in tablas) {
@@ -1842,6 +1908,15 @@ class SyncEngine {
               'id,entrenador_id,entrenador_nombre,telegram_id,fecha,'
                   'turno,total_cobrado,total_esperado,pagos_count,nota,'
                   'cerrado_en,sync_seq',
+            // v1.3.6 (v28): esquemas planos con id TEXT (UUID).
+            'liquidaciones_caja' =>
+              'id,entrenador_telegram_id,entrenador_nombre,'
+                  'monto_esperado,monto_entregado,saldo_arrastre,moneda,'
+                  'estado,op_ids,creada_por,creada_en,nota,sync_seq',
+            'incidencias_sync' =>
+              'id,op_uuid,tipo,payload,error,dispositivo,user_id,'
+                  'creada_en,estado,resuelta_por,resuelta_en,'
+                  'nota_resolucion,sync_seq',
             _ => 'id,data,sync_seq',
           };
           // v1.2.9+47 (AppLog): medir latencia del lote.
@@ -2043,6 +2118,11 @@ class SyncEngine {
         // v1.3.1 (Argón pull): la tabla completó sin errores: limpiar
         // su error guardado.
         await _db.setMeta('wm_err_$tabla', '');
+        // v1.3.6 (Argón): la tabla se re-descargó completa con éxito:
+        // recién ahora se consume el flag forzar_redescarga_<tabla>.
+        if (tablasReseteadas.contains(tabla)) {
+          await _db.setMeta('forzar_redescarga_$tabla', '');
+        }
         final wmActual = await _db.getWatermarkTabla(tabla);
         if (wmActual < serverSeq) {
           // v1.3.1 (Argón pull): NO forzar el watermark si la tabla es

@@ -226,7 +226,7 @@ class LocalDb {
     final dir = await getDatabasesPath();
     _db = await openDatabase(
       p.join(dir, 'ironbody.db'),
-      version: 27,
+      version: 28,
       // v1.3-r4 (Gemini): WAL mode para que lectores (UI) y escritores
       // (Workmanager en otro isolate) no se bloqueen mutuamente.
       // v1.2.9+34 (hotfix): try-catch — si el dispositivo no soporta WAL,
@@ -822,6 +822,40 @@ class LocalDb {
             // en tests; el DELETE es best-effort.
           }
         }
+        // v28 (v1.3.6, ítems 1B+1C): espejos de arqueo de caja e
+        // incidencias de sync (veredicto de Argón).
+        // - liquidaciones_caja: actos de liquidación del dueño
+        //   (monto_esperado vs monto_entregado, saldo_arrastre).
+        // - incidencias_sync: ops rechazadas con Aprobar/Descartar.
+        // Ambas con id TEXT (UUID) y sync_seq indexado (invariante 4).
+        // Watermarks en 0 explícito: son tablas nuevas que NO heredan el
+        // global (patrón v12 turnos_cierre); si no, perderían el historial.
+        if (oldV < 28) {
+          await db.execute('CREATE TABLE IF NOT EXISTS liquidaciones_caja ('
+              'id TEXT PRIMARY KEY, data TEXT NOT NULL, '
+              'sync_seq INTEGER NOT NULL)');
+          await db.execute(
+              'CREATE INDEX IF NOT EXISTS idx_liquidaciones_caja_seq '
+              'ON liquidaciones_caja(sync_seq)');
+          await db.execute('CREATE TABLE IF NOT EXISTS incidencias_sync ('
+              'id TEXT PRIMARY KEY, data TEXT NOT NULL, '
+              'sync_seq INTEGER NOT NULL)');
+          await db.execute(
+              'CREATE INDEX IF NOT EXISTS idx_incidencias_sync_seq '
+              'ON incidencias_sync(sync_seq)');
+          // Watermarks en 0 explícito (patrón v27): best-effort porque la
+          // tabla meta puede no existir en BDs mínimas de tests.
+          try {
+            await db.insert(
+                'meta',
+                {'k': 'wm_liquidaciones_caja', 'v': '0'},
+                conflictAlgorithm: ConflictAlgorithm.replace);
+            await db.insert(
+                'meta',
+                {'k': 'wm_incidencias_sync', 'v': '0'},
+                conflictAlgorithm: ConflictAlgorithm.replace);
+          } catch (_) {}
+        }
       },
     );
     // v1.2.5+28: repara el índice FTS si la migración lo omitió y el
@@ -1094,6 +1128,12 @@ class LocalDb {
     // aparte del bucle genérico de ids enteros.
     await db.execute(
         'CREATE TABLE turnos_cierre (id TEXT PRIMARY KEY, data TEXT NOT NULL, sync_seq INTEGER NOT NULL)');
+    // v1.3.6 (v28, ítems 1B+1C): espejos de arqueo e incidencias de sync.
+    // Mismo esquema que turnos_cierre: id TEXT (UUID), data JSON, sync_seq.
+    for (final t in ['liquidaciones_caja', 'incidencias_sync']) {
+      await db.execute(
+          'CREATE TABLE $t (id TEXT PRIMARY KEY, data TEXT NOT NULL, sync_seq INTEGER NOT NULL)');
+    }
     // v1.3.3 (v24): registro local de turnos con máquina de estados
     // (abrir/cerrar turno desde el Home del entrenador).
     await _crearTablaTurnos(db);
@@ -1104,6 +1144,7 @@ class LocalDb {
     for (final t in [
       'clientes', 'pagos', 'pagos_diarios', 'gastos', 'suplementos',
       'ventas_suplementos', 'categorias_suplemento', 'turnos_cierre',
+      'liquidaciones_caja', 'incidencias_sync', // v1.3.6 (v28)
     ]) {
       await db.execute('CREATE INDEX IF NOT EXISTS idx_${t}_seq ON $t(sync_seq)');
     }
@@ -2075,11 +2116,18 @@ class LocalDb {
   /// columna indexada `fecha` en vez de allMirror + filtro en Dart.
   /// Fallback en Dart para filas con `fecha` NULL, igual que
   /// [pagosPorDiaYEntrenador].
-  Future<List<Map<String, dynamic>>> pagosDelDia(String fechaIso) async {
+  Future<List<Map<String, dynamic>>> pagosDelDia(String fechaIso,
+      {int? soloTelegramId}) async {
     final d = await db;
     final res = <Map<String, dynamic>>[];
+    // v1.3.6 (Argón): filtro SQL por telegram_user_id (columna indexada)
+    // cuando no es el dueño. La columna se normaliza al poblar (v1.3.4).
+    final whereExtra =
+        soloTelegramId == null ? '' : ' AND telegram_user_id = ?';
+    final argsExtra = soloTelegramId == null ? <Object>[] : [soloTelegramId];
     final rows = await d.rawQuery(
-        'SELECT id, data FROM pagos WHERE fecha = ?', [fechaIso]);
+        'SELECT id, data FROM pagos WHERE fecha = ?$whereExtra',
+        [fechaIso, ...argsExtra]);
     for (final r in rows) {
       try {
         res.add({
@@ -2088,8 +2136,9 @@ class LocalDb {
         });
       } catch (_) {}
     }
-    final nulos =
-        await d.rawQuery('SELECT id, data FROM pagos WHERE fecha IS NULL');
+    final nulos = await d.rawQuery(
+        'SELECT id, data FROM pagos WHERE fecha IS NULL$whereExtra',
+        argsExtra);
     for (final r in nulos) {
       try {
         final p = jsonDecode(r['data'] as String) as Map<String, dynamic>;
@@ -3591,6 +3640,8 @@ class LocalDb {
     'categorias_suplemento',
     'turnos_cierre',
     'borrados', // tombstones de sync_borrados
+    'liquidaciones_caja', // v1.3.6 (v28, ítem 1B)
+    'incidencias_sync', // v1.3.6 (v28, ítem 1C)
   ];
 
   Future<int> getWatermarkTabla(String tabla) async {
