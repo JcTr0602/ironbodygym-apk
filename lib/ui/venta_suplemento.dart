@@ -147,31 +147,7 @@ class _VentaSuplementoScreenState
     if (!mounted) return;
     final sel = await showDialog<Map<String, dynamic>>(
       context: context,
-      builder: (ctx) => DialogoApp(
-        titulo: 'Cliente del gym',
-        iconoTitulo: Icons.person_search,
-        contenido: SizedBox(
-          width: double.maxFinite,
-          height: 320,
-          child: ListView.builder(
-            shrinkWrap: true,
-            itemCount: activos.length,
-            itemBuilder: (_, i) {
-              final c = activos[i];
-              return ListTile(
-                title: Text('${c['nombre'] ?? ''}'),
-                onTap: () => Navigator.pop(ctx, c),
-              );
-            },
-          ),
-        ),
-        acciones: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancelar'),
-          ),
-        ],
-      ),
+      builder: (ctx) => _DialogoBuscarCliente(clientes: activos),
     );
     if (sel != null && mounted) {
       setState(() {
@@ -673,6 +649,83 @@ class _VentaSuplementoScreenState
           ),
         ],
       ),
+    );
+  }
+}
+
+/// v1.3.7: diálogo de selección de cliente con búsqueda.
+/// Pedido de Jc: no solo el listado fijo, poder buscar por nombre.
+class _DialogoBuscarCliente extends StatefulWidget {
+  final List<Map<String, dynamic>> clientes;
+  const _DialogoBuscarCliente({required this.clientes});
+
+  @override
+  State<_DialogoBuscarCliente> createState() => _DialogoBuscarClienteState();
+}
+
+class _DialogoBuscarClienteState extends State<_DialogoBuscarCliente> {
+  final _ctrl = TextEditingController();
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final q = _ctrl.text.trim().toLowerCase();
+    final filtrados = q.isEmpty
+        ? widget.clientes
+        : widget.clientes.where((c) {
+            final n = '${c['nombre'] ?? ''}'.toLowerCase();
+            return n.contains(q);
+          }).toList();
+    return DialogoApp(
+      titulo: 'Cliente del gym',
+      iconoTitulo: Icons.person_search,
+      contenido: SizedBox(
+        width: double.maxFinite,
+        height: 380,
+        child: Column(
+          children: [
+            TextField(
+              controller: _ctrl,
+              autofocus: true,
+              decoration: const InputDecoration(
+                hintText: 'Buscar por nombre…',
+                prefixIcon: Icon(Icons.search),
+                border: OutlineInputBorder(),
+                contentPadding:
+                    EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              ),
+              onChanged: (_) => setState(() {}),
+            ),
+            const SizedBox(height: 8),
+            Expanded(
+              child: filtrados.isEmpty
+                  ? const Center(child: Text('Sin resultados'))
+                  : ListView.builder(
+                      shrinkWrap: true,
+                      itemCount: filtrados.length,
+                      itemBuilder: (_, i) {
+                        final c = filtrados[i];
+                        return ListTile(
+                          title: Text('${c['nombre'] ?? ''}'),
+                          onTap: () => Navigator.pop(context, c),
+                        );
+                      },
+                    ),
+            ),
+          ],
+        ),
+      ),
+      acciones: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancelar'),
+        ),
+      ],
     );
   }
 }
