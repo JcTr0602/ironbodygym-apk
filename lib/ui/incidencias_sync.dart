@@ -307,7 +307,7 @@ class _IncidenciasSyncScreenState extends State<IncidenciasSyncScreen> {
             ),
             const SizedBox(height: 6),
             if ((inc['error'] as String?)?.isNotEmpty == true)
-              Text('Motivo: ${inc['error']}',
+              Text('Motivo: ${errorSyncLegible('${inc['error']}')}',
                   style: const TextStyle(fontSize: 13)),
             if (resumen.isNotEmpty)
               Padding(

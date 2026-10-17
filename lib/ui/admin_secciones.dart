@@ -387,7 +387,8 @@ class SeccionSistemaScreen extends StatelessWidget {
               Padding(
                 padding: const EdgeInsets.only(top: 8),
                 child: Text(
-                  syncDet.error ?? '',
+                  // v1.3.8: lenguaje común, no tecnicismos.
+                  errorSyncLegible(syncDet.error ?? ''),
                   style: const TextStyle(
                       color: AppColores.error, fontSize: 13),
                 ),

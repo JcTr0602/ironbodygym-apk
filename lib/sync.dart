@@ -203,6 +203,40 @@ class SyncDetalle {
   int get bajados => bajadosUltimo;
 }
 
+/// v1.3.8: traduce un error técnico de sincronización a lenguaje común.
+/// Pedido de Jc: no mostrar ClientException/SocketException en crudo.
+String errorSyncLegible(String crudo) {
+  final t = crudo.toLowerCase();
+  if (t.contains('failed host lookup') ||
+      t.contains('no address associated with hostname') ||
+      t.contains('socketexception') ||
+      t.contains('network is unreachable') ||
+      t.contains('connection refused')) {
+    return 'Sin conexión a internet. Revisa tus datos o el Wi-Fi e intenta de nuevo.';
+  }
+  if (t.contains('timeoutexception') || t.contains('timed out')) {
+    return 'La conexión tardó demasiado. Intenta de nuevo.';
+  }
+  if (t.contains('401') || t.contains('unauthorized')) {
+    return 'Sesión vencida. Cierra sesión y entra de nuevo.';
+  }
+  if (t.contains('403') || t.contains('forbidden')) {
+    return 'Sin permiso para esta operación.';
+  }
+  if (t.contains('404') || t.contains('not found')) {
+    return 'No se encontró el recurso en el servidor.';
+  }
+  if (t.contains('500') || t.contains('internal server error')) {
+    return 'Error del servidor. Intenta más tarde.';
+  }
+  if (t.contains('clientexception')) {
+    return 'Error de conexión. Revisa tu internet e intenta de nuevo.';
+  }
+  // Fallback: recorta el tecnicismo a una línea legible.
+  final unaLinea = crudo.replaceAll(RegExp(r'\s+'), ' ').trim();
+  return unaLinea.length > 120 ? '${unaLinea.substring(0, 120)}…' : unaLinea;
+}
+
 class SessionExpired implements Exception {
   final String message;
   SessionExpired([this.message = 'sesión vencida, entra de nuevo']);

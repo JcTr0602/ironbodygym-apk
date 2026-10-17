@@ -910,7 +910,8 @@ class _AdminScreenState extends State<AdminScreen> {
                           _tarjetaCompacta(
                             Icons.error_outline_rounded,
                             'Último error',
-                            _syncDet.error!,
+                            // v1.3.8: lenguaje común, no tecnicismos.
+                            errorSyncLegible(_syncDet.error!),
                             AppColores.error,
                           ),
                         _tarjetaFlujo(

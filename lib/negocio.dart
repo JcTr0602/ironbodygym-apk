@@ -39,6 +39,19 @@ String _hace(int dias) {
       '${d.day.toString().padLeft(2, '0')}';
 }
 
+/// v1.3.8: días de atraso entre pagado_hasta y hoy (formato YYYY-MM-DD).
+/// Retorna 0 si la fecha es inválida o futura.
+int _diasAtraso(String pagadoHasta, String hoyIso) {
+  try {
+    final ph = DateTime.parse(pagadoHasta.substring(0, 10));
+    final hoy = DateTime.parse(hoyIso.substring(0, 10));
+    final d = hoy.difference(ph).inDays;
+    return d > 0 ? d : 0;
+  } catch (_) {
+    return 0;
+  }
+}
+
 /// Ejecuta [fn] capturando errores de SQLite. Si la BD falla (I/O,
 /// bloqueada, corrupta), retorna [fallback] en vez de propagar la
 /// excepción a la UI. (v1.3: auditoría Gemini 2026-10-12)
@@ -1203,6 +1216,29 @@ Future<List<Map<String, dynamic>>> avisosWhatsappHoy() async {
   String nombreDe(Map<String, dynamic> c) =>
       '${c['nombre'] ?? 'Cliente'}'.trim();
   String telDe(Map<String, dynamic> c) => '${c['telefono'] ?? ''}';
+
+  // 0) Vencidos (1-30 días de atraso). Van primero: son los que más
+  // dinero representan (v1.3.8, 1C: Vencidos > Vencen hoy > Por vencer
+  // > Recibos > Cumpleaños).
+  final idsVencidos = <int>{};
+  for (final c in await atrasados(masDe30: false)) {
+    final cid = (c['id'] as num?)?.toInt() ?? 0;
+    idsVencidos.add(cid);
+    final ph = '${c['pagado_hasta'] ?? ''}';
+    final dias = _diasAtraso(ph, hoy);
+    avisos.add({
+      'tipo': 'vencido',
+      'cliente_id': cid,
+      'nombre': nombreDe(c),
+      'telefono': telDe(c),
+      'detalle': dias > 0
+          ? 'Vencido hace $dias día${dias == 1 ? '' : 's'}'
+          : 'Mensualidad vencida',
+      'mensaje': 'Hola ${nombreDe(c)}, te escribe Iron Body Gym.\n'
+          'Tu mensualidad está vencida. Pásate por el gym para renovar. '
+          '¡Te esperamos! 💪',
+    });
+  }
 
   // 1) Cumpleaños hoy.
   for (final c in await cumpleanosProximos(dias: 0)) {
