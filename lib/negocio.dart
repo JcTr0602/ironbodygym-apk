@@ -1174,8 +1174,9 @@ Future<List<Map<String, dynamic>>> porVencer({int dias = 3}) async {
   final rows = await _activos();
   final res = rows.where((c) {
     final ph = c['pagado_hasta'] as String?;
+    // v1.3.7: excluye los que vencen hoy (tienen su propio segmento).
     return ph != null &&
-        ph.compareTo(hoy) >= 0 &&
+        ph.compareTo(hoy) > 0 &&
         ph.compareTo(limIso) <= 0;
   }).toList();
   res.sort((a, b) => '${a['pagado_hasta']}'.compareTo('${b['pagado_hasta']}'));
