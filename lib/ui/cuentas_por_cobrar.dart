@@ -120,15 +120,17 @@ class _CuentasPorCobrarScreenState
       aceptar: 'Cobrar',
     );
     if (!ok) return;
+    final fechaCobro = hoyHabanaIso();
     await LocalDb.instance.queueOp(
       opUuid: const Uuid().v4(),
       tipo: 'saldar_fiado_suplemento',
       payload: {
         'venta_id': v['id'],
-        'fecha': hoyHabanaIso(),
+        'fecha': fechaCobro,
       },
     );
-    // Optimista: lo saca de la lista ya (el pull lo confirma).
+    // Optimista: actualiza el espejo local (el pull lo confirma).
+    await LocalDb.instance.marcarFiadoSaldado(v['id'] as int, fechaCobro);
     if (mounted) {
       setState(() {
         _fiados.remove(v);

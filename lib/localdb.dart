@@ -1863,6 +1863,22 @@ class LocalDb {
         where: 'id=?', whereArgs: [clienteId]);
   }
 
+  /// v1.3.7 (Fase B §6.2): marca un fiado como saldado en el espejo local
+  /// (optimista; el pull lo confirma). Actualiza es_fiado=0 y la fecha
+  /// a la del cobro para que sume al "Total cobrado" del día correcto.
+  Future<void> marcarFiadoSaldado(int ventaId, String fechaCobro) async {
+    final d = await db;
+    final rows = await d.query('ventas_suplementos',
+        where: 'id=?', whereArgs: [ventaId], limit: 1);
+    if (rows.isEmpty) return;
+    final data =
+        jsonDecode(rows.first['data'] as String) as Map<String, dynamic>;
+    data['es_fiado'] = 0;
+    data['fecha'] = fechaCobro;
+    await d.update('ventas_suplementos', {'data': jsonEncode(data)},
+        where: 'id=?', whereArgs: [ventaId]);
+  }
+
   /// Actualización optimista del teléfono en el espejo local
   /// (v1.3.3, Argón spec 4: guardar el número al regalar sin fricción).
   Future<void> updateMirrorTelefono(int clienteId, String telefono) async {
