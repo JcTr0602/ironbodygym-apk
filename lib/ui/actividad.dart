@@ -2,11 +2,13 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../auth.dart';
 import '../fotos.dart';
 import '../localdb.dart';
 import '../negocio.dart';
+import '../tiempo.dart';
 import 'componentes.dart';
 import 'diseno.dart';
 import 'ficha.dart';
@@ -39,6 +41,11 @@ class _ActividadScreenState extends State<ActividadScreen> {
   // Caché: cliente_id -> nombre y foto_storage
   final Map<int, String> _nombres = {};
   final Map<int, String?> _fotos = {};
+  // v1.3.5 (Fase 1, C4): teléfonos para el recibo por WhatsApp.
+  final Map<int, String> _telefonos = {};
+  // v1.3.5 (Fase 1, C4): claves de ops no confirmadas para el indicador
+  // de sync O(1) en el itemBuilder. Se construye UNA vez por carga.
+  final Set<String> _pendientesSync = {};
 
   @override
   void initState() {
@@ -91,10 +98,49 @@ class _ActividadScreenState extends State<ActividadScreen> {
       // Reordenar la fusión por ts descendente.
       lista.sort(
           (a, b) => '${b['ts'] ?? ''}'.compareTo('${a['ts'] ?? ''}'));
+      // v1.3.5 (Fase 1, C4): set en memoria de ops no confirmadas.
+      // PROHIBIDO consultar ops_queue por tarjeta (N+1); se resuelve aquí
+      // una sola vez por ciclo y el itemBuilder hace lookup O(1).
+      // Incluye 'enviada' y 'rechazada' (Argón): una op enviada aún no está
+      // confirmada por el servidor. La fusión de _en_cola NO cambia para
+      // no duplicar (una 'enviada' puede ya venir en sync_estado_actividad).
+      _pendientesSync.clear();
+      void agregarClaveOp(String tipo, Map<String, dynamic> payload,
+          String creadaTs) {
+        final cid = _clienteIdDePayload(payload);
+        final dia =
+            creadaTs.length >= 10 ? creadaTs.substring(0, 10) : '';
+        _pendientesSync.add('${_categoriaDe(tipo)}|${cid ?? ''}|$dia');
+      }
+
+      for (final op in opsPend) {
+        Map<String, dynamic> payload = {};
+        try {
+          payload =
+              jsonDecode(op['payload'] as String) as Map<String, dynamic>;
+        } catch (_) {}
+        agregarClaveOp('${op['tipo'] ?? ''}', payload,
+            '${op['creada_ts'] ?? ''}');
+      }
+      try {
+        final opsProc = await db.query('ops_queue',
+            columns: ['tipo', 'payload', 'creada_ts'],
+            where: "estado IN ('enviada', 'rechazada')");
+        for (final op in opsProc) {
+          Map<String, dynamic> payload = {};
+          try {
+            payload = jsonDecode(op['payload'] as String)
+                as Map<String, dynamic>;
+          } catch (_) {}
+          agregarClaveOp('${op['tipo'] ?? ''}', payload,
+              '${op['creada_ts'] ?? ''}');
+        }
+      } catch (_) {}
     } catch (_) {}
     // v1.2.1: resolver nombres y fotos de clientes para cada item.
     _nombres.clear();
     _fotos.clear();
+    _telefonos.clear();
     for (final a in lista) {
       final id = _clienteIdDe(a);
       if (id != null && !_nombres.containsKey(id)) {
@@ -102,6 +148,8 @@ class _ActividadScreenState extends State<ActividadScreen> {
         if (c != null) {
           _nombres[id] = '${c['nombre'] ?? 'Cliente $id'}';
           _fotos[id] = c['foto_storage'] as String?;
+          final tel = '${c['telefono'] ?? ''}'.trim();
+          if (tel.isNotEmpty) _telefonos[id] = tel;
         } else {
           _nombres[id] = 'Cliente $id';
           _fotos[id] = null;
@@ -342,6 +390,181 @@ class _ActividadScreenState extends State<ActividadScreen> {
     return (cup, usd);
   }
 
+  /// v1.3.5 (Fase 1, E1+E2): modal de detalle al tocar la tarjeta.
+  /// Aloja el botón "Recibo WhatsApp" (wa.me) y el acceso a la ficha.
+  Future<void> _abrirDetalle(Map<String, dynamic> a) async {
+    final accion = '${a['accion'] ?? ''}';
+    final cliId = _clienteIdDe(a);
+    final tieneCliente = cliId != null;
+    final nombreCli = cliId != null ? _nombres[cliId] : null;
+    final titulo =
+        (nombreCli != null && !nombreCli.startsWith('Cliente '))
+            ? nombreCli
+            : _tituloAccion(accion);
+    final subtitulo = _subtituloNuevo(a, titulo);
+    final pendiente = _pendienteSync(a);
+    // Monto para el recibo.
+    double cup = 0, usd = 0;
+    if (a['_en_cola'] == true) {
+      cup = (a['_monto_cup'] as num?)?.toDouble() ?? 0;
+      usd = (a['_monto_usd'] as num?)?.toDouble() ?? 0;
+    } else if (_esCobroServidor(accion)) {
+      final m = _montoServidor('${a['detalle'] ?? ''}');
+      cup = m.$1;
+      usd = m.$2;
+    }
+    final montoTxt = usd > 0
+        ? '${fmtMonto(usd)} USD'
+        : (cup > 0 ? '${fmtMonto(cup)} CUP' : '');
+    final telefono =
+        cliId != null ? (_telefonos[cliId] ?? '') : '';
+    final waNum = normalizarTelefonoWaMe(telefono);
+    final fechaLarga = _fechaHoraLarga('${a['ts'] ?? ''}');
+    if (!mounted) return;
+    await showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(
+            top: Radius.circular(AppRadio.xl)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Center(
+                child: Container(
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: AppColores.borde(context),
+                    borderRadius:
+                        BorderRadius.circular(AppRadio.sm),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(titulo,
+                        style: AppTexto.titulo
+                            .copyWith(fontSize: 18)),
+                  ),
+                  _indicadorSync(pendiente),
+                ],
+              ),
+              if (subtitulo.isNotEmpty) ...[
+                const SizedBox(height: 4),
+                Text(subtitulo,
+                    style: AppTexto.secundario.copyWith(
+                        color: AppColores.textoSecundario(
+                            context))),
+              ],
+              if (montoTxt.isNotEmpty) ...[
+                const SizedBox(height: 8),
+                Text(montoTxt,
+                    style: const TextStyle(
+                        color: AppColores.exito,
+                        fontSize: 22,
+                        fontWeight: FontWeight.bold)),
+              ],
+              const SizedBox(height: 8),
+              if (fechaLarga.isNotEmpty)
+                Text('Fecha: $fechaLarga',
+                    style: AppTexto.cuerpo),
+              const SizedBox(height: 16),
+              Row(
+                children: [
+                  if (tieneCliente)
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        icon: const Icon(Icons.person_outline,
+                            size: 18),
+                        label: const Text('Ver ficha'),
+                        onPressed: () {
+                          Navigator.of(ctx).pop();
+                          _abrirFicha(a);
+                        },
+                      ),
+                    ),
+                  if (tieneCliente && waNum.isNotEmpty)
+                    const SizedBox(width: 8),
+                  if (waNum.isNotEmpty)
+                    Expanded(
+                      child: ElevatedButton.icon(
+                        icon: const Icon(Icons.share, size: 18),
+                        label: const Text('Recibo WhatsApp'),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor:
+                              AppColores.naranja,
+                          foregroundColor: Colors.white,
+                          shape: RoundedRectangleBorder(
+                            borderRadius:
+                                BorderRadius.circular(
+                                    AppRadio.md),
+                          ),
+                        ),
+                        onPressed: () {
+                          Navigator.of(ctx).pop();
+                          _compartirRecibo(
+                              a, titulo, montoTxt, waNum);
+                        },
+                      ),
+                    ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// v1.3.5 (Fase 1, E2): comparte el recibo por wa.me con el formato
+  /// existente del proyecto (normalizarTelefonoWaMe + launchUrl).
+  Future<void> _compartirRecibo(Map<String, dynamic> a, String titulo,
+      String montoTxt, String waNum) async {
+    final subtitulo = _subtituloNuevo(a, titulo);
+    final fechaLarga = _fechaHoraLarga('${a['ts'] ?? ''}');
+    final actor = '${a['actor'] ?? ''}'.trim();
+    final buf = StringBuffer()
+      ..writeln('*Iron Body Gym* — Recibo')
+      ..writeln('Cliente: $titulo');
+    if (montoTxt.isNotEmpty) buf.writeln('Monto: $montoTxt');
+    if (subtitulo.isNotEmpty) buf.writeln('Detalle: $subtitulo');
+    if (fechaLarga.isNotEmpty) buf.writeln('Fecha: $fechaLarga');
+    if (actor.isNotEmpty) buf.writeln('Cobrado por: $actor');
+    final url = Uri.parse(
+        'https://wa.me/$waNum?text=${Uri.encodeComponent(buf.toString().trim())}');
+    try {
+      await launchUrl(url, mode: LaunchMode.externalApplication);
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+              content: Text('No se pudo abrir WhatsApp')),
+        );
+      }
+    }
+  }
+
+  /// v1.3.5: "dd/MM/yyyy HH:mm" para el detalle.
+  String _fechaHoraLarga(String ts) {
+    if (ts.isEmpty) return '';
+    try {
+      final dt = DateTime.parse(ts).toLocal();
+      return '${dt.day.toString().padLeft(2, '0')}/'
+          '${dt.month.toString().padLeft(2, '0')}/${dt.year} '
+          '${dt.hour.toString().padLeft(2, '0')}:'
+          '${dt.minute.toString().padLeft(2, '0')}';
+    } catch (_) {
+      return '';
+    }
+  }
+
   Future<void> _abrirFicha(Map<String, dynamic> a) async {
     final id = _clienteIdDe(a);
     if (id == null) return;
@@ -361,46 +584,6 @@ class _ActividadScreenState extends State<ActividadScreen> {
         MaterialPageRoute(builder: (_) => FichaScreen(clienteId: id)),
       );
     }
-  }
-
-  /// v1.2.1: leading de la fila: foto del cliente si hay,
-  /// o el icono de la acción en círculo.
-  Widget _leadingActividad(
-      String? fotoPath, Color color, String accion) {
-    if (fotoPath != null && fotoPath.isNotEmpty) {
-      return FutureBuilder(
-        future: FotoCache.instance.obtener(fotoPath),
-        builder: (ctx, snap) {
-          final f = snap.data;
-          if (f != null) {
-            return ClipRRect(
-              borderRadius:
-                  BorderRadius.circular(AppRadio.md),
-              child: Image.file(f,
-                  width: 44, height: 44, fit: BoxFit.cover),
-            );
-          }
-          return _iconoLeading(color, accion);
-        },
-      );
-    }
-    return _iconoLeading(color, accion);
-  }
-
-  Widget _iconoLeading(Color color, String accion) {
-    return Container(
-      width: 44,
-      height: 44,
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.14),
-        shape: BoxShape.circle,
-      ),
-      child: Icon(
-        _iconoAccion(accion),
-        color: color,
-        size: 22,
-      ),
-    );
   }
 
   /// Icono Material por tipo de acción (v1.1: sin emojis).
@@ -445,6 +628,190 @@ class _ActividadScreenState extends State<ActividadScreen> {
     return AppColores.textoSecundario(context);
   }
 
+  /// v1.3.5 (Fase 1, C4): clave de un item del servidor para buscar
+  /// en _pendientesSync. Mismo formato que agregarClaveOp en _cargar.
+  String _claveSyncItem(Map<String, dynamic> a) {
+    final accion = '${a['accion'] ?? ''}';
+    final ts = '${a['ts'] ?? ''}';
+    final dia = ts.length >= 10 ? ts.substring(0, 10) : '';
+    return '${_categoriaDe(accion)}|${_clienteIdDe(a) ?? ''}|$dia';
+  }
+
+  /// v1.3.5 (Fase 1, C4): ¿el item tiene una op pendiente relacionada?
+  /// Lookup O(1) en memoria — prohibido query aquí.
+  bool _pendienteSync(Map<String, dynamic> a) {
+    if (a['_en_cola'] == true) return true;
+    return _pendientesSync.contains(_claveSyncItem(a));
+  }
+
+  /// v1.3.5 (Fase 1, C2): extrae el método de pago del detalle
+  /// ("... (mensual, efectivo, vía APK)"). Best-effort: si no se
+  /// encuentra, se omite del subtítulo.
+  String _metodoDe(Map<String, dynamic> a) {
+    final det = '${a['detalle'] ?? ''}'.toLowerCase();
+    final m = RegExp(r'\(([^)]*)\)').firstMatch(det);
+    if (m != null) {
+      final dentro = m.group(1)!;
+      if (dentro.contains('efectivo')) return 'Efectivo';
+      if (dentro.contains('transferencia')) return 'Transferencia';
+    }
+    if (det.contains('usd')) return 'USD';
+    return '';
+  }
+
+  /// v1.3.5 (Fase 1, C3): hora para el subtítulo — UN solo formato.
+  /// Hoy y <60 min: "hace X min" (o "ahora mismo"); hoy y >=60 min: HH:mm;
+  /// otro día: dd/MM HH:mm. Nunca "21:07 (ahora mismo)".
+  String _horaSubtitulo(Map<String, dynamic> a) {
+    final ts = '${a['ts'] ?? ''}';
+    if (ts.isEmpty) return '';
+    try {
+      final dt = DateTime.parse(ts).toLocal();
+      final ahora = ahoraHabana();
+      final esHoy = dt.year == ahora.year &&
+          dt.month == ahora.month &&
+          dt.day == ahora.day;
+      final hhmm = '${dt.hour.toString().padLeft(2, '0')}:'
+          '${dt.minute.toString().padLeft(2, '0')}';
+      if (esHoy) {
+        final diff = ahora.difference(dt);
+        if (!diff.isNegative && diff.inMinutes < 60) {
+          final m = diff.inMinutes;
+          return m < 1 ? 'ahora mismo' : 'hace $m min';
+        }
+        return hhmm;
+      }
+      return '${dt.day.toString().padLeft(2, '0')}/'
+          '${dt.month.toString().padLeft(2, '0')} $hhmm';
+    } catch (_) {
+      return '';
+    }
+  }
+
+  /// v1.3.5 (Fase 1, C1+C2+C3): subtítulo compacto de 1 línea:
+  /// "Tipo · Método · Hora · Entrenador". Sin duplicar el título ni
+  /// el monto (el monto va solo a la derecha, en verde).
+  String _subtituloNuevo(Map<String, dynamic> a, String titulo) {
+    final partes = <String>[];
+    final tipo = _tituloAccion('${a['accion'] ?? ''}');
+    if (tipo != titulo && tipo.isNotEmpty) partes.add(tipo);
+    final metodo = _metodoDe(a);
+    if (metodo.isNotEmpty) partes.add(metodo);
+    final hora = _horaSubtitulo(a);
+    if (hora.isNotEmpty) partes.add(hora);
+    final actor = '${a['actor'] ?? ''}'.trim();
+    if (actor.isNotEmpty) partes.add(actor);
+    return partes.join(' · ');
+  }
+
+  /// v1.3.5 (Fase 1, A3): avatar 40×40 unificado. Foto del cliente
+  /// (cacheWidth 120, fallback limpio) o círculo semántico por tipo.
+  Widget _avatarActividad(String? fotoPath, Color color, String accion,
+      String categoria) {
+    IconData icono;
+    switch (categoria) {
+      case 'mensualidades':
+        icono = Icons.payments;
+        break;
+      case 'diarios':
+        icono = Icons.receipt_long;
+        break;
+      case 'suplementos':
+      case 'entregas':
+        icono = Icons.shopping_bag;
+        break;
+      default:
+        icono = _iconoAccion(accion);
+    }
+    if (fotoPath != null && fotoPath.isNotEmpty) {
+      return FutureBuilder(
+        future: FotoCache.instance.obtener(fotoPath),
+        builder: (ctx, snap) {
+          final f = snap.data;
+          if (f != null) {
+            return ClipRRect(
+              borderRadius: BorderRadius.circular(AppRadio.circular),
+              child: Image.file(f,
+                  width: 40,
+                  height: 40,
+                  fit: BoxFit.cover,
+                  cacheWidth: 120,
+                  errorBuilder: (_, __, ___) =>
+                      _iconoAvatar(color, icono)),
+            );
+          }
+          return _iconoAvatar(color, icono);
+        },
+      );
+    }
+    return _iconoAvatar(color, icono);
+  }
+
+  Widget _iconoAvatar(Color color, IconData icono) {
+    return Container(
+      width: 40,
+      height: 40,
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.14),
+        shape: BoxShape.circle,
+      ),
+      child: Icon(icono, color: color, size: 20),
+    );
+  }
+
+  /// v1.3.5 (Fase 1, C4): micro-indicador de sync, 14px.
+  Widget _indicadorSync(bool pendiente) {
+    return Icon(
+      pendiente ? Icons.schedule_outlined : Icons.check,
+      size: 14,
+      color: pendiente
+          ? AppColores.alerta
+          : AppColores.exito.withValues(alpha: 0.55),
+    );
+  }
+
+  /// v1.3.5 (Fase 1, F1): resetea todos los filtros.
+  void _limpiarFiltros() {
+    _busquedaCtrl.clear();
+    setState(() {
+      _filtro = 'todo';
+      _filtroActor = 'todos';
+      _filtroFecha = 'todo';
+      _rangoIni = null;
+      _rangoFin = null;
+      _busqueda = '';
+      _agruparPor = 'dia';
+    });
+  }
+
+  /// v1.3.5 (Fase 1, A1+B1): cantidad de filtros secundarios activos
+  /// (para el botón "Filtros · N").
+  int get _filtrosSecundariosActivos {
+    var n = 0;
+    if (_filtro != 'todo') n++;
+    if (_filtroActor != 'todos') n++;
+    if (_agruparPor != 'dia') n++;
+    if (_filtroFecha == 'rango') n++;
+    return n;
+  }
+
+  String _etiquetaFiltro(String f) {
+    switch (f) {
+      case 'mensualidades':
+        return 'Mensualidades';
+      case 'inscripciones':
+        return 'Inscripciones';
+      case 'diarios':
+        return 'Diarios';
+      case 'suplementos':
+        return 'Suplementos';
+      case 'entregas':
+        return 'Entregas';
+      default:
+        return 'Todo';
+    }
+  }
+
   /// v1.2.1: agrupa por entrenador/actor en vez de por día.
   List<MapEntry<String, List<Map<String, dynamic>>>> _agruparPorEntrenador(
       List<Map<String, dynamic>> items) {
@@ -461,75 +828,6 @@ class _ActividadScreenState extends State<ActividadScreen> {
     }
     orden.sort();
     return orden.map((t) => MapEntry(t, grupos[t]!)).toList();
-  }
-
-  /// v1.2.1: selector de rango de fechas personalizado.
-  Future<void> _elegirRango() async {
-    final ini = await showDatePicker(
-      context: context,
-      initialDate: _rangoIni ?? DateTime.now(),
-      firstDate: DateTime(2020),
-      lastDate: DateTime.now(),
-      helpText: 'Fecha inicial',
-    );
-    if (ini == null || !mounted) return;
-    final fin = await showDatePicker(
-      context: context,
-      initialDate: _rangoFin ?? DateTime.now(),
-      firstDate: ini,
-      lastDate: DateTime.now(),
-      helpText: 'Fecha final',
-    );
-    if (fin == null || !mounted) return;
-    setState(() {
-      _rangoIni = ini;
-      _rangoFin = fin;
-      _filtroFecha = 'rango';
-    });
-  }
-
-  /// v1.2.1: resalta montos (ej "2000 CUP", "30.00 USD") en naranja/negrita,
-  /// y cambios de campo en ediciones (ej "teléfono: 5xxxx → 5yyyy") en info.
-  List<TextSpan> _resaltarMontos(String texto) {
-    final spans = <TextSpan>[];
-    // Montos y cambios de campo (con →).
-    final regex = RegExp(
-        r'\d[\d.,]*\s*(CUP|USD|MN)|[^:,\n]+:\s*[^\n,]*?→[^\n,]*');
-    var pos = 0;
-    for (final m in regex.allMatches(texto)) {
-      if (m.start > pos) {
-        spans.add(TextSpan(text: texto.substring(pos, m.start)));
-      }
-      final esMonto = !m.group(0)!.contains('→');
-      spans.add(TextSpan(
-        text: m.group(0),
-        style: TextStyle(
-          color:
-              esMonto ? AppColores.naranja : AppColores.info,
-          fontWeight: FontWeight.bold,
-        ),
-      ));
-      pos = m.end;
-    }
-    if (pos < texto.length) {
-      spans.add(TextSpan(text: texto.substring(pos)));
-    }
-    if (spans.isEmpty) spans.add(TextSpan(text: texto));
-    return spans;
-  }
-
-  /// v1.2.1: reemplaza "cliente 123" por el nombre real en el detalle.
-  String _detalleConNombre(Map<String, dynamic> a) {
-    var det = '${a['detalle'] ?? ''}';
-    final id = _clienteIdDe(a);
-    if (id != null) {
-      final nombre = _nombres[id];
-      if (nombre != null && !nombre.startsWith('Cliente ')) {
-        det = det.replaceAll(
-            RegExp('cliente\\s+$id\\b', caseSensitive: false), nombre);
-      }
-    }
-    return det;
   }
 
   /// Agrupa por día: devuelve lista de (tituloDia, items).
@@ -561,6 +859,306 @@ class _ActividadScreenState extends State<ActividadScreen> {
       grupos[titulo]!.add(a);
     }
     return orden.map((t) => MapEntry(t, grupos[t]!)).toList();
+  }
+
+  /// v1.3.5 (Fase 1, A1+B1+A4): UNA sola fila horizontal con los chips
+  /// rápidos de fecha + botón "Filtros · N" + chips resumen de los
+  /// secundarios activos (con × para quitarlos de un toque).
+  /// ShaderMask con fade a la derecha (A4): nunca chips mutilados
+  /// sin pista visual de scroll.
+  Widget _filaFiltros() {
+    return ShaderMask(
+      shaderCallback: (rect) => const LinearGradient(
+        begin: Alignment.centerLeft,
+        end: Alignment.centerRight,
+        colors: [Colors.black, Colors.black, Colors.transparent],
+        stops: [0.0, 0.88, 1.0],
+      ).createShader(rect),
+      blendMode: BlendMode.dstIn,
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        padding:
+            const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        child: Row(
+          children: [
+            _chipFechaRapida('hoy', 'Hoy'),
+            const SizedBox(width: 8),
+            _chipFechaRapida('ayer', 'Ayer'),
+            const SizedBox(width: 8),
+            _chipFechaRapida('7dias', '7 días'),
+            const SizedBox(width: 8),
+            _chipFechaRapida('mes', 'Mes'),
+            const SizedBox(width: 8),
+            _botonFiltros(),
+            for (final chip in _chipsSecundariosActivos()) ...[
+              const SizedBox(width: 8),
+              chip,
+            ],
+            // Espacio para que el fade no corte el último chip.
+            const SizedBox(width: 16),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// v1.3.5: chip rápido de fecha. Tocar el activo vuelve a "Siempre".
+  Widget _chipFechaRapida(String valor, String etiqueta) {
+    final activo = _filtroFecha == valor;
+    return ChoiceChip(
+      label: Text(etiqueta, style: const TextStyle(fontSize: 12)),
+      selected: activo,
+      onSelected: (_) => setState(
+          () => _filtroFecha = activo ? 'todo' : valor),
+    );
+  }
+
+  /// v1.3.5: botón que abre el panel de filtros secundarios.
+  Widget _botonFiltros() {
+    final n = _filtrosSecundariosActivos;
+    return OutlinedButton.icon(
+      icon: const Icon(Icons.filter_list, size: 16),
+      label: Text(n > 0 ? 'Filtros · $n' : 'Filtros',
+          style: const TextStyle(fontSize: 12)),
+      style: OutlinedButton.styleFrom(
+        padding:
+            const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(AppRadio.lg),
+        ),
+      ),
+      onPressed: _abrirPanelFiltros,
+    );
+  }
+
+  /// v1.3.5: chips resumen de secundarios activos, con × para quitar.
+  List<Widget> _chipsSecundariosActivos() {
+    final chips = <Widget>[];
+    if (_filtro != 'todo') {
+      chips.add(_chipResumen(_etiquetaFiltro(_filtro),
+          () => setState(() => _filtro = 'todo')));
+    }
+    if (_filtroFecha == 'rango') {
+      var etiqueta = 'Rango';
+      if (_rangoIni != null && _rangoFin != null) {
+        etiqueta =
+            '${fmtFecha(_isoDia(_rangoIni!))}–${fmtFecha(_isoDia(_rangoFin!))}';
+      }
+      chips.add(_chipResumen(etiqueta, () => setState(() {
+            _filtroFecha = 'todo';
+            _rangoIni = null;
+            _rangoFin = null;
+          })));
+    }
+    if (_filtroActor != 'todos') {
+      chips.add(_chipResumen(_filtroActor,
+          () => setState(() => _filtroActor = 'todos')));
+    }
+    if (_agruparPor != 'dia') {
+      chips.add(_chipResumen('Por entrenador',
+          () => setState(() => _agruparPor = 'dia')));
+    }
+    return chips;
+  }
+
+  Widget _chipResumen(String etiqueta, VoidCallback onQuitar) {
+    return InputChip(
+      label: Text(etiqueta, style: const TextStyle(fontSize: 12)),
+      deleteIcon: const Icon(Icons.close, size: 16),
+      onDeleted: onQuitar,
+    );
+  }
+
+  /// v1.3.5 (Fase 1, B1): bottom sheet con los filtros secundarios:
+  /// tipo de operación, fecha completa, entrenador y agrupamiento.
+  Future<void> _abrirPanelFiltros() async {
+    var fTipo = _filtro;
+    var fFecha = _filtroFecha;
+    var fActor = _filtroActor;
+    var fAgrupar = _agruparPor;
+    DateTime? rIni = _rangoIni;
+    DateTime? rFin = _rangoFin;
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(
+            top: Radius.circular(AppRadio.xl)),
+      ),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSheet) {
+          Widget seccion(String titulo, List<Widget> chips) {
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(titulo,
+                    style: AppTexto.subtitulo.copyWith(
+                        fontWeight: FontWeight.bold)),
+                const SizedBox(height: 8),
+                Wrap(spacing: 8, runSpacing: 8, children: chips),
+                const SizedBox(height: 16),
+              ],
+            );
+          }
+
+          ChoiceChip chipSel(
+              String etiqueta, bool sel, VoidCallback onTap) {
+            return ChoiceChip(
+              label: Text(etiqueta,
+                  style: const TextStyle(fontSize: 12)),
+              selected: sel,
+              onSelected: (_) {
+                onTap();
+                setSheet(() {});
+              },
+            );
+          }
+
+          Future<void> elegirRangoSheet() async {
+            final ini = await showDatePicker(
+              context: ctx,
+              initialDate: rIni ?? DateTime.now(),
+              firstDate: DateTime(2020),
+              lastDate: DateTime.now(),
+              helpText: 'Fecha inicial',
+            );
+            if (ini == null || !ctx.mounted) return;
+            final fin = await showDatePicker(
+              context: ctx,
+              initialDate: rFin ?? DateTime.now(),
+              firstDate: ini,
+              lastDate: DateTime.now(),
+              helpText: 'Fecha final',
+            );
+            if (fin == null || !ctx.mounted) return;
+            rIni = ini;
+            rFin = fin;
+            fFecha = 'rango';
+            setSheet(() {});
+          }
+
+          return SafeArea(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Center(
+                    child: Container(
+                      width: 40,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: AppColores.borde(context),
+                        borderRadius:
+                            BorderRadius.circular(AppRadio.sm),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Text('Filtros',
+                      style: AppTexto.titulo
+                          .copyWith(fontSize: 18)),
+                  const SizedBox(height: 12),
+                  seccion('Tipo de operación', [
+                    chipSel('Todo', fTipo == 'todo',
+                        () => fTipo = 'todo'),
+                    chipSel('Mensualidades',
+                        fTipo == 'mensualidades',
+                        () => fTipo = 'mensualidades'),
+                    chipSel('Inscripciones',
+                        fTipo == 'inscripciones',
+                        () => fTipo = 'inscripciones'),
+                    chipSel('Diarios', fTipo == 'diarios',
+                        () => fTipo = 'diarios'),
+                    chipSel('Suplementos',
+                        fTipo == 'suplementos',
+                        () => fTipo = 'suplementos'),
+                    chipSel('Entregas', fTipo == 'entregas',
+                        () => fTipo = 'entregas'),
+                  ]),
+                  seccion('Fecha', [
+                    chipSel('Siempre', fFecha == 'todo',
+                        () => fFecha = 'todo'),
+                    chipSel('Hoy', fFecha == 'hoy',
+                        () => fFecha = 'hoy'),
+                    chipSel('Ayer', fFecha == 'ayer',
+                        () => fFecha = 'ayer'),
+                    chipSel('7 días', fFecha == '7dias',
+                        () => fFecha = '7dias'),
+                    chipSel('Este mes', fFecha == 'mes',
+                        () => fFecha = 'mes'),
+                    chipSel(
+                        fFecha == 'rango' && rIni != null
+                            ? 'Rango ✓'
+                            : 'Rango…',
+                        fFecha == 'rango',
+                        elegirRangoSheet),
+                  ]),
+                  if (_actores.length > 1)
+                    seccion('Entrenador', [
+                      chipSel('Todos', fActor == 'todos',
+                          () => fActor = 'todos'),
+                      for (final actor in _actores)
+                        chipSel(actor, fActor == actor,
+                            () => fActor = actor),
+                    ]),
+                  seccion('Agrupar', [
+                    chipSel('Por día', fAgrupar == 'dia',
+                        () => fAgrupar = 'dia'),
+                    chipSel('Por entrenador',
+                        fAgrupar == 'entrenador',
+                        () => fAgrupar = 'entrenador'),
+                  ]),
+                  Row(
+                    children: [
+                      TextButton(
+                        onPressed: () {
+                          fTipo = 'todo';
+                          fFecha = 'todo';
+                          fActor = 'todos';
+                          fAgrupar = 'dia';
+                          rIni = null;
+                          rFin = null;
+                          setSheet(() {});
+                        },
+                        child:
+                            const Text('Limpiar todo'),
+                      ),
+                      const Spacer(),
+                      ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor:
+                              AppColores.naranja,
+                          foregroundColor: Colors.white,
+                          shape: RoundedRectangleBorder(
+                            borderRadius:
+                                BorderRadius.circular(
+                                    AppRadio.md),
+                          ),
+                        ),
+                        onPressed: () {
+                          setState(() {
+                            _filtro = fTipo;
+                            _filtroFecha = fFecha;
+                            _filtroActor = fActor;
+                            _agruparPor = fAgrupar;
+                            _rangoIni = rIni;
+                            _rangoFin = rFin;
+                          });
+                          Navigator.of(ctx).pop();
+                        },
+                        child: const Text('Aplicar'),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
   }
 
   @override
@@ -611,103 +1209,35 @@ class _ActividadScreenState extends State<ActividadScreen> {
                   setState(() => _busqueda = v),
             ),
           ),
-          // v1.3.3: 6 filtros de categoría (diseño Argón).
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            padding:
-                const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            child: Row(
-              children: [
-                _chipFiltro('todo', 'Todo'),
-                const SizedBox(width: 8),
-                _chipFiltro('mensualidades', 'Mensualidades'),
-                const SizedBox(width: 8),
-                _chipFiltro('inscripciones', 'Inscripciones'),
-                const SizedBox(width: 8),
-                _chipFiltro('diarios', 'Diarios'),
-                const SizedBox(width: 8),
-                _chipFiltro('suplementos', 'Suplementos'),
-                const SizedBox(width: 8),
-                _chipFiltro('entregas', 'Entregas'),
-              ],
-            ),
-          ),
-          // v1.3.3: cinta de resumen financiero (KPI bar).
+          // v1.3.5 (Fase 1, A1+B1): UNA sola fila de filtros.
+          // Chips rápidos de fecha (uso diario) + botón "Filtros · N".
+          // Los secundarios (tipo, entrenador, agrupar, rango) van en el
+          // bottom sheet. Tocar un chip rápido activo vuelve a "Siempre".
+          _filaFiltros(),
+          // v1.3.3: cinta de resumen financiero (KPI bar) con desglose D1.
           _kpiBar(filtrados),
-          // v1.2.1: filtro por fecha
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.symmetric(
-                horizontal: 12, vertical: 0),
-            child: Row(
-              children: [
-                _chipFecha('todo', 'Siempre'),
-                const SizedBox(width: 8),
-                _chipFecha('hoy', 'Hoy'),
-                const SizedBox(width: 8),
-                _chipFecha('ayer', 'Ayer'),
-                const SizedBox(width: 8),
-                _chipFecha('7dias', '7 días'),
-                const SizedBox(width: 8),
-                _chipFecha('mes', 'Este mes'),
-                const SizedBox(width: 8),
-                _chipFechaRango(),
-              ],
-            ),
-          ),
-          // v1.0.15: filtro por entrenador
-          if (_actores.length > 1)
-            SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.symmetric(
-                  horizontal: 12, vertical: 8),
-              child: Row(
-                children: [
-                  _chipActor('todos', 'Todos'),
-                  const SizedBox(width: 8),
-                  for (final actor in _actores) ...[
-                    _chipActor(actor, actor),
-                    const SizedBox(width: 8),
-                  ],
-                ],
-              ),
-            ),
-          // v1.2.1: agrupar por día o por entrenador
-          Padding(
-            padding: const EdgeInsets.symmetric(
-                horizontal: 12, vertical: 4),
-            child: Row(
-              children: [
-                const Text('Agrupar: ',
-                    style: TextStyle(fontSize: 13)),
-                ChoiceChip(
-                  label: const Text('Por día',
-                      style: TextStyle(fontSize: 12)),
-                  selected: _agruparPor == 'dia',
-                  onSelected: (_) =>
-                      setState(() => _agruparPor = 'dia'),
-                ),
-                const SizedBox(width: 8),
-                ChoiceChip(
-                  label: const Text('Por entrenador',
-                      style: TextStyle(fontSize: 12)),
-                  selected: _agruparPor == 'entrenador',
-                  onSelected: (_) => setState(
-                      () => _agruparPor = 'entrenador'),
-                ),
-              ],
-            ),
-          ),
           Expanded(
             child: _cargando
                 ? const Center(child: CircularProgressIndicator())
                 : filtrados.isEmpty
-                    ? const EstadoVacio(
-                        icono: Icons.history_outlined,
-                        titulo: 'Sin actividad reciente',
-                        subtitulo:
-                            'Sincroniza para actualizar.',
-                      )
+                    // v1.3.5 (Fase 1, F1): distinguir "sin datos" de
+                    // "filtros sin resultados".
+                    ? (_items.isEmpty
+                        ? const EstadoVacio(
+                            icono: Icons.history_outlined,
+                            titulo: 'Sin actividad reciente',
+                            subtitulo:
+                                'Sincroniza para actualizar.',
+                          )
+                        : EstadoVacio(
+                            icono: Icons.search_off_outlined,
+                            titulo:
+                                'Sin resultados con estos filtros',
+                            subtitulo:
+                                'Prueba con otros filtros o límpialos.',
+                            textoAccion: 'Limpiar filtros',
+                            onAccion: _limpiarFiltros,
+                          ))
                     : RefreshIndicator(
                         onRefresh: _cargar,
                         child: ListView.builder(
@@ -733,27 +1263,30 @@ class _ActividadScreenState extends State<ActividadScreen> {
                                   final accion =
                                       '${a['accion'] ?? ''}';
                                   final cliId = _clienteIdDe(a);
-                                  final tieneCliente =
-                                      cliId != null;
                                   final color =
                                       _colorAccion(context, accion);
-                                  // v1.2.1: nombre y foto del cliente.
+                                  final categoria =
+                                      _categoriaDe(accion);
+                                  // v1.3.5 (Fase 1, A3): tarjeta unificada.
+                                  // Título: nombre del cliente o concepto.
+                                  // PROHIBIDO repetir nombre/monto/hora.
                                   final nombreCli = cliId != null
                                       ? _nombres[cliId]
                                       : null;
+                                  final titulo =
+                                      (nombreCli != null &&
+                                              !nombreCli.startsWith(
+                                                  'Cliente '))
+                                          ? nombreCli
+                                          : _tituloAccion(accion);
+                                  final subtitulo =
+                                      _subtituloNuevo(a, titulo);
                                   final fotoPath = cliId != null
                                       ? _fotos[cliId]
                                       : null;
-                                  // v1.2.1: detalle con nombre real y
-                                  // montos resaltados.
-                                  final detalle =
-                                      _detalleConNombre(a);
-                                  // v1.3.3: chip "En cola" y badge de
-                                  // monto (diseño Argón).
-                                  final enCola =
-                                      a['_en_cola'] == true;
+                                  // Monto único (C2): solo a la derecha.
                                   double badgeCup = 0, badgeUsd = 0;
-                                  if (enCola) {
+                                  if (a['_en_cola'] == true) {
                                     badgeCup =
                                         (a['_monto_cup'] as num?)
                                                 ?.toDouble() ??
@@ -769,11 +1302,15 @@ class _ActividadScreenState extends State<ActividadScreen> {
                                     badgeCup = m.$1;
                                     badgeUsd = m.$2;
                                   }
-                                  final titulo = (nombreCli != null &&
-                                          !nombreCli.startsWith(
-                                              'Cliente '))
-                                      ? nombreCli
-                                      : _tituloAccion(accion);
+                                  final tieneMonto =
+                                      badgeCup > 0 ||
+                                          badgeUsd > 0;
+                                  final montoTxt = badgeUsd > 0
+                                      ? '+${fmtMonto(badgeUsd)} USD'
+                                      : '+${fmtMonto(badgeCup)} CUP';
+                                  // v1.3.5 (Fase 1, C4): lookup O(1).
+                                  final pendiente =
+                                      _pendienteSync(a);
                                   return Padding(
                                     padding: const EdgeInsets
                                         .symmetric(
@@ -783,10 +1320,8 @@ class _ActividadScreenState extends State<ActividadScreen> {
                                       borderRadius:
                                           BorderRadius.circular(
                                               AppRadio.md),
-                                      onTap: tieneCliente
-                                          ? () =>
-                                              _abrirFicha(a)
-                                          : null,
+                                      onTap: () =>
+                                          _abrirDetalle(a),
                                       child: Padding(
                                         padding:
                                             const EdgeInsets
@@ -794,18 +1329,17 @@ class _ActividadScreenState extends State<ActividadScreen> {
                                                 horizontal:
                                                     8,
                                                 vertical:
-                                                    8),
+                                                    10),
                                         child: Row(
                                           crossAxisAlignment:
                                               CrossAxisAlignment
-                                                  .start,
+                                                  .center,
                                           children: [
-                                            // v1.2.1: foto del cliente
-                                            // o icono de la acción.
-                                            _leadingActividad(
+                                            _avatarActividad(
                                                 fotoPath,
                                                 color,
-                                                accion),
+                                                accion,
+                                                categoria),
                                             const SizedBox(
                                                 width:
                                                     AppEspacio
@@ -815,110 +1349,95 @@ class _ActividadScreenState extends State<ActividadScreen> {
                                                 crossAxisAlignment:
                                                     CrossAxisAlignment
                                                         .start,
+                                                mainAxisSize:
+                                                    MainAxisSize
+                                                        .min,
                                                 children: [
-                                                  // v1.3.3: título +
-                                                  // badge de monto +
-                                                  // chip "En cola".
-                                                  Row(
-                                                    children: [
-                                                      Expanded(
-                                                        child: Text(
-                                                          titulo,
-                                                          style: AppTexto
-                                                              .subtitulo
-                                                              .copyWith(
-                                                                  fontWeight:
-                                                                      FontWeight
-                                                                          .bold),
-                                                          maxLines:
-                                                              1,
-                                                          overflow:
-                                                              TextOverflow
-                                                                  .ellipsis,
-                                                        ),
-                                                      ),
-                                                      if (badgeCup > 0 ||
-                                                          badgeUsd >
-                                                              0)
-                                                        _badgeMonto(
-                                                            badgeCup,
-                                                            badgeUsd),
-                                                      if (enCola) ...[
-                                                        const SizedBox(
-                                                            width:
-                                                                6),
-                                                        _chipEnCola(),
-                                                      ],
-                                                    ],
-                                                  ),
-                                                  const SizedBox(
-                                                      height:
-                                                          2),
-                                                  RichText(
-                                                    maxLines: 3,
+                                                  Text(
+                                                    titulo,
+                                                    style: AppTexto
+                                                        .subtitulo
+                                                        .copyWith(
+                                                            fontWeight:
+                                                                FontWeight
+                                                                    .bold),
+                                                    maxLines:
+                                                        1,
                                                     overflow:
                                                         TextOverflow
                                                             .ellipsis,
-                                                    text: TextSpan(
+                                                  ),
+                                                  if (subtitulo
+                                                      .isNotEmpty) ...[
+                                                    const SizedBox(
+                                                        height:
+                                                            2),
+                                                    Text(
+                                                      subtitulo,
                                                       style: AppTexto
-                                                          .cuerpo.copyWith(
-                                                              color: Theme.of(
-                                                                      context)
-                                                                  .colorScheme
-                                                                  .onSurface),
-                                                      children:
-                                                          _resaltarMontos(
-                                                              detalle),
-                                                    ),
-                                                  ),
-                                                  const SizedBox(
-                                                      height:
-                                                          4),
-                                                  Row(
-                                                    children: [
-                                                      Icon(
-                                                          Icons
-                                                              .person_outline,
-                                                          size:
-                                                              13,
-                                                          color: Theme.of(
-                                                                  context)
-                                                              .colorScheme
-                                                              .onSurfaceVariant),
-                                                      const SizedBox(
-                                                          width:
-                                                              4),
-                                                      Expanded(
-                                                        child:
-                                                            Text(
-                                                          _subtituloActividad(
-                                                              a),
-                                                          style:
-                                                              AppTexto
-                                                                  .etiqueta
-                                                                  .copyWith(
-                                                            color: Theme.of(context)
-                                                                .colorScheme
-                                                                .onSurfaceVariant,
-                                                          ),
-                                                          overflow:
-                                                              TextOverflow
-                                                                  .ellipsis,
-                                                        ),
+                                                          .etiqueta
+                                                          .copyWith(
+                                                        color: AppColores
+                                                            .textoSecundario(
+                                                                context),
                                                       ),
-                                                    ],
-                                                  ),
+                                                      maxLines:
+                                                          1,
+                                                      overflow:
+                                                          TextOverflow
+                                                              .ellipsis,
+                                                    ),
+                                                  ],
                                                 ],
                                               ),
                                             ),
-                                            if (tieneCliente)
-                                              Icon(
-                                                  Icons
-                                                      .chevron_right,
-                                                  size: 20,
-                                                  color: AppColores
-                                                      .textoSecundario(
-                                                          context)),
+                                            const SizedBox(
+                                                width: 8),
+                                            Column(
+                                              mainAxisSize:
+                                                  MainAxisSize
+                                                      .min,
+                                              crossAxisAlignment:
+                                                  CrossAxisAlignment
+                                                      .end,
+                                              children: [
+                                                if (tieneMonto)
+                                                  Text(
+                                                    montoTxt,
+                                                    style: const TextStyle(
+                                                        color: AppColores
+                                                            .exito,
+                                                        fontSize:
+                                                            14,
+                                                        fontWeight:
+                                                            FontWeight
+                                                                .bold),
+                                                  ),
+                                                const SizedBox(
+                                                    height:
+                                                        4),
+                                                Row(
+                                                  mainAxisSize:
+                                                      MainAxisSize
+                                                          .min,
+                                                  children: [
+                                                    _indicadorSync(
+                                                        pendiente),
+                                                    const SizedBox(
+                                                        width:
+                                                            2),
+                                                    Icon(
+                                                        Icons
+                                                            .chevron_right,
+                                                        size:
+                                                            20,
+                                                        color: AppColores
+                                                            .textoSecundario(
+                                                                context)),
+                                                  ],
+                                                ),
+                                              ],
+                                            ),
                                           ],
                                         ),
                                       ),
@@ -936,34 +1455,67 @@ class _ActividadScreenState extends State<ActividadScreen> {
     );
   }
 
-  /// v1.3.3: calcula (n_acciones, total_cup, total_usd) sobre los
-  /// items filtrados. Servidor: regex sobre detalle (solo cobros
-  /// reales). Local: montos del payload ya calculados al cargar.
-  (int, double, double) _kpi(List<Map<String, dynamic>> items) {
-    double cup = 0, usd = 0;
+  /// v1.3.5 (Fase 1, D1): calcula (n_acciones, mapa categoría→CUP, usd)
+  /// sobre los items filtrados. O(N) en memoria, cero costo de BD.
+  /// 'inscripciones' se pliega en 'mensualidades' (la inscripción cobra
+  /// la primera mensualidad).
+  /// Servidor: regex sobre detalle (solo cobros reales).
+  /// Local: montos del payload ya calculados al cargar.
+  (int, Map<String, double>, double) _kpi(
+      List<Map<String, dynamic>> items) {
+    final porCat = <String, double>{
+      'mensualidades': 0,
+      'diarios': 0,
+      'suplementos': 0,
+    };
+    var usd = 0.0;
     for (final a in items) {
+      double cup = 0, u = 0;
+      String cat;
       if (a['_en_cola'] == true) {
-        cup += (a['_monto_cup'] as num?)?.toDouble() ?? 0;
-        usd += (a['_monto_usd'] as num?)?.toDouble() ?? 0;
+        cup = (a['_monto_cup'] as num?)?.toDouble() ?? 0;
+        u = (a['_monto_usd'] as num?)?.toDouble() ?? 0;
+        cat = _categoriaDe('${a['accion'] ?? ''}');
       } else {
         final accion = '${a['accion'] ?? ''}';
         if (!_esCobroServidor(accion)) continue;
         final m = _montoServidor('${a['detalle'] ?? ''}');
-        cup += m.$1;
-        usd += m.$2;
+        cup = m.$1;
+        u = m.$2;
+        cat = _categoriaDe(accion);
       }
+      if (cat == 'inscripciones') cat = 'mensualidades';
+      if (porCat.containsKey(cat)) {
+        porCat[cat] = porCat[cat]! + cup;
+      }
+      usd += u;
     }
-    return (items.length, cup, usd);
+    return (items.length, porCat, usd);
   }
 
-  /// v1.3.3: cinta de resumen financiero debajo de los filtros.
+  /// v1.3.5 (Fase 1, D1): cinta de resumen con desglose por tipo.
   Widget _kpiBar(List<Map<String, dynamic>> filtrados) {
     final kpi = _kpi(filtrados);
     final n = kpi.$1;
-    final cup = kpi.$2;
+    final porCat = kpi.$2;
     final usd = kpi.$3;
-    final totalTxt = StringBuffer('${fmtMonto(cup)} CUP');
+    final totalCup =
+        porCat.values.fold(0.0, (s, v) => s + v);
+    final totalTxt = StringBuffer('${fmtMonto(totalCup)} CUP');
     if (usd > 0) totalTxt.write(' (+ ${fmtMonto(usd)} USD)');
+    final desglose = <String>[];
+    if (porCat['mensualidades']! > 0) {
+      desglose.add(
+          'Mensualidades ${fmtMonto(porCat['mensualidades']!)}');
+    }
+    if (porCat['diarios']! > 0) {
+      desglose
+          .add('Diarios ${fmtMonto(porCat['diarios']!)}');
+    }
+    if (porCat['suplementos']! > 0) {
+      desglose.add(
+          'Suplementos ${fmtMonto(porCat['suplementos']!)}');
+    }
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 0, 12, 4),
       child: Tarjeta(
@@ -987,6 +1539,13 @@ class _ActividadScreenState extends State<ActividadScreen> {
                       style: AppTexto.subtitulo.copyWith(
                           fontWeight: FontWeight.bold,
                           color: AppColores.exito)),
+                  if (desglose.isNotEmpty) ...[
+                    const SizedBox(height: 2),
+                    Text(desglose.join(' · '),
+                        style: AppTexto.etiqueta.copyWith(
+                            color: AppColores.textoSecundario(
+                                context))),
+                  ],
                 ],
               ),
             ),
@@ -1022,119 +1581,6 @@ class _ActividadScreenState extends State<ActividadScreen> {
     return t[0].toUpperCase() + t.substring(1);
   }
 
-  /// v1.3.3: chip ámbar "⏳ En cola" para ops locales.
-  Widget _chipEnCola() {
-    return Container(
-      padding: const EdgeInsets.symmetric(
-          horizontal: 8, vertical: 2),
-      decoration: BoxDecoration(
-        color: AppColores.alerta.withValues(alpha: 0.15),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(
-            color: AppColores.alerta.withValues(alpha: 0.5)),
-      ),
-      child: const Text(
-        '⏳ En cola',
-        style: TextStyle(
-            color: AppColores.alerta,
-            fontSize: 10,
-            fontWeight: FontWeight.bold),
-      ),
-    );
-  }
-
-  /// v1.3.3: badge de monto a la derecha (+2,000 CUP).
-  Widget _badgeMonto(double cup, double usd) {
-    final txt = usd > 0
-        ? '+${fmtMonto(usd)} USD'
-        : '+${fmtMonto(cup)} CUP';
-    return Container(
-      padding: const EdgeInsets.symmetric(
-          horizontal: 8, vertical: 3),
-      decoration: BoxDecoration(
-        color: AppColores.exito.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(10),
-      ),
-      child: Text(
-        txt,
-        style: const TextStyle(
-            color: AppColores.exito,
-            fontSize: 12,
-            fontWeight: FontWeight.bold),
-      ),
-    );
-  }
-
-  /// v1.3.3: subtítulo "actor · HH:mm (hace X min)".
-  String _subtituloActividad(Map<String, dynamic> a) {
-    final actor = '${a['actor'] ?? '—'}';
-    final ts = a['ts'] as String?;
-    final hora = _horaCorta(ts);
-    final rel = tiempoRelativo(ts);
-    final horaTxt = hora.isNotEmpty ? ' · $hora' : '';
-    return '$actor$horaTxt ($rel)';
-  }
-
-  /// v1.3.3: "HH:mm" local a partir del ts.
-  String _horaCorta(String? ts) {
-    if (ts == null || ts.isEmpty) return '';
-    try {
-      final dt = DateTime.parse(ts).toLocal();
-      return '${dt.hour.toString().padLeft(2, '0')}:'
-          '${dt.minute.toString().padLeft(2, '0')}';
-    } catch (_) {
-      return '';
-    }
-  }
-
-  Widget _chipFiltro(String valor, String etiqueta) {
-    final activo = _filtro == valor;
-    return ChoiceChip(
-      label: Text(etiqueta),
-      selected: activo,
-      onSelected: (_) => setState(() => _filtro = valor),
-    );
-  }
-
-  /// v1.0.15: chip de filtro por entrenador/actor.
-  Widget _chipActor(String valor, String etiqueta) {
-    final activo = _filtroActor == valor;
-    return ChoiceChip(
-      label: Text(etiqueta,
-          style: const TextStyle(fontSize: 12)),
-      selected: activo,
-      onSelected: (_) =>
-          setState(() => _filtroActor = valor),
-    );
-  }
-
-  /// v1.2.1: chip de filtro por fecha.
-  Widget _chipFecha(String valor, String etiqueta) {
-    final activo = _filtroFecha == valor;
-    return ChoiceChip(
-      label: Text(etiqueta,
-          style: const TextStyle(fontSize: 12)),
-      selected: activo,
-      onSelected: (_) =>
-          setState(() => _filtroFecha = valor),
-    );
-  }
-
-  /// v1.2.1: chip de rango personalizado (abre date pickers).
-  Widget _chipFechaRango() {
-    final activo = _filtroFecha == 'rango';
-    String etiqueta = 'Rango…';
-    if (_rangoIni != null && _rangoFin != null) {
-      etiqueta =
-          '${fmtFecha(_isoDia(_rangoIni!))}–${fmtFecha(_isoDia(_rangoFin!))}';
-    }
-    return ChoiceChip(
-      label: Text(etiqueta,
-          style: const TextStyle(fontSize: 12)),
-      selected: activo,
-      onSelected: (_) => _elegirRango(),
-    );
-  }
 }
 
 /// Cuenta las actividades no leídas (para el badge).

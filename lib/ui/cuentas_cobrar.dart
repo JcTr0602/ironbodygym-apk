@@ -104,7 +104,7 @@ class _CuentasCobrarScreenState
                 padding:
                     const EdgeInsets.all(AppEspacio.lg),
                 children: [
-                  const SyncBanner(),
+                  const SyncBanner(alcance: 'pagos'),
                   const SizedBox(height: AppEspacio.sm),
                   // Hero: tarjeta carbón con el total
                   // (texto claro legible en ambos temas).

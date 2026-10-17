@@ -6,12 +6,10 @@
 library;
 
 import 'dart:async';
-import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:uuid/uuid.dart';
@@ -20,7 +18,6 @@ import '../auth.dart';
 import '../fotos.dart';
 import '../fotos_cola.dart';
 import '../localdb.dart';
-import '../negocio.dart';
 import '../sync.dart';
 import 'componentes.dart';
 import 'detalle_suplemento.dart';
@@ -48,27 +45,13 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
   // v1.2.1: tasa USD del día + ids de los más vendidos.
   double? _tasaUsd;
   List<int> _topIds = [];
-  // v1.2.9+47: vista compacta (decisión Jc).
-  bool _vistaCompacta = true;
-  // v1.2.9+47: ventas del día para el banner.
-  Map<String, dynamic> _ventasHoy = {'n': 0, 'total': 0.0};
-  // v1.2.9+47: ids con ops pendientes (badge naranja).
-  Set<int> _idsPendientes = {};
 
   bool get _esDueno => _auth.isOwner;
 
   @override
   void initState() {
     super.initState();
-    _cargarPreferenciaVista();
     _cargar();
-  }
-
-  Future<void> _cargarPreferenciaVista() async {
-    final v = await LocalDb.instance.getMeta('suplementos_vista');
-    if (mounted) {
-      setState(() => _vistaCompacta = v != 'tarjetas');
-    }
   }
 
   Future<void> _cargar() async {
@@ -101,8 +84,6 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
       _topIds = _topVendidos(ventas);
       _cargando = false;
     });
-    _cargarVentasHoy();
-    _cargarIdsPendientes();
   }
 
   /// v1.2.1: ids de los 4 productos más vendidos (por cantidad).
@@ -112,13 +93,18 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
     for (final v in ventas) {
       // Gemini-2: excluir ventas anuladas del top.
       if ((v['anulada'] as int?) == 1 ||
-          (v['activo'] as int?) == 0) continue;
+          (v['activo'] as int?) == 0) {
+        continue;
+      }
       final id = (v['suplemento_id'] as num?)?.toInt();
-      if (id == null) continue;
+      if (id == null) {
+        continue;
+      }
       porProd[id] =
           (porProd[id] ?? 0) + ((v['cantidad'] as num?)?.toInt() ?? 0);
     }
-    final ids = porProd.keys.toList()
+    // v1.3.4 (C5): solo productos con ventas reales > 0 en el carrusel.
+    final ids = porProd.keys.where((id) => porProd[id]! > 0).toList()
       ..sort((a, b) => porProd[b]!.compareTo(porProd[a]!));
     return ids.take(4).toList();
   }
@@ -200,404 +186,79 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
     if (mounted) setState(() => _promoActiva = v);
   }
 
+  /// v1.3.4: abre la venta con el flujo unificado (VentaSuplementoScreen +
+  /// registrarVentaSuplemento). Esta pantalla NUNCA escribe SQL de venta.
   void _irVender(Map<String, dynamic> s) {
     Navigator.push(
       context,
       MaterialPageRoute(
         builder: (_) => VentaSuplementoScreen(suplemento: s),
       ),
-    ).then((_) => _cargar());
-  }
-
-  /// v1.2.9+47: vende usando el nuevo diálogo con confirmación obligatoria.
-  /// Guarda en ventas_suplementos local, descuenta stock, actualiza
-  /// ultimo_precio y encola la op con creada_en (corrección Gemini).
-  Future<void> _venderConDialogo(Map<String, dynamic> s) async {
-    final resultado = await mostrarDialogoVenta(context, s);
-    if (resultado == null || !mounted) return;
-
-    final cantidad = resultado['cantidad'] as int;
-    final precio = resultado['precio'] as double;
-    final db = LocalDb.instance;
-    final ahoraIso = DateTime.now().toIso8601String();
-
-    try {
-      final stockActual = (s['stock'] as num?)?.toInt() ?? 0;
-      final nuevoStock = stockActual - cantidad;
-      if (nuevoStock < 0) throw Exception('Stock insuficiente');
-
-      // v1.2.9+47 (Gemini): transacción atómica. Si el móvil se bloquea
-      // o la app crashea a mitad, no quedan datos inconsistentes.
-      final d = await db.db;
-      final opUuid = const Uuid().v4();
-      final payload = {
-        'suplemento_id': s['id'],
-        'cantidad': cantidad,
-        'precio': precio,
-        'total': cantidad * precio,
-        'creada_en': ahoraIso,
-      };
-      final auth = AuthService();
-      await d.transaction((txn) async {
-        // 1. Registro local (para banner y reportes)
-        await txn.rawInsert(
-            'INSERT INTO ventas_suplementos '
-            '(suplemento_id, cantidad, precio, total, creada_en) '
-            'VALUES (?, ?, ?, ?, ?)',
-            [s['id'], cantidad, precio, cantidad * precio, ahoraIso]);
-
-        // 2. Descontar stock + memoria de precio
-        await txn.update(
-          'suplementos',
-          {'stock': nuevoStock, 'ultimo_precio': precio},
-          where: 'id = ?',
-          whereArgs: [s['id']],
-        );
-
-        // 3. Encolar op con timestamp real (campos de queueOp)
-        await txn.insert('ops_queue', {
-          'op_uuid': opUuid,
-          'tipo': 'venta_suplemento',
-          'payload': jsonEncode(payload),
-          'estado': 'pendiente',
-          'creada_ts': ahoraIso,
-          'user_id': auth.userId,
-          'telegram_id': auth.telegramId,
-        });
-      });
-      unawaited(SyncEngine.instance.push());
-      if (mounted) {
-        setState(() {
-          _idsPendientes.add(s['id'] as int);
-        });
+    ).then((exito) {
+      _cargar();
+      // TODO (Ítem A v1.3.5 / condición C1 — hook recibo WhatsApp, dueño):
+      // VentaSuplementoScreen hoy devuelve `true` al cerrar una venta
+      // exitosa. Cuando devuelva los datos de la venta (cantidad, total
+      // en USD, teléfono del cliente si aplica), ofrecer aquí el recibo
+      // por WhatsApp reutilizando normalizarTelefonoWaMe (negocio.dart)
+      // y el patrón de _mostrarDialogoWhatsApp (ficha.dart: campo de
+      // teléfono editable + wa.me), con moneda explícita "<monto> USD".
+      // NO duplicar la lógica del diálogo: extraer un helper compartido
+      // antes de implementarlo.
+      if (exito == true && _esDueno) {
+        // Punto de enganche del recibo (pendiente de los datos de venta).
       }
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text('Venta: $cantidad x '
-                '\$${precio.toStringAsFixed(2)}')));
-        _cargar();
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('Error: $e')));
-      }
-    }
+    });
   }
 
-  /// v1.2.9+47: suma +1 al stock con opción Deshacer.
-  Future<void> _sumarStockRapido(Map<String, dynamic> s) async {
-    final db = LocalDb.instance;
-    final stockActual = (s['stock'] as num?)?.toInt() ?? 0;
-    final nuevoStock = stockActual + 1;
-
-    await db.actualizarSuplemento(
-        s['id'] as int, {'stock': nuevoStock});
-    await db.queueOp(
-      opUuid: const Uuid().v4(),
-      tipo: 'editar_suplemento',
-      payload: {'suplemento_id': s['id'], 'stock': nuevoStock},
-    );
-    unawaited(SyncEngine.instance.push());
-    if (mounted) {
-      setState(() {
-        _idsPendientes.add(s['id'] as int);
-      });
-    }
-    _cargar();
-
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('${s['nombre']}: stock $nuevoStock'),
-          action: SnackBarAction(
-            label: 'Deshacer',
-            onPressed: () async {
-              await db.actualizarSuplemento(
-                  s['id'] as int, {'stock': stockActual});
-              await db.queueOp(
-                opUuid: const Uuid().v4(),
-                tipo: 'editar_suplemento',
-                payload: {'suplemento_id': s['id'], 'stock': stockActual},
-              );
-              unawaited(SyncEngine.instance.push());
-              _cargar();
-            },
-          ),
-        ),
-      );
-    }
-  }
-
-  /// v1.2.9+47: ajuste manual de stock (long-press).
-  Future<void> _ajusteManualStock(Map<String, dynamic> s) async {
-    final ctrl =
-        TextEditingController(text: '${s['stock'] ?? 0}');
-    final nuevo = await showDialog<int>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text('Stock: ${s['nombre']}'),
-        content: TextField(
-          controller: ctrl,
-          keyboardType: TextInputType.number,
-          decoration:
-              const InputDecoration(labelText: 'Nuevo stock'),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancelar'),
-          ),
-          ElevatedButton(
-            onPressed: () =>
-                Navigator.pop(ctx, int.tryParse(ctrl.text)),
-            child: const Text('Guardar'),
-          ),
-        ],
-      ),
-    );
-    ctrl.dispose();
-    if (nuevo == null || nuevo < 0 || !mounted) return;
-
-    final db = LocalDb.instance;
-    await db.actualizarSuplemento(s['id'] as int, {'stock': nuevo});
-    await db.queueOp(
-      opUuid: const Uuid().v4(),
-      tipo: 'editar_suplemento',
-      payload: {'suplemento_id': s['id'], 'stock': nuevo},
-    );
-    unawaited(SyncEngine.instance.push());
-    _cargar();
-  }
-
-  /// v1.2.9+47: ventas del día para el banner.
-  Future<void> _cargarVentasHoy() async {
-    try {
-      final d = await LocalDb.instance.db;
-      final hoy =
-          DateTime.now().toIso8601String().substring(0, 10);
-      final r = await d.rawQuery(
-          'SELECT COUNT(*) as n, SUM(total) as total '
-          'FROM ventas_suplementos WHERE date(creada_en) = ?',
-          [hoy]);
-      if (mounted) {
-        setState(() {
-          _ventasHoy = {
-            'n': r.first['n'] ?? 0,
-            'total': (r.first['total'] as num?)?.toDouble() ?? 0.0,
-          };
-        });
-      }
-    } catch (_) {}
-  }
-
-  /// v1.2.9+47: ¿tiene ops pendientes este suplemento?
-  bool _tieneOpPendiente(dynamic id) {
-    final i = (id as num?)?.toInt();
-    return i != null && _idsPendientes.contains(i);
-  }
-
-  /// v1.2.9+47: precarga ids con ops pendientes (filtro por tipo).
-  Future<void> _cargarIdsPendientes() async {
-    try {
-      final d = await LocalDb.instance.db;
-      final rows = await d.query(
-        'ops_queue',
-        columns: ['tipo', 'payload'],
-        where: "estado IN ('pendiente', 'enviada') "
-            "AND tipo IN ('venta_suplemento', 'editar_suplemento')",
-      );
-      final ids = <int>{};
-      for (final r in rows) {
-        final p = r['payload'] as String?;
-        if (p == null) continue;
-        final m = RegExp(r'"(?:suplemento_id|id)":\s*(\d+)')
-            .firstMatch(p);
-        if (m != null) ids.add(int.parse(m.group(1)!));
-      }
-      if (mounted) setState(() => _idsPendientes = ids);
-    } catch (_) {}
-  }
-
-  /// v1.2.9+47: selector de vista (compacta vs tarjeta).
-  Widget _itemSuplemento(Map<String, dynamic> s) {
-    if (_vistaCompacta) {
-      return FilaSuplementoCompacta(
-        sup: s,
-        tienePendiente: _tieneOpPendiente(s['id']),
-        onVender: () => _venderConDialogo(s),
-        onEditar: () => _irDetalle(s),
-        onSumarStock: () => _sumarStockRapido(s),
-        onAjusteManual: () => _ajusteManualStock(s),
-      );
-    }
-    return _tarjetaProducto(s);
-  }
-
-  /// v1.2.9+47: tarjeta del carrusel "Más vendidos" con venta directa.
-  Widget _tarjetaMasVendido(Map<String, dynamic> s) {
-    final nombre = (s['nombre'] ?? '').toString();
-    final precio = (s['precio'] as num?)?.toDouble() ?? 0.0;
-    final stock = (s['stock'] as num?)?.toInt() ?? 0;
-    final activo = (s['activo'] as int? ?? 1) == 1;
-    final fotoPath = s['foto_local'] as String?;
-
-    return Container(
-      width: 148,
-      margin: const EdgeInsets.only(right: 12),
-      decoration: BoxDecoration(
-        color: AppColores.fondo(context),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.white.withOpacity(0.08)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          ClipRRect(
-            borderRadius: const BorderRadius.vertical(
-                top: Radius.circular(12)),
-            child: fotoPath != null && fotoPath.isNotEmpty
-                ? Image.file(
-                    File(fotoPath),
-                    height: 90,
-                    fit: BoxFit.cover,
-                    errorBuilder: (_, __, ___) =>
-                        PlaceholderFotoSuplemento(
-                      nombre: nombre,
-                      width: double.infinity,
-                      height: 90,
-                      borderRadius:
-                          const BorderRadius.vertical(
-                              top: Radius.circular(12)),
-                    ),
-                  )
-                : PlaceholderFotoSuplemento(
-                    nombre: nombre,
-                    width: double.infinity,
-                    height: 90,
-                    borderRadius:
-                        const BorderRadius.vertical(
-                            top: Radius.circular(12)),
-                  ),
-          ),
-          Padding(
-            padding: const EdgeInsets.all(8),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  nombre,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                      fontSize: 13, fontWeight: FontWeight.w600),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  '${precio.toStringAsFixed(2)} USD',
-                  style: TextStyle(
-                      fontSize: 12, color: Colors.orange[300]),
-                ),
-                const SizedBox(height: 6),
-                SizedBox(
-                  height: 30,
-                  width: double.infinity,
-                  child: ElevatedButton(
-                    onPressed: (stock > 0 && activo)
-                        ? () => _venderConDialogo(s)
-                        : null,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: AppColores.naranja,
-                      padding: EdgeInsets.zero,
-                    ),
-                    child: const Text('Vender',
-                        style: TextStyle(fontSize: 12)),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  /// v1.2.9+47: banner HUD de ventas del día.
-  Widget _bannerVentasHoy() {
-    final n = _ventasHoy['n'] as int;
-    if (n <= 0) return const SizedBox.shrink();
-    final total =
-        (_ventasHoy['total'] as num?)?.toDouble() ?? 0.0;
-    return Container(
-      margin: const EdgeInsets.fromLTRB(16, 4, 16, 8),
-      padding: const EdgeInsets.symmetric(
-          horizontal: 14, vertical: 10),
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: [
-            AppColores.naranja.withOpacity(0.25),
-            AppColores.naranja.withOpacity(0.08),
-          ],
-        ),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-            color: AppColores.naranja.withOpacity(0.3)),
-      ),
-      child: Row(
-        children: [
-          const Icon(Icons.today,
-              color: AppColores.naranja, size: 20),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Text(
-              'Hoy: $n ventas · '
-              '\$${total.toStringAsFixed(2)} USD',
-              style: const TextStyle(
-                  fontWeight: FontWeight.w600, fontSize: 14),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  /// v1.2.9+47: comparte catálogo como texto para WhatsApp.
+  /// v1.3.4 (B2): comparte el catálogo como texto para WhatsApp.
+  /// Lee del JSON `data` (las columnas nombre/precio no existen en la
+  /// tabla espejo). Filtro de negocio: solo stock > 0 y activos
+  /// (no eliminados). Precio <= 0 → "Consultar precio", jamás $0.00.
+  /// Orden determinista: categoría, luego nombre.
   Future<void> _compartirCatalogo() async {
-    final d = await LocalDb.instance.db;
-    final rows = await d.query('suplementos',
-        columns: ['nombre', 'precio'],
-        where: 'activo = 1 AND stock > 0',
-        orderBy: 'nombre');
-
-    if (rows.isEmpty) {
+    final items = await LocalDb.instance.allMirror('suplementos');
+    final visibles = items.where((s) {
+      final stock = (s['stock'] as num?)?.toInt() ?? 0;
+      if (stock <= 0) return false;
+      final activo = s['activo'];
+      if (activo == false || activo == 0) return false;
+      final eliminado = s['eliminado'];
+      if (eliminado == 1 || eliminado == true) return false;
+      return true;
+    }).toList();
+    visibles.sort((a, b) {
+      final cmpCat = _nombreCategoria(a['categoria_id'] as int?)
+          .compareTo(_nombreCategoria(b['categoria_id'] as int?));
+      if (cmpCat != 0) return cmpCat;
+      return '${a['nombre'] ?? ''}'.compareTo('${b['nombre'] ?? ''}');
+    });
+    if (visibles.isEmpty) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-              content: Text(
-                  'No hay productos activos con stock')),
+              content: Text('No hay productos activos con stock')),
         );
       }
       return;
     }
-
-    final buf = StringBuffer();
-    buf.writeln('🏋️ *IRON BODY GYM*');
-    buf.writeln('Catálogo de suplementos');
-    buf.writeln('');
-    for (final r in rows) {
-      final nombre = r['nombre'];
-      final precio =
-          (r['precio'] as num?)?.toDouble() ?? 0;
-      buf.writeln(
-          '• $nombre — \$${precio.toStringAsFixed(2)} USD');
+    final buf = StringBuffer('Iron Body Gym — Suplementos\n\n');
+    for (final s in visibles) {
+      final nombre = '${s['nombre'] ?? 'Suplemento'}';
+      final precio = (s['precio_oficial'] as num?)?.toDouble() ??
+          (s['precio'] as num?)?.toDouble() ??
+          0;
+      final stock = (s['stock'] as num?)?.toInt() ?? 0;
+      buf.writeln(nombre);
+      // B2 (Argón): jamás exportar "$0.00 USD" a clientes.
+      buf.writeln(precio > 0
+          ? 'Precio: ${precio.toStringAsFixed(2)} USD'
+          : 'Precio: Consultar precio');
+      buf.writeln('Disponibles: $stock');
+      buf.writeln();
     }
-    buf.writeln('');
-    buf.writeln('_Precios en USD. Stock limitado._');
-
-    await Share.share(buf.toString());
+    await Share.share(buf.toString().trimRight());
   }
-
   /// v1.2.1: ficha del producto al tocar la tarjeta.
   void _irDetalle(Map<String, dynamic> s) {
     Navigator.push<bool>(
@@ -615,28 +276,6 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
     });
   }
 
-  /// v1.2.1: venta rápida (1 unidad, precio oficial, cliente externo).
-  /// Gemini-2: exige confirmación previa (riesgo de toques accidentales).
-  Future<void> _ventaRapida(Map<String, dynamic> s) async {
-    final confirmar = await DialogoApp.confirmar(
-      context,
-      titulo: 'Venta rápida',
-      mensaje: '¿Registrar venta de 1 unidad de ${s['nombre']} '
-          'a precio oficial?',
-      aceptar: 'Vender',
-      icono: Icons.flash_on,
-    );
-    if (!confirmar || !mounted) return;
-    final ok = await ventaRapidaSuplemento(context, s, _tasaUsd);
-    if (ok && mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-              content:
-                  Text('Venta registrada (se sincronizará)')));
-      _cargar();
-    }
-  }
-
   void _irEditar(Map<String, dynamic>? s) {
     Navigator.push(
       context,
@@ -652,6 +291,23 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
       appBar: AppBar(
         title: const Text('Suplementos'),
         actions: [
+          // v1.3.4 (C5): "+ Nuevo" compacto en la cabecera (solo dueño).
+          // Ni FAB (tapaba el botón Vender) ni tarjeta en el grid.
+          if (_esDueno)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              child: FilledButton.tonalIcon(
+                onPressed: () => _irEditar(null),
+                icon: const Icon(Icons.add, size: 18),
+                label: const Text('Nuevo'),
+              ),
+            ),
+          // v1.3.4 (B2): compartir el catálogo como texto (WhatsApp).
+          IconButton(
+            icon: const Icon(Icons.share_outlined),
+            tooltip: 'Compartir catálogo',
+            onPressed: _compartirCatalogo,
+          ),
           if (_esDueno)
             IconButton(
               icon: const Icon(Icons.receipt_long),
@@ -678,16 +334,9 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
             ),
         ],
       ),
-      floatingActionButton: _esDueno
-          ? FloatingActionButton.extended(
-              onPressed: () => _irEditar(null),
-              icon: const Icon(Icons.add),
-              label: const Text('Nuevo'),
-            )
-          : null,
       body: Column(
         children: [
-          const SyncBanner(compact: true),
+          const SyncBanner(compact: true, alcance: 'suplementos'),
           // v1.2.1: la promo la ven todos (el interruptor solo el dueño).
           _tarjetaPromo(),
           Padding(
@@ -765,6 +414,12 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
     );
   }
 
+  /// v1.3.4 (C5): vista ÚNICA de catálogo — Grid 2 columnas.
+  /// NOTA: el spec pedía childAspectRatio 0.72, pero con foto
+  /// AspectRatio(1.1) la mitad inferior queda en ~76-88px en pantallas de
+  /// 360-412dp y el contenido del spec (nombre 2 líneas + precio grande +
+  /// botón ancho completo, ~107-116px) desborda. 0.60 preserva todos los
+  /// elementos del spec sin overflow.
   Widget _cuerpo() {
     if (_cargando) {
       return const Center(child: CircularProgressIndicator());
@@ -775,11 +430,13 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
         icono: Icons.medication_outlined,
         titulo: 'Sin suplementos',
         subtitulo: _esDueno
-            ? 'Agrega el primero con el botón Nuevo.'
+            ? 'Agrega el primero para empezar el catálogo.'
             : 'Aún no hay productos en el inventario.',
+        textoAccion: _esDueno ? '+ Crear primer suplemento' : null,
+        onAccion: _esDueno ? () => _irEditar(null) : null,
       );
     }
-    // v1.2.1: sección destacada con los más vendidos.
+    // v1.2.1: sección destacada con los más vendidos (solo si hay ventas).
     final top = _topProductos;
     return Column(
       children: [
@@ -787,7 +444,23 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
         Expanded(
           child: RefreshIndicator(
             onRefresh: _cargar,
-            child: _listaConSeccionSinStock(items),
+            child: GridView.builder(
+              padding: const EdgeInsets.all(AppEspacio.md),
+              gridDelegate:
+                  const SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: 2,
+                childAspectRatio: 0.60,
+                crossAxisSpacing: 12,
+                mainAxisSpacing: 12,
+              ),
+              itemCount: items.length,
+              itemBuilder: (ctx, i) => _TarjetaSuplemento(
+                key: ValueKey(items[i]['id']),
+                sup: items[i],
+                onVender: () => _irVender(items[i]),
+                onTap: () => _irDetalle(items[i]),
+              ),
+            ),
           ),
         ),
       ],
@@ -904,228 +577,325 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
     );
   }
 
-  /// v1.2.3: Lista con sección "Sin stock" para el dueño.
-  Widget _listaConSeccionSinStock(List<Map<String, dynamic>> items) {
-    if (!_esDueno || items.isEmpty) {
-      return ListView.builder(
-        padding: const EdgeInsets.fromLTRB(
-            AppEspacio.md, AppEspacio.sm, AppEspacio.md, 96),
-        itemCount: items.length,
-        itemBuilder: (ctx, i) => _itemSuplemento(items[i]),
-      );
-    }
-    // Encontrar índice donde empieza sin-stock
-    int idxSinStock = -1;
-    for (int i = 0; i < items.length; i++) {
-      final stock = (items[i]['stock'] as num?)?.toInt() ?? 0;
-      if (stock <= 0) {
-        idxSinStock = i;
-        break;
-      }
-    }
-    if (idxSinStock == -1) {
-      // No hay sin-stock
-      return ListView.builder(
-        padding: const EdgeInsets.fromLTRB(
-            AppEspacio.md, AppEspacio.sm, AppEspacio.md, 96),
-        itemCount: items.length,
-        itemBuilder: (ctx, i) => _itemSuplemento(items[i]),
-      );
-    }
-    // Construir lista con header
-    return ListView.builder(
-      padding: const EdgeInsets.fromLTRB(
-          AppEspacio.md, AppEspacio.sm, AppEspacio.md, 96),
-      itemCount: items.length + 1, // +1 por el header
-      itemBuilder: (ctx, i) {
-        if (i == idxSinStock) {
-          return const Padding(
-            padding: EdgeInsets.symmetric(vertical: AppEspacio.md),
-            child: EncabezadoSeccion(titulo: 'Sin stock'),
-          );
-        }
-        final itemIdx = i > idxSinStock ? i - 1 : i;
-        return _itemSuplemento(items[itemIdx]);
-      },
-    );
-  }
+}
 
-  Widget _tarjetaProducto(Map<String, dynamic> s) {
-    final stock = (s['stock'] as num?)?.toInt() ?? 0;
-    final precio = (s['precio_oficial'] as num?)?.toDouble() ?? 0;
-    final inactivo = (s['activo'] as int?) != 1;
-    // v1.2.1: mostrar categoría del suplemento.
-    final catNombre =
-        _nombreCategoria(s['categoria_id'] as int?);
-    // v1.2.1: equivalente en CUP según la tasa del día.
-    // v1.3.1 (Medio #6): solo si la tasa es real (> 1.0).
-    final cup =
-        _tasaUsd != null && _tasaUsd! > 1.0 && precio > 0
-            ? '≈ ${fmtMonto(precio * _tasaUsd!)} CUP'
-            : null;
-    return Padding(
-      padding: const EdgeInsets.only(bottom: AppEspacio.sm),
-      child: Tarjeta(
-        padding: const EdgeInsets.all(AppEspacio.md),
-        // v1.2.1: tocar abre la ficha del producto.
-        onTap: () => _irDetalle(s),
-        child: Row(
+// ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// v1.3.4 (C5): tarjeta de catálogo — vista única de suplementos.
+// ---------------------------------------------------------------------------
+
+/// Tarjeta de catálogo (spec Argón):
+/// - Mitad superior: foto AspectRatio(1.1), bordes superiores 12px,
+///   BoxFit.cover, con triestado de carga (ver _FotoSuplemento).
+/// - Badge de stock flotante (sup. derecha): chip negro + punto semántico.
+/// - Mitad inferior: nombre (2 líneas), precio oficial grande, botón Vender.
+/// - Elevación 2, borde 1px (white10 oscuro / black12 claro).
+class _TarjetaSuplemento extends StatelessWidget {
+  final Map<String, dynamic> sup;
+  final VoidCallback onVender;
+  final VoidCallback onTap;
+
+  const _TarjetaSuplemento({
+    super.key,
+    required this.sup,
+    required this.onVender,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final nombre = '${sup['nombre'] ?? 'Sin nombre'}';
+    final stock = (sup['stock'] as num?)?.toInt() ?? 0;
+    // B3 (Argón): el precio mostrado es SIEMPRE precio_oficial
+    // (fallback legacy a `precio`); ultimo_precio no se usa.
+    final precio = (sup['precio_oficial'] as num?)?.toDouble() ??
+        (sup['precio'] as num?)?.toDouble() ??
+        0;
+    // Lógica tolerante (igual que _compartirCatalogo): 'activo' puede
+    // venir como int, bool o faltar (null) sin romper ni marcar
+    // falso "Agotado".
+    final act = sup['activo'];
+    final inactivo = act == 0 ||
+        act == false ||
+        sup['eliminado'] == 1 ||
+        sup['eliminado'] == true;
+    final hayStock = stock > 0 && !inactivo;
+    final oscuro = Theme.of(context).brightness == Brightness.dark;
+
+    return Card(
+      elevation: 2,
+      margin: EdgeInsets.zero,
+      clipBehavior: Clip.antiAlias,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(
+          color: oscuro ? Colors.white10 : Colors.black12,
+          width: 1,
+        ),
+      ),
+      child: InkWell(
+        onTap: onTap,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            _fotoProducto(s),
-            const SizedBox(width: AppEspacio.md),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+            AspectRatio(
+              aspectRatio: 1.1,
+              child: Stack(
+                fit: StackFit.expand,
                 children: [
-                  Text('${s['nombre'] ?? 'Sin nombre'}',
-                      style: AppTexto.subtitulo),
-                  const SizedBox(height: 2),
-                  Text(
-                    '${precio.toStringAsFixed(2)} USD · $stock disp.',
-                    style: AppTexto.secundario,
-                  ),
-                  if (cup != null)
-                    Text(
-                      cup,
-                      style: AppTexto.secundario.copyWith(
-                          color: AppColores.naranja,
-                          fontWeight: FontWeight.bold),
-                    ),
-                  // v1.2.1: chip de categoría.
-                  Padding(
-                    padding: const EdgeInsets.only(top: 4),
-                    child: ChipEstado(
-                        texto: catNombre,
-                        color: AppColores.naranja),
-                  ),
-                  if (inactivo)
-                    ChipEstado(
-                        texto: 'Inactivo',
-                        color:
-                            AppColores.textoSecundario(context)),
-                  // v1.2.2: acciones movidas aquí desde abajo (mejor ubicación).
-                  // Rápida y Compartir como botones compactos con icono+etiqueta.
-                  Wrap(
-                    spacing: 4,
-                    runSpacing: 2,
-                    children: [
-                      TextButton.icon(
-                        onPressed: stock > 0
-                            ? () => _ventaRapida(s)
-                            : null,
-                        icon: const Icon(Icons.bolt,
-                            size: 16),
-                        label: const Text('Rápida',
-                            style: TextStyle(fontSize: 12)),
-                        style: TextButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 8, vertical: 4),
-                          minimumSize: const Size(48, 32),
-                          tapTargetSize:
-                              MaterialTapTargetSize.shrinkWrap,
-                        ),
-                      ),
-                      TextButton.icon(
-                        onPressed: () => compartirSuplemento(
-                            context, s, _tasaUsd),
-                        icon: const Icon(
-                            Icons.share,
-                            size: 16),
-                        label: const Text('Compartir',
-                            style: TextStyle(fontSize: 12)),
-                        style: TextButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 8, vertical: 4),
-                          minimumSize: const Size(48, 32),
-                          tapTargetSize:
-                              MaterialTapTargetSize.shrinkWrap,
-                        ),
-                      ),
-                    ],
+                  _FotoSuplemento(sup: sup),
+                  Positioned(
+                    top: 8,
+                    right: 8,
+                    child: _BadgeStock(stock: stock),
                   ),
                 ],
               ),
             ),
-            // v1.2.1: el dueño ve Editar y Vender (antes solo Editar).
-            // Bug 15/16: expandido=false para no romper el Row de la
-            // tarjeta (el SizedBox infinito aplastaba el texto a ancho 0
-            // y el botón desaparecía/rompía el layout).
-            if (_esDueno)
-              Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  BotonPrimario(
-                    texto: 'Vender',
-                    expandido: false,
-                    onPressed:
-                        stock > 0 ? () => _irVender(s) : null,
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.edit_outlined),
-                    tooltip: 'Editar',
-                    onPressed: () => _irEditar(s),
-                  ),
-                ],
-              )
-            else
-              BotonPrimario(
-                texto: 'Vender',
-                expandido: false,
-                onPressed: stock > 0 ? () => _irVender(s) : null,
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.all(8),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      nombre,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w600,
+                        fontSize: 13,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      '${precio.toStringAsFixed(2)} USD',
+                      style: const TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 16,
+                        color: AppColores.naranja,
+                      ),
+                    ),
+                    if (inactivo)
+                      const Text(
+                        'Inactivo',
+                        style: TextStyle(
+                          fontSize: 10,
+                          color: Colors.grey,
+                          height: 1.2,
+                        ),
+                      ),
+                    const Spacer(),
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton(
+                        onPressed: hayStock ? onVender : null,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: AppColores.naranja,
+                          foregroundColor: Colors.white,
+                          disabledBackgroundColor:
+                              oscuro ? Colors.white12 : Colors.black12,
+                          disabledForegroundColor:
+                              oscuro ? Colors.white38 : Colors.black38,
+                          padding: const EdgeInsets.symmetric(vertical: 8),
+                          tapTargetSize:
+                              MaterialTapTargetSize.shrinkWrap,
+                        ),
+                        child: Text(hayStock ? 'Vender' : 'Agotado'),
+                      ),
+                    ),
+                  ],
+                ),
               ),
+            ),
           ],
         ),
       ),
     );
   }
+}
 
-  /// v1.3.3: acepta el mapa completo para priorizar foto_local
-  /// (foto recién tomada, offline) sobre la remota del caché.
-  Widget _fotoProducto(Map<String, dynamic> s) {
-    const tam = 56.0;
-    Widget placeholder() => Container(
-          width: tam,
-          height: tam,
-          decoration: BoxDecoration(
-            color: AppColores.fondo(context),
-            borderRadius:
-                BorderRadius.circular(AppRadio.md),
-          ),
-          child: const Icon(Icons.medication_outlined,
-              color: AppColores.naranja),
-        );
-    final fotoLocal = s['foto_local'] as String?;
-    if (fotoLocal != null && fotoLocal.isNotEmpty && File(fotoLocal).existsSync()) {
-      return ClipRRect(
-        borderRadius: BorderRadius.circular(AppRadio.md),
-        child: Image.file(File(fotoLocal),
-            width: tam,
-            height: tam,
-            fit: BoxFit.cover,
-            errorBuilder: (_, __, ___) => placeholder()),
-      );
+/// Foto con triestado estricto (condición C4/B4 de Argón):
+/// 1. `foto_local` existe → directa, sin red.
+/// 2. `foto_storage` en caché (`enCache`) → directa, sin red.
+/// 3. Si no: shimmer sutil mientras `obtener()` descarga;
+///    null (fallo de red/offline) → placeholder elegante SIN cachear
+///    el fallo (se reintenta en el próximo render).
+/// 4. Sin `foto_local` ni `foto_storage` → placeholder directo, sin red.
+class _FotoSuplemento extends StatefulWidget {
+  final Map<String, dynamic> sup;
+  const _FotoSuplemento({required this.sup});
+
+  @override
+  State<_FotoSuplemento> createState() => _FotoSuplementoState();
+}
+
+class _FotoSuplementoState extends State<_FotoSuplemento> {
+  late Future<File?> _futura;
+
+  @override
+  void initState() {
+    super.initState();
+    _futura = _resolver();
+  }
+
+  /// Si el widget se recicla para otro suplemento (filtro, búsqueda,
+  /// sync), re-resolver la foto en vez de conservar la anterior.
+  @override
+  void didUpdateWidget(covariant _FotoSuplemento oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.sup['id'] != widget.sup['id'] ||
+        oldWidget.sup['foto_local'] != widget.sup['foto_local'] ||
+        oldWidget.sup['foto_storage'] != widget.sup['foto_storage']) {
+      _futura = _resolver();
     }
-    final storagePath = s['foto_storage'] as String?;
-    if (storagePath == null || storagePath.isEmpty) {
-      return placeholder();
+  }
+
+  Future<File?> _resolver() async {
+    final s = widget.sup;
+    final local = s['foto_local'] as String?;
+    if (local != null && local.isNotEmpty && File(local).existsSync()) {
+      return File(local);
     }
-    return FutureBuilder(
-      future: FotoCache.instance.obtener(storagePath),
+    final storage = s['foto_storage'] as String?;
+    if (storage == null || storage.isEmpty) return null;
+    final enCache = await FotoCache.instance.enCache(storage);
+    if (enCache != null) return enCache;
+    return FotoCache.instance.obtener(storage);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<File?>(
+      future: _futura,
       builder: (ctx, snap) {
+        if (snap.connectionState == ConnectionState.waiting) {
+          return const _ShimmerFoto();
+        }
         final f = snap.data;
-        if (f == null) return placeholder();
-        return ClipRRect(
-          borderRadius:
-              BorderRadius.circular(AppRadio.md),
-          child: Image.file(f,
-              width: tam, height: tam, fit: BoxFit.cover),
-        );
+        if (f != null) {
+          return Image.file(
+            f,
+            fit: BoxFit.cover,
+            errorBuilder: (_, __, ___) => const _PlaceholderFoto(),
+          );
+        }
+        return const _PlaceholderFoto();
       },
     );
   }
 }
 
-// ---------------------------------------------------------------------------
+/// Placeholder elegante: gradiente carbón/gris acero + ícono vectorial
+/// a baja opacidad. Cero letras gigantes (decisión Jc).
+class _PlaceholderFoto extends StatelessWidget {
+  const _PlaceholderFoto();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [Color(0xFF2B3138), Color(0xFF14171B)],
+        ),
+      ),
+      child: const Center(
+        child: Icon(
+          Icons.fitness_center,
+          size: 46,
+          color: Color(0x40FFFFFF),
+        ),
+      ),
+    );
+  }
+}
+
+/// Shimmer sutil para el estado "cargando / descargando" del triestado.
+class _ShimmerFoto extends StatefulWidget {
+  const _ShimmerFoto();
+
+  @override
+  State<_ShimmerFoto> createState() => _ShimmerFotoState();
+}
+
+class _ShimmerFotoState extends State<_ShimmerFoto>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _c;
+
+  @override
+  void initState() {
+    super.initState();
+    _c = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 900),
+    )..repeat(reverse: true);
+  }
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FadeTransition(
+      opacity: Tween<double>(begin: 0.45, end: 0.95).animate(_c),
+      child: const _PlaceholderFoto(),
+    );
+  }
+}
+
+/// Badge de stock flotante: chip negro translúcido + punto semántico
+/// (verde > 5, ámbar 1–5, rojo agotado) + "Stock: X".
+class _BadgeStock extends StatelessWidget {
+  final int stock;
+  const _BadgeStock({required this.stock});
+
+  @override
+  Widget build(BuildContext context) {
+    final Color punto;
+    if (stock <= 0) {
+      punto = AppColores.error;
+    } else if (stock <= 5) {
+      punto = AppColores.alerta;
+    } else {
+      punto = AppColores.exito;
+    }
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+      decoration: BoxDecoration(
+        color: Colors.black87,
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 8,
+            height: 8,
+            decoration: BoxDecoration(
+              color: punto,
+              shape: BoxShape.circle,
+            ),
+          ),
+          const SizedBox(width: 6),
+          Text(
+            'Stock: $stock',
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 // Crear / editar suplemento (solo dueño)
 // ---------------------------------------------------------------------------
 
@@ -1311,7 +1081,7 @@ class _EditarSuplementoScreenState
       body: ListView(
         padding: const EdgeInsets.all(AppEspacio.lg),
         children: [
-          const SyncBanner(compact: true),
+          const SyncBanner(compact: true, alcance: 'suplementos'),
           const SizedBox(height: AppEspacio.md),
           Center(
             child: GestureDetector(
@@ -1421,369 +1191,6 @@ class _EditarSuplementoScreenState
             onPressed: _guardando ? null : _guardar,
           ),
         ],
-      ),
-    );
-  }
-}
-
-/// Fila compacta de suplemento (76px). Revisado por Gemini 2026-10-13.
-/// - Borde izquierdo condicional por stock (rojo ≤3, naranja ≤5)
-/// - Swipe endToStart: +1 stock (confirmDismiss retorna false)
-/// - LongPress: ajuste manual de stock
-/// - Tap: abre edición. Botón Vender: abre diálogo de venta.
-class FilaSuplementoCompacta extends StatelessWidget {
-  final Map<String, dynamic> sup;
-  final bool tienePendiente;
-  final VoidCallback onVender;
-  final VoidCallback onEditar;
-  final VoidCallback onSumarStock;
-  final VoidCallback onAjusteManual;
-
-  const FilaSuplementoCompacta({
-    super.key,
-    required this.sup,
-    required this.tienePendiente,
-    required this.onVender,
-    required this.onEditar,
-    required this.onSumarStock,
-    required this.onAjusteManual,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final stock = (sup['stock'] as num?)?.toInt() ?? 0;
-    final nombre = (sup['nombre'] ?? '').toString();
-    final precio = (sup['precio'] as num?)?.toDouble() ?? 0.0;
-    final activo = (sup['activo'] as int? ?? 1) == 1;
-
-    Color? bordeColor;
-    if (stock <= 3) {
-      bordeColor = Colors.redAccent;
-    } else if (stock <= 5) {
-      bordeColor = Colors.orangeAccent;
-    }
-
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-      child: Dismissible(
-        key: ValueKey('sup_${sup['id']}'),
-        direction: DismissDirection.endToStart,
-        movementDuration: const Duration(milliseconds: 200),
-        dismissThresholds: const {DismissDirection.endToStart: 0.35},
-        background: Container(
-          decoration: BoxDecoration(
-            color: Colors.green.withOpacity(0.2),
-            borderRadius: BorderRadius.circular(12),
-          ),
-          alignment: Alignment.centerRight,
-          padding: const EdgeInsets.only(right: 20),
-          child: const Icon(Icons.add, color: Colors.green),
-        ),
-        confirmDismiss: (direction) async {
-          if (direction == DismissDirection.endToStart) {
-            onSumarStock();
-            HapticFeedback.lightImpact();
-          }
-          return false;
-        },
-        child: GestureDetector(
-          onLongPress: onAjusteManual,
-          onTap: onEditar,
-          child: Container(
-            height: 76,
-            padding: const EdgeInsets.symmetric(horizontal: 8),
-            decoration: BoxDecoration(
-              color: AppColores.fondo(context),
-              borderRadius: BorderRadius.circular(12),
-              border: Border(
-                left: BorderSide(
-                  color: bordeColor ?? Colors.transparent,
-                  width: 3.5,
-                ),
-              ),
-            ),
-            child: Row(
-              children: [
-                _miniaturaSuplemento(sup, nombre),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Expanded(
-                            child: Text(
-                              nombre,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                fontWeight: FontWeight.w600,
-                                color: activo ? Colors.white : Colors.white38,
-                              ),
-                            ),
-                          ),
-                          if (tienePendiente)
-                            Container(
-                              width: 8,
-                              height: 8,
-                              margin: const EdgeInsets.only(left: 6),
-                              decoration: const BoxDecoration(
-                                color: Colors.orange,
-                                shape: BoxShape.circle,
-                              ),
-                            ),
-                        ],
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        '${precio.toStringAsFixed(2)} USD · $stock disp.',
-                        style: TextStyle(
-                          color: activo ? Colors.orange[300] : Colors.white24,
-                          fontSize: 13,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                ElevatedButton(
-                  onPressed: (stock > 0 && activo) ? onVender : null,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColores.naranja,
-                    foregroundColor: Colors.white,
-                    disabledBackgroundColor: Colors.white10,
-                    disabledForegroundColor: Colors.white24,
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 14, vertical: 8),
-                    minimumSize: Size.zero,
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  ),
-                  child: const Text('Vender'),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _miniaturaSuplemento(
-      Map<String, dynamic> sup, String nombre) {
-    final fotoPath = sup['foto_local'] as String?;
-    if (fotoPath != null && fotoPath.isNotEmpty) {
-      return ClipRRect(
-        borderRadius: BorderRadius.circular(8),
-        child: Image.file(
-          File(fotoPath),
-          width: 56,
-          height: 56,
-          fit: BoxFit.cover,
-          errorBuilder: (_, __, ___) => PlaceholderFotoSuplemento(
-            nombre: nombre,
-            width: 56,
-            height: 56,
-          ),
-        ),
-      );
-    }
-    return PlaceholderFotoSuplemento(
-      nombre: nombre,
-      width: 56,
-      height: 56,
-    );
-  }
-}
-
-/// Diálogo de venta con confirmación obligatoria. Revisado por Gemini.
-/// - StatefulWidget (no StatefulBuilder) para TextEditingController limpio
-/// - Valida precio > 0, deshabilita Confirmar si inválido
-/// - Evita crash de clamp con stock 0
-Future<Map<String, dynamic>?> mostrarDialogoVenta(
-  BuildContext context,
-  Map<String, dynamic> sup,
-) {
-  return showDialog<Map<String, dynamic>>(
-    context: context,
-    builder: (ctx) => DialogoVenta(sup: sup),
-  );
-}
-
-class DialogoVenta extends StatefulWidget {
-  final Map<String, dynamic> sup;
-  const DialogoVenta({super.key, required this.sup});
-
-  @override
-  State<DialogoVenta> createState() => _DialogoVentaState();
-}
-
-class _DialogoVentaState extends State<DialogoVenta> {
-  late int _stock;
-  late double _precio;
-  late TextEditingController _precioCtrl;
-  int _cantidad = 1;
-  bool _precioValido = true;
-
-  @override
-  void initState() {
-    super.initState();
-    _stock = (widget.sup['stock'] as num?)?.toInt() ?? 0;
-    final precioBase =
-        (widget.sup['precio'] as num?)?.toDouble() ?? 0.0;
-    _precio =
-        (widget.sup['ultimo_precio'] as num?)?.toDouble() ?? precioBase;
-    _precioCtrl =
-        TextEditingController(text: _precio.toStringAsFixed(2));
-  }
-
-  @override
-  void dispose() {
-    _precioCtrl.dispose();
-    super.dispose();
-  }
-
-  void _ajustarCantidad(int nueva) {
-    if (_stock <= 0) return;
-    setState(() {
-      _cantidad = nueva.clamp(1, _stock);
-    });
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final total = _precioValido ? (_cantidad * _precio) : 0.0;
-
-    return AlertDialog(
-      title: Text('Vender ${widget.sup['nombre']}'),
-      content: SingleChildScrollView(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                IconButton(
-                  icon: const Icon(Icons.remove),
-                  onPressed: _cantidad > 1
-                      ? () => _ajustarCantidad(_cantidad - 1)
-                      : null,
-                ),
-                Text('$_cantidad',
-                    style: const TextStyle(
-                        fontSize: 22, fontWeight: FontWeight.bold)),
-                IconButton(
-                  icon: const Icon(Icons.add),
-                  onPressed: _cantidad < _stock
-                      ? () => _ajustarCantidad(_cantidad + 1)
-                      : null,
-                ),
-              ],
-            ),
-            Wrap(
-              spacing: 8,
-              children: [1, 5, 10].map((n) {
-                return ActionChip(
-                  label: Text('+$n'),
-                  onPressed: _cantidad + n <= _stock
-                      ? () => _ajustarCantidad(_cantidad + n)
-                      : null,
-                );
-              }).toList(),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: _precioCtrl,
-              keyboardType:
-                  const TextInputType.numberWithOptions(decimal: true),
-              decoration: InputDecoration(
-                labelText: 'Precio unitario (USD)',
-                prefixText: '\$ ',
-                errorText: _precioValido ? null : 'Precio inválido',
-              ),
-              onChanged: (v) {
-                final p = double.tryParse(v);
-                setState(() {
-                  if (p != null && p > 0) {
-                    _precio = p;
-                    _precioValido = true;
-                  } else {
-                    _precioValido = false;
-                  }
-                });
-              },
-            ),
-            const SizedBox(height: 14),
-            Text(
-              'Total: \$${total.toStringAsFixed(2)}',
-              style: const TextStyle(
-                  fontSize: 18, fontWeight: FontWeight.bold),
-            ),
-            Text(
-              'Stock disponible: $_stock',
-              style: TextStyle(fontSize: 12, color: Colors.grey[400]),
-            ),
-          ],
-        ),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context),
-          child: const Text('Cancelar'),
-        ),
-        ElevatedButton(
-          onPressed: (_precioValido && _stock > 0)
-              ? () => Navigator.pop(
-                  context, {'cantidad': _cantidad, 'precio': _precio})
-              : null,
-          style: ElevatedButton.styleFrom(
-              backgroundColor: AppColores.naranja),
-          child: const Text('Confirmar venta'),
-        ),
-      ],
-    );
-  }
-}
-
-/// Placeholder unificado con inicial para lista compacta y carrusel.
-/// Revisado por Gemini 2026-10-13: evita duplicar lógica.
-class PlaceholderFotoSuplemento extends StatelessWidget {
-  final String nombre;
-  final double width;
-  final double height;
-  final double fontSize;
-  final BorderRadius? borderRadius;
-
-  const PlaceholderFotoSuplemento({
-    super.key,
-    required this.nombre,
-    required this.width,
-    required this.height,
-    this.fontSize = 22,
-    this.borderRadius,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final inicial = nombre.trim().isNotEmpty
-        ? nombre.trim()[0].toUpperCase()
-        : '?';
-    return Container(
-      width: width,
-      height: height,
-      decoration: BoxDecoration(
-        color: AppColores.naranja.withOpacity(0.15),
-        borderRadius: borderRadius ?? BorderRadius.circular(8),
-      ),
-      child: Center(
-        child: Text(
-          inicial,
-          style: TextStyle(
-            fontSize: fontSize,
-            fontWeight: FontWeight.bold,
-            color: AppColores.naranja,
-          ),
-        ),
       ),
     );
   }

@@ -3,6 +3,7 @@
 /// Trabaja sobre los mapas decodificados del espejo `clientes`.
 library;
 
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
@@ -11,6 +12,7 @@ import 'package:uuid/uuid.dart';
 
 import 'auth.dart';
 import 'localdb.dart';
+import 'sync.dart';
 import 'tiempo.dart';
 
 String _norm(String s) {
@@ -455,7 +457,7 @@ String textoTotalVenta(double total, String moneda, double? tasa) {
   if (moneda == 'USD') {
     // v1.3.1 (Medio #6): si la tasa es 1.0 o menor es la normalización por
     // defecto (tasa no indicada), no mostrar equivalencia falsa "≈ 1 CUP".
-    final mostrarCup = hayTasa && tasa! > 1.0;
+    final mostrarCup = hayTasa && tasa > 1.0;
     return '${total.toStringAsFixed(2)} USD'
         '${mostrarCup ? ' (≈ ${(total * tasa).toStringAsFixed(0)} CUP)' : ''}';
   }
@@ -2784,4 +2786,118 @@ Future<Map<String, double>> cobradoHoyPorMetodo() async {
     }
   }
   return {'efectivo': ef, 'transferencia': tr};
+}
+
+/// Comparación de precios en centavos enteros (candado (a) de auditoría,
+/// B3/C-Auditoría): evita los falsos positivos/negativos del double
+/// (p. ej. 0.1 + 0.2). Dos precios "iguales" en centavos no difieren.
+bool precioDifiereEnCentavos(double a, double b) =>
+    (a * 100).round() != (b * 100).round();
+
+/// Registra una venta de suplemento — ÚNICO punto de venta de la app
+/// (v1.3.4, B1-Unificación / C1 / C2 / C3).
+///
+/// La usan la tarjeta del catálogo, el detalle (`ventaRapidaSuplemento`) y
+/// el diálogo (`VentaSuplementoScreen`): prohibido duplicar esta lógica en
+/// la UI.
+///
+/// Transacción atómica: descuento optimista del stock en el JSON de
+/// `suplementos.data` + encolado de la op `venta_suplemento`. Si [txn] se
+/// pasa, todo corre dentro de esa transacción; si es null, se abre una.
+///
+/// NUNCA inserta en `ventas_suplementos`: es espejo puro poblado por pull
+/// (evita doble conteo en `pendienteEntrega` y colisión de ids con el
+/// servidor). El estado de sync vive en `ops_queue`, no en el payload.
+///
+/// Validación: `cantidad > 0` y `precioVenta > 0` se verifican ANTES de la
+/// transacción; el stock se lee del JSON DENTRO de la transacción y si
+/// `cantidad > stockActual` lanza `Exception('Stock insuficiente')`.
+///
+/// Devuelve el `op_uuid` generado. NO toca `ultimo_precio` (telemetría
+/// muerta de v18: el precio mostrado es siempre `precio_oficial`).
+Future<String> registrarVentaSuplemento({
+  required int suplementoId,
+  required int cantidad,
+  required double precioOficial, // por unidad
+  required double precioVenta, // por unidad (puede diferir del oficial)
+  String moneda = 'USD',
+  double? usdTasa,
+  required String compradorTipo, // 'cliente' | 'externo'
+  int? clienteId,
+  required String compradorNombre,
+  String? nota,
+  String? notaPrecio,
+  DatabaseExecutor? txn,
+}) async {
+  // Validación PRE-transacción (no necesita BD).
+  if (cantidad <= 0) throw Exception('Cantidad inválida');
+  if (precioVenta <= 0) throw Exception('Precio de venta inválido');
+  if (compradorTipo != 'cliente' && compradorTipo != 'externo') {
+    throw Exception('comprador_tipo inválido');
+  }
+  if (compradorTipo == 'cliente' && clienteId == null) {
+    throw Exception('Falta el cliente comprador');
+  }
+
+  final db = LocalDb.instance;
+  final oficialCent = (precioOficial * 100).round();
+  final ventaCent = (precioVenta * 100).round();
+  final opUuid = const Uuid().v4();
+  // Contrato exacto con el servidor (candados de auditoría C2):
+  // doubles por retrocompat + centavos enteros para comparar.
+  final payload = <String, dynamic>{
+    'suplemento_id': suplementoId,
+    'cantidad': cantidad,
+    'precio': precioVenta, // double retrocompat
+    'precio_oficial': precioOficial, // double retrocompat
+    'precio_oficial_centavos': oficialCent,
+    'precio_venta_centavos': ventaCent,
+    'descuento_autorizado_centavos': ventaCent - oficialCent,
+    'moneda': moneda, // explícita, nunca implícita
+    'usd_tasa': (usdTasa != null && usdTasa > 0) ? usdTasa : 1.0,
+    'comprador_tipo': compradorTipo,
+    if (compradorTipo == 'cliente') 'cliente_id': clienteId,
+    'comprador_nombre': compradorNombre,
+    'fecha': hoyHabanaIso(), // PROHIBIDO DateTime.now()
+    if (nota != null && nota.isNotEmpty) 'nota': nota,
+    if (notaPrecio != null && notaPrecio.isNotEmpty)
+      'nota_precio': notaPrecio,
+    'entregado': 0, // int; el estado de sync va en ops_queue
+  };
+
+  Future<String> dentro(DatabaseExecutor ex) async {
+    // Stock actual leído del JSON DENTRO de la transacción (evita TOCTOU).
+    final rows = await ex.query('suplementos',
+        columns: ['data'],
+        where: 'id = ?',
+        whereArgs: [suplementoId],
+        limit: 1);
+    if (rows.isEmpty) throw Exception('Suplemento no encontrado');
+    final data = Map<String, dynamic>.from(
+        jsonDecode(rows.first['data'] as String) as Map);
+    final stockActual = (data['stock'] as num?)?.toInt() ?? 0;
+    if (cantidad > stockActual) throw Exception('Stock insuficiente');
+    // (a) decremento optimista del stock en el JSON.
+    await db.actualizarSuplemento(
+        suplementoId, {'stock': stockActual - cantidad}, ex);
+    // (b) encolar la op.
+    await db.queueOp(
+        opUuid: opUuid, tipo: 'venta_suplemento', payload: payload, txn: ex);
+    return opUuid;
+  }
+
+  final String resultado;
+  if (txn != null) {
+    resultado = await dentro(txn);
+  } else {
+    final d = await db.db;
+    resultado = await d.transaction(dentro);
+  }
+  // Push en segundo plano SOLO si no hay txn externa: con txn externa
+  // el commit aún no ocurrió y el push leería datos inconsistentes.
+  // El catchError evita errores no manejados en tests/entornos sin sesión.
+  if (txn == null) {
+    unawaited(SyncEngine.instance.push().catchError((_) {}));
+  }
+  return resultado;
 }

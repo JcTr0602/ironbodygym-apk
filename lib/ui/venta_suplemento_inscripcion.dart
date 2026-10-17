@@ -27,6 +27,8 @@ class VentaSuplementoInscripcionScreen extends StatefulWidget {
   final double precio;
   final String moneda;
   final double? usdTasa;
+  final double precioOficial;
+  final String? notaPrecio;
 
   const VentaSuplementoInscripcionScreen({
     super.key,
@@ -35,6 +37,8 @@ class VentaSuplementoInscripcionScreen extends StatefulWidget {
     required this.precio,
     required this.moneda,
     this.usdTasa,
+    required this.precioOficial,
+    this.notaPrecio,
   });
 
   @override
@@ -128,6 +132,12 @@ class _VentaSuplementoInscripcionScreenState
             'cantidad': widget.cantidad,
             'precio': widget.precio,
             'moneda': widget.moneda,
+            // Auditoría: precio oficial y nota viajan para que el
+            // servidor no dependa del payload manipulable.
+            'precio_oficial': widget.precioOficial,
+            if (widget.notaPrecio != null &&
+                widget.notaPrecio!.isNotEmpty)
+              'nota_precio': widget.notaPrecio,
             // v1.2.4: la tasa se guarda siempre que se conozca (USD y CUP).
             if (widget.usdTasa != null && widget.usdTasa! > 0)
               'usd_tasa': widget.usdTasa,

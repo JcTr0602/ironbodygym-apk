@@ -159,7 +159,7 @@ class _PagosRealizadosScreenState extends State<PagosRealizadosScreen> {
       ),
       body: Column(
         children: [
-          const SyncBanner(),
+          const SyncBanner(alcance: 'pagos'),
           Padding(
             padding: const EdgeInsets.all(12),
             child: Text(

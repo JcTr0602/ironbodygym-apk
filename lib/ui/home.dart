@@ -449,6 +449,10 @@ class _HomeScreenState extends State<HomeScreen>
   Widget build(BuildContext context) {
     final esDueno = _auth.isOwner;
     return Scaffold(
+      // v1.3.5 (dock inferior, veredicto Argón Opción A): acciones
+      // críticas siempre al alcance del pulgar. El scroll principal
+      // queda intacto.
+      bottomNavigationBar: _dockInferior(),
       body: SafeArea(
         child: RefreshIndicator(
           onRefresh: () => _cargar(forceRefresh: true),
@@ -523,15 +527,9 @@ class _HomeScreenState extends State<HomeScreen>
                       ),
                     ),
                   ),
-                // v1.3.3: dock principal (arriba del pliegue)
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(
-                      AppEspacio.lg,
-                      AppEspacio.md,
-                      AppEspacio.lg,
-                      0),
-                  child: _dockPrincipal(),
-                ),
+                // v1.3.5: el dock principal ahora es inferior fijo
+                // (_dockInferior en bottomNavigationBar); se elimina del
+                // scroll para no duplicar las acciones.
                 // v1.3.3: tarjeta financiera por rol
                 Padding(
                   padding: const EdgeInsets.fromLTRB(
@@ -643,6 +641,14 @@ class _HomeScreenState extends State<HomeScreen>
               ),
               _iconoSync(),
               _campana(),
+              // v1.3.5: buscar cliente (antes en el dock del scroll).
+              IconButton(
+                tooltip: 'Buscar cliente',
+                color: Colors.white70,
+                icon: const Icon(Icons.search),
+                onPressed: () =>
+                    _ir(const BuscarScreen()),
+              ),
               IconButton(
                 tooltip: 'Ayuda',
                 color: Colors.white70,
@@ -771,108 +777,89 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
-  /// v1.3.3: dock principal. Fila hero (Cobrar, Pago diario) con
-  /// gradiente naranja + fila rápida (Inscribir, Buscar).
-  Widget _dockPrincipal() {
-    return Column(
-      children: [
-        Row(
-          children: [
-            Expanded(
-                child: _botonHero(
-                    Icons.payments,
-                    'Cobrar',
-                    'Mensualidad',
-                    () => _ir(const PagoScreen()))),
-            const SizedBox(width: AppEspacio.sm),
-            Expanded(
-                child: _botonHero(
-                    Icons.receipt_long,
-                    'Pago diario',
-                    'Cuota del día',
-                    () =>
-                        _ir(const PagoDiarioScreen()))),
-          ],
-        ),
-        const SizedBox(height: AppEspacio.sm),
-        Row(
-          children: [
-            Expanded(
-                child: _botonRapido(
-                    Icons.person_add_alt,
-                    'Inscribir',
-                    () =>
-                        _ir(const InscribirScreen()))),
-            const SizedBox(width: AppEspacio.sm),
-            Expanded(
-                child: _botonRapido(Icons.search,
-                    'Buscar cliente',
-                    () =>
-                        _ir(const BuscarScreen()))),
-          ],
-        ),
-      ],
-    );
-  }
-
-  /// Botón hero con gradiente naranja (acción principal).
-  Widget _botonHero(IconData icono, String titulo,
-      String subtitulo, VoidCallback onTap) {
-    return InkWell(
-      borderRadius: BorderRadius.circular(AppRadio.lg),
-      onTap: onTap,
+  /// v1.3.5: dock inferior fijo (Opción A de Argón). Una fila compacta
+  /// (56-64px) con las 3 acciones críticas al alcance del pulgar:
+  /// Cobrar (destacado), Pago diario, Inscribir. Buscar queda en la
+  /// cabecera (ícono de lupa).
+  Widget _dockInferior() {
+    return SafeArea(
+      top: false,
       child: Container(
-        padding: const EdgeInsets.symmetric(
-            vertical: AppEspacio.lg,
-            horizontal: AppEspacio.md),
         decoration: BoxDecoration(
-          gradient: AppColores.gradienteNaranja,
-          borderRadius:
-              BorderRadius.circular(AppRadio.lg),
-          boxShadow: AppSombra.tarjeta(context),
+          color: Theme.of(context).scaffoldBackgroundColor,
+          // Sombra sutil superior para separar del contenido.
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.12),
+              blurRadius: 8,
+              offset: const Offset(0, -2),
+            ),
+          ],
         ),
+        padding: const EdgeInsets.symmetric(
+            horizontal: AppEspacio.md, vertical: 8),
         child: Row(
           children: [
-            Icon(icono, color: Colors.white, size: 30),
+            Expanded(child: _botonDock(Icons.payments, 'Cobrar',
+                () => _ir(const PagoScreen()),
+                destacado: true)),
             const SizedBox(width: AppEspacio.sm),
-            Expanded(
-              child: Column(
-                crossAxisAlignment:
-                    CrossAxisAlignment.start,
-                children: [
-                  Text(titulo,
-                      style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold)),
-                  Text(subtitulo,
-                      style: const TextStyle(
-                          color: Colors.white70,
-                          fontSize: 11)),
-                ],
-              ),
-            ),
+            Expanded(child: _botonDock(Icons.receipt_long, 'Pago diario',
+                () => _ir(const PagoDiarioScreen()))),
+            const SizedBox(width: AppEspacio.sm),
+            Expanded(child: _botonDock(Icons.person_add_alt, 'Inscribir',
+                () => _ir(const InscribirScreen()))),
           ],
         ),
       ),
     );
   }
 
-  /// Botón de acción rápida (gris, secundario).
-  Widget _botonRapido(
-      IconData icono, String texto, VoidCallback onTap) {
-    return Tarjeta(
+  /// Botón compacto del dock inferior: ícono + etiqueta en una fila.
+  Widget _botonDock(
+      IconData icono, String texto, VoidCallback onTap,
+      {bool destacado = false}) {
+    final fondo =
+        destacado ? AppColores.gradienteNaranja : null;
+    final colorTexto =
+        destacado ? Colors.white : AppColores.naranja;
+    return InkWell(
+      borderRadius: BorderRadius.circular(AppRadio.md),
       onTap: onTap,
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(icono,
-              color: AppColores.naranja, size: 28),
-          const SizedBox(height: AppEspacio.xs),
-          Text(texto,
-              style: AppTexto.secundario,
-              textAlign: TextAlign.center),
-        ],
+      child: Container(
+        height: 48,
+        decoration: fondo == null
+            ? BoxDecoration(
+                borderRadius: BorderRadius.circular(AppRadio.md),
+                border: Border.all(
+                    color: AppColores.naranja.withValues(alpha: 0.4)),
+              )
+            : BoxDecoration(
+                gradient: fondo,
+                borderRadius: BorderRadius.circular(AppRadio.md),
+                boxShadow: AppSombra.tarjeta(context),
+              ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icono, color: colorTexto, size: 22),
+            const SizedBox(width: 6),
+            // v1.3.5 (auditoría 2026-10-16): FittedBox en vez de ellipsis
+            // para que "Pago diario" no se trunque en móviles estrechos o
+            // con texto ampliado; en pantallas normales no cambia nada.
+            Flexible(
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.centerLeft,
+                child: Text(texto,
+                    style: TextStyle(
+                        color: colorTexto,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600)),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

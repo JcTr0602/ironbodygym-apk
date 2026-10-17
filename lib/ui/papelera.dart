@@ -8,6 +8,7 @@ library;
 
 import 'package:flutter/material.dart';
 import 'package:uuid/uuid.dart';
+import 'dart:async';
 
 import '../auth.dart';
 import '../localdb.dart';
@@ -29,16 +30,36 @@ class PapeleraScreen extends StatefulWidget {
 class _PapeleraScreenState extends State<PapeleraScreen> {
   List<Map<String, dynamic>> _res = [];
   final Set<int> _seleccionados = {};
+  StreamSubscription<SyncStatus>? _subSync;
 
   @override
   void initState() {
     super.initState();
     _cargar();
+    // v1.3.5 (fix 2026-10-16): recargar cuando un ciclo de sync termina,
+    // para que los tombstones aplicados se reflejen sin salir y entrar.
+    _subSync = SyncEngine.instance.statusStream.listen((s) {
+      if (!mounted) return;
+      if (s.phase == SyncPhase.idle) _cargar();
+    });
+  }
+
+  @override
+  void dispose() {
+    _subSync?.cancel();
+    super.dispose();
   }
 
   Future<void> _cargar() async {
     final r = await clientesInactivos();
-    if (mounted) setState(() => _res = r);
+    // v1.3.5 (fix 2026-10-16): filtro anti-zombie. Si un pull intermedio
+    // re-inserta un cliente con op eliminar_cliente en vuelo ('pendiente'
+    // o 'enviada'), no debe revivir ante los ojos del usuario.
+    final zombies = await LocalDb.instance.clientesConBorradoEnVuelo();
+    final filtrados = r
+        .where((c) => !zombies.contains((c['id'] as int?) ?? 0))
+        .toList();
+    if (mounted) setState(() => _res = filtrados);
   }
 
   Future<void> _recuperar(Map<String, dynamic> c) async {
@@ -139,13 +160,25 @@ class _PapeleraScreenState extends State<PapeleraScreen> {
       peligro: true,
     );
     if (ok2 != true || !mounted) return;
-    for (final id in _seleccionados) {
-      await LocalDb.instance.queueOp(
-        opUuid: const Uuid().v4(),
-        tipo: 'eliminar_cliente',
-        payload: {'cliente_id': id, 'definitivo': true},
-      );
-    }
+    // v1.3.5 (fix 2026-10-16): borrado optimista atómico. Se encola la op
+    // y se borra el espejo local en la MISMA transacción: la UI refleja
+    // el borrado de inmediato sin esperar el viaje
+    // push → servidor → puente → Supabase → pull (varios minutos).
+    // Los pagos NO se tocan en local: los borra el servidor y bajan por
+    // sus tombstones (si la op se rechazara, el pull no restauraría
+    // pagos borrados localmente porque su sync_seq no cambió).
+    final db = await LocalDb.instance.db;
+    await db.transaction((txn) async {
+      for (final id in _seleccionados) {
+        await LocalDb.instance.queueOp(
+          opUuid: const Uuid().v4(),
+          tipo: 'eliminar_cliente',
+          payload: {'cliente_id': id, 'definitivo': true},
+          txn: txn,
+        );
+        await LocalDb.instance.deleteMirror('clientes', id, txn: txn);
+      }
+    });
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
         content: Text(
@@ -174,7 +207,7 @@ class _PapeleraScreenState extends State<PapeleraScreen> {
       ),
       body: Column(
         children: [
-          const SyncBanner(),
+          const SyncBanner(alcance: 'papelera'),
           Padding(
             padding: const EdgeInsets.all(AppEspacio.md),
             child: Text(

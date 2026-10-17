@@ -41,6 +41,11 @@ class _EditarIncidenciaScreenState
   final _ctrlBuscarCliente = TextEditingController();
   List<Map<String, dynamic>> _sugerenciasCliente = [];
 
+  /// Solo el dueño puede asignar incidencias a entrenadores
+  /// (decisión de Jc 2026-10-16: los entrenadores no se ponen
+  /// incidencias entre ellos).
+  bool get _esDueno => AuthService().isOwner;
+
   /// Parsea un asignado_a existente y restaura el estado del selector.
   void _restaurarResponsable(String? asignadoA) {
     _responsable = asignadoA;
@@ -274,14 +279,16 @@ class _EditarIncidenciaScreenState
                         FontWeight.w600)),
             const SizedBox(height: 4),
             SegmentedButton<String>(
-              segments: const [
-                ButtonSegment(
+              segments: [
+                const ButtonSegment(
                     value: 'ninguno',
                     label: Text('Sin asignar')),
-                ButtonSegment(
-                    value: 'entrenador',
-                    label: Text('Entrenador')),
-                ButtonSegment(
+                // Solo el dueño puede asignar a entrenadores.
+                if (_esDueno)
+                  const ButtonSegment(
+                      value: 'entrenador',
+                      label: Text('Entrenador')),
+                const ButtonSegment(
                     value: 'cliente',
                     label: Text('Cliente')),
               ],
@@ -299,7 +306,31 @@ class _EditarIncidenciaScreenState
                 _actualizarResponsable();
               }),
             ),
-            if (_tipoResponsable == 'entrenador') ...[
+            // Si no es dueño y la incidencia ya trae entrenador asignado
+            // (lo puso Jc), se muestra como solo lectura.
+            if (!_esDueno && _tipoResponsable == 'entrenador') ...[
+              const SizedBox(height: 8),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.grey.withValues(alpha: 0.4)),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.person, size: 18),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Asignado a: ${_entrenadorUsername == 'gabriel' ? 'Gabriel' : 'Duany'} (solo el dueño puede cambiarlo)',
+                        style: const TextStyle(fontSize: 13),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+            if (_esDueno && _tipoResponsable == 'entrenador') ...[
               const SizedBox(height: 8),
               DropdownButtonFormField<String>(
                 value: _entrenadorUsername,
@@ -509,7 +540,19 @@ class _EditarIncidenciaScreenState
             ?.toIso8601String(),
         // v1.3.3: responsable (entrenador:<username>:<Nombre> |
         // cliente:<id>:<Nombre> | null).
-        'asignado_a': _responsable,
+        // Solo el dueño puede asignar a entrenadores (Jc 2026-10-16).
+        // Si no es dueño: puede asignar a cliente (su propia selección),
+        // pero una asignación a entrenador existente (puesta por Jc) se
+        // preserva intacta; nunca puede crear ni cambiar una a entrenador.
+        'asignado_a': _esDueno
+            ? _responsable
+            : (_tipoResponsable == 'cliente'
+                ? _responsable
+                : (widget.existente?.asignadoA
+                                ?.startsWith('entrenador:') ==
+                            true
+                        ? widget.existente!.asignadoA
+                        : null)),
         'estado':
             widget.existente?.estado ??
                 'pendiente',

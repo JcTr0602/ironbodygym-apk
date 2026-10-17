@@ -1,21 +1,25 @@
 // Registrar venta de suplemento (entrenadores y dueño).
 //
-// - Precio precargado con el oficial; si el entrenador lo cambia,
-//   alerta ámbar visible ("precio diferente al oficial").
-// - Moneda CUP/USD. Comprador: cliente del gym o externo (3 opciones).
+// - Precio precargado SIEMPRE con precio_oficial (jamás ultimo_precio);
+//   referencia fija "Precio oficial: X".
+// - Si el precio difiere del oficial (comparación en centavos): advertencia
+//   clara + confirmación explícita + nota_precio obligatoria si no es dueño.
+// - Moneda CUP/USD (chips). La moneda de suplementos es siempre USD:
+//   en USD se oculta el campo "Tasa (CUP por 1 USD)" y el equivalente
+//   en CUP (pedido Jc 2026-10-16); solo aparecen si se elige CUP.
+// - Comprador: cliente del gym o externo.
+// - Venta por el camino único registrarVentaSuplemento (transacción
+//   atómica: stock JSON + op en ops_queue; nunca inserta en
+//   ventas_suplementos, espejo puro por pull).
 // - Si la promo "mes gratis" está activa y el comprador es cliente,
 //   la confirmación avisa que se le asignará 1 mes de mensualidad.
 library;
 
-import 'dart:async';
-import 'dart:convert';
-
 import 'package:flutter/material.dart';
-import 'package:uuid/uuid.dart';
 
-import '../negocio.dart';
 import '../localdb.dart';
-import '../sync.dart';
+import '../negocio.dart';
+import '../permisos.dart';
 import 'componentes.dart';
 import 'diseno.dart';
 import 'venta_suplemento_inscripcion.dart';
@@ -38,6 +42,10 @@ class _VentaSuplementoScreenState
   final _compradorNombre = TextEditingController();
   // v1.2.1: nota opcional de la venta (ej: "apartado").
   final _nota = TextEditingController();
+  // v1.3.4 (B3/C-Auditoría, candado b): motivo del precio distinto al
+  // oficial. Obligatorio (mín. 5 caracteres) si quien vende NO es el dueño.
+  final _notaPrecio = TextEditingController();
+  final _permisos = Permisos();
   // v1.2.4: USD por defecto (precio oficial en USD).
   String _moneda = 'USD';
   String _tipoComprador = 'cliente'; // cliente | externo_nombre | externo_generico | inscribir_nuevo
@@ -53,12 +61,14 @@ class _VentaSuplementoScreenState
   double? get _oficialEnMoneda =>
       precioOficialEn(_moneda, _precioOficial, _tasaUsd);
 
+  /// v1.3.4 (candado a de auditoría): la comparación se hace en centavos
+  /// enteros, nunca con double directamente.
   bool get _precioDifiere {
     final p =
         double.tryParse(_precio.text.trim().replaceAll(',', '.'));
     final ref = _oficialEnMoneda;
     if (p == null || ref == null) return false;
-    return (p - ref).abs() > 0.009;
+    return precioDifiereEnCentavos(p, ref);
   }
 
   /// v1.2.4: al cambiar de moneda, si el precio no se tocó a mano,
@@ -96,6 +106,8 @@ class _VentaSuplementoScreenState
   @override
   void initState() {
     super.initState();
+    // v1.3.4 (B3-Invariante): el campo se inicializa SIEMPRE y ÚNICAMENTE
+    // con precio_oficial. Jamás se lee ultimo_precio para pre-llenar.
     _precio.text = _precioOficial.toStringAsFixed(2);
     LocalDb.instance.getAjustes().then((aj) {
       if (mounted) {
@@ -118,6 +130,7 @@ class _VentaSuplementoScreenState
     _tasa.dispose();
     _compradorNombre.dispose();
     _nota.dispose();
+    _notaPrecio.dispose();
     super.dispose();
   }
 
@@ -183,11 +196,11 @@ class _VentaSuplementoScreenState
           cancelar: '');
       return;
     }
-    final tasa = _tasaUsd;
-    // v1.3.1: tasa obligatoria en CUP. En USD es opcional, pero si el
-    // usuario escribió algo debe ser > 0 (el servidor exige usd_tasa > 0).
-    if ((_moneda == 'CUP' && (tasa == null || tasa <= 0)) ||
-        (tasa != null && tasa <= 0)) {
+    // v1.3.4 (pedido Jc 2026-10-16): en USD la tasa es irrelevante — el
+    // campo se oculta y no se envía (se normaliza a 1.0 en el payload).
+    // Solo en CUP es obligatoria.
+    final tasa = _moneda == 'CUP' ? _tasaUsd : null;
+    if (_moneda == 'CUP' && (tasa == null || tasa <= 0)) {
       await DialogoApp.confirmar(context,
           titulo: 'Revisa la valoración',
           mensaje:
@@ -213,6 +226,30 @@ class _VentaSuplementoScreenState
           cancelar: '');
       return;
     }
+    // v1.3.4 (B3/C-Auditoría, candado b): si el precio difiere del oficial
+    // y quien vende NO es el dueño, la nota de precio es obligatoria
+    // (mín. 5 caracteres). Sin nota no se puede confirmar.
+    final difiere = _precioDifiere;
+    final notaPrecio = _notaPrecio.text.trim();
+    if (difiere && !_permisos.esDueno && notaPrecio.length < 5) {
+      await DialogoApp.confirmar(context,
+          titulo: 'Falta la nota de precio',
+          mensaje: 'Vas a vender a un precio distinto al oficial. '
+              'Escribe el motivo (mín. 5 caracteres, '
+              'ej. "Autorizado por Jc por compra de 2 botes").',
+          aceptar: 'Entendido',
+          cancelar: '');
+      return;
+    }
+    final sid = (widget.suplemento['id'] as num?)?.toInt();
+    if (sid == null) {
+      await DialogoApp.confirmar(context,
+          titulo: 'No se registró la venta',
+          mensaje: 'Suplemento sin identificador válido.',
+          aceptar: 'Entendido',
+          cancelar: '');
+      return;
+    }
 
     final nombreComprador = _tipoComprador == 'cliente'
         ? _clienteNombre
@@ -223,9 +260,11 @@ class _VentaSuplementoScreenState
     final conPromo = _promoActiva &&
         (_tipoComprador == 'cliente' ||
             _tipoComprador == 'inscribir_nuevo');
+    final oficialRef = _oficialEnMoneda ?? _precioOficial;
     final lineaMoneda = 'Precio: ${precio.toStringAsFixed(2)} $_moneda'
         '${tasa != null ? ' (tasa ${tasa.toStringAsFixed(2)} CUP/USD)' : ''}'
-        '${_precioDifiere ? ' — difiere del oficial' : ''}\n'
+        '${difiere ? '\n⚠️ Vas a vender a un precio distinto al oficial'
+            ' (oficial: ${oficialRef.toStringAsFixed(2)} $_moneda)' : ''}\n'
         'Total: ${textoTotalVenta(total, _moneda, tasa)}';
 
     final ok = await DialogoApp.confirmar(
@@ -247,55 +286,33 @@ class _VentaSuplementoScreenState
     // validaciones y confirmación. El finally lo restaura siempre.
     setState(() => _guardando = true);
     try {
-      await LocalDb.instance.queueOp(
-        opUuid: const Uuid().v4(),
-        tipo: 'venta_suplemento',
-        payload: {
-          'suplemento_id': widget.suplemento['id'],
-          'cantidad': _cantidad,
-          'precio': precio,
-          'moneda': _moneda,
-          // v1.3.1: en USD la tasa es irrelevante; se normaliza a 1.0 si
-          // no hay o es inválida. En CUP es obligatoria (validada arriba).
-          'usd_tasa': (tasa != null && tasa > 0) ? tasa : 1.0,
-          // ChatGPT CRÍTICO 2: el servidor solo acepta 'cliente'|'externo'.
-          // 'externo_nombre' y 'externo_generico' se mapean a 'externo'.
-          'comprador_tipo':
-              _tipoComprador == 'cliente' ? 'cliente' : 'externo',
-          if (_tipoComprador == 'cliente')
-            'cliente_id': _clienteId,
-          'comprador_nombre': nombreComprador,
-          'fecha': DateTime.now().toIso8601String().substring(0, 10),
-          // v1.2.1: nota opcional.
-          if (_nota.text.trim().isNotEmpty)
-            'nota': _nota.text.trim(),
-        },
+      // v1.3.4 (B1-Unificación): ÚNICO camino de venta — transacción
+      // atómica (descuento de stock en el JSON + op en ops_queue).
+      // NUNCA inserta en ventas_suplementos (espejo puro por pull) ni
+      // toca ultimo_precio (telemetría muerta de v18).
+      await registrarVentaSuplemento(
+        suplementoId: sid,
+        cantidad: _cantidad,
+        precioOficial: oficialRef,
+        precioVenta: precio,
+        moneda: _moneda,
+        usdTasa: tasa,
+        // ChatGPT CRÍTICO 2: el servidor solo acepta 'cliente'|'externo'.
+        // 'externo_nombre' y 'externo_generico' se mapean a 'externo'.
+        compradorTipo:
+            _tipoComprador == 'cliente' ? 'cliente' : 'externo',
+        clienteId: _clienteId,
+        compradorNombre: nombreComprador,
+        // v1.2.1: nota opcional.
+        nota: _nota.text.trim().isEmpty ? null : _nota.text.trim(),
+        // v1.3.4 (candado b): solo viaja si el precio difiere.
+        notaPrecio:
+            difiere && notaPrecio.isNotEmpty ? notaPrecio : null,
       );
-      // v1.3.1: stock optimista aislado (no crítico, el pull corrige).
-      try {
-        final db = await LocalDb.instance.db;
-        final sid = widget.suplemento['id'] as int?;
-        if (sid != null) {
-          final rows = await db.query('suplementos',
-              columns: ['data'], where: 'id = ?', whereArgs: [sid]);
-          if (rows.isNotEmpty) {
-            final data = jsonDecode(rows.first['data'] as String)
-                as Map<String, dynamic>;
-            final stockActual = (data['stock'] as num?)?.toInt() ?? 0;
-            data['stock'] = (stockActual - _cantidad).clamp(0, 999999);
-            await db.update('suplementos', {'data': jsonEncode(data)},
-                where: 'id = ?', whereArgs: [sid]);
-          }
-        }
-      } catch (_) {
-        // El pull sincronizará el valor canónico.
-      }
-      // v1.3.1 (Argón): push y pop DENTRO del try, al final.
-      // Solo se disparan si el encolado tuvo éxito.
-      unawaited(SyncEngine.instance.push().catchError((_) {}));
+      // v1.3.1 (Argón): pop solo si el registro tuvo éxito.
       if (mounted) Navigator.pop(context, true);
     } catch (e) {
-      // v1.3.1: si falla el encolado, avisar y NO cerrar (evita duplicado).
+      // v1.3.1: si falla el registro, avisar y NO cerrar (evita duplicado).
       if (mounted) {
         await DialogoApp.confirmar(context,
             titulo: 'No se registró la venta',
@@ -323,8 +340,10 @@ class _VentaSuplementoScreenState
       return;
     }
     {
-      final tasa = _tasaUsd;
-      if (tasa == null || tasa <= 0) {
+      // v1.3.4 (pedido Jc 2026-10-16): tasa solo obligatoria en CUP;
+      // en USD el campo está oculto y viaja null.
+      final tasa = _moneda == 'CUP' ? _tasaUsd : null;
+      if (_moneda == 'CUP' && (tasa == null || tasa <= 0)) {
         await DialogoApp.confirmar(context,
             titulo: 'Revisa la valoración',
             mensaje:
@@ -333,6 +352,20 @@ class _VentaSuplementoScreenState
             cancelar: '');
         return;
       }
+    }
+    // Auditoría (Argón): el flujo inscribir_nuevo no puede bypassear
+    // el candado de nota_precio. Misma validación que _guardar().
+    final difiere = _precioDifiere;
+    final notaPrecio = _notaPrecio.text.trim();
+    if (difiere && !_permisos.esDueno && notaPrecio.length < 5) {
+      await DialogoApp.confirmar(context,
+          titulo: 'Falta la nota de precio',
+          mensaje: 'Vas a vender a un precio distinto al oficial. '
+              'Escribe el motivo (mín. 5 caracteres, '
+              'ej. "Autorizado por Jc por compra de 2 botes").',
+          aceptar: 'Entendido',
+          cancelar: '');
+      return;
     }
     if (!mounted) return;
     final ok = await Navigator.push<bool>(
@@ -343,7 +376,10 @@ class _VentaSuplementoScreenState
           cantidad: _cantidad,
           precio: precio,
           moneda: _moneda,
-          usdTasa: _tasaUsd,
+          usdTasa: _moneda == 'CUP' ? _tasaUsd : null,
+          precioOficial: _precioOficial,
+          notaPrecio:
+              difiere && notaPrecio.isNotEmpty ? notaPrecio : null,
         ),
       ),
     );
@@ -388,6 +424,15 @@ class _VentaSuplementoScreenState
           _stepperCantidad(stock),
           const SizedBox(height: AppEspacio.sm),
           const EncabezadoSeccion(titulo: 'Precio de venta'),
+          // v1.3.4 (B3-Invariante): referencia fija del oficial, siempre
+          // visible. El campo propone el oficial; jamás ultimo_precio.
+          Padding(
+            padding: const EdgeInsets.only(bottom: AppEspacio.sm),
+            child: Text(
+              'Precio oficial: ${(_oficialEnMoneda ?? _precioOficial).toStringAsFixed(2)} $_moneda',
+              style: AppTexto.secundario,
+            ),
+          ),
           CampoTexto(
             controller: _precio,
             etiqueta: 'Precio por unidad',
@@ -396,16 +441,32 @@ class _VentaSuplementoScreenState
             onChanged: (_) => setState(() {}),
           ),
           if (_precioDifiere) _alertaPrecio(),
+          // v1.3.4 (candado b): motivo del precio distinto. Obligatorio
+          // (mín. 5 caracteres) si quien vende NO es el dueño.
+          if (_precioDifiere) ...[
+            const SizedBox(height: AppEspacio.sm),
+            const EncabezadoSeccion(titulo: 'Nota de precio'),
+            CampoTexto(
+              controller: _notaPrecio,
+              etiqueta: _permisos.esDueno
+                  ? 'Motivo (opcional para el dueño)'
+                  : 'Motivo (obligatorio, mín. 5 caracteres)',
+              hint: 'Ej: Autorizado por Jc por compra de 2 botes',
+              icono: Icons.edit_note,
+              onChanged: (_) => setState(() {}),
+            ),
+          ],
           const SizedBox(height: AppEspacio.sm),
           const EncabezadoSeccion(titulo: 'Moneda'),
           _chipsMoneda(),
-          ...[
+          // v1.3.4 (pedido Jc 2026-10-16): en USD no se muestra el
+          // equivalente en CUP ni el campo de tasa — solo tienen sentido
+          // si la moneda es CUP.
+          if (_moneda == 'CUP') ...[
             const SizedBox(height: AppEspacio.sm),
             CampoTexto(
               controller: _tasa,
-              etiqueta: _moneda == 'CUP'
-                  ? 'Tasa (CUP por 1 USD) — obligatoria'
-                  : 'Tasa (CUP por 1 USD) — opcional',
+              etiqueta: 'Tasa (CUP por 1 USD) — obligatoria',
               teclado: const TextInputType.numberWithOptions(
                   decimal: true),
               onChanged: (_) => setState(() {}),
@@ -487,7 +548,9 @@ class _VentaSuplementoScreenState
             const SizedBox(width: AppEspacio.sm),
             Expanded(
               child: Text(
-                'Precio diferente al oficial (${_precioOficial.toStringAsFixed(2)} USD). Quedará marcado en el historial.',
+                'Vas a vender a un precio distinto al oficial '
+                '(${_precioOficial.toStringAsFixed(2)} USD). '
+                'Quedarán registrados ambos precios para auditoría.',
                 style: AppTexto.secundario,
               ),
             ),

@@ -18,6 +18,7 @@ import '../negocio.dart';
 import '../sync.dart';
 import '../tipos_pago.dart';
 import 'componentes.dart';
+import 'dialogo_confirmar_inscripcion.dart';
 import 'diseno.dart';
 import 'editor_foto.dart';
 import 'widgets.dart';
@@ -231,38 +232,17 @@ class _InscribirScreenState extends State<InscribirScreen> {
     final dias = _diasPeriodo();
     final hasta = previewHastaDias(null, dias);
     if (!mounted) return;
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => DialogoApp(
-        titulo: 'Confirmar inscripción',
-        iconoTitulo: Icons.check_circle,
-        contenido: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('Nombre: $nombre'),
-            Text('Período: ${_etiquetaPeriodo()}'),
-            Text('Monto: ${fmtMonto(monto)} CUP (efectivo)',
-                style: const TextStyle(fontWeight: FontWeight.bold)),
-            Text('Válido hasta: ${fmtFecha(hasta)}',
-                style: const TextStyle(fontWeight: FontWeight.bold)),
-            if (tel.isNotEmpty) Text('Teléfono: $tel'),
-            if (carnet.isNotEmpty) Text('Carnet: $carnet'),
-          ],
-        ),
-        acciones: [
-          TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Cancelar')),
-          ElevatedButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppColores.naranja,
-                foregroundColor: Colors.white,
-              ),
-              child: const Text('Confirmar')),
-        ],
-      ),
+    // v1.3.5: diálogo rediseñado (widget dedicado, luz verde de Argón).
+    final ok = await DialogoConfirmarInscripcion.mostrar(
+      context,
+      nombre: nombre,
+      periodoEtiqueta: _etiquetaPeriodo(),
+      montoTxt: '${fmtMonto(monto)} CUP',
+      metodoPago: 'efectivo',
+      validoHastaTxt: fmtFecha(hasta),
+      telefono: tel,
+      carnet: carnet,
+      fotoPath: _foto?.path,
     );
     if (ok != true || !mounted) return;
 

@@ -10,7 +10,6 @@ library;
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:uuid/uuid.dart';
 
 import '../auth.dart';
 import '../localdb.dart';
@@ -37,6 +36,9 @@ class _PendienteScreenState extends State<PendienteScreen> {
   List<Map<String, dynamic>> _crudos = [];
   // Gemini: totales USD separados (no mezclar con CUP).
   double _totalUsd = 0;
+  // v1.3.4 (C2d): detalle de ventas de suplementos indexado por id,
+  // para el badge de "precio modificado" en el arqueo de caja.
+  Map<int, Map<String, dynamic>> _detalleVentasSup = {};
   bool _cargando = true;
   bool _confirmando = false;
   late final bool _esDueno;
@@ -57,11 +59,18 @@ class _PendienteScreenState extends State<PendienteScreen> {
       // Gemini: USD separado del CUP.
       final usd = await pendienteRecogerUsd(
           excluirTelegramId: auth.telegramId);
+      // v1.3.4 (C2d): espejo de ventas para el badge de precio modificado.
+      final ventasSup =
+          await LocalDb.instance.allMirror('ventas_suplementos');
       if (mounted) {
         setState(() {
           _crudos = crudos;
           _entrenadores = procesarPendientes(crudos);
           _totalUsd = usd;
+          _detalleVentasSup = {
+            for (final v in ventasSup)
+              (v['id'] as num).toInt(): v
+          };
           _cargando = false;
         });
       }
@@ -348,6 +357,8 @@ class _PendienteScreenState extends State<PendienteScreen> {
           _EntrenadorCard(
         entrenador: _entrenadores[i],
         confirmando: _confirmando,
+        // v1.3.4 (C2d): detalle de ventas para el badge de precio.
+        detalleVentas: _detalleVentasSup,
         onConfirmarDia: (dia) => _confirmarPorIds(
           dia,
           _entrenadores[i].nombre,
@@ -414,6 +425,8 @@ class _EntrenadorCard extends StatelessWidget {
   final void Function(PendienteDia dia) onConfirmarDia;
   final VoidCallback onConfirmarTodo;
   final VoidCallback onWhatsApp;
+  // v1.3.4 (C2d): ventas de suplementos por id (badge precio modificado).
+  final Map<int, Map<String, dynamic>> detalleVentas;
 
   const _EntrenadorCard({
     required this.entrenador,
@@ -421,6 +434,7 @@ class _EntrenadorCard extends StatelessWidget {
     required this.onConfirmarDia,
     required this.onConfirmarTodo,
     required this.onWhatsApp,
+    this.detalleVentas = const {},
   });
 
   @override
@@ -479,6 +493,7 @@ class _EntrenadorCard extends StatelessWidget {
                 for (final dia in entrenador.dias)
                   _DiaTile(
                     dia: dia,
+                    detalleVentas: detalleVentas,
                     onConfirmar: confirmando
                         ? null
                         : () => onConfirmarDia(dia),
@@ -524,8 +539,14 @@ class _EntrenadorCard extends StatelessWidget {
 class _DiaTile extends StatefulWidget {
   final PendienteDia dia;
   final VoidCallback? onConfirmar;
+  // v1.3.4 (C2d): ventas de suplementos por id (badge precio modificado).
+  final Map<int, Map<String, dynamic>> detalleVentas;
 
-  const _DiaTile({required this.dia, this.onConfirmar});
+  const _DiaTile({
+    required this.dia,
+    this.onConfirmar,
+    this.detalleVentas = const {},
+  });
 
   @override
   State<_DiaTile> createState() => _DiaTileState();
@@ -544,6 +565,67 @@ class _DiaTileState extends State<_DiaTile> {
     if (nivel == 2) return Colors.red.shade900;
     if (nivel == 1) return Colors.amber.shade900;
     return Colors.black87;
+  }
+
+  /// v1.3.4 (C2d): chip ámbar cuando una venta de suplemento se cobró a
+  /// un precio distinto del oficial. Comparación en centavos enteros
+  /// (candado a de auditoría). Muestra también la `nota_precio` si existe.
+  Widget _chipPrecioModificado(PagoPendiente p) {
+    if (p.tipo != 'suplemento') return const SizedBox.shrink();
+    final v = widget.detalleVentas[p.id];
+    if (v == null) return const SizedBox.shrink();
+    // Priorizar centavos enteros (candado a); fallback a doubles.
+    final oficialCent = (v['precio_oficial_centavos'] as num?)?.toInt() ??
+        (((v['precio_oficial'] as num?)?.toDouble() ?? 0) * 100).round();
+    final cobradoCent = (v['precio_venta_centavos'] as num?)?.toInt() ??
+        (((v['precio'] as num?)?.toDouble() ?? 0) * 100).round();
+    if (oficialCent == 0 || cobradoCent == 0) {
+      return const SizedBox.shrink();
+    }
+    if (cobradoCent == oficialCent) {
+      return const SizedBox.shrink();
+    }
+    final mon = '${v['moneda'] ?? p.moneda}';
+    final nota = (v['nota_precio'] as String?)?.trim();
+    return Padding(
+      padding: const EdgeInsets.only(left: 20, top: 3, right: 4),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(
+            horizontal: 8, vertical: 5),
+        decoration: BoxDecoration(
+          color: Colors.amber.shade100,
+          borderRadius: BorderRadius.circular(6),
+          border: Border.all(color: Colors.amber.shade800),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              '⚠️ Precio modificado '
+              '(Oficial: ${(oficialCent / 100).toStringAsFixed(2)} $mon → '
+              'Cobrado: ${(cobradoCent / 100).toStringAsFixed(2)} $mon)',
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+                color: Colors.amber.shade900,
+              ),
+            ),
+            if (nota != null && nota.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(top: 2),
+                child: Text(
+                  '📝 $nota',
+                  style: const TextStyle(
+                    fontSize: 11,
+                    color: Colors.black87,
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
   }
 
   @override
@@ -624,34 +706,42 @@ class _DiaTileState extends State<_DiaTile> {
             Padding(
               padding: const EdgeInsets.symmetric(
                   vertical: 2),
-              child: Row(
+              child: Column(
+                crossAxisAlignment:
+                    CrossAxisAlignment.start,
                 children: [
-                  Icon(
-                    p.tipo == 'mensual'
-                        ? Icons.calendar_month
-                        : Icons.today,
-                    size: 14,
-                    color: Colors.grey.shade600,
+                  Row(
+                    children: [
+                      Icon(
+                        p.tipo == 'mensual'
+                            ? Icons.calendar_month
+                            : Icons.today,
+                        size: 14,
+                        color: Colors.grey.shade600,
+                      ),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          '${p.descripcion} (${p.tipo})',
+                          style: const TextStyle(
+                              fontSize: 12,
+                              color: Colors.black54),
+                          overflow:
+                              TextOverflow.ellipsis,
+                        ),
+                      ),
+                      Text(
+                        '${fmtMonto(p.monto)} ${p.moneda}',
+                        style: const TextStyle(
+                            fontSize: 12,
+                            fontWeight:
+                                FontWeight.w600,
+                            color: Colors.black87),
+                      ),
+                    ],
                   ),
-                  const SizedBox(width: 6),
-                  Expanded(
-                    child: Text(
-                      '${p.descripcion} (${p.tipo})',
-                      style: const TextStyle(
-                          fontSize: 12,
-                          color: Colors.black54),
-                      overflow:
-                          TextOverflow.ellipsis,
-                    ),
-                  ),
-                  Text(
-                    '${fmtMonto(p.monto)} ${p.moneda}',
-                    style: const TextStyle(
-                        fontSize: 12,
-                        fontWeight:
-                            FontWeight.w600,
-                        color: Colors.black87),
-                  ),
+                  // v1.3.4 (C2d): badge si se cobró distinto del oficial.
+                  _chipPrecioModificado(p),
                 ],
               ),
             ),

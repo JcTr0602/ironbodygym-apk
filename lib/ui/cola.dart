@@ -19,6 +19,176 @@ import '../tipos_operacion.dart';
 import 'componentes.dart';
 import 'diseno.dart';
 
+
+/// v1.3.4 (detalle ampliable Bajados/Subidos): utilidades de UI
+/// compartidas entre [ColaScreen] y [DetalleSyncScreen].
+/// Detalles legibles del payload según el tipo de operación (v1.0.11).
+/// v1.3.4: extraído de `_ColaScreenState._detallesOp` a función top-level
+/// para reutilizarlo en [DetalleSyncScreen].
+Future<List<String>> detallesDeOp(Map<String, dynamic> op) async {
+  final detalles = <String>[];
+  Map<String, dynamic> payload = {};
+  try {
+    final raw = op['payload'];
+    if (raw is String && raw.isNotEmpty) {
+      payload = Map<String, dynamic>.from(
+          jsonDecode(raw) as Map);
+    } else if (raw is Map) {
+      payload = Map<String, dynamic>.from(raw);
+    }
+  } catch (_) {}
+  if (payload.isEmpty) return detalles;
+
+  // Nombre del cliente si hay cliente_id
+  Future<String?> nombreCliente(dynamic id) async {
+    if (id == null) return null;
+    try {
+      final c = await clientePorId(int.tryParse('$id') ?? 0);
+      return c?['nombre'] as String?;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  final tipo = '${op['tipo']}';
+  if (tipo == 'foto') {
+    final n = await nombreCliente(payload['cliente_id']);
+    if (n != null) detalles.add('Cliente: $n');
+  } else if (tipo == 'pago_mensual' || tipo == 'pago_diario') {
+    final n = await nombreCliente(payload['cliente_id']);
+    if (n != null) detalles.add('Cliente: $n');
+    if (payload['monto'] != null) {
+      detalles.add('Monto: ${payload['monto']} CUP');
+    }
+    if (payload['metodo'] != null) {
+      final m = payload['metodo'] == 'efectivo'
+          ? 'Efectivo'
+          : 'Transferencia';
+      detalles.add('Método: $m');
+    }
+    if (payload['fecha'] != null) {
+      detalles.add('Fecha: ${payload['fecha']}');
+    }
+  } else if (tipo == 'inscribir') {
+    if (payload['nombre'] != null) {
+      detalles.add('Cliente: ${payload['nombre']}');
+    }
+  } else if (tipo == 'editar_cliente') {
+    final n = await nombreCliente(payload['cliente_id']);
+    if (n != null) detalles.add('Cliente: $n');
+  } else if (tipo == 'cambiar_estado') {
+    final n = await nombreCliente(payload['cliente_id']);
+    if (n != null) detalles.add('Cliente: $n');
+    if (payload['estado'] != null) {
+      detalles.add('Estado: ${payload['estado']}');
+    }
+  } else if (tipo == 'gasto') {
+    if (payload['concepto'] != null) {
+      detalles.add('${payload['concepto']}');
+    }
+    if (payload['monto'] != null) {
+      detalles.add('Monto: ${payload['monto']} CUP');
+    }
+  } else if (tipo == 'confirmar_entrega') {
+    if (payload['monto'] != null) {
+      detalles.add('Monto: ${payload['monto']} CUP');
+    }
+  } else if (tipo == 'venta_suplemento') {
+    if (payload['suplemento_nombre'] != null) {
+      detalles.add('Suplemento: ${payload['suplemento_nombre']}');
+    }
+    final cant = (payload['cantidad'] as num?) ?? 1;
+    detalles.add('Cantidad: $cant');
+    final total = (payload['total'] as num?) ??
+        (((payload['precio'] as num?) ?? 0) * cant);
+    final moneda = payload['moneda'] ?? 'CUP';
+    if (total > 0) detalles.add('Total: ${fmtMonto(total)} $moneda');
+    final n = await nombreCliente(payload['cliente_id']);
+    if (n != null) {
+      detalles.add('Cliente: $n');
+    } else if (payload['comprador_nombre'] != null) {
+      detalles.add('Comprador: ${payload['comprador_nombre']}');
+    }
+  } else if (tipo == 'crear_suplemento' || tipo == 'editar_suplemento') {
+    if (payload['nombre'] != null) {
+      detalles.add('Suplemento: ${payload['nombre']}');
+    }
+    final p = payload['precio_oficial'] ?? payload['precio'];
+    if (p != null) detalles.add('Precio: $p USD');
+  } else if (tipo == 'eliminar_suplemento') {
+    detalles.add('ID suplemento: ${payload['suplemento_id'] ?? '—'}');
+    detalles.add('Acción: Eliminar');
+  } else if (tipo == 'incidencia' || tipo == 'incidencia_estado') {
+    if (payload['descripcion'] != null) {
+      detalles.add('Descripción: ${payload['descripcion']}');
+    }
+    if (payload['tipo'] != null) {
+      detalles.add('Tipo: ${payload['tipo']}');
+    }
+    if (payload['estado'] != null) {
+      detalles.add('Estado: ${payload['estado']}');
+    }
+    if (payload['nota_resolucion'] != null) {
+      detalles.add('Nota: ${payload['nota_resolucion']}');
+    }
+  } else if (tipo == 'cierre_turno') {
+    if (payload['fecha'] != null) {
+      detalles.add('Fecha: ${payload['fecha']}');
+    }
+    if (payload['turno'] != null) {
+      detalles.add('Turno: ${payload['turno']}');
+    }
+    final tc = payload['total_cobrado'] ?? payload['total'];
+    if (tc != null) detalles.add('Total cobrado: ${fmtMonto(tc)} CUP');
+  } else if (tipo == 'foto_suplemento') {
+    if (payload['suplemento_id'] != null) {
+      detalles.add('Suplemento ID: ${payload['suplemento_id']}');
+    }
+  }
+  return detalles;
+}
+
+/// Chip de estado para operaciones (v1.0.9.1).
+/// v1.3.4: extraído de `_ColaScreenState._estadoChip` a función top-level
+/// para reutilizarlo en [DetalleSyncScreen].
+Widget chipEstadoOp(String estado) {
+  Color color;
+  IconData icono;
+  String texto;
+  if (estado == 'aplicada') {
+    color = AppColores.exito;
+    icono = Icons.check_circle;
+    texto = 'Confirmada';
+  } else if (estado == 'rechazada') {
+    color = AppColores.error;
+    icono = Icons.block;
+    texto = 'Rechazada';
+  } else if (estado == 'enviada') {
+    // v1.2.9+46: ámbar + etiqueta legible.
+    color = AppColores.alerta;
+    icono = Icons.sync_problem;
+    texto = 'Confirmación pendiente';
+  } else if (estado == 'pendiente') {
+    color = AppColores.naranja;
+    icono = Icons.schedule;
+    texto = 'Pendiente';
+  } else if (estado == 'error') {
+    color = AppColores.error;
+    icono = Icons.warning;
+    texto = 'Falló';
+  } else if (estado == 'necesita_revision') {
+    // v1.3.5 (auditoría 2026-10-16): etiqueta legible en vez del código.
+    color = AppColores.alerta;
+    icono = Icons.rule;
+    texto = 'Requiere revisión';
+  } else {
+    color = AppColores.naranja;
+    icono = Icons.schedule;
+    texto = estado;
+  }
+  return ChipEstado(texto: texto, color: color, icono: icono);
+}
+
 class ColaScreen extends StatefulWidget {
   const ColaScreen({super.key});
   @override
@@ -764,129 +934,10 @@ class _ColaScreenState extends State<ColaScreen> {
     );
   }
 
-  /// Detalles legibles del payload según el tipo de operación (v1.0.11).
-  Future<List<String>> _detallesOp(Map<String, dynamic> op) async {
-    final detalles = <String>[];
-    Map<String, dynamic> payload = {};
-    try {
-      final raw = op['payload'];
-      if (raw is String && raw.isNotEmpty) {
-        payload = Map<String, dynamic>.from(
-            jsonDecode(raw) as Map);
-      } else if (raw is Map) {
-        payload = Map<String, dynamic>.from(raw);
-      }
-    } catch (_) {}
-    if (payload.isEmpty) return detalles;
-
-    // Nombre del cliente si hay cliente_id
-    Future<String?> nombreCliente(dynamic id) async {
-      if (id == null) return null;
-      try {
-        final c = await clientePorId(int.tryParse('$id') ?? 0);
-        return c?['nombre'] as String?;
-      } catch (_) {
-        return null;
-      }
-    }
-
-    final tipo = '${op['tipo']}';
-    if (tipo == 'foto') {
-      final n = await nombreCliente(payload['cliente_id']);
-      if (n != null) detalles.add('Cliente: $n');
-    } else if (tipo == 'pago_mensual' || tipo == 'pago_diario') {
-      final n = await nombreCliente(payload['cliente_id']);
-      if (n != null) detalles.add('Cliente: $n');
-      if (payload['monto'] != null) {
-        detalles.add('Monto: ${payload['monto']} CUP');
-      }
-      if (payload['metodo'] != null) {
-        final m = payload['metodo'] == 'efectivo'
-            ? 'Efectivo'
-            : 'Transferencia';
-        detalles.add('Método: $m');
-      }
-      if (payload['fecha'] != null) {
-        detalles.add('Fecha: ${payload['fecha']}');
-      }
-    } else if (tipo == 'inscribir') {
-      if (payload['nombre'] != null) {
-        detalles.add('Cliente: ${payload['nombre']}');
-      }
-    } else if (tipo == 'editar_cliente') {
-      final n = await nombreCliente(payload['cliente_id']);
-      if (n != null) detalles.add('Cliente: $n');
-    } else if (tipo == 'cambiar_estado') {
-      final n = await nombreCliente(payload['cliente_id']);
-      if (n != null) detalles.add('Cliente: $n');
-      if (payload['estado'] != null) {
-        detalles.add('Estado: ${payload['estado']}');
-      }
-    } else if (tipo == 'gasto') {
-      if (payload['concepto'] != null) {
-        detalles.add('${payload['concepto']}');
-      }
-      if (payload['monto'] != null) {
-        detalles.add('Monto: ${payload['monto']} CUP');
-      }
-    } else if (tipo == 'confirmar_entrega') {
-      if (payload['monto'] != null) {
-        detalles.add('Monto: ${payload['monto']} CUP');
-      }
-    } else if (tipo == 'venta_suplemento') {
-      if (payload['suplemento_nombre'] != null) {
-        detalles.add('Suplemento: ${payload['suplemento_nombre']}');
-      }
-      final cant = (payload['cantidad'] as num?) ?? 1;
-      detalles.add('Cantidad: $cant');
-      final total = (payload['total'] as num?) ??
-          (((payload['precio'] as num?) ?? 0) * cant);
-      final moneda = payload['moneda'] ?? 'CUP';
-      if (total > 0) detalles.add('Total: ${fmtMonto(total)} $moneda');
-      final n = await nombreCliente(payload['cliente_id']);
-      if (n != null) {
-        detalles.add('Cliente: $n');
-      } else if (payload['comprador_nombre'] != null) {
-        detalles.add('Comprador: ${payload['comprador_nombre']}');
-      }
-    } else if (tipo == 'crear_suplemento' || tipo == 'editar_suplemento') {
-      if (payload['nombre'] != null) {
-        detalles.add('Suplemento: ${payload['nombre']}');
-      }
-      final p = payload['precio_oficial'] ?? payload['precio'];
-      if (p != null) detalles.add('Precio: $p USD');
-    } else if (tipo == 'eliminar_suplemento') {
-      detalles.add('ID suplemento: ${payload['suplemento_id'] ?? '—'}');
-      detalles.add('Acción: Eliminar');
-    } else if (tipo == 'incidencia' || tipo == 'incidencia_estado') {
-      if (payload['descripcion'] != null) {
-        detalles.add('Descripción: ${payload['descripcion']}');
-      }
-      if (payload['tipo'] != null) {
-        detalles.add('Tipo: ${payload['tipo']}');
-      }
-      if (payload['estado'] != null) {
-        detalles.add('Estado: ${payload['estado']}');
-      }
-      if (payload['nota_resolucion'] != null) {
-        detalles.add('Nota: ${payload['nota_resolucion']}');
-      }
-    } else if (tipo == 'cierre_turno') {
-      if (payload['fecha'] != null) {
-        detalles.add('Fecha: ${payload['fecha']}');
-      }
-      if (payload['turno'] != null) {
-        detalles.add('Turno: ${payload['turno']}');
-      }
-      final tc = payload['total_cobrado'] ?? payload['total'];
-      if (tc != null) detalles.add('Total cobrado: ${fmtMonto(tc)} CUP');
-    } else if (tipo == 'foto_suplemento') {
-      if (payload['suplemento_id'] != null) {
-        detalles.add('Suplemento ID: ${payload['suplemento_id']}');
-      }
-    }
-    return detalles;
-  }
+  /// Detalles legibles del payload segun el tipo de operacion (v1.0.11).
+  /// v1.3.4: delega en la funcion top-level [detallesDeOp].
+  Future<List<String>> _detallesOp(Map<String, dynamic> op) =>
+      detallesDeOp(op);
 
   @override
   Widget build(BuildContext context) {
@@ -1036,6 +1087,7 @@ class _ColaScreenState extends State<ColaScreen> {
                     // v1.3.1 (E5): acumulado histórico + última sync.
                     'Total: ${_det.totalBajados} · ${_hora(_det.ultimaPull)}',
                     AppColores.info,
+                    onTap: _abrirDetalleBajados,
                   ),
                 ),
                 const SizedBox(width: 12),
@@ -1047,6 +1099,7 @@ class _ColaScreenState extends State<ColaScreen> {
                     // v1.3.1 (E5): acumulado histórico + última sync.
                     'Total: ${_det.totalSubidos} · ${_hora(_det.ultimaPush)}',
                     AppColores.naranja,
+                    onTap: _abrirDetalleSubidos,
                   ),
                 ),
               ],
@@ -1274,14 +1327,60 @@ class _ColaScreenState extends State<ColaScreen> {
     );
   }
 
-  /// Tarjeta de estadística (v1.0.9.1)
-  Widget _tarjetaStat(
-      IconData icono, String titulo, String valor, String subtitulo, Color color) {
+  /// v1.3.4: abre el detalle ampliable de las ops del último push.
+  Future<void> _abrirDetalleSubidos() async {
+    final uuids = parsearUuidsPush(
+        await LocalDb.instance.getMeta('ultimo_push_op_uuids'));
+    if (uuids.isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No hay registros en este ciclo')));
+      return;
+    }
+    if (!mounted) return;
+    await Navigator.of(context).push(MaterialPageRoute(
+      builder: (_) =>
+          const DetalleSyncScreen(tipo: TipoDetalleSync.subidos)));
+  }
+
+  /// v1.3.4: abre el detalle ampliable del último pull.
+  Future<void> _abrirDetalleBajados() async {
+    final detalle = parsearDetallePull(
+        await LocalDb.instance.getMeta('ultimo_pull_detalle'));
+    if (detalle.isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No hay registros en este ciclo')));
+      return;
+    }
+    if (!mounted) return;
+    await Navigator.of(context).push(MaterialPageRoute(
+      builder: (_) =>
+          const DetalleSyncScreen(tipo: TipoDetalleSync.bajados)));
+  }
+
+  /// Tarjeta de estadística (v1.0.9.1).
+  /// v1.3.4: `onTap` opcional abre el detalle ampliable (Bajados/Subidos);
+  /// cuando está presente se muestra un chevron como affordance.
+  Widget _tarjetaStat(IconData icono, String titulo, String valor,
+      String subtitulo, Color color,
+      {VoidCallback? onTap}) {
     return Tarjeta(
+      onTap: onTap,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(icono, size: 24, color: color),
+          Row(
+            children: [
+              Icon(icono, size: 24, color: color),
+              if (onTap != null) ...[
+                const Spacer(),
+                Icon(Icons.chevron_right,
+                    size: 16,
+                    color: AppColores.textoSecundario(context)),
+              ],
+            ],
+          ),
           const SizedBox(height: 8),
           Text(
             valor,
@@ -1305,39 +1404,314 @@ class _ColaScreenState extends State<ColaScreen> {
     );
   }
 
-  /// Chip de estado para operaciones (v1.0.9.1)
-  Widget _estadoChip(String estado) {
-    Color color;
-    IconData icono;
-    String texto;
-    if (estado == 'aplicada') {
-      color = AppColores.exito;
-      icono = Icons.check_circle;
-      texto = 'Confirmada';
-    } else if (estado == 'rechazada') {
-      color = AppColores.error;
-      icono = Icons.block;
-      texto = 'Rechazada';
-    } else if (estado == 'enviada') {
-      // v1.2.9+46: ámbar + etiqueta legible.
-      color = AppColores.alerta;
-      icono = Icons.sync_problem;
-      texto = 'Confirmación pendiente';
-    } else if (estado == 'pendiente') {
-      color = AppColores.naranja;
-      icono = Icons.schedule;
-      texto = 'Pendiente';
-    } else if (estado == 'error') {
-      color = AppColores.error;
-      icono = Icons.warning;
-      texto = 'Falló';
+  /// Chip de estado para operaciones (v1.0.9.1).
+  /// v1.3.4: delega en la funcion top-level [chipEstadoOp].
+  Widget _estadoChip(String estado) => chipEstadoOp(estado);
+
+
+}
+
+/// v1.3.4: tipo de detalle ampliable de sincronización.
+enum TipoDetalleSync { subidos, bajados }
+
+/// Etiquetas de negocio por tabla espejo (veredicto Argón A1).
+const Map<String, String> kEtiquetasTablaSync = {
+  'clientes': 'Clientes actualizados/creados',
+  'pagos': 'Pagos de mensualidad',
+  'pagos_diarios': 'Pagos diarios',
+  'ventas_suplementos': 'Ventas de suplementos',
+  'suplementos': 'Inventario de suplementos',
+  'categorias_suplemento': 'Categorías de suplementos',
+  'turnos': 'Cierres de turno',
+  'turnos_cierre': 'Cierres de turno',
+  'incidencias': 'Incidencias operativas',
+  'liquidaciones_caja': 'Liquidaciones de caja',
+};
+
+/// v1.3.4: detalle ampliable de un ciclo de sincronización.
+/// Muestra qué se subió en el último push (con estado y motivos de
+/// rechazo) o qué se bajó en el último pull (por tabla espejo).
+class DetalleSyncScreen extends StatefulWidget {
+  final TipoDetalleSync tipo;
+  const DetalleSyncScreen({super.key, required this.tipo});
+
+  @override
+  State<DetalleSyncScreen> createState() => _DetalleSyncScreenState();
+}
+
+class _DetalleSyncScreenState extends State<DetalleSyncScreen> {
+  bool _cargando = true;
+  // Subidos.
+  List<Map<String, dynamic>> _ops = [];
+  Map<String, List<String>> _detallesPorOp = {};
+  String? _pushTs;
+  String? _pushDetalleTs;
+  // Bajados.
+  Map<String, int> _detallePull = {};
+  String? _detalleTs;
+  String? _pullTs;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.tipo == TipoDetalleSync.subidos) {
+      _cargarSubidos();
     } else {
-      color = AppColores.naranja;
-      icono = Icons.schedule;
-      texto = estado;
+      _cargarBajados();
     }
-    return ChipEstado(texto: texto, color: color, icono: icono);
   }
 
+  Future<void> _cargarSubidos() async {
+    final uuids = parsearUuidsPush(
+        await LocalDb.instance.getMeta('ultimo_push_op_uuids'));
+    final ts = await LocalDb.instance.getMeta('ultimo_push_ts');
+    final detalleTs =
+        await LocalDb.instance.getMeta('ultimo_push_detalle_ts');
+    final ops = await LocalDb.instance.opsPorUuids(uuids);
+    final detalles = <String, List<String>>{};
+    for (final op in ops) {
+      detalles['${op['op_uuid']}'] = await detallesDeOp(op);
+    }
+    if (!mounted) return;
+    setState(() {
+      _ops = ops;
+      _detallesPorOp = detalles;
+      _pushTs = ts;
+      _pushDetalleTs = detalleTs;
+      _cargando = false;
+    });
+  }
 
+  Future<void> _cargarBajados() async {
+    final detalle = parsearDetallePull(
+        await LocalDb.instance.getMeta('ultimo_pull_detalle'));
+    final detalleTs =
+        await LocalDb.instance.getMeta('ultimo_pull_detalle_ts');
+    final pullTs = await LocalDb.instance.getMeta('ultimo_pull_ts');
+    if (!mounted) return;
+    setState(() {
+      _detallePull = detalle;
+      _detalleTs = detalleTs;
+      _pullTs = pullTs;
+      _cargando = false;
+    });
+  }
+
+  /// dd/MM HH:mm, '—' si no hay fecha.
+  String _fmtHora(String? iso) {
+    final d = parseFecha(iso);
+    if (d == null) return '—';
+    String p(int n) => n.toString().padLeft(2, '0');
+    return '${p(d.day)}/${p(d.month)} ${p(d.hour)}:${p(d.minute)}';
+  }
+
+  /// HH:mm, '—' si no hay fecha.
+  String _fmtHoraCorta(String? iso) {
+    final d = parseFecha(iso);
+    if (d == null) return '—';
+    String p(int n) => n.toString().padLeft(2, '0');
+    return '${p(d.hour)}:${p(d.minute)}';
+  }
+
+  /// Motivo de rechazo legible para una op rechazada.
+  String _motivoOp(Map<String, dynamic> op) {
+    dynamic res;
+    try {
+      res = jsonDecode('${op['resultado_servidor'] ?? ''}');
+    } catch (_) {
+      res = null;
+    }
+    final motivo = motivoRechazo(res, op['error'] as String?);
+    if (motivo != null && motivo.isNotEmpty) return motivo;
+    final err = op['error'] as String?;
+    if (err != null && err.isNotEmpty) return err;
+    return 'Rechazada por el servidor';
+  }
+
+  Widget _placeholder() {
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.inbox_outlined,
+              size: 48,
+              color: AppColores.textoSecundario(context)),
+          const SizedBox(height: 12),
+          Text(
+            'Sin registros en este ciclo',
+            style: AppTexto.subtitulo.copyWith(
+                color: AppColores.textoSecundario(context)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSubidos() {
+    if (_ops.isEmpty) return _placeholder();
+    // v1.3.5 (Argón ajuste 1): si el último chequeo no envió nada,
+    // se muestra el lote anterior con nota informativa.
+    final pushTs = _pushTs ?? '';
+    final detTs = _pushDetalleTs ?? '';
+    final mostrarBanner =
+        pushTs.isNotEmpty && detTs.isNotEmpty && pushTs != detTs;
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(bottom: 4),
+          child: Text(
+            'Lote de ${_fmtHora(_pushDetalleTs ?? _pushTs)}',
+            style: AppTexto.subtitulo,
+          ),
+        ),
+        if (mostrarBanner)
+          Container(
+            margin: const EdgeInsets.only(bottom: 12, top: 8),
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: AppColores.info.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(AppRadio.md),
+              border: Border.all(
+                  color: AppColores.info.withValues(alpha: 0.4)),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.info_outline,
+                    size: 20, color: AppColores.info),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Sin envíos en el último chequeo '
+                    '(${_fmtHoraCorta(_pushTs)}). Mostrando datos del lote '
+                    'anterior (${_fmtHoraCorta(_pushDetalleTs)}).',
+                    style: AppTexto.minuscula,
+                  ),
+                ),
+              ],
+            ),
+          )
+        else
+          const SizedBox(height: 12),
+        ..._ops.map(_tarjetaOp),
+      ],
+    );
+  }
+
+  Widget _tarjetaOp(Map<String, dynamic> op) {
+    final estado = '${op['estado']}';
+    final detalles = _detallesPorOp['${op['op_uuid']}'] ?? [];
+    final uuid = '${op['op_uuid']}';
+    final uuidCorto = uuid.length > 8 ? uuid.substring(0, 8) : uuid;
+    final textoDetalles =
+        detalles.isEmpty ? 'op $uuidCorto' : detalles.join(' · ');
+    return Card(
+      margin: const EdgeInsets.only(bottom: 8),
+      child: ListTile(
+        title: Text(describirTipoOp('${op['tipo']}')),
+        subtitle: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(textoDetalles),
+            // v1.3.5 (auditoría 2026-10-16): el motivo también se muestra
+            // para necesita_revision, no solo rechazada.
+            if (estado == 'rechazada' || estado == 'necesita_revision')
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Text(
+                  _motivoOp(op),
+                  style: AppTexto.minuscula.copyWith(
+                      color: estado == 'rechazada'
+                          ? AppColores.error
+                          : AppColores.alerta),
+                ),
+              ),
+          ],
+        ),
+        trailing: chipEstadoOp(estado),
+      ),
+    );
+  }
+
+  Widget _buildBajados() {
+    final entradas = _detallePull.entries.toList();
+    if (entradas.isEmpty) return _placeholder();
+    final d = parseFecha(_detalleTs);
+    String p(int n) => n.toString().padLeft(2, '0');
+    final cabecera = d == null
+        ? 'Lote sin fecha registrada'
+        : 'Lote de ${p(d.hour)}:${p(d.minute)} del ${p(d.day)}/${p(d.month)}';
+    final pullTs = _pullTs ?? '';
+    final detTs = _detalleTs ?? '';
+    final mostrarBanner =
+        pullTs.isNotEmpty && detTs.isNotEmpty && pullTs != detTs;
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(bottom: 4),
+          child: Text(cabecera, style: AppTexto.subtitulo),
+        ),
+        if (mostrarBanner)
+          Container(
+            margin: const EdgeInsets.only(bottom: 12, top: 8),
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: AppColores.info.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(AppRadio.md),
+              border: Border.all(
+                  color: AppColores.info.withValues(alpha: 0.4)),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.info_outline,
+                    size: 20, color: AppColores.info),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Sin cambios en el último chequeo '
+                    '(${_fmtHoraCorta(_pullTs)}). Mostrando datos del lote '
+                    'anterior (${_fmtHoraCorta(_detalleTs)}).',
+                    style: AppTexto.minuscula,
+                  ),
+                ),
+              ],
+            ),
+          )
+        else
+          const SizedBox(height: 12),
+        ...entradas.map(
+          (e) => Card(
+            margin: const EdgeInsets.only(bottom: 8),
+            child: ListTile(
+              leading:
+                  const Icon(Icons.download, color: AppColores.info),
+              title: Text(kEtiquetasTablaSync[e.key] ?? e.key),
+              trailing: Text(
+                '${e.value}',
+                style:
+                    AppTexto.subtitulo.copyWith(color: AppColores.info),
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final esSubidos = widget.tipo == TipoDetalleSync.subidos;
+    return Scaffold(
+      appBar: AppBar(
+        title:
+            Text(esSubidos ? 'Detalle de subidos' : 'Detalle de bajados'),
+      ),
+      body: _cargando
+          ? const Center(child: CircularProgressIndicator())
+          : esSubidos
+              ? _buildSubidos()
+              : _buildBajados(),
+    );
+  }
 }

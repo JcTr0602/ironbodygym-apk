@@ -446,7 +446,7 @@ class _PagoScreenState extends State<PagoScreen> {
       appBar: AppBar(title: const Text('Agregar pago')),
       body: Column(
         children: [
-          const SyncBanner(compact: true),
+          const SyncBanner(compact: true, alcance: 'pagos'),
           _resumenDia(),
           _ultimosCobros(),
           Padding(

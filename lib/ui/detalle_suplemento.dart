@@ -9,7 +9,6 @@
 library;
 
 import 'dart:async';
-import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -21,6 +20,7 @@ import '../auth.dart';
 import '../fotos.dart';
 import '../localdb.dart';
 import '../negocio.dart';
+import '../permisos.dart';
 import '../sync.dart';
 import 'componentes.dart';
 import 'diseno.dart';
@@ -28,10 +28,19 @@ import 'suplementos.dart';
 import 'venta_suplemento.dart';
 import 'widgets.dart';
 
-/// Venta rápida: 1 unidad al precio oficial (USD), comprador externo.
-/// Devuelve true si se registró la venta.
-/// ChatGPT CRÍTICO 2: el servidor solo acepta comprador_tipo 'cliente'|'externo'
-/// y exige usd_tasa>0 para moneda USD. Se envía 'externo' + tasa del día.
+/// Venta rápida rediseñada (v1.3.4, pedido Jc 2026-10-16).
+///
+/// Diálogo "Vender <producto>" con cantidad y precio (oficial por defecto)
+/// + buscador de cliente del gym:
+/// - CON cliente seleccionado y promo `promo_suplementos` activa: la venta
+///   queda asociada (`comprador_tipo: 'cliente'`, `cliente_id`) y SÍ aplica
+///   la promo de 1 mes gratis (el servidor la procesa en
+///   `_op_venta_suplemento`).
+/// - SIN cliente: advertencia imposible de pasar por alto + aceptación
+///   explícita (checkbox); la venta sale como `externo`, sin promo.
+///
+/// Devuelve true si se registró la venta. Usa el camino único
+/// `registrarVentaSuplemento` (transacción atómica: stock JSON + op).
 Future<bool> ventaRapidaSuplemento(
     BuildContext context, Map<String, dynamic> s,
     [double? tasaUsd]) async {
@@ -41,55 +50,400 @@ Future<bool> ventaRapidaSuplemento(
         content: Text('Sin stock disponible para venta rápida')));
     return false;
   }
-  // v1.3.1: tasa opcional en USD (se normaliza a 1.0 si no hay).
-  final precio =
-      (s['precio_oficial'] as num?)?.toDouble() ?? 0;
-  final ok = await DialogoApp.confirmar(
-    context,
-    titulo: 'Venta rápida',
-    icono: Icons.flash_on,
-    mensaje: '${s['nombre']}\n'
-        '1 x ${precio.toStringAsFixed(2)} USD'
-        ' = ${textoTotalVenta(precio, 'USD', tasaUsd)}\n'
-        'Comprador: Cliente externo',
-    aceptar: 'Confirmar',
+  if (!context.mounted) return false;
+  final res = await showDialog<bool>(
+    context: context,
+    builder: (ctx) => _DialogoVentaRapida(sup: s, stock: stock),
   );
-  if (!ok) return false;
-  await LocalDb.instance.queueOp(
-    opUuid: const Uuid().v4(),
-    tipo: 'venta_suplemento',
-    payload: {
-      'suplemento_id': s['id'],
-      'cantidad': 1,
-      'precio': precio,
-      'moneda': 'USD',
-      // v1.3.1 (Medio #6, corrección Argón): normalizar a 1.0 igual que la
-      // venta normal. Enviar null hacía que el servidor rechazara la venta.
-      'usd_tasa': (tasaUsd != null && tasaUsd > 0) ? tasaUsd : 1.0,
-      'comprador_tipo': 'externo',
-      'comprador_nombre': 'Cliente externo',
-      'fecha':
-          DateTime.now().toIso8601String().substring(0, 10),
-      'nota': 'venta rápida',
-    },
-  );
-  // Gemini: reducción optimista de stock local (tabla espejo usa JSON en data).
-  final db = await LocalDb.instance.db;
-  final sid = s['id'] as int?;
-  if (sid != null) {
-    final rows = await db.query('suplementos',
-        columns: ['data'], where: 'id = ?', whereArgs: [sid]);
-    if (rows.isNotEmpty) {
-      final data =
-          jsonDecode(rows.first['data'] as String) as Map<String, dynamic>;
-      final stockActual = (data['stock'] as num?)?.toInt() ?? 0;
-      data['stock'] = (stockActual - 1).clamp(0, 999999);
-      await db.update('suplementos', {'data': jsonEncode(data)},
-          where: 'id = ?', whereArgs: [sid]);
+  return res == true;
+}
+
+/// Diálogo de venta rápida: cantidad + precio + selector de cliente.
+///
+/// Diseñado para que el vendedor no pierda la promo por accidente: el
+/// selector de cliente es visible y, sin cliente, la advertencia de
+/// "sin promo" exige aceptación explícita antes de confirmar.
+class _DialogoVentaRapida extends StatefulWidget {
+  final Map<String, dynamic> sup;
+  final int stock;
+
+  const _DialogoVentaRapida({required this.sup, required this.stock});
+
+  @override
+  State<_DialogoVentaRapida> createState() =>
+      _DialogoVentaRapidaState();
+}
+
+class _DialogoVentaRapidaState extends State<_DialogoVentaRapida> {
+  int _cantidad = 1;
+  final _precio = TextEditingController();
+  final _notaPrecio = TextEditingController();
+  final _busqueda = TextEditingController();
+  final _permisos = Permisos();
+
+  int? _clienteId;
+  String _clienteNombre = '';
+  bool _promoActiva = false;
+  bool _aceptaSinPromo = false;
+  bool _guardando = false;
+  List<Map<String, dynamic>> _clientes = [];
+
+  double get _precioOficial =>
+      (widget.sup['precio_oficial'] as num?)?.toDouble() ??
+      (widget.sup['precio'] as num?)?.toDouble() ??
+      0;
+
+  double? get _precioVenta =>
+      double.tryParse(_precio.text.trim().replaceAll(',', '.'));
+
+  /// v1.3.4 (candado a): comparación en centavos enteros.
+  bool get _precioDifiere {
+    final p = _precioVenta;
+    if (p == null) return false;
+    return precioDifiereEnCentavos(p, _precioOficial);
+  }
+
+  bool get _conCliente => _clienteId != null;
+
+  List<Map<String, dynamic>> get _coincidencias {
+    final q = _busqueda.text.trim().toLowerCase();
+    if (q.isEmpty) return const [];
+    return _clientes
+        .where(
+            (c) => '${c['nombre'] ?? ''}'.toLowerCase().contains(q))
+        .take(5)
+        .toList();
+  }
+
+  bool get _puedeConfirmar {
+    if (_guardando) return false;
+    final p = _precioVenta;
+    if (p == null || p <= 0) return false;
+    if (_cantidad < 1 || _cantidad > widget.stock) return false;
+    // Sin cliente: la advertencia debe aceptarse explícitamente.
+    if (!_conCliente && !_aceptaSinPromo) return false;
+    // Candado b: precio distinto + no dueño → nota_precio obligatoria.
+    if (_precioDifiere &&
+        !_permisos.esDueno &&
+        _notaPrecio.text.trim().length < 5) {
+      return false;
+    }
+    return true;
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    // B3-Invariante: el precio propone SIEMPRE el oficial, jamás
+    // ultimo_precio.
+    _precio.text = _precioOficial.toStringAsFixed(2);
+    _cargar();
+  }
+
+  Future<void> _cargar() async {
+    final aj = await LocalDb.instance.getAjustes();
+    final clientes = await LocalDb.instance.allMirror('clientes');
+    if (!mounted) return;
+    setState(() {
+      _promoActiva =
+          (aj['promo_suplementos'] as num?)?.toInt() != 0;
+      _clientes = clientes
+          .where((c) => (c['estado'] as String?) == 'activo')
+          .toList()
+        ..sort((a, b) =>
+            '${a['nombre']}'.compareTo('${b['nombre']}'));
+    });
+  }
+
+  @override
+  void dispose() {
+    _precio.dispose();
+    _notaPrecio.dispose();
+    _busqueda.dispose();
+    super.dispose();
+  }
+
+  Future<void> _confirmar() async {
+    if (!_puedeConfirmar || _guardando) return;
+    setState(() => _guardando = true);
+    try {
+      final sid = (widget.sup['id'] as num?)?.toInt();
+      if (sid == null) throw Exception('Suplemento sin identificador');
+      final notaPrecio = _notaPrecio.text.trim();
+      await registrarVentaSuplemento(
+        suplementoId: sid,
+        cantidad: _cantidad,
+        precioOficial: _precioOficial,
+        precioVenta: _precioVenta!,
+        moneda: 'USD',
+        compradorTipo: _conCliente ? 'cliente' : 'externo',
+        clienteId: _clienteId,
+        compradorNombre:
+            _conCliente ? _clienteNombre : 'Cliente externo',
+        nota: 'venta rápida',
+        notaPrecio:
+            _precioDifiere && notaPrecio.isNotEmpty ? notaPrecio : null,
+      );
+      if (mounted) Navigator.pop(context, true);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('No se registró la venta: $e')));
+      }
+    } finally {
+      if (mounted) setState(() => _guardando = false);
     }
   }
-  unawaited(SyncEngine.instance.push());
-  return true;
+
+  @override
+  Widget build(BuildContext context) {
+    return DialogoApp(
+      titulo: 'Vender ${widget.sup['nombre'] ?? 'suplemento'}',
+      iconoTitulo: Icons.flash_on,
+      contenido: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              'Precio oficial: ${_precioOficial.toStringAsFixed(2)} USD',
+              style: AppTexto.secundario,
+            ),
+            const SizedBox(height: AppEspacio.md),
+            _stepperCantidad(),
+            const SizedBox(height: AppEspacio.sm),
+            CampoTexto(
+              controller: _precio,
+              etiqueta: 'Precio por unidad (USD)',
+              teclado: const TextInputType.numberWithOptions(
+                  decimal: true),
+              onChanged: (_) => setState(() {}),
+            ),
+            if (_precioDifiere) _alertaPrecio(),
+            if (_precioDifiere) ...[
+              const SizedBox(height: AppEspacio.sm),
+              CampoTexto(
+                controller: _notaPrecio,
+                etiqueta: _permisos.esDueno
+                    ? 'Motivo del precio (opcional para el dueño)'
+                    : 'Motivo del precio (obligatorio, mín. 5 caracteres)',
+                hint: 'Ej: Autorizado por Jc',
+                icono: Icons.edit_note,
+                onChanged: (_) => setState(() {}),
+              ),
+            ],
+            const SizedBox(height: AppEspacio.md),
+            const EncabezadoSeccion(
+                titulo: 'Cliente del gym (opcional)'),
+            if (!_conCliente) ...[
+              CampoTexto(
+                controller: _busqueda,
+                hint: 'Buscar cliente por nombre…',
+                icono: Icons.person_search,
+                onChanged: (_) => setState(() {}),
+              ),
+              ..._coincidencias.map((c) => ListTile(
+                    dense: true,
+                    contentPadding: EdgeInsets.zero,
+                    title: Text('${c['nombre'] ?? ''}'),
+                    trailing: const Icon(Icons.add_circle_outline,
+                        color: AppColores.naranja),
+                    onTap: () => setState(() {
+                      _clienteId =
+                          (c['id'] as num?)?.toInt();
+                      _clienteNombre = '${c['nombre'] ?? ''}';
+                      _busqueda.clear();
+                    }),
+                  )),
+            ] else
+              _clienteSeleccionado(),
+            const SizedBox(height: AppEspacio.sm),
+            // La promo solo aplica con cliente asociado.
+            if (_conCliente && _promoActiva)
+              _infoPromo()
+            else if (!_conCliente)
+              _advertenciaSinPromo(),
+          ],
+        ),
+      ),
+      acciones: [
+        TextButton(
+          onPressed:
+              _guardando ? null : () => Navigator.pop(context, false),
+          child: const Text('Cancelar'),
+        ),
+        ElevatedButton(
+          onPressed: _puedeConfirmar ? _confirmar : null,
+          style: ElevatedButton.styleFrom(
+            backgroundColor: AppColores.naranja,
+          ),
+          child: Text(_guardando ? 'Registrando…' : 'Confirmar venta'),
+        ),
+      ],
+    );
+  }
+
+  Widget _stepperCantidad() {
+    return Tarjeta(
+      padding: const EdgeInsets.symmetric(
+          horizontal: AppEspacio.md, vertical: AppEspacio.sm),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          IconButton(
+            icon: const Icon(Icons.remove_circle_outline),
+            onPressed: _cantidad > 1 && !_guardando
+                ? () => setState(() => _cantidad--)
+                : null,
+          ),
+          Text('$_cantidad', style: AppTexto.displayPequeno),
+          IconButton(
+            icon: const Icon(Icons.add_circle_outline),
+            onPressed: _cantidad < widget.stock && !_guardando
+                ? () => setState(() => _cantidad++)
+                : null,
+          ),
+          const SizedBox(width: AppEspacio.sm),
+          Text('de ${widget.stock} disp.', style: AppTexto.secundario),
+        ],
+      ),
+    );
+  }
+
+  Widget _alertaPrecio() {
+    return Padding(
+      padding: const EdgeInsets.only(top: AppEspacio.sm),
+      child: Container(
+        padding: const EdgeInsets.all(AppEspacio.md),
+        decoration: BoxDecoration(
+          color: AppColores.alerta.withValues(alpha: 0.12),
+          borderRadius: BorderRadius.circular(AppRadio.md),
+          border: Border.all(
+              color: AppColores.alerta.withValues(alpha: 0.4)),
+        ),
+        child: Row(
+          children: [
+            const Icon(Icons.warning_amber,
+                color: AppColores.alerta),
+            const SizedBox(width: AppEspacio.sm),
+            Expanded(
+              child: Text(
+                'Vas a vender a un precio distinto al oficial '
+                '(${_precioOficial.toStringAsFixed(2)} USD). '
+                'Quedarán registrados ambos precios para auditoría.',
+                style: AppTexto.secundario,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _clienteSeleccionado() {
+    return Container(
+      padding: const EdgeInsets.symmetric(
+          horizontal: AppEspacio.md, vertical: AppEspacio.sm),
+      decoration: BoxDecoration(
+        color: AppColores.exito.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(AppRadio.md),
+        border: Border.all(
+            color: AppColores.exito.withValues(alpha: 0.4)),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.person, color: AppColores.exito),
+          const SizedBox(width: AppEspacio.sm),
+          Expanded(
+            child: Text(_clienteNombre, style: AppTexto.cuerpo),
+          ),
+          IconButton(
+            icon: const Icon(Icons.clear),
+            tooltip: 'Quitar cliente',
+            onPressed: _guardando
+                ? null
+                : () => setState(() {
+                      _clienteId = null;
+                      _clienteNombre = '';
+                      _aceptaSinPromo = false;
+                    }),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _infoPromo() {
+    return Container(
+      padding: const EdgeInsets.all(AppEspacio.md),
+      decoration: BoxDecoration(
+        color: AppColores.exito.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(AppRadio.md),
+        border: Border.all(
+            color: AppColores.exito.withValues(alpha: 0.4)),
+      ),
+      child: const Row(
+        children: [
+          Icon(Icons.card_giftcard, color: AppColores.exito),
+          SizedBox(width: AppEspacio.sm),
+          Expanded(
+            child: Text(
+              'Se le asignará 1 mes de mensualidad gratis (promo activa).',
+              style: AppTexto.secundario,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Advertencia imposible de pasar por alto: sin cliente no hay promo,
+  /// y hay que aceptarlo explícitamente para poder confirmar.
+  Widget _advertenciaSinPromo() {
+    return Container(
+      padding: const EdgeInsets.all(AppEspacio.md),
+      decoration: BoxDecoration(
+        color: AppColores.alerta.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(AppRadio.md),
+        border: Border.all(
+            color: AppColores.alerta.withValues(alpha: 0.5)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.warning_amber,
+                  color: AppColores.alerta),
+              const SizedBox(width: AppEspacio.sm),
+              Expanded(
+                child: Text(
+                  'Venta rápida: no se asocia ningún cliente del gym, '
+                  'por lo que NO aplica la promo de 1 mes gratis por compra.',
+                  style: AppTexto.cuerpo
+                      .copyWith(fontWeight: FontWeight.w600),
+                ),
+              ),
+            ],
+          ),
+          CheckboxListTile(
+            value: _aceptaSinPromo,
+            onChanged: _guardando
+                ? null
+                : (v) =>
+                    setState(() => _aceptaSinPromo = v == true),
+            title: const Text(
+              'Entiendo: esta venta no aplica la promo',
+              style: AppTexto.secundario,
+            ),
+            controlAffinity: ListTileControlAffinity.leading,
+            contentPadding: EdgeInsets.zero,
+            dense: true,
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 /// Comparte la info del suplemento (foto + precio) por WhatsApp

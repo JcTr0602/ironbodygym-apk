@@ -15,7 +15,14 @@ import '../sync.dart';
 class SyncBanner extends StatefulWidget {
   /// Variante compacta de una línea para formularios.
   final bool compact;
-  const SyncBanner({super.key, this.compact = false});
+
+  /// Alcance de sincronización (scope de SyncScope). Si se indica, al
+  /// tocar el banner se ejecuta sincronizarScope(alcance) en vez del
+  /// sync completo: el push sigue siendo global, solo el pull se limita
+  /// a la categoría visible (v1.3.5, luz verde de Argón).
+  final String? alcance;
+
+  const SyncBanner({super.key, this.compact = false, this.alcance});
 
   @override
   State<SyncBanner> createState() => _SyncBannerState();
@@ -201,7 +208,13 @@ class _SyncBannerState extends State<SyncBanner>
             child: InkWell(
               borderRadius: BorderRadius.circular(10),
               onTap: () {
-                if (!enProgreso) SyncEngine.instance.run();
+                if (enProgreso) return;
+                final alc = widget.alcance;
+                if (alc != null) {
+                  SyncEngine.instance.sincronizarScope(alc);
+                } else {
+                  SyncEngine.instance.run();
+                }
               },
               child: Padding(
                 padding: const EdgeInsets.symmetric(
@@ -261,7 +274,12 @@ class _SyncBannerState extends State<SyncBanner>
               if (enProgreso) {
                 setState(() => _expandido = !_expandido);
               } else {
-                SyncEngine.instance.run();
+                final alc = widget.alcance;
+                if (alc != null) {
+                  SyncEngine.instance.sincronizarScope(alc);
+                } else {
+                  SyncEngine.instance.run();
+                }
               }
             },
             child: Padding(

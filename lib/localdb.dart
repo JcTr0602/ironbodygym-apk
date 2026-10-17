@@ -50,7 +50,7 @@ class LocalDb {
   /// Nunca se confunde un error de acceso con ausencia del módulo.
   static bool? _ftsOk;
 
-  static Future<bool> _ftsDisponible(Database db) async {
+  static Future<bool> _ftsDisponible(DatabaseExecutor db) async {
     final ok = _ftsOk;
     if (ok != null) return ok;
     try {
@@ -226,7 +226,7 @@ class LocalDb {
     final dir = await getDatabasesPath();
     _db = await openDatabase(
       p.join(dir, 'ironbody.db'),
-      version: 26,
+      version: 27,
       // v1.3-r4 (Gemini): WAL mode para que lectores (UI) y escritores
       // (Workmanager en otro isolate) no se bloqueen mutuamente.
       // v1.2.9+34 (hotfix): try-catch — si el dispositivo no soporta WAL,
@@ -806,6 +806,21 @@ class LocalDb {
           await _addColumnIfMissing(
               db, 'ops_queue', 'resultado_servidor', 'TEXT');
           await _backfillColumnasPagos(db);
+        }
+        // v27 (v1.3.5, fix 2026-10-16): reset del cursor de tombstones.
+        // El pull de borrados saltaba el watermark a serverSeq cuando no
+        // había nada nuevo (bug v1.3.1), perdiendo para siempre los
+        // tombstones que el puente subía después con sync_seq menor.
+        // Al resetear a 0, el próximo pull re-descarga los ~45 tombstones
+        // (deleteMirror es idempotente) y aplica los que se perdieron.
+        if (oldV < 27) {
+          try {
+            await db.delete('meta',
+                where: 'k = ?', whereArgs: ['wm_borrados']);
+          } catch (_) {
+            // La tabla meta puede no existir en BDs revertidas a v24
+            // en tests; el DELETE es best-effort.
+          }
         }
       },
     );
@@ -1563,19 +1578,28 @@ class LocalDb {
     ];
   }
 
-  Future<void> deleteMirror(String tabla, int id) async {
-    final d = await db;
-    await d.delete(tabla, where: 'id=?', whereArgs: [id]);
+  Future<void> deleteMirror(String tabla, int id,
+      {DatabaseExecutor? txn}) async {
+    final DatabaseExecutor ex = txn ?? await db;
+    await ex.delete(tabla, where: 'id=?', whereArgs: [id]);
     if (tabla == 'clientes') {
       // v1.2.5+28: solo si FTS5 está disponible (ver comentario en
       // upsertMirror: el índice es derivado y reconstruible).
-      var fts = false;
-      try {
-        fts = await _ftsDisponible(d);
-      } catch (_) {}
-      if (fts) {
+      // Nota: _ftsDisponible necesita Database (hace CREATE); con txn
+      // se omite el chequeo y se intenta el delete defensivo.
+      if (txn == null) {
+        var fts = false;
         try {
-          await d.delete('clientes_fts', where: 'id=?', whereArgs: [id]);
+          fts = await _ftsDisponible(await db);
+        } catch (_) {}
+        if (fts) {
+          try {
+            await ex.delete('clientes_fts', where: 'id=?', whereArgs: [id]);
+          } catch (_) {}
+        }
+      } else {
+        try {
+          await ex.delete('clientes_fts', where: 'id=?', whereArgs: [id]);
         } catch (_) {}
       }
     }
@@ -3629,14 +3653,28 @@ class LocalDb {
     return mapa[k] ?? k;
   }
 
+  /// Encola una operación de sincronización (idempotente por op_uuid).
+  ///
+  /// v1.3.4 (B1-Unificación): [txn] opcional — si se pasa, el chequeo de
+  /// idempotencia, el insert y el meta corren sobre esa transacción en vez
+  /// de abrir `db`, para que mutación local + encolado sean atómicos.
   Future<void> queueOp(
       {required String opUuid,
       required String tipo,
       required Map<String, dynamic> payload,
-      String? fotoPath}) async {
-    final d = await db;
-    // v1.0.16: guardar autoría para no atribuir ops ajenas al sincronizar
-    final auth = AuthService();
+      String? fotoPath,
+      DatabaseExecutor? txn}) async {
+    final DatabaseExecutor ex = txn ?? await db;
+    // v1.0.16: guardar autoría para no atribuir ops ajenas al sincronizar.
+    // v1.3.4: acceso defensivo — en tests (sin sesión de Supabase) las
+    // columnas user_id/telegram_id quedan NULL (son anulables).
+    String? userId;
+    int? telegramId;
+    try {
+      final auth = AuthService();
+      userId = auth.userId;
+      telegramId = auth.telegramId;
+    } catch (_) {}
     // FIX (Gemini BUG 4): normalizar clave de ajuste antes de encolar.
     var payloadFinal = payload;
     if (tipo == 'ajuste' && payload['clave'] is String) {
@@ -3646,25 +3684,25 @@ class LocalDb {
     }
     // v1.2.5 (D13): idempotente ante doble-tap. Si el op_uuid ya existe,
     // no se duplica (el servidor además valida por payload_hash).
-    final yaExiste = await d.query('ops_queue',
+    final yaExiste = await ex.query('ops_queue',
         columns: ['op_uuid'],
         where: 'op_uuid=?',
         whereArgs: [opUuid],
         limit: 1);
     if (yaExiste.isNotEmpty) return;
-    await d.insert('ops_queue', {
+    await ex.insert('ops_queue', {
       'op_uuid': opUuid,
       'tipo': tipo,
       'payload': jsonEncode(payloadFinal),
       'estado': 'pendiente',
       'creada_ts': isoHabana(ahoraHabana()), // v1.3.4 (Argón): creada_ts normalizada a Habana
       'foto_path': fotoPath,
-      'user_id': auth.userId,
-      'telegram_id': auth.telegramId,
+      'user_id': userId,
+      'telegram_id': telegramId,
     });
     // v1.2.5 (D12): marca COMMIT local real (no optimista).
     try {
-      await d.rawUpdate(
+      await ex.rawUpdate(
           "INSERT OR REPLACE INTO meta(k,v) VALUES('ultimo_guardado_local',?)",
           [isoHabana(ahoraHabana())]); // v1.3.4 (Argón)
     } catch (_) {}
@@ -3674,7 +3712,17 @@ class LocalDb {
       final cid = (payload['cliente_id'] as int?) ?? 0;
       final est = (payload['estado'] as String?) ?? '';
       if (cid > 0 && est.isNotEmpty) {
-        await updateMirrorEstado(cid, est);
+        // v1.3.4: inline sobre el mismo executor para no romper la
+        // atomicidad cuando queueOp corre dentro de una transacción.
+        final rows = await ex.query('clientes',
+            where: 'id=?', whereArgs: [cid], limit: 1);
+        if (rows.isNotEmpty) {
+          final data = jsonDecode(rows.first['data'] as String)
+              as Map<String, dynamic>;
+          data['estado'] = est;
+          await ex.update('clientes', {'data': jsonEncode(data)},
+              where: 'id=?', whereArgs: [cid]);
+        }
       }
     }
   }
@@ -3850,6 +3898,20 @@ class LocalDb {
         where: 'estado = ?', whereArgs: [estado], orderBy: 'creada_ts ASC');
   }
 
+  /// v1.3.5 (detalle Subidos): ops de la cola por lista de UUIDs,
+  /// ordenadas por creación descendente (las más recientes primero).
+  /// Es la lectura del detalle: los UUIDs vienen de la meta
+  /// `ultimo_push_op_uuids`. Lista vacía → lista vacía.
+  Future<List<Map<String, dynamic>>> opsPorUuids(List<String> uuids) async {
+    if (uuids.isEmpty) return [];
+    final d = await db;
+    final ph = List.filled(uuids.length, '?').join(',');
+    return d.query('ops_queue',
+        where: 'op_uuid IN ($ph)',
+        whereArgs: uuids,
+        orderBy: 'creada_ts DESC');
+  }
+
   Future<void> markOp(String opUuid, String estado, {String? error}) async {
     final d = await db;
     // v1.2.5-rev5 (Gemini #10): medir latencia de confirmación. Al marcar
@@ -3974,6 +4036,26 @@ class LocalDb {
     final r = await d.rawQuery(
         'SELECT COUNT(*) c FROM ops_queue WHERE estado IN (\'pendiente\', \'enviada\', \'error\')');
     return (r.first['c'] as int?) ?? 0;
+  }
+
+  /// v1.3.5 (fix 2026-10-16): IDs de clientes con op eliminar_cliente
+  /// en vuelo ('pendiente' o 'enviada'). Se usa como filtro anti-zombie
+  /// en Papelera: si un pull intermedio re-inserta la fila antes de que
+  /// el tombstone oficial llegue, el cliente no revive en la UI.
+  Future<Set<int>> clientesConBorradoEnVuelo() async {
+    final d = await db;
+    final rows = await d.rawQuery(
+      "SELECT payload FROM ops_queue WHERE tipo='eliminar_cliente' "
+      "AND estado IN ('pendiente','enviada')");
+    final ids = <int>{};
+    for (final r in rows) {
+      try {
+        final p = jsonDecode('${r['payload']}') as Map;
+        final id = (p['cliente_id'] as num?)?.toInt();
+        if (id != null) ids.add(id);
+      } catch (_) {}
+    }
+    return ids;
   }
 
   /// v1.3.4 Ítem 5 (Argón, Bug A1.2): pendientes excluyendo las ops
@@ -4146,9 +4228,12 @@ class LocalDb {
   /// - Columnas SQL (ultimo_precio): van directo.
   /// - Campos del JSON (stock, etc.): se fusionan en data.
   /// Agregado v1.2.9+47; corregido v1.3.1 (B2).
+  /// v1.3.4 (B1-Unificación): [txn] opcional — si se pasa, la lectura y
+  /// el update corren dentro de esa transacción en vez de abrir `db`.
   Future<int> actualizarSuplemento(
-      int id, Map<String, dynamic> campos) async {
-    final d = await db;
+      int id, Map<String, dynamic> campos,
+      [DatabaseExecutor? txn]) async {
+    final DatabaseExecutor ex = txn ?? await db;
     const columnasSql = {'ultimo_precio'};
     final sqlCampos = <String, dynamic>{};
     final jsonCampos = <String, dynamic>{};
@@ -4160,7 +4245,7 @@ class LocalDb {
       }
     }
     if (jsonCampos.isNotEmpty || sqlCampos.containsKey('ultimo_precio')) {
-      final rows = await d.query('suplementos',
+      final rows = await ex.query('suplementos',
           columns: ['data'], where: 'id = ?', whereArgs: [id], limit: 1);
       if (rows.isNotEmpty) {
         final data =
@@ -4174,7 +4259,7 @@ class LocalDb {
       }
     }
     if (sqlCampos.isEmpty) return 0;
-    return await d.update(
+    return await ex.update(
       'suplementos',
       sqlCampos,
       where: 'id = ?',

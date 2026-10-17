@@ -364,9 +364,15 @@ class TurnoService {
     if (t == null) {
       return {'ok': false, 'error': 'sin_turno_abierto'};
     }
-    // Intento de subir todo lo pendiente.
+    // Intento de subir todo lo pendiente, con tiempo límite corto para
+    // no colgar el cierre sin conexión (reporte de campo v1.3.4: el
+    // "Sincronizando..." se quedaba esperando timeouts de 30-120s).
+    // Si no hay red, se continúa con los datos locales y el cierre queda
+    // como cerrado_local hasta que el sync normal lo suba.
     try {
-      await SyncEngine.instance.run(forzar: true);
+      await SyncEngine.instance
+          .run(forzar: true)
+          .timeout(const Duration(seconds: 10));
     } catch (_) {}
     await marcarTurnosSincronizados();
     final d = await desglosePendientes();
@@ -497,9 +503,12 @@ class TurnoService {
       await _db.setMeta(
           'cierre_turno_${fechaTurno}_${turno}_$tid', horaCierre);
     } catch (_) {}
-    // 3) Segundo sync para enviar el propio cierre.
+    // 3) Segundo sync para enviar el propio cierre, con tiempo límite
+    // corto para no colgar sin conexión (ver prepararCierre).
     try {
-      await SyncEngine.instance.run(forzar: true);
+      await SyncEngine.instance
+          .run(forzar: true)
+          .timeout(const Duration(seconds: 10));
     } catch (_) {}
     await marcarTurnosSincronizados();
     // El PK pudo reconciliarse al canónico durante el run (Argón P1):

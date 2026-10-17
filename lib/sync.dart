@@ -125,11 +125,26 @@ class SyncScope {
 
   /// Scopes de pantalla: solo declaran sus tablas objetivo.
   /// Las dependencias se resuelven automáticamente vía _dependenciasTablas.
+  /// v1.3.5 (Argón): matriz aprobada — el orden declarado es el orden
+  /// de descarga (padres primero); el push siempre es global.
   static const Map<String, List<String>> _scopes = {
     'pago_diario': ['pagos_diarios'],
     'inscribir': ['clientes'],
     'buscar_cliente': ['clientes', 'pagos'],
-    'suplementos': ['suplementos'],
+    // Clientes / Papelera: clientes + sus pagos (un pago huérfano sin su
+    // cliente es inconsistente).
+    'clientes': ['clientes', 'pagos', 'pagos_diarios'],
+    'papelera': ['clientes', 'pagos', 'pagos_diarios'],
+    // Pagos / Cobrar: clientes primero para que el cliente exista antes
+    // de insertar sus pagos y la UI resuelva nombres sin huérfanos.
+    'pagos': ['clientes', 'pagos', 'pagos_diarios'],
+    'cobrar': ['clientes', 'pagos', 'pagos_diarios'],
+    // Suplementos: orden exacto categorías → inventario → ventas.
+    'suplementos': [
+      'categorias_suplemento',
+      'suplementos',
+      'ventas_suplementos'
+    ],
     'ventas': ['ventas_suplementos'],
     'incidencias': ['incidencia_eventos'],
     'gastos': ['gastos'],
@@ -311,6 +326,67 @@ String? motivoRechazo(dynamic resultado, String? errorServidor) {
     if (m.isNotEmpty) return m;
   }
   return null;
+}
+
+// ---------------------------------------------------------------------------
+// v1.3.5 — Detalle ampliable "Bajados/Subidos" (veredicto de Argón,
+// LUZ ÁMBAR 2026-10-16). Persistencia en tabla meta (sin migraciones,
+// sin columnas nuevas en ops_queue). Funciones puras para tests.
+// ---------------------------------------------------------------------------
+
+/// Serializa el desglose por tabla de un pull a JSON para la meta
+/// `ultimo_pull_detalle`. Solo incluye tablas con filas > 0.
+String serializarDetallePull(Map<String, int> porTabla) {
+  final limpio = <String, int>{};
+  for (final e in porTabla.entries) {
+    if (e.value > 0) limpio[e.key] = e.value;
+  }
+  return jsonEncode(limpio);
+}
+
+/// Incrementa el contador de una tabla en el desglose del pull.
+/// Se usa tanto para filas aplicadas (upsert) como para tombstones
+/// aplicados (deleteMirror): un pull que solo trajo eliminaciones debe
+/// reflejarse en el detalle de Bajados (auditoría 2026-10-16).
+void contarEnDetallePull(Map<String, int> porTabla, String tabla) {
+  porTabla[tabla] = (porTabla[tabla] ?? 0) + 1;
+}
+
+/// Parsea `ultimo_pull_detalle` de vuelta a mapa tabla → filas.
+/// Tolerante: JSON inválido o valores raros devuelven mapa vacío.
+Map<String, int> parsearDetallePull(String? json) {
+  if (json == null || json.isEmpty) return {};
+  try {
+    final m = jsonDecode(json) as Map<String, dynamic>;
+    final out = <String, int>{};
+    for (final e in m.entries) {
+      final v = (e.value as num?)?.toInt() ?? 0;
+      if (v > 0) out[e.key] = v;
+    }
+    return out;
+  } catch (_) {
+    return {};
+  }
+}
+
+/// Regla de persistencia del detalle (veredicto Argón, trampa 2):
+/// el desglose solo se actualiza cuando el pull trajo filas (> 0).
+/// Un pull vacío preserva el desglose del último pull con datos.
+bool debeActualizarDetallePull(int filasBajadas) => filasBajadas > 0;
+
+/// Serializa los UUIDs procesados en un push para la meta
+/// `ultimo_push_op_uuids`.
+String serializarUuidsPush(List<String> uuids) => jsonEncode(uuids);
+
+/// Parsea `ultimo_push_op_uuids` de vuelta a lista. Tolerante.
+List<String> parsearUuidsPush(String? json) {
+  if (json == null || json.isEmpty) return [];
+  try {
+    final l = jsonDecode(json) as List;
+    return [for (final e in l) '$e'];
+  } catch (_) {
+    return [];
+  }
 }
 
 /// Extrae el "núcleo" del resultado que guarda el puente: el envelope
@@ -774,15 +850,43 @@ class SyncEngine {
         // Tablas normales vía _download.
         final tablasNormales =
             tablas.where((t) => !tablasIncidencias.contains(t)).toList();
+        // v1.3.5 (veredicto Argón 2026-10-17): conservar el desglose por
+        // tabla para cuadrarlo con DetalleSyncScreen.
+        var porTablaScope = <String, int>{};
         if (tablasNormales.isNotEmpty) {
-          n = await _download(tablasFiltro: tablasNormales);
+          final resScope = await _download(tablasFiltro: tablasNormales);
+          n = resScope.aplicadas;
+          porTablaScope = resScope.porTabla;
         }
         await _db.setMeta('last_pull_ok', DateTime.now().toIso8601String());
         // v1.3.1 (E5): scope sync es manual, siempre refleja el ciclo real.
         await _db.setMeta('last_downloaded', '$n');
         await _db.setMeta('last_scope', scope);
+        // v1.3.5 (veredicto Argón 2026-10-17): los pulls por alcance también
+        // actualizan el detalle de "Bajados" (acumulan total_bajados igual que
+        // el ciclo normal), para que la tarjeta no muestre un desglose viejo.
+        final prevBajados =
+            int.tryParse(await _db.getMeta('total_bajados') ?? '0') ?? 0;
+        await _db.setMeta('total_bajados', '${prevBajados + n}');
+        final tsPullScope = isoHabana(ahoraHabana());
+        await _db.setMeta('ultimo_pull_ts', tsPullScope);
+        if (debeActualizarDetallePull(n)) {
+          await _db.setMeta(
+              'ultimo_pull_detalle', serializarDetallePull(porTablaScope));
+          await _db.setMeta('ultimo_pull_detalle_ts', tsPullScope);
+        }
+        // v1.3.5: resumen con nombre amigable del alcance (no claves técnicas).
+        final nombreScope = {
+          'papelera': 'papelera',
+          'clientes': 'clientes',
+          'pagos': 'pagos',
+          'cobrar': 'cobros',
+          'suplementos': 'suplementos',
+        }[scope] ?? scope;
         _emit(SyncPhase.idle,
-            resumen: 'Sincronizado: ${tablas.join(', ')}');
+            resumen: n == 0
+                ? 'Sin cambios en $nombreScope'
+                : 'Sincronizado: $nombreScope ($n)');
       } catch (e) {
         final errSync = await _describeErrorVisible(e);
         _emit(SyncPhase.error, error: errSync);
@@ -848,7 +952,10 @@ class SyncEngine {
       } catch (_) {}
       await subirFotosIncidencias();
       // v1.2.9+46 (Gemini): acumular ambos lotes para last_uploaded.
-      var totalOps = await _uploadOps(forzar: forzar);
+      // v1.3.5 (detalle Subidos): acumular también los UUIDs.
+      final resPush1 = await _uploadOps(forzar: forzar);
+      var totalOps = resPush1.aplicadas;
+      final uuidsPush = <String>[...resPush1.uuids];
       AppLog.info('sync', 'ops_enviadas', d: 'n=$totalOps');
       // v1.2.9+46: las fotos SIEMPRE se suben en cada sincronización,
       // como en v1.2.3. La puerta de ahorro de datos se eliminó por
@@ -885,7 +992,9 @@ class SyncEngine {
       // vaciar ops_queue hacia Supabase de inmediato.
       if (fotosSubidas > 0) {
         // v1.2.9+46 (Gemini): sumar al total para last_uploaded.
-        totalOps += await _uploadOps(forzar: forzar);
+        final resPush2 = await _uploadOps(forzar: forzar);
+        totalOps += resPush2.aplicadas;
+        uuidsPush.addAll(resPush2.uuids);
       }
       await _db.setMeta('last_push_ok', DateTime.now().toIso8601String());
       // v1.3.0: acumulativo (no solo última sincronización).
@@ -894,6 +1003,20 @@ class SyncEngine {
       await _db.setMeta(
           'total_subidos', '${prevSubidos + totalOps}');
       await _db.setMeta('last_uploaded', '$totalOps');
+      // v1.3.5 (detalle Subidos, veredicto Argón): UUIDs procesados en
+      // esta corrida + hora Habana. El detalle lista exactamente estos
+      // UUIDs para concordar con el contador de la tarjeta.
+      // v1.3.5 (Argón ajuste 1): simetría con _doPull. ultimo_push_ts
+      // siempre se actualiza; ultimo_push_op_uuids solo se sobrescribe
+      // si este push procesó ops. Un push vacío preserva el detalle del
+      // último lote real.
+      final tsPush = isoHabana(ahoraHabana());
+      await _db.setMeta('ultimo_push_ts', tsPush);
+      if (uuidsPush.isNotEmpty) {
+        await _db.setMeta(
+            'ultimo_push_op_uuids', serializarUuidsPush(uuidsPush));
+        await _db.setMeta('ultimo_push_detalle_ts', tsPush);
+      }
       // v1.2.5 (D12): el servidor confirmó (ack real, no optimista).
       await marcarSincronizado();
       _emit(SyncPhase.idle);
@@ -951,11 +1074,28 @@ class SyncEngine {
     AppLog.info('sync', 'pull_ini');
     try {
       if (!silencioso) _emit(SyncPhase.downloading);
-      final n = await _download(silencioso: silencioso);
+      final resDownload = await _download(silencioso: silencioso);
+      final n = resDownload.aplicadas;
       // v1.3.0: acumulativo para bajados.
       final prevBajados =
           int.tryParse(await _db.getMeta('total_bajados') ?? '0') ?? 0;
       await _db.setMeta('total_bajados', '${prevBajados + n}');
+      // v1.3.5 (detalle Bajados, veredicto Argón): persistir el desglose
+      // por tabla SOLO si este pull trajo filas (> 0). Un pull vacío
+      // preserva el desglose del último pull con datos (la UI lo indica
+      // con una nota). El pull silencioso tras el push no pisa el
+      // detalle, igual que no pisa last_downloaded: el detalle
+      // corresponde al último ciclo visible para el usuario.
+      // Todo en meta: sin migraciones ni columnas nuevas.
+      if (!silencioso) {
+        final tsPull = isoHabana(ahoraHabana());
+        await _db.setMeta('ultimo_pull_ts', tsPull);
+        if (debeActualizarDetallePull(n)) {
+          await _db.setMeta('ultimo_pull_detalle',
+              serializarDetallePull(resDownload.porTabla));
+          await _db.setMeta('ultimo_pull_detalle_ts', tsPull);
+        }
+      }
       // v1.3.0: pull de incidencias (tipos → incidencias, orden por FK).
       // Fix #11 (Sol): si falla, no se marca last_pull_ok general.
       var incidenciasOk = true;
@@ -1004,8 +1144,12 @@ class SyncEngine {
   /// Envío en lote (punto 19): varias ops por petición PostgREST
   /// (bulk + on_conflict para idempotencia), menos viajes de ida y vuelta
   /// con conexiones de alta latencia.
-  Future<int> _uploadOps({bool forzar = false}) async {
+  Future<({int aplicadas, List<String> uuids})> _uploadOps(
+      {bool forzar = false}) async {
     var aplicadas = 0;
+    // v1.3.5 (detalle Subidos): UUIDs confirmados en esta corrida, para
+    // que el detalle liste exactamente lo que cuenta last_uploaded.
+    final uuids = <String>[];
     // v1.2.9+46 (Gemini): las ops en 'enviada' por más de 2 minutos
     // vuelven a 'pendiente' para reintento idempotente. Evita que
     // queden en limbo perpetuo si la confirmación falló.
@@ -1056,7 +1200,15 @@ class SyncEngine {
         porEnviar.add(op);
         continue;
       }
-      if (await _aplicarEstadoServidor(op, rec)) aplicadas++;
+      if (await _aplicarEstadoServidor(op, rec)) {
+        aplicadas++;
+        uuids.add(uuid);
+      } else if (esTerminalParaDetalle(rec)) {
+        // v1.3.5 (Argón ajuste 2): la op fue rechazada o pide revisión
+        // en este ciclo: va al detalle del lote con su motivo en rojo,
+        // aunque no sume al contador de aplicadas.
+        uuids.add(uuid);
+      }
     }
     // 2) envío en lotes adaptativos (v1.3.4 Ítem 4, Argón): base 20,
     // baja a 10 en fallo de lote, sube a 30 y luego a 50 en racha de
@@ -1156,6 +1308,11 @@ class SyncEngine {
           }
           await _limpiarOptimistaDeOp(op);
           aplicadas++;
+          uuids.add(uuid);
+        } else if (esTerminalParaDetalle(rec)) {
+          // v1.3.5 (Argón ajuste 2): rechazada o en revisión en este
+          // ciclo: va al detalle del lote con su motivo en rojo.
+          uuids.add(uuid);
         }
       }
     }
@@ -1165,7 +1322,7 @@ class SyncEngine {
         await _db.marcarTiposComentariosSincronizados();
       } catch (_) {}
     }
-    return aplicadas;
+    return (aplicadas: aplicadas, uuids: uuids);
   }
 
   /// Reintenta un lote op por op: la que falle con 4xx se marca
@@ -1303,6 +1460,21 @@ class SyncEngine {
   /// Aplica a la cola local el estado que reportó el servidor para una op.
   /// Guarda el JSON del resultado en `ops_queue.resultado_servidor`.
   /// Retorna true si la op quedó 'aplicada' (para el contador del push).
+  ///
+  /// v1.3.5 (Argón ajuste 2): [esTerminalParaDetalle] indica si la op
+  /// llegó a un estado final que debe aparecer en el detalle del lote
+  /// (aplicada, rechazada o necesita_revision). 'pendiente' no es final.
+  static bool esTerminalParaDetalle(ResultadoOpServidor rec) {
+    if (rec.estado == 'rechazada' || rec.estado == 'necesita_revision') {
+      return true;
+    }
+    // 'aplicada' con rechazo del puente se marca como rechazada.
+    if (rec.estado == 'aplicada' && esRechazoServidor(rec.resultado)) {
+      return true;
+    }
+    return rec.estado == 'aplicada';
+  }
+
   Future<bool> _aplicarEstadoServidor(
       Map<String, dynamic> op, ResultadoOpServidor rec) async {
     final uuid = op['op_uuid'] as String;
@@ -1546,18 +1718,37 @@ class SyncEngine {
   /// aplicar todos los cambios. Si algo falla a mitad, el watermark no se
   /// mueve y la próxima bajada re-aplica (idempotente) desde el mismo
   /// punto. No hay ningún camino donde el watermark avance sin aplicar.
-  Future<int> _download({bool silencioso = false, List<String>? tablasFiltro}) async {
+  Future<({int aplicadas, Map<String, int> porTabla})> _download(
+      {bool silencioso = false, List<String>? tablasFiltro}) async {
+    // v1.2.8 (Paso 1): si se pasa tablasFiltro (scope), solo esas tablas.
+    final todasTablas = [
+      'clientes',
+      'pagos',
+      'pagos_diarios',
+      'gastos',
+      'suplementos',
+      'ventas_suplementos',
+      'categorias_suplemento', // v1.2.1
+      'turnos_cierre', // v1.2.5-rev5
+    ];
+    final tablas = tablasFiltro ?? todasTablas;
     // v1.2.5 (D19): si el manifiesto marcó algún ámbito divergente,
     // re-descarga completa desde cero en este ciclo.
     // v1.2.5-rev5 (Gemini): reseteo GRANULAR por tabla, no nuclear global.
     // Cada flag 'forzar_redescarga_<tabla>' hace que solo esa tabla se
     // re-descargue desde 0; las demás usan el watermark global normal.
+    // v1.3.5 (Argón): en pull con alcance, SOLO se evalúan/consumen los
+    // flags de las tablas presentes en tablasFiltro. Los flags de tablas
+    // fuera del alcance quedan intactos para el próximo pull completo.
     final tablasReseteadas = <String>{};
     try {
       final flags = await _db.metasConPrefijo('forzar_redescarga_');
       for (final k in flags) {
-        tablasReseteadas.add(k.replaceFirst('forzar_redescarga_', ''));
-        await _db.setMeta(k, '');
+        final tablaFlag = k.replaceFirst('forzar_redescarga_', '');
+        if (tablas.contains(tablaFlag)) {
+          tablasReseteadas.add(tablaFlag);
+          await _db.setMeta(k, '');
+        }
       }
     } catch (_) {}
     // ajustes + server_seq (para verificación de sincronización)
@@ -1603,18 +1794,9 @@ class SyncEngine {
     var aplicadas = 0;
     var sinCambios = 0;
     var fallidas = 0;
-    // v1.2.8 (Paso 1): si se pasa tablasFiltro (scope), solo esas tablas.
-    final todasTablas = [
-      'clientes',
-      'pagos',
-      'pagos_diarios',
-      'gastos',
-      'suplementos',
-      'ventas_suplementos',
-      'categorias_suplemento', // v1.2.1
-      'turnos_cierre', // v1.2.5-rev5
-    ];
-    final tablas = tablasFiltro ?? todasTablas;
+    // v1.3.5 (detalle Bajados): filas aplicadas por tabla espejo.
+    final porTabla = <String, int>{};
+    // (tablas ya definidas arriba para el reseteo granular por alcance)
     const supTablas = {
       'clientes': 'sync_clientes',
       'pagos': 'sync_pagos',
@@ -1749,6 +1931,8 @@ class SyncEngine {
                     'oldFoto': verif['oldFoto'],
                   });
                   aplicadas++;
+                  // v1.3.5 (detalle Bajados): conteo por tabla.
+                  contarEnDetallePull(porTabla, tabla);
                 } else {
                   sinCambios++;
                 }
@@ -1889,6 +2073,12 @@ class SyncEngine {
       AppLog.info('sync', 'pull_tabla_fin', d: tabla);
     }
     // borrados (tombstones)
+    // INVARIANTE (auditoría 2026-10-16): los tombstones SIEMPRE se procesan
+    // completos, nunca filtrados por categoría. wm_borrados es un cursor
+    // global único; si un futuro pull con alcance (soloTablas) lo filtrara,
+    // adelantaría el cursor por encima de eliminaciones pendientes de
+    // otras categorías y se perderían para siempre (misma clase de bug
+    // que el salto a serverSeq corregido en v27).
     if (!silencioso) {
       _emit(SyncPhase.downloading,
           detalle: 'Descargando eliminados…',
@@ -1949,8 +2139,19 @@ class SyncEngine {
             await _db.setMeta('borrados_entidad_desconocida', entidad);
           } else if (tabla == 'turnos_cierre') {
             await _db.deleteMirrorTexto(tabla, '${m['entidad_id'] ?? ''}');
+            // v1.3.5 (auditoría 2026-10-16): los borrados también cuentan
+            // en porTabla para que el detalle de Bajados refleje un pull
+            // que solo trajo eliminaciones (si no, n queda en 0 y la UI
+            // muestra "Sin cambios" aunque sí hubo borrados).
+            // Argón 2026-10-16: aplicadas++ para que debeActualizarDetallePull(n)
+            // no bloquee el guardado de ultimo_pull_detalle en _doPull.
+            aplicadas++;
+            contarEnDetallePull(porTabla, tabla);
           } else {
             await _db.deleteMirror(tabla, (m['entidad_id'] as int?) ?? -1);
+            // v1.3.5 (auditoría 2026-10-16): ver comentario arriba.
+            aplicadas++;
+            contarEnDetallePull(porTabla, tabla);
           }
           if (seq > borradosMax) borradosMax = seq;
         }
@@ -1973,11 +2174,15 @@ class SyncEngine {
         await _db.getMeta('wm_borrados_sin_permiso') == '1';
     if (borradosOk && !borradosAusente && !borradosSinPermiso) {
       await _db.setMeta('wm_err_borrados', '');
-      // v1.3.1: si no hubo borrados, avanzar al serverSeq para no
-      // dejar el watermark en 0 (el diagnóstico muestra el mínimo).
-      final nuevoWm = borradosMax > cursorBorrados ? borradosMax : (serverSeq ?? cursorBorrados);
-      if (nuevoWm > cursorBorrados) {
-        await _db.setWatermarkTabla('borrados', nuevoWm);
+      // v1.3.5 (fix): NUNCA saltar el cursor a serverSeq. El puente sube
+      // los tombstones a Supabase de forma asíncrona; si un pull no
+      // encuentra nada nuevo y saltamos a serverSeq, los tombstones que
+      // el puente suba después (con sync_seq menor) quedan invisibles
+      // para siempre (bug 2026-10-16: IDs 179/178/160 nunca se borraron
+      // en la app aunque estaban en sync_borrados). Solo se avanza al
+      // máximo realmente descargado y aplicado.
+      if (borradosMax > cursorBorrados) {
+        await _db.setWatermarkTabla('borrados', borradosMax);
       }
     }
     // Argón v1.3.0: bajadas viejas v1.2.4/v1.2.5 DESACTIVADAS.
@@ -2018,7 +2223,7 @@ class SyncEngine {
     AppLog.info('sync', 'pull_fin',
         d: 'vistas=$vistas aplicadas=$aplicadas '
             'sinCambios=$sinCambios fallidas=$fallidas');
-    return aplicadas;
+    return (aplicadas: aplicadas, porTabla: porTabla);
   }
 
   /// v1.3.4 (Ítem 6 Capa 1, veredicto de Argón): reconciliación
