@@ -30,7 +30,6 @@ import 'diseno.dart';
 import 'historial_entrenador.dart';
 import 'incidencias_sync.dart';
 import 'arqueo.dart';
-import 'auditoria_silenciosa.dart';
 import 'nomina.dart';
 import 'historial_ventas.dart';
 import 'papelera.dart';
@@ -263,23 +262,6 @@ class _SeccionCobrosScreenState extends State<SeccionCobrosScreen> {
               texto: 'Ver nómina',
               icono: Icons.payments_rounded,
               onPressed: () => _irYActualizar(const NominaScreen()),
-            ),
-          ]),
-          // v1.3.7 (Fase A, 6.3): auditoría silenciosa.
-          seccionAdmin(context, Icons.fact_check_outlined, 'Auditoría', [
-            Text(
-              'Revisión automática de anomalías: turnos cortos, '
-              'ediciones de pagos y desfases de sync. Sin notificaciones.',
-              style: TextStyle(
-                  color: AppColores.textoSecundario(context),
-                  fontSize: 12),
-            ),
-            const SizedBox(height: 8),
-            BotonPrimario(
-              texto: 'Ver auditoría',
-              icono: Icons.fact_check_outlined,
-              onPressed: () =>
-                  _irYActualizar(const AuditoriaSilenciosaScreen()),
             ),
           ]),
           seccionAdmin(

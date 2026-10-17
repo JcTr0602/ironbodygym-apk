@@ -1,5 +1,8 @@
-/// Auditoría mejorada (v1.0.12): quién hizo qué, a qué cliente,
-/// qué cambió y foto asociada.
+/// Auditoría (v1.3.7): registro útil de quién hizo qué.
+///
+/// Rediseño: los tipos técnicos de operación se traducen a lenguaje
+/// humano, siempre se muestra la persona afectada, y las operaciones
+/// se agrupan por día con encabezados.
 library;
 
 import 'dart:convert';
@@ -9,6 +12,7 @@ import 'package:flutter/material.dart';
 
 import '../localdb.dart';
 import '../negocio.dart';
+import '../tiempo.dart';
 import 'diseno.dart';
 import 'componentes.dart';
 import 'widgets.dart';
@@ -40,8 +44,7 @@ class _AuditoriaScreenState extends State<AuditoriaScreen> {
     // Precargar nombres y fotos de clientes mencionados
     final clientes = await LocalDb.instance.allMirror('clientes');
     final porId = <int, Map<String, dynamic>>{
-      for (final c in clientes)
-        (c['id'] as int): c,
+      for (final c in clientes) (c['id'] as int): c,
     };
     for (final op in ops) {
       final p = _payload(op);
@@ -83,32 +86,98 @@ class _AuditoriaScreenState extends State<AuditoriaScreen> {
     return null;
   }
 
-  String _nombreTipo(String tipo) {
+  /// v1.3.7: traduce el tipo técnico a lenguaje humano.
+  String _descripcionOp(String tipo) {
     switch (tipo) {
       case 'inscribir':
-        return 'Inscripción';
+        return 'Inscripción de cliente';
       case 'pago_mensual':
-        return 'Pago mensual';
+        return 'Pago de mensualidad';
       case 'pago_diario':
         return 'Pago diario';
       case 'cambiar_estado':
         return 'Cambio de estado';
       case 'foto':
-        return 'Foto';
+        return 'Foto de cliente';
       case 'gasto':
-        return 'Gasto';
+        return 'Gasto registrado';
       case 'editar_cliente':
         return 'Edición de cliente';
+      case 'editar_pago':
+        return 'Edición de pago';
+      case 'anular_pago':
+        return 'Pago anulado';
+      case 'editar_pago_diario':
+        return 'Edición de pago diario';
+      case 'anular_pago_diario':
+        return 'Pago diario anulado';
+      case 'eliminar_cliente':
+        return 'Cliente eliminado';
+      case 'eliminar_foto':
+        return 'Foto eliminada';
       case 'admin_usuario':
         return 'Gestión de usuario';
+      case 'confirmar_entrega':
+        return 'Entrega de efectivo confirmada';
+      case 'regalar_mes_cumpleanos':
+        return 'Mes de cumpleaños regalado';
+      case 'apertura_turno':
+        return 'Apertura de turno';
+      case 'cierre_turno':
+        return 'Cierre de turno';
+      case 'liquidar_caja':
+        return 'Caja liquidada (arqueo)';
+      case 'aprobar_incidencia_sync':
+        return 'Incidencia de sync aprobada';
+      case 'descartar_incidencia_sync':
+        return 'Incidencia de sync descartada';
+      case 'crear_suplemento':
+        return 'Suplemento creado';
+      case 'editar_suplemento':
+        return 'Suplemento editado';
+      case 'eliminar_suplemento':
+        return 'Suplemento eliminado';
+      case 'venta_suplemento':
+        return 'Venta de suplemento';
+      case 'anular_venta_suplemento':
+        return 'Venta de suplemento anulada';
+      case 'foto_suplemento':
+        return 'Foto de suplemento';
       case 'inscripcion_venta_suplemento':
-        return 'Inscripción + venta';
+        return 'Inscripción + venta de suplemento';
+      case 'crear_categoria':
+        return 'Categoría creada';
+      case 'editar_categoria':
+        return 'Categoría editada';
+      case 'incidencia':
+      case 'crear_incidencia':
+        return 'Incidencia reportada';
+      case 'editar_incidencia':
+        return 'Incidencia editada';
+      case 'cambiar_estado_incidencia':
+        return 'Estado de incidencia cambiado';
+      case 'incidencia_estado':
+        return 'Cambio en incidencia';
+      case 'agregar_comentario_incidencia':
+        return 'Comentario en incidencia';
+      case 'registrar_foto_incidencia':
+        return 'Foto en incidencia';
+      case 'upsert_tipo_incidencia':
+        return 'Tipo de incidencia guardado';
+      case 'reordenar_tipos_incidencia':
+        return 'Tipos de incidencia reordenados';
+      case 'guardar_tipos_pago':
+        return 'Tipos de pago guardados';
+      case 'ajuste':
+        return 'Ajuste de configuración';
+      case 'auditoria':
+        return 'Nota de auditoría';
       default:
-        return tipo;
+        return tipo.replaceAll('_', ' ');
     }
   }
 
-  /// Describe qué cambió en la operación.
+  /// Describe la operación en lenguaje humano, con la persona afectada.
   String _detalle(Map<String, dynamic> op) {
     final tipo = '${op['tipo']}';
     final p = _payload(op);
@@ -132,25 +201,49 @@ class _AuditoriaScreenState extends State<AuditoriaScreen> {
         final q = cambiados.isEmpty ? '' : ' (${cambiados.join(', ')})';
         return nombre != null ? 'Editó a $nombre$q' : 'Edición$q';
       case 'pago_mensual':
+      case 'pago_diario':
         final monto = p['monto'];
         final metodo = p['metodo'] ?? 'efectivo';
+        final etiqueta =
+            tipo == 'pago_mensual' ? 'mensualidad' : 'pago diario';
         return nombre != null
-            ? '$nombre — ${monto ?? '?'} CUP ($metodo)'
-            : 'Pago ${monto ?? '?'} CUP';
+            ? '$nombre pagó $etiqueta: ${monto ?? '?'} CUP ($metodo)'
+            : 'Pago de $etiqueta: ${monto ?? '?'} CUP ($metodo)';
       case 'inscribir':
         final n = '${p['nombre'] ?? nombre ?? '?'}';
-        return 'Inscribió a $n';
-      case 'foto':
-        return nombre != null ? 'Foto de $nombre' : 'Foto';
-      case 'cambiar_estado':
-        final est = p['estado'] ?? '?';
-        return nombre != null ? '$nombre → $est' : 'Estado → $est';
+        return 'Se inscribió a $n';
+      case 'regalar_mes_cumpleanos':
+        return nombre != null
+            ? 'Se le regaló el mes a $nombre (cumpleaños)'
+            : 'Mes de cumpleaños regalado';
+      case 'confirmar_entrega':
+        final monto = p['monto'];
+        final quien = '${p['entrenador'] ?? p['nombre'] ?? ''}';
+        return quien.isNotEmpty
+            ? 'Entrega de $quien confirmada${monto != null ? ': $monto CUP' : ''}'
+            : 'Entrega de efectivo confirmada';
+      case 'liquidar_caja':
+        final quien = '${p['entrenador_nombre'] ?? ''}';
+        return quien.isNotEmpty
+            ? 'Caja de $quien liquidada (arqueo)'
+            : 'Caja liquidada (arqueo)';
       case 'gasto':
-        return '${p['concepto'] ?? 'Gasto'} (${p['monto'] ?? '?'} CUP)';
+        return 'Gasto: ${p['concepto'] ?? '—'} (${p['monto'] ?? '?'} CUP)';
+      case 'venta_suplemento':
+        final prod = '${p['suplemento'] ?? p['nombre'] ?? ''}';
+        return nombre != null && prod.isNotEmpty
+            ? '$nombre compró $prod'
+            : (prod.isNotEmpty ? 'Se vendió $prod' : 'Venta de suplemento');
+      case 'cierre_turno':
+        return 'Se cerró el turno (${p['turno'] ?? ''})'.trim();
+      case 'apertura_turno':
+        return 'Se abrió el turno (${p['turno'] ?? ''})'.trim();
       case 'admin_usuario':
         return '${p['accion'] ?? '?'}: ${p['username'] ?? '?'}';
       default:
-        return nombre ?? '';
+        // Para el resto: descripción + persona si la hay.
+        final desc = _descripcionOp(tipo);
+        return nombre != null ? '$desc — $nombre' : desc;
     }
   }
 
@@ -163,8 +256,40 @@ class _AuditoriaScreenState extends State<AuditoriaScreen> {
     return 'Este dispositivo';
   }
 
+  /// Día ISO (yyyy-MM-dd) de la operación.
+  String _diaOp(Map<String, dynamic> op) {
+    final s = '${op['creada_ts'] ?? ''}';
+    return s.length >= 10 ? s.substring(0, 10) : s;
+  }
+
+  /// Encabezado humano del día: Hoy, Ayer o fecha dd/mm/yyyy.
+  String _etiquetaDia(String diaIso) {
+    final hoy = hoyHabanaIso();
+    if (diaIso == hoy) return 'Hoy';
+    final ayer = isoHabana(ahoraHabana().subtract(const Duration(days: 1)))
+        .substring(0, 10);
+    if (diaIso == ayer) return 'Ayer';
+    if (diaIso.length >= 10) {
+      return '${diaIso.substring(8, 10)}/${diaIso.substring(5, 7)}/${diaIso.substring(0, 4)}';
+    }
+    return diaIso;
+  }
+
   @override
   Widget build(BuildContext context) {
+    final hoy = hoyHabanaIso();
+    final opsHoy = _ops.where((o) => _diaOp(o) == hoy).length;
+    final pendientes =
+        _ops.where((o) => '${o['estado']}' == 'pendiente').length;
+
+    // Agrupar por día manteniendo el orden (ya viene DESC).
+    final grupos = <String, List<Map<String, dynamic>>>{};
+    for (final op in _ops) {
+      final d = _diaOp(op);
+      (grupos[d] ??= []).add(op);
+    }
+    final dias = grupos.keys.toList(); // ya en orden DESC
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('Auditoría'),
@@ -178,6 +303,25 @@ class _AuditoriaScreenState extends State<AuditoriaScreen> {
       body: Column(
         children: [
           const SyncBanner(),
+          // Tarjeta resumen.
+          if (!_cargando && _ops.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 12, 12, 4),
+              child: Tarjeta(
+                child: Row(
+                  children: [
+                    IconoModuloBadge.naranja(Icons.fact_check),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        '$opsHoy operaciones hoy · $pendientes pendientes de sync',
+                        style: AppTexto.subtitulo,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
           Expanded(
             child: _cargando
                 ? const Center(child: CircularProgressIndicator())
@@ -191,87 +335,121 @@ class _AuditoriaScreenState extends State<AuditoriaScreen> {
                     : RefreshIndicator(
                         onRefresh: _cargar,
                         child: ListView.builder(
-                    itemCount: _ops.length,
-                    itemBuilder: (ctx, i) {
-                      final op = _ops[i];
-                      final tipo = '${op['tipo']}';
-                      final estado = '${op['estado']}';
-                      final fecha = fechaCorta(
-                              op['creada_ts'], 16)
-                          .replaceAll('T', ' ');
-                      final detalle = _detalle(op);
-                      final usuario = _usuario(op);
-                      final p = _payload(op);
-                      final cid = _clienteId(p, tipo);
-                      final fotoPath = cid != null ? _fotos[cid] : null;
-                      final tieneFoto = fotoPath != null &&
-                          fotoPath.isNotEmpty &&
-                          File(fotoPath).existsSync();
-
-                      return Padding(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 12, vertical: 6),
-                        child: Tarjeta(
-                          padding: EdgeInsets.zero,
-                          child: ListTile(
-                          leading: tieneFoto
-                              ? ClipRRect(
-                                  borderRadius: BorderRadius.circular(20),
-                                  child: Image.file(
-                                    File(fotoPath),
-                                    width: 40,
-                                    height: 40,
-                                    fit: BoxFit.cover,
-                                  ),
-                                )
-                              : CircleAvatar(
+                          itemCount: dias.length,
+                          itemBuilder: (ctx, gi) {
+                            final dia = dias[gi];
+                            final items = grupos[dia]!;
+                            return Column(
+                              crossAxisAlignment:
+                                  CrossAxisAlignment.start,
+                              children: [
+                                Padding(
+                                  padding: const EdgeInsets.fromLTRB(
+                                      16, 12, 16, 4),
                                   child: Text(
-                                    usuario.isNotEmpty
-                                        ? usuario[0].toUpperCase()
-                                        : '?',
+                                    _etiquetaDia(dia),
+                                    style: AppTexto.subtitulo.copyWith(
+                                      color: AppColores.naranja,
+                                    ),
                                   ),
                                 ),
-                          title: Text(_nombreTipo(tipo),
-                              style: AppTexto.subtitulo),
-                          subtitle: Column(
-                            crossAxisAlignment:
-                                CrossAxisAlignment.start,
-                            children: [
-                              if (detalle.isNotEmpty)
-                                Text(detalle,
-                                    style: AppTexto.cuerpo.copyWith(
-                                        fontWeight:
-                                            FontWeight.w500)),
-                              Text(usuario,
-                                  style: AppTexto.secundario),
-                              Text(fecha,
-                                  style: AppTexto.secundario
-                                      .copyWith(
-                                          color: AppColores
-                                              .textoSecundario(
-                                                  ctx))),
-                              Text(
-                                'Estado: $estado',
-                                style: AppTexto.etiqueta.copyWith(
-                                  color: estado == 'aplicada'
-                                      ? AppColores.exito
-                                      : estado == 'rechazada'
-                                          ? AppColores.error
-                                          : AppColores.alerta,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                            ],
-                          ),
+                                for (final op
+                                    in items) _tarjetaOp(ctx, op),
+                              ],
+                            );
+                          },
                         ),
-                        ),
-                      );
-                    },
+                      ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _tarjetaOp(BuildContext ctx, Map<String, dynamic> op) {
+    final tipo = '${op['tipo']}';
+    final estado = '${op['estado']}';
+    final fecha =
+        fechaCorta(op['creada_ts'], 16).replaceAll('T', ' ');
+    final detalle = _detalle(op);
+    final usuario = _usuario(op);
+    final p = _payload(op);
+    final cid = _clienteId(p, tipo);
+    final fotoPath = cid != null ? _fotos[cid] : null;
+    final tieneFoto = fotoPath != null &&
+        fotoPath.isNotEmpty &&
+        File(fotoPath).existsSync();
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      child: Tarjeta(
+        padding: EdgeInsets.zero,
+        child: ListTile(
+          leading: tieneFoto
+              ? ClipRRect(
+                  borderRadius: BorderRadius.circular(20),
+                  child: Image.file(
+                    File(fotoPath),
+                    width: 40,
+                    height: 40,
+                    fit: BoxFit.cover,
                   ),
+                )
+              : CircleAvatar(
+                  child: Text(
+                    usuario.isNotEmpty
+                        ? usuario[0].toUpperCase()
+                        : '?',
+                  ),
+                ),
+          // v1.3.7: título en lenguaje humano, siempre con detalle.
+          title: Text(_descripcionOp(tipo), style: AppTexto.subtitulo),
+          subtitle: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (detalle.isNotEmpty)
+                Text(detalle,
+                    style: AppTexto.cuerpo
+                        .copyWith(fontWeight: FontWeight.w500)),
+              Text('$usuario · $fecha', style: AppTexto.secundario),
+              Text(
+                _etiquetaEstado(estado),
+                style: AppTexto.etiqueta.copyWith(
+                  color: _colorEstado(estado),
+                  fontWeight: FontWeight.bold,
                 ),
               ),
             ],
           ),
+        ),
+      ),
     );
+  }
+
+  String _etiquetaEstado(String estado) {
+    switch (estado) {
+      case 'aplicada':
+        return 'Sincronizada';
+      case 'pendiente':
+        return 'Pendiente de sync';
+      case 'rechazada':
+        return 'Rechazada por el servidor';
+      case 'error':
+        return 'Error al subir';
+      default:
+        return estado;
+    }
+  }
+
+  Color _colorEstado(String estado) {
+    switch (estado) {
+      case 'aplicada':
+        return AppColores.exito;
+      case 'rechazada':
+      case 'error':
+        return AppColores.error;
+      default:
+        return AppColores.alerta;
+    }
   }
 }

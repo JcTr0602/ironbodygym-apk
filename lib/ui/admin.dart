@@ -23,6 +23,13 @@ import '../tipos_pago.dart';
 import 'componentes.dart';
 import 'diseno.dart';
 import 'admin_secciones.dart';
+import 'arqueo.dart';
+import 'auditoria.dart';
+import 'nomina.dart';
+import 'riesgo.dart';
+import 'papelera.dart';
+import 'congelados.dart';
+import 'usuarios.dart';
 import 'incidencias/lista_incidencias.dart';
 import 'historial_caja.dart';
 import 'exportar_excel.dart';
@@ -787,9 +794,15 @@ class _AdminScreenState extends State<AdminScreen> {
         text: 'Iron Body Gym — clientes y pagos del mes');
   }
 
-  // -- UI (hub A–G) ---------------------------------------------------------
+  // -- UI (hub por flujos, v1.3.7) -------------------------------------------
   @override
   Widget build(BuildContext context) {
+    // Datos para las líneas de resumen de cada tarjeta.
+    final cajaTotal = (_caja['efectivo'] ?? 0) + (_caja['transferencia'] ?? 0);
+    final netoHoy = cajaTotal - _gastosHoy;
+    final pendTotal =
+        _pend.fold<double>(0, (s, e) => s + (e['total'] as double? ?? 0));
+
     return Scaffold(
       appBar: AppBar(title: const Text('Administración')),
       body: Column(
@@ -800,32 +813,15 @@ class _AdminScreenState extends State<AdminScreen> {
                 ? const Center(child: CircularProgressIndicator())
                 : RefreshIndicator(
                     onRefresh: _cargar,
-                    child: GridView.count(
+                    child: ListView(
                       padding: const EdgeInsets.all(16),
-                      crossAxisCount: 2,
-                      mainAxisSpacing: AppEspacio.md,
-                      crossAxisSpacing: AppEspacio.md,
-                      // v1.3.2 (Argón #22): celdas más altas para que el
-                      // subtítulo no desborde en pantallas angostas.
-                      childAspectRatio: 0.92,
                       children: [
-                        _tarjetaHub(
-                          'A',
-                          Icons.bar_chart,
-                          'Resumen',
-                          'Estadísticas e inscripciones del mes',
-                          () => _ir(SeccionResumenScreen(
-                            ingresos: _ingresos,
-                            inscMes: _inscMes,
-                            morosos: _morosos,
-                            inscPorEntrenador: _inscPorEntrenador,
-                          )),
-                        ),
-                        _tarjetaHub(
-                          'B',
-                          Icons.point_of_sale,
-                          'Cobros',
-                          'Cierre de caja, pendientes y cuentas',
+                        // -- 💰 DINERO ------------------------------------------------
+                        _encabezadoGrupo('💰', 'DINERO'),
+                        _tarjetaFlujo(
+                          Icons.point_of_sale_rounded,
+                          'Cierre de caja',
+                          'Neto hoy: ${fmtMonto(netoHoy)} CUP',
                           () => _ir(SeccionCobrosScreen(
                             getCaja: () => _caja,
                             getGastosHoy: () => _gastosHoy,
@@ -834,20 +830,166 @@ class _AdminScreenState extends State<AdminScreen> {
                             onIr: _irYRecargar,
                           )),
                         ),
-                        _tarjetaHub(
-                          'C',
-                          Icons.group,
-                          'Clientes',
-                          'Papelera, congelados y en riesgo',
-                          () => _ir(SeccionClientesScreen(
+                        _tarjetaFlujo(
+                          Icons.account_balance_wallet_rounded,
+                          'Arqueo de caja',
+                          pendTotal > 0
+                              ? '${fmtMonto(pendTotal)} CUP por liquidar'
+                              : 'Todo cuadrado',
+                          () => _ir(const ArqueoScreen()),
+                        ),
+                        _tarjetaFlujo(
+                          Icons.payments_rounded,
+                          'Nómina del mes',
+                          'Proyección: clientes pagados × 150 CUP',
+                          () => _ir(const NominaScreen()),
+                        ),
+                        _tarjetaFlujo(
+                          Icons.receipt_long_rounded,
+                          'Últimos gastos',
+                          'Hoy: ${fmtMonto(_gastosHoy)} CUP',
+                          () => _ir(SeccionGastosScreen(
+                            getGastos: () => _gastos,
+                            onAgregarGasto: _agregarGasto,
+                          )),
+                        ),
+                        _tarjetaFlujo(
+                          Icons.history_outlined,
+                          'Historial de caja',
+                          'Cierres por entrenador y fecha',
+                          () => _ir(const HistorialCajaScreen()),
+                        ),
+                        // v1.3.1: pago por cliente a entrenadores (solo dueño).
+                        if (AuthService().isOwner)
+                          _tarjetaFlujo(
+                            Icons.payments_outlined,
+                            'Pago a entrenadores',
+                            '$_pagoEntrenador CUP por cliente que pagó',
+                            _elegirPagoEntrenador,
+                          ),
+
+                        // -- 👥 CLIENTES ----------------------------------------------
+                        _encabezadoGrupo('👥', 'CLIENTES'),
+                        _tarjetaFlujo(
+                          Icons.warning_amber_rounded,
+                          'Clientes en riesgo',
+                          'Inactivos 60+ días, buenos para recuperar',
+                          () => _ir(const RiesgoScreen()),
+                        ),
+                        _tarjetaFlujo(
+                          Icons.delete_outline_rounded,
+                          'Papelera',
+                          'Clientes eliminados (recuperables)',
+                          () => _ir(const PapeleraScreen()),
+                        ),
+                        _tarjetaFlujo(
+                          Icons.ac_unit_rounded,
+                          'Congelados',
+                          'Membresías pausadas',
+                          () => _ir(const CongeladosScreen()),
+                        ),
+
+                        // -- 📊 OPERACIÓN ----------------------------------------------
+                        _encabezadoGrupo('📊', 'OPERACIÓN'),
+                        // Estado y último error como tarjetas compactas.
+                        _tarjetaCompacta(
+                          _pendientesSubir > 0
+                              ? Icons.sync_problem_rounded
+                              : Icons.check_circle_outline_rounded,
+                          'Estado de sync',
+                          _pendientesSubir > 0
+                              ? '$_pendientesSubir por subir'
+                              : 'Todo sincronizado',
+                          _pendientesSubir > 0
+                              ? AppColores.alerta
+                              : AppColores.exito,
+                        ),
+                        if (_syncDet.error != null &&
+                            _syncDet.error!.isNotEmpty)
+                          _tarjetaCompacta(
+                            Icons.error_outline_rounded,
+                            'Último error',
+                            _syncDet.error!,
+                            AppColores.error,
+                          ),
+                        _tarjetaFlujo(
+                          Icons.bar_chart_rounded,
+                          'Estadísticas del mes',
+                          '${fmtMonto(_ingresos)} CUP · $_inscMes insc.',
+                          () => _ir(SeccionResumenScreen(
+                            ingresos: _ingresos,
+                            inscMes: _inscMes,
+                            morosos: _morosos,
+                            inscPorEntrenador: _inscPorEntrenador,
+                          )),
+                        ),
+                        _tarjetaFlujo(
+                          Icons.inventory_2_rounded,
+                          'Suplementos',
+                          'Catálogo, categorías y ventas',
+                          () => _ir(SeccionSuplementosScreen(
                             onIr: _irYRecargar,
                           )),
                         ),
-                        _tarjetaHub(
-                          'D',
-                          Icons.health_and_safety,
-                          'Sistema',
-                          'Salud, auditoría y exportar',
+                        _tarjetaFlujo(
+                          Icons.fact_check_rounded,
+                          'Auditoría',
+                          'Quién hizo qué y cuándo',
+                          () => _ir(const AuditoriaScreen()),
+                        ),
+                        _tarjetaFlujo(
+                          Icons.monitor_heart_rounded,
+                          'Salud del sistema',
+                          _pendientesSubir > 0
+                              ? '$_pendientesSubir ops por subir'
+                              : 'Sincronizado',
+                          () => _ir(const SeccionDiagnosticoScreen()),
+                        ),
+                        _tarjetaFlujo(
+                          Icons.warning_amber_rounded,
+                          'Incidencias',
+                          'Errores que requieren atención',
+                          () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) =>
+                                    const ListaIncidenciasScreen(),
+                              ),
+                            );
+                          },
+                        ),
+
+                        // -- ⚙️ CONFIGURACIÓN ------------------------------------------
+                        _encabezadoGrupo('⚙️', 'CONFIGURACIÓN'),
+                        _tarjetaFlujo(
+                          Icons.payments_outlined,
+                          'Tipos de pago',
+                          '${_tipos.length} tipos configurados',
+                          () => _ir(_pantallaAjustes()),
+                        ),
+                        _tarjetaFlujo(
+                          Icons.price_change_rounded,
+                          'Otros precios',
+                          'Mensualidades, diario, tasa USD',
+                          () => _ir(_pantallaAjustes()),
+                        ),
+                        _tarjetaFlujo(
+                          Icons.account_balance_rounded,
+                          'Datos bancarios',
+                          'Tarjetas y móvil de confirmación',
+                          () => _ir(_pantallaAjustes()),
+                        ),
+                        _tarjetaFlujo(
+                          Icons.manage_accounts_rounded,
+                          'Usuarios APK',
+                          'Gestionar accesos de entrenadores',
+                          () => _ir(const UsuariosScreen()),
+                        ),
+                        _tarjetaFlujo(
+                          Icons.file_download_rounded,
+                          'Exportar',
+                          'CSV y Excel de clientes y pagos',
                           () => _ir(SeccionSistemaScreen(
                             syncDet: _syncDet,
                             pendientesSubir: _pendientesSubir,
@@ -866,88 +1008,6 @@ class _AdminScreenState extends State<AdminScreen> {
                             onIr: _irYRecargar,
                           )),
                         ),
-                        _tarjetaHub(
-                          'E',
-                          Icons.settings,
-                          'Ajustes',
-                          'Tipos de pago, precios y usuarios',
-                          () => _ir(SeccionAjustesScreen(
-                            getTipos: () => _tipos,
-                            onToggleTipo: _toggleTipo,
-                            onEditarTipo: _editarTipo,
-                            onEliminarTipo: _eliminarTipo,
-                            onAgregarTipo: _agregarTipo,
-                            onGuardarTipos: _guardarTipos,
-                            montos: _montos,
-                            clavesMonto: _clavesMonto,
-                            onGuardarMontos: _guardarMontos,
-                            // v1.2.4: datos bancarios
-                            bancarios: _bancarios,
-                            onGuardarBancarios: _guardarBancarios,
-                            gestionarUsuarios:
-                                Permisos().gestionarUsuarios,
-                            onIr: _irYRecargar,
-                            esTipoFijo: _esTipoFijo,
-                          )),
-                        ),
-                        _tarjetaHub(
-                          'F',
-                          Icons.receipt_long,
-                          'Gastos',
-                          'Últimos gastos registrados',
-                          () => _ir(SeccionGastosScreen(
-                            getGastos: () => _gastos,
-                            onAgregarGasto: _agregarGasto,
-                          )),
-                        ),
-                        _tarjetaHub(
-                          'G',
-                          Icons.medication,
-                          'Suplementos',
-                          'Catálogo y ventas',
-                          () => _ir(SeccionSuplementosScreen(
-                            onIr: _irYRecargar,
-                          )),
-                        ),
-                        _tarjetaHub(
-                          'H',
-                          Icons.monitor_heart,
-                          'Diagnóstico',
-                          'Estado de sync y operaciones',
-                          () => _ir(const SeccionDiagnosticoScreen()),
-                        ),
-                        _tarjetaHub(
-                          'I',
-                          Icons.warning_amber,
-                          'Incidencias',
-                          'Errores que requieren atención',
-                          () {
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (_) =>
-                                    const ListaIncidenciasScreen(),
-                              ),
-                            );
-                          },
-                        ),
-                        // v1.2.5 (2.5): historial de caja por entrenador.
-                        _tarjetaHub(
-                          'J',
-                          Icons.history_outlined,
-                          'Historial de caja',
-                          'Cierres por entrenador y fecha',
-                          () => _ir(const HistorialCajaScreen()),
-                        ),
-                        // v1.3.1: pago por cliente a entrenadores (solo dueño).
-                        if (AuthService().isOwner)
-                          _tarjetaHub(
-                            'K',
-                            Icons.payments_outlined,
-                            'Pago a entrenadores',
-                            '$_pagoEntrenador CUP por cliente que pagó',
-                            _elegirPagoEntrenador,
-                          ),
                       ],
                     ),
                   ),
@@ -957,54 +1017,106 @@ class _AdminScreenState extends State<AdminScreen> {
     );
   }
 
-  /// Tarjeta del hub (letra + icono + título + subtítulo).
-  Widget _tarjetaHub(String letra, IconData icono, String titulo,
-      String subtitulo, VoidCallback onTap) {
-    return Tarjeta(
-      onTap: onTap,
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Container(
-                width: 40,
-                height: 40,
-                decoration: BoxDecoration(
-                  color:
-                      AppColores.naranja.withValues(alpha: 0.15),
-                  borderRadius:
-                      BorderRadius.circular(AppRadio.md),
-                ),
-                child: Center(
-                  child: Text(
-                    letra,
-                    style: const TextStyle(
-                      fontSize: 20,
-                      fontWeight: FontWeight.bold,
-                      color: AppColores.naranja,
-                    ),
+  /// Construye la pantalla de Ajustes (se reutiliza en 3 tarjetas).
+  Widget _pantallaAjustes() {
+    return SeccionAjustesScreen(
+      getTipos: () => _tipos,
+      onToggleTipo: _toggleTipo,
+      onEditarTipo: _editarTipo,
+      onEliminarTipo: _eliminarTipo,
+      onAgregarTipo: _agregarTipo,
+      onGuardarTipos: _guardarTipos,
+      montos: _montos,
+      clavesMonto: _clavesMonto,
+      onGuardarMontos: _guardarMontos,
+      bancarios: _bancarios,
+      onGuardarBancarios: _guardarBancarios,
+      gestionarUsuarios: Permisos().gestionarUsuarios,
+      onIr: _irYRecargar,
+      esTipoFijo: _esTipoFijo,
+    );
+  }
+
+  /// Encabezado de grupo (emoji + título).
+  Widget _encabezadoGrupo(String emoji, String titulo) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(4, 16, 4, 8),
+      child: Text(
+        '$emoji  $titulo',
+        style: AppTexto.subtitulo.copyWith(
+          fontWeight: FontWeight.bold,
+          letterSpacing: 1.2,
+        ),
+      ),
+    );
+  }
+
+  /// Tarjeta de flujo: badge + título + una línea de resumen.
+  Widget _tarjetaFlujo(
+      IconData icono, String titulo, String resumen, VoidCallback onTap) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Tarjeta(
+        onTap: onTap,
+        child: Row(
+          children: [
+            IconoModuloBadge.naranja(icono),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(titulo, style: AppTexto.subtitulo),
+                  const SizedBox(height: 2),
+                  Text(
+                    resumen,
+                    style: TextStyle(
+                        fontSize: 12,
+                        color: AppColores.textoSecundario(context)),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                   ),
-                ),
+                ],
               ),
-              const SizedBox(width: AppEspacio.sm),
-              Icon(icono,
-                  color: AppColores.naranja, size: 28),
-            ],
-          ),
-          const SizedBox(height: AppEspacio.sm),
-          Text(titulo, style: AppTexto.subtitulo),
-          const SizedBox(height: 2),
-          Text(
-            subtitulo,
-            style: TextStyle(
-                fontSize: 12,
+            ),
+            Icon(Icons.chevron_right_rounded,
                 color: AppColores.textoSecundario(context)),
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-          ),
-        ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Tarjeta compacta informativa (no navegable): Estado / Último error.
+  Widget _tarjetaCompacta(
+      IconData icono, String titulo, String detalle, Color color) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Tarjeta(
+        child: Row(
+          children: [
+            Icon(icono, color: color, size: 22),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(titulo,
+                      style: AppTexto.cuerpo
+                          .copyWith(fontWeight: FontWeight.w600)),
+                  Text(
+                    detalle,
+                    style: TextStyle(
+                        fontSize: 12,
+                        color: AppColores.textoSecundario(context)),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
