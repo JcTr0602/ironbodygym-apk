@@ -1587,9 +1587,9 @@ class _HomeScreenState extends State<HomeScreen>
 
 /// v1.3.6 (Jc): botón flotante de acciones rápidas (speed dial) que
 /// reemplaza al dock inferior fijo de la v1.3.5. Cerrado muestra un solo
-/// FAB naranja (rayo); al tocarlo despliega en horizontal las 3 acciones
-/// más usadas del día a día: Cobrar (destacada), Pago diario, Inscribir.
-/// Elegir una acción (o el botón Atrás del sistema) lo cierra.
+/// FAB naranja (rayo); v1.3.7 (Jc): al tocarlo despliega en VERTICAL las
+/// 3 acciones más usadas (Cobrar, Pago diario, Inscribir) con aparición
+/// escalonada suave. Elegir una acción (o el botón Atrás) lo cierra.
 class _FabAccionesRapidas extends StatefulWidget {
   final VoidCallback onCobrar;
   final VoidCallback onPagoDiario;
@@ -1609,16 +1609,15 @@ class _FabAccionesRapidasState extends State<_FabAccionesRapidas>
     with SingleTickerProviderStateMixin {
   bool _abierto = false;
   late final AnimationController _ctrl;
-  late final Animation<double> _anim;
 
   @override
   void initState() {
     super.initState();
+    // v1.3.7 (Jc): transición más suave y escalonada (300ms).
     _ctrl = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 220),
+      duration: const Duration(milliseconds: 300),
     );
-    _anim = CurvedAnimation(parent: _ctrl, curve: Curves.easeOut);
   }
 
   @override
@@ -1652,41 +1651,24 @@ class _FabAccionesRapidasState extends State<_FabAccionesRapidas>
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.end,
         children: [
-          // Fila de acciones: aparece con fade + despliegue hacia arriba.
+          // v1.3.7 (Jc): acciones en VERTICAL sobre el FAB, con
+          // aparición escalonada (fade + deslizamiento suave).
           ClipRect(
-            child: SizeTransition(
-              sizeFactor: _anim,
-              alignment: Alignment.bottomCenter,
-              child: FadeTransition(
-                opacity: _anim,
-                child: Container(
-                  // Ancho de pantalla menos los márgenes laterales del FAB.
-                  width: MediaQuery.of(context).size.width - 32,
-                  margin: const EdgeInsets.only(bottom: 12),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: _pildora(Icons.payments_rounded, 'Cobrar',
-                            () => _irCerrando(widget.onCobrar)),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: _pildora(
-                            Icons.today_rounded,
-                            'Pago diario',
-                            () =>
-                                _irCerrando(widget.onPagoDiario)),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: _pildora(
-                            Icons.person_add_alt_1_rounded,
-                            'Inscribir',
-                            () => _irCerrando(widget.onInscribir)),
-                      ),
-                    ],
-                  ),
-                ),
+            child: Container(
+              margin: const EdgeInsets.only(bottom: 12),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  _accionAnimada(0, Icons.payments_rounded, 'Cobrar',
+                      () => _irCerrando(widget.onCobrar)),
+                  const SizedBox(height: 8),
+                  _accionAnimada(1, Icons.today_rounded, 'Pago diario',
+                      () => _irCerrando(widget.onPagoDiario)),
+                  const SizedBox(height: 8),
+                  _accionAnimada(2, Icons.person_add_alt_1_rounded,
+                      'Inscribir', () => _irCerrando(widget.onInscribir)),
+                ],
               ),
             ),
           ),
@@ -1734,6 +1716,33 @@ class _FabAccionesRapidasState extends State<_FabAccionesRapidas>
   /// Píldora de acción. v1.3.6 (Argón, diseño): superficie de tarjeta con
   /// borde sutil + mini-círculo interno (28×28, naranja 15%) para el icono
   /// _rounded a 17 px. Sin destacado: el protagonismo es del FAB.
+  /// v1.3.7 (Jc): cada acción aparece con fade + deslizamiento,
+  /// escalonada según su índice (la de arriba sale última).
+  Widget _accionAnimada(
+      int index, IconData icono, String texto, VoidCallback onTap) {
+    // Orden visual: Cobrar (0) abajo … Inscribir (2) arriba.
+    // La animación entra de abajo hacia arriba.
+    final inicio = 0.15 * (2 - index);
+    final itemAnim = CurvedAnimation(
+      parent: _ctrl,
+      curve: Interval(inicio, inicio + 0.7, curve: Curves.easeOutCubic),
+    );
+    return FadeTransition(
+      opacity: itemAnim,
+      child: SlideTransition(
+        position: Tween<Offset>(
+          begin: const Offset(0, 0.35),
+          end: Offset.zero,
+        ).animate(itemAnim),
+        // Ancho fijo para que las 3 píldoras queden alineadas.
+        child: SizedBox(
+          width: 190,
+          child: _pildora(icono, texto, onTap),
+        ),
+      ),
+    );
+  }
+
   Widget _pildora(IconData icono, String texto, VoidCallback onTap) {
     return InkWell(
       borderRadius: BorderRadius.circular(AppRadio.md),

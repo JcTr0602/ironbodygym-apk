@@ -242,20 +242,23 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
       }
       return;
     }
-    final buf = StringBuffer('Iron Body Gym — Suplementos\n\n');
+    // v1.3.7 (pedido de Jc 2026-10-17): catálogo profesional para
+    // WhatsApp — sin stock (el cliente no necesita verlo), con
+    // descripción del producto; compacto y con formato.
+    final buf = StringBuffer('🏋️ *Iron Body Gym — Suplementos*');
     for (final s in visibles) {
       final nombre = '${s['nombre'] ?? 'Suplemento'}';
       final precio = (s['precio_oficial'] as num?)?.toDouble() ??
           (s['precio'] as num?)?.toDouble() ??
           0;
-      final stock = (s['stock'] as num?)?.toInt() ?? 0;
-      buf.writeln(nombre);
+      final desc = '${s['descripcion'] ?? ''}'.trim();
+      buf.writeln('\n');
+      buf.writeln('*$nombre*');
+      if (desc.isNotEmpty) buf.writeln(desc);
       // B2 (Argón): jamás exportar "$0.00 USD" a clientes.
       buf.writeln(precio > 0
-          ? 'Precio: ${precio.toStringAsFixed(2)} USD'
-          : 'Precio: Consultar precio');
-      buf.writeln('Disponibles: $stock');
-      buf.writeln();
+          ? '💰 ${precio.toStringAsFixed(2)} USD'
+          : '💰 Consultar precio');
     }
     await Share.share(buf.toString().trimRight());
   }
