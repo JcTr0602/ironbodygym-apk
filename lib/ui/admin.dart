@@ -25,6 +25,7 @@ import 'diseno.dart';
 import 'admin_secciones.dart';
 import 'arqueo.dart';
 import 'auditoria.dart';
+import 'auditoria_silenciosa.dart';
 import 'nomina.dart';
 import 'riesgo.dart';
 import 'papelera.dart';
@@ -936,6 +937,12 @@ class _AdminScreenState extends State<AdminScreen> {
                           'Auditoría',
                           'Quién hizo qué y cuándo',
                           () => _ir(const AuditoriaScreen()),
+                        ),
+                        _tarjetaFlujo(
+                          Icons.radar_rounded,
+                          'Anomalías',
+                          'Detección silenciosa (solo dueño)',
+                          () => _ir(const AuditoriaSilenciosaScreen()),
                         ),
                         _tarjetaFlujo(
                           Icons.monitor_heart_rounded,

@@ -87,95 +87,8 @@ class _AuditoriaScreenState extends State<AuditoriaScreen> {
   }
 
   /// v1.3.7: traduce el tipo técnico a lenguaje humano.
-  String _descripcionOp(String tipo) {
-    switch (tipo) {
-      case 'inscribir':
-        return 'Inscripción de cliente';
-      case 'pago_mensual':
-        return 'Pago de mensualidad';
-      case 'pago_diario':
-        return 'Pago diario';
-      case 'cambiar_estado':
-        return 'Cambio de estado';
-      case 'foto':
-        return 'Foto de cliente';
-      case 'gasto':
-        return 'Gasto registrado';
-      case 'editar_cliente':
-        return 'Edición de cliente';
-      case 'editar_pago':
-        return 'Edición de pago';
-      case 'anular_pago':
-        return 'Pago anulado';
-      case 'editar_pago_diario':
-        return 'Edición de pago diario';
-      case 'anular_pago_diario':
-        return 'Pago diario anulado';
-      case 'eliminar_cliente':
-        return 'Cliente eliminado';
-      case 'eliminar_foto':
-        return 'Foto eliminada';
-      case 'admin_usuario':
-        return 'Gestión de usuario';
-      case 'confirmar_entrega':
-        return 'Entrega de efectivo confirmada';
-      case 'regalar_mes_cumpleanos':
-        return 'Mes de cumpleaños regalado';
-      case 'apertura_turno':
-        return 'Apertura de turno';
-      case 'cierre_turno':
-        return 'Cierre de turno';
-      case 'liquidar_caja':
-        return 'Caja liquidada (arqueo)';
-      case 'aprobar_incidencia_sync':
-        return 'Incidencia de sync aprobada';
-      case 'descartar_incidencia_sync':
-        return 'Incidencia de sync descartada';
-      case 'crear_suplemento':
-        return 'Suplemento creado';
-      case 'editar_suplemento':
-        return 'Suplemento editado';
-      case 'eliminar_suplemento':
-        return 'Suplemento eliminado';
-      case 'venta_suplemento':
-        return 'Venta de suplemento';
-      case 'anular_venta_suplemento':
-        return 'Venta de suplemento anulada';
-      case 'foto_suplemento':
-        return 'Foto de suplemento';
-      case 'inscripcion_venta_suplemento':
-        return 'Inscripción + venta de suplemento';
-      case 'crear_categoria':
-        return 'Categoría creada';
-      case 'editar_categoria':
-        return 'Categoría editada';
-      case 'incidencia':
-      case 'crear_incidencia':
-        return 'Incidencia reportada';
-      case 'editar_incidencia':
-        return 'Incidencia editada';
-      case 'cambiar_estado_incidencia':
-        return 'Estado de incidencia cambiado';
-      case 'incidencia_estado':
-        return 'Cambio en incidencia';
-      case 'agregar_comentario_incidencia':
-        return 'Comentario en incidencia';
-      case 'registrar_foto_incidencia':
-        return 'Foto en incidencia';
-      case 'upsert_tipo_incidencia':
-        return 'Tipo de incidencia guardado';
-      case 'reordenar_tipos_incidencia':
-        return 'Tipos de incidencia reordenados';
-      case 'guardar_tipos_pago':
-        return 'Tipos de pago guardados';
-      case 'ajuste':
-        return 'Ajuste de configuración';
-      case 'auditoria':
-        return 'Nota de auditoría';
-      default:
-        return tipo.replaceAll('_', ' ');
-    }
-  }
+  /// Delegada a [descripcionOp] (top-level, testeable).
+  String _descripcionOp(String tipo) => descripcionOp(tipo);
 
   /// Describe la operación en lenguaje humano, con la persona afectada.
   String _detalle(Map<String, dynamic> op) {
@@ -210,8 +123,8 @@ class _AuditoriaScreenState extends State<AuditoriaScreen> {
             ? '$nombre pagó $etiqueta: ${monto ?? '?'} CUP ($metodo)'
             : 'Pago de $etiqueta: ${monto ?? '?'} CUP ($metodo)';
       case 'inscribir':
-        final n = '${p['nombre'] ?? nombre ?? '?'}';
-        return 'Se inscribió a $n';
+        final n = '${p['nombre'] ?? nombre ?? ''}'.trim();
+        return n.isNotEmpty ? 'Se inscribió a $n' : 'Nueva inscripción';
       case 'regalar_mes_cumpleanos':
         return nombre != null
             ? 'Se le regaló el mes a $nombre (cumpleaños)'
@@ -452,4 +365,96 @@ class _AuditoriaScreenState extends State<AuditoriaScreen> {
         return AppColores.alerta;
     }
   }
+}
+
+/// v1.3.7: traduce un tipo de op técnico a lenguaje humano.
+/// Top-level para poder testearla.
+String descripcionOp(String tipo) {
+    switch (tipo) {
+      case 'inscribir':
+        return 'Inscripción de cliente';
+      case 'pago_mensual':
+        return 'Pago de mensualidad';
+      case 'pago_diario':
+        return 'Pago diario';
+      case 'cambiar_estado':
+        return 'Cambio de estado';
+      case 'foto':
+        return 'Foto de cliente';
+      case 'gasto':
+        return 'Gasto registrado';
+      case 'editar_cliente':
+        return 'Edición de cliente';
+      case 'editar_pago':
+        return 'Edición de pago';
+      case 'anular_pago':
+        return 'Pago anulado';
+      case 'editar_pago_diario':
+        return 'Edición de pago diario';
+      case 'anular_pago_diario':
+        return 'Pago diario anulado';
+      case 'eliminar_cliente':
+        return 'Cliente eliminado';
+      case 'eliminar_foto':
+        return 'Foto eliminada';
+      case 'admin_usuario':
+        return 'Gestión de usuario';
+      case 'confirmar_entrega':
+        return 'Entrega de efectivo confirmada';
+      case 'regalar_mes_cumpleanos':
+        return 'Mes de cumpleaños regalado';
+      case 'apertura_turno':
+        return 'Apertura de turno';
+      case 'cierre_turno':
+        return 'Cierre de turno';
+      case 'liquidar_caja':
+        return 'Caja liquidada (arqueo)';
+      case 'aprobar_incidencia_sync':
+        return 'Incidencia de sync aprobada';
+      case 'descartar_incidencia_sync':
+        return 'Incidencia de sync descartada';
+      case 'crear_suplemento':
+        return 'Suplemento creado';
+      case 'editar_suplemento':
+        return 'Suplemento editado';
+      case 'eliminar_suplemento':
+        return 'Suplemento eliminado';
+      case 'venta_suplemento':
+        return 'Venta de suplemento';
+      case 'anular_venta_suplemento':
+        return 'Venta de suplemento anulada';
+      case 'foto_suplemento':
+        return 'Foto de suplemento';
+      case 'inscripcion_venta_suplemento':
+        return 'Inscripción + venta de suplemento';
+      case 'crear_categoria':
+        return 'Categoría creada';
+      case 'editar_categoria':
+        return 'Categoría editada';
+      case 'incidencia':
+      case 'crear_incidencia':
+        return 'Incidencia reportada';
+      case 'editar_incidencia':
+        return 'Incidencia editada';
+      case 'cambiar_estado_incidencia':
+        return 'Estado de incidencia cambiado';
+      case 'incidencia_estado':
+        return 'Cambio en incidencia';
+      case 'agregar_comentario_incidencia':
+        return 'Comentario en incidencia';
+      case 'registrar_foto_incidencia':
+        return 'Foto en incidencia';
+      case 'upsert_tipo_incidencia':
+        return 'Tipo de incidencia guardado';
+      case 'reordenar_tipos_incidencia':
+        return 'Tipos de incidencia reordenados';
+      case 'guardar_tipos_pago':
+        return 'Tipos de pago guardados';
+      case 'ajuste':
+        return 'Ajuste de configuración';
+      case 'auditoria':
+        return 'Nota de auditoría';
+      default:
+        return tipo.replaceAll('_', ' ');
+    }
 }
