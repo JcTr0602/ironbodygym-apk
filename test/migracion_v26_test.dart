@@ -139,7 +139,7 @@ void main() {
 
     // Abrir con LocalDb dispara el onUpgrade 24→25→26 real.
     final db = await LocalDb.instance.db;
-    expect(await db.getVersion(), 28);
+    expect(await db.getVersion(), 29);
 
     // 1. Columnas nuevas en pagos.
     final cols = await _columnas(db, 'pagos');
@@ -187,7 +187,7 @@ void main() {
   test('instalación limpia v26: DDL trae columnas e índices', () async {
     await _dbPathNuevo();
     final db = await LocalDb.instance.db;
-    expect(await db.getVersion(), 28);
+    expect(await db.getVersion(), 29);
 
     final cols = await _columnas(db, 'pagos');
     for (final c in _colsPagos) {

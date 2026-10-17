@@ -74,7 +74,7 @@ void main() {
     final db = await LocalDb.instance.db;
 
     // 1. Versión migrada.
-    expect(await db.getVersion(), 28);
+    expect(await db.getVersion(), 29);
 
     // 2. Columnas nuevas existen.
     final info = await db.rawQuery('PRAGMA table_info(turnos)');
@@ -121,7 +121,7 @@ void main() {
     await LocalDb.resetParaTest();
 
     final db = await LocalDb.instance.db;
-    expect(await db.getVersion(), 28);
+    expect(await db.getVersion(), 29);
     final info = await db.rawQuery('PRAGMA table_info(turnos)');
     final cols = info.map((c) => '${c['name']}').toSet();
     expect(cols.contains('tiene_incidencias'), isTrue);

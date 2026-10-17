@@ -20,6 +20,7 @@ import '../fotos_cola.dart';
 import '../localdb.dart';
 import '../sync.dart';
 import 'componentes.dart';
+import 'cuentas_por_cobrar.dart';
 import 'detalle_suplemento.dart';
 import 'diseno.dart';
 import 'historial_ventas.dart';
@@ -310,6 +311,17 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
             icon: const Icon(Icons.share_outlined),
             tooltip: 'Compartir catálogo',
             onPressed: _compartirCatalogo,
+          ),
+          // v1.3.7 (Fase B §6.2): cuentas por cobrar (fiados).
+          IconButton(
+            icon: const Icon(Icons.account_balance_wallet_outlined),
+            tooltip: 'Cuentas por cobrar',
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(
+                  builder: (_) =>
+                      const CuentasPorCobrarScreen()),
+            ),
           ),
           if (_esDueno)
             IconButton(
@@ -688,6 +700,40 @@ class _TarjetaSuplemento extends StatelessWidget {
                           height: 1.2,
                         ),
                       ),
+                    // v1.3.7 (Fase B §6.2): chip de stock bajo.
+                    Builder(builder: (ctx) {
+                      final umbral = (sup['umbral_stock'] as num?)
+                              ?.toInt() ??
+                          3;
+                      if (inactivo || stock <= 0 || stock > umbral) {
+                        return const SizedBox.shrink();
+                      }
+                      return Padding(
+                        padding:
+                            const EdgeInsets.only(top: 4),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 8, vertical: 3),
+                          decoration: BoxDecoration(
+                            color: AppColores.alerta
+                                .withValues(alpha: 0.15),
+                            borderRadius:
+                                BorderRadius.circular(12),
+                            border: Border.all(
+                                color: AppColores.alerta
+                                    .withValues(alpha: 0.4)),
+                          ),
+                          child: Text(
+                            'Stock bajo: $stock',
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                              color: AppColores.alerta,
+                            ),
+                          ),
+                        ),
+                      );
+                    }),
                     const Spacer(),
                     SizedBox(
                       width: double.infinity,
@@ -917,6 +963,9 @@ class _EditarSuplementoScreenState
   final _desc = TextEditingController();
   final _precio = TextEditingController();
   final _stock = TextEditingController();
+  // v1.3.7 (Fase B §6.2): costo (solo dueño) y umbral de stock bajo.
+  final _costo = TextEditingController();
+  final _umbral = TextEditingController();
   bool _activo = true;
   bool _guardando = false;
   Uint8List? _fotoNueva;
@@ -938,8 +987,12 @@ class _EditarSuplementoScreenState
       _desc.text = '${s['descripcion'] ?? ''}';
       _precio.text = '${s['precio_oficial'] ?? ''}';
       _stock.text = '${s['stock'] ?? 0}';
+      _costo.text = '${s['costo'] ?? ''}';
+      _umbral.text = '${s['umbral_stock'] ?? 3}';
       _activo = (s['activo'] as int?) == 1;
       _categoriaId = s['categoria_id'] as int?;
+    } else {
+      _umbral.text = '3';
     }
     _cargarCategorias();
   }
@@ -1009,6 +1062,11 @@ class _EditarSuplementoScreenState
     }
     setState(() => _guardando = true);
     try {
+      // v1.3.7 (Fase B §6.2): costo (solo dueño) y umbral de stock.
+      final costo =
+          double.tryParse(_costo.text.trim().replaceAll(',', '.'));
+      final umbral =
+          int.tryParse(_umbral.text.trim()) ?? 3;
       final payload = {
         'nombre': nombre,
         'descripcion': _desc.text.trim(),
@@ -1018,6 +1076,11 @@ class _EditarSuplementoScreenState
         // v1.2.1: categoría asignada.
         if (_categoriaId != null) 'categoria_id': _categoriaId,
         if (_editando) 'suplemento_id': widget.suplemento!['id'],
+        // v1.3.7: costo solo lo envía el dueño (el campo UI ya lo
+        // restringe); umbral siempre.
+        if (AuthService().isOwner && costo != null && costo >= 0)
+          'costo': costo,
+        'umbral_stock': umbral < 0 ? 3 : umbral,
       };
       // v1.2.1 fix auditoría Gemini: el uuid de creación se genera aquí
       // para ligar la foto pendiente a la op (así no se pierde offline).
@@ -1178,6 +1241,21 @@ class _EditarSuplementoScreenState
               ),
             ],
           ),
+          const SizedBox(height: AppEspacio.sm),
+          // v1.3.7 (Fase B §6.2): costo (solo dueño, sensible) y
+          // umbral de stock bajo.
+          if (AuthService().isOwner)
+            CampoTexto(
+                controller: _costo,
+                etiqueta: 'Costo por unidad (USD)',
+                teclado: const TextInputType.numberWithOptions(
+                    decimal: true)),
+          if (AuthService().isOwner)
+            const SizedBox(height: AppEspacio.sm),
+          CampoTexto(
+              controller: _umbral,
+              etiqueta: 'Alerta de stock bajo (unidades)',
+              teclado: TextInputType.number),
           const SizedBox(height: AppEspacio.sm),
           SwitchListTile(
             value: _activo,

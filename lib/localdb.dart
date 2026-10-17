@@ -226,7 +226,7 @@ class LocalDb {
     final dir = await getDatabasesPath();
     _db = await openDatabase(
       p.join(dir, 'ironbody.db'),
-      version: 28,
+      version: 29,
       // v1.3-r4 (Gemini): WAL mode para que lectores (UI) y escritores
       // (Workmanager en otro isolate) no se bloqueen mutuamente.
       // v1.2.9+34 (hotfix): try-catch — si el dispositivo no soporta WAL,
@@ -855,6 +855,38 @@ class LocalDb {
                 {'k': 'wm_incidencias_sync', 'v': '0'},
                 conflictAlgorithm: ConflictAlgorithm.replace);
           } catch (_) {}
+        }
+        // v29 (v1.3.7, Fase B §6.2): campos nuevos de suplementos en el
+        // JSON del espejo (best-effort; el código tolera su ausencia con
+        // defaults: costo=0, umbral_stock=3).
+        // - suplementos: `costo` (REAL, solo visible para el dueño),
+        //   `umbral_stock` (INTEGER, alerta de stock bajo).
+        // - ventas_suplementos: `es_fiado` y `fiado_cliente_id` llegan
+        //   por el pull del servidor; no requieren backfill local.
+        if (oldV < 29) {
+          try {
+            final rows = await db.query('suplementos', columns: ['id', 'data']);
+            for (final r in rows) {
+              final data = Map<String, dynamic>.from(jsonDecode(
+                  r['data'] as String) as Map);
+              var cambio = false;
+              if (!data.containsKey('costo')) {
+                data['costo'] = 0;
+                cambio = true;
+              }
+              if (!data.containsKey('umbral_stock')) {
+                data['umbral_stock'] = 3;
+                cambio = true;
+              }
+              if (cambio) {
+                await db.update('suplementos', {'data': jsonEncode(data)},
+                    where: 'id = ?', whereArgs: [r['id']]);
+              }
+            }
+          } catch (_) {
+            // Tabla puede no existir en BDs mínimas de tests; el código
+            // tolera la ausencia de los campos.
+          }
         }
       },
     );

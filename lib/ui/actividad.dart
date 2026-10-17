@@ -1693,13 +1693,18 @@ class _ActividadScreenState extends State<ActividadScreen> {
     );
   }
 
-  /// v1.3.7 (Fase 2, D2): ¿el item es una venta en estado "fiado"?
+  /// v1.3.7 (Fase B §6.2): ¿el item es una venta en estado "fiado"?
   /// Regla de negocio: el fiado NO suma al "Total cobrado" hasta que
-  /// se pague. (Fase B implementará el estado; por ahora best-effort
-  /// sobre el detalle.)
+  /// se pague. Lee el campo estructurado `es_fiado`; el chequeo por
+  /// texto queda como respaldo con límite de palabra (\bfiado\b)
+  /// para no capturar "confiado" (nota de Argón).
+  static final _reFiado = RegExp(r'\bfiado\b', caseSensitive: false);
   bool _esFiado(Map<String, dynamic> a) {
-    final det = '${a['detalle'] ?? ''}'.toLowerCase();
-    return det.contains('fiado') && !det.contains('pagado');
+    final estructurado = (a['es_fiado'] as num?)?.toInt() == 1;
+    if (estructurado) return true;
+    final det = '${a['detalle'] ?? ''}';
+    return _reFiado.hasMatch(det) &&
+        !det.toLowerCase().contains('pagado');
   }
 
   /// v1.3.7 (Fase 2, D2): total cobrado en CUP de los items en [ini, fin].

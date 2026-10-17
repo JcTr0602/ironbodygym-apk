@@ -29,6 +29,23 @@ class _Caso {
   const _Caso(this.tipo, this.titulo, this.detalle, this.fecha);
 }
 
+// v1.3.7 (Fase B, nota de Argón): umbrales centralizados como constantes
+// nombradas (antes literales dispersos). Conservadores para evitar
+// falsos positivos.
+class _Umbrales {
+  /// Turno sospechoso si duró menos de este tiempo.
+  static const turnoCortoMin = 30;
+
+  /// Ventana de búsqueda de ediciones de pago.
+  static const edicionesDias = 30;
+
+  /// Días sin sync para alertar.
+  static const sinSyncDias = 3;
+
+  /// Ventana para buscar el ajuste de caja que respalda una edición.
+  static const ajusteVentanaHoras = 24;
+}
+
 class _AuditoriaSilenciosaScreenState
     extends State<AuditoriaSilenciosaScreen> {
   bool _cargando = true;
@@ -53,7 +70,7 @@ class _AuditoriaSilenciosaScreenState
     if (mounted) setState(() => _cargando = false);
   }
 
-  /// (a) Turnos cerrados que duraron menos de 30 minutos.
+  /// (a) Turnos cerrados que duraron menos de [_Umbrales.turnoCortoMin].
   Future<void> _detectarTurnosCortos() async {
     final db = await LocalDb.instance.db;
     List<Map<String, dynamic>> turnos = [];
@@ -74,7 +91,7 @@ class _AuditoriaSilenciosaScreenState
         continue;
       }
       final min = ci.difference(ap).inMinutes;
-      if (min >= 0 && min < 30) {
+      if (min >= 0 && min < _Umbrales.turnoCortoMin) {
         _casos.add(_Caso(
           'turno_corto',
           'Turno de $min min (${t['turno'] ?? '?'})',
@@ -90,17 +107,19 @@ class _AuditoriaSilenciosaScreenState
       '${dt.hour.toString().padLeft(2, '0')}:'
       '${dt.minute.toString().padLeft(2, '0')}';
 
-  /// (b) Ediciones de pagos en los últimos 30 días (para revisar si
-  /// tuvieron movimiento de caja asociado).
+  /// (b) Ediciones de pagos en los últimos [_Umbrales.edicionesDias] días.
+  /// Nota de Argón: solo se listan las ediciones SIN movimiento de caja
+  /// asociado (un `ajuste` del mismo autor en ±24h la respalda como
+  /// corrección legítima con asiento contable).
   Future<void> _detectarEdiciones() async {
     final db = await LocalDb.instance.db;
     List<Map<String, dynamic>> ops = [];
     try {
       final desde = ahoraHabana()
-          .subtract(const Duration(days: 30))
+          .subtract(Duration(days: _Umbrales.edicionesDias))
           .toIso8601String();
       ops = await db.query('ops_queue',
-          columns: ['tipo', 'creada_ts', 'telegram_id', 'estado'],
+          columns: ['tipo', 'creada_ts', 'telegram_id', 'estado', 'payload'],
           where: "tipo IN ('editar_pago', 'editar_pago_diario') "
               "AND creada_ts >= ?",
           whereArgs: [desde],
@@ -111,16 +130,41 @@ class _AuditoriaSilenciosaScreenState
     }
     for (final op in ops) {
       final ts = '${op['creada_ts'] ?? ''}';
+      final tid = op['telegram_id'];
+      // ¿Hay un ajuste de caja del mismo autor cerca en el tiempo?
+      var respaldada = false;
+      if (tid != null && ts.isNotEmpty) {
+        try {
+          final dt = DateTime.parse(ts);
+          final ini = dt
+              .subtract(
+                  Duration(hours: _Umbrales.ajusteVentanaHoras))
+              .toIso8601String();
+          final fin = dt
+              .add(Duration(hours: _Umbrales.ajusteVentanaHoras))
+              .toIso8601String();
+          final ajustes = await db.query('ops_queue',
+              columns: ['op_uuid'],
+              where: "tipo = 'ajuste' AND telegram_id = ? "
+                  "AND creada_ts >= ? AND creada_ts <= ?",
+              whereArgs: [tid, ini, fin],
+              limit: 1);
+          respaldada = ajustes.isNotEmpty;
+        } catch (_) {}
+      }
+      if (respaldada) continue;
       _casos.add(_Caso(
         'edicion',
-        'Edición: ${op['tipo']}',
-        'Por ID ${op['telegram_id'] ?? '?'} · estado ${op['estado']}',
+        'Edición sin respaldo: ${op['tipo']}',
+        'Por ID ${tid ?? '?'} · estado ${op['estado']} · '
+            'sin ajuste de caja en ±${_Umbrales.ajusteVentanaHoras}h',
         ts.length >= 10 ? ts.substring(0, 10) : '',
       ));
     }
   }
 
-  /// (c) Este dispositivo lleva más de 3 días sin sincronizar.
+  /// (c) Este dispositivo lleva más de [_Umbrales.sinSyncDias] días
+  /// sin sincronizar.
   Future<void> _detectarSinSync() async {
     try {
       final ultimo =
@@ -129,7 +173,7 @@ class _AuditoriaSilenciosaScreenState
       final dt = DateTime.tryParse(ultimo);
       if (dt == null) return;
       final dias = ahoraHabana().difference(dt).inDays;
-      if (dias > 3) {
+      if (dias > _Umbrales.sinSyncDias) {
         _casos.add(_Caso(
           'sin_sync',
           'Sin sincronizar hace $dias días',

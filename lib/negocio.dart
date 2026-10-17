@@ -3284,6 +3284,9 @@ Future<String> registrarVentaSuplemento({
   required String compradorNombre,
   String? nota,
   String? notaPrecio,
+  // v1.3.7 (Fase B §6.2): fiado — solo con cliente asociado. El fiado
+  // NO suma al "Total cobrado" hasta que se salda (regla de negocio).
+  bool esFiado = false,
   DatabaseExecutor? txn,
 }) async {
   // Validación PRE-transacción (no necesita BD).
@@ -3294,6 +3297,10 @@ Future<String> registrarVentaSuplemento({
   }
   if (compradorTipo == 'cliente' && clienteId == null) {
     throw Exception('Falta el cliente comprador');
+  }
+  // v1.3.7 (Fase B §6.2): el fiado exige cliente asociado.
+  if (esFiado && (compradorTipo != 'cliente' || clienteId == null)) {
+    throw Exception('El fiado requiere un cliente asociado');
   }
 
   final db = LocalDb.instance;
@@ -3320,6 +3327,9 @@ Future<String> registrarVentaSuplemento({
     if (notaPrecio != null && notaPrecio.isNotEmpty)
       'nota_precio': notaPrecio,
     'entregado': 0, // int; el estado de sync va en ops_queue
+    // v1.3.7 (Fase B §6.2): fiado — estado estructurado (no texto).
+    if (esFiado) 'es_fiado': 1,
+    if (esFiado && clienteId != null) 'fiado_cliente_id': clienteId,
   };
 
   Future<String> dentro(DatabaseExecutor ex) async {

@@ -53,6 +53,8 @@ class _VentaSuplementoScreenState
   String _clienteNombre = '';
   bool _promoActiva = false;
   bool _guardando = false;
+  // v1.3.7 (Fase B §6.2): venta a fiado (solo con cliente).
+  bool _esFiado = false;
 
   double get _precioOficial =>
       (widget.suplemento['precio_oficial'] as num?)?.toDouble() ?? 0;
@@ -308,6 +310,8 @@ class _VentaSuplementoScreenState
         // v1.3.4 (candado b): solo viaja si el precio difiere.
         notaPrecio:
             difiere && notaPrecio.isNotEmpty ? notaPrecio : null,
+        // v1.3.7 (Fase B §6.2): fiado.
+        esFiado: _esFiado && _tipoComprador == 'cliente',
       );
       // v1.3.1 (Argón): pop solo si el registro tuvo éxito.
       if (mounted) Navigator.pop(context, true);
@@ -484,12 +488,27 @@ class _VentaSuplementoScreenState
           const SizedBox(height: AppEspacio.sm),
           const EncabezadoSeccion(titulo: 'Comprador'),
           _selectorComprador(),
+          // v1.3.7 (Fase B §6.2): fiado solo con cliente del gym.
+          if (_tipoComprador == 'cliente') ...[
+            const SizedBox(height: AppEspacio.sm),
+            SwitchListTile(
+              value: _esFiado,
+              activeThumbColor: AppColores.naranja,
+              title: const Text('Vender a fiado',
+                  style: AppTexto.cuerpo),
+              subtitle: const Text(
+                  'Se cobra después; no suma a la caja de hoy',
+                  style: AppTexto.secundario),
+              onChanged: (v) =>
+                  setState(() => _esFiado = v),
+            ),
+          ],
           // v1.2.1: nota opcional de la venta.
           const SizedBox(height: AppEspacio.sm),
           const EncabezadoSeccion(titulo: 'Nota (opcional)'),
           CampoTexto(
             controller: _nota,
-            hint: 'Ej: apartado, fiado…',
+            hint: 'Ej: apartado…',
             icono: Icons.sticky_note_2_outlined,
           ),
           const SizedBox(height: AppEspacio.lg),

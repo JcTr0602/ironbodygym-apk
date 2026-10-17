@@ -688,6 +688,49 @@ class DetalleSuplementoScreen extends StatelessWidget {
               ],
             ),
           ),
+          // v1.3.7 (Fase B §6.2): margen por bote, SOLO dueño.
+          if (AuthService().isOwner)
+            Builder(builder: (ctx) {
+              final costo =
+                  (suplemento['costo'] as num?)?.toDouble() ?? 0;
+              if (costo <= 0 || precio <= 0) {
+                return const SizedBox.shrink();
+              }
+              final margen = precio - costo;
+              final pct =
+                  costo > 0 ? (margen / costo * 100) : 0.0;
+              return Column(
+                children: [
+                  const SizedBox(height: AppEspacio.md),
+                  Tarjeta(
+                    child: Row(
+                      children: [
+                        const Icon(Icons.trending_up_outlined,
+                            color: AppColores.exito, size: 32),
+                        const SizedBox(width: AppEspacio.md),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment:
+                                CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                  'Margen: ${margen.toStringAsFixed(2)} USD '
+                                  '(${pct.toStringAsFixed(0)}%)',
+                                  style: AppTexto.cuerpo.copyWith(
+                                      fontWeight: FontWeight.bold,
+                                      color: AppColores.exito)),
+                              Text(
+                                  'Costo: ${costo.toStringAsFixed(2)} USD',
+                                  style: AppTexto.secundario),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              );
+            }),
           const SizedBox(height: AppEspacio.lg),
           BotonPrimario(
             texto: 'Vender',
