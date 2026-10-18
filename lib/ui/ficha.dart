@@ -7,6 +7,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_contacts/flutter_contacts.dart';
 import 'package:image_picker/image_picker.dart';
@@ -17,6 +18,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:uuid/uuid.dart';
 
 import '../auth.dart';
+import '../permisos_entrenador.dart';
 import '../app_log.dart';
 import '../tiempo.dart';
 import '../fotos.dart';
@@ -24,11 +26,14 @@ import '../fotos_cola.dart';
 import '../localdb.dart';
 import '../negocio.dart';
 import '../sync.dart';
+import '../acceso_app_cache.dart';
 import 'componentes.dart';
 import 'dialogo_pago.dart';
 import 'confirmacion_cobro.dart';
 import 'diseno.dart';
 import 'editor_foto.dart';
+import 'modal_pin_acceso.dart';
+import 'vista_previa_cliente.dart';
 import 'widgets.dart';
 
 class FichaScreen extends StatefulWidget {
@@ -49,6 +54,10 @@ class _FichaScreenState extends State<FichaScreen> {
   // v1.3.3 (Argón spec 2): regalo de cumpleaños del año en curso, si ya
   // se otorgó. Candado anual + botón "Reenviar WhatsApp".
   Map<String, dynamic>? _regaloAnio;
+  // v1.3.9 (F1): estado del acceso a la App de Clientes.
+  // null = sin acceso o caché no cargado; _accesoSinConexion = true si
+  // no se pudo verificar por falta de red.
+  bool _accesoSinConexion = false;
 
   @override
   void initState() {
@@ -66,6 +75,12 @@ class _FichaScreenState extends State<FichaScreen> {
         soloCompartidas: !AuthService().isAdmin);
     // v1.3.3 (Argón spec 2): ¿ya se regaló este año?
     final regaloAnio = await _regaloDelAnio(widget.clienteId);
+    // v1.3.9 (F1): cargar caché de accesos (solo dueño, tolerante a offline).
+    bool accesoSinConexion = false;
+    if (AuthService().isOwner && !AccesoAppCache.instance.cargado) {
+      final ok = await AccesoAppCache.instance.cargar();
+      if (!ok) accesoSinConexion = true;
+    }
     if (mounted) {
       setState(() {
         _c = c;
@@ -74,6 +89,7 @@ class _FichaScreenState extends State<FichaScreen> {
         _incidencias = incidencias;
         _foto = null;
         _regaloAnio = regaloAnio;
+        _accesoSinConexion = accesoSinConexion;
       });
     }
     // v1.3.6 (reporte de campo): la foto carga en SEGUNDO PLANO sin
@@ -1815,6 +1831,11 @@ class _FichaScreenState extends State<FichaScreen> {
                         const SizedBox(
                             height: AppEspacio.md),
                       ],
+                      // v1.3.9 (F1): acceso a la App de Clientes.
+                      // v1.3.9 Sprint 1 (#14): también si tiene permiso can_generate_pin.
+                      if (AuthService().isOwner ||
+                          PermisosEntrenador().canGeneratePin)
+                        _seccionAccesoApp(),
                       // Acciones secundarias
                       if (vencido)
                         Padding(
@@ -1924,9 +1945,424 @@ class _FichaScreenState extends State<FichaScreen> {
     );
   }
 
+  // ============================================================
+  // v1.3.9 (F1): Acceso a la App de Clientes
+  // ============================================================
+
+  /// Sección "Acceso App" en la ficha (solo dueño).
+  /// 4 estados: sin acceso, activo, revocado, bloqueado.
+  Widget _seccionAccesoApp() {
+    final acceso =
+        AccesoAppCache.instance.obtener(widget.clienteId);
+
+    Widget contenido;
+    if (_accesoSinConexion && !AccesoAppCache.instance.cargado) {
+      contenido = Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text('Acceso App',
+              style: AppTexto.titulo),
+          const SizedBox(height: AppEspacio.sm),
+          const Text(
+              'Sin conexión para verificar acceso.',
+              style: AppTexto.secundario),
+          const SizedBox(height: AppEspacio.sm),
+          OutlinedButton.icon(
+            icon: const Icon(Icons.refresh, size: 18),
+            label: const Text('Reintentar'),
+            onPressed: _reintentarCargaAcceso,
+          ),
+        ],
+      );
+    } else if (acceso == null) {
+      // Sin acceso.
+      contenido = Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text('Acceso App',
+              style: AppTexto.titulo),
+          const SizedBox(height: AppEspacio.sm),
+          const Text(
+              'Este cliente aún no tiene acceso a la app.',
+              style: AppTexto.secundario),
+          const SizedBox(height: AppEspacio.sm),
+          FilledButton.icon(
+            icon: const Icon(Icons.key, size: 18),
+            label: const Text('Generar PIN para App'),
+            onPressed: () => _generarPin(esRegeneracion: false),
+          ),
+        ],
+      );
+    } else if (!acceso.activo) {
+      // Revocado.
+      contenido = Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text('Acceso App',
+              style: AppTexto.titulo),
+          const SizedBox(height: AppEspacio.sm),
+          Chip(
+            avatar: const Icon(Icons.block,
+                size: 16, color: Colors.white),
+            label: const Text('Revocado',
+                style: TextStyle(color: Colors.white)),
+            backgroundColor: Colors.grey[600],
+          ),
+          const SizedBox(height: AppEspacio.sm),
+          FilledButton.icon(
+            icon: const Icon(Icons.refresh, size: 18),
+            label: const Text('Reactivar / Generar PIN'),
+            onPressed: () => _generarPin(esRegeneracion: true),
+          ),
+        ],
+      );
+    } else if (acceso.estaBloqueado) {
+      // Bloqueado por intentos fallidos.
+      contenido = Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text('Acceso App',
+              style: AppTexto.titulo),
+          const SizedBox(height: AppEspacio.sm),
+          Chip(
+            avatar: const Icon(Icons.lock,
+                size: 16, color: Colors.white),
+            label: const Text('Bloqueado',
+                style: TextStyle(color: Colors.white)),
+            backgroundColor: Colors.amber[700],
+          ),
+          const SizedBox(height: AppEspacio.sm),
+          Text(
+              'Intentos fallidos: ${acceso.intentosFallidos}',
+              style: AppTexto.secundario),
+          const SizedBox(height: AppEspacio.sm),
+          FilledButton.icon(
+            icon: const Icon(Icons.lock_open, size: 18),
+            label: const Text('Desbloquear (Nuevo PIN)'),
+            onPressed: () => _generarPin(esRegeneracion: true),
+          ),
+        ],
+      );
+    } else {
+      // Activo.
+      final ultimo = acceso.ultimoAccesoEn == null
+          ? 'Nunca ha entrado'
+          : 'Último acceso: ${fmtFecha(acceso.ultimoAccesoEn!.toIso8601String().substring(0, 10))}';
+      contenido = Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text('Acceso App',
+              style: AppTexto.titulo),
+          const SizedBox(height: AppEspacio.sm),
+          Chip(
+            avatar: const Icon(Icons.check_circle,
+                size: 16, color: Colors.white),
+            label: const Text('Activo',
+                style: TextStyle(color: Colors.white)),
+            backgroundColor: Colors.green[600],
+          ),
+          const SizedBox(height: AppEspacio.sm),
+          Text(ultimo, style: AppTexto.secundario),
+          const SizedBox(height: AppEspacio.sm),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton.icon(
+                  icon: const Icon(Icons.refresh, size: 18),
+                  label: const Text('Regenerar PIN'),
+                  onPressed: () =>
+                      _confirmarRegenerar(acceso),
+                ),
+              ),
+              const SizedBox(width: AppEspacio.sm),
+              Expanded(
+                child: OutlinedButton.icon(
+                  icon: const Icon(Icons.block,
+                      size: 18, color: Colors.red),
+                  label: const Text('Revocar',
+                      style: TextStyle(color: Colors.red)),
+                  onPressed: () =>
+                      _confirmarRevocar(acceso),
+                ),
+              ),
+            ],
+          ),
+        ],
+      );
+    }
+
+    return Column(
+      children: [
+        Tarjeta(child: contenido),
+        const SizedBox(height: AppEspacio.sm),
+        // v1.3.9 (ajuste Argón): vista previa disponible en TODOS los
+        // estados (el RPC no requiere PIN activo).
+        SizedBox(
+          width: double.infinity,
+          child: OutlinedButton.icon(
+            icon: const Icon(Icons.preview, size: 18),
+            label: const Text('Vista previa App'),
+            onPressed: _abrirVistaPrevia,
+          ),
+        ),
+        const SizedBox(height: AppEspacio.sm),
+        // v1.3.9 Sprint 1 (#2): avisar por WhatsApp
+        SizedBox(
+          width: double.infinity,
+          child: OutlinedButton.icon(
+            icon: const Icon(Icons.chat, size: 18, color: Colors.green),
+            label: const Text('Avisar por WhatsApp'),
+            onPressed: () => _mostrarAvisosWhatsApp(context),
+          ),
+        ),
+        const SizedBox(height: AppEspacio.md),
+      ],
+    );
+  }
+
+  /// Limpia un teléfono cubano para wa.me (Argón).
+  String _limpiarTelefonoCuba(String raw) {
+    final digitos = raw.replaceAll(RegExp(r'[^0-9]'), '');
+    if (digitos.length == 8 &&
+        (digitos.startsWith('5') || digitos.startsWith('6'))) {
+      return '53$digitos';
+    }
+    return digitos;
+  }
+
+  /// v1.3.9 Sprint 1 (#2): avisos por WhatsApp con plantillas editables.
+  Future<void> _mostrarAvisosWhatsApp(BuildContext context) async {
+    final cli = _c;
+    final String nombre = '${cli?['nombre'] ?? 'atleta'}';
+    final String telefonoRaw = '${cli?['telefono'] ?? ''}';
+    final String fechaVenc = '${cli?['pagado_hasta'] ?? 'próximamente'}';
+
+    final telLimpio = _limpiarTelefonoCuba(telefonoRaw);
+    if (telLimpio.length < 8) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+              content: Text(
+                  'Este cliente no tiene un teléfono válido registrado.')),
+        );
+      }
+      return;
+    }
+
+    final prefs = await SharedPreferences.getInstance();
+    final ultimaPromo = prefs.getString('ultima_plantilla_promo') ??
+        'Hola $nombre, tenemos una promoción especial para ti en Iron Body Gym: ';
+
+    if (!context.mounted) return;
+
+    final plantillas = {
+      'vencimiento':
+          'Hola $nombre, te recordamos que tu membresía en Iron Body Gym vence el $fechaVenc. ¡Te esperamos para renovar!',
+      'recordatorio':
+          'Hola $nombre, ¡hace días no te vemos por Iron Body Gym! Recuerda que la constancia es la clave. ¡Te esperamos hoy!',
+      'promo': ultimaPromo,
+      'libre': 'Hola $nombre, ',
+    };
+
+    final tipoSeleccionado = await showModalBottomSheet<String>(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const ListTile(
+              title: Text('Avisar por WhatsApp',
+                  style: TextStyle(fontWeight: FontWeight.bold)),
+              subtitle: Text(
+                  'Selecciona una plantilla para editar antes de enviar'),
+            ),
+            ListTile(
+              leading:
+                  const Icon(Icons.schedule, color: Colors.orange),
+              title: const Text('Vencimiento próximo'),
+              onTap: () => Navigator.pop(ctx, 'vencimiento'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.fitness_center,
+                  color: Colors.blue),
+              title: const Text('Recordatorio de asistencia'),
+              onTap: () => Navigator.pop(ctx, 'recordatorio'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.local_offer,
+                  color: Colors.purple),
+              title:
+                  const Text('Promoción (guarda último texto)'),
+              onTap: () => Navigator.pop(ctx, 'promo'),
+            ),
+            ListTile(
+              leading:
+                  const Icon(Icons.edit, color: Colors.teal),
+              title: const Text('Texto libre'),
+              onTap: () => Navigator.pop(ctx, 'libre'),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (tipoSeleccionado == null || !context.mounted) return;
+
+    final ctrl =
+        TextEditingController(text: plantillas[tipoSeleccionado]);
+
+    final textoFinal = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Confirmar mensaje'),
+        content: TextField(
+          controller: ctrl,
+          maxLines: 5,
+          decoration: const InputDecoration(
+            border: OutlineInputBorder(),
+            hintText: 'Escribe el mensaje...',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('CANCELAR'),
+          ),
+          ElevatedButton.icon(
+            icon: const Icon(Icons.send, size: 16),
+            label: const Text('ABRIR WHATSAPP'),
+            onPressed: () =>
+                Navigator.pop(ctx, ctrl.text.trim()),
+          ),
+        ],
+      ),
+    );
+
+    if (textoFinal == null || textoFinal.isEmpty) return;
+
+    // Si usó la plantilla promo, guardar para el próximo cliente
+    if (tipoSeleccionado == 'promo') {
+      await prefs.setString('ultima_plantilla_promo', textoFinal);
+    }
+
+    final uri = Uri.parse(
+      'https://wa.me/$telLimpio?text=${Uri.encodeComponent(textoFinal)}',
+    );
+    await launchUrl(uri, mode: LaunchMode.externalApplication);
+  }
+
+  Future<void> _reintentarCargaAcceso() async {
+    final ok = await AccesoAppCache.instance.cargar();
+    if (mounted) {
+      setState(() => _accesoSinConexion = !ok);
+    }
+  }
+
+  Future<void> _confirmarRegenerar(AccesoCliente acceso) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Regenerar PIN'),
+        content: const Text(
+            'Se invalidará el PIN anterior y se cerrará la sesión del cliente en su app. ¿Continuar?'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: const Text('Cancelar')),
+          FilledButton(
+              onPressed: () => Navigator.of(ctx).pop(true),
+              child: const Text('Regenerar')),
+        ],
+      ),
+    );
+    if (ok == true && mounted) {
+      _generarPin(esRegeneracion: true);
+    }
+  }
+
+  Future<void> _confirmarRevocar(AccesoCliente acceso) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Revocar acceso'),
+        content: Text(
+            'Se desactivará el acceso de ${acceso.nombre} a la app y se cerrará su sesión. ¿Continuar?'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: const Text('Cancelar')),
+          FilledButton(
+              style: FilledButton.styleFrom(
+                  backgroundColor: Colors.red),
+              onPressed: () => Navigator.of(ctx).pop(true),
+              child: const Text('Revocar')),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    try {
+      await Supabase.instance.client
+          .rpc('revocar_acceso_cliente', params: {
+        'p_cliente_id': widget.clienteId,
+      });
+      // v1.3.9 (ajuste Argón): recargar en vez de eliminar del caché —
+      // el servidor pone activo=false, no borra el registro.
+      await AccesoAppCache.instance.cargar();
+      if (mounted) {
+        setState(() {});
+        ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+                content: Text('Acceso revocado')));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text('Error al revocar: $e')));
+      }
+    }
+  }
+
+  /// Genera (o regenera) el PIN vía RPC y muestra el modal.
+  Future<void> _generarPin({required bool esRegeneracion}) async {
+    final nombre = '${_c?['nombre'] ?? 'Cliente'}';
+    final telefono = '${_c?['telefono'] ?? ''}';
+    try {
+      final res = await Supabase.instance.client
+          .rpc('generar_acceso_cliente', params: {
+        'p_cliente_id': widget.clienteId,
+        'p_creado_por': AuthService().username,
+      });
+      final data = Map<String, dynamic>.from(res as Map);
+      final pin = '${data['pin_temporal'] ?? ''}';
+      if (pin.isEmpty) throw 'El servidor no devolvió el PIN';
+      // Invalidación inmediata: recargar el caché para reflejar el cambio.
+      await AccesoAppCache.instance.cargar();
+      if (mounted) {
+        setState(() => _accesoSinConexion = false);
+        mostrarModalPin(context, pin, telefono, nombre);
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text('Error al generar PIN: $e')));
+      }
+    }
+  }
+
+  /// Abre la vista previa de la app del cliente (F6).
+  void _abrirVistaPrevia() {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => VistaPreviaClienteScreen(
+          clienteId: widget.clienteId,
+          nombreCliente: '${_c?['nombre'] ?? ''}',
+        ),
+      ),
+    );
+  }
+
   /// Resumen 360: totales del cliente.
-  Widget _resumen360() {
-    final total = _pagos.fold<double>(
+  Widget _resumen360() {    final total = _pagos.fold<double>(
         0,
         (s, p) =>
             s +

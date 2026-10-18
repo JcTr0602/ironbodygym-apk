@@ -38,6 +38,8 @@ class _InscribirScreenState extends State<InscribirScreen> {
   String _sexo = 'M';
   String _periodo = 'mensual';
   int _meses = 1;
+  // v1.3.9 (Bug 2): método de pago del período inicial (antes hardcodeado a 'efectivo').
+  String _metodoPago = 'efectivo';
   File? _foto;
   bool _guardando = false;
   bool _esMenor = false;
@@ -105,7 +107,13 @@ class _InscribirScreenState extends State<InscribirScreen> {
           0;
     }
     // v1.2.2: menores pagan precio reducido
-    final precioMensual = _esMenor ? _precioMenorVal : precios['mensual']!;
+    // v1.3.9 (Bug 2, Argón): respetar el método de pago elegido —
+    // la tarifa por transferencia difiere del efectivo.
+    final precioMensual = _esMenor
+        ? _precioMenorVal
+        : (_metodoPago == 'transferencia'
+            ? precios['transfer']!
+            : precios['mensual']!);
     return precioMensual * _meses;
   }
 
@@ -238,7 +246,7 @@ class _InscribirScreenState extends State<InscribirScreen> {
       nombre: nombre,
       periodoEtiqueta: _etiquetaPeriodo(),
       montoTxt: '${fmtMonto(monto)} CUP',
-      metodoPago: 'efectivo',
+      metodoPago: _metodoPago,
       validoHastaTxt: fmtFecha(hasta),
       telefono: tel,
       carnet: carnet,
@@ -263,6 +271,8 @@ class _InscribirScreenState extends State<InscribirScreen> {
           'telefono': tel.isEmpty ? null : tel,
           'carnet': carnet.isEmpty ? null : carnet,
           'fecha': DateTime.now().toIso8601String().substring(0, 10),
+          // v1.3.9 (Bug 2): método de pago elegido (antes hardcodeado a 'efectivo').
+          'metodo_pago': _metodoPago,
           // v1.2.2: guardar si es menor y el precio aplicado (histórico)
           if (_esMenor) 'es_menor': true,
           'precio_aplicado': monto,
@@ -296,6 +306,8 @@ class _InscribirScreenState extends State<InscribirScreen> {
       'mensual': (aj['mensualidad'] as num?)?.toDouble() ?? 2000,
       'semanal': (aj['pago_semanal'] as num?)?.toDouble() ?? 600,
       'quincenal': (aj['pago_quincenal'] as num?)?.toDouble() ?? 1200,
+      // v1.3.9 (Bug 2): tarifa por transferencia (difiere del efectivo).
+      'transfer': (aj['transferencia'] as num?)?.toDouble() ?? 2500,
     };
   }
 
@@ -471,7 +483,8 @@ class _InscribirScreenState extends State<InscribirScreen> {
                                         child: Text(
                                             _esMenor
                                                 ? '$m mes${m == 1 ? '' : 'es'} (${fmtMonto(_precioMenorVal * m)} CUP) — Menor de edad'
-                                                : '$m mes${m == 1 ? '' : 'es'} (${fmtMonto(pr['mensual']! * m)} CUP)')),
+                                                // v1.3.9 (Bug 2): mostrar tarifa según método de pago elegido.
+                                                : '$m mes${m == 1 ? '' : 'es'} (${fmtMonto((_metodoPago == 'transferencia' ? pr['transfer']! : pr['mensual']!) * m)} CUP)')),
                                   const DropdownMenuItem(
                                       value:
                                           'personalizado',
@@ -536,6 +549,30 @@ class _InscribirScreenState extends State<InscribirScreen> {
                             ],
                           );
                         },
+                      ),
+                      // v1.3.9 (Bug 2): selector de método de pago del período
+                      // inicial. Patrón visual de dialogo_pago.dart.
+                      const SizedBox(height: AppEspacio.md),
+                      const Text('Método de pago:',
+                          style: AppTexto.cuerpo),
+                      const SizedBox(height: AppEspacio.sm),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          ChoiceChip(
+                              label: const Text('Efectivo'),
+                              avatar: const Icon(Icons.payments, size: 18),
+                              selected: _metodoPago == 'efectivo',
+                              onSelected: (_) => setState(
+                                  () => _metodoPago = 'efectivo')),
+                          const SizedBox(width: 8),
+                          ChoiceChip(
+                              label: const Text('Transfer.'),
+                              avatar: const Icon(Icons.smartphone, size: 18),
+                              selected: _metodoPago == 'transferencia',
+                              onSelected: (_) => setState(
+                                  () => _metodoPago = 'transferencia')),
+                        ],
                       ),
                     ],
                   ),

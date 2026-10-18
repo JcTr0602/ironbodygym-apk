@@ -12,6 +12,7 @@ import '../localdb.dart';
 import '../negocio.dart';
 import '../novedades.dart';
 import '../perfil.dart';
+import '../permisos_entrenador.dart';
 import '../sync.dart';
 import '../theme.dart';
 import '../tiempo.dart';
@@ -69,6 +70,39 @@ class _HomeScreenState extends State<HomeScreen>
   /// Evita recargas simultáneas de _cargar().
   bool _cargando = false;
 
+  /// Evita apilar el diálogo de suspendido (Argón).
+  bool _mostrandoDialogoSuspendido = false;
+
+  /// v1.3.9 Sprint 1 (#14): carga permisos y verifica si está suspendido.
+  Future<void> _verificarPermisos() async {
+    await PermisosEntrenador().cargar();
+    if (!mounted || _mostrandoDialogoSuspendido) return;
+    if (PermisosEntrenador().estaSuspendido) {
+      _mostrandoDialogoSuspendido = true;
+      // Mostrar diálogo de suspendido
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Acceso suspendido'),
+          content: const Text(
+            'Tu acceso fue suspendido por el administrador. '
+            'Contacta a Julio Cesar.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.pop(ctx);
+                AuthService().signOut();
+              },
+              child: const Text('ENTENDIDO'),
+            ),
+          ],
+        ),
+      );
+    }
+  }
+
   /// v1.3.0 (Gemini): caché en memoria 30s para evitar recargas
   /// al volver del background. Bypass con forceRefresh.
   DateTime? _lastFetch;
@@ -100,9 +134,10 @@ class _HomeScreenState extends State<HomeScreen>
   // "Pulso del Día"; _entrenadoresSinSync medía otra cosa).
   List<String> _turnosSinReporte = [];
   // v1.3.6 (ítem 4, Jc): turnos sin reporte descartados por el usuario.
-  // SOLO en memoria por sesión (nunca persistido). Clave "fecha:turno":
-  // si aparece un turno NUEVO sin reporte, el banner reaparece solo.
-  final Set<String> _turnosSinReporteDescartados = {};
+  // v1.3.9 (Bug 3, Argón): STATIC para que sobreviva en RAM aunque Home
+  // se desmonte y reconstruya al navegar. Clave "fecha:turno": jamás oculta
+  // el turno del día siguiente. Solo en memoria (nunca persistido).
+  static final Set<String> _turnosSinReporteDescartados = {};
 
   /// Turnos sin reporte visibles (excluye los descartados en la sesión).
   List<String> get _turnosSinReporteVisibles {
@@ -117,6 +152,8 @@ class _HomeScreenState extends State<HomeScreen>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _cargar();
+    // v1.3.9 Sprint 1 (#14): cargar permisos y verificar suspensión
+    _verificarPermisos();
     // Auto-actualiza contadores cuando termina una sincronización.
     // (item 11: avisa si la sincronización falla).
     _sub = SyncEngine.instance.statusStream.listen((s) async {
@@ -177,6 +214,10 @@ class _HomeScreenState extends State<HomeScreen>
   /// Bloqueo automático con PIN al volver a la app (item 14).
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    // v1.3.9 Sprint 1 (#14): re-verificar al volver del background
+    if (state == AppLifecycleState.resumed) {
+      _verificarPermisos();
+    }
     if (state == AppLifecycleState.paused ||
         state == AppLifecycleState.inactive) {
       PerfilService.instance.setUltimaActividad(
@@ -1636,7 +1677,12 @@ class _FabAccionesRapidasState extends State<_FabAccionesRapidas>
   }
 
   void _irCerrando(VoidCallback accion) {
-    _toggle();
+    // v1.3.9 (Bug 1, Argón): cierre EXPLÍCITO (no toggle) antes de navegar.
+    // Garantiza que al regresar a Home el estado visual coincida con el lógico.
+    if (_abierto) {
+      setState(() => _abierto = false);
+      _ctrl.reverse();
+    }
     accion();
   }
 
@@ -1647,28 +1693,64 @@ class _FabAccionesRapidasState extends State<_FabAccionesRapidas>
       onPopInvokedWithResult: (didPop, _) {
         if (!didPop && _abierto) _toggle();
       },
-      child: Column(
+      // v1.3.9 (Argón): Stack con clipBehavior none para permitir que el
+      // scrim se extienda más allá de los límites del FAB.
+      child: Stack(
+        clipBehavior: Clip.none,
+        alignment: Alignment.bottomRight,
+        children: [
+          // v1.3.9 (Argón): Scrim semitransparente que cubre la pantalla
+          // cuando el dial está abierto. Al tocarlo, cierra el dial.
+          // Positioned con offsets negativos grandes para cubrir toda la pantalla.
+          Positioned(
+            top: -2000,
+            left: -2000,
+            right: -30,
+            bottom: -30,
+            child: IgnorePointer(
+              ignoring: !_abierto,
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: () => setState(() => _abierto = false),
+                child: AnimatedOpacity(
+                  duration: const Duration(milliseconds: 200),
+                  opacity: _abierto ? 1.0 : 0.0,
+                  child: Container(
+                    color: Colors.black.withOpacity(0.55),
+                  ),
+                ),
+              ),
+            ),
+          ),
+          Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.end,
         children: [
           // v1.3.7 (Jc): acciones en VERTICAL sobre el FAB, con
           // aparición escalonada (fade + deslizamiento suave).
-          ClipRect(
-            child: Container(
-              margin: const EdgeInsets.only(bottom: 12),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  _accionAnimada(0, Icons.payments_rounded, 'Cobrar',
-                      () => _irCerrando(widget.onCobrar)),
-                  const SizedBox(height: 8),
-                  _accionAnimada(1, Icons.today_rounded, 'Pago diario',
-                      () => _irCerrando(widget.onPagoDiario)),
-                  const SizedBox(height: 8),
-                  _accionAnimada(2, Icons.person_add_alt_1_rounded,
-                      'Inscribir', () => _irCerrando(widget.onInscribir)),
-                ],
+          // v1.3.9 (Bug 1, Argón): IgnorePointer envuelve SOLO la columna
+          // de píldoras (no el FAB principal). Con el menú cerrado las
+          // píldoras invisibles ya no capturan toques. NO usar Visibility:
+          // cortaría la animación de cierre.
+          IgnorePointer(
+            ignoring: !_abierto,
+            child: ClipRect(
+              child: Container(
+                margin: const EdgeInsets.only(bottom: 12),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    _accionAnimada(0, Icons.payments_rounded, 'Cobrar',
+                        () => _irCerrando(widget.onCobrar)),
+                    const SizedBox(height: 8),
+                    _accionAnimada(1, Icons.today_rounded, 'Pago diario',
+                        () => _irCerrando(widget.onPagoDiario)),
+                    const SizedBox(height: 8),
+                    _accionAnimada(2, Icons.person_add_alt_1_rounded,
+                        'Inscribir', () => _irCerrando(widget.onInscribir)),
+                  ],
+                ),
               ),
             ),
           ),
@@ -1707,6 +1789,8 @@ class _FabAccionesRapidasState extends State<_FabAccionesRapidas>
                 ),
               ),
             ),
+          ),
+        ],
           ),
         ],
       ),

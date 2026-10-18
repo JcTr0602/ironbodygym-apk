@@ -31,6 +31,9 @@ class _PapeleraScreenState extends State<PapeleraScreen> {
   List<Map<String, dynamic>> _res = [];
   final Set<int> _seleccionados = {};
   StreamSubscription<SyncStatus>? _subSync;
+  // v1.3.9 (Argón): búsqueda en tiempo real por nombre, carnet o teléfono.
+  final TextEditingController _searchCtrl = TextEditingController();
+  String _filtro = '';
 
   @override
   void initState() {
@@ -47,6 +50,7 @@ class _PapeleraScreenState extends State<PapeleraScreen> {
   @override
   void dispose() {
     _subSync?.cancel();
+    _searchCtrl.dispose();
     super.dispose();
   }
 
@@ -188,9 +192,45 @@ class _PapeleraScreenState extends State<PapeleraScreen> {
     SyncEngine.instance.push();
   }
 
+  /// v1.3.9 (Argón): normaliza texto quitando tildes para búsqueda flexible.
+  String _normalizar(String? input) {
+    if (input == null || input.isEmpty) return '';
+    return input
+        .toLowerCase()
+        .replaceAll('á', 'a')
+        .replaceAll('é', 'e')
+        .replaceAll('í', 'i')
+        .replaceAll('ó', 'o')
+        .replaceAll('ú', 'u')
+        .replaceAll('ü', 'u')
+        .replaceAll('ñ', 'n')
+        .trim();
+  }
+
+  /// v1.3.9 (Argón): filtra inactivos por nombre, carnet o teléfono.
+  List<Map<String, dynamic>> _filtrarInactivos(
+      List<Map<String, dynamic>> inactivos) {
+    final q = _normalizar(_filtro);
+    if (q.isEmpty) return inactivos;
+    final qNumerico = q.replaceAll(RegExp(r'[\s\-]'), '');
+    return inactivos.where((c) {
+      final nombre = _normalizar(c['nombre']?.toString());
+      final carnet = _normalizar(
+              c['carnet']?.toString() ?? c['ci']?.toString())
+          .replaceAll(RegExp(r'[\s\-]'), '');
+      final telefono = _normalizar(c['telefono']?.toString())
+          .replaceAll(RegExp(r'[\s\-]'), '');
+      return nombre.contains(q) ||
+          (qNumerico.isNotEmpty && carnet.contains(qNumerico)) ||
+          (qNumerico.isNotEmpty && telefono.contains(qNumerico));
+    }).toList();
+  }
+
   @override
   Widget build(BuildContext context) {
     final esDueno = AuthService().isOwner;
+    // v1.3.9 (Argón): lista filtrada en tiempo real.
+    final listaFiltrada = _filtrarInactivos(_res);
     return Scaffold(
       appBar: AppBar(
         title: const Text('Papelera'),
@@ -216,6 +256,34 @@ class _PapeleraScreenState extends State<PapeleraScreen> {
                   color:
                       AppColores.textoSecundario(context)),
               textAlign: TextAlign.center,
+            ),
+          ),
+          // v1.3.9 (Argón): buscador en tiempo real.
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+            child: TextField(
+              controller: _searchCtrl,
+              onChanged: (val) => setState(() => _filtro = val),
+              decoration: InputDecoration(
+                hintText: 'Buscar por nombre, carnet o teléfono...',
+                prefixIcon: const Icon(Icons.search),
+                suffixIcon: _filtro.isNotEmpty
+                    ? IconButton(
+                        tooltip: 'Limpiar búsqueda',
+                        icon: const Icon(Icons.clear),
+                        onPressed: () {
+                          _searchCtrl.clear();
+                          setState(() => _filtro = '');
+                        },
+                      )
+                    : null,
+                filled: true,
+                contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 16, vertical: 12),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
             ),
           ),
           if (_seleccionados.isNotEmpty)
@@ -250,12 +318,18 @@ class _PapeleraScreenState extends State<PapeleraScreen> {
                     icono: Icons.delete_outline,
                     titulo: 'Papelera vacía',
                   )
-                : RefreshIndicator(
-                    onRefresh: _cargar,
-                    child: ListView.builder(
-                      itemCount: _res.length,
-                      itemBuilder: (ctx, i) {
-                        final c = _res[i];
+                : listaFiltrada.isEmpty
+                    ? EstadoVacio(
+                        icono: Icons.search_off,
+                        titulo:
+                            'No se encontraron clientes inactivos para «$_filtro».',
+                      )
+                    : RefreshIndicator(
+                        onRefresh: _cargar,
+                        child: ListView.builder(
+                          itemCount: listaFiltrada.length,
+                          itemBuilder: (ctx, i) {
+                            final c = listaFiltrada[i];
                         final id = (c['id'] as int?) ?? 0;
                         final seleccionado =
                             _seleccionados.contains(id);

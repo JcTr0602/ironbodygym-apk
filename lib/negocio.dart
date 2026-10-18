@@ -598,7 +598,8 @@ double _montoEfectivoOp(
         payload['tipo_id'] as String?);
   }
   if (tipo == 'inscribir') {
-    // la inscripción inicial se cobra en efectivo
+    // v1.3.9 (Bug 2): si fue por transferencia no es efectivo a entregar.
+    if ('${payload['metodo_pago'] ?? 'efectivo'}' == 'transferencia') return 0;
     return mensualidad(
         '${payload['periodo'] ?? 'mensual'}',
         (payload['meses'] as num?)?.toInt() ?? 1,
@@ -687,10 +688,12 @@ Future<double> montoCobradoCupOp(Map<String, dynamic> op) async {
         payload['tipo_id'] as String?);
   }
   if (tipo == 'inscribir') {
+    // v1.3.9 (Bug 2): usar el método de pago del payload (fallback 'efectivo'
+    // para ops viejas). El precio por transferencia difiere del efectivo.
     return mensualidad(
         '${payload['periodo'] ?? 'mensual'}',
         (payload['meses'] as num?)?.toInt() ?? 1,
-        'efectivo',
+        '${payload['metodo_pago'] ?? 'efectivo'}',
         (payload['monto'] as num?)?.toDouble(),
         payload['tipo_id'] as String?);
   }
@@ -1718,6 +1721,13 @@ String fechaCorta(dynamic v, int n) {
 /// sueltos (evita falsos positivos: un pago de mensualidad por la tarde
 /// no implica que el turno mañana reportó su caja).
 /// Retorna la lista de turnos esperados sin registro ('mañana', 'tarde').
+/// v1.3.9 (Bug 3, Argón): filtro por día de la semana + exigibilidad por hora.
+/// - Domingo: gym cerrado → siempre [].
+/// - Sábado: solo se evalúa 'mañana' (7am-12pm); 'tarde' jamás.
+/// - Lunes-viernes: 'mañana' exigible desde las 12:30, 'tarde' desde las 20:30
+///   (30 min de gracia tras el cierre; hora de La Habana).
+/// - Fechas pasadas (anteriores a hoy): todo turno laborable no reportado
+///   es exigible sin importar la hora actual.
 Future<List<String>> turnosSinReporte(String fechaIso,
     {int? soloTelegramId}) async {
   // v1.3.2 (Argón #15): para hoy usar diariosDeHoy (incluye la cola
@@ -1741,9 +1751,31 @@ Future<List<String>> turnosSinReporte(String fechaIso,
       }
     }
   } catch (_) {}
+  // v1.3.9 (Bug 3): día de la semana de la fecha evaluada.
+  final fecha = DateTime.tryParse(fechaIso);
+  final dow = fecha?.weekday ?? 7; // 1=lunes … 7=domingo
+  if (dow == DateTime.sunday) return []; // Gym cerrado.
+  final esHoy = fechaIso == _hoyIso();
+  // Turnos laborables según el día.
+  final esperados = <String>[
+    'mañana',
+    if (dow != DateTime.saturday) 'tarde', // Sábado: solo mañana.
+  ];
+  if (!esHoy) {
+    // Fecha pasada: todo lo no reportado es exigible.
+    return esperados.where((t) => !turnos.contains(t)).toList();
+  }
+  // Hoy: exigir solo si ya pasó la hora de cierre + 30 min de gracia.
+  final ahora = ahoraHabana();
+  final horaNum = ahora.hour + ahora.minute / 60.0;
+  final mananaExigible = horaNum >= 12.5;
+  final tardeExigible = horaNum >= 20.5;
   return [
-    if (!turnos.contains('mañana')) 'mañana',
-    if (!turnos.contains('tarde')) 'tarde',
+    if (!turnos.contains('mañana') && mananaExigible) 'mañana',
+    if (!turnos.contains('tarde') &&
+        tardeExigible &&
+        dow != DateTime.saturday)
+      'tarde',
   ];
 }
 

@@ -31,6 +31,9 @@ import 'riesgo.dart';
 import 'papelera.dart';
 import 'congelados.dart';
 import 'usuarios.dart';
+import 'panel_accesos.dart';
+import 'panel_permisos.dart';
+import 'dashboard_adopcion.dart';
 import 'incidencias/lista_incidencias.dart';
 import 'historial_caja.dart';
 import 'exportar_excel.dart';
@@ -993,6 +996,28 @@ class _AdminScreenState extends State<AdminScreen> {
                           'Usuarios APK',
                           'Gestionar accesos de entrenadores',
                           () => _ir(const UsuariosScreen()),
+                        ),
+                        // v1.3.9 (F2/F8): Panel de Accesos a la App de Clientes.
+                        _tarjetaFlujo(
+                          Icons.phonelink_setup_rounded,
+                          'Accesos App Clientes',
+                          'PINs, accesos y estadísticas de la app',
+                          () => _ir(
+                              const PanelAccesosScreen()),
+                        ),
+                        // v1.3.9 Sprint 1 (#14): Permisos de entrenadores.
+                        _tarjetaFlujo(
+                          Icons.admin_panel_settings_rounded,
+                          'Permisos de Entrenadores',
+                          'Toggles y suspensión de accesos',
+                          () => _ir(const PanelPermisos()),
+                        ),
+                        // v1.3.9 Sprint 1 (#1): Dashboard de adopción.
+                        _tarjetaFlujo(
+                          Icons.trending_up_rounded,
+                          'Adopción App Clientes',
+                          'Métricas y clientes sin PIN',
+                          () => _ir(const DashboardAdopcion()),
                         ),
                         _tarjetaFlujo(
                           Icons.file_download_rounded,
