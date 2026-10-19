@@ -44,9 +44,15 @@ Future<List<String>> detallesDeOp(Map<String, dynamic> op) async {
     if (id == null) return null;
     try {
       final c = await clientePorId(int.tryParse('$id') ?? 0);
-      return c?['nombre'] as String?;
+      final nombre = c?['nombre'] as String?;
+      // v1.3.9: si no se encuentra el nombre, mostrar el ID
+      // para identificar el pago pendiente
+      if (nombre == null || nombre.isEmpty) {
+        return 'ID $id';
+      }
+      return nombre;
     } catch (_) {
-      return null;
+      return 'ID $id';
     }
   }
 
@@ -1271,14 +1277,25 @@ class _ColaScreenState extends State<ColaScreen> {
                         if (esError &&
                             op['error'] != null &&
                             '${op['error']}'.isNotEmpty)
-                          Padding(
-                            padding: const EdgeInsets.only(top: 4),
-                            child: Text(
-                              '${op['error']}',
-                              style: const TextStyle(
-                                  fontSize: 12,
-                                  color: AppColores.error),
-                            ),
+                          Builder(
+                            builder: (context) {
+                              // v1.3.9: traducir error a lenguaje humano
+                              final errTraducido =
+                                  traducirErrorSync(
+                                      '${op['error']}');
+                              return Padding(
+                                padding:
+                                    const EdgeInsets.only(
+                                        top: 4),
+                                child: Text(
+                                  errTraducido.mensaje,
+                                  style: const TextStyle(
+                                      fontSize: 12,
+                                      color:
+                                          AppColores.error),
+                                ),
+                              );
+                            },
                           ),
                         if (esPendiente)
                           Padding(
