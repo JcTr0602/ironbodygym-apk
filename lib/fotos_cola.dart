@@ -320,7 +320,8 @@ class FotosColaService {
         'fotos_cola',
         where: "estado = 'pendiente' AND intentos < 5 "
             "AND (proximo_intento_en IS NULL OR proximo_intento_en <= ?)"
-            "${puedeOriginal ? '' : " AND tipo != 'original'"}",
+            // v1.3.10: el reintento manual (forzar_qos=1) salta el filtro QoS.
+            "${puedeOriginal ? '' : " AND (tipo != 'original' OR forzar_qos = 1)"}",
         whereArgs: [ahoraIso],
         orderBy: "CASE tipo WHEN 'thumb' THEN 0 "
             "WHEN 'display' THEN 1 ELSE 2 END, creado_en ASC",
@@ -526,6 +527,8 @@ class FotosColaService {
                 'storage_path': storagePath,
                 'worker_id': null,
                 'lease_hasta': null,
+                // v1.3.10: limpiar el flag de forzado manual al completar.
+                'forzar_qos': 0,
                 'actualizado_en': isoHabana(ahoraHabana()),
               },
               where: 'id = ? AND worker_id = ?',
@@ -1038,7 +1041,7 @@ class FotosColaService {
         "SELECT COUNT(*) as n FROM fotos_cola WHERE estado = 'pendiente' "
         "AND intentos < 5 "
         "AND (proximo_intento_en IS NULL OR proximo_intento_en <= ?)"
-        "${puedeOriginal ? '' : " AND tipo != 'original'"}",
+        "${puedeOriginal ? '' : " AND (tipo != 'original' OR forzar_qos = 1)"}",
         [ahoraIso]);
     return (r.first['n'] as int? ?? 0);
   }

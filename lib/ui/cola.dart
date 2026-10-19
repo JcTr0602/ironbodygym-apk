@@ -329,6 +329,8 @@ class _ColaScreenState extends State<ColaScreen> {
           'proximo_intento_en': null,
           'worker_id': null,
           'lease_hasta': null,
+          // v1.3.10: el reintento manual salta el filtro QoS de 'original'.
+          'forzar_qos': 1,
         },
         where: 'id = ?',
         whereArgs: [id],

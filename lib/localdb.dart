@@ -226,7 +226,7 @@ class LocalDb {
     final dir = await getDatabasesPath();
     _db = await openDatabase(
       p.join(dir, 'ironbody.db'),
-      version: 29,
+      version: 30,
       // v1.3-r4 (Gemini): WAL mode para que lectores (UI) y escritores
       // (Workmanager en otro isolate) no se bloqueen mutuamente.
       // v1.2.9+34 (hotfix): try-catch — si el dispositivo no soporta WAL,
@@ -454,6 +454,7 @@ class LocalDb {
               'worker_id TEXT, '
               'lease_hasta TEXT, '
               'proximo_intento_en TEXT, '
+              'forzar_qos INTEGER NOT NULL DEFAULT 0, '
               'creado_en TEXT NOT NULL, '
               'actualizado_en TEXT NOT NULL)');
           await db.execute(
@@ -500,6 +501,7 @@ class LocalDb {
               'worker_id TEXT, '
               'lease_hasta TEXT, '
               'proximo_intento_en TEXT, '
+              'forzar_qos INTEGER NOT NULL DEFAULT 0, '
               'creado_en TEXT NOT NULL, '
               'actualizado_en TEXT NOT NULL)');
           await db.execute(
@@ -526,6 +528,7 @@ class LocalDb {
               'worker_id TEXT, '
               'lease_hasta TEXT, '
               'proximo_intento_en TEXT, '
+              'forzar_qos INTEGER NOT NULL DEFAULT 0, '
               'creado_en TEXT NOT NULL, '
               'actualizado_en TEXT NOT NULL)');
           await db.execute(
@@ -886,6 +889,16 @@ class LocalDb {
           } catch (_) {
             // Tabla puede no existir en BDs mínimas de tests; el código
             // tolera la ausencia de los campos.
+          }
+        }
+        // v30 (v1.3.10): columna forzar_qos en fotos_cola para que el
+        // reintento manual del usuario salte el filtro QoS de 'original'.
+        if (oldV < 30) {
+          try {
+            await db.execute(
+                'ALTER TABLE fotos_cola ADD COLUMN forzar_qos INTEGER NOT NULL DEFAULT 0');
+          } catch (_) {
+            // Columna ya existe o tabla no existe; tolerante.
           }
         }
       },

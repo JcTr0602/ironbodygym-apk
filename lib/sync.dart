@@ -44,6 +44,24 @@ import 'tiempo.dart';
 
 enum SyncPhase { idle, uploading, downloading, photos, error }
 
+/// v1.3.10: fases del progreso visible durante la sincronización manual.
+enum SyncFase { conectando, subiendo, bajando, verificando }
+
+/// v1.3.10: objeto de progreso para feedback en vivo en la UI.
+class SyncProgress {
+  final SyncFase fase;
+  final int? actual;
+  final int? total;
+  final String mensaje;
+
+  const SyncProgress({
+    required this.fase,
+    this.actual,
+    this.total,
+    required this.mensaje,
+  });
+}
+
 class SyncStatus {
   final SyncPhase phase;
   final int pending;
@@ -771,7 +789,12 @@ class SyncEngine {
   /// Repite el pull hasta que el watermark alcance al server_seq
   /// (pueden llegar cambios nuevos mientras se descarga).
   /// v1.2.5 (D14): [forzar] cancela el backoff ("Sincronizar ahora").
-  Future<void> run({bool forzar = false}) async {
+  /// v1.3.10: [onProgreso] callback opcional para feedback en vivo en la UI.
+  /// v1.3.10: retorna cuántas ops atascadas en 'enviada' se reactivaron.
+  Future<int> run({
+    bool forzar = false,
+    void Function(SyncProgress)? onProgreso,
+  }) async {
     // v1.3.1 (E1): si es manual y hay un ciclo en curso, esperar hasta 30s.
     if (forzar) {
       var espera = 0;
@@ -780,15 +803,33 @@ class SyncEngine {
         espera++;
       }
     }
+    var reactivadas = 0;
     await _conLock(() async {
       try {
+        // v1.3.10: al forzar, reactivar ops atascadas en 'enviada' antes del push.
+        if (forzar) {
+          reactivadas = await _forzarAtascadas();
+          if (reactivadas > 0) {
+            _emitirProgreso(
+                onProgreso,
+                SyncProgress(
+                    fase: SyncFase.verificando,
+                    mensaje:
+                        'Reintentando $reactivadas operaciones pendientes...'));
+          }
+        }
         // v1.3.3: reportar versión de la app (throttle interno; barato).
         unawaited(_auth.reportAppVersion());
         // v1.2.9+47: errores de push y pull por separado (Gemini).
         String? errPush;
         String? errPull;
         try {
-          await _doPush(forzar: forzar);
+          _emitirProgreso(
+              onProgreso,
+              const SyncProgress(
+                  fase: SyncFase.subiendo,
+                  mensaje: 'Subiendo operaciones...'));
+          await _doPush(forzar: forzar, onProgreso: onProgreso);
         } catch (e) {
           errPush = (await _describeErrorVisible(e)).mensaje;
           AppLog.error('sync', 'push_fallo', d: '$e');

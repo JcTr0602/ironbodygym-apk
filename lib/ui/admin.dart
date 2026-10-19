@@ -867,15 +867,6 @@ class _AdminScreenState extends State<AdminScreen> {
                           'Cierres por entrenador y fecha',
                           () => _ir(const HistorialCajaScreen()),
                         ),
-                        // v1.3.1: pago por cliente a entrenadores (solo dueño).
-                        if (AuthService().isOwner)
-                          _tarjetaFlujo(
-                            Icons.payments_outlined,
-                            'Pago a entrenadores',
-                            '$_pagoEntrenador CUP por cliente que pagó',
-                            _elegirPagoEntrenador,
-                          ),
-
                         // -- 👥 CLIENTES ----------------------------------------------
                         _encabezadoGrupo('👥', 'CLIENTES'),
                         _tarjetaFlujo(
@@ -981,19 +972,19 @@ class _AdminScreenState extends State<AdminScreen> {
                           Icons.payments_outlined,
                           'Tipos de pago',
                           '${_tipos.length} tipos configurados',
-                          () => _ir(_pantallaAjustes()),
+                          () => _ir(_pantallaAjustes(seccion: 'tipos')),
                         ),
                         _tarjetaFlujo(
                           Icons.price_change_rounded,
                           'Otros precios',
                           'Mensualidades, diario, tasa USD',
-                          () => _ir(_pantallaAjustes()),
+                          () => _ir(_pantallaAjustes(seccion: 'precios')),
                         ),
                         _tarjetaFlujo(
                           Icons.account_balance_rounded,
                           'Datos bancarios',
                           'Tarjetas y móvil de confirmación',
-                          () => _ir(_pantallaAjustes()),
+                          () => _ir(_pantallaAjustes(seccion: 'bancarios')),
                         ),
                         _tarjetaFlujo(
                           Icons.manage_accounts_rounded,
@@ -1090,8 +1081,9 @@ class _AdminScreenState extends State<AdminScreen> {
   }
 
   /// Construye la pantalla de Ajustes (se reutiliza en 3 tarjetas).
-  Widget _pantallaAjustes() {
+  Widget _pantallaAjustes({String? seccion}) {
     return SeccionAjustesScreen(
+      seccion: seccion,
       getTipos: () => _tipos,
       onToggleTipo: _toggleTipo,
       onEditarTipo: _editarTipo,

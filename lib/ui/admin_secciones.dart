@@ -437,6 +437,8 @@ class SeccionAjustesScreen extends StatefulWidget {
   final bool gestionarUsuarios;
   final Future<void> Function(Widget) onIr;
   final bool Function(String) esTipoFijo;
+  // v1.3.9: filtrar por sección ('tipos', 'precios', 'bancarios', null=todas)
+  final String? seccion;
 
   const SeccionAjustesScreen({
     super.key,
@@ -454,6 +456,7 @@ class SeccionAjustesScreen extends StatefulWidget {
     required this.gestionarUsuarios,
     required this.onIr,
     required this.esTipoFijo,
+    this.seccion,
   });
 
   @override
@@ -485,11 +488,19 @@ class _SeccionAjustesScreenState extends State<SeccionAjustesScreen> {
   Widget build(BuildContext context) {
     final tipos = widget.getTipos();
     return Scaffold(
-      appBar: AppBar(title: const Text('E · Ajustes')),
+      appBar: AppBar(
+          title: Text(widget.seccion == 'bancarios'
+              ? 'Datos bancarios'
+              : widget.seccion == 'precios'
+                  ? 'Otros precios'
+                  : widget.seccion == 'tipos'
+                      ? 'Tipos de pago'
+                      : 'Ajustes')),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          seccionAdmin(context, Icons.payments, 'Tipos de pago', [
+          if (widget.seccion == null || widget.seccion == 'tipos')
+            seccionAdmin(context, Icons.payments, 'Tipos de pago', [
             for (final t in tipos)
               ListTile(
                 dense: true,
@@ -537,7 +548,8 @@ class _SeccionAjustesScreenState extends State<SeccionAjustesScreen> {
               onPressed: widget.onGuardarTipos,
             ),
           ]),
-          seccionAdmin(context, Icons.price_change, 'Otros precios', [
+          if (widget.seccion == null || widget.seccion == 'precios')
+            seccionAdmin(context, Icons.price_change, 'Otros precios', [
             for (final (clave, etiqueta) in widget.clavesMonto)
               Padding(
                 padding: const EdgeInsets.only(bottom: 8),
@@ -555,7 +567,8 @@ class _SeccionAjustesScreenState extends State<SeccionAjustesScreen> {
             ),
           ]),
           // v1.2.4: datos bancarios para transferencias
-          seccionAdmin(context, Icons.account_balance, 'Datos bancarios', [
+          if (widget.seccion == null || widget.seccion == 'bancarios')
+            seccionAdmin(context, Icons.account_balance, 'Datos bancarios', [
             Padding(
               padding: const EdgeInsets.only(bottom: 8),
               child: CampoTexto(
