@@ -51,7 +51,16 @@ class _EditorPlanNutricionalState
         params: {'p_cliente_id': widget.clienteId},
       );
       if (res != null && mounted) {
-        final m = Map<String, dynamic>.from(res as Map);
+        // Fix 2026-10-19: el RPC puede devolver List (PostgREST) o Map.
+        dynamic data = res;
+        if (data is List && data.isNotEmpty) {
+          data = data.first;
+        }
+        if (data is! Map) {
+          setState(() => _cargando = false);
+          return;
+        }
+        final m = Map<String, dynamic>.from(data);
         // El contenido está en detalle.contenido (JSONB)
         final detalle = m['detalle'];
         String contenido = '';
