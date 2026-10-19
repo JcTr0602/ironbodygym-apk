@@ -67,9 +67,14 @@ class _DashboardAdopcionState extends State<DashboardAdopcion> {
         _filtrados = List.from(_sinAcceso);
       } else {
         _filtrados = _sinAcceso.where((c) {
-          return _normalizar(c.nombre).contains(q) ||
-              c.telefono.replaceAll(RegExp(r'[^0-9]'), '').contains(
-                  q.replaceAll(RegExp(r'[^0-9]'), ''));
+          if (_normalizar(c.nombre).contains(q)) return true;
+          // Fix 2026-10-19: si la búsqueda no tiene dígitos, no comparar
+          // por teléfono — contains('') siempre es true y anulaba el filtro.
+          final qDig = q.replaceAll(RegExp(r'[^0-9]'), '');
+          if (qDig.isEmpty) return false;
+          return c.telefono
+              .replaceAll(RegExp(r'[^0-9]'), '')
+              .contains(qDig);
         }).toList();
       }
     });
