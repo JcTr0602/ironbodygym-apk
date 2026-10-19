@@ -33,6 +33,7 @@ import 'confirmacion_cobro.dart';
 import 'diseno.dart';
 import 'editor_foto.dart';
 import 'modal_pin_acceso.dart';
+import 'pestana_progreso.dart';
 import 'vista_previa_cliente.dart';
 import 'widgets.dart';
 
@@ -1836,6 +1837,33 @@ class _FichaScreenState extends State<FichaScreen> {
                       if (AuthService().isOwner ||
                           PermisosEntrenador().canGeneratePin)
                         _seccionAccesoApp(),
+                      // v1.3.9 Sprint 2 (#3): botón de Progreso.
+                      // (Argón: archivo separado para no saturar ficha.dart)
+                      SizedBox(
+                        width: double.infinity,
+                        child: OutlinedButton.icon(
+                          icon: const Icon(Icons.show_chart,
+                              size: 18, color: Colors.blue),
+                          label:
+                              const Text('Progreso y Nutrición'),
+                          onPressed: () {
+                            final cli = _c;
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) =>
+                                    PestanaProgreso(
+                                  clienteId:
+                                      '${widget.clienteId}',
+                                  nombreCliente:
+                                      '${cli?['nombre'] ?? ''}',
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+                      const SizedBox(height: AppEspacio.sm),
                       // Acciones secundarias
                       if (vencido)
                         Padding(
