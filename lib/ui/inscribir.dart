@@ -295,7 +295,11 @@ class _InscribirScreenState extends State<InscribirScreen> {
           'periodo': _periodo,
           'meses': _meses,
           if (_periodo == 'personalizado') 'dias': dias,
-          if (_periodo == 'personalizado') 'monto': monto,
+          // v1.3.9: guardar monto también para tipos personalizados
+          // (ej. "Oferta 50%") — se usa en el cálculo del pendiente.
+          if (_periodo == 'personalizado' ||
+              _periodo.startsWith('tipo:'))
+            'monto': monto,
           'telefono': tel.isEmpty ? null : tel,
           'carnet': carnet.isEmpty ? null : carnet,
           'fecha': DateTime.now().toIso8601String().substring(0, 10),

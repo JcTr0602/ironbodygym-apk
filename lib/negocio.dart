@@ -582,6 +582,9 @@ double _montoEfectivoOp(
       double? montoManual, String? tipoId) {
     if (metodo != 'efectivo') return 0;
     if (periodo == 'personalizado') return montoManual ?? 0;
+    // v1.3.9: tipo de pago personalizado (ej. "Oferta 50%") —
+    // usa el monto real del payload, no el precio estándar.
+    if (periodo.startsWith('tipo:')) return montoManual ?? 0;
     if (periodo == 'semanal') return pr['semanal']!;
     if (periodo == 'quincenal') return pr['quincenal']!;
     // v1.3.2 (Argón #4): tarifa de menores.
