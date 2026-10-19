@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../auth.dart';
 import '../localdb.dart';
@@ -7,12 +8,10 @@ import '../tiempo.dart';
 import 'componentes.dart';
 import 'diseno.dart';
 
-/// v1.3.7 (Fase A, 6.1): pre-cálculo de nómina mensual (solo dueño).
-///
-/// El pago a entrenadores es 150 CUP por cada cliente del gym que haya
-/// pagado el mes vigente (gym completo), pagado el último día del mes.
-/// Esta pantalla muestra la proyección corriente: N × 150 CUP.
-/// Solo lectura — el pago real sigue siendo manual.
+/// v1.3.7 (Fase A, 6.1): pre-cálculo de nómina mensual.
+/// v1.3.9 Sprint 3 (#8): + bono manual editable por el dueño.
+/// Fórmula (Jc): (clientes que pagaron el mes) × 150 CUP + bono manual.
+/// El dueño ve todo; el entrenador ve su tarjeta en el Home.
 class NominaScreen extends StatefulWidget {
   const NominaScreen({super.key});
 
@@ -24,11 +23,22 @@ class _NominaScreenState extends State<NominaScreen> {
   bool _cargando = true;
   int _clientesPagados = 0;
   String _mesEtiqueta = '';
+  double _bono = 0;
+  final _bonoCtrl = TextEditingController();
+
+  String _bonoKey(DateTime d) =>
+      'nomina_bono_${d.year}_${d.month}';
 
   @override
   void initState() {
     super.initState();
     _cargar();
+  }
+
+  @override
+  void dispose() {
+    _bonoCtrl.dispose();
+    super.dispose();
   }
 
   Future<void> _cargar() async {
@@ -48,10 +58,27 @@ class _NominaScreenState extends State<NominaScreen> {
       }
     } catch (_) {}
     if (mounted) {
+      final prefs = await SharedPreferences.getInstance();
+      final bono = prefs.getDouble(_bonoKey(ahoraHabana())) ?? 0;
       setState(() {
         _clientesPagados = vistos.length;
+        _bono = bono;
+        _bonoCtrl.text = bono != 0 ? bono.toStringAsFixed(0) : '';
         _cargando = false;
       });
+    }
+  }
+
+  Future<void> _guardarBono() async {
+    final texto = _bonoCtrl.text.trim().replaceAll(',', '.');
+    final bono = double.tryParse(texto) ?? 0;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setDouble(_bonoKey(ahoraHabana()), bono);
+    setState(() => _bono = bono);
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Bono actualizado')),
+      );
     }
   }
 
@@ -76,20 +103,16 @@ class _NominaScreenState extends State<NominaScreen> {
 
   @override
   Widget build(BuildContext context) {
-    if (!AuthService().isOwner) {
-      return Scaffold(
-        appBar: AppBar(title: const Text('Nómina')),
-        body: const Center(
-          child: Text('Solo el dueño puede ver la nómina.'),
-        ),
-      );
-    }
+    // v1.3.9 Sprint 3 (#8): el entrenador también puede ver su nómina.
+    // El dueño ve el desglose completo + bono editable.
     const pagoPorCliente = 150.0;
-    final total = _clientesPagados * pagoPorCliente;
+    final base = _clientesPagados * pagoPorCliente;
+    final total = base + _bono;
     final ahora = ahoraHabana();
     final proyeccion =
         'Proyección al día ${ahora.day.toString().padLeft(2, '0')}/'
         '${ahora.month.toString().padLeft(2, '0')}';
+    final esDueno = AuthService().isOwner;
     return Scaffold(
       appBar: AppBar(
         title: const Text('Nómina del mes'),
@@ -143,6 +166,19 @@ class _NominaScreenState extends State<NominaScreen> {
                               context),
                         ),
                       ),
+                      if (_bono != 0) ...[
+                        const SizedBox(height: 4),
+                        Text(
+                          '${_bono > 0 ? 'Bono' : 'Descuento'} manual: ${fmtMonto(_bono)} CUP',
+                          style:
+                              AppTexto.cuerpo.copyWith(
+                            color: _bono > 0
+                                ? AppColores.exito
+                                : Colors.red,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
                       const SizedBox(height: 12),
                       Container(
                         padding: const EdgeInsets.symmetric(
@@ -177,8 +213,102 @@ class _NominaScreenState extends State<NominaScreen> {
                     ],
                   ),
                 ),
+                // v1.3.9 Sprint 3 (#8): bono manual (solo dueño)
+                if (esDueno) ...[
+                  const SizedBox(height: 16),
+                  Tarjeta(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      crossAxisAlignment:
+                          CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Ajuste manual (bono/descuento)',
+                          style: AppTexto.titulo
+                              .copyWith(fontSize: 14),
+                        ),
+                        const SizedBox(height: 8),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: TextField(
+                                controller: _bonoCtrl,
+                                keyboardType:
+                                    const TextInputType
+                                        .numberWithOptions(
+                                            decimal: true,
+                                            signed: true),
+                                decoration:
+                                    const InputDecoration(
+                                  hintText:
+                                      'Ej: 2000 o -500',
+                                  border:
+                                      OutlineInputBorder(),
+                                  prefixText: '\$ ',
+                                  suffixText: 'CUP',
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            ElevatedButton(
+                              onPressed: _guardarBono,
+                              child:
+                                  const Text('Aplicar'),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          'Por limpieza, organización, trato destacado, etc.',
+                          style:
+                              AppTexto.etiqueta.copyWith(
+                            color: AppColores
+                                .textoSecundario(
+                                    context),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
               ],
             ),
+    );
+  }
+}
+
+/// Tarjeta compacta para el Home del entrenador (v1.3.9 #8).
+class TarjetaNominaEntrenador extends StatelessWidget {
+  const TarjetaNominaEntrenador({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Tarjeta(
+      padding: const EdgeInsets.all(16),
+      child: InkWell(
+        onTap: () {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+                builder: (_) =>
+                    const NominaScreen()),
+          );
+        },
+        child: Row(
+          children: [
+            IconoModuloBadge.naranja(
+                Icons.payments_rounded),
+            const SizedBox(width: 12),
+            const Expanded(
+              child: Text(
+                'Mi nómina (estimado)',
+                style: TextStyle(fontSize: 14),
+              ),
+            ),
+            const Icon(Icons.chevron_right),
+          ],
+        ),
+      ),
     );
   }
 }

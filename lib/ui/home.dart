@@ -13,6 +13,7 @@ import '../negocio.dart';
 import '../novedades.dart';
 import '../perfil.dart';
 import '../permisos_entrenador.dart';
+import '../cierre_automatico.dart';
 import '../sync.dart';
 import '../theme.dart';
 import '../tiempo.dart';
@@ -72,6 +73,31 @@ class _HomeScreenState extends State<HomeScreen>
 
   /// Evita apilar el diálogo de suspendido (Argón).
   bool _mostrandoDialogoSuspendido = false;
+
+  /// v1.3.9 Sprint 4 (#9): verifica cierres automáticos pendientes.
+  Future<void> _verificarCierresAuto() async {
+    final ejecuto = await verificarCierresAutomaticos();
+    if (ejecuto && mounted) {
+      // Mostrar diálogo informativo
+      showDialog(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Cierre automático'),
+          content: const Text(
+            'El turno anterior había quedado abierto y se cerró '
+            'automáticamente por horario.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('TODO EN ORDEN'),
+            ),
+          ],
+        ),
+      );
+      _cargar(); // Recargar datos
+    }
+  }
 
   /// v1.3.9 Sprint 1 (#14): carga permisos y verifica si está suspendido.
   Future<void> _verificarPermisos() async {
@@ -154,6 +180,8 @@ class _HomeScreenState extends State<HomeScreen>
     _cargar();
     // v1.3.9 Sprint 1 (#14): cargar permisos y verificar suspensión
     _verificarPermisos();
+    // v1.3.9 Sprint 4 (#9): verificar cierres automáticos
+    _verificarCierresAuto();
     // Auto-actualiza contadores cuando termina una sincronización.
     // (item 11: avisa si la sincronización falla).
     _sub = SyncEngine.instance.statusStream.listen((s) async {

@@ -27,6 +27,8 @@ import 'arqueo.dart';
 import 'auditoria.dart';
 import 'auditoria_silenciosa.dart';
 import 'nomina.dart';
+import 'horario_gym.dart';
+import 'cumpleanos_mes.dart';
 import 'riesgo.dart';
 import 'papelera.dart';
 import 'congelados.dart';
@@ -34,6 +36,8 @@ import 'usuarios.dart';
 import 'panel_accesos.dart';
 import 'panel_permisos.dart';
 import 'dashboard_adopcion.dart';
+import 'comparativa_mensual.dart';
+import 'pagos_por_metodo.dart';
 import 'incidencias/lista_incidencias.dart';
 import 'historial_caja.dart';
 import 'exportar_excel.dart';
@@ -1018,6 +1022,41 @@ class _AdminScreenState extends State<AdminScreen> {
                           'Adopción App Clientes',
                           'Métricas y clientes sin PIN',
                           () => _ir(const DashboardAdopcion()),
+                        ),
+                        // v1.3.9 Sprint 3 (#6): Pagos por método.
+                        _tarjetaFlujo(
+                          Icons.credit_card_rounded,
+                          'Pagos por Método',
+                          'Efectivo vs transferencia',
+                          () => _ir(const PagosPorMetodo()),
+                        ),
+                        // v1.3.9 Sprint 3 (#7): Comparativa mensual.
+                        _tarjetaFlujo(
+                          Icons.compare_arrows_rounded,
+                          'Comparativa Mensual',
+                          'Este mes vs anterior',
+                          () => _ir(const ComparativaMensual()),
+                        ),
+                        // v1.3.9 Sprint 3 (#8): Nómina.
+                        _tarjetaFlujo(
+                          Icons.payments_rounded,
+                          'Nómina',
+                          'Cálculo mensual + bonos',
+                          () => _ir(const NominaScreen()),
+                        ),
+                        // v1.3.9 Sprint 4 (#11): Cumpleaños.
+                        _tarjetaFlujo(
+                          Icons.cake_rounded,
+                          'Cumpleaños',
+                          'Próximos 30 días',
+                          () => _ir(const CumpleanosMes()),
+                        ),
+                        // v1.3.9 Sprint 4 (#10): Horario.
+                        _tarjetaFlujo(
+                          Icons.schedule_rounded,
+                          'Horario del Gym',
+                          'Configurar turnos',
+                          () => _ir(const HorarioGym()),
                         ),
                         _tarjetaFlujo(
                           Icons.file_download_rounded,
