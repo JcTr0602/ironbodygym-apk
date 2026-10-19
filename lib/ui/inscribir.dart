@@ -38,6 +38,8 @@ class _InscribirScreenState extends State<InscribirScreen> {
   String _sexo = 'M';
   String _periodo = 'mensual';
   int _meses = 1;
+  List<TipoPago> _tiposCustom = [];
+  TipoPago? _tipoCustomSel;
   // v1.3.9 (Bug 2): método de pago del período inicial (antes hardcodeado a 'efectivo').
   String _metodoPago = 'efectivo';
   File? _foto;
@@ -50,6 +52,24 @@ class _InscribirScreenState extends State<InscribirScreen> {
     super.initState();
     _carnet.addListener(_actualizarEsMenor);
     _cargarPrecioMenor();
+    _cargarTiposCustom();
+  }
+
+  /// v1.3.9: cargar tipos de pago personalizados (ej. "Oferta 50%").
+  Future<void> _cargarTiposCustom() async {
+    try {
+      final tipos = await getTiposPago();
+      // Filtrar los que no son los estándar (semanal, quincenal, mensual, menores)
+      final custom = tipos
+          .where((t) =>
+              t.activo &&
+              !['semanal', 'quincenal', 'mensual', 'menores']
+                  .contains(t.id))
+          .toList();
+      if (mounted) {
+        setState(() => _tiposCustom = custom);
+      }
+    } catch (_) {}
   }
 
   Future<void> _cargarPrecioMenor() async {
@@ -102,6 +122,10 @@ class _InscribirScreenState extends State<InscribirScreen> {
   double _montoPeriodo(Map<String, double> precios) {
     if (_periodo == 'semanal') return precios['semanal']!;
     if (_periodo == 'quincenal') return precios['quincenal']!;
+    // v1.3.9: tipo de pago personalizado (ej. "Oferta 50%")
+    if (_periodo.startsWith('tipo:')) {
+      return _tipoCustomSel?.monto ?? 0;
+    }
     if (_periodo == 'personalizado') {
       return double.tryParse(_monto.text.trim().replaceAll(',', '.')) ??
           0;
@@ -120,6 +144,10 @@ class _InscribirScreenState extends State<InscribirScreen> {
   int _diasPeriodo() {
     if (_periodo == 'semanal') return 7;
     if (_periodo == 'quincenal') return 15;
+    // v1.3.9: tipo personalizado usa sus días configurados
+    if (_periodo.startsWith('tipo:')) {
+      return _tipoCustomSel?.dias ?? 30;
+    }
     if (_periodo == 'personalizado') {
       return int.tryParse(_dias.text.trim()) ?? 0;
     }
@@ -476,7 +504,7 @@ class _InscribirScreenState extends State<InscribirScreen> {
                                       child: Text(
                                           'Quincena (${fmtMonto(pr['quincenal'])} CUP)')),
                                   for (final m
-                                      in [1, 2, 3, 6, 12])
+                                      in [1, 2, 3])
                                     DropdownMenuItem(
                                         value:
                                             'mensual:$m',
@@ -485,6 +513,14 @@ class _InscribirScreenState extends State<InscribirScreen> {
                                                 ? '$m mes${m == 1 ? '' : 'es'} (${fmtMonto(_precioMenorVal * m)} CUP) — Menor de edad'
                                                 // v1.3.9 (Bug 2): mostrar tarifa según método de pago elegido.
                                                 : '$m mes${m == 1 ? '' : 'es'} (${fmtMonto((_metodoPago == 'transferencia' ? pr['transfer']! : pr['mensual']!) * m)} CUP)')),
+                                  // v1.3.9: tipos personalizados (ej. "Oferta 50%")
+                                  for (final t
+                                      in _tiposCustom)
+                                    DropdownMenuItem(
+                                        value:
+                                            'tipo:${t.id}',
+                                        child: Text(
+                                            '${t.nombre} (${fmtMonto(t.monto)} CUP)')),
                                   const DropdownMenuItem(
                                       value:
                                           'personalizado',
@@ -500,9 +536,29 @@ class _InscribirScreenState extends State<InscribirScreen> {
                                       v ==
                                           'personalizado') {
                                     _periodo = v!;
+                                    _tipoCustomSel = null;
+                                  } else if (v!
+                                      .startsWith(
+                                          'tipo:')) {
+                                    // v1.3.9: tipo personalizado
+                                    _periodo = v;
+                                    final id = v
+                                        .substring(5);
+                                    _tipoCustomSel =
+                                        _tiposCustom
+                                            .firstWhere(
+                                      (t) =>
+                                          t.id ==
+                                          id,
+                                      orElse: () =>
+                                          _tiposCustom
+                                              .first,
+                                    );
                                   } else {
                                     _periodo =
                                         'mensual';
+                                    _tipoCustomSel =
+                                        null;
                                     _meses = int.parse(
                                         v!.split(
                                             ':')[1]);
