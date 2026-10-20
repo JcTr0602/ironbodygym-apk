@@ -77,6 +77,7 @@ class _FichaAccesoScreenState extends State<FichaAccesoScreen> {
   /// acciones_acceso.dart (las usa también el menú ⋮ de la lista).
   /// Este envoltorio conserva el indicador de ocupado de la ficha.
   Future<void> _conOcupado(Future<void> Function() accion) async {
+    if (!mounted) return;
     setState(() => _ocupado = true);
     try {
       await accion();

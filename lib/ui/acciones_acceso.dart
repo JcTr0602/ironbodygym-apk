@@ -202,8 +202,14 @@ Future<void> bloquearAcceso(
       ),
     ),
   );
-  if (ok != true) return;
+  if (ok != true) {
+    ctrlMotivo.dispose();
+    return;
+  }
   if (!ctx.mounted) return;
+  final motivo =
+      ctrlMotivo.text.trim().isEmpty ? null : ctrlMotivo.text.trim();
+  ctrlMotivo.dispose();
   try {
     await Supabase.instance.client.rpc(
       'bloquear_acceso_cliente',
@@ -212,8 +218,7 @@ Future<void> bloquearAcceso(
         'p_hasta': dias < 0
             ? null
             : isoHabana(ahoraHabana().add(Duration(days: dias))),
-        'p_motivo':
-            ctrlMotivo.text.trim().isEmpty ? null : ctrlMotivo.text.trim(),
+        'p_motivo': motivo,
       },
     );
     if (!ctx.mounted) return;
@@ -268,14 +273,19 @@ Future<void> cambiarTelefonoAcceso(
       ],
     ),
   );
-  if (ok != true) return;
+  if (ok != true) {
+    ctrl.dispose();
+    return;
+  }
   if (!ctx.mounted) return;
+  final nuevoTelefono = ctrl.text.trim();
+  ctrl.dispose();
   try {
     await Supabase.instance.client.rpc(
       'cambiar_telefono_acceso',
       params: {
         'p_cliente_id': clienteId,
-        'p_telefono': ctrl.text.trim(),
+        'p_telefono': nuevoTelefono,
       },
     );
     if (!ctx.mounted) return;
@@ -450,6 +460,10 @@ Future<void> mostrarMenuAccionesAcceso(
   );
 
   if (elegida != null && ctx.mounted) {
-    await elegida!();
+    try {
+      await elegida!();
+    } catch (e) {
+      _snackError(ctx, e);
+    }
   }
 }
