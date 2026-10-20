@@ -4,6 +4,7 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../auth.dart';
+import '../tiempo.dart';
 import '../permisos_entrenador.dart';
 import 'editor_plan_nutricional.dart';
 import 'grafico_peso.dart';
@@ -280,7 +281,7 @@ class _PestanaProgresoState extends State<PestanaProgreso> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              '${m.createdAt.day}/${m.createdAt.month}/${m.createdAt.year} • Por: ${m.registradoPor}',
+              '${fmtFechaHabana(m.createdAt)} • Por: ${m.registradoPor}',
               style: const TextStyle(fontSize: 12),
             ),
             // v1.4.0: solo medidas visibles (sin % grasa/pecho/cadera).
@@ -335,7 +336,7 @@ class _PestanaProgresoState extends State<PestanaProgreso> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-                'Fecha: ${m.createdAt.day}/${m.createdAt.month}/${m.createdAt.year}'),
+                'Fecha: ${fmtFechaHabana(m.createdAt)}'),
             Text('Registrado por: ${m.registradoPor}'),
             // v1.4.0: el detalle solo muestra las medidas visibles.
             if (m.cinturaCm != null)

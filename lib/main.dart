@@ -187,7 +187,7 @@ class _IronBodyAppState extends State<IronBodyApp>
               );
             },
             navigatorKey: navigatorKey,
-            title: 'Iron Body Gym',
+            title: 'Iron Body Gestión',
             themeMode: mode,
             // v1.2.4: tema unificado (lib/ui/diseno.dart → AppTema).
             theme: AppTema.claro(),

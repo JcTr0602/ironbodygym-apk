@@ -2,6 +2,7 @@
 // v1.3.9 Sprint 2: gráfico de evolución de peso (adaptado de app clientes v0.4).
 // Usa el modelo Medicion local (pesoKg + createdAt).
 import 'package:flutter/material.dart';
+import '../tiempo.dart';
 import 'pestana_progreso.dart';
 
 /// Naranja Iron Body
@@ -34,8 +35,8 @@ class GraficoPesoEntrenador extends StatelessWidget {
     final prom =
         pesos.reduce((a, b) => a + b) / pesos.length;
 
-    String fmtFecha(DateTime d) =>
-        '${d.day}/${d.month}/${d.year}';
+    // v1.4.1 (Pieza 6): fecha del eje en hora de La Habana.
+    String fmtFecha(DateTime d) => fmtFechaHabana(d);
 
     return Card(
       child: Padding(

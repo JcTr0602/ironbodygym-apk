@@ -199,15 +199,11 @@ class _LoginScreenState extends State<LoginScreen>
                               text: 'BODY',
                               style: TextStyle(
                                   color: AppColores.naranja)),
-                          TextSpan(
-                              text: ' GYM',
-                              style:
-                                  TextStyle(color: Colors.white)),
                         ],
                       ),
                     ),
                     const SizedBox(height: AppEspacio.sm),
-                    const Text('E N T R E N A D O R E S',
+                    const Text('G E S T I Ó N',
                         style: TextStyle(
                             color: Colors.white60,
                             fontSize: 12,

@@ -984,7 +984,7 @@ class _AjustesScreenState extends State<AjustesScreen> {
     try {
       final pendientes =
           await LocalDb.instance.countPendingOps();
-      final texto = 'Hola, tengo un problema con la app Iron Body Gym:\n\n'
+      final texto = 'Hola, tengo un problema con la app Iron Body Gestión:\n\n'
           '• Versión: ${AppConfig.appVersion}\n'
           '• Usuario: ${_auth.username}\n'
           '• Pendientes por subir: $pendientes\n'

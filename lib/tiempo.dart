@@ -105,6 +105,36 @@ DateTime ahoraHabana() {
   );
 }
 
+/// v1.4.1 (Pieza 6): convierte un instante a wall-clock de La Habana,
+/// SOLO para mostrar. Los `created_at` del servidor vienen en UTC; sin
+/// esta conversión, una medición de las 8pm en La Habana podía verse
+/// con la fecha del día siguiente.
+///
+/// Blindaje (Argón 6.1): la entrada se normaliza con `toUtc()` antes de
+/// aplicar el offset y el resultado se reconstruye sin bandera UTC
+/// (mismo patrón que `ahoraHabana()`). No guardar el resultado ni
+/// volver a convertirlo: se aplica únicamente al pintar la fecha.
+DateTime aHabana(DateTime dt) {
+  final u = dt.toUtc();
+  final d = u.add(offsetHabana(u));
+  return DateTime(
+    d.year,
+    d.month,
+    d.day,
+    d.hour,
+    d.minute,
+    d.second,
+    d.millisecond,
+    d.microsecond,
+  );
+}
+
+/// Fecha corta (d/m/aaaa) de un instante, en hora de La Habana.
+String fmtFechaHabana(DateTime dt) {
+  final h = aHabana(dt);
+  return '${h.day}/${h.month}/${h.year}';
+}
+
 /// ISO-8601 con offset explícito (p. ej. 2026-10-15T14:30:00-04:00),
 /// coherente con la fecha/franja calculadas en hora de La Habana
 /// (auditoría ChatGPT #13).

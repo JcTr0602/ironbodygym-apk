@@ -14,7 +14,7 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
     <!-- Huella digital: entrada rápida (v1.0.12) -->
     <application
-        android:label="Iron Body Gym"
+        android:label="Iron Body Gestión"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity

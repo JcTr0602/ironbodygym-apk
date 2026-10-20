@@ -822,19 +822,9 @@ class _AdminScreenState extends State<AdminScreen> {
                       padding: const EdgeInsets.all(16),
                       children: [
                         // -- 💰 DINERO ------------------------------------------------
-                        _encabezadoGrupo('💰', 'DINERO'),
-                        _tarjetaFlujo(
-                          Icons.point_of_sale_rounded,
-                          'Cierre de caja',
-                          'Neto hoy: ${fmtMonto(netoHoy)} CUP',
-                          () => _ir(SeccionCobrosScreen(
-                            getCaja: () => _caja,
-                            getGastosHoy: () => _gastosHoy,
-                            getPend: () => _pend,
-                            onConfirmarEntrega: _confirmarEntrega,
-                            onIr: _irYRecargar,
-                          )),
-                        ),
+                        // -- ⚡ USO DIARIO ----------------------------------------------
+                        // v1.4.1 (Pieza 3 + D4): lo de todos los días, a un toque.
+                        _encabezadoGrupo('⚡', 'USO DIARIO'),
                         _tarjetaFlujo(
                           Icons.account_balance_wallet_rounded,
                           'Arqueo de caja',
@@ -848,6 +838,20 @@ class _AdminScreenState extends State<AdminScreen> {
                           'Nómina del mes',
                           'Proyección: clientes pagados × 150 CUP',
                           () => _ir(const NominaScreen()),
+                        ),
+                        // -- 💰 DINERO ------------------------------------------------
+                        _encabezadoGrupo('💰', 'DINERO'),
+                        _tarjetaFlujo(
+                          Icons.point_of_sale_rounded,
+                          'Cierre de caja',
+                          'Neto hoy: ${fmtMonto(netoHoy)} CUP',
+                          () => _ir(SeccionCobrosScreen(
+                            getCaja: () => _caja,
+                            getGastosHoy: () => _gastosHoy,
+                            getPend: () => _pend,
+                            onConfirmarEntrega: _confirmarEntrega,
+                            onIr: _irYRecargar,
+                          )),
                         ),
                         _tarjetaFlujo(
                           Icons.receipt_long_rounded,
@@ -886,8 +890,23 @@ class _AdminScreenState extends State<AdminScreen> {
                         ),
 
                         // -- 📊 OPERACIÓN ----------------------------------------------
+                        _tarjetaFlujo(
+                          Icons.cake_rounded,
+                          'Cumpleaños',
+                          'Próximos 30 días',
+                          () => _ir(const CumpleanosMes()),
+                        ),
+                        // v1.3.9 Sprint 4 (#10): Horario.
                         _encabezadoGrupo('📊', 'OPERACIÓN'),
                         // Estado y último error como tarjetas compactas.
+                        _tarjetaFlujo(
+                          Icons.admin_panel_settings_rounded,
+                          'Control de Acceso',
+                          'Entrenadores, accesos de clientes y turnos',
+                          () => _ir(
+                              const ControlAccesoScreen()),
+                        ),
+                        // v1.3.9 Sprint 3 (#6): Pagos por método.
                         _tarjetaCompacta(
                           _pendientesSubir > 0
                               ? Icons.sync_problem_rounded
@@ -964,6 +983,20 @@ class _AdminScreenState extends State<AdminScreen> {
                         ),
 
                         // -- ⚙️ CONFIGURACIÓN ------------------------------------------
+                        _tarjetaFlujo(
+                          Icons.credit_card_rounded,
+                          'Pagos por Método',
+                          'Efectivo vs transferencia',
+                          () => _ir(const PagosPorMetodo()),
+                        ),
+                        // v1.3.9 Sprint 3 (#7): Comparativa mensual.
+                        _tarjetaFlujo(
+                          Icons.compare_arrows_rounded,
+                          'Comparativa Mensual',
+                          'Este mes vs anterior',
+                          () => _ir(const ComparativaMensual()),
+                        ),
+                        // v1.3.9 Sprint 3 (#8): Nómina.
                         _encabezadoGrupo('⚙️', 'CONFIGURACIÓN'),
                         _tarjetaFlujo(
                           Icons.payments_outlined,
@@ -985,42 +1018,6 @@ class _AdminScreenState extends State<AdminScreen> {
                         ),
                         // v1.4.0 Paso 2: fusión en "Control de Acceso"
                         // (Entrenadores | Clientes) + turnos manuales.
-                        _tarjetaFlujo(
-                          Icons.admin_panel_settings_rounded,
-                          'Control de Acceso',
-                          'Entrenadores, accesos de clientes y turnos',
-                          () => _ir(
-                              const ControlAccesoScreen()),
-                        ),
-                        // v1.3.9 Sprint 3 (#6): Pagos por método.
-                        _tarjetaFlujo(
-                          Icons.credit_card_rounded,
-                          'Pagos por Método',
-                          'Efectivo vs transferencia',
-                          () => _ir(const PagosPorMetodo()),
-                        ),
-                        // v1.3.9 Sprint 3 (#7): Comparativa mensual.
-                        _tarjetaFlujo(
-                          Icons.compare_arrows_rounded,
-                          'Comparativa Mensual',
-                          'Este mes vs anterior',
-                          () => _ir(const ComparativaMensual()),
-                        ),
-                        // v1.3.9 Sprint 3 (#8): Nómina.
-                        _tarjetaFlujo(
-                          Icons.payments_rounded,
-                          'Nómina',
-                          'Cálculo mensual + bonos',
-                          () => _ir(const NominaScreen()),
-                        ),
-                        // v1.3.9 Sprint 4 (#11): Cumpleaños.
-                        _tarjetaFlujo(
-                          Icons.cake_rounded,
-                          'Cumpleaños',
-                          'Próximos 30 días',
-                          () => _ir(const CumpleanosMes()),
-                        ),
-                        // v1.3.9 Sprint 4 (#10): Horario.
                         _tarjetaFlujo(
                           Icons.schedule_rounded,
                           'Horario del Gym',

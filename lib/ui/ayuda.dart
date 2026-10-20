@@ -145,7 +145,7 @@ class AyudaScreen extends StatelessWidget {
                   padding:
                       const EdgeInsets.symmetric(vertical: 12),
                   child: Text(
-                    'Iron Body Gym · versión ${AppConfig.appVersion}',
+                    'Iron Body Gestión · versión ${AppConfig.appVersion}',
                     style: AppTexto.minuscula.copyWith(
                         color: AppColores.textoSecundario(
                             context)),

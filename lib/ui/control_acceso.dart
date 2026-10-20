@@ -11,6 +11,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../acceso_app_cache.dart';
 import '../auth.dart';
 import '../negocio.dart' show tiempoRelativo;
+import 'acciones_acceso.dart';
 import 'diseno.dart';
 import 'ficha_acceso.dart';
 import 'modal_pin_acceso.dart';
@@ -575,39 +576,49 @@ class _AccesosClientesTabState extends State<AccesosClientesTab> {
               backgroundColor: chipColor,
               visualDensity: VisualDensity.compact,
             ),
+            IconButton(
+              icon: const Icon(Icons.more_vert, size: 20),
+              tooltip: 'Opciones rápidas',
+              onPressed: () => _menuAcciones(a),
+            ),
           ],
         ),
-        onTap: () async {
-          await Navigator.of(context).push(
-            MaterialPageRoute(
-              builder: (_) => FichaAccesoScreen(clienteId: a.clienteId),
-            ),
-          );
-          if (mounted) _cargar();
-        },
+        onTap: () => _abrirFicha(a),
       ),
     );
   }
 
+  Future<void> _abrirFicha(AccesoCliente a) async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => FichaAccesoScreen(clienteId: a.clienteId),
+      ),
+    );
+    if (mounted) _cargar();
+  }
+
+  /// v1.4.1 (Pieza 2): opciones rápidas sin entrar a la ficha. El
+  /// contexto que viaja a las acciones es el de ESTA pantalla (el
+  /// State), nunca el de la hoja modal (regla de Argón 2.1); al
+  /// terminar cualquier acción se recarga TODO (lista, sin-acceso y
+  /// contadores) vía _cargar.
+  Future<void> _menuAcciones(AccesoCliente a) async {
+    await mostrarMenuAccionesAcceso(
+      context,
+      a: a,
+      alTerminar: _cargar,
+      alAbrirFicha: () => _abrirFicha(a),
+    );
+  }
+
   Future<void> _desbloqueoRapido(AccesoCliente a) async {
-    try {
-      await Supabase.instance.client.rpc(
-        'desbloquear_acceso_cliente',
-        params: {'p_cliente_id': a.clienteId},
-      );
-      await _cargar();
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('${a.nombre} desbloqueado.')),
-        );
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e')),
-        );
-      }
-    }
+    await accionSimpleAcceso(
+      context,
+      clienteId: a.clienteId,
+      rpc: 'desbloquear_acceso_cliente',
+      mensajeOk: '${a.nombre} desbloqueado.',
+      alTerminar: _cargar,
+    );
   }
 
   Widget _listaSinAcceso(List<_SinAcceso> lista) {

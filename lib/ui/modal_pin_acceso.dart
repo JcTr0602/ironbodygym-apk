@@ -1,6 +1,7 @@
 /// Modal seguro para mostrar el PIN de acceso a la App de Clientes.
-/// v1.3.9 (F1, ajuste de Argón): helper compartido entre ficha.dart
-/// y panel_accesos.dart. El modal NO se cierra solo: tiene Copiar PIN,
+/// v1.3.9 (F1, ajuste de Argón): helper compartido entre ficha.dart,
+/// ficha_acceso.dart y el menú ⋮ de Control de Acceso (vía
+/// acciones_acceso.dart). El modal NO se cierra solo: tiene Copiar PIN,
 /// Enviar por WhatsApp y cierre explícito "Ya lo envié (Cerrar)".
 library;
 
