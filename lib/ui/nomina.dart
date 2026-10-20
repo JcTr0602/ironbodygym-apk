@@ -109,6 +109,19 @@ class _NominaScreenState extends State<NominaScreen> {
     }
   }
 
+  /// Suma solo los bonos generales ('ambos'), contados una vez.
+  /// Respaldo defensivo cuando no se puede identificar al entrenador.
+  double _bonoSoloAmbos() {
+    double total = 0;
+    for (final b in _bonos) {
+      final para = '${b['entrenador'] ?? 'ambos'}';
+      if (para == 'ambos') {
+        total += (b['monto'] as num?)?.toDouble() ?? 0;
+      }
+    }
+    return total;
+  }
+
   /// Suma de bonos aplicables a un entrenador ('duany' o 'gabriel').
   double _bonoPara(String entrenador) {
     double total = 0;
@@ -192,20 +205,27 @@ class _NominaScreenState extends State<NominaScreen> {
   List<Widget> _buildFilasEntrenadores(
       BuildContext context, double base) {
     final esDueno = AuthService().isOwner;
-    // Si es entrenador, solo mostrar su fila. Determinar quién es:
-    // por ahora mostramos ambos para el dueño, y el total genérico
-    // para el entrenador (sin saber cuál es).
+    // El dueño ve las dos filas. El entrenador ve solo la suya: SÍ se
+    // puede identificar por AuthService().username ('duany'/'gabriel').
+    // (Ajuste Argón, revisión Paso 1: antes la vista 'mi' sumaba los
+    // bonos de ambos y duplicaba los bonos marcados 'ambos', además de
+    // mezclar los bonos individuales del otro entrenador.)
+    final yo = AuthService().username;
     final entrenadores = esDueno
         ? ['duany', 'gabriel']
-        : ['mi'];
+        : [
+            if (yo == 'duany' || yo == 'gabriel') yo else 'mi',
+          ];
     return entrenadores.map((ent) {
       final nombre = ent == 'duany'
           ? 'Duany'
           : ent == 'gabriel'
               ? 'Gabriel'
               : 'Pago por entrenador';
-      final bono = ent == 'mi' ? _bonoPara('duany') + _bonoPara('gabriel') : _bonoPara(ent);
-      // Para 'mi' sumamos todos (no sabemos cuál entrenador es)
+      // 'mi' solo como respaldo si el username no es de un entrenador
+      // conocido: en ese caso únicamente los bonos generales ('ambos'),
+      // contados UNA sola vez.
+      final bono = ent == 'mi' ? _bonoSoloAmbos() : _bonoPara(ent);
       final total = base + bono;
       return Padding(
         padding: const EdgeInsets.only(bottom: 8),

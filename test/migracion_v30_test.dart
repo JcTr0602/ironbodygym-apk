@@ -32,6 +32,17 @@ Future<Database> _abrirDbVacia() async {
   return await LocalDb.instance.db;
 }
 
+/// Deja la BD con la FORMA real de v29 antes de reabrir: quita la
+/// columna forzar_qos (Ajuste Argón, revisión Paso 1). Sin esto, la BD
+/// nace en v30 por onCreate (ya con la columna) y el ALTER TABLE de
+/// onUpgrade cae en el catch tolerante por columna duplicada: el test
+/// pasaría sin ejercitar la migración real. SQLite ≥ 3.35 soporta
+/// DROP COLUMN (el ffi de escritorio va muy por encima).
+Future<void> _bajarEsquemaAv29(Database db) async {
+  await db.execute('ALTER TABLE fotos_cola DROP COLUMN forzar_qos');
+  await db.setVersion(29);
+}
+
 /// Mapa nombre → descripción de columna según PRAGMA table_info.
 Future<Map<String, Map<String, dynamic>>> _infoFotosCola(
     Database db) async {
@@ -55,9 +66,8 @@ void main() {
     final db = await _abrirDbVacia();
     expect(await db.getVersion(), LocalDb.versionActual);
 
-    // Filas como quedarían en una instalación v29 (sin forzar_qos
-    // seteado a mano: la columna ya existe en onCreate, por eso la
-    // simulación baja solo la versión, patrón del resto de tests).
+    // Forma real de v29: sin la columna (ver _bajarEsquemaAv29).
+    await _bajarEsquemaAv29(db);
     await db.insert('fotos_cola', {
       'op_uuid': 'op-test-v30',
       'tipo': 'original',
@@ -69,8 +79,7 @@ void main() {
       'creado_en': '2026-10-19T10:00:00',
       'actualizado_en': '2026-10-19T10:00:00',
     });
-    // Simula que venimos de v29 y reabre: corre onUpgrade 29→30.
-    await db.setVersion(29);
+    // Reabre: corre el onUpgrade real 29→30 (ALTER TABLE de verdad).
     await LocalDb.resetParaTest();
     final db2 = await LocalDb.instance.db;
     expect(await db2.getVersion(), LocalDb.versionActual);
@@ -99,9 +108,10 @@ void main() {
     final infoA = await _infoFotosCola(dbA);
     await dbA.close();
 
-    // BD-B: limpia, bajar a 29 y reabrir (onUpgrade real 29→30).
+    // BD-B: limpia, bajar a la forma real de 29 y reabrir
+    // (onUpgrade real 29→30, con su ALTER TABLE).
     final db = await _abrirDbVacia();
-    await db.setVersion(29);
+    await _bajarEsquemaAv29(db);
     await LocalDb.resetParaTest();
     final dbB = await LocalDb.instance.db;
     final infoB = await _infoFotosCola(dbB);
