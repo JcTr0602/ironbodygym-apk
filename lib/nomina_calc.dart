@@ -19,18 +19,30 @@ class NominaCalc {
   /// (un cliente que paga dos veces en el mes cuenta UNA vez).
   /// Ante un error de lectura devuelve 0 (la pantalla muestra la base
   /// en 0 en vez de romperse, como hacía el cálculo original).
-  static Future<int> clientesQuePagaronElMes(String pref) async {
+  static Future<int> clientesQuePagaronElMes(String pref) async =>
+      (await _contar(pref)) ?? 0;
+
+  /// Igual que [clientesQuePagaronElMes] pero distingue el "0 real"
+  /// (nadie pagó) de un error de lectura (null). La usa el
+  /// pre-cálculo para NO persistir un 0 nacido de un error como si
+  /// fuera una caché fresca (auditoría del código, DeepSeek).
+  static Future<int?> clientesQuePagaronElMesSeguro(String pref) =>
+      _contar(pref);
+
+  static Future<int?> _contar(String pref) async {
     try {
       final pagos = await LocalDb.instance.pagosDelMes(pref);
       final vistos = <int>{};
       for (final p in pagos) {
         final cid = p['cliente_id'];
-        final id = cid is int ? cid : int.tryParse('$cid');
+        // Numérico tolerante: un 10.0 llegado por JSON también es el
+        // cliente 10 (auditoría del código, DeepSeek).
+        final id = cid is num ? cid.toInt() : int.tryParse('$cid');
         if (id != null) vistos.add(id);
       }
       return vistos.length;
     } catch (_) {
-      return 0;
+      return null;
     }
   }
 

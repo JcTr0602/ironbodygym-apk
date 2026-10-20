@@ -92,7 +92,13 @@ class NominaPrecalc {
       // cálculo (si cambió, el conteo podría mezclar dos estados).
       for (var intento = 0; intento < 3; intento++) {
         final h1 = await huella();
-        final n = await NominaCalc.clientesQuePagaronElMes(pref);
+        final n = await NominaCalc.clientesQuePagaronElMesSeguro(pref);
+        if (n == null) {
+          // Error de lectura: NO se cachea nada (un 0 por error
+          // quedaría pegado como cifra "fresca" hasta que cambiara
+          // la tabla pagos). Se devuelve el cálculo de pantalla.
+          return await NominaCalc.clientesQuePagaronElMes(pref);
+        }
         final h2 = await huella();
         if (h1 == h2) {
           try {

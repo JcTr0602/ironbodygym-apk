@@ -126,6 +126,20 @@ void main() {
     await db.close();
   });
 
+  test('un error de lectura NO se persiste como caché (DeepSeek #9)',
+      () async {
+    final db = await _abrirDbVacia();
+    final pref = NominaCalc.prefMesActual();
+    // Romper la fuente: sin tabla pagos, toda lectura falla.
+    await db.execute('DROP TABLE pagos');
+    // asegurar devuelve el 0 de pantalla pero no escribe la caché.
+    expect(await NominaPrecalc.instance.asegurar(pref), 0);
+    final filas = await db.query('nomina_precalc');
+    expect(filas, isEmpty,
+        reason: 'un 0 nacido de un error jamás se guarda como fresco');
+    await db.close();
+  });
+
   test('leer sin caché devuelve null y asegurar del mes vacío da 0',
       () async {
     final db = await _abrirDbVacia();
