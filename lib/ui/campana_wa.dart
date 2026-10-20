@@ -59,6 +59,7 @@ class _CampanaWaScreenState extends State<CampanaWaScreen> {
   List<Map<String, dynamic>> _items = [];
   String _textoTanda = '';
   bool _hayTandaPrevia = false;
+  bool _abriendoWa = false;
   int _prevResueltos = 0;
   int _prevTotal = 0;
 
@@ -90,6 +91,13 @@ class _CampanaWaScreenState extends State<CampanaWaScreen> {
       if (p is List) {
         _plantillas = [
           for (final e in p) Map<String, dynamic>.from(e as Map)
+        ];
+        // Defensa: nombres duplicados romperían el desplegable;
+        // se conserva la primera de cada nombre.
+        final vistos = <String>{};
+        _plantillas = [
+          for (final pl in _plantillas)
+            if (vistos.add('${pl['nombre']}'.toLowerCase())) pl
         ];
       }
     } catch (_) {}
@@ -123,10 +131,13 @@ class _CampanaWaScreenState extends State<CampanaWaScreen> {
     } catch (_) {}
   }
 
-  Future<void> _persistir() async {
+  /// Devuelve false si el guardado falló: quien llama decide si
+  /// puede seguir (panel T5: jamás saltar a WhatsApp sin haber
+  /// persistido el paso, garantía 9.1).
+  Future<bool> _persistir() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      await prefs.setString(
+      return await prefs.setString(
         _clavePrefs,
         jsonEncode({
           'version': 1,
@@ -135,7 +146,19 @@ class _CampanaWaScreenState extends State<CampanaWaScreen> {
           'items': _items,
         }),
       );
-    } catch (_) {}
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Recalcula el aviso "Reanudar tanda (N/M)" desde _items
+  /// (panel T5: pausar una tanda de ESTA sesión también debe
+  /// ofrecer reanudarla, con el contador al día).
+  void _refrescarPrevia() {
+    _prevResueltos = _resueltos;
+    _prevTotal = _items.length;
+    _hayTandaPrevia = _items.any((i) =>
+        i['estado'] == 'pendiente' || i['estado'] == 'abierto');
   }
 
   Future<void> _descartarTanda() async {
@@ -209,15 +232,42 @@ class _CampanaWaScreenState extends State<CampanaWaScreen> {
   }
 
   Future<void> _iniciarTanda() async {
+    // No pisar una tanda sin terminar sin confirmarlo (panel T5):
+    // se perdería su avance y un destinatario "abierto" podría
+    // recibir el mensaje dos veces.
+    if (_hayTandaPrevia) {
+      final sigue = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Ya hay una tanda sin terminar'),
+          content: Text(
+              'Va $_prevResueltos de $_prevTotal. Si inicias otra, '
+              'se pierde ese avance.'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: const Text('Cancelar'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(ctx).pop(true),
+              child: const Text('Iniciar otra'),
+            ),
+          ],
+        ),
+      );
+      if (sigue != true || !mounted) return;
+    }
     setState(() => _errorAudiencia = null);
     List<Map<String, dynamic>> lista;
     try {
       lista = await _construirAudiencia();
     } catch (_) {
+      if (!mounted) return;
       setState(() => _errorAudiencia =
           'No se pudo cargar la audiencia. Revisa la conexión.');
       return;
     }
+    if (!mounted) return;
     if (lista.isEmpty) {
       setState(() => _errorAudiencia =
           'No hay destinatarios con teléfono válido en este grupo.');
@@ -225,8 +275,16 @@ class _CampanaWaScreenState extends State<CampanaWaScreen> {
     }
     _items = lista;
     _textoTanda = _textoElegido;
-    // Persistir ANTES de mostrar el primer paso (diseño 9.1).
-    await _persistir();
+    // Persistir ANTES de mostrar el primer paso (diseño 9.1); si
+    // el guardado falla, NO se entra a la tanda (panel T5).
+    if (!await _persistir()) {
+      if (mounted) {
+        setState(() => _errorAudiencia =
+            'No se pudo guardar la tanda en el dispositivo.');
+      }
+      return;
+    }
+    _refrescarPrevia();
     if (mounted) setState(() => _fase = 'run');
   }
 
@@ -249,27 +307,52 @@ class _CampanaWaScreenState extends State<CampanaWaScreen> {
       _textoTanda.replaceAll('{nombre}', '${item['nombre'] ?? ''}');
 
   Future<void> _abrirWhatsApp(Map<String, dynamic> item) async {
-    // 9.1: persistir el paso ("abierto") ANTES de saltar a WhatsApp.
-    item['estado'] = 'abierto';
-    await _persistir();
-    if (mounted) setState(() {});
-    final wa = normalizarTelefonoWaMe('${item['telefono'] ?? ''}');
-    final url = Uri.parse(
-        'https://wa.me/$wa?text=${Uri.encodeComponent(_mensajePara(item))}');
+    if (_abriendoWa) return; // doble toque (panel T5)
+    _abriendoWa = true;
     try {
-      await launchUrl(url, mode: LaunchMode.externalApplication);
-    } catch (_) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('No se pudo abrir WhatsApp')));
+      // 9.1: persistir el paso ("abierto") ANTES de saltar a
+      // WhatsApp. Si el guardado falla, NO se salta (panel T5):
+      // sin el "abierto" persistido, al volver no se podría
+      // preguntar si se envió y cabría un reenvío.
+      item['estado'] = 'abierto';
+      if (!await _persistir()) {
+        item['estado'] = 'pendiente';
+        if (mounted) {
+          setState(() {});
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+              content: Text(
+                  'No se pudo guardar el avance; no se abrió WhatsApp.')));
+        }
+        return;
       }
+      if (mounted) setState(() {});
+      final wa = normalizarTelefonoWaMe('${item['telefono'] ?? ''}');
+      final url = Uri.parse(
+          'https://wa.me/$wa?text=${Uri.encodeComponent(_mensajePara(item))}');
+      try {
+        await launchUrl(url, mode: LaunchMode.externalApplication);
+      } catch (_) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('No se pudo abrir WhatsApp')));
+        }
+      }
+    } finally {
+      _abriendoWa = false;
+      if (mounted) setState(() {});
     }
   }
 
   Future<void> _resolver(Map<String, dynamic> item, String estado) async {
     item['estado'] = estado;
-    await _persistir();
+    final ok = await _persistir();
     if (!mounted) return;
+    if (!ok) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content:
+              Text('Ojo: no se pudo guardar el avance en el dispositivo.')));
+    }
+    _refrescarPrevia();
     if (_actual == null) {
       setState(() => _fase = 'fin');
     } else {
@@ -355,6 +438,16 @@ class _CampanaWaScreenState extends State<CampanaWaScreen> {
     if (nombre.isEmpty || texto.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
           content: Text('La plantilla necesita nombre y texto')));
+      return;
+    }
+    // El servidor también lo rechaza, pero el estado optimista
+    // local rompería el desplegable antes de sincronizar.
+    final duplicada = _plantillas.any((p) =>
+        p['nombre'] != existente?['nombre'] &&
+        '${p['nombre']}'.toLowerCase() == nombre.toLowerCase());
+    if (duplicada) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Ya existe una plantilla con ese nombre.')));
       return;
     }
     final nuevas = [
@@ -576,7 +669,9 @@ class _CampanaWaScreenState extends State<CampanaWaScreen> {
       // Todo resuelto pero la fase no cambió (p. ej. reanudada ya
       // completa): ir a fin.
       WidgetsBinding.instance
-          .addPostFrameCallback((_) => setState(() => _fase = 'fin'));
+          .addPostFrameCallback((_) {
+        if (mounted) setState(() => _fase = 'fin');
+      });
       return const Center(child: CircularProgressIndicator());
     }
     final abierto = actual['estado'] == 'abierto';
@@ -639,7 +734,8 @@ class _CampanaWaScreenState extends State<CampanaWaScreen> {
           FilledButton.icon(
             icon: const Icon(Icons.chat, size: 18),
             label: const Text('Abrir WhatsApp'),
-            onPressed: () => _abrirWhatsApp(actual),
+            onPressed:
+                _abriendoWa ? null : () => _abrirWhatsApp(actual),
           ),
           const SizedBox(height: 8),
           OutlinedButton(
@@ -649,7 +745,10 @@ class _CampanaWaScreenState extends State<CampanaWaScreen> {
         ],
         const SizedBox(height: 20),
         TextButton(
-          onPressed: () => setState(() => _fase = 'setup'),
+          onPressed: () {
+            _refrescarPrevia();
+            setState(() => _fase = 'setup');
+          },
           child: const Text(
               'Pausar tanda (queda guardada para reanudar)'),
         ),

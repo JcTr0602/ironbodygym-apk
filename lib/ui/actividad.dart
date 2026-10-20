@@ -227,6 +227,18 @@ class _ActividadScreenState extends State<ActividadScreen> {
           for (final e in jsonDecode(rawSerie) as List)
             Map<String, dynamic>.from(e as Map)
         ];
+        // Frescura (panel T4): la serie del puente SIEMPRE
+        // termina en hoy (Habana). Si la guardada termina antes
+        // de ayer, está vencida: no se presenta como actual.
+        if (_serie.isNotEmpty) {
+          final hoy = hoyHabanaIso();
+          final ayer = DateTime.parse(hoy)
+              .subtract(const Duration(days: 1))
+              .toIso8601String()
+              .substring(0, 10);
+          final ultima = '${_serie.last['fecha'] ?? ''}';
+          if (ultima != hoy && ultima != ayer) _serie = [];
+        }
       }
     } catch (_) {}
     await _cargarGuardados();
@@ -304,6 +316,22 @@ class _ActividadScreenState extends State<ActividadScreen> {
     if (actor != 'todos' && !_actores.contains(actor)) {
       actor = 'todos';
     }
+    // Parseo seguro de montos (panel T4): un valor de otro tipo
+    // NO lanza; degrada a null. Negativos/no finitos se descartan.
+    // Un solo límite SÍ es válido (la hoja de filtros lo permite
+    // crear); min > max con ambos presentes invalida ambos.
+    double? montoSeguro(dynamic v) {
+      if (v is! num) return null;
+      final d = v.toDouble();
+      return (d.isFinite && d >= 0) ? d : null;
+    }
+
+    var montoMinOk = montoSeguro(g['montoMin']);
+    var montoMaxOk = montoSeguro(g['montoMax']);
+    if (montoMinOk != null && montoMaxOk != null && montoMinOk > montoMaxOk) {
+      montoMinOk = null;
+      montoMaxOk = null;
+    }
     setState(() {
       _filtro = tipos.contains(g['filtro']) ? '${g['filtro']}' : 'todo';
       _filtroActor = actor;
@@ -311,6 +339,14 @@ class _ActividadScreenState extends State<ActividadScreen> {
           fechas.contains(g['filtroFecha']) ? '${g['filtroFecha']}' : 'todo';
       _rangoIni = DateTime.tryParse('${g['rangoIni'] ?? ''}');
       _rangoFin = DateTime.tryParse('${g['rangoFin'] ?? ''}');
+      // Rango incompleto o invertido = no válido (panel T4):
+      // degrada a 'todo' en vez de aplicar un rango roto.
+      if (_filtroFecha == 'rango' &&
+          (_rangoIni == null ||
+              _rangoFin == null ||
+              _rangoIni!.isAfter(_rangoFin!))) {
+        _filtroFecha = 'todo';
+      }
       if (_filtroFecha != 'rango') {
         _rangoIni = null;
         _rangoFin = null;
@@ -318,8 +354,15 @@ class _ActividadScreenState extends State<ActividadScreen> {
       _agruparPor = g['agruparPor'] == 'entrenador' ? 'entrenador' : 'dia';
       _filtroMonto =
           montos.contains(g['filtroMonto']) ? '${g['filtroMonto']}' : 'todo';
-      _montoMin = (g['montoMin'] as num?)?.toDouble();
-      _montoMax = (g['montoMax'] as num?)?.toDouble();
+      _montoMin = montoMinOk;
+      _montoMax = montoMaxOk;
+      if (_filtroMonto == 'rango' && _montoMin == null && _montoMax == null) {
+        _filtroMonto = 'todo';
+      }
+      if (_filtroMonto != 'rango') {
+        _montoMin = null;
+        _montoMax = null;
+      }
     });
   }
 

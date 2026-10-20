@@ -772,7 +772,17 @@ class GraficoBarrasDiarias extends StatelessWidget {
       final v = (d['total'] as num?)?.toInt() ?? 0;
       if (v > maximo) maximo = v;
     }
-    if (maximo <= 0) maximo = 1;
+    // Corrección del panel (T4): con TODO a cero no se dibujan
+    // barras fantasma ni un "máx 1/día" falso: se dice sin datos.
+    if (maximo <= 0) {
+      return SizedBox(
+        height: altura,
+        child: const Center(
+          child: Text('Sin actividad en el período',
+              style: TextStyle(fontSize: 11, color: Colors.grey)),
+        ),
+      );
+    }
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -786,10 +796,12 @@ class GraficoBarrasDiarias extends StatelessWidget {
                   child: Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 1),
                     child: FractionallySizedBox(
+                      // Cero = sin barra (panel T4).
                       heightFactor:
-                          (((d['total'] as num?)?.toDouble() ?? 0) /
-                                  maximo)
-                              .clamp(0.02, 1.0),
+                          ((d['total'] as num?)?.toInt() ?? 0) <= 0
+                              ? 0.0
+                              : (((d['total'] as num).toDouble()) / maximo)
+                                  .clamp(0.03, 1.0),
                       child: Container(
                         decoration: const BoxDecoration(
                           color: AppColores.naranja,
@@ -810,9 +822,12 @@ class GraficoBarrasDiarias extends StatelessWidget {
             Text(etiquetaPrimera ?? _ddmm('${datos.first['fecha'] ?? ''}'),
                 style: const TextStyle(
                     fontSize: 10, color: Colors.grey)),
-            Text('máx $maximo/día',
-                style: const TextStyle(
-                    fontSize: 10, color: Colors.grey)),
+            Flexible(
+              child: Text('máx $maximo/día',
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                      fontSize: 10, color: Colors.grey)),
+            ),
             Text(etiquetaUltima ?? _ddmm('${datos.last['fecha'] ?? ''}'),
                 style: const TextStyle(
                     fontSize: 10, color: Colors.grey)),
