@@ -24,6 +24,15 @@ const int kHolguraOpsMinutosSinDisplay = 15;
 /// Umbral de velocidad: bytes/segundo equivalentes a 128 KB en 5 s.
 const double kVelocidadMinBytesPorSeg = 128 * 1024 / 5;
 
+/// v1.4.0 (Argón, revisión fotos): si la variante 'original' ya pesa
+/// esto o menos (lo normal tras comprimir a 1600px WebP q80:
+/// ~180-350 KB), NO se retiene por holgura/velocidad: sube en el
+/// mismo ciclo tras thumb/display. Motivo: la retención hacía que
+/// el Foreground Service se apagara antes de reclamarla y el reloj
+/// de holgura (en RAM, por isolate) nunca acumulaba los minutos
+/// exigidos — la foto quedaba atrapada días en campo.
+const int kTamanoMaxOriginalInmediato = 512 * 1024;
+
 /// ¿Puede reclamarse la variante 'original'?
 /// [opsVaciaDesde]: instante en que ops_queue se observó vacía por
 /// última vez (null = nunca observada vacía, o volvió a tener trabajo

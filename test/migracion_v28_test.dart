@@ -71,7 +71,7 @@ void main() {
   test('instalación limpia v28: tablas, índices y watermarks', () async {
     await _dbPathNuevo();
     final db = await LocalDb.instance.db;
-    expect(await db.getVersion(), 29);
+    expect(await db.getVersion(), LocalDb.versionActual);
 
     for (final t in _tablasV28) {
       final cols = await _defColumnas(db, t);
@@ -103,7 +103,7 @@ void main() {
   test('upgrade 27→28: crea tablas y watermarks', () async {
     await _dbPathNuevo();
     var db = await LocalDb.instance.db;
-    expect(await db.getVersion(), 29);
+    expect(await db.getVersion(), LocalDb.versionActual);
     // Simula una BD v27: quita las tablas v28 y baja la versión.
     await db.execute('DROP TABLE liquidaciones_caja');
     await db.execute('DROP TABLE incidencias_sync');
@@ -116,7 +116,7 @@ void main() {
 
     // Reabrir dispara onUpgrade 27→28 real.
     db = await LocalDb.instance.db;
-    expect(await db.getVersion(), 29);
+    expect(await db.getVersion(), LocalDb.versionActual);
     for (final t in _tablasV28) {
       final cols = await _columnas(db, t);
       expect(cols, {'id', 'data', 'sync_seq'}, reason: '$t columnas');

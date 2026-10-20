@@ -10,6 +10,7 @@ import 'package:flutter/material.dart';
 import 'package:sqflite/sqflite.dart';
 
 import '../errores_sync.dart';
+import '../fotos_qos.dart';
 import '../app_log.dart';
 import '../localdb.dart';
 import '../negocio.dart';
@@ -210,6 +211,7 @@ class _ColaScreenState extends State<ColaScreen> {
   // v1.4.0: progreso visible de la sincronización manual.
   SyncProgress? _progresoSync;
   int _ultimoProgresoMs = 0;
+  SyncFase? _ultimaFaseSync;
   // v1.2.9+46: contadores de la cola de fotos.
   int _fotosPendientes = 0;
   int _fotosSubiendo = 0;
@@ -299,7 +301,9 @@ class _ColaScreenState extends State<ColaScreen> {
           'intentos',
           'ultimo_error',
           'creado_en',
-          'proximo_intento_en'
+          'proximo_intento_en',
+          'forzar_qos',
+          'tamano_bytes'
         ],
         where: "estado IN ('pendiente', 'subiendo', 'error')",
         orderBy: 'creado_en DESC',
@@ -389,6 +393,7 @@ class _ColaScreenState extends State<ColaScreen> {
     setState(() {
       _sincronizando = true;
       _progresoSync = null;
+      _ultimaFaseSync = null;
     });
     var reactivadas = 0;
     try {
@@ -398,10 +403,21 @@ class _ColaScreenState extends State<ColaScreen> {
       reactivadas = await SyncEngine.instance.run(
         forzar: true,
         onProgreso: (p) {
-          // v1.4.0: throttle de setState (~150 ms) para no saturar la UI.
+          // v1.4.0: throttle de setState (~150 ms) para no saturar la
+          // UI — PERO los cambios de fase y el tick final pasan
+          // siempre (Argón: si no, la barra se queda visualmente
+          // a medias y el último mensaje nunca se anuncia).
+          final esCambioFase = p.fase != _ultimaFaseSync;
+          final esFinal =
+              p.actual != null && p.total != null && p.actual == p.total;
           final ahoraMs = DateTime.now().millisecondsSinceEpoch;
-          if (ahoraMs - _ultimoProgresoMs < 150) return;
+          if (!esCambioFase &&
+              !esFinal &&
+              ahoraMs - _ultimoProgresoMs < 150) {
+            return;
+          }
           _ultimoProgresoMs = ahoraMs;
+          _ultimaFaseSync = p.fase;
           if (mounted) setState(() => _progresoSync = p);
         },
       );
@@ -752,6 +768,18 @@ class _ColaScreenState extends State<ColaScreen> {
         : estado == 'subiendo'
             ? AppColores.info
             : AppColores.alerta;
+    // v1.4.0 (Argón): estado VISUAL calculado en lectura, sin tocar
+    // la columna estado de la BD. Una 'original' pesada retenida por
+    // el QoS (pendiente, sin forzar, sin error) no está fallando:
+    // está "Esperando buena conexión". El botón de reintento de la
+    // fila activa forzar_qos ("Subir ahora").
+    final tamanoFoto = f['tamano_bytes'] as int?;
+    final esperandoConexion = estado == 'pendiente' &&
+        tipo == 'original' &&
+        (f['forzar_qos'] as int? ?? 0) != 1 &&
+        (error == null || error.isEmpty) &&
+        (tamanoFoto == null ||
+            tamanoFoto > kTamanoMaxOriginalInmediato);
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 6),
       child: Row(
@@ -806,7 +834,9 @@ class _ColaScreenState extends State<ColaScreen> {
                             ? 'Falló'
                             : estado == 'subiendo'
                                 ? 'Subiendo'
-                                : 'Pendiente',
+                                : esperandoConexion
+                                    ? 'Esperando buena conexión'
+                                    : 'Pendiente',
                         style: TextStyle(
                             color: colorEstado,
                             fontSize: 11,
@@ -837,7 +867,8 @@ class _ColaScreenState extends State<ColaScreen> {
           ),
           IconButton(
             icon: const Icon(Icons.refresh, size: 20),
-            tooltip: 'Reintentar',
+            tooltip:
+                esperandoConexion ? 'Subir ahora' : 'Reintentar',
             onPressed: () => _reintentarFoto(id),
           ),
           IconButton(

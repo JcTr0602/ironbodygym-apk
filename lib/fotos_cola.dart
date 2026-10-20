@@ -59,12 +59,27 @@ Future<Map<String, String>> _generarVariantes(
     variantes['display'] = displayFinal;
   }
 
-  // Original se copia a persistente (no se deja en caché temporal).
-  final origTmp = '$base-original.jpg.tmp';
-  final origFinal = '$base-original.jpg';
-  await File(rutaOriginal).copy(origTmp);
-  await File(origTmp).rename(origFinal);
-  variantes['original'] = origFinal;
+  // v1.4.0 (Argón, revisión fotos): la 'original' también se comprime
+  // (máx 1600px, WebP q80): una foto de cámara de 4-8 MB baja a
+  // ~180-350 KB sin pérdida visual apreciable. Si la compresión
+  // falla, fallback a la copia sin comprimir (JPG de cámara).
+  final origWebpTmp = '$base-original.webp.tmp';
+  final origWebpFinal = '$base-original.webp';
+  final origRes = await FlutterImageCompress.compressAndGetFile(
+    rutaOriginal, origWebpTmp,
+    minWidth: 1600, minHeight: 1600,
+    quality: 80, format: CompressFormat.webp,
+  );
+  if (origRes != null) {
+    await File(origWebpTmp).rename(origWebpFinal);
+    variantes['original'] = origWebpFinal;
+  } else {
+    final origTmp = '$base-original.jpg.tmp';
+    final origFinal = '$base-original.jpg';
+    await File(rutaOriginal).copy(origTmp);
+    await File(origTmp).rename(origFinal);
+    variantes['original'] = origFinal;
+  }
 
   return variantes;
 }
@@ -321,7 +336,9 @@ class FotosColaService {
         where: "estado = 'pendiente' AND intentos < 5 "
             "AND (proximo_intento_en IS NULL OR proximo_intento_en <= ?)"
             // v1.3.10: el reintento manual (forzar_qos=1) salta el filtro QoS.
-            "${puedeOriginal ? '' : " AND (tipo != 'original' OR forzar_qos = 1)"}",
+            // v1.4.0 (Argón): una 'original' ligera (<=512 KB, ya
+            // comprimida) tampoco se retiene: sube en este ciclo.
+            "${puedeOriginal ? '' : " AND (tipo != 'original' OR forzar_qos = 1 OR (tamano_bytes IS NOT NULL AND tamano_bytes <= $kTamanoMaxOriginalInmediato))"}",
         whereArgs: [ahoraIso],
         orderBy: "CASE tipo WHEN 'thumb' THEN 0 "
             "WHEN 'display' THEN 1 ELSE 2 END, creado_en ASC",
@@ -702,7 +719,10 @@ class FotosColaService {
     final entidad = clienteId != null
         ? 'clientes/$clienteId'
         : 'suplementos/$suplementoId';
-    final ext = (tipo == 'original') ? 'jpg' : 'webp';
+    // v1.4.0 (Argón): la extensión se deduce del archivo local real
+    // (la 'original' ya puede ser .webp comprimida o .jpg fallback).
+    final ext =
+        (f['ruta_local'] as String).endsWith('.webp') ? 'webp' : 'jpg';
     final objectPath = '$entidad/${opUuid}_$tipo.$ext';
 
     // Corrección Gemini #1: claves TUS compuestas (op_uuid se comparte
@@ -1041,7 +1061,7 @@ class FotosColaService {
         "SELECT COUNT(*) as n FROM fotos_cola WHERE estado = 'pendiente' "
         "AND intentos < 5 "
         "AND (proximo_intento_en IS NULL OR proximo_intento_en <= ?)"
-        "${puedeOriginal ? '' : " AND (tipo != 'original' OR forzar_qos = 1)"}",
+        "${puedeOriginal ? '' : " AND (tipo != 'original' OR forzar_qos = 1 OR (tamano_bytes IS NOT NULL AND tamano_bytes <= $kTamanoMaxOriginalInmediato))"}",
         [ahoraIso]);
     return (r.first['n'] as int? ?? 0);
   }

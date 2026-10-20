@@ -34,13 +34,13 @@ void main() {
 
   test('instalación limpia v29', () async {
     final db = await _abrirDbVacia();
-    expect(await db.getVersion(), 29);
+    expect(await db.getVersion(), LocalDb.versionActual);
     await db.close();
   });
 
   test('upgrade 28→29: backfill de costo y umbral_stock', () async {
     final db = await _abrirDbVacia();
-    expect(await db.getVersion(), 29);
+    expect(await db.getVersion(), LocalDb.versionActual);
     // Simula suplementos viejos sin los campos nuevos.
     await db.insert('suplementos', {
       'id': 1,
@@ -57,7 +57,7 @@ void main() {
     await db.setVersion(28);
     await LocalDb.resetParaTest();
     final db2 = await LocalDb.instance.db;
-    expect(await db2.getVersion(), 29);
+    expect(await db2.getVersion(), LocalDb.versionActual);
 
     final r1 = await db2.query('suplementos',
         columns: ['data'], where: 'id = ?', whereArgs: [1]);

@@ -51,7 +51,7 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
   void initState() {
     super.initState();
     // v1.3.1: turno por defecto según la hora del día.
-    _turno = DateTime.now().hour >= 12 ? 'tarde' : 'mañana';
+    _turno = ahoraHabana().hour >= 12 ? 'tarde' : 'mañana';
     LocalDb.instance.getAjustes().then((aj) {
       if (mounted) {
         setState(() =>
@@ -116,9 +116,11 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
       opUuid: uuid,
       tipo: 'pago_diario',
       payload: {
-        'fecha': DateTime.now().toIso8601String().substring(0, 10),
+        // v1.4.0 (Argón §8): fecha de negocio en hora de La Habana,
+        // nunca DateTime.now() crudo en payloads.
+        'fecha': hoyHabanaIso(),
         // v1.2.7: timestamp para deduplicar pagos idénticos (fix Gemini).
-        'creado_en': DateTime.now().toIso8601String(),
+        'creado_en': isoHabana(ahoraHabana()),
         'turno': _turno,
         'cantidad': cantidad,
         // v1.3.1: total calculado + registrado_por para deduplicación.

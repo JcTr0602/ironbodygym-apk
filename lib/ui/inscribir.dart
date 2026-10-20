@@ -16,6 +16,7 @@ import '../localdb.dart';
 import '../fotos_cola.dart';
 import '../negocio.dart';
 import '../sync.dart';
+import '../tiempo.dart';
 import '../tipos_pago.dart';
 import 'componentes.dart';
 import 'dialogo_confirmar_inscripcion.dart';
@@ -302,7 +303,8 @@ class _InscribirScreenState extends State<InscribirScreen> {
             'monto': monto,
           'telefono': tel.isEmpty ? null : tel,
           'carnet': carnet.isEmpty ? null : carnet,
-          'fecha': DateTime.now().toIso8601String().substring(0, 10),
+          // v1.4.0 (Argón §8): fecha de negocio en hora de La Habana.
+          'fecha': hoyHabanaIso(),
           // v1.3.9 (Bug 2): método de pago elegido (antes hardcodeado a 'efectivo').
           'metodo_pago': _metodoPago,
           // v1.2.2: guardar si es menor y el precio aplicado (histórico)

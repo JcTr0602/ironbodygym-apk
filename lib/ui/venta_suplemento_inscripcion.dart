@@ -17,6 +17,7 @@ import '../negocio.dart';
 import '../auth.dart';
 import '../localdb.dart';
 import '../sync.dart';
+import '../tiempo.dart';
 import 'componentes.dart';
 import 'diseno.dart';
 import 'widgets.dart';
@@ -114,8 +115,8 @@ class _VentaSuplementoInscripcionScreenState
     setState(() => _guardando = true);
     try {
       final opUuid = const Uuid().v4();
-      final hoy =
-          DateTime.now().toIso8601String().substring(0, 10);
+      // v1.4.0 (Argón §8): fecha de negocio en hora de La Habana.
+      final hoy = hoyHabanaIso();
       final telefono = _telefono.text.trim();
       await LocalDb.instance.queueOp(
         opUuid: opUuid,

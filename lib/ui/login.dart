@@ -4,6 +4,7 @@ library;
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../app_log.dart';
 import '../auth.dart';
 import '../config.dart';
 import '../perfil.dart';
@@ -86,7 +87,14 @@ class _LoginScreenState extends State<LoginScreen>
         return true;
       }
       return vinculado == actual;
-    } catch (_) {
+    } catch (e) {
+      // v1.4.0 (Argón §8): prohibido el fail-open SILENCIOSO. La
+      // vinculación es 100% local (SharedPreferences), sin respuesta
+      // de servidor que pueda negar el acceso: bloquear la entrada
+      // por un fallo local dejaría fuera a un entrenador legítimo
+      // sin ganar seguridad real. Se registra el fallo en la
+      // bitácora (visible para el dueño) y se permite entrar.
+      AppLog.error('login', 'verificar_dispositivo_fallo', d: '$e');
       return true;
     }
   }

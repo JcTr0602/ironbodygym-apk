@@ -37,6 +37,11 @@ class LocalDb {
   static final LocalDb instance = LocalDb._();
   Database? _db;
 
+  /// v1.4.0 (Argón): versión actual del esquema local. Los tests de
+  /// migración comparan contra esta constante en vez de un número
+  /// fijo, para no caer en cascada de fallos con cada migración.
+  static const int versionActual = 30;
+
   /// ¿El SQLite del dispositivo trae el módulo FTS5? Algunos
   /// fabricantes lo recortan ("no such module: fts5"). Se prueba una
   /// vez y se cachea. v1.2.5+28: FTS5 pasó a ser opcional; sin él la
@@ -226,7 +231,7 @@ class LocalDb {
     final dir = await getDatabasesPath();
     _db = await openDatabase(
       p.join(dir, 'ironbody.db'),
-      version: 30,
+      version: versionActual,
       // v1.3-r4 (Gemini): WAL mode para que lectores (UI) y escritores
       // (Workmanager en otro isolate) no se bloqueen mutuamente.
       // v1.2.9+34 (hotfix): try-catch — si el dispositivo no soporta WAL,
@@ -1248,6 +1253,9 @@ class LocalDb {
             'worker_id TEXT, '
             'lease_hasta TEXT, '
             'proximo_intento_en TEXT, '
+            // v30: paridad con onUpgrade — sin esta columna, una
+            // instalación limpia rompía las consultas con forzar_qos.
+            'forzar_qos INTEGER NOT NULL DEFAULT 0, '
             'creado_en TEXT NOT NULL, '
             'actualizado_en TEXT NOT NULL)');
         await db.execute(
