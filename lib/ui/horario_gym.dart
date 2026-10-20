@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'dart:convert';
 import '../auth.dart';
+import 'horario_turnos.dart';
 
 class DiaHorario {
   final int diaSemana; // 1=Lun ... 7=Dom
@@ -264,11 +265,35 @@ class _HorarioGymState extends State<HorarioGym> {
       body: _cargando
           ? const Center(
               child: CircularProgressIndicator())
-          : ListView.builder(
-              padding: const EdgeInsets.all(16),
-              itemCount: _dias.length,
-              itemBuilder: (ctx, i) =>
-                  _buildDiaCard(_dias[i]),
+          : Column(
+              children: [
+                // v1.4.1 (Pieza 5): quién cubre cada turno.
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+                  child: Card(
+                    child: ListTile(
+                      leading: const Icon(Icons.groups_rounded),
+                      title: const Text('Entrenadores por turno'),
+                      subtitle: const Text(
+                          'Plan semanal que ve la app de clientes'),
+                      trailing: const Icon(Icons.chevron_right),
+                      onTap: () => Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => const HorarioTurnosScreen(),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+                Expanded(
+                  child: ListView.builder(
+                    padding: const EdgeInsets.all(16),
+                    itemCount: _dias.length,
+                    itemBuilder: (ctx, i) =>
+                        _buildDiaCard(_dias[i]),
+                  ),
+                ),
+              ],
             ),
     );
   }
