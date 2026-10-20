@@ -10,6 +10,7 @@ import 'package:flutter/material.dart';
 import '../auth.dart';
 import '../localdb.dart';
 import '../negocio.dart';
+import '../nomina_calc.dart';
 import '../novedades.dart';
 import '../perfil.dart';
 import '../permisos_entrenador.dart';
@@ -34,6 +35,7 @@ import 'listas.dart';
 import 'login.dart';
 import 'mi_dia.dart';
 import 'mi_turno.dart';
+import 'nomina.dart';
 import 'pago.dart';
 import 'pago_diario.dart';
 import 'pagos_realizados.dart';
@@ -57,6 +59,8 @@ class _HomeScreenState extends State<HomeScreen>
   int _vencen = 0;
   int _atras = 0;
   double _pendiente = 0; // v1.3.3: pendiente a entregar (entrenador)
+  int _pagaronMes = 0; // v1.4.0: clientes únicos que pagaron el mes
+  int _tarifaMes = 150; // v1.4.0: tarifa por cliente (base del entrenador)
   double _porRecoger = 0; // v1.3.3: pendiente por recoger (dueño)
   int _noLeidas = 0;
   double _cobradoHoy = 0;
@@ -154,7 +158,7 @@ class _HomeScreenState extends State<HomeScreen>
   bool _procesandoTurno = false;
 
   /// v1.3.3: entrenadores sin actividad reciente (alerta "turnos sin
-  /// reporte" en la tarjeta Pulso del Día del dueño).
+  /// reporte" en la tarjeta Estadísticas Rápidas del dueño).
   List<Map<String, dynamic>> _entrenadoresSinSync = [];
   // v1.3.3 (Argón): turnos de hoy sin reporte real (para el chip de
   // "Pulso del Día"; _entrenadoresSinSync medía otra cosa).
@@ -389,6 +393,11 @@ class _HomeScreenState extends State<HomeScreen>
         _auth.isOwner
             ? avisosWhatsappHoy().then((l) => l.length)
             : Future.value(0), // 15
+        // v1.4.0: Estadísticas Rápidas — clientes que pagaron el mes
+        // (misma definición que la nómina: NominaCalc) y tarifa vigente.
+        NominaCalc.clientesQuePagaronElMes(
+            hoyHabanaIso().substring(0, 7)), // 16
+        PerfilService.instance.getPagoEntrenador(), // 17
       ]);
       final v = res[0] as List;
       final a = res[1] as List;
@@ -479,6 +488,8 @@ class _HomeScreenState extends State<HomeScreen>
           _cumpleHoy = cumple.length;
           _incidenciasAbiertas = incidAbiertas;
           _avisosPendientes = res[15] as int;
+          _pagaronMes = res[16] as int;
+          _tarifaMes = res[17] as int;
           _avisoSync = aviso;
           _nombreVisible = nombreVisible;
           _entrenadoresSinSync = sinSync;
@@ -886,8 +897,12 @@ class _HomeScreenState extends State<HomeScreen>
   /// v1.3.3: tarjeta financiera contextual por rol.
   /// Entrenador: "Mi Turno Hoy" (tocable -> MiTurnoScreen) con
   /// cobrado hoy + pendiente a entregar + botón "Cerrar turno".
-  /// Dueño: "Pulso del Día" con cobrado hoy (-> Dashboard) +
-  /// por recoger (-> Pendiente) + alerta de turnos sin reporte.
+  /// Dueño: "Estadísticas Rápidas" (antes "Pulso del Día") con cobrado
+  /// hoy (-> Dashboard) + por recoger (-> Pendiente) + alerta de
+  /// turnos sin reporte.
+  /// v1.4.0 (Jc): ambas tarjetas muestran "Pagaron el mes" (clientes
+  /// únicos del mes, misma definición que la nómina) con su base:
+  /// el entrenador la ve × su tarifa y el dueño ×300.
   Widget _tarjetaFinanciera(bool esDueno) {
     if (!esDueno) {
       return Tarjeta(
@@ -924,6 +939,23 @@ class _HomeScreenState extends State<HomeScreen>
               ],
             ),
             const SizedBox(height: AppEspacio.sm),
+            // v1.4.0: pagaron el mes + mi base (sin bonos: los bonos los
+            // gestiona el dueño en su teléfono; la base es lo seguro).
+            Row(
+              children: [
+                Expanded(
+                    child: _datoFinanciero(
+                        'Pagaron el mes',
+                        '$_pagaronMes',
+                        AppColores.naranja)),
+                Expanded(
+                    child: _datoFinanciero(
+                        'Mi base del mes (×$_tarifaMes)',
+                        fmtMonto(_pagaronMes * _tarifaMes),
+                        AppColores.exito)),
+              ],
+            ),
+            const SizedBox(height: AppEspacio.sm),
             // v1.3.3: abrir/cerrar turno (botones rápidos con estado real).
             _botonesTurno(),
             // v1.3.3: turnos abiertos sin resolver (auditoría ChatGPT #2).
@@ -938,11 +970,11 @@ class _HomeScreenState extends State<HomeScreen>
         children: [
           const Row(
             children: [
-              Icon(Icons.monitor_heart_outlined,
+              Icon(Icons.insights,
                   size: 18,
                   color: AppColores.naranja),
               SizedBox(width: 6),
-              Text('Pulso del Día',
+              Text('Estadísticas Rápidas',
                   style: AppTexto.subtitulo),
             ],
           ),
@@ -963,6 +995,23 @@ class _HomeScreenState extends State<HomeScreen>
                       AppColores.alerta,
                       () =>
                           _ir(const PendienteScreen()))),
+            ],
+          ),
+          const SizedBox(height: AppEspacio.sm),
+          // v1.4.0 (Jc): pagaron el mes (→ Nómina) y la base ×300.
+          Row(
+            children: [
+              Expanded(
+                  child: _datoFinancieroTappable(
+                      'Pagaron el mes',
+                      '$_pagaronMes',
+                      AppColores.naranja,
+                      () => _ir(const NominaScreen()))),
+              Expanded(
+                  child: _datoFinanciero(
+                      'Base del mes (×300)',
+                      fmtMonto(_pagaronMes * 300),
+                      AppColores.exito)),
             ],
           ),
           // v1.3.6 (ítem 4): el banner se puede descartar (X). El descarte

@@ -4,8 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../auth.dart';
-import '../localdb.dart';
 import '../negocio.dart';
+import '../nomina_calc.dart';
 import '../perfil.dart';
 import '../tiempo.dart';
 import 'componentes.dart';
@@ -57,16 +57,9 @@ class _NominaScreenState extends State<NominaScreen> {
     final pref = hoyHabanaIso().substring(0, 7); // YYYY-MM
     _mesEtiqueta = _nombreMes(ahora.month);
     // Misma fuente que "Pagos realizados": clientes únicos con pago
-    // este mes (se queda el pago más reciente por cliente).
-    final vistos = <int>{};
-    try {
-      final pagos = await LocalDb.instance.pagosDelMes(pref);
-      for (final p in pagos) {
-        final cid = p['cliente_id'];
-        final id = cid is int ? cid : int.tryParse('$cid');
-        if (id != null) vistos.add(id);
-      }
-    } catch (_) {}
+    // este mes. v1.4.0: cálculo compartido en NominaCalc (lo usan
+    // también el home y el pre-cálculo; no pueden divergir).
+    final clientesPagados = await NominaCalc.clientesQuePagaronElMes(pref);
     if (mounted) {
       final prefs = await SharedPreferences.getInstance();
       // v1.3.9: leer lista de bonos (migrar bono simple viejo si existe)
@@ -100,7 +93,7 @@ class _NominaScreenState extends State<NominaScreen> {
       final tarifa =
           await PerfilService.instance.getPagoEntrenador();
       setState(() {
-        _clientesPagados = vistos.length;
+        _clientesPagados = clientesPagados;
         _bonos = bonos;
         _tarifa = tarifa.toDouble();
         _tarifaCtrl.text = tarifa.toString();
@@ -111,28 +104,11 @@ class _NominaScreenState extends State<NominaScreen> {
 
   /// Suma solo los bonos generales ('ambos'), contados una vez.
   /// Respaldo defensivo cuando no se puede identificar al entrenador.
-  double _bonoSoloAmbos() {
-    double total = 0;
-    for (final b in _bonos) {
-      final para = '${b['entrenador'] ?? 'ambos'}';
-      if (para == 'ambos') {
-        total += (b['monto'] as num?)?.toDouble() ?? 0;
-      }
-    }
-    return total;
-  }
+  double _bonoSoloAmbos() => NominaCalc.bonoSoloAmbos(_bonos);
 
   /// Suma de bonos aplicables a un entrenador ('duany' o 'gabriel').
-  double _bonoPara(String entrenador) {
-    double total = 0;
-    for (final b in _bonos) {
-      final para = '${b['entrenador'] ?? 'ambos'}';
-      if (para == 'ambos' || para == entrenador) {
-        total += (b['monto'] as num?)?.toDouble() ?? 0;
-      }
-    }
-    return total;
-  }
+  double _bonoPara(String entrenador) =>
+      NominaCalc.bonosPara(_bonos, entrenador);
 
   Future<void> _agregarBono() async {
     final texto =
