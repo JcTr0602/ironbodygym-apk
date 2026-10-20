@@ -94,6 +94,12 @@ class _ActividadScreenState extends State<ActividadScreen> {
   // montos en una sola moneda. Se carga en _cargar().
   double _tasaUsd = 0;
   final _busquedaCtrl = TextEditingController();
+  // v1.4.1 (Pieza 7, D3): serie diaria agregada de 30 días (puente).
+  List<Map<String, dynamic>> _serie = [];
+  bool _verSerie = true;
+  // v1.4.1 (Pieza 7, B3): filtros guardados (ámbito: este
+  // dispositivo; se validan al restaurar).
+  List<Map<String, dynamic>> _guardados = [];
   // Caché: cliente_id -> nombre y foto_storage
   final Map<int, String> _nombres = {};
   final Map<int, String?> _fotos = {};
@@ -212,6 +218,18 @@ class _ActividadScreenState extends State<ActividadScreen> {
         }
       }
     }
+    // v1.4.1 (Pieza 7): serie diaria para el mini gráfico.
+    try {
+      final rawSerie =
+          await LocalDb.instance.getMeta('sync_estado_actividad_serie');
+      if (rawSerie != null && rawSerie.isNotEmpty) {
+        _serie = [
+          for (final e in jsonDecode(rawSerie) as List)
+            Map<String, dynamic>.from(e as Map)
+        ];
+      }
+    } catch (_) {}
+    await _cargarGuardados();
     if (mounted) {
       setState(() {
         _items = lista;
@@ -232,6 +250,151 @@ class _ActividadScreenState extends State<ActividadScreen> {
   void dispose() {
     _busquedaCtrl.dispose();
     super.dispose();
+  }
+
+  /// v1.4.1 (Pieza 7, B3): lee los filtros guardados del
+  /// dispositivo (SharedPreferences). Formato: lista de objetos
+  /// con nombre + los campos del filtro.
+  Future<void> _cargarGuardados() async {
+    try {
+      final p = await SharedPreferences.getInstance();
+      final raw = p.getString('actividad_filtros_guardados');
+      if (raw != null && raw.isNotEmpty) {
+        _guardados = [
+          for (final e in jsonDecode(raw) as List)
+            Map<String, dynamic>.from(e as Map)
+        ];
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _persistirGuardados() async {
+    try {
+      final p = await SharedPreferences.getInstance();
+      await p.setString(
+          'actividad_filtros_guardados', jsonEncode(_guardados));
+    } catch (_) {}
+  }
+
+  Map<String, dynamic> _snapshotFiltros(String nombre) => {
+        'nombre': nombre,
+        'filtro': _filtro,
+        'filtroActor': _filtroActor,
+        'filtroFecha': _filtroFecha,
+        'rangoIni': _rangoIni?.toIso8601String(),
+        'rangoFin': _rangoFin?.toIso8601String(),
+        'agruparPor': _agruparPor,
+        'filtroMonto': _filtroMonto,
+        'montoMin': _montoMin,
+        'montoMax': _montoMax,
+      };
+
+  /// v1.4.1 (Pieza 7, B3): aplica un guardado VALIDANDO cada campo
+  /// contra los valores conocidos (diseño: al restaurar se valida
+  /// que los campos sigan existiendo; un entrenador que ya no
+  /// aparece degrada a "todos", un valor raro degrada a su default).
+  void _aplicarGuardado(Map<String, dynamic> g) {
+    const tipos = {
+      'todo', 'mensualidades', 'inscripciones', 'diarios',
+      'suplementos', 'entregas'
+    };
+    const fechas = {'todo', 'hoy', 'ayer', '7dias', 'mes', 'rango'};
+    const montos = {'todo', 'm500', 'm1000', 'm5000', 'rango'};
+    var actor = '${g['filtroActor'] ?? 'todos'}';
+    if (actor != 'todos' && !_actores.contains(actor)) {
+      actor = 'todos';
+    }
+    setState(() {
+      _filtro = tipos.contains(g['filtro']) ? '${g['filtro']}' : 'todo';
+      _filtroActor = actor;
+      _filtroFecha =
+          fechas.contains(g['filtroFecha']) ? '${g['filtroFecha']}' : 'todo';
+      _rangoIni = DateTime.tryParse('${g['rangoIni'] ?? ''}');
+      _rangoFin = DateTime.tryParse('${g['rangoFin'] ?? ''}');
+      if (_filtroFecha != 'rango') {
+        _rangoIni = null;
+        _rangoFin = null;
+      }
+      _agruparPor = g['agruparPor'] == 'entrenador' ? 'entrenador' : 'dia';
+      _filtroMonto =
+          montos.contains(g['filtroMonto']) ? '${g['filtroMonto']}' : 'todo';
+      _montoMin = (g['montoMin'] as num?)?.toDouble();
+      _montoMax = (g['montoMax'] as num?)?.toDouble();
+    });
+  }
+
+  Future<void> _guardarFiltroActual() async {
+    final ctrl = TextEditingController();
+    final nombre = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Guardar filtros'),
+        content: TextField(
+          controller: ctrl,
+          autofocus: true,
+          decoration: const InputDecoration(
+              labelText: 'Nombre (ej. Cobros de Gabriel)'),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () =>
+                Navigator.of(ctx).pop(ctrl.text.trim()),
+            child: const Text('Guardar'),
+          ),
+        ],
+      ),
+    );
+    if (nombre == null || nombre.isEmpty || !mounted) return;
+    setState(() {
+      _guardados.removeWhere((g) => g['nombre'] == nombre);
+      _guardados.add(_snapshotFiltros(nombre));
+    });
+    await _persistirGuardados();
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Filtros «$nombre» guardados')));
+    }
+  }
+
+  /// v1.4.1 (Pieza 7, D3): tarjeta del mini gráfico de la serie.
+  Widget _tarjetaSerie() {
+    if (!_verSerie || _serie.length < 7) {
+      return const SizedBox.shrink();
+    }
+    final hayDatos =
+        _serie.any((d) => ((d['total'] as num?)?.toInt() ?? 0) > 0);
+    if (!hayDatos) return const SizedBox.shrink();
+    return Card(
+      margin: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 8, 12, 10),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Expanded(
+                  child: Text('Acciones por día · últimos 30 días',
+                      style: TextStyle(
+                          fontSize: 12, fontWeight: FontWeight.w600)),
+                ),
+                InkWell(
+                  onTap: () => setState(() => _verSerie = false),
+                  child: const Icon(Icons.close,
+                      size: 16, color: Colors.grey),
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            GraficoBarrasDiarias(datos: _serie, altura: 56),
+          ],
+        ),
+      ),
+    );
   }
 
   Future<void> _marcarLeidas() async {
@@ -1188,6 +1351,47 @@ class _ActividadScreenState extends State<ActividadScreen> {
                       style: AppTexto.titulo
                           .copyWith(fontSize: 18)),
                   const SizedBox(height: 12),
+                  // v1.4.1 (Pieza 7, B3): filtros guardados de este
+                  // dispositivo. Tocar aplica y cierra; la × borra.
+                  if (_guardados.isNotEmpty) ...[
+                    Text('Guardados',
+                        style: AppTexto.subtitulo
+                            .copyWith(fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 8),
+                    Wrap(spacing: 8, runSpacing: 8, children: [
+                      for (final g in _guardados)
+                        InputChip(
+                          label: Text('${g['nombre'] ?? ''}',
+                              style:
+                                  const TextStyle(fontSize: 12)),
+                          deleteIcon:
+                              const Icon(Icons.close, size: 16),
+                          onPressed: () {
+                            _aplicarGuardado(g);
+                            Navigator.of(ctx).pop();
+                          },
+                          onDeleted: () async {
+                            setState(() => _guardados.removeWhere(
+                                (x) => x['nombre'] == g['nombre']));
+                            await _persistirGuardados();
+                            setSheet(() {});
+                          },
+                        ),
+                    ]),
+                    const SizedBox(height: 4),
+                  ],
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: TextButton.icon(
+                      icon: const Icon(Icons.bookmark_add_outlined,
+                          size: 18),
+                      label: const Text('Guardar filtros actuales'),
+                      onPressed: () async {
+                        Navigator.of(ctx).pop();
+                        await _guardarFiltroActual();
+                      },
+                    ),
+                  ),
                   seccion('Tipo de operación', [
                     chipSel('Todo', fTipo == 'todo',
                         () => fTipo = 'todo'),
@@ -1419,6 +1623,8 @@ class _ActividadScreenState extends State<ActividadScreen> {
           // Los secundarios (tipo, entrenador, agrupar, rango) van en el
           // bottom sheet. Tocar un chip rápido activo vuelve a "Siempre".
           _filaFiltros(),
+          // v1.4.1 (Pieza 7, D3): mini gráfico de la serie diaria.
+          _tarjetaSerie(),
           // v1.3.3: cinta de resumen financiero (KPI bar) con desglose D1.
           _kpiBar(filtrados),
           Expanded(

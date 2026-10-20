@@ -1962,6 +1962,22 @@ class SyncEngine {
             await _db.setMeta(
                 'sync_estado_actividad', jsonEncode(rows.first['actividad']));
           }
+          // v1.4.1 (Pieza 7, D3): serie diaria agregada de 30 días.
+          // La columna puede no existir aún en sync_estado (el select
+          // la pide igual: PostgREST respondería 400 y el bloque
+          // entero fallaría... por eso va en su PROPIA lectura).
+          try {
+            final rs = await _getAuth(Uri.parse(
+                '$_base/rest/v1/sync_estado?id=eq.1'
+                '&select=actividad_serie'));
+            if (rs.statusCode == 200) {
+              final rowsS = jsonDecode(rs.body) as List;
+              if (rowsS.isNotEmpty && rowsS.first['actividad_serie'] is List) {
+                await _db.setMeta('sync_estado_actividad_serie',
+                    jsonEncode(rowsS.first['actividad_serie']));
+              }
+            }
+          } catch (_) {}
           serverSeq = rows.first['server_seq'] as int?;
           if (serverSeq != null) {
             await _db.setMeta('server_seq', '$serverSeq');

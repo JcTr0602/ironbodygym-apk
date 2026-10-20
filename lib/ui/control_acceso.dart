@@ -12,6 +12,8 @@ import '../acceso_app_cache.dart';
 import '../auth.dart';
 import '../negocio.dart' show tiempoRelativo;
 import 'acciones_acceso.dart';
+import 'campana_wa.dart';
+import 'estadisticas_adopcion.dart';
 import 'diseno.dart';
 import 'ficha_acceso.dart';
 import 'modal_pin_acceso.dart';
@@ -312,6 +314,39 @@ class _AccesosClientesTabState extends State<AccesosClientesTab> {
 
     return Column(
       children: [
+        // v1.4.1 (Pieza 9): estadísticas de adopción y campaña WA.
+        Padding(
+          padding: const EdgeInsets.fromLTRB(
+              AppEspacio.lg, AppEspacio.md, AppEspacio.lg, 0),
+          child: Row(
+            children: [
+              Expanded(
+                child: OutlinedButton.icon(
+                  icon: const Icon(Icons.bar_chart, size: 18),
+                  label: const Text('Adopción'),
+                  onPressed: () => Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) =>
+                          const EstadisticasAdopcionScreen(),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: OutlinedButton.icon(
+                  icon: const Icon(Icons.campaign_outlined, size: 18),
+                  label: const Text('Campaña WA'),
+                  onPressed: () => Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => const CampanaWaScreen(),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
         // Tarjetas de conteo filtrables (12-15 + Revocados + Sin acceso)
         SingleChildScrollView(
           scrollDirection: Axis.horizontal,

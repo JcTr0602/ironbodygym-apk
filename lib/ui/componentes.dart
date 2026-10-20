@@ -737,3 +737,88 @@ class IconoModuloBadge extends StatelessWidget {
     );
   }
 }
+
+/// v1.4.1: mini gráfico de barras diarias para series agregadas
+/// (actividad de 30 días del puente, adopción de 90 días de la
+/// RPC). [datos]: lista de {"fecha": "YYYY-MM-DD", "total": n} en
+/// orden ascendente. Sin dependencias nuevas: barras con layout.
+class GraficoBarrasDiarias extends StatelessWidget {
+  final List<Map<String, dynamic>> datos;
+  final double altura;
+
+  /// Etiquetas extremas opcionales (p. ej. un histograma por hora
+  /// usa "0h"/"23h" en vez de fechas).
+  final String? etiquetaPrimera;
+  final String? etiquetaUltima;
+
+  const GraficoBarrasDiarias({
+    super.key,
+    required this.datos,
+    this.altura = 84,
+    this.etiquetaPrimera,
+    this.etiquetaUltima,
+  });
+
+  static String _ddmm(String fecha) {
+    if (fecha.length >= 10) return fecha.substring(5, 10);
+    return fecha;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (datos.isEmpty) return const SizedBox.shrink();
+    var maximo = 0;
+    for (final d in datos) {
+      final v = (d['total'] as num?)?.toInt() ?? 0;
+      if (v > maximo) maximo = v;
+    }
+    if (maximo <= 0) maximo = 1;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        SizedBox(
+          height: altura,
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              for (final d in datos)
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 1),
+                    child: FractionallySizedBox(
+                      heightFactor:
+                          (((d['total'] as num?)?.toDouble() ?? 0) /
+                                  maximo)
+                              .clamp(0.02, 1.0),
+                      child: Container(
+                        decoration: const BoxDecoration(
+                          color: AppColores.naranja,
+                          borderRadius: BorderRadius.vertical(
+                              top: Radius.circular(2)),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 4),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text(etiquetaPrimera ?? _ddmm('${datos.first['fecha'] ?? ''}'),
+                style: const TextStyle(
+                    fontSize: 10, color: Colors.grey)),
+            Text('máx $maximo/día',
+                style: const TextStyle(
+                    fontSize: 10, color: Colors.grey)),
+            Text(etiquetaUltima ?? _ddmm('${datos.last['fecha'] ?? ''}'),
+                style: const TextStyle(
+                    fontSize: 10, color: Colors.grey)),
+          ],
+        ),
+      ],
+    );
+  }
+}
