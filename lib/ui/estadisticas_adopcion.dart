@@ -141,28 +141,28 @@ class _EstadisticasAdopcionScreenState
             const SizedBox(width: 12),
             _tarjetaNumero(
               'Ingresos / semana',
-              '${((_d['promedio_accesos_semana'] as num?)?.toDouble() ?? 0).toStringAsFixed(1)}',
+              ((_d['promedio_accesos_semana'] as num?)?.toDouble() ?? 0).toStringAsFixed(1),
               pie: '${_n('ingresos_28d')} ingresos en 28 días',
             ),
           ],
         ),
-        const const SizedBox(height: 20),
+        const SizedBox(height: 20),
         Text('Activaciones por día · últimos 90 días',
             style: AppTexto.subtitulo
                 .copyWith(fontWeight: FontWeight.bold)),
-        const const SizedBox(height: 8),
+        const SizedBox(height: 8),
         if (serie.isEmpty)
-          Text('Sin datos de activaciones.',
+          const Text('Sin datos de activaciones.',
               style: AppTexto.secundario)
         else
           GraficoBarrasDiarias(datos: serie, altura: 96),
-        const const SizedBox(height: 20),
+        const SizedBox(height: 20),
         Text('Ingresos por hora del día · 90 días',
             style: AppTexto.subtitulo
                 .copyWith(fontWeight: FontWeight.bold)),
-        const const SizedBox(height: 8),
+        const SizedBox(height: 8),
         if (horas.isEmpty)
-          Text('Sin ingresos registrados.', style: AppTexto.secundario)
+          const Text('Sin ingresos registrados.', style: AppTexto.secundario)
         else
           GraficoBarrasDiarias(
             datos: [
@@ -173,13 +173,13 @@ class _EstadisticasAdopcionScreenState
             etiquetaPrimera: '0h',
             etiquetaUltima: '23h',
           ),
-        const const SizedBox(height: 20),
+        const SizedBox(height: 20),
         Text('Clientes más activos · 90 días',
             style: AppTexto.subtitulo
                 .copyWith(fontWeight: FontWeight.bold)),
-        const const SizedBox(height: 8),
+        const SizedBox(height: 8),
         if (top.isEmpty)
-          Text('Todavía no hay ingresos registrados.',
+          const Text('Todavía no hay ingresos registrados.',
               style: AppTexto.secundario)
         else
           for (var i = 0; i < top.length; i++)
