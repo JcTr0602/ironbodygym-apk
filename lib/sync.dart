@@ -44,10 +44,10 @@ import 'tiempo.dart';
 
 enum SyncPhase { idle, uploading, downloading, photos, error }
 
-/// v1.3.10: fases del progreso visible durante la sincronización manual.
+/// v1.4.0: fases del progreso visible durante la sincronización manual.
 enum SyncFase { conectando, subiendo, bajando, verificando }
 
-/// v1.3.10: objeto de progreso para feedback en vivo en la UI.
+/// v1.4.0: objeto de progreso para feedback en vivo en la UI.
 class SyncProgress {
   final SyncFase fase;
   final int? actual;
@@ -785,12 +785,54 @@ class SyncEngine {
     onSessionExpired?.call();
   }
 
+  /// v1.4.0: emite progreso de forma segura: un fallo en el callback
+  /// de la UI jamás debe romper la sincronización.
+  void _emitirProgreso(void Function(SyncProgress)? cb, SyncProgress p) {
+    if (cb == null) return;
+    try {
+      cb(p);
+    } catch (_) {}
+  }
+
+  /// v1.4.0: reactiva las ops atascadas en 'enviada' (>2 min sin
+  /// confirmación del servidor) devolviéndolas a 'pendiente' para
+  /// reintento idempotente. Devuelve cuántas se reactivaron.
+  /// Solo se llama al forzar (botón manual) y bajo el lock de [run],
+  /// para no competir con un push en curso.
+  Future<int> _forzarAtascadas() async {
+    try {
+      final db = await _db.db;
+      // Corte en hora de La Habana: enviada_ts se guarda con
+      // isoHabana() y la comparación en SQLite es lexicográfica.
+      final corte =
+          isoHabana(ahoraHabana().subtract(const Duration(minutes: 2)));
+      return await db.transaction((txn) async {
+        final filas = await txn.query('ops_queue',
+            columns: ['op_uuid'],
+            where:
+                "estado = 'enviada' AND (enviada_ts IS NULL OR enviada_ts < ?)",
+            whereArgs: [corte]);
+        if (filas.isEmpty) return 0;
+        await txn.update(
+          'ops_queue',
+          {'estado': 'pendiente', 'error': null},
+          where:
+              "estado = 'enviada' AND (enviada_ts IS NULL OR enviada_ts < ?)",
+          whereArgs: [corte],
+        );
+        return filas.length;
+      });
+    } catch (_) {
+      return 0;
+    }
+  }
+
   /// Ciclo completo: push + pull (botón "Sincronizar ahora", al entrar).
   /// Repite el pull hasta que el watermark alcance al server_seq
   /// (pueden llegar cambios nuevos mientras se descarga).
   /// v1.2.5 (D14): [forzar] cancela el backoff ("Sincronizar ahora").
-  /// v1.3.10: [onProgreso] callback opcional para feedback en vivo en la UI.
-  /// v1.3.10: retorna cuántas ops atascadas en 'enviada' se reactivaron.
+  /// v1.4.0: [onProgreso] callback opcional para feedback en vivo en la UI.
+  /// v1.4.0: retorna cuántas ops atascadas en 'enviada' se reactivaron.
   Future<int> run({
     bool forzar = false,
     void Function(SyncProgress)? onProgreso,
@@ -806,7 +848,7 @@ class SyncEngine {
     var reactivadas = 0;
     await _conLock(() async {
       try {
-        // v1.3.10: al forzar, reactivar ops atascadas en 'enviada' antes del push.
+        // v1.4.0: al forzar, reactivar ops atascadas en 'enviada' antes del push.
         if (forzar) {
           reactivadas = await _forzarAtascadas();
           if (reactivadas > 0) {
@@ -903,6 +945,7 @@ class SyncEngine {
         _emit(SyncPhase.idle);
       }
     });
+    return reactivadas;
   }
 
   /// v1.2.8 (Paso 1): sincroniza solo las tablas del scope (pull parcial).
@@ -1022,7 +1065,9 @@ class SyncEngine {
   /// Lógica interna de subida (sin guard _running).
   /// P0 (2026-10-08): propaga la excepción para que run() no marque
   /// "sincronizado" si el push falló por dentro.
-  Future<void> _doPush({bool forzar = false}) async {
+  Future<void> _doPush(
+      {bool forzar = false,
+      void Function(SyncProgress)? onProgreso}) async {
     // v1.2.9+46 (AppLog): inicio de push.
     AppLog.info('sync', 'push_ini');
     try {
@@ -1045,6 +1090,10 @@ class SyncEngine {
       // v1.2.9+46: las fotos SIEMPRE se suben en cada sincronización,
       // como en v1.2.3. La puerta de ahorro de datos se eliminó por
       // orden de Jc (2026-10-13): hacía que las fotos nunca se intentaran.
+      _emitirProgreso(
+          onProgreso,
+          const SyncProgress(
+              fase: SyncFase.subiendo, mensaje: 'Subiendo fotos...'));
       _emit(SyncPhase.photos);
       // v1.2.9+43: solo intentar el flujo viejo si hay datos legacy.
       // v1.2.9+41: _uploadFotos no debe bloquear procesarCola.

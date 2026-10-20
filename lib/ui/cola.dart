@@ -207,6 +207,9 @@ class _ColaScreenState extends State<ColaScreen> {
   List<Map<String, dynamic>> _bloqueadas = [];
   SyncDetalle _det = const SyncDetalle();
   bool _sincronizando = false;
+  // v1.4.0: progreso visible de la sincronización manual.
+  SyncProgress? _progresoSync;
+  int _ultimoProgresoMs = 0;
   // v1.2.9+46: contadores de la cola de fotos.
   int _fotosPendientes = 0;
   int _fotosSubiendo = 0;
@@ -383,13 +386,38 @@ class _ColaScreenState extends State<ColaScreen> {
   }
 
   Future<void> _sincronizar() async {
-    setState(() => _sincronizando = true);
-    // v1.2.5 (D14): "Sincronizar ahora" cancela el backoff de reintentos.
-    await SyncEngine.instance.run(forzar: true);
-    await _cargar();
-    if (mounted) setState(() => _sincronizando = false);
+    setState(() {
+      _sincronizando = true;
+      _progresoSync = null;
+    });
+    var reactivadas = 0;
+    try {
+      // v1.4.0: vibración sutil al tocar, sin bloquear la sync.
+      unawaited(vibrarConfirmacion());
+      // v1.2.5 (D14): "Sincronizar ahora" cancela el backoff de reintentos.
+      reactivadas = await SyncEngine.instance.run(
+        forzar: true,
+        onProgreso: (p) {
+          // v1.4.0: throttle de setState (~150 ms) para no saturar la UI.
+          final ahoraMs = DateTime.now().millisecondsSinceEpoch;
+          if (ahoraMs - _ultimoProgresoMs < 150) return;
+          _ultimoProgresoMs = ahoraMs;
+          if (mounted) setState(() => _progresoSync = p);
+        },
+      );
+    } catch (_) {
+      // El resumen posterior refleja el error guardado por el motor.
+    } finally {
+      await _cargar();
+      if (mounted) {
+        setState(() {
+          _sincronizando = false;
+          _progresoSync = null;
+        });
+      }
+    }
     // Resumen post-sync (solo en sincronización manual desde aquí)
-    if (mounted) _mostrarResumen();
+    if (mounted) _mostrarResumen(reactivadas: reactivadas);
   }
 
   /// v1.2.5 (D15): reintento manual de una bloqueada. La devuelve a
@@ -415,7 +443,10 @@ class _ColaScreenState extends State<ColaScreen> {
   }
 
   /// Muestra un diálogo con el resumen de la sincronización recién hecha.
-  Future<void> _mostrarResumen() async {
+  /// v1.4.0: [reactivadas] = ops atascadas que se reintentaron al forzar;
+  /// el texto explica el resultado en lenguaje claro (todo al día,
+  /// éxito parcial, error) en vez de solo mostrar los conteos.
+  Future<void> _mostrarResumen({int reactivadas = 0}) async {
     final det = await SyncEngine.instance.detalle();
     if (!mounted) return;
     final subidos = det.subidos;
@@ -433,6 +464,24 @@ class _ColaScreenState extends State<ColaScreen> {
             _resumenFila(context, Icons.upload, 'Subidos', '$subidos'),
             const SizedBox(height: 8),
             _resumenFila(context, Icons.download, 'Bajados', '$bajados'),
+            if (reactivadas > 0) ...[
+              const SizedBox(height: 12),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Icon(Icons.refresh,
+                      size: 16, color: AppColores.info),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      'Se reintentaron $reactivadas operaciones que '
+                      'estaban atascadas.',
+                      style: const TextStyle(fontSize: 13),
+                    ),
+                  ),
+                ],
+              ),
+            ],
             if (error != null && error.isNotEmpty) ...[
               const SizedBox(height: 12),
               Row(
@@ -454,11 +503,28 @@ class _ColaScreenState extends State<ColaScreen> {
                 ],
               ),
             ],
-            if (subidos == 0 && bajados == 0)
+            if (subidos == 0 &&
+                bajados == 0 &&
+                (error == null || error.isEmpty))
               Padding(
                 padding: const EdgeInsets.only(top: 12),
                 child: Text(
-                  'No hubo cambios nuevos.',
+                  'Todo estaba al día: no había nada nuevo que subir '
+                  'ni bajar.',
+                  style: AppTexto.secundario.copyWith(
+                      color: AppColores.textoSecundario(
+                          context)),
+                ),
+              ),
+            if (subidos == 0 &&
+                bajados == 0 &&
+                error != null &&
+                error.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(top: 12),
+                child: Text(
+                  'No se pudo sincronizar. Revisa tu conexión e '
+                  'inténtalo de nuevo.',
                   style: AppTexto.secundario.copyWith(
                       color: AppColores.textoSecundario(
                           context)),
@@ -1120,6 +1186,25 @@ class _ColaScreenState extends State<ColaScreen> {
               icono: Icons.sync,
               onPressed: _sincronizando ? null : _sincronizar,
             ),
+            // v1.4.0: progreso visible bajo el botón (el mensaje va
+            // fuera del botón porque dentro se truncaría).
+            if (_sincronizando) ...[
+              const SizedBox(height: 12),
+              const LinearProgressIndicator(),
+              if (_progresoSync != null) ...[
+                const SizedBox(height: 8),
+                Semantics(
+                  liveRegion: true,
+                  child: Text(
+                    _progresoSync!.mensaje,
+                    textAlign: TextAlign.center,
+                    style: AppTexto.secundario.copyWith(
+                        color:
+                            AppColores.textoSecundario(context)),
+                  ),
+                ),
+              ],
+            ],
             if (_det.error != null && _det.error!.isNotEmpty) ...[
               const SizedBox(height: 12),
               Container(
