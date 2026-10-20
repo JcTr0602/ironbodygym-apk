@@ -896,7 +896,6 @@ class _AdminScreenState extends State<AdminScreen> {
                           'Próximos 30 días',
                           () => _ir(const CumpleanosMes()),
                         ),
-                        // v1.3.9 Sprint 4 (#10): Horario.
                         _encabezadoGrupo('📊', 'OPERACIÓN'),
                         // Estado y último error como tarjetas compactas.
                         _tarjetaFlujo(
@@ -906,7 +905,6 @@ class _AdminScreenState extends State<AdminScreen> {
                           () => _ir(
                               const ControlAccesoScreen()),
                         ),
-                        // v1.3.9 Sprint 3 (#6): Pagos por método.
                         _tarjetaCompacta(
                           _pendientesSubir > 0
                               ? Icons.sync_problem_rounded
@@ -983,6 +981,7 @@ class _AdminScreenState extends State<AdminScreen> {
                         ),
 
                         // -- ⚙️ CONFIGURACIÓN ------------------------------------------
+                        // v1.3.9 Sprint 3 (#6): Pagos por método.
                         _tarjetaFlujo(
                           Icons.credit_card_rounded,
                           'Pagos por Método',
@@ -996,7 +995,6 @@ class _AdminScreenState extends State<AdminScreen> {
                           'Este mes vs anterior',
                           () => _ir(const ComparativaMensual()),
                         ),
-                        // v1.3.9 Sprint 3 (#8): Nómina.
                         _encabezadoGrupo('⚙️', 'CONFIGURACIÓN'),
                         _tarjetaFlujo(
                           Icons.payments_outlined,
@@ -1018,6 +1016,7 @@ class _AdminScreenState extends State<AdminScreen> {
                         ),
                         // v1.4.0 Paso 2: fusión en "Control de Acceso"
                         // (Entrenadores | Clientes) + turnos manuales.
+                        // v1.3.9 Sprint 4 (#10): Horario.
                         _tarjetaFlujo(
                           Icons.schedule_rounded,
                           'Horario del Gym',

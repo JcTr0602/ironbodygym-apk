@@ -79,10 +79,14 @@ Future<void> accionSimpleAcceso(
         boton: 'Sí, continuar')) {
       return;
     }
+    // Guarda de ciclo de vida (panel R2): si el anfitrión se desmontó
+    // con la confirmación abierta, no ejecutar la RPC.
+    if (!ctx.mounted) return;
   }
   try {
     await Supabase.instance.client
         .rpc(rpc, params: {'p_cliente_id': clienteId});
+    if (!ctx.mounted) return;
     await alTerminar();
     _snack(ctx, mensajeOk);
   } catch (e) {
@@ -113,6 +117,9 @@ Future<void> resetearPinAcceso(
     boton: 'Generar PIN nuevo',
   );
   if (!ok) return;
+  // Guarda de ciclo de vida (panel R2): con el anfitrión desmontado,
+  // la RPC invalidaría el PIN viejo sin poder mostrar el nuevo.
+  if (!ctx.mounted) return;
   try {
     final res = await Supabase.instance.client.rpc(
       'resetear_pin_cliente',
@@ -121,6 +128,7 @@ Future<void> resetearPinAcceso(
     final data = Map<String, dynamic>.from(res as Map);
     final pin = '${data['pin_temporal'] ?? ''}';
     if (pin.isEmpty) throw 'El servidor no devolvió el PIN';
+    if (!ctx.mounted) return;
     await alTerminar();
     if (!ctx.mounted) return;
     mostrarModalPin(
@@ -195,6 +203,7 @@ Future<void> bloquearAcceso(
     ),
   );
   if (ok != true) return;
+  if (!ctx.mounted) return;
   try {
     await Supabase.instance.client.rpc(
       'bloquear_acceso_cliente',
@@ -207,6 +216,7 @@ Future<void> bloquearAcceso(
             ctrlMotivo.text.trim().isEmpty ? null : ctrlMotivo.text.trim(),
       },
     );
+    if (!ctx.mounted) return;
     await alTerminar();
     _snack(ctx, 'Acceso bloqueado.');
   } catch (e) {
@@ -259,6 +269,7 @@ Future<void> cambiarTelefonoAcceso(
     ),
   );
   if (ok != true) return;
+  if (!ctx.mounted) return;
   try {
     await Supabase.instance.client.rpc(
       'cambiar_telefono_acceso',
@@ -267,6 +278,7 @@ Future<void> cambiarTelefonoAcceso(
         'p_telefono': ctrl.text.trim(),
       },
     );
+    if (!ctx.mounted) return;
     await alTerminar();
     _snack(ctx, 'Teléfono actualizado.');
   } catch (e) {
@@ -288,12 +300,15 @@ Future<void> mostrarMenuAccionesAcceso(
   final revocado = a.estado == 'revocado';
   final bloqueado = a.estado == 'bloqueado';
 
+  // Panel R2 (Luna): la hoja solo ANOTA la opción elegida y se
+  // cierra; la acción se ejecuta cuando showModalBottomSheet ya
+  // terminó, nunca sobre la transición de cierre de la hoja.
+  Future<void> Function()? elegida;
+
   await showModalBottomSheet<void>(
     context: ctx,
     showDragHandle: true,
     builder: (sheetCtx) {
-      // La hoja se cierra con SU contexto antes de actuar (Argón 2.1);
-      // las acciones reciben el contexto anfitrión [ctx].
       Widget item(
           IconData icono, String texto, Future<void> Function() accion,
           {bool peligro = false}) {
@@ -304,9 +319,9 @@ Future<void> mostrarMenuAccionesAcceso(
               style: peligro
                   ? const TextStyle(color: AppColores.error)
                   : null),
-          onTap: () async {
+          onTap: () {
+            elegida = accion;
             Navigator.of(sheetCtx).pop();
-            await accion();
           },
         );
       }
@@ -433,4 +448,8 @@ Future<void> mostrarMenuAccionesAcceso(
       );
     },
   );
+
+  if (elegida != null && ctx.mounted) {
+    await elegida!();
+  }
 }

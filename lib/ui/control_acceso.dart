@@ -602,22 +602,53 @@ class _AccesosClientesTabState extends State<AccesosClientesTab> {
   /// State), nunca el de la hoja modal (regla de Argón 2.1); al
   /// terminar cualquier acción se recarga TODO (lista, sin-acceso y
   /// contadores) vía _cargar.
+  /// v1.4.1 (panel R2, Sol): exclusión por cliente. Sin ella, con la
+  /// conexión lenta el dueño podía confirmar dos acciones rápidas
+  /// sobre el mismo acceso (p. ej. dos reseteos de PIN: el segundo
+  /// invalida el primero mientras su modal sigue en pantalla). La
+  /// ficha ya se protege con su _ocupado; la lista usa este conjunto,
+  /// adquirido ANTES de abrir la hoja/confirmación.
+  final Set<int> _accionesEnCurso = {};
+
+  Future<void> _conExclusion(
+      AccesoCliente a, Future<void> Function() accion) async {
+    if (!_accionesEnCurso.add(a.clienteId)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+            content:
+                Text('Ya hay una acción en curso para ${a.nombre}.')),
+      );
+      return;
+    }
+    try {
+      await accion();
+    } finally {
+      _accionesEnCurso.remove(a.clienteId);
+    }
+  }
+
   Future<void> _menuAcciones(AccesoCliente a) async {
-    await mostrarMenuAccionesAcceso(
-      context,
-      a: a,
-      alTerminar: _cargar,
-      alAbrirFicha: () => _abrirFicha(a),
+    await _conExclusion(
+      a,
+      () => mostrarMenuAccionesAcceso(
+        context,
+        a: a,
+        alTerminar: _cargar,
+        alAbrirFicha: () => _abrirFicha(a),
+      ),
     );
   }
 
   Future<void> _desbloqueoRapido(AccesoCliente a) async {
-    await accionSimpleAcceso(
-      context,
-      clienteId: a.clienteId,
-      rpc: 'desbloquear_acceso_cliente',
-      mensajeOk: '${a.nombre} desbloqueado.',
-      alTerminar: _cargar,
+    await _conExclusion(
+      a,
+      () => accionSimpleAcceso(
+        context,
+        clienteId: a.clienteId,
+        rpc: 'desbloquear_acceso_cliente',
+        mensajeOk: '${a.nombre} desbloqueado.',
+        alTerminar: _cargar,
+      ),
     );
   }
 
