@@ -47,7 +47,10 @@ class Medicion {
       cinturaCm: (j['cintura_cm'] as num?)?.toDouble(),
       caderaCm: (j['cadera_cm'] as num?)?.toDouble(),
       brazoCm: (j['brazo_cm'] as num?)?.toDouble(),
-      musloCm: (j['muslo_cm'] as num?)?.toDouble(),
+      // La clave canónica es muslo_cm; 'pierna_cm' solo es lectura
+      // defensiva por si un origen futuro la renombra (nunca se
+      // escribe: el RPC sigue recibiendo p_muslo_cm).
+      musloCm: ((j['muslo_cm'] ?? j['pierna_cm']) as num?)?.toDouble(),
       notas: j['notas']?.toString(),
       registradoPor: '${j['registrado_por'] ?? ''}',
       createdAt: DateTime.tryParse('${j['created_at'] ?? ''}') ??
@@ -280,9 +283,19 @@ class _PestanaProgresoState extends State<PestanaProgreso> {
               '${m.createdAt.day}/${m.createdAt.month}/${m.createdAt.year} • Por: ${m.registradoPor}',
               style: const TextStyle(fontSize: 12),
             ),
-            if (m.grasaPct != null)
-              Text('Grasa: ${m.grasaPct!.toStringAsFixed(1)}%',
-                  style: const TextStyle(fontSize: 12)),
+            // v1.4.0: solo medidas visibles (sin % grasa/pecho/cadera).
+            if (m.cinturaCm != null || m.brazoCm != null || m.musloCm != null)
+              Text(
+                [
+                  if (m.cinturaCm != null)
+                    'Cintura ${m.cinturaCm!.toStringAsFixed(1)}',
+                  if (m.brazoCm != null)
+                    'Brazo ${m.brazoCm!.toStringAsFixed(1)}',
+                  if (m.musloCm != null)
+                    'Pierna ${m.musloCm!.toStringAsFixed(1)}',
+                ].join(' · '),
+                style: const TextStyle(fontSize: 12),
+              ),
           ],
         ),
         trailing: puedeEditar
@@ -324,23 +337,16 @@ class _PestanaProgresoState extends State<PestanaProgreso> {
             Text(
                 'Fecha: ${m.createdAt.day}/${m.createdAt.month}/${m.createdAt.year}'),
             Text('Registrado por: ${m.registradoPor}'),
-            if (m.grasaPct != null)
-              Text(
-                  'Grasa corporal: ${m.grasaPct!.toStringAsFixed(1)}%'),
-            if (m.pechoCm != null)
-              Text('Pecho: ${m.pechoCm!.toStringAsFixed(1)} cm'),
+            // v1.4.0: el detalle solo muestra las medidas visibles.
             if (m.cinturaCm != null)
               Text(
                   'Cintura: ${m.cinturaCm!.toStringAsFixed(1)} cm'),
-            if (m.caderaCm != null)
-              Text(
-                  'Cadera: ${m.caderaCm!.toStringAsFixed(1)} cm'),
             if (m.brazoCm != null)
               Text(
                   'Brazo: ${m.brazoCm!.toStringAsFixed(1)} cm'),
             if (m.musloCm != null)
               Text(
-                  'Muslo: ${m.musloCm!.toStringAsFixed(1)} cm'),
+                  'Pierna: ${m.musloCm!.toStringAsFixed(1)} cm'),
             if (m.notas != null && m.notas!.isNotEmpty)
               Text('Notas: ${m.notas}'),
           ],
@@ -357,16 +363,15 @@ class _PestanaProgresoState extends State<PestanaProgreso> {
 
   Future<void> _mostrarFormulario(
       BuildContext context, Medicion? existente) async {
+    // v1.4.0 (Paso 3, diseño de Argón): el formulario solo muestra
+    // Peso, Cintura, Brazo y Pierna. % grasa, pecho y cadera quedan
+    // en la BD: al EDITAR se reenvían los valores previos de la
+    // medición (el RPC es de reemplazo completo y no puede cambiar
+    // de firma); al CREAR van en null, como hasta ahora.
     final pesoCtrl = TextEditingController(
         text: existente?.pesoKg.toString() ?? '');
-    final grasaCtrl = TextEditingController(
-        text: existente?.grasaPct?.toString() ?? '');
-    final pechoCtrl = TextEditingController(
-        text: existente?.pechoCm?.toString() ?? '');
     final cinturaCtrl = TextEditingController(
         text: existente?.cinturaCm?.toString() ?? '');
-    final caderaCtrl = TextEditingController(
-        text: existente?.caderaCm?.toString() ?? '');
     final brazoCtrl = TextEditingController(
         text: existente?.brazoCm?.toString() ?? '');
     final musloCtrl = TextEditingController(
@@ -396,45 +401,12 @@ class _PestanaProgresoState extends State<PestanaProgreso> {
               ),
               const SizedBox(height: 8),
               TextField(
-                controller: grasaCtrl,
-                keyboardType:
-                    const TextInputType.numberWithOptions(
-                        decimal: true),
-                decoration: const InputDecoration(
-                  labelText: '% Grasa',
-                  border: OutlineInputBorder(),
-                ),
-              ),
-              const SizedBox(height: 8),
-              TextField(
-                controller: pechoCtrl,
-                keyboardType:
-                    const TextInputType.numberWithOptions(
-                        decimal: true),
-                decoration: const InputDecoration(
-                  labelText: 'Pecho (cm)',
-                  border: OutlineInputBorder(),
-                ),
-              ),
-              const SizedBox(height: 8),
-              TextField(
                 controller: cinturaCtrl,
                 keyboardType:
                     const TextInputType.numberWithOptions(
                         decimal: true),
                 decoration: const InputDecoration(
                   labelText: 'Cintura (cm)',
-                  border: OutlineInputBorder(),
-                ),
-              ),
-              const SizedBox(height: 8),
-              TextField(
-                controller: caderaCtrl,
-                keyboardType:
-                    const TextInputType.numberWithOptions(
-                        decimal: true),
-                decoration: const InputDecoration(
-                  labelText: 'Cadera (cm)',
                   border: OutlineInputBorder(),
                 ),
               ),
@@ -456,7 +428,7 @@ class _PestanaProgresoState extends State<PestanaProgreso> {
                     const TextInputType.numberWithOptions(
                         decimal: true),
                 decoration: const InputDecoration(
-                  labelText: 'Muslo (cm)',
+                  labelText: 'Pierna (cm)',
                   border: OutlineInputBorder(),
                 ),
               ),
@@ -487,19 +459,13 @@ class _PestanaProgresoState extends State<PestanaProgreso> {
 
     // FIX 2 (Argón): capturar valores y liberar controladores
     final pesoStr = pesoCtrl.text;
-    final grasaStr = grasaCtrl.text;
-    final pechoStr = pechoCtrl.text;
     final cinturaStr = cinturaCtrl.text;
-    final caderaStr = caderaCtrl.text;
     final brazoStr = brazoCtrl.text;
     final musloStr = musloCtrl.text;
     final notasStr = notasCtrl.text;
     // Dispose inmediato para evitar fuga de memoria
     pesoCtrl.dispose();
-    grasaCtrl.dispose();
-    pechoCtrl.dispose();
     cinturaCtrl.dispose();
-    caderaCtrl.dispose();
     brazoCtrl.dispose();
     musloCtrl.dispose();
     notasCtrl.dispose();
@@ -522,10 +488,12 @@ class _PestanaProgresoState extends State<PestanaProgreso> {
           .rpc('guardar_medicion_staff', params: {
         'p_cliente_id': widget.clienteId,
         'p_peso_kg': peso,
-        'p_grasa_pct': _parseNum(grasaStr),
-        'p_pecho_cm': _parseNum(pechoStr),
+        // v1.4.0: campos ocultos en la UI. Al editar se conservan los
+        // valores previos; al crear van en null (igual que antes).
+        'p_grasa_pct': existente?.grasaPct,
+        'p_pecho_cm': existente?.pechoCm,
         'p_cintura_cm': _parseNum(cinturaStr),
-        'p_cadera_cm': _parseNum(caderaStr),
+        'p_cadera_cm': existente?.caderaCm,
         'p_brazo_cm': _parseNum(brazoStr),
         'p_muslo_cm': _parseNum(musloStr),
         'p_notas': notasStr.trim().isEmpty ? null : notasStr.trim(),
