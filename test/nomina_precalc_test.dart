@@ -96,6 +96,36 @@ void main() {
     await db.close();
   });
 
+  test('mover un pago a otro mes invalida la huella (auditoría terra)',
+      () async {
+    final db = await _abrirDbVacia();
+    final pref = NominaCalc.prefMesActual();
+    await _insertarPago(db,
+        id: 1, clienteId: 10, fecha: '$pref-03', syncSeq: 1);
+    expect(await NominaPrecalc.instance.asegurar(pref), 1);
+
+    // Edición SOLO de fecha (mismo id, cliente y sync_seq): el pago
+    // sale del mes. La huella vieja no lo detectaba; la nueva sí.
+    await db.update(
+        'pagos',
+        {
+          'fecha': '2020-01-15',
+          'data': jsonEncode({
+            'id': 1,
+            'cliente_id': 10,
+            'fecha': '2020-01-15',
+            'monto': 2000,
+          }),
+        },
+        where: 'id = ?',
+        whereArgs: [1]);
+    final cache = await NominaPrecalc.instance.leer(pref);
+    expect(cache!.fresco, isFalse,
+        reason: 'la huella debe detectar el cambio de fecha');
+    expect(await NominaPrecalc.instance.asegurar(pref), 0);
+    await db.close();
+  });
+
   test('leer sin caché devuelve null y asegurar del mes vacío da 0',
       () async {
     final db = await _abrirDbVacia();

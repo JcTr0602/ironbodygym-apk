@@ -499,9 +499,12 @@ class _HomeScreenState extends State<HomeScreen>
           _turnosPendientes = turnosPend;
         });
         // v1.4.0: calentar la caché de nómina tras cargar el home
-        // (asegurar() no hace nada si la huella sigue fresca).
+        // (asegurar() no hace nada si la huella sigue fresca; el
+        // catchError blinda el Future no esperado ante cualquier
+        // fallo de BD — auditoría del código, terra).
         unawaited(NominaPrecalc.instance
-            .asegurar(hoyHabanaIso().substring(0, 7)));
+            .asegurar(hoyHabanaIso().substring(0, 7))
+            .catchError((_) => 0));
       }
     } catch (e) {
       // Fix #29 (Sol): NO actualizar _lastFetch si falló.

@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -27,9 +26,8 @@ class NominaScreen extends StatefulWidget {
 class _NominaScreenState extends State<NominaScreen> {
   bool _cargando = true;
   int _clientesPagados = 0;
-  // v1.4.0: sello del pre-cálculo ("Actualizado: ...") y su recálculo.
+  // v1.4.0: sello del pre-cálculo ("Actualizado: ...").
   String _actualizadoEtiqueta = '';
-  bool _recalculando = false;
   String _mesEtiqueta = '';
   // v1.3.9: lista de bonos por entrenador [{id, entrenador, monto, nota}]
   List<Map<String, dynamic>> _bonos = [];
@@ -68,14 +66,20 @@ class _NominaScreenState extends State<NominaScreen> {
     // si su huella quedó vieja, se recalcula en segundo plano y la
     // pantalla se refresca sola cuando termina.
     final cache = await NominaPrecalc.instance.leer(pref);
-    final clientesPagados = cache?.clientes ??
-        await NominaCalc.clientesQuePagaronElMes(pref);
-    if (cache == null) {
-      // Primera vez: sembrar la caché para las próximas aperturas.
-      unawaited(NominaPrecalc.instance.asegurar(pref));
-    }
+    final desdeCache = cache != null && cache.fresco;
+    // Solo se compone dinero con una base FRESCA: si la caché está
+    // vieja se espera el recálculo (asegurar) en vez de mostrar una
+    // nómina provisional calculada con la cifra anterior
+    // (auditoría del código, terra). Con caché fresca la apertura
+    // sigue siendo instantánea, que es el objetivo del pre-cálculo.
+    final clientesPagados = desdeCache
+        ? cache.clientes
+        : await NominaPrecalc.instance.asegurar(pref);
     if (mounted) {
       final prefs = await SharedPreferences.getInstance();
+      // La pantalla pudo cerrarse durante los awaits: no seguir
+      // hasta el setState con el widget desmontado (auditoría, terra).
+      if (!mounted) return;
       // v1.3.9: leer lista de bonos (migrar bono simple viejo si existe)
       List<Map<String, dynamic>> bonos = [];
       final jsonStr = prefs.getString(_bonosKey(ahoraHabana()));
@@ -106,28 +110,17 @@ class _NominaScreenState extends State<NominaScreen> {
       }
       final tarifa =
           await PerfilService.instance.getPagoEntrenador();
+      if (!mounted) return;
       setState(() {
         _clientesPagados = clientesPagados;
         _bonos = bonos;
         _tarifa = tarifa.toDouble();
         _tarifaCtrl.text = tarifa.toString();
-        _actualizadoEtiqueta = _etiquetaActualizado(
-            cache?.calculadoEn ?? ahoraHabana().toIso8601String());
-        _recalculando = cache != null && !cache.fresco;
+        _actualizadoEtiqueta = _etiquetaActualizado(desdeCache
+            ? cache.calculadoEn
+            : ahoraHabana().toIso8601String());
         _cargando = false;
       });
-      // Caché vieja: recalcular detrás y refrescar la cifra al llegar.
-      if (cache != null && !cache.fresco) {
-        final nuevo = await NominaPrecalc.instance.asegurar(pref);
-        if (mounted) {
-          setState(() {
-            _clientesPagados = nuevo;
-            _actualizadoEtiqueta =
-                _etiquetaActualizado(ahoraHabana().toIso8601String());
-            _recalculando = false;
-          });
-        }
-      }
     }
   }
 
@@ -396,9 +389,7 @@ class _NominaScreenState extends State<NominaScreen> {
                       const SizedBox(height: 4),
                       // v1.4.0: sello del pre-cálculo automático.
                       Text(
-                        _recalculando
-                            ? 'Recalculando con los datos más recientes…'
-                            : 'Actualizado: $_actualizadoEtiqueta',
+                        'Actualizado: $_actualizadoEtiqueta',
                         style: AppTexto.etiqueta.copyWith(
                           color: AppColores.textoSecundario(
                               context),

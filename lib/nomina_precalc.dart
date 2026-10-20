@@ -26,17 +26,23 @@ class NominaPrecalc {
   /// Huella de los insumos de nómina sobre la tabla espejo `pagos`.
   /// COUNT + SUM(sync_seq) + SUM(cliente_id) + MAX(id) detectan
   /// altas, bajas, ediciones que llegan por pull (nuevo sync_seq) y
-  /// ops locales aplicadas al espejo (nuevo id). El conteo de filas
-  /// con fecha NULL cubre el camino de fallback de pagosDelMes.
+  /// ops locales aplicadas al espejo (nuevo id). SUM(epoch(fecha))
+  /// detecta además que un pago se mueva de mes (auditoría del
+  /// código, terra: una edición local solo de fecha no tocaba
+  /// ninguno de los otros componentes). Las filas con fecha NULL
+  /// (camino de fallback de pagosDelMes) quedan cubiertas por su
+  /// conteo y la suma de sus ids.
   Future<String> huella() async {
     final d = await LocalDb.instance.db;
     final rows = await d.rawQuery(
         'SELECT COUNT(*) AS c, COALESCE(SUM(sync_seq), 0) AS ss, '
         'COALESCE(SUM(cliente_id), 0) AS sc, COALESCE(MAX(id), 0) AS mi, '
-        '(SELECT COUNT(*) FROM pagos WHERE fecha IS NULL) AS cn '
+        "COALESCE(SUM(CAST(strftime('%s', fecha) AS INTEGER)), 0) AS sf, "
+        '(SELECT COUNT(*) FROM pagos WHERE fecha IS NULL) AS cn, '
+        '(SELECT COALESCE(SUM(id), 0) FROM pagos WHERE fecha IS NULL) AS sn '
         'FROM pagos');
     final r = rows.first;
-    return '${r['c']}|${r['ss']}|${r['sc']}|${r['mi']}|${r['cn']}';
+    return '${r['c']}|${r['ss']}|${r['sc']}|${r['mi']}|${r['sf']}|${r['cn']}|${r['sn']}';
   }
 
   /// Lee la caché del mes [pref] ('YYYY-MM'). Devuelve null si aún no
@@ -78,33 +84,37 @@ class NominaPrecalc {
   }
 
   Future<int> _recalcular(String pref) async {
-    // Solo se escribe la caché si la huella no cambió DURANTE el
-    // cálculo (si cambió, el conteo podría mezclar dos estados).
-    for (var intento = 0; intento < 3; intento++) {
-      final h1 = await huella();
-      final n = await NominaCalc.clientesQuePagaronElMes(pref);
-      final h2 = await huella();
-      if (h1 == h2) {
-        try {
-          final d = await LocalDb.instance.db;
-          await d.insert(
-            'nomina_precalc',
-            {
-              'mes': pref,
-              'clientes_pagados': n,
-              'huella': h2,
-              'calculado_en': ahoraHabana().toIso8601String(),
-            },
-            conflictAlgorithm: ConflictAlgorithm.replace,
-          );
-        } catch (e) {
+    // Nunca lanza: asegurar() se llama también sin await desde el
+    // home, y un error de BD aquí no debe convertirse en una
+    // excepción asíncrona sin manejar (auditoría del código, terra).
+    try {
+      // Solo se escribe la caché si la huella no cambió DURANTE el
+      // cálculo (si cambió, el conteo podría mezclar dos estados).
+      for (var intento = 0; intento < 3; intento++) {
+        final h1 = await huella();
+        final n = await NominaCalc.clientesQuePagaronElMes(pref);
+        final h2 = await huella();
+        if (h1 == h2) {
+          try {
+            final d = await LocalDb.instance.db;
+            await d.insert(
+              'nomina_precalc',
+              {
+                'mes': pref,
+                'clientes_pagados': n,
+                'huella': h2,
+                'calculado_en': ahoraHabana().toIso8601String(),
+              },
+              conflictAlgorithm: ConflictAlgorithm.replace,
+            );
+          } catch (_) {}
+          return n;
         }
-        return n;
       }
-    }
-    // Espejo inestable (sync escribiendo sin parar): no se guarda
-    // nada; se devuelve el cálculo vivo para no mostrar una cifra
-    // vieja como si fuera fresca.
+    } catch (_) {}
+    // Espejo inestable (sync escribiendo sin parar) o error de
+    // lectura: no se guarda nada; se devuelve el cálculo vivo para
+    // no mostrar una cifra vieja como si fuera fresca.
     return NominaCalc.clientesQuePagaronElMes(pref);
   }
 }
