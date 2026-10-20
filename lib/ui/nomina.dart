@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -6,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../auth.dart';
 import '../negocio.dart';
 import '../nomina_calc.dart';
+import '../nomina_precalc.dart';
 import '../perfil.dart';
 import '../tiempo.dart';
 import 'componentes.dart';
@@ -25,6 +27,9 @@ class NominaScreen extends StatefulWidget {
 class _NominaScreenState extends State<NominaScreen> {
   bool _cargando = true;
   int _clientesPagados = 0;
+  // v1.4.0: sello del pre-cálculo ("Actualizado: ...") y su recálculo.
+  String _actualizadoEtiqueta = '';
+  bool _recalculando = false;
   String _mesEtiqueta = '';
   // v1.3.9: lista de bonos por entrenador [{id, entrenador, monto, nota}]
   List<Map<String, dynamic>> _bonos = [];
@@ -59,7 +64,16 @@ class _NominaScreenState extends State<NominaScreen> {
     // Misma fuente que "Pagos realizados": clientes únicos con pago
     // este mes. v1.4.0: cálculo compartido en NominaCalc (lo usan
     // también el home y el pre-cálculo; no pueden divergir).
-    final clientesPagados = await NominaCalc.clientesQuePagaronElMes(pref);
+    // Primero se sirve la caché del pre-cálculo (apertura instantánea);
+    // si su huella quedó vieja, se recalcula en segundo plano y la
+    // pantalla se refresca sola cuando termina.
+    final cache = await NominaPrecalc.instance.leer(pref);
+    final clientesPagados = cache?.clientes ??
+        await NominaCalc.clientesQuePagaronElMes(pref);
+    if (cache == null) {
+      // Primera vez: sembrar la caché para las próximas aperturas.
+      unawaited(NominaPrecalc.instance.asegurar(pref));
+    }
     if (mounted) {
       final prefs = await SharedPreferences.getInstance();
       // v1.3.9: leer lista de bonos (migrar bono simple viejo si existe)
@@ -97,9 +111,34 @@ class _NominaScreenState extends State<NominaScreen> {
         _bonos = bonos;
         _tarifa = tarifa.toDouble();
         _tarifaCtrl.text = tarifa.toString();
+        _actualizadoEtiqueta = _etiquetaActualizado(
+            cache?.calculadoEn ?? ahoraHabana().toIso8601String());
+        _recalculando = cache != null && !cache.fresco;
         _cargando = false;
       });
+      // Caché vieja: recalcular detrás y refrescar la cifra al llegar.
+      if (cache != null && !cache.fresco) {
+        final nuevo = await NominaPrecalc.instance.asegurar(pref);
+        if (mounted) {
+          setState(() {
+            _clientesPagados = nuevo;
+            _actualizadoEtiqueta =
+                _etiquetaActualizado(ahoraHabana().toIso8601String());
+            _recalculando = false;
+          });
+        }
+      }
     }
+  }
+
+  /// "20 de octubre, 12:40" a partir de un ISO guardado por el
+  /// pre-cálculo. Si el ISO no parsea, devuelve el texto tal cual.
+  String _etiquetaActualizado(String iso) {
+    final d = DateTime.tryParse(iso);
+    if (d == null) return iso;
+    final hh = d.hour.toString().padLeft(2, '0');
+    final mm = d.minute.toString().padLeft(2, '0');
+    return '${d.day} de ${_nombreMes(d.month).toLowerCase()}, $hh:$mm';
   }
 
   /// Suma solo los bonos generales ('ambos'), contados una vez.
@@ -350,6 +389,17 @@ class _NominaScreenState extends State<NominaScreen> {
                         '$_clientesPagados clientes pagados en $_mesEtiqueta '
                         '× ${fmtMonto(pagoPorCliente)} CUP',
                         style: AppTexto.cuerpo.copyWith(
+                          color: AppColores.textoSecundario(
+                              context),
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      // v1.4.0: sello del pre-cálculo automático.
+                      Text(
+                        _recalculando
+                            ? 'Recalculando con los datos más recientes…'
+                            : 'Actualizado: $_actualizadoEtiqueta',
+                        style: AppTexto.etiqueta.copyWith(
                           color: AppColores.textoSecundario(
                               context),
                         ),

@@ -11,6 +11,7 @@ import '../auth.dart';
 import '../localdb.dart';
 import '../negocio.dart';
 import '../nomina_calc.dart';
+import '../nomina_precalc.dart';
 import '../novedades.dart';
 import '../perfil.dart';
 import '../permisos_entrenador.dart';
@@ -497,6 +498,10 @@ class _HomeScreenState extends State<HomeScreen>
           _turnoActual = turnoAct;
           _turnosPendientes = turnosPend;
         });
+        // v1.4.0: calentar la caché de nómina tras cargar el home
+        // (asegurar() no hace nada si la huella sigue fresca).
+        unawaited(NominaPrecalc.instance
+            .asegurar(hoyHabanaIso().substring(0, 7)));
       }
     } catch (e) {
       // Fix #29 (Sol): NO actualizar _lastFetch si falló.

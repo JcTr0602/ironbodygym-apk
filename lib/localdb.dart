@@ -40,7 +40,7 @@ class LocalDb {
   /// v1.4.0 (Argón): versión actual del esquema local. Los tests de
   /// migración comparan contra esta constante en vez de un número
   /// fijo, para no caer en cascada de fallos con cada migración.
-  static const int versionActual = 30;
+  static const int versionActual = 31;
 
   /// ¿El SQLite del dispositivo trae el módulo FTS5? Algunos
   /// fabricantes lo recortan ("no such module: fts5"). Se prueba una
@@ -906,6 +906,19 @@ class LocalDb {
             // Columna ya existe o tabla no existe; tolerante.
           }
         }
+        // v31 (v1.4.0): tabla nomina_precalc (caché del conteo de
+        // clientes que pagaron el mes). Debe coincidir con _crearTablas.
+        if (oldV < 31) {
+          try {
+            await db.execute('CREATE TABLE IF NOT EXISTS nomina_precalc ('
+                'mes TEXT PRIMARY KEY, '
+                'clientes_pagados INTEGER NOT NULL, '
+                'huella TEXT NOT NULL, '
+                'calculado_en TEXT NOT NULL)');
+          } catch (_) {
+            // Tabla ya existe; tolerante.
+          }
+        }
       },
     );
     // v1.2.5+28: repara el índice FTS si la migración lo omitió y el
@@ -1184,6 +1197,14 @@ class LocalDb {
       await db.execute(
           'CREATE TABLE $t (id TEXT PRIMARY KEY, data TEXT NOT NULL, sync_seq INTEGER NOT NULL)');
     }
+    // v1.4.0 (v31): caché del pre-cálculo de nómina. Solo guarda el
+    // conteo de clientes que pagaron el mes + huella de insumos +
+    // cuándo se calculó. Bonos y tarifa se leen siempre en vivo.
+    await db.execute('CREATE TABLE IF NOT EXISTS nomina_precalc ('
+        'mes TEXT PRIMARY KEY, '
+        'clientes_pagados INTEGER NOT NULL, '
+        'huella TEXT NOT NULL, '
+        'calculado_en TEXT NOT NULL)');
     // v1.3.3 (v24): registro local de turnos con máquina de estados
     // (abrir/cerrar turno desde el Home del entrenador).
     await _crearTablaTurnos(db);
