@@ -25,6 +25,10 @@ class AccesoCliente {
   final bool debeCambiarPin;
   final bool forzarCambioPin;
   final bool bloqueadoManual;
+  // Auditoría OpenCode 2026-10-20: el servidor ahora separa
+  // 'esta_bloqueado' (semántica desplegada) de 'bloqueo_manual_vigente'.
+  // Si el JSON no trae la clave nueva, se deriva localmente.
+  final bool bloqueoManualVigente;
   final String? motivoBloqueo;
   final bool revocado;
   final DateTime? revocadoEn;
@@ -50,6 +54,7 @@ class AccesoCliente {
     this.debeCambiarPin = false,
     this.forzarCambioPin = false,
     this.bloqueadoManual = false,
+    this.bloqueoManualVigente = false,
     this.motivoBloqueo,
     this.revocado = false,
     this.revocadoEn,
@@ -82,6 +87,12 @@ class AccesoCliente {
       debeCambiarPin: j['debe_cambiar_pin'] == true,
       forzarCambioPin: j['forzar_cambio_pin'] == true,
       bloqueadoManual: j['bloqueado'] == true,
+      bloqueoManualVigente: j['bloqueo_manual_vigente'] != null
+          ? j['bloqueo_manual_vigente'] == true
+          : (j['bloqueado'] == true &&
+              (parseFecha(j['bloqueado_hasta']) == null ||
+                  parseFecha(j['bloqueado_hasta'])!
+                      .isAfter(DateTime.now()))),
       motivoBloqueo: j['motivo_bloqueo']?.toString(),
       revocado: j['revocado'] == true,
       revocadoEn: parseFecha(j['revocado_en']),
@@ -100,7 +111,7 @@ class AccesoCliente {
   /// revocado > bloqueado > pin pendiente > activo.
   String get estado {
     if (revocado || !activo) return 'revocado';
-    if (estaBloqueado) return 'bloqueado';
+    if (estaBloqueado || bloqueoManualVigente) return 'bloqueado';
     return 'activo';
   }
 

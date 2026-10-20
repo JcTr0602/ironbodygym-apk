@@ -140,7 +140,34 @@ class _TurnosManualesScreenState extends State<TurnosManualesScreen> {
     }
   }
 
-  void _moverSemana(int delta) {
+  /// Auditoría OpenCode 2026-10-20: no descartar cambios sin
+  /// guardar en silencio al navegar entre semanas.
+  Future<bool> _confirmarSiHayCambios() async {
+    if (!_hayCambios) return true;
+    final seguir = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Cambios sin guardar'),
+        content: const Text(
+            'Tienes turnos editados sin guardar en esta semana. '
+            'Si cambias de semana, se pierden.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Quedarme'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Descartar y cambiar'),
+          ),
+        ],
+      ),
+    );
+    return seguir == true && mounted;
+  }
+
+  Future<void> _moverSemana(int delta) async {
+    if (!await _confirmarSiHayCambios()) return;
     setState(() {
       _lunes = _lunes.add(Duration(days: 7 * delta));
     });
@@ -198,7 +225,8 @@ class _TurnosManualesScreenState extends State<TurnosManualesScreen> {
           TextButton(
             onPressed: _cargando
                 ? null
-                : () {
+                : () async {
+                    if (!await _confirmarSiHayCambios()) return;
                     setState(() => _lunes = _lunesDe(DateTime.now()));
                     _cargar();
                   },

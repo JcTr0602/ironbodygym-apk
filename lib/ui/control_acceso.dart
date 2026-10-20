@@ -111,6 +111,13 @@ class AccesosClientesTab extends StatefulWidget {
 
 class _AccesosClientesTabState extends State<AccesosClientesTab> {
   bool _cargando = true;
+  // Auditoría OpenCode 2026-10-20: distinguir "sin clientes
+  // pendientes" de "no se pudo consultar" (offline no es éxito).
+  bool _sinAccesoFallo = false;
+  // PINs de la última generación masiva, vivos en memoria hasta que
+  // el dueño confirme que los entregó (si cierra el diálogo por
+  // error, puede reabrirlo; si la app muere, se resetea cada PIN).
+  List<Map<String, dynamic>>? _ultimosResultados;
   String? _error;
   List<_SinAcceso> _sinAcceso = [];
 
@@ -157,8 +164,11 @@ class _AccesosClientesTabState extends State<AccesosClientesTab> {
           '${m['telefono'] ?? ''}',
         );
       }).where((c) => c.clienteId > 0).toList();
+      _sinAccesoFallo = false;
     } catch (_) {
-      // Sin conexión: la lista de sin-acceso queda como estaba.
+      // Sin conexión: la lista queda como estaba y se marca el fallo
+      // para NO mostrar "todos tienen acceso" como si fuera un hecho.
+      _sinAccesoFallo = true;
     }
     if (mounted) {
       setState(() {
@@ -416,6 +426,37 @@ class _AccesosClientesTabState extends State<AccesosClientesTab> {
               ? _listaSinAcceso(sinAccesoFiltrados)
               : _listaAccesos(filtrados),
         ),
+        if (_vista == 'sinacceso' && _ultimosResultados != null)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(
+                AppEspacio.lg, 0, AppEspacio.lg, AppEspacio.sm),
+            child: Card(
+              color: AppColores.alerta.withOpacity(0.12),
+              child: ListTile(
+                leading: const Icon(Icons.key, size: 20),
+                title: const Text('PINs de la última generación',
+                    style: TextStyle(fontSize: 14)),
+                subtitle: const Text(
+                    'Aún no confirmaste la entrega. Si la app se cierra, '
+                    'se pierden y habrá que resetearlos.'),
+                trailing: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    TextButton(
+                      onPressed: () =>
+                          _mostrarResultadosMasivos(_ultimosResultados!),
+                      child: const Text('Ver'),
+                    ),
+                    TextButton(
+                      onPressed: () =>
+                          setState(() => _ultimosResultados = null),
+                      child: const Text('Ya los entregué'),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
         if (_vista == 'sinacceso' && _seleccion.isNotEmpty)
           SafeArea(
             child: Padding(
@@ -571,6 +612,32 @@ class _AccesosClientesTabState extends State<AccesosClientesTab> {
 
   Widget _listaSinAcceso(List<_SinAcceso> lista) {
     if (lista.isEmpty) {
+      if (_sinAccesoFallo) {
+        return Center(
+          child: Padding(
+            padding: const EdgeInsets.all(AppEspacio.lg),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.cloud_off, color: AppColores.error),
+                const SizedBox(height: AppEspacio.sm),
+                const Text(
+                  'No se pudo cargar la lista de clientes sin acceso. '
+                  'Revisa la conexión.',
+                  textAlign: TextAlign.center,
+                  style: AppTexto.secundario,
+                ),
+                const SizedBox(height: AppEspacio.md),
+                OutlinedButton.icon(
+                  onPressed: _cargar,
+                  icon: const Icon(Icons.refresh, size: 18),
+                  label: const Text('Reintentar'),
+                ),
+              ],
+            ),
+          ),
+        );
+      }
       return const Center(
         child: Text('Todos los clientes tienen acceso. ¡Buen trabajo!',
             style: AppTexto.secundario),
@@ -700,9 +767,18 @@ class _AccesosClientesTabState extends State<AccesosClientesTab> {
           .toList();
       await AccesoAppCache.instance.cargar();
       if (mounted) {
+        // Auditoría OpenCode 2026-10-20: solo salen de la lista los
+        // que el servidor confirmó; los fallidos quedan seleccionados
+        // para reintentarlos sin recargar.
+        final okIds = resultados
+            .where((r) => r['ok'] == true)
+            .map((r) => int.tryParse('${r['cliente_id']}'))
+            .whereType<int>()
+            .toSet();
         setState(() {
-          _sinAcceso.removeWhere((c) => _seleccion.contains(c.clienteId));
-          _seleccion.clear();
+          _sinAcceso.removeWhere((c) => okIds.contains(c.clienteId));
+          _seleccion.removeWhere((id) => okIds.contains(id));
+          _ultimosResultados = resultados;
         });
         _mostrarResultadosMasivos(resultados);
       }
@@ -781,7 +857,12 @@ class _AccesosClientesTabState extends State<AccesosClientesTab> {
         ),
         actions: [
           FilledButton(
-            onPressed: () => Navigator.of(ctx).pop(),
+            onPressed: () {
+              Navigator.of(ctx).pop();
+              // Confirmación explícita de entrega: los PINs salen de
+              // memoria y ya no se pueden reabrir desde el aviso.
+              setState(() => _ultimosResultados = null);
+            },
             child: const Text('Ya los envié (Cerrar)'),
           ),
         ],
