@@ -20,6 +20,23 @@ class AccesoCliente {
   final DateTime? ultimoAccesoEn;
   final DateTime? createdAt;
 
+  // v1.4.0 Paso 2 (Control de Acceso): campos nuevos del RPC extendido.
+  // Todos con default seguro si el servidor aún devuelve el JSON viejo.
+  final bool debeCambiarPin;
+  final bool forzarCambioPin;
+  final bool bloqueadoManual;
+  final String? motivoBloqueo;
+  final bool revocado;
+  final DateTime? revocadoEn;
+  final int totalAccesos;
+  final String? ultimoDispositivo;
+  final String? ultimaAppVersion;
+  final DateTime? pinCambiadoEn;
+  final DateTime? ultimoIntentoFallidoEn;
+  final int tokenVersion;
+  final bool tieneSesion;
+  final String? creadoPor;
+
   AccesoCliente({
     required this.clienteId,
     required this.nombre,
@@ -30,6 +47,20 @@ class AccesoCliente {
     required this.estaBloqueado,
     required this.ultimoAccesoEn,
     required this.createdAt,
+    this.debeCambiarPin = false,
+    this.forzarCambioPin = false,
+    this.bloqueadoManual = false,
+    this.motivoBloqueo,
+    this.revocado = false,
+    this.revocadoEn,
+    this.totalAccesos = 0,
+    this.ultimoDispositivo,
+    this.ultimaAppVersion,
+    this.pinCambiadoEn,
+    this.ultimoIntentoFallidoEn,
+    this.tokenVersion = 1,
+    this.tieneSesion = false,
+    this.creadoPor,
   });
 
   factory AccesoCliente.fromJson(Map<String, dynamic> j) {
@@ -48,8 +79,32 @@ class AccesoCliente {
       estaBloqueado: j['esta_bloqueado'] == true,
       ultimoAccesoEn: parseFecha(j['ultimo_acceso_en']),
       createdAt: parseFecha(j['created_at']),
+      debeCambiarPin: j['debe_cambiar_pin'] == true,
+      forzarCambioPin: j['forzar_cambio_pin'] == true,
+      bloqueadoManual: j['bloqueado'] == true,
+      motivoBloqueo: j['motivo_bloqueo']?.toString(),
+      revocado: j['revocado'] == true,
+      revocadoEn: parseFecha(j['revocado_en']),
+      totalAccesos: (j['total_accesos'] as num?)?.toInt() ?? 0,
+      ultimoDispositivo: j['ultimo_dispositivo']?.toString(),
+      ultimaAppVersion: j['ultima_app_version']?.toString(),
+      pinCambiadoEn: parseFecha(j['pin_cambiado_en']),
+      ultimoIntentoFallidoEn: parseFecha(j['ultimo_intento_fallido_en']),
+      tokenVersion: (j['token_version'] as num?)?.toInt() ?? 1,
+      tieneSesion: j['tiene_sesion'] == true,
+      creadoPor: j['creado_por']?.toString(),
     );
   }
+
+  /// Estado principal para chips y filtros del panel.
+  /// revocado > bloqueado > pin pendiente > activo.
+  String get estado {
+    if (revocado || !activo) return 'revocado';
+    if (estaBloqueado) return 'bloqueado';
+    return 'activo';
+  }
+
+  bool get pinPendiente => debeCambiarPin || forzarCambioPin;
 }
 
 class AccesoAppCache {

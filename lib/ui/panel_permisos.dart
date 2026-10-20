@@ -28,7 +28,10 @@ class EntrenadorPermiso {
 }
 
 class PanelPermisos extends StatefulWidget {
-  const PanelPermisos({super.key});
+  /// v1.4.0 Paso 2: [embebido] = true cuando vive dentro de la pestaña
+  /// "Entrenadores" de Control de Acceso (sin Scaffold/AppBar propios).
+  final bool embebido;
+  const PanelPermisos({super.key, this.embebido = false});
 
   @override
   State<PanelPermisos> createState() => _PanelPermisosState();
@@ -172,13 +175,28 @@ class _PanelPermisosState extends State<PanelPermisos> {
   Widget build(BuildContext context) {
     // Solo dueño (Argón: estándar AuthService().isOwner)
     if (!AuthService().isOwner) {
+      const denegado =
+          Center(child: Text('Solo el dueño puede gestionar permisos.'));
+      if (widget.embebido) return denegado;
       return Scaffold(
         appBar: AppBar(title: const Text('Permisos')),
-        body: const Center(
-          child: Text('Solo el dueño puede gestionar permisos.'),
-        ),
+        body: denegado,
       );
     }
+
+    final contenido = _cargando
+        ? const Center(child: CircularProgressIndicator())
+        : _entrenadores.isEmpty
+            ? const Center(
+                child: Text('No hay entrenadores registrados.'))
+            : ListView.builder(
+                padding: const EdgeInsets.all(16),
+                itemCount: _entrenadores.length,
+                itemBuilder: (ctx, i) =>
+                    _buildEntrenadorCard(_entrenadores[i]),
+              );
+
+    if (widget.embebido) return contenido;
 
     return Scaffold(
       appBar: AppBar(
@@ -190,17 +208,7 @@ class _PanelPermisosState extends State<PanelPermisos> {
           ),
         ],
       ),
-      body: _cargando
-          ? const Center(child: CircularProgressIndicator())
-          : _entrenadores.isEmpty
-              ? const Center(
-                  child: Text('No hay entrenadores registrados.'))
-              : ListView.builder(
-                  padding: const EdgeInsets.all(16),
-                  itemCount: _entrenadores.length,
-                  itemBuilder: (ctx, i) =>
-                      _buildEntrenadorCard(_entrenadores[i]),
-                ),
+      body: contenido,
     );
   }
 

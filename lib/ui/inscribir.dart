@@ -12,6 +12,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:uuid/uuid.dart';
 
+import '../auth.dart';
 import '../localdb.dart';
 import '../fotos_cola.dart';
 import '../negocio.dart';
@@ -46,6 +47,10 @@ class _InscribirScreenState extends State<InscribirScreen> {
   File? _foto;
   bool _guardando = false;
   bool _esMenor = false;
+  // v1.4.0 Paso 2 (propuesta 11): crear acceso a la app de clientes al
+  // inscribir. El servidor lo genera tras sincronizar y el PIN le llega
+  // a Jc por Telegram (el cliente aún no existe en la nube al guardar).
+  bool _crearAccesoApp = false;
   double _precioMenorVal = 1500;
 
   @override
@@ -310,6 +315,9 @@ class _InscribirScreenState extends State<InscribirScreen> {
           // v1.2.2: guardar si es menor y el precio aplicado (histórico)
           if (_esMenor) 'es_menor': true,
           'precio_aplicado': monto,
+          // v1.4.0 Paso 2 (propuesta 11): el puente genera el acceso a
+          // la app de clientes tras aplicar la inscripción.
+          if (_crearAccesoApp) 'crear_acceso_app': true,
         },
         fotoPath: fotoPath,
       );
@@ -706,6 +714,25 @@ class _InscribirScreenState extends State<InscribirScreen> {
                     ],
                   ),
                 ),
+                // v1.4.0 Paso 2 (propuesta 11): acceso a la app de
+                // clientes al inscribir (solo dueño; el PIN llega por
+                // Telegram a Jc cuando el cliente sincroniza).
+                if (AuthService().isOwner) ...[
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text(
+                        'Crear acceso a la app de clientes'),
+                    subtitle: const Text(
+                        'Requiere teléfono de 8 dígitos. El PIN se '
+                        'genera al sincronizar y le llega a Jc por '
+                        'Telegram para entregarlo al cliente.',
+                        style: AppTexto.secundario),
+                    value: _crearAccesoApp,
+                    onChanged: (v) =>
+                        setState(() => _crearAccesoApp = v),
+                  ),
+                  const SizedBox(height: AppEspacio.md),
+                ],
                 const SizedBox(
                     height: AppEspacio.xl),
                 _guardando
