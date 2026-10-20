@@ -42,9 +42,12 @@ class _HorarioTurnosScreenState extends State<HorarioTurnosScreen> {
   bool _guardando = false;
   List<String> _entrenadores = [];
 
-  /// día ISO (1-6) -> franja -> entrenador asignado (null = sin asignar)
+  /// día ISO (1-6) -> franja -> entrenador asignado (null = sin asignar).
+  /// El día 6 (sábado) NO tiene clave 'tarde': ni se carga ni se
+  /// serializa, como exige el contrato (corrección del panel S4).
   final Map<int, Map<String, String?>> _sel = {
-    for (var d = 1; d <= 6; d++) d: {'manana': null, 'tarde': null},
+    for (var d = 1; d <= 5; d++) d: {'manana': null, 'tarde': null},
+    6: {'manana': null},
   };
 
   @override
@@ -53,9 +56,17 @@ class _HorarioTurnosScreenState extends State<HorarioTurnosScreen> {
     _cargar();
   }
 
+  /// Forma visible canónica de un nombre: recortado y con la
+  /// primera letra en mayúscula ("duany" -> "Duany").
+  static String _visible(String bruto) {
+    final n = bruto.trim();
+    if (n.length <= 1) return n.toUpperCase();
+    return '${n[0].toUpperCase()}${n.substring(1)}';
+  }
+
   Future<void> _cargar() async {
-    // Asignaciones vigentes (del espejo de ajustes).
-    final asignados = <String>{};
+    // Asignaciones vigentes en crudo (del espejo de ajustes).
+    final crudas = <(int, String, String)>[];
     try {
       final aj = await LocalDb.instance.getAjustes();
       final h = aj['horario_turnos'];
@@ -65,47 +76,46 @@ class _HorarioTurnosScreenState extends State<HorarioTurnosScreen> {
           if (d == null || franjas is! Map) return;
           franjas.forEach((franja, nombre) {
             final n = '$nombre'.trim();
-            if (n.isEmpty) return;
-            asignados.add(n);
-            if (_sel.containsKey(d) &&
-                _sel[d]!.containsKey('$franja')) {
-              _sel[d]!['$franja'] = n;
-            }
+            // El sábado no tiene tarde: ni siquiera se carga.
+            if (n.isEmpty || (d == 6 && franja == 'tarde')) return;
+            crudas.add((d, '$franja', n));
           });
         });
       }
     } catch (_) {}
 
-    // Nombres del selector: usuarios APK conocidos (meta usuarios_apk).
-    final nombres = <String>[];
-    void agregar(String? bruto) {
-      final n = (bruto ?? '').trim();
-      if (n.isEmpty) return;
-      final bonito =
-          n.length == 1 ? n.toUpperCase() : '${n[0].toUpperCase()}${n.substring(1)}';
-      if (!nombres.contains(bonito)) nombres.add(bonito);
-    }
-
+    // UNA normalización de identidad para usuarios y asignaciones
+    // (panel S4): clave en minúsculas -> forma visible. Primero los
+    // usuarios APK conocidos; las asignaciones se remapean al mismo
+    // canon, así "duany" asignado y "Duany" de usuario son la MISMA
+    // opción y el valor del desplegable siempre está en sus items.
+    final canon = <String, String>{};
+    String registrar(String bruto) =>
+        canon.putIfAbsent(bruto.trim().toLowerCase(),
+            () => _visible(bruto));
     try {
       final raw = await LocalDb.instance.getMeta('usuarios_apk');
       if (raw != null && raw.isNotEmpty) {
         for (final u in jsonDecode(raw) as List) {
           final m = Map<String, dynamic>.from(u as Map);
           final nom = (m['nombre'] as String?)?.trim();
-          agregar(nom != null && nom.isNotEmpty
+          final base = (nom != null && nom.isNotEmpty)
               ? nom
-              : m['username'] as String?);
+              : (m['username'] as String? ?? '');
+          if (base.trim().isNotEmpty) registrar(base);
         }
       }
     } catch (_) {}
-    // Una asignación vigente nunca queda fuera del selector.
-    for (final n in asignados) {
-      if (!nombres.contains(n)) nombres.add(n);
+    for (final (d, franja, nombre) in crudas) {
+      final visible = registrar(nombre);
+      if (_sel.containsKey(d) && _sel[d]!.containsKey(franja)) {
+        _sel[d]![franja] = visible;
+      }
     }
 
     if (mounted) {
       setState(() {
-        _entrenadores = nombres;
+        _entrenadores = canon.values.toList();
         _cargando = false;
       });
     }
