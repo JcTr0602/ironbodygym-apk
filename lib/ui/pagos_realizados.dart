@@ -8,6 +8,7 @@ import 'dart:io';
 import '../fotos.dart';
 import '../localdb.dart';
 import '../negocio.dart';
+import '../sync.dart';
 import 'componentes.dart';
 import 'diseno.dart';
 import 'ficha.dart';
@@ -86,6 +87,25 @@ class _PagosRealizadosScreenState extends State<PagosRealizadosScreen> {
     _cargar();
   }
 
+  /// v1.4.4: el ⟳ de esta pantalla ahora SÍ sincroniza (antes solo
+  /// releía la BD local, a diferencia del de Buscar cliente, y los
+  /// pagos bajados en otro dispositivo no aparecían). Sincroniza
+  /// con el alcance de la pantalla y luego recarga la lista.
+  Future<void> _actualizar() async {
+    try {
+      await SyncEngine.instance.sincronizarScope('pagos');
+      await _cargar();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Lista actualizada')));
+    } catch (_) {
+      await _cargar();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Sin conexión: mostrando datos locales')));
+    }
+  }
+
   Future<void> _cargar() async {
     final n = DateTime.now();
     final pref = '${n.year.toString().padLeft(4, '0')}-'
@@ -156,7 +176,8 @@ class _PagosRealizadosScreenState extends State<PagosRealizadosScreen> {
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh),
-            onPressed: _cargar,
+            tooltip: 'Actualizar (bajar cambios)',
+            onPressed: _actualizar,
           ),
         ],
       ),
@@ -182,7 +203,7 @@ class _PagosRealizadosScreenState extends State<PagosRealizadosScreen> {
                         subtitulo:
                             'Los pagos registrados aparecerán aquí')
                     : RefreshIndicator(
-                        onRefresh: _cargar,
+                        onRefresh: _actualizar,
                         child: ListView.builder(
                           itemCount: _clientes.length,
                           itemBuilder: (ctx, i) {

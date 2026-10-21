@@ -55,10 +55,41 @@ const Map<String, TipoOperacionInfo> kTiposOperacion = {
       TipoOperacionInfo('Inscripción + venta', Icons.person_add),
 };
 
+/// v1.4.4: etiquetas de la op 'ajuste' según su clave. Antes TODA
+/// op de ajuste se etiquetaba «Cambio de precio» y un cambio de
+/// horario de turnos parecía un cambio de precio en el historial.
+const Map<String, String> kEtiquetasAjuste = {
+  'mensualidad': 'Ajuste: precio de mensualidad',
+  'mensualidad_menores': 'Ajuste: mensualidad de menores',
+  'transferencia': 'Ajuste: precio por transferencia',
+  'pago_diario': 'Ajuste: precio del pago diario',
+  'pago_semanal': 'Ajuste: precio semanal',
+  'pago_quincenal': 'Ajuste: precio quincenal',
+  'promo_suplementos': 'Ajuste: promo de suplementos',
+  'tarjeta_bandec': 'Ajuste: tarjeta BANDEC',
+  'tarjeta_bpa': 'Ajuste: tarjeta BPA',
+  'movil_confirmacion': 'Ajuste: móvil de confirmación',
+  'tasa_usd': 'Ajuste: tasa USD',
+  'horario_turnos': 'Ajuste: horario de turnos',
+  'plantillas_wa': 'Ajuste: plantillas de WhatsApp',
+  'titular': 'Ajuste: titular de la cuenta',
+};
+
 /// Nombre formal de un tipo de operación. Si no está en el mapa,
 /// devuelve el identificador tal cual (no rompe con tipos nuevos).
 String describirTipoOp(String tipo) =>
     kTiposOperacion[tipo]?.etiqueta ?? tipo;
+
+/// Como [describirTipoOp] pero consciente del payload: para la op
+/// 'ajuste' la etiqueta sale de la CLAVE ajustada, no del tipo.
+String describirTipoOpConPayload(
+    String tipo, Map<String, dynamic>? payload) {
+  if (tipo == 'ajuste') {
+    final clave = '${payload?['clave'] ?? ''}';
+    return kEtiquetasAjuste[clave] ?? 'Ajuste';
+  }
+  return describirTipoOp(tipo);
+}
 
 /// Icono de un tipo de operación. Fallback genérico.
 IconData iconoTipoOp(String tipo) =>

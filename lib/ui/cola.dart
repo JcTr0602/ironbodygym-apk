@@ -21,6 +21,22 @@ import 'componentes.dart';
 import 'diseno.dart';
 
 
+/// v1.4.4: título de una op consciente del payload. Para la op
+/// 'ajuste' la etiqueta sale de la clave ajustada («Ajuste:
+/// horario de turnos») y no del tipo genérico («Cambio de precio»).
+String tituloDeOp(Map<String, dynamic> op) {
+  Map<String, dynamic> payload = {};
+  try {
+    final raw = op['payload'];
+    if (raw is String && raw.isNotEmpty) {
+      payload = Map<String, dynamic>.from(jsonDecode(raw) as Map);
+    } else if (raw is Map) {
+      payload = Map<String, dynamic>.from(raw);
+    }
+  } catch (_) {}
+  return describirTipoOpConPayload('${op['tipo']}', payload);
+}
+
 /// v1.3.4 (detalle ampliable Bajados/Subidos): utilidades de UI
 /// compartidas entre [ColaScreen] y [DetalleSyncScreen].
 /// Detalles legibles del payload según el tipo de operación (v1.0.11).
@@ -951,7 +967,7 @@ class _ColaScreenState extends State<ColaScreen> {
   }
 
   void _verDetalle(Map<String, dynamic> op) async {
-    final tipo = _tipo('${op['tipo']}');
+    final tipo = tituloDeOp(op);
     final estado = '${op['estado']}';
     final fecha =
         fechaCorta(op['creada_ts'], 16).replaceAll('T', ' ');
@@ -1380,7 +1396,7 @@ class _ColaScreenState extends State<ColaScreen> {
                       leading: Icon(_iconoEstado(estado),
                           size: 26,
                           color: _colorEstado(estado)),
-                    title: Text(_tipo('${op['tipo']}')),
+                    title: Text(tituloDeOp(op)),
                     subtitle: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
@@ -1743,7 +1759,7 @@ class _DetalleSyncScreenState extends State<DetalleSyncScreen> {
     return Card(
       margin: const EdgeInsets.only(bottom: 8),
       child: ListTile(
-        title: Text(describirTipoOp('${op['tipo']}')),
+        title: Text(tituloDeOp(op)),
         subtitle: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [

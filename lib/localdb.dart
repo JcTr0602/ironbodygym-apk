@@ -3940,10 +3940,14 @@ class LocalDb {
   /// Se usa para el chequeo de sincronización completa contra server_seq.
   /// Las tablas marcadas como ausentes (404/400: aún no existen en
   /// Supabase o el rol no las lee) no bloquean el "completo".
-  Future<int> getWatermarkMinimo() async {
+  /// [excluir] permite ignorar tablas concretas (v1.4.4: el cartel
+  /// de novedades excluye 'borrados' — ver _emit en sync.dart).
+  Future<int> getWatermarkMinimo(
+      {Set<String> excluir = const {}}) async {
     var m = 1 << 62;
     var hay = false;
     for (final t in tablasConWatermark) {
+      if (excluir.contains(t)) continue;
       if (await getMeta('wm_${t}_ausente') == '1') continue;
       // v1.3.1 (Argón pull): las tablas sin permiso (403 para entrenadores)
       // tampoco bloquean el "completo".

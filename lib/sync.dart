@@ -660,7 +660,14 @@ class SyncEngine {
     // v1.0.15: detectar si el servidor tiene cambios sin bajar
     bool novedades = false;
     try {
-      final wm = await _db.getWatermarkMinimo();
+      // v1.4.4: el cartel excluye 'borrados' del mínimo. El cursor
+      // de tumbas solo avanza hasta la última tumba bajada y desde
+      // el fix v1.3.5 ya no salta a server_seq; como server_seq
+      // avanza con CUALQUIER cambio (una foto, un ajuste), el
+      // mínimo con borrados quedaba por debajo para siempre y el
+      // cartel «Hay cambios nuevos» no se apagaba nunca, aunque la
+      // pantalla de Sincronización dijera «Todo al día».
+      final wm = await _db.getWatermarkMinimo(excluir: {'borrados'});
       final ss = int.tryParse(await _db.getMeta('server_seq') ?? '0') ?? 0;
       novedades = ss > wm;
     } catch (_) {}
