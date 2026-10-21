@@ -120,10 +120,19 @@ class NominaPrecalc {
       if (rows.isEmpty) return null;
       final r = rows.first;
       final h = await huella();
+      // Guarda de transición de mes (ronda 2, Luna, ALTA latente):
+      // una fila calculada cuando su mes era el EN CURSO lleva la
+      // excepción de vencimiento; al cerrar el mes, ese mismo mes
+      // pasa a la regla histórica y la huella de datos NO cambia.
+      // Hoy la única pantalla lectora solo pide el mes actual,
+      // pero por construcción: la caché de un mes ya pasado NUNCA
+      // se sirve como fresca — quien la pida recalcula vía
+      // asegurar() con la regla que le corresponde.
+      final esMesActual = pref == NominaCalc.prefMesActual();
       return (
         clientes: (r['clientes_pagados'] as num).toInt(),
         calculadoEn: '${r['calculado_en']}',
-        fresco: r['huella'] == h,
+        fresco: esMesActual && r['huella'] == h,
       );
     } catch (_) {
       return null;

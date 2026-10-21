@@ -229,4 +229,29 @@ void main() {
     expect(await NominaCalc.clientesQuePagaronElMes(pref), 1);
     await db.close();
   });
+
+  // Ronda 2 (Luna, ALTA latente): la caché de un mes YA PASADO
+  // nunca se sirve como fresca, aunque la huella de datos siga
+  // coincidiendo (la fila pudo calcularse cuando ese mes era el
+  // en curso, con la excepción que ya no le aplica).
+  test('precalc: la caché de un mes pasado nunca es fresca', () async {
+    final db = await _abrirDbVacia();
+    const prefPasado = '2020-01';
+    await _pago(db, id: 1, clienteId: 10, fecha: '$prefPasado-10');
+    await _cliente(db, id: 10, pagadoHasta: '2020-02-05');
+    final h = await NominaPrecalc.instance.huella();
+    await db.insert('nomina_precalc', {
+      'mes': prefPasado,
+      'clientes_pagados': 999,
+      'huella': h,
+      'calculado_en': '2020-01-31T00:00:00',
+    });
+    final cache = await NominaPrecalc.instance.leer(prefPasado);
+    expect(cache, isNotNull);
+    expect(cache!.fresco, isFalse,
+        reason: 'mes cerrado: se recalcula con la regla histórica');
+    // Y asegurar() devuelve el conteo correcto, no el sembrado.
+    expect(await NominaPrecalc.instance.asegurar(prefPasado), 1);
+    await db.close();
+  });
 }
