@@ -45,6 +45,27 @@ void main() {
       ]..sort(compararPorNombre);
       expect(lista.first['id'], 3);
     });
+
+    test('un nombre_norm cacheado y obsoleto NO manda: manda el '
+        'nombre visible', () {
+      // Panel 2026-10-21: si el mapa trae un nombre_norm viejo
+      // (p. ej. de antes de una edición), ordenar por él pondría
+      // al cliente en un sitio que no coincide con lo que se ve.
+      final lista = <Map<String, dynamic>>[
+        {'id': 1, 'nombre': 'Zuleica Pérez', 'nombre_norm': 'aaa'},
+        {'id': 2, 'nombre': 'Beatriz León', 'nombre_norm': 'zzz'},
+      ]..sort(compararPorNombre);
+      expect(lista.map((c) => c['id']).toList(), [2, 1],
+          reason: 'beatriz < zuleica por el nombre visible');
+    });
+
+    test('el desempate acepta id como texto', () {
+      final lista = <Map<String, dynamic>>[
+        {'id': '9', 'nombre': 'Juan Pérez'},
+        {'id': '3', 'nombre': 'juan pérez'},
+      ]..sort(compararPorNombre);
+      expect(lista.first['id'], '3');
+    });
   });
 
   group('listaClientes (integración)', () {

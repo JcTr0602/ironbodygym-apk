@@ -970,6 +970,12 @@ class _EditarSuplementoScreenState
   final _pesoValor = TextEditingController();
   final _servicios = TextEditingController();
   String? _pesoUnidad;
+
+  // Presentación tal como venía al abrir la ficha (para mandar las
+  // claves al servidor SOLO si cambió; ver _guardar).
+  double? _presPesoIni;
+  String? _presUnidadIni;
+  int? _presServiciosIni;
   static const _unidadesEnvase = [
     'g', 'kg', 'ml', 'L', 'cápsulas', 'tabletas', 'unidades',
   ];
@@ -1008,6 +1014,13 @@ class _EditarSuplementoScreenState
       }
       final unidad = s['peso_unidad']?.toString().trim();
       _pesoUnidad = (unidad != null && unidad.isNotEmpty) ? unidad : null;
+      _presPesoIni = (s['peso_valor'] as num?)?.toDouble();
+      _presUnidadIni = _pesoUnidad;
+      final servIni = (s['servicios_estandar'] as num?)?.toDouble();
+      _presServiciosIni =
+          (servIni != null && servIni == servIni.roundToDouble())
+              ? servIni.toInt()
+              : null;
       _activo = (s['activo'] as int?) == 1;
       _categoriaId = s['categoria_id'] as int?;
     } else {
@@ -1080,15 +1093,46 @@ class _EditarSuplementoScreenState
           cancelar: '');
       return;
     }
-    // v1.4.3: la presentación va en pareja (cantidad + unidad);
-    // si falta una, el servidor rechazaría la op entera.
-    final pesoValor =
-        double.tryParse(_pesoValor.text.trim().replaceAll(',', '.'));
-    final serviciosTxt = _servicios.text.trim().replaceAll(',', '.');
-    final servicios =
-        int.tryParse(serviciosTxt) ?? double.tryParse(serviciosTxt)?.round();
-    if ((pesoValor != null) != (_pesoUnidad != null) ||
-        (pesoValor != null && pesoValor <= 0)) {
+    // v1.4.3: presentación del envase, con validación ESTRICTA
+    // (panel de código 2026-10-21): un campo NO vacío que no se
+    // puede interpretar es un ERROR y no se guarda — jamás se
+    // traduce a «limpiar el dato» (antes, escribir «abc» mandaba
+    // '' y el servidor borraba el dato bueno). Servicios solo
+    // acepta enteros: nada de redondear «60.5» a 61 en silencio.
+    final pesoTxt = _pesoValor.text.trim().replaceAll(',', '.');
+    double? pesoValor;
+    if (pesoTxt.isNotEmpty) {
+      pesoValor = double.tryParse(pesoTxt);
+      if (pesoValor == null ||
+          !pesoValor.isFinite ||
+          pesoValor <= 0 ||
+          pesoValor > 100000) {
+        await DialogoApp.confirmar(context,
+            titulo: 'Revisa la presentación',
+            mensaje:
+                'El contenido del envase debe ser un número mayor que 0 (ej. 300), o el campo vacío.',
+            aceptar: 'Entendido',
+            cancelar: '');
+        return;
+      }
+    }
+    final serviciosTxt = _servicios.text.trim();
+    int? servicios;
+    if (serviciosTxt.isNotEmpty) {
+      servicios = int.tryParse(serviciosTxt);
+      if (servicios == null || servicios <= 0 || servicios > 100000) {
+        await DialogoApp.confirmar(context,
+            titulo: 'Revisa la presentación',
+            mensaje:
+                'Los servicios por envase deben ser un número entero mayor que 0 (ej. 60), o el campo vacío.',
+            aceptar: 'Entendido',
+            cancelar: '');
+        return;
+      }
+    }
+    // La presentación va en pareja (cantidad + unidad); si falta
+    // una, el servidor rechazaría la op entera.
+    if ((pesoValor != null) != (_pesoUnidad != null)) {
       await DialogoApp.confirmar(context,
           titulo: 'Revisa la presentación',
           mensaje:
@@ -1118,12 +1162,22 @@ class _EditarSuplementoScreenState
         if (AuthService().isOwner && costo != null && costo >= 0)
           'costo': costo,
         'umbral_stock': umbral < 0 ? 3 : umbral,
-        // v1.4.3: presentación del envase; se manda siempre
-        // (vacío = limpiar el dato). El servidor conserva el
-        // dato si la op no trae las claves (apps viejas).
-        'peso_valor': pesoValor ?? '',
-        'peso_unidad': _pesoUnidad ?? '',
-        'servicios_estandar': servicios ?? '',
+        // v1.4.3: presentación del envase. Al CREAR se manda
+        // siempre; al EDITAR solo si cambió respecto a lo que
+        // traía la ficha (vacío = limpiar el dato). Si no cambió,
+        // la op no lleva las claves y el servidor conserva el
+        // dato: así un espejo local atrasado no pisa una
+        // presentación más nueva al editar otro campo (panel
+        // 2026-10-21). El servidor también conserva el dato si
+        // la op no trae las claves (apps viejas).
+        if (!_editando ||
+            pesoValor != _presPesoIni ||
+            _pesoUnidad != _presUnidadIni ||
+            servicios != _presServiciosIni) ...{
+          'peso_valor': pesoValor ?? '',
+          'peso_unidad': _pesoUnidad ?? '',
+          'servicios_estandar': servicios ?? '',
+        },
       };
       // v1.2.1 fix auditoría Gemini: el uuid de creación se genera aquí
       // para ligar la foto pendiente a la op (así no se pierde offline).

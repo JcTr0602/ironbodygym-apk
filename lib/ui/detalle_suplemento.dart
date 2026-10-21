@@ -550,7 +550,14 @@ class DetalleSuplementoScreen extends StatelessWidget {
     final servD = suplemento['servicios_estandar'] is num
         ? (suplemento['servicios_estandar'] as num).toDouble()
         : double.tryParse('${suplemento['servicios_estandar'] ?? ''}');
-    final serv = servD?.round();
+    // Solo se muestra si es un entero positivo: redondear un
+    // dato fraccionario legado (1.5 → «2 servicios») fabricaría
+    // un dato que no existe (panel 2026-10-21).
+    final serv = (servD != null &&
+            servD > 0 &&
+            servD == servD.roundToDouble())
+        ? servD.toInt()
+        : null;
     final presentacion = [
       if (pesoV != null && pesoV > 0 && pesoU.isNotEmpty)
         '${pesoV == pesoV.roundToDouble() ? pesoV.toInt() : pesoV} $pesoU',

@@ -921,20 +921,43 @@ class LocalDb {
         }
         // v32 (v1.5): limpieza del camino legado de fotos. La
         // migración v13 ya drenó fotos_pendientes a fotos_cola como
-        // 'original'; aquí va el drenaje final (solo filas cuyo
-        // op_uuid NO esté ya en la cola) y el DROP de la tabla
-        // legada. Defensivo: si la tabla no existe, no pasa nada.
+        // 'original'; aquí va el drenaje final y el DROP de la
+        // tabla legada. Endurecido tras el panel de código
+        // (2026-10-21): solo se rescatan filas 'pendiente' (el
+        // uploader legado jamás procesó otro estado: 'lista' ya
+        // subió, 'descartada' fue decisión del usuario y 'error'
+        // solo volvía a 'pendiente' por un reintento manual que
+        // ya no existe); NOT EXISTS en vez de NOT IN (semántica
+        // de NULL); deduplicado por op_uuid quedándose con la
+        // fila más reciente; y el DROP solo ocurre si el drenaje
+        // terminó bien — si el rescate falla, la tabla se
+        // conserva (peso muerto: ningún código la usa) antes que
+        // destruir la única copia.
         if (oldV < 32) {
-          try {
-            await db.execute(
-                "INSERT INTO fotos_cola (op_uuid, tipo, cliente_id, suplemento_id, ruta_local, estado, intentos, creado_en, actualizado_en) "
-                "SELECT op_uuid, 'original', cliente_id, suplemento_id, local_path, 'pendiente', 0, datetime('now'), datetime('now') "
-                "FROM fotos_pendientes WHERE local_path IS NOT NULL "
-                "AND op_uuid NOT IN (SELECT op_uuid FROM fotos_cola)");
-          } catch (_) {}
-          try {
-            await db.execute('DROP TABLE IF EXISTS fotos_pendientes');
-          } catch (_) {}
+          final existeLegada = await db.rawQuery(
+              "SELECT 1 FROM sqlite_master WHERE type='table' "
+              "AND name='fotos_pendientes'");
+          var drenajeOk = existeLegada.isEmpty;
+          if (!drenajeOk) {
+            try {
+              await db.execute(
+                  "INSERT INTO fotos_cola (op_uuid, tipo, cliente_id, suplemento_id, ruta_local, estado, intentos, creado_en, actualizado_en) "
+                  "SELECT fp.op_uuid, 'original', fp.cliente_id, fp.suplemento_id, fp.local_path, 'pendiente', 0, datetime('now'), datetime('now') "
+                  "FROM fotos_pendientes fp "
+                  "WHERE fp.estado = 'pendiente' AND fp.local_path IS NOT NULL "
+                  "AND NOT EXISTS (SELECT 1 FROM fotos_cola fc WHERE fc.op_uuid = fp.op_uuid) "
+                  "AND fp.id = (SELECT MAX(f2.id) FROM fotos_pendientes f2 WHERE f2.op_uuid = fp.op_uuid AND f2.estado = 'pendiente')");
+              drenajeOk = true;
+            } catch (e) {
+              debugPrint('v32: drenaje de fotos_pendientes falló; '
+                  'la tabla legada se conserva: $e');
+            }
+          }
+          if (drenajeOk) {
+            try {
+              await db.execute('DROP TABLE IF EXISTS fotos_pendientes');
+            } catch (_) {}
+          }
         }
       },
     );
@@ -4390,46 +4413,10 @@ class LocalDb {
     }
   }
 
-  // -- fotos pendientes --------------------------------------------------
-  Future<int> addFotoPendiente(
-      {required String opUuid,
-      required String localPath,
-      int? clienteId,
-      int? suplementoId}) async {
-    final d = await db;
-    return d.insert('fotos_pendientes', {
-      'op_uuid': opUuid,
-      'local_path': localPath,
-      'cliente_id': clienteId,
-      'suplemento_id': suplementoId,
-      'estado': 'pendiente',
-      // v1.0.16: autoría
-      'user_id': AuthService().userId,
-    });
-  }
-
-
-  /// v1.2.9 (Gemini #4): verifica si un op_uuid ya está en la cola
-  /// persistente. El flujo viejo debe ignorar esas fotos.
-  Future<bool> tieneFilaEnCola(String opUuid) async {
-    final d = await db;
-    final r = await d.query(
-      'fotos_cola',
-      columns: ['id'],
-      where: 'op_uuid = ?',
-      whereArgs: [opUuid],
-      limit: 1,
-    );
-    return r.isNotEmpty;
-  }
-
-
-  /// v1.2.1 fix auditoría Gemini: liga una foto pendiente a un suplemento.
-  Future<void> setFotoSuplemento(int fotoId, int suplementoId) async {
-    final d = await db;
-    await d.update('fotos_pendientes', {'suplemento_id': suplementoId},
-        where: 'id=?', whereArgs: [fotoId]);
-  }
+  // (v32: los helpers del camino legado de fotos — addFotoPendiente,
+  // tieneFilaEnCola y setFotoSuplemento — se eliminaron con la
+  // tabla fotos_pendientes; no tenían llamadores desde v1.2.9 y la
+  // tabla ya no existe. La única vía de fotos es fotos_cola.)
 
   /// Actualiza campos de un suplemento.
   /// - Columnas SQL (ultimo_precio): van directo.
@@ -4557,8 +4544,4 @@ class LocalDb {
     final dir = await getDatabasesPath();
     return p.join(dir, 'ironbody.db');
   }
-
-  /// v1.2.9+43: retorna true si existe la tabla fotos_pendientes (formato
-  /// viejo) y tiene registros. Verifica sqlite_master primero para no
-  /// lanzar excepción si la tabla no existe.
 }

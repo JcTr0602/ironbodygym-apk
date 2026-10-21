@@ -29,18 +29,26 @@ String _norm(String s) {
 /// (v1.4.3): comparar el nombre CRUDO con compareTo manda las
 /// minúsculas tras las mayúsculas (un cliente inscrito como
 /// «alberto prueba» quedaba al final de la lista, tras la Z).
-/// Se ordena por el nombre normalizado (minúsculas, sin tildes)
-/// y se desempata por id: orden total y estable entre
-/// ejecuciones.
+/// Se ordena por el nombre VISIBLE normalizado (minúsculas, sin
+/// tildes) calculado aquí mismo — NO se usa ningún `nombre_norm`
+/// cacheado que venga en el mapa: puede estar obsoleto o no
+/// corresponder al nombre actual (panel de código 2026-10-21).
+/// Desempate por id: orden total y estable entre ejecuciones.
 int compararPorNombre(Map<String, dynamic> a, Map<String, dynamic> b) {
-  final na = (a['nombre_norm'] as String?) ?? _norm('${a['nombre'] ?? ''}');
-  final nb = (b['nombre_norm'] as String?) ?? _norm('${b['nombre'] ?? ''}');
-  final c = na.compareTo(nb);
+  final c = _norm('${a['nombre'] ?? ''}')
+      .compareTo(_norm('${b['nombre'] ?? ''}'));
   if (c != 0) return c;
   // Desempate por id (orden de registro): total y estable,
   // sin volver a introducir el sesgo mayúsculas/minúsculas.
-  return ((a['id'] as num?)?.toInt() ?? 0)
-      .compareTo((b['id'] as num?)?.toInt() ?? 0);
+  return _idOrdenable(a).compareTo(_idOrdenable(b));
+}
+
+/// Id tolerante para desempatar: acepta num o texto numérico;
+/// cualquier otra cosa vale 0.
+int _idOrdenable(Map<String, dynamic> m) {
+  final v = m['id'];
+  if (v is num) return v.toInt();
+  return int.tryParse('${v ?? ''}') ?? 0;
 }
 
 String _hoyIso() {

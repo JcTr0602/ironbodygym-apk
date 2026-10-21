@@ -94,4 +94,62 @@ void main() {
         ['uuid-rescatable', 'uuid-ya-en-cola'],
         reason: 'la rescatable entró y la drenada no se duplicó');
   });
+
+  test('upgrade 31→32: no resucita estados terminales ni duplica '
+      'un op_uuid repetido en la tabla legada', () async {
+    var db = await _abrirDbVacia();
+    await db.execute('CREATE TABLE fotos_pendientes ('
+        'id INTEGER PRIMARY KEY AUTOINCREMENT, op_uuid TEXT NOT NULL, '
+        'cliente_id INTEGER, suplemento_id INTEGER, '
+        'local_path TEXT NOT NULL, '
+        "estado TEXT NOT NULL DEFAULT 'pendiente', user_id TEXT, "
+        'retry_count INTEGER NOT NULL DEFAULT 0, '
+        'last_error TEXT, last_retry_at TEXT)');
+    // Estados que el uploader legado jamás procesaba: no migran.
+    await db.insert('fotos_pendientes', {
+      'op_uuid': 'uuid-lista',
+      'cliente_id': 7,
+      'local_path': '/tmp/lista.jpg',
+      'estado': 'lista',
+    });
+    await db.insert('fotos_pendientes', {
+      'op_uuid': 'uuid-descartada',
+      'cliente_id': 7,
+      'local_path': '/tmp/desc.jpg',
+      'estado': 'descartada',
+    });
+    await db.insert('fotos_pendientes', {
+      'op_uuid': 'uuid-error',
+      'cliente_id': 7,
+      'local_path': '/tmp/err.jpg',
+      'estado': 'error',
+    });
+    // Mismo op_uuid dos veces en 'pendiente' (duplicado histórico):
+    // solo entra UNA fila a la cola (la más reciente).
+    await db.insert('fotos_pendientes', {
+      'op_uuid': 'uuid-repetida',
+      'cliente_id': 8,
+      'local_path': '/tmp/vieja.jpg',
+      'estado': 'pendiente',
+    });
+    await db.insert('fotos_pendientes', {
+      'op_uuid': 'uuid-repetida',
+      'cliente_id': 8,
+      'local_path': '/tmp/nueva.jpg',
+      'estado': 'pendiente',
+    });
+    await db.setVersion(31);
+    await db.close();
+    await LocalDb.resetParaTest();
+
+    db = await LocalDb.instance.db;
+    expect(await _existeTabla(db, 'fotos_pendientes'), isFalse);
+    final cola = await db.query('fotos_cola',
+        columns: ['op_uuid', 'ruta_local'], orderBy: 'op_uuid');
+    expect(cola.length, 1,
+        reason: 'solo migra la pendiente, una sola vez');
+    expect(cola.single['op_uuid'], 'uuid-repetida');
+    expect(cola.single['ruta_local'], '/tmp/nueva.jpg',
+        reason: 'ante duplicados se conserva la fila más reciente');
+  });
 }
