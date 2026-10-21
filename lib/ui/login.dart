@@ -11,7 +11,6 @@ import '../perfil.dart';
 import '../sync.dart';
 import 'componentes.dart';
 import 'diseno.dart';
-import 'home.dart';
 
 class LoginScreen extends StatefulWidget {
   final String? aviso;
@@ -121,6 +120,13 @@ class _LoginScreenState extends State<LoginScreen>
       SharedPreferences.getInstance().then((prefs) {
         prefs.setString('ultimo_usuario', u);
       });
+      // sincroniza al entrar
+      SyncEngine.instance.run();
+      // v1.4.4: ya NO se navega a Inicio a mano: la raíz
+      // (RaizSesion) detecta la sesión nueva y muestra Inicio.
+      // (El pushReplacement anterior reemplazaba la ruta raíz y
+      // dejaba la app sin raíz reactiva: un cierre de sesión
+      // posterior no volvía a Login.)
       // v1.0.12: verifica vinculación de dispositivo
       final vinculado = await _verificarDispositivo(u);
       if (!mounted) return;
@@ -132,10 +138,6 @@ class _LoginScreenState extends State<LoginScreen>
           duration: Duration(seconds: 4),
         ));
       }
-      Navigator.of(context).pushReplacement(
-          MaterialPageRoute(builder: (_) => const HomeScreen()));
-      // sincroniza al entrar
-      SyncEngine.instance.run();
     } catch (e) {
       setState(() {
         _cargando = false;

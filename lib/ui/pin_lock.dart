@@ -11,7 +11,6 @@ import '../localdb.dart';
 import '../perfil.dart';
 import 'componentes.dart';
 import 'diseno.dart';
-import 'login.dart';
 
 class PinLockScreen extends StatefulWidget {
   const PinLockScreen({super.key});
@@ -74,10 +73,11 @@ class _PinLockScreenState extends State<PinLockScreen> {
     await AuthService().signOut();
     await PerfilService.instance.setPinHash(null);
     if (!mounted) return;
-    Navigator.of(context).pushAndRemoveUntil(
-      MaterialPageRoute(builder: (_) => const LoginScreen()),
-      (_) => false,
-    );
+    // v1.4.4: basta replegar hasta la raíz: al desaparecer la
+    // sesión, RaizSesion muestra Login. (Antes se empujaba una
+    // LoginScreen suelta que reemplazaba la raíz y la dejaba
+    // muerta para futuros cierres.)
+    Navigator.of(context).popUntil((r) => r.isFirst);
   }
 
   @override

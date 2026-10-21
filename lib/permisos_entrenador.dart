@@ -17,9 +17,15 @@ class PermisosEntrenador {
 
   static const _kPrefsPermisos = 'cache_permisos_entrenador_json';
   static const _kPrefsActivo = 'cache_entrenador_activo';
+  static const _kPrefsHabilitado = 'cache_entrenador_habilitado';
 
   Map<String, dynamic> _permisos = {};
   bool _activo = true;
+  // v1.4.4: ¿existe la fila del entrenador en
+  // entrenadores_autorizados? Sin fila NO es un suspendido: es una
+  // cuenta aún no habilitada (la RPC vieja devolvía activo=false
+  // para ambos casos y la app lo llamaba «suspendido»).
+  bool _habilitado = true;
   bool _cargado = false;
 
   /// Carga los permisos desde Supabase (llamar en login/sync).
@@ -30,6 +36,7 @@ class PermisosEntrenador {
     // 1. Primero levantar caché local por si estamos offline
     if (!_cargado) {
       _activo = prefs.getBool(_kPrefsActivo) ?? true;
+      _habilitado = prefs.getBool(_kPrefsHabilitado) ?? true;
       final raw = prefs.getString(_kPrefsPermisos);
       if (raw != null && raw.isNotEmpty) {
         try {
@@ -54,8 +61,13 @@ class PermisosEntrenador {
           'can_view_payroll': true,
         };
         _activo = true;
+        _habilitado = true;
       } else {
         _activo = data['activo'] == true;
+        // v1.4.4: la RPC nueva trae 'habilitado'; con la vieja la
+        // clave no viene y se asume habilitado (comportamiento
+        // anterior) hasta que el SQL nuevo se aplique.
+        _habilitado = data['habilitado'] != false;
         final p = data['permisos'];
         if (p is Map) {
           _permisos = Map<String, dynamic>.from(p);
@@ -63,6 +75,7 @@ class PermisosEntrenador {
       }
       _cargado = true;
       await prefs.setBool(_kPrefsActivo, _activo);
+      await prefs.setBool(_kPrefsHabilitado, _habilitado);
       await prefs.setString(
           _kPrefsPermisos, jsonEncode(_permisos));
     } catch (_) {
@@ -70,9 +83,15 @@ class PermisosEntrenador {
     }
   }
 
-  /// Si la cuenta está suspendida (el dueño nunca está suspendido).
+  /// Si la cuenta está suspendida: TIENE fila y está desactivada
+  /// (el dueño nunca está suspendido).
   bool get estaSuspendido =>
-      !AuthService().isOwner && _cargado && !_activo;
+      !AuthService().isOwner && _cargado && _habilitado && !_activo;
+
+  /// Si la cuenta aún NO tiene fila de permisos (no es una
+  /// suspensión: nadie la ha habilitado todavía).
+  bool get sinHabilitar =>
+      !AuthService().isOwner && _cargado && !_habilitado;
 
   bool _check(String key) {
     // El dueño siempre tiene permiso

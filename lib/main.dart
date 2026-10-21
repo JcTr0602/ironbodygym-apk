@@ -86,14 +86,16 @@ Future<void> main() async {
   await ThemeController.load();
   // Subida en segundo plano (punto 21): aunque cierren la app.
   await _programarSubidaFondo();
-  // Sesión vencida -> volver al login con aviso.
+  // Sesión vencida -> volver al login con aviso. v1.4.4: la raíz
+  // (RaizSesion) ya vuelve a Login sola al desaparecer la sesión;
+  // aquí solo se repliegan las pantallas apiladas y se avisa.
   SyncEngine.instance.onSessionExpired = () {
-    navigatorKey.currentState?.pushAndRemoveUntil(
-      MaterialPageRoute(
-          builder: (_) => const LoginScreen(
-              aviso: 'Tu sesión venció. Entra de nuevo.')),
-      (_) => false,
-    );
+    navigatorKey.currentState?.popUntil((r) => r.isFirst);
+    final ctx = navigatorKey.currentContext;
+    if (ctx != null) {
+      ScaffoldMessenger.of(ctx).showSnackBar(const SnackBar(
+          content: Text('Tu sesión venció. Entra de nuevo.')));
+    }
   };
   // v1.3.1 (B4): inicializar servicio foreground de fotos.
   initForegroundFotos();
@@ -197,23 +199,53 @@ class _IronBodyAppState extends State<IronBodyApp>
                 hc ? AppTema.claroAltoContraste() : null,
             highContrastDarkTheme:
                 hc ? AppTema.oscuroAltoContraste() : null,
-            home: FutureBuilder<Widget>(
-              future: _auth.loggedIn
-                  ? Future.value(const HomeScreen())
-                  : Future.value(const LoginScreen()),
-              builder: (ctx, snap) {
-                if (!snap.hasData) {
-                  return const Scaffold(
-                    body: Center(
-                        child: CircularProgressIndicator()),
-                  );
-                }
-                return snap.data!;
-              },
-            ),
+            home: const RaizSesion(),
           ),
         ),
       ),
     );
   }
+}
+
+/// v1.4.4: raíz reactiva a la sesión. Antes la raíz decidía
+/// Inicio/Login UNA sola vez (un FutureBuilder al arrancar): cerrar
+/// sesión mataba la sesión en el servidor, pero la app seguía
+/// abierta y usable en local hasta reiniciarla — una suspensión
+/// real no expulsaba a nadie y el diálogo de suspendido lo
+/// comprobó Jc en campo. Ahora la raíz escucha los cambios de
+/// sesión: si la sesión desaparece (cierre manual, suspensión o
+/// vencimiento), vuelve a Login al momento; si aparece, entra a
+/// Inicio. Los refrescos de token NO reconstruyen nada (la sesión
+/// sigue existiendo: solo se reacciona al cambio de presencia).
+class RaizSesion extends StatefulWidget {
+  const RaizSesion({super.key});
+
+  @override
+  State<RaizSesion> createState() => _RaizSesionState();
+}
+
+class _RaizSesionState extends State<RaizSesion> {
+  bool _logueado = AuthService().loggedIn;
+  StreamSubscription<AuthState>? _sub;
+
+  @override
+  void initState() {
+    super.initState();
+    _sub = Supabase.instance.client.auth.onAuthStateChange.listen((s) {
+      final hay = s.session != null;
+      if (hay != _logueado && mounted) {
+        setState(() => _logueado = hay);
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _sub?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) =>
+      _logueado ? const HomeScreen() : const LoginScreen();
 }

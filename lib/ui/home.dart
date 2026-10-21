@@ -33,7 +33,6 @@ import 'dashboard.dart';
 import 'diseno.dart';
 import 'inscribir.dart';
 import 'listas.dart';
-import 'login.dart';
 import 'mi_dia.dart';
 import 'mi_turno.dart';
 import 'nomina.dart';
@@ -105,33 +104,43 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   /// v1.3.9 Sprint 1 (#14): carga permisos y verifica si está suspendido.
+  /// v1.4.4: se distingue «sin habilitar» (la cuenta no tiene fila
+  /// de permisos: nadie la activó aún) de «suspendido» (tiene fila
+  /// y está desactivada). Antes ambos casos decían «suspendido» y,
+  /// peor, el cierre de sesión no expulsaba de la app (la raíz
+  /// decidía Inicio/Login una sola vez); con RaizSesion el
+  /// signOut de estos diálogos sí saca al usuario a Login.
   Future<void> _verificarPermisos() async {
     await PermisosEntrenador().cargar();
     if (!mounted || _mostrandoDialogoSuspendido) return;
-    if (PermisosEntrenador().estaSuspendido) {
-      _mostrandoDialogoSuspendido = true;
-      // Mostrar diálogo de suspendido
-      showDialog(
-        context: context,
-        barrierDismissible: false,
-        builder: (ctx) => AlertDialog(
-          title: const Text('Acceso suspendido'),
-          content: const Text(
-            'Tu acceso fue suspendido por el administrador. '
-            'Contacta a Julio Cesar.',
+    final permisos = PermisosEntrenador();
+    if (!permisos.estaSuspendido && !permisos.sinHabilitar) return;
+    _mostrandoDialogoSuspendido = true;
+    final suspendido = permisos.estaSuspendido;
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        title: Text(suspendido
+            ? 'Acceso suspendido'
+            : 'Cuenta no habilitada'),
+        content: Text(suspendido
+            ? 'Tu acceso fue suspendido por el administrador. '
+                'Contacta a Julio Cesar.'
+            : 'Tu cuenta todavía no fue habilitada por el '
+                'administrador. Avisa a Julio César para que la '
+                'active.'),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              AuthService().signOut();
+            },
+            child: const Text('ENTENDIDO'),
           ),
-          actions: [
-            TextButton(
-              onPressed: () {
-                Navigator.pop(ctx);
-                AuthService().signOut();
-              },
-              child: const Text('ENTENDIDO'),
-            ),
-          ],
-        ),
-      );
-    }
+        ],
+      ),
+    );
   }
 
   /// v1.3.0 (Gemini): caché en memoria 30s para evitar recargas
@@ -539,9 +548,10 @@ class _HomeScreenState extends State<HomeScreen>
     // v1.2.5: purga de datos sensibles antes de cerrar sesión.
     await LocalDb.purgaAlCerrarSesion();
     await _auth.signOut();
-    if (!mounted) return;
-    Navigator.of(context).pushReplacement(
-        MaterialPageRoute(builder: (_) => const LoginScreen()));
+    // v1.4.4: sin navegación manual: la raíz (RaizSesion) detecta
+    // la sesión cerrada y muestra Login. El pushReplacement
+    // anterior reemplazaba la ruta raíz y la dejaba sin reaccionar
+    // a cierres posteriores.
   }
 
   void _ir(Widget w) {
