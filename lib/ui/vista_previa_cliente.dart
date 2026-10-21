@@ -100,7 +100,7 @@ SemaforoVistaPrevia semaforoVistaPrevia(
 
 /// Texto tolerante a tipos (panel de código): el JSON de la RPC puede
 /// traer num/objetos donde se espera String; nunca lanzar por un cast.
-String? textoSeguro(Object? v) => v == null ? null : v.toString();
+String? textoSeguro(Object? v) => v?.toString();
 
 /// Mapa tolerante a tipos: cualquier cosa que no sea Map → mapa vacío.
 Map<String, dynamic> mapaSeguro(Object? v) =>
