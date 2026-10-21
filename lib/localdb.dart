@@ -1829,16 +1829,18 @@ class LocalDb {
   Future<List<Object>> purgarMirrorAusentes(
       String tabla, Set<Object> idsServidor) async {
     final d = await db;
-    final rows = await d.query(tabla, columns: ['id', 'sync_seq']);
     final borrar = <Object>[];
-    for (final r in rows) {
-      final id = r['id'];
-      if (id == null) continue;
-      final seq = (r['sync_seq'] as num?)?.toInt() ?? 0;
-      if (seq > 0 && !idsServidor.contains(id)) borrar.add(id);
-    }
-    if (borrar.isEmpty) return borrar;
+    // Selección y borrado en la MISMA transacción (panel v1.4.4):
+    // ninguna escritura local puede colarse entre inspeccionar
+    // las candidatas y borrarlas.
     await d.transaction((txn) async {
+      final rows = await txn.query(tabla, columns: ['id', 'sync_seq']);
+      for (final r in rows) {
+        final id = r['id'];
+        if (id == null) continue;
+        final seq = (r['sync_seq'] as num?)?.toInt() ?? 0;
+        if (seq > 0 && !idsServidor.contains(id)) borrar.add(id);
+      }
       for (final id in borrar) {
         if (id is int) {
           await deleteMirror(tabla, id, txn: txn);

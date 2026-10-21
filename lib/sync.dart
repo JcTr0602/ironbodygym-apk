@@ -1983,9 +1983,12 @@ class SyncEngine {
       'gympedia_articulos',
     };
     try {
-      if (await _db.getMeta('purga_v144_programada') != '1') {
-        await _db.setMeta('purga_v144_programada', '1');
-        for (final t in tablasPurgables) {
+      // Programación idempotente por tabla (panel v1.4.4): la
+      // marca nace AUSENTE (null), pasa a '1' y al completarse la
+      // purga queda ''. Sin meta global: un cierre a mitad de la
+      // programación no deja tablas olvidadas para siempre.
+      for (final t in tablasPurgables) {
+        if (await _db.getMeta('purga_v144_$t') == null) {
           await _db.setMeta('purga_v144_$t', '1');
         }
       }
@@ -2339,13 +2342,42 @@ class SyncEngine {
           await _db.setMeta('forzar_redescarga_$tabla', '');
         }
         // v1.4.4: purga por reconciliación de esta tabla. Solo con
-        // la pasada completa y sin errores (este bloque), y con el
-        // candado extra de no purgar contra un conjunto vacío si la
-        // tabla local tiene filas (sospecha de lectura rota, mismo
-        // criterio que el no-forzado de watermark de abajo).
+        // la pasada completa y sin errores (este bloque) y con las
+        // revalidaciones del panel: (a) la cola de ops sigue vacía
+        // AHORA (pudo aparecer una op durante la descarga); (b) el
+        // server_seq no cambió durante la pasada (la foto del
+        // servidor es la misma de principio a fin); (c) no se purga
+        // contra un conjunto vacío en las tablas troncales
+        // (clientes/pagos/suplementos nunca están vacías en
+        // producción: un 200 [] ahí es lectura rota, no verdad).
+        // Si algo no se cumple, la marca queda y se reintenta en
+        // el próximo ciclo.
         if (tablasPurga.contains(tabla)) {
+          var viable = await _db.countPendingOps() == 0;
+          if (viable) {
+            try {
+              final r2 = await _getAuth(Uri.parse(
+                  '$_base/rest/v1/sync_estado?id=eq.1'
+                  '&select=server_seq'));
+              if (r2.statusCode == 200) {
+                final rows2 = jsonDecode(r2.body) as List;
+                final ss2 = rows2.isNotEmpty
+                    ? rows2.first['server_seq'] as int?
+                    : null;
+                if (ss2 != serverSeq) viable = false;
+              } else {
+                viable = false;
+              }
+            } catch (_) {
+              viable = false;
+            }
+          }
           final filasLocales = await _db.contar(tabla);
-          if (idsPurga.isNotEmpty || filasLocales == 0) {
+          const troncales = {'clientes', 'pagos', 'suplementos'};
+          final conjuntoFiable = idsPurga.isNotEmpty ||
+              filasLocales == 0 ||
+              !troncales.contains(tabla);
+          if (viable && conjuntoFiable) {
             final borradas =
                 await _db.purgarMirrorAusentes(tabla, idsPurga);
             if (borradas.isNotEmpty) {
@@ -2354,8 +2386,9 @@ class SyncEngine {
             }
             await _db.setMeta('purga_v144_$tabla', '');
           } else {
-            AppLog.aviso('sync', 'purga_omitida_conjunto_vacio',
-                d: '$tabla locales=$filasLocales');
+            AppLog.aviso('sync', 'purga_omitida',
+                d: '$tabla viable=$viable fiable=$conjuntoFiable '
+                    'locales=$filasLocales');
           }
         }
         final wmActual = await _db.getWatermarkTabla(tabla);

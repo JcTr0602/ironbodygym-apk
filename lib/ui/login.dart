@@ -109,6 +109,10 @@ class _LoginScreenState extends State<LoginScreen>
       _cargando = true;
       _error = null;
     });
+    // v1.4.4: el messenger se captura ANTES de entrar: en cuanto
+    // nazca la sesión, la raíz puede desmontar esta pantalla y el
+    // contexto dejaría de ser válido para mostrar avisos.
+    final messenger = ScaffoldMessenger.of(context);
     try {
       await _auth.signIn(u, p);
       // v1.2.2: descarga perfil (móvil/carnet) si lo local está vacío
@@ -120,24 +124,26 @@ class _LoginScreenState extends State<LoginScreen>
       SharedPreferences.getInstance().then((prefs) {
         prefs.setString('ultimo_usuario', u);
       });
-      // sincroniza al entrar
-      SyncEngine.instance.run();
       // v1.4.4: ya NO se navega a Inicio a mano: la raíz
       // (RaizSesion) detecta la sesión nueva y muestra Inicio.
       // (El pushReplacement anterior reemplazaba la ruta raíz y
       // dejaba la app sin raíz reactiva: un cierre de sesión
       // posterior no volvía a Login.)
-      // v1.0.12: verifica vinculación de dispositivo
+      // v1.0.12: verifica vinculación de dispositivo (100% local;
+      // avisa pero NUNCA bloquea la entrada — decisión Argón
+      // v1.4.0 §8). Va antes de arrancar la sincronización, como
+      // en el flujo original, y su aviso usa el messenger
+      // capturado al inicio (panel v1.4.4).
       final vinculado = await _verificarDispositivo(u);
-      if (!mounted) return;
       if (!vinculado) {
-        // Dispositivo no vinculado: avisa pero permite entrar
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        messenger.showSnackBar(const SnackBar(
           content: Text(
               'Entrando desde un dispositivo no vinculado'),
           duration: Duration(seconds: 4),
         ));
       }
+      // sincroniza al entrar
+      SyncEngine.instance.run();
     } catch (e) {
       setState(() {
         _cargando = false;

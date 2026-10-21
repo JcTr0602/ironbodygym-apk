@@ -66,6 +66,19 @@ void main() {
     expect(pubs.map((a) => a['id']), ['art-vivo']);
   });
 
+  test('conjunto vacío: borra todas las filas de servidor '
+      '(el motor decide cuándo un vacío es de fiar)', () async {
+    final db = await _abrir();
+    await db.upsertMirror('pagos', 7, {'id': 7, 'monto': 2000}, 33);
+    await db.upsertMirror('pagos', 8, {'id': 8, 'monto': 2000}, 34);
+    await db.upsertMirror('pagos', 9, {'id': 9, 'monto': 500}, 0);
+    final borradas = await db.purgarMirrorAusentes('pagos', {});
+    expect(borradas.toSet(), {7, 8},
+        reason: 'las de servidor caen; la optimista (seq 0) queda');
+    final restantes = await db.allMirror('pagos');
+    expect(restantes.map((p) => p['id']), [9]);
+  });
+
   test('sin fantasmas no borra nada', () async {
     final db = await _abrir();
     await db.upsertMirror('pagos', 7, {'id': 7, 'monto': 2000}, 33);

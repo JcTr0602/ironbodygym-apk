@@ -235,6 +235,13 @@ class _RaizSesionState extends State<RaizSesion> {
       final hay = s.session != null;
       if (hay != _logueado && mounted) {
         setState(() => _logueado = hay);
+        // Panel v1.4.4: al PERDER la sesión hay que replegar la
+        // pila entera hasta la raíz. Cambiar solo el contenido de
+        // la ruta raíz dejaba vivas las pantallas apiladas encima
+        // (una ficha, un pago) sobre el Login.
+        if (!hay) {
+          navigatorKey.currentState?.popUntil((r) => r.isFirst);
+        }
       }
     });
   }
