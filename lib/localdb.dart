@@ -1813,6 +1813,43 @@ class LocalDb {
     await d.delete(tabla, where: 'id=?', whereArgs: [id]);
   }
 
+  /// v1.4.4: purga por reconciliación. Borra de [tabla] las filas
+  /// locales que YA no están en el servidor, dado el conjunto
+  /// COMPLETO de ids de una re-descarga total (SyncEngine decide
+  /// cuándo el conjunto es de fiar: descarga sin errores y cola de
+  /// ops limpia). Es el arreglo del «dinero fantasma»: el pull
+  /// normal es solo upsert y las tumbas ya pasadas por el cursor
+  /// nunca se re-aplican, así que una fila borrada del espejo de
+  /// Supabase podía vivir en el teléfono para siempre.
+  ///
+  /// Candado: solo se borran filas que vinieron del servidor
+  /// (sync_seq > 0). Una fila optimista local aún no espejada
+  /// (seq 0: p. ej. un cliente recién creado cuyo op sigue en la
+  /// cola) jamás se toca. Devuelve los ids borrados.
+  Future<List<Object>> purgarMirrorAusentes(
+      String tabla, Set<Object> idsServidor) async {
+    final d = await db;
+    final rows = await d.query(tabla, columns: ['id', 'sync_seq']);
+    final borrar = <Object>[];
+    for (final r in rows) {
+      final id = r['id'];
+      if (id == null) continue;
+      final seq = (r['sync_seq'] as num?)?.toInt() ?? 0;
+      if (seq > 0 && !idsServidor.contains(id)) borrar.add(id);
+    }
+    if (borrar.isEmpty) return borrar;
+    await d.transaction((txn) async {
+      for (final id in borrar) {
+        if (id is int) {
+          await deleteMirror(tabla, id, txn: txn);
+        } else {
+          await txn.delete(tabla, where: 'id=?', whereArgs: [id]);
+        }
+      }
+    });
+    return borrar;
+  }
+
   // ── GymPedia (v33) ────────────────────────────────────────────────
 
   /// Artículos publicados del espejo local, decodificados, en el

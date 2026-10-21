@@ -1964,6 +1964,47 @@ class SyncEngine {
         }
       }
     } catch (_) {}
+    // v1.4.4: purga por reconciliación (arreglo del «dinero
+    // fantasma», decisión de Jc: sanar SOLO al actualizar, sin
+    // pasos manuales). Al re-descargar una tabla COMPLETA con la
+    // cola de ops limpia, las filas locales que ya no están en el
+    // servidor se borran (LocalDb.purgarMirrorAusentes, solo filas
+    // con sync_seq > 0: las optimistas locales nunca se tocan).
+    // Disparo único al actualizar: la primera descarga de la
+    // versión programa la purga de todas las tablas purgables;
+    // los reseteos por manifiesto la repiten a futuro.
+    const tablasPurgables = {
+      'clientes',
+      'pagos',
+      'pagos_diarios',
+      'suplementos',
+      'ventas_suplementos',
+      'categorias_suplemento',
+      'gympedia_articulos',
+    };
+    try {
+      if (await _db.getMeta('purga_v144_programada') != '1') {
+        await _db.setMeta('purga_v144_programada', '1');
+        for (final t in tablasPurgables) {
+          await _db.setMeta('purga_v144_$t', '1');
+        }
+      }
+    } catch (_) {}
+    final tablasPurga = <String>{};
+    try {
+      if (await _db.countPendingOps() == 0) {
+        for (final t in tablas) {
+          if (!tablasPurgables.contains(t)) continue;
+          if (tablasReseteadas.contains(t) ||
+              await _db.getMeta('purga_v144_$t') == '1') {
+            tablasPurga.add(t);
+            // Su pasada debe ser COMPLETA (desde 0) para que el
+            // conjunto de ids sea el universo de la tabla.
+            tablasReseteadas.add(t);
+          }
+        }
+      }
+    } catch (_) {}
     // ajustes + server_seq (para verificación de sincronización)
     int? serverSeq;
     try {
@@ -2066,6 +2107,9 @@ class SyncEngine {
       }
       var pageWm = cursor;
       var tablaMax = cursor;
+      // v1.4.4: ids vistos en la pasada completa (purga).
+      final recolectarPurga = tablasPurga.contains(tabla);
+      final idsPurga = <Object>{};
       try {
         while (true) {
           // gastos y turnos_cierre tienen esquema plano en Supabase
@@ -2158,6 +2202,9 @@ class SyncEngine {
             vistas++;
             try {
               final m = Map<String, dynamic>.from(row as Map);
+              if (recolectarPurga && m['id'] != null) {
+                idsPurga.add(m['id'] as Object);
+              }
               final seq = (m['sync_seq'] as int?) ?? 0;
               final prep = _prepararFilaMirror(tabla, m);
               if (prep != null) {
@@ -2290,6 +2337,26 @@ class SyncEngine {
         // recién ahora se consume el flag forzar_redescarga_<tabla>.
         if (tablasReseteadas.contains(tabla)) {
           await _db.setMeta('forzar_redescarga_$tabla', '');
+        }
+        // v1.4.4: purga por reconciliación de esta tabla. Solo con
+        // la pasada completa y sin errores (este bloque), y con el
+        // candado extra de no purgar contra un conjunto vacío si la
+        // tabla local tiene filas (sospecha de lectura rota, mismo
+        // criterio que el no-forzado de watermark de abajo).
+        if (tablasPurga.contains(tabla)) {
+          final filasLocales = await _db.contar(tabla);
+          if (idsPurga.isNotEmpty || filasLocales == 0) {
+            final borradas =
+                await _db.purgarMirrorAusentes(tabla, idsPurga);
+            if (borradas.isNotEmpty) {
+              AppLog.info('sync', 'purga_reconciliacion',
+                  d: '$tabla borradas=${borradas.length}');
+            }
+            await _db.setMeta('purga_v144_$tabla', '');
+          } else {
+            AppLog.aviso('sync', 'purga_omitida_conjunto_vacio',
+                d: '$tabla locales=$filasLocales');
+          }
         }
         final wmActual = await _db.getWatermarkTabla(tabla);
         if (wmActual < serverSeq) {
