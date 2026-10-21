@@ -6,6 +6,7 @@
 library;
 
 import 'package:flutter/material.dart';
+import '../negocio.dart';
 
 import '../localdb.dart';
 import 'componentes.dart';
@@ -38,8 +39,7 @@ class _CongeladosScreenState extends State<CongeladosScreen> {
     final congelados = todos
         .where((c) => '${c['estado'] ?? 'activo'}' == 'congelado')
         .toList();
-    congelados.sort((a, b) =>
-        '${a['nombre']}'.compareTo('${b['nombre']}'));
+    congelados.sort(compararPorNombre);
     if (mounted) {
       setState(() {
         _clientes = congelados;

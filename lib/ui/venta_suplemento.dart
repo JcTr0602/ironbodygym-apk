@@ -144,8 +144,7 @@ class _VentaSuplementoScreenState
     final activos = clientes
         .where((c) => (c['estado'] as String?) == 'activo')
         .toList()
-      ..sort((a, b) => '${a['nombre']}'
-          .compareTo('${b['nombre']}'));
+      ..sort(compararPorNombre);
     if (!mounted) return;
     final sel = await showDialog<Map<String, dynamic>>(
       context: context,

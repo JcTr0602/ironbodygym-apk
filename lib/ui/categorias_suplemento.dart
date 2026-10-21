@@ -4,6 +4,7 @@
 // en la lista de suplementos (entrenadores y dueño).
 
 import 'package:flutter/material.dart';
+import '../negocio.dart';
 import 'package:uuid/uuid.dart';
 
 import '../auth.dart';
@@ -41,8 +42,7 @@ class _CategoriasSuplementoScreenState
     if (!mounted) return;
     setState(() {
       _items = items
-        ..sort((a, b) =>
-            '${a['nombre']}'.compareTo('${b['nombre']}'));
+        ..sort(compararPorNombre);
       _cargando = false;
     });
   }

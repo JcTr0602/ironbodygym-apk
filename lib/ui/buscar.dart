@@ -54,7 +54,7 @@ class _BuscarScreenState extends State<BuscarScreen> {
           '${c['notas'] ?? ''}'.toLowerCase().contains(nq));
       r = [...r, ...extra];
       r.sort(
-          (a, b) => '${a['nombre']}'.compareTo('${b['nombre']}'));
+          compararPorNombre);
     }
     // Filtros de estado de mensualidad.
     // v1.3.1: sin fecha = vencido (no "al día").

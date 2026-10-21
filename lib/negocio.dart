@@ -25,6 +25,24 @@ String _norm(String s) {
   return n;
 }
 
+/// Orden alfabético de personas/productos para TODAS las listas
+/// (v1.4.3): comparar el nombre CRUDO con compareTo manda las
+/// minúsculas tras las mayúsculas (un cliente inscrito como
+/// «alberto prueba» quedaba al final de la lista, tras la Z).
+/// Se ordena por el nombre normalizado (minúsculas, sin tildes)
+/// y se desempata por id: orden total y estable entre
+/// ejecuciones.
+int compararPorNombre(Map<String, dynamic> a, Map<String, dynamic> b) {
+  final na = (a['nombre_norm'] as String?) ?? _norm('${a['nombre'] ?? ''}');
+  final nb = (b['nombre_norm'] as String?) ?? _norm('${b['nombre'] ?? ''}');
+  final c = na.compareTo(nb);
+  if (c != 0) return c;
+  // Desempate por id (orden de registro): total y estable,
+  // sin volver a introducir el sesgo mayúsculas/minúsculas.
+  return ((a['id'] as num?)?.toInt() ?? 0)
+      .compareTo((b['id'] as num?)?.toInt() ?? 0);
+}
+
 String _hoyIso() {
   final n = ahoraHabana();
   return '${n.year.toString().padLeft(4, '0')}-'
@@ -111,7 +129,7 @@ Future<List<Map<String, dynamic>>> buscarClientes(String q) async {
     final porTel =
         porId.values.where((c) => c['estado'] == 'activo').toList();
     if (porTel.isNotEmpty) {
-      porTel.sort((a, b) => '${a['nombre']}'.compareTo('${b['nombre']}'));
+      porTel.sort(compararPorNombre);
       return porTel;
     }
     // Sin match por teléfono, se sigue a la búsqueda por nombre.
@@ -129,7 +147,7 @@ Future<List<Map<String, dynamic>>> buscarClientes(String q) async {
     }
   }
   if (resultado.length >= 5) {
-    resultado.sort((a, b) => '${a['nombre']}'.compareTo('${b['nombre']}'));
+    resultado.sort(compararPorNombre);
     return resultado;
   }
   // Tolerancia a typos: en un isolate, solo sobre candidatos acotados
@@ -241,7 +259,7 @@ Future<List<Map<String, dynamic>>> clientesAlDia() async {
     final ph = c['pagado_hasta'] as String?;
     return ph != null && ph.compareTo(hoy) >= 0;
   }).toList();
-  res.sort((a, b) => '${a['nombre']}'.compareTo('${b['nombre']}'));
+  res.sort(compararPorNombre);
   return res;
 }
 
@@ -251,7 +269,7 @@ Future<List<Map<String, dynamic>>> vencenHoy() async {
   final rows = await _activos();
   final res =
       rows.where((c) => (c['pagado_hasta'] as String?) == hoy).toList();
-  res.sort((a, b) => '${a['nombre']}'.compareTo('${b['nombre']}'));
+  res.sort(compararPorNombre);
   return res;
 }
 
@@ -1180,7 +1198,7 @@ Future<List<Map<String, dynamic>>> listaClientes([String q = '']) async {
       return false;
     }).toList();
   }
-  res.sort((a, b) => '${a['nombre']}'.compareTo('${b['nombre']}'));
+  res.sort(compararPorNombre);
   return res;
 }
 
@@ -1334,7 +1352,7 @@ Future<List<Map<String, dynamic>>> clientesInactivos() async {
   final todos = await LocalDb.instance.allMirror('clientes');
   final res =
       todos.where((c) => c['estado'] != 'activo').toList();
-  res.sort((a, b) => '${a['nombre']}'.compareTo('${b['nombre']}'));
+  res.sort(compararPorNombre);
   return res;
 }
 
@@ -1347,7 +1365,7 @@ Future<Map<String, List<Map<String, dynamic>>>> clientesPorEntrenador() async {
     mapa.putIfAbsent(quien, () => []).add(c);
   }
   for (final l in mapa.values) {
-    l.sort((a, b) => '${a['nombre']}'.compareTo('${b['nombre']}'));
+    l.sort(compararPorNombre);
   }
   return mapa;
 }

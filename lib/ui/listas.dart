@@ -71,7 +71,7 @@ class _ListasScreenState extends State<ListasScreen>
               .compareTo('${b['pagado_hasta'] ?? ''}');
           return c != 0
               ? c
-              : '${a['nombre']}'.compareTo('${b['nombre']}');
+              : compararPorNombre(a, b);
         });
         break;
       case 'dias':
@@ -83,12 +83,11 @@ class _ListasScreenState extends State<ListasScreen>
           final c = da.compareTo(db);
           return c != 0
               ? c
-              : '${a['nombre']}'.compareTo('${b['nombre']}');
+              : compararPorNombre(a, b);
         });
         break;
       default:
-        r.sort((a, b) =>
-            '${a['nombre']}'.compareTo('${b['nombre']}'));
+        r.sort(compararPorNombre);
     }
     return r;
   }

@@ -18,6 +18,7 @@ import '../auth.dart';
 import '../fotos.dart';
 import '../fotos_cola.dart';
 import '../localdb.dart';
+import '../negocio.dart';
 import '../sync.dart';
 import 'componentes.dart';
 import 'cuentas_por_cobrar.dart';
@@ -78,8 +79,7 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
           .where((c) =>
               (c['activa'] as int?) != 0 || _esDueno)
           .toList()
-        ..sort((a, b) =>
-            '${a['nombre']}'.compareTo('${b['nombre']}'));
+        ..sort(compararPorNombre);
       _promoActiva = (aj['promo_suplementos'] as num?)?.toInt() != 0;
       _tasaUsd = (aj['tasa_usd'] as num?)?.toDouble();
       _topIds = _topVendidos(ventas);
@@ -164,8 +164,7 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
         if (aSin != bSin) return aSin - bSin;
         // v1.2.3: orden estable (sugerencia GPT-5.4-mini)
         // nombre, luego id como desempate final
-        final cmpNombre =
-            '${a['nombre']}'.compareTo('${b['nombre']}');
+        final cmpNombre = compararPorNombre(a, b);
         if (cmpNombre != 0) return cmpNombre;
         return (a['id'] as int? ?? 0).compareTo(b['id'] as int? ?? 0);
       });
@@ -1005,8 +1004,7 @@ class _EditarSuplementoScreenState
       _categorias = cats
           .where((c) => (c['activa'] as int?) != 0)
           .toList()
-        ..sort((a, b) =>
-            '${a['nombre']}'.compareTo('${b['nombre']}'));
+        ..sort(compararPorNombre);
       // Fix auditoría Gemini: si el suplemento en edición tiene asignada
       // una categoría inactiva, incluirla en el dropdown (marcada) para
       // que DropdownButtonFormField no crashee por valor sin item.

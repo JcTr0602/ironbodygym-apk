@@ -150,8 +150,7 @@ class _DialogoVentaRapidaState extends State<_DialogoVentaRapida> {
       _clientes = clientes
           .where((c) => (c['estado'] as String?) == 'activo')
           .toList()
-        ..sort((a, b) =>
-            '${a['nombre']}'.compareTo('${b['nombre']}'));
+        ..sort(compararPorNombre);
     });
   }
 
