@@ -24,6 +24,7 @@ import 'componentes.dart';
 import 'diseno.dart';
 import 'admin_secciones.dart';
 import 'arqueo.dart';
+import 'gympedia.dart';
 import 'auditoria.dart';
 import 'auditoria_silenciosa.dart';
 import 'nomina.dart';
@@ -1022,6 +1023,13 @@ class _AdminScreenState extends State<AdminScreen> {
                           'Horario del Gym',
                           'Configurar turnos',
                           () => _ir(const HorarioGym()),
+                        ),
+                        // v1.4.4 (v33): GymPedia (solo dueño).
+                        _tarjetaFlujo(
+                          Icons.menu_book_rounded,
+                          'GymPedia',
+                          'Artículos para la app de clientes',
+                          () => _ir(const GympediaScreen()),
                         ),
                         _tarjetaFlujo(
                           Icons.file_download_rounded,

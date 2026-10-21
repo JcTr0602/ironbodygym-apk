@@ -40,7 +40,30 @@ class LocalDb {
   /// v1.4.0 (Argón): versión actual del esquema local. Los tests de
   /// migración comparan contra esta constante en vez de un número
   /// fijo, para no caer en cascada de fallos con cada migración.
-  static const int versionActual = 32;
+  static const int versionActual = 33;
+
+  /// v1.4.4 (v33): DDL de borradores de GymPedia (compartido entre
+  /// onCreate y la migración v33). Los campos de contenido espejan el
+  /// artículo; pasos/errores/referencias/related_ids van como TEXT
+  /// JSON. `base_revision` = revision publicada de la que partió el
+  /// borrador (0 si es nuevo): si el espejo la supera, el borrador
+  /// quedó obsoleto (adenda de Argón, ajuste 3).
+  static const String _ddlGympediaBorradores =
+      'CREATE TABLE IF NOT EXISTS gympedia_borradores ('
+      'slug TEXT PRIMARY KEY, '
+      'titulo TEXT NOT NULL DEFAULT \'\', '
+      'categoria TEXT NOT NULL DEFAULT \'entrenamiento\', '
+      'lo_esencial TEXT NOT NULL DEFAULT \'\', '
+      'explicacion_md TEXT NOT NULL DEFAULT \'\', '
+      'pasos TEXT NOT NULL DEFAULT \'[]\', '
+      'errores TEXT NOT NULL DEFAULT \'[]\', '
+      'referencias TEXT NOT NULL DEFAULT \'[]\', '
+      'sello TEXT NOT NULL DEFAULT \'verde\', '
+      'related_ids TEXT NOT NULL DEFAULT \'[]\', '
+      'tiene_imagen INTEGER NOT NULL DEFAULT 0, '
+      'imagen_cambiada INTEGER NOT NULL DEFAULT 0, '
+      'base_revision INTEGER NOT NULL DEFAULT 0, '
+      'actualizado_ts TEXT NOT NULL DEFAULT \'\')';
 
   /// ¿El SQLite del dispositivo trae el módulo FTS5? Algunos
   /// fabricantes lo recortan ("no such module: fts5"). Se prueba una
@@ -959,6 +982,26 @@ class LocalDb {
             } catch (_) {}
           }
         }
+        if (oldV < 33) {
+          // v1.4.4: GymPedia (espejo + borradores locales del dueño).
+          // meta se crea por si una BD muy vieja (o simulada) aún no
+          // la tiene: este bloque es el primero en escribirla sin
+          // pasar por los bloques antiguos que la daban por hecha.
+          await db.execute(
+              'CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT NOT NULL)');
+          await db.execute(
+              'CREATE TABLE IF NOT EXISTS gympedia_articulos (id TEXT PRIMARY KEY, data TEXT NOT NULL, sync_seq INTEGER NOT NULL)');
+          await db.execute(_ddlGympediaBorradores);
+          await db.execute(
+              'CREATE INDEX IF NOT EXISTS idx_gympedia_articulos_seq ON gympedia_articulos(sync_seq)');
+          // Los cursores de GymPedia NUNCA heredan el watermark global
+          // (patrón turnos_cierre v12): la tabla nace vacía y debe
+          // descargarse desde cero aunque el global vaya por 80000+.
+          await db.rawInsert(
+              "INSERT OR IGNORE INTO meta (k, v) VALUES ('wm_gympedia_articulos', '0')");
+          await db.rawInsert(
+              "INSERT OR IGNORE INTO meta (k, v) VALUES ('wm_gympedia_borrados', '0')");
+        }
       },
     );
     // v1.2.5+28: repara el índice FTS si la migración lo omitió y el
@@ -1237,6 +1280,12 @@ class LocalDb {
       await db.execute(
           'CREATE TABLE $t (id TEXT PRIMARY KEY, data TEXT NOT NULL, sync_seq INTEGER NOT NULL)');
     }
+    // v1.4.4 (v33): GymPedia. Espejo de artículos publicados (id TEXT =
+    // slug) + borradores 100% locales del dueño (nunca se sincronizan;
+    // por sync solo viajan las ops gympedia_upsert_publicado/retirar).
+    await db.execute(
+        'CREATE TABLE IF NOT EXISTS gympedia_articulos (id TEXT PRIMARY KEY, data TEXT NOT NULL, sync_seq INTEGER NOT NULL)');
+    await db.execute(_ddlGympediaBorradores);
     // v1.4.0 (v31): caché del pre-cálculo de nómina. Solo guarda el
     // conteo de clientes que pagaron el mes + huella de insumos +
     // cuándo se calculó. Bonos y tarifa se leen siempre en vivo.
@@ -1256,6 +1305,7 @@ class LocalDb {
       'clientes', 'pagos', 'pagos_diarios', 'gastos', 'suplementos',
       'ventas_suplementos', 'categorias_suplemento', 'turnos_cierre',
       'liquidaciones_caja', 'incidencias_sync', // v1.3.6 (v28)
+      'gympedia_articulos', // v1.4.4 (v33)
     ]) {
       await db.execute('CREATE INDEX IF NOT EXISTS idx_${t}_seq ON $t(sync_seq)');
     }
@@ -1760,6 +1810,68 @@ class LocalDb {
     if (id.isEmpty) return;
     final d = await db;
     await d.delete(tabla, where: 'id=?', whereArgs: [id]);
+  }
+
+  // ── GymPedia (v33) ────────────────────────────────────────────────
+
+  /// Artículos publicados del espejo local, decodificados, en el
+  /// orden en que llegaron (sync_seq). La UI ordena por categoría.
+  Future<List<Map<String, dynamic>>> gympediaPublicados() async {
+    final d = await db;
+    final rows = await d.query('gympedia_articulos', orderBy: 'sync_seq ASC');
+    final out = <Map<String, dynamic>>[];
+    for (final r in rows) {
+      try {
+        final m = Map<String, dynamic>.from(
+            jsonDecode('${r['data']}') as Map);
+        m['id'] = '${r['id']}';
+        out.add(m);
+      } catch (_) {}
+    }
+    return out;
+  }
+
+  /// Un artículo publicado del espejo (o null si no está).
+  Future<Map<String, dynamic>?> gympediaPublicado(String slug) async {
+    final d = await db;
+    final rows = await d.query('gympedia_articulos',
+        where: 'id=?', whereArgs: [slug], limit: 1);
+    if (rows.isEmpty) return null;
+    try {
+      final m =
+          Map<String, dynamic>.from(jsonDecode('${rows.first['data']}') as Map);
+      m['id'] = '${rows.first['id']}';
+      return m;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Borradores locales de GymPedia (filas crudas de la tabla).
+  Future<List<Map<String, dynamic>>> gympediaBorradores() async {
+    final d = await db;
+    return d.query('gympedia_borradores', orderBy: 'actualizado_ts DESC');
+  }
+
+  /// Un borrador por slug (o null).
+  Future<Map<String, dynamic>?> gympediaBorrador(String slug) async {
+    final d = await db;
+    final rows = await d.query('gympedia_borradores',
+        where: 'slug=?', whereArgs: [slug], limit: 1);
+    return rows.isEmpty ? null : rows.first;
+  }
+
+  /// Crea o actualiza un borrador (INSERT OR REPLACE por slug).
+  Future<void> gympediaGuardarBorrador(Map<String, dynamic> b) async {
+    final d = await db;
+    await d.insert('gympedia_borradores', b,
+        conflictAlgorithm: ConflictAlgorithm.replace);
+  }
+
+  /// Elimina un borrador (al publicar con éxito de encolado o a mano).
+  Future<void> gympediaEliminarBorrador(String slug) async {
+    final d = await db;
+    await d.delete('gympedia_borradores', where: 'slug=?', whereArgs: [slug]);
   }
 
   /// Normaliza para búsqueda: minúsculas, sin tildes.
@@ -3775,6 +3887,9 @@ class LocalDb {
     // v1.3.1 (C3): las tablas de incidencias NO heredan el watermark
     // global; si no, en teléfonos viejos se saltan registros.
     if (tabla.startsWith('incidencias')) return 0;
+    // v1.4.4 (v33): GymPedia tampoco hereda el global (nace en v33 con
+    // el global ya avanzado; heredar saltaría todos los artículos).
+    if (tabla == 'gympedia_articulos') return 0;
     return getWatermark(); // hereda el global (migración)
   }
 

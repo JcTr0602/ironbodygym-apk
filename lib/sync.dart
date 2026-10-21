@@ -174,6 +174,8 @@ class SyncScope {
       'ventas_suplementos'
     ],
     'incidencias_sync': ['incidencias_sync'],
+    // v1.4.4 (v33): refresco puntual del espejo de GymPedia.
+    'gympedia': ['gympedia_articulos'],
   };
 
   /// Resuelve las tablas del scope en orden topológico (padres primero).
@@ -573,6 +575,8 @@ class SyncEngine {
         return 'suplementos';
       case 'ventas_suplementos':
         return 'ventas de suplementos';
+      case 'gympedia_articulos':
+        return 'GymPedia';
       default:
         return tabla.replaceAll('_', ' ');
     }
@@ -1859,6 +1863,27 @@ class SyncEngine {
       };
       return {'id': id, 'dataJson': jsonEncode(data), 'esTexto': true};
     }
+    // v1.4.4 (v33): GymPedia — espejo con id TEXT (slug) y la fila
+    // entera en 'data' (jsonb de sync_gympedia, como suplementos).
+    if (tabla == 'gympedia_articulos') {
+      final id = '${m['id'] ?? ''}';
+      if (id.isEmpty) return null;
+      final rawData = m['data'];
+      final Map<String, dynamic> data;
+      if (rawData is Map) {
+        data = Map<String, dynamic>.from(rawData);
+      } else if (rawData is String) {
+        try {
+          data = Map<String, dynamic>.from(jsonDecode(rawData) as Map);
+        } catch (_) {
+          return null;
+        }
+      } else {
+        return null;
+      }
+      data['id'] = id;
+      return {'id': id, 'dataJson': jsonEncode(data), 'esTexto': true};
+    }
     final id = (m['id'] as int?) ?? 0;
     if (id == 0) return null;
     // gastos usa columnas planas en Supabase (sin 'data' JSON)
@@ -1907,6 +1932,7 @@ class SyncEngine {
       'turnos_cierre', // v1.2.5-rev5
       'liquidaciones_caja', // v1.3.6 (v28, ítem 1B)
       'incidencias_sync', // v1.3.6 (v28, ítem 1C)
+      'gympedia_articulos', // v1.4.4 (v33)
     ];
     final tablas = tablasFiltro ?? todasTablas;
     // v1.2.5 (D19): si el manifiesto marcó algún ámbito divergente,
@@ -2007,6 +2033,8 @@ class SyncEngine {
       // v1.3.6 (v28): arqueo de caja e incidencias de sync.
       'liquidaciones_caja': 'sync_liquidaciones_caja',
       'incidencias_sync': 'sync_incidencias_sync',
+      // v1.4.4 (v33): espejo de artículos GymPedia.
+      'gympedia_articulos': 'sync_gympedia',
     };
     var ti = 0;
     for (final tabla in tablas) {
@@ -2397,6 +2425,42 @@ class SyncEngine {
       if (borradosMax > cursorBorrados) {
         await _db.setWatermarkTabla('borrados', borradosMax);
       }
+    }
+    // v1.4.4 (v33): tombstones de GymPedia. Viven en su propia tabla
+    // (sync_gympedia_borrados) porque el id es TEXT (slug) y no cabe
+    // en sync_borrados.entidad_id (bigint). Cursor propio en meta;
+    // jamás salta a server_seq: solo avanza al máximo aplicado.
+    // Tolerante a fallos: GymPedia nunca rompe el pull principal.
+    if (tablas.contains('gympedia_articulos')) {
+      try {
+        final cursorGb =
+            int.tryParse(await _db.getMeta('wm_gympedia_borrados') ?? '0') ??
+                0;
+        var gbMax = cursorGb;
+        while (true) {
+          final r = await _getAuth(Uri.parse(
+              '$_base/rest/v1/sync_gympedia_borrados?select=id,sync_seq'
+              '&sync_seq=gt.$gbMax&order=sync_seq.asc&limit=100'));
+          if (r.statusCode != 200) break; // ausente/sin permiso: omitir
+          final rows = jsonDecode(r.body) as List;
+          if (rows.isEmpty) break;
+          for (final row in rows) {
+            final m = Map<String, dynamic>.from(row as Map);
+            final slug = '${m['id'] ?? ''}';
+            final seq = (m['sync_seq'] as int?) ?? 0;
+            if (slug.isNotEmpty) {
+              await _db.deleteMirrorTexto('gympedia_articulos', slug);
+              aplicadas++;
+              contarEnDetallePull(porTabla, 'gympedia_articulos');
+            }
+            if (seq > gbMax) gbMax = seq;
+          }
+          if (rows.length < 100) break;
+        }
+        if (gbMax > cursorGb) {
+          await _db.setMeta('wm_gympedia_borrados', '$gbMax');
+        }
+      } catch (_) {}
     }
     // Argón v1.3.0: bajadas viejas v1.2.4/v1.2.5 DESACTIVADAS.
     // Ahora se usan _pullTiposIncidencia(), _pullIncidencias(),

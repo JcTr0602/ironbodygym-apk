@@ -8,6 +8,8 @@ class AppConfig {
   static const anonKey = 'sb_publishable_R04zp3diEAOvtgD-tjCQag_ayS5mzW_';
 
   static const bucketFotos = 'fotos-clientes';
+  // v1.4.4 (v33): imágenes de artículos GymPedia (<slug>.webp).
+  static const bucketGympedia = 'gympedia-imagenes';
 
   // Datos de transferencia (Transfermóvil/Enzona) — fijos del negocio.
   //

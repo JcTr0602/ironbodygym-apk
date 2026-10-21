@@ -27,6 +27,8 @@ dependencies:
   crypto: ^3.0.7
   flutter_image_compress: ^2.3.0
   flutter_foreground_task: ^8.0.0
+  # v1.4.4 (v33): vista previa Markdown del editor GymPedia.
+  flutter_markdown: ^0.7.7+1
 
 dev_dependencies:
   flutter_test:

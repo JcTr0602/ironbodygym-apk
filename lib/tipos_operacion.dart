@@ -31,6 +31,10 @@ const Map<String, TipoOperacionInfo> kTiposOperacion = {
   'cambiar_estado':
       TipoOperacionInfo('Cambio de estado', Icons.swap_horiz),
   'ajuste': TipoOperacionInfo('Cambio de precio', Icons.tune),
+  'gympedia_upsert_publicado':
+      TipoOperacionInfo('Artículo GymPedia', Icons.menu_book),
+  'gympedia_retirar':
+      TipoOperacionInfo('Retirar artículo GymPedia', Icons.menu_book),
   'admin_usuario': TipoOperacionInfo('Usuario APK', Icons.manage_accounts),
   'confirmar_entrega':
       TipoOperacionInfo('Confirmar entrega', Icons.check_circle),
