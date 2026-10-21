@@ -965,6 +965,14 @@ class _EditarSuplementoScreenState
   // v1.3.7 (Fase B §6.2): costo (solo dueño) y umbral de stock bajo.
   final _costo = TextEditingController();
   final _umbral = TextEditingController();
+  // v1.4.3: presentación del envase (contenido + unidad + servicios)
+  // — lo que el cliente ve en su catálogo («300 g · 60 servicios»).
+  final _pesoValor = TextEditingController();
+  final _servicios = TextEditingController();
+  String? _pesoUnidad;
+  static const _unidadesEnvase = [
+    'g', 'kg', 'ml', 'L', 'cápsulas', 'tabletas', 'unidades',
+  ];
   bool _activo = true;
   bool _guardando = false;
   Uint8List? _fotoNueva;
@@ -977,6 +985,12 @@ class _EditarSuplementoScreenState
 
   bool get _editando => widget.suplemento != null;
 
+  /// Número del espejo sin decimales inútiles (300.0 → «300»).
+  static String _fmtNum(dynamic v) {
+    final n = v is num ? v.toDouble() : double.tryParse('$v') ?? 0;
+    return n == n.roundToDouble() ? '${n.toInt()}' : '$n';
+  }
+
   @override
   void initState() {
     super.initState();
@@ -988,6 +1002,12 @@ class _EditarSuplementoScreenState
       _stock.text = '${s['stock'] ?? 0}';
       _costo.text = '${s['costo'] ?? ''}';
       _umbral.text = '${s['umbral_stock'] ?? 3}';
+      if (s['peso_valor'] != null) _pesoValor.text = _fmtNum(s['peso_valor']);
+      if (s['servicios_estandar'] != null) {
+        _servicios.text = _fmtNum(s['servicios_estandar']);
+      }
+      final unidad = s['peso_unidad']?.toString().trim();
+      _pesoUnidad = (unidad != null && unidad.isNotEmpty) ? unidad : null;
       _activo = (s['activo'] as int?) == 1;
       _categoriaId = s['categoria_id'] as int?;
     } else {
@@ -1024,6 +1044,8 @@ class _EditarSuplementoScreenState
     _desc.dispose();
     _precio.dispose();
     _stock.dispose();
+    _pesoValor.dispose();
+    _servicios.dispose();
     super.dispose();
   }
 
@@ -1058,6 +1080,23 @@ class _EditarSuplementoScreenState
           cancelar: '');
       return;
     }
+    // v1.4.3: la presentación va en pareja (cantidad + unidad);
+    // si falta una, el servidor rechazaría la op entera.
+    final pesoValor =
+        double.tryParse(_pesoValor.text.trim().replaceAll(',', '.'));
+    final serviciosTxt = _servicios.text.trim().replaceAll(',', '.');
+    final servicios =
+        int.tryParse(serviciosTxt) ?? double.tryParse(serviciosTxt)?.round();
+    if ((pesoValor != null) != (_pesoUnidad != null) ||
+        (pesoValor != null && pesoValor <= 0)) {
+      await DialogoApp.confirmar(context,
+          titulo: 'Revisa la presentación',
+          mensaje:
+              'El contenido del envase necesita cantidad y unidad juntas (ej. 300 + g), o ambos vacíos.',
+          aceptar: 'Entendido',
+          cancelar: '');
+      return;
+    }
     setState(() => _guardando = true);
     try {
       // v1.3.7 (Fase B §6.2): costo (solo dueño) y umbral de stock.
@@ -1079,6 +1118,12 @@ class _EditarSuplementoScreenState
         if (AuthService().isOwner && costo != null && costo >= 0)
           'costo': costo,
         'umbral_stock': umbral < 0 ? 3 : umbral,
+        // v1.4.3: presentación del envase; se manda siempre
+        // (vacío = limpiar el dato). El servidor conserva el
+        // dato si la op no trae las claves (apps viejas).
+        'peso_valor': pesoValor ?? '',
+        'peso_unidad': _pesoUnidad ?? '',
+        'servicios_estandar': servicios ?? '',
       };
       // v1.2.1 fix auditoría Gemini: el uuid de creación se genera aquí
       // para ligar la foto pendiente a la op (así no se pierde offline).
@@ -1253,6 +1298,60 @@ class _EditarSuplementoScreenState
           CampoTexto(
               controller: _umbral,
               etiqueta: 'Alerta de stock bajo (unidades)',
+              teclado: TextInputType.number),
+          const SizedBox(height: AppEspacio.sm),
+          // v1.4.3: presentación del envase — el cliente la ve en
+          // su catálogo bajo el nombre del producto.
+          Row(
+            children: [
+              Expanded(
+                child: CampoTexto(
+                    controller: _pesoValor,
+                    etiqueta: 'Contenido del envase',
+                    hint: 'Ej. 300',
+                    teclado:
+                        const TextInputType.numberWithOptions(
+                            decimal: true)),
+              ),
+              const SizedBox(width: AppEspacio.md),
+              Expanded(
+                child: DropdownButtonFormField<String?>(
+                  initialValue: _pesoUnidad,
+                  decoration: const InputDecoration(
+                    labelText: 'Unidad',
+                    border: OutlineInputBorder(),
+                  ),
+                  items: [
+                    const DropdownMenuItem<String?>(
+                      value: null,
+                      child: Text('—'),
+                    ),
+                    for (final u in _unidadesEnvase)
+                      DropdownMenuItem<String?>(
+                        value: u,
+                        child: Text(u),
+                      ),
+                    // Si el dato guardado trae una unidad fuera de
+                    // la lista, se incluye para no romper el
+                    // dropdown (mismo arreglo que en Categoría).
+                    if (_pesoUnidad != null &&
+                        !_unidadesEnvase.contains(_pesoUnidad))
+                      DropdownMenuItem<String?>(
+                        value: _pesoUnidad,
+                        child: Text(_pesoUnidad!),
+                      ),
+                  ],
+                  onChanged: (v) =>
+                      setState(() => _pesoUnidad = v),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: AppEspacio.sm),
+          CampoTexto(
+              controller: _servicios,
+              etiqueta: 'Servicios por envase (opcional)',
+              hint: 'Ej. 60',
               teclado: TextInputType.number),
           const SizedBox(height: AppEspacio.sm),
           SwitchListTile(

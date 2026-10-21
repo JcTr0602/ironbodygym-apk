@@ -540,6 +540,23 @@ class DetalleSuplementoScreen extends StatelessWidget {
     final cup = tasaUsd != null && tasaUsd! > 1.0
         ? '≈ ${fmtMonto(precio * tasaUsd!)} CUP'
         : null;
+    // v1.4.3: presentación del envase (la misma que ve el cliente
+    // en su catálogo). Parseo tolerante: el espejo puede traer el
+    // número como num o como texto.
+    final pesoV = suplemento['peso_valor'] is num
+        ? (suplemento['peso_valor'] as num).toDouble()
+        : double.tryParse('${suplemento['peso_valor'] ?? ''}');
+    final pesoU = '${suplemento['peso_unidad'] ?? ''}'.trim();
+    final servD = suplemento['servicios_estandar'] is num
+        ? (suplemento['servicios_estandar'] as num).toDouble()
+        : double.tryParse('${suplemento['servicios_estandar'] ?? ''}');
+    final serv = servD?.round();
+    final presentacion = [
+      if (pesoV != null && pesoV > 0 && pesoU.isNotEmpty)
+        '${pesoV == pesoV.roundToDouble() ? pesoV.toInt() : pesoV} $pesoU',
+      if (serv != null && serv > 0)
+        '$serv servicio${serv == 1 ? '' : 's'}',
+    ].join(' · ');
 
     return Scaffold(
       appBar: AppBar(
@@ -656,6 +673,10 @@ class DetalleSuplementoScreen extends StatelessWidget {
           if (descripcion.isNotEmpty) ...[
             const SizedBox(height: AppEspacio.md),
             Text(descripcion, style: AppTexto.cuerpo),
+          ],
+          if (presentacion.isNotEmpty) ...[
+            const SizedBox(height: AppEspacio.xs),
+            Text('Presentación: $presentacion', style: AppTexto.cuerpo),
           ],
           const SizedBox(height: AppEspacio.md),
           // Precio USD + equivalente CUP + stock.

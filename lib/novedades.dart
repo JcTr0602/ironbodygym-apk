@@ -16,6 +16,7 @@ class Novedad {
 
 const novedades = [
   Novedad('1.4.3', [
+    'Ficha del suplemento: ahora escribes el contenido del envase (ej. 300 g) y los servicios por envase; el cliente los ve en su catálogo',
     'Listas ordenadas por el nombre real: los clientes escritos en minúsculas (p. ej. «alberto prueba») ya no quedan al final, tras la Z',
     'Limpieza interna: se retiró el sistema viejo de subida de fotos; la cola actual es el único camino (sin cambios visibles)',
   ]),
