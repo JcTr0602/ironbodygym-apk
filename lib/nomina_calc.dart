@@ -93,7 +93,21 @@ class NominaCalc {
   /// Devuelve null si no se puede interpretar.
   static String? _fechaCalendario(dynamic v) {
     if (v is! String || v.isEmpty) return null;
-    if (RegExp(r'^\d{4}-\d{2}-\d{2}$').hasMatch(v)) return v;
+    final m = RegExp(r'^(\d{4})-(\d{2})-(\d{2})$').firstMatch(v);
+    if (m != null) {
+      // La fecha debe EXISTIR (ronda 2, Terra): el formato solo
+      // no basta — '2026-02-30' pasaría el regex y caería dentro
+      // del intervalo del mes, excluyendo a un cliente que la
+      // regla manda conservar ante datos no interpretables.
+      // DateTime normaliza el desborde (30 feb → 2 mar); si no
+      // reproduce año/mes/día exactos, no es interpretable.
+      final y = int.parse(m.group(1)!);
+      final mo = int.parse(m.group(2)!);
+      final d = int.parse(m.group(3)!);
+      final dt = DateTime.utc(y, mo, d);
+      if (dt.year != y || dt.month != mo || dt.day != d) return null;
+      return v;
+    }
     final dt = DateTime.tryParse(v);
     if (dt == null) return null;
     return isoHabana(aHabana(dt)).substring(0, 10);

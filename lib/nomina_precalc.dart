@@ -26,6 +26,11 @@ import 'tiempo.dart';
 /// vencimiento sin ningún pago nuevo también debe invalidar la
 /// caché. El prefijo 'v2|' invalida por sí solo toda caché escrita
 /// con la huella v1 (panel de revisión 2026-10-21).
+///
+/// Huella v3 (ronda 2, mismo día): el componente de clientes pasó
+/// de sumas agregadas a un hash canónico por cliente (las sumas
+/// colisionaban con exclusiones opuestas). El prefijo 'v3|'
+/// invalida toda caché v2.
 class NominaPrecalc {
   NominaPrecalc._();
   static final NominaPrecalc instance = NominaPrecalc._();
@@ -53,43 +58,55 @@ class NominaPrecalc {
     final r = rows.first;
     final pagosParte =
         '${r['c']}|${r['ss']}|${r['sc']}|${r['mi']}|${r['sf']}|${r['cn']}|${r['sn']}';
-    return 'v2|$pagosParte|${await _huellaClientes()}';
+    // v3 (ronda 2): el componente de clientes cambió de algoritmo
+    // (de sumas a hash canónico); el prefijo nuevo invalida de una
+    // vez toda caché v2 sin depender de que los formatos difieran.
+    return 'v3|$pagosParte|${await _huellaClientes()}';
   }
 
   /// Componente de huella sobre el espejo `clientes`: detecta altas,
   /// bajas y cualquier cambio de `pagado_hasta` (la regla del mes en
   /// curso depende de ese campo). Se calcula en Dart leyendo el JSON
   /// de `data` (sin depender de funciones JSON de SQLite, ausentes
-  /// en Android viejos); con ~160 clientes es despreciable.
+  /// en Android viejos); con ~190 clientes es despreciable.
+  ///
+  /// Representación CANÓNICA por cliente, ordenada por id, hasheada
+  /// con FNV-1a de 64 bits (ronda 2, Terra, ALTA): la primera
+  /// versión resumía con sumas (nº de filas, suma de ids, suma de
+  /// días) y dos estados distintos con la misma suma —p. ej.
+  /// vencimientos (30 sep, 10 nov) frente a (10 oct, 31 oct)—
+  /// producían la MISMA huella con exclusiones opuestas: la caché
+  /// vieja se servía como fresca y la nómina salía mal sin ruido.
   Future<String> _huellaClientes() async {
     final d = await LocalDb.instance.db;
     final rows = await d.query('clientes', columns: ['id', 'data']);
-    var sumaIds = 0;
-    var sumaDias = 0;
-    var nulos = 0;
-    var ilegibles = 0;
+    final partes = <String>[];
     for (final r in rows) {
       final id = (r['id'] as num?)?.toInt() ?? 0;
-      sumaIds += id;
+      String estado;
       try {
         final data = jsonDecode(r['data'] as String) as Map<String, dynamic>;
         final h = data['pagado_hasta'];
-        final m = h is String
-            ? RegExp(r'^(\d{4})-(\d{2})-(\d{2})').firstMatch(h)
-            : null;
-        if (m == null) {
-          nulos++;
-        } else {
-          sumaDias += DateTime.utc(int.parse(m.group(1)!),
-                  int.parse(m.group(2)!), int.parse(m.group(3)!))
-              .millisecondsSinceEpoch ~/
-              86400000;
-        }
+        estado = h == null ? '<null>' : '$h';
       } catch (_) {
-        ilegibles++;
+        estado = '<ilegible>';
       }
+      partes.add('$id:$estado');
     }
-    return '${rows.length}|$sumaIds|$sumaDias|$nulos|$ilegibles';
+    partes.sort();
+    return 'c${partes.length}:${_fnv1a64(partes.join('|'))}';
+  }
+
+  /// FNV-1a de 64 bits sobre UTF-8, en hex. Determinista entre
+  /// ejecuciones; la huella solo vive y se compara en el propio
+  /// dispositivo (app Android, enteros de 64 bits).
+  static String _fnv1a64(String s) {
+    var h = 0xcbf29ce484222325;
+    for (final b in utf8.encode(s)) {
+      h ^= b;
+      h = (h * 0x100000001b3) & 0xFFFFFFFFFFFFFFFF;
+    }
+    return h.toRadixString(16);
   }
 
   /// Lee la caché del mes [pref] ('YYYY-MM'). Devuelve null si aún no

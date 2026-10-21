@@ -67,6 +67,10 @@ String _mesSiguiente(String pref) {
   return '${ny.toString().padLeft(4, '0')}-${nm.toString().padLeft(2, '0')}';
 }
 
+String _iso(DateTime d) => '${d.year.toString().padLeft(4, '0')}-'
+    '${d.month.toString().padLeft(2, '0')}-'
+    '${d.day.toString().padLeft(2, '0')}';
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
@@ -149,15 +153,15 @@ void main() {
     await db.close();
   });
 
-  test('precalc v2: cambiar solo pagado_hasta invalida la caché', () async {
+  test('precalc v3: cambiar solo pagado_hasta invalida la caché', () async {
     final db = await _abrirDbVacia();
     final pref = NominaCalc.prefMesActual();
     await _pago(db, id: 1, clienteId: 10, fecha: '$pref-05');
     await _cliente(db, id: 10, pagadoHasta: '${_mesSiguiente(pref)}-05');
     expect(await NominaPrecalc.instance.asegurar(pref), 1);
     final filas = await db.query('nomina_precalc');
-    expect(filas.first['huella'], startsWith('v2|'),
-        reason: 'toda caché nueva nace con la huella v2');
+    expect(filas.first['huella'], startsWith('v3|'),
+        reason: 'toda caché nueva nace con la huella v3');
 
     // Cambia SOLO el vencimiento (entra al mes): sin tocar pagos.
     await db.update(
@@ -175,8 +179,54 @@ void main() {
         whereArgs: [10]);
     final cache = await NominaPrecalc.instance.leer(pref);
     expect(cache!.fresco, isFalse,
-        reason: 'la huella v2 detecta el cambio de pagado_hasta');
+        reason: 'la huella v3 detecta el cambio de pagado_hasta');
     expect(await NominaPrecalc.instance.asegurar(pref), 0);
+    await db.close();
+  });
+
+  // Ronda 2 (Terra, ALTA): la huella por sumas colisionaba — dos
+  // estados con la misma suma de días y exclusiones opuestas
+  // (fuera+fuera frente a dentro+dentro) daban la misma huella y
+  // la caché vieja se servía como fresca. Con el hash canónico
+  // las huellas difieren SIEMPRE que difiera algún vencimiento.
+  test('precalc v3: la huella no colisiona con sumas equivalentes',
+      () async {
+    final db = await _abrirDbVacia();
+    final pref = NominaCalc.prefMesActual();
+    final ultimoPrevio = _iso(
+        DateTime.parse('$pref-01').subtract(const Duration(days: 1)));
+    final decimoSiguiente = '${_mesSiguiente(pref)}-10';
+    // Estado A: ambos vencimientos FUERA del mes en curso.
+    await _cliente(db, id: 10, pagadoHasta: ultimoPrevio);
+    await _cliente(db, id: 11, pagadoHasta: decimoSiguiente);
+    final huellaA = await NominaPrecalc.instance.huella();
+    // Estado B: ambos DENTRO (10 y último día del mes en curso),
+    // elegido para que la suma de días coincida con la de A.
+    await db.delete('clientes');
+    await _cliente(db, id: 10, pagadoHasta: '$pref-10');
+    await _cliente(
+        db,
+        id: 11,
+        pagadoHasta: _iso(
+            DateTime.parse('${_mesSiguiente(pref)}-01')
+                .subtract(const Duration(days: 1))));
+    final huellaB = await NominaPrecalc.instance.huella();
+    expect(huellaB, isNot(huellaA),
+        reason: 'estados con exclusiones opuestas jamás comparten '
+            'huella');
+    await db.close();
+  });
+
+  // Ronda 2 (Terra, MEDIA): una fecha con formato válido pero
+  // inexistente en el calendario ('<mes>-99') NO es interpretable:
+  // el cliente se CONSERVA en la base, no se excluye.
+  test('fecha inexistente en el calendario: el cliente se conserva',
+      () async {
+    final db = await _abrirDbVacia();
+    final pref = NominaCalc.prefMesActual();
+    await _pago(db, id: 1, clienteId: 10, fecha: '$pref-05');
+    await _cliente(db, id: 10, pagadoHasta: '$pref-99');
+    expect(await NominaCalc.clientesQuePagaronElMes(pref), 1);
     await db.close();
   });
 }
