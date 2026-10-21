@@ -52,10 +52,18 @@ SemaforoVistaPrevia semaforoVistaPrevia(
       color: verde,
     );
   }
-  final hoyParsed = fechaServidor != null
-      ? DateTime.tryParse(fechaServidor.trim())
-      : null;
-  final ref = hoyParsed ?? DateTime.now();
+  final hoyParsed = DateTime.tryParse(fechaServidor?.trim() ?? '');
+  // Panel de código (unánime): NUNCA caer al reloj del teléfono. Sin
+  // fecha válida del servidor, el estado no se puede verificar.
+  if (hoyParsed == null) {
+    return const SemaforoVistaPrevia(
+      titulo: 'ESTADO SIN VERIFICAR',
+      subtitulo: 'No se pudo obtener la fecha del servidor.',
+      badge: 'Pendiente',
+      color: ambar,
+    );
+  }
+  final ref = hoyParsed;
   final hoyUtc = DateTime.utc(ref.year, ref.month, ref.day);
   final fechaVencUtc = DateTime.utc(parsed.year, parsed.month, parsed.day);
   final diasRestantes = fechaVencUtc.difference(hoyUtc).inDays;
@@ -75,7 +83,9 @@ SemaforoVistaPrevia semaforoVistaPrevia(
       subtitulo: diasRestantes == 0
           ? 'Hoy es el último día cubierto por tu pago actual.'
           : 'Quedan $diasRestantes ${diasRestantes == 1 ? "día" : "días"} de vigencia en tu mensualidad.',
-      badge: diasRestantes == 0 ? 'Hoy' : '$diasRestantes días',
+      badge: diasRestantes == 0
+          ? 'Hoy'
+          : '$diasRestantes ${diasRestantes == 1 ? "día" : "días"}',
       color: ambar,
     );
   }
@@ -87,6 +97,14 @@ SemaforoVistaPrevia semaforoVistaPrevia(
     color: verde,
   );
 }
+
+/// Texto tolerante a tipos (panel de código): el JSON de la RPC puede
+/// traer num/objetos donde se espera String; nunca lanzar por un cast.
+String? textoSeguro(Object? v) => v == null ? null : v.toString();
+
+/// Mapa tolerante a tipos: cualquier cosa que no sea Map → mapa vacío.
+Map<String, dynamic> mapaSeguro(Object? v) =>
+    v is Map ? Map<String, dynamic>.from(v) : <String, dynamic>{};
 
 /// Formatea un monto sin el «.0» que ensuciaba la previa: enteros sin
 /// decimales; con decimales, hasta 2 y sin ceros de relleno a la derecha.
@@ -183,12 +201,12 @@ class _VistaPreviaClienteScreenState
     }
   }
 
-  Map<String, dynamic> get _cliente =>
-      Map<String, dynamic>.from(_datos?['cliente'] as Map? ?? {});
-  Map<String, dynamic> get _meta =>
-      Map<String, dynamic>.from(_datos?['meta'] as Map? ?? {});
-  List<dynamic> _lista(String clave) =>
-      List<dynamic>.from(_datos?[clave] as List? ?? []);
+  Map<String, dynamic> get _cliente => mapaSeguro(_datos?['cliente']);
+  Map<String, dynamic> get _meta => mapaSeguro(_datos?['meta']);
+  List<dynamic> _lista(String clave) {
+    final v = _datos?[clave];
+    return v is List ? List<dynamic>.from(v) : const [];
+  }
   int? _total(String clave) {
     final v = _datos?[clave];
     return v is num ? v.toInt() : null;
@@ -273,11 +291,10 @@ class _VistaPreviaClienteScreenState
     final nombre = '${c['nombre'] ?? widget.nombreCliente}';
     final plan = '${c['plan'] ?? ''}'.trim();
     final semaforo = semaforoVistaPrevia(
-      c['pagado_hasta'] as String?,
-      _meta['fecha_servidor_cuba'] as String?,
+      textoSeguro(c['pagado_hasta']),
+      textoSeguro(_meta['fecha_servidor_cuba']),
     );
-    final turno = Map<String, dynamic>.from(
-        _meta['entrenador_turno'] as Map? ?? {});
+    final turno = mapaSeguro(_meta['entrenador_turno']);
     final abierto = _meta['gimnasio_abierto_horario'] == true;
     final totalPagos = _total('total_pagos') ?? _lista('historial_pagos').length;
     final totalCompras =
@@ -293,7 +310,7 @@ class _VistaPreviaClienteScreenState
         _tarjeta([
           Row(
             children: [
-              _foto(c['foto_storage'] as String?,
+              _foto(textoSeguro(c['foto_storage']),
                   size: 64, nombre: nombre, circular: true),
               const SizedBox(width: 12),
               Expanded(
@@ -461,7 +478,7 @@ class _VistaPreviaClienteScreenState
             Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                _foto(s['foto_storage'] as String?,
+                _foto(textoSeguro(s['foto_storage']),
                     size: 64, nombre: '${s['nombre'] ?? ''}'),
                 const SizedBox(width: 12),
                 Expanded(
@@ -546,7 +563,8 @@ class _VistaPreviaClienteScreenState
   // ---------------- Plan ----------------
 
   Widget _tabPlan() {
-    final plan = _datos?['plan_nutricional'] as Map?;
+    final planCrudo = _datos?['plan_nutricional'];
+    final plan = planCrudo == null ? null : mapaSeguro(planCrudo);
     if (plan == null) {
       return const Center(
         child: Text('Sin plan asignado',
@@ -597,18 +615,19 @@ class _VistaPreviaClienteScreenState
   // ---------------- Progreso ----------------
 
   List<dynamic> _registrosMarcas() {
-    final m = _datos?['marcas'] as Map?;
-    if (m == null) return const [];
-    return List<dynamic>.from(m['registros'] as List? ?? []);
+    final m = mapaSeguro(_datos?['marcas']);
+    final regs = m['registros'];
+    return regs is List ? List<dynamic>.from(regs) : const [];
   }
 
   Widget _tabProgreso() {
     final mediciones = _lista('progreso_mediciones');
     final totalMed = _total('total_mediciones');
-    final marcas = _datos?['marcas'] as Map?;
-    final records = marcas == null
-        ? const <dynamic>[]
-        : List<dynamic>.from(marcas['records'] as List? ?? []);
+    final marcas = mapaSeguro(_datos?['marcas']);
+    final recordsCrudos = marcas['records'];
+    final records = recordsCrudos is List
+        ? List<dynamic>.from(recordsCrudos)
+        : const <dynamic>[];
     final registros = _registrosMarcas();
     final totalReg = _total('total_registros_marcas');
     return ListView(
@@ -738,8 +757,12 @@ class _VistaPreviaClienteScreenState
               fontSize: size * 0.36)),
     );
     if (ref == null || ref.isEmpty) return fallback;
-    final url = '${AppConfig.supabaseUrl}/storage/v1/object/public/'
-        '${AppConfig.bucketFotos}/$ref';
+    // Panel de código: URL vía el SDK de Storage (codifica la ruta;
+    // la concatenación manual rompía con espacios/#/? en el nombre).
+    final ruta = ref.startsWith('/') ? ref.substring(1) : ref;
+    final url = Supabase.instance.client.storage
+        .from(AppConfig.bucketFotos)
+        .getPublicUrl(ruta);
     return ClipRRect(
       borderRadius: BorderRadius.circular(radio),
       child: Image.network(

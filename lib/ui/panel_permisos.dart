@@ -41,6 +41,26 @@ class _PanelPermisosState extends State<PanelPermisos> {
   List<EntrenadorPermiso> _entrenadores = [];
   bool _cargando = true;
 
+  /// v1.4.4 (panel de código): serializa las operaciones por
+  /// entrenador. Sin esto, dos toques rápidos sobre el mismo
+  /// entrenador se solapaban y la relectura/reversión de la operación
+  /// vieja podía pisar el estado de la nueva.
+  final Map<String, Future<void>> _colas = {};
+
+  Future<void> _enSerie(
+      String email, Future<void> Function() op) async {
+    final anterior = _colas[email] ?? Future<void>.value();
+    final actual = anterior.then((_) => op());
+    _colas[email] = actual;
+    try {
+      await actual;
+    } finally {
+      if (identical(_colas[email], actual)) {
+        _colas.remove(email);
+      }
+    }
+  }
+
   @override
   void initState() {
     super.initState();
@@ -96,7 +116,10 @@ class _PanelPermisosState extends State<PanelPermisos> {
   /// servidor, relee la fila real de ese entrenador y la pinta tal
   /// cual quedó. La palabra final la tiene el servidor, no la UI
   /// optimista: si algo difiere, la pantalla muestra la verdad.
-  Future<void> _releerEntrenador(EntrenadorPermiso ent) async {
+  /// Devuelve true si la fila se releyó y se aplicó; false si la
+  /// relectura falló (la RPC ya confirmó el guardado: el llamador
+  /// conserva el estado optimista y avisa «sin verificar»).
+  Future<bool> _releerEntrenador(EntrenadorPermiso ent) async {
     try {
       final res = await Supabase.instance.client
           .from('entrenadores_autorizados')
@@ -105,18 +128,19 @@ class _PanelPermisosState extends State<PanelPermisos> {
           .single();
       final m = Map<String, dynamic>.from(res as Map);
       final perms = m['permisos'];
-      if (!mounted) return;
+      if (!mounted) return false;
       setState(() {
         ent.activo = m['activo'] == true;
-        if (perms is Map) {
-          for (final k in EntrenadorPermiso.permisosDisponibles) {
-            ent.permisos[k.$1] = perms[k.$1] == true;
-          }
+        // Reconstrucción completa (panel de código): una clave
+        // ausente en la respuesta vale false (fail-closed), no se
+        // conserva el valor anterior.
+        for (final k in EntrenadorPermiso.permisosDisponibles) {
+          ent.permisos[k.$1] = perms is Map ? perms[k.$1] == true : false;
         }
       });
+      return true;
     } catch (_) {
-      // La RPC ya confirmó el cambio; si la relectura falla, la UI
-      // optimista queda como estaba (coincide con lo enviado).
+      return false;
     }
   }
 
@@ -125,39 +149,45 @@ class _PanelPermisosState extends State<PanelPermisos> {
   /// cambio confirmado muestra «✓ Permiso actualizado» y se relee la
   /// fila real del servidor.
   Future<void> _togglePermiso(
-      EntrenadorPermiso ent, String key, bool valor) async {
-    final anterior = ent.permisos[key] ?? false;
-    setState(() => ent.permisos[key] = valor);
-    try {
-      await Supabase.instance.client.rpc(
-        'actualizar_permiso_entrenador',
-        params: {
-          'p_email': ent.email,
-          'p_permiso_key': key,
-          'p_valor': valor,
-        },
-      );
-      await _releerEntrenador(ent);
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('✓ Permiso actualizado'),
-            duration: Duration(seconds: 2),
-          ),
+      EntrenadorPermiso ent, String key, bool valor) {
+    // Serializado por entrenador (panel de código): el estado
+    // anterior se lee al ejecutar la operación, no al tocar.
+    return _enSerie(ent.email, () async {
+      final anterior = ent.permisos[key] ?? false;
+      if (mounted) setState(() => ent.permisos[key] = valor);
+      try {
+        await Supabase.instance.client.rpc(
+          'actualizar_permiso_entrenador',
+          params: {
+            'p_email': ent.email,
+            'p_permiso_key': key,
+            'p_valor': valor,
+          },
         );
+        final verificado = await _releerEntrenador(ent);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(verificado
+                  ? '✓ Permiso actualizado'
+                  : 'Guardado, pero no se pudo verificar el estado'),
+              duration: const Duration(seconds: 2),
+            ),
+          );
+        }
+      } catch (e) {
+        // Revertir
+        if (mounted) {
+          setState(() => ent.permisos[key] = anterior);
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Sin conexión. Cambio revertido.'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
       }
-    } catch (e) {
-      // Revertir
-      if (mounted) {
-        setState(() => ent.permisos[key] = anterior);
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Sin conexión. Cambio revertido.'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
-    }
+    });
   }
 
   Future<void> _toggleActivo(EntrenadorPermiso ent) async {
@@ -186,37 +216,46 @@ class _PanelPermisosState extends State<PanelPermisos> {
       );
       if (confirmar != true) return;
     }
-    final nuevo = !ent.activo;
-    setState(() => ent.activo = nuevo);
-    try {
-      await Supabase.instance.client.rpc(
-        'suspender_entrenador',
-        params: {'p_email': ent.email, 'p_activo': nuevo},
-      );
-      // v1.4.4 (Permisos nivel 1): confirmación visible en AMBOS
-      // sentidos + relectura de la fila real.
-      await _releerEntrenador(ent);
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(nuevo
-                ? '✓ ${ent.nombre} reactivado'
-                : '✓ Acceso de ${ent.nombre} suspendido'),
-            duration: const Duration(seconds: 2),
-          ),
+    final objetivo = !ent.activo;
+    // Serializado por entrenador (panel de código). Si una operación
+    // anterior ya dejó la cuenta en el estado objetivo (doble toque),
+    // no se repite la RPC.
+    return _enSerie(ent.email, () async {
+      if (ent.activo == objetivo) return;
+      final nuevo = objetivo;
+      if (mounted) setState(() => ent.activo = nuevo);
+      try {
+        await Supabase.instance.client.rpc(
+          'suspender_entrenador',
+          params: {'p_email': ent.email, 'p_activo': nuevo},
         );
+        // v1.4.4 (Permisos nivel 1): confirmación visible en AMBOS
+        // sentidos + relectura de la fila real.
+        final verificado = await _releerEntrenador(ent);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(verificado
+                  ? (nuevo
+                      ? '✓ ${ent.nombre} reactivado'
+                      : '✓ Acceso de ${ent.nombre} suspendido')
+                  : 'Guardado, pero no se pudo verificar el estado'),
+              duration: const Duration(seconds: 2),
+            ),
+          );
+        }
+      } catch (e) {
+        if (mounted) {
+          setState(() => ent.activo = !nuevo);
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Sin conexión. Cambio revertido.'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
       }
-    } catch (e) {
-      if (mounted) {
-        setState(() => ent.activo = !nuevo);
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Sin conexión. Cambio revertido.'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
-    }
+    });
   }
 
   @override

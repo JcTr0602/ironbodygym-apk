@@ -37,7 +37,16 @@ void main() {
       expect(s.badge, '3 días');
       final s1 = semaforoVistaPrevia('2026-10-22', '2026-10-21');
       expect(s1.subtitulo, contains('Quedan 1 día'));
-      expect(s1.badge, '1 días');
+      expect(s1.badge, '1 día');
+    });
+
+    test('sin fecha del servidor válida → SIN VERIFICAR (nunca el reloj local)',
+        () {
+      for (final fs in <String?>[null, '', 'no-es-fecha']) {
+        final s = semaforoVistaPrevia('2026-10-21', fs);
+        expect(s.titulo, 'ESTADO SIN VERIFICAR');
+        expect(s.badge, 'Pendiente');
+      }
     });
 
     test('cuota al día', () {
