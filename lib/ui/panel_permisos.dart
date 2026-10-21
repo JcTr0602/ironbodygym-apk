@@ -24,6 +24,17 @@ class EntrenadorPermiso {
     ('can_record_measurements', 'Registrar mediciones', 'Medir a clientes en el gym'),
     ('can_view_progress', 'Ver progreso', 'Ver mediciones de clientes'),
     ('can_view_payroll', 'Ver nómina', 'Ver su acumulado del mes'),
+    // Niveles 2+3 (v1.4.5): las 6 primeras son candados duros
+    // en el servidor (permisos_ops); las 2 últimas son de
+    // visibilidad (interfaz y consultas). Clave ausente = no.
+    ('can_cobrar_pagos', 'Cobrar pagos', 'Registrar pagos y mensualidades'),
+    ('can_inscribir_clientes', 'Inscribir clientes', 'Dar de alta clientes nuevos'),
+    ('can_editar_fichas', 'Editar fichas', 'Modificar datos, fotos y notas del cliente'),
+    ('can_vender_suplementos', 'Vender suplementos', 'Registrar ventas y reservas de suplementos'),
+    ('can_registrar_gastos', 'Registrar gastos', 'Anotar gastos del gimnasio'),
+    ('can_gestionar_turnos', 'Gestionar turnos', 'Marcar y corregir turnos de apertura'),
+    ('can_ver_todos_pagos', 'Ver todos los pagos', 'Ver pagos registrados por otros entrenadores'),
+    ('can_ver_cifras', 'Ver cifras', 'Ver totales de dinero del panel'),
   ];
 }
 

@@ -59,6 +59,14 @@ class PermisosEntrenador {
           'can_record_measurements': true,
           'can_view_progress': true,
           'can_view_payroll': true,
+          'can_cobrar_pagos': true,
+          'can_inscribir_clientes': true,
+          'can_editar_fichas': true,
+          'can_vender_suplementos': true,
+          'can_registrar_gastos': true,
+          'can_gestionar_turnos': true,
+          'can_ver_todos_pagos': true,
+          'can_ver_cifras': true,
         };
         _activo = true;
         _habilitado = true;
@@ -105,4 +113,14 @@ class PermisosEntrenador {
       _check('can_record_measurements');
   bool get canViewProgress => _check('can_view_progress');
   bool get canViewPayroll => _check('can_view_payroll');
+
+  // Niveles 2+3 (v1.4.5)
+  bool get canCobrarPagos => _check('can_cobrar_pagos');
+  bool get canInscribirClientes => _check('can_inscribir_clientes');
+  bool get canEditarFichas => _check('can_editar_fichas');
+  bool get canVenderSuplementos => _check('can_vender_suplementos');
+  bool get canRegistrarGastos => _check('can_registrar_gastos');
+  bool get canGestionarTurnos => _check('can_gestionar_turnos');
+  bool get canVerTodosPagos => _check('can_ver_todos_pagos');
+  bool get canVerCifras => _check('can_ver_cifras');
 }
