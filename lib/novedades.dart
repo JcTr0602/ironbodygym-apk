@@ -15,6 +15,14 @@ class Novedad {
 }
 
 const novedades = [
+  Novedad('1.4.2', [
+    'Nómina: «Pagaron el mes» ya no cuenta a los clientes que vencen dentro del mismo mes (ese pago corresponde al mes siguiente)',
+    'Panel: tocar una barra de la gráfica de 7 días ya muestra el detalle del día (antes podía cerrar la pantalla)',
+    'Panel: el desglose del mes ahora incluye los suplementos y cuadra con el total',
+    'Panel: «Pendiente por entrenador» muestra también lo que falta en USD',
+    'Panel: nueva fila «Neto del mes» (ingresos menos gastos) y acceso directo a los que están por vencer',
+    'Ayuda al día: la guía ya refleja las pantallas actuales',
+  ]),
   Novedad('1.4.1', [
     'La app ahora se llama Iron Body Gestión',
     'Administración reorganizada: lo de todos los días quedó arriba',
