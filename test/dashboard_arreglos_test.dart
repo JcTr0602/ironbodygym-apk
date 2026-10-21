@@ -143,6 +143,11 @@ void main() {
     expect(pt.values.fold<double>(0, (a, b) => a + b), mes,
         reason: 'mensual+diario+suplementos = mes');
     expect(pt['suplementos'], 700);
+    // Ronda 2 (Sol, ALTA refutada con el código en la mano): los
+    // diarios NO caen en 'mensual'; ingresosPorTipo los suma desde
+    // su propia fuente al cubo 'diario'.
+    expect(pt['diario'], 300);
+    expect(pt['mensual'], 3500);
     await db.close();
   });
 
