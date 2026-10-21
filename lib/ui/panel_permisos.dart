@@ -92,7 +92,38 @@ class _PanelPermisosState extends State<PanelPermisos> {
     }
   }
 
+  /// v1.4.4 (Permisos nivel 1): tras un guardado confirmado por el
+  /// servidor, relee la fila real de ese entrenador y la pinta tal
+  /// cual quedó. La palabra final la tiene el servidor, no la UI
+  /// optimista: si algo difiere, la pantalla muestra la verdad.
+  Future<void> _releerEntrenador(EntrenadorPermiso ent) async {
+    try {
+      final res = await Supabase.instance.client
+          .from('entrenadores_autorizados')
+          .select('activo, permisos')
+          .eq('email', ent.email)
+          .single();
+      final m = Map<String, dynamic>.from(res as Map);
+      final perms = m['permisos'];
+      if (!mounted) return;
+      setState(() {
+        ent.activo = m['activo'] == true;
+        if (perms is Map) {
+          for (final k in EntrenadorPermiso.permisosDisponibles) {
+            ent.permisos[k.$1] = perms[k.$1] == true;
+          }
+        }
+      });
+    } catch (_) {
+      // La RPC ya confirmó el cambio; si la relectura falla, la UI
+      // optimista queda como estaba (coincide con lo enviado).
+    }
+  }
+
   /// Optimistic UI (Argón): cambia visual al instante, revierte si falla.
+  /// v1.4.4 (Permisos nivel 1): el éxito ya NO es silencioso — cada
+  /// cambio confirmado muestra «✓ Permiso actualizado» y se relee la
+  /// fila real del servidor.
   Future<void> _togglePermiso(
       EntrenadorPermiso ent, String key, bool valor) async {
     final anterior = ent.permisos[key] ?? false;
@@ -106,6 +137,15 @@ class _PanelPermisosState extends State<PanelPermisos> {
           'p_valor': valor,
         },
       );
+      await _releerEntrenador(ent);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('✓ Permiso actualizado'),
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
     } catch (e) {
       // Revertir
       if (mounted) {
@@ -153,9 +193,17 @@ class _PanelPermisosState extends State<PanelPermisos> {
         'suspender_entrenador',
         params: {'p_email': ent.email, 'p_activo': nuevo},
       );
-      if (mounted && nuevo) {
+      // v1.4.4 (Permisos nivel 1): confirmación visible en AMBOS
+      // sentidos + relectura de la fila real.
+      await _releerEntrenador(ent);
+      if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('${ent.nombre} reactivado.')),
+          SnackBar(
+            content: Text(nuevo
+                ? '✓ ${ent.nombre} reactivado'
+                : '✓ Acceso de ${ent.nombre} suspendido'),
+            duration: const Duration(seconds: 2),
+          ),
         );
       }
     } catch (e) {
