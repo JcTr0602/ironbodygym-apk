@@ -9,6 +9,8 @@ import 'package:flutter/material.dart';
 import '../negocio.dart';
 import '../localdb.dart';
 import '../auth.dart';
+import '../permisos_entrenador.dart';
+import '../permisos_visibilidad.dart';
 import '../tiempo.dart';
 import 'diseno.dart';
 import 'componentes.dart';
@@ -253,6 +255,41 @@ class _DashboardScreenState extends State<DashboardScreen> {
   /// Vista del entrenador (v1.2): solo sus propios números.
   /// Sin ranking, sin totales globales, sin pendiente de otros.
   Widget _buildEntrenador() {
+    // Permisos 2+3 (candado de UI): can_ver_cifras apagada =
+    // el panel no muestra importes. Los cobros se registran
+    // igual; solo cambia lo que esta pantalla enseña.
+    if (!cifrasVisibles(
+      esDueno: _esDueno,
+      permisosCargados: PermisosEntrenador().cargado,
+      canVerCifras: PermisosEntrenador().canVerCifras,
+    )) {
+      return Scaffold(
+        appBar: AppBar(
+          title: const Text('Mi dashboard'),
+          actions: [
+            IconButton(
+              icon: const Icon(Icons.refresh),
+              onPressed: _cargar,
+            ),
+          ],
+        ),
+        body: ListView(
+          padding: const EdgeInsets.all(16),
+          children: const [
+            SyncBanner(),
+            SizedBox(height: 8),
+            Tarjeta(
+              child: Text(
+                'El dueño desactivó la vista de cifras de este '
+                'panel. Tus cobros se siguen registrando igual; '
+                'pídele que active «Ver cifras» si lo necesitas.',
+                style: TextStyle(fontSize: 14),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
     return Scaffold(
       appBar: AppBar(
         title: const Text('Mi dashboard'),

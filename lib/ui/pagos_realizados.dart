@@ -5,9 +5,12 @@ library;
 import 'package:flutter/material.dart';
 import 'dart:io';
 
+import '../auth.dart';
 import '../fotos.dart';
 import '../localdb.dart';
 import '../negocio.dart';
+import '../permisos_entrenador.dart';
+import '../permisos_visibilidad.dart';
 import '../sync.dart';
 import 'componentes.dart';
 import 'diseno.dart';
@@ -113,7 +116,19 @@ class _PagosRealizadosScreenState extends State<PagosRealizadosScreen> {
 
     // Clientes con pago este mes
     // v1.3.4 (ítem 2): columna `fecha` indexada en vez de allMirror.
-    final pagos = await LocalDb.instance.pagosDelMes(pref);
+    var pagos = await LocalDb.instance.pagosDelMes(pref);
+    // Permisos 2+3 (candado de UI): sin can_ver_todos_pagos el
+    // entrenador solo ve SUS cobros (por telegram_user_id,
+    // antes de agrupar por cliente: si no, un cliente cuyo
+    // último pago es de otro desaparecía aunque tenga uno suyo).
+    final permisos = PermisosEntrenador();
+    if (!pagosSinRestriccion(
+      esDueno: AuthService().isOwner,
+      permisosCargados: permisos.cargado,
+      canVerTodosPagos: permisos.canVerTodosPagos,
+    )) {
+      pagos = filtrarPagosPorEntrenador(pagos, AuthService().telegramId);
+    }
     final porCliente = <int, Map<String, dynamic>>{};
     for (final p in pagos) {
       final cid = p['cliente_id'] as int?;

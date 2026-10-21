@@ -101,6 +101,12 @@ class PermisosEntrenador {
   bool get sinHabilitar =>
       !AuthService().isOwner && _cargado && !_habilitado;
 
+  /// ¿Ya hay una foto de permisos (de la RPC o de la caché)?
+  /// Los candados de visibilidad la exigen para restringir:
+  /// sin foto no se bloquea la interfaz por un dato que nunca
+  /// llegó (ver permisos_visibilidad.dart).
+  bool get cargado => _cargado;
+
   bool _check(String key) {
     // El dueño siempre tiene permiso
     if (AuthService().isOwner) return true;
