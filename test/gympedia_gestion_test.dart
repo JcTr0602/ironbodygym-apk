@@ -128,6 +128,43 @@ void main() {
     expect(await db.gympediaPublicados(), isEmpty);
   });
 
+  test('tumba condicionada por seq: una republicación más nueva '
+      'sobrevive a la tumba vieja (panel 2026-10-21)', () async {
+    await _abrirDbVacia();
+    final db = LocalDb.instance;
+    // Republicado con sync_seq 555.
+    await db.upsertMirrorTexto('gympedia_articulos', 'tecnica-sentadilla',
+        _articuloValido()..['revision'] = 3, 555);
+    // Tumba vieja (seq 400, de un retiro anterior): NO borra.
+    await db.gympediaAplicarTumba('tecnica-sentadilla', 400);
+    expect(await db.gympediaPublicados(), hasLength(1),
+        reason: 'la fila local es más nueva que la tumba');
+    // Tumba posterior a la republicación (seq 600): sí borra.
+    await db.gympediaAplicarTumba('tecnica-sentadilla', 600);
+    expect(await db.gympediaPublicados(), isEmpty);
+  });
+
+  test('borrador conserva la ruta de su imagen local y el archivo '
+      'se guarda/borra en disco', () async {
+    await _abrirDbVacia();
+    final db = LocalDb.instance;
+    final ruta = await db.gympediaGuardarImagenLocal(
+        'tecnica-sentadilla', [1, 2, 3, 4]);
+    expect(await File(ruta).exists(), isTrue);
+    await db.gympediaGuardarBorrador({
+      'slug': 'tecnica-sentadilla',
+      'titulo': 'X',
+      'imagen_local': ruta,
+      'base_revision': 2,
+      'actualizado_ts': '2026-10-21T10:00:00-04:00',
+    });
+    final b = await db.gympediaBorrador('tecnica-sentadilla');
+    expect(b!['imagen_local'], ruta);
+    expect(b['base_revision'], 2);
+    await db.gympediaBorrarImagenLocal(ruta);
+    expect(await File(ruta).exists(), isFalse);
+  });
+
   group('validador local (espejo del servidor)', () {
     final publicados = {'tecnica-sentadilla', 'tecnica-press-banca'};
 
@@ -197,6 +234,28 @@ void main() {
       expect(
           GympediaValidacion.validar(a, slugsPublicados: publicados)
               .any((e) => e.contains('repetido')),
+          isTrue);
+    });
+
+    test('tipos raros son error explícito, no pase en silencio '
+        '(panel 2026-10-21)', () {
+      final a = _articuloValido();
+      a['pasos'] = 'esto-no-es-una-lista';
+      expect(
+          GympediaValidacion.validar(a, slugsPublicados: publicados)
+              .any((e) => e.contains('debe ser una lista')),
+          isTrue);
+      final b = _articuloValido();
+      b['pasos'] = [1, 2];
+      expect(
+          GympediaValidacion.validar(b, slugsPublicados: publicados)
+              .any((e) => e.contains('debe ser texto')),
+          isTrue);
+      final c = _articuloValido();
+      c['related_ids'] = 'tecnica-press-banca';
+      expect(
+          GympediaValidacion.validar(c, slugsPublicados: publicados)
+              .any((e) => e.contains('deben ser una lista')),
           isTrue);
     });
 

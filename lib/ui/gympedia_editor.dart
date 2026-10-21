@@ -7,6 +7,7 @@
 // (revision del espejo > base_revision), se avisa antes de pisar
 // (adenda de Argón, ajuste 3).
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_image_compress/flutter_image_compress.dart';
@@ -71,6 +72,10 @@ class _GympediaEditorScreenState extends State<GympediaEditorScreen> {
   Set<String> _relacionados = {};
   bool _tieneImagen = false;
   bool _imagenCambiada = false;
+  // Ruta local de la imagen NUEVA del borrador (panel 2026-10-21):
+  // se guarda en el teléfono y se sube SOLO al publicar, para que
+  // un borrador nunca altere la imagen ya publicada.
+  String _imagenLocal = '';
   int _baseRevision = 0;
   int _imagenRev = 0;
   bool _slugBloqueado = false;
@@ -135,6 +140,8 @@ class _GympediaEditorScreenState extends State<GympediaEditorScreen> {
     _baseRevision = (p['revision'] as num?)?.toInt() ?? 0;
     _imagenRev = (p['imagen_rev'] as num?)?.toInt() ?? 0;
     _tieneImagen = p['tiene_imagen'] == true || p['tiene_imagen'] == 1;
+    _imagenCambiada = false;
+    _imagenLocal = '';
     _cargarListas(p);
   }
 
@@ -150,6 +157,7 @@ class _GympediaEditorScreenState extends State<GympediaEditorScreen> {
     _tieneImagen = b['tiene_imagen'] == 1 || b['tiene_imagen'] == true;
     _imagenCambiada =
         b['imagen_cambiada'] == 1 || b['imagen_cambiada'] == true;
+    _imagenLocal = '${b['imagen_local'] ?? ''}';
     _cargarListas(b);
     // ¿Sigue publicado en el espejo?
     _db.gympediaPublicado(_slug.text).then((p) {
@@ -271,6 +279,7 @@ class _GympediaEditorScreenState extends State<GympediaEditorScreen> {
       'related_ids': jsonEncode(a['related_ids']),
       'tiene_imagen': _tieneImagen ? 1 : 0,
       'imagen_cambiada': _imagenCambiada ? 1 : 0,
+      'imagen_local': _imagenLocal,
       'base_revision': _baseRevision,
       'actualizado_ts': isoHabana(ahoraHabana()),
     };
@@ -324,7 +333,15 @@ class _GympediaEditorScreenState extends State<GympediaEditorScreen> {
       ),
     );
     if (recargar == true) {
+      // La recarga también reemplaza el borrador PERSISTIDO
+      // (panel 2026-10-21): si solo cambiara la memoria, al salir
+      // sin guardar reaparecería el borrador obsoleto.
+      final rutaVieja = _imagenLocal;
       setState(() => _aplicarPublicado(actual));
+      await _db.gympediaEliminarBorrador('${actual['id']}');
+      if (rutaVieja.isNotEmpty) {
+        await _db.gympediaBorrarImagenLocal(rutaVieja);
+      }
       _aviso('Borrador recargado con la versión publicada.');
     }
     return false;
@@ -339,9 +356,10 @@ class _GympediaEditorScreenState extends State<GympediaEditorScreen> {
     try {
       if (!await _chequearObsoleto()) return;
       final a = _articuloActual();
-      final slugs = {...widget.slugsPublicados};
-      final actual = await _db.gympediaPublicado('${a['id']}');
-      if (actual != null) slugs.add('${a['id']}');
+      // Relacionados contra el espejo ACTUAL (panel 2026-10-21),
+      // no contra la foto de slugs capturada al navegar.
+      final publicados = await _db.gympediaPublicados();
+      final slugs = {for (final p in publicados) '${p['id']}'};
       final errores =
           GympediaValidacion.validar(a, slugsPublicados: slugs);
       // related_ids no puede apuntar al propio artículo aunque la
@@ -363,10 +381,24 @@ class _GympediaEditorScreenState extends State<GympediaEditorScreen> {
         );
         return;
       }
+      // Imagen nueva: se sube AHORA, al publicar (panel): un
+      // borrador jamás toca el objeto público. Si la subida falla,
+      // no se encola nada y el borrador queda intacto.
+      final slug = '${a['id']}';
+      final quitabaImagen = _imagenCambiada && !_tieneImagen;
+      if (_imagenCambiada && _tieneImagen && _imagenLocal.isNotEmpty) {
+        if (!await _subirImagen(slug)) return;
+      }
+      // CAS (panel): la op declara la revisión sobre la que se
+      // editó; el servidor rechaza si otro dispositivo publicó
+      // entretanto, y el borrador (que se conserva) permite
+      // reintentar tras recargar.
+      final payload = Map<String, dynamic>.from(a)
+        ..['base_revision'] = _baseRevision;
       await _db.queueOp(
         opUuid: const Uuid().v4(),
         tipo: 'gympedia_upsert_publicado',
-        payload: a,
+        payload: payload,
       );
       // Espejo optimista: el pull lo confirmará con la revision del
       // servidor; imagen_rev lo asigna SOLO el servidor.
@@ -375,13 +407,74 @@ class _GympediaEditorScreenState extends State<GympediaEditorScreen> {
         ..['revision'] = _baseRevision + 1
         ..['imagen_rev'] = _imagenRev;
       await _db.upsertMirrorTexto(
-          'gympedia_articulos', '${a['id']}', optimista, 0);
-      await _db.gympediaEliminarBorrador('${a['id']}');
+          'gympedia_articulos', slug, optimista, 0);
+      // El borrador se CONSERVA con la base ya actualizada: si el
+      // servidor rechaza la op, el contenido no se pierde; y no
+      // salta un falso aviso de obsoleto porque el espejo también
+      // quedó en base+1.
+      final rutaSubida = _imagenLocal;
+      _baseRevision = _baseRevision + 1;
+      _imagenCambiada = false;
+      _imagenLocal = '';
+      await _db.gympediaGuardarBorrador(_borradorActual());
+      if (rutaSubida.isNotEmpty) {
+        await _db.gympediaBorrarImagenLocal(rutaSubida);
+      }
+      // Quitar la imagen: el objeto público se borra al publicar,
+      // no al tocar «Quitar» en el borrador.
+      if (quitabaImagen) await _borrarImagenRemota(slug);
       _aviso('Publicado. Se enviará al servidor al sincronizar.');
       if (mounted) Navigator.of(context).pop(true);
     } finally {
       if (mounted) setState(() => _ocupado = false);
     }
+  }
+
+  /// Sube el webp local del borrador al objeto público del bucket.
+  /// Devuelve false (con aviso) si la subida no se logró.
+  Future<bool> _subirImagen(String slug) async {
+    try {
+      final bytes = await File(_imagenLocal).readAsBytes();
+      final token = AuthService().session?.accessToken ?? '';
+      final r = await http
+          .post(
+            Uri.parse('${AppConfig.supabaseUrl}/storage/v1/object/'
+                '${AppConfig.bucketGympedia}/$slug.webp'),
+            headers: {
+              'apikey': AppConfig.anonKey,
+              if (token.isNotEmpty) 'Authorization': 'Bearer $token',
+              'Content-Type': 'image/webp',
+              'x-upsert': 'true',
+            },
+            body: bytes,
+          )
+          .timeout(const Duration(seconds: 60));
+      if (r.statusCode == 200 || r.statusCode == 201) return true;
+      _aviso('La subida de la imagen falló (HTTP ${r.statusCode}). '
+          'No se publicó nada; revisa la conexión e inténtalo de nuevo.');
+    } catch (_) {
+      _aviso('La subida de la imagen falló. No se publicó nada; '
+          'revisa la conexión e inténtalo de nuevo.');
+    }
+    return false;
+  }
+
+  /// Borra el objeto público de la imagen (mejor esfuerzo): se
+  /// llama SOLO al publicar un artículo que quedó sin imagen.
+  Future<void> _borrarImagenRemota(String slug) async {
+    try {
+      final token = AuthService().session?.accessToken ?? '';
+      await http
+          .delete(
+            Uri.parse('${AppConfig.supabaseUrl}/storage/v1/object/'
+                '${AppConfig.bucketGympedia}/$slug.webp'),
+            headers: {
+              'apikey': AppConfig.anonKey,
+              if (token.isNotEmpty) 'Authorization': 'Bearer $token',
+            },
+          )
+          .timeout(const Duration(seconds: 30));
+    } catch (_) {}
   }
 
   Future<void> _retirar() async {
@@ -411,7 +504,8 @@ class _GympediaEditorScreenState extends State<GympediaEditorScreen> {
     await _db.queueOp(
       opUuid: const Uuid().v4(),
       tipo: 'gympedia_retirar',
-      payload: {'id': slug},
+      // CAS: no retirar una revisión más nueva que la vista aquí.
+      payload: {'id': slug, 'base_revision': _baseRevision},
     );
     await _db.deleteMirrorTexto('gympedia_articulos', slug);
     await _db.gympediaEliminarBorrador(slug);
@@ -425,8 +519,10 @@ class _GympediaEditorScreenState extends State<GympediaEditorScreen> {
       _aviso('Primero define el identificador del artículo.');
       return;
     }
-    final img = await ImagePicker()
-        .pickImage(source: ImageSource.gallery, maxWidth: 1600);
+    // Tope real de 1024 px (panel): el selector ya entrega la
+    // imagen acotada y la compresión no la agranda.
+    final img = await ImagePicker().pickImage(
+        source: ImageSource.gallery, maxWidth: 1024, maxHeight: 1024);
     if (img == null || !mounted) return;
     setState(() => _ocupado = true);
     try {
@@ -441,58 +537,39 @@ class _GympediaEditorScreenState extends State<GympediaEditorScreen> {
         _aviso('No se pudo procesar la imagen.');
         return;
       }
-      final token = AuthService().session?.accessToken ?? '';
-      final r = await http
-          .post(
-            Uri.parse('${AppConfig.supabaseUrl}/storage/v1/object/'
-                '${AppConfig.bucketGympedia}/$slug.webp'),
-            headers: {
-              'apikey': AppConfig.anonKey,
-              if (token.isNotEmpty) 'Authorization': 'Bearer $token',
-              'Content-Type': 'image/webp',
-              'x-upsert': 'true',
-            },
-            body: bytes,
-          )
-          .timeout(const Duration(seconds: 60));
-      if (r.statusCode == 200 || r.statusCode == 201) {
-        setState(() {
-          _tieneImagen = true;
-          _imagenCambiada = true;
-        });
-        _aviso('Imagen subida. Se enlaza al publicar.');
-      } else {
-        _aviso('La subida falló (HTTP ${r.statusCode}). '
-            'Revisa la conexión e inténtalo de nuevo.');
+      // SOLO se guarda en el teléfono (panel): el objeto público
+      // no se toca hasta publicar.
+      final rutaVieja = _imagenLocal;
+      final ruta = await _db.gympediaGuardarImagenLocal(slug, bytes);
+      if (rutaVieja.isNotEmpty && rutaVieja != ruta) {
+        await _db.gympediaBorrarImagenLocal(rutaVieja);
       }
+      setState(() {
+        _tieneImagen = true;
+        _imagenCambiada = true;
+        _imagenLocal = ruta;
+      });
+      _aviso('Imagen lista. Se subirá al publicar.');
     } catch (_) {
-      _aviso('La subida falló. Revisa la conexión e inténtalo de nuevo.');
+      _aviso('No se pudo guardar la imagen en el teléfono.');
     } finally {
       if (mounted) setState(() => _ocupado = false);
     }
   }
 
   Future<void> _quitarImagen() async {
-    final slug = _slug.text.trim();
+    // Solo marcas del borrador (panel): el objeto público se
+    // borra al publicar, no ahora. La app de clientes, al ver
+    // tiene_imagen=false, limpia su caché local.
+    final rutaVieja = _imagenLocal;
     setState(() {
       _tieneImagen = false;
       _imagenCambiada = true;
+      _imagenLocal = '';
     });
-    // Borrado directo del objeto (mejor esfuerzo): la app de
-    // clientes, al ver tiene_imagen=false, limpia su caché local.
-    try {
-      final token = AuthService().session?.accessToken ?? '';
-      await http
-          .delete(
-            Uri.parse('${AppConfig.supabaseUrl}/storage/v1/object/'
-                '${AppConfig.bucketGympedia}/$slug.webp'),
-            headers: {
-              'apikey': AppConfig.anonKey,
-              if (token.isNotEmpty) 'Authorization': 'Bearer $token',
-            },
-          )
-          .timeout(const Duration(seconds: 30));
-    } catch (_) {}
+    if (rutaVieja.isNotEmpty) {
+      await _db.gympediaBorrarImagenLocal(rutaVieja);
+    }
     _aviso('Imagen desvinculada. Se aplica al publicar.');
   }
 
@@ -747,18 +824,31 @@ class _GympediaEditorScreenState extends State<GympediaEditorScreen> {
                 if (_tieneImagen)
                   ClipRRect(
                     borderRadius: BorderRadius.circular(8),
-                    child: Image.network(
-                      '${AppConfig.supabaseUrl}/storage/v1/object/public/'
-                      '${AppConfig.bucketGympedia}/${_slug.text.trim()}.webp'
-                      '?v=$_imagenRev',
-                      height: 160,
-                      width: double.infinity,
-                      fit: BoxFit.cover,
-                      errorBuilder: (_, __, ___) => const Padding(
-                        padding: EdgeInsets.all(8),
-                        child: Text('Imagen enlazada (sin vista previa)'),
-                      ),
-                    ),
+                    child: _imagenLocal.isNotEmpty
+                        ? Image.file(
+                            File(_imagenLocal),
+                            height: 160,
+                            width: double.infinity,
+                            fit: BoxFit.cover,
+                            errorBuilder: (_, __, ___) => const Padding(
+                              padding: EdgeInsets.all(8),
+                              child:
+                                  Text('Imagen local (sin vista previa)'),
+                            ),
+                          )
+                        : Image.network(
+                            '${AppConfig.supabaseUrl}/storage/v1/object/public/'
+                            '${AppConfig.bucketGympedia}/${_slug.text.trim()}.webp'
+                            '?v=$_imagenRev',
+                            height: 160,
+                            width: double.infinity,
+                            fit: BoxFit.cover,
+                            errorBuilder: (_, __, ___) => const Padding(
+                              padding: EdgeInsets.all(8),
+                              child:
+                                  Text('Imagen enlazada (sin vista previa)'),
+                            ),
+                          ),
                   ),
                 Row(
                   children: [
@@ -780,8 +870,8 @@ class _GympediaEditorScreenState extends State<GympediaEditorScreen> {
                   ],
                 ),
                 const Text(
-                  'La imagen se sube al momento (necesita conexión); el '
-                  'enlace con el artículo se aplica al publicar.',
+                  'La imagen se guarda en este teléfono y se sube al '
+                  'publicar (ese paso sí necesita conexión).',
                   style: TextStyle(fontSize: 12, color: Colors.grey),
                 ),
                 if (_hayPublicado) ...[

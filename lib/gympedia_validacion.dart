@@ -64,15 +64,25 @@ class GympediaValidacion {
     }
     for (final campo in ['pasos', 'errores']) {
       final lista = a[campo];
-      if (lista is List) {
-        if (lista.length > 10) {
-          errores.add('«$campo» admite como máximo 10 elementos.');
+      // Tipos estrictos (panel 2026-10-21), espejo del servidor:
+      // ausente = lista vacía (válido); presente con un tipo raro
+      // es un error explícito, no un pase en silencio.
+      if (lista == null) continue;
+      if (lista is! List) {
+        errores.add('«$campo» debe ser una lista.');
+        continue;
+      }
+      if (lista.length > 10) {
+        errores.add('«$campo» admite como máximo 10 elementos.');
+      }
+      for (final item in lista) {
+        if (item is! String) {
+          errores.add('Cada elemento de «$campo» debe ser texto.');
+          break;
         }
-        for (final item in lista) {
-          if (bytes('$item') > 300) {
-            errores.add('Un elemento de «$campo» supera los 300 bytes.');
-            break;
-          }
+        if (bytes(item) > 300) {
+          errores.add('Un elemento de «$campo» supera los 300 bytes.');
+          break;
         }
       }
     }
@@ -99,7 +109,9 @@ class GympediaValidacion {
       errores.add('Sello no válido.');
     }
     final rel = a['related_ids'];
-    if (rel is List) {
+    if (rel != null && rel is! List) {
+      errores.add('Los artículos relacionados deben ser una lista.');
+    } else if (rel is List) {
       if (rel.length > 6) {
         errores.add('Como máximo 6 artículos relacionados.');
       }
@@ -121,7 +133,11 @@ class GympediaValidacion {
       if (bytes(jsonEncode(a)) > 12288) {
         errores.add('El artículo completo supera los 12288 bytes.');
       }
-    } catch (_) {}
+    } catch (_) {
+      // Serializar es parte de validar (panel): si no se puede
+      // codificar, el artículo no es publicable.
+      errores.add('El artículo no se pudo serializar.');
+    }
     return errores;
   }
 }

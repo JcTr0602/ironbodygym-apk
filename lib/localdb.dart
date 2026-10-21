@@ -62,6 +62,7 @@ class LocalDb {
       'related_ids TEXT NOT NULL DEFAULT \'[]\', '
       'tiene_imagen INTEGER NOT NULL DEFAULT 0, '
       'imagen_cambiada INTEGER NOT NULL DEFAULT 0, '
+      'imagen_local TEXT NOT NULL DEFAULT \'\', '
       'base_revision INTEGER NOT NULL DEFAULT 0, '
       'actualizado_ts TEXT NOT NULL DEFAULT \'\')';
 
@@ -1872,6 +1873,44 @@ class LocalDb {
   Future<void> gympediaEliminarBorrador(String slug) async {
     final d = await db;
     await d.delete('gympedia_borradores', where: 'slug=?', whereArgs: [slug]);
+  }
+
+  /// Aplica una tumba de GymPedia SOLO si la fila local no es más
+  /// nueva que la tumba (panel 2026-10-21): si el artículo se
+  /// republicó (sync_seq mayor que el de la tumba), la versión
+  /// vigente sobrevive; la tumba se considera igualmente aplicada.
+  Future<void> gympediaAplicarTumba(String slug, int seqTumba) async {
+    final d = await db;
+    await d.delete('gympedia_articulos',
+        where: 'id=? AND sync_seq<=?', whereArgs: [slug, seqTumba]);
+  }
+
+  Future<Directory> _dirImagenesBorrador() async {
+    final base = await getDatabasesPath();
+    final dir = Directory(p.join(base, 'gympedia_borrador_img'));
+    if (!await dir.exists()) await dir.create(recursive: true);
+    return dir;
+  }
+
+  /// Guarda en disco local la imagen NUEVA elegida para un borrador
+  /// (panel 2026-10-21): NO se sube al bucket al elegirla — la
+  /// subida ocurre al publicar, para que un borrador jamás altere
+  /// la imagen ya publicada. Devuelve la ruta del archivo.
+  Future<String> gympediaGuardarImagenLocal(
+      String slug, List<int> bytes) async {
+    final dir = await _dirImagenesBorrador();
+    final f = File(p.join(dir.path, '$slug.webp'));
+    await f.writeAsBytes(bytes, flush: true);
+    return f.path;
+  }
+
+  /// Borra un archivo de imagen local de borrador (si existe).
+  Future<void> gympediaBorrarImagenLocal(String ruta) async {
+    if (ruta.isEmpty) return;
+    try {
+      final f = File(ruta);
+      if (await f.exists()) await f.delete();
+    } catch (_) {}
   }
 
   /// Normaliza para búsqueda: minúsculas, sin tildes.

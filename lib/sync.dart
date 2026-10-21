@@ -2444,18 +2444,26 @@ class SyncEngine {
           if (r.statusCode != 200) break; // ausente/sin permiso: omitir
           final rows = jsonDecode(r.body) as List;
           if (rows.isEmpty) break;
+          var paginaCortada = false;
           for (final row in rows) {
             final m = Map<String, dynamic>.from(row as Map);
             final slug = '${m['id'] ?? ''}';
-            final seq = (m['sync_seq'] as int?) ?? 0;
-            if (slug.isNotEmpty) {
-              await _db.deleteMirrorTexto('gympedia_articulos', slug);
-              aplicadas++;
-              contarEnDetallePull(porTabla, 'gympedia_articulos');
+            final seq = (m['sync_seq'] as num?)?.toInt() ?? 0;
+            // Fila inválida (panel 2026-10-21): el cursor SOLO
+            // avanza sobre filas aplicadas; ante una inválida se
+            // corta la página sin saltarla.
+            if (slug.isEmpty || seq <= 0) {
+              paginaCortada = true;
+              break;
             }
+            // Borrado condicionado por seq: una republicación más
+            // nueva que la tumba sobrevive.
+            await _db.gympediaAplicarTumba(slug, seq);
+            aplicadas++;
+            contarEnDetallePull(porTabla, 'gympedia_articulos');
             if (seq > gbMax) gbMax = seq;
           }
-          if (rows.length < 100) break;
+          if (paginaCortada || rows.length < 100) break;
         }
         if (gbMax > cursorGb) {
           await _db.setMeta('wm_gympedia_borrados', '$gbMax');
