@@ -93,8 +93,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
       final mor = await morosos();
       // Misma población que la pestaña «Por vencer» de Listas
       // (porVencer con 3 días, solo activos): conteo y lista
-      // coinciden por construcción.
-      final porVencer = (await porVencer(dias: 3)).length;
+      // coinciden por construcción. (El conteo se llama
+      // conteoPorVencer para no sombrear la función homónima;
+      // ronda 2, Luna.)
+      final conteoPorVencer = (await porVencer(dias: 3)).length;
       final gastos = await gastosDelMes(hoyHabanaIso().substring(0, 7));
       final nuevos = await nuevosEsteMes();
       final rank = await rankingEntrenadores();
@@ -114,7 +116,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           _mejorPeor = mp;
           _activos = activos;
           _morosos = mor;
-          _porVencer = porVencer;
+          _porVencer = conteoPorVencer;
           _gastosMes = gastos;
           _nuevos = nuevos;
           _ranking = rank;
