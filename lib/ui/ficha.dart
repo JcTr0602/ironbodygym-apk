@@ -703,8 +703,11 @@ class _FichaScreenState extends State<FichaScreen> {
                     keyboardType: const TextInputType.numberWithOptions(
                         decimal: true),
                     inputFormatters: [
+                      // Panel v0.6.0 (BAJO): como máximo un punto
+                      // decimal y dos decimales (antes «1.2.3»
+                      // pasaba el filtro y reventaba al guardar).
                       FilteringTextInputFormatter.allow(
-                          RegExp(r'[0-9.]'))
+                          RegExp(r'^\d*\.?\d{0,2}$'))
                     ],
                     decoration: const InputDecoration(
                         labelText:
@@ -763,7 +766,12 @@ class _FichaScreenState extends State<FichaScreen> {
     double? nuevaTarifa;
     if (tarifaTxt.isNotEmpty) {
       nuevaTarifa = double.tryParse(tarifaTxt);
-      if (nuevaTarifa == null || nuevaTarifa <= 0) {
+      // Panel v0.6.0: mismo rango que el servidor (0, 1000000];
+      // sin el tope, el espejo optimista mostraba un valor que el
+      // servidor iba a rechazar.
+      if (nuevaTarifa == null ||
+          nuevaTarifa <= 0 ||
+          nuevaTarifa > 1000000) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
             content: Text(
                 'Tarifa especial inválida: monto mayor que 0 o vacío')));
@@ -803,15 +811,18 @@ class _FichaScreenState extends State<FichaScreen> {
       // parciales de otros flujos).
       'tarifa_especial_transferencia': nuevaTarifa,
     };
-    if (nuevaTarifa != tarifaOrig) {
-      await LocalDb.instance
-          .updateMirrorTarifaTransferencia(widget.clienteId, nuevaTarifa);
-    }
     await LocalDb.instance.queueOp(
       opUuid: const Uuid().v4(),
       tipo: 'editar_cliente',
       payload: payload,
     );
+    // Panel v0.6.0: el parche optimista va DESPUÉS de encolar (si
+    // queueOp falla, el espejo no debe mostrar una tarifa que
+    // nunca salió del teléfono).
+    if (nuevaTarifa != tarifaOrig) {
+      await LocalDb.instance
+          .updateMirrorTarifaTransferencia(widget.clienteId, nuevaTarifa);
+    }
     // v1.3.1 (Argón regresión 2): sin dispose. Controllers locales de _editar().
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
