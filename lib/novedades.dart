@@ -15,6 +15,14 @@ class Novedad {
 }
 
 const novedades = [
+  Novedad('1.4.4', [
+    'Vista previa del cliente: desde su ficha ves exactamente lo que él ve en su app (inicio, pagos, suplementos, plan y progreso)',
+    'La sincronización ahora limpia los datos fantasma y rellena huecos: si un pago no te aparece, una sincronización completa lo trae',
+    'El botón de actualizar en «Pagos realizados» ahora sincroniza de verdad (antes solo releía el teléfono)',
+    'Si suspendes a un entrenador, su app se cierra al momento; y el panel de permisos confirma cada cambio contra el servidor',
+    'El cartel «Hay cambios nuevos» ya no se queda fijo por los borrados de otros dispositivos',
+    'Las notificaciones de ajustes dicen qué cambió (por ejemplo, «titular de la cuenta actualizado»)',
+  ]),
   Novedad('1.4.3', [
     'Ficha del suplemento: ahora escribes el contenido del envase (ej. 300 g) y los servicios por envase; el cliente los ve en su catálogo',
     'Listas ordenadas por el nombre real: los clientes escritos en minúsculas (p. ej. «alberto prueba») ya no quedan al final, tras la Z',

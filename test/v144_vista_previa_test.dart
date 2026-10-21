@@ -1,5 +1,7 @@
 // v1.4.4 — Vista previa por pestañas: semáforo de membresía (espejo de
 // Clientes, calculado contra la fecha del servidor) y formato de montos.
+import 'dart:ui' show Color;
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ironbody_gym/ui/vista_previa_cliente.dart';
 
@@ -28,6 +30,8 @@ void main() {
       final s = semaforoVistaPrevia('2026-10-21', '2026-10-21');
       expect(s.titulo, 'VENCE HOY');
       expect(s.badge, 'Hoy');
+      // Pedido de Jc (2026-10-21): vence hoy va en ROJO.
+      expect(s.color, const Color(0xFFEF5350));
     });
 
     test('próximo a vencer (3 días, plural y singular)', () {

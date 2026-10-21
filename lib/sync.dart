@@ -1101,11 +1101,21 @@ class SyncEngine {
       // v1.2.9+46: las fotos SIEMPRE se suben en cada sincronización,
       // como en v1.2.3. La puerta de ahorro de datos se eliminó por
       // orden de Jc (2026-10-13): hacía que las fotos nunca se intentaran.
-      _emitirProgreso(
-          onProgreso,
-          const SyncProgress(
-              fase: SyncFase.subiendo, mensaje: 'Subiendo fotos...'));
-      _emit(SyncPhase.photos);
+      // El rótulo «Subiendo fotos…» SOLO se emite si la cola tiene
+      // fotos de verdad (reporte de campo de Jc 2026-10-21: salía
+      // también en syncs de solo texto y confundía).
+      var hayFotos = false;
+      try {
+        hayFotos =
+            await FotosColaService.instance.contarPendientes() > 0;
+      } catch (_) {}
+      if (hayFotos) {
+        _emitirProgreso(
+            onProgreso,
+            const SyncProgress(
+                fase: SyncFase.subiendo, mensaje: 'Subiendo fotos...'));
+        _emit(SyncPhase.photos);
+      }
       // v1.5 (v32): el flujo legado de fotos se retiró; la
       // cola persistente (fotos_cola) es el único camino y la
       // migración v32 drenó lo que quedara en fotos_pendientes.

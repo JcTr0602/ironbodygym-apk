@@ -86,7 +86,9 @@ SemaforoVistaPrevia semaforoVistaPrevia(
       badge: diasRestantes == 0
           ? 'Hoy'
           : '$diasRestantes ${diasRestantes == 1 ? "día" : "días"}',
-      color: ambar,
+      // Espejo del pedido de Jc (2026-10-21): vence hoy = rojo
+      // también en la app de clientes.
+      color: diasRestantes == 0 ? rojo : ambar,
     );
   }
   return SemaforoVistaPrevia(
