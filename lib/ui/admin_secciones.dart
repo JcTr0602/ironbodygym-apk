@@ -537,6 +537,13 @@ class _SeccionAjustesScreenState extends State<SeccionAjustesScreen> {
                 teclado: TextInputType.phone,
               ),
             ),
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: CampoTexto(
+                controller: widget.bancarios['titular'],
+                etiqueta: 'Titular de la cuenta',
+              ),
+            ),
             BotonPrimario(
               texto: 'Guardar datos bancarios',
               icono: Icons.save,

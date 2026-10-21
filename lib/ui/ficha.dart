@@ -564,6 +564,16 @@ class _FichaScreenState extends State<FichaScreen> {
         TextEditingController(text: '${c['telefono'] ?? ''}');
     final carnet =
         TextEditingController(text: '${c['carnet'] ?? ''}');
+    // v0.6.0 (Pieza A): tarifa especial por transferencia (vacío = sin
+    // especial; rige el precio general por transferencia).
+    final tarifaActual = (c['tarifa_especial_transferencia'] as num?)
+        ?.toDouble();
+    final tarifa = TextEditingController(
+        text: tarifaActual == null
+            ? ''
+            : (tarifaActual == tarifaActual.roundToDouble()
+                ? '${tarifaActual.toInt()}'
+                : '$tarifaActual'));
     String sexo = '${c['sexo'] ?? 'M'}';
     // Fecha de vencimiento vigente (v1.0.11)
     DateTime? pagadoHasta;
@@ -687,6 +697,21 @@ class _FichaScreenState extends State<FichaScreen> {
                     ),
                   ),
                 ),
+                const SizedBox(height: 8),
+                TextField(
+                    controller: tarifa,
+                    keyboardType: const TextInputType.numberWithOptions(
+                        decimal: true),
+                    inputFormatters: [
+                      FilteringTextInputFormatter.allow(
+                          RegExp(r'[0-9.]'))
+                    ],
+                    decoration: const InputDecoration(
+                        labelText:
+                            'Tarifa especial por transferencia (CUP)',
+                        helperText:
+                            'Vacío = precio general por transferencia',
+                        border: OutlineInputBorder())),
               ],
             ),
           ),
@@ -733,6 +758,20 @@ class _FichaScreenState extends State<FichaScreen> {
         : '${pagadoHasta!.year.toString().padLeft(4, '0')}-'
             '${pagadoHasta!.month.toString().padLeft(2, '0')}-'
             '${pagadoHasta!.day.toString().padLeft(2, '0')}';
+    // v0.6.0 (Pieza A): tarifa especial por transferencia.
+    final tarifaTxt = tarifa.text.trim();
+    double? nuevaTarifa;
+    if (tarifaTxt.isNotEmpty) {
+      nuevaTarifa = double.tryParse(tarifaTxt);
+      if (nuevaTarifa == null || nuevaTarifa <= 0) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text(
+                'Tarifa especial inválida: monto mayor que 0 o vacío')));
+        return;
+      }
+    }
+    final tarifaOrig =
+        (c['tarifa_especial_transferencia'] as num?)?.toDouble();
     // Argón B7: enviar SIEMPRE todos los campos (como v1.2.9) para
     // no depender de que el backend maneje payload parcial.
     final orig = _c ?? {};
@@ -744,7 +783,8 @@ class _FichaScreenState extends State<FichaScreen> {
         nuevoTel != (orig['telefono'] as String?) ||
         nuevoCar != (orig['carnet'] as String?) ||
         sexo != orig['sexo'] ||
-        phStr != (orig['pagado_hasta'] as String?);
+        phStr != (orig['pagado_hasta'] as String?) ||
+        nuevaTarifa != tarifaOrig;
     if (!huboCambios) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -758,7 +798,15 @@ class _FichaScreenState extends State<FichaScreen> {
       'carnet': nuevoCar,
       'sexo': sexo,
       'pagado_hasta': phStr,
+      // v0.6.0: siempre presente desde este diálogo (null = quitar la
+      // tarifa especial; el servidor distingue clave ausente en ops
+      // parciales de otros flujos).
+      'tarifa_especial_transferencia': nuevaTarifa,
     };
+    if (nuevaTarifa != tarifaOrig) {
+      await LocalDb.instance
+          .updateMirrorTarifaTransferencia(widget.clienteId, nuevaTarifa);
+    }
     await LocalDb.instance.queueOp(
       opUuid: const Uuid().v4(),
       tipo: 'editar_cliente',

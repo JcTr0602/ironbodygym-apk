@@ -133,7 +133,8 @@ class _AdminScreenState extends State<AdminScreen> {
               .text = '${(aj[clave] as num?) ?? ''}';
         }
         // v1.2.4: cargar datos bancarios (strings)
-        for (final clave in ['tarjeta_bandec', 'tarjeta_bpa', 'movil_confirmacion']) {
+        // v0.6.0: + titular de la cuenta (Pieza A de Clientes)
+        for (final clave in ['tarjeta_bandec', 'tarjeta_bpa', 'movil_confirmacion', 'titular']) {
           _bancarios
               .putIfAbsent(clave, () => TextEditingController())
               .text = '${aj[clave] ?? ''}';
@@ -209,11 +210,21 @@ class _AdminScreenState extends State<AdminScreen> {
     if (!mounted) return;
     final cambios = <String, String>{};
     final errores = <String>[];
-    for (final clave in ['tarjeta_bandec', 'tarjeta_bpa', 'movil_confirmacion']) {
+    for (final clave in ['tarjeta_bandec', 'tarjeta_bpa', 'movil_confirmacion', 'titular']) {
       final v = (_bancarios[clave]?.text ?? '').trim();
       // v1.2.4: vaciar un dato bancario se decide en el servidor
       // (pendiente de aprobación); la app solo envía valores no vacíos.
       if (v.isEmpty) continue;
+      // v0.6.0: el titular es un nombre, no un número: sin validación
+      // de dígitos ni normalización; se envía el texto tal cual.
+      if (clave == 'titular') {
+        if (v.length > 80) {
+          errores.add('Titular: máx. 80 caracteres');
+          continue;
+        }
+        if (v != '${aj[clave] ?? ''}'.trim()) cambios[clave] = v;
+        continue;
+      }
       final digitos = v.replaceAll(RegExp(r'[\s-]'), '');
       {
         if (clave.startsWith('tarjeta') &&

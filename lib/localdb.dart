@@ -2160,6 +2160,26 @@ class LocalDb {
         where: 'id=?', whereArgs: [clienteId]);
   }
 
+  /// Actualización optimista de la tarifa especial por transferencia
+  /// (v0.6.0, Pieza A): null quita la clave del espejo (sin especial,
+  /// rige el ajuste global); un valor la fija.
+  Future<void> updateMirrorTarifaTransferencia(
+      int clienteId, double? tarifa) async {
+    final d = await db;
+    final rows = await d.query('clientes',
+        where: 'id=?', whereArgs: [clienteId], limit: 1);
+    if (rows.isEmpty) return;
+    final data =
+        jsonDecode(rows.first['data'] as String) as Map<String, dynamic>;
+    if (tarifa == null) {
+      data.remove('tarifa_especial_transferencia');
+    } else {
+      data['tarifa_especial_transferencia'] = tarifa;
+    }
+    await d.update('clientes', {'data': jsonEncode(data)},
+        where: 'id=?', whereArgs: [clienteId]);
+  }
+
   /// Actualización optimista: extiende pagado_hasta de un cliente en el
   /// espejo local sin esperar al servidor. Se usa al regalar un mes
   /// de cumpleaños (v1.3.3).
