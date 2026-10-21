@@ -99,6 +99,132 @@ class _ContenidoBoton extends StatelessWidget {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Tarjeta de acciones de la ficha del cliente (etapa 4 · F3)
+// ---------------------------------------------------------------------------
+
+/// Tarjeta «Acciones» de la ficha: agrupa como filas lo que antes
+/// eran botones sueltos al final (Progreso y Nutrición,
+/// Renovación rápida solo si está vencido, Congelar/Descongelar
+/// y A papelera en rojo). Widget presentacional sin dependencias
+/// (flags + callbacks): la ficha conserva las condiciones y los
+/// destinos; aquí solo se pinta y se hacen widget tests.
+class TarjetaAccionesCliente extends StatelessWidget {
+  final bool vencido;
+  final bool congelado;
+  final VoidCallback onProgreso;
+  final VoidCallback onRenovar;
+  final VoidCallback onCongelar;
+  final VoidCallback onPapelera;
+
+  const TarjetaAccionesCliente({
+    super.key,
+    required this.vencido,
+    required this.congelado,
+    required this.onProgreso,
+    required this.onRenovar,
+    required this.onCongelar,
+    required this.onPapelera,
+  });
+
+  Widget _fila({
+    required IconData icono,
+    required Color color,
+    required String texto,
+    required VoidCallback onTap,
+    bool chevron = false,
+    bool peligro = false,
+  }) {
+    // Material transparente propio: dentro de Tarjeta (fondo con
+    // DecoratedBox), el ListTile pintaria su efecto de toque en el
+    // Material del Scaffold, debajo de la tarjeta (invisible).
+    return Material(
+      type: MaterialType.transparency,
+      child: ListTile(
+      contentPadding: EdgeInsets.zero,
+      leading: Container(
+        width: 38,
+        height: 38,
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.12),
+          borderRadius: BorderRadius.circular(AppRadio.sm),
+        ),
+        child: Icon(icono, size: 20, color: color),
+      ),
+      title: Text(
+        texto,
+        style: peligro
+            ? const TextStyle(color: AppColores.error)
+            : null,
+      ),
+      trailing: chevron
+          ? const Icon(Icons.chevron_right, size: 20)
+          : null,
+      onTap: onTap,
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Tarjeta(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 30,
+                height: 30,
+                decoration: BoxDecoration(
+                  color:
+                      AppColores.naranja.withValues(alpha: 0.12),
+                  borderRadius:
+                      BorderRadius.circular(AppRadio.sm),
+                ),
+                child: const Icon(Icons.bolt,
+                    size: 18, color: AppColores.naranja),
+              ),
+              const SizedBox(width: AppEspacio.sm),
+              const Text('Acciones', style: AppTexto.titulo),
+            ],
+          ),
+          const SizedBox(height: AppEspacio.sm),
+          _fila(
+            icono: Icons.show_chart,
+            color: Colors.blue,
+            texto: 'Progreso y Nutrición',
+            onTap: onProgreso,
+            chevron: true,
+          ),
+          if (vencido)
+            _fila(
+              icono: Icons.refresh,
+              color: AppColores.naranja,
+              texto: 'Renovación rápida (1 mes)',
+              onTap: onRenovar,
+            ),
+          _fila(
+            icono: congelado ? Icons.wb_sunny : Icons.ac_unit,
+            color: AppColores.naranja,
+            texto: congelado ? 'Descongelar' : 'Congelar',
+            onTap: onCongelar,
+          ),
+          const Divider(height: 1),
+          _fila(
+            icono: Icons.delete_outline,
+            color: AppColores.error,
+            texto: 'A papelera',
+            onTap: onPapelera,
+            peligro: true,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 /// Botón secundario: contorno neutro, fondo transparente
 /// (cancelar, volver, acciones complementarias).
 class BotonSecundario extends StatelessWidget {

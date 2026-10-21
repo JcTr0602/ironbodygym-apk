@@ -51,6 +51,12 @@ class _FichaScreenState extends State<FichaScreen> {
   // v1.2.5 (#10): incidencias relacionadas con el cliente.
   List<Map<String, dynamic>> _incidencias = [];
   File? _foto;
+
+  /// Etapa 4 · F2: generación de la foto mostrada. La carga en
+  /// segundo plano captura el valor y solo aplica su resultado si
+  /// no cambió: eliminar o reemplazar la foto lo incrementa y una
+  /// descarga vieja ya no puede resucitar la foto anterior.
+  int _fotoGen = 0;
   bool _verificando = false;
   // v1.3.3 (Argón spec 2): regalo de cumpleaños del año en curso, si ya
   // se otorgó. Candado anual + botón "Reenviar WhatsApp".
@@ -99,10 +105,23 @@ class _FichaScreenState extends State<FichaScreen> {
     // datos se muestran de inmediato con el avatar de iniciales y,
     // al llegar la foto, solo se actualiza ese widget.
     if (c != null) {
-      final foto = await FotoCache.instance
-          .obtener(c['foto_storage'] as String?);
-      if (mounted && foto != null) {
-        setState(() => _foto = foto);
+      // Si hay una eliminación local pendiente, el espejo aún
+      // trae foto_storage hasta sincronizar: la foto NO se
+      // muestra ni se descarga (etapa 4 · F2: la intención
+      // pendiente manda también al pintar; corrección del
+      // panel — una carga NUEVA, no solo una en vuelo, podía
+      // resucitar la foto eliminada al reabrir la ficha).
+      final intencion = await LocalDb.instance
+          .ultimaIntencionFoto(widget.clienteId);
+      if (intencion != 'eliminar') {
+        final gen = _fotoGen;
+        final foto = await FotoCache.instance
+            .obtener(c['foto_storage'] as String?);
+        // Si mientras descargaba se eliminó o se puso otra foto,
+        // el resultado ya es viejo: no resucitarla.
+        if (mounted && gen == _fotoGen && foto != null) {
+          setState(() => _foto = foto);
+        }
       }
     }
   }
@@ -853,18 +872,35 @@ class _FichaScreenState extends State<FichaScreen> {
     );
   }
 
-  /// ¿El cliente tiene foto asignada? (v1.0.15)
+  /// ¿El cliente tiene foto? (v1.0.15; etapa 4 · F2)
+  ///
+  /// Antes solo miraba el caché local de ESTE teléfono: si la
+  /// foto no estaba cacheada en ese momento, la opción «Eliminar
+  /// foto» no aparecía aunque el cliente tuviera foto (reporte
+  /// de campo con Yunieski Garrido). Ahora, en orden:
+  /// 1) La intención local pendiente manda (deriva de las colas
+  ///    persistentes): eliminar encolado -> no tiene; foto en la
+  ///    cola de subida -> sí tiene. Sobrevive a cerrar la ficha.
+  /// 2) El espejo: foto_storage no vacío (la misma fuente que usa
+  ///    la ficha para mostrarla; cubre fotos del bot y de la APK).
+  /// 3) La foto en pantalla (_foto), p. ej. recién puesta.
+  /// La caché sola ya no prueba existencia (puede ser huérfana).
+  /// Semántica offline: «hay una foto efectiva conocida que se
+  /// puede eliminar»; la op del servidor tolera que ya no haya.
   Future<bool> _tieneFoto() async {
     try {
-      // Revisar el caché local de fotos
-      final f = await FotoCache.instance
-          .enCache('bot/${widget.clienteId}.jpg');
-      if (f != null) return true;
-      final f2 = await FotoCache.instance
-          .enCache('apk/${widget.clienteId}.jpg');
-      return f2 != null;
+      final intencion =
+          await LocalDb.instance.ultimaIntencionFoto(widget.clienteId);
+      if (intencion == 'eliminar') return false;
+      if (intencion == 'poner') return true;
+      final storage = _c?['foto_storage'] as String?;
+      if (storage != null && storage.isNotEmpty) return true;
+      return _foto != null;
     } catch (_) {
-      return false;
+      // Ni siquiera el respaldo omite el espejo (panel).
+      final storage = _c?['foto_storage'] as String?;
+      return (storage != null && storage.isNotEmpty) ||
+          _foto != null;
     }
   }
 
@@ -891,6 +927,11 @@ class _FichaScreenState extends State<FichaScreen> {
       ),
     );
     if (ok != true || !mounted) return;
+    // Invalida cualquier descarga en vuelo y quita la foto de
+    // pantalla YA (etapa 4 · F2): feedback inmediato, ANTES de
+    // los await de caché y BD (corrección del panel).
+    _fotoGen++;
+    setState(() => _foto = null);
     // Limpia el caché local
     await FotoCache.instance.invalidar('bot/${widget.clienteId}.jpg');
     await FotoCache.instance.invalidar('apk/${widget.clienteId}.jpg');
@@ -905,7 +946,6 @@ class _FichaScreenState extends State<FichaScreen> {
       const SnackBar(content: Text('Foto eliminada (se sincronizará)')),
     );
     SyncEngine.instance.push();
-    setState(() {});
   }
 
   /// Cambia la foto del cliente: cámara, galería o eliminar (v1.0.15).
@@ -980,6 +1020,7 @@ class _FichaScreenState extends State<FichaScreen> {
       rutaOriginal: editada.path,
     );
     if (!mounted) return;
+    _fotoGen++;
     setState(() => _foto = editada);
     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
         content: Text('Foto actualizada (se sincronizará)')));
@@ -1469,25 +1510,65 @@ class _FichaScreenState extends State<FichaScreen> {
                     padding: const EdgeInsets.all(
                         AppEspacio.lg),
                     children: [
-                      // Cabecera: foto + nombre + badge
+                      // Cabecera: foto + nombre + badge (etapa 4 ·
+                      // F3: banda con gradiente sutil naranja).
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.symmetric(
+                            vertical: AppEspacio.md),
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            begin: Alignment.topCenter,
+                            end: Alignment.bottomCenter,
+                            colors: [
+                              AppColores.naranja
+                                  .withValues(alpha: 0.10),
+                              AppColores.naranja
+                                  .withValues(alpha: 0.0),
+                            ],
+                          ),
+                          borderRadius: BorderRadius.circular(
+                              AppRadio.lg),
+                        ),
+                        child: Column(
+                          children: [
                       Center(
                         child: _foto != null
                             ? GestureDetector(
                                 onTap: () =>
                                     _verFotoGrande(),
-                                child: ClipRRect(
-                                  borderRadius:
-                                      BorderRadius.circular(
-                                          60),
-                                  child: Image.file(
-                                      _foto!,
-                                      width: 120,
-                                      height: 120,
-                                      fit: BoxFit.cover),
+                                child: Container(
+                                  padding:
+                                      const EdgeInsets.all(3),
+                                  decoration: BoxDecoration(
+                                    shape: BoxShape.circle,
+                                    border: Border.all(
+                                        color:
+                                            AppColores.naranja,
+                                        width: 2),
+                                  ),
+                                  child: ClipRRect(
+                                    borderRadius:
+                                        BorderRadius.circular(
+                                            57),
+                                    child: Image.file(_foto!,
+                                        width: 114,
+                                        height: 114,
+                                        fit: BoxFit.cover),
+                                  ),
                                 ),
                               )
-                            : CircleAvatar(
-                                radius: 60,
+                            : Container(
+                                padding:
+                                    const EdgeInsets.all(3),
+                                decoration: BoxDecoration(
+                                  shape: BoxShape.circle,
+                                  border: Border.all(
+                                      color: AppColores.naranja,
+                                      width: 2),
+                                ),
+                                child: CircleAvatar(
+                                radius: 57,
                                 backgroundColor: AppColores
                                     .naranja
                                     .withValues(alpha: 0.15),
@@ -1499,6 +1580,7 @@ class _FichaScreenState extends State<FichaScreen> {
                                             FontWeight.bold,
                                         color: AppColores
                                             .naranja)),
+                                ),
                               ),
                       ),
                       const SizedBox(
@@ -1522,6 +1604,9 @@ class _FichaScreenState extends State<FichaScreen> {
                       Center(
                           child: BadgeEstado.desdeDias(
                               dias)),
+                          ],
+                        ),
+                      ),
                       const SizedBox(
                           height: AppEspacio.lg),
                       // Acciones principales
@@ -1575,9 +1660,31 @@ class _FichaScreenState extends State<FichaScreen> {
                           crossAxisAlignment:
                               CrossAxisAlignment.start,
                           children: [
-                            const Text(
-                                'Información personal',
-                                style: AppTexto.titulo),
+                            Row(
+                              children: [
+                                Container(
+                                  width: 30,
+                                  height: 30,
+                                  decoration: BoxDecoration(
+                                    color: AppColores.naranja
+                                        .withValues(alpha: 0.12),
+                                    borderRadius:
+                                        BorderRadius.circular(
+                                            AppRadio.sm),
+                                  ),
+                                  child: const Icon(
+                                      Icons.person_outline,
+                                      size: 18,
+                                      color:
+                                          AppColores.naranja),
+                                ),
+                                const SizedBox(
+                                    width: AppEspacio.sm),
+                                const Text(
+                                    'Información personal',
+                                    style: AppTexto.titulo),
+                              ],
+                            ),
                             const SizedBox(
                                 height: AppEspacio.sm),
                             _filaInfo(
@@ -1837,84 +1944,31 @@ class _FichaScreenState extends State<FichaScreen> {
                       if (AuthService().isOwner ||
                           PermisosEntrenador().canGeneratePin)
                         _seccionAccesoApp(),
-                      // v1.3.9 Sprint 2 (#3): botón de Progreso.
-                      // (Argón: archivo separado para no saturar ficha.dart)
-                      SizedBox(
-                        width: double.infinity,
-                        child: OutlinedButton.icon(
-                          icon: const Icon(Icons.show_chart,
-                              size: 18, color: Colors.blue),
-                          label:
-                              const Text('Progreso y Nutrición'),
-                          onPressed: () {
-                            final cli = _c;
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (_) =>
-                                    PestanaProgreso(
-                                  clienteId:
-                                      '${widget.clienteId}',
-                                  nombreCliente:
-                                      '${cli?['nombre'] ?? ''}',
-                                ),
+                      // Etapa 4 · F3: tarjeta «Acciones» (antes
+                      // botones sueltos): mismas acciones, mismas
+                      // condiciones y mismos callbacks.
+                      // (Progreso: Argón, archivo separado para no
+                      // saturar ficha.dart.)
+                      TarjetaAccionesCliente(
+                        vencido: vencido,
+                        congelado: (_c?['estado'] as String?) ==
+                            'congelado',
+                        onProgreso: () {
+                          final cli = _c;
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => PestanaProgreso(
+                                clienteId: '${widget.clienteId}',
+                                nombreCliente:
+                                    '${cli?['nombre'] ?? ''}',
                               ),
-                            );
-                          },
-                        ),
-                      ),
-                      const SizedBox(height: AppEspacio.sm),
-                      // Acciones secundarias
-                      if (vencido)
-                        Padding(
-                          padding:
-                              const EdgeInsets.only(
-                                  bottom: AppEspacio.sm),
-                          child: BotonSecundario(
-                            texto:
-                                'Renovación rápida (1 mes)',
-                            icono: Icons.refresh,
-                            onPressed: _renovar,
-                          ),
-                        ),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: OutlinedButton.icon(
-                              icon: Icon(
-                                  (_c?['estado']
-                                              as String?) ==
-                                          'congelado'
-                                      ? Icons.wb_sunny
-                                      : Icons.ac_unit,
-                                  size: 18),
-                              label: Text(
-                                  (_c?['estado']
-                                              as String?) ==
-                                          'congelado'
-                                      ? 'Descongelar'
-                                      : 'Congelar'),
-                              onPressed: _congelar,
                             ),
-                          ),
-                          const SizedBox(
-                              width: AppEspacio.sm),
-                          Expanded(
-                            child: OutlinedButton.icon(
-                              icon: const Icon(
-                                  Icons.delete_outline,
-                                  size: 18,
-                                  color:
-                                      AppColores.error),
-                              label: const Text(
-                                  'A papelera',
-                                  style: TextStyle(
-                                      color: AppColores
-                                          .error)),
-                              onPressed: _aPapelera,
-                            ),
-                          ),
-                        ],
+                          );
+                        },
+                        onRenovar: _renovar,
+                        onCongelar: _congelar,
+                        onPapelera: _aPapelera,
                       ),
                       const SizedBox(
                           height: AppEspacio.lg),
@@ -1953,7 +2007,15 @@ class _FichaScreenState extends State<FichaScreen> {
   /// Fila de información con icono.
   Widget _filaInfo(
       IconData icono, String etiqueta, String valor) {
-    return Padding(
+    // Etapa 4 · F3: hairline inferior sutil entre filas.
+    return Container(
+      decoration: BoxDecoration(
+        border: Border(
+          bottom: BorderSide(
+              color: AppColores.borde(context)
+                  .withValues(alpha: 0.5)),
+        ),
+      ),
       padding: const EdgeInsets.symmetric(
           vertical: AppEspacio.sm),
       child: Row(
@@ -2119,28 +2181,42 @@ class _FichaScreenState extends State<FichaScreen> {
       );
     }
 
+    // Etapa 4 · F3: «Vista previa» y «Avisar» van DENTRO de la
+    // tarjeta, al final y FUERA de las ramas de estado: se siguen
+    // mostrando exactamente en los estados de hoy (v1.3.9: la
+    // vista previa en TODOS, el RPC no requiere PIN activo).
     return Column(
       children: [
-        Tarjeta(child: contenido),
-        const SizedBox(height: AppEspacio.sm),
-        // v1.3.9 (ajuste Argón): vista previa disponible en TODOS los
-        // estados (el RPC no requiere PIN activo).
-        SizedBox(
-          width: double.infinity,
-          child: OutlinedButton.icon(
-            icon: const Icon(Icons.preview, size: 18),
-            label: const Text('Vista previa App'),
-            onPressed: _abrirVistaPrevia,
-          ),
-        ),
-        const SizedBox(height: AppEspacio.sm),
-        // v1.3.9 Sprint 1 (#2): avisar por WhatsApp
-        SizedBox(
-          width: double.infinity,
-          child: OutlinedButton.icon(
-            icon: const Icon(Icons.chat, size: 18, color: Colors.green),
-            label: const Text('Avisar por WhatsApp'),
-            onPressed: () => _mostrarAvisosWhatsApp(context),
+        Tarjeta(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              contenido,
+              const SizedBox(height: AppEspacio.md),
+              const Divider(height: 1),
+              const SizedBox(height: AppEspacio.md),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  icon: const Icon(Icons.preview, size: 18),
+                  label: const Text('Vista previa App'),
+                  onPressed: _abrirVistaPrevia,
+                ),
+              ),
+              const SizedBox(height: AppEspacio.sm),
+              // v1.3.9 Sprint 1 (#2): avisar por WhatsApp
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  icon: const Icon(Icons.chat,
+                      size: 18, color: Colors.green),
+                  label: const Text('Avisar por WhatsApp'),
+                  onPressed: () =>
+                      _mostrarAvisosWhatsApp(context),
+                ),
+              ),
+            ],
           ),
         ),
         const SizedBox(height: AppEspacio.md),

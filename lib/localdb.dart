@@ -4023,6 +4023,70 @@ class LocalDb {
     return (r.first['c'] as int?) ?? 0;
   }
 
+  /// Etapa 4 · F2: última intención local sobre la foto de un
+  /// cliente, derivada de las colas persistentes: 'eliminar' si
+  /// la intención vigente más reciente es una op `eliminar_foto`
+  /// aún no aplicada/rechazada, 'poner' si es una foto en la
+  /// cola de subida aún no completada, null si no hay ninguna.
+  /// La intención pendiente manda sobre el espejo: tras eliminar
+  /// sin conexión, foto_storage sigue poblado hasta sincronizar
+  /// y la foto NO debe seguir ofreciéndose como existente.
+  Future<String?> ultimaIntencionFoto(int clienteId) async {
+    final d = await db;
+    // Ambas colas se leen en UNA transacción (corrección del
+    // panel): sin instantánea común, una sincronización entre
+    // las dos consultas podría mezclar estados de momentos
+    // distintos y devolver una intención que nunca fue la
+    // vigente.
+    return d.transaction((txn) async {
+      DateTime? tsEliminar;
+      DateTime? tsPoner;
+      final ops = await txn.query(
+        'ops_queue',
+        columns: ['payload', 'creada_ts'],
+        where: "tipo = 'eliminar_foto' AND estado NOT IN "
+            "('aplicada', 'rechazada', 'archivada')",
+      );
+      for (final op in ops) {
+        try {
+          final p = jsonDecode(op['payload'] as String)
+              as Map<String, dynamic>;
+          if ((p['cliente_id'] as num?)?.toInt() != clienteId) {
+            continue;
+          }
+          final ts =
+              DateTime.tryParse(op['creada_ts'] as String? ?? '');
+          if (ts != null &&
+              (tsEliminar == null || ts.isAfter(tsEliminar))) {
+            tsEliminar = ts;
+          }
+        } catch (_) {}
+      }
+      final fotos = await txn.query(
+        'fotos_cola',
+        columns: ['creado_en'],
+        where: "cliente_id = ? AND estado IN "
+            "('pendiente', 'subiendo', 'error')",
+        whereArgs: [clienteId],
+      );
+      for (final f in fotos) {
+        final ts = DateTime.tryParse(f['creado_en'] as String? ?? '');
+        if (ts != null && (tsPoner == null || ts.isAfter(tsPoner))) {
+          tsPoner = ts;
+        }
+      }
+      if (tsEliminar == null && tsPoner == null) return null;
+      if (tsPoner == null) return 'eliminar';
+      if (tsEliminar == null) return 'poner';
+      // Desempate EXPLÍCITO (panel): con el mismo timestamp gana
+      // 'poner' — la foto se sigue mostrando y el usuario puede
+      // volver a eliminarla (la op es idempotente); al revés,
+      // una foto recién puesta podría quedar oculta por una
+      // eliminación creada en su mismo milisegundo.
+      return tsEliminar.isAfter(tsPoner) ? 'eliminar' : 'poner';
+    });
+  }
+
   /// Todas las no aplicadas ni rechazadas (para re-chequear `aplicada`
   /// en el servidor).
   Future<List<Map<String, dynamic>>> unappliedOps() async {
