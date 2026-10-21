@@ -1,6 +1,10 @@
 /// Ayuda para entrenadores.
 ///
 /// Secciones plegables por tema + "Lo Nuevo" con la versión actual destacada.
+/// Contenido revisado a fondo en la v1.4.2 (rescate de Ayuda): las
+/// guías viejas mandaban a botones que ya no existen y daban cifras
+/// de un motor de sync anterior. Regla: nada de frecuencias ni
+/// absolutos sin verificar en el código vigente.
 library;
 
 import 'package:flutter/material.dart';
@@ -29,10 +33,12 @@ class AyudaScreen extends StatelessWidget {
                 const _Tema('Tu trabajo diario'),
                 const _Seccion(
                   'Inscribir un cliente',
-                  '1. Toca "Inscribir" en el inicio.\n'
+                  '1. En el inicio, toca el botón naranja del rayo (abajo '
+                  'a la derecha) y elige "Inscribir".\n'
                   '2. Escribe el nombre y, si quieres, teléfono, carnet y foto.\n'
-                  '3. Elige el período de pago y confirma.\n'
-                  '4. Si ya existe alguien parecido, la app te avisa.\n\n'
+                  '3. Elige el tipo de pago y confirma el resumen.\n'
+                  '4. Si ya existe alguien parecido, la app te avisa '
+                  'antes de duplicarlo.\n\n'
                   'Todo se guarda en el teléfono aunque no haya internet.',
                   icono: Icons.edit_note,
                   color: AppColores.info,
@@ -40,8 +46,12 @@ class AyudaScreen extends StatelessWidget {
                 const _Seccion(
                   'Cobrar una mensualidad',
                   '1. Busca al cliente o ábrelo desde las listas.\n'
-                  '2. Toca "Registrar pago" (o el botón Pagar de la lista).\n'
-                  '3. Elige el período y el método (efectivo o transferencia).\n'
+                  '2. En su ficha toca "Registrar pago" (o el botón Pagar '
+                  'de la lista). También puedes tocar el botón del rayo '
+                  'del inicio y elegir "Cobrar".\n'
+                  '3. Elige el tipo de pago (mensual, semanal, quincenal '
+                  'u ofertas como "Oferta 50%") y el método: efectivo o '
+                  'transferencia.\n'
                   '4. Confirma el resumen.\n\n'
                   'Si está vencido, en su ficha verás "Renovación rápida" '
                   'para cobrarle 1 mes con un toque.',
@@ -50,34 +60,64 @@ class AyudaScreen extends StatelessWidget {
                 ),
                 const _Seccion(
                   'Pago diario',
-                  'Para quien entrena un día suelto. Se registra en '
-                  '"Pago diario" del inicio.',
+                  'Para quien entrena un día suelto.\n'
+                  'En el inicio, toca el botón del rayo y elige '
+                  '"Pago diario". Queda registrado en tu turno y en tu '
+                  'pendiente si es en efectivo.',
                   icono: Icons.receipt_long,
                   color: AppColores.infoOscuro,
                 ),
                 const _Seccion(
                   'Las listas',
-                  '• Vencen hoy: pagan hoy.\n'
-                  '• Por vencer: vencen en los próximos 3 días.\n'
-                  '• -30d: atrasados de menos de un mes.\n'
-                  '• +30d: atrasados de más de un mes.\n'
-                  '• Cumpleaños: cumplen años esta semana.\n\n'
-                  'Toca Pagar en cualquier fila para cobrar sin entrar a la ficha.',
+                  '• Hoy: vencen hoy.\n'
+                  '• Por vencer: vencen en los próximos 3 días (sin '
+                  'contar los de hoy).\n'
+                  '• Atrasados -30d: vencidos hace menos de un mes.\n'
+                  '• Atrasados +30d: vencidos hace más de un mes.\n'
+                  '• Al día: clientes activos con su pago corriente.\n\n'
+                  'Toca Pagar en cualquier fila para cobrar sin entrar '
+                  'a la ficha.',
                   icono: Icons.list_alt,
                   color: AppColores.alerta,
                 ),
                 const _Seccion(
                   'Mi turno',
-                  'Lo que cobraste hoy y tu pendiente a entregar. '
-                  'Cada entrenador solo ve lo suyo.',
+                  'Tus cobros de hoy, tu cierre de turno y tu pendiente '
+                  'a entregar. Con tu usuario solo ves tus números.',
                   icono: Icons.person,
                   color: AppColores.infoOscuro,
+                ),
+                const _Seccion(
+                  'Avisos WhatsApp de hoy',
+                  'El botón de avisos del inicio junta lo del día: '
+                  'cumpleaños, clientes que vencen hoy, por vencer y '
+                  'recibos de pago.\n\n'
+                  'Al tocar un aviso se abre TU WhatsApp con el mensaje '
+                  'ya escrito; tú decides si lo envías. La app no '
+                  'envía nada sola.',
+                  icono: Icons.chat,
+                  color: AppColores.exito,
+                ),
+                const _Seccion(
+                  'Foto del cliente',
+                  'Al poner o cambiar la foto puedes acercarla y '
+                  'moverla para encuadrar el rostro: lo que dejes en '
+                  'el cuadro es lo que se guarda.\n\n'
+                  'Para quitarla, en la ficha toca "Eliminar foto" '
+                  '(funciona aunque la foto nunca se haya descargado '
+                  'en este teléfono).',
+                  icono: Icons.photo_camera,
+                  color: AppColores.info,
                 ),
                 const _Tema('Dinero'),
                 const _Seccion(
                   'Pendiente a entregar',
-                  'Es el efectivo que cobraste y aún no le entregaste a Jc. '
-                  'Baja solo cuando él lo confirma. No es un error.',
+                  'Es el efectivo que cobraste (pagos, diarios y ventas '
+                  'en efectivo) y aún no le entregaste al dueño. '
+                  'Baja cuando el dueño hace el arqueo y confirma la '
+                  'entrega; no es un error.\n\n'
+                  'Las transferencias no entran aquí: van directo a '
+                  'la cuenta del dueño.',
                   icono: Icons.handshake,
                   color: AppColores.exito,
                 ),
@@ -89,55 +129,131 @@ class AyudaScreen extends StatelessWidget {
                   icono: Icons.smartphone,
                   color: AppColores.infoOscuro,
                 ),
+                const _Seccion(
+                  'Suplementos',
+                  'Para vender: busca el producto (o el cliente, si la '
+                  'venta es suya), elige cantidad y moneda (CUP o USD) '
+                  'y confirma. Puedes enviar el comprobante por '
+                  'WhatsApp.\n\n'
+                  'Si un producto se vende a crédito queda como fiado '
+                  'hasta que se salde. El dueño controla el stock, '
+                  'los márgenes y los fiados desde Administración.',
+                  icono: Icons.medication,
+                  color: AppColores.info,
+                ),
+                const _Seccion(
+                  'Nómina (solo dueño)',
+                  'En Administración → Nómina: la base es el número de '
+                  'clientes que pagaron el mes, por la tarifa de cada '
+                  'entrenador, más los bonos. La app la pre-calcula '
+                  'sola.\n\n'
+                  'Ojo: quien paga este mes pero su cobertura vence '
+                  'dentro del propio mes (por ejemplo un semanal) no '
+                  'entra en la base de este mes.',
+                  icono: Icons.calculate,
+                  color: AppColores.alerta,
+                ),
+                const _Tema('Gestión'),
+                const _Seccion(
+                  'Control de Acceso',
+                  'En Administración → Control de Acceso, con dos '
+                  'pestañas:\n\n'
+                  '• Entrenadores: los usuarios de esta app de gestión '
+                  'y sus turnos.\n'
+                  '• Clientes: el acceso de cada cliente a su app. '
+                  'Ahí generas o reseteas su PIN y, con el botón de '
+                  'tres puntos de cada tarjeta, tienes las opciones '
+                  'rápidas (ver ficha, avisar por WhatsApp y más).\n\n'
+                  'Si un día el registro automático de turnos falló, '
+                  'el dueño puede marcar el turno a mano. El horario '
+                  'semanal de turnos lo define el dueño en '
+                  'Administración → Horario.',
+                  icono: Icons.badge,
+                  color: AppColores.info,
+                ),
+                const _Seccion(
+                  'Adopción y Campaña WA (solo dueño)',
+                  'En Control de Acceso → Clientes:\n\n'
+                  '• Adopción: cuántos clientes ya tienen acceso a su '
+                  'app y cuántos la han activado.\n'
+                  '• Campaña WA: una tanda guiada para invitar por '
+                  'WhatsApp a los clientes que faltan, uno por uno '
+                  '(máximo 40 por tanda). La app prepara cada mensaje '
+                  'y recuerda por dónde quedaste; el envío siempre '
+                  'lo haces tú desde tu WhatsApp.',
+                  icono: Icons.campaign,
+                  color: AppColores.naranja,
+                ),
+                const _Seccion(
+                  'Incidencias',
+                  'Si algo anda mal en el gym (equipo roto, un problema '
+                  'con un cliente, lo que sea), repórtalo como '
+                  'incidencia con su descripción. El dueño las sigue '
+                  'y las marca resueltas; tú ves el estado de las '
+                  'tuyas.',
+                  icono: Icons.report_problem,
+                  color: AppColores.alerta,
+                ),
+                const _Seccion(
+                  'Papelera',
+                  'Los clientes inactivos van a la papelera. Desde '
+                  'ahí puedes recuperarlos sin inscribirlos de nuevo. '
+                  'Eliminarlos definitivamente solo puede hacerlo '
+                  'el dueño.',
+                  icono: Icons.delete_outline,
+                ),
                 const _Tema('La app'),
                 const _Seccion(
                   '¿Necesita internet?',
-                  'No para trabajar. Inscribes y cobras con normalidad en el gym; '
-                  'cuando tengas conexión, los datos se envían solos.',
+                  'No para trabajar. Inscribes y cobras con normalidad '
+                  'en el gym; cuando tengas conexión, los datos se '
+                  'envían solos.',
                   icono: Icons.signal_cellular_alt,
                   color: AppColores.naranja,
                 ),
                 const _Seccion(
                   'Sincronización',
-                  '• Revisa cambios de otros entrenadores cada 2 minutos.\n'
-                  '• Tus cambios suben cada hora, en segundo plano, o al tocar '
-                  '"Sincronizar ahora".\n'
-                  '• Si ves "N por subir", son tus cambios esperando conexión.\n'
-                  '• En el inicio verás la hora de la última sincronización. '
-                  'Si es vieja, busca mejor cobertura.',
+                  '• La app sincroniza sola al abrirla y cuando hay '
+                  'cambios con conexión: sube lo tuyo y baja lo de '
+                  'los demás.\n'
+                  '• El botón de sincronizar del inicio muestra el '
+                  'estado (al día, sincronizando, esperando '
+                  'conexión) y tocándolo fuerzas una sincronización.\n'
+                  '• Si ves "N por subir", son tus cambios esperando '
+                  'conexión; no se pierden.\n'
+                  '• Las fotos suben después de los datos, para que '
+                  'un cobro nunca espere por una foto.',
                   icono: Icons.sync,
                   color: AppColores.info,
-                ),
-                const _Seccion(
-                  'Papelera',
-                  'Los clientes inactivos van a la papelera. Desde ahí puedes '
-                  'recuperarlos sin inscribirlos de nuevo. '
-                  'Solo Jc puede eliminarlos definitivamente.',
-                  icono: Icons.delete_outline,
                 ),
                 const _Tema('Si algo falla'),
                 const _Seccion(
                   'Problemas comunes',
-                  '• "Sin conexión": sigue trabajando, todo se guarda y sube después.\n'
-                  '• "Conexión muy lenta": ten paciencia, las fotos continúan '
-                  'donde quedaron.\n'
-                  '• "Error del servidor": reintenta luego; si sigue, avisa a Jc.\n'
-                  '• "Te saca al login": tu sesión venció, entra de nuevo.\n'
-                  '• "Un cliente no aparece": sincroniza manualmente.',
+                  '• "Sin conexión": sigue trabajando, todo se guarda '
+                  'y sube después.\n'
+                  '• "Conexión muy lenta": ten paciencia, las fotos '
+                  'continúan donde quedaron.\n'
+                  '• "Error del servidor": reintenta luego; si sigue, '
+                  'avisa al dueño.\n'
+                  '• "Te saca al login": tu sesión venció, entra de '
+                  'nuevo.\n'
+                  '• "Un cliente no aparece": sincroniza manualmente '
+                  'desde el inicio.',
                   icono: Icons.warning,
                   color: AppColores.error,
                 ),
                 const _Seccion(
                   'Tu privacidad',
-                  'Solo ves tus datos: tu pendiente, tu turno, tus cobros. '
-                  'Jc ve los totales de todos para llevar el control del gym.',
+                  'Con tu usuario ves tus cobros, tu turno y tu '
+                  'pendiente. El dueño ve los totales de todo el gym '
+                  'para llevar el control.',
                   icono: Icons.lock,
                   color: AppColores.error,
                 ),
                 const _Seccion(
                   'Contacto',
-                  '¿Dudas con la app? Escríbele a Jc por Telegram: '
-                  '${AppConfig.telegramContacto}.',
+                  '¿Dudas con la app? Escríbele al dueño por '
+                  'Telegram: ${AppConfig.telegramContacto}.',
                   icono: Icons.phone,
                   color: AppColores.exito,
                 ),

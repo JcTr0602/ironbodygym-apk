@@ -15,6 +15,58 @@ class Novedad {
 }
 
 const novedades = [
+  Novedad('1.4.1', [
+    'La app ahora se llama Iron Body Gestión',
+    'Administración reorganizada: lo de todos los días quedó arriba',
+    'Control de Acceso: opciones rápidas en cada cliente (los tres puntos de su tarjeta)',
+    'Horario de turnos del dueño: la app de clientes muestra quién abre según el horario cuando no hay turno registrado',
+    'Actividad: gráfico de acciones por día (30 días) y filtros que quedan guardados',
+    'Adopción y Campaña WA (solo dueño): estadísticas de la app de clientes e invitaciones por tandas',
+    'Foto del cliente: el recorte al ajustarla ahora sí se aplica tal cual lo dejas',
+    'Eliminar la foto de un cliente funciona aunque nunca se haya descargado en este teléfono',
+    'Ficha del cliente reorganizada: acciones juntas y el acceso a su app más claro',
+  ]),
+  Novedad('1.4.0', [
+    'Control de Acceso: entrenadores y accesos de la app de clientes en un solo lugar',
+    'Los clientes pueden activar su app ellos mismos con el PIN inicial',
+    'Turnos manuales: marca quién abrió si el registro automático falló',
+    'Estadísticas rápidas en el inicio: cuántos pagaron el mes y la base de la nómina',
+    'Nómina pre-calculada (solo dueño) en Administración',
+    'Mediciones del cliente simplificadas en su ficha',
+    'Botón de sincronizar con estados claros: sincronizando, al día o esperando conexión',
+  ]),
+  Novedad('1.3.9', [
+    'Permisos por usuario: cada quien ve y hace solo lo que le toca',
+    'App de clientes: mediciones de progreso y planes nutricionales',
+    'Al inscribir: tipos de pago personalizados en la lista (por ejemplo, las ofertas)',
+  ]),
+  Novedad('1.3.8', [
+    'Avisos de WhatsApp mejorados',
+    'Cumpleaños mejor presentados en el inicio y en los avisos',
+  ]),
+  Novedad('1.3.7', [
+    'Suplementos: margen por producto, aviso de stock bajo y control de fiados',
+    'Comprobante de venta para enviar por WhatsApp',
+    'Buscar al cliente al registrar una venta',
+    'Actividad y Auditoría rediseñadas; Administración reorganizada',
+    '"Por vencer" ya no mezcla a los que vencen hoy (tienen su propia lista)',
+  ]),
+  Novedad('1.3.6', [
+    'Avisos WhatsApp de hoy: cumpleaños, vencimientos y recibos en una sola bandeja',
+    'Arqueo de caja (solo dueño): liquida el efectivo pendiente de cada entrenador',
+    'Incidencias de sincronización visibles en Administración',
+    'Botón de acciones rápidas (el rayo) en el inicio: Cobrar, Pago diario e Inscribir',
+  ]),
+  Novedad('1.3.5', [
+    'Confirmación con resumen antes de inscribir un cliente',
+    'Actividad renovada: más detalle de quién hizo qué',
+    'Sincronización por alcance: baja solo lo que cambió, más ligera',
+  ]),
+  Novedad('1.3.4', [
+    'Motor de sincronización nuevo: más rápido y más fiable',
+    'Las fotos suben sin bloquear los cobros: primero los datos, después las fotos',
+    'Limpieza interna de la base de datos: la app responde mejor con muchos clientes',
+  ]),
   Novedad('1.3.2', [
     'Plantillas de descripción por tipo de incidencia',
     'Acciones en lote para incidencias (cambiar estado de varias a la vez)',
