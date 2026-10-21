@@ -59,25 +59,27 @@ Map<String, dynamic> _articuloValido() => {
     };
 
 void main() {
-  test('limpia v33: espejo y borradores existen', () async {
+  test('limpia v34: espejos GymPedia y Reservas existen', () async {
     final db = await _abrirDbVacia();
-    expect(await db.getVersion(), 33);
+    expect(await db.getVersion(), 34);
     expect(await _existeTabla(db, 'gympedia_articulos'), isTrue);
     expect(await _existeTabla(db, 'gympedia_borradores'), isTrue);
+    expect(await _existeTabla(db, 'reservas'), isTrue);
   });
 
-  test('upgrade 32→33: tablas nuevas y cursores GymPedia en 0 '
+  test('upgrade 32→actual: tablas nuevas y cursores propios en 0 '
       'aunque el watermark global vaya alto', () async {
     var db = await _abrirDbVacia();
     await db.execute('DROP TABLE gympedia_articulos');
     await db.execute('DROP TABLE gympedia_borradores');
+    await db.execute('DROP TABLE reservas');
     await LocalDb.instance.setWatermark(83184);
     await db.setVersion(32);
     await db.close();
     await LocalDb.resetParaTest();
 
     db = await LocalDb.instance.db;
-    expect(await db.getVersion(), 33);
+    expect(await db.getVersion(), 34);
     expect(await _existeTabla(db, 'gympedia_articulos'), isTrue);
     expect(await _existeTabla(db, 'gympedia_borradores'), isTrue);
     expect(await LocalDb.instance.getMeta('wm_gympedia_articulos'), '0');
@@ -85,6 +87,10 @@ void main() {
     // La clave: NO hereda los 83184 del global.
     expect(await LocalDb.instance.getWatermarkTabla('gympedia_articulos'),
         0);
+    // Reservas v2 (v34): mismo patrón de cursor propio.
+    expect(await _existeTabla(db, 'reservas'), isTrue);
+    expect(await LocalDb.instance.getMeta('wm_reservas'), '0');
+    expect(await LocalDb.instance.getWatermarkTabla('reservas'), 0);
   });
 
   test('borrador no toca el espejo; publicar sí y borra el borrador',

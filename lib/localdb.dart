@@ -40,7 +40,7 @@ class LocalDb {
   /// v1.4.0 (Argón): versión actual del esquema local. Los tests de
   /// migración comparan contra esta constante en vez de un número
   /// fijo, para no caer en cascada de fallos con cada migración.
-  static const int versionActual = 33;
+  static const int versionActual = 34;
 
   /// v1.4.4 (v33): DDL de borradores de GymPedia (compartido entre
   /// onCreate y la migración v33). Los campos de contenido espejan el
@@ -1003,6 +1003,20 @@ class LocalDb {
           await db.rawInsert(
               "INSERT OR IGNORE INTO meta (k, v) VALUES ('wm_gympedia_borrados', '0')");
         }
+        if (oldV < 34) {
+          // Reservas v2: espejo de la proyección sync_reservas.
+          // Cursor propio en 0 (mismo patrón que GymPedia): la
+          // tabla nace vacía y debe descargarse completa aunque
+          // el watermark global vaya muy avanzado.
+          await db.execute(
+              'CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT NOT NULL)');
+          await db.execute(
+              'CREATE TABLE IF NOT EXISTS reservas (id INTEGER PRIMARY KEY, data TEXT NOT NULL, sync_seq INTEGER NOT NULL)');
+          await db.execute(
+              'CREATE INDEX IF NOT EXISTS idx_reservas_seq ON reservas(sync_seq)');
+          await db.rawInsert(
+              "INSERT OR IGNORE INTO meta (k, v) VALUES ('wm_reservas', '0')");
+        }
       },
     );
     // v1.2.5+28: repara el índice FTS si la migración lo omitió y el
@@ -1287,6 +1301,10 @@ class LocalDb {
     await db.execute(
         'CREATE TABLE IF NOT EXISTS gympedia_articulos (id TEXT PRIMARY KEY, data TEXT NOT NULL, sync_seq INTEGER NOT NULL)');
     await db.execute(_ddlGympediaBorradores);
+    // Reservas v2 (v34): espejo de la proyección sync_reservas
+    // (id entero = id de la reserva en gym.db).
+    await db.execute(
+        'CREATE TABLE IF NOT EXISTS reservas (id INTEGER PRIMARY KEY, data TEXT NOT NULL, sync_seq INTEGER NOT NULL)');
     // v1.4.0 (v31): caché del pre-cálculo de nómina. Solo guarda el
     // conteo de clientes que pagaron el mes + huella de insumos +
     // cuándo se calculó. Bonos y tarifa se leen siempre en vivo.
@@ -1307,6 +1325,7 @@ class LocalDb {
       'ventas_suplementos', 'categorias_suplemento', 'turnos_cierre',
       'liquidaciones_caja', 'incidencias_sync', // v1.3.6 (v28)
       'gympedia_articulos', // v1.4.4 (v33)
+      'reservas', // Reservas v2 (v34)
     ]) {
       await db.execute('CREATE INDEX IF NOT EXISTS idx_${t}_seq ON $t(sync_seq)');
     }
@@ -3988,6 +4007,9 @@ class LocalDb {
     // v1.4.4 (v33): GymPedia tampoco hereda el global (nace en v33 con
     // el global ya avanzado; heredar saltaría todos los artículos).
     if (tabla == 'gympedia_articulos') return 0;
+    // Reservas v2 (v34): mismo motivo — la proyección nace con la
+    // tabla y debe descargarse desde cero.
+    if (tabla == 'reservas') return 0;
     return getWatermark(); // hereda el global (migración)
   }
 

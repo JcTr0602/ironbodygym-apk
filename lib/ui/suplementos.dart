@@ -16,6 +16,7 @@ import 'package:uuid/uuid.dart';
 
 import '../auth.dart';
 import '../fotos.dart';
+import '../permisos_entrenador.dart';
 import '../fotos_cola.dart';
 import '../localdb.dart';
 import '../negocio.dart';
@@ -25,6 +26,7 @@ import 'cuentas_por_cobrar.dart';
 import 'detalle_suplemento.dart';
 import 'diseno.dart';
 import 'historial_ventas.dart';
+import 'reservas.dart';
 import 'venta_suplemento.dart';
 import 'widgets.dart';
 
@@ -49,6 +51,23 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
   List<int> _topIds = [];
 
   bool get _esDueno => _auth.isOwner;
+
+  // Reservas v2: solicitudes pendientes de respuesta (contador
+  // del acceso a la bandeja).
+  int _reservasSolicitadas = 0;
+
+  bool get _puedeReservas =>
+      _esDueno || PermisosEntrenador().canVenderSuplementos;
+
+  Future<void> _cargarReservasPendientes() async {
+    if (!_puedeReservas) return;
+    final reservas = await LocalDb.instance.allMirror('reservas');
+    if (!mounted) return;
+    setState(() {
+      _reservasSolicitadas =
+          reservas.where((r) => r['estado'] == 'solicitada').length;
+    });
+  }
 
   @override
   void initState() {
@@ -85,6 +104,7 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
       _topIds = _topVendidos(ventas);
       _cargando = false;
     });
+    await _cargarReservasPendientes();
   }
 
   /// v1.2.1: ids de los 4 productos más vendidos (por cantidad).
@@ -311,6 +331,25 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
             tooltip: 'Compartir catálogo',
             onPressed: _compartirCatalogo,
           ),
+          // Reservas v2: bandeja de reservas de los clientes,
+          // con contador de solicitudes sin responder.
+          if (_puedeReservas)
+            IconButton(
+              icon: Badge(
+                isLabelVisible: _reservasSolicitadas > 0,
+                label: Text('$_reservasSolicitadas'),
+                child: const Icon(Icons.bookmark_border),
+              ),
+              tooltip: 'Reservas',
+              onPressed: () async {
+                await Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                      builder: (_) => const ReservasScreen()),
+                );
+                if (mounted) _cargar();
+              },
+            ),
           // v1.3.7 (Fase B §6.2): cuentas por cobrar (fiados).
           IconButton(
             icon: const Icon(Icons.account_balance_wallet_outlined),

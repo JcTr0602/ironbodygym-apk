@@ -139,6 +139,8 @@ class SyncScope {
     'ventas_suplementos': ['clientes', 'suplementos'],
     'incidencias': ['incidencia_tipos'],
     'incidencia_eventos': ['incidencias'],
+    // Reservas v2: la bandeja resuelve nombres desde ambos espejos.
+    'reservas': ['clientes', 'suplementos'],
   };
 
   /// Scopes de pantalla: solo declaran sus tablas objetivo.
@@ -158,10 +160,13 @@ class SyncScope {
     'pagos': ['clientes', 'pagos', 'pagos_diarios'],
     'cobrar': ['clientes', 'pagos', 'pagos_diarios'],
     // Suplementos: orden exacto categorías → inventario → ventas.
+    // Reservas v2: la bandeja vive en esta pantalla; su espejo se
+    // refresca con el mismo alcance.
     'suplementos': [
       'categorias_suplemento',
       'suplementos',
-      'ventas_suplementos'
+      'ventas_suplementos',
+      'reservas'
     ],
     'ventas': ['ventas_suplementos'],
     'incidencias': ['incidencia_eventos'],
@@ -577,6 +582,8 @@ class SyncEngine {
         return 'ventas de suplementos';
       case 'gympedia_articulos':
         return 'GymPedia';
+      case 'reservas':
+        return 'reservas';
       default:
         return tabla.replaceAll('_', ' ');
     }
@@ -1950,6 +1957,7 @@ class SyncEngine {
       'liquidaciones_caja', // v1.3.6 (v28, ítem 1B)
       'incidencias_sync', // v1.3.6 (v28, ítem 1C)
       'gympedia_articulos', // v1.4.4 (v33)
+      'reservas', // Reservas v2 (v34)
     ];
     final tablas = tablasFiltro ?? todasTablas;
     // v1.2.5 (D19): si el manifiesto marcó algún ámbito divergente,
@@ -1991,6 +1999,7 @@ class SyncEngine {
       'ventas_suplementos',
       'categorias_suplemento',
       'gympedia_articulos',
+      'reservas', // Reservas v2: la proyección es completa, purgar es seguro
     };
     try {
       // Programación idempotente por tabla (panel v1.4.4): la
@@ -2096,6 +2105,8 @@ class SyncEngine {
       'incidencias_sync': 'sync_incidencias_sync',
       // v1.4.4 (v33): espejo de artículos GymPedia.
       'gympedia_articulos': 'sync_gympedia',
+      // Reservas v2 (v34): proyección que publica el puente.
+      'reservas': 'sync_reservas',
     };
     var ti = 0;
     for (final tabla in tablas) {

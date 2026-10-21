@@ -38,6 +38,15 @@ const Map<String, TipoOperacionInfo> kTiposOperacion = {
   'admin_usuario': TipoOperacionInfo('Usuario APK', Icons.manage_accounts),
   'confirmar_entrega':
       TipoOperacionInfo('Confirmar entrega', Icons.check_circle),
+  // Reservas v2.
+  'confirmar_reserva':
+      TipoOperacionInfo('Confirmar reserva', Icons.bookmark_added),
+  'rechazar_reserva':
+      TipoOperacionInfo('Rechazar reserva', Icons.bookmark_remove),
+  'cancelar_reserva':
+      TipoOperacionInfo('Cancelar reserva', Icons.bookmark_remove),
+  'cobrar_reserva':
+      TipoOperacionInfo('Cobrar reserva', Icons.payments),
   'gasto': TipoOperacionInfo('Gasto', Icons.receipt),
   'crear_suplemento':
       TipoOperacionInfo('Nuevo suplemento', Icons.fitness_center),
