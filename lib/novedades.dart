@@ -15,6 +15,10 @@ class Novedad {
 }
 
 const novedades = [
+  Novedad('1.4.3', [
+    'Listas ordenadas por el nombre real: los clientes escritos en minúsculas (p. ej. «alberto prueba») ya no quedan al final, tras la Z',
+    'Limpieza interna: se retiró el sistema viejo de subida de fotos; la cola actual es el único camino (sin cambios visibles)',
+  ]),
   Novedad('1.4.2', [
     'Nómina: «Pagaron el mes» ya no cuenta a los clientes que vencen dentro del mismo mes (ese pago corresponde al mes siguiente)',
     'Panel: tocar una barra de la gráfica de 7 días ya muestra el detalle del día (antes podía cerrar la pantalla)',
