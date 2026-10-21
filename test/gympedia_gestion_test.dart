@@ -65,6 +65,10 @@ void main() {
     expect(await _existeTabla(db, 'gympedia_articulos'), isTrue);
     expect(await _existeTabla(db, 'gympedia_borradores'), isTrue);
     expect(await _existeTabla(db, 'reservas'), isTrue);
+    // Reservas v2: el cursor propio nace sembrado también en
+    // instalación limpia (panel Gestión 2026-10-21).
+    expect(await LocalDb.instance.getMeta('wm_reservas'), '0');
+    expect(await LocalDb.instance.getWatermarkTabla('reservas'), 0);
   });
 
   test('upgrade 32→actual: tablas nuevas y cursores propios en 0 '

@@ -1302,7 +1302,10 @@ class LocalDb {
         'CREATE TABLE IF NOT EXISTS gympedia_articulos (id TEXT PRIMARY KEY, data TEXT NOT NULL, sync_seq INTEGER NOT NULL)');
     await db.execute(_ddlGympediaBorradores);
     // Reservas v2 (v34): espejo de la proyección sync_reservas
-    // (id entero = id de la reserva en gym.db).
+    // (id entero = id de la reserva en gym.db). El cursor propio
+    // se siembra explícito también en instalación limpia (panel
+    // Reservas Gestión 2026-10-21): mismo estado observable que
+    // en una BD migrada, sin depender del fallback de lectura.
     await db.execute(
         'CREATE TABLE IF NOT EXISTS reservas (id INTEGER PRIMARY KEY, data TEXT NOT NULL, sync_seq INTEGER NOT NULL)');
     // v1.4.0 (v31): caché del pre-cálculo de nómina. Solo guarda el
@@ -1400,6 +1403,10 @@ class LocalDb {
             'CREATE INDEX IF NOT EXISTS idx_app_log_ts ON app_log(ts)');
         await db.execute(
             'CREATE TABLE meta (k TEXT PRIMARY KEY, v TEXT NOT NULL)');
+        // Reservas v2 (v34): siembra explícita del cursor propio
+        // también en instalación limpia (panel Gestión 2026-10-21).
+        await db.rawInsert(
+            "INSERT OR IGNORE INTO meta (k, v) VALUES ('wm_reservas', '0')");
         // v1.2.4: incidencias (diseño ChatGPT: bidireccional, offline-first).
         // incidencias_local: creadas en este dispositivo, pendientes de subir.
         // incidencias_mirror: copia de la tabla central de Supabase.

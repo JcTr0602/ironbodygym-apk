@@ -3,8 +3,10 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:uuid/uuid.dart';
 
+import '../auth.dart';
 import '../localdb.dart';
 import '../negocio.dart' show fmtMonto;
+import '../permisos_entrenador.dart';
 import '../sync.dart';
 import '../tiempo.dart';
 import 'componentes.dart';
@@ -190,7 +192,12 @@ String etiquetaEstadoReserva(String estado) {
 // ------------------------------------------------------------------
 
 class ReservasScreen extends StatefulWidget {
-  const ReservasScreen({super.key});
+  /// Acceso a la bandeja. Null = se calcula de la sesión (dueño
+  /// o can_vender_suplementos, la misma clave que exige el
+  /// servidor para las ops). Inyectable en tests.
+  final bool? accesoPermitido;
+
+  const ReservasScreen({super.key, this.accesoPermitido});
 
   @override
   State<ReservasScreen> createState() => _ReservasScreenState();
@@ -199,12 +206,27 @@ class ReservasScreen extends StatefulWidget {
 class _ReservasScreenState extends State<ReservasScreen> {
   BandejaReservas? _bandeja;
   Set<int> _conOpPendiente = {};
+
+  /// Reservas con una op encolándose AHORA (panel Gestión
+  /// 2026-10-21): el bloqueo es inmediato y local, antes de
+  /// cualquier await — un segundo toque no puede encolar una
+  /// op contradictoria mientras la primera se persiste o la
+  /// sincronización corre (o falla).
+  final Set<int> _enCurso = {};
   bool _cargando = true;
+
+  bool get _puedeAcceder =>
+      widget.accesoPermitido ??
+      (AuthService().isOwner ||
+          PermisosEntrenador().canVenderSuplementos);
+
+  bool _bloqueada(int id) =>
+      _enCurso.contains(id) || _conOpPendiente.contains(id);
 
   @override
   void initState() {
     super.initState();
-    _cargar();
+    if (_puedeAcceder) _cargar();
   }
 
   Future<void> _cargar() async {
@@ -221,24 +243,51 @@ class _ReservasScreenState extends State<ReservasScreen> {
   }
 
   Future<void> _refrescar() async {
-    await SyncEngine.instance.sincronizarScope('suplementos');
+    try {
+      await SyncEngine.instance.sincronizarScope('suplementos');
+    } catch (_) {
+      // Sin red o sync ocupado: la cola y el bloqueo ya están
+      // persistidos; se relee lo que haya y el ciclo normal de
+      // sincronización resuelve el envío.
+    }
     await _cargar();
   }
 
   Future<void> _encolar(String tipo, Map<String, dynamic> payload,
       String mensajeOk) async {
-    await LocalDb.instance.queueOp(
-      opUuid: const Uuid().v4(),
-      tipo: tipo,
-      payload: payload,
-    );
+    final rid = _entero(payload['reserva_id']);
+    if (rid <= 0 || _bloqueada(rid)) return;
+    // Bloqueo SINCRÓNICO, antes del primer await (panel).
+    setState(() => _enCurso.add(rid));
+    try {
+      await LocalDb.instance.queueOp(
+        opUuid: const Uuid().v4(),
+        tipo: tipo,
+        payload: payload,
+      );
+    } catch (_) {
+      if (mounted) {
+        setState(() => _enCurso.remove(rid));
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('No se pudo guardar la acción. '
+                'Inténtalo de nuevo.')));
+      }
+      return;
+    }
     if (!mounted) return;
+    // La op ya está persistida: la tarjeta queda bloqueada
+    // desde ya, sin esperar a que la sincronización termine.
+    setState(() {
+      _enCurso.remove(rid);
+      _conOpPendiente = {..._conOpPendiente, rid};
+    });
     ScaffoldMessenger.of(context)
         .showSnackBar(SnackBar(content: Text(mensajeOk)));
     await _refrescar();
   }
 
   Future<void> _confirmar(ReservaVista r) async {
+    if (_bloqueada(r.id)) return;
     final ok = await DialogoApp.confirmar(
       context,
       titulo: 'Confirmar reserva',
@@ -252,11 +301,12 @@ class _ReservasScreenState extends State<ReservasScreen> {
     );
     if (ok && mounted) {
       await _encolar('confirmar_reserva', {'reserva_id': r.id},
-          'Reserva #${r.id} confirmada — se sincroniza ahora');
+          'Confirmación de la reserva #${r.id} encolada');
     }
   }
 
   Future<void> _rechazar(ReservaVista r) async {
+    if (_bloqueada(r.id)) return;
     final ctrl = TextEditingController();
     final ok = await showDialog<bool>(
       context: context,
@@ -297,12 +347,13 @@ class _ReservasScreenState extends State<ReservasScreen> {
       await _encolar(
           'rechazar_reserva',
           {'reserva_id': r.id, if (nota.isNotEmpty) 'nota': nota},
-          'Reserva #${r.id} rechazada — se sincroniza ahora');
+          'Rechazo de la reserva #${r.id} encolado');
     }
     ctrl.dispose();
   }
 
   Future<void> _cancelar(ReservaVista r) async {
+    if (_bloqueada(r.id)) return;
     final ok = await DialogoApp.confirmar(
       context,
       titulo: 'Cancelar reserva',
@@ -315,11 +366,12 @@ class _ReservasScreenState extends State<ReservasScreen> {
     );
     if (ok && mounted) {
       await _encolar('cancelar_reserva', {'reserva_id': r.id},
-          'Reserva #${r.id} cancelada — se sincroniza ahora');
+          'Cancelación de la reserva #${r.id} encolada');
     }
   }
 
   Future<void> _cobrar(ReservaVista r) async {
+    if (_bloqueada(r.id)) return;
     var metodo = 'efectivo';
     final dif = r.diferenciaTotal;
     final ok = await showDialog<bool>(
@@ -389,6 +441,24 @@ class _ReservasScreenState extends State<ReservasScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // La puerta de acceso vive TAMBIÉN en la pantalla (panel
+    // Gestión 2026-10-21): el botón de Suplementos no es la
+    // única ruta posible hasta aquí.
+    if (!_puedeAcceder) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Reservas')),
+        body: const Center(
+          child: Padding(
+            padding: EdgeInsets.all(24),
+            child: Text(
+              'No tienes permiso para ver las reservas.\n'
+              'Pídele al dueño que te active «Vender suplementos».',
+              textAlign: TextAlign.center,
+            ),
+          ),
+        ),
+      );
+    }
     final b = _bandeja;
     return Scaffold(
       appBar: AppBar(
@@ -426,16 +496,38 @@ class _ReservasScreenState extends State<ReservasScreen> {
                         _tituloSeccion(
                             'Solicitadas', b.solicitadas.length),
                         for (final r in b.solicitadas)
-                          _tarjeta(r, solicitada: true),
+                          TarjetaReserva(
+                            reserva: r,
+                            bloqueada: _bloqueada(r.id),
+                            onConfirmar: () => _confirmar(r),
+                            onRechazar: () => _rechazar(r),
+                            onCancelar: () => _cancelar(r),
+                            onCobrar: () => _cobrar(r),
+                          ),
                       ],
                       if (b.reservadas.isNotEmpty) ...[
                         _tituloSeccion('Reservadas', b.reservadas.length),
                         for (final r in b.reservadas)
-                          _tarjeta(r, reservada: true),
+                          TarjetaReserva(
+                            reserva: r,
+                            bloqueada: _bloqueada(r.id),
+                            onConfirmar: () => _confirmar(r),
+                            onRechazar: () => _rechazar(r),
+                            onCancelar: () => _cancelar(r),
+                            onCobrar: () => _cobrar(r),
+                          ),
                       ],
                       if (b.historial.isNotEmpty) ...[
                         _tituloSeccion('Historial', b.historial.length),
-                        for (final r in b.historial) _tarjeta(r),
+                        for (final r in b.historial)
+                          TarjetaReserva(
+                            reserva: r,
+                            bloqueada: _bloqueada(r.id),
+                            onConfirmar: () => _confirmar(r),
+                            onRechazar: () => _rechazar(r),
+                            onCancelar: () => _cancelar(r),
+                            onCobrar: () => _cobrar(r),
+                          ),
                       ],
                     ],
                   ),
@@ -452,9 +544,35 @@ class _ReservasScreenState extends State<ReservasScreen> {
     );
   }
 
-  Widget _tarjeta(ReservaVista r,
-      {bool solicitada = false, bool reservada = false}) {
-    final bloqueada = _conOpPendiente.contains(r.id);
+}
+
+/// Tarjeta de una reserva. Widget sin estado y sin dependencias
+/// de BD/sync (testeable directo): la pantalla le pasa si está
+/// [bloqueada] (op encolada o encolándose) y los callbacks; con
+/// bloqueo muestra el chip y NINGÚN botón de acción.
+class TarjetaReserva extends StatelessWidget {
+  final ReservaVista reserva;
+  final bool bloqueada;
+  final VoidCallback onConfirmar;
+  final VoidCallback onRechazar;
+  final VoidCallback onCancelar;
+  final VoidCallback onCobrar;
+
+  const TarjetaReserva({
+    super.key,
+    required this.reserva,
+    required this.bloqueada,
+    required this.onConfirmar,
+    required this.onRechazar,
+    required this.onCancelar,
+    required this.onCobrar,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final r = reserva;
+    final solicitada = r.estado == 'solicitada';
+    final reservada = r.estado == 'reservada';
     final ahora = ahoraHabana();
     return Card(
       child: Padding(
@@ -478,10 +596,7 @@ class _ReservasScreenState extends State<ReservasScreen> {
             Text('${r.cantidad} × ${r.suplementoNombre}'),
             Text('Total: ${fmtMonto(r.totalFoto)} CUP '
                 '(${fmtMonto(r.precioUnitario)} c/u al reservar)'),
-            if (solicitada)
-              Text(textoVenceEn(r.expiraEn, ahora),
-                  style: const TextStyle(color: Colors.orange)),
-            if (reservada)
+            if (solicitada || reservada)
               Text(textoVenceEn(r.expiraEn, ahora),
                   style: const TextStyle(color: Colors.orange)),
             if (r.notaResolucion != null &&
@@ -501,12 +616,12 @@ class _ReservasScreenState extends State<ReservasScreen> {
                 mainAxisAlignment: MainAxisAlignment.end,
                 children: [
                   OutlinedButton(
-                    onPressed: () => _rechazar(r),
+                    onPressed: onRechazar,
                     child: const Text('Rechazar'),
                   ),
                   const SizedBox(width: 8),
                   FilledButton(
-                    onPressed: () => _confirmar(r),
+                    onPressed: onConfirmar,
                     child: const Text('Confirmar'),
                   ),
                 ],
@@ -516,12 +631,12 @@ class _ReservasScreenState extends State<ReservasScreen> {
                 mainAxisAlignment: MainAxisAlignment.end,
                 children: [
                   OutlinedButton(
-                    onPressed: () => _cancelar(r),
+                    onPressed: onCancelar,
                     child: const Text('Cancelar'),
                   ),
                   const SizedBox(width: 8),
                   FilledButton(
-                    onPressed: () => _cobrar(r),
+                    onPressed: onCobrar,
                     child: const Text('Cobrar'),
                   ),
                 ],
