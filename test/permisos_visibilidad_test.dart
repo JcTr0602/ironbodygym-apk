@@ -12,13 +12,20 @@ void main() {
               esDueno: true, permisosCargados: true, canVerCifras: false),
           isTrue);
     });
-    test('sin foto cargada no se restringe (primer arranque)', () {
+    test('sin foto cargada: fail-closed (panel 2026-10-21)', () {
       expect(
           cifrasVisibles(
               esDueno: false,
               permisosCargados: false,
               canVerCifras: false),
-          isTrue);
+          isFalse);
+      // Ni alegando la clave: sin foto no hay concesión.
+      expect(
+          cifrasVisibles(
+              esDueno: false,
+              permisosCargados: false,
+              canVerCifras: true),
+          isFalse);
     });
     test('con foto, la clave manda', () {
       expect(
@@ -47,7 +54,7 @@ void main() {
               esDueno: false,
               permisosCargados: false,
               canVerTodosPagos: false),
-          isTrue);
+          isFalse);
       expect(
           pagosSinRestriccion(
               esDueno: true,
@@ -73,6 +80,16 @@ void main() {
     });
     test('sin telegram id no se atribuye ninguno', () {
       expect(filtrarPagosPorEntrenador(pagos, null), isEmpty);
+    });
+    test('la atribución es exacta: 111.9 no es el usuario 111 '
+        '(panel 2026-10-21)', () {
+      final raros = <Map<String, dynamic>>[
+        {'id': 1, 'telegram_user_id': 111.9},
+        {'id': 2, 'telegram_user_id': 111.0},
+        {'id': 3, 'telegram_user_id': ' 111 '},
+      ];
+      expect(filtrarPagosPorEntrenador(raros, 111).map((p) => p['id']),
+          [2, 3]);
     });
   });
 }

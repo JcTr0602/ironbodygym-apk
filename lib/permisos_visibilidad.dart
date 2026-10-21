@@ -4,37 +4,44 @@
 /// servidor). Funciones puras, testeadas en
 /// test/permisos_visibilidad_test.dart.
 ///
-/// Regla de arranque: si los permisos aún no se han cargado
-/// ni una vez (primer arranque sin red), NO se restringe —
-/// un candado de UI no debe dejar al entrenador sin su panel
-/// por falta de un dato que nunca llegó. En cuanto hay una
-/// foto cargada (RPC o caché), la clave manda: ausente = no.
+/// FAIL-CLOSED (panel de visibilidad 2026-10-21, Luna+Terra):
+/// estos candados ocultan datos financieros; la ausencia de
+/// una foto de permisos NO equivale a permiso concedido. Sin
+/// foto, el entrenador ve un estado neutro en el dashboard y
+/// solo SUS pagos en la lista (dato propio, sin exposición de
+/// terceros), hasta que la foto llegue (caché o RPC: en la
+/// práctica, al arrancar). El dueño nunca se restringe.
 
 bool cifrasVisibles({
   required bool esDueno,
   required bool permisosCargados,
   required bool canVerCifras,
 }) =>
-    esDueno || !permisosCargados || canVerCifras;
+    esDueno || (permisosCargados && canVerCifras);
 
 bool pagosSinRestriccion({
   required bool esDueno,
   required bool permisosCargados,
   required bool canVerTodosPagos,
 }) =>
-    esDueno || !permisosCargados || canVerTodosPagos;
+    esDueno || (permisosCargados && canVerTodosPagos);
 
-/// Deja solo los pagos cuyo telegram_user_id (número o texto;
-/// en el espejo viaja en el JSON) es el del entrenador. Sin
-/// telegram id conocido no se puede atribuir ninguno: lista
-/// vacía (fail-closed dentro de la restricción).
+/// Deja solo los pagos cuyo telegram_user_id es el del
+/// entrenador. La atribución es EXACTA: solo enteros (número
+/// integral o texto parseable); un 123.9 no es el usuario 123.
+/// Los pagos sin atribución quedan fuera, y sin telegram id
+/// conocido no se atribuye ninguno.
 List<Map<String, dynamic>> filtrarPagosPorEntrenador(
     List<Map<String, dynamic>> pagos, int? telegramId) {
   if (telegramId == null) return const [];
   int? tidDe(Map<String, dynamic> p) {
     final v = p['telegram_user_id'];
-    if (v is num) return v.toInt();
-    return int.tryParse('${v ?? ''}');
+    if (v is int) return v;
+    if (v is num && v.isFinite && v == v.truncateToDouble()) {
+      return v.toInt();
+    }
+    if (v is String) return int.tryParse(v.trim());
+    return null;
   }
 
   return [

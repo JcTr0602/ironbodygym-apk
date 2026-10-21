@@ -275,15 +275,21 @@ class _DashboardScreenState extends State<DashboardScreen> {
         ),
         body: ListView(
           padding: const EdgeInsets.all(16),
-          children: const [
-            SyncBanner(),
-            SizedBox(height: 8),
+          children: [
+            const SyncBanner(),
+            const SizedBox(height: 8),
             Tarjeta(
               child: Text(
-                'El dueño desactivó la vista de cifras de este '
-                'panel. Tus cobros se siguen registrando igual; '
-                'pídele que active «Ver cifras» si lo necesitas.',
-                style: TextStyle(fontSize: 14),
+                PermisosEntrenador().cargado
+                    ? 'El dueño desactivó la vista de cifras de '
+                        'este panel. Tus cobros se siguen '
+                        'registrando igual; pídele que active '
+                        '«Ver cifras» si lo necesitas.'
+                    : 'Cargando tus permisos… En cuanto se '
+                        'comprueben, este panel muestra tus '
+                        'cifras. Si tarda, revisa tu conexión y '
+                        'toca el botón de actualizar.',
+                style: const TextStyle(fontSize: 14),
               ),
             ),
           ],
