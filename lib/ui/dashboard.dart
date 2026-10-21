@@ -9,11 +9,13 @@ import 'package:flutter/material.dart';
 import '../negocio.dart';
 import '../localdb.dart';
 import '../auth.dart';
+import '../tiempo.dart';
 import 'diseno.dart';
 import 'componentes.dart';
 import 'buscar.dart';
 import 'listas.dart';
 import 'widgets.dart';
+import 'detalle_pendiente.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -34,6 +36,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
   Map<String, Map<String, dynamic>> _mejorPeor = {};
   int _activos = 0;
   int _morosos = 0;
+  int _porVencer = 0;
+  double _gastosMes = 0;
   int _nuevos = 0;
   List<Map<String, dynamic>> _ranking = [];
   int _inactivos = 0;
@@ -63,74 +67,102 @@ class _DashboardScreenState extends State<DashboardScreen> {
     _cargar();
   }
 
+  // Versión de carga (panel 2026-10-21): una recarga nueva invalida
+  // el resultado de cualquier carga anterior aún en vuelo, para que
+  // datos viejos no sobrescriban datos frescos. `_cargando` solo
+  // gobierna la PRIMERA carga (spinner de pantalla completa); las
+  // recargas conservan los datos visibles y el scroll.
+  int _versionCarga = 0;
+
   Future<void> _cargar() async {
-    setState(() => _cargando = true);
-    if (!_esDueno) {
-      await _cargarEntrenador();
-      return;
-    }
-    final hoy = await ingresosHoy();
-    final semana = await ingresosSemana();
-    final mes = await ingresosMes();
-    final mesAnt = await ingresosMesAnterior();
-    final proy = await proyeccionMes();
-    final porMet = await ingresosPorMetodo();
-    final porTip = await ingresosPorTipo();
-    final mp = await mejorPeorDia();
-    final activos = await activosCount();
-    final mor = await morosos();
-    final nuevos = await nuevosEsteMes();
-    final rank = await rankingEntrenadores();
-    final inact = await inactivosCount();
-    final pend = await pendientePorEntrenador();
-    final ult7 = await ingresosUltimos7Dias();
-    final ult30 = await ingresosUltimos30Dias();
-    if (mounted) {
-      setState(() {
-        _hoy = hoy;
-        _semana = semana;
-        _mes = mes;
-        _mesAnterior = mesAnt;
-        _proyeccion = proy;
-        _porMetodo = porMet;
-        _porTipo = porTip;
-        _mejorPeor = mp;
-        _activos = activos;
-        _morosos = mor;
-        _nuevos = nuevos;
-        _ranking = rank;
-        _inactivos = inact;
-        _pend = pend;
-        _ultimos7 = ult7;
-        _ultimos30 = ult30;
-        _cargando = false;
-      });
+    final v = ++_versionCarga;
+    try {
+      if (!_esDueno) {
+        await _cargarEntrenador(v);
+        return;
+      }
+      final hoy = await ingresosHoy();
+      final semana = await ingresosSemana();
+      final mes = await ingresosMes();
+      final mesAnt = await ingresosMesAnterior();
+      final proy = await proyeccionMes();
+      final porMet = await ingresosPorMetodo();
+      final porTip = await ingresosPorTipo();
+      final mp = await mejorPeorDia();
+      final activos = await activosCount();
+      final mor = await morosos();
+      // Misma población que la pestaña «Por vencer» de Listas
+      // (porVencer con 3 días, solo activos): conteo y lista
+      // coinciden por construcción.
+      final porVencer = (await porVencer(dias: 3)).length;
+      final gastos = await gastosDelMes(hoyHabanaIso().substring(0, 7));
+      final nuevos = await nuevosEsteMes();
+      final rank = await rankingEntrenadores();
+      final inact = await inactivosCount();
+      final pend = await pendientePorEntrenador();
+      final ult7 = await ingresosUltimos7Dias();
+      final ult30 = await ingresosUltimos30Dias();
+      if (mounted && v == _versionCarga) {
+        setState(() {
+          _hoy = hoy;
+          _semana = semana;
+          _mes = mes;
+          _mesAnterior = mesAnt;
+          _proyeccion = proy;
+          _porMetodo = porMet;
+          _porTipo = porTip;
+          _mejorPeor = mp;
+          _activos = activos;
+          _morosos = mor;
+          _porVencer = porVencer;
+          _gastosMes = gastos;
+          _nuevos = nuevos;
+          _ranking = rank;
+          _inactivos = inact;
+          _pend = pend;
+          _ultimos7 = ult7;
+          _ultimos30 = ult30;
+          _cargando = false;
+        });
+      }
+    } catch (_) {
+      // Un fallo de lectura no debe dejar el spinner eterno ni
+      // borrar lo ya mostrado: se conserva el estado anterior.
+      if (mounted && v == _versionCarga) {
+        setState(() => _cargando = false);
+      }
     }
   }
 
   /// Carga los números propios del entrenador (dashboard por rol, v1.2).
-  Future<void> _cargarEntrenador() async {
-    final tid = _auth.telegramId;
-    final hoy = await ingresosHoyPorEntrenador(tid);
-    final semana = await ingresosSemanaPorEntrenador(tid);
-    final mes = await cobradoMes(tid);
-    final pendCup = await pendienteEntrega(tid);
-    final pendUsd = await pendienteEntregaUsd(tid);
-    final porMet = await ingresosPorMetodoEntrenador(tid);
-    final porTip = await ingresosPorTipoEntrenador(tid);
-    final mp = await mejorPeorDiaEntrenador(tid);
-    if (mounted) {
-      setState(() {
-        _miHoy = hoy;
-        _miSemana = semana;
-        _miMes = mes;
-        _miPendCup = pendCup;
-        _miPendUsd = pendUsd;
-        _miPorMetodo = porMet;
-        _miPorTipo = porTip;
-        _miMejorPeor = mp;
-        _cargando = false;
-      });
+  Future<void> _cargarEntrenador(int v) async {
+    try {
+      final tid = _auth.telegramId;
+      final hoy = await ingresosHoyPorEntrenador(tid);
+      final semana = await ingresosSemanaPorEntrenador(tid);
+      final mes = await cobradoMes(tid);
+      final pendCup = await pendienteEntrega(tid);
+      final pendUsd = await pendienteEntregaUsd(tid);
+      final porMet = await ingresosPorMetodoEntrenador(tid);
+      final porTip = await ingresosPorTipoEntrenador(tid);
+      final mp = await mejorPeorDiaEntrenador(tid);
+      if (mounted && v == _versionCarga) {
+        setState(() {
+          _miHoy = hoy;
+          _miSemana = semana;
+          _miMes = mes;
+          _miPendCup = pendCup;
+          _miPendUsd = pendUsd;
+          _miPorMetodo = porMet;
+          _miPorTipo = porTip;
+          _miMejorPeor = mp;
+          _cargando = false;
+        });
+      }
+    } catch (_) {
+      if (mounted && v == _versionCarga) {
+        setState(() => _cargando = false);
+      }
     }
   }
 
@@ -142,17 +174,30 @@ class _DashboardScreenState extends State<DashboardScreen> {
         : periodo == 'semana'
             ? 'Ingresos últimos 7 días'
             : 'Ingresos del mes';
-    // Obtener pagos del período para el desglose
+    // Partición por ORIGEN (panel 2026-10-21): cada movimiento cae
+    // en UNA sola fila y las filas suman el total. Los pagos se
+    // clasifican por método (todo lo que no sea exactamente
+    // 'transferencia' va a Efectivo, la regla histórica); diarios y
+    // suplementos tienen su fila propia y ya NO se pliegan dentro
+    // de Efectivo (antes se contaban dos veces).
     final pagos = await pagosDelPeriodo(periodo);
-    double efectivo = 0, transferencia = 0;
+    double efectivo = 0, transferencia = 0, diario = 0, suplementos = 0;
     for (final p in pagos) {
       final m = (p['monto'] as num?)?.toDouble() ?? 0;
-      if ('${p['metodo']}' == 'transferencia') {
-        transferencia += m;
-      } else {
-        efectivo += m;
+      switch ('${p['origen'] ?? 'pago'}') {
+        case 'diario':
+          diario += m;
+        case 'suplemento':
+          suplementos += m;
+        default:
+          if ('${p['metodo']}' == 'transferencia') {
+            transferencia += m;
+          } else {
+            efectivo += m;
+          }
       }
     }
+    final total = efectivo + transferencia + diario + suplementos;
     if (!mounted) return;
     showModalBottomSheet(
       context: context,
@@ -169,11 +214,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
             const SizedBox(height: 12),
             _filaDetalle('Efectivo', efectivo),
             _filaDetalle('Transferencia', transferencia),
+            if (diario > 0) _filaDetalle('Pago diario', diario),
+            if (suplementos > 0)
+              _filaDetalle('Suplementos', suplementos),
             const Divider(),
-            _filaDetalle('Total', efectivo + transferencia,
-                negrita: true),
+            _filaDetalle('Total', total, negrita: true),
             const SizedBox(height: 8),
-            Text('${pagos.length} pagos registrados',
+            Text('${pagos.length} movimientos registrados',
                 style: AppTexto.secundario.copyWith(
                     color: AppColores.textoSecundario(ctx))),
             const SizedBox(height: 16),
@@ -284,6 +331,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         _filaDesglose(
                             'Pago diario',
                             _miPorTipo['diario'] ?? 0,
+                            _miMes),
+                        // D2: el bloque por tipo también suma el mes;
+                        // faltaba Suplementos (panel 2026-10-21).
+                        _filaDesglose(
+                            'Suplementos',
+                            _miPorTipo['suplementos'] ?? 0,
                             _miMes),
                         if (_miMejorPeor.isNotEmpty) ...[
                           const SizedBox(height: 8),
@@ -414,7 +467,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
       child: Row(
         children: [
           Icon(sube ? Icons.trending_up : Icons.trending_down,
-              size: 20, color: AppColores.naranja),
+              size: 20,
+              color: sube ? AppColores.exito : AppColores.error),
           const SizedBox(width: 8),
           Expanded(
             child: Text(
@@ -436,12 +490,19 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   /// v1.0.15: desgloses por método y tipo + proyección.
+  /// D2 (panel 2026-10-21): AMBOS bloques incluyen Suplementos y
+  /// usan como denominador el total del mes (_mes, de ingresosMes),
+  /// así cada bloque suma exactamente la tarjeta «Este mes».
+  /// Antes el denominador era ef+tr y los suplementos no tenían
+  /// fila: las filas no sumaban el mes y los % salían inflados.
   Widget _desgloses() {
     final ef = _porMetodo['efectivo'] ?? 0;
     final tr = _porMetodo['transferencia'] ?? 0;
+    final supM = _porMetodo['suplementos'] ?? 0;
     final men = _porTipo['mensual'] ?? 0;
     final dia = _porTipo['diario'] ?? 0;
-    final total = ef + tr;
+    final supT = _porTipo['suplementos'] ?? 0;
+    final total = _mes;
     return Tarjeta(
       child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -452,9 +513,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
             const SizedBox(height: 8),
             _filaDesglose('Efectivo', ef, total),
             _filaDesglose('Transferencia', tr, total),
+            _filaDesglose('Suplementos', supM, total),
             const Divider(height: 16),
             _filaDesglose('Mensualidades', men, total),
             _filaDesglose('Pago diario', dia, total),
+            _filaDesglose('Suplementos', supT, total),
             if (_proyeccion > 0) ...[
               const Divider(height: 16),
               Row(
@@ -464,6 +527,24 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   const Text('Proyección cierre',
                       style: TextStyle(fontSize: 13)),
                   Text('${fmtMonto(_proyeccion.round())} CUP',
+                      style: const TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.bold,
+                          color: naranja)),
+                ],
+              ),
+            ],
+            // Neto del mes (panel 2026-10-21): ingresos − gastos,
+            // todo en CUP (la tabla gastos no maneja otra moneda).
+            if (_gastosMes > 0) ...[
+              const Divider(height: 16),
+              Row(
+                mainAxisAlignment:
+                    MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text('Neto del mes (ingresos − gastos)',
+                      style: TextStyle(fontSize: 13)),
+                  Text('${fmtMonto(_mes - _gastosMes)} CUP',
                       style: const TextStyle(
                           fontSize: 13,
                           fontWeight: FontWeight.bold,
@@ -527,17 +608,27 @@ class _DashboardScreenState extends State<DashboardScreen> {
         scrollDirection: Axis.horizontal,
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.end,
-          children: datos.map((d) {
+          children: datos.asMap().entries.map((e) {
+            final d = e.value;
+            final i = e.key;
             final monto = (d['monto'] as num).toDouble();
             final altura = maxMonto > 0
                 ? (monto / maxMonto * 80).clamp(4.0, 80.0)
                 : 4.0;
             final es30 = _periodoGrafico == '30';
+            // En 30 días la etiqueta es el Nº de día (de la fecha),
+            // solo cada 5 barras para no amontonar; en 7 días, el
+            // día de semana como siempre.
+            final fecha = '${d['fecha'] ?? ''}';
+            final etiqueta = es30
+                ? (i % 5 == 0 && fecha.length >= 10
+                    ? fecha.substring(8, 10)
+                    : '')
+                : d['dia'] as String;
             return GestureDetector(
               // v1.0.15: tocar barra muestra el detalle
               onTap: monto > 0
-                  ? () => _detalleDia(
-                      d['fecha'] as String, monto)
+                  ? () => _detalleDia(d['fecha'] as String)
                   : null,
               child: Padding(
                 padding:
@@ -563,7 +654,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      d['dia'] as String,
+                      etiqueta,
                       style: TextStyle(
                           fontSize: es30 ? 7 : 10),
                     ),
@@ -578,8 +669,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   /// v1.0.15: detalle de un día al tocar su barra.
-  Future<void> _detalleDia(String fechaIso, double monto) async {
-    double efectivo = 0, transferencia = 0, diario = 0;
+  /// Partición real (panel 2026-10-21): diarios y suplementos ya
+  /// NO se suman también dentro de Efectivo; el Total se calcula
+  /// de las propias filas de la hoja (el monto de la barra puede
+  /// estar viejo si hubo un sync entre la carga y el toque).
+  Future<void> _detalleDia(String fechaIso) async {
+    double efectivo = 0, transferencia = 0, diario = 0, suplementos = 0;
     int n = 0;
     // v1.3.4 (ítem 2): columna `fecha` indexada en vez de allMirror.
     for (final p in await LocalDb.instance.pagosDelDia(fechaIso)) {
@@ -594,21 +689,19 @@ class _DashboardScreenState extends State<DashboardScreen> {
     for (final d in await LocalDb.instance.allMirror('pagos_diarios')) {
       final f = '${d['fecha'] ?? ''}';
       if (f.length >= 10 && f.substring(0, 10) == fechaIso) {
-        final m = (d['total'] as num?)?.toDouble() ?? 0;
-        diario += m;
-        efectivo += m;
+        diario += (d['total'] as num?)?.toDouble() ?? 0;
+        n++;
       }
     }
     // v1.3.2 (Argón #5): suplementos en CUP.
-    double suplementos = 0;
     for (final v in await ventasSuplementosCup()) {
       final f = '${v['fecha'] ?? ''}';
       if (f.length >= 10 && f.substring(0, 10) == fechaIso) {
-        final m = totalVentaCup(v);
-        suplementos += m;
-        efectivo += m;
+        suplementos += totalVentaCup(v);
+        n++;
       }
     }
+    final total = efectivo + transferencia + diario + suplementos;
     if (!mounted) return;
     showModalBottomSheet(
       context: context,
@@ -629,9 +722,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
             if (suplementos > 0)
               _filaDetalle('Suplementos', suplementos),
             const Divider(),
-            _filaDetalle('Total', monto, negrita: true),
+            _filaDetalle('Total', total, negrita: true),
             const SizedBox(height: 8),
-            Text('$n pagos registrados',
+            Text('$n movimientos registrados',
                 style: AppTexto.secundario.copyWith(
                     color: AppColores.textoSecundario(ctx))),
             const SizedBox(height: 16),
@@ -752,9 +845,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   Tarjeta(
                       child: Column(
                         children: [
-                          Row(
-                            mainAxisAlignment:
-                                MainAxisAlignment.spaceAround,
+                          Wrap(
+                            alignment: WrapAlignment.spaceAround,
                             children: [
                               _statCliente(
                                   '$_activos', 'activos', null,
@@ -764,6 +856,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                   'al día',
                                   AppColores.exito,
                                   () => _ir(const BuscarScreen())),
+                              _statCliente(
+                                  '$_porVencer',
+                                  'por vencer',
+                                  AppColores.naranja,
+                                  () => _ir(const ListasScreen(
+                                      inicial: 1))),
                               _statCliente(
                                   '$_morosos',
                                   'vencidos',
@@ -897,6 +995,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     for (final t in _pend)
                       Tarjeta(
                         padding: EdgeInsets.zero,
+                        // C (panel 2026-10-21): la fila abre el
+                        // detalle de pendientes de ese entrenador
+                        // (pantalla existente DetallePendiente).
+                        onTap: () => _ir(DetallePendienteScreen(
+                            trainerId: t['id'] as int,
+                            nombre: '${t['nombre']}')),
                         child: ListTile(
                           leading: const CircleAvatar(
                             backgroundColor: AppColores.naranja,
@@ -905,13 +1009,31 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           ),
                           title: Text('${t['nombre']}'),
                           subtitle: Text(
-                              '${t['n']} pagos sin entregar'),
-                          trailing: Text(
-                            '${fmtMonto(t['total'])} CUP',
-                            style: const TextStyle(
-                                fontWeight: FontWeight.bold,
-                                color: naranja,
-                                fontSize: 15),
+                              '${t['n']} movimientos sin entregar'),
+                          trailing: Column(
+                            mainAxisAlignment:
+                                MainAxisAlignment.center,
+                            crossAxisAlignment:
+                                CrossAxisAlignment.end,
+                            children: [
+                              if ((t['total'] as double) > 0)
+                                Text(
+                                  '${fmtMonto(t['total'])} CUP',
+                                  style: const TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      color: naranja,
+                                      fontSize: 15),
+                                ),
+                              if (((t['total_usd'] as double?) ?? 0) >
+                                  0)
+                                Text(
+                                  '${fmtMonto(t['total_usd'])} USD',
+                                  style: const TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      color: naranja,
+                                      fontSize: 13),
+                                ),
+                            ],
                           ),
                         ),
                       ),

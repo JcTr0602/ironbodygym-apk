@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:sqflite/sqflite.dart';
 
 import 'localdb.dart';
@@ -16,7 +18,14 @@ import 'tiempo.dart';
 /// Frescura: la huella se recalcula al leer; si no coincide con la
 /// guardada, la caché se considera vieja y se recalcula. La huella
 /// cubre cambios locales (ops sin subir) y remotos (pull), porque se
-/// deriva del estado real de la tabla `pagos`, no de eventos.
+/// deriva del estado real de las tablas espejo, no de eventos.
+///
+/// Huella v2 (2026-10-21): además de `pagos`, cubre los
+/// `pagado_hasta` de la tabla espejo `clientes`, porque la regla del
+/// mes en curso (ver NominaCalc) depende de ellos: un cambio de
+/// vencimiento sin ningún pago nuevo también debe invalidar la
+/// caché. El prefijo 'v2|' invalida por sí solo toda caché escrita
+/// con la huella v1 (panel de revisión 2026-10-21).
 class NominaPrecalc {
   NominaPrecalc._();
   static final NominaPrecalc instance = NominaPrecalc._();
@@ -42,7 +51,45 @@ class NominaPrecalc {
         '(SELECT COALESCE(SUM(id), 0) FROM pagos WHERE fecha IS NULL) AS sn '
         'FROM pagos');
     final r = rows.first;
-    return '${r['c']}|${r['ss']}|${r['sc']}|${r['mi']}|${r['sf']}|${r['cn']}|${r['sn']}';
+    final pagosParte =
+        '${r['c']}|${r['ss']}|${r['sc']}|${r['mi']}|${r['sf']}|${r['cn']}|${r['sn']}';
+    return 'v2|$pagosParte|${await _huellaClientes()}';
+  }
+
+  /// Componente de huella sobre el espejo `clientes`: detecta altas,
+  /// bajas y cualquier cambio de `pagado_hasta` (la regla del mes en
+  /// curso depende de ese campo). Se calcula en Dart leyendo el JSON
+  /// de `data` (sin depender de funciones JSON de SQLite, ausentes
+  /// en Android viejos); con ~160 clientes es despreciable.
+  Future<String> _huellaClientes() async {
+    final d = await LocalDb.instance.db;
+    final rows = await d.query('clientes', columns: ['id', 'data']);
+    var sumaIds = 0;
+    var sumaDias = 0;
+    var nulos = 0;
+    var ilegibles = 0;
+    for (final r in rows) {
+      final id = (r['id'] as num?)?.toInt() ?? 0;
+      sumaIds += id;
+      try {
+        final data = jsonDecode(r['data'] as String) as Map<String, dynamic>;
+        final h = data['pagado_hasta'];
+        final m = h is String
+            ? RegExp(r'^(\d{4})-(\d{2})-(\d{2})').firstMatch(h)
+            : null;
+        if (m == null) {
+          nulos++;
+        } else {
+          sumaDias += DateTime.utc(int.parse(m.group(1)!),
+                  int.parse(m.group(2)!), int.parse(m.group(3)!))
+              .millisecondsSinceEpoch ~/
+              86400000;
+        }
+      } catch (_) {
+        ilegibles++;
+      }
+    }
+    return '${rows.length}|$sumaIds|$sumaDias|$nulos|$ilegibles';
   }
 
   /// Lee la caché del mes [pref] ('YYYY-MM'). Devuelve null si aún no

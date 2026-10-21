@@ -2694,13 +2694,39 @@ Future<void> confirmarEntregaPorIds({
   });
 }
 
+/// Pendiente de entregar por entrenador (vista del dueño).
+///
+/// Devuelve filas {id, nombre, total (CUP), total_usd, n} ordenadas
+/// por CUP descendente (desempate: USD descendente). `n` cuenta
+/// TODOS los movimientos pendientes, incluidos los de USD.
+///
+/// Fuentes: SOLO el espejo (lo ya sincronizado). La vista del
+/// entrenador (pendienteEntrega/pendienteEntregaUsd) suma además SU
+/// cola local sin sincronizar, que en el teléfono del dueño no
+/// existe; sobre lo sincronizado ambas vistas coinciden exactamente
+/// (misma regla: esPendiente + normalizarTelegramId + totalVenta*).
+/// El USD faltaba aquí hasta 2026-10-21 (panel): el dueño no veía
+/// los dólares pendientes de cada entrenador, solo el total global.
 Future<List<Map<String, dynamic>>> pendientePorEntrenador(
     {int? excluirTid}) async {
   final mapa = <int, Map<String, dynamic>>{};
+  Map<String, dynamic> entrada(int id, String nombre) =>
+      mapa.putIfAbsent(id, () => {
+            'id': id,
+            'nombre': nombre,
+            'total': 0.0,
+            'total_usd': 0.0,
+            'n': 0,
+          });
   void suma(int id, String nombre, double monto) {
-    final e = mapa.putIfAbsent(id,
-        () => {'id': id, 'nombre': nombre, 'total': 0.0, 'n': 0});
+    final e = entrada(id, nombre);
     e['total'] = (e['total'] as double) + monto;
+    e['n'] = (e['n'] as int) + 1;
+  }
+
+  void sumaUsd(int id, String nombre, double monto) {
+    final e = entrada(id, nombre);
+    e['total_usd'] = (e['total_usd'] as double) + monto;
     e['n'] = (e['n'] as int) + 1;
   }
 
@@ -2730,9 +2756,24 @@ Future<List<Map<String, dynamic>>> pendientePorEntrenador(
     suma(tid, '${v['registrado_por_nombre'] ?? 'Entrenador $tid'}',
         totalVentaCup(v));
   }
+  // USD: misma regla que pendienteEntregaUsd sobre el espejo
+  // (ventas USD pendientes del entrenador). Crea la entrada aunque
+  // el entrenador no tenga nada en CUP.
+  for (final v in await ventasSuplementosUsd()) {
+    if (!esPendiente(v['entregado'])) continue;
+    final tid = LocalDb.normalizarTelegramId(v['registrado_por']);
+    if (tid == null) continue;
+    if (excluirTid != null && tid == excluirTid) continue;
+    sumaUsd(tid, '${v['registrado_por_nombre'] ?? 'Entrenador $tid'}',
+        totalVentaUsd(v));
+  }
   final l = mapa.values.toList()
-    ..sort(
-        (a, b) => (b['total'] as double).compareTo(a['total'] as double));
+    ..sort((a, b) {
+      final c = (b['total'] as double).compareTo(a['total'] as double);
+      if (c != 0) return c;
+      return (b['total_usd'] as double)
+          .compareTo(a['total_usd'] as double);
+    });
   return l;
 }
 
@@ -3144,9 +3185,19 @@ Future<List<Map<String, dynamic>>> pagosDelPeriodo(
   } else {
     desdeIso =
         '${hoy.year.toString().padLeft(4, '0')}-${hoy.month.toString().padLeft(2, '0')}-01';
-    hastaIso = iso(hoy);
+    // Ventana mensual ÚNICA del dashboard: el detalle del mes cubre
+    // el mes completo, igual que la tarjeta «Este mes»
+    // (ingresosMes). Antes cortaba en hoy y una fila con fecha
+    // futura dentro del mes salía en la tarjeta pero no en su
+    // detalle (panel 2026-10-21).
+    hastaIso = iso(DateTime(hoy.year, hoy.month + 1, 0));
   }
   final out = <Map<String, dynamic>>[];
+  // Cada fila lleva su ORIGEN ('pago' | 'diario' | 'suplemento')
+  // para que el detalle del dashboard haga una partición real:
+  // antes diarios y suplementos viajaban plegados como
+  // metodo='efectivo' y el detalle los sumaba dos veces
+  // (panel 2026-10-21).
   // v1.3.4 (ítem 2): mirrorPorFecha usa la columna indexada `fecha`
   // para el espejo `pagos` (misma semántica que el filtro en Dart).
   for (final p in await LocalDb.instance
@@ -3154,6 +3205,7 @@ Future<List<Map<String, dynamic>>> pagosDelPeriodo(
     out.add({
       'monto': (p['monto'] as num?)?.toDouble() ?? 0,
       'metodo': '${p['metodo'] ?? 'efectivo'}',
+      'origen': 'pago',
     });
   }
   // v1.0.16: incluir pagos diarios (antes se excluían del desglose)
@@ -3166,6 +3218,7 @@ Future<List<Map<String, dynamic>>> pagosDelPeriodo(
         out.add({
           'monto': (d['total'] as num?)?.toDouble() ?? 0,
           'metodo': 'efectivo',
+          'origen': 'diario',
         });
       }
     }
@@ -3180,6 +3233,7 @@ Future<List<Map<String, dynamic>>> pagosDelPeriodo(
         out.add({
           'monto': totalVentaCup(v),
           'metodo': 'efectivo',
+          'origen': 'suplemento',
         });
       }
     }
@@ -3188,7 +3242,11 @@ Future<List<Map<String, dynamic>>> pagosDelPeriodo(
 }
 
 /// Ingresos por día de los últimos 7 días (v1.0.8).
-/// Devuelve lista de {dia: 'Lun', monto: 123.0} ordenada de más antiguo a hoy.
+/// Devuelve lista de {dia: 'Lun', fecha: 'YYYY-MM-DD', monto: 123.0}
+/// ordenada de más antiguo a hoy. La `fecha` la necesita el gráfico
+/// del dashboard para abrir el detalle del día tocado (sin ella, la
+/// vista de 7 días lanzaba un TypeError al tocar una barra; la de
+/// 30 días ya la traía).
 /// v1.0.16: usa ingresosPorDia() centralizado (incluye pagos diarios).
 Future<List<Map<String, dynamic>>> ingresosUltimos7Dias() async {
   final hoy = ahoraHabana();
@@ -3203,6 +3261,7 @@ Future<List<Map<String, dynamic>>> ingresosUltimos7Dias() async {
     final diaIso = iso(d);
     resultado.add({
       'dia': diasSem[d.weekday - 1],
+      'fecha': diaIso,
       'monto': porDia[diaIso] ?? 0.0,
     });
   }
@@ -3270,6 +3329,20 @@ Future<double> gastosDe(String fechaIso) async {
   for (final g in await LocalDb.instance.allMirror('gastos')) {
     if ('${g['fecha'] ?? ''}'.length >= 10 &&
         '${g['fecha']}'.substring(0, 10) == fechaIso) {
+      t += (g['monto'] as num?)?.toDouble() ?? 0;
+    }
+  }
+  return t;
+}
+
+/// Total de gastos del mes [pref] ('YYYY-MM').
+/// Contrato verificado (2026-10-21): la tabla `gastos` no tiene
+/// moneda ni anulaciones; todos sus montos son CUP. Alimenta el
+/// «Neto del mes (CUP)» del dashboard (ingresos − gastos).
+Future<double> gastosDelMes(String pref) async {
+  double t = 0;
+  for (final g in await LocalDb.instance.allMirror('gastos')) {
+    if ('${g['fecha'] ?? ''}'.startsWith(pref)) {
       t += (g['monto'] as num?)?.toDouble() ?? 0;
     }
   }
