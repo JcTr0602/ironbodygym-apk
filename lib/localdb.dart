@@ -40,7 +40,7 @@ class LocalDb {
   /// v1.4.0 (Argón): versión actual del esquema local. Los tests de
   /// migración comparan contra esta constante en vez de un número
   /// fijo, para no caer en cascada de fallos con cada migración.
-  static const int versionActual = 31;
+  static const int versionActual = 32;
 
   /// ¿El SQLite del dispositivo trae el módulo FTS5? Algunos
   /// fabricantes lo recortan ("no such module: fts5"). Se prueba una
@@ -919,6 +919,23 @@ class LocalDb {
             // Tabla ya existe; tolerante.
           }
         }
+        // v32 (v1.5): limpieza del camino legado de fotos. La
+        // migración v13 ya drenó fotos_pendientes a fotos_cola como
+        // 'original'; aquí va el drenaje final (solo filas cuyo
+        // op_uuid NO esté ya en la cola) y el DROP de la tabla
+        // legada. Defensivo: si la tabla no existe, no pasa nada.
+        if (oldV < 32) {
+          try {
+            await db.execute(
+                "INSERT INTO fotos_cola (op_uuid, tipo, cliente_id, suplemento_id, ruta_local, estado, intentos, creado_en, actualizado_en) "
+                "SELECT op_uuid, 'original', cliente_id, suplemento_id, local_path, 'pendiente', 0, datetime('now'), datetime('now') "
+                "FROM fotos_pendientes WHERE local_path IS NOT NULL "
+                "AND op_uuid NOT IN (SELECT op_uuid FROM fotos_cola)");
+          } catch (_) {}
+          try {
+            await db.execute('DROP TABLE IF EXISTS fotos_pendientes');
+          } catch (_) {}
+        }
       },
     );
     // v1.2.5+28: repara el índice FTS si la migración lo omitió y el
@@ -1250,13 +1267,8 @@ class LocalDb {
         'resultado_servidor TEXT)');
     await db.execute(
         'CREATE INDEX IF NOT EXISTS idx_ops_estado ON ops_queue(estado)');
-        await db.execute('CREATE TABLE fotos_pendientes ('
-            'id INTEGER PRIMARY KEY AUTOINCREMENT, op_uuid TEXT NOT NULL, '
-            'cliente_id INTEGER, suplemento_id INTEGER, '
-            'local_path TEXT NOT NULL, '
-            'estado TEXT NOT NULL DEFAULT \'pendiente\', user_id TEXT, '
-            'retry_count INTEGER NOT NULL DEFAULT 0, '
-            'last_error TEXT, last_retry_at TEXT)');
+        // v32: la tabla legada fotos_pendientes ya no se crea;
+        // la cola persistente (fotos_cola) es el único camino.
         // v15: cola persistente de fotos (también en onUpgrade para
         // quienes actualizan desde versiones anteriores).
         await db.execute('CREATE TABLE IF NOT EXISTS fotos_cola ('
@@ -4396,11 +4408,6 @@ class LocalDb {
     });
   }
 
-  Future<List<Map<String, dynamic>>> fotosPendientes() async {
-    final d = await db;
-    return d.query('fotos_pendientes',
-        where: 'estado=\'pendiente\'', orderBy: 'id ASC');
-  }
 
   /// v1.2.9 (Gemini #4): verifica si un op_uuid ya está en la cola
   /// persistente. El flujo viejo debe ignorar esas fotos.
@@ -4416,11 +4423,6 @@ class LocalDb {
     return r.isNotEmpty;
   }
 
-  Future<void> setFotoCliente(int fotoId, int clienteId) async {
-    final d = await db;
-    await d.update('fotos_pendientes', {'cliente_id': clienteId},
-        where: 'id=?', whereArgs: [fotoId]);
-  }
 
   /// v1.2.1 fix auditoría Gemini: liga una foto pendiente a un suplemento.
   Future<void> setFotoSuplemento(int fotoId, int suplementoId) async {
@@ -4472,52 +4474,9 @@ class LocalDb {
     );
   }
 
-  Future<void> markFotoLista(int fotoId) async {
-    final d = await db;
-    await d.update('fotos_pendientes', {'estado': 'lista'},
-        where: 'id=?', whereArgs: [fotoId]);
-  }
 
-  /// v1.2.4 (Hark): registra un fallo de subida de foto.
-  /// - [definitivo]=false: suma un intento y guarda el error, pero la foto
-  ///   sigue 'pendiente' (con mala conexión nunca se abandona sola).
-  /// - [definitivo]=true: pasa a 'error' (p. ej. archivo local borrado) y
-  ///   aparece en Admin → Incidencias.
-  Future<void> marcarFotoError(int fotoId, String error,
-      {bool definitivo = false}) async {
-    final d = await db;
-    await d.rawUpdate(
-      'UPDATE fotos_pendientes SET retry_count = retry_count + 1, '
-      'last_error = ?, last_retry_at = ?'
-      '${definitivo ? ", estado = 'error'" : ''} WHERE id = ?',
-      [error, isoHabana(ahoraHabana()), fotoId], // v1.3.4 (Argón)
-    );
-  }
 
-  /// v1.2.4: fotos con problema para la bandeja de incidencias:
-  /// en 'error' o pendientes con 10+ intentos fallidos.
-  Future<List<Map<String, dynamic>>> fotosConProblema() async {
-    final d = await db;
-    return d.query('fotos_pendientes',
-        where: "estado = 'error' OR (estado = 'pendiente' AND retry_count >= 10)",
-        orderBy: 'id DESC',
-        limit: 50);
-  }
 
-  /// v1.2.4: vuelve a poner una foto en cola desde cero.
-  Future<void> reintentarFoto(int fotoId) async {
-    final d = await db;
-    await d.update('fotos_pendientes',
-        {'estado': 'pendiente', 'retry_count': 0, 'last_error': null},
-        where: 'id=?', whereArgs: [fotoId]);
-  }
-
-  /// v1.2.4: descarta una foto (no se volverá a intentar).
-  Future<void> descartarFoto(int fotoId) async {
-    final d = await db;
-    await d.update('fotos_pendientes', {'estado': 'descartada'},
-        where: 'id=?', whereArgs: [fotoId]);
-  }
 
   /// v1.2.4 (Hark): resincronizar fotos de verdad.
   /// Vuelve a poner en cola, con el contador a cero, las fotos en 'error'
@@ -4602,16 +4561,4 @@ class LocalDb {
   /// v1.2.9+43: retorna true si existe la tabla fotos_pendientes (formato
   /// viejo) y tiene registros. Verifica sqlite_master primero para no
   /// lanzar excepción si la tabla no existe.
-  Future<bool> hayFotosLegacy() async {
-    final d = await db;
-    final tablaExiste = await d.rawQuery(
-      "SELECT 1 FROM sqlite_master "
-      "WHERE type = 'table' AND name = 'fotos_pendientes' LIMIT 1",
-    );
-    if (tablaExiste.isEmpty) return false;
-    final r = await d.rawQuery(
-      "SELECT COUNT(*) as n FROM fotos_pendientes LIMIT 1",
-    );
-    return ((r.first['n'] as int?) ?? 0) > 0;
-  }
 }

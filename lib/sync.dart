@@ -1095,16 +1095,9 @@ class SyncEngine {
           const SyncProgress(
               fase: SyncFase.subiendo, mensaje: 'Subiendo fotos...'));
       _emit(SyncPhase.photos);
-      // v1.2.9+43: solo intentar el flujo viejo si hay datos legacy.
-      // v1.2.9+41: _uploadFotos no debe bloquear procesarCola.
-      if (await _db.hayFotosLegacy()) {
-        try {
-          await _uploadFotos();
-        } catch (e) {
-          debugPrint('WARN _uploadFotos (viejo) falló: $e');
-          AppLog.aviso('sync', 'fotos_legacy_fallo', d: '$e');
-        }
-      }
+      // v1.5 (v32): el flujo legado de fotos se retiró; la
+      // cola persistente (fotos_cola) es el único camino y la
+      // migración v32 drenó lo que quedara en fotos_pendientes.
       // v1.2.9+42 (Gemini): procesarCola protegido + segundo _uploadOps
       // para enviar las ops de vinculación generadas por las fotos.
       // v1.3.2 (Argón #18): si el Foreground Service ya está procesando
@@ -3326,131 +3319,6 @@ class SyncEngine {
 
   /// v1.2.1 fix auditoría Gemini: sube una foto pendiente de suplemento
   /// y encola la op `foto_suplemento` para que el puente la vincule.
-  Future<void> _uploadFotoSuplemento(Map<String, dynamic> f, int fid,
-      int suplementoId, int i, int total) async {
-    if (f['suplemento_id'] == null) {
-      await _db.setFotoSuplemento(fid, suplementoId);
-    }
-    final file = File(f['local_path'] as String);
-    if (!await file.exists()) {
-      // v1.2.4: antes se marcaba 'lista' y la foto se perdía sin aviso.
-      await _db.marcarFotoError(fid, 'Archivo local no encontrado',
-          definitivo: true);
-      return;
-    }
-    final bytes = await file.readAsBytes();
-    if (bytes.isEmpty) {
-      await _db.marcarFotoError(fid, 'Archivo local vacío (0 bytes)',
-          definitivo: true);
-      return;
-    }
-    final path = await subirFotoSuplemento(f['op_uuid'] as String, bytes);
-    _emit(SyncPhase.photos,
-        detalle: 'Subiendo fotos… $i de $total', progreso: (i - 1) / total);
-    if (path == null) {
-      // sin conexión o rechazo: cuenta el intento; sigue 'pendiente' y con
-      // 10+ intentos aparece en Incidencias (fotosConProblema).
-      await _db.marcarFotoError(fid, 'No se pudo subir (intento fallido)');
-      return;
-    }
-    _emit(SyncPhase.photos,
-        detalle: 'Subiendo fotos… $i de $total', progreso: i / total);
-    final d = await _db.db;
-    await d.insert('ops_queue', {
-      'op_uuid': const Uuid().v4(),
-      'tipo': 'foto_suplemento',
-      'payload':
-          jsonEncode({'suplemento_id': suplementoId, 'storage_path': path}),
-      'estado': 'pendiente',
-      'creada_ts': isoHabana(ahoraHabana()), // v1.3.4 (Argón): formato Habana homogéneo en ops_queue
-    });
-    await _db.markFotoLista(fid);
-  }
-
-  Future<void> _uploadFotos() async {
-    final fotos = await _db.fotosPendientes();
-    var i = 0;
-    for (final f in fotos) {
-      // v1.2.9 (Gemini #4): el flujo viejo IGNORA fotos que tengan fila
-      // en fotos_cola. La cola persistente es el único camino para fotos
-      // nuevas; esto evita doble subida.
-      final enCola = await _db.tieneFilaEnCola(f['op_uuid'] as String);
-      if (enCola) continue;
-      i++;
-      final fid = f['id'] as int;
-      // v1.2.6: cada foto se aísla en try/catch — un error inesperado
-      // en una no aborta la subida de las demás.
-      try {
-        var clienteId = f['cliente_id'] as int?;
-        // v1.2.1 fix auditoría Gemini: fotos de suplementos.
-        var suplementoId = f['suplemento_id'] as int?;
-        clienteId ??= await _clienteDeOp(f['op_uuid'] as String);
-        suplementoId ??= await _suplementoDeOp(f['op_uuid'] as String);
-        if (clienteId == null && suplementoId == null) {
-          continue; // la creación aún no se aplica en el servidor
-        }
-        if (suplementoId != null) {
-          await _uploadFotoSuplemento(f, fid, suplementoId, i, fotos.length);
-          continue;
-        }
-        if (f['cliente_id'] == null) {
-          await _db.setFotoCliente(fid, clienteId!);
-        }
-        final file = File(f['local_path'] as String);
-        if (!await file.exists()) {
-          // v1.2.4: antes se marcaba 'lista' y la foto se perdía sin aviso.
-          await _db.marcarFotoError(fid, 'Archivo local no encontrado',
-              definitivo: true);
-          continue;
-        }
-        var bytes = await file.readAsBytes();
-        if (bytes.isEmpty) {
-          await _db.marcarFotoError(fid, 'Archivo local vacío (0 bytes)',
-              definitivo: true);
-          continue;
-        }
-        bytes = _comprimirFoto(bytes);
-        final path = 'pendientes/${f['op_uuid']}.jpg';
-        _emit(SyncPhase.photos,
-            detalle: 'Subiendo fotos… $i de ${fotos.length}',
-            progreso: (i - 1) / fotos.length);
-        // reanudable primero; si tus falla o no está disponible, método simple
-        final fotoOpUuid = f['op_uuid'] as String;
-        final tus = await _subirFotoTus(fotoOpUuid, path, bytes);
-        // v1.2.6: si TUS falla (false) también se intenta el método simple,
-        // no solo cuando TUS no está disponible (null).
-        final ok = tus == true || await _subirFotoSimple(path, bytes);
-        if (!ok) {
-          // v1.2.6: incluir el detalle del error TUS si existe
-          final detalleTus = await _db.getMeta('tus_err_$fotoOpUuid');
-          final motivo = detalleTus != null
-              ? 'No se pudo subir: $detalleTus'
-              : 'No se pudo subir (intento fallido)';
-          await _db.marcarFotoError(fid, motivo);
-          continue;
-        }
-        _emit(SyncPhase.photos,
-            detalle: 'Subiendo fotos… $i de ${fotos.length}',
-            progreso: i / fotos.length);
-        // encola la op 'foto' para que el puente la guarde en gym.db
-        final d = await _db.db;
-        final opUuid = const Uuid().v4();
-        await d.insert('ops_queue', {
-          'op_uuid': opUuid,
-          'tipo': 'foto',
-          'payload':
-              jsonEncode({'storage_path': path, 'cliente_id': clienteId}),
-          'estado': 'pendiente',
-          'creada_ts': isoHabana(ahoraHabana()), // v1.3.4 (Argón): formato Habana homogéneo en ops_queue
-        });
-        await _db.markFotoLista(fid);
-      } catch (e) {
-        await _db.marcarFotoError(fid, 'Error inesperado: $e');
-        continue;
-      }
-    }
-  }
-
   /// v1.3.0: Pull de tipos de incidencia (antes que incidencias, por FK).
   /// Fix #11 (Sol): no silenciar errores; lanzar para que el pull
   /// exterior no marque last_pull_ok.
