@@ -275,9 +275,11 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
       buf.writeln('\n');
       buf.writeln('*$nombre*');
       if (desc.isNotEmpty) buf.writeln(desc);
-      // B2 (Argón): jamás exportar "$0.00 USD" a clientes.
+      // B2 (Argón): jamás exportar "$0.00" a clientes.
+      // v1.4.6: la moneda es la del propio suplemento (puede
+      // ser CUP desde el formulario), no «USD» fijo.
       buf.writeln(precio > 0
-          ? '💰 ${precio.toStringAsFixed(2)} USD'
+          ? '💰 ${precio.toStringAsFixed(2)} ${LocalDb.monedaDe(s)}'
           : '💰 Consultar precio');
     }
     await Share.share(buf.toString().trimRight());
@@ -620,7 +622,7 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: AppTexto.cuerpo),
-            Text('${precio.toStringAsFixed(2)} USD',
+            Text('${precio.toStringAsFixed(2)} ${LocalDb.monedaDe(s)}',
                 style: AppTexto.secundario.copyWith(
                     color: AppColores.naranja,
                     fontWeight: FontWeight.bold)),
@@ -722,7 +724,8 @@ class _TarjetaSuplemento extends StatelessWidget {
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      '${precio.toStringAsFixed(2)} USD',
+                      '${precio.toStringAsFixed(2)} '
+                      '${LocalDb.monedaDe(sup)}',
                       style: const TextStyle(
                         fontWeight: FontWeight.bold,
                         fontSize: 16,
@@ -1020,6 +1023,11 @@ class _EditarSuplementoScreenState
   ];
   bool _activo = true;
   bool _guardando = false;
+  // v1.4.6: moneda del precio oficial ('CUP'|'USD'). _monedaIni
+  // conserva la que traía el suplemento al abrir, para avisar si
+  // el dueño la cambia al editar.
+  String _moneda = 'CUP';
+  String _monedaIni = 'CUP';
   Uint8List? _fotoNueva;
   // v1.2.1 fix auditoría Gemini: ruta local de la foto para el
   // mecanismo de fotos pendientes (no se pierde offline).
@@ -1062,6 +1070,9 @@ class _EditarSuplementoScreenState
               : null;
       _activo = (s['activo'] as int?) == 1;
       _categoriaId = s['categoria_id'] as int?;
+      // v1.4.6: moneda actual del suplemento (fallback 'CUP').
+      _moneda = LocalDb.monedaDe(s);
+      _monedaIni = _moneda;
     } else {
       _umbral.text = '3';
     }
@@ -1191,6 +1202,9 @@ class _EditarSuplementoScreenState
         'nombre': nombre,
         'descripcion': _desc.text.trim(),
         'precio_oficial': precio,
+        // v1.4.6: moneda del precio oficial; viaja siempre en la
+        // op (crear y editar) para que el servidor la persista.
+        'moneda': _moneda,
         'stock': stock,
         'activo': _activo ? 1 : 0,
         // v1.2.1: categoría asignada.
@@ -1268,6 +1282,17 @@ class _EditarSuplementoScreenState
         }
       }
       unawaited(SyncEngine.instance.push());
+      // v1.4.6: si el dueño cambió la moneda de un suplemento
+      // existente, aviso breve (sin bloquear): el cambio solo
+      // afecta a ventas y reservas futuras; lo ya vendido o
+      // reservado conserva su moneda snapshot.
+      if (mounted && _editando && _moneda != _monedaIni) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+              content: Text('Moneda cambiada a $_moneda: solo '
+                  'afecta a las ventas y reservas futuras.')),
+        );
+      }
       if (mounted) Navigator.pop(context, true);
     } finally {
       if (mounted) setState(() => _guardando = false);
@@ -1361,15 +1386,41 @@ class _EditarSuplementoScreenState
           Row(
             children: [
               Expanded(
+                flex: 3,
                 child: CampoTexto(
                     controller: _precio,
-                    etiqueta: 'Precio oficial (USD)',
+                    etiqueta: 'Precio oficial ($_moneda)',
                     teclado:
                         const TextInputType.numberWithOptions(
                             decimal: true)),
               ),
               const SizedBox(width: AppEspacio.md),
+              // v1.4.6: selector de moneda del precio oficial.
               Expanded(
+                flex: 2,
+                child: DropdownButtonFormField<String>(
+                  initialValue: _moneda,
+                  decoration: const InputDecoration(
+                    labelText: 'Moneda',
+                    border: OutlineInputBorder(),
+                  ),
+                  items: const [
+                    DropdownMenuItem<String>(
+                      value: 'CUP',
+                      child: Text('CUP'),
+                    ),
+                    DropdownMenuItem<String>(
+                      value: 'USD',
+                      child: Text('USD'),
+                    ),
+                  ],
+                  onChanged: (v) =>
+                      setState(() => _moneda = v ?? 'CUP'),
+                ),
+              ),
+              const SizedBox(width: AppEspacio.md),
+              Expanded(
+                flex: 2,
                 child: CampoTexto(
                     controller: _stock,
                     etiqueta: 'Stock',

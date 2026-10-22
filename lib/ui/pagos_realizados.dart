@@ -157,6 +157,8 @@ class _PagosRealizadosScreenState extends State<PagosRealizadosScreen> {
         'nombre': c['nombre'] ?? 'Cliente $cid',
         'monto': pago['monto'],
         'metodo': pago['metodo'] ?? 'efectivo',
+        // v1.4.6: quién cobró ese pago (mismo formato que la ficha).
+        'registrado_por': pago['registrado_por'],
         'fecha': pago['fecha'],
         'pagado_hasta': c['pagado_hasta'],
         'foto_local': c['foto_local'],
@@ -233,7 +235,8 @@ class _PagosRealizadosScreenState extends State<PagosRealizadosScreen> {
                               subtitle: Text(
                                 '${fmtMonto(c['monto'])} CUP · '
                                 '${c['metodo']} · '
-                                '${fmtFecha(c['fecha'] as String?)}',
+                                '${fmtFecha(c['fecha'] as String?)}\n'
+                                '${textoCobradoPor(c['registrado_por'])}',
                                 style:
                                     const TextStyle(fontSize: 12),
                               ),

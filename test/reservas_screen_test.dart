@@ -6,15 +6,24 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ironbody_gym/ui/reservas.dart';
 
-ReservaVista _vista({String estado = 'solicitada'}) => ReservaVista(
+ReservaVista _vista({
+  String estado = 'solicitada',
+  String moneda = 'CUP',
+  String monedaVigente = 'CUP',
+  double precioUnitario = 3000,
+  double precioVigente = 3000,
+}) =>
+    ReservaVista(
       id: 5,
       clienteId: 7,
       clienteNombre: 'Ana',
       suplementoId: 3,
       suplementoNombre: 'Creatina',
       cantidad: 1,
-      precioUnitario: 3000,
-      precioVigente: 3000,
+      precioUnitario: precioUnitario,
+      precioVigente: precioVigente,
+      moneda: moneda,
+      monedaVigente: monedaVigente,
       estado: estado,
       creadaTs: '2026-10-21T10:00:00-04:00',
       expiraEn: '2026-10-22T10:00:00-04:00',
@@ -89,5 +98,43 @@ void main() {
         findsNothing);
     expect(
         find.text('Acción encolada — sincronizando'), findsOneWidget);
+  });
+
+  testWidgets('tarjeta con moneda del catálogo distinta al '
+      'snapshot: aviso de precio hoy sin diferencia numérica',
+      (tester) async {
+    await tester.pumpWidget(_envolver(TarjetaReserva(
+      reserva: _vista(
+        estado: 'reservada',
+        moneda: 'CUP',
+        monedaVigente: 'USD',
+        precioUnitario: 3000,
+        precioVigente: 45,
+      ),
+      bloqueada: false,
+      onConfirmar: () {},
+      onRechazar: () {},
+      onCancelar: () {},
+      onCobrar: () {},
+    )));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Precio hoy'), findsOneWidget);
+    expect(find.textContaining('Se cobra el precio al reservar'),
+        findsOneWidget);
+    expect(find.textContaining('diferencia'), findsNothing);
+  });
+
+  testWidgets('tarjeta con monedas coincidentes: sin aviso de '
+      'moneda distinta', (tester) async {
+    await tester.pumpWidget(_envolver(TarjetaReserva(
+      reserva: _vista(estado: 'reservada'),
+      bloqueada: false,
+      onConfirmar: () {},
+      onRechazar: () {},
+      onCancelar: () {},
+      onCobrar: () {},
+    )));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Precio hoy'), findsNothing);
   });
 }

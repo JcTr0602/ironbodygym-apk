@@ -2268,10 +2268,18 @@ class SyncEngine {
                 if (tabla == 'suplementos') {
                   // v1.3.1 (B2): preservar ultimo_precio local en el pull.
                   // INSERT OR REPLACE borraría la columna; usar UPSERT.
+                  // v1.4.6 (v35): poblar también la columna moneda
+                  // desde el JSON (fallback 'CUP' si no la trae).
+                  var monedaOp = 'CUP';
+                  try {
+                    monedaOp = LocalDb.monedaDe(
+                        jsonDecode(op['dataJson'] as String)
+                            as Map<String, dynamic>);
+                  } catch (_) {}
                   batch.rawInsert(
-                      'INSERT INTO suplementos (id, data, sync_seq) VALUES (?, ?, ?)'
-                      ' ON CONFLICT(id) DO UPDATE SET data=excluded.data, sync_seq=excluded.sync_seq',
-                      [op['id'], op['dataJson'], op['seq']]);
+                      'INSERT INTO suplementos (id, data, sync_seq, moneda) VALUES (?, ?, ?, ?)'
+                      ' ON CONFLICT(id) DO UPDATE SET data=excluded.data, sync_seq=excluded.sync_seq, moneda=excluded.moneda',
+                      [op['id'], op['dataJson'], op['seq'], monedaOp]);
                 } else {
                   // v1.3.4 (ítem 2): para 'pagos' incluye las 4 columnas
                   // indexadas extraídas del JSON (LocalDb.filaParaBatchMirror);

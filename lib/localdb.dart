@@ -40,7 +40,7 @@ class LocalDb {
   /// v1.4.0 (Argón): versión actual del esquema local. Los tests de
   /// migración comparan contra esta constante en vez de un número
   /// fijo, para no caer en cascada de fallos con cada migración.
-  static const int versionActual = 34;
+  static const int versionActual = 35;
 
   /// v1.4.4 (v33): DDL de borradores de GymPedia (compartido entre
   /// onCreate y la migración v33). Los campos de contenido espejan el
@@ -1017,6 +1017,20 @@ class LocalDb {
           await db.rawInsert(
               "INSERT OR IGNORE INTO meta (k, v) VALUES ('wm_reservas', '0')");
         }
+        if (oldV < 35) {
+          // v1.4.6: moneda por suplemento ('CUP'|'USD'). Columna
+          // dedicada en los espejos suplementos y reservas (en
+          // reservas es la moneda snapshot de la foto de precio),
+          // mismo patrón que ultimo_precio (v18) y las columnas
+          // indexadas de pagos (v26): se puebla en Dart desde el
+          // JSON en cada escritura y aquí se rellena lo existente.
+          await _addColumnIfMissing(db, 'suplementos', 'moneda',
+              "TEXT NOT NULL DEFAULT 'CUP'");
+          await _addColumnIfMissing(db, 'reservas', 'moneda',
+              "TEXT NOT NULL DEFAULT 'CUP'");
+          await _backfillMoneda(db, 'suplementos');
+          await _backfillMoneda(db, 'reservas');
+        }
       },
     );
     // v1.2.5+28: repara el índice FTS si la migración lo omitió y el
@@ -1085,6 +1099,58 @@ class LocalDb {
     };
   }
 
+  /// v1.4.6 (v35): moneda de un suplemento o de una reserva desde
+  /// su JSON: 'USD' solo si el dato dice exactamente eso; cualquier
+  /// otra cosa (ausente, vacío, valor viejo) es 'CUP'. Único punto
+  /// de verdad para leer `moneda` con fallback: lo usan el poblado
+  /// de la columna, el backfill v35 y las pantallas.
+  static String monedaDe(Map<String, dynamic> data) {
+    final m = data['moneda'];
+    return (m is String && m.trim().toUpperCase() == 'USD')
+        ? 'USD'
+        : 'CUP';
+  }
+
+  /// v1.4.6 (v35): la columna `moneda` de los espejos suplementos y
+  /// reservas, extraída del JSON ya decodificado. Mismo patrón que
+  /// [columnasPagos]: se puebla en los dos caminos de escritura
+  /// ([upsertMirror] y el batch del pull vía [filaParaBatchMirror]).
+  static Map<String, Object?> columnasMoneda(Map<String, dynamic> data) {
+    return {'moneda': monedaDe(data)};
+  }
+
+  /// v1.4.6 (v35): rellena la columna `moneda` de las filas ya
+  /// existentes de [tabla] desde su JSON (migración v35). Las filas
+  /// cuyo JSON no trae moneda quedan en el DEFAULT 'CUP' de la
+  /// columna. Tolerante: sin tabla o sin columna no hace nada (el
+  /// onUpgrade no debe reventar en BDs mínimas de test).
+  static Future<void> _backfillMoneda(Database db, String tabla) async {
+    try {
+      final t = await db.rawQuery(
+          "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
+          [tabla]);
+      if (t.isEmpty) return;
+      final info = await db.rawQuery('PRAGMA table_info($tabla)');
+      if (!info.any((c) => '${c['name']}' == 'moneda')) return;
+      final rows = await db.rawQuery('SELECT id, data FROM $tabla');
+      final batch = db.batch();
+      var cambios = 0;
+      for (final r in rows) {
+        try {
+          final data =
+              jsonDecode(r['data'] as String) as Map<String, dynamic>;
+          final m = monedaDe(data);
+          if (m != 'CUP') {
+            batch.update(tabla, {'moneda': m},
+                where: 'id=?', whereArgs: [r['id']]);
+            cambios++;
+          }
+        } catch (_) {}
+      }
+      if (cambios > 0) await batch.commit(noResult: true);
+    } catch (_) {}
+  }
+
   /// v1.3.4 (ítem 2): construye el mapa de columnas para el INSERT del
   /// batch del pull (sync.dart). Para `pagos` incluye las 4 columnas
   /// indexadas extraídas del JSON; las demás tablas quedan igual.
@@ -1101,6 +1167,14 @@ class LocalDb {
       try {
         fila.addAll(
             columnasPagos(jsonDecode(dataJson) as Map<String, dynamic>));
+      } catch (_) {}
+    }
+    // v1.4.6 (v35): la fila del batch también puebla la columna
+    // moneda de suplementos y reservas.
+    if (tabla == 'suplementos' || tabla == 'reservas') {
+      try {
+        fila.addAll(
+            columnasMoneda(jsonDecode(dataJson) as Map<String, dynamic>));
       } catch (_) {}
     }
     return fila;
@@ -1283,8 +1357,10 @@ class LocalDb {
         'CREATE INDEX IF NOT EXISTS idx_pagos_telegram ON pagos(telegram_user_id, fecha)');
     // v1.3.1: suplementos lleva ultimo_precio como columna (no en JSON)
     // para no perderlo en cada pull con INSERT OR REPLACE.
+    // v1.4.6 (v35): moneda como columna ('CUP'|'USD'), poblada en
+    // Dart desde el JSON — paridad con la migración v35.
     await db.execute(
-        'CREATE TABLE suplementos (id INTEGER PRIMARY KEY, data TEXT NOT NULL, sync_seq INTEGER NOT NULL, ultimo_precio REAL)');
+        'CREATE TABLE suplementos (id INTEGER PRIMARY KEY, data TEXT NOT NULL, sync_seq INTEGER NOT NULL, ultimo_precio REAL, moneda TEXT NOT NULL DEFAULT \'CUP\')');
     // v1.2.5-rev6: turnos_cierre lleva id TEXT (UUID de Supabase); va
     // aparte del bucle genérico de ids enteros.
     await db.execute(
@@ -1306,8 +1382,10 @@ class LocalDb {
     // se siembra explícito también en instalación limpia (panel
     // Reservas Gestión 2026-10-21): mismo estado observable que
     // en una BD migrada, sin depender del fallback de lectura.
+    // v1.4.6 (v35): moneda snapshot de la reserva como columna —
+    // paridad con la migración v35.
     await db.execute(
-        'CREATE TABLE IF NOT EXISTS reservas (id INTEGER PRIMARY KEY, data TEXT NOT NULL, sync_seq INTEGER NOT NULL)');
+        'CREATE TABLE IF NOT EXISTS reservas (id INTEGER PRIMARY KEY, data TEXT NOT NULL, sync_seq INTEGER NOT NULL, moneda TEXT NOT NULL DEFAULT \'CUP\')');
     // v1.4.0 (v31): caché del pre-cálculo de nómina. Solo guarda el
     // conteo de clientes que pagaron el mes + huella de insumos +
     // cuándo se calculó. Bonos y tarifa se leen siempre en vivo.
@@ -1676,10 +1754,11 @@ class LocalDb {
     }
     if (tabla == 'suplementos') {
       // v1.3.1: preservar ultimo_precio (columna SQL, no JSON).
+      // v1.4.6 (v35): poblar también la columna moneda desde el JSON.
       await d.rawInsert(
-          'INSERT INTO suplementos (id, data, sync_seq) VALUES (?, ?, ?)'
-          ' ON CONFLICT(id) DO UPDATE SET data=excluded.data, sync_seq=excluded.sync_seq',
-          [id, nuevoJson, syncSeq]);
+          'INSERT INTO suplementos (id, data, sync_seq, moneda) VALUES (?, ?, ?, ?)'
+          ' ON CONFLICT(id) DO UPDATE SET data=excluded.data, sync_seq=excluded.sync_seq, moneda=excluded.moneda',
+          [id, nuevoJson, syncSeq, monedaDe(data)]);
     } else {
       final fila = <String, Object?>{
         'id': id,
@@ -1691,6 +1770,8 @@ class LocalDb {
       // filaParaBatchMirror en sync.dart; si se olvida uno, el índice
       // queda vacío.)
       if (tabla == 'pagos') fila.addAll(columnasPagos(data));
+      // v1.4.6 (v35): poblar la columna moneda del espejo reservas.
+      if (tabla == 'reservas') fila.addAll(columnasMoneda(data));
       await d.insert(tabla, fila,
           conflictAlgorithm: ConflictAlgorithm.replace);
     }
@@ -2246,17 +2327,31 @@ class LocalDb {
     final d = await db;
     final rows = await d.query(tabla);
     return [
-      for (final r in rows)
-        {
-          ...jsonDecode(r['data'] as String) as Map<String, dynamic>,
-          // v1.3.2 (Argón #17): garantizar id desde la columna SQL,
-          // como hacen mirrorPorIds y mirrorPorEstado.
-          'id': r['id'],
-          // v1.3.1 (B2): inyectar ultimo_precio (columna SQL, no JSON).
-          if (tabla == 'suplementos' && r['ultimo_precio'] != null)
-            'ultimo_precio': (r['ultimo_precio'] as num).toDouble(),
-        }
+      for (final r in rows) _mapaMirror(tabla, r),
     ];
+  }
+
+  /// Arma el mapa de una fila espejo: JSON decodificado + columnas
+  /// SQL que no viven en el JSON.
+  Map<String, dynamic> _mapaMirror(
+      String tabla, Map<String, Object?> r) {
+    final data = jsonDecode(r['data'] as String) as Map<String, dynamic>;
+    return {
+      ...data,
+      // v1.3.2 (Argón #17): garantizar id desde la columna SQL,
+      // como hacen mirrorPorIds y mirrorPorEstado.
+      'id': r['id'],
+      // v1.3.1 (B2): inyectar ultimo_precio (columna SQL, no JSON).
+      if (tabla == 'suplementos' && r['ultimo_precio'] != null)
+        'ultimo_precio': (r['ultimo_precio'] as num).toDouble(),
+      // v1.4.6 (v35): si el JSON aún no trae `moneda` (fila escrita
+      // antes de que el servidor la incluyera), se expone la de la
+      // columna dedicada; si el JSON la trae, manda el JSON.
+      if ((tabla == 'suplementos' || tabla == 'reservas') &&
+          data['moneda'] == null &&
+          r['moneda'] != null)
+        'moneda': r['moneda'],
+    };
   }
 
   /// v1.3.4 (ítem 2): pagos del día de un entrenador usando las columnas

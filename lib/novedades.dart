@@ -15,6 +15,11 @@ class Novedad {
 }
 
 const novedades = [
+  Novedad('1.4.6', [
+    'Moneda por suplemento: cada suplemento tiene su moneda (CUP o USD) y su precio, sus ventas y sus reservas se muestran y cobran en esa moneda',
+    'Ficha del cliente: el historial de pagos ahora dice quién cobró cada pago; también en «Pagos realizados»',
+    'Reservas: el importe de cada reserva se muestra en su moneda (la de la foto al reservar)',
+  ]),
   Novedad('1.4.5', [
     'Reservas de suplementos: bandeja nueva en Suplementos con las solicitudes de los clientes; puedes confirmarlas, rechazarlas y cobrarlas desde ahí',
     'Panel de permisos completo: las 13 claves de cada entrenador (cobrar, inscribir, editar fichas, vender suplementos, gastos, turnos y visibilidad de cifras)',

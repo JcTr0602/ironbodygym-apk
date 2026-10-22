@@ -24,7 +24,7 @@ class AppConfig {
 
   /// Versión visible en login/Ajustes (mantener igual que pubspec).
   /// Incluye el build number para identificar claramente la versión instalada.
-  static const appVersion = '1.4.5+63';
+  static const appVersion = '1.4.6+64';
 
   /// Usuarios con permiso de dueño (solo Jc). Comparación en minúsculas
   /// contra la parte local del email alias (nombre@ironbody.gym).

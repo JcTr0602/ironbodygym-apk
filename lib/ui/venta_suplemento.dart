@@ -4,9 +4,11 @@
 //   referencia fija "Precio oficial: X".
 // - Si el precio difiere del oficial (comparación en centavos): advertencia
 //   clara + confirmación explícita + nota_precio obligatoria si no es dueño.
-// - Moneda CUP/USD (chips). La moneda de suplementos es siempre USD:
-//   en USD se oculta el campo "Tasa (CUP por 1 USD)" y el equivalente
-//   en CUP (pedido Jc 2026-10-16); solo aparecen si se elige CUP.
+// - Moneda CUP/USD (chips). v1.4.6: la moneda de la venta arranca
+//   en la moneda del suplemento (su precio oficial está expresado
+//   en ella); en USD se oculta el campo "Tasa (CUP por 1 USD)" y el
+//   equivalente en CUP (pedido Jc 2026-10-16); solo aparecen si se
+//   elige CUP.
 // - Comprador: cliente del gym o externo.
 // - Venta por el camino único registrarVentaSuplemento (transacción
 //   atómica: stock JSON + op en ops_queue; nunca inserta en
@@ -48,8 +50,10 @@ class _VentaSuplementoScreenState
   // oficial. Obligatorio (mín. 5 caracteres) si quien vende NO es el dueño.
   final _notaPrecio = TextEditingController();
   final _permisos = Permisos();
-  // v1.2.4: USD por defecto (precio oficial en USD).
-  String _moneda = 'USD';
+  // v1.4.6: la moneda inicial es la del suplemento (se asigna en
+  // initState desde widget.suplemento); este valor es solo el
+  // respaldo antes de initState.
+  String _moneda = 'CUP';
   String _tipoComprador = 'cliente'; // cliente | externo_nombre | externo_generico | inscribir_nuevo
   int? _clienteId;
   String _clienteNombre = '';
@@ -61,9 +65,29 @@ class _VentaSuplementoScreenState
   double get _precioOficial =>
       (widget.suplemento['precio_oficial'] as num?)?.toDouble() ?? 0;
 
+  /// v1.4.6: moneda en la que está expresado el precio oficial
+  /// del suplemento (fallback 'CUP').
+  String get _monedaSuplemento => LocalDb.monedaDe(widget.suplemento);
+
+  /// v1.4.6: precio oficial convertido a la moneda [m] de la venta.
+  /// El oficial vive en la moneda del suplemento: si esta es USD se
+  /// conserva EXACTAMENTE el comportamiento histórico (v1.2.4:
+  /// [precioOficialEn], con redondeo a decenas al pasar a CUP); si
+  /// es CUP, a CUP va tal cual y a USD se divide por la tasa.
+  double? _oficialEn(String m) {
+    if (_monedaSuplemento == 'USD') {
+      return precioOficialEn(m, _precioOficial, _tasaUsd);
+    }
+    if (m == 'CUP') return _precioOficial;
+    final tasa = _tasaUsd;
+    // Delta panel: tampoco una tasa infinita produce referencia válida
+    // (alineado con el fail-closed del servidor).
+    if (tasa == null || tasa <= 0 || !tasa.isFinite) return null;
+    return _precioOficial / tasa;
+  }
+
   /// v1.2.4: precio oficial en la moneda elegida (CUP = oficial × tasa).
-  double? get _oficialEnMoneda =>
-      precioOficialEn(_moneda, _precioOficial, _tasaUsd);
+  double? get _oficialEnMoneda => _oficialEn(_moneda);
 
   /// v1.3.4 (candado a de auditoría): la comparación se hace en centavos
   /// enteros, nunca con double directamente.
@@ -78,14 +102,14 @@ class _VentaSuplementoScreenState
   /// v1.2.4: al cambiar de moneda, si el precio no se tocó a mano,
   /// se rellena con el oficial convertido (evita cobrar 50 CUP por 50 USD).
   void _cambiarMoneda(String m) {
-    final anterior = precioOficialEn(_moneda, _precioOficial, _tasaUsd);
+    final anterior = _oficialEn(_moneda);
     final actual =
         double.tryParse(_precio.text.trim().replaceAll(',', '.'));
     final sinTocar = actual == null ||
         (anterior != null && (actual - anterior).abs() < 0.01);
     setState(() {
       _moneda = m;
-      final nuevo = precioOficialEn(m, _precioOficial, _tasaUsd);
+      final nuevo = _oficialEn(m);
       if (sinTocar || nuevo == null) {
         // v1.3.1: sin conversión posible, no arrastrar el importe
         // de la otra moneda (evita 50 USD -> 50 CUP).
@@ -110,6 +134,9 @@ class _VentaSuplementoScreenState
   @override
   void initState() {
     super.initState();
+    // v1.4.6: el selector de moneda arranca en la moneda del
+    // suplemento (el precio oficial está expresado en ella).
+    _moneda = _monedaSuplemento;
     // v1.3.4 (B3-Invariante): el campo se inicializa SIEMPRE y ÚNICAMENTE
     // con precio_oficial. Jamás se lee ultimo_precio para pre-llenar.
     _precio.text = _precioOficial.toStringAsFixed(2);
@@ -488,7 +515,8 @@ class _VentaSuplementoScreenState
                       Text('${widget.suplemento['nombre']}',
                           style: AppTexto.subtitulo),
                       Text(
-                          'Oficial: ${_precioOficial.toStringAsFixed(2)} USD · $stock disp.',
+                          'Oficial: ${_precioOficial.toStringAsFixed(2)} '
+                          '$_monedaSuplemento · $stock disp.',
                           style: AppTexto.secundario),
                     ],
                   ),
@@ -641,7 +669,7 @@ class _VentaSuplementoScreenState
             Expanded(
               child: Text(
                 'Vas a vender a un precio distinto al oficial '
-                '(${_precioOficial.toStringAsFixed(2)} USD). '
+                '(${_precioOficial.toStringAsFixed(2)} $_monedaSuplemento). '
                 'Quedarán registrados ambos precios para auditoría.',
                 style: AppTexto.secundario,
               ),

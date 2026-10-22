@@ -455,6 +455,15 @@ String fmtMonto(dynamic m) {
   return v == v.roundToDouble() ? '${v.toInt()}' : '$v';
 }
 
+/// v1.4.6: línea «Cobró: …» de los historiales de pago (ficha del
+/// cliente y «Pagos realizados»). `registrado_por` ya viaja en el
+/// espejo de pagos; si falta o viene vacío se dice explícito en
+/// vez de dejar la línea en blanco.
+String textoCobradoPor(dynamic registradoPor) {
+  final s = '${registradoPor ?? ''}'.trim();
+  return s.isEmpty ? 'Cobró: No registrado' : 'Cobró: $s';
+}
+
 /// Nuevo pagado_hasta estimado si se pagan `meses` hoy.
 /// Regla del servidor: max(pagado_hasta actual, hoy) + meses*30 días.
 String previewHasta(String? pagadoHasta, int meses) =>
@@ -508,7 +517,7 @@ String textoTotalVenta(double total, String moneda, double? tasa) {
 /// En CUP se convierte con la tasa y se redondea a la decena.
 double? precioOficialEn(String moneda, double oficialUsd, double? tasa) {
   if (moneda == 'USD') return oficialUsd;
-  if (tasa == null || tasa <= 0) return null;
+  if (tasa == null || tasa <= 0 || !tasa.isFinite) return null;
   return ((oficialUsd * tasa) / 10).round() * 10.0;
 }
 
@@ -1500,6 +1509,12 @@ Future<List<Map<String, dynamic>>> cumpleanosProximos(
         ...c,
         '_dias_para': falta,
         '_cumple': proximo.year - nac.year,
+        // v1.4.6: la tarjeta de cumpleaños (cumpleanos.dart) lee '_dia' y
+        // '_fecha_cumple' en AMBAS pestañas; sin estas claves la de
+        // «Próximos 7 días» mostraba «Día 0» y «null · Cumple …».
+        '_dia': nac.day,
+        '_fecha_cumple':
+            '${nac.day.toString().padLeft(2, '0')}/${nac.month.toString().padLeft(2, '0')}',
       });
     }
   }

@@ -16,6 +16,7 @@ Map<String, dynamic> _reserva(
   String creada = '2026-10-21T10:00:00-04:00',
   String? expira,
   String? nota,
+  String? monedaReserva,
 }) =>
     {
       'id': id,
@@ -27,6 +28,7 @@ Map<String, dynamic> _reserva(
       'creada_ts': creada,
       'expira_en': expira,
       'nota_resolucion': nota,
+      if (monedaReserva != null) 'moneda': monedaReserva,
     };
 
 final _clientes = [
@@ -64,6 +66,61 @@ void main() {
       expect(r.suplementoNombre, 'Suplemento #88');
       expect(r.precioVigente, isNull);
       expect(r.diferenciaTotal, isNull);
+    });
+
+    test('moneda vigente = snapshot: diferencia numérica válida '
+        'y sin aviso', () {
+      final b = construirBandeja([
+        _reserva(1, precio: 40, monedaReserva: 'USD'),
+      ], _clientes, [
+        {
+          'id': 3,
+          'nombre': 'Creatina',
+          'precio_oficial': 45.0,
+          'moneda': 'USD',
+        },
+      ]);
+      final r = b.solicitadas.single;
+      expect(r.moneda, 'USD');
+      expect(r.monedaVigente, 'USD');
+      expect(r.diferenciaTotal, 5.0);
+      expect(avisoMonedaReserva(r), isNull);
+    });
+
+    test('moneda del catálogo distinta al snapshot: sin diferencia '
+        'numérica y con aviso de cobro al reservar', () {
+      final b = construirBandeja([
+        _reserva(1, precio: 3000), // snapshot CUP (sin clave moneda)
+      ], _clientes, [
+        {
+          'id': 3,
+          'nombre': 'Creatina',
+          'precio_oficial': 45.0,
+          'moneda': 'USD',
+        },
+      ]);
+      final r = b.solicitadas.single;
+      expect(r.moneda, 'CUP');
+      expect(r.monedaVigente, 'USD');
+      expect(r.diferenciaTotal, isNull);
+      final aviso = avisoMonedaReserva(r);
+      expect(aviso, isNotNull);
+      expect(aviso, contains('Precio hoy'));
+      expect(aviso, contains('USD'));
+      expect(aviso, contains('Se cobra el precio al reservar'));
+      expect(aviso, contains('CUP'));
+    });
+
+    test('sin suplemento en el espejo: monedaVigente cae a la '
+        'del snapshot', () {
+      final b = construirBandeja(
+          [_reserva(9, suplemento: 88, monedaReserva: 'USD')],
+          [],
+          []);
+      final r = b.solicitadas.single;
+      expect(r.moneda, 'USD');
+      expect(r.monedaVigente, 'USD');
+      expect(avisoMonedaReserva(r), isNull);
     });
 
     test('solicitadas FIFO; reservadas por vencimiento; historial reciente', () {

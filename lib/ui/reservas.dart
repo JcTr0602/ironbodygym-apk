@@ -35,6 +35,14 @@ class ReservaVista {
   final int cantidad;
   final double precioUnitario;
   final double? precioVigente;
+  // v1.4.6: moneda snapshot de la reserva (la de la foto de
+  // precio al reservar), no la del catálogo actual.
+  final String moneda;
+  // v1.4.6: moneda ACTUAL del suplemento en el catálogo. Si
+  // difiere de [moneda] (el dueño cambió la moneda del producto
+  // tras crearse la reserva), el precio vigente NO es comparable
+  // con el snapshot: no hay diferencia numérica válida.
+  final String monedaVigente;
   final String estado;
   final String creadaTs;
   final String? expiraEn;
@@ -49,6 +57,8 @@ class ReservaVista {
     required this.cantidad,
     required this.precioUnitario,
     required this.precioVigente,
+    this.moneda = 'CUP',
+    this.monedaVigente = 'CUP',
     required this.estado,
     required this.creadaTs,
     required this.expiraEn,
@@ -58,8 +68,11 @@ class ReservaVista {
   double get totalFoto => cantidad * precioUnitario;
 
   /// Diferencia total contra el precio vigente del catálogo
-  /// (null si el suplemento ya no está en el espejo).
-  double? get diferenciaTotal => precioVigente == null
+  /// (null si el suplemento ya no está en el espejo, o si la
+  /// moneda del catálogo difiere de la snapshot: restar unidades
+  /// incompatibles fabricaría una diferencia falsa).
+  double? get diferenciaTotal => precioVigente == null ||
+          monedaVigente != moneda
       ? null
       : (precioVigente! - precioUnitario) * cantidad;
 }
@@ -102,6 +115,12 @@ BandejaReservas construirBandeja(
           (supl?['nombre'] as String?) ?? 'Suplemento #$sid',
       cantidad: _entero(r['cantidad']),
       precioUnitario: _doble(r['precio_unitario']),
+      // v1.4.6: moneda snapshot que trae la propia reserva.
+      moneda: LocalDb.monedaDe(r),
+      // v1.4.6: moneda vigente del catálogo; sin suplemento en
+      // el espejo, la del snapshot (nada con qué comparar).
+      monedaVigente:
+          supl == null ? LocalDb.monedaDe(r) : LocalDb.monedaDe(supl),
       precioVigente:
           supl == null ? null : _doble(supl['precio_oficial']),
       estado: (r['estado'] ?? '') as String,
@@ -134,6 +153,21 @@ const tiposOpReserva = {
   'cancelar_reserva',
   'cobrar_reserva',
 };
+
+/// Aviso de «precio hoy» cuando la moneda del catálogo difiere
+/// de la snapshot de la reserva: el precio vigente va con SU
+/// moneda y SIN diferencia numérica (unidades incompatibles), y
+/// queda claro que el cobro usa el precio al reservar. Null si
+/// no hay precio vigente o si las monedas coinciden (en ese caso
+/// manda la diferencia normal de [ReservaVista.diferenciaTotal]).
+String? avisoMonedaReserva(ReservaVista r) {
+  if (r.precioVigente == null || r.monedaVigente == r.moneda) {
+    return null;
+  }
+  return 'Precio hoy: ${fmtMonto(r.precioVigente)} '
+      '${r.monedaVigente}. Se cobra el precio al reservar: '
+      '${fmtMonto(r.precioUnitario)} ${r.moneda}.';
+}
 
 /// Ids de reservas con una op encolada (pendiente o en error):
 /// su tarjeta se bloquea hasta que la sincronización resuelva.
@@ -292,8 +326,8 @@ class _ReservasScreenState extends State<ReservasScreen> {
       context,
       titulo: 'Confirmar reserva',
       mensaje: '${r.clienteNombre} aparta ${r.cantidad} × '
-          '${r.suplementoNombre} a ${fmtMonto(r.precioUnitario)} CUP '
-          '(${fmtMonto(r.totalFoto)} CUP en total).\n\n'
+          '${r.suplementoNombre} a ${fmtMonto(r.precioUnitario)} ${r.moneda} '
+          '(${fmtMonto(r.totalFoto)} ${r.moneda} en total).\n\n'
           'El apartado dura 72 horas: ese stock no se puede vender '
           'a nadie más hasta que pague o venza.',
       aceptar: 'Confirmar',
@@ -374,6 +408,7 @@ class _ReservasScreenState extends State<ReservasScreen> {
     if (_bloqueada(r.id)) return;
     var metodo = 'efectivo';
     final dif = r.diferenciaTotal;
+    final avisoMoneda = avisoMonedaReserva(r);
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => StatefulBuilder(
@@ -387,15 +422,21 @@ class _ReservasScreenState extends State<ReservasScreen> {
               Text('${r.clienteNombre} · ${r.cantidad} × '
                   '${r.suplementoNombre}'),
               const SizedBox(height: 8),
-              Text('Total a cobrar: ${fmtMonto(r.totalFoto)} CUP',
+              Text('Total a cobrar: ${fmtMonto(r.totalFoto)} ${r.moneda}',
                   style: const TextStyle(
                       fontWeight: FontWeight.bold, fontSize: 16)),
               Text('Precio al reservar: '
-                  '${fmtMonto(r.precioUnitario)} CUP'),
+                  '${fmtMonto(r.precioUnitario)} ${r.moneda}'),
+              if (avisoMoneda != null)
+                Text(
+                  avisoMoneda,
+                  style: TextStyle(
+                      color: Theme.of(ctx).colorScheme.error),
+                ),
               if (dif != null && dif != 0)
                 Text(
-                  'Precio hoy: ${fmtMonto(r.precioVigente)} CUP — '
-                  '${dif > 0 ? '+' : ''}${fmtMonto(dif)} CUP de '
+                  'Precio hoy: ${fmtMonto(r.precioVigente)} ${r.moneda} — '
+                  '${dif > 0 ? '+' : ''}${fmtMonto(dif)} ${r.moneda} de '
                   'diferencia. Se cobra el de la reserva.',
                   style: TextStyle(
                       color: Theme.of(ctx).colorScheme.error),
@@ -594,8 +635,12 @@ class TarjetaReserva extends StatelessWidget {
               ],
             ),
             Text('${r.cantidad} × ${r.suplementoNombre}'),
-            Text('Total: ${fmtMonto(r.totalFoto)} CUP '
-                '(${fmtMonto(r.precioUnitario)} c/u al reservar)'),
+            Text('Total: ${fmtMonto(r.totalFoto)} ${r.moneda} '
+                '(${fmtMonto(r.precioUnitario)} ${r.moneda} c/u al reservar)'),
+            if (avisoMonedaReserva(r) != null)
+              Text(avisoMonedaReserva(r)!,
+                  style: TextStyle(
+                      color: Theme.of(context).colorScheme.error)),
             if (solicitada || reservada)
               Text(textoVenceEn(r.expiraEn, ahora),
                   style: const TextStyle(color: Colors.orange)),

@@ -59,9 +59,11 @@ Map<String, dynamic> _articuloValido() => {
     };
 
 void main() {
-  test('limpia v34: espejos GymPedia y Reservas existen', () async {
+  test('limpia: espejos GymPedia y Reservas existen', () async {
     final db = await _abrirDbVacia();
-    expect(await db.getVersion(), 34);
+    // Contra la constante, no un literal: convención de localdb
+    // para no caer en cascada con cada migración (v35, v1.4.6).
+    expect(await db.getVersion(), LocalDb.versionActual);
     expect(await _existeTabla(db, 'gympedia_articulos'), isTrue);
     expect(await _existeTabla(db, 'gympedia_borradores'), isTrue);
     expect(await _existeTabla(db, 'reservas'), isTrue);
@@ -83,7 +85,7 @@ void main() {
     await LocalDb.resetParaTest();
 
     db = await LocalDb.instance.db;
-    expect(await db.getVersion(), 34);
+    expect(await db.getVersion(), LocalDb.versionActual);
     expect(await _existeTabla(db, 'gympedia_articulos'), isTrue);
     expect(await _existeTabla(db, 'gympedia_borradores'), isTrue);
     expect(await LocalDb.instance.getMeta('wm_gympedia_articulos'), '0');

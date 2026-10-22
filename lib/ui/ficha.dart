@@ -1897,7 +1897,8 @@ class _FichaScreenState extends State<FichaScreen> {
                                     style:
                                         AppTexto.cuerpo),
                                 subtitle: Text(
-                                    '${fmtFecha(p['fecha'] as String?)} · ${p['periodo'] ?? 'mensual'}',
+                                    '${fmtFecha(p['fecha'] as String?)} · ${p['periodo'] ?? 'mensual'}\n'
+                                    '${textoCobradoPor(p['registrado_por'])}',
                                     style: AppTexto
                                         .secundario),
                                 trailing:

@@ -1,7 +1,8 @@
 // Ficha del suplemento (v1.2.1).
 //
 // Al tocar un producto del catálogo se abre su detalle: foto grande,
-// descripción, precio en USD y su equivalente en CUP según la tasa del
+// descripción, precio en su moneda (CUP o USD según el suplemento) y,
+// si es USD, su equivalente en CUP según la tasa del
 // día, categoría y stock. Acciones: Vender, Venta rápida y Compartir.
 //
 // También expone los helpers reutilizables [ventaRapidaSuplemento] y
@@ -93,6 +94,11 @@ class _DialogoVentaRapidaState extends State<_DialogoVentaRapida> {
       (widget.sup['precio'] as num?)?.toDouble() ??
       0;
 
+  /// v1.4.6: la venta rápida se registra en la moneda del
+  /// suplemento (antes 'USD' fijo: un suplemento en CUP habría
+  /// quedado vendido como si fuera en USD).
+  String get _monedaSup => LocalDb.monedaDe(widget.sup);
+
   double? get _precioVenta =>
       double.tryParse(_precio.text.trim().replaceAll(',', '.'));
 
@@ -174,7 +180,7 @@ class _DialogoVentaRapidaState extends State<_DialogoVentaRapida> {
         cantidad: _cantidad,
         precioOficial: _precioOficial,
         precioVenta: _precioVenta!,
-        moneda: 'USD',
+        moneda: _monedaSup,
         compradorTipo: _conCliente ? 'cliente' : 'externo',
         clienteId: _clienteId,
         compradorNombre:
@@ -205,7 +211,7 @@ class _DialogoVentaRapidaState extends State<_DialogoVentaRapida> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Text(
-              'Precio oficial: ${_precioOficial.toStringAsFixed(2)} USD',
+              'Precio oficial: ${_precioOficial.toStringAsFixed(2)} $_monedaSup',
               style: AppTexto.secundario,
             ),
             const SizedBox(height: AppEspacio.md),
@@ -213,7 +219,7 @@ class _DialogoVentaRapidaState extends State<_DialogoVentaRapida> {
             const SizedBox(height: AppEspacio.sm),
             CampoTexto(
               controller: _precio,
-              etiqueta: 'Precio por unidad (USD)',
+              etiqueta: 'Precio por unidad ($_monedaSup)',
               teclado: const TextInputType.numberWithOptions(
                   decimal: true),
               onChanged: (_) => setState(() {}),
@@ -328,7 +334,7 @@ class _DialogoVentaRapidaState extends State<_DialogoVentaRapida> {
             Expanded(
               child: Text(
                 'Vas a vender a un precio distinto al oficial '
-                '(${_precioOficial.toStringAsFixed(2)} USD). '
+                '(${_precioOficial.toStringAsFixed(2)} $_monedaSup). '
                 'Quedarán registrados ambos precios para auditoría.',
                 style: AppTexto.secundario,
               ),
@@ -452,13 +458,16 @@ Future<void> compartirSuplemento(BuildContext context,
   final nombre = '${s['nombre'] ?? 'Suplemento'}';
   final precio =
       (s['precio_oficial'] as num?)?.toDouble() ?? 0;
-  final cup = tasaUsd != null && tasaUsd > 1.0
+  // v1.4.6: la etiqueta es la moneda del propio suplemento;
+  // el equivalente en CUP solo existe si el precio está en USD.
+  final moneda = LocalDb.monedaDe(s);
+  final cup = moneda == 'USD' && tasaUsd != null && tasaUsd > 1.0
       ? ' (≈ ${fmtMonto(precio * tasaUsd)} CUP)'
       : '';
   final stock = (s['stock'] as num?)?.toInt() ?? 0;
   final texto = 'Iron Body Gym — Suplementos\n\n'
       '$nombre\n'
-      'Precio: ${precio.toStringAsFixed(2)} USD$cup\n'
+      'Precio: ${precio.toStringAsFixed(2)} $moneda$cup\n'
       'Disponibles: $stock';
   try {
     // v1.3.3: preferir la foto local recién tomada (offline) si existe.
@@ -537,7 +546,10 @@ class DetalleSuplementoScreen extends StatelessWidget {
     final foto = suplemento['foto_storage'] as String?;
     // v1.3.3: foto local recién tomada (offline) tiene prioridad.
     final fotoLocal = suplemento['foto_local'] as String?;
-    final cup = tasaUsd != null && tasaUsd! > 1.0
+    // v1.4.6: el equivalente en CUP solo aplica si el precio
+    // oficial está en USD (moneda del propio suplemento).
+    final monedaSup = LocalDb.monedaDe(suplemento);
+    final cup = monedaSup == 'USD' && tasaUsd != null && tasaUsd! > 1.0
         ? '≈ ${fmtMonto(precio * tasaUsd!)} CUP'
         : null;
     // v1.4.3: presentación del envase (la misma que ve el cliente
@@ -686,7 +698,8 @@ class DetalleSuplementoScreen extends StatelessWidget {
             Text('Presentación: $presentacion', style: AppTexto.cuerpo),
           ],
           const SizedBox(height: AppEspacio.md),
-          // Precio USD + equivalente CUP + stock.
+          // Precio (moneda del suplemento) + equivalente CUP
+          // si es USD + stock.
           Tarjeta(
             child: Row(
               children: [
@@ -699,7 +712,7 @@ class DetalleSuplementoScreen extends StatelessWidget {
                         CrossAxisAlignment.start,
                     children: [
                       Text(
-                          '${precio.toStringAsFixed(2)} USD',
+                          '${precio.toStringAsFixed(2)} $monedaSup',
                           style: AppTexto.displayPequeno),
                       if (cup != null)
                         Text(cup,
