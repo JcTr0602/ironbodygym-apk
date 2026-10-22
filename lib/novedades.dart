@@ -15,6 +15,13 @@ class Novedad {
 }
 
 const novedades = [
+  Novedad('1.4.5', [
+    'Reservas de suplementos: bandeja nueva en Suplementos con las solicitudes de los clientes; puedes confirmarlas, rechazarlas y cobrarlas desde ahí',
+    'Panel de permisos completo: las 13 claves de cada entrenador (cobrar, inscribir, editar fichas, vender suplementos, gastos, turnos y visibilidad de cifras)',
+    'Sin permiso de cifras, el entrenador ve el panel sin importes y en «Pagos realizados» solo los pagos registrados por él',
+    'Administración: nuevo campo «Titular de la cuenta» para los datos de transferencia, y tarifa especial por transferencia en la ficha del cliente',
+    'La fase «Subiendo fotos…» solo aparece cuando de verdad hay fotos pendientes',
+  ]),
   Novedad('1.4.4', [
     'Vista previa del cliente: desde su ficha ves exactamente lo que él ve en su app (inicio, pagos, suplementos, plan y progreso)',
     'La sincronización ahora limpia los datos fantasma y rellena huecos: si un pago no te aparece, una sincronización completa lo trae',
