@@ -133,6 +133,27 @@ void main() {
     ]);
     expect(lista.single.id, 'r9');
     expect(lista.single.monto, 1000.0);
+    // La fila REAL del contrato B2 (verificada en vivo el
+    // 2026-10-23): el monto viaja como `monto_cup`. Sin esta
+    // clave en el parseo, la tarjeta pintaba 0 CUP con el
+    // dato correcto en el servidor (bug de campo).
+    lista = parsearReportesPlus([
+      {
+        'id': 1,
+        'banco': 'bandec',
+        'estado': 'pendiente',
+        'nombre': 'Prueba',
+        'telefono': '59191577',
+        'creado_en': '2026-10-23T19:29:08.271964+00:00',
+        'monto_cup': 1000.0,
+        'referencia': 'KW6020',
+        'invitado_id': 'e0d3bd77-ca77-4605-9368-45aa33c161f0',
+        'movil_origen': '59191577',
+        'alerta_referencia_rechazada': false,
+      }
+    ]);
+    expect(lista.single.monto, 1000.0);
+    expect(lista.single.referencia, 'KW6020');
     // Filas sin id o sin invitado se descartan; basura no rompe.
     expect(
         parsearReportesPlus([

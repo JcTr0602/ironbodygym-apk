@@ -133,7 +133,11 @@ class ReportePlus {
     final id = '${j['id'] ?? j['reporte_id'] ?? ''}';
     final invitadoId = '${j['invitado_id'] ?? ''}';
     if (id.isEmpty || invitadoId.isEmpty) return null;
-    final montoRaw = j['monto'] ?? j['precio_cup'];
+    // El contrato B2 devuelve `monto_cup` (la fila real de
+    // plus_reportes_listar); `monto`/`precio_cup` quedan como
+    // tolerancia histórica. Sin `monto_cup` la tarjeta pintaba
+    // 0 CUP con el dato correcto en el servidor (campo 2026-10-23).
+    final montoRaw = j['monto_cup'] ?? j['monto'] ?? j['precio_cup'];
     final alerta = j['alerta_referencia_rechazada'];
     return ReportePlus(
       id: id,
