@@ -87,6 +87,13 @@ const Map<String, TipoOperacionInfo> kTiposOperacion = {
       TipoOperacionInfo('Cerrar lote de servicio', Icons.lock),
   'cerrar_bote_servicio':
       TipoOperacionInfo('Cerrar bote de servicio', Icons.lock),
+  // v1.8.0: adelantos a entrenadores.
+  'registrar_adelanto':
+      TipoOperacionInfo('Adelanto a entrenador', Icons.payments),
+  'anular_adelanto':
+      TipoOperacionInfo('Anulación de adelanto', Icons.undo),
+  'liquidar_nomina':
+      TipoOperacionInfo('Nómina liquidada', Icons.fact_check),
 };
 
 /// v1.4.4: etiquetas de la op 'ajuste' según su clave. Antes TODA
@@ -105,6 +112,7 @@ const Map<String, String> kEtiquetasAjuste = {
   'movil_confirmacion': 'Ajuste: móvil de confirmación',
   'tasa_usd': 'Ajuste: tasa USD',
   'horario_turnos': 'Ajuste: horario de turnos',
+  'horario_excepciones': 'Ajuste: excepciones de turnos',
   'plantillas_wa': 'Ajuste: plantillas de WhatsApp',
   'titular': 'Ajuste: titular de la cuenta',
   'precio_app_plus': 'Ajuste: precio App Plus (A++)',

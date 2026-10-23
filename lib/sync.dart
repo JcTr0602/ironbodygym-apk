@@ -2312,6 +2312,8 @@ class SyncEngine {
       'categorias_suplemento', // v1.2.1
       'turnos_cierre', // v1.2.5-rev5
       'turnos_apertura', // v1.8.0 (v39): espejo para la Auditoría
+      'adelantos', // v1.8.0 (v40)
+      'nomina_liquidada', // v1.8.0 (v40)
       'liquidaciones_caja', // v1.3.6 (v28, ítem 1B)
       'incidencias_sync', // v1.3.6 (v28, ítem 1C)
       'gympedia_articulos', // v1.4.4 (v33)
@@ -2365,6 +2367,8 @@ class SyncEngine {
       'categorias_suplemento',
       'gympedia_articulos',
       'turnos_apertura', // v1.8.0: espejo del servidor, sin filas locales
+      'adelantos', // v1.8.0: espejo del servidor, sin filas locales
+      'nomina_liquidada', // v1.8.0: ídem
       'reservas', // Reservas v2: la proyección es completa, purgar es seguro
       // v1.8.0: servicios — la app nunca inserta filas optimistas en
       // estos espejos (las ventas viven en ops_queue hasta que el
@@ -2478,6 +2482,9 @@ class SyncEngine {
       // v1.8.0 (v39): aperturas sincronizadas (Auditoría por
       // persona; la tabla existe en Supabase desde v1.3.3).
       'turnos_apertura': 'sync_turnos_apertura',
+      // v1.8.0 (v40): adelantos (si la oleada SQL no está, se omite).
+      'adelantos': 'sync_adelantos',
+      'nomina_liquidada': 'sync_nomina_liquidada',
       // v1.3.6 (v28): arqueo de caja e incidencias de sync.
       'liquidaciones_caja': 'sync_liquidaciones_caja',
       'incidencias_sync': 'sync_incidencias_sync',
