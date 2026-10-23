@@ -6,6 +6,7 @@ library;
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../auth.dart';
 import '../localdb.dart';
@@ -39,6 +40,7 @@ import 'mi_turno.dart';
 import 'nomina.dart';
 import 'pago.dart';
 import 'pago_diario.dart';
+import 'pagaron_mes.dart';
 import 'pagos_realizados.dart';
 import 'suplementos.dart';
 import 'papelera.dart';
@@ -48,6 +50,15 @@ import 'transferencia.dart';
 import 'widgets.dart';
 import '../app_log.dart';
 import '../turno_service.dart';
+
+/// v1.6.0 (pedido de Jc): clave DURABLE del descarte del aviso de
+/// turno sin reporte: «sin_reporte:<fecha>:<turno>». La DETECCIÓN
+/// (turnosSinReporte en negocio.dart) no cambia; solo el filtrado
+/// de presentación: el descarte se guarda en SharedPreferences y
+/// oculta únicamente ESA instancia (otro día u otro turno = aviso
+/// nuevo). Función pura, testeable.
+String claveDescarteSinReporte(String fechaIso, String turno) =>
+    'sin_reporte:$fechaIso:$turno';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -176,16 +187,60 @@ class _HomeScreenState extends State<HomeScreen>
   List<String> _turnosSinReporte = [];
   // v1.3.6 (ítem 4, Jc): turnos sin reporte descartados por el usuario.
   // v1.3.9 (Bug 3, Argón): STATIC para que sobreviva en RAM aunque Home
-  // se desmonte y reconstruya al navegar. Clave "fecha:turno": jamás oculta
-  // el turno del día siguiente. Solo en memoria (nunca persistido).
+  // se desmonte y reconstruya al navegar.
+  // v1.6.0 (Jc): el descarte ahora es DURABLE por instancia: la clave
+  // «sin_reporte:<fecha>:<turno>» (claveDescarteSinReporte) se persiste
+  // en SharedPreferences y se recarga en _cargar; este set es solo el
+  // espejo en memoria. Jamás oculta el turno del día siguiente.
   static final Set<String> _turnosSinReporteDescartados = {};
 
-  /// Turnos sin reporte visibles (excluye los descartados en la sesión).
+  /// Turnos sin reporte visibles (excluye los descartados, ya
+  /// persistidos, de la instancia fecha+turno de hoy).
   List<String> get _turnosSinReporteVisibles {
     final hoy = hoyHabanaIso();
     return _turnosSinReporte
-        .where((t) => !_turnosSinReporteDescartados.contains('$hoy:$t'))
+        .where((t) => !_turnosSinReporteDescartados
+            .contains(claveDescarteSinReporte(hoy, t)))
         .toList();
+  }
+
+  /// v1.6.0: vuelca al set en memoria los descartes de HOY guardados
+  /// en SharedPreferences y purga las claves de días anteriores
+  /// (mismo patrón que la bandeja de WhatsApp). Solo prefs locales:
+  /// sin red ni BD, y cualquier fallo deja el aviso visible.
+  Future<void> _cargarDescartesSinReporte(String hoy) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      for (final k in prefs.getKeys()) {
+        if (!k.startsWith('sin_reporte:')) continue;
+        // Formato: sin_reporte:YYYY-MM-DD:turno
+        final resto = k.substring('sin_reporte:'.length);
+        if (resto.length < 10) continue;
+        final fecha = resto.substring(0, 10);
+        if (fecha.compareTo(hoy) < 0) {
+          await prefs.remove(k);
+        } else if (fecha == hoy && prefs.getBool(k) == true) {
+          _turnosSinReporteDescartados.add(k);
+        }
+      }
+    } catch (_) {}
+  }
+
+  /// v1.6.0: persiste el descarte de las instancias indicadas.
+  /// Devuelve true solo si TODAS las escrituras completaron: el
+  /// handler de la X espera esta confirmación ANTES de ocultar el
+  /// aviso (si el proceso muriera a mitad de un guardado sin
+  /// esperar, el descarte se perdía y el aviso resucitaba).
+  Future<bool> _guardarDescartesSinReporte(List<String> claves) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      for (final k in claves) {
+        await prefs.setBool(k, true);
+      }
+      return true;
+    } catch (_) {
+      return false;
+    }
   }
 
   @override
@@ -432,6 +487,11 @@ class _HomeScreenState extends State<HomeScreen>
           ? await turnosSinReporte(
               hoyHabanaIso()) // v1.3.4 (Argón): fecha de negocio en La Habana
           : <String>[];
+      // v1.6.0: recargar los descartes DURABLES del aviso (persisten
+      // entre refrescos y reinicios; la detección no cambia).
+      if (_auth.isOwner) {
+        await _cargarDescartesSinReporte(hoyHabanaIso());
+      }
       // Alerta de entrenadores sin actividad reciente (solo dueño).
       final sinSync = <Map<String, dynamic>>[];
       if (_auth.isOwner) {
@@ -1017,7 +1077,14 @@ class _HomeScreenState extends State<HomeScreen>
             ],
           ),
           const SizedBox(height: AppEspacio.sm),
-          // v1.4.0 (Jc): pagaron el mes (→ Nómina) y la base ×300.
+          // v1.4.0 (Jc): pagaron el mes y la base ×300.
+          // v1.6.0 (Jc): destinos CORREGIDOS — «Pagaron el mes» abre
+          // el LISTADO exacto de los que pagaron el mes
+          // (PagaronMesScreen, mismo conjunto NominaCalc que la
+          // cifra; antes abría la Nómina, que no es lo que la cifra
+          // cuenta); la base se renombra «Pago de entrenadores»
+          // (mismo valor: lo que hay que pagarles en el mes) y es
+          // la que abre la Nómina.
           Row(
             children: [
               Expanded(
@@ -1025,17 +1092,21 @@ class _HomeScreenState extends State<HomeScreen>
                       'Pagaron el mes',
                       '$_pagaronMes',
                       AppColores.naranja,
-                      () => _ir(const NominaScreen()))),
+                      () => _ir(const PagaronMesScreen()))),
               Expanded(
-                  child: _datoFinanciero(
-                      'Base del mes (×300)',
+                  child: _datoFinancieroTappable(
+                      'Pago de entrenadores',
                       fmtMonto(_pagaronMes * 300),
-                      AppColores.exito)),
+                      AppColores.exito,
+                      () => _ir(const NominaScreen()))),
             ],
           ),
-          // v1.3.6 (ítem 4): el banner se puede descartar (X). El descarte
-          // es solo en memoria por sesión; si aparece un turno NUEVO sin
-          // reporte, el banner reaparece solo.
+          // v1.3.6 (ítem 4): el banner se puede descartar (X).
+          // v1.6.0 (Jc): el descarte es DURABLE por instancia
+          // (fecha+turno, en SharedPreferences): refrescar o reabrir
+          // la app ya no lo revive; un turno NUEVO sin reporte sí
+          // genera su aviso. Un solo icono de advertencia (el de la
+          // izquierda); el texto ya no lleva el emoji ⚠️ duplicado.
           if (_turnosSinReporteVisibles.isNotEmpty) ...[
             const SizedBox(height: AppEspacio.sm),
             InkWell(
@@ -1064,21 +1135,34 @@ class _HomeScreenState extends State<HomeScreen>
                         width: AppEspacio.sm),
                     Expanded(
                       child: Text(
-                        '⚠️ ${_turnosSinReporteVisibles.length} turno(s) sin reporte: ${_turnosSinReporteVisibles.join(' y ')}',
+                        '${_turnosSinReporteVisibles.length} turno(s) sin reporte: ${_turnosSinReporteVisibles.join(' y ')}',
                         style: AppTexto.secundario,
                       ),
                     ),
                     InkWell(
                       borderRadius: BorderRadius.circular(16),
-                      onTap: () {
-                        // Descarta solo los visibles ahora; los nuevos
-                        // reaparecen solos.
+                      onTap: () async {
+                        // Descarta solo las instancias visibles ahora
+                        // (clave por turno: la tarjeta solo volverá a
+                        // listar los NO descartados); un turno nuevo
+                        // sin reporte genera su propio aviso. v1.6.0:
+                        // además se PERSISTE en SharedPreferences.
+                        // Panel 1.6.0: la persistencia se ESPERA y el
+                        // estado visual solo se aplica cuando la
+                        // escritura ya completó (si el proceso muere
+                        // justo tras tocar la X, el aviso NO revive
+                        // por un descarte nunca guardado). Si la
+                        // escritura falla, el aviso se queda visible
+                        // en vez de darse por descartado.
                         final hoy = hoyHabanaIso();
+                        final claves = _turnosSinReporteVisibles
+                            .map((t) => claveDescarteSinReporte(hoy, t))
+                            .toList();
+                        final guardado =
+                            await _guardarDescartesSinReporte(claves);
+                        if (!guardado || !mounted) return;
                         setState(() {
-                          _turnosSinReporteDescartados.addAll(
-                            _turnosSinReporteVisibles
-                                .map((t) => '$hoy:$t'),
-                          );
+                          _turnosSinReporteDescartados.addAll(claves);
                         });
                       },
                       child: const Padding(

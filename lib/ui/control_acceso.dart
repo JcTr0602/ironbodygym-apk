@@ -4,6 +4,9 @@
 // sección "Control de Acceso" con pestañas Entrenadores | Clientes.
 // Solo dueño. Fase C de Argón (gráficos/rankings/plantillas) → v1.4.1;
 // aquí van las tarjetas de conteo filtrables y el WhatsApp (máx. 40).
+// v1.6.0 (pedido de Jc): la zona pasa a llamarse «Usuarios» e integra
+// la bandeja de Invitados como tercera pestaña: Entrenadores,
+// Clientes e Invitados se gestionan en un mismo sitio.
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -16,9 +19,10 @@ import 'campana_wa.dart';
 import 'estadisticas_adopcion.dart';
 import 'diseno.dart';
 import 'ficha_acceso.dart';
+import 'invitados.dart';
 import 'modal_pin_acceso.dart';
 import 'panel_permisos.dart';
-import 'turnos_manuales.dart';
+import 'turnos_hub.dart';
 import 'usuarios.dart';
 import 'widgets.dart';
 
@@ -29,24 +33,27 @@ class ControlAccesoScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     if (!AuthService().isOwner) {
       return Scaffold(
-        appBar: AppBar(title: const Text('Control de Acceso')),
+        appBar: AppBar(title: const Text('Usuarios')),
         body: const Center(
           child: Text('Solo el dueño puede gestionar los accesos.'),
         ),
       );
     }
     return DefaultTabController(
-      length: 2,
+      length: 3,
       child: Scaffold(
         appBar: AppBar(
-          title: const Text('Control de Acceso'),
+          title: const Text('Usuarios'),
           actions: [
+            // v1.6.0 (Jc): una sola puerta «Turnos» (hub con el
+            // plan semanal, los ajustes por fecha y la línea de
+            // precedencia). Antes esto abría solo «Turnos manuales».
             IconButton(
               icon: const Icon(Icons.calendar_month),
-              tooltip: 'Turnos manuales',
+              tooltip: 'Turnos',
               onPressed: () => Navigator.of(context).push(
                 MaterialPageRoute(
-                  builder: (_) => const TurnosManualesScreen(),
+                  builder: (_) => const TurnosHubScreen(),
                 ),
               ),
             ),
@@ -55,6 +62,9 @@ class ControlAccesoScreen extends StatelessWidget {
             tabs: [
               Tab(icon: Icon(Icons.sports, size: 18), text: 'Entrenadores'),
               Tab(icon: Icon(Icons.people, size: 18), text: 'Clientes'),
+              Tab(
+                  icon: Icon(Icons.person_add_alt_rounded, size: 18),
+                  text: 'Invitados'),
             ],
           ),
         ),
@@ -87,6 +97,9 @@ class ControlAccesoScreen extends StatelessWidget {
             ),
             // ---- Pestaña Clientes ----
             const AccesosClientesTab(),
+            // ---- Pestaña Invitados (v1.6.0): la bandeja de siempre,
+            // embebida y con todas sus funciones ----
+            const InvitadosScreen(embebido: true),
           ],
         ),
       ),

@@ -920,6 +920,13 @@ class InvitadosService {
     ];
   }
 
+  /// Solicitudes de inscripción pendientes de atender: la MISMA
+  /// fuente que la bandeja (filtro 'solicitudes'). La usa el Panel
+  /// del dueño (v1.6.0) para el bloque «Necesita tu atención» y el
+  /// distintivo de Usuarios; no crea un canal nuevo.
+  Future<List<InvitadoResumen>> solicitudesPendientes() =>
+      listar(filtro: 'solicitudes');
+
   Future<InvitadoDetalle> detalle(String invitadoId) async {
     final res =
         await _rpc('invitado_detalle', {'p_invitado_id': invitadoId});

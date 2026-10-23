@@ -15,6 +15,19 @@ class Novedad {
 }
 
 const novedades = [
+  Novedad('1.6.0', [
+    'Panel del dueño rediseñado: la Administración abre ahora con lo que necesita tu atención (solicitudes de invitados, reservas por confirmar, efectivo por liquidar, cierres pendientes y stock crítico, cada uno con su botón para resolverlo)',
+    'Usuarios: entrenadores, clientes e invitados se gestionan en una sola zona con pestañas; la bandeja de invitados vive ahí, con sus solicitudes a mano',
+    'Acciones rápidas arriba: Cobrar, Arqueo y Cierre a un toque, sin entrar a ningún módulo',
+    'Resumen del mes de un vistazo: ingresos, pagos y clientes activos, con la hora de la última sincronización',
+    'Las secciones de siempre, agrupadas en 5 módulos con nombres de tarea: Caja y dinero, Clientes y equipo, Suplementos y contenido, Control y sistema y Configuración y datos',
+    'Turnos en una sola puerta: plan semanal y ajustes por fecha juntos, con la regla a la vista (la app muestra al entrenador programado y solo cambia si abre otro)',
+    'Auditoría: abre mostrando lo de otros y las operaciones sensibles o rechazadas; tus operaciones quedan a un toque en «Solo mías»',
+    'El aviso de turnos sin reporte ya no reaparece tras descartarlo: el descarte se guarda por día y turno',
+    'Información pública: el horario dejó de teclearse a mano; se muestra el horario del sistema y se republica tal cual al guardar',
+    'Estadísticas rápidas: «Pagaron el mes» abre el listado de clientes y «Pago de entrenadores» (antes «Base del mes») abre la nómina',
+    'El invitado convertido muestra su fecha de conversión y, si su cliente fue eliminado después, lo dice en su registro',
+  ]),
   Novedad('1.5.0', [
     'Invitados: nueva bandeja con las personas que se registran desde la app de clientes; se pueden ver sus datos y medidas sincronizadas, atender su solicitud y convertirlas en clientes con un toque',
     'Al convertir un invitado, sus medidas sincronizadas se importan a su ficha tras verificarlas en el servidor',

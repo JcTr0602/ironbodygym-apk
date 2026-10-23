@@ -39,16 +39,25 @@ class NominaCalc {
       _contar(pref);
 
   static Future<int?> _contar(String pref) async {
+    final ids = await _conjunto(pref);
+    return ids?.length;
+  }
+
+  /// IDs de los clientes que forman la base del mes [pref]:
+  /// EXACTAMENTE el mismo conjunto que cuenta
+  /// [clientesQuePagaronElMes] (ambos salen de [_conjunto]), para
+  /// que el listado «Pagaron este mes» y la cifra de Home nunca
+  /// discrepen. Ante un error de lectura devuelve lista vacía, como
+  /// el contador devuelve 0.
+  static Future<List<int>> idsQuePagaronElMes(String pref) async =>
+      (await _conjunto(pref))?.toList() ?? <int>[];
+
+  /// El conjunto de la base del mes [pref], o null si la lectura
+  /// falló (para distinguir el "0 real" de un error).
+  static Future<Set<int>?> _conjunto(String pref) async {
     try {
       final pagos = await LocalDb.instance.pagosDelMes(pref);
-      final vistos = <int>{};
-      for (final p in pagos) {
-        final cid = p['cliente_id'];
-        // Numérico tolerante: un 10.0 llegado por JSON también es el
-        // cliente 10 (auditoría del código, DeepSeek).
-        final id = cid is num ? cid.toInt() : int.tryParse('$cid');
-        if (id != null) vistos.add(id);
-      }
+      final vistos = idsDesdePagos(pagos);
       // Excepción del mes en curso (ver la nota de la clase): se
       // excluye al cliente cuyo pagado_hasta cae en
       // [inicioMes, inicioMesSiguiente). Cliente sin fila en el
@@ -63,18 +72,43 @@ class NominaCalc {
           for (final f in filas)
             (f['id'] as num).toInt(): _fechaCalendario(f['pagado_hasta']),
         };
-        final inicio = '$pref-01';
-        final siguiente = _inicioMesSiguiente(pref);
-        vistos.removeWhere((id) {
-          final h = hastaPorId[id];
-          if (h == null) return false;
-          return h.compareTo(inicio) >= 0 && h.compareTo(siguiente) < 0;
-        });
+        excluirVencidosDentroDelMes(vistos, pref, hastaPorId);
       }
-      return vistos.length;
+      return vistos;
     } catch (_) {
       return null;
     }
+  }
+
+  /// PURO (testeable sin BD): ids únicos de cliente presentes en
+  /// [pagos]. Numérico tolerante: un 10.0 llegado por JSON también
+  /// es el cliente 10 (auditoría del código, DeepSeek); un id no
+  /// interpretable se ignora.
+  static Set<int> idsDesdePagos(List<Map<String, dynamic>> pagos) {
+    final vistos = <int>{};
+    for (final p in pagos) {
+      final cid = p['cliente_id'];
+      final id = cid is num ? cid.toInt() : int.tryParse('$cid');
+      if (id != null) vistos.add(id);
+    }
+    return vistos;
+  }
+
+  /// PURO (testeable sin BD): aplica sobre [ids] la excepción del
+  /// mes en curso — quita a quien tenga `pagado_hasta` dentro de
+  /// [pref], según [hastaPorId] (id → fecha calendario 'YYYY-MM-DD'
+  /// ya normalizada, o null si no es interpretable: ese se
+  /// CONSERVA). Si [pref] no es el mes en curso, no toca nada.
+  static void excluirVencidosDentroDelMes(
+      Set<int> ids, String pref, Map<int, String?> hastaPorId) {
+    if (pref != prefMesActual()) return;
+    final inicio = '$pref-01';
+    final siguiente = _inicioMesSiguiente(pref);
+    ids.removeWhere((id) {
+      final h = hastaPorId[id];
+      if (h == null) return false;
+      return h.compareTo(inicio) >= 0 && h.compareTo(siguiente) < 0;
+    });
   }
 
   /// Primer día del mes siguiente a [pref] ('YYYY-MM') como

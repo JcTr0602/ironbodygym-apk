@@ -1,10 +1,13 @@
-/// Administración (solo admin).
+/// Administración (solo admin) — Panel del dueño desde v1.6.0.
 ///
-/// Estadísticas del negocio, montos, usuarios APK, pendiente a entrega,
-/// gastos, cierre de caja, papelera y exportar. Todo funciona offline:
-/// los cambios se encolan y suben al sincronizar.
+/// Consola del dueño: pendientes con acción, acciones rápidas de caja,
+/// resumen del mes y los módulos de siempre (estadísticas, montos,
+/// usuarios APK, pendiente a entrega, gastos, cierre de caja, papelera
+/// y exportar). Todo funciona offline: los cambios se encolan y suben
+/// al sincronizar.
 library;
 
+import 'dart:async';
 import 'dart:io';
 
 import 'dart:convert';
@@ -14,11 +17,14 @@ import 'package:share_plus/share_plus.dart';
 import 'package:uuid/uuid.dart';
 
 import '../auth.dart';
+import '../invitados.dart' as invitados_svc;
 import '../localdb.dart';
 import '../negocio.dart';
+import '../nomina_calc.dart';
 import '../perfil.dart';
 import '../permisos.dart';
 import '../sync.dart';
+import '../tiempo.dart';
 import '../tipos_pago.dart';
 import 'componentes.dart';
 import 'diseno.dart';
@@ -34,12 +40,18 @@ import 'riesgo.dart';
 import 'papelera.dart';
 import 'congelados.dart';
 import 'control_acceso.dart';
+import 'turnos_hub.dart';
 import 'comparativa_mensual.dart';
+import 'pagaron_mes.dart';
 import 'pagos_por_metodo.dart';
 import 'incidencias/lista_incidencias.dart';
 import 'historial_caja.dart';
 import 'invitados.dart';
 import 'exportar_excel.dart';
+import 'incidencias_sync.dart';
+import 'pago.dart';
+import 'reservas.dart';
+import 'suplementos.dart';
 import 'widgets.dart';
 
 class AdminScreen extends StatefulWidget {
@@ -64,6 +76,25 @@ class _AdminScreenState extends State<AdminScreen> {
   // Salud del sistema
   SyncDetalle _syncDet = const SyncDetalle();
   int _pendientesSubir = 0;
+
+  // Panel del dueño (v1.6.0): datos de los bloques nuevos.
+  int _pagosMes = 0;
+  int _clientesActivos = 0;
+  List<Map<String, dynamic>> _reservasSolicitadas = [];
+  Map<String, String> _nombreSupl = {};
+  List<Map<String, dynamic>> _stockCritico = [];
+  List<String> _sinReporteAyer = [];
+  List<String> _sinReporteHoy = [];
+  int _incidenciasPend = 0;
+  // Solicitudes de inscripción de invitados por atender (del
+  // servicio de Invitados; vacío si no hay conexión al cargar).
+  List<invitados_svc.InvitadoResumen> _solicitudesInvitados = [];
+  // Panel 1.6.0: la RPC de solicitudes NO bloquea el pintado del
+  // panel: _cargar pinta con los datos locales y la fila queda en
+  // estado «cargando» hasta que la RPC resuelve (ver
+  // _cargarSolicitudesInvitados).
+  bool _solicitudesCargando = true;
+  int _solicitudesGen = 0;
 
   List<TipoPago> _tipos = [];
   // v1.3.1: pago por cliente a entrenadores (movido desde Ajustes, solo dueño).
@@ -114,6 +145,56 @@ class _AdminScreenState extends State<AdminScreen> {
     // Salud del sistema
     final det = await SyncEngine.instance.detalle();
     final pendSubir = await LocalDb.instance.countPendingOps();
+    // Panel del dueño (v1.6.0): KPIs del mes y pendientes reales,
+    // todos de fuentes existentes (sin cifras inventadas).
+    // Panel 1.6.0 (decisión de Jc): el KPI «Pagos este mes» usa la
+    // definición del dueño — la MISMA de Home y de la lista
+    // (NominaCalc: descuenta a quien vence dentro del propio mes).
+    // pagosRealizadosMes() conserva su sentido contable en sus
+    // otros usos; aquí no se usa.
+    final pagosMes = await NominaCalc.clientesQuePagaronElMes(
+        NominaCalc.prefMesActual());
+    final activos = await activosCount();
+    final reservas = await LocalDb.instance.allMirror('reservas');
+    final solicitadas = [
+      for (final r in reservas)
+        if (r['estado'] == 'solicitada') r,
+    ]..sort((a, b) => '${a['creada_ts']}'.compareTo('${b['creada_ts']}'));
+    final supls = await LocalDb.instance.allMirror('suplementos');
+    final nombreSupl = {
+      for (final s in supls) '${s['id']}': '${s['nombre'] ?? ''}',
+    };
+    // Stock crítico: mismo criterio que el chip de Suplementos
+    // (activo y 0 < stock <= umbral propio, 3 por defecto).
+    final criticos = <Map<String, dynamic>>[];
+    for (final s in supls) {
+      final act = s['activo'];
+      final inactivo = act == 0 ||
+          act == false ||
+          s['eliminado'] == 1 ||
+          s['eliminado'] == true;
+      if (inactivo) continue;
+      final stock = (s['stock'] as num?)?.toInt() ?? 0;
+      final umbral = (s['umbral_stock'] as num?)?.toInt() ?? 3;
+      if (stock > 0 && stock <= umbral) criticos.add(s);
+    }
+    criticos.sort((a, b) => ((a['stock'] as num?)?.toInt() ?? 0)
+        .compareTo((b['stock'] as num?)?.toInt() ?? 0));
+    final hoyH = ahoraHabana();
+    String isoDia(DateTime d) =>
+        '${d.year.toString().padLeft(4, '0')}-'
+        '${d.month.toString().padLeft(2, '0')}-'
+        '${d.day.toString().padLeft(2, '0')}';
+    final sinHoy = await turnosSinReporte(isoDia(hoyH));
+    final sinAyer = await turnosSinReporte(
+        isoDia(hoyH.subtract(const Duration(days: 1))));
+    final incidencias = await incidenciasSyncPendientes();
+    // Solicitudes de invitados: la bandeja vive en el servidor y
+    // su RPC ya NO se espera aquí (panel 1.6.0): con la red
+    // colgada, esperar en serie retrasaba TODO el panel aunque
+    // los datos locales ya estaban listos. Se pinta primero y la
+    // fila se rellena cuando la RPC resuelve (_cargarSolicitudes
+    // Invitados); si la RPC falla, la fila no aparece, como antes.
     if (mounted) {
       setState(() {
         _ingresos = ing;
@@ -126,6 +207,16 @@ class _AdminScreenState extends State<AdminScreen> {
         _gastosHoy = gh;
         _syncDet = det;
         _pendientesSubir = pendSubir;
+        _pagosMes = pagosMes;
+        _clientesActivos = activos;
+        _reservasSolicitadas = solicitadas;
+        _nombreSupl = nombreSupl;
+        _stockCritico = criticos;
+        _sinReporteAyer = sinAyer;
+        _sinReporteHoy = sinHoy;
+        _incidenciasPend = incidencias.length;
+        _solicitudesInvitados = [];
+        _solicitudesCargando = true;
         _tipos = tipos;
         _pagoEntrenador = pagoEnt;
         for (final (clave, _) in _clavesMonto) {
@@ -143,6 +234,30 @@ class _AdminScreenState extends State<AdminScreen> {
         _cargando = false;
       });
     }
+    // La fila de solicitudes se rellena en segundo plano, sin
+    // bloquear el pintado que acaba de ocurrir.
+    unawaited(_cargarSolicitudesInvitados());
+  }
+
+  /// Segundo pase de _cargar: resuelve la RPC de solicitudes de
+  /// invitados y rellena su fila con un segundo setState. Si la
+  /// RPC falla, la fila simplemente no aparece (el panel sigue
+  /// offline-first, como antes). La generación descarta el
+  /// resultado si una recarga más nueva ya pidió el suyo.
+  Future<void> _cargarSolicitudesInvitados() async {
+    final gen = ++_solicitudesGen;
+    List<invitados_svc.InvitadoResumen> lista;
+    try {
+      lista =
+          await invitados_svc.InvitadosService().solicitudesPendientes();
+    } catch (_) {
+      lista = [];
+    }
+    if (!mounted || gen != _solicitudesGen) return;
+    setState(() {
+      _solicitudesInvitados = lista;
+      _solicitudesCargando = false;
+    });
   }
 
   void _ir(Widget w) {
@@ -812,15 +927,17 @@ class _AdminScreenState extends State<AdminScreen> {
         text: 'Iron Body Gym — clientes y pagos del mes');
   }
 
-  // -- UI (hub por flujos, v1.3.7) -------------------------------------------
+  // -- UI (Panel del dueño, v1.6.0) -----------------------------------------
+  // Rediseño según el mockup v2 aprobado y el consenso del panel de
+  // diseño (2026-10-22): la Administración pasa a ser la consola del
+  // dueño como estación de trabajo diaria. Orden estricto de bloques:
+  // 1) Necesita tu atención (solo decisiones del dueño, con botón,
+  //    máx. 5), 2) Acciones rápidas (Cobrar · Arqueo · Cierre),
+  // 3) Resumen del mes, 4) Módulos (las entradas de siempre agrupadas
+  //    y renombradas a lenguaje de tarea; cada una navega a donde
+  //    navegaba en el hub v1.3.7).
   @override
   Widget build(BuildContext context) {
-    // Datos para las líneas de resumen de cada tarjeta.
-    final cajaTotal = (_caja['efectivo'] ?? 0) + (_caja['transferencia'] ?? 0);
-    final netoHoy = cajaTotal - _gastosHoy;
-    final pendTotal =
-        _pend.fold<double>(0, (s, e) => s + (e['total'] as double? ?? 0));
-
     return Scaffold(
       appBar: AppBar(title: const Text('Administración')),
       body: Column(
@@ -834,251 +951,27 @@ class _AdminScreenState extends State<AdminScreen> {
                     child: ListView(
                       padding: const EdgeInsets.all(16),
                       children: [
-                        // -- 💰 DINERO ------------------------------------------------
-                        // -- ⚡ USO DIARIO ----------------------------------------------
-                        // v1.4.1 (Pieza 3 + D4): lo de todos los días, a un toque.
-                        _encabezadoGrupo('⚡', 'USO DIARIO'),
-                        _tarjetaFlujo(
-                          Icons.account_balance_wallet_rounded,
-                          'Arqueo de caja',
-                          pendTotal > 0
-                              ? '${fmtMonto(pendTotal)} CUP por liquidar'
-                              : 'Todo cuadrado',
-                          () => _ir(const ArqueoScreen()),
-                        ),
-                        _tarjetaFlujo(
-                          Icons.payments_rounded,
-                          'Nómina del mes',
-                          'Proyección: clientes pagados × 150 CUP',
-                          () => _ir(const NominaScreen()),
-                        ),
-                        // -- 💰 DINERO ------------------------------------------------
-                        _encabezadoGrupo('💰', 'DINERO'),
-                        _tarjetaFlujo(
-                          Icons.point_of_sale_rounded,
-                          'Cierre de caja',
-                          'Neto hoy: ${fmtMonto(netoHoy)} CUP',
-                          () => _ir(SeccionCobrosScreen(
-                            getCaja: () => _caja,
-                            getGastosHoy: () => _gastosHoy,
-                            getPend: () => _pend,
-                            onConfirmarEntrega: _confirmarEntrega,
-                            onIr: _irYRecargar,
-                          )),
-                        ),
-                        _tarjetaFlujo(
-                          Icons.receipt_long_rounded,
-                          'Últimos gastos',
-                          'Hoy: ${fmtMonto(_gastosHoy)} CUP',
-                          () => _ir(SeccionGastosScreen(
-                            getGastos: () => _gastos,
-                            onAgregarGasto: _agregarGasto,
-                          )),
-                        ),
-                        _tarjetaFlujo(
-                          Icons.history_outlined,
-                          'Historial de caja',
-                          'Cierres por entrenador y fecha',
-                          () => _ir(const HistorialCajaScreen()),
-                        ),
-                        // -- 👥 CLIENTES ----------------------------------------------
-                        _encabezadoGrupo('👥', 'CLIENTES'),
-                        // v1.5.0 (Bloque G): bandeja de invitados.
-                        _tarjetaFlujo(
-                          Icons.person_add_alt_rounded,
-                          'Invitados',
-                          'Registros desde la app de clientes y conversiones',
-                          () => _ir(const InvitadosScreen()),
-                        ),
-                        _tarjetaFlujo(
-                          Icons.warning_amber_rounded,
-                          'Clientes en riesgo',
-                          'Inactivos 60+ días, buenos para recuperar',
-                          () => _ir(const RiesgoScreen()),
-                        ),
-                        _tarjetaFlujo(
-                          Icons.delete_outline_rounded,
-                          'Papelera',
-                          'Clientes eliminados (recuperables)',
-                          () => _ir(const PapeleraScreen()),
-                        ),
-                        _tarjetaFlujo(
-                          Icons.ac_unit_rounded,
-                          'Congelados',
-                          'Membresías pausadas',
-                          () => _ir(const CongeladosScreen()),
-                        ),
-
-                        // -- 📊 OPERACIÓN ----------------------------------------------
-                        _tarjetaFlujo(
-                          Icons.cake_rounded,
-                          'Cumpleaños',
-                          'Próximos 30 días',
-                          () => _ir(const CumpleanosMes()),
-                        ),
-                        _encabezadoGrupo('📊', 'OPERACIÓN'),
-                        // Estado y último error como tarjetas compactas.
-                        _tarjetaFlujo(
-                          Icons.admin_panel_settings_rounded,
-                          'Control de Acceso',
-                          'Entrenadores, accesos de clientes y turnos',
-                          () => _ir(
-                              const ControlAccesoScreen()),
-                        ),
-                        _tarjetaCompacta(
-                          _pendientesSubir > 0
-                              ? Icons.sync_problem_rounded
-                              : Icons.check_circle_outline_rounded,
-                          'Estado de sync',
-                          _pendientesSubir > 0
-                              ? '$_pendientesSubir por subir'
-                              : 'Todo sincronizado',
-                          _pendientesSubir > 0
-                              ? AppColores.alerta
-                              : AppColores.exito,
-                        ),
-                        if (_syncDet.error != null &&
-                            _syncDet.error!.isNotEmpty)
-                          _tarjetaCompacta(
-                            Icons.error_outline_rounded,
-                            'Último error',
-                            // v1.3.8: lenguaje común, no tecnicismos.
-                            errorSyncLegible(_syncDet.error!),
-                            AppColores.error,
+                        _cabeceraPanel(),
+                        _bloqueAtencion(),
+                        _tituloSeccion('ACCIONES RÁPIDAS'),
+                        _accionesRapidas(),
+                        _tituloSeccion('RESUMEN DEL MES',
+                            derecha: _textoActualizado()),
+                        _resumenMes(),
+                        _tituloSeccion('MÓDULOS'),
+                        _tarjetasModulos(),
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(24, 16, 24, 4),
+                          child: Text(
+                            'Diseño propio de esta sección: directo y con '
+                            'lo urgente primero. Los entrenadores no ven '
+                            'este panel.',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                                fontSize: 11,
+                                color:
+                                    AppColores.textoSecundario(context)),
                           ),
-                        _tarjetaFlujo(
-                          Icons.bar_chart_rounded,
-                          'Estadísticas del mes',
-                          '${fmtMonto(_ingresos)} CUP · $_inscMes insc.',
-                          () => _ir(SeccionResumenScreen(
-                            ingresos: _ingresos,
-                            inscMes: _inscMes,
-                            morosos: _morosos,
-                            inscPorEntrenador: _inscPorEntrenador,
-                          )),
-                        ),
-                        _tarjetaFlujo(
-                          Icons.inventory_2_rounded,
-                          'Suplementos',
-                          'Catálogo, categorías y ventas',
-                          () => _ir(SeccionSuplementosScreen(
-                            onIr: _irYRecargar,
-                          )),
-                        ),
-                        _tarjetaFlujo(
-                          Icons.fact_check_rounded,
-                          'Auditoría',
-                          'Quién hizo qué y cuándo',
-                          () => _ir(const AuditoriaScreen()),
-                        ),
-                        _tarjetaFlujo(
-                          Icons.radar_rounded,
-                          'Anomalías',
-                          'Detección silenciosa (solo dueño)',
-                          () => _ir(const AuditoriaSilenciosaScreen()),
-                        ),
-                        _tarjetaFlujo(
-                          Icons.monitor_heart_rounded,
-                          'Salud del sistema',
-                          _pendientesSubir > 0
-                              ? '$_pendientesSubir ops por subir'
-                              : 'Sincronizado',
-                          () => _ir(const SeccionDiagnosticoScreen()),
-                        ),
-                        _tarjetaFlujo(
-                          Icons.warning_amber_rounded,
-                          'Incidencias',
-                          'Errores que requieren atención',
-                          () {
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (_) =>
-                                    const ListaIncidenciasScreen(),
-                              ),
-                            );
-                          },
-                        ),
-
-                        // -- ⚙️ CONFIGURACIÓN ------------------------------------------
-                        // v1.3.9 Sprint 3 (#6): Pagos por método.
-                        _tarjetaFlujo(
-                          Icons.credit_card_rounded,
-                          'Pagos por Método',
-                          'Efectivo vs transferencia',
-                          () => _ir(const PagosPorMetodo()),
-                        ),
-                        // v1.3.9 Sprint 3 (#7): Comparativa mensual.
-                        _tarjetaFlujo(
-                          Icons.compare_arrows_rounded,
-                          'Comparativa Mensual',
-                          'Este mes vs anterior',
-                          () => _ir(const ComparativaMensual()),
-                        ),
-                        _encabezadoGrupo('⚙️', 'CONFIGURACIÓN'),
-                        _tarjetaFlujo(
-                          Icons.payments_outlined,
-                          'Tipos de pago',
-                          '${_tipos.length} tipos configurados',
-                          () => _ir(_pantallaAjustes(seccion: 'tipos')),
-                        ),
-                        _tarjetaFlujo(
-                          Icons.price_change_rounded,
-                          'Otros precios',
-                          'Mensualidades, diario, tasa USD',
-                          () => _ir(_pantallaAjustes(seccion: 'precios')),
-                        ),
-                        _tarjetaFlujo(
-                          Icons.account_balance_rounded,
-                          'Datos bancarios',
-                          'Tarjetas y móvil de confirmación',
-                          () => _ir(_pantallaAjustes(seccion: 'bancarios')),
-                        ),
-                        // v1.4.0 Paso 2: fusión en "Control de Acceso"
-                        // (Entrenadores | Clientes) + turnos manuales.
-                        // v1.3.9 Sprint 4 (#10): Horario.
-                        _tarjetaFlujo(
-                          Icons.schedule_rounded,
-                          'Horario del Gym',
-                          'Configurar turnos',
-                          () => _ir(const HorarioGym()),
-                        ),
-                        // v1.4.4 (v33): GymPedia (solo dueño).
-                        _tarjetaFlujo(
-                          Icons.menu_book_rounded,
-                          'GymPedia',
-                          'Artículos para la app de clientes',
-                          () => _ir(const GympediaScreen()),
-                        ),
-                        // v1.5.0 (Bloque G): información pública que
-                        // ve el invitado en la app de clientes.
-                        _tarjetaFlujo(
-                          Icons.public_rounded,
-                          'Información pública',
-                          'Redes, contactos y precios para invitados',
-                          () => _ir(const InfoPublicaScreen()),
-                        ),
-                        _tarjetaFlujo(
-                          Icons.file_download_rounded,
-                          'Exportar',
-                          'CSV y Excel de clientes y pagos',
-                          () => _ir(SeccionSistemaScreen(
-                            syncDet: _syncDet,
-                            pendientesSubir: _pendientesSubir,
-                            fechaHora: _fechaHora,
-                            onExportar: _exportar,
-                            onExportarExcel: () async {
-                              final ok = await exportarExcel();
-                              if (context.mounted) {
-                                ScaffoldMessenger.of(context)
-                                    .showSnackBar(SnackBar(
-                                        content: Text(ok
-                                            ? 'Archivos listos para compartir'
-                                            : 'No se pudo generar el archivo')));
-                              }
-                            },
-                            onIr: _irYRecargar,
-                          )),
                         ),
                       ],
                     ),
@@ -1087,6 +980,973 @@ class _AdminScreenState extends State<AdminScreen> {
         ],
       ),
     );
+  }
+
+  /// Cabecera del panel (mockup v2): título con acento naranja,
+  /// subtítulo y chip con el estado de sincronización.
+  Widget _cabeceraPanel() {
+    final Color chipColor;
+    final String chipTxt;
+    if (_syncDet.error != null && _syncDet.error!.isNotEmpty) {
+      chipColor = AppColores.error;
+      chipTxt = 'Error de sync';
+    } else if (_pendientesSubir > 0) {
+      chipColor = AppColores.alerta;
+      chipTxt = '$_pendientesSubir por subir';
+    } else {
+      chipColor = AppColores.exito;
+      chipTxt = 'Sincronizado';
+    }
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text.rich(
+                TextSpan(
+                  style: AppTexto.titulo
+                      .copyWith(fontSize: 24, fontWeight: FontWeight.w800),
+                  children: const [
+                    TextSpan(text: 'Panel '),
+                    TextSpan(
+                        text: 'del dueño',
+                        style: TextStyle(color: AppColores.naranja)),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 3),
+              Text(
+                'Iron Body Gym · Solo tú ves esta sección',
+                style: TextStyle(
+                    fontSize: 12,
+                    color: AppColores.textoSecundario(context)),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(width: 8),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+          decoration: BoxDecoration(
+            color: chipColor.withValues(alpha: 0.14),
+            borderRadius: BorderRadius.circular(999),
+            border: Border.all(color: chipColor.withValues(alpha: 0.4)),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 8,
+                height: 8,
+                decoration:
+                    BoxDecoration(color: chipColor, shape: BoxShape.circle),
+              ),
+              const SizedBox(width: 6),
+              Text(chipTxt,
+                  style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                      color: chipColor)),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// Título de bloque del panel (mockup v2): versalitas con tracking;
+  /// naranja en «Necesita tu atención», gris en el resto.
+  Widget _tituloSeccion(String titulo,
+      {bool naranja = false, String? derecha}) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(4, 20, 4, 8),
+      child: Row(
+        children: [
+          if (naranja) ...[
+            const Icon(Icons.warning_amber_rounded,
+                size: 15, color: AppColores.naranja),
+            const SizedBox(width: 6),
+          ],
+          Expanded(
+            child: Text(
+              titulo,
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w800,
+                letterSpacing: 1.6,
+                color: naranja
+                    ? AppColores.naranja
+                    : AppColores.textoSecundario(context),
+              ),
+            ),
+          ),
+          if (derecha != null)
+            Text(derecha,
+                style: TextStyle(
+                    fontSize: 11,
+                    color: AppColores.textoSecundario(context))),
+        ],
+      ),
+    );
+  }
+
+  /// Bloque 1 · Necesita tu atención: SOLO decisiones del dueño, cada
+  /// una con su botón de acción, máx. 5 visibles (consenso del panel
+  /// de diseño). Sin pendientes: una línea discreta, no una tarjeta.
+  Widget _bloqueAtencion() {
+    final pendientes = <_PendientePanel>[];
+
+    // Solicitudes de inscripción de invitados (pedido de Jc,
+    // 2026-10-22): decisión del dueño con acción en 1 toque; el
+    // botón abre la bandeja YA filtrada en solicitudes. Misma
+    // fuente que la pantalla de Invitados (InvitadosService).
+    if (_solicitudesInvitados.isNotEmpty) {
+      final n = _solicitudesInvitados.length;
+      final s = _solicitudesInvitados.first;
+      var detalle = s.nombre;
+      if (s.solicitudDesde != null) {
+        detalle += ' · ${hace(s.solicitudDesde)}';
+      }
+      pendientes.add(_PendientePanel(
+        icono: Icons.mark_email_unread_rounded,
+        tinte: AppColores.naranja,
+        titulo: n == 1
+            ? '1 solicitud de inscripción por atender'
+            : '$n solicitudes de inscripción por atender',
+        detalle: detalle,
+        boton: 'Atender',
+        primario: true,
+        onTap: () =>
+            _ir(const InvitadosScreen(filtroInicial: 'solicitudes')),
+      ));
+    }
+
+    // Reservas por confirmar (bandeja FIFO; la primera manda el detalle).
+    if (_reservasSolicitadas.isNotEmpty) {
+      final n = _reservasSolicitadas.length;
+      final r = _reservasSolicitadas.first;
+      final nombreSupl =
+          _nombreSupl['${r['suplemento_id']}'] ?? 'Suplemento';
+      var detalle = '$nombreSupl ×${(r['cantidad'] as num?)?.toInt() ?? 1}';
+      final exp = r['expira_en'] as String?;
+      if (exp != null && exp.isNotEmpty) {
+        detalle += ' · vence ${fmtFecha(exp)}';
+      }
+      pendientes.add(_PendientePanel(
+        icono: Icons.inventory_2_rounded,
+        tinte: AppColores.naranja,
+        titulo: n == 1
+            ? '1 reserva por confirmar'
+            : '$n reservas por confirmar',
+        detalle: detalle,
+        boton: 'Revisar',
+        // Botón lleno solo si es la primera fila (sin solicitudes
+        // y ya sin su carga en curso).
+        primario: _solicitudesInvitados.isEmpty && !_solicitudesCargando,
+        onTap: () => _ir(const ReservasScreen()),
+      ));
+    }
+
+    // Efectivo por liquidar (pendiente a entregar, por entrenador).
+    final pendTotal =
+        _pend.fold<double>(0, (s, e) => s + (e['total'] as double? ?? 0));
+    if (pendTotal > 0) {
+      final detalle = [
+            for (final t in _pend.take(2))
+              '${t['nombre']} \$${fmtMonto(t['total'])}',
+          ].join(' · ') +
+          (_pend.length > 2 ? ' · …' : '');
+      pendientes.add(_PendientePanel(
+        icono: Icons.payments_rounded,
+        tinte: AppColores.alerta,
+        titulo: 'Efectivo por liquidar',
+        detalle: detalle,
+        boton: 'Arqueo',
+        primario: false,
+        onTap: () => _ir(const ArqueoScreen()),
+      ));
+    }
+
+    // Cierre de caja pendiente: ayer ya es exigible completo;
+    // hoy solo tras el cierre + gracia (regla de turnosSinReporte).
+    if (_sinReporteAyer.isNotEmpty) {
+      pendientes.add(_PendientePanel(
+        icono: Icons.task_alt_rounded,
+        tinte: AppColores.info,
+        titulo: 'Cierre de caja pendiente',
+        detalle: 'Ayer · turno ${_sinReporteAyer.join(' y ')}',
+        boton: 'Cerrar',
+        primario: false,
+        onTap: () => _ir(_pantallaCierre()),
+      ));
+    }
+    if (_sinReporteHoy.isNotEmpty) {
+      pendientes.add(_PendientePanel(
+        icono: Icons.task_alt_rounded,
+        tinte: AppColores.info,
+        titulo: 'Sin reporte de caja',
+        detalle: 'Hoy · turno ${_sinReporteHoy.join(' y ')}',
+        boton: 'Cerrar',
+        primario: false,
+        onTap: () => _ir(_pantallaCierre()),
+      ));
+    }
+
+    // Incidencias de sync por revisar (aprobar/descartar, solo dueño).
+    if (_incidenciasPend > 0) {
+      pendientes.add(_PendientePanel(
+        icono: Icons.sync_problem_rounded,
+        tinte: AppColores.error,
+        titulo: _incidenciasPend == 1
+            ? '1 incidencia de sync por revisar'
+            : '$_incidenciasPend incidencias de sync por revisar',
+        detalle: 'Operaciones rechazadas o en revisión',
+        boton: 'Revisar',
+        primario: false,
+        onTap: () => _ir(const IncidenciasSyncScreen()),
+      ));
+    }
+
+    // Error de sincronización (último error, en lenguaje común).
+    if (_syncDet.error != null && _syncDet.error!.isNotEmpty) {
+      pendientes.add(_PendientePanel(
+        icono: Icons.error_outline_rounded,
+        tinte: AppColores.error,
+        titulo: 'Problema de sincronización',
+        detalle: errorSyncLegible(_syncDet.error!),
+        boton: 'Ver',
+        primario: false,
+        onTap: () => _ir(const SeccionDiagnosticoScreen()),
+      ));
+    }
+
+    // Stock crítico (mismo criterio que el chip de Suplementos).
+    if (_stockCritico.isNotEmpty) {
+      final s = _stockCritico.first;
+      final stock = (s['stock'] as num?)?.toInt() ?? 0;
+      pendientes.add(_PendientePanel(
+        icono: Icons.warning_amber_rounded,
+        tinte: AppColores.alerta,
+        titulo: 'Stock crítico',
+        detalle: _stockCritico.length == 1
+            ? '${s['nombre']} · queda $stock'
+            : '${_stockCritico.length} productos bajo el mínimo · '
+                '${s['nombre']} queda $stock',
+        boton: 'Ver',
+        primario: false,
+        onTap: () => _ir(const SuplementosScreen()),
+      ));
+    }
+
+    final visibles = pendientes.take(5).toList();
+    final ocultos = pendientes.length - visibles.length;
+    final oscuro = Theme.of(context).brightness == Brightness.dark;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _tituloSeccion('NECESITA TU ATENCIÓN', naranja: true),
+        if (pendientes.isEmpty && !_solicitudesCargando)
+          Container(
+            padding:
+                const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            decoration: BoxDecoration(
+              color: AppColores.superficie(context),
+              borderRadius: BorderRadius.circular(AppRadio.lg),
+              border: Border.all(color: AppColores.borde(context)),
+            ),
+            child: const Row(
+              children: [
+                Icon(Icons.check_circle_outline_rounded,
+                    size: 20, color: AppColores.exito),
+                SizedBox(width: 10),
+                Text('Sin pendientes · Todo en orden',
+                    style: AppTexto.cuerpo),
+              ],
+            ),
+          )
+        else
+          Container(
+            decoration: BoxDecoration(
+              color:
+                  oscuro ? const Color(0xFF1B150B) : const Color(0xFFFFF6E5),
+              borderRadius: BorderRadius.circular(AppRadio.lg),
+              border: Border.all(
+                  color: oscuro
+                      ? const Color(0xFF6B4A12)
+                      : AppColores.alerta.withValues(alpha: 0.45)),
+            ),
+            child: Column(
+              children: [
+                // Panel 1.6.0: mientras la RPC de solicitudes no
+                // resuelve, su fila va en estado «cargando» (sin
+                // conteo) en vez de bloquear todo el bloque.
+                if (_solicitudesCargando)
+                  _filaSolicitudesCargando(
+                      ultima: visibles.isEmpty && ocultos == 0),
+                for (var i = 0; i < visibles.length; i++)
+                  _filaAtencion(visibles[i],
+                      ultima: i == visibles.length - 1 && ocultos == 0),
+                if (ocultos > 0)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(14, 0, 14, 10),
+                    child: Text(
+                      '+$ocultos pendiente(s) más en los módulos',
+                      style: TextStyle(
+                          fontSize: 11.5,
+                          color: AppColores.textoSecundario(context)),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+      ],
+    );
+  }
+
+  /// Fila «cargando» de las solicitudes de invitados: mismo cuerpo
+  /// visual que _filaAtencion pero sin conteo ni botón, mientras
+  /// la RPC no resuelve (panel 1.6.0: el panel pinta primero con
+  /// los datos locales; esta fila se sustituye al llegar el dato).
+  Widget _filaSolicitudesCargando({required bool ultima}) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+      decoration: BoxDecoration(
+        border: ultima
+            ? null
+            : Border(
+                bottom: BorderSide(
+                    color: AppColores.borde(context)
+                        .withValues(alpha: 0.6))),
+      ),
+      child: Row(
+        children: [
+          const IconoModuloBadge(
+            icono: Icons.mark_email_unread_rounded,
+            tinte: AppColores.naranja,
+            iconoOscuro: AppColores.naranja,
+            iconoClaro: AppColores.naranja,
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Solicitudes de inscripción',
+                    style: AppTexto.cuerpo.copyWith(
+                        fontSize: 13.5, fontWeight: FontWeight.w700)),
+                const SizedBox(height: 1),
+                Text(
+                  'Cargando…',
+                  style: TextStyle(
+                      fontSize: 11.5,
+                      color: AppColores.textoSecundario(context)),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          const SizedBox(
+            width: 18,
+            height: 18,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Fila de un pendiente: badge, título, detalle y botón píldora.
+  Widget _filaAtencion(_PendientePanel p, {required bool ultima}) {
+    return InkWell(
+      onTap: p.onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+        decoration: BoxDecoration(
+          border: ultima
+              ? null
+              : Border(
+                  bottom: BorderSide(
+                      color: AppColores.borde(context)
+                          .withValues(alpha: 0.6))),
+        ),
+        child: Row(
+          children: [
+            IconoModuloBadge(
+              icono: p.icono,
+              tinte: p.tinte,
+              iconoOscuro: p.tinte,
+              iconoClaro: p.tinte,
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(p.titulo,
+                      style: AppTexto.cuerpo.copyWith(
+                          fontSize: 13.5, fontWeight: FontWeight.w700)),
+                  const SizedBox(height: 1),
+                  Text(
+                    p.detalle,
+                    style: TextStyle(
+                        fontSize: 11.5,
+                        color: AppColores.textoSecundario(context)),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            InkWell(
+              borderRadius: BorderRadius.circular(999),
+              onTap: p.onTap,
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 13, vertical: 7),
+                decoration: BoxDecoration(
+                  color: p.primario
+                      ? AppColores.naranja
+                      : AppColores.superficie(context),
+                  borderRadius: BorderRadius.circular(999),
+                  border: p.primario
+                      ? null
+                      : Border.all(color: AppColores.borde(context)),
+                ),
+                child: Text(p.boton,
+                    style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w800,
+                        color: p.primario
+                            ? const Color(0xFF171106)
+                            : null)),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Bloque 2 · Acciones rápidas: Cobrar · Arqueo · Cierre, a un toque
+  /// a los flujos de siempre (consenso del panel de diseño).
+  Widget _accionesRapidas() {
+    return Row(
+      children: [
+        Expanded(
+          child: _accionRapida(Icons.payments_rounded, 'Cobrar',
+              primario: true, onTap: () => _ir(const PagoScreen())),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: _accionRapida(
+              Icons.account_balance_wallet_rounded, 'Arqueo',
+              onTap: () => _ir(const ArqueoScreen())),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: _accionRapida(Icons.point_of_sale_rounded, 'Cierre',
+              onTap: () => _ir(_pantallaCierre())),
+        ),
+      ],
+    );
+  }
+
+  Widget _accionRapida(IconData icono, String texto,
+      {bool primario = false, required VoidCallback onTap}) {
+    final fg = primario ? const Color(0xFF171106) : null;
+    return InkWell(
+      borderRadius: BorderRadius.circular(AppRadio.lg),
+      onTap: onTap,
+      child: Container(
+        height: 54,
+        decoration: BoxDecoration(
+          color: primario
+              ? AppColores.naranja
+              : AppColores.superficie(context),
+          borderRadius: BorderRadius.circular(AppRadio.lg),
+          border: primario
+              ? null
+              : Border.all(color: AppColores.borde(context)),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icono, size: 19, color: fg),
+            const SizedBox(width: 7),
+            Text(texto,
+                style: TextStyle(
+                    fontSize: 14.5,
+                    fontWeight: FontWeight.w800,
+                    color: fg)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// «Actualizado …» del Resumen: última sincronización registrada
+  /// (los datos son del espejo local; el panel de diseño pidió que se
+  /// vea cuándo se actualizaron).
+  String? _textoActualizado() {
+    final u = _syncDet.ultimaPull ?? _syncDet.ultimaPush;
+    if (u == null) return null;
+    return 'Actualizado ${_fechaHora(u)}';
+  }
+
+  /// Bloque 3 · Resumen del mes: las 3 cifras del mockup v2
+  /// (ingresosMes, NominaCalc — la definición de Home — y
+  /// activosCount).
+  Widget _resumenMes() {
+    const meses = [
+      'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio',
+      'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre',
+    ];
+    final mes = meses[ahoraHabana().month - 1];
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Expanded(
+            child: _kpi('\$${fmtMonto(_ingresos)}', 'Ingresos de $mes',
+                color: AppColores.exito)),
+        const SizedBox(width: 10),
+        // v1.6.0 (Jc, añadido 7): «Pagos este mes» abre el LISTADO
+        // exacto de los que pagaron el mes (PagaronMesScreen, el
+        // conjunto de NominaCalc), no la nómina (misma corrección
+        // que en la tarjeta de estadísticas de Home).
+        Expanded(
+            child: _kpi('$_pagosMes', 'Pagos este mes',
+                onTap: () => _ir(const PagaronMesScreen()))),
+        const SizedBox(width: 10),
+        Expanded(child: _kpi('$_clientesActivos', 'Clientes activos')),
+      ],
+    );
+  }
+
+  Widget _kpi(String valor, String etiqueta,
+      {Color? color, VoidCallback? onTap}) {
+    return Tarjeta(
+      onTap: onTap,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(valor,
+              style: TextStyle(
+                  fontSize: 17,
+                  fontWeight: FontWeight.w800,
+                  color: color),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis),
+          const SizedBox(height: 2),
+          Text(etiqueta,
+              style: TextStyle(
+                  fontSize: 10.5,
+                  color: AppColores.textoSecundario(context))),
+        ],
+      ),
+    );
+  }
+
+  /// Bloque 4 · Módulos: las 5 filas del mockup v2. Cada fila abre un
+  /// contenedor con las tarjetas de destino de siempre.
+  Widget _tarjetasModulos() {
+    final modulos =
+        <({IconData icono, Color tinte, String titulo, String resumen, int? badge, List<Widget> Function() tarjetas})>[
+      (
+        icono: Icons.attach_money_rounded,
+        tinte: AppColores.exito,
+        titulo: 'Caja y dinero',
+        resumen: 'Arqueo · Cierre · Últimos gastos · Nómina · Historial',
+        badge: null,
+        tarjetas: _tarjetasCaja,
+      ),
+      (
+        icono: Icons.people_rounded,
+        tinte: AppColores.info,
+        titulo: 'Clientes y equipo',
+        resumen: 'Usuarios · Por recuperar · Congelados · Papelera',
+        badge: _solicitudesInvitados.isEmpty
+            ? null
+            : _solicitudesInvitados.length,
+        tarjetas: _tarjetasClientes,
+      ),
+      (
+        icono: Icons.inventory_2_rounded,
+        tinte: const Color(0xFFA855F7),
+        titulo: 'Suplementos y contenido',
+        resumen: 'Suplementos · Reservas · GymPedia',
+        badge:
+            _reservasSolicitadas.isEmpty ? null : _reservasSolicitadas.length,
+        tarjetas: _tarjetasSuplementosModulo,
+      ),
+      (
+        icono: Icons.bar_chart_rounded,
+        tinte: const Color(0xFF14B8A6),
+        titulo: 'Control y sistema',
+        resumen: 'Estadísticas · Auditoría · Anomalías · Sincronización',
+        badge: null,
+        tarjetas: _tarjetasControl,
+      ),
+      (
+        icono: Icons.settings_rounded,
+        tinte: const Color(0xFF9AA3B2),
+        titulo: 'Configuración y datos',
+        resumen: 'Tipos de pago · Tarifas especiales · Datos bancarios',
+        badge: null,
+        tarjetas: _tarjetasConfig,
+      ),
+    ];
+    return Container(
+      decoration: BoxDecoration(
+        color: AppColores.superficie(context),
+        borderRadius: BorderRadius.circular(AppRadio.lg),
+        border: Border.all(color: AppColores.borde(context)),
+      ),
+      child: Column(
+        children: [
+          for (var i = 0; i < modulos.length; i++) ...[
+            if (i > 0)
+              Divider(height: 1, color: AppColores.borde(context)),
+            InkWell(
+              onTap: () => _ir(_ModuloAdminScreen(
+                  titulo: modulos[i].titulo,
+                  tarjetas: modulos[i].tarjetas())),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 14, vertical: 12),
+                child: Row(
+                  children: [
+                    IconoModuloBadge(
+                      icono: modulos[i].icono,
+                      tinte: modulos[i].tinte,
+                      iconoOscuro: modulos[i].tinte,
+                      iconoClaro: modulos[i].tinte,
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(modulos[i].titulo,
+                              style: AppTexto.subtitulo),
+                          const SizedBox(height: 2),
+                          Text(
+                            modulos[i].resumen,
+                            style: TextStyle(
+                                fontSize: 11.5,
+                                color:
+                                    AppColores.textoSecundario(context)),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ],
+                      ),
+                    ),
+                    if (modulos[i].badge != null) ...[
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: AppColores.error,
+                          borderRadius: BorderRadius.circular(999),
+                        ),
+                        child: Text('${modulos[i].badge}',
+                            style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 10.5,
+                                fontWeight: FontWeight.w800)),
+                      ),
+                      const SizedBox(width: 6),
+                    ],
+                    Icon(Icons.chevron_right_rounded,
+                        color: AppColores.textoSecundario(context)),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  /// Destino «Cierre de caja» de siempre (sección B · Cobros),
+  /// reutilizado por la acción rápida, el módulo Caja y los
+  /// pendientes de cierre/reporte.
+  Widget _pantallaCierre() {
+    return SeccionCobrosScreen(
+      getCaja: () => _caja,
+      getGastosHoy: () => _gastosHoy,
+      getPend: () => _pend,
+      onConfirmarEntrega: _confirmarEntrega,
+      onIr: _irYRecargar,
+    );
+  }
+
+  // -- Módulo · Caja y dinero -------------------------------------------------
+  List<Widget> _tarjetasCaja() {
+    final cajaTotal = (_caja['efectivo'] ?? 0) + (_caja['transferencia'] ?? 0);
+    final netoHoy = cajaTotal - _gastosHoy;
+    final pendTotal =
+        _pend.fold<double>(0, (s, e) => s + (e['total'] as double? ?? 0));
+    return [
+      _tarjetaFlujo(
+        Icons.account_balance_wallet_rounded,
+        'Arqueo de caja',
+        pendTotal > 0
+            ? '${fmtMonto(pendTotal)} CUP por liquidar'
+            : 'Todo cuadrado',
+        () => _ir(const ArqueoScreen()),
+      ),
+      _tarjetaFlujo(
+        Icons.point_of_sale_rounded,
+        'Cierre de caja',
+        'Neto hoy: ${fmtMonto(netoHoy)} CUP',
+        () => _ir(_pantallaCierre()),
+      ),
+      _tarjetaFlujo(
+        Icons.receipt_long_rounded,
+        'Últimos gastos',
+        'Hoy: ${fmtMonto(_gastosHoy)} CUP',
+        () => _ir(SeccionGastosScreen(
+          getGastos: () => _gastos,
+          onAgregarGasto: _agregarGasto,
+        )),
+      ),
+      _tarjetaFlujo(
+        Icons.payments_rounded,
+        'Nómina del mes',
+        'Proyección: clientes pagados × 150 CUP',
+        () => _ir(const NominaScreen()),
+      ),
+      _tarjetaFlujo(
+        Icons.history_outlined,
+        'Historial de caja',
+        'Cierres por entrenador y fecha',
+        () => _ir(const HistorialCajaScreen()),
+      ),
+      _tarjetaFlujo(
+        Icons.credit_card_rounded,
+        'Pagos por método',
+        'Efectivo vs transferencia',
+        () => _ir(const PagosPorMetodo()),
+      ),
+      _tarjetaFlujo(
+        Icons.compare_arrows_rounded,
+        'Comparativa mensual',
+        'Este mes vs anterior',
+        () => _ir(const ComparativaMensual()),
+      ),
+    ];
+  }
+
+  // -- Módulo · Clientes y equipo ---------------------------------------------
+  List<Widget> _tarjetasClientes() {
+    return [
+      // v1.6.0 (pedido de Jc): Entrenadores, Clientes e Invitados
+      // viven en una misma zona «Usuarios» (ControlAccesoScreen con
+      // la bandeja de Invitados como tercera pestaña). Ya no hay
+      // entrada suelta de Invitados en Administración.
+      _tarjetaFlujo(
+        Icons.manage_accounts_rounded,
+        'Usuarios',
+        _solicitudesInvitados.isEmpty
+            ? 'Entrenadores, clientes e invitados'
+            : 'Entrenadores, clientes e invitados · '
+                '${_solicitudesInvitados.length} solicitud(es) por atender',
+        () => _ir(const ControlAccesoScreen()),
+      ),
+      // v1.6.0 (Jc): UNA sola puerta «Turnos» — el hub agrupa el
+      // plan semanal y los ajustes por fecha con la línea de
+      // precedencia (antes eran dos entradas sueltas y confusas).
+      _tarjetaFlujo(
+        Icons.calendar_month_rounded,
+        'Turnos',
+        'Plan semanal y ajustes por fecha',
+        () => _ir(const TurnosHubScreen()),
+      ),
+      _tarjetaFlujo(
+        Icons.warning_amber_rounded,
+        'Clientes por recuperar',
+        'Inactivos 60+ días, buenos para recuperar',
+        () => _ir(const RiesgoScreen()),
+      ),
+      _tarjetaFlujo(
+        Icons.ac_unit_rounded,
+        'Membresías congeladas',
+        'Membresías pausadas',
+        () => _ir(const CongeladosScreen()),
+      ),
+      _tarjetaFlujo(
+        Icons.cake_rounded,
+        'Cumpleaños',
+        'Próximos 30 días',
+        () => _ir(const CumpleanosMes()),
+      ),
+      _tarjetaFlujo(
+        Icons.delete_outline_rounded,
+        'Papelera',
+        'Clientes eliminados (recuperables)',
+        () => _ir(const PapeleraScreen()),
+      ),
+    ];
+  }
+
+  // -- Módulo · Suplementos y contenido ---------------------------------------
+  List<Widget> _tarjetasSuplementosModulo() {
+    return [
+      _tarjetaFlujo(
+        Icons.inventory_2_rounded,
+        'Suplementos',
+        'Catálogo, categorías y ventas',
+        () => _ir(SeccionSuplementosScreen(
+          onIr: _irYRecargar,
+        )),
+      ),
+      _tarjetaFlujo(
+        Icons.inbox_rounded,
+        'Reservas',
+        _reservasSolicitadas.isEmpty
+            ? 'Bandeja de reservas de los clientes'
+            : '${_reservasSolicitadas.length} por confirmar',
+        () => _ir(const ReservasScreen()),
+      ),
+      _tarjetaFlujo(
+        Icons.menu_book_rounded,
+        'GymPedia',
+        'Artículos para la app de clientes',
+        () => _ir(const GympediaScreen()),
+      ),
+      _tarjetaFlujo(
+        Icons.public_rounded,
+        'Información pública',
+        'Redes, contactos y precios para invitados',
+        () => _ir(const InfoPublicaScreen()),
+      ),
+    ];
+  }
+
+  // -- Módulo · Control y sistema ---------------------------------------------
+  List<Widget> _tarjetasControl() {
+    return [
+      // Estado y último error: las tarjetas compactas de siempre.
+      _tarjetaCompacta(
+        _pendientesSubir > 0
+            ? Icons.sync_problem_rounded
+            : Icons.check_circle_outline_rounded,
+        'Estado de sync',
+        _pendientesSubir > 0
+            ? '$_pendientesSubir por subir'
+            : 'Todo sincronizado',
+        _pendientesSubir > 0 ? AppColores.alerta : AppColores.exito,
+      ),
+      if (_syncDet.error != null && _syncDet.error!.isNotEmpty)
+        _tarjetaCompacta(
+          Icons.error_outline_rounded,
+          'Último error',
+          // v1.3.8: lenguaje común, no tecnicismos.
+          errorSyncLegible(_syncDet.error!),
+          AppColores.error,
+        ),
+      _tarjetaFlujo(
+        Icons.bar_chart_rounded,
+        'Estadísticas del mes',
+        '${fmtMonto(_ingresos)} CUP · $_inscMes insc.',
+        () => _ir(SeccionResumenScreen(
+          ingresos: _ingresos,
+          inscMes: _inscMes,
+          morosos: _morosos,
+          inscPorEntrenador: _inscPorEntrenador,
+        )),
+      ),
+      _tarjetaFlujo(
+        Icons.fact_check_rounded,
+        'Auditoría',
+        'Quién hizo qué y cuándo',
+        () => _ir(const AuditoriaScreen()),
+      ),
+      _tarjetaFlujo(
+        Icons.radar_rounded,
+        'Anomalías',
+        'Detección silenciosa (solo dueño)',
+        () => _ir(const AuditoriaSilenciosaScreen()),
+      ),
+      _tarjetaFlujo(
+        Icons.sync_rounded,
+        'Sincronización',
+        _pendientesSubir > 0
+            ? '$_pendientesSubir ops por subir'
+            : 'Sincronizado',
+        () => _ir(const SeccionDiagnosticoScreen()),
+      ),
+      _tarjetaFlujo(
+        Icons.warning_amber_rounded,
+        'Incidencias',
+        'Errores que requieren atención',
+        () {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => const ListaIncidenciasScreen(),
+            ),
+          );
+        },
+      ),
+    ];
+  }
+
+  // -- Módulo · Configuración y datos -----------------------------------------
+  List<Widget> _tarjetasConfig() {
+    return [
+      _tarjetaFlujo(
+        Icons.payments_outlined,
+        'Tipos de pago',
+        '${_tipos.length} tipos configurados',
+        () => _ir(_pantallaAjustes(seccion: 'tipos')),
+      ),
+      _tarjetaFlujo(
+        Icons.price_change_rounded,
+        'Tarifas especiales',
+        'Mensualidades, diario, tasa USD',
+        () => _ir(_pantallaAjustes(seccion: 'precios')),
+      ),
+      _tarjetaFlujo(
+        Icons.account_balance_rounded,
+        'Datos bancarios',
+        'Tarjetas y móvil de confirmación',
+        () => _ir(_pantallaAjustes(seccion: 'bancarios')),
+      ),
+      _tarjetaFlujo(
+        Icons.schedule_rounded,
+        'Horario del Gym',
+        'Configurar turnos',
+        () => _ir(const HorarioGym()),
+      ),
+      _tarjetaFlujo(
+        Icons.file_download_rounded,
+        'Exportar',
+        'CSV y Excel de clientes y pagos',
+        () => _ir(SeccionSistemaScreen(
+          syncDet: _syncDet,
+          pendientesSubir: _pendientesSubir,
+          fechaHora: _fechaHora,
+          onExportar: _exportar,
+          onExportarExcel: () async {
+            final ok = await exportarExcel();
+            if (context.mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                  content: Text(ok
+                      ? 'Archivos listos para compartir'
+                      : 'No se pudo generar el archivo')));
+            }
+          },
+          onIr: _irYRecargar,
+        )),
+      ),
+    ];
   }
 
   /// Construye la pantalla de Ajustes (se reutiliza en 3 tarjetas).
@@ -1107,20 +1967,6 @@ class _AdminScreenState extends State<AdminScreen> {
       gestionarUsuarios: Permisos().gestionarUsuarios,
       onIr: _irYRecargar,
       esTipoFijo: _esTipoFijo,
-    );
-  }
-
-  /// Encabezado de grupo (emoji + título).
-  Widget _encabezadoGrupo(String emoji, String titulo) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(4, 16, 4, 8),
-      child: Text(
-        '$emoji  $titulo',
-        style: AppTexto.subtitulo.copyWith(
-          fontWeight: FontWeight.bold,
-          letterSpacing: 1.2,
-        ),
-      ),
     );
   }
 
@@ -1202,5 +2048,48 @@ class _AdminScreenState extends State<AdminScreen> {
     final h = dt.hour.toString().padLeft(2, '0');
     final min = dt.minute.toString().padLeft(2, '0');
     return '$d/$m $h:$min';
+  }
+}
+
+/// Un pendiente del bloque «Necesita tu atención» (v1.6.0): icono,
+/// textos, botón de acción y destino. Solo decisiones del dueño.
+class _PendientePanel {
+  final IconData icono;
+  final Color tinte;
+  final String titulo;
+  final String detalle;
+  final String boton;
+  final bool primario;
+  final VoidCallback onTap;
+
+  const _PendientePanel({
+    required this.icono,
+    required this.tinte,
+    required this.titulo,
+    required this.detalle,
+    required this.boton,
+    required this.primario,
+    required this.onTap,
+  });
+}
+
+/// Contenedor de un módulo del Panel del dueño (v1.6.0): lista las
+/// tarjetas de destino existentes del módulo. No añade funciones;
+/// solo agrupa las que ya estaban en el hub.
+class _ModuloAdminScreen extends StatelessWidget {
+  final String titulo;
+  final List<Widget> tarjetas;
+
+  const _ModuloAdminScreen({required this.titulo, required this.tarjetas});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: Text(titulo)),
+      body: ListView(
+        padding: const EdgeInsets.all(16),
+        children: tarjetas,
+      ),
+    );
   }
 }

@@ -14,12 +14,14 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../auth.dart';
 import '../invitados.dart';
+import '../localdb.dart';
 import '../negocio.dart';
 import '../sync.dart';
 import '../tiempo.dart';
 import 'componentes.dart';
 import 'diseno.dart';
 import 'ficha.dart';
+import 'horario_gym.dart';
 import 'inscribir.dart';
 import 'widgets.dart';
 
@@ -28,7 +30,16 @@ import 'widgets.dart';
 // ---------------------------------------------------------------------------
 
 class InvitadosScreen extends StatefulWidget {
-  const InvitadosScreen({super.key});
+  /// v1.6.0: embebida como pestaña de «Usuarios» (sin Scaffold ni
+  /// AppBar propios; las acciones de la AppBar van en una fila).
+  final bool embebido;
+
+  /// Filtro con el que abre la bandeja ('todos' por defecto; el
+  /// Panel del dueño enlaza directo con 'solicitudes').
+  final String filtroInicial;
+
+  const InvitadosScreen(
+      {super.key, this.embebido = false, this.filtroInicial = 'todos'});
   @override
   State<InvitadosScreen> createState() => _InvitadosScreenState();
 }
@@ -47,10 +58,15 @@ class _InvitadosScreenState extends State<InvitadosScreen> {
   String? _error;
   List<InvitadoResumen> _lista = [];
   Map<String, ConversionInvitado> _locales = {};
+  // v1.6.0: ids de clientes de la base LOCAL, para contar la historia
+  // completa del convertido (si su cliente ya no existe aquí, fue
+  // eliminado después de la conversión).
+  Set<String> _idsClientes = {};
 
   @override
   void initState() {
     super.initState();
+    _filtro = widget.filtroInicial;
     _cargar();
   }
 
@@ -66,10 +82,12 @@ class _InvitadosScreenState extends State<InvitadosScreen> {
     try {
       final lista = await _svc.listar(filtro: _filtro);
       final locales = await ConversionInvitadoStore().todas();
+      final clientes = await LocalDb.instance.allMirror('clientes');
       if (!mounted) return;
       setState(() {
         _lista = lista;
         _locales = {for (final c in locales) c.invitadoId: c};
+        _idsClientes = {for (final c in clientes) '${c['id']}'};
         _cargando = false;
       });
     } catch (e) {
@@ -99,55 +117,81 @@ class _InvitadosScreenState extends State<InvitadosScreen> {
     }
   }
 
+  /// Acciones de la cabecera (información pública y actualizar):
+  /// en la AppBar en modo pantalla y en una fila propia en modo
+  /// embebido, para no perder ninguna función al integrar la
+  /// bandeja como pestaña de «Usuarios» (v1.6.0).
+  List<Widget> _acciones(bool esAdmin) {
+    return [
+      if (esAdmin)
+        IconButton(
+          tooltip: 'Información pública de la app',
+          icon: const Icon(Icons.public_rounded),
+          onPressed: () => Navigator.of(context).push(
+            MaterialPageRoute(builder: (_) => const InfoPublicaScreen()),
+          ),
+        ),
+      IconButton(
+        tooltip: 'Actualizar',
+        icon: const Icon(Icons.refresh_rounded),
+        onPressed: _cargando ? null : _cargar,
+      ),
+    ];
+  }
+
   @override
   Widget build(BuildContext context) {
     final esAdmin = AuthService().isAdmin;
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Invitados'),
-        actions: [
-          if (esAdmin)
-            IconButton(
-              tooltip: 'Información pública de la app',
-              icon: const Icon(Icons.public_rounded),
-              onPressed: () => Navigator.of(context).push(
-                MaterialPageRoute(
-                    builder: (_) => const InfoPublicaScreen()),
-              ),
-            ),
-          IconButton(
-            tooltip: 'Actualizar',
-            icon: const Icon(Icons.refresh_rounded),
-            onPressed: _cargando ? null : _cargar,
-          ),
-        ],
-      ),
-      body: Column(
-        children: [
-          const SyncBanner(compact: true),
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
+    final cuerpo = Column(
+      children: [
+        const SyncBanner(compact: true),
+        if (widget.embebido)
+          Padding(
             padding: const EdgeInsets.fromLTRB(
-                AppEspacio.lg, AppEspacio.md, AppEspacio.lg, 0),
+                AppEspacio.lg, AppEspacio.sm, AppEspacio.lg, 0),
             child: Row(
               children: [
-                for (final f in _filtros) ...[
-                  ChoiceChip(
-                    label: Text(f.etiqueta),
-                    selected: _filtro == f.id,
-                    onSelected: (_) {
-                      setState(() => _filtro = f.id);
-                      _cargar();
-                    },
+                const Expanded(
+                  child: Text(
+                    'Registros desde la app de clientes: atiende '
+                    'solicitudes y convierte invitados en clientes.',
+                    style: AppTexto.secundario,
                   ),
-                  const SizedBox(width: AppEspacio.sm),
-                ],
+                ),
+                ..._acciones(esAdmin),
               ],
             ),
           ),
-          Expanded(child: _cuerpo()),
-        ],
+        SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          padding: const EdgeInsets.fromLTRB(
+              AppEspacio.lg, AppEspacio.md, AppEspacio.lg, 0),
+          child: Row(
+            children: [
+              for (final f in _filtros) ...[
+                ChoiceChip(
+                  label: Text(f.etiqueta),
+                  selected: _filtro == f.id,
+                  onSelected: (_) {
+                    setState(() => _filtro = f.id);
+                    _cargar();
+                  },
+                ),
+                const SizedBox(width: AppEspacio.sm),
+              ],
+            ],
+          ),
+        ),
+        Expanded(child: _cuerpo()),
+      ],
+    );
+    if (widget.embebido) return cuerpo;
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Invitados'),
+        actions: _acciones(esAdmin),
       ),
+      body: cuerpo,
     );
   }
 
@@ -258,8 +302,30 @@ class _InvitadosScreenState extends State<InvitadosScreen> {
                             AppColores.alertaOscuro),
                       if (badge != null)
                         _chip(badge, AppColores.infoOscuro),
+                      // v1.6.0: el cliente vinculado ya no existe en
+                      // la base local: fue eliminado tras convertir.
+                      // La inferencia por ausencia SOLO vale si el
+                      // espejo de clientes tiene filas: con el espejo
+                      // vacío (reinstalación, primer sync pendiente)
+                      // la ausencia no prueba ninguna eliminación.
+                      if (inv.convertido &&
+                          inv.clienteId != null &&
+                          _idsClientes.isNotEmpty &&
+                          !_idsClientes.contains('${inv.clienteId}'))
+                        _chip('Cliente eliminado', AppColores.error),
                     ],
                   ),
+                  // v1.6.0: la tarjeta del convertido cuenta su
+                  // historia: cuándo se convirtió y a qué cliente.
+                  if (inv.convertido) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      'Convertido'
+                      '${inv.convertidoEn != null ? ' el ${fechaAbsoluta(inv.convertidoEn)}' : ''}'
+                      '${inv.clienteId != null ? ' · Cliente #${inv.clienteId}' : ''}',
+                      style: AppTexto.secundario,
+                    ),
+                  ],
                 ],
               ),
             ),
@@ -304,6 +370,8 @@ class _InvitadoDetalleScreenState extends State<InvitadoDetalleScreen> {
   String? _error;
   InvitadoDetalle? _d;
   ConversionInvitado? _local;
+  // v1.6.0: el cliente vinculado ya no está en la base local.
+  bool _clienteEliminado = false;
 
   @override
   void initState() {
@@ -334,10 +402,22 @@ class _InvitadoDetalleScreenState extends State<InvitadoDetalleScreen> {
       if (local != null) {
         local = await _svc.reconciliarPreparadaObsoleta(d, local);
       }
+      // v1.6.0: ¿el cliente vinculado sigue existiendo en la base
+      // local? Si no está, fue eliminado después de la conversión.
+      // Panel 1.6.0: la inferencia por ausencia solo aplica con el
+      // espejo NO vacío; vacío (reinstalación/sin primer sync) no
+      // prueba eliminación: ni se marca ni se oculta «Ver ficha».
+      var clienteEliminado = false;
+      if (d.clienteId != null) {
+        final clientes = await LocalDb.instance.allMirror('clientes');
+        clienteEliminado = clientes.isNotEmpty &&
+            !clientes.any((c) => '${c['id']}' == '${d.clienteId}');
+      }
       if (!mounted) return;
       setState(() {
         _d = d;
         _local = local;
+        _clienteEliminado = clienteEliminado;
         _cargando = false;
       });
     } catch (e) {
@@ -698,12 +778,20 @@ class _InvitadoDetalleScreenState extends State<InvitadoDetalleScreen> {
               '${d.clienteId != null ? ' · Cliente #${d.clienteId}' : ''}.',
               style: AppTexto.cuerpo,
             ),
+            if (_clienteEliminado) ...[
+              const SizedBox(height: AppEspacio.sm),
+              Text(
+                'El cliente vinculado fue eliminado.',
+                style: AppTexto.cuerpo.copyWith(
+                    color: AppColores.error, fontWeight: FontWeight.w600),
+              ),
+            ],
             if (_local?.resultadoMedidas != null) ...[
               const SizedBox(height: AppEspacio.sm),
               Text(_local!.resultadoMedidas!.texto,
                   style: AppTexto.secundario),
             ],
-            if (d.clienteId != null) ...[
+            if (d.clienteId != null && !_clienteEliminado) ...[
               const SizedBox(height: AppEspacio.md),
               BotonPrimario(
                 texto: 'Ver ficha del cliente',
@@ -1103,6 +1191,11 @@ class _InfoPublicaScreenState extends State<InfoPublicaScreen> {
   bool _cargando = true;
   bool _guardando = false;
   String? _error;
+  // v1.6.0 (Jc): el horario ya NO se edita en esta pantalla: la
+  // fuente única es el horario del sistema («Horario del Gym»).
+  // Aquí se muestra en solo lectura y al guardar se republica como
+  // «horario_texto» para que el invitado vea el horario real.
+  List<DiaHorario> _horarioSistema = [];
 
   @override
   void initState() {
@@ -1128,12 +1221,16 @@ class _InfoPublicaScreenState extends State<InfoPublicaScreen> {
     });
     try {
       final info = await _svc.infoPublica();
+      // v1.6.0: el horario canónico del sistema (caché local o la
+      // misma RPC que usa «Horario del Gym»); [] si no se pudo.
+      final horario = await cargarHorarioCanonico();
       if (!mounted) return;
       setState(() {
         _originales = info;
         for (final c in clavesInfoPublica) {
           _ctrls[c.clave]!.text = info[c.clave] ?? '';
         }
+        _horarioSistema = horario;
         _cargando = false;
       });
     } catch (e) {
@@ -1150,11 +1247,23 @@ class _InfoPublicaScreenState extends State<InfoPublicaScreen> {
   Future<void> _guardar() async {
     final cambios = <String, String>{};
     for (final c in clavesInfoPublica) {
+      // v1.6.0: «horario_texto» no sale de un campo editable (ver
+      // el bloque siguiente); el resto, como siempre.
+      if (c.clave == 'horario_texto') continue;
       // G6: las claves de teléfono se comparan y guardan
       // NORMALIZADAS (8 dígitos); el resto, como texto libre.
       final v =
           valorAGuardarInfoPublica(c.clave, _ctrls[c.clave]!.text);
       if (v != (_originales[c.clave] ?? '')) cambios[c.clave] = v;
+    }
+    // v1.6.0 (Jc, fuente única): el horario que ve el invitado se
+    // REPUBLICA desde el horario del sistema al guardar esta
+    // pantalla, para que nunca quede un horario viejo tecleado a
+    // mano. Si el canónico no cargó, no se toca el valor guardado.
+    final textoHorario = textoHorarioCanonico(_horarioSistema);
+    if (textoHorario.isNotEmpty &&
+        textoHorario != (_originales['horario_texto'] ?? '')) {
+      cambios['horario_texto'] = textoHorario;
     }
     if (cambios.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -1166,6 +1275,8 @@ class _InfoPublicaScreenState extends State<InfoPublicaScreen> {
     // a medias.
     for (final c in clavesInfoPublica) {
       if (!cambios.containsKey(c.clave)) continue;
+      // El horario republicado no es texto tecleado: no se valida.
+      if (c.clave == 'horario_texto') continue;
       final error = validarValorInfoPublica(
           c.clave, _ctrls[c.clave]!.text);
       if (error != null) {
@@ -1244,11 +1355,16 @@ class _InfoPublicaScreenState extends State<InfoPublicaScreen> {
         ),
         const SizedBox(height: AppEspacio.md),
         for (final c in clavesInfoPublica) ...[
-          CampoTexto(
-            controller: _ctrls[c.clave],
-            etiqueta: c.etiqueta,
-            hint: c.ayuda,
-          ),
+          // v1.6.0 (Jc): el horario ya no es un campo editable
+          // aquí; se muestra el del sistema en solo lectura.
+          if (c.clave == 'horario_texto')
+            _tarjetaHorarioSistema()
+          else
+            CampoTexto(
+              controller: _ctrls[c.clave],
+              etiqueta: c.etiqueta,
+              hint: c.ayuda,
+            ),
           const SizedBox(height: AppEspacio.md),
         ],
         const SizedBox(height: AppEspacio.sm),
@@ -1263,6 +1379,42 @@ class _InfoPublicaScreenState extends State<InfoPublicaScreen> {
               ),
         const SizedBox(height: AppEspacio.lg),
       ],
+    );
+  }
+
+  /// v1.6.0 (Jc): el horario del gym en SOLO LECTURA dentro de la
+  /// Información pública. La fuente única es el horario del
+  /// sistema; aquí no se teclea nada.
+  Widget _tarjetaHorarioSistema() {
+    final texto = textoHorarioCanonico(_horarioSistema);
+    return Tarjeta(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Row(
+            children: [
+              Icon(Icons.schedule_rounded,
+                  size: 18, color: AppColores.naranja),
+              SizedBox(width: AppEspacio.sm),
+              Text('Horario del gym', style: AppTexto.subtitulo),
+            ],
+          ),
+          const SizedBox(height: AppEspacio.sm),
+          Text(
+            texto.isEmpty
+                ? 'No se pudo cargar el horario del sistema.'
+                : texto,
+            style: AppTexto.cuerpo,
+          ),
+          const SizedBox(height: AppEspacio.xs),
+          const Text(
+            'Este es el horario del sistema; se edita en su '
+            'sección («Horario del Gym»). Al guardar esta pantalla '
+            'se republica tal cual para los invitados.',
+            style: AppTexto.secundario,
+          ),
+        ],
+      ),
     );
   }
 }

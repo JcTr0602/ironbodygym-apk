@@ -6,7 +6,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'dart:convert';
 import '../auth.dart';
-import 'horario_turnos.dart';
 
 class DiaHorario {
   final int diaSemana; // 1=Lun ... 7=Dom
@@ -55,6 +54,92 @@ class DiaHorario {
         'apertura_2': abierto ? apertura2 : null,
         'cierre_2': abierto ? cierre2 : null,
       };
+}
+
+const _nombresDiasHorario = [
+  '',
+  'Lunes',
+  'Martes',
+  'Miércoles',
+  'Jueves',
+  'Viernes',
+  'Sábado',
+  'Domingo'
+];
+
+/// v1.6.0: texto compacto del horario CANÓNICO del gym (fuente
+/// única: esta pantalla lo edita; el resto solo lo lee). Agrupa
+/// días seguidos con la misma franja. Función pura, testeable.
+/// Ej.: «Lun–Vie 06:00–12:00 y 14:00–20:00 · Sáb 07:00–12:00 ·
+/// Dom cerrado». Devuelve '' si no hay 7 días.
+String textoHorarioCanonico(List<DiaHorario> dias) {
+  if (dias.length != 7) return '';
+  const cortos = ['', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'];
+  String franjas(DiaHorario d) {
+    if (!d.abierto) return 'cerrado';
+    final partes = <String>[];
+    if (d.apertura1 != null && d.cierre1 != null) {
+      partes.add('${d.apertura1}–${d.cierre1}');
+    }
+    if (d.apertura2 != null && d.cierre2 != null) {
+      partes.add('${d.apertura2}–${d.cierre2}');
+    }
+    return partes.isEmpty ? 'cerrado' : partes.join(' y ');
+  }
+
+  final ordenados = [...dias]
+    ..sort((a, b) => a.diaSemana.compareTo(b.diaSemana));
+  final grupos = <String>[];
+  var i = 0;
+  while (i < ordenados.length) {
+    final f = franjas(ordenados[i]);
+    var j = i;
+    while (j + 1 < ordenados.length && franjas(ordenados[j + 1]) == f) {
+      j++;
+    }
+    final desde = cortos[ordenados[i].diaSemana.clamp(1, 7)];
+    final hasta = cortos[ordenados[j].diaSemana.clamp(1, 7)];
+    grupos.add(i == j ? '$desde $f' : '$desde–$hasta $f');
+    i = j + 1;
+  }
+  return grupos.join(' · ');
+}
+
+/// v1.6.0: carga el horario canónico del gym con los datos que la
+/// app ya tiene: caché local «cache_horarios_gym» primero y
+/// refresco por la RPC «obtener_horarios» después (el mismo camino
+/// que usa la pantalla Horario del Gym). Devuelve [] si no se
+/// pudo cargar de ninguna fuente.
+Future<List<DiaHorario>> cargarHorarioCanonico() async {
+  var dias = <DiaHorario>[];
+  try {
+    final prefs = await SharedPreferences.getInstance();
+    final cacheRaw = prefs.getString('cache_horarios_gym');
+    if (cacheRaw != null && cacheRaw.isNotEmpty) {
+      final lista = (jsonDecode(cacheRaw) as List).map((e) {
+        final m = Map<String, dynamic>.from(e as Map);
+        final ds = (m['dia_semana'] as num?)?.toInt() ?? 1;
+        return DiaHorario.fromJson(
+            m, _nombresDiasHorario[ds.clamp(1, 7)]);
+      }).toList();
+      if (lista.length == 7) dias = lista;
+    }
+  } catch (_) {}
+  try {
+    final res = await Supabase.instance.client.rpc('obtener_horarios');
+    final lista = ((res as List?) ?? []).map((e) {
+      final m = Map<String, dynamic>.from(e as Map);
+      final ds = (m['dia_semana'] as num?)?.toInt() ?? 1;
+      return DiaHorario.fromJson(m, _nombresDiasHorario[ds.clamp(1, 7)]);
+    }).toList();
+    if (lista.length == 7) {
+      dias = lista;
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('cache_horarios_gym',
+          jsonEncode(lista.map((d) => d.toJson()).toList()));
+    }
+  } catch (_) {}
+  return dias;
 }
 
 class HorarioGym extends StatefulWidget {
@@ -267,24 +352,12 @@ class _HorarioGymState extends State<HorarioGym> {
               child: CircularProgressIndicator())
           : Column(
               children: [
-                // v1.4.1 (Pieza 5): quién cubre cada turno.
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
-                  child: Card(
-                    child: ListTile(
-                      leading: const Icon(Icons.groups_rounded),
-                      title: const Text('Entrenadores por turno'),
-                      subtitle: const Text(
-                          'Plan semanal que ve la app de clientes'),
-                      trailing: const Icon(Icons.chevron_right),
-                      onTap: () => Navigator.of(context).push(
-                        MaterialPageRoute(
-                          builder: (_) => const HorarioTurnosScreen(),
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
+                // v1.6.0 (Jc): la entrada «Entrenadores por turno»
+                // que vivía aquí se retiró — los turnos tienen UNA
+                // sola puerta (el hub «Turnos» en Administración →
+                // Clientes y equipo, y en Usuarios), con el plan
+                // semanal, los ajustes por fecha y la precedencia.
+                // Esta pantalla queda solo para el horario del gym.
                 Expanded(
                   child: ListView.builder(
                     padding: const EdgeInsets.all(16),
