@@ -4493,6 +4493,17 @@ class LocalDb {
         orderBy: 'creada_ts DESC');
   }
 
+  /// v1.5.0 (Bloque G): filas de la cola de UN tipo de op, de la
+  /// más vieja a la más nueva. La usa la reconstrucción de
+  /// conversiones de invitados: una op `inscribir` con
+  /// invitado_id/conversion_uuid en el payload nunca puede quedar
+  /// sin su registro local de conversión.
+  Future<List<Map<String, dynamic>>> opsPorTipo(String tipo) async {
+    final d = await db;
+    return d.query('ops_queue',
+        where: 'tipo=?', whereArgs: [tipo], orderBy: 'creada_ts ASC');
+  }
+
   Future<void> markOp(String opUuid, String estado, {String? error}) async {
     final d = await db;
     // v1.2.5-rev5 (Gemini #10): medir latencia de confirmación. Al marcar

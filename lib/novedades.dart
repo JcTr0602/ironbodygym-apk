@@ -15,6 +15,12 @@ class Novedad {
 }
 
 const novedades = [
+  Novedad('1.5.0', [
+    'Invitados: nueva bandeja con las personas que se registran desde la app de clientes; se pueden ver sus datos y medidas sincronizadas, atender su solicitud y convertirlas en clientes con un toque',
+    'Al convertir un invitado, sus medidas sincronizadas se importan a su ficha tras verificarlas en el servidor',
+    'Información pública editable: grupo de WhatsApp, Instagram, contactos y precios que ve el invitado en su app',
+    'Carnet: si los dígitos no forman una fecha real (día y mes invertidos), la app avisa al momento sin bloquear el guardado',
+  ]),
   Novedad('1.4.6', [
     'Moneda por suplemento: cada suplemento tiene su moneda (CUP o USD) y su precio, sus ventas y sus reservas se muestran y cobran en esa moneda',
     'Ficha del cliente: el historial de pagos ahora dice quién cobró cada pago; también en «Pagos realizados»',

@@ -32,6 +32,7 @@ import 'cumpleanos.dart';
 import 'dashboard.dart';
 import 'diseno.dart';
 import 'inscribir.dart';
+import 'invitados.dart';
 import 'listas.dart';
 import 'mi_dia.dart';
 import 'mi_turno.dart';
@@ -1676,6 +1677,9 @@ class _HomeScreenState extends State<HomeScreen>
             () => _ir(const TransferenciaScreen())),
         _herramienta(Icons.cake_rounded, 'Cumpleaños',
             () => _ir(const CumpleanosScreen())),
+        // v1.5.0 (Bloque G): bandeja de invitados de la app de clientes.
+        _herramienta(Icons.person_add_alt_rounded, 'Invitados',
+            () => _ir(const InvitadosScreen())),
         if (_auth.isAdmin)
           _herramienta(Icons.badge_rounded, 'Mis cobros',
               () => _ir(const MiTurnoScreen())),

@@ -535,6 +535,23 @@ class SyncEngine {
   /// Se llama cuando el servidor rechaza la sesión (401).
   void Function()? onSessionExpired;
 
+  /// v1.5.0 (Bloque G): gancho tras un ciclo push/pull exitoso.
+  /// Lo registra main.dart (confirmar conversiones de invitados
+  /// cuya op ya subió). Mismo patrón que [onSessionExpired]: el
+  /// motor no conoce al consumidor y el gancho jamás bloquea ni
+  /// rompe el ciclo (corre en segundo plano, con try/catch).
+  Future<void> Function()? onSyncExitoso;
+
+  void _avisarSyncExitoso() {
+    final g = onSyncExitoso;
+    if (g == null) return;
+    unawaited(() async {
+      try {
+        await g();
+      } catch (_) {}
+    }());
+  }
+
   final _auth = AuthService();
   final _db = LocalDb.instance;
 
@@ -952,6 +969,9 @@ class SyncEngine {
                 if (bajados > 0) '↓ $bajados nuevo${bajados == 1 ? '' : 's'}',
               ].join(' · ');
         _emit(SyncPhase.idle, resumen: resumen);
+        // v1.5.0 (Bloque G): ciclo completo sin error de push →
+        // avisar al gancho (confirmación de conversiones).
+        _avisarSyncExitoso();
       } on SessionExpired {
         _sesionVencida();
         _emit(SyncPhase.idle);
@@ -1033,6 +1053,9 @@ class SyncEngine {
             resumen: n == 0
                 ? 'Sin cambios en $nombreScope'
                 : 'Sincronizado: $nombreScope ($n)');
+        // v1.5.0 (Bloque G): el push del alcance es global → el
+        // gancho de fin de sync también corre aquí.
+        _avisarSyncExitoso();
       } catch (e) {
         final errSync = await _describeErrorVisible(e);
         _emit(SyncPhase.error, error: errSync);
@@ -1077,6 +1100,8 @@ class SyncEngine {
       try {
         await _doPull(silencioso: true);
       } catch (_) {}
+      // v1.5.0 (Bloque G): push exitoso → gancho de fin de sync.
+      _avisarSyncExitoso();
     });
   }
 
@@ -1199,6 +1224,9 @@ class SyncEngine {
       // v1.0.12: cierre remoto de sesión (el dueño lo forzó)
       await _verificarCierreForzado();
       await _doPull();
+      // v1.5.0 (Bloque G): pull exitoso (trae los resultados de
+      // las ops) → gancho de fin de sync.
+      _avisarSyncExitoso();
     });
   }
 

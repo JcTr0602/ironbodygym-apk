@@ -575,6 +575,8 @@ class _FichaScreenState extends State<FichaScreen> {
                 ? '${tarifaActual.toInt()}'
                 : '$tarifaActual'));
     String sexo = '${c['sexo'] ?? 'M'}';
+    // v1.5.0 (Bloque G): aviso de fecha de carnet imposible (no bloquea).
+    var carnetInvalido = carnetFechaInvalida(carnet.text);
     // Fecha de vencimiento vigente (v1.0.11)
     DateTime? pagadoHasta;
     final phRaw = c['pagado_hasta'] as String?;
@@ -634,9 +636,13 @@ class _FichaScreenState extends State<FichaScreen> {
                     inputFormatters: [
                       FilteringTextInputFormatter.digitsOnly
                     ],
+                    onChanged: (v) => setS(() =>
+                        carnetInvalido = carnetFechaInvalida(v)),
                     decoration: const InputDecoration(
                         labelText: 'Carnet (6–11 dígitos)',
                         border: OutlineInputBorder())),
+                // v1.5.0 (Bloque G): aviso sin bloquear el guardado.
+                if (carnetInvalido) const AvisoFechaCarnet(),
                 const SizedBox(height: 8),
                 Row(
                   children: [

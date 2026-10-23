@@ -38,6 +38,7 @@ import 'comparativa_mensual.dart';
 import 'pagos_por_metodo.dart';
 import 'incidencias/lista_incidencias.dart';
 import 'historial_caja.dart';
+import 'invitados.dart';
 import 'exportar_excel.dart';
 import 'widgets.dart';
 
@@ -882,6 +883,13 @@ class _AdminScreenState extends State<AdminScreen> {
                         ),
                         // -- 👥 CLIENTES ----------------------------------------------
                         _encabezadoGrupo('👥', 'CLIENTES'),
+                        // v1.5.0 (Bloque G): bandeja de invitados.
+                        _tarjetaFlujo(
+                          Icons.person_add_alt_rounded,
+                          'Invitados',
+                          'Registros desde la app de clientes y conversiones',
+                          () => _ir(const InvitadosScreen()),
+                        ),
                         _tarjetaFlujo(
                           Icons.warning_amber_rounded,
                           'Clientes en riesgo',
@@ -1041,6 +1049,14 @@ class _AdminScreenState extends State<AdminScreen> {
                           'GymPedia',
                           'Artículos para la app de clientes',
                           () => _ir(const GympediaScreen()),
+                        ),
+                        // v1.5.0 (Bloque G): información pública que
+                        // ve el invitado en la app de clientes.
+                        _tarjetaFlujo(
+                          Icons.public_rounded,
+                          'Información pública',
+                          'Redes, contactos y precios para invitados',
+                          () => _ir(const InfoPublicaScreen()),
                         ),
                         _tarjetaFlujo(
                           Icons.file_download_rounded,

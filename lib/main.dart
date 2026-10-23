@@ -11,6 +11,7 @@ import 'package:workmanager/workmanager.dart';
 import 'app_log.dart';
 import 'auth.dart';
 import 'config.dart';
+import 'invitados.dart';
 import 'localdb.dart';
 import 'sync.dart';
 import 'fotos_foreground.dart';
@@ -20,6 +21,17 @@ import 'ui/home.dart';
 import 'ui/login.dart';
 
 final navigatorKey = GlobalKey<NavigatorState>();
+
+/// v1.5.0 (Bloque G): gancho de fin de sync — tras cada push/pull
+/// exitoso se verifican las conversiones de invitados cuya op
+/// `inscribir` ya subió, para confirmarlas en Supabase SIN
+/// esperar a que alguien abra la bandeja. La verificación es
+/// barata: sin conversiones en curso no llama a la red.
+Future<void> _verificarConversionesInvitados() async {
+  try {
+    await InvitadosService().verificarConversiones();
+  } catch (_) {}
+}
 
 /// Tarea en segundo plano (punto 21): sube lo pendiente aunque la app
 /// esté cerrada. Todo va en try/catch: si falla, se reintenta luego.
@@ -32,6 +44,8 @@ void callbackDispatcher() {
         url: AppConfig.supabaseUrl,
         publishableKey: AppConfig.anonKey,
       );
+      SyncEngine.instance.onSyncExitoso =
+          _verificarConversionesInvitados;
       final auth = AuthService();
       if (auth.loggedIn) {
         await SyncEngine.instance.push();
@@ -97,6 +111,10 @@ Future<void> main() async {
           content: Text('Tu sesión venció. Entra de nuevo.')));
     }
   };
+  // v1.5.0 (Bloque G): confirmación automática de conversiones
+  // de invitados tras cada sync exitosa (ver SyncEngine).
+  SyncEngine.instance.onSyncExitoso =
+      _verificarConversionesInvitados;
   // v1.3.1 (B4): inicializar servicio foreground de fotos.
   initForegroundFotos();
   // v1.3.4 (item 3): poda diaria de ops aplicadas viejas en
@@ -142,6 +160,13 @@ class _IronBodyAppState extends State<IronBodyApp>
       _detenerTimers();
     } else if (state == AppLifecycleState.resumed) {
       _iniciarTimers();
+      // v1.5.0 (Bloque G): al volver a primer plano se verifican
+      // las conversiones pendientes aunque el ciclo de sync aún
+      // no haya corrido (barato: sin conversiones en curso no
+      // toca la red).
+      if (_auth.loggedIn) {
+        unawaited(_verificarConversionesInvitados());
+      }
     }
   }
 

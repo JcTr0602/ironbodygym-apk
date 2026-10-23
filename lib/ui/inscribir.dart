@@ -13,6 +13,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:uuid/uuid.dart';
 
 import '../auth.dart';
+import '../invitados.dart';
 import '../localdb.dart';
 import '../fotos_cola.dart';
 import '../negocio.dart';
@@ -26,7 +27,12 @@ import 'editor_foto.dart';
 import 'widgets.dart';
 
 class InscribirScreen extends StatefulWidget {
-  const InscribirScreen({super.key});
+  /// v1.5.0 (Bloque G): conversión de un invitado — la pantalla se
+  /// abre pre-llenada desde la bandeja de Invitados y la op
+  /// `inscribir` lleva `invitado_id`, `conversion_uuid` y las
+  /// medidas sincronizadas del invitado.
+  final DatosConversionInvitado? conversion;
+  const InscribirScreen({super.key, this.conversion});
   @override
   State<InscribirScreen> createState() => _InscribirScreenState();
 }
@@ -47,6 +53,8 @@ class _InscribirScreenState extends State<InscribirScreen> {
   File? _foto;
   bool _guardando = false;
   bool _esMenor = false;
+  // v1.5.0 (Bloque G): aviso de fecha de carnet imposible (no bloquea).
+  bool _carnetFechaInvalida = false;
   // v1.4.0 Paso 2 (propuesta 11): crear acceso a la app de clientes al
   // inscribir. El servidor lo genera tras sincronizar y el PIN le llega
   // a Jc por Telegram (el cliente aún no existe en la nube al guardar).
@@ -57,6 +65,14 @@ class _InscribirScreenState extends State<InscribirScreen> {
   void initState() {
     super.initState();
     _carnet.addListener(_actualizarEsMenor);
+    // v1.5.0 (Bloque G): pre-llenado de la conversión de invitado.
+    final conv = widget.conversion;
+    if (conv != null) {
+      _nombre.text = conv.nombre;
+      _telefono.text = conv.telefono;
+      final carnet = conv.carnetSugerido;
+      if (carnet != null) _carnet.text = carnet;
+    }
     _cargarPrecioMenor();
     _cargarTiposCustom();
   }
@@ -85,8 +101,13 @@ class _InscribirScreenState extends State<InscribirScreen> {
 
   void _actualizarEsMenor() {
     final esMenorVal = esMenor(_carnet.text.trim());
-    if (esMenorVal != _esMenor) {
-      setState(() => _esMenor = esMenorVal);
+    final fechaInvalida = carnetFechaInvalida(_carnet.text);
+    if (esMenorVal != _esMenor ||
+        fechaInvalida != _carnetFechaInvalida) {
+      setState(() {
+        _esMenor = esMenorVal;
+        _carnetFechaInvalida = fechaInvalida;
+      });
     }
   }
 
@@ -292,35 +313,66 @@ class _InscribirScreenState extends State<InscribirScreen> {
     try {
       final opUuid = const Uuid().v4();
       String? fotoPath = _foto?.path;
-      await LocalDb.instance.queueOp(
-        opUuid: opUuid,
-        tipo: 'inscribir',
-        payload: {
-          'nombre': nombre,
-          'sexo': _sexo,
-          'periodo': _periodo,
-          'meses': _meses,
-          if (_periodo == 'personalizado') 'dias': dias,
-          // v1.3.9: guardar monto también para tipos personalizados
-          // (ej. "Oferta 50%") — se usa en el cálculo del pendiente.
-          if (_periodo == 'personalizado' ||
-              _periodo.startsWith('tipo:'))
-            'monto': monto,
-          'telefono': tel.isEmpty ? null : tel,
-          'carnet': carnet.isEmpty ? null : carnet,
-          // v1.4.0 (Argón §8): fecha de negocio en hora de La Habana.
-          'fecha': hoyHabanaIso(),
-          // v1.3.9 (Bug 2): método de pago elegido (antes hardcodeado a 'efectivo').
-          'metodo_pago': _metodoPago,
-          // v1.2.2: guardar si es menor y el precio aplicado (histórico)
-          if (_esMenor) 'es_menor': true,
-          'precio_aplicado': monto,
-          // v1.4.0 Paso 2 (propuesta 11): el puente genera el acceso a
-          // la app de clientes tras aplicar la inscripción.
-          if (_crearAccesoApp) 'crear_acceso_app': true,
-        },
-        fotoPath: fotoPath,
-      );
+      final payload = <String, dynamic>{
+        'nombre': nombre,
+        'sexo': _sexo,
+        'periodo': _periodo,
+        'meses': _meses,
+        if (_periodo == 'personalizado') 'dias': dias,
+        // v1.3.9: guardar monto también para tipos personalizados
+        // (ej. "Oferta 50%") — se usa en el cálculo del pendiente.
+        if (_periodo == 'personalizado' ||
+            _periodo.startsWith('tipo:'))
+          'monto': monto,
+        'telefono': tel.isEmpty ? null : tel,
+        'carnet': carnet.isEmpty ? null : carnet,
+        // v1.4.0 (Argón §8): fecha de negocio en hora de La Habana.
+        'fecha': hoyHabanaIso(),
+        // v1.3.9 (Bug 2): método de pago elegido (antes hardcodeado a 'efectivo').
+        'metodo_pago': _metodoPago,
+        // v1.2.2: guardar si es menor y el precio aplicado (histórico)
+        if (_esMenor) 'es_menor': true,
+        'precio_aplicado': monto,
+        // v1.4.0 Paso 2 (propuesta 11): el puente genera el acceso a
+        // la app de clientes tras aplicar la inscripción.
+        if (_crearAccesoApp) 'crear_acceso_app': true,
+        // v1.5.0 (Bloque G): conversión de invitado — el servidor
+        // (Bloque B) verifica las medidas contra el detalle
+        // autoritativo de ESTE invitado antes de importarlas.
+        if (widget.conversion != null)
+          'invitado_id': widget.conversion!.invitadoId,
+        if (widget.conversion != null)
+          'conversion_uuid': widget.conversion!.conversionUuid,
+        if (widget.conversion != null &&
+            widget.conversion!.medidas.isNotEmpty)
+          'medidas_invitado': widget.conversion!.medidasPayload,
+      };
+      // v1.5.0 (Bloque G, G1): en una conversión, el registro
+      // local durable `opEncolada` con ESTE op_uuid se persiste
+      // ANTES de encolar la op, y la op se encola con ese mismo
+      // uuid: ninguna op de conversión puede quedar huérfana por
+      // un cierre de la app (ver encolarInscripcionConversion).
+      final conv = widget.conversion;
+      if (conv != null) {
+        await encolarInscripcionConversion(
+          invitadoId: conv.invitadoId,
+          conversionUuid: conv.conversionUuid,
+          opUuid: opUuid,
+          encolar: (uuid) => LocalDb.instance.queueOp(
+            opUuid: uuid,
+            tipo: 'inscribir',
+            payload: payload,
+            fotoPath: fotoPath,
+          ),
+        );
+      } else {
+        await LocalDb.instance.queueOp(
+          opUuid: opUuid,
+          tipo: 'inscribir',
+          payload: payload,
+          fotoPath: fotoPath,
+        );
+      }
       if (fotoPath != null) {
         // v1.2.9: usar la cola persistente (no fotos_pendientes).
         await FotosColaService.instance.encolarFoto(
@@ -356,7 +408,10 @@ class _InscribirScreenState extends State<InscribirScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Inscribir cliente')),
+      appBar: AppBar(
+          title: Text(widget.conversion != null
+              ? 'Convertir invitado en cliente'
+              : 'Inscribir cliente')),
       body: Column(
         children: [
           const SyncBanner(compact: true),
@@ -364,6 +419,31 @@ class _InscribirScreenState extends State<InscribirScreen> {
             child: ListView(
               padding: const EdgeInsets.all(AppEspacio.lg),
               children: [
+                // v1.5.0 (Bloque G): aviso de conversión en curso.
+                if (widget.conversion != null) ...[
+                  Tarjeta(
+                    color:
+                        AppColores.info.withValues(alpha: 0.10),
+                    child: Row(
+                      crossAxisAlignment:
+                          CrossAxisAlignment.start,
+                      children: [
+                        const Icon(Icons.swap_horiz_rounded,
+                            color: AppColores.info),
+                        const SizedBox(width: AppEspacio.sm),
+                        Expanded(
+                          child: Text(
+                            'Estás convirtiendo a un invitado '
+                            'registrado desde la app de clientes.'
+                            '${widget.conversion!.medidas.isNotEmpty ? ' Al guardar, sus ${widget.conversion!.medidas.length} medida(s) sincronizadas (autodeclaradas) se enviarán al servidor para verificarlas: solo se importarán las que el servidor confirme como de este invitado, y el resultado se verá al confirmarse la conversión.' : ''}',
+                            style: AppTexto.secundario,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: AppEspacio.md),
+                ],
                 // Bloque 1: información personal
                 Tarjeta(
                   child: Column(
@@ -437,6 +517,10 @@ class _InscribirScreenState extends State<InscribirScreen> {
                           icono: Icons.badge,
                           teclado:
                               TextInputType.number),
+                      // v1.5.0 (Bloque G): aviso de fecha
+                      // imposible; NO bloquea el guardado.
+                      if (_carnetFechaInvalida)
+                        const AvisoFechaCarnet(),
                     ],
                   ),
                 ),

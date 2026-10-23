@@ -264,7 +264,11 @@ class _VentaSuplementoInscripcionScreenState
             etiqueta: 'Carnet (6 dígitos, opcional)',
             icono: Icons.badge_outlined,
             teclado: TextInputType.number,
+            onChanged: (_) => setState(() {}),
           ),
+          // v1.5.0 (Bloque G): aviso de fecha imposible (no bloquea).
+          if (carnetFechaInvalida(_carnet.text))
+            const AvisoFechaCarnet(),
           const SizedBox(height: AppEspacio.md),
           const EncabezadoSeccion(
               titulo: 'Mensualidad inicial'),

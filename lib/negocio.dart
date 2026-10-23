@@ -1475,6 +1475,20 @@ DateTime? fechaNacDeCarnet(String? carnet) {
   }
 }
 
+/// v1.5.0 (Bloque G, decisión de Jc 2026-10-22): ¿los dígitos del
+/// carnet NO forman una fecha AAMMDD real? La UI avisa en el momento
+/// («esa fecha no existe, revísala») SIN bloquear el guardado: el
+/// error típico es teclear día/mes invertidos (ej. «122303», mes 23).
+///
+/// Única fuente de verdad: [fechaNacDeCarnet]. Con menos de 6
+/// dígitos no hay fecha que juzgar → no avisa (no se exige ninguna
+/// longitud: ni 11 ni 6 rígidos; el formulario no cambia).
+bool carnetFechaInvalida(String? carnet) {
+  final d = (carnet ?? '').replaceAll(RegExp(r'[^0-9]'), '');
+  if (d.length < 6) return false;
+  return fechaNacDeCarnet(carnet) == null;
+}
+
 /// True si el carnet indica menos de 18 años (precio reducido).
 bool esMenor(String? carnet) {
   final nac = fechaNacDeCarnet(carnet);

@@ -701,6 +701,38 @@ class CampoTexto extends StatelessWidget {
   }
 }
 
+/// v1.5.0 (Bloque G, decisión de Jc): aviso de que los dígitos del
+/// carnet no forman una fecha AAMMDD real («122303» = mes 23: día y
+/// mes invertidos al teclear). Es SOLO un aviso en el momento: no
+/// bloquea el guardado ni exige longitud alguna. La condición la
+/// decide `carnetFechaInvalida` (negocio.dart), única fuente.
+class AvisoFechaCarnet extends StatelessWidget {
+  const AvisoFechaCarnet({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return const Padding(
+      padding: EdgeInsets.only(top: 6),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(Icons.warning_amber_rounded,
+              size: 16, color: AppColores.alerta),
+          SizedBox(width: 6),
+          Expanded(
+            child: Text(
+              'Esa fecha no existe, revísala: el día y el mes '
+              'pueden estar invertidos. Puedes guardar igual.',
+              style: TextStyle(
+                  fontSize: 12, color: AppColores.alertaOscuro),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Encabezado de sección (título + acción opcional "ver todo")
 // ---------------------------------------------------------------------------
