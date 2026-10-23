@@ -2,7 +2,7 @@
 // semántica «el plan manda» (§4), colchón T1 y desplazamiento
 // solo con apertura viva (T2), poda T3 y resolver T4.
 import 'package:flutter_test/flutter_test.dart';
-import 'package:ironbody_gestion/turnos_resolucion.dart';
+import 'package:ironbody_gym/turnos_resolucion.dart';
 
 void main() {
   // 2026-10-26 = lunes; 2026-10-31 = sábado.
