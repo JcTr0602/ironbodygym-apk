@@ -1,22 +1,32 @@
-/// Carrera de la republicación de info pública (v1.7.0, delta
-/// del panel): el gancho de fin de sync republicando un valor
-/// NO puede barrer la marca de un guardado más nuevo.
+/// Carrera de la republicación de info pública (v1.7.0, panel;
+/// representación v37): el gancho de fin de sync republicando un
+/// valor NO puede barrer la marca de un guardado más nuevo,
+/// venga del isolate que venga.
 ///
-/// Dos defensas, ambas probadas aquí:
+/// Tres defensas, todas probadas aquí:
 ///  1. SERIALIZACIÓN: guardar y republicar corren en una cadena
 ///     compartida del servicio; nunca hay dos RPC de publicación
 ///     solapadas en el mismo isolate.
-///  2. LIMPIEZA DEFENSIVA: tras publicar, la marca se recalcula
-///     sobre la meta ACTUAL y solo se borra la clave cuyo valor
-///     sigue siendo el recién publicado; si el valor cambió
-///     mientras tanto, la marca nueva sobrevive.
+///  2. MARCAS POR FILAS (v37): marcar es un INSERT OR REPLACE y
+///     limpiar un DELETE condicional por (clave, valor) sobre la
+///     tabla `info_publica_pendiente` — sentencias únicas que
+///     SQLite serializa entre conexiones. Si el valor cambió
+///     mientras la RPC estaba en vuelo, el DELETE afecta 0
+///     filas y la marca nueva sobrevive. (La representación
+///     anterior, un JSON en meta leído-modificado-escrito, es
+///     la que el panel tumbó dos veces.)
+///  3. ENTRE ISOLATES: el escenario exacto de la última delta —
+///     republicación del 1200 en vuelo mientras OTRA conexión a
+///     la misma BD (como el isolate de fondo) marca y publica
+///     el 1600 — a nivel de BD, no de meta.
 ///
 /// Sin red real: RPC inyectada y controlable (puerta manual) y
-/// la meta contra la BD local real (FFI), patrón de la casa.
+/// la tabla contra la BD local real (FFI), patrón de la casa.
 library;
 
 import 'dart:async';
 import 'dart:io';
+import 'dart:isolate';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ironbody_gym/invitados.dart';
@@ -25,12 +35,16 @@ import 'package:path/path.dart' as p;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
+Future<String> _rutaDb() async {
+  final dir = await getDatabasesPath();
+  return p.join(dir, 'ironbody.db');
+}
+
 Future<Database> _abrirDbVacia() async {
   sqfliteFfiInit();
   databaseFactory = databaseFactoryFfi;
   SharedPreferences.setMockInitialValues({});
-  final dir = await getDatabasesPath();
-  final dbPath = p.join(dir, 'ironbody.db');
+  final dbPath = await _rutaDb();
   try {
     await File(dbPath).delete();
   } catch (_) {}
@@ -38,13 +52,11 @@ Future<Database> _abrirDbVacia() async {
   return await LocalDb.instance.db;
 }
 
-Future<Map<String, String>> _pendientesEnMeta() async =>
-    decodificarInfoPublicaPendiente(
-        await LocalDb.instance.getMeta(kMetaInfoPublicaPendiente));
+Future<Map<String, String>> _pendientes() =>
+    LocalDb.instance.infoPublicaPendientes();
 
 Future<void> _marcarPendiente(String clave, String valor) =>
-    LocalDb.instance.setMeta(kMetaInfoPublicaPendiente,
-        codificarInfoPublicaPendiente({clave: valor}));
+    LocalDb.instance.marcarInfoPublicaPendiente(clave, valor);
 
 /// Red falsa controlable: cada RPC de publicación puede quedar
 /// retenida en una puerta (Completer) hasta que el test la
@@ -86,49 +98,6 @@ class _RedControlable {
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  group('pendientesTrasRepublicar (limpieza defensiva, pura)', () {
-    test('valor sin cambiar: la clave publicada se limpia', () {
-      expect(
-        pendientesTrasRepublicar(
-          actuales: {'precio_app_plus': '1200'},
-          publicadas: {'precio_app_plus': '1200'},
-        ),
-        isEmpty,
-      );
-    });
-
-    test('valor cambiado mientras tanto: la marca NUEVA se '
-        'conserva', () {
-      expect(
-        pendientesTrasRepublicar(
-          actuales: {'precio_app_plus': '1500'},
-          publicadas: {'precio_app_plus': '1200'},
-        ),
-        {'precio_app_plus': '1500'},
-      );
-    });
-
-    test('las claves ajenas al intento quedan intactas', () {
-      expect(
-        pendientesTrasRepublicar(
-          actuales: {'precio_app_plus': '1200', 'otra': 'x'},
-          publicadas: {'precio_app_plus': '1200'},
-        ),
-        {'otra': 'x'},
-      );
-    });
-
-    test('sin publicadas no se borra nada', () {
-      expect(
-        pendientesTrasRepublicar(
-          actuales: {'precio_app_plus': '1200'},
-          publicadas: const {},
-        ),
-        {'precio_app_plus': '1200'},
-      );
-    });
-  });
-
   group('serialización (cadena del servicio)', () {
     test('(c) un guardado concurrente espera a la republicación '
         'en curso: nunca hay dos RPC solapadas', () async {
@@ -162,7 +131,7 @@ void main() {
           ['precio_app_plus=1200', 'precio_app_plus=1500']);
       expect(red.maxSimultaneas, 1);
       expect(red.publicadas, {'precio_app_plus': '1500'});
-      expect(await _pendientesEnMeta(), isEmpty);
+      expect(await _pendientes(), isEmpty);
       await db.close();
     });
 
@@ -191,22 +160,23 @@ void main() {
       expect(red.inicios,
           ['precio_app_plus=1200', 'precio_app_plus=1500']);
       expect(red.publicadas, {'precio_app_plus': '1200'});
-      // La marca NO es '' ni {1200}: sigue pendiente el 1500.
-      expect(await _pendientesEnMeta(), {'precio_app_plus': '1500'});
+      // La fila NO desaparece ni vuelve al 1200: sigue pendiente
+      // el 1500.
+      expect(await _pendientes(), {'precio_app_plus': '1500'});
 
       // (b) Con la red sana, la siguiente republicación publica
-      // el 1500 y limpia la marca.
+      // el 1500 y limpia la fila.
       red.valoresQueFallan.clear();
       await gancho.republicarInfoPublicaPendiente();
       expect(red.publicadas, {'precio_app_plus': '1500'});
-      expect(await _pendientesEnMeta(), isEmpty);
+      expect(await _pendientes(), isEmpty);
       await db.close();
     });
   });
 
-  group('limpieza defensiva (marca movida fuera de la cadena)', () {
-    test('(a) la meta cambia DURANTE la republicación en vuelo: '
-        'la limpieza no barre la marca nueva', () async {
+  group('limpieza atómica (la fila cambia fuera de la cadena)', () {
+    test('(a) la fila cambia DURANTE la republicación en vuelo: '
+        'el DELETE condicional no barre la marca nueva', () async {
       final db = await _abrirDbVacia();
       await _marcarPendiente('precio_app_plus', '1200');
       final red = _RedControlable()..puerta = Completer<void>();
@@ -216,9 +186,9 @@ void main() {
       await red.primeraRpcEnVuelo
           .timeout(const Duration(seconds: 10));
 
-      // Un guardado más nuevo aterriza en la meta MIENTRAS la
-      // RPC del 1200 sigue en vuelo (p. ej. escrito desde el
-      // isolate de fondo, al que la cadena no alcanza).
+      // Un guardado más nuevo aterriza en la tabla MIENTRAS la
+      // RPC del 1200 sigue en vuelo (un solo INSERT OR REPLACE,
+      // como haría otro isolate, al que la cadena no alcanza).
       await _marcarPendiente('precio_app_plus', '1500');
 
       red.puerta!.complete();
@@ -227,13 +197,73 @@ void main() {
 
       // El 1200 SÍ se publicó...
       expect(red.publicadas, {'precio_app_plus': '1200'});
-      // ...pero la marca del 1500 sobrevive intacta.
-      expect(await _pendientesEnMeta(), {'precio_app_plus': '1500'});
+      // ...pero su DELETE (clave, 1200) afectó 0 filas: la fila
+      // del 1500 sobrevive intacta.
+      expect(await _pendientes(), {'precio_app_plus': '1500'});
 
       // (b) La republicación siguiente publica el 1500 y limpia.
       await svc.republicarInfoPublicaPendiente();
       expect(red.publicadas, {'precio_app_plus': '1500'});
-      expect(await _pendientesEnMeta(), isEmpty);
+      expect(await _pendientes(), isEmpty);
+      await db.close();
+    });
+  });
+
+  group('entre isolates (segunda conexión a la misma BD)', () {
+    test('la republicación del 1200 en vuelo no borra la marca '
+        'del 1600 escrita por OTRA conexión', () async {
+      final db = await _abrirDbVacia();
+      await _marcarPendiente('precio_app_plus', '1200');
+      final red = _RedControlable()..puerta = Completer<void>();
+      final svc = InvitadosService(rpc: red.rpc);
+
+      // Este isolate (el de fondo) republica el 1200; su RPC
+      // queda en vuelo, retenida en la puerta.
+      final fRep = svc.republicarInfoPublicaPendiente();
+      await red.primeraRpcEnVuelo
+          .timeout(const Duration(seconds: 10));
+
+      // OTRO isolate (el de la app, como el dispatcher de
+      // fondo en producción): abre su PROPIA conexión a la
+      // misma BD, marca el 1600 con un INSERT OR REPLACE y lo
+      // publica. SQLite serializa las sentencias entre
+      // conexiones: no hay foto compartida que pisar. (En el
+      // mismo isolate, sqflite deduplica la conexión nativa
+      // por ruta aunque cambie la factory: la segunda conexión
+      // DEBE vivir en otro isolate, igual que en producción.)
+      final ruta = await _rutaDb();
+      await Isolate.run(() async {
+        sqfliteFfiInit();
+        databaseFactory = databaseFactoryFfi;
+        final otraConexion =
+            await databaseFactoryFfi.openDatabase(ruta);
+        try {
+          await otraConexion.rawInsert(
+              'INSERT OR REPLACE INTO info_publica_pendiente '
+              '(clave, valor) VALUES (?, ?)',
+              ['precio_app_plus', '1600']);
+        } finally {
+          await otraConexion.close();
+        }
+      });
+      red.publicadas['precio_app_plus'] = '1600';
+      // La conexión de LocalDb VE la fila escrita por la otra
+      // conexión: mismo fichero, conexiones distintas.
+      expect(await _pendientes(), {'precio_app_plus': '1600'});
+
+      // La RPC del 1200 por fin completa.
+      red.puerta!.complete();
+      red.puerta = null;
+      await fRep;
+
+      // La limpieza del 1200 (DELETE por clave+valor) afectó 0
+      // filas: NO queda marca del 1200 NI se borró la del 1600.
+      expect(await _pendientes(), {'precio_app_plus': '1600'});
+
+      // La siguiente republicación publica el 1600 y limpia.
+      await svc.republicarInfoPublicaPendiente();
+      expect(red.publicadas, {'precio_app_plus': '1600'});
+      expect(await _pendientes(), isEmpty);
       await db.close();
     });
   });

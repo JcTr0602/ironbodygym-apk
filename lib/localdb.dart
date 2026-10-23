@@ -40,7 +40,18 @@ class LocalDb {
   /// v1.4.0 (Argón): versión actual del esquema local. Los tests de
   /// migración comparan contra esta constante en vez de un número
   /// fijo, para no caer en cascada de fallos con cada migración.
-  static const int versionActual = 36;
+  static const int versionActual = 37;
+
+  /// v37: marcas de información pública pendiente de republicar,
+  /// UNA FILA POR CLAVE (compartido entre onCreate y la migración
+  /// v37). Sustituye al JSON único en meta `info_publica_pendiente`:
+  /// marcar es un INSERT OR REPLACE y limpiar un DELETE condicional
+  /// por (clave, valor) — sentencias únicas y atómicas, sin la
+  /// ventana leer-modificar-escribir entre isolates.
+  static const String _ddlInfoPublicaPendiente =
+      'CREATE TABLE IF NOT EXISTS info_publica_pendiente ('
+      'clave TEXT PRIMARY KEY, '
+      'valor TEXT NOT NULL)';
 
   /// v1.4.4 (v33): DDL de borradores de GymPedia (compartido entre
   /// onCreate y la migración v33). Los campos de contenido espejan el
@@ -1059,6 +1070,14 @@ class LocalDb {
           await _backfillCuentaCasa(db);
           await _backfillNivelGympedia(db);
         }
+        if (oldV < 37) {
+          // Marcas de info pública pendiente: de UN JSON en meta a
+          // UNA FILA POR CLAVE (ver _ddlInfoPublicaPendiente). Se
+          // vuelcan las marcas que la 1.7.0 hubiera dejado en la
+          // meta vieja para no perder ningún reintento en curso.
+          await db.execute(_ddlInfoPublicaPendiente);
+          await _migrarInfoPublicaPendienteDeMeta(db);
+        }
       },
     );
     // v1.2.5+28: repara el índice FTS si la migración lo omitió y el
@@ -1083,6 +1102,48 @@ class LocalDb {
         await db.execute('ALTER TABLE $tabla ADD COLUMN $columna $tipo');
       }
     } catch (_) {}
+  }
+
+  /// v37: vuelca las marcas de info pública pendiente que la
+  /// 1.7.0 guardaba como UN JSON en la meta `info_publica_pendiente`
+  /// a la tabla por filas, y borra la meta. Tolerante: meta ausente
+  /// o vacía = nada que volcar; JSON corrupto o con forma inesperada
+  /// = se descarta (la meta se borra igual) sin reventar el
+  /// onUpgrade. La clave de meta va literal porque el codec viejo
+  /// vivía en invitados.dart y esto no debe importar la UI de
+  /// negocio.
+  static Future<void> _migrarInfoPublicaPendienteDeMeta(
+      Database db) async {
+    try {
+      final filas = await db.query('meta',
+          columns: ['v'],
+          where: 'k=?',
+          whereArgs: ['info_publica_pendiente']);
+      if (filas.isEmpty) return;
+      final crudo = '${filas.first['v'] ?? ''}'.trim();
+      if (crudo.isNotEmpty) {
+        try {
+          final j = jsonDecode(crudo);
+          if (j is Map) {
+            for (final e in j.entries) {
+              final clave = '${e.key}'.trim();
+              if (clave.isEmpty) continue;
+              await db.rawInsert(
+                  'INSERT OR REPLACE INTO info_publica_pendiente '
+                  '(clave, valor) VALUES (?, ?)',
+                  [clave, '${e.value}']);
+            }
+          }
+        } catch (_) {
+          // JSON corrupto: se descarta, sin romper el arranque.
+        }
+      }
+      await db.delete('meta',
+          where: 'k=?', whereArgs: ['info_publica_pendiente']);
+    } catch (_) {
+      // La migración de datos NUNCA revienta el onUpgrade: si algo
+      // falla, la tabla nueva simplemente nace vacía.
+    }
   }
 
   /// v1.3.4 (ítem 2, veredicto de Argón): normaliza un id de Telegram
@@ -1742,6 +1803,9 @@ class LocalDb {
             'CREATE INDEX IF NOT EXISTS idx_app_log_ts ON app_log(ts)');
         await db.execute(
             'CREATE TABLE meta (k TEXT PRIMARY KEY, v TEXT NOT NULL)');
+        // v37: marcas de info pública pendiente, una fila por
+        // clave — paridad con la migración v37.
+        await db.execute(_ddlInfoPublicaPendiente);
         // Reservas v2 (v34): siembra explícita del cursor propio
         // también en instalación limpia (panel Gestión 2026-10-21).
         await db.rawInsert(
@@ -4013,6 +4077,51 @@ class LocalDb {
   Future<String?> getMeta(String k) async {    final d = await db;
     final rows = await d.query('meta', where: 'k=?', whereArgs: [k]);
     return rows.isEmpty ? null : rows.first['v'] as String;
+  }
+
+  // -- info pública pendiente (v37) --------------------------------
+  // Una fila por clave pendiente de republicar en `info_publica`
+  // (hoy: el precio del App Plus). Cada operación es UNA sentencia:
+  // SQLite las serializa entre conexiones, así que ni el isolate
+  // de la app ni el de la tarea de fondo necesitan leer-modificar-
+  // escribir un valor compartido (la ventana que el panel tumbó
+  // dos veces con la representación anterior en meta).
+
+  /// Marca (o actualiza) la clave como pendiente con [valor]:
+  /// un solo INSERT OR REPLACE atómico.
+  Future<void> marcarInfoPublicaPendiente(
+      String clave, String valor) async {
+    final d = await db;
+    await d.rawInsert(
+        'INSERT OR REPLACE INTO info_publica_pendiente '
+        '(clave, valor) VALUES (?, ?)',
+        [clave, valor]);
+  }
+
+  /// Las claves pendientes con su valor marcado. Lectura pura,
+  /// sin escritura asociada.
+  Future<Map<String, String>> infoPublicaPendientes() async {
+    final d = await db;
+    final rows = await d.query('info_publica_pendiente',
+        columns: ['clave', 'valor']);
+    return {
+      for (final r in rows) '${r['clave']}': '${r['valor']}',
+    };
+  }
+
+  /// Limpia la marca de [clave] SOLO si sigue guardando
+  /// exactamente [valor] (el recién publicado): un solo DELETE
+  /// condicional. Si otro isolate — o un guardado más nuevo en
+  /// este — cambió el valor mientras la RPC estaba en vuelo, el
+  /// DELETE afecta 0 filas y la marca nueva SOBREVIVE. Devuelve
+  /// cuántas filas se borraron (0 o 1).
+  Future<int> limpiarInfoPublicaPendiente(
+      String clave, String valor) async {
+    final d = await db;
+    return d.rawDelete(
+        'DELETE FROM info_publica_pendiente '
+        'WHERE clave = ? AND valor = ?',
+        [clave, valor]);
   }
 
   // ============================================================

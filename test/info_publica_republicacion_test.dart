@@ -1,12 +1,19 @@
-/// Republicación durable de información pública (v1.7.0, panel):
-/// una clave que vive en `info_publica` (el precio del App Plus)
-/// se marca como pendiente en meta ANTES de intentar publicarla;
-/// si la red falla, la marca queda y el gancho de fin de sync
-/// reintenta tras cada sincronización exitosa. La marca SOLO se
-/// limpia cuando la republicación tiene éxito.
+/// Republicación durable de información pública (v1.7.0, panel;
+/// representación v37): una clave que vive en `info_publica` (el
+/// precio del App Plus) se marca como pendiente ANTES de intentar
+/// publicarla; si la red falla, la marca queda y el gancho de fin
+/// de sync reintenta tras cada sincronización exitosa. La marca
+/// SOLO se limpia cuando la republicación tiene éxito.
+///
+/// La marca es UNA FILA por clave en la tabla
+/// `info_publica_pendiente` (v37): marcar = INSERT OR REPLACE y
+/// limpiar = DELETE condicional por (clave, valor), sentencias
+/// únicas y atómicas a nivel de BD. (La representación original
+/// — un JSON en meta leído-modificado-escrito — dejaba una
+/// ventana entre isolates.)
 ///
 /// Sin red real: el servicio se prueba con RPC inyectada y la
-/// meta contra la BD local real (FFI), patrón de la casa.
+/// tabla contra la BD local real (FFI), patrón de la casa.
 library;
 
 import 'dart:io';
@@ -36,27 +43,49 @@ InvitadosService _sinRed() => InvitadosService(
           throw Exception('sin red (test)'),
     );
 
-Future<Map<String, String>> _pendientesEnMeta() async =>
-    decodificarInfoPublicaPendiente(
-        await LocalDb.instance.getMeta(kMetaInfoPublicaPendiente));
+Future<Map<String, String>> _pendientes() =>
+    LocalDb.instance.infoPublicaPendientes();
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  group('codec de pendientes (puro)', () {
-    test('meta ausente, vacía o ilegible = sin pendientes', () {
-      expect(decodificarInfoPublicaPendiente(null), isEmpty);
-      expect(decodificarInfoPublicaPendiente(''), isEmpty);
-      expect(decodificarInfoPublicaPendiente('no-es-json'), isEmpty);
-      expect(decodificarInfoPublicaPendiente('[1,2]'), isEmpty);
+  group('tabla de pendientes (LocalDb, v37)', () {
+    test('marcar inserta y ACTUALIZA con un solo INSERT OR '
+        'REPLACE', () async {
+      final db = await _abrirDbVacia();
+      await LocalDb.instance
+          .marcarInfoPublicaPendiente('precio_app_plus', '1200');
+      await LocalDb.instance
+          .marcarInfoPublicaPendiente('precio_app_plus', '1500');
+      await LocalDb.instance
+          .marcarInfoPublicaPendiente('otra', 'x');
+      expect(await _pendientes(),
+          {'precio_app_plus': '1500', 'otra': 'x'});
+      await db.close();
     });
 
-    test('ida y vuelta conserva las parejas', () {
-      final mapa = {'precio_app_plus': '1200', 'otra': 'x'};
-      expect(
-          decodificarInfoPublicaPendiente(
-              codificarInfoPublicaPendiente(mapa)),
-          mapa);
+    test('limpiar con el valor exacto borra la fila (1 fila)',
+        () async {
+      final db = await _abrirDbVacia();
+      await LocalDb.instance
+          .marcarInfoPublicaPendiente('precio_app_plus', '1200');
+      final borradas = await LocalDb.instance
+          .limpiarInfoPublicaPendiente('precio_app_plus', '1200');
+      expect(borradas, 1);
+      expect(await _pendientes(), isEmpty);
+      await db.close();
+    });
+
+    test('limpiar con un valor DISTINTO no borra nada (0 filas): '
+        'la marca nueva sobrevive', () async {
+      final db = await _abrirDbVacia();
+      await LocalDb.instance
+          .marcarInfoPublicaPendiente('precio_app_plus', '1500');
+      final borradas = await LocalDb.instance
+          .limpiarInfoPublicaPendiente('precio_app_plus', '1200');
+      expect(borradas, 0);
+      expect(await _pendientes(), {'precio_app_plus': '1500'});
+      await db.close();
     });
   });
 
@@ -88,33 +117,32 @@ void main() {
     });
   });
 
-  group('servicio: bandera en meta y reintento', () {
-    test('guardar el precio sin red deja la bandera puesta',
-        () async {
+  group('servicio: fila pendiente y reintento', () {
+    test('guardar el precio sin red deja la fila puesta', () async {
       final db = await _abrirDbVacia();
       await _sinRed().guardarInfoPublicaConReintento(
           'precio_app_plus', '1200');
-      expect(await _pendientesEnMeta(), {'precio_app_plus': '1200'});
+      expect(await _pendientes(), {'precio_app_plus': '1200'});
       await db.close();
     });
 
-    test('guardar de nuevo sin red ACTUALIZA el valor marcado',
+    test('guardar de nuevo sin red ACTUALIZA el valor de la fila',
         () async {
       final db = await _abrirDbVacia();
       final svc = _sinRed();
       await svc.guardarInfoPublicaConReintento('precio_app_plus', '1200');
       await svc.guardarInfoPublicaConReintento('precio_app_plus', '1500');
-      expect(await _pendientesEnMeta(), {'precio_app_plus': '1500'});
+      expect(await _pendientes(), {'precio_app_plus': '1500'});
       await db.close();
     });
 
     test(
         'una republicación posterior con red publica el valor y '
-        'limpia la bandera', () async {
+        'limpia la fila', () async {
       final db = await _abrirDbVacia();
       await _sinRed().guardarInfoPublicaConReintento(
           'precio_app_plus', '1200');
-      expect(await _pendientesEnMeta(), isNotEmpty);
+      expect(await _pendientes(), isNotEmpty);
 
       final llamadas = <({String nombre, Map<String, dynamic>? params})>[];
       final conRed = InvitadosService(rpc: (nombre, params) async {
@@ -127,17 +155,17 @@ void main() {
       expect(llamadas.single.nombre, 'info_publica_guardar');
       expect(llamadas.single.params,
           {'p_clave': 'precio_app_plus', 'p_valor': '1200'});
-      expect(await _pendientesEnMeta(), isEmpty);
+      expect(await _pendientes(), isEmpty);
       await db.close();
     });
 
-    test('si la republicación vuelve a fallar, la bandera persiste',
+    test('si la republicación vuelve a fallar, la fila persiste',
         () async {
       final db = await _abrirDbVacia();
       final svc = _sinRed();
       await svc.guardarInfoPublicaConReintento('precio_app_plus', '1200');
       await svc.republicarInfoPublicaPendiente();
-      expect(await _pendientesEnMeta(), {'precio_app_plus': '1200'});
+      expect(await _pendientes(), {'precio_app_plus': '1200'});
       await db.close();
     });
 

@@ -184,5 +184,9 @@ Future<void> revertirBDaV24(Database db) async {
   for (final c in ['tiene_incidencias', 'turno_id_reconciliado']) {
     await db.execute('ALTER TABLE turnos DROP COLUMN $c');
   }
+  // v37: la tabla de marcas de info pública no existía en v24;
+  // sin este DROP, el onUpgrade v37 no se ejercitaría de verdad
+  // (su CREATE TABLE IF NOT EXISTS sería un no-op).
+  await db.execute('DROP TABLE IF EXISTS info_publica_pendiente');
   await db.execute('PRAGMA user_version = 24');
 }

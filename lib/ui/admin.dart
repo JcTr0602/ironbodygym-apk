@@ -363,8 +363,9 @@ class _AdminScreenState extends State<AdminScreen> {
     // info_publica al guardar (patrón del horario canónico de la
     // 1.6.0): la cotización de S2 lee el precio de ahí, no del
     // ajuste local. La republicación va con reintento durable:
-    // la clave queda marcada como pendiente en meta ANTES del
-    // intento y el gancho de fin de sync la republica tras cada
+    // la clave queda marcada como pendiente ANTES del
+    // intento (fila en la tabla info_publica_pendiente, v37) y
+    // el gancho de fin de sync la republica tras cada
     // sincronización exitosa hasta lograrlo — si el guardado
     // fue sin red, el precio público no queda obsoleto en
     // silencio esperando a que el dueño vuelva a guardar.

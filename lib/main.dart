@@ -33,13 +33,14 @@ Future<void> _verificarConversionesInvitados() async {
   } catch (_) {}
 }
 
-/// v1.7.0 (panel): tras cada sync exitosa se reintenta la
-/// republicación de la información pública pendiente (p. ej.
-/// el precio del App Plus guardado sin red). Barata: sin
-/// pendientes marcados en meta no llama a la red.
+/// v1.7.0 (panel): tras cada sync exitosa se reconcilia la
+/// información pública contra el ajuste local y se reintenta
+/// la republicación de lo pendiente (p. ej. el precio del App
+/// Plus guardado sin red). Barata: sin pendientes marcados ni
+/// ajuste local que reconciliar no llama a la red.
 Future<void> _republicarInfoPublicaPendiente() async {
   try {
-    await InvitadosService().republicarInfoPublicaPendiente();
+    await InvitadosService().republicarYReconciliarInfoPublica();
   } catch (_) {}
 }
 
