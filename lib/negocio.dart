@@ -12,6 +12,7 @@ import 'package:uuid/uuid.dart';
 
 import 'auth.dart';
 import 'localdb.dart';
+import 'adelantos.dart';
 import 'sync.dart';
 import 'tiempo.dart';
 
@@ -871,14 +872,15 @@ double montoCobradoUsdOp(Map<String, dynamic> op) => _montoUsdOp(op);
 /// pendiente los refleja al llegar el espejo, como el resto.)
 Future<double> adelantosEnPendiente(int? telegramId) async {
   if (telegramId == null) return 0;
-  double total = 0;
-  for (final a in await LocalDb.instance.allMirror('adelantos')) {
-    if (LocalDb.normalizarTelegramId(a['descuenta_a']) == telegramId &&
-        (a['en_pendiente'] as num?)?.toInt() == 1) {
-      total += (a['monto'] as num?)?.toDouble() ?? 0;
-    }
-  }
-  return total;
+  // Panel 1.8.0 (Claude): con overlay de ops encoladas en ESTE
+  // teléfono, como el resto del pendiente: registrar el adelanto
+  // lo descuenta al momento en este mismo equipo.
+  return sumaAdelantosPendientes(
+    espejo: await LocalDb.instance.allMirror('adelantos'),
+    opsPendientes: await LocalDb.instance.pendingOps(),
+    telegramId: telegramId,
+    normalizarTid: LocalDb.normalizarTelegramId,
+  );
 }
 
 Future<double> pendienteEntrega(int? telegramId) async {
