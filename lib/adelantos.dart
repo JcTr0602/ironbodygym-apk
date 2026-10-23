@@ -107,6 +107,66 @@ List<MesLibroAdelantos> libroAdelantos({
   return out;
 }
 
+/// Suma neta de los adelantos VIVOS que descuentan de la gaveta
+/// de [telegramId] (panel 1.8.0, Claude): espejo (en_pendiente=1)
+/// + las ops registrar_adelanto AÚN encoladas en ESTE teléfono
+/// (caja_turno + efectivo + descuenta_a == telegramId), sin
+/// duplicar las que ya bajaron al espejo (se cruzan por op_uuid),
+/// − las anulaciones encoladas cuyo original sigue pendiente en
+/// el espejo. Los reversos del espejo netan solos (monto < 0).
+double sumaAdelantosPendientes({
+  required List<Map<String, dynamic>> espejo,
+  required List<Map<String, dynamic>> opsPendientes,
+  required int telegramId,
+  required int? Function(Object?) normalizarTid,
+}) {
+  double total = 0;
+  final uuidsEspejo = <String>{};
+  final porId = <int, Map<String, dynamic>>{};
+  for (final a in espejo) {
+    final id = (a['id'] as num?)?.toInt();
+    if (id != null) porId[id] = a;
+    final u = a['op_uuid'];
+    if (u != null) uuidsEspejo.add('$u');
+    if (normalizarTid(a['descuenta_a']) == telegramId &&
+        (a['en_pendiente'] as num?)?.toInt() == 1) {
+      total += (a['monto'] as num?)?.toDouble() ?? 0;
+    }
+  }
+  for (final op in opsPendientes) {
+    final tipo = '${op['tipo']}';
+    if (tipo != 'registrar_adelanto' && tipo != 'anular_adelanto') {
+      continue;
+    }
+    Map<String, dynamic> payload;
+    try {
+      payload = jsonDecode(op['payload'] as String)
+          as Map<String, dynamic>;
+    } catch (_) {
+      continue;
+    }
+    if (tipo == 'registrar_adelanto') {
+      final uuid = op['op_uuid'] ?? op['uuid'];
+      if (uuid != null && uuidsEspejo.contains('$uuid')) continue;
+      if ('${payload['origen'] ?? 'caja_turno'}' == 'caja_turno' &&
+          '${payload['metodo'] ?? 'efectivo'}' == 'efectivo' &&
+          normalizarTid(payload['descuenta_a']) == telegramId) {
+        total += (payload['monto'] as num?)?.toDouble() ?? 0;
+      }
+    } else {
+      // Anulación encolada: resta lo que el original aún suma.
+      final origId = (payload['adelanto_id'] as num?)?.toInt();
+      final orig = origId == null ? null : porId[origId];
+      if (orig != null &&
+          normalizarTid(orig['descuenta_a']) == telegramId &&
+          (orig['en_pendiente'] as num?)?.toInt() == 1) {
+        total -= (orig['monto'] as num?)?.toDouble() ?? 0;
+      }
+    }
+  }
+  return total;
+}
+
 /// Servicio de adelantos: espejo + ops pendientes (este teléfono)
 /// y acciones (solo dueño en el servidor; la UI también gatea).
 class AdelantosService {
