@@ -20,6 +20,7 @@ library;
 import 'dart:convert';
 
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:uuid/uuid.dart';
 
 import 'auth.dart';
 import 'localdb.dart';
@@ -65,6 +66,13 @@ InvitadoError mapearErrorInvitado(Object e) {
       (texto.contains('DATOS_INVALIDOS') && texto.contains('clave'))) {
     return const InvitadoError('CLAVE_INVALIDA',
         'La clave debe tener de 6 a 32 caracteres, sin espacios.');
+  }
+  if (texto.contains('reservada solo al dueño') ||
+      texto.contains('42501')) {
+    // G2 (Argón): error de dominio limpio de las guardas solo-dueño
+    // (eliminar invitado, acciones Plus en lote).
+    return const InvitadoError('SOLO_DUENO',
+        'Acción reservada solo al dueño.');
   }
   if (texto.contains('No autorizado')) {
     return const InvitadoError('NO_AUTORIZADO',
@@ -181,6 +189,14 @@ class InvitadoResumen {
   final DateTime? solicitudDesde;
   final DateTime? convertidoEn;
   final int? clienteId;
+  // v1.8.0 (Invitados desarrollados): bloque Plus de la lista.
+  // Con la RPC vieja (sin la oleada SQL) llegan ausentes → el
+  // invitado se pinta como regular, sin romper nada.
+  final bool plusActivo;
+  final DateTime? plusHasta;
+  final int? plusDiasRestantes;
+  final String? plusOrigen; // 'pago' | 'cortesia' | null
+  final bool telefonoYaCliente;
 
   const InvitadoResumen({
     required this.id,
@@ -194,6 +210,11 @@ class InvitadoResumen {
     this.solicitudDesde,
     this.convertidoEn,
     this.clienteId,
+    this.plusActivo = false,
+    this.plusHasta,
+    this.plusDiasRestantes,
+    this.plusOrigen,
+    this.telefonoYaCliente = false,
   });
 
   factory InvitadoResumen.fromJson(Map<String, dynamic> j) {
@@ -209,12 +230,229 @@ class InvitadoResumen {
       solicitudDesde: _ts(j['solicitud_desde']),
       convertidoEn: _ts(j['convertido_en']),
       clienteId: (j['cliente_id'] as num?)?.toInt(),
+      plusActivo: j['plus_activo'] == true,
+      plusHasta: _ts(j['plus_hasta']),
+      plusDiasRestantes: (j['plus_dias_restantes'] as num?)?.toInt(),
+      plusOrigen: j['plus_origen'] as String?,
+      telefonoYaCliente: j['telefono_ya_cliente'] == true,
     );
   }
 
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'nombre': nombre,
+        'telefono': telefono,
+        'estado': estado,
+        'creado_en': creadoEn?.toIso8601String(),
+        'caduca_en': caducaEn?.toIso8601String(),
+        'dias_restantes': diasRestantes,
+        'tiene_solicitud_pendiente': tieneSolicitudPendiente,
+        'solicitud_desde': solicitudDesde?.toIso8601String(),
+        'convertido_en': convertidoEn?.toIso8601String(),
+        'cliente_id': clienteId,
+        'plus_activo': plusActivo,
+        'plus_hasta': plusHasta?.toIso8601String(),
+        'plus_dias_restantes': plusDiasRestantes,
+        'plus_origen': plusOrigen,
+        'telefono_ya_cliente': telefonoYaCliente,
+      };
+
   bool get convertido => estado == 'convertido';
+  bool get enConversion => estado == 'en_conversion';
   bool get caducaPronto => !convertido && diasRestantes <= 7;
   bool get caducado => !convertido && diasRestantes <= 0;
+  bool get plusPorVencer =>
+      plusActivo && (plusDiasRestantes ?? 99) <= 7;
+}
+
+/// Conteos de cabecera (`invitados_resumen`): vienen del servidor,
+/// NUNCA de la página cargada (con paginación mentirían).
+class InvitadosConteos {
+  final int total;
+  final int plus;
+  final int plusPorVencer;
+  final int solicitudes;
+  final int porExpirar;
+  final int nuevos;
+  const InvitadosConteos({
+    this.total = 0,
+    this.plus = 0,
+    this.plusPorVencer = 0,
+    this.solicitudes = 0,
+    this.porExpirar = 0,
+    this.nuevos = 0,
+  });
+  factory InvitadosConteos.fromJson(Map<String, dynamic> j) =>
+      InvitadosConteos(
+        total: (j['total'] as num?)?.toInt() ?? 0,
+        plus: (j['plus'] as num?)?.toInt() ?? 0,
+        plusPorVencer: (j['plus_por_vencer'] as num?)?.toInt() ?? 0,
+        solicitudes: (j['solicitudes'] as num?)?.toInt() ?? 0,
+        porExpirar: (j['por_expirar'] as num?)?.toInt() ?? 0,
+        nuevos: (j['nuevos'] as num?)?.toInt() ?? 0,
+      );
+  Map<String, dynamic> toJson() => {
+        'total': total,
+        'plus': plus,
+        'plus_por_vencer': plusPorVencer,
+        'solicitudes': solicitudes,
+        'por_expirar': porExpirar,
+        'nuevos': nuevos,
+      };
+}
+
+/// Un movimiento del historial del Plus (reporte de pago o acción
+/// de staff: cortesía / revocación — G5).
+class PlusHistorialItem {
+  final String tipo; // reporte_* | plus_cortesia | plus_quitar
+  final DateTime? fecha;
+  final String? actor;
+  final String? motivo;
+  final DateTime? hasta;
+  final int? dias;
+  final double? montoCup;
+  const PlusHistorialItem({
+    required this.tipo,
+    this.fecha,
+    this.actor,
+    this.motivo,
+    this.hasta,
+    this.dias,
+    this.montoCup,
+  });
+  factory PlusHistorialItem.fromJson(Map<String, dynamic> j) =>
+      PlusHistorialItem(
+        tipo: '${j['tipo'] ?? ''}',
+        fecha: _ts(j['fecha']),
+        actor: j['actor'] as String?,
+        motivo: j['motivo'] as String?,
+        hasta: _ts(j['hasta']),
+        dias: (j['dias'] as num?)?.toInt(),
+        montoCup: (j['monto_cup'] as num?)?.toDouble(),
+      );
+}
+
+/// Bloque Plus del detalle (v2): estado explícito — revocado NO
+/// se confunde con vencido (G5).
+class PlusDetalle {
+  final String estado; // activo | vencido | revocado | nunca
+  final bool activo;
+  final DateTime? desde;
+  final DateTime? hasta;
+  final int? diasRestantes;
+  final String? origen; // 'pago' | 'cortesia' | null
+  final List<PlusHistorialItem> historial;
+  const PlusDetalle({
+    this.estado = 'nunca',
+    this.activo = false,
+    this.desde,
+    this.hasta,
+    this.diasRestantes,
+    this.origen,
+    this.historial = const [],
+  });
+  factory PlusDetalle.fromJson(Map<String, dynamic> j) {
+    final hist = (j['historial'] as List?) ?? const [];
+    return PlusDetalle(
+      estado: '${j['estado'] ?? 'nunca'}',
+      activo: j['activo'] == true,
+      desde: _ts(j['desde']),
+      hasta: _ts(j['hasta']),
+      diasRestantes: (j['dias_restantes'] as num?)?.toInt(),
+      origen: j['origen'] as String?,
+      historial: [
+        for (final h in hist)
+          if (h is Map)
+            PlusHistorialItem.fromJson(
+                h.map((k, v) => MapEntry('$k', v))),
+      ],
+    );
+  }
+}
+
+/// Una acción de staff sobre el invitado (invitado_auditoria).
+class AccionStaffInvitado {
+  final String accion;
+  final String? actor;
+  final DateTime? fecha;
+  final Map<String, dynamic> detalle;
+  const AccionStaffInvitado({
+    required this.accion,
+    this.actor,
+    this.fecha,
+    this.detalle = const {},
+  });
+  factory AccionStaffInvitado.fromJson(Map<String, dynamic> j) {
+    final d = j['detalle'];
+    return AccionStaffInvitado(
+      accion: '${j['accion'] ?? ''}',
+      actor: j['actor'] as String?,
+      fecha: _ts(j['fecha']),
+      detalle: d is Map ? d.map((k, v) => MapEntry('$k', v)) : const {},
+    );
+  }
+}
+
+/// Resultado por ítem de `invitado_accion_lote`.
+class ItemLote {
+  final String id;
+  final bool ok;
+  final String codigo; // aplicada | convertido | en_conversion |
+  // sin_plus | no_existe | error
+  final String? motivo;
+  final DateTime? plusHasta;
+  final DateTime? caducaEn;
+  const ItemLote({
+    required this.id,
+    required this.ok,
+    required this.codigo,
+    this.motivo,
+    this.plusHasta,
+    this.caducaEn,
+  });
+  factory ItemLote.fromJson(Map<String, dynamic> j) => ItemLote(
+        id: '${j['id'] ?? ''}',
+        ok: j['ok'] == true,
+        codigo: '${j['codigo'] ?? ''}',
+        motivo: j['motivo'] as String?,
+        plusHasta: _ts(j['plus_hasta']),
+        caducaEn: _ts(j['caduca_en']),
+      );
+}
+
+/// Resultado completo de un lote: la UI lo pinta desde ESTA
+/// respuesta, no de recargar la lista (aunque el refetch falle,
+/// el dueño ve qué pasó con cada invitado).
+class ResultadoLote {
+  final String accion;
+  final int aplicados;
+  final int omitidos;
+  final int fallidos;
+  final List<ItemLote> items;
+  final bool repetida;
+  const ResultadoLote({
+    required this.accion,
+    this.aplicados = 0,
+    this.omitidos = 0,
+    this.fallidos = 0,
+    this.items = const [],
+    this.repetida = false,
+  });
+  factory ResultadoLote.fromJson(Map<String, dynamic> j) {
+    final items = (j['items'] as List?) ?? const [];
+    return ResultadoLote(
+      accion: '${j['accion'] ?? ''}',
+      aplicados: (j['aplicados'] as num?)?.toInt() ?? 0,
+      omitidos: (j['omitidos'] as num?)?.toInt() ?? 0,
+      fallidos: (j['fallidos'] as num?)?.toInt() ?? 0,
+      repetida: j['repetida'] == true,
+      items: [
+        for (final i in items)
+          if (i is Map)
+            ItemLote.fromJson(i.map((k, v) => MapEntry('$k', v))),
+      ],
+    );
+  }
 }
 
 /// Solicitud «Quiero inscribirme» vigente o última del invitado.
@@ -289,6 +527,12 @@ class InvitadoDetalle {
   final List<MedidaInvitado> mediciones;
   final SolicitudInvitado? solicitud;
   final ConversionServidor? conversionPreparada;
+  // v1.8.0 (detalle v2): Plus con estado, acciones de staff y
+  // aviso de teléfono compartido con un cliente. Con la RPC vieja
+  // llegan ausentes (plus = null, listas vacías).
+  final PlusDetalle? plus;
+  final List<AccionStaffInvitado> staffAcciones;
+  final bool telefonoYaCliente;
 
   const InvitadoDetalle({
     required this.id,
@@ -306,6 +550,9 @@ class InvitadoDetalle {
     this.mediciones = const [],
     this.solicitud,
     this.conversionPreparada,
+    this.plus,
+    this.staffAcciones = const [],
+    this.telefonoYaCliente = false,
   });
 
   factory InvitadoDetalle.fromJson(Map<String, dynamic> j) {
@@ -314,6 +561,8 @@ class InvitadoDetalle {
     final meds = (j['mediciones'] as List?) ?? const [];
     final sol = j['solicitud'];
     final conv = j['conversion_preparada'];
+    final plusJ = j['plus'];
+    final staff = (j['staff_acciones'] as List?) ?? const [];
     return InvitadoDetalle(
       id: '${invM['id'] ?? ''}',
       nombre: '${invM['nombre'] ?? ''}',
@@ -341,10 +590,21 @@ class InvitadoDetalle {
           ? ConversionServidor.fromJson(
               conv.map((k, v) => MapEntry('$k', v)))
           : null,
+      plus: plusJ is Map
+          ? PlusDetalle.fromJson(plusJ.map((k, v) => MapEntry('$k', v)))
+          : null,
+      staffAcciones: [
+        for (final a in staff)
+          if (a is Map)
+            AccionStaffInvitado.fromJson(
+                a.map((k, v) => MapEntry('$k', v))),
+      ],
+      telefonoYaCliente: invM['telefono_ya_cliente'] == true,
     );
   }
 
   bool get convertido => estado == 'convertido';
+  bool get enConversion => estado == 'en_conversion';
 }
 
 // ---------------------------------------------------------------------------
@@ -876,6 +1136,54 @@ class ConversionInvitadoStore {
 // Servicio RPC (staff) + verificación de conversiones pendientes
 // ---------------------------------------------------------------------------
 
+/// Ciclo de vida del op_id de un lote (G4.3 de Argón, el punto
+/// crítico del diseño): el MISMO op_id se reutiliza SOLO cuando
+/// la llamada falló por transporte (error RED: sin respuesta de
+/// la RPC) y se reintenta la intención idéntica. En cuanto la RPC
+/// responde — aunque traiga ítems fallidos — la intención queda
+/// consumida: un reintento posterior (sobre el subconjunto que
+/// sea) genera un op_id NUEVO, porque reusar el viejo devolvería
+/// el resultado cacheado del lote original y los fallidos jamás
+/// se ejecutarían.
+class AccionLoteInvitados {
+  String _opId = const Uuid().v4();
+  String _huella = '';
+
+  static String _huellaDe(
+          List<String> ids, String accion, int? dias, String? motivo) =>
+      '$accion|${dias ?? ''}|${motivo ?? ''}|${ids.join(',')}';
+
+  Future<ResultadoLote> ejecutar(
+    InvitadosService svc, {
+    required List<String> ids,
+    required String accion,
+    int? dias,
+    String? motivo,
+  }) async {
+    final huella = _huellaDe(ids, accion, dias, motivo);
+    if (huella != _huella) {
+      _opId = const Uuid().v4();
+      _huella = huella;
+    }
+    try {
+      final r = await svc.accionLote(
+        ids: ids,
+        accion: accion,
+        dias: dias,
+        motivo: motivo,
+        opId: _opId,
+      );
+      _huella = ''; // respuesta válida: la intención se consumió
+      return r;
+    } on InvitadoError catch (e) {
+      // Solo el fallo de transporte conserva la intención; un
+      // error de dominio también la consume (fue respuesta).
+      if (e.codigo != 'RED') _huella = '';
+      rethrow;
+    }
+  }
+}
+
 class InvitadosService {
   /// Seam de testeo (patrón de la casa, cf. manifiestoDiarioSiToca):
   /// en producción las RPC van por el cliente Supabase de la
@@ -951,6 +1259,108 @@ class InvitadosService {
   /// distintivo de Usuarios; no crea un canal nuevo.
   Future<List<InvitadoResumen>> solicitudesPendientes() =>
       listar(filtro: 'solicitudes');
+
+  /// Conteos de cabecera (RPC `invitados_resumen`). Devuelve null
+  /// si la RPC aún no existe (oleada SQL sin aplicar): la cabecera
+  /// simplemente no se pinta, sin romper la bandeja.
+  Future<InvitadosConteos?> resumen() async {
+    try {
+      final res = await _rpc('invitados_resumen');
+      if (res is Map) {
+        return InvitadosConteos.fromJson(
+            res.map((k, v) => MapEntry('$k', v)));
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  /// UNA RPC para acciones individuales (ids de 1) y masivas:
+  /// plus_cortesia / plus_quitar (solo dueño) y vida_extender
+  /// (staff). El [opId] lo gobierna [AccionLoteInvitados] (G4).
+  Future<ResultadoLote> accionLote({
+    required List<String> ids,
+    required String accion,
+    int? dias,
+    String? motivo,
+    required String opId,
+  }) async {
+    if (ids.isEmpty) {
+      throw const InvitadoError(
+          'DATOS', 'No hay invitados seleccionados.');
+    }
+    if (ids.length > 50) {
+      // G3: tope duro también en el cliente.
+      throw const InvitadoError('DATOS',
+          'El lote supera el máximo de 50 invitados.');
+    }
+    final res = await _rpc('invitado_accion_lote', {
+      'p_ids': ids,
+      'p_accion': accion,
+      if (dias != null) 'p_dias': dias,
+      if (motivo != null && motivo.isNotEmpty) 'p_motivo': motivo,
+      'p_op_id': opId,
+    });
+    if (res is! Map) {
+      throw const InvitadoError(
+          'RED', 'Respuesta inesperada del servidor.');
+    }
+    return ResultadoLote.fromJson(
+        res.map((k, v) => MapEntry('$k', v)));
+  }
+
+  // ---------------------------------------------------------------
+  // Caché offline de SOLO LECTURA (J3 + G1 de Argón): únicamente
+  // el par {resumen, lista de «Todos»} con su marca de tiempo.
+  // PROHIBIDO cachear otros filtros ni filtrar localmente.
+  // ---------------------------------------------------------------
+
+  static const _cacheKey = 'invitados_cache_v1';
+
+  Future<void> guardarCacheInvitados({
+    required InvitadosConteos? resumen,
+    required List<InvitadoResumen> listaTodos,
+  }) async {
+    try {
+      await LocalDb.instance.setMeta(
+        _cacheKey,
+        jsonEncode({
+          'cached_at': isoHabana(ahoraHabana()),
+          'resumen': resumen?.toJson(),
+          'lista': [for (final r in listaTodos) r.toJson()],
+        }),
+      );
+    } catch (_) {}
+  }
+
+  Future<
+      ({
+        InvitadosConteos? resumen,
+        List<InvitadoResumen> lista,
+        DateTime? cachedAt
+      })?> leerCacheInvitados() async {
+    try {
+      final raw = await LocalDb.instance.getMeta(_cacheKey);
+      if (raw == null || raw.isEmpty) return null;
+      final j = jsonDecode(raw) as Map<String, dynamic>;
+      final listaJ = (j['lista'] as List?) ?? const [];
+      final resJ = j['resumen'];
+      return (
+        resumen: resJ is Map
+            ? InvitadosConteos.fromJson(
+                resJ.map((k, v) => MapEntry('$k', v)))
+            : null,
+        lista: [
+          for (final r in listaJ)
+            if (r is Map)
+              InvitadoResumen.fromJson(
+                  r.map((k, v) => MapEntry('$k', v))),
+        ],
+        cachedAt: DateTime.tryParse('${j['cached_at'] ?? ''}'),
+      );
+    } catch (_) {
+      return null;
+    }
+  }
 
   Future<InvitadoDetalle> detalle(String invitadoId) async {
     final res =
