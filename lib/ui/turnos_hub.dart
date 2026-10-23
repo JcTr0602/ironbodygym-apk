@@ -1,19 +1,17 @@
 // lib/ui/turnos_hub.dart
 // v1.6.0 (pedido de Jc): UNA sola puerta para los turnos.
-//
-// Antes había dos entradas separadas y confusas — «Entrenadores
-// por turno» (dentro de Horario del Gym) y «Turnos manuales»
-// (acción de Usuarios) — y no se sabía cuál mandaba. Este hub las
-// agrupa con etiquetas de tarea y la línea de precedencia visible.
-// NO fusiona las pantallas ni toca su lógica ni su guardado: solo
-// navegación, etiquetas y la explicación de qué manda.
+// v1.8.0: el hub pasa a «Horario y turnos» (Editor único): el
+// patrón semanal y el CALENDARIO de excepciones por fecha — los
+// antiguos «Turnos manuales» fueron absorbidos como excepciones
+// (ajuste horario_excepciones; migración T4 de Argón) y su
+// pantalla desaparece.
 import 'package:flutter/material.dart';
 
 import '../auth.dart';
 import 'componentes.dart';
 import 'diseno.dart';
 import 'horario_turnos.dart';
-import 'turnos_manuales.dart';
+import 'turnos_calendario.dart';
 
 class TurnosHubScreen extends StatelessWidget {
   const TurnosHubScreen({super.key});
@@ -25,14 +23,14 @@ class TurnosHubScreen extends StatelessWidget {
     // aunque se llegue al hub por cualquier ruta.
     if (!AuthService().isOwner) {
       return Scaffold(
-        appBar: AppBar(title: const Text('Turnos')),
+        appBar: AppBar(title: const Text('Horario y turnos')),
         body: const Center(
           child: Text('Solo el dueño puede gestionar los turnos.'),
         ),
       );
     }
     return Scaffold(
-      appBar: AppBar(title: const Text('Turnos')),
+      appBar: AppBar(title: const Text('Horario y turnos')),
       body: ListView(
         padding: const EdgeInsets.all(AppEspacio.lg),
         children: [
@@ -49,9 +47,10 @@ class TurnosHubScreen extends StatelessWidget {
                     'La app muestra al entrenador programado desde '
                     'la hora de su turno, haya abierto o no. Si '
                     'abre otro entrenador, hubo un cambio y se '
-                    'muestra a ese. El ajuste por fecha corrige lo '
-                    'programado para un día concreto; el plan '
-                    'semanal es la base que se repite.',
+                    'muestra a ese mientras su turno siga abierto. '
+                    'La excepción por fecha corrige lo programado '
+                    'para un día concreto; el plan semanal es la '
+                    'base que se repite.',
                     style: AppTexto.cuerpo,
                   ),
                 ),
@@ -62,7 +61,7 @@ class TurnosHubScreen extends StatelessWidget {
           _entrada(
             context,
             Icons.calendar_view_week_rounded,
-            'Plan semanal',
+            'Patrón semanal',
             'Quién trabaja cada día de la semana (mañana y tarde). '
                 'Es la base que anuncia la app de clientes.',
             () => Navigator.of(context).push(
@@ -74,12 +73,13 @@ class TurnosHubScreen extends StatelessWidget {
           _entrada(
             context,
             Icons.edit_calendar_rounded,
-            'Ajustes por fecha',
+            'Calendario',
             'Excepciones para un día concreto (intercambios, '
-                'ausencias): corrigen lo programado de ese día.',
+                'ausencias): corrigen lo programado de ese día '
+                'sin tocar el patrón.',
             () => Navigator.of(context).push(
               MaterialPageRoute(
-                builder: (_) => const TurnosManualesScreen(),
+                builder: (_) => const CalendarioTurnosScreen(),
               ),
             ),
           ),
