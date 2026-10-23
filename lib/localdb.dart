@@ -40,7 +40,7 @@ class LocalDb {
   /// v1.4.0 (Argón): versión actual del esquema local. Los tests de
   /// migración comparan contra esta constante en vez de un número
   /// fijo, para no caer en cascada de fallos con cada migración.
-  static const int versionActual = 39;
+  static const int versionActual = 40;
 
   /// v37: marcas de información pública pendiente de republicar,
   /// UNA FILA POR CLAVE (compartido entre onCreate y la migración
@@ -1100,6 +1100,14 @@ class LocalDb {
           await db.execute(
               'CREATE TABLE IF NOT EXISTS turnos_apertura (id TEXT PRIMARY KEY, data TEXT NOT NULL, sync_seq INTEGER NOT NULL)');
         }
+        if (oldV < 40) {
+          // v1.8.0: espejos de adelantos y liquidaciones de
+          // nómina (paridad con _crearTablas).
+          await db.execute(
+              'CREATE TABLE IF NOT EXISTS adelantos (id INTEGER PRIMARY KEY, data TEXT NOT NULL, sync_seq INTEGER NOT NULL)');
+          await db.execute(
+              'CREATE TABLE IF NOT EXISTS nomina_liquidada (id TEXT PRIMARY KEY, data TEXT NOT NULL, sync_seq INTEGER NOT NULL)');
+        }
       },
     );
     // v1.2.5+28: repara el índice FTS si la migración lo omitió y el
@@ -1797,6 +1805,13 @@ class LocalDb {
     // el teléfono y la auditoría de turnos era imposible.
     await db.execute(
         'CREATE TABLE IF NOT EXISTS turnos_apertura (id TEXT PRIMARY KEY, data TEXT NOT NULL, sync_seq INTEGER NOT NULL)');
+    // v1.8.0 (v40): espejos de adelantos (id entero de gym.db) y
+    // de las marcas de liquidación de nómina (id texto
+    // 'YYYY-MM|entrenador'). Cursor propio desde 0.
+    await db.execute(
+        'CREATE TABLE IF NOT EXISTS adelantos (id INTEGER PRIMARY KEY, data TEXT NOT NULL, sync_seq INTEGER NOT NULL)');
+    await db.execute(
+        'CREATE TABLE IF NOT EXISTS nomina_liquidada (id TEXT PRIMARY KEY, data TEXT NOT NULL, sync_seq INTEGER NOT NULL)');
     // v1.4.0 (v31): caché del pre-cálculo de nómina. Solo guarda el
     // conteo de clientes que pagaron el mes + huella de insumos +
     // cuándo se calculó. Bonos y tarifa se leen siempre en vivo.
@@ -4642,6 +4657,8 @@ class LocalDb {
     'categorias_suplemento',
     'turnos_cierre',
     'turnos_apertura', // v1.8.0 (v39)
+    'adelantos', // v1.8.0 (v40)
+    'nomina_liquidada', // v1.8.0 (v40)
     'borrados', // tombstones de sync_borrados
     'liquidaciones_caja', // v1.3.6 (v28, ítem 1B)
     'incidencias_sync', // v1.3.6 (v28, ítem 1C)
@@ -4673,6 +4690,8 @@ class LocalDb {
     if (tabla.startsWith('servicio_')) return 0;
     // v1.8.0 (v39): aperturas de turno, mismo motivo.
     if (tabla == 'turnos_apertura') return 0;
+    // v1.8.0 (v40): adelantos y liquidaciones, mismo motivo.
+    if (tabla == 'adelantos' || tabla == 'nomina_liquidada') return 0;
     return getWatermark(); // hereda el global (migración)
   }
 

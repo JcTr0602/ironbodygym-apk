@@ -863,6 +863,24 @@ double montoCobradoUsdOp(Map<String, dynamic> op) => _montoUsdOp(op);
 /// Cuando el dueño confirma en el bot, el espejo se actualiza y esto baja solo.
 /// Incluye las operaciones encoladas aún no sincronizadas (son del
 /// entrenador logueado por definición).
+/// v1.8.0: adelantos vivos que descuentan del pendiente del
+/// entrenador DE TURNO (A2 de Argón): salieron de su gaveta en
+/// efectivo y ya no están en su mano. Los reversos llevan el
+/// monto en negativo y netan solos. (Los registrados en ESTE
+/// teléfono aún sin sincronizar no están en el espejo: el
+/// pendiente los refleja al llegar el espejo, como el resto.)
+Future<double> adelantosEnPendiente(int? telegramId) async {
+  if (telegramId == null) return 0;
+  double total = 0;
+  for (final a in await LocalDb.instance.allMirror('adelantos')) {
+    if (LocalDb.normalizarTelegramId(a['descuenta_a']) == telegramId &&
+        (a['en_pendiente'] as num?)?.toInt() == 1) {
+      total += (a['monto'] as num?)?.toDouble() ?? 0;
+    }
+  }
+  return total;
+}
+
 Future<double> pendienteEntrega(int? telegramId) async {
   if (telegramId == null) return 0;
   double total = 0;
@@ -903,6 +921,8 @@ Future<double> pendienteEntrega(int? telegramId) async {
   for (final op in await LocalDb.instance.pendingOps()) {
     total += _montoEfectivoOp(op, pr);
   }
+  // v1.8.0: los adelantos de su gaveta ya salieron de su mano.
+  total -= await adelantosEnPendiente(telegramId);
   return total;
 }
 
@@ -1055,6 +1075,8 @@ Future<({double cup, double usd})> pendienteArqueo(int? telegramId) async {
           ((v['cantidad'] as num?)?.toDouble() ?? 0);
     }
   }
+  // v1.8.0: adelantos vivos de su gaveta (A2) — descuentan.
+  cup -= await adelantosEnPendiente(telegramId);
   // Saldo de arrastre de liquidaciones parciales (sin partir ops).
   for (final l
       in await LocalDb.instance.allMirror('liquidaciones_caja')) {
@@ -1081,6 +1103,7 @@ Future<Map<String, List<int>>> idsPendienteArqueo(int? telegramId,
     'pagos_diarios': [],
     'ventas_suplementos': [],
     'servicio_ventas': [], // v1.8.0 (el servidor la lee con este nombre)
+    'adelantos': [], // v1.8.0: la liquidación los saca del pendiente
   };
   if (telegramId == null) return res;
   final cubiertos = await _idsLiquidados(telegramId);
@@ -1126,6 +1149,18 @@ Future<Map<String, List<int>>> idsPendienteArqueo(int? telegramId,
           esPendiente(v['entregado'])) {
         final id = (v['id'] as num?)?.toInt();
         if (id != null) res['servicio_ventas']!.add(id);
+      }
+    }
+    // v1.8.0: adelantos vivos de su gaveta (en_pendiente=1 ya
+    // codifica «aún no liquidados»: no hace falta el filtro de
+    // cubiertos, que mira las liquidaciones por op_ids).
+    for (final a in await LocalDb.instance.allMirror('adelantos')) {
+      if (LocalDb.normalizarTelegramId(a['descuenta_a']) != telegramId) {
+        continue;
+      }
+      if ((a['en_pendiente'] as num?)?.toInt() == 1) {
+        final id = (a['id'] as num?)?.toInt();
+        if (id != null) res['adelantos']!.add(id);
       }
     }
   }
