@@ -30,7 +30,6 @@ import 'arqueo.dart';
 import 'nomina.dart';
 import 'historial_ventas.dart';
 import 'suplementos.dart';
-import 'usuarios.dart';
 
 /// Tarjeta de sección (mismo diseño que la antigua administración).
 /// v1.3.6 (Argón, diseño): el icono del encabezado usa el badge squircle
@@ -381,8 +380,6 @@ class SeccionAjustesScreen extends StatefulWidget {
   // v1.2.4: datos bancarios
   final Map<String, TextEditingController> bancarios;
   final Future<void> Function() onGuardarBancarios;
-  final bool gestionarUsuarios;
-  final Future<void> Function(Widget) onIr;
   final bool Function(String) esTipoFijo;
   // v1.3.9: filtrar por sección ('tipos', 'precios', 'bancarios', null=todas)
   final String? seccion;
@@ -400,8 +397,6 @@ class SeccionAjustesScreen extends StatefulWidget {
     required this.onGuardarMontos,
     required this.bancarios,
     required this.onGuardarBancarios,
-    required this.gestionarUsuarios,
-    required this.onIr,
     required this.esTipoFijo,
     this.seccion,
   });
@@ -551,21 +546,10 @@ class _SeccionAjustesScreenState extends State<SeccionAjustesScreen> {
               onPressed: widget.onGuardarBancarios,
             ),
           ]),
-          if (widget.gestionarUsuarios)
-            seccionAdmin(context, Icons.smartphone, 'Usuarios APK', [
-              BotonPrimario(
-                texto: 'Gestionar usuarios',
-                icono: Icons.manage_accounts,
-                onPressed: () => widget.onIr(const UsuariosScreen()),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                'Ver lista, bloquear, desbloquear, cambiar contraseña o eliminar.',
-                style: TextStyle(
-                    fontSize: 12,
-                    color: AppColores.textoSecundario(context)),
-              ),
-            ]),
+          // v1.8.0 (decisión de Jc): la tarjeta «Usuarios APK /
+          // Gestionar usuarios» salió de esta sección — aquí ya no
+          // tenía sentido. La pantalla sigue viva desde Control de
+          // Acceso (control_acceso.dart).
         ],
       ),
     );

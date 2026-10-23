@@ -9,8 +9,10 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../auth.dart';
+import '../invitados.dart' as invitados_svc;
 import '../localdb.dart';
 import '../negocio.dart';
+import '../plus_reportes.dart';
 import '../nomina_calc.dart';
 import '../nomina_precalc.dart';
 import '../novedades.dart';
@@ -60,6 +62,36 @@ import '../turno_service.dart';
 String claveDescarteSinReporte(String fechaIso, String turno) =>
     'sin_reporte:$fechaIso:$turno';
 
+/// v1.8.0 (pedido de Jc): señal de «personas esperando» del dueño
+/// en Home — (a) solicitudes de inscripción de invitados
+/// («Quiero inscribirme») y (b) reportes App Plus pendientes de
+/// confirmar. Son las dos filas de «Necesita tu atención» del Panel
+/// donde hay una PERSONA esperando respuesta; Jc no debe tener
+/// que entrar a Administración para enterarse de que existen.
+///
+/// Agregación pura y testeable: los conteos llegan de las MISMAS
+/// RPC que consume el Panel (segundo pase de _cargar en Home,
+/// fail-silent sin conexión); aquí solo se suman y se decide si
+/// la señal se pinta. Un conteo negativo (no debería existir) no
+/// resta: se trata como 0.
+class SenalAtencion {
+  /// Solicitudes de inscripción de invitados por atender.
+  final int solicitudes;
+
+  /// Reportes App Plus pendientes de confirmar.
+  final int reportesPlus;
+
+  const SenalAtencion({this.solicitudes = 0, this.reportesPlus = 0});
+
+  static int _sano(int n) => n < 0 ? 0 : n;
+
+  /// Total de personas esperando atención.
+  int get total => _sano(solicitudes) + _sano(reportesPlus);
+
+  /// La señal solo se pinta si hay alguien esperando.
+  bool get visible => total > 0;
+}
+
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
   @override
@@ -81,6 +113,12 @@ class _HomeScreenState extends State<HomeScreen>
   int _incidenciasAbiertas = 0; // v1.3.3: chip de incidencias
   int _avisosPendientes = 0; // v1.3.6 (Argón, diseño): contador del botón
   // de WhatsApp (solo dueño).
+  // v1.8.0: señal de atención del dueño (solicitudes de invitados
+  // + reportes Plus). Solo dueño; la rellena el segundo pase de
+  // _cargar (_cargarAtencionDueno). Sin conexión queda en 0 = sin
+  // señal, como las filas del Panel.
+  SenalAtencion _atencion = const SenalAtencion();
+  int _atencionGen = 0;
   StreamSubscription? _sub;
   final _auth = AuthService();
 
@@ -584,6 +622,9 @@ class _HomeScreenState extends State<HomeScreen>
             .asegurar(hoyHabanaIso().substring(0, 7))
             .catchError((_) => 0));
       }
+      // v1.8.0: señal de atención del dueño en segundo pase (las
+      // RPC no bloquean el pintado local; ver _cargarAtencionDueno).
+      if (_auth.isOwner) unawaited(_cargarAtencionDueno());
     } catch (e) {
       // Fix #29 (Sol): NO actualizar _lastFetch si falló.
       // M4 (Argón): loguear y retornar en vez de rethrow.
@@ -594,6 +635,34 @@ class _HomeScreenState extends State<HomeScreen>
     }
     // Fix #29: solo marcar caché si llegamos aquí (éxito).
     _lastFetch = DateTime.now();
+  }
+
+  /// v1.8.0: segundo pase de _cargar (SOLO dueño): trae los conteos
+  /// de personas esperando — la MISMA fuente que el bloque
+  /// «Necesita tu atención» del Panel del dueño
+  /// (InvitadosService.solicitudesPendientes + la bandeja
+  /// plus_reportes_listar vía PlusReportesService.pendientes).
+  /// Fail-silent POR FUENTE, como el Panel: si una RPC falla (sin
+  /// conexión), su conteo queda en 0 y la señal simplemente no suma
+  /// esa parte; Home sigue offline-first. La generación descarta
+  /// resultados de refrescos ya superados.
+  Future<void> _cargarAtencionDueno() async {
+    final gen = ++_atencionGen;
+    var solicitudes = 0;
+    var reportes = 0;
+    try {
+      solicitudes = (await invitados_svc.InvitadosService()
+              .solicitudesPendientes())
+          .length;
+    } catch (_) {}
+    try {
+      reportes = (await PlusReportesService().pendientes()).length;
+    } catch (_) {}
+    if (!mounted || gen != _atencionGen) return;
+    setState(() {
+      _atencion =
+          SenalAtencion(solicitudes: solicitudes, reportesPlus: reportes);
+    });
   }
 
   Future<void> _salir() async {
@@ -1658,7 +1727,12 @@ class _HomeScreenState extends State<HomeScreen>
         if (_auth.isAdmin)
           _modulo(Icons.admin_panel_settings_rounded,
               'Administración',
-              () => _ir(const AdminScreen()))
+              () => _ir(const AdminScreen()),
+              // v1.8.0: personas esperando (solo dueño; el conteo
+              // solo se carga para el dueño, para el resto queda 0
+              // y el distintivo no se pinta). El toque ya lleva al
+              // Panel, donde se atienden.
+              badge: _atencion.total)
         else
           _modulo(Icons.badge_rounded, 'Mi turno',
               () => _ir(const MiTurnoScreen())),
@@ -1741,7 +1815,11 @@ class _HomeScreenState extends State<HomeScreen>
 
   /// Módulo del grid (badge squircle + etiqueta). v1.3.6 (Argón, diseño):
   /// iconos _rounded dentro del badge tinted naranja.
-  Widget _modulo(IconData icono, String texto, VoidCallback onTap) {
+  /// Módulo del grid. v1.8.0: [badge] opcional — conteo en una
+  /// píldora roja a la derecha (mismo lenguaje visual que el
+  /// contador de la campana); con 0 no se pinta nada.
+  Widget _modulo(IconData icono, String texto, VoidCallback onTap,
+      {int badge = 0}) {
     return Tarjeta(
       onTap: onTap,
       padding: const EdgeInsets.symmetric(
@@ -1757,6 +1835,22 @@ class _HomeScreenState extends State<HomeScreen>
                     fontWeight: FontWeight.w600),
                 overflow: TextOverflow.ellipsis),
           ),
+          if (badge > 0) ...[
+            const SizedBox(width: AppEspacio.sm),
+            Container(
+              padding: const EdgeInsets.symmetric(
+                  horizontal: 8, vertical: 2),
+              decoration: BoxDecoration(
+                color: AppColores.error,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Text(badge > 99 ? '99+' : '$badge',
+                  style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 11,
+                      fontWeight: FontWeight.bold)),
+            ),
+          ],
         ],
       ),
     );

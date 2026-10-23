@@ -1179,7 +1179,7 @@ Future<String> crearLiquidacion({
   );
   // Push en segundo plano; el pull silencioso posterior trae la fila
   // espejo (invariante 1C: _download inmediato tras el 200 OK).
-  unawaited(SyncEngine.instance.push().catchError((_) {}));
+  unawaited(SyncEngine.instance.push().then((_) {}, onError: (_) {}));
   return liqId;
 }
 
@@ -1214,7 +1214,7 @@ Future<void> aprobarIncidenciaSync(String incidenciaId) async {
     tipo: 'aprobar_incidencia_sync',
     payload: {'incidencia_id': incidenciaId},
   );
-  unawaited(SyncEngine.instance.push().catchError((_) {}));
+  unawaited(SyncEngine.instance.push().then((_) {}, onError: (_) {}));
 }
 
 /// Descarta una incidencia de sync. Solo dueño.
@@ -1231,7 +1231,7 @@ Future<void> descartarIncidenciaSync(String incidenciaId,
       if (nota != null && nota.isNotEmpty) 'nota': nota,
     },
   );
-  unawaited(SyncEngine.instance.push().catchError((_) {}));
+  unawaited(SyncEngine.instance.push().then((_) {}, onError: (_) {}));
 }
 
 /// Días restantes de vigencia (negativo si vencido, null si sin pagos).
@@ -3647,9 +3647,9 @@ Future<String> registrarVentaSuplemento({
   }
   // Push en segundo plano SOLO si no hay txn externa: con txn externa
   // el commit aún no ocurrió y el push leería datos inconsistentes.
-  // El catchError evita errores no manejados en tests/entornos sin sesión.
+  // El onError evita errores no manejados en tests/entornos sin sesión.
   if (txn == null) {
-    unawaited(SyncEngine.instance.push().catchError((_) {}));
+    unawaited(SyncEngine.instance.push().then((_) {}, onError: (_) {}));
   }
   return resultado;
 }

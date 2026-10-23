@@ -411,12 +411,14 @@ class _ColaScreenState extends State<ColaScreen> {
       _progresoSync = null;
       _ultimaFaseSync = null;
     });
-    var reactivadas = 0;
+    SyncResultado? resultado;
     try {
       // v1.4.0: vibración sutil al tocar, sin bloquear la sync.
       unawaited(vibrarConfirmacion());
       // v1.2.5 (D14): "Sincronizar ahora" cancela el backoff de reintentos.
-      reactivadas = await SyncEngine.instance.run(
+      // v1.8.0 (Frente 5): el resumen se arma con el SyncResultado
+      // de ESTA corrida (run() ya no traga el «no corrió»).
+      resultado = await SyncEngine.instance.run(
         forzar: true,
         onProgreso: (p) {
           // v1.4.0: throttle de setState (~150 ms) para no saturar la
@@ -438,7 +440,10 @@ class _ColaScreenState extends State<ColaScreen> {
         },
       );
     } catch (_) {
-      // El resumen posterior refleja el error guardado por el motor.
+      // El motor captura sus errores en el SyncResultado; si algo
+      // escapó hasta aquí, resultado queda null y el resumen lo
+      // dice como error (nunca como éxito).
+      resultado = null;
     } finally {
       await _cargar();
       if (mounted) {
@@ -449,7 +454,7 @@ class _ColaScreenState extends State<ColaScreen> {
       }
     }
     // Resumen post-sync (solo en sincronización manual desde aquí)
-    if (mounted) _mostrarResumen(reactivadas: reactivadas);
+    if (mounted) _mostrarResumen(resultado);
   }
 
   /// v1.2.5 (D15): reintento manual de una bloqueada. La devuelve a
@@ -475,15 +480,54 @@ class _ColaScreenState extends State<ColaScreen> {
   }
 
   /// Muestra un diálogo con el resumen de la sincronización recién hecha.
-  /// v1.4.0: [reactivadas] = ops atascadas que se reintentaron al forzar;
-  /// el texto explica el resultado en lenguaje claro (todo al día,
-  /// éxito parcial, error) en vez de solo mostrar los conteos.
-  Future<void> _mostrarResumen({int reactivadas = 0}) async {
-    final det = await SyncEngine.instance.detalle();
+  /// v1.4.0: el texto explica el resultado en lenguaje claro (todo al
+  /// día, éxito parcial, error) en vez de solo mostrar los conteos.
+  /// v1.8.0 (Frente 5): el resumen sale SOLO del [SyncResultado] de
+  /// ESTA corrida. Antes se leía `detalle()` (contadores meta de
+  /// corridas anteriores) y el diálogo salía siempre, incluso
+  /// cuando el ciclo ni siquiera corrió (lock ocupado): de ahí el
+  /// «Subidos 0 · Bajados 0 · Todo estaba al día» falso del reporte
+  /// de campo 2026-10-23. Ahora: si no corrió, se dice en claro;
+  /// si corrió y quedan pendientes, se dice cuántas y de qué tipo;
+  /// «Todo estaba al día» solo con la cola vacía y sin error.
+  Future<void> _mostrarResumen(SyncResultado? res) async {
     if (!mounted) return;
-    final subidos = det.subidos;
-    final bajados = det.bajados;
-    final error = det.error;
+    // El ciclo NO corrió (u escapó una excepción): jamás éxito.
+    if (res == null || !res.corrio) {
+      final enCurso =
+          res != null && res.motivoNoCorrio == SyncMotivoNoCorrio.enCurso;
+      await showDialog(
+        context: context,
+        builder: (ctx) => DialogoApp(
+          titulo:
+              enCurso ? 'Sincronización en curso' : 'No se pudo sincronizar',
+          iconoTitulo: Icons.sync,
+          contenido: Text(
+            enCurso
+                ? 'Ya hay una sincronización en curso en este '
+                    'teléfono. Espera unos segundos y vuelve a '
+                    'intentarlo.'
+                : res == null
+                    ? 'La sincronización no se pudo completar. '
+                        'Inténtalo de nuevo.'
+                    : 'No hay una sesión activa para sincronizar. '
+                        'Entra de nuevo e inténtalo.',
+            style: const TextStyle(fontSize: 14, height: 1.4),
+          ),
+          acciones: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: const Text('Entendido'),
+            ),
+          ],
+        ),
+      );
+      return;
+    }
+    final subidos = res.subidos;
+    final bajados = res.bajados;
+    final error = res.error;
+    final reactivadas = res.reactivadas;
     await showDialog(
       context: context,
       builder: (ctx) => DialogoApp(
@@ -535,8 +579,29 @@ class _ColaScreenState extends State<ColaScreen> {
                 ],
               ),
             ],
+            // v1.8.0 (Frente 5): si al cerrar el ciclo queda algo
+            // en la cola, el resumen lo dice con su categoría —
+            // prohibido «al día» con pendientes.
+            if (res.pendientesRestantes > 0) ...[
+              const SizedBox(height: 12),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Icon(Icons.schedule,
+                      size: 16, color: AppColores.alerta),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      res.textoPendientes,
+                      style: const TextStyle(fontSize: 13),
+                    ),
+                  ),
+                ],
+              ),
+            ],
             if (subidos == 0 &&
                 bajados == 0 &&
+                res.pendientesRestantes == 0 &&
                 (error == null || error.isEmpty))
               Padding(
                 padding: const EdgeInsets.only(top: 12),

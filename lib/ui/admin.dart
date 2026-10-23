@@ -23,7 +23,6 @@ import '../plus_reportes.dart';
 import '../negocio.dart';
 import '../nomina_calc.dart';
 import '../perfil.dart';
-import '../permisos.dart';
 import '../sync.dart';
 import '../tiempo.dart';
 import '../tipos_pago.dart';
@@ -2083,8 +2082,6 @@ class _AdminScreenState extends State<AdminScreen> {
       onGuardarMontos: _guardarMontos,
       bancarios: _bancarios,
       onGuardarBancarios: _guardarBancarios,
-      gestionarUsuarios: Permisos().gestionarUsuarios,
-      onIr: _irYRecargar,
       esTipoFijo: _esTipoFijo,
     );
   }

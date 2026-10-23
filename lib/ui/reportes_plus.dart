@@ -120,7 +120,7 @@ class _ReportesPlusScreenState extends State<ReportesPlusScreen> {
         content: Text(confirmar
             ? 'Confirmación encolada: el Plus se activa al sincronizar'
             : 'Rechazo encolado: se aplica al sincronizar')));
-    unawaited(SyncEngine.instance.push().catchError((_) {}));
+    unawaited(SyncEngine.instance.push().then((_) {}, onError: (_) {}));
   }
 
   Future<void> _confirmar(ReportePlus r) async {

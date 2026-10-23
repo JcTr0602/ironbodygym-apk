@@ -4471,19 +4471,30 @@ class LocalDb {
     return e == 'pendiente' || e == 'error' || e == 'necesita_revision';
   }
 
+  /// Ventana de expiración del lock de sincronización (v1.8.0): un
+  /// lock cuyo timestamp tenga más de esto se considera MUERTO y se
+  /// puede robar. El dueño vivo lo renueva con [renovarSyncLock]
+  /// (latido), así que la ventana solo castiga a dueños que ya no
+  /// están (proceso matado, isolate colgado): antes eran 5 minutos
+  /// SIN latido, y un ciclo largo con red lenta podía perder el
+  /// lock a mitad y correr dos ciclos a la vez.
+  static const int syncLockTimeoutMs = 3 * 60 * 1000; // 3 minutos
+
   /// Lock de sincronización entre isolates (Gemini auditoría 2026-10-12).
   /// Workmanager corre en un isolate separado con su propia instancia de
   /// SyncEngine; la bandera _running en memoria no lo protege.
-  /// Usa la tabla meta con timeout de 5 minutos (si el dueño muere, otro
-  /// isolate puede robar el lock).
+  /// Usa la tabla meta con timeout (si el dueño muere y no renueva,
+  /// otro isolate puede robar el lock pasado [syncLockTimeoutMs]).
   /// v1.3-r3 (Gemini): el lock lleva owner UUID. liberarSyncLock solo
   /// borra si el UUID coincide, evitando que un isolate rezagado desmonte
   /// el lock de otro isolate activo (race condition con red lenta).
   /// Retorna el owner UUID si se adquirió, null si no.
-  Future<String?> adquirirSyncLock() async {
+  /// [ahoraMs]/[timeoutMs] son costuras de testeo; en producción se
+  /// usa el reloj real y [syncLockTimeoutMs].
+  Future<String?> adquirirSyncLock({int? ahoraMs, int? timeoutMs}) async {
     final d = await db;
-    final ahora = DateTime.now().millisecondsSinceEpoch;
-    const timeoutMs = 5 * 60 * 1000; // 5 minutos
+    final ahora = ahoraMs ?? DateTime.now().millisecondsSinceEpoch;
+    final timeout = timeoutMs ?? syncLockTimeoutMs;
     // UUID simple sin dependencia externa.
     final owner =
         '${ahora}_${DateTime.now().microsecondsSinceEpoch % 1000000}';
@@ -4498,7 +4509,7 @@ class LocalDb {
           // Formato: "timestamp:owner". Compatibilidad con locks viejos.
           final partes = v.split(':');
           final ts = int.tryParse(partes[0]) ?? 0;
-          if (ahora - ts < timeoutMs) return null; // lock vigente
+          if (ahora - ts < timeout) return null; // lock vigente
         }
         await txn.insert('meta', {'k': 'sync_lock', 'v': '$ahora:$owner'},
             conflictAlgorithm: ConflictAlgorithm.replace);
@@ -4506,6 +4517,29 @@ class LocalDb {
       });
     } catch (_) {
       return null;
+    }
+  }
+
+  /// v1.8.0: latido del lock — renueva el timestamp SOLO si el owner
+  /// coincide (la misma guarda que [liberarSyncLock]: un isolate
+  /// rezagado jamás renueva el lock de otro). Devuelve true si
+  /// renovó, es decir, si seguimos siendo los dueños.
+  Future<bool> renovarSyncLock(String owner, {int? ahoraMs}) async {
+    try {
+      final d = await db;
+      final ahora = ahoraMs ?? DateTime.now().millisecondsSinceEpoch;
+      return await d.transaction<bool>((txn) async {
+        final rows = await txn
+            .query('meta', where: 'k = ?', whereArgs: ['sync_lock']);
+        if (rows.isEmpty) return false;
+        final v = '${rows.first['v']}';
+        if (!v.endsWith(':$owner')) return false; // ya no es mío
+        await txn.update('meta', {'v': '$ahora:$owner'},
+            where: 'k = ?', whereArgs: ['sync_lock']);
+        return true;
+      });
+    } catch (_) {
+      return false;
     }
   }
 
@@ -5122,6 +5156,52 @@ class LocalDb {
     final r = await d.rawQuery(
         'SELECT COUNT(*) c FROM ops_queue WHERE estado IN (\'pendiente\', \'enviada\', \'error\')');
     return (r.first['c'] as int?) ?? 0;
+  }
+
+  /// v1.8.0 (Frente 5): conteo de pendientes por categoría, para que
+  /// el resumen de la sincronización diga la VERDAD al cerrar un
+  /// ciclo (nada de «todo al día» con la cola llena). Categorías
+  /// mutuamente excluyentes y exhaustivas respecto a
+  /// [countPendingOps] (pendiente + enviada + error):
+  /// - esperandoConfirmacion: 'enviada' (ya salió; falta que el
+  ///   servidor confirme que la aplicó).
+  /// - porSubir: 'pendiente' del usuario actual (o sin autor).
+  /// - conError: 'error' del usuario actual (o sin autor); se
+  ///   reintentan en la próxima sincronización.
+  /// - deOtroUsuario: 'pendiente'/'error' con user_id de OTRA
+  ///   persona (no se suben con esta sesión; ver countOpsAjenas).
+  Future<
+      ({
+        int esperandoConfirmacion,
+        int porSubir,
+        int conError,
+        int deOtroUsuario
+      })> conteoPendientesSync(String? userId) async {
+    final d = await db;
+    final esPropia = userId == null
+        ? '1=1'
+        : '(user_id IS NULL OR user_id = ?)';
+    final esAjena = userId == null
+        ? '1=0'
+        : '(user_id IS NOT NULL AND user_id != ?)';
+    final args = <Object?>[
+      if (userId != null) ...[userId, userId, userId],
+    ];
+    final r = await d.rawQuery(
+        'SELECT '
+        "COALESCE(SUM(CASE WHEN estado = 'enviada' THEN 1 ELSE 0 END), 0) AS esperando, "
+        "COALESCE(SUM(CASE WHEN estado = 'pendiente' AND $esPropia THEN 1 ELSE 0 END), 0) AS por_subir, "
+        "COALESCE(SUM(CASE WHEN estado = 'error' AND $esPropia THEN 1 ELSE 0 END), 0) AS con_error, "
+        "COALESCE(SUM(CASE WHEN estado IN ('pendiente', 'error') AND $esAjena THEN 1 ELSE 0 END), 0) AS ajenas "
+        'FROM ops_queue',
+        args);
+    final f = r.first;
+    return (
+      esperandoConfirmacion: (f['esperando'] as num?)?.toInt() ?? 0,
+      porSubir: (f['por_subir'] as num?)?.toInt() ?? 0,
+      conError: (f['con_error'] as num?)?.toInt() ?? 0,
+      deOtroUsuario: (f['ajenas'] as num?)?.toInt() ?? 0,
+    );
   }
 
   /// v1.3.5 (fix 2026-10-16): IDs de clientes con op eliminar_cliente

@@ -228,6 +228,136 @@ class SyncDetalle {
   int get bajados => bajadosUltimo;
 }
 
+/// v1.8.0 (Frente 5): por qué un ciclo de sincronización NO corrió.
+/// Antes `run()` tragaba el false del lock y la UI armaba el
+/// resumen con contadores meta de corridas viejas: el diálogo decía
+/// «Todo estaba al día» sin haber intentado nada (bug de campo
+/// 2026-10-23: dos ops pendientes durante horas y el botón
+/// respondía al instante con éxito falso).
+enum SyncMotivoNoCorrio { enCurso, sinSesion }
+
+/// v1.8.0 (Frente 5): resultado REAL de una corrida del motor
+/// ([SyncEngine.run], [SyncEngine.push], [SyncEngine.pull]).
+/// subidos/bajados son los de ESTA corrida (confirmados por el
+/// servidor / aplicados del pull), jamás leídos de la meta
+/// persistida; los pendientes se cuentan de la cola al cierre.
+/// La UI del resumen consume SOLO este objeto.
+class SyncResultado {
+  /// ¿El ciclo llegó a ejecutarse?
+  final bool corrio;
+
+  /// Si [corrio] es false, el motivo (lock ocupado por otro ciclo
+  /// o sin sesión activa).
+  final SyncMotivoNoCorrio? motivoNoCorrio;
+
+  /// Ops confirmadas como aplicadas por el servidor en ESTA
+  /// corrida (push + barrido de confirmación).
+  final int subidos;
+
+  /// Filas aplicadas del pull en ESTA corrida.
+  final int bajados;
+
+  /// Mensaje de error visible si la corrida falló (push o pull).
+  final String? error;
+
+  /// Ops 'enviada' atascadas reactivadas al forzar (solo run()).
+  final int reactivadas;
+
+  /// Pendientes en la cola al cierre (countPendingOps real).
+  final int pendientesRestantes;
+
+  /// De los restantes: 'enviada', esperando que el servidor
+  /// confirme que las aplicó.
+  final int esperandoConfirmacion;
+
+  /// De los restantes: 'pendiente' propias aún sin enviar.
+  final int porSubir;
+
+  /// De los restantes: 'error' propias (se reintentan al
+  /// sincronizar).
+  final int conError;
+
+  /// De los restantes: de OTRO usuario en este teléfono; se suben
+  /// cuando esa persona inicie sesión.
+  final int deOtroUsuario;
+
+  const SyncResultado({
+    required this.corrio,
+    this.motivoNoCorrio,
+    this.subidos = 0,
+    this.bajados = 0,
+    this.error,
+    this.reactivadas = 0,
+    this.pendientesRestantes = 0,
+    this.esperandoConfirmacion = 0,
+    this.porSubir = 0,
+    this.conError = 0,
+    this.deOtroUsuario = 0,
+  });
+
+  /// La corrida no llegó a ejecutarse: NUNCA es un éxito.
+  const SyncResultado.noCorrio(SyncMotivoNoCorrio motivo)
+      : corrio = false,
+        motivoNoCorrio = motivo,
+        subidos = 0,
+        bajados = 0,
+        error = null,
+        reactivadas = 0,
+        pendientesRestantes = 0,
+        esperandoConfirmacion = 0,
+        porSubir = 0,
+        conError = 0,
+        deOtroUsuario = 0;
+
+  /// «Al día» SOLO si el ciclo corrió, no falló y la cola quedó
+  /// vacía. Con pendientes restantes o error, jamás.
+  bool get alDia => corrio && error == null && pendientesRestantes == 0;
+
+  /// Resumen corto y VERAZ de la corrida. El «Todo estaba al día»
+  /// solo aparece cuando [alDia] y no se movió nada.
+  String get resumenCorto {
+    if (!corrio) {
+      return motivoNoCorrio == SyncMotivoNoCorrio.sinSesion
+          ? 'Sin sesión activa para sincronizar'
+          : 'Ya hay una sincronización en curso';
+    }
+    if (error != null) return 'No se pudo sincronizar';
+    if (pendientesRestantes > 0) {
+      return 'Sincronización parcial: quedan $pendientesRestantes '
+          'operación${pendientesRestantes == 1 ? '' : 'es'} por sincronizar';
+    }
+    if (subidos == 0 && bajados == 0) return 'Todo estaba al día';
+    return 'Sincronización completada';
+  }
+
+  /// Detalle de los pendientes restantes en lenguaje claro
+  /// (cadena vacía si no queda nada). Una línea por categoría con
+  /// conteo, para que el usuario sepa QUÉ falta y qué hacer.
+  String get textoPendientes {
+    if (pendientesRestantes <= 0) return '';
+    final lineas = <String>[
+      'Quedan $pendientesRestantes operación'
+          '${pendientesRestantes == 1 ? '' : 'es'} sin sincronizar:',
+    ];
+    if (esperandoConfirmacion > 0) {
+      lineas.add('• $esperandoConfirmacion esperando confirmación '
+          'del servidor.');
+    }
+    if (porSubir > 0) {
+      lineas.add('• $porSubir por subir desde este teléfono.');
+    }
+    if (conError > 0) {
+      lineas.add('• $conError con error: se reintentan en la '
+          'próxima sincronización.');
+    }
+    if (deOtroUsuario > 0) {
+      lineas.add('• $deOtroUsuario de otro usuario en este '
+          'teléfono: se suben cuando esa persona inicie sesión.');
+    }
+    return lineas.join('\n');
+  }
+}
+
 /// v1.3.8: traduce un error técnico de sincronización a lenguaje común.
 /// Pedido de Jc: no mostrar ClientException/SocketException en crudo.
 String errorSyncLegible(String crudo) {
@@ -886,8 +1016,13 @@ class SyncEngine {
   /// (pueden llegar cambios nuevos mientras se descarga).
   /// v1.2.5 (D14): [forzar] cancela el backoff ("Sincronizar ahora").
   /// v1.4.0: [onProgreso] callback opcional para feedback en vivo en la UI.
-  /// v1.4.0: retorna cuántas ops atascadas en 'enviada' se reactivaron.
-  Future<int> run({
+  /// v1.8.0 (Frente 5): devuelve el [SyncResultado] REAL de la
+  /// corrida — si corrió o no (y por qué), subidos/bajados de ESTA
+  /// corrida, error y pendientes restantes al cierre. Antes
+  /// devolvía solo las reactivadas y tragaba el «no corrió» del
+  /// lock: la UI rellenaba el hueco con contadores meta viejos y
+  /// anunciaba «Todo estaba al día» sin haber sincronizado.
+  Future<SyncResultado> run({
     bool forzar = false,
     void Function(SyncProgress)? onProgreso,
   }) async {
@@ -900,7 +1035,10 @@ class SyncEngine {
       }
     }
     var reactivadas = 0;
-    await _conLock(() async {
+    var subidos = 0;
+    var bajados = 0;
+    String? errorCorrida;
+    final noCorrio = await _conLock(() async {
       try {
         // v1.4.0: al forzar, reactivar ops atascadas en 'enviada' antes del push.
         if (forzar) {
@@ -919,16 +1057,28 @@ class SyncEngine {
         // v1.2.9+47: errores de push y pull por separado (Gemini).
         String? errPush;
         String? errPull;
+        var pushOk = false;
         try {
           _emitirProgreso(
               onProgreso,
               const SyncProgress(
                   fase: SyncFase.subiendo,
                   mensaje: 'Subiendo operaciones...'));
-          await _doPush(forzar: forzar, onProgreso: onProgreso);
+          subidos = await _doPush(forzar: forzar, onProgreso: onProgreso);
+          pushOk = true;
         } catch (e) {
           errPush = (await _describeErrorVisible(e)).mensaje;
           AppLog.error('sync', 'push_fallo', d: '$e');
+        }
+        // v1.8.0 (Frente 5, punto E): si el push murió ANTES de su
+        // barrido interno (p. ej. falló la subida de fotos de
+        // incidencias), la confirmación de las ops que el servidor
+        // ya aplicó no queda rehén de ese fallo: barrido directo,
+        // tolerante (si también falla la red, no se marca nada).
+        if (!pushOk) {
+          try {
+            subidos += (await barridoConfirmacion()).confirmadas;
+          } catch (_) {}
         }
         // v1.2.4: perfil (móvil/carnet) que no pudo subirse sin conexión.
         try {
@@ -938,7 +1088,10 @@ class SyncEngine {
         bool completo = false;
         for (var i = 0; i < 3; i++) {
           try {
-            await _doPull();
+            // v1.8.0: sumar lo bajado en CADA intento (un intento
+            // que avanza el watermark y falla después ya bajó
+            // filas reales).
+            bajados += await _doPull();
           } catch (e) {
             errPull = (await _describeErrorVisible(e)).mensaje;
             AppLog.error(
@@ -968,19 +1121,21 @@ class SyncEngine {
           await _db.setMeta('last_sync_error', errPush);
           _emit(SyncPhase.error,
               error: traducirErrorSync(errPush));
+          errorCorrida = errPush;
           return;
         } else if (errPull != null) {
           await _db.setMeta('last_sync_error', errPull);
+          errorCorrida = errPull;
         } else {
           // Push OK y pull sin excepciones: limpiar error y marcar OK.
           await _marcarOk();
           await _db.setMeta('last_sync_error', '');
         }
-        // v1.0.17: resumen discreto de lo que realmente cambió
-        final subidos =
-            int.tryParse(await _db.getMeta('last_uploaded') ?? '0') ?? 0;
-        final bajados =
-            int.tryParse(await _db.getMeta('last_downloaded') ?? '0') ?? 0;
+        // v1.0.17: resumen discreto de lo que realmente cambió.
+        // v1.8.0: sale de los conteos de ESTA corrida (los que
+        // devuelve _doPush/_doPull), no de la meta: last_downloaded
+        // no lo escribe el pull silencioso y last_uploaded podía
+        // ser de otra corrida.
         final resumen = (subidos == 0 && bajados == 0)
             ? 'Sin cambios'
             : [
@@ -994,15 +1149,73 @@ class SyncEngine {
       } on SessionExpired {
         _sesionVencida();
         _emit(SyncPhase.idle);
+        errorCorrida = 'La sesión venció. Entra de nuevo.';
       } catch (e) {
         final errSync = await _describeErrorVisible(e);
         await _db.setMeta('last_sync_error', errSync.mensaje);
         _emit(SyncPhase.error, error: errSync);
+        errorCorrida = errSync.mensaje;
         await Future.delayed(const Duration(seconds: 2));
         _emit(SyncPhase.idle);
       }
     });
-    return reactivadas;
+    if (noCorrio != null) {
+      return SyncResultado.noCorrio(noCorrio);
+    }
+    // Pendientes al cierre, contados de la cola real: el resumen
+    // de la UI se construye con esto y jamás dirá «al día» si
+    // queda algo por sincronizar.
+    final conteo = await _conteoPendientesSeguro();
+    return SyncResultado(
+      corrio: true,
+      subidos: subidos,
+      bajados: bajados,
+      error: errorCorrida,
+      reactivadas: reactivadas,
+      pendientesRestantes: conteo.total,
+      esperandoConfirmacion: conteo.esperandoConfirmacion,
+      porSubir: conteo.porSubir,
+      conError: conteo.conError,
+      deOtroUsuario: conteo.deOtroUsuario,
+    );
+  }
+
+  /// Conteo de pendientes al cierre de una corrida, tolerante a
+  /// fallos (ante cualquier error devuelve ceros: el resumen no
+  /// debe romperse por contar la cola).
+  Future<
+      ({
+        int total,
+        int esperandoConfirmacion,
+        int porSubir,
+        int conError,
+        int deOtroUsuario
+      })> _conteoPendientesSeguro() async {
+    try {
+      String? uid;
+      try {
+        uid = _auth.userId;
+      } catch (_) {}
+      final c = await _db.conteoPendientesSync(uid);
+      return (
+        total: c.esperandoConfirmacion +
+            c.porSubir +
+            c.conError +
+            c.deOtroUsuario,
+        esperandoConfirmacion: c.esperandoConfirmacion,
+        porSubir: c.porSubir,
+        conError: c.conError,
+        deOtroUsuario: c.deOtroUsuario,
+      );
+    } catch (_) {
+      return (
+        total: 0,
+        esperandoConfirmacion: 0,
+        porSubir: 0,
+        conError: 0,
+        deOtroUsuario: 0
+      );
+    }
   }
 
   /// v1.2.8 (Paso 1): sincroniza solo las tablas del scope (pull parcial).
@@ -1084,50 +1297,95 @@ class SyncEngine {
     });
   }
 
+  /// ¿Hay sesión activa? Defensivo: si el acceso a la sesión
+  /// lanza (p. ej. Supabase sin inicializar en tests), se lee como
+  /// «sin sesión» — fail-closed, nunca como sesión válida.
+  bool get _haySesion {
+    try {
+      return _auth.loggedIn;
+    } catch (_) {
+      return false;
+    }
+  }
+
   /// Ejecuta [fn] con el lock de sincronización entre isolates.
-  /// Retorna false si otro isolate ya está sincronizando.
+  /// Retorna null si el ciclo CORRIÓ; si no corrió, el
+  /// [SyncMotivoNoCorrio] (v1.8.0, Frente 5: antes retornaba false
+  /// y los llamadores lo tragaban — así nacía el resumen falso
+  /// «Todo estaba al día» sin haber intentado sincronizar).
   /// NOTA: Solo los 4 puntos de entrada públicos (run, push, pull,
   /// sincronizarScope) usan _conLock. Los métodos internos (_doPush,
   /// _doPull, _download) NUNCA lo adquieren, así evitan auto-bloqueo.
   /// La bandera _running evita reentrada en el mismo isolate.
   /// v1.3-r3: el lock lleva owner UUID para evitar race condition al
   /// liberar (un isolate rezagado no desmonta el lock de otro activo).
-  Future<bool> _conLock(Future<void> Function() fn) async {
-    if (_running || !_auth.loggedIn) return false;
+  /// v1.8.0: latido — mientras el ciclo corre, el timestamp del
+  /// lock se renueva cada minuto; si el proceso muere, el latido
+  /// cesa y el lock se puede robar al vencer la ventana de
+  /// expiración (ver LocalDb.syncLockTimeoutMs).
+  Future<SyncMotivoNoCorrio?> _conLock(Future<void> Function() fn) async {
+    if (_running) return SyncMotivoNoCorrio.enCurso;
+    if (!_haySesion) return SyncMotivoNoCorrio.sinSesion;
     // Lock persistente: protege contra Workmanager en otro isolate.
     final owner = await _db.adquirirSyncLock();
-    if (owner == null) return false;
+    if (owner == null) return SyncMotivoNoCorrio.enCurso;
     _running = true;
+    final latido = Timer.periodic(
+        const Duration(seconds: 60), (_) => _db.renovarSyncLock(owner));
     try {
       await fn();
-      return true;
+      return null;
     } finally {
+      latido.cancel();
       _running = false;
       await _db.liberarSyncLock(owner);
     }
   }
 
   /// Solo subida (cada hora o manual).
-  Future<void> push() async {
-    await _conLock(() async {
-      await _doPush();
+  /// v1.8.0 (Frente 5): devuelve el [SyncResultado] de la corrida
+  /// (o el «no corrió» si el lock/sesión lo impidió). Si el push
+  /// falla, la excepción se propaga COMO ANTES: los llamadores que
+  /// la esperaban (p. ej. Workmanager, que reintenta la tarea)
+  /// conservan su comportamiento.
+  Future<SyncResultado> push() async {
+    var subidos = 0;
+    var bajados = 0;
+    final noCorrio = await _conLock(() async {
+      subidos = await _doPush();
       // v1.0.14: limpiar error viejo si el push tuvo éxito
       await _db.setMeta('last_sync_error', '');
       // v1.0.17: pull silencioso tras el push para actualizar el watermark.
       // Sin esto, el server_seq avanza por las ops propias y el banner
       // muestra "Hay cambios nuevos" aunque no haya nada que bajar.
       try {
-        await _doPull(silencioso: true);
+        bajados = await _doPull(silencioso: true);
       } catch (_) {}
       // v1.5.0 (Bloque G): push exitoso → gancho de fin de sync.
       _avisarSyncExitoso();
     });
+    if (noCorrio != null) return SyncResultado.noCorrio(noCorrio);
+    final conteo = await _conteoPendientesSeguro();
+    return SyncResultado(
+      corrio: true,
+      subidos: subidos,
+      bajados: bajados,
+      pendientesRestantes: conteo.total,
+      esperandoConfirmacion: conteo.esperandoConfirmacion,
+      porSubir: conteo.porSubir,
+      conError: conteo.conError,
+      deOtroUsuario: conteo.deOtroUsuario,
+    );
   }
 
   /// Lógica interna de subida (sin guard _running).
   /// P0 (2026-10-08): propaga la excepción para que run() no marque
   /// "sincronizado" si el push falló por dentro.
-  Future<void> _doPush(
+  /// v1.8.0 (Frente 5): devuelve las ops confirmadas como aplicadas
+  /// en ESTA corrida (el dato que alimenta [SyncResultado]; antes
+  /// el resumen se reconstruía de la meta y podía ser de otra
+  /// corrida).
+  Future<int> _doPush(
       {bool forzar = false,
       void Function(SyncProgress)? onProgreso}) async {
     // v1.2.9+46 (AppLog): inicio de push.
@@ -1221,6 +1479,7 @@ class SyncEngine {
       _emit(SyncPhase.idle);
       // v1.2.9+46 (AppLog): push completo.
       AppLog.info('sync', 'push_fin', d: 'ops=$totalOps fotos=$fotosSubidas');
+      return totalOps;
     } on SessionExpired {
       _sesionVencida();
       _emit(SyncPhase.idle);
@@ -1238,15 +1497,30 @@ class SyncEngine {
   }
 
   /// Solo bajada (frecuente: ver cambios de otros entrenadores).
-  Future<void> pull() async {
-    await _conLock(() async {
+  /// v1.8.0 (Frente 5): devuelve el [SyncResultado] de la corrida
+  /// (o el «no corrió»); si el pull falla, la excepción se propaga
+  /// como antes.
+  Future<SyncResultado> pull() async {
+    var bajados = 0;
+    final noCorrio = await _conLock(() async {
       // v1.0.12: cierre remoto de sesión (el dueño lo forzó)
       await _verificarCierreForzado();
-      await _doPull();
+      bajados = await _doPull();
       // v1.5.0 (Bloque G): pull exitoso (trae los resultados de
       // las ops) → gancho de fin de sync.
       _avisarSyncExitoso();
     });
+    if (noCorrio != null) return SyncResultado.noCorrio(noCorrio);
+    final conteo = await _conteoPendientesSeguro();
+    return SyncResultado(
+      corrio: true,
+      bajados: bajados,
+      pendientesRestantes: conteo.total,
+      esperandoConfirmacion: conteo.esperandoConfirmacion,
+      porSubir: conteo.porSubir,
+      conError: conteo.conError,
+      deOtroUsuario: conteo.deOtroUsuario,
+    );
   }
 
   /// Si el dueño forzó el cierre, cierra sesión local (v1.0.12).
@@ -1271,7 +1545,9 @@ class SyncEngine {
   /// Lógica interna de bajada (sin guard _running).
   /// Si [silencioso] es true, no emite fases de progreso (pull de
   /// mantenimiento tras un push; el usuario no pidió ver el proceso).
-  Future<void> _doPull({bool silencioso = false}) async {
+  /// v1.8.0 (Frente 5): devuelve las filas aplicadas en ESTA
+  /// corrida (mismo conteo que alimentaba last_downloaded).
+  Future<int> _doPull({bool silencioso = false}) async {
     // v1.2.9+47 (AppLog): instrumentación del pull.
     AppLog.info('sync', 'pull_ini');
     try {
@@ -1327,6 +1603,7 @@ class SyncEngine {
         await _db.setMeta('last_downloaded', '$n');
       }
       _emit(SyncPhase.idle);
+      return n;
     } on SessionExpired {
       _sesionVencida();
       _emit(SyncPhase.idle);
@@ -1338,6 +1615,67 @@ class SyncEngine {
       _emit(SyncPhase.idle);
       rethrow;
     }
+  }
+
+  /// v1.8.0 (Frente 5, punto E): barrido de confirmación — verifica
+  /// contra el servidor TODAS las ops locales no terminales
+  /// (incluidas las 'enviada' cuya confirmación se perdió: el caso
+  /// de campo de confirmar_entrega, aplicada por el puente a las
+  /// 11:42 y aún «pendiente» en el teléfono a las 12:34) y aplica
+  /// localmente el estado que el servidor ya decidió.
+  ///
+  /// Era el paso 3 de [_uploadOps]; se extrajo para poder invocarlo
+  /// también cuando el push muere antes de llegar a él (run() lo
+  /// hace si el push falla) y para probarlo sin red: [verificar]
+  /// es el seam de testeo, mismo patrón que
+  /// [manifiestoDiarioSiToca]; en producción se usa
+  /// [_resultadosOpsBatch].
+  ///
+  /// TRIESTADO (veredicto de Argón): si la lectura en lote falla,
+  /// no se marca NADA y se reintenta en la próxima pasada.
+  /// Devuelve cuántas ops quedaron confirmadas como aplicadas y
+  /// los UUIDs procesados en la pasada (aplicadas + terminales,
+  /// para el detalle del lote, como el paso 3 original).
+  Future<({int confirmadas, List<String> uuids})> barridoConfirmacion({
+    Future<Map<String, ResultadoOpServidor>> Function(List<String> uuids)?
+        verificar,
+  }) async {
+    var confirmadas = 0;
+    final uuids = <String>[];
+    final sinConfirmar = await _db.unappliedOps();
+    if (sinConfirmar.isEmpty) {
+      return (confirmadas: confirmadas, uuids: uuids);
+    }
+    Map<String, ResultadoOpServidor> confirmados = {};
+    try {
+      confirmados = await (verificar ?? _resultadosOpsBatch)(
+          [for (final o in sinConfirmar) o['op_uuid'] as String]);
+    } catch (e) {
+      debugPrint('WARN confirmación batch falló, se reintenta luego: $e');
+    }
+    for (final op in sinConfirmar) {
+      final uuid = op['op_uuid'] as String;
+      final rec = confirmados[uuid];
+      if (rec == null || rec.estado == 'pendiente') continue;
+      if (await _aplicarEstadoServidor(op, rec)) {
+        // v1.2.4: la incidencia local queda confirmada por el servidor
+        if ('${op['tipo']}' == 'incidencia') {
+          try {
+            final pl = jsonDecode(op['payload'] as String);
+            final iid = pl['id'] as String?;
+            if (iid != null) await _db.marcarIncidenciaSincronizada(iid);
+          } catch (_) {}
+        }
+        await _limpiarOptimistaDeOp(op);
+        confirmadas++;
+        uuids.add(uuid);
+      } else if (esTerminalParaDetalle(rec)) {
+        // v1.3.5 (Argón ajuste 2): rechazada o en revisión en este
+        // ciclo: va al detalle del lote con su motivo en rojo.
+        uuids.add(uuid);
+      }
+    }
+    return (confirmadas: confirmadas, uuids: uuids);
   }
 
   // -- subida ----------------------------------------------------------
@@ -1484,40 +1822,12 @@ class SyncEngine {
     }
     // 3) segunda pasada: confirmar en lote (sin N+1) y capturar el
     // resultado del servidor en ops_queue.resultado_servidor.
-    // TRIESTADO (veredicto de Argón): si la lectura en lote falla, no
-    // se marca nada; se reintenta en la próxima pasada.
-    final sinConfirmar = await _db.unappliedOps();
-    if (sinConfirmar.isNotEmpty) {
-      Map<String, ResultadoOpServidor> confirmados = {};
-      try {
-        confirmados = await _resultadosOpsBatch(
-            [for (final o in sinConfirmar) o['op_uuid'] as String]);
-      } catch (e) {
-        debugPrint('WARN confirmación batch falló, se reintenta luego: $e');
-      }
-      for (final op in sinConfirmar) {
-        final uuid = op['op_uuid'] as String;
-        final rec = confirmados[uuid];
-        if (rec == null || rec.estado == 'pendiente') continue;
-        if (await _aplicarEstadoServidor(op, rec)) {
-          // v1.2.4: la incidencia local queda confirmada por el servidor
-          if ('${op['tipo']}' == 'incidencia') {
-            try {
-              final pl = jsonDecode(op['payload'] as String);
-              final iid = pl['id'] as String?;
-              if (iid != null) await _db.marcarIncidenciaSincronizada(iid);
-            } catch (_) {}
-          }
-          await _limpiarOptimistaDeOp(op);
-          aplicadas++;
-          uuids.add(uuid);
-        } else if (esTerminalParaDetalle(rec)) {
-          // v1.3.5 (Argón ajuste 2): rechazada o en revisión en este
-          // ciclo: va al detalle del lote con su motivo en rojo.
-          uuids.add(uuid);
-        }
-      }
-    }
+    // v1.8.0 (Frente 5): extraído a [barridoConfirmacion] — mismo
+    // comportamiento, ahora reutilizable fuera del push y testeable
+    // sin red.
+    final barrido = await barridoConfirmacion();
+    aplicadas += barrido.confirmadas;
+    uuids.addAll(barrido.uuids);
     // Argón B1: marcar tipos y comentarios como synced tras push.
     if (aplicadas > 0) {
       try {
