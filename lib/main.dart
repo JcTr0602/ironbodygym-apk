@@ -33,6 +33,25 @@ Future<void> _verificarConversionesInvitados() async {
   } catch (_) {}
 }
 
+/// v1.7.0 (panel): tras cada sync exitosa se reintenta la
+/// republicación de la información pública pendiente (p. ej.
+/// el precio del App Plus guardado sin red). Barata: sin
+/// pendientes marcados en meta no llama a la red.
+Future<void> _republicarInfoPublicaPendiente() async {
+  try {
+    await InvitadosService().republicarInfoPublicaPendiente();
+  } catch (_) {}
+}
+
+/// Gancho de fin de sync registrado en [SyncEngine]: las
+/// verificaciones posteriores a un ciclo exitoso, en orden.
+/// Cada una va con su propio try/catch y ninguna bloquea al
+/// motor ni a la otra.
+Future<void> _trasSyncExitosa() async {
+  await _verificarConversionesInvitados();
+  await _republicarInfoPublicaPendiente();
+}
+
 /// Tarea en segundo plano (punto 21): sube lo pendiente aunque la app
 /// esté cerrada. Todo va en try/catch: si falla, se reintenta luego.
 @pragma('vm:entry-point')
@@ -44,8 +63,7 @@ void callbackDispatcher() {
         url: AppConfig.supabaseUrl,
         publishableKey: AppConfig.anonKey,
       );
-      SyncEngine.instance.onSyncExitoso =
-          _verificarConversionesInvitados;
+      SyncEngine.instance.onSyncExitoso = _trasSyncExitosa;
       final auth = AuthService();
       if (auth.loggedIn) {
         await SyncEngine.instance.push();
@@ -113,8 +131,9 @@ Future<void> main() async {
   };
   // v1.5.0 (Bloque G): confirmación automática de conversiones
   // de invitados tras cada sync exitosa (ver SyncEngine).
-  SyncEngine.instance.onSyncExitoso =
-      _verificarConversionesInvitados;
+  // v1.7.0: el mismo gancho reintenta la republicación de la
+  // información pública pendiente.
+  SyncEngine.instance.onSyncExitoso = _trasSyncExitosa;
   // v1.3.1 (B4): inicializar servicio foreground de fotos.
   initForegroundFotos();
   // v1.3.4 (item 3): poda diaria de ops aplicadas viejas en

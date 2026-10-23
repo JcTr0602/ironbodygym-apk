@@ -40,7 +40,7 @@ class LocalDb {
   /// v1.4.0 (Argón): versión actual del esquema local. Los tests de
   /// migración comparan contra esta constante en vez de un número
   /// fijo, para no caer en cascada de fallos con cada migración.
-  static const int versionActual = 35;
+  static const int versionActual = 36;
 
   /// v1.4.4 (v33): DDL de borradores de GymPedia (compartido entre
   /// onCreate y la migración v33). Los campos de contenido espejan el
@@ -59,6 +59,7 @@ class LocalDb {
       'errores TEXT NOT NULL DEFAULT \'[]\', '
       'referencias TEXT NOT NULL DEFAULT \'[]\', '
       'sello TEXT NOT NULL DEFAULT \'verde\', '
+      'nivel TEXT NOT NULL DEFAULT \'plus\', '
       'related_ids TEXT NOT NULL DEFAULT \'[]\', '
       'tiene_imagen INTEGER NOT NULL DEFAULT 0, '
       'imagen_cambiada INTEGER NOT NULL DEFAULT 0, '
@@ -1031,6 +1032,33 @@ class LocalDb {
           await _backfillMoneda(db, 'suplementos');
           await _backfillMoneda(db, 'reservas');
         }
+        if (oldV < 36) {
+          // v1.7.0 (oleada A++): Cuenta a la Casa + nivel GymPedia.
+          // - Espejo `clientes`: 4 columnas dedicadas para el flag
+          //   ortogonal cuenta_casa (el flag viaja en el JSON de
+          //   sync_clientes.data; las columnas se pueblan en Dart
+          //   en cada escritura, mismo patrón que moneda en v35).
+          // - Espejo `gympedia_articulos`: columna `nivel`
+          //   ('esencial'|'plus'); viaja en el JSON y la columna se
+          //   puebla igual. Sin nivel en el JSON, mandan los 7 slugs
+          //   esenciales aprobados por Jc (ver nivelGympediaDe).
+          // - `gympedia_borradores`: el editor guarda el nivel del
+          //   borrador antes de publicar (misma columna).
+          await _addColumnIfMissing(
+              db, 'clientes', 'cuenta_casa', 'INTEGER NOT NULL DEFAULT 0');
+          await _addColumnIfMissing(
+              db, 'clientes', 'cuenta_casa_motivo', 'TEXT');
+          await _addColumnIfMissing(
+              db, 'clientes', 'cuenta_casa_en', 'TEXT');
+          await _addColumnIfMissing(
+              db, 'clientes', 'cuenta_casa_por', 'TEXT');
+          await _addColumnIfMissing(db, 'gympedia_articulos', 'nivel',
+              "TEXT NOT NULL DEFAULT 'plus'");
+          await _addColumnIfMissing(db, 'gympedia_borradores', 'nivel',
+              "TEXT NOT NULL DEFAULT 'plus'");
+          await _backfillCuentaCasa(db);
+          await _backfillNivelGympedia(db);
+        }
       },
     );
     // v1.2.5+28: repara el índice FTS si la migración lo omitió y el
@@ -1151,6 +1179,211 @@ class LocalDb {
     } catch (_) {}
   }
 
+  // ── v1.7.0 (v36): Cuenta a la Casa + nivel GymPedia ─────────────
+
+  /// ¿El cliente del JSON es Cuenta a la Casa? El flag viaja en
+  /// `sync_clientes.data` como 1/true/'1'; cualquier otra cosa
+  /// (ausente, 0, texto) es NO. Único punto de verdad: lo usan el
+  /// poblado de columnas, el backfill v36 y las pantallas.
+  static bool cuentaCasaDe(Map<String, dynamic> data) {
+    final v = data['cuenta_casa'];
+    return v == 1 || v == true || v == '1';
+  }
+
+  /// v1.7.0 (v36): las columnas dedicadas del espejo `clientes`
+  /// para Cuenta a la Casa, extraídas del JSON ya decodificado.
+  /// Mismo patrón que [columnasPagos]/[columnasMoneda]: se pueblan
+  /// en los dos caminos de escritura ([upsertMirror] y el batch
+  /// del pull vía [filaParaBatchMirror]).
+  static Map<String, Object?> columnasClientes(Map<String, dynamic> data) {
+    String? texto(String k) =>
+        data[k] is String && (data[k] as String).isNotEmpty
+            ? data[k] as String
+            : null;
+    return {
+      'cuenta_casa': cuentaCasaDe(data) ? 1 : 0,
+      'cuenta_casa_motivo': texto('cuenta_casa_motivo'),
+      'cuenta_casa_en': texto('cuenta_casa_en'),
+      'cuenta_casa_por': texto('cuenta_casa_por'),
+    };
+  }
+
+  /// v1.7.0 (v36): rellena las columnas cuenta_casa de las filas ya
+  /// existentes del espejo `clientes` desde su JSON (migración
+  /// v36). Las filas cuyo JSON no trae el flag quedan en el DEFAULT
+  /// 0 de la columna. Tolerante como [_backfillMoneda].
+  static Future<void> _backfillCuentaCasa(Database db) async {
+    try {
+      final t = await db.rawQuery(
+          "SELECT name FROM sqlite_master WHERE type='table' AND name='clientes'");
+      if (t.isEmpty) return;
+      final info = await db.rawQuery('PRAGMA table_info(clientes)');
+      if (!info.any((c) => '${c['name']}' == 'cuenta_casa')) return;
+      final rows = await db.rawQuery('SELECT id, data FROM clientes');
+      final batch = db.batch();
+      var cambios = 0;
+      for (final r in rows) {
+        try {
+          final data =
+              jsonDecode(r['data'] as String) as Map<String, dynamic>;
+          if (data['cuenta_casa'] == null &&
+              data['cuenta_casa_motivo'] == null &&
+              data['cuenta_casa_en'] == null &&
+              data['cuenta_casa_por'] == null) {
+            continue; // Sin datos Casa en el JSON: manda el DEFAULT.
+          }
+          batch.update('clientes', columnasClientes(data),
+              where: 'id=?', whereArgs: [r['id']]);
+          cambios++;
+        } catch (_) {}
+      }
+      if (cambios > 0) await batch.commit(noResult: true);
+    } catch (_) {}
+  }
+
+  /// Los 7 artículos GymPedia aprobados por Jc como nivel
+  /// 'esencial' (reparto 7/38 del 2026-10-22). El resto nace
+  /// 'plus'. Solo se usa como fallback cuando el JSON del espejo
+  /// aún no trae `nivel` (el servidor lo proyecta desde S2).
+  static const Set<String> slugsGympediaEsenciales = {
+    'tu-primer-mes',
+    'constancia-vs-motivacion',
+    'sobrecarga-progresiva',
+    'dolor-o-lesion',
+    'calentamiento-5-minutos',
+    'como-tomar-tus-medidas',
+    'entrenar-de-joven',
+  };
+
+  /// v1.7.0 (v36): nivel efectivo de un artículo GymPedia desde su
+  /// JSON: el `nivel` del servidor si es válido ('esencial'|'plus',
+  /// insensible a mayúsculas); si no viene, el slug manda: los 7
+  /// esenciales aprobados son 'esencial' y el resto 'plus'. Único
+  /// punto de verdad (columna, backfill y pantallas).
+  static String nivelGympediaDe(Map<String, dynamic> data) {
+    final n = data['nivel'];
+    if (n is String) {
+      final t = n.trim().toLowerCase();
+      if (t == 'esencial' || t == 'plus') return t;
+    }
+    return slugsGympediaEsenciales.contains('${data['id'] ?? ''}')
+        ? 'esencial'
+        : 'plus';
+  }
+
+  /// v1.7.0 (v36): la columna `nivel` del espejo gympedia_articulos
+  /// desde el JSON ya decodificado (patrón columnasMoneda).
+  static Map<String, Object?> columnasGympedia(Map<String, dynamic> data) {
+    return {'nivel': nivelGympediaDe(data)};
+  }
+
+  /// v1.7.0 (v36): rellena la columna `nivel` de las filas ya
+  /// existentes de gympedia_articulos desde su JSON (o por slug si
+  /// el JSON aún no lo trae). Tolerante como [_backfillMoneda].
+  static Future<void> _backfillNivelGympedia(Database db) async {
+    try {
+      final t = await db.rawQuery(
+          "SELECT name FROM sqlite_master WHERE type='table' "
+          "AND name='gympedia_articulos'");
+      if (t.isEmpty) return;
+      final info =
+          await db.rawQuery('PRAGMA table_info(gympedia_articulos)');
+      if (!info.any((c) => '${c['name']}' == 'nivel')) return;
+      final rows =
+          await db.rawQuery('SELECT id, data FROM gympedia_articulos');
+      final batch = db.batch();
+      var cambios = 0;
+      for (final r in rows) {
+        try {
+          final data =
+              jsonDecode(r['data'] as String) as Map<String, dynamic>;
+          data['id'] = '${r['id']}';
+          final n = nivelGympediaDe(data);
+          if (n != 'plus') {
+            batch.update('gympedia_articulos', {'nivel': n},
+                where: 'id=?', whereArgs: [r['id']]);
+            cambios++;
+          }
+        } catch (_) {}
+      }
+      if (cambios > 0) await batch.commit(noResult: true);
+    } catch (_) {}
+  }
+
+  /// v1.7.0: IDs de los clientes Cuenta a la Casa según el espejo
+  /// local (columna dedicada o JSON, lo que ya haya llegado). Una
+  /// sola lectura del padrón (pequeño); la usan el contador del
+  /// Panel, el distintivo de Control de Acceso y las exclusiones
+  /// de dinero (NominaCalc).
+  Future<Set<int>> idsCuentasCasa() async {
+    final d = await db;
+    final out = <int>{};
+    try {
+      final rows =
+          await d.rawQuery('SELECT id, cuenta_casa, data FROM clientes');
+      for (final r in rows) {
+        final id = (r['id'] as num?)?.toInt();
+        if (id == null) continue;
+        if ((r['cuenta_casa'] as num?)?.toInt() == 1) {
+          out.add(id);
+          continue;
+        }
+        try {
+          final data =
+              jsonDecode(r['data'] as String) as Map<String, dynamic>;
+          if (cuentaCasaDe(data)) out.add(id);
+        } catch (_) {}
+      }
+    } catch (_) {
+      // Sin columna (BD mínima de test): se cae al JSON del espejo.
+      for (final c in await allMirror('clientes')) {
+        final id = (c['id'] as num?)?.toInt();
+        if (id != null && cuentaCasaDe(c)) out.add(id);
+      }
+    }
+    return out;
+  }
+
+  /// v1.7.0: cuántas Cuentas a la Casa activas hay en el espejo.
+  Future<int> conteoCuentasCasa() async => (await idsCuentasCasa()).length;
+
+  /// Actualización optimista del flag Cuenta a la Casa en el
+  /// espejo local (JSON + columnas dedicadas), sin esperar al
+  /// servidor. Se usa al encolar la op `cuenta_casa` desde la
+  /// ficha. Al desactivar se limpian motivo/fecha/autor del JSON.
+  Future<void> updateMirrorCuentaCasa(int clienteId,
+      {required bool activar,
+      String? motivo,
+      String? enIso,
+      String? por}) async {
+    final d = await db;
+    final rows = await d.query('clientes',
+        where: 'id=?', whereArgs: [clienteId], limit: 1);
+    if (rows.isEmpty) return;
+    final data =
+        jsonDecode(rows.first['data'] as String) as Map<String, dynamic>;
+    if (activar) {
+      data['cuenta_casa'] = 1;
+      if (motivo != null && motivo.isNotEmpty) {
+        data['cuenta_casa_motivo'] = motivo;
+      } else {
+        data.remove('cuenta_casa_motivo');
+      }
+      if (enIso != null) data['cuenta_casa_en'] = enIso;
+      if (por != null) data['cuenta_casa_por'] = por;
+    } else {
+      data['cuenta_casa'] = 0;
+      data.remove('cuenta_casa_motivo');
+      data.remove('cuenta_casa_en');
+      data.remove('cuenta_casa_por');
+    }
+    await d.update(
+        'clientes',
+        {'data': jsonEncode(data), ...columnasClientes(data)},
+        where: 'id=?',
+        whereArgs: [clienteId]);
+  }
+
   /// v1.3.4 (ítem 2): construye el mapa de columnas para el INSERT del
   /// batch del pull (sync.dart). Para `pagos` incluye las 4 columnas
   /// indexadas extraídas del JSON; las demás tablas quedan igual.
@@ -1175,6 +1408,21 @@ class LocalDb {
       try {
         fila.addAll(
             columnasMoneda(jsonDecode(dataJson) as Map<String, dynamic>));
+      } catch (_) {}
+    }
+    // v1.7.0 (v36): la fila del batch también puebla las columnas
+    // cuenta_casa del espejo clientes y el nivel de GymPedia.
+    if (tabla == 'clientes') {
+      try {
+        fila.addAll(
+            columnasClientes(jsonDecode(dataJson) as Map<String, dynamic>));
+      } catch (_) {}
+    }
+    if (tabla == 'gympedia_articulos') {
+      try {
+        final data = jsonDecode(dataJson) as Map<String, dynamic>;
+        data['id'] = '$id';
+        fila.addAll(columnasGympedia(data));
       } catch (_) {}
     }
     return fila;
@@ -1342,6 +1590,15 @@ class LocalDb {
       await db.execute(
           'CREATE TABLE $t (id INTEGER PRIMARY KEY, data TEXT NOT NULL, sync_seq INTEGER NOT NULL)');
     }
+    // v1.7.0 (v36): columnas dedicadas de Cuenta a la Casa en el
+    // espejo clientes — paridad con la migración v36 (la definición
+    // sale del MISMO _addColumnIfMissing para que onCreate y
+    // onUpgrade produzcan el mismo esquema).
+    await _addColumnIfMissing(
+        db, 'clientes', 'cuenta_casa', 'INTEGER NOT NULL DEFAULT 0');
+    await _addColumnIfMissing(db, 'clientes', 'cuenta_casa_motivo', 'TEXT');
+    await _addColumnIfMissing(db, 'clientes', 'cuenta_casa_en', 'TEXT');
+    await _addColumnIfMissing(db, 'clientes', 'cuenta_casa_por', 'TEXT');
     // v1.3.4 (v26, ítem 2): el espejo `pagos` lleva 4 columnas dedicadas
     // (fecha, cliente_id, telegram_user_id, metodo) con índices, para
     // eliminar los escaneos completos en memoria de allMirror('pagos').
@@ -1376,6 +1633,10 @@ class LocalDb {
     // por sync solo viajan las ops gympedia_upsert_publicado/retirar).
     await db.execute(
         'CREATE TABLE IF NOT EXISTS gympedia_articulos (id TEXT PRIMARY KEY, data TEXT NOT NULL, sync_seq INTEGER NOT NULL)');
+    // v1.7.0 (v36): nivel del artículo como columna — paridad con
+    // la migración v36.
+    await _addColumnIfMissing(db, 'gympedia_articulos', 'nivel',
+        "TEXT NOT NULL DEFAULT 'plus'");
     await db.execute(_ddlGympediaBorradores);
     // Reservas v2 (v34): espejo de la proyección sync_reservas
     // (id entero = id de la reserva en gym.db). El cursor propio
@@ -1772,6 +2033,8 @@ class LocalDb {
       if (tabla == 'pagos') fila.addAll(columnasPagos(data));
       // v1.4.6 (v35): poblar la columna moneda del espejo reservas.
       if (tabla == 'reservas') fila.addAll(columnasMoneda(data));
+      // v1.7.0 (v36): poblar las columnas cuenta_casa del espejo.
+      if (tabla == 'clientes') fila.addAll(columnasClientes(data));
       await d.insert(tabla, fila,
           conflictAlgorithm: ConflictAlgorithm.replace);
     }
@@ -1862,7 +2125,18 @@ class LocalDb {
     final rows = await d.query(tabla,
         columns: ['data'], where: 'id=?', whereArgs: [id], limit: 1);
     if (rows.isNotEmpty && rows.first['data'] == nuevoJson) return false;
-    await d.insert(tabla, {'id': id, 'data': nuevoJson, 'sync_seq': syncSeq},
+    final fila = <String, Object?>{
+      'id': id,
+      'data': nuevoJson,
+      'sync_seq': syncSeq,
+    };
+    // v1.7.0 (v36): poblar la columna nivel del espejo GymPedia
+    // (el otro camino de escritura —batch del pull— lo hace vía
+    // filaParaBatchMirror).
+    if (tabla == 'gympedia_articulos') {
+      fila.addAll(columnasGympedia({...data, 'id': data['id'] ?? id}));
+    }
+    await d.insert(tabla, fila,
         conflictAlgorithm: ConflictAlgorithm.replace);
     return true;
   }
@@ -1972,6 +2246,14 @@ class LocalDb {
         final m = Map<String, dynamic>.from(
             jsonDecode('${r['data']}') as Map);
         m['id'] = '${r['id']}';
+        // v1.7.0 (v36): nivel efectivo — el del JSON si ya lo trae
+        // el servidor; si no, el de la columna dedicada (que a su
+        // vez nació del JSON o de la regla de slugs esenciales).
+        m['nivel'] = nivelGympediaDe({
+          ...m,
+          if (m['nivel'] == null && r['nivel'] != null)
+            'nivel': r['nivel'],
+        });
         out.add(m);
       } catch (_) {}
     }
@@ -1988,6 +2270,12 @@ class LocalDb {
       final m =
           Map<String, dynamic>.from(jsonDecode('${rows.first['data']}') as Map);
       m['id'] = '${rows.first['id']}';
+      // v1.7.0 (v36): nivel efectivo (ver gympediaPublicados).
+      m['nivel'] = nivelGympediaDe({
+        ...m,
+        if (m['nivel'] == null && rows.first['nivel'] != null)
+          'nivel': rows.first['nivel'],
+      });
       return m;
     } catch (_) {
       return null;
@@ -2351,6 +2639,12 @@ class LocalDb {
           data['moneda'] == null &&
           r['moneda'] != null)
         'moneda': r['moneda'],
+      // v1.7.0 (v36): si el JSON aún no trae el flag Cuenta a la
+      // Casa (fila escrita antes de que el servidor lo proyecte),
+      // se expone el de la columna dedicada; si el JSON lo trae,
+      // manda el JSON (mismo criterio que moneda en v35).
+      if (tabla == 'clientes' && data['cuenta_casa'] == null)
+        'cuenta_casa': (r['cuenta_casa'] as num?)?.toInt() ?? 0,
     };
   }
 
@@ -2930,23 +3224,38 @@ class LocalDb {
 
   /// Filtra el mirror en SQL por el campo `estado` del JSON, sin cargar
   /// toda la tabla en memoria. (Optimización v1.3: evita full scans.)
+  /// v1.7.0 (v36): mapa de una fila de [mirrorPorEstado]: JSON +
+  /// id de la columna + fallback de cuenta_casa desde la columna
+  /// dedicada cuando el JSON aún no trae el flag.
+  Map<String, dynamic> _mapaPorEstado(
+      String tabla, Map<String, Object?> r) {
+    final data = jsonDecode(r['data'] as String) as Map<String, dynamic>;
+    return {
+      ...data,
+      'id': r['id'],
+      if (tabla == 'clientes' && data['cuenta_casa'] == null)
+        'cuenta_casa': (r['cuenta_casa'] as num?)?.toInt() ?? 0,
+    };
+  }
+
   Future<List<Map<String, dynamic>>> mirrorPorEstado(
       String tabla, String estado) async {
     final d = await db;
     // FIX (Gemini): incluir id desde la columna SQL, y tratar null como
     // 'activo' (todo cliente sin estado explícito se considera activo).
     try {
+      // v1.7.0 (v36): para clientes se trae también la columna
+      // cuenta_casa y se inyecta si el JSON aún no la trae (mismo
+      // fallback que _mapaMirror). Si la columna no existiera (BD
+      // mínima), el SELECT falla y manda el catch de abajo.
+      final colsCasa = tabla == 'clientes' ? ', cuenta_casa' : '';
       final rows = await d.rawQuery(
-        'SELECT id, data FROM $tabla WHERE json_extract(data, \'\$.estado\') = ? '
+        'SELECT id, data$colsCasa FROM $tabla WHERE json_extract(data, \'\$.estado\') = ? '
         'OR (json_extract(data, \'\$.estado\') IS NULL AND ? = \'activo\')',
         [estado, estado],
       );
       return [
-        for (final r in rows)
-          {
-            ...jsonDecode(r['data'] as String) as Map<String, dynamic>,
-            'id': r['id'],
-          }
+        for (final r in rows) _mapaPorEstado(tabla, r),
       ];
     } catch (_) {
       final todos = await allMirror(tabla);

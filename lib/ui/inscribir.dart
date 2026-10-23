@@ -59,6 +59,9 @@ class _InscribirScreenState extends State<InscribirScreen> {
   // inscribir. El servidor lo genera tras sincronizar y el PIN le llega
   // a Jc por Telegram (el cliente aún no existe en la nube al guardar).
   bool _crearAccesoApp = false;
+  // v1.7.0: inscribir directamente como Cuenta a la Casa (solo
+  // dueño; el servidor revalida que el actor sea admin).
+  bool _cuentaCasa = false;
   double _precioMenorVal = 1500;
 
   @override
@@ -212,7 +215,8 @@ class _InscribirScreenState extends State<InscribirScreen> {
     }
     final precios0 = await _precios();
     if (!mounted) return;
-    if (_periodo == 'personalizado' &&
+    if (!_cuentaCasa &&
+        _periodo == 'personalizado' &&
         (_diasPeriodo() <= 0 || _montoPeriodo(precios0) <= 0)) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
           content: Text('Indica días y monto válidos')));
@@ -290,6 +294,63 @@ class _InscribirScreenState extends State<InscribirScreen> {
     }
 
     // Confirmación con resumen (la operación solo se crea aquí).
+    // v1.7.0: una Cuenta a la Casa no cobra — confirmación simple
+    // y payload SIN campos de pago: pagado_hasta nace NULL en el
+    // servidor y el flag viaja como `cuenta_casa: 1` (el puente
+    // rechaza la op si el actor no es admin).
+    if (_cuentaCasa) {
+      if (!mounted) return;
+      final okCasa = await DialogoApp.confirmar(
+        context,
+        titulo: 'Inscribir como Cuenta a la Casa',
+        mensaje: '$nombre tendrá acceso permanente sin pagar ni '
+            'vencer. No contará en nómina, vencimientos ni '
+            'ingresos.',
+        aceptar: 'Inscribir',
+        icono: Icons.home_rounded,
+      );
+      if (okCasa != true || !mounted) return;
+      setState(() => _guardando = true);
+      try {
+        final opUuidCasa = const Uuid().v4();
+        final payloadCasa = <String, dynamic>{
+          'nombre': nombre,
+          'sexo': _sexo,
+          'telefono': tel.isEmpty ? null : tel,
+          'carnet': carnet.isEmpty ? null : carnet,
+          // Fecha de negocio en hora de La Habana (regla de la casa).
+          'fecha': hoyHabanaIso(),
+          if (_esMenor) 'es_menor': true,
+          'cuenta_casa': 1,
+          if (_crearAccesoApp) 'crear_acceso_app': true,
+        };
+        await LocalDb.instance.queueOp(
+          opUuid: opUuidCasa,
+          tipo: 'inscribir',
+          payload: payloadCasa,
+          fotoPath: _foto?.path,
+        );
+        if (_foto?.path != null) {
+          await FotosColaService.instance.encolarFoto(
+            opUuid: opUuidCasa,
+            rutaOriginal: _foto!.path,
+          );
+        }
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content:
+                Text('Cuenta a la Casa guardada (se sincronizará)')));
+        Navigator.of(context).pop();
+        SyncEngine.instance.push();
+      } catch (e) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('Error: $e')));
+      } finally {
+        if (mounted) setState(() => _guardando = false);
+      }
+      return;
+    }
     final precios = await _precios();
     final monto = _montoPeriodo(precios);
     final dias = _diasPeriodo();
@@ -526,7 +587,9 @@ class _InscribirScreenState extends State<InscribirScreen> {
                 ),
                 const SizedBox(
                     height: AppEspacio.md),
-                // Bloque 2: membresía
+                // Bloque 2: membresía (con Cuenta a la Casa no hay
+                // cobro: se sustituye por el aviso dorado).
+                if (!_cuentaCasa)
                 Tarjeta(
                   child: Column(
                     crossAxisAlignment:
@@ -731,6 +794,30 @@ class _InscribirScreenState extends State<InscribirScreen> {
                     ],
                   ),
                 ),
+                if (_cuentaCasa) ...[
+                  Tarjeta(
+                    color: const Color(0xFFFFF3CD),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Icon(Icons.home_rounded,
+                            color: Color(0xFFB8860B)),
+                        const SizedBox(width: AppEspacio.sm),
+                        Expanded(
+                          child: Text(
+                            'Cuenta a la Casa: sin cobro y sin '
+                            'vencimiento. Esta persona usa el gym '
+                            'como cliente activo siempre; no entra '
+                            'en nómina ni en avisos de vencimiento.',
+                            style: AppTexto.secundario.copyWith(
+                                color: const Color(0xFF7A5A00)),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: AppEspacio.md),
+                ],
                 const SizedBox(
                     height: AppEspacio.md),
                 // Bloque 3: fotografía
@@ -814,6 +901,25 @@ class _InscribirScreenState extends State<InscribirScreen> {
                     value: _crearAccesoApp,
                     onChanged: (v) =>
                         setState(() => _crearAccesoApp = v),
+                  ),
+                  const SizedBox(height: AppEspacio.md),
+                ],
+                // v1.7.0: inscribir como Cuenta a la Casa (solo
+                // dueño; no aplica en una conversión de invitado,
+                // que sigue su flujo con pago).
+                if (AuthService().isOwner &&
+                    widget.conversion == null) ...[
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('Cuenta a la Casa'),
+                    subtitle: const Text(
+                        'Sin cobro y sin vencimiento: acceso '
+                        'permanente. No cuenta en nómina ni en '
+                        'avisos. Solo el dueño puede otorgarla.',
+                        style: AppTexto.secundario),
+                    value: _cuentaCasa,
+                    onChanged: (v) =>
+                        setState(() => _cuentaCasa = v),
                   ),
                   const SizedBox(height: AppEspacio.md),
                 ],

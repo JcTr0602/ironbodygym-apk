@@ -15,6 +15,14 @@ class Novedad {
 }
 
 const novedades = [
+  Novedad('1.7.0', [
+    'Cuenta a la Casa: las personas de la casa (familia, cortesías) quedan marcadas en dorado, con acceso permanente sin pagar ni vencer; no cuentan en nómina, vencimientos ni ingresos. Solo tú la otorgas o la quitas, desde la ficha del cliente o al inscribir',
+    'Reportes App Plus: bandeja nueva con los pagos del App Plus que reportan los invitados; solo tú confirmas o rechazas (con motivo), y el Plus se activa al sincronizar',
+    'Precio del App Plus editable en Configuración (por defecto 1000 CUP por 30 días): al guardarlo se actualiza también lo que ve el invitado al cotizar',
+    'GymPedia por niveles: 7 artículos esenciales quedan gratis para invitados; el resto es contenido Plus (App Plus o cliente con mensualidad activa). El nivel de cada artículo se elige en su editor',
+    'Control de Acceso: las Cuentas a la Casa se distinguen con su chip dorado «Casa»',
+    'Cumpleaños: a una Cuenta a la Casa se la felicita igual, pero ya no se le ofrece el regalo de mes (no lo necesita)',
+  ]),
   Novedad('1.6.0', [
     'Panel del dueño rediseñado: la Administración abre ahora con lo que necesita tu atención (solicitudes de invitados, reservas por confirmar, efectivo por liquidar, cierres pendientes y stock crítico, cada uno con su botón para resolverlo)',
     'Usuarios: entrenadores, clientes e invitados se gestionan en una sola zona con pestañas; la bandeja de invitados vive ahí, con sus solicitudes a mano',

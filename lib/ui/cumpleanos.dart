@@ -465,7 +465,10 @@ class _CumpleanosScreenState extends State<CumpleanosScreen>
                       : () => _agregarTelefono(c),
                 ),
                 // Botón Regalar mes + felicitar (solo dueño).
-                if (AuthService().isOwner)
+                // v1.7.0 (regla firme de Argón): una Cuenta a la
+                // Casa se celebra pero NO recibe «regalo de mes»:
+                // el botón se omite; Felicitar queda igual.
+                if (AuthService().isOwner && !esCuentaCasa(c))
                   IconButton(
                     tooltip: regalado
                         ? 'Mes ya regalado este año'

@@ -30,6 +30,15 @@ const Map<String, TipoOperacionInfo> kTiposOperacion = {
       TipoOperacionInfo('Vinculación de foto', Icons.photo_library),
   'cambiar_estado':
       TipoOperacionInfo('Cambio de estado', Icons.swap_horiz),
+  // v1.7.0 (oleada A++): Cuenta a la Casa (solo dueño) y las dos
+  // decisiones sobre un reporte de pago App Plus de un invitado
+  // (ops separadas según el contrato definitivo del servidor).
+  'cuenta_casa':
+      TipoOperacionInfo('Cuenta a la Casa', Icons.home_rounded),
+  'plus_confirmar_reporte':
+      TipoOperacionInfo('Confirmación App Plus', Icons.star_rounded),
+  'plus_rechazar_reporte':
+      TipoOperacionInfo('Rechazo App Plus', Icons.star_border_rounded),
   'ajuste': TipoOperacionInfo('Cambio de precio', Icons.tune),
   'gympedia_upsert_publicado':
       TipoOperacionInfo('Artículo GymPedia', Icons.menu_book),
@@ -82,6 +91,7 @@ const Map<String, String> kEtiquetasAjuste = {
   'horario_turnos': 'Ajuste: horario de turnos',
   'plantillas_wa': 'Ajuste: plantillas de WhatsApp',
   'titular': 'Ajuste: titular de la cuenta',
+  'precio_app_plus': 'Ajuste: precio App Plus (A++)',
 };
 
 /// Nombre formal de un tipo de operación. Si no está en el mapa,

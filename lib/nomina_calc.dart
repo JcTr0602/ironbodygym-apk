@@ -58,6 +58,14 @@ class NominaCalc {
     try {
       final pagos = await LocalDb.instance.pagosDelMes(pref);
       final vistos = idsDesdePagos(pagos);
+      // v1.7.0 (Argón, separación estricta): la contabilidad
+      // filtra cuenta_casa=0. Una Cuenta a la Casa no genera los
+      // 150 CUP ni entra en «pagaron el mes» aunque tenga un pago
+      // suelto registrado (permitido pero inútil, diseño Casa §4).
+      if (vistos.isNotEmpty) {
+        excluirCuentasCasa(
+            vistos, await LocalDb.instance.idsCuentasCasa());
+      }
       // Excepción del mes en curso (ver la nota de la clase): se
       // excluye al cliente cuyo pagado_hasta cae en
       // [inicioMes, inicioMesSiguiente). Cliente sin fila en el
@@ -92,6 +100,15 @@ class NominaCalc {
       if (id != null) vistos.add(id);
     }
     return vistos;
+  }
+
+  /// PURO (testeable sin BD): quita de [ids] a las Cuentas a la
+  /// Casa (v1.7.0). La nómina y «pagaron el mes» comparten este
+  /// conjunto, así que la exclusión vale para cifra y listado a
+  /// la vez. Un id sin fila Casa en [casaIds] se conserva.
+  static void excluirCuentasCasa(Set<int> ids, Set<int> casaIds) {
+    if (casaIds.isEmpty) return;
+    ids.removeAll(casaIds);
   }
 
   /// PURO (testeable sin BD): aplica sobre [ids] la excepción del

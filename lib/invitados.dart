@@ -1111,6 +1111,54 @@ class InvitadosService {
         {'p_clave': clave, 'p_valor': valor});
   }
 
+  /// v1.7.0 (panel): guarda una clave de info pública con
+  /// REINTENTO DURABLE. Primero deja la pareja (clave, valor)
+  /// marcada como pendiente en meta ([kMetaInfoPublicaPendiente])
+  /// y después intenta republicar todo lo pendiente. Si la red
+  /// falla, la marca queda y el gancho de fin de sync
+  /// ([republicarInfoPublicaPendiente]) reintenta tras cada
+  /// sincronización exitosa hasta lograrlo: el valor público
+  /// nunca queda obsoleto en silencio (caso del panel: el precio
+  /// del App Plus guardado sin conexión). NUNCA lanza: el
+  /// guardado local del ajuste no depende de la red.
+  Future<void> guardarInfoPublicaConReintento(
+      String clave, String valor) async {
+    try {
+      final db = LocalDb.instance;
+      final pendientes = decodificarInfoPublicaPendiente(
+          await db.getMeta(kMetaInfoPublicaPendiente));
+      pendientes[clave] = valor;
+      await db.setMeta(kMetaInfoPublicaPendiente,
+          codificarInfoPublicaPendiente(pendientes));
+      await republicarInfoPublicaPendiente();
+    } catch (_) {
+      // La marca ya quedó escrita antes del intento; el próximo
+      // fin de sync reintenta. Nada que propagar.
+    }
+  }
+
+  /// v1.7.0 (panel): reintenta republicar las claves de info
+  /// pública marcadas como pendientes. Sin pendientes no toca
+  /// la red. La marca de cada clave SOLO se limpia si su
+  /// republicación tuvo éxito; si vuelve a fallar, la clave
+  /// queda marcada y se reintenta en la siguiente sync.
+  Future<void> republicarInfoPublicaPendiente() async {
+    final db = LocalDb.instance;
+    final pendientes = decodificarInfoPublicaPendiente(
+        await db.getMeta(kMetaInfoPublicaPendiente));
+    if (pendientes.isEmpty) return;
+    final quedan = await republicarInfoPublicaPendientes(
+        pendientes, guardarInfoPublica);
+    if (quedan.isEmpty) {
+      await db.setMeta(kMetaInfoPublicaPendiente, '');
+    } else if (quedan.length != pendientes.length) {
+      await db.setMeta(kMetaInfoPublicaPendiente,
+          codificarInfoPublicaPendiente(quedan));
+    }
+    // Si quedan TODOS, la meta ya guarda el mapa correcto:
+    // no hace falta reescribirla.
+  }
+
   /// G1(b): reconstruye los registros locales de conversión
   /// desde la cola de ops (todo local, sin red): una op
   /// `inscribir` de conversión cuyo registro se perdió (cierre
@@ -1314,4 +1362,55 @@ String valorAGuardarInfoPublica(String clave, String valor) {
     return normalizarTelefonoInfoPublica(v) ?? v;
   }
   return v;
+}
+
+// ---------------------------------------------------------------------------
+// Republicación durable de información pública (v1.7.0, panel)
+// ---------------------------------------------------------------------------
+
+/// Clave de meta con el JSON `{clave: valor}` de la información
+/// pública PENDIENTE de republicar. La escribe quien guarda un
+/// ajuste que también vive en `info_publica` (hoy: el precio
+/// del App Plus) y la consume el reintento de fin de sync.
+const kMetaInfoPublicaPendiente = 'info_publica_pendiente';
+
+/// Decodifica el mapa pendiente guardado en meta. Tolerante:
+/// meta ausente, vacía o ilegible = sin pendientes. Función PURA.
+Map<String, String> decodificarInfoPublicaPendiente(String? crudo) {
+  final v = (crudo ?? '').trim();
+  if (v.isEmpty) return {};
+  try {
+    final j = jsonDecode(v);
+    if (j is! Map) return {};
+    return {
+      for (final e in j.entries)
+        if ('${e.key}'.isNotEmpty) '${e.key}': '${e.value}',
+    };
+  } catch (_) {
+    return {};
+  }
+}
+
+/// Codifica el mapa pendiente para guardarlo en meta. Función PURA.
+String codificarInfoPublicaPendiente(Map<String, String> pendientes) =>
+    jsonEncode(pendientes);
+
+/// Reintenta publicar cada pareja pendiente con [publicar] y
+/// devuelve las que SIGUEN pendientes (las que fallaron). Un
+/// fallo no detiene a las demás claves. La publicación va
+/// inyectada para poder probarlo sin red. Función pura de red.
+Future<Map<String, String>> republicarInfoPublicaPendientes(
+  Map<String, String> pendientes,
+  Future<void> Function(String clave, String valor) publicar,
+) async {
+  final quedan = Map<String, String>.of(pendientes);
+  for (final e in pendientes.entries) {
+    try {
+      await publicar(e.key, e.value);
+      quedan.remove(e.key);
+    } catch (_) {
+      // Sigue pendiente: se reintenta en la próxima sync.
+    }
+  }
+  return quedan;
 }

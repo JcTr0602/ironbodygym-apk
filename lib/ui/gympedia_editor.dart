@@ -66,6 +66,9 @@ class _GympediaEditorScreenState extends State<GympediaEditorScreen> {
   final _explicacion = TextEditingController();
   String _categoria = 'entrenamiento';
   String _sello = 'verde';
+  // v1.7.0 (A++): nivel de acceso del artículo — 'esencial'
+  // (gratis para invitados) o 'plus' (App Plus o cliente activo).
+  String _nivel = 'plus';
   final List<TextEditingController> _pasos = [];
   final List<TextEditingController> _errores = [];
   final List<_RefEdit> _refs = [];
@@ -137,6 +140,7 @@ class _GympediaEditorScreenState extends State<GympediaEditorScreen> {
     _esencial.text = '${p['lo_esencial'] ?? ''}';
     _explicacion.text = '${p['explicacion_md'] ?? ''}';
     _sello = '${p['sello'] ?? 'verde'}';
+    _nivel = LocalDb.nivelGympediaDe(p);
     _baseRevision = (p['revision'] as num?)?.toInt() ?? 0;
     _imagenRev = (p['imagen_rev'] as num?)?.toInt() ?? 0;
     _tieneImagen = p['tiene_imagen'] == true || p['tiene_imagen'] == 1;
@@ -153,6 +157,8 @@ class _GympediaEditorScreenState extends State<GympediaEditorScreen> {
     _esencial.text = '${b['lo_esencial'] ?? ''}';
     _explicacion.text = '${b['explicacion_md'] ?? ''}';
     _sello = '${b['sello'] ?? 'verde'}';
+    _nivel = LocalDb.nivelGympediaDe(
+        {'id': '${b['slug'] ?? ''}', 'nivel': b['nivel']});
     _baseRevision = (b['base_revision'] as num?)?.toInt() ?? 0;
     _tieneImagen = b['tiene_imagen'] == 1 || b['tiene_imagen'] == true;
     _imagenCambiada =
@@ -258,6 +264,9 @@ class _GympediaEditorScreenState extends State<GympediaEditorScreen> {
             },
       ],
       'sello': _sello,
+      // v1.7.0: el nivel viaja en la proyección del artículo
+      // (sync_gympedia.data.nivel) y lo respeta el paywall de S2.
+      'nivel': _nivel,
       'related_ids': _relacionados.toList()..sort(),
       'tiene_imagen': _tieneImagen,
       'imagen_cambiada': _imagenCambiada,
@@ -276,6 +285,7 @@ class _GympediaEditorScreenState extends State<GympediaEditorScreen> {
       'errores': jsonEncode(a['errores']),
       'referencias': jsonEncode(a['referencias']),
       'sello': a['sello'],
+      'nivel': a['nivel'],
       'related_ids': jsonEncode(a['related_ids']),
       'tiene_imagen': _tieneImagen ? 1 : 0,
       'imagen_cambiada': _imagenCambiada ? 1 : 0,
@@ -727,6 +737,27 @@ class _GympediaEditorScreenState extends State<GympediaEditorScreen> {
                       ),
                     ),
                   ],
+                ),
+                const SizedBox(height: 12),
+                // v1.7.0 (A++): nivel de acceso del artículo.
+                DropdownButtonFormField<String>(
+                  initialValue: _nivel,
+                  decoration: const InputDecoration(
+                      labelText: 'Nivel de acceso (App Plus)',
+                      border: OutlineInputBorder(),
+                      helperText: 'Esencial: gratis para invitados · '
+                          'Plus: solo App Plus o clientes con '
+                          'mensualidad activa'),
+                  items: const [
+                    DropdownMenuItem(
+                        value: 'esencial',
+                        child: Text('Esencial (gratis)')),
+                    DropdownMenuItem(
+                        value: 'plus',
+                        child: Text('Plus (de pago)')),
+                  ],
+                  onChanged: (v) =>
+                      setState(() => _nivel = v ?? _nivel),
                 ),
                 const SizedBox(height: 12),
                 _campoTexto('Lo esencial (resumen corto)', _esencial,

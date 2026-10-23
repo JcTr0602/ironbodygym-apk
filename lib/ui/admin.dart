@@ -19,6 +19,7 @@ import 'package:uuid/uuid.dart';
 import '../auth.dart';
 import '../invitados.dart' as invitados_svc;
 import '../localdb.dart';
+import '../plus_reportes.dart';
 import '../negocio.dart';
 import '../nomina_calc.dart';
 import '../perfil.dart';
@@ -50,6 +51,7 @@ import 'invitados.dart';
 import 'exportar_excel.dart';
 import 'incidencias_sync.dart';
 import 'pago.dart';
+import 'reportes_plus.dart';
 import 'reservas.dart';
 import 'suplementos.dart';
 import 'widgets.dart';
@@ -95,6 +97,15 @@ class _AdminScreenState extends State<AdminScreen> {
   // _cargarSolicitudesInvitados).
   bool _solicitudesCargando = true;
   int _solicitudesGen = 0;
+  // G2 (v1.7.0): reportes App Plus pendientes (misma pauta de dos
+  // fases que las solicitudes: la RPC no bloquea el pintado; si
+  // falla, la fila no aparece) y contador de Cuentas a la Casa
+  // (consulta local al espejo, en el pase principal).
+  List<ReportePlus> _reportesPlus = [];
+  bool _reportesPlusCargando = true;
+  int _reportesPlusGen = 0;
+  int _cuentasCasa = 0;
+  final PlusReportesService _plusSvc = PlusReportesService();
 
   List<TipoPago> _tipos = [];
   // v1.3.1: pago por cliente a entrenadores (movido desde Ajustes, solo dueño).
@@ -107,6 +118,10 @@ class _AdminScreenState extends State<AdminScreen> {
     ('mensualidad_menores', 'Mensualidad menores'),
     // v1.2.1: tasa USD del día para mostrar precios CUP en suplementos.
     ('tasa_usd', 'Tasa USD (CUP por 1 USD)'),
+    // v1.7.0 (G2): precio del App Plus (30 días). Default 1000 CUP;
+    // al guardar se republica a info_publica, que es lo que lee la
+    // cotización de S2 (ver _guardarMontos).
+    ('precio_app_plus', 'Precio App Plus (30 días)'),
   ];
 
   @override
@@ -189,6 +204,8 @@ class _AdminScreenState extends State<AdminScreen> {
     final sinAyer = await turnosSinReporte(
         isoDia(hoyH.subtract(const Duration(days: 1))));
     final incidencias = await incidenciasSyncPendientes();
+    // v1.7.0: contador de Cuentas a la Casa (consulta local).
+    final casa = await LocalDb.instance.conteoCuentasCasa();
     // Solicitudes de invitados: la bandeja vive en el servidor y
     // su RPC ya NO se espera aquí (panel 1.6.0): con la red
     // colgada, esperar en serie retrasaba TODO el panel aunque
@@ -217,12 +234,18 @@ class _AdminScreenState extends State<AdminScreen> {
         _incidenciasPend = incidencias.length;
         _solicitudesInvitados = [];
         _solicitudesCargando = true;
+        _reportesPlus = [];
+        _reportesPlusCargando = true;
+        _cuentasCasa = casa;
         _tipos = tipos;
         _pagoEntrenador = pagoEnt;
         for (final (clave, _) in _clavesMonto) {
+          final v = aj[clave] as num?;
           _montos
               .putIfAbsent(clave, () => TextEditingController())
-              .text = '${(aj[clave] as num?) ?? ''}';
+              .text = v != null
+                  ? '$v'
+                  : (clave == 'precio_app_plus' ? '1000' : '');
         }
         // v1.2.4: cargar datos bancarios (strings)
         // v0.6.0: + titular de la cuenta (Pieza A de Clientes)
@@ -237,6 +260,25 @@ class _AdminScreenState extends State<AdminScreen> {
     // La fila de solicitudes se rellena en segundo plano, sin
     // bloquear el pintado que acaba de ocurrir.
     unawaited(_cargarSolicitudesInvitados());
+    unawaited(_cargarReportesPlus());
+  }
+
+  /// G2 (v1.7.0): segundo pase — trae los reportes App Plus
+  /// pendientes por RPC. Si la RPC falla, la fila no aparece (el
+  /// panel sigue offline-first), como las solicitudes.
+  Future<void> _cargarReportesPlus() async {
+    final gen = ++_reportesPlusGen;
+    List<ReportePlus> lista;
+    try {
+      lista = await _plusSvc.pendientes();
+    } catch (_) {
+      lista = [];
+    }
+    if (!mounted || gen != _reportesPlusGen) return;
+    setState(() {
+      _reportesPlus = lista;
+      _reportesPlusCargando = false;
+    });
   }
 
   /// Segundo pase de _cargar: resuelve la RPC de solicitudes de
@@ -317,6 +359,22 @@ class _AdminScreenState extends State<AdminScreen> {
     ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Precios guardados (se sincronizarán)')));
     SyncEngine.instance.push();
+    // v1.7.0 (G2 + panel): el precio del App Plus se REPUBLICA a
+    // info_publica al guardar (patrón del horario canónico de la
+    // 1.6.0): la cotización de S2 lee el precio de ahí, no del
+    // ajuste local. La republicación va con reintento durable:
+    // la clave queda marcada como pendiente en meta ANTES del
+    // intento y el gancho de fin de sync la republica tras cada
+    // sincronización exitosa hasta lograrlo — si el guardado
+    // fue sin red, el precio público no queda obsoleto en
+    // silencio esperando a que el dueño vuelva a guardar.
+    final precioPlus = cambios['precio_app_plus'];
+    if (precioPlus != null) {
+      final entero = precioPlus.round();
+      unawaited(invitados_svc.InvitadosService()
+          .guardarInfoPublicaConReintento(
+              'precio_app_plus', '$entero'));
+    }
   }
 
   /// v1.2.4: Guardar datos bancarios (strings, no montos).
@@ -958,6 +1016,7 @@ class _AdminScreenState extends State<AdminScreen> {
                         _tituloSeccion('RESUMEN DEL MES',
                             derecha: _textoActualizado()),
                         _resumenMes(),
+                        _lineaCuentasCasa(),
                         _tituloSeccion('MÓDULOS'),
                         _tarjetasModulos(),
                         Padding(
@@ -1146,6 +1205,26 @@ class _AdminScreenState extends State<AdminScreen> {
         // y ya sin su carga en curso).
         primario: _solicitudesInvitados.isEmpty && !_solicitudesCargando,
         onTap: () => _ir(const ReservasScreen()),
+      ));
+    }
+
+    // G2 (v1.7.0): reportes de pago App Plus por confirmar. Solo
+    // aparece con pendientes CONOCIDOS: si la RPC del segundo
+    // pase falló, la fila no se pinta (sin cifras inventadas).
+    if (_reportesPlus.isNotEmpty) {
+      final n = _reportesPlus.length;
+      final r = _reportesPlus.first;
+      pendientes.add(_PendientePanel(
+        icono: Icons.star_rounded,
+        tinte: AppColores.naranja,
+        titulo: n == 1
+            ? '1 reporte App Plus por confirmar'
+            : '$n reportes App Plus por confirmar',
+        detalle: '${r.nombre} · ${fmtMonto(r.monto)} CUP · '
+            'ref. ${r.referencia}',
+        boton: 'Revisar',
+        primario: false,
+        onTap: () => _ir(const ReportesPlusScreen()),
       ));
     }
 
@@ -1525,6 +1604,32 @@ class _AdminScreenState extends State<AdminScreen> {
     );
   }
 
+  /// v1.7.0: contador de Cuentas a la Casa activas (consulta
+  /// local al espejo). Línea discreta bajo el resumen; sin
+  /// cuentas, no ocupa espacio.
+  Widget _lineaCuentasCasa() {
+    if (_cuentasCasa <= 0) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.only(top: 10),
+      child: Row(
+        children: [
+          const Icon(Icons.home_rounded,
+              size: 16, color: Color(0xFFB8860B)),
+          const SizedBox(width: 6),
+          Text(
+            _cuentasCasa == 1
+                ? 'Cuentas a la Casa activas: 1'
+                : 'Cuentas a la Casa activas: $_cuentasCasa',
+            style: const TextStyle(
+                fontSize: 12.5,
+                fontWeight: FontWeight.w600,
+                color: Color(0xFFB8860B)),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _kpi(String valor, String etiqueta,
       {Color? color, VoidCallback? onTap}) {
     return Tarjeta(
@@ -1577,7 +1682,7 @@ class _AdminScreenState extends State<AdminScreen> {
         icono: Icons.inventory_2_rounded,
         tinte: const Color(0xFFA855F7),
         titulo: 'Suplementos y contenido',
-        resumen: 'Suplementos · Reservas · GymPedia',
+        resumen: 'Suplementos · Reservas · Reportes A++ · GymPedia',
         badge:
             _reservasSolicitadas.isEmpty ? null : _reservasSolicitadas.length,
         tarjetas: _tarjetasSuplementosModulo,
@@ -1813,6 +1918,16 @@ class _AdminScreenState extends State<AdminScreen> {
             ? 'Bandeja de reservas de los clientes'
             : '${_reservasSolicitadas.length} por confirmar',
         () => _ir(const ReservasScreen()),
+      ),
+      _tarjetaFlujo(
+        Icons.star_rounded,
+        'Reportes App Plus',
+        _reportesPlusCargando
+            ? 'Consultando reportes…'
+            : _reportesPlus.isEmpty
+                ? 'Pagos del Plus reportados por invitados'
+                : '${_reportesPlus.length} por confirmar',
+        () => _ir(const ReportesPlusScreen()),
       ),
       _tarjetaFlujo(
         Icons.menu_book_rounded,

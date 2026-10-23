@@ -274,9 +274,102 @@ class _FichaScreenState extends State<FichaScreen> {
     }
   }
 
+  /// v1.7.0: pasa el cliente a Cuenta a la Casa o se la quita
+  /// (solo dueño — el menú que la invoca ya es solo del dueño).
+  /// Confirma con motivo opcional, encola la op `cuenta_casa`
+  /// (contrato en negocio.dart: payloadOpCuentaCasa) y refleja el
+  /// cambio en el espejo local de forma optimista. El servidor
+  /// revalida que el actor sea admin (blindaje de Argón).
+  Future<void> _cambiarCuentaCasa(bool activar) async {
+    final c = _c;
+    if (c == null || !AuthService().isOwner) return;
+    final nombre = '${c['nombre'] ?? ''}';
+    final ctrl = TextEditingController();
+    final motivo = await showDialog<String>(
+      context: context,
+      builder: (ctx) => DialogoApp(
+        titulo: activar
+            ? 'Pasar a Cuenta a la Casa'
+            : 'Quitar Cuenta a la Casa',
+        iconoTitulo: Icons.home_rounded,
+        contenido: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(activar
+                ? '$nombre tendrá acceso permanente sin pagar ni '
+                    'vencer. No contará en nómina, vencimientos ni '
+                    'ingresos.'
+                : '$nombre volverá a ser un cliente normal: regirá '
+                    'su «pagado hasta» actual.'),
+            const SizedBox(height: 12),
+            TextField(
+              controller: ctrl,
+              decoration: const InputDecoration(
+                labelText: 'Motivo (opcional)',
+                hintText: 'Ej.: hermana del dueño, cortesía…',
+                border: OutlineInputBorder(),
+              ),
+              maxLength: 120,
+            ),
+          ],
+        ),
+        acciones: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
+            child: Text(activar ? 'Pasar a la Casa' : 'Quitar'),
+          ),
+        ],
+      ),
+    );
+    ctrl.dispose();
+    if (motivo == null || !mounted) return;
+    await LocalDb.instance.queueOp(
+      opUuid: const Uuid().v4(),
+      tipo: 'cuenta_casa',
+      payload: payloadOpCuentaCasa(
+          clienteId: widget.clienteId,
+          activar: activar,
+          motivo: motivo),
+    );
+    // Reflejo optimista en el espejo (JSON + columnas dedicadas).
+    await LocalDb.instance.updateMirrorCuentaCasa(
+      widget.clienteId,
+      activar: activar,
+      motivo: motivo.isEmpty ? null : motivo,
+      enIso: isoHabana(ahoraHabana()),
+      por: AuthService().displayName,
+    );
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(activar
+            ? 'Cuenta a la Casa activada (se sincronizará)'
+            : 'Cuenta a la Casa retirada (se sincronizará)')));
+    SyncEngine.instance.push();
+    _cargar();
+  }
+
   Future<void> _pagar() async {
     final c = _c;
     if (c == null) return;
+    // v1.7.0: cobrar a una Cuenta a la Casa es permitido pero
+    // inútil (nunca vence y no necesita pagar): aviso previo.
+    if (esCuentaCasa(c)) {
+      final seguir = await DialogoApp.confirmar(
+        context,
+        titulo: 'Cuenta a la Casa',
+        mensaje: 'Esta cuenta no necesita pagar: tiene acceso '
+            'permanente sin vencimiento. Cobrarle un mes no cambia '
+            'nada.\n\n¿Cobrar igual?',
+        aceptar: 'Cobrar igual',
+        icono: Icons.home_rounded,
+      );
+      if (seguir != true || !mounted) return;
+    }
     final payload = await pagoDialogo(context, c);
     if (payload == null || !mounted) return;
     // v1.0.11: si es el dueño quien cobra, se marca entregado automáticamente
@@ -1518,6 +1611,9 @@ class _FichaScreenState extends State<FichaScreen> {
     final dias =
         diasRestantes(c?['pagado_hasta'] as String?) ?? 999999;
     final vencido = c != null && dias < 0;
+    // v1.7.0: Cuenta a la Casa (distintivo dorado; el predicado
+    // vive en negocio.dart/LocalDb).
+    final esCasa = c != null && esCuentaCasa(c);
     final nombre = c == null ? '…' : '${c['nombre']}';
     return Scaffold(
       appBar: AppBar(
@@ -1531,9 +1627,28 @@ class _FichaScreenState extends State<FichaScreen> {
                 onSelected: (v) {
                   if (v == 'eliminar') {
                     _eliminarDefinitivo();
+                  } else if (v == 'casa_on') {
+                    _cambiarCuentaCasa(true);
+                  } else if (v == 'casa_off') {
+                    _cambiarCuentaCasa(false);
                   }
                 },
                 itemBuilder: (ctx) => [
+                  // v1.7.0: Cuenta a la Casa (solo dueño; el menú
+                  // ya es solo del dueño).
+                  PopupMenuItem(
+                    value: esCasa ? 'casa_off' : 'casa_on',
+                    child: Row(
+                      children: [
+                        const Icon(Icons.home_rounded,
+                            color: Color(0xFFB8860B), size: 20),
+                        const SizedBox(width: 8),
+                        Text(esCasa
+                            ? 'Quitar Cuenta a la Casa'
+                            : 'Pasar a Cuenta a la Casa'),
+                      ],
+                    ),
+                  ),
                   const PopupMenuItem(
                     value: 'eliminar',
                     child: Row(
@@ -1669,6 +1784,35 @@ class _FichaScreenState extends State<FichaScreen> {
                       Center(
                           child: BadgeEstado.desdeDias(
                               dias)),
+                      // v1.7.0: distintivo DORADO de Cuenta a la Casa.
+                      if (esCasa) ...[
+                        const SizedBox(height: AppEspacio.sm),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 12, vertical: 5),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFFFF3CD),
+                            borderRadius:
+                                BorderRadius.circular(999),
+                            border: Border.all(
+                                color: const Color(0xFFB8860B)),
+                          ),
+                          child: const Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.home_rounded,
+                                  size: 15,
+                                  color: Color(0xFFB8860B)),
+                              SizedBox(width: 6),
+                              Text('Cuenta a la Casa',
+                                  style: TextStyle(
+                                      fontSize: 12.5,
+                                      fontWeight: FontWeight.w700,
+                                      color: Color(0xFF7A5A00))),
+                            ],
+                          ),
+                        ),
+                      ],
                           ],
                         ),
                       ),
@@ -1700,7 +1844,10 @@ class _FichaScreenState extends State<FichaScreen> {
                       // v1.3.3: regalar mensualidad de cumpleaños (solo dueño).
                       // Argón spec 2: si ya se regaló este año, el botón
                       // pasa a "Reenviar WhatsApp" (no aplica otro mes).
-                      if (AuthService().isOwner)
+                      // v1.7.0 (regla firme de Argón): en una Cuenta a
+                      // la Casa la celebración NO ofrece «regalo de
+                      // mes» — el botón no aparece.
+                      if (AuthService().isOwner && !esCasa)
                         Padding(
                           padding: const EdgeInsets.only(
                               bottom: AppEspacio.sm),
@@ -1842,13 +1989,17 @@ class _FichaScreenState extends State<FichaScreen> {
                             _filaInfo(
                                 Icons.calendar_today,
                                 'Pagado hasta',
-                                fmtFecha(c['pagado_hasta']
-                                    as String?)),
+                                esCasa
+                                    ? 'Sin vencimiento'
+                                    : fmtFecha(c['pagado_hasta']
+                                        as String?)),
                             _filaInfo(
                                 Icons.event,
                                 'Estado',
-                                textoEstado(c['pagado_hasta']
-                                    as String?)),
+                                esCasa
+                                    ? 'Cuenta a la Casa'
+                                    : textoEstado(c['pagado_hasta']
+                                        as String?)),
                             _filaInfo(
                                 Icons.payments_outlined,
                                 'Último pago',

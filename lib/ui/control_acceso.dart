@@ -13,6 +13,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../acceso_app_cache.dart';
 import '../auth.dart';
+import '../localdb.dart';
 import '../negocio.dart' show tiempoRelativo;
 import 'acciones_acceso.dart';
 import 'campana_wa.dart';
@@ -130,6 +131,9 @@ class _AccesosClientesTabState extends State<AccesosClientesTab> {
   // Auditoría OpenCode 2026-10-20: distinguir "sin clientes
   // pendientes" de "no se pudo consultar" (offline no es éxito).
   bool _sinAccesoFallo = false;
+  // v1.7.0: ids de Cuentas a la Casa (espejo local) para el
+  // distintivo dorado: la Casa pasa siempre por Control de Acceso.
+  Set<int> _casaIds = {};
   // PINs de la última generación masiva, vivos en memoria hasta que
   // el dueño confirme que los entregó (si cierra el diálogo por
   // error, puede reabrirlo; si la app muere, se resetea cada PIN).
@@ -185,6 +189,11 @@ class _AccesosClientesTabState extends State<AccesosClientesTab> {
       // Sin conexión: la lista queda como estaba y se marca el fallo
       // para NO mostrar "todos tienen acceso" como si fuera un hecho.
       _sinAccesoFallo = true;
+    }
+    try {
+      _casaIds = await LocalDb.instance.idsCuentasCasa();
+    } catch (_) {
+      // Sin espejo local disponible: nadie se marca (fail-safe).
     }
     if (mounted) {
       setState(() {
@@ -591,6 +600,22 @@ class _AccesosClientesTabState extends State<AccesosClientesTab> {
     );
   }
 
+  /// v1.7.0: distintivo dorado de Cuenta a la Casa en Control de
+  /// Acceso (la Casa pasa siempre; se marca, no se bloquea).
+  Widget _chipCasa() {
+    return const Chip(
+      label: Text('Casa',
+          style: TextStyle(
+              color: Color(0xFF7A5A00),
+              fontSize: 11,
+              fontWeight: FontWeight.w700)),
+      avatar: Icon(Icons.home_rounded,
+          size: 14, color: Color(0xFFB8860B)),
+      backgroundColor: Color(0xFFFFF3CD),
+      visualDensity: VisualDensity.compact,
+    );
+  }
+
   Widget _filaAcceso(AccesoCliente a) {
     final (chipTexto, chipColor) = switch (a.estado) {
       'bloqueado' => ('Bloqueado', AppColores.alertaOscuro),
@@ -602,8 +627,19 @@ class _AccesosClientesTabState extends State<AccesosClientesTab> {
         : 'Entró ${tiempoRelativo(a.ultimoAccesoEn!.toIso8601String())}';
     return Card(
       child: ListTile(
-        title: Text(a.nombre,
-            style: const TextStyle(fontWeight: FontWeight.w600)),
+        title: Row(
+          children: [
+            Flexible(
+              child: Text(a.nombre,
+                  style: const TextStyle(fontWeight: FontWeight.w600),
+                  overflow: TextOverflow.ellipsis),
+            ),
+            if (_casaIds.contains(a.clienteId)) ...[
+              const SizedBox(width: 6),
+              _chipCasa(),
+            ],
+          ],
+        ),
         subtitle: Text(
           '${a.telefono} · $ultimo'
           '${a.pinPendiente ? ' · PIN sin cambiar' : ''}',
@@ -762,8 +798,20 @@ class _AccesosClientesTabState extends State<AccesosClientesTab> {
                 });
               },
             ),
-            title: Text(c.nombre,
-                style: const TextStyle(fontWeight: FontWeight.w600)),
+            title: Row(
+              children: [
+                Flexible(
+                  child: Text(c.nombre,
+                      style:
+                          const TextStyle(fontWeight: FontWeight.w600),
+                      overflow: TextOverflow.ellipsis),
+                ),
+                if (_casaIds.contains(c.clienteId)) ...[
+                  const SizedBox(width: 6),
+                  _chipCasa(),
+                ],
+              ],
+            ),
             subtitle: Text(
                 c.telefono.isNotEmpty ? c.telefono : 'Sin teléfono'),
             trailing: TextButton(

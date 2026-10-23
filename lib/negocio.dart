@@ -100,6 +100,36 @@ Future<List<Map<String, dynamic>>> _activos() async {
   return LocalDb.instance.mirrorPorEstado('clientes', 'activo');
 }
 
+/// v1.7.0: ¿el cliente (mapa del espejo) es Cuenta a la Casa?
+/// Delega en el punto único de verdad de LocalDb.
+bool esCuentaCasa(Map<String, dynamic> c) => LocalDb.cuentaCasaDe(c);
+
+/// v1.7.0: payload EXACTO de la op `cuenta_casa` (contrato con el
+/// servidor B2): {cliente_id, activar, motivo?} — el motivo solo
+/// viaja si no está vacío. Función pura para fijarlo con tests.
+Map<String, dynamic> payloadOpCuentaCasa({
+  required int clienteId,
+  required bool activar,
+  String? motivo,
+}) {
+  final m = (motivo ?? '').trim();
+  return {
+    'cliente_id': clienteId,
+    'activar': activar,
+    if (m.isNotEmpty) 'motivo': m,
+  };
+}
+
+/// v1.7.0: predicado compuesto de Argón para COMPUERTAS de acceso
+/// y UI de estado (nunca para contabilidad/nómina, que miran pagos
+/// reales): el cliente tiene acceso vigente si es Cuenta a la Casa
+/// O su `pagado_hasta` no ha vencido a [hoyIso] ('YYYY-MM-DD').
+bool accesoEfectivoVigente(Map<String, dynamic> c, String hoyIso) {
+  if (esCuentaCasa(c)) return true;
+  final ph = c['pagado_hasta'] as String?;
+  return ph != null && ph.compareTo(hoyIso) >= 0;
+}
+
 /// Búsqueda por nombre (usa nombre_norm si viene en el espejo).
 /// v1.2.5 (A24): búsqueda tolerante.
 /// - Insensible a tildes/mayúsculas (vía _norm).
@@ -263,20 +293,23 @@ int _levenshtein(String a, String b) {
 Future<List<Map<String, dynamic>>> clientesAlDia() async {
   final hoy = _hoyIso();
   final rows = await _activos();
-  final res = rows.where((c) {
-    final ph = c['pagado_hasta'] as String?;
-    return ph != null && ph.compareTo(hoy) >= 0;
-  }).toList();
+  // v1.7.0: predicado compuesto (UI de estado): la Cuenta a la
+  // Casa está siempre al día, aunque su pagado_hasta sea NULL.
+  final res = rows.where((c) => accesoEfectivoVigente(c, hoy)).toList();
   res.sort(compararPorNombre);
   return res;
 }
 
 /// Vencen exactamente hoy.
+/// v1.7.0: la Cuenta a la Casa queda FUERA (nunca vence; no es un
+/// vencimiento cobrable ni entra en recordatorios de cobro).
 Future<List<Map<String, dynamic>>> vencenHoy() async {
   final hoy = _hoyIso();
   final rows = await _activos();
-  final res =
-      rows.where((c) => (c['pagado_hasta'] as String?) == hoy).toList();
+  final res = rows
+      .where((c) =>
+          !esCuentaCasa(c) && (c['pagado_hasta'] as String?) == hoy)
+      .toList();
   res.sort(compararPorNombre);
   return res;
 }
@@ -288,13 +321,18 @@ Future<List<Map<String, dynamic>>> atrasados({required bool masDe30}) async {
   final limite = _hace(30);
   final rows = await _activos();
   List<Map<String, dynamic>> res;
+  // v1.7.0: la Cuenta a la Casa queda FUERA de atrasados en ambas
+  // ramas (su pagado_hasta puede ser NULL o viejo sin que deba
+  // nada: excluirla explícitamente, no por accidente del filtro).
   if (masDe30) {
     res = rows.where((c) {
+      if (esCuentaCasa(c)) return false;
       final ph = c['pagado_hasta'] as String?;
       return ph != null && ph.compareTo(limite) < 0;
     }).toList();
   } else {
     res = rows.where((c) {
+      if (esCuentaCasa(c)) return false;
       final ph = c['pagado_hasta'] as String?;
       return ph == null ||
           (ph.compareTo(hoy) < 0 && ph.compareTo(limite) >= 0);
@@ -1227,6 +1265,8 @@ Future<List<Map<String, dynamic>>> porVencer({int dias = 3}) async {
       '${limite.year.toString().padLeft(4, '0')}-${limite.month.toString().padLeft(2, '0')}-${limite.day.toString().padLeft(2, '0')}';
   final rows = await _activos();
   final res = rows.where((c) {
+    // v1.7.0: la Cuenta a la Casa nunca está «por vencer».
+    if (esCuentaCasa(c)) return false;
     final ph = c['pagado_hasta'] as String?;
     // v1.3.7: excluye los que vencen hoy (tienen su propio segmento).
     return ph != null &&
@@ -2987,6 +3027,8 @@ Future<List<Map<String, dynamic>>> porVencer7Dias() async {
   final res = <Map<String, dynamic>>[];
   for (final c in await LocalDb.instance.allMirror('clientes')) {
     try {
+      // v1.7.0: la Cuenta a la Casa queda fuera (no vence nunca).
+      if (esCuentaCasa(c)) continue;
       final ph = '${c['pagado_hasta'] ?? ''}';
       if (ph.length < 10) continue;
       final v = DateTime.parse(ph.substring(0, 10));
@@ -3102,6 +3144,9 @@ Future<int> inactivosCount() async {
   int c = 0;
   for (final cl in await LocalDb.instance.allMirror('clientes')) {
     try {
+      // v1.7.0: la Cuenta a la Casa no cuenta como inactiva por
+      // vencimiento (no tiene vencimiento).
+      if (esCuentaCasa(cl)) continue;
       final ph = '${cl['pagado_hasta'] ?? ''}';
       if (ph.length < 10) continue;
       final v = DateTime.parse(ph.substring(0, 10));
@@ -3361,10 +3406,12 @@ Future<List<Map<String, dynamic>>> inscripcionesPorEntrenador() async {
 }
 
 /// Nº de morosos: clientes activos con pagado_hasta anterior a hoy.
+/// v1.7.0: la Cuenta a la Casa no es morosa (no debe nada).
 Future<int> morosos() async {
   final hoy = _hoyIso();
   var c = 0;
   for (final cl in await _activos()) {
+    if (esCuentaCasa(cl)) continue;
     final ph = cl['pagado_hasta'] as String?;
     if (ph != null && ph.compareTo(hoy) < 0) c++;
   }

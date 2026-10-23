@@ -253,10 +253,25 @@ void main() {
     expect(rows.first['metodo'], 'transferencia');
     expect(rows.first['sync_seq'], 50);
 
-    // Las demás tablas no reciben columnas extra.
+    // Las tablas sin columnas dedicadas no reciben extras.
     final f2 = LocalDb.filaParaBatchMirror(
-        'clientes', 1, jsonEncode({'id': 1}), 1);
+        'gastos', 1, jsonEncode({'id': 1}), 1);
     expect(f2.keys.toSet(), {'id', 'data', 'sync_seq'});
+
+    // v1.7.0 (v36): clientes SÍ recibe en el batch sus columnas
+    // dedicadas de Cuenta a la Casa (columnasClientes).
+    final f3 = LocalDb.filaParaBatchMirror(
+        'clientes', 1, jsonEncode({'id': 1, 'cuenta_casa': 1}), 1);
+    expect(f3['cuenta_casa'], 1);
+    expect(f3.keys.toSet(), {
+      'id',
+      'data',
+      'sync_seq',
+      'cuenta_casa',
+      'cuenta_casa_motivo',
+      'cuenta_casa_en',
+      'cuenta_casa_por',
+    });
 
     await db.close();
   });
