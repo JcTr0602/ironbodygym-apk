@@ -12,6 +12,7 @@ import 'package:flutter/services.dart';
 
 import '../auth.dart';
 import '../config.dart';
+import '../errores_sync.dart';
 
 import '../negocio.dart';
 import '../localdb.dart';
@@ -742,10 +743,13 @@ class _SeccionDiagnosticoScreenState extends State<SeccionDiagnosticoScreen> {
           var i = 0;
           for (final f in fotosAtascadas) {
             i++;
+            // v1.8.0: misma traducción que el estado por tabla.
+            final errFoto =
+                (f['ultimo_error'] ?? f['error'])?.toString() ?? '';
             datos['Foto cola #$i'] =
                 'id=${f['id']} cliente=${f['cliente_id'] ?? f['suplemento_id'] ?? '-'} '
                 'estado=${f['estado']} intentos=${f['intentos']} '
-                'error=${f['ultimo_error'] ?? f['error'] ?? '-'}';
+                'error=${errFoto.isEmpty ? '-' : resumenErrorDiagnostico(errFoto)}';
           }
         }
       } catch (_) {
@@ -775,7 +779,10 @@ class _SeccionDiagnosticoScreenState extends State<SeccionDiagnosticoScreen> {
         var estado = 'OK';
         final err = await db.getMeta('wm_err_$t');
         if (err != null && err.isNotEmpty) {
-          estado = 'ERROR: $err';
+          // v1.8.0: el error crudo (ClientException truncada, etc.)
+          // no se entiende; se pinta la frase corta traducida. El
+          // texto técnico sigue guardado en wm_err_ para soporte.
+          estado = 'ERROR: ${resumenErrorDiagnostico(err)}';
         } else if (await db.getMeta('wm_${t}_sin_permiso') == '1') {
           estado = 'sin_permiso';
         } else if (await db.getMeta('wm_${t}_ausente') == '1') {

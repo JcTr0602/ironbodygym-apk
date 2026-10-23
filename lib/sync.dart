@@ -530,6 +530,25 @@ class SyncEngine {
   final _status = StreamController<SyncStatus>.broadcast();
   Stream<SyncStatus> get statusStream => _status.stream;
   SyncStatus _current = const SyncStatus();
+
+  /// v1.8.0 (bug de campo): último estado calculado por el motor.
+  /// El stream es broadcast SIN replay: un suscriptor nuevo (p.ej.
+  /// la SyncPill al volver a Home desde una ficha) no recibe nada
+  /// hasta el próximo _emit, y su initialData por defecto
+  /// (pending=0) pintaba «Al día» junto al badge correcto con las
+  /// ops pendientes. La UI usa este getter como initialData para
+  /// nacer con el dato real.
+  SyncStatus get currentStatus => _current;
+
+  /// v1.8.0: re-emite el estado actual recomputado desde la BD
+  /// (pending/lastOk/novedades los recalcula el propio _emit),
+  /// conservando la fase y el último error. Lo llama Home tras
+  /// refrescar sus contadores desde la BD, para que la píldora y
+  /// el badge nunca discrepen tras un refresco. Se lanza sin
+  /// await (unawaited), como el resto de emisiones del motor.
+  Future<void> reemitirEstado() async {
+    _emit(_current.phase, error: _current.lastError);
+  }
   bool _running = false;
 
   /// Se llama cuando el servidor rechaza la sesión (401).

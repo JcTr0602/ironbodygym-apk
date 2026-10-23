@@ -86,6 +86,33 @@ Future<List<TipoPago>> getTiposPago(
           dias: 15),
     ];
   }
+  // v1.8.0 (bug de campo): el blob del servidor puede venir SIN el
+  // tipo 'menores' (trae mensual/semanal/quincenal/ofertas) y el
+  // fallback de arriba solo corre con el blob vacío: el menor se
+  // quedaba sin opción mensual y el aviso del diálogo caía al
+  // primer tipo (600, el semanal) en vez de a los 1500 de menores.
+  // Si se pide para menor y la lista no trae 'menores', se
+  // sintetiza desde la clave fija 'mensualidad_menores' — el mismo
+  // patrón de respaldo que usa precioMenor() — colocado junto al
+  // mensual. Si el blob SÍ trae 'menores', se respeta tal cual.
+  if (paraMenor && !tipos.any((t) => t.id == 'menores')) {
+    final montoMenor =
+        (aj['mensualidad_menores'] as num?)?.toDouble() ?? 1500;
+    if (montoMenor > 0) {
+      final sintetico = TipoPago(
+          id: 'menores',
+          nombre: 'Mensualidad menores',
+          monto: montoMenor,
+          dias: 30,
+          soloMenores: true);
+      final iMensual = tipos.indexWhere((t) => t.id == 'mensual');
+      if (iMensual >= 0) {
+        tipos.insert(iMensual, sintetico);
+      } else {
+        tipos.insert(0, sintetico);
+      }
+    }
+  }
   return [
     for (final t in tipos)
       if (t.id.isNotEmpty &&

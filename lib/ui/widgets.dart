@@ -75,7 +75,10 @@ class _SyncBannerState extends State<SyncBanner>
   Widget build(BuildContext context) {
     return StreamBuilder<SyncStatus>(
       stream: SyncEngine.instance.statusStream,
-      initialData: const SyncStatus(),
+      // v1.8.0: nacer con el último estado real del motor, no con
+      // el vacío (pending=0 → «Al día» fantasma hasta el próximo
+      // _emit; el stream broadcast no tiene replay).
+      initialData: SyncEngine.instance.currentStatus,
       builder: (ctx, snap) {
         final s = snap.data!;
         List<Color> gradiente;
@@ -447,7 +450,10 @@ class SyncPill extends StatelessWidget {
   Widget build(BuildContext context) {
     return StreamBuilder<SyncStatus>(
       stream: SyncEngine.instance.statusStream,
-      initialData: const SyncStatus(),
+      // v1.8.0: nacer con el último estado real del motor, no con
+      // el vacío (pending=0 → «Al día» fantasma hasta el próximo
+      // _emit; el stream broadcast no tiene replay).
+      initialData: SyncEngine.instance.currentStatus,
       builder: (ctx, snap) {
         final s = snap.data!;
         final enProgreso = s.phase == SyncPhase.uploading ||

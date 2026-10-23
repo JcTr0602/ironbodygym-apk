@@ -325,6 +325,44 @@ ErrorSync traducirErrorSync(Object error, {int? httpStatus, StackTrace? stack}) 
 ErrorSync clasificarError(Object e, {int? httpStatus}) =>
     traducirErrorSync(e, httpStatus: httpStatus);
 
+/// v1.8.0: frase corta y legible para un error CRUDO ya guardado
+/// como texto (p.ej. el `wm_err_<tabla>` que pinta la pantalla de
+/// Diagnóstico). [traducirErrorSync] trabaja sobre excepciones
+/// vivas y produce mensaje + acción para diálogos; aquí el dato es
+/// un String persistido (posiblemente truncado a 200 caracteres) y
+/// solo hace falta una frase de estado que el dueño entienda de un
+/// vistazo. Función pura: el texto crudo NUNCA se devuelve — si no
+/// se reconoce la causa, cae al genérico.
+String resumenErrorDiagnostico(String crudo) {
+  final raw = crudo.toLowerCase();
+  // 1. Sin conexión con el servidor: red caída, DNS, TLS, rechazo.
+  if (raw.contains('socketexception') ||
+      raw.contains('failed host lookup') ||
+      raw.contains('network is unreachable') ||
+      raw.contains('connection refused') ||
+      raw.contains('connection reset') ||
+      raw.contains('handshakeexception') ||
+      raw.contains('certificate')) {
+    return 'sin conexión con el servidor';
+  }
+  // 2. El servidor tardó demasiado en responder.
+  if (raw.contains('timeoutexception') ||
+      raw.contains('timed out') ||
+      raw.contains('timeout')) {
+    return 'el servidor tardó demasiado en responder';
+  }
+  // 3. El servidor rechazó el acceso (401/403).
+  if (RegExp(r'\b40[13]\b').hasMatch(raw)) {
+    return 'el servidor rechazó el acceso';
+  }
+  // 4. Error interno del servidor (500/502/503).
+  if (RegExp(r'\b50[023]\b').hasMatch(raw)) {
+    return 'error interno del servidor';
+  }
+  // 5. Genérico: sin volcar el texto técnico.
+  return 'error de sincronización';
+}
+
 /// Calcula el backoff con jitter para un reintento.
 Duration backoffReintento(int intentos) {
   const baseSeg = 30;

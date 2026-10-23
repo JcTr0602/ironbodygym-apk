@@ -568,6 +568,14 @@ class _HomeScreenState extends State<HomeScreen>
           _turnoActual = turnoAct;
           _turnosPendientes = turnosPend;
         });
+        // v1.8.0 (bug de campo): el badge de arriba ya trae las
+        // pendientes reales desde la BD (_pendientesSync), pero la
+        // SyncPill se re-suscribe al volver a Home y el stream del
+        // motor no tiene replay: nacía en «Al día» hasta el próximo
+        // _emit. Re-emitir el estado recomputado (sin await, con
+        // unawaited como el resto de llamadas del sitio) para que
+        // píldora y badge nunca discrepen tras un refresco.
+        unawaited(SyncEngine.instance.reemitirEstado());
         // v1.4.0: calentar la caché de nómina tras cargar el home
         // (asegurar() no hace nada si la huella sigue fresca; el
         // catchError blinda el Future no esperado ante cualquier
