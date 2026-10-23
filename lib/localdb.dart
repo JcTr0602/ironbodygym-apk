@@ -40,7 +40,7 @@ class LocalDb {
   /// v1.4.0 (Argón): versión actual del esquema local. Los tests de
   /// migración comparan contra esta constante en vez de un número
   /// fijo, para no caer en cascada de fallos con cada migración.
-  static const int versionActual = 38;
+  static const int versionActual = 39;
 
   /// v37: marcas de información pública pendiente de republicar,
   /// UNA FILA POR CLAVE (compartido entre onCreate y la migración
@@ -1094,6 +1094,12 @@ class LocalDb {
                 'CREATE TABLE IF NOT EXISTS $t (id INTEGER PRIMARY KEY, data TEXT NOT NULL, sync_seq INTEGER NOT NULL)');
           }
         }
+        if (oldV < 39) {
+          // v1.8.0: espejo de aperturas de turno (paridad con
+          // _crearTablas). Nace vacío; el pull lo puebla desde 0.
+          await db.execute(
+              'CREATE TABLE IF NOT EXISTS turnos_apertura (id TEXT PRIMARY KEY, data TEXT NOT NULL, sync_seq INTEGER NOT NULL)');
+        }
       },
     );
     // v1.2.5+28: repara el índice FTS si la migración lo omitió y el
@@ -1784,6 +1790,13 @@ class LocalDb {
       await db.execute(
           'CREATE TABLE IF NOT EXISTS $t (id INTEGER PRIMARY KEY, data TEXT NOT NULL, sync_seq INTEGER NOT NULL)');
     }
+    // v1.8.0 (v39): espejo de APERTURAS de turno (sync_turnos_
+    // apertura; id TEXT = uuid de la apertura). Lo puebla el pull
+    // desde cero y lo consume la Auditoría por persona: sin este
+    // espejo, las aperturas de OTROS entrenadores no existían en
+    // el teléfono y la auditoría de turnos era imposible.
+    await db.execute(
+        'CREATE TABLE IF NOT EXISTS turnos_apertura (id TEXT PRIMARY KEY, data TEXT NOT NULL, sync_seq INTEGER NOT NULL)');
     // v1.4.0 (v31): caché del pre-cálculo de nómina. Solo guarda el
     // conteo de clientes que pagaron el mes + huella de insumos +
     // cuándo se calculó. Bonos y tarifa se leen siempre en vivo.
@@ -4628,6 +4641,7 @@ class LocalDb {
     'ventas_suplementos',
     'categorias_suplemento',
     'turnos_cierre',
+    'turnos_apertura', // v1.8.0 (v39)
     'borrados', // tombstones de sync_borrados
     'liquidaciones_caja', // v1.3.6 (v28, ítem 1B)
     'incidencias_sync', // v1.3.6 (v28, ítem 1C)
@@ -4657,6 +4671,8 @@ class LocalDb {
     // v1.8.0 (v38): servicios por dosis — nacen con la tabla y deben
     // descargarse desde cero, por el mismo motivo.
     if (tabla.startsWith('servicio_')) return 0;
+    // v1.8.0 (v39): aperturas de turno, mismo motivo.
+    if (tabla == 'turnos_apertura') return 0;
     return getWatermark(); // hereda el global (migración)
   }
 

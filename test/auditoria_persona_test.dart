@@ -2,8 +2,8 @@
 // el EVENTO (P1), dinero por registrado_por sin cruces (P3) y
 // cobertura por marca de agua global (P2).
 import 'package:flutter_test/flutter_test.dart';
-import 'package:ironbody_gestion/auditoria_persona.dart';
-import 'package:ironbody_gestion/turnos_resolucion.dart';
+import 'package:ironbody_gym/auditoria_persona.dart';
+import 'package:ironbody_gym/turnos_resolucion.dart';
 
 void main() {
   const duany = PersonaApk(

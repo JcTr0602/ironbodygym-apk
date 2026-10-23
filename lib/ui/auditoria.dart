@@ -14,6 +14,7 @@ import '../auth.dart';
 import '../localdb.dart';
 import '../negocio.dart';
 import '../tiempo.dart';
+import 'auditoria_persona.dart';
 import 'diseno.dart';
 import 'componentes.dart';
 import 'widgets.dart';
@@ -406,6 +407,16 @@ class _AuditoriaScreenState extends State<AuditoriaScreen> {
       appBar: AppBar(
         title: const Text('Auditoría'),
         actions: [
+          // v1.8.0: vista por persona (turnos, dinero, sensibles).
+          IconButton(
+            icon: const Icon(Icons.person_search_rounded),
+            tooltip: 'Por persona',
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (_) => const AuditoriaPersonaScreen(),
+              ),
+            ),
+          ),
           IconButton(
             icon: const Icon(Icons.refresh),
             onPressed: _cargar,
