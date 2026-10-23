@@ -35,6 +35,7 @@ import 'cumpleanos.dart';
 import 'dashboard.dart';
 import 'diseno.dart';
 import 'inscribir.dart';
+import 'servicios.dart';
 import 'invitados.dart';
 import 'listas.dart';
 import 'mi_dia.dart';
@@ -814,6 +815,10 @@ class _HomeScreenState extends State<HomeScreen>
                       // usada; así no queda espacio vacío en el grid).
                       const SizedBox(height: AppEspacio.sm),
                       _botonBuscarCliente(),
+                      // v1.8.0: Servicios por dosis — botón de ancho
+                      // completo bajo Buscar (venta rápida del día).
+                      const SizedBox(height: AppEspacio.sm),
+                      _botonServicios(),
                       // v1.3.6 (ítem 1A, auditoría Argón): la bandeja es
                       // SOLO del dueño (abre su WhatsApp y el check vive
                       // en su teléfono; si un entrenador la usara, el
@@ -1755,6 +1760,31 @@ class _HomeScreenState extends State<HomeScreen>
           const SizedBox(width: AppEspacio.sm),
           Expanded(
             child: Text('Buscar cliente',
+                style: AppTexto.secundario
+                    .copyWith(fontWeight: FontWeight.w600)),
+          ),
+          Icon(Icons.chevron_right_rounded,
+              size: 20,
+              color: AppColores.naranja.withValues(alpha: 0.5)),
+        ],
+      ),
+    );
+  }
+
+  /// v1.8.0: botón horizontal de ancho completo para Servicios por
+  /// dosis (mismo patrón visual que Buscar cliente).
+  Widget _botonServicios() {
+    return Tarjeta(
+      onTap: () => _ir(const ServiciosScreen()),
+      padding: const EdgeInsets.symmetric(
+          horizontal: AppEspacio.md, vertical: AppEspacio.md),
+      child: Row(
+        children: [
+          IconoModuloBadge.naranja(Icons.bolt_rounded,
+              tamanoIcono: 22),
+          const SizedBox(width: AppEspacio.sm),
+          Expanded(
+            child: Text('Servicios ⚡ dosis',
                 style: AppTexto.secundario
                     .copyWith(fontWeight: FontWeight.w600)),
           ),

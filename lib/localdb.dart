@@ -40,7 +40,7 @@ class LocalDb {
   /// v1.4.0 (Argón): versión actual del esquema local. Los tests de
   /// migración comparan contra esta constante en vez de un número
   /// fijo, para no caer en cascada de fallos con cada migración.
-  static const int versionActual = 37;
+  static const int versionActual = 38;
 
   /// v37: marcas de información pública pendiente de republicar,
   /// UNA FILA POR CLAVE (compartido entre onCreate y la migración
@@ -1078,6 +1078,22 @@ class LocalDb {
           await db.execute(_ddlInfoPublicaPendiente);
           await _migrarInfoPublicaPendienteDeMeta(db);
         }
+        if (oldV < 38) {
+          // v1.8.0: espejos de servicios por dosis (paridad con
+          // _crearTablas). Nacen vacíos; el pull los puebla desde 0
+          // (cursor propio, no heredan el global).
+          for (final t in [
+            'servicio_botes',
+            'servicio_lotes',
+            'servicio_ventas',
+            'servicio_salidas',
+            'servicio_agua_movimientos',
+            'servicio_compras',
+          ]) {
+            await db.execute(
+                'CREATE TABLE IF NOT EXISTS $t (id INTEGER PRIMARY KEY, data TEXT NOT NULL, sync_seq INTEGER NOT NULL)');
+          }
+        }
       },
     );
     // v1.2.5+28: repara el índice FTS si la migración lo omitió y el
@@ -1754,6 +1770,20 @@ class LocalDb {
     // paridad con la migración v35.
     await db.execute(
         'CREATE TABLE IF NOT EXISTS reservas (id INTEGER PRIMARY KEY, data TEXT NOT NULL, sync_seq INTEGER NOT NULL, moneda TEXT NOT NULL DEFAULT \'CUP\')');
+    // v1.8.0 (v38): espejos de servicios por dosis (6 tablas del
+    // servidor; ids enteros de gym.db). Cursor propio desde 0 (ver
+    // getWatermarkTabla: no heredan el global).
+    for (final t in [
+      'servicio_botes',
+      'servicio_lotes',
+      'servicio_ventas',
+      'servicio_salidas',
+      'servicio_agua_movimientos',
+      'servicio_compras',
+    ]) {
+      await db.execute(
+          'CREATE TABLE IF NOT EXISTS $t (id INTEGER PRIMARY KEY, data TEXT NOT NULL, sync_seq INTEGER NOT NULL)');
+    }
     // v1.4.0 (v31): caché del pre-cálculo de nómina. Solo guarda el
     // conteo de clientes que pagaron el mes + huella de insumos +
     // cuándo se calculó. Bonos y tarifa se leen siempre en vivo.
@@ -4601,6 +4631,15 @@ class LocalDb {
     'borrados', // tombstones de sync_borrados
     'liquidaciones_caja', // v1.3.6 (v28, ítem 1B)
     'incidencias_sync', // v1.3.6 (v28, ítem 1C)
+    // v1.8.0 (v38): servicios por dosis (el cuadre depende de ellas;
+    // si la tabla sync_* aún no existe en Supabase quedan marcadas
+    // ausentes y no bloquean el «completo»).
+    'servicio_botes',
+    'servicio_lotes',
+    'servicio_ventas',
+    'servicio_salidas',
+    'servicio_agua_movimientos',
+    'servicio_compras',
   ];
 
   Future<int> getWatermarkTabla(String tabla) async {
@@ -4615,6 +4654,9 @@ class LocalDb {
     // Reservas v2 (v34): mismo motivo — la proyección nace con la
     // tabla y debe descargarse desde cero.
     if (tabla == 'reservas') return 0;
+    // v1.8.0 (v38): servicios por dosis — nacen con la tabla y deben
+    // descargarse desde cero, por el mismo motivo.
+    if (tabla.startsWith('servicio_')) return 0;
     return getWatermark(); // hereda el global (migración)
   }
 

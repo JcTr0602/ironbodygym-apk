@@ -199,4 +199,34 @@ class NominaCalc {
     required double bonos,
   }) =>
       baseClientes * tarifa + bonos;
+
+  /// v1.8.0 (diseño dosis, Argón E-integración): comisión por dosis
+  /// de un entrenador en el mes [pref] ('YYYY-MM'), desde el espejo
+  /// de ventas de servicios. PURO. La comisión ya viene SNAPSOTEADA
+  /// en cada fila (comision_unitaria) y es 0 en agua suelta, en
+  /// ventas del dueño y en Casa por construcción; los reversos
+  /// llevan cantidad negativa y netan solos. Regla de reverso de
+  /// Argón: un reverso POSTERIOR al pago de la nómina resta en el
+  /// mes EN CURSO — eso sale gratis de esta función, porque el
+  /// reverso se fecha en el mes en que ocurre, no en el de la venta.
+  /// Devuelve (dosis netas con comisión, total CUP).
+  static ({int dosis, double total}) comisionDosisDesdeVentas(
+      List<Map<String, dynamic>> ventas, int telegramId, String pref) {
+    var dosis = 0;
+    var total = 0.0;
+    for (final v in ventas) {
+      if (LocalDb.normalizarTelegramId(v['registrado_por']) !=
+          telegramId) {
+        continue;
+      }
+      final f = '${v['fecha'] ?? ''}';
+      if (f.length < 7 || f.substring(0, 7) != pref) continue;
+      if ((v['casa'] as num?)?.toInt() == 1) continue;
+      final cant = (v['cantidad'] as num?)?.toInt() ?? 0;
+      final com = (v['comision_unitaria'] as num?)?.toDouble() ?? 0;
+      if (com > 0) dosis += cant;
+      total += com * cant;
+    }
+    return (dosis: dosis, total: total);
+  }
 }

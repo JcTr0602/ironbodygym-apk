@@ -720,6 +720,17 @@ double _montoEfectivoOp(
     final precio = (payload['precio'] as num?)?.toDouble() ?? 0;
     return cant * precio;
   }
+  // v1.8.0: venta de servicio en efectivo suma al pendiente (Casa y
+  // transferencia no; el reverso encolado no se neta aquí — se neta al
+  // espejarse la fila de reverso en servicio_ventas, como con las
+  // anulaciones de suplementos).
+  if (tipo == 'venta_servicio') {
+    if (payload['casa'] == true) return 0;
+    if ('${payload['metodo'] ?? 'efectivo'}' != 'efectivo') return 0;
+    final cant = (payload['cantidad'] as num?)?.toDouble() ?? 0;
+    final precio = (payload['precio_unitario'] as num?)?.toDouble() ?? 0;
+    return cant * precio;
+  }
   if (tipo == 'inscripcion_venta_suplemento') {
     double t = 0;
     final c = payload['cliente'];
@@ -830,6 +841,14 @@ Future<double> montoCobradoCupOp(Map<String, dynamic> op) async {
     }
     return t;
   }
+  // v1.8.0: venta de servicio cobrada (cualquier método; Casa = 0
+  // porque su precio snapshot es 0).
+  if (tipo == 'venta_servicio') {
+    if (payload['casa'] == true) return 0;
+    final cant = (payload['cantidad'] as num?)?.toDouble() ?? 0;
+    final precio = (payload['precio_unitario'] as num?)?.toDouble() ?? 0;
+    return cant * precio;
+  }
   return 0;
 }
 
@@ -866,6 +885,18 @@ Future<double> pendienteEntrega(int? telegramId) async {
     if (LocalDb.normalizarTelegramId(v['registrado_por']) == telegramId &&
         esPendiente(v['entregado'])) {
       total += totalVentaCup(v);
+    }
+  }
+  // v1.8.0: ventas de servicios en efectivo pendientes (las filas de
+  // reverso llevan cantidad negativa y netan solas; Casa queda fuera
+  // por su entregado=1 en el servidor, y se excluye por si acaso).
+  for (final v in await LocalDb.instance.allMirror('servicio_ventas')) {
+    if (LocalDb.normalizarTelegramId(v['registrado_por']) == telegramId &&
+        (v['metodo'] as String?) == 'efectivo' &&
+        (v['casa'] as num?)?.toInt() != 1 &&
+        esPendiente(v['entregado'])) {
+      total += ((v['precio_unitario'] as num?)?.toDouble() ?? 0) *
+          ((v['cantidad'] as num?)?.toDouble() ?? 0);
     }
   }
   final pr = await preciosVigentes();
@@ -1010,6 +1041,20 @@ Future<({double cup, double usd})> pendienteArqueo(int? telegramId) async {
     if (cubiertos.contains('ventas_suplementos:${v['id']}')) continue;
     if (esPendiente(v['entregado'])) usd += totalVentaUsd(v);
   }
+  // v1.8.0: ventas de servicios en efectivo (CUP) pendientes de
+  // arqueo; los reversos (cantidad negativa) netan solos.
+  for (final v in await LocalDb.instance.allMirror('servicio_ventas')) {
+    if (LocalDb.normalizarTelegramId(v['registrado_por']) != telegramId) {
+      continue;
+    }
+    if (cubiertos.contains('servicio_ventas:${v['id']}')) continue;
+    if ((v['metodo'] as String?) == 'efectivo' &&
+        (v['casa'] as num?)?.toInt() != 1 &&
+        esPendiente(v['entregado'])) {
+      cup += ((v['precio_unitario'] as num?)?.toDouble() ?? 0) *
+          ((v['cantidad'] as num?)?.toDouble() ?? 0);
+    }
+  }
   // Saldo de arrastre de liquidaciones parciales (sin partir ops).
   for (final l
       in await LocalDb.instance.allMirror('liquidaciones_caja')) {
@@ -1035,6 +1080,7 @@ Future<Map<String, List<int>>> idsPendienteArqueo(int? telegramId,
     'pagos': [],
     'pagos_diarios': [],
     'ventas_suplementos': [],
+    'servicio_ventas': [], // v1.8.0 (el servidor la lee con este nombre)
   };
   if (telegramId == null) return res;
   final cubiertos = await _idsLiquidados(telegramId);
@@ -1067,6 +1113,20 @@ Future<Map<String, List<int>>> idsPendienteArqueo(int? telegramId,
     if (esPendiente(v['entregado'])) {
       final id = (v['id'] as num?)?.toInt();
       if (id != null) res['ventas_suplementos']!.add(id);
+    }
+  }
+  if (!esUsd) {
+    for (final v in await LocalDb.instance.allMirror('servicio_ventas')) {
+      if (LocalDb.normalizarTelegramId(v['registrado_por']) != telegramId) {
+        continue;
+      }
+      if (cubiertos.contains('servicio_ventas:${v['id']}')) continue;
+      if ((v['metodo'] as String?) == 'efectivo' &&
+          (v['casa'] as num?)?.toInt() != 1 &&
+          esPendiente(v['entregado'])) {
+        final id = (v['id'] as num?)?.toInt();
+        if (id != null) res['servicio_ventas']!.add(id);
+      }
     }
   }
   return res;
@@ -1102,6 +1162,10 @@ Future<List<Map<String, dynamic>>> entrenadoresConPendiente() async {
     if (tid != null) tids.add(tid);
   }
   for (final v in await ventasSuplementosUsd()) {
+    final tid = LocalDb.normalizarTelegramId(v['registrado_por']);
+    if (tid != null) tids.add(tid);
+  }
+  for (final v in await LocalDb.instance.allMirror('servicio_ventas')) {
     final tid = LocalDb.normalizarTelegramId(v['registrado_por']);
     if (tid != null) tids.add(tid);
   }
@@ -3525,6 +3589,19 @@ Future<Map<String, double>> cobradoHoyPorMetodo(
     final f = '${v['fecha'] ?? ''}';
     if (f.length >= 10 && f.substring(0, 10) == hoy) {
       ef += totalVentaCup(v);
+    }
+  }
+  // v1.8.0: servicios del día por método (Casa fuera: precio 0).
+  for (final v in await LocalDb.instance.allMirror('servicio_ventas')) {
+    final f = '${v['fecha'] ?? ''}';
+    if (f.length < 10 || f.substring(0, 10) != hoy) continue;
+    if ((v['casa'] as num?)?.toInt() == 1) continue;
+    final monto = ((v['precio_unitario'] as num?)?.toDouble() ?? 0) *
+        ((v['cantidad'] as num?)?.toDouble() ?? 0);
+    if ('${v['metodo']}' == 'transferencia') {
+      tr += monto;
+    } else {
+      ef += monto;
     }
   }
   return {'efectivo': ef, 'transferencia': tr};

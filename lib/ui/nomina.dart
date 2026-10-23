@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../auth.dart';
+import '../localdb.dart';
 import '../negocio.dart';
 import '../nomina_calc.dart';
 import '../nomina_precalc.dart';
@@ -36,6 +37,9 @@ class _NominaScreenState extends State<NominaScreen> {
   String _bonoEntrenador = 'ambos'; // 'duany', 'gabriel', 'ambos'
   final _tarifaCtrl = TextEditingController();
   double _tarifa = 150;
+  // v1.8.0: comisión por dosis del mes por entrenador (clave
+  // 'duany'/'gabriel'; el entrenador además la ve bajo 'mi').
+  Map<String, ({int dosis, double total})> _comisionDosis = {};
 
   String _bonosKey(DateTime d) =>
       'nomina_bonos_${d.year}_${d.month}';
@@ -110,8 +114,42 @@ class _NominaScreenState extends State<NominaScreen> {
       }
       final tarifa =
           await PerfilService.instance.getPagoEntrenador();
+      // v1.8.0: comisión por dosis del mes (espejo de ventas de
+      // servicios; función pura de NominaCalc). La clave sale del
+      // nombre registrado del vendedor.
+      final comisionDosis = <String, ({int dosis, double total})>{};
+      try {
+        final ventasServ =
+            await LocalDb.instance.allMirror('servicio_ventas');
+        final miTid = AuthService().telegramId;
+        final nombrePorTid = <int, String>{};
+        for (final v in ventasServ) {
+          final tid =
+              LocalDb.normalizarTelegramId(v['registrado_por']);
+          if (tid != null) {
+            nombrePorTid.putIfAbsent(
+                tid, () => '${v['registrado_por_nombre'] ?? ''}');
+          }
+        }
+        for (final tid in nombrePorTid.keys) {
+          final r = NominaCalc.comisionDosisDesdeVentas(
+              ventasServ, tid, pref);
+          if (r.total == 0 && r.dosis == 0) continue;
+          final nombre = nombrePorTid[tid]!.toLowerCase();
+          if (nombre.contains('duany')) {
+            comisionDosis['duany'] = r;
+          } else if (nombre.contains('gabriel')) {
+            comisionDosis['gabriel'] = r;
+          }
+          if (tid == miTid) comisionDosis['mi'] = r;
+        }
+      } catch (_) {
+        // Sin espejo de servicios (BD vieja): la nómina clásica
+        // no se rompe por esto.
+      }
       if (!mounted) return;
       setState(() {
+        _comisionDosis = comisionDosis;
         _clientesPagados = clientesPagados;
         _bonos = bonos;
         _tarifa = tarifa.toDouble();
@@ -234,7 +272,9 @@ class _NominaScreenState extends State<NominaScreen> {
       // conocido: en ese caso únicamente los bonos generales ('ambos'),
       // contados UNA sola vez.
       final bono = ent == 'mi' ? _bonoSoloAmbos() : _bonoPara(ent);
-      final total = base + bono;
+      // v1.8.0: la comisión por dosis se suma a la nómina del mes.
+      final comision = _comisionDosis[ent] ?? (dosis: 0, total: 0.0);
+      final total = base + bono + comision.total;
       return Padding(
         padding: const EdgeInsets.only(bottom: 8),
         child: Row(
@@ -264,6 +304,18 @@ class _NominaScreenState extends State<NominaScreen> {
                     style: TextStyle(
                       fontSize: 12,
                       color: bono > 0
+                          ? AppColores.exito
+                          : Colors.red,
+                    ),
+                  ),
+                if (comision.total != 0)
+                  Text(
+                    '${comision.total > 0 ? '+' : ''}'
+                    '${fmtMonto(comision.total)} comisión dosis '
+                    '(${comision.dosis})',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: comision.total > 0
                           ? AppColores.exito
                           : Colors.red,
                     ),

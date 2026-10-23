@@ -27,6 +27,7 @@ import 'detalle_suplemento.dart';
 import 'diseno.dart';
 import 'historial_ventas.dart';
 import 'reservas.dart';
+import 'servicios.dart';
 import 'venta_suplemento.dart';
 import 'widgets.dart';
 
@@ -392,6 +393,36 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
       body: Column(
         children: [
           const SyncBanner(compact: true, alcance: 'suplementos'),
+          // v1.8.0: entrada a Servicios por dosis (venta + gestión).
+          Padding(
+            padding: const EdgeInsets.fromLTRB(
+                AppEspacio.md, AppEspacio.md, AppEspacio.md, 0),
+            child: Tarjeta(
+              onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute(
+                    builder: (_) => const ServiciosScreen()),
+              ),
+              padding: const EdgeInsets.symmetric(
+                  horizontal: AppEspacio.md, vertical: AppEspacio.md),
+              child: Row(
+                children: [
+                  IconoModuloBadge.naranja(Icons.bolt_rounded,
+                      tamanoIcono: 22),
+                  const SizedBox(width: AppEspacio.sm),
+                  Expanded(
+                    child: Text('Servicios ⚡ pre-entreno por dosis',
+                        style: AppTexto.secundario.copyWith(
+                            fontWeight: FontWeight.w600)),
+                  ),
+                  Icon(Icons.chevron_right_rounded,
+                      size: 20,
+                      color: AppColores.naranja
+                          .withValues(alpha: 0.5)),
+                ],
+              ),
+            ),
+          ),
           // v1.2.1: la promo la ven todos (el interruptor solo el dueño).
           _tarjetaPromo(),
           Padding(

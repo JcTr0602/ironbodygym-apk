@@ -2315,6 +2315,13 @@ class SyncEngine {
       'incidencias_sync', // v1.3.6 (v28, ítem 1C)
       'gympedia_articulos', // v1.4.4 (v33)
       'reservas', // Reservas v2 (v34)
+      // v1.8.0 (v38): servicios por dosis.
+      'servicio_botes',
+      'servicio_lotes',
+      'servicio_ventas',
+      'servicio_salidas',
+      'servicio_agua_movimientos',
+      'servicio_compras',
     ];
     final tablas = tablasFiltro ?? todasTablas;
     // v1.2.5 (D19): si el manifiesto marcó algún ámbito divergente,
@@ -2357,6 +2364,15 @@ class SyncEngine {
       'categorias_suplemento',
       'gympedia_articulos',
       'reservas', // Reservas v2: la proyección es completa, purgar es seguro
+      // v1.8.0: servicios — la app nunca inserta filas optimistas en
+      // estos espejos (las ventas viven en ops_queue hasta que el
+      // servidor las confirma), así que purgar ausentes es seguro.
+      'servicio_botes',
+      'servicio_lotes',
+      'servicio_ventas',
+      'servicio_salidas',
+      'servicio_agua_movimientos',
+      'servicio_compras',
     };
     try {
       // Programación idempotente por tabla (panel v1.4.4): la
@@ -2464,6 +2480,14 @@ class SyncEngine {
       'gympedia_articulos': 'sync_gympedia',
       // Reservas v2 (v34): proyección que publica el puente.
       'reservas': 'sync_reservas',
+      // v1.8.0 (v38): servicios por dosis (si la tabla sync_* aún no
+      // existe en Supabase, el pull la marca ausente y la omite).
+      'servicio_botes': 'sync_servicio_botes',
+      'servicio_lotes': 'sync_servicio_lotes',
+      'servicio_ventas': 'sync_servicio_ventas',
+      'servicio_salidas': 'sync_servicio_salidas',
+      'servicio_agua_movimientos': 'sync_servicio_agua_movimientos',
+      'servicio_compras': 'sync_servicio_compras',
     };
     var ti = 0;
     for (final tabla in tablas) {

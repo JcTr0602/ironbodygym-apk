@@ -71,6 +71,22 @@ const Map<String, TipoOperacionInfo> kTiposOperacion = {
       TipoOperacionInfo('Edición de categoría', Icons.edit),
   'inscripcion_venta_suplemento':
       TipoOperacionInfo('Inscripción + venta', Icons.person_add),
+  // v1.8.0: servicios por dosis.
+  'abrir_bote_servicio':
+      TipoOperacionInfo('Abrir bote de servicio', Icons.science),
+  'crear_lote_servicio':
+      TipoOperacionInfo('Crear lote de servicio', Icons.local_drink),
+  'venta_servicio':
+      TipoOperacionInfo('Venta de servicio', Icons.bolt),
+  'salida_servicio':
+      TipoOperacionInfo('Salida de servicio', Icons.outbox),
+  'revertir_venta_servicio':
+      TipoOperacionInfo('Reverso de servicio', Icons.undo),
+  'reponer_agua': TipoOperacionInfo('Reponer agua', Icons.water_drop),
+  'cerrar_lote_servicio':
+      TipoOperacionInfo('Cerrar lote de servicio', Icons.lock),
+  'cerrar_bote_servicio':
+      TipoOperacionInfo('Cerrar bote de servicio', Icons.lock),
 };
 
 /// v1.4.4: etiquetas de la op 'ajuste' según su clave. Antes TODA
@@ -92,6 +108,10 @@ const Map<String, String> kEtiquetasAjuste = {
   'plantillas_wa': 'Ajuste: plantillas de WhatsApp',
   'titular': 'Ajuste: titular de la cuenta',
   'precio_app_plus': 'Ajuste: precio App Plus (A++)',
+  'servicio_precio_sin_agua': 'Ajuste: precio dosis sin agua',
+  'servicio_precio_con_agua': 'Ajuste: precio dosis con agua',
+  'servicio_precio_agua': 'Ajuste: precio del pomo de agua',
+  'servicio_comision_dosis': 'Ajuste: comisión por dosis',
 };
 
 /// Nombre formal de un tipo de operación. Si no está en el mapa,

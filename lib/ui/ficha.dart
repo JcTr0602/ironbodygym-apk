@@ -25,6 +25,7 @@ import '../fotos.dart';
 import '../fotos_cola.dart';
 import '../localdb.dart';
 import '../negocio.dart';
+import '../servicios.dart' as servicios_svc;
 import '../sync.dart';
 import '../acceso_app_cache.dart';
 import 'componentes.dart';
@@ -65,6 +66,8 @@ class _FichaScreenState extends State<FichaScreen> {
   // null = sin acceso o caché no cargado; _accesoSinConexion = true si
   // no se pudo verificar por falta de red.
   bool _accesoSinConexion = false;
+  // v1.8.0: historial de servicios por dosis del cliente.
+  List<Map<String, dynamic>> _serviciosHist = [];
 
   @override
   void initState() {
@@ -76,6 +79,8 @@ class _FichaScreenState extends State<FichaScreen> {
     final c = await clientePorId(widget.clienteId);
     final pagos = await pagosDe(widget.clienteId);
     final suplementos = await _suplementosDe(widget.clienteId);
+    final serviciosHist = await servicios_svc
+        .historialServiciosCliente(widget.clienteId);
     // v1.2.5 (#10): incidencias relacionadas (respeta visibilidad).
     final incidencias = await LocalDb.instance.incidenciasRelacionadas(
         'cliente', widget.clienteId,
@@ -93,6 +98,7 @@ class _FichaScreenState extends State<FichaScreen> {
         _c = c;
         _pagos = pagos;
         _suplementos = suplementos;
+        _serviciosHist = serviciosHist;
         _incidencias = incidencias;
         _foto = null;
         _regaloAnio = regaloAnio;
@@ -2131,6 +2137,62 @@ class _FichaScreenState extends State<FichaScreen> {
                           ),
                         ),
                       if (_suplementos.isNotEmpty)
+                        const SizedBox(
+                            height: AppEspacio.md),
+                      // v1.8.0: Historial de servicios por dosis
+                      if (_serviciosHist.isNotEmpty)
+                        Tarjeta(
+                          child: Column(
+                            crossAxisAlignment:
+                                CrossAxisAlignment.start,
+                            children: [
+                              const Text(
+                                  'Servicios (dosis)',
+                                  style: AppTexto.titulo),
+                              const SizedBox(
+                                  height: AppEspacio.sm),
+                              for (final s in _serviciosHist)
+                                ListTile(
+                                  dense: true,
+                                  contentPadding:
+                                      EdgeInsets.zero,
+                                  leading: Icon(
+                                    (s['reverso_de'] as num?) != null
+                                        ? Icons.undo
+                                        : Icons.bolt,
+                                    size: 20,
+                                    color: AppColores.naranja,
+                                  ),
+                                  title: Text(
+                                      switch ('${s['tipo']}') {
+                                        'dosis_sin_agua' =>
+                                          'Dosis sin agua',
+                                        'dosis_con_agua' =>
+                                          'Dosis con agua',
+                                        'agua_suelta' =>
+                                          'Pomo de agua',
+                                        _ => 'Servicio',
+                                      },
+                                      style:
+                                          AppTexto.cuerpo),
+                                  subtitle: Text(
+                                      '${fmtFecha(s['fecha'] as String?)} · '
+                                      '${(s['casa'] as num?)?.toInt() == 1 ? 'Cuenta a la Casa' : (s['metodo'] ?? '')}'
+                                      ' · ${s['registrado_por_nombre'] ?? ''}',
+                                      style: AppTexto
+                                          .secundario),
+                                  trailing: Text(
+                                      (s['casa'] as num?)?.toInt() == 1
+                                          ? 'Casa'
+                                          : '${fmtMonto(((s['precio_unitario'] as num?)?.toDouble() ?? 0) * ((s['cantidad'] as num?)?.toDouble() ?? 0))} CUP',
+                                      style: AppTexto.cuerpo.copyWith(
+                                          fontWeight: FontWeight.bold,
+                                          color: AppColores.naranja)),
+                                ),
+                            ],
+                          ),
+                        ),
+                      if (_serviciosHist.isNotEmpty)
                         const SizedBox(
                             height: AppEspacio.md),
                       // v1.2.5 (#10): incidencias relacionadas con el cliente.
