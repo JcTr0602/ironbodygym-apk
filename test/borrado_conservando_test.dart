@@ -262,4 +262,58 @@ void main() {
     expect(tot['USD'], 0.0);
     await db.close();
   });
+
+  test(
+      'queueOpYMarcarEliminado: la op queda en cola Y el espejo '
+      'marcado, en una sola llamada', () async {
+    final db = await _abrirDbVacia();
+    await _cliente(db, id: 5, nombre: 'Se Va', estado: 'activo');
+    await LocalDb.instance.queueOpYMarcarEliminado(
+      opUuid: 'op-atomica-1',
+      payload: payloadOpEliminarCliente(clienteId: 5, modo: 'conservar'),
+      clienteId: 5,
+    );
+    final ops = await db
+        .query('ops_queue', where: 'op_uuid=?', whereArgs: ['op-atomica-1']);
+    expect(ops, hasLength(1));
+    expect(ops.single['tipo'], 'eliminar_cliente');
+    final payload =
+        jsonDecode(ops.single['payload'] as String) as Map<String, dynamic>;
+    expect(payload['cliente_id'], 5);
+    expect(payload['modo'], 'conservar');
+    final filas = await db.query('clientes', where: 'id=?', whereArgs: [5]);
+    final data =
+        jsonDecode(filas.single['data'] as String) as Map<String, dynamic>;
+    expect(data['estado'], 'eliminado',
+        reason: 'el parche optimista va en la misma transacción');
+    await db.close();
+  });
+
+  test(
+      'queueOpYMarcarEliminado: si el marcado falla, la op NO '
+      'queda encolada (transacción revertida)', () async {
+    final db = await _abrirDbVacia();
+    // data con JSON válido pero que no es un objeto: el marcado
+    // revienta al interpretarlo como mapa y la transacción debe
+    // revertir también el encolado. (Un texto no-JSON ni siquiera
+    // se puede sembrar: los triggers del espejo lo rechazan.)
+    await db.insert('clientes', {
+      'id': 6,
+      'data': '123',
+      'sync_seq': 106,
+    });
+    await expectLater(
+      LocalDb.instance.queueOpYMarcarEliminado(
+        opUuid: 'op-atomica-2',
+        payload: payloadOpEliminarCliente(clienteId: 6, modo: 'conservar'),
+        clienteId: 6,
+      ),
+      throwsA(anything),
+    );
+    final ops = await db
+        .query('ops_queue', where: 'op_uuid=?', whereArgs: ['op-atomica-2']);
+    expect(ops, isEmpty,
+        reason: 'sin atomicidad quedaría una op huérfana sin marcado');
+    await db.close();
+  });
 }

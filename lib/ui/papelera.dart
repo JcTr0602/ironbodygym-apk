@@ -203,6 +203,10 @@ class _PapeleraScreenState extends State<PapeleraScreen> {
     // v1.8.0: en modo 'conservar' NO se borra el espejo: la fila
     // queda como cáscara local (estado='eliminado', fuera de
     // todas las listas) hasta que el pull traiga la anonimizada.
+    // El marcado va DENTRO de la misma transacción del encolado
+    // (corrección del panel): antes iba en un segundo paso y una
+    // muerte del proceso entre ambos dejaba la op encolada con
+    // la persona visible, igual que en la ficha.
     final db = await LocalDb.instance.db;
     await db.transaction((txn) async {
       for (final id in _seleccionados) {
@@ -216,13 +220,12 @@ class _PapeleraScreenState extends State<PapeleraScreen> {
         if (modo == 'todo') {
           await LocalDb.instance.deleteMirror('clientes', id, txn: txn);
         }
+        if (modo == 'conservar') {
+          await LocalDb.instance
+              .updateMirrorEstado(id, 'eliminado', txn: txn);
+        }
       }
     });
-    if (modo == 'conservar') {
-      for (final id in _seleccionados) {
-        await LocalDb.instance.updateMirrorEstado(id, 'eliminado');
-      }
-    }
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
         content: Text(modo == 'conservar'

@@ -1358,19 +1358,28 @@ class _FichaScreenState extends State<FichaScreen> {
     ctrl.dispose();
     if (ok2 != true || !mounted) return;
 
-    await LocalDb.instance.queueOp(
-      opUuid: const Uuid().v4(),
-      tipo: 'eliminar_cliente',
-      payload: payloadOpEliminarCliente(
-          clienteId: widget.clienteId, modo: modo),
-    );
     if (modo == 'conservar') {
-      // Optimista: la cáscara local (estado='eliminado') lo saca
-      // de todas las listas al momento; el pull traerá la fila
-      // anonimizada completa. En modo 'todo' no se toca el
-      // espejo: el borrado baja por su tombstone, como siempre.
-      await LocalDb.instance
-          .updateMirrorEstado(widget.clienteId, 'eliminado');
+      // Optimista ATÓMICO (corrección del panel, v1.8.0): la op y
+      // el marcado de la cáscara local (estado='eliminado', que lo
+      // saca de todas las listas al momento) van en UNA
+      // transacción; si el proceso muere a mitad, no puede quedar
+      // la op encolada con la persona visible. El pull traerá la
+      // fila anonimizada completa.
+      await LocalDb.instance.queueOpYMarcarEliminado(
+        opUuid: const Uuid().v4(),
+        payload: payloadOpEliminarCliente(
+            clienteId: widget.clienteId, modo: modo),
+        clienteId: widget.clienteId,
+      );
+    } else {
+      // En modo 'todo' no se toca el espejo: el borrado baja por
+      // su tombstone, como siempre.
+      await LocalDb.instance.queueOp(
+        opUuid: const Uuid().v4(),
+        tipo: 'eliminar_cliente',
+        payload: payloadOpEliminarCliente(
+            clienteId: widget.clienteId, modo: modo),
+      );
     }
     AppLog.info('clientes', 'eliminar_definitivo',
         d: 'id=${widget.clienteId} nombre=$nombre modo=$modo');

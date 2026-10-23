@@ -2623,15 +2623,20 @@ class LocalDb {
 
   /// Actualización optimista: cambia el estado de un cliente en el espejo
   /// local sin esperar al servidor. Se usa al encolar `cambiar_estado`.
-  Future<void> updateMirrorEstado(int clienteId, String estado) async {
-    final d = await db;
-    final rows = await d.query('clientes',
+  ///
+  /// v1.8.0: [txn] opcional — si se pasa, la lectura y la escritura
+  /// corren sobre esa transacción (mismo patrón que [queueOp]),
+  /// para que marcado + encolado sean atómicos.
+  Future<void> updateMirrorEstado(int clienteId, String estado,
+      {DatabaseExecutor? txn}) async {
+    final DatabaseExecutor ex = txn ?? await db;
+    final rows = await ex.query('clientes',
         where: 'id=?', whereArgs: [clienteId], limit: 1);
     if (rows.isEmpty) return;
     final data =
         jsonDecode(rows.first['data'] as String) as Map<String, dynamic>;
     data['estado'] = estado;
-    await d.update('clientes', {'data': jsonEncode(data)},
+    await ex.update('clientes', {'data': jsonEncode(data)},
         where: 'id=?', whereArgs: [clienteId]);
   }
 
@@ -4706,6 +4711,31 @@ class LocalDb {
         }
       }
     }
+  }
+
+  /// v1.8.0 (corrección del panel): encola la op `eliminar_cliente`
+  /// en modo 'conservar' y marca el espejo como 'eliminado' en UNA
+  /// SOLA transacción (la ops_queue y el espejo viven en la misma
+  /// BD). Antes ficha/papelera hacían queueOp y updateMirrorEstado
+  /// en dos pasos separados: si el proceso moría entre ambos, la
+  /// op quedaba encolada pero la persona seguía visible hasta que
+  /// la sync empujara. Con la transacción quedan las dos cosas o
+  /// ninguna. El modo 'todo' NO usa este método (su espejo baja
+  /// por el tombstone, como siempre).
+  Future<void> queueOpYMarcarEliminado({
+    required String opUuid,
+    required Map<String, dynamic> payload,
+    required int clienteId,
+  }) async {
+    final d = await db;
+    await d.transaction((txn) async {
+      await queueOp(
+          opUuid: opUuid,
+          tipo: 'eliminar_cliente',
+          payload: payload,
+          txn: txn);
+      await updateMirrorEstado(clienteId, 'eliminado', txn: txn);
+    });
   }
 
   /// v1.3.2 (Argón #8): asegura que la incidencia exista en
