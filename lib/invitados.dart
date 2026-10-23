@@ -889,6 +889,29 @@ class InvitadosService {
   final Future<dynamic> Function(
       String nombre, Map<String, dynamic>? params)? _rpcInyectado;
 
+  /// Serialización de las operaciones sobre la marca de info
+  /// pública pendiente (v1.7.0, delta del panel): guardar y
+  /// republicar NUNCA se solapan dentro del mismo isolate. Sin
+  /// esto, el gancho de fin de sync podía estar republicando un
+  /// valor mientras Ajustes guardaba otro más nuevo, y la
+  /// limpieza del primero barría la marca del segundo. La cadena
+  /// es ESTÁTICA porque los puntos de llamada crean instancias
+  /// nuevas del servicio (main.dart, admin.dart): solo protege
+  /// si la comparten todas. Entre isolates (el dispatcher de
+  /// fondo corre en otro) protege la limpieza defensiva de
+  /// [republicarInfoPublicaPendiente].
+  static Future<void> _cadenaInfoPublica = Future<void>.value();
+
+  /// Encola [operacion] tras todo lo que ya espera en la cadena
+  /// y devuelve su futuro. La cadena en sí nunca queda en error:
+  /// una operación fallida no bloquea a las siguientes.
+  static Future<void> _enSerieInfoPublica(
+      Future<void> Function() operacion) {
+    final resultado = _cadenaInfoPublica.then((_) => operacion());
+    _cadenaInfoPublica = resultado.catchError((_) {});
+    return resultado;
+  }
+
   SupabaseClient get _c => Supabase.instance.client;
 
   Future<dynamic> _rpc(String nombre,
@@ -1124,13 +1147,21 @@ class InvitadosService {
   Future<void> guardarInfoPublicaConReintento(
       String clave, String valor) async {
     try {
-      final db = LocalDb.instance;
-      final pendientes = decodificarInfoPublicaPendiente(
-          await db.getMeta(kMetaInfoPublicaPendiente));
-      pendientes[clave] = valor;
-      await db.setMeta(kMetaInfoPublicaPendiente,
-          codificarInfoPublicaPendiente(pendientes));
-      await republicarInfoPublicaPendiente();
+      // En serie (delta del panel): marcar y republicar forman
+      // una sola sección crítica con el resto de operaciones
+      // sobre la marca; un guardado concurrente espera su turno
+      // en vez de pisar la limpieza de una republicación en
+      // vuelo. La marca se sigue escribiendo ANTES de intentar
+      // publicar, y un fallo de red no se propaga.
+      await _enSerieInfoPublica(() async {
+        final db = LocalDb.instance;
+        final pendientes = decodificarInfoPublicaPendiente(
+            await db.getMeta(kMetaInfoPublicaPendiente));
+        pendientes[clave] = valor;
+        await db.setMeta(kMetaInfoPublicaPendiente,
+            codificarInfoPublicaPendiente(pendientes));
+        await _republicarInfoPublicaPendienteEnSerie();
+      });
     } catch (_) {
       // La marca ya quedó escrita antes del intento; el próximo
       // fin de sync reintenta. Nada que propagar.
@@ -1142,21 +1173,51 @@ class InvitadosService {
   /// la red. La marca de cada clave SOLO se limpia si su
   /// republicación tuvo éxito; si vuelve a fallar, la clave
   /// queda marcada y se reintenta en la siguiente sync.
-  Future<void> republicarInfoPublicaPendiente() async {
+  ///
+  /// Corre EN SERIE con los guardados (ver [_cadenaInfoPublica])
+  /// y limpia de forma defensiva (ver
+  /// [_republicarInfoPublicaPendienteEnSerie]).
+  Future<void> republicarInfoPublicaPendiente() =>
+      _enSerieInfoPublica(_republicarInfoPublicaPendienteEnSerie);
+
+  /// Núcleo de [republicarInfoPublicaPendiente]; quien llama
+  /// ya va dentro de la cadena de serialización.
+  ///
+  /// LIMPIEZA DEFENSIVA (delta del panel): la limpieza NO se
+  /// calcula sobre la foto leída al empezar. Tras republicar se
+  /// RE-LEE la meta actual y solo se borran las claves cuyo
+  /// valor actual sigue siendo EXACTAMENTE el que se acaba de
+  /// publicar con éxito ([pendientesTrasRepublicar]). Si un
+  /// guardado más nuevo cambió el valor mientras tanto (p. ej.
+  /// desde el isolate de fondo, donde la cadena no alcanza),
+  /// la clave conserva su marca nueva y se reintentará con el
+  /// valor vigente: el precio público nunca queda obsoleto en
+  /// silencio por una limpieza con foto vieja.
+  Future<void> _republicarInfoPublicaPendienteEnSerie() async {
     final db = LocalDb.instance;
     final pendientes = decodificarInfoPublicaPendiente(
         await db.getMeta(kMetaInfoPublicaPendiente));
     if (pendientes.isEmpty) return;
     final quedan = await republicarInfoPublicaPendientes(
         pendientes, guardarInfoPublica);
-    if (quedan.isEmpty) {
-      await db.setMeta(kMetaInfoPublicaPendiente, '');
-    } else if (quedan.length != pendientes.length) {
-      await db.setMeta(kMetaInfoPublicaPendiente,
-          codificarInfoPublicaPendiente(quedan));
+    final publicadas = <String, String>{
+      for (final e in pendientes.entries)
+        if (!quedan.containsKey(e.key)) e.key: e.value,
+    };
+    if (publicadas.isEmpty) {
+      // Nada se publicó: la meta ya guarda el mapa correcto
+      // (todos siguen pendientes); no hace falta reescribirla.
+      return;
     }
-    // Si quedan TODOS, la meta ya guarda el mapa correcto:
-    // no hace falta reescribirla.
+    final actuales = decodificarInfoPublicaPendiente(
+        await db.getMeta(kMetaInfoPublicaPendiente));
+    final resultado = pendientesTrasRepublicar(
+        actuales: actuales, publicadas: publicadas);
+    await db.setMeta(
+        kMetaInfoPublicaPendiente,
+        resultado.isEmpty
+            ? ''
+            : codificarInfoPublicaPendiente(resultado));
   }
 
   /// G1(b): reconstruye los registros locales de conversión
@@ -1413,4 +1474,24 @@ Future<Map<String, String>> republicarInfoPublicaPendientes(
     }
   }
   return quedan;
+}
+
+/// La marca pendiente que debe quedar tras un intento de
+/// republicación, calculada sobre la meta ACTUAL ([actuales],
+/// re-leída después de publicar) y no sobre la foto con la que
+/// se empezó. De [publicadas] (clave → valor publicado con
+/// éxito) solo se borra una clave si su valor actual sigue
+/// siendo EXACTAMENTE ese: si un guardado concurrente escribió
+/// un valor más nuevo, la clave se conserva marcada con su
+/// valor vigente; las claves ajenas al intento (fallidas o
+/// marcadas por otro) quedan intactas. Función PURA.
+Map<String, String> pendientesTrasRepublicar({
+  required Map<String, String> actuales,
+  required Map<String, String> publicadas,
+}) {
+  final resultado = Map<String, String>.of(actuales);
+  for (final e in publicadas.entries) {
+    if (resultado[e.key] == e.value) resultado.remove(e.key);
+  }
+  return resultado;
 }
