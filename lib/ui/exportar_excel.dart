@@ -34,7 +34,11 @@ Future<bool> exportarExcel() async {
     final csvClientes = _csv(
       ['nombre', 'carnet', 'telefono', 'estado', 'pagado_hasta'],
       [
+        // v1.8.0: la cáscara de una baja conservando estadísticas
+        // no es una persona exportable (sin datos y fuera de toda
+        // lista); sus pagos sí viajan en la hoja de pagos.
         for (final c in clientes)
+          if (!LocalDb.esEliminadoDe(c))
           [
             '${c['nombre'] ?? ''}',
             '${c['carnet'] ?? ''}',

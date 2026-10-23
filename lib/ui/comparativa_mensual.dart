@@ -93,6 +93,7 @@ class _ComparativaMensualState
     int count = 0;
     for (final c in await LocalDb.instance
         .allMirror('clientes')) {
+      if (esClienteEliminado(c)) continue; // v1.8.0: no es persona
       final f = '${c['created_at'] ?? c['fecha_ingreso'] ?? ''}';
       if (f.length >= 10) {
         final dia = f.substring(0, 10);

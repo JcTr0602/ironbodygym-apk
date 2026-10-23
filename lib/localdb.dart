@@ -1251,6 +1251,16 @@ class LocalDb {
     return v == 1 || v == true || v == '1';
   }
 
+  /// v1.8.0: ¿la fila del espejo es la CÁSCARA de una baja
+  /// conservando estadísticas? (estado='eliminado': la persona
+  /// desapareció; la fila solo sostiene sus pagos/ventas
+  /// anónimos). Punto único de verdad, como [cuentaCasaDe]: toda
+  /// lista/conteo de PERSONAS la excluye; los historiales de
+  /// dinero la siguen resolviendo (su nombre ya es
+  /// «Cliente eliminado»).
+  static bool esEliminadoDe(Map<String, dynamic> data) =>
+      '${data['estado'] ?? ''}' == 'eliminado';
+
   /// v1.7.0 (v36): las columnas dedicadas del espejo `clientes`
   /// para Cuenta a la Casa, extraídas del JSON ya decodificado.
   /// Mismo patrón que [columnasPagos]/[columnasMoneda]: se pueblan
@@ -1407,6 +1417,42 @@ class LocalDb {
 
   /// v1.7.0: cuántas Cuentas a la Casa activas hay en el espejo.
   Future<int> conteoCuentasCasa() async => (await idsCuentasCasa()).length;
+
+  /// v1.8.0: IDs de las cáscaras (estado='eliminado') del espejo.
+  /// Mismo patrón que [idsCuentasCasa]: una sola lectura del
+  /// padrón (pequeño) para las exclusiones de personas.
+  Future<Set<int>> idsClientesEliminados() async {
+    final out = <int>{};
+    for (final c in await allMirror('clientes')) {
+      final id = (c['id'] as num?)?.toInt();
+      if (id != null && esEliminadoDe(c)) out.add(id);
+    }
+    return out;
+  }
+
+  /// v1.8.0: fiado de suplementos PENDIENTE de un cliente, por
+  /// moneda ({'CUP': x, 'USD': y}; 0.0 si no debe en esa moneda).
+  /// Misma semántica que Cuentas por Cobrar: venta con es_fiado=1
+  /// y no saldada, cuyo deudor es el cliente; el monto es
+  /// cantidad × precio. Lo usa el diálogo de eliminar conservando
+  /// estadísticas para avisar de que la deuda se dará por
+  /// incobrable (candado 3 de Argón).
+  Future<Map<String, double>> fiadoPendienteDeCliente(
+      int clienteId) async {
+    final tot = <String, double>{'CUP': 0.0, 'USD': 0.0};
+    for (final v in await allMirror('ventas_suplementos')) {
+      if ((v['es_fiado'] as num?)?.toInt() != 1) continue;
+      if ((v['fiado_saldado'] as num?)?.toInt() == 1) continue;
+      final deudor = (v['fiado_cliente_id'] as num?)?.toInt() ??
+          (v['cliente_id'] as num?)?.toInt();
+      if (deudor != clienteId) continue;
+      final moneda = '${v['moneda'] ?? 'CUP'}';
+      final monto = ((v['cantidad'] as num?)?.toDouble() ?? 0) *
+          ((v['precio'] as num?)?.toDouble() ?? 0);
+      tot[moneda] = (tot[moneda] ?? 0) + monto;
+    }
+    return tot;
+  }
 
   /// Actualización optimista del flag Cuenta a la Casa en el
   /// espejo local (JSON + columnas dedicadas), sin esperar al

@@ -120,6 +120,32 @@ Map<String, dynamic> payloadOpCuentaCasa({
   };
 }
 
+/// v1.8.0: payload EXACTO de la op `eliminar_cliente` (contrato
+/// con el servidor): {cliente_id, definitivo: true, modo} con
+/// modo 'todo' | 'conservar'. El servidor trata un modo ausente o
+/// desconocido como 'todo' (compatibilidad con APKs viejas);
+/// aquí siempre se envía explícito. Función pura para fijarlo
+/// con tests, como [payloadOpCuentaCasa].
+Map<String, dynamic> payloadOpEliminarCliente({
+  required int clienteId,
+  required String modo,
+}) {
+  return {
+    'cliente_id': clienteId,
+    'definitivo': true,
+    'modo': modo == 'conservar' ? 'conservar' : 'todo',
+  };
+}
+
+/// v1.8.0: ¿el cliente (mapa del espejo) es la cáscara de una
+/// baja conservando estadísticas? Delega en el punto único de
+/// verdad de LocalDb. Toda lista/conteo de PERSONAS lo excluye;
+/// los historiales de dinero NO usan este filtro (la cáscara
+/// sostiene los pagos/ventas anónimos y se muestra como
+/// «Cliente eliminado»).
+bool esClienteEliminado(Map<String, dynamic> c) =>
+    LocalDb.esEliminadoDe(c);
+
 /// v1.7.0: predicado compuesto de Argón para COMPUERTAS de acceso
 /// y UI de estado (nunca para contabilidad/nómina, que miran pagos
 /// reales): el cliente tiene acceso vigente si es Cuenta a la Casa
@@ -1405,10 +1431,14 @@ Future<List<Map<String, dynamic>>> avisosWhatsappHoy() async {
 }
 
 /// Clientes inactivos (papelera de reciclaje).
+/// v1.8.0: la cáscara (estado='eliminado') NO es papelera: ya
+/// está eliminada y no se puede restaurar ni re-borrar desde
+/// aquí (candado 4 de Argón).
 Future<List<Map<String, dynamic>>> clientesInactivos() async {
   final todos = await LocalDb.instance.allMirror('clientes');
-  final res =
-      todos.where((c) => c['estado'] != 'activo').toList();
+  final res = todos
+      .where((c) => c['estado'] != 'activo' && !esClienteEliminado(c))
+      .toList();
   res.sort(compararPorNombre);
   return res;
 }
@@ -2309,6 +2339,7 @@ Future<Map<String, dynamic>> resumenSemanal() async {
   }
   var nuevos = 0;
   for (final c in await LocalDb.instance.allMirror('clientes')) {
+    if (esClienteEliminado(c)) continue; // v1.8.0: no es persona
     final f = '${c['fecha_inscripcion'] ?? ''}';
     if (f.length >= 10 && f.substring(0, 10).compareTo(inicio) >= 0) {
       nuevos++;
@@ -3013,6 +3044,7 @@ Future<int> nuevosEsteMes() async {
       '${n.month.toString().padLeft(2, '0')}';
   int c = 0;
   for (final cl in await LocalDb.instance.allMirror('clientes')) {
+    if (esClienteEliminado(cl)) continue; // v1.8.0: no es persona
     final f = '${cl['creado'] ?? cl['fecha_inscripcion'] ?? ''}';
     if (f.startsWith(pref)) c++;
   }
@@ -3027,6 +3059,9 @@ Future<List<Map<String, dynamic>>> porVencer7Dias() async {
   final res = <Map<String, dynamic>>[];
   for (final c in await LocalDb.instance.allMirror('clientes')) {
     try {
+      // v1.8.0: la cáscara conserva pagado_hasta (lo lee la
+      // nómina) pero NO es una persona por vencer.
+      if (esClienteEliminado(c)) continue;
       // v1.7.0: la Cuenta a la Casa queda fuera (no vence nunca).
       if (esCuentaCasa(c)) continue;
       final ph = '${c['pagado_hasta'] ?? ''}';
@@ -3144,6 +3179,7 @@ Future<int> inactivosCount() async {
   int c = 0;
   for (final cl in await LocalDb.instance.allMirror('clientes')) {
     try {
+      if (esClienteEliminado(cl)) continue; // v1.8.0: no es persona
       // v1.7.0: la Cuenta a la Casa no cuenta como inactiva por
       // vencimiento (no tiene vencimiento).
       if (esCuentaCasa(cl)) continue;
@@ -3378,6 +3414,7 @@ Future<int> inscripcionesMes() async {
       '${n.month.toString().padLeft(2, '0')}';
   var c = 0;
   for (final cl in await LocalDb.instance.allMirror('clientes')) {
+    if (esClienteEliminado(cl)) continue; // v1.8.0: no es persona
     if ('${cl['fecha_inscripcion'] ?? ''}'.startsWith(pref)) c++;
   }
   return c;
@@ -3391,6 +3428,7 @@ Future<List<Map<String, dynamic>>> inscripcionesPorEntrenador() async {
       '${n.month.toString().padLeft(2, '0')}';
   final porEntrenador = <String, int>{};
   for (final cl in await LocalDb.instance.allMirror('clientes')) {
+    if (esClienteEliminado(cl)) continue; // v1.8.0: no es persona
     if ('${cl['fecha_inscripcion'] ?? ''}'.startsWith(pref)) {
       final nombre =
           (cl['registrado_por_nombre'] as String?)?.trim() ?? 'Desconocido';

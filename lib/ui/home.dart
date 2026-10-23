@@ -974,47 +974,59 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   /// v1.3.3: tarjeta financiera contextual por rol.
-  /// Entrenador: "Mi Turno Hoy" (tocable -> MiTurnoScreen) con
-  /// cobrado hoy + pendiente a entregar + botón "Cerrar turno".
+  /// Entrenador: "Mi Turno Hoy" con cobrado hoy + pendiente a
+  /// entregar + botón "Cerrar turno".
   /// Dueño: "Estadísticas Rápidas" (antes "Pulso del Día") con cobrado
   /// hoy (-> Dashboard) + por recoger (-> Pendiente) + alerta de
   /// turnos sin reporte.
   /// v1.4.0 (Jc): ambas tarjetas muestran "Pagaron el mes" (clientes
   /// únicos del mes, misma definición que la nómina) con su base:
   /// el entrenador la ve × su tarifa y el dueño ×300.
+  /// v1.8.0 (bug de campo): la tarjeta del entrenador ya NO es un
+  /// solo botón a Mi Turno: cada dato navega a SU detalle, como
+  /// la del dueño — «Cobrado hoy» y «A entregar» a Mi Turno (ahí
+  /// viven su detalle y el desglose de pendiente), «Pagaron el
+  /// mes» al listado PagaronMesScreen y «Mi base del mes» a la
+  /// Nómina (que por rol muestra su resumen). La cabecera
+  /// «Mi Turno Hoy» sigue llevando a Mi Turno.
   Widget _tarjetaFinanciera(bool esDueno) {
     if (!esDueno) {
       return Tarjeta(
-        onTap: () => _ir(const MiTurnoScreen()),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Row(
-              children: [
-                Icon(Icons.schedule,
-                    size: 18,
-                    color: AppColores.naranja),
-                SizedBox(width: 6),
-                Text('Mi Turno Hoy',
-                    style: AppTexto.subtitulo),
-                Spacer(),
-                Icon(Icons.chevron_right,
-                    color: Colors.grey, size: 18),
-              ],
+            InkWell(
+              borderRadius: BorderRadius.circular(AppRadio.md),
+              onTap: () => _ir(const MiTurnoScreen()),
+              child: const Row(
+                children: [
+                  Icon(Icons.schedule,
+                      size: 18,
+                      color: AppColores.naranja),
+                  SizedBox(width: 6),
+                  Text('Mi Turno Hoy',
+                      style: AppTexto.subtitulo),
+                  Spacer(),
+                  Icon(Icons.chevron_right,
+                      color: Colors.grey, size: 18),
+                ],
+              ),
             ),
             const SizedBox(height: AppEspacio.sm),
             Row(
               children: [
                 Expanded(
-                    child: _datoFinanciero(
+                    child: _datoFinancieroTappable(
                         'Cobrado hoy',
                         fmtMonto(_cobradoHoy),
-                        AppColores.exito)),
+                        AppColores.exito,
+                        () => _ir(const MiTurnoScreen()))),
                 Expanded(
-                    child: _datoFinanciero(
+                    child: _datoFinancieroTappable(
                         'A entregar',
                         fmtMonto(_pendiente),
-                        AppColores.alerta)),
+                        AppColores.alerta,
+                        () => _ir(const MiTurnoScreen()))),
               ],
             ),
             const SizedBox(height: AppEspacio.sm),
@@ -1023,15 +1035,17 @@ class _HomeScreenState extends State<HomeScreen>
             Row(
               children: [
                 Expanded(
-                    child: _datoFinanciero(
+                    child: _datoFinancieroTappable(
                         'Pagaron el mes',
                         '$_pagaronMes',
-                        AppColores.naranja)),
+                        AppColores.naranja,
+                        () => _ir(const PagaronMesScreen()))),
                 Expanded(
-                    child: _datoFinanciero(
+                    child: _datoFinancieroTappable(
                         'Mi base del mes (×$_tarifaMes)',
                         fmtMonto(_pagaronMes * _tarifaMes),
-                        AppColores.exito)),
+                        AppColores.exito,
+                        () => _ir(const NominaScreen()))),
               ],
             ),
             const SizedBox(height: AppEspacio.sm),

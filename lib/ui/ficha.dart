@@ -1272,36 +1272,40 @@ class _FichaScreenState extends State<FichaScreen> {
   }
 
   /// Elimina definitivamente sin pasar por papelera (solo dueño).
-  /// Doble confirmación: advertencia + escribir "ELIMINAR".
+  /// v1.8.0: primero se elige el MODO (todo | conservando
+  /// estadísticas, diseño de Argón) y después la confirmación
+  /// fuerte de siempre: escribir "ELIMINAR".
   /// Revisado por Gemini 2026-10-13. Backend lo maneja directo.
   Future<void> _eliminarDefinitivo() async {
     final nombre = '${_c?['nombre'] ?? ''}';
-    // Primera confirmación
-    final ok1 = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => DialogoApp(
-        titulo: 'Eliminar definitivamente',
-        iconoTitulo: Icons.warning,
-        contenido: Text(
-          'Se eliminará a "$nombre" de forma PERMANENTE.\n\n'
-          'Esta acción NO se puede deshacer y NO pasa por la papelera.\n'
-          'Se borrarán sus datos, pagos e historial.',
-        ),
-        acciones: [
-          TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Cancelar')),
-          ElevatedButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.red,
-                foregroundColor: Colors.white,
-              ),
-              child: const Text('Continuar')),
-        ],
-      ),
+    // Candado 3: si debe un fiado, el modo conservar lo da por
+    // incobrable; el diálogo lo avisa antes de elegir.
+    String? avisoFiado;
+    try {
+      final fiado = await LocalDb.instance
+          .fiadoPendienteDeCliente(widget.clienteId);
+      final partes = <String>[
+        if ((fiado['CUP'] ?? 0) > 0)
+          '${fmtMonto(fiado['CUP']!)} CUP',
+        if ((fiado['USD'] ?? 0) > 0)
+          '${fmtMonto(fiado['USD']!)} USD',
+      ];
+      if (partes.isNotEmpty) {
+        avisoFiado = '⚠️ Tiene un fiado pendiente de '
+            '${partes.join(' y ')}: al eliminar conservando, la '
+            'deuda se dará por incobrable.';
+      }
+    } catch (_) {
+      // Sin lectura de fiados no se bloquea la baja: el servidor
+      // cierra el fiado igualmente en la misma op.
+    }
+    if (!mounted) return;
+    final modo = await elegirModoEliminacion(
+      context,
+      titulo: 'Eliminar definitivamente',
+      avisoFiado: avisoFiado,
     );
-    if (ok1 != true || !mounted) return;
+    if (modo == null || !mounted) return;
 
     // Segunda confirmación: escribir ELIMINAR
     // (Gemini: palabra fija evita problemas de acentos/mayúsculas)
@@ -1357,19 +1361,25 @@ class _FichaScreenState extends State<FichaScreen> {
     await LocalDb.instance.queueOp(
       opUuid: const Uuid().v4(),
       tipo: 'eliminar_cliente',
-      payload: {
-        'cliente_id': widget.clienteId,
-        'definitivo': true
-      },
+      payload: payloadOpEliminarCliente(
+          clienteId: widget.clienteId, modo: modo),
     );
+    if (modo == 'conservar') {
+      // Optimista: la cáscara local (estado='eliminado') lo saca
+      // de todas las listas al momento; el pull traerá la fila
+      // anonimizada completa. En modo 'todo' no se toca el
+      // espejo: el borrado baja por su tombstone, como siempre.
+      await LocalDb.instance
+          .updateMirrorEstado(widget.clienteId, 'eliminado');
+    }
     AppLog.info('clientes', 'eliminar_definitivo',
-        d: 'id=${widget.clienteId} nombre=$nombre');
+        d: 'id=${widget.clienteId} nombre=$nombre modo=$modo');
 
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-            content: Text(
-                'Cliente eliminado definitivamente')));
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(modo == 'conservar'
+            ? 'Cliente eliminado conservando estadísticas'
+            : 'Cliente eliminado definitivamente')));
     Navigator.of(context).pop();
     SyncEngine.instance.push();
   }

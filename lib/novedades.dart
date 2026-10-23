@@ -15,6 +15,11 @@ class Novedad {
 }
 
 const novedades = [
+  Novedad('1.8.0', [
+    'Eliminar conservando estadísticas: al eliminar definitivamente a un cliente (desde su ficha o desde la Papelera) ahora puedes elegir — «Eliminar conservando estadísticas» hace desaparecer a la persona pero sus pagos y ventas quedan anónimos, para que las estadísticas y la nómina de meses pasados no cambien; «Eliminar todo» borra también el dinero, como siempre',
+    'Si el cliente debe un fiado, el diálogo avisa el monto: al eliminar conservando, la deuda se da por incobrable',
+    'Vista del entrenador: cada dato de su tarjeta «Mi Turno Hoy» abre ahora su propio detalle («Pagaron el mes» abre el listado y «Mi base del mes» abre la Nómina), en vez de llevar todo a Mi Turno',
+  ]),
   Novedad('1.7.0', [
     'Cuenta a la Casa: las personas de la casa (familia, cortesías) quedan marcadas en dorado, con acceso permanente sin pagar ni vencer; no cuentan en nómina, vencimientos ni ingresos. Solo tú la otorgas o la quitas, desde la ficha del cliente o al inscribir',
     'Reportes App Plus: bandeja nueva con los pagos del App Plus que reportan los invitados; solo tú confirmas o rechazas (con motivo), y el Plus se activa al sincronizar',

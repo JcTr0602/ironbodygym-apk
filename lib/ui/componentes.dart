@@ -501,6 +501,111 @@ class DialogoApp extends StatelessWidget {
   }
 }
 
+/// v1.8.0: selector de modo para eliminar cliente definitivamente
+/// (ficha y papelera comparten este diálogo). Devuelve 'todo',
+/// 'conservar' o null si se cancela. Ambos modos son irreversibles
+/// y el diálogo lo dice; cada modo trae su explicación de una
+/// línea. [avisoFiado] (si el cliente debe un fiado) se muestra
+/// junto a la opción de conservar: al conservar, la deuda se da
+/// por incobrable (candado 3 de Argón).
+Future<String?> elegirModoEliminacion(
+  BuildContext context, {
+  required String titulo,
+  String? avisoFiado,
+}) async {
+  var modo = 'conservar';
+  Widget opcion(String valor, String tituloOp, String descripcion,
+      void Function(void Function()) setState) {
+    final sel = modo == valor;
+    return InkWell(
+      onTap: () => setState(() => modo = valor),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 6),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(
+              sel
+                  ? Icons.radio_button_checked
+                  : Icons.radio_button_unchecked,
+              color: sel ? AppColores.naranja : null,
+              size: 22,
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(tituloOp,
+                      style: const TextStyle(
+                          fontWeight: FontWeight.w600)),
+                  Text(descripcion,
+                      style: const TextStyle(fontSize: 13)),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  final elegido = await showDialog<String>(
+    context: context,
+    builder: (ctx) => StatefulBuilder(
+      builder: (ctx, setState) => DialogoApp(
+        titulo: titulo,
+        iconoTitulo: Icons.warning,
+        contenido: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Hay dos formas de eliminar. Ambas son IRREVERSIBLES: '
+              'no se puede deshacer ni recuperar a la persona.',
+            ),
+            const SizedBox(height: 12),
+            opcion(
+                'conservar',
+                'Eliminar conservando estadísticas',
+                'La persona desaparece; sus pagos y ventas quedan '
+                    'anónimos y las estadísticas y la nómina no cambian.',
+                setState),
+            if (avisoFiado != null && modo == 'conservar')
+              Padding(
+                padding: const EdgeInsets.only(left: 32, bottom: 4),
+                child: Text(
+                  avisoFiado,
+                  style: const TextStyle(
+                      color: Colors.red, fontWeight: FontWeight.w600),
+                ),
+              ),
+            opcion(
+                'todo',
+                'Eliminar todo',
+                'Borra también sus pagos y ventas; las estadísticas '
+                    'de meses pasados bajan.',
+                setState),
+          ],
+        ),
+        acciones: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, null),
+              child: const Text('Cancelar')),
+          ElevatedButton(
+              onPressed: () => Navigator.pop(ctx, modo),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.red,
+                foregroundColor: Colors.white,
+              ),
+              child: const Text('Continuar')),
+        ],
+      ),
+    ),
+  );
+  return elegido;
+}
+
 // ---------------------------------------------------------------------------
 // Estado vacío
 // ---------------------------------------------------------------------------

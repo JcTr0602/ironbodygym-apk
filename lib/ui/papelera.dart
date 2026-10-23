@@ -164,6 +164,35 @@ class _PapeleraScreenState extends State<PapeleraScreen> {
       peligro: true,
     );
     if (ok2 != true || !mounted) return;
+    // v1.8.0: elección de modo (todo | conservando estadísticas),
+    // la misma de la ficha. El aviso de fiado agrega las deudas
+    // de los seleccionados (candado 3: al conservar se dan por
+    // incobrables).
+    String? avisoFiado;
+    try {
+      var cup = 0.0, usd = 0.0;
+      for (final id in _seleccionados) {
+        final f = await LocalDb.instance.fiadoPendienteDeCliente(id);
+        cup += f['CUP'] ?? 0;
+        usd += f['USD'] ?? 0;
+      }
+      final partes = <String>[
+        if (cup > 0) '${fmtMonto(cup)} CUP',
+        if (usd > 0) '${fmtMonto(usd)} USD',
+      ];
+      if (partes.isNotEmpty) {
+        avisoFiado = '⚠️ Hay fiados pendientes por '
+            '${partes.join(' y ')}: al eliminar conservando, las '
+            'deudas se darán por incobrables.';
+      }
+    } catch (_) {}
+    if (!mounted) return;
+    final modo = await elegirModoEliminacion(
+      context,
+      titulo: '¿Cómo eliminar?',
+      avisoFiado: avisoFiado,
+    );
+    if (modo == null || !mounted) return;
     // v1.3.5 (fix 2026-10-16): borrado optimista atómico. Se encola la op
     // y se borra el espejo local en la MISMA transacción: la UI refleja
     // el borrado de inmediato sin esperar el viaje
@@ -171,22 +200,35 @@ class _PapeleraScreenState extends State<PapeleraScreen> {
     // Los pagos NO se tocan en local: los borra el servidor y bajan por
     // sus tombstones (si la op se rechazara, el pull no restauraría
     // pagos borrados localmente porque su sync_seq no cambió).
+    // v1.8.0: en modo 'conservar' NO se borra el espejo: la fila
+    // queda como cáscara local (estado='eliminado', fuera de
+    // todas las listas) hasta que el pull traiga la anonimizada.
     final db = await LocalDb.instance.db;
     await db.transaction((txn) async {
       for (final id in _seleccionados) {
         await LocalDb.instance.queueOp(
           opUuid: const Uuid().v4(),
           tipo: 'eliminar_cliente',
-          payload: {'cliente_id': id, 'definitivo': true},
+          payload:
+              payloadOpEliminarCliente(clienteId: id, modo: modo),
           txn: txn,
         );
-        await LocalDb.instance.deleteMirror('clientes', id, txn: txn);
+        if (modo == 'todo') {
+          await LocalDb.instance.deleteMirror('clientes', id, txn: txn);
+        }
       }
     });
+    if (modo == 'conservar') {
+      for (final id in _seleccionados) {
+        await LocalDb.instance.updateMirrorEstado(id, 'eliminado');
+      }
+    }
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(
-            '${_seleccionados.length} eliminados definitivamente')));
+        content: Text(modo == 'conservar'
+            ? '${_seleccionados.length} eliminados conservando '
+                'estadísticas'
+            : '${_seleccionados.length} eliminados definitivamente')));
     setState(() => _seleccionados.clear());
     _cargar();
     SyncEngine.instance.push();

@@ -944,7 +944,10 @@ class _AdminScreenState extends State<AdminScreen> {
       ['id', 'nombre', 'carnet', 'telefono', 'sexo', 'estado',
        'pagado_hasta', 'fecha_inscripcion'],
       [
+        // v1.8.0: sin cáscaras (estado='eliminado') en el listado
+        // de personas; sus pagos del mes sí se exportan abajo.
         for (final c in clientes)
+          if (!esClienteEliminado(c))
           [
             '${c['id'] ?? ''}',
             '${c['nombre'] ?? ''}',
