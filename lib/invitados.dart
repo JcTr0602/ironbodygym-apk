@@ -516,6 +516,9 @@ class InvitadoDetalle {
   final String nombre;
   final String telefono;
   final String? fechaNac; // 'YYYY-MM-DD'
+  // Carnet de invitado (obligatorio desde Clientes 0.9.1): 11
+  // dígitos; null en registros viejos (muestran «Sin carnet»).
+  final String? carnet;
   final String estado;
   final DateTime? creadoEn;
   final DateTime? caducaEn;
@@ -539,6 +542,7 @@ class InvitadoDetalle {
     required this.nombre,
     required this.telefono,
     this.fechaNac,
+    this.carnet,
     required this.estado,
     this.creadoEn,
     this.caducaEn,
@@ -568,6 +572,7 @@ class InvitadoDetalle {
       nombre: '${invM['nombre'] ?? ''}',
       telefono: '${invM['telefono'] ?? ''}',
       fechaNac: invM['fecha_nac'] as String?,
+      carnet: invM['carnet'] as String?,
       estado: '${invM['estado'] ?? 'activo'}',
       creadoEn: _ts(invM['creado_en']),
       caducaEn: _ts(invM['caduca_en']),

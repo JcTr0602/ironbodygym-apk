@@ -1212,6 +1212,8 @@ class _InvitadoDetalleScreenState extends State<InvitadoDetalleScreen> {
           _linea('📱 Teléfono', d.telefono),
           if (d.fechaNac != null)
             _linea('🎂 Nacimiento', fmtFecha(d.fechaNac)),
+          // Carnet (0.9.1): los viejos no lo tienen → «Sin carnet».
+          _linea('🪪 Carnet', d.carnet ?? 'Sin carnet'),
           _linea('🗓 Registrado', fechaAbsoluta(d.creadoEn)),
           _linea(
               '⏳ Caduca',
