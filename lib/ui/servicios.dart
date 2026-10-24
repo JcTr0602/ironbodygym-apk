@@ -177,35 +177,66 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                           '${tipo == 'agua_suelta' ? ' por pomo' : ''}',
                   style: AppTexto.titulo.copyWith(fontSize: 16),
                 ),
+                // v1.8.1 (pedido de Jc 2026-10-23): el diálogo de agua
+                // muestra cuántos pomos quedan (el tope ya existía en
+                // el selector de cantidad, pero el número no se veía).
+                if (tipo == 'agua_suelta') ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    _agua.saldo > 0
+                        ? 'En inventario: ${_agua.saldo} pomos'
+                        : '⚠️ Sin pomos en inventario',
+                    style: AppTexto.secundario,
+                  ),
+                ],
                 const SizedBox(height: 12),
-                Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        cliente == null
-                            ? 'Cliente: sin identificar'
-                            : 'Cliente: ${cliente!['nombre']}',
-                        style: AppTexto.cuerpo,
-                      ),
+                // v1.8.1 (pedido de Jc 2026-10-23): el cliente se elige
+                // en un campo completo y evidente, como en la venta de
+                // suplementos — el botón «Elegir» pequeño no se
+                // percibía como buscador de clientes del gym.
+                InkWell(
+                  borderRadius: BorderRadius.circular(12),
+                  onTap: () async {
+                    final sel = await _elegirCliente();
+                    if (sel != null) {
+                      setD(() {
+                        cliente = sel;
+                        paraDuenoCasa = false;
+                      });
+                    }
+                  },
+                  child: Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 12, vertical: 6),
+                    decoration: BoxDecoration(
+                      border: Border.all(color: Colors.grey.shade400),
+                      borderRadius: BorderRadius.circular(12),
                     ),
-                    TextButton(
-                      onPressed: () async {
-                        final sel = await _elegirCliente();
-                        if (sel != null) {
-                          setD(() {
-                            cliente = sel;
-                            paraDuenoCasa = false;
-                          });
-                        }
-                      },
-                      child: const Text('Elegir'),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.person_search, size: 20),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            cliente == null
+                                ? 'Cliente: sin identificar — toca para elegir del gym'
+                                : 'Cliente: ${cliente!['nombre']}',
+                            style: AppTexto.cuerpo,
+                          ),
+                        ),
+                        if (cliente != null)
+                          IconButton(
+                            visualDensity: VisualDensity.compact,
+                            icon: const Icon(Icons.close, size: 18),
+                            onPressed: () =>
+                                setD(() => cliente = null),
+                          )
+                        else
+                          const Icon(Icons.chevron_right, size: 20),
+                      ],
                     ),
-                    if (cliente != null)
-                      TextButton(
-                        onPressed: () => setD(() => cliente = null),
-                        child: const Text('Quitar'),
-                      ),
-                  ],
+                  ),
                 ),
                 if (esCasaCliente)
                   const Chip(
@@ -223,16 +254,16 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                   ),
                 if (!esCasa) ...[
                   const SizedBox(height: 8),
+                  // v1.8.1: sin iconos — con icono, «Transferencia»
+                  // se partía en dos líneas en el diálogo (visto por
+                  // Jc en campo el 2026-10-23).
                   SegmentedButton<String>(
                     segments: const [
                       ButtonSegment(
-                          value: 'efectivo',
-                          label: Text('Efectivo'),
-                          icon: Icon(Icons.payments_outlined)),
+                          value: 'efectivo', label: Text('Efectivo')),
                       ButtonSegment(
                           value: 'transferencia',
-                          label: Text('Transferencia'),
-                          icon: Icon(Icons.smartphone)),
+                          label: Text('Transferencia')),
                     ],
                     selected: {metodo},
                     onSelectionChanged: (s) =>
@@ -742,7 +773,21 @@ class _DialogoClienteState extends State<_DialogoCliente> {
             const SizedBox(height: 8),
             Expanded(
               child: filtrados.isEmpty
-                  ? const Center(child: Text('Sin resultados'))
+                  ? Center(
+                      child: Padding(
+                        padding: const EdgeInsets.all(16),
+                        child: Text(
+                          // v1.8.1: distinguir «el teléfono aún no
+                          // tiene clientes» de «la búsqueda no dio
+                          // resultados» (confusión de campo 2026-10-23).
+                          widget.clientes.isEmpty
+                              ? 'No hay clientes cargados en este teléfono.\n'
+                                  'Sincroniza la app y vuelve a intentarlo.'
+                              : 'Sin resultados para «$q»',
+                          textAlign: TextAlign.center,
+                        ),
+                      ),
+                    )
                   : ListView.builder(
                       shrinkWrap: true,
                       itemCount: filtrados.length,
