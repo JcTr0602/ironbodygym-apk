@@ -40,7 +40,7 @@ class LocalDb {
   /// v1.4.0 (Argón): versión actual del esquema local. Los tests de
   /// migración comparan contra esta constante en vez de un número
   /// fijo, para no caer en cascada de fallos con cada migración.
-  static const int versionActual = 40;
+  static const int versionActual = 41;
 
   /// v37: marcas de información pública pendiente de republicar,
   /// UNA FILA POR CLAVE (compartido entre onCreate y la migración
@@ -1108,6 +1108,11 @@ class LocalDb {
           await db.execute(
               'CREATE TABLE IF NOT EXISTS nomina_liquidada (id TEXT PRIMARY KEY, data TEXT NOT NULL, sync_seq INTEGER NOT NULL)');
         }
+        if (oldV < 41) {
+          // v1.10.0 (Bloque 2 NÚCLEO, Argón AMARILLO): MISMO método
+          // que onCreate (paridad garantizada, no SQL copiado).
+          await _crearTablasBloque2(db);
+        }
       },
     );
     // v1.2.5+28: repara el índice FTS si la migración lo omitió y el
@@ -1812,6 +1817,11 @@ class LocalDb {
         'CREATE TABLE IF NOT EXISTS adelantos (id INTEGER PRIMARY KEY, data TEXT NOT NULL, sync_seq INTEGER NOT NULL)');
     await db.execute(
         'CREATE TABLE IF NOT EXISTS nomina_liquidada (id TEXT PRIMARY KEY, data TEXT NOT NULL, sync_seq INTEGER NOT NULL)');
+    // v1.10.0 (v41, Bloque 2 NÚCLEO, Argón AMARILLO): tablas locales
+    // del Panel. Se crean con el MISMO método en onCreate y en
+    // onUpgrade (ver _crearTablasBloque2) para que la paridad de
+    // esquema no dependa de copiar el SQL dos veces.
+    await _crearTablasBloque2(db);
     // v1.4.0 (v31): caché del pre-cálculo de nómina. Solo guarda el
     // conteo de clientes que pagaron el mes + huella de insumos +
     // cuándo se calculó. Bonos y tarifa se leen siempre en vivo.
@@ -1961,6 +1971,128 @@ class LocalDb {
   /// Llamado desde _crearTablas (clean install) y onUpgrade (migración).
   /// Máquina de estados: abierto_local | abierto_sincronizado |
   /// cerrado_local | cerrado_sincronizado | no_cerrado.
+  /// v1.10.0 (v41, Bloque 2 NÚCLEO, Argón AMARILLO ajustes 1 y 3).
+  ///
+  /// Tablas locales del Panel. Se llama desde onCreate (_crearTablas)
+  /// Y desde onUpgrade (oldV < 41) para que el esquema sea idéntico
+  /// en instalación limpia y en migración (paridad de esquema).
+  ///
+  /// - tarifa_especial: 1 fila por cliente_id (el selector multi-cliente
+  ///   de Administración es solo visual: al otorgar a N clientes se
+  ///   crean N filas). Unicidad: UNA sola fila activa por
+  ///   (cliente_id, periodo) con ambos montos, garantizada por el
+  ///   índice único parcial idx_tarifa_esp_unica. NO es espejo: el
+  ///   servidor aún no tiene handler (llega por otra vía); los cambios
+  ///   del usuario viajan por ops upsert/revoke_tarifa_especial.
+  /// - plantilla_mensaje: plantillas G1 (lista blanca en
+  ///   plantilla_mensaje.dart, no en la tabla).
+  /// - compras: compras MANUALES del Centro de Compras E4 (las ventas
+  ///   del turno ya viven en ventas_suplementos/servicio_ventas y el
+  ///   Extracto las unifica en lectura; esta tabla NO las duplica).
+  static Future<void> _crearTablasBloque2(DatabaseExecutor db) async {
+    await db.execute('CREATE TABLE IF NOT EXISTS tarifa_especial ('
+        'id TEXT PRIMARY KEY, '
+        'cliente_id INTEGER NOT NULL, '
+        'nombre TEXT NOT NULL DEFAULT \'\', '
+        'monto_efectivo REAL, '
+        'monto_transferencia REAL, '
+        'periodo TEXT NOT NULL DEFAULT \'mensual\', '
+        'vigente_desde TEXT, '
+        'vigente_hasta TEXT, '
+        'motivo TEXT NOT NULL DEFAULT \'\', '
+        'otorgado_por INTEGER, '
+        'activa INTEGER NOT NULL DEFAULT 1, '
+        'historial TEXT NOT NULL DEFAULT \'[]\', '
+        'creada_ts TEXT NOT NULL, '
+        'actualizada_ts TEXT NOT NULL)');
+    // Índice único parcial (Argón ajuste 1): una sola fila activa por
+    // (cliente_id, periodo). Las filas inactivas (historial) conviven.
+    await db.execute('CREATE UNIQUE INDEX IF NOT EXISTS '
+        'idx_tarifa_esp_unica ON tarifa_especial(cliente_id, periodo) '
+        'WHERE activa = 1');
+    await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_tarifa_esp_cliente '
+        'ON tarifa_especial(cliente_id)');
+    await db.execute('CREATE TABLE IF NOT EXISTS plantilla_mensaje ('
+        'id TEXT PRIMARY KEY, '
+        'nombre TEXT NOT NULL, '
+        'cuerpo TEXT NOT NULL, '
+        'activa INTEGER NOT NULL DEFAULT 1, '
+        'creada_ts TEXT NOT NULL, '
+        'actualizada_ts TEXT NOT NULL)');
+    await db.execute('CREATE TABLE IF NOT EXISTS compras ('
+        'id TEXT PRIMARY KEY, '
+        'tipo TEXT NOT NULL, '
+        'concepto TEXT NOT NULL, '
+        'monto REAL NOT NULL, '
+        'fecha TEXT NOT NULL, '
+        'cliente_id INTEGER, '
+        'cliente_nombre TEXT NOT NULL DEFAULT \'\', '
+        'metodo TEXT NOT NULL DEFAULT \'efectivo\', '
+        'anulada INTEGER NOT NULL DEFAULT 0, '
+        'motivo_anulacion TEXT, '
+        'creada_ts TEXT NOT NULL, '
+        'op_uuid TEXT)');
+    await _sembrarTarifasEspeciales(db);
+  }
+
+  /// Siembra inicial D6 (Argón ajuste 3): IDs deterministas, INSERT OR
+  /// IGNORE, SIN encolar ningún sync_op. Si un teléfono ya tiene la
+  /// fila (o la tuvo y se inactivó), el IGNORE no la reescribe ni la
+  /// reactiva: correr la siembra dos veces no duplica ni resucita.
+  /// Yennifer Gandara (145): transferencia 2000, efectivo null.
+  /// Kevin Vera Martinez (70): efectivo 1000, transferencia null
+  /// (por transferencia rige la estándar 2500; confirmado por Jc).
+  static Future<void> _sembrarTarifasEspeciales(
+      DatabaseExecutor db) async {
+    // vigente_desde fijo por diseño (2026-10-24); creada_ts con la
+    // hora real de la migración (no se sincroniza ni se compara).
+    final ts = isoHabana(ahoraHabana());
+    const vigenteDesde = '2026-10-24';
+    await db.rawInsert(
+        'INSERT OR IGNORE INTO tarifa_especial '
+        '(id, cliente_id, nombre, monto_efectivo, monto_transferencia, '
+        'periodo, vigente_desde, vigente_hasta, motivo, otorgado_por, '
+        'activa, historial, creada_ts, actualizada_ts) '
+        'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)',
+        [
+          'seed_esp_145',
+          145,
+          'Yennifer transfer 2000',
+          null,
+          2000,
+          'mensual',
+          vigenteDesde,
+          null,
+          'pactada',
+          735772141,
+          '[]',
+          ts,
+          ts,
+        ]);
+    await db.rawInsert(
+        'INSERT OR IGNORE INTO tarifa_especial '
+        '(id, cliente_id, nombre, monto_efectivo, monto_transferencia, '
+        'periodo, vigente_desde, vigente_hasta, motivo, otorgado_por, '
+        'activa, historial, creada_ts, actualizada_ts) '
+        'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)',
+        [
+          'seed_esp_70',
+          70,
+          'Kevin 1000',
+          1000,
+          null,
+          'mensual',
+          vigenteDesde,
+          null,
+          'pactada',
+          735772141,
+          '[]',
+          ts,
+          ts,
+        ]);
+  }
+
   static Future<void> _crearTablaTurnos(Database db) async {
     await db.execute('CREATE TABLE IF NOT EXISTS turnos ('
         'turno_id TEXT PRIMARY KEY, '
@@ -2724,6 +2856,32 @@ class LocalDb {
     final data =
         jsonDecode(rows.first['data'] as String) as Map<String, dynamic>;
     data['telefono'] = telefono;
+    await d.update('clientes', {'data': jsonEncode(data)},
+        where: 'id=?', whereArgs: [clienteId]);
+  }
+
+  /// Actualización optimista de los campos BÁSICOS de la ficha
+  /// (v1.10.0, Bloque 2, Argón ajuste 4): nombre, teléfono, carnet,
+  /// sexo. Solo se tocan las claves presentes en [campos]; un valor
+  /// null ELIMINA la clave del espejo. Los campos sensibles
+  /// (pagado_hasta, Casa, permisos, accesos) NUNCA pasan por aquí:
+  /// van por updateMirrorPagadoHasta / updateMirrorCuentaCasa o por
+  /// sus flujos dedicados.
+  Future<void> updateMirrorBasico(
+      int clienteId, Map<String, dynamic?> campos) async {
+    final d = await db;
+    final rows = await d.query('clientes',
+        where: 'id=?', whereArgs: [clienteId], limit: 1);
+    if (rows.isEmpty) return;
+    final data =
+        jsonDecode(rows.first['data'] as String) as Map<String, dynamic>;
+    for (final e in campos.entries) {
+      if (e.value == null) {
+        data.remove(e.key);
+      } else {
+        data[e.key] = e.value;
+      }
+    }
     await d.update('clientes', {'data': jsonEncode(data)},
         where: 'id=?', whereArgs: [clienteId]);
   }

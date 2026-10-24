@@ -19,6 +19,8 @@ import 'package:uuid/uuid.dart';
 import '../auth.dart';
 import '../permisos_entrenador.dart';
 import '../app_log.dart';
+import '../precio_cobro.dart';
+import '../tarifa_especial.dart';
 import '../tiempo.dart';
 import '../fotos.dart';
 import '../fotos_cola.dart';
@@ -29,7 +31,9 @@ import '../sync.dart';
 import '../acceso_app_cache.dart';
 import 'componentes.dart';
 import 'dialogo_pago.dart';
+import 'panel_bloque2.dart';
 import 'preview_cobro.dart';
+import 'tarifas_especiales.dart';
 import 'diseno.dart';
 import 'editor_foto.dart';
 import 'modal_pin_acceso.dart';
@@ -51,6 +55,10 @@ class FichaScreen extends StatefulWidget {
 
 class _FichaScreenState extends State<FichaScreen> {
   Map<String, dynamic>? _c;
+  // v1.10.0 (Bloque 2, D6): especial activa mensual + si existe
+  // ALGÚN registro en tarifa_especial (para el fallback legacy).
+  Map<String, dynamic>? _especialActiva;
+  bool _tieneRegistroTarifa = false;
   List<Map<String, dynamic>> _pagos = [];
   List<Map<String, dynamic>> _suplementos = [];
   // v1.2.5 (#10): incidencias relacionadas con el cliente.
@@ -89,6 +97,17 @@ class _FichaScreenState extends State<FichaScreen> {
     final suplementos = await _suplementosDe(widget.clienteId);
     final serviciosHist = await servicios_svc
         .historialServiciosCliente(widget.clienteId);
+    // v1.10.0 (Bloque 2, D6): especial activa + existencia de
+    // registros (tolerante: si la tabla aún no existe en algún
+    // entorno de test viejo, la ficha igual abre).
+    Map<String, dynamic>? especialActiva;
+    var tieneRegistro = false;
+    try {
+      especialActiva =
+          await tarifaActivaPara(widget.clienteId, 'mensual');
+      tieneRegistro =
+          await tieneAlgunRegistroTarifa(widget.clienteId);
+    } catch (_) {}
     // v1.2.5 (#10): incidencias relacionadas (respeta visibilidad).
     final incidencias = await LocalDb.instance.incidenciasRelacionadas(
         'cliente', widget.clienteId,
@@ -111,6 +130,8 @@ class _FichaScreenState extends State<FichaScreen> {
         _foto = null;
         _regaloAnio = regaloAnio;
         _accesoSinConexion = accesoSinConexion;
+        _especialActiva = especialActiva;
+        _tieneRegistroTarifa = tieneRegistro;
       });
     }
     // Bloque 1: abrir directo en Editar (deslizar en Buscar).
@@ -373,6 +394,31 @@ class _FichaScreenState extends State<FichaScreen> {
             : 'Cuenta a la Casa retirada (se sincronizará)')));
     SyncEngine.instance.push();
     _cargar();
+  }
+
+  /// v1.10.0 (Bloque 2, D6): texto de la fila «Tarifa especial» de
+  /// Membresía. Null = no mostrar la fila.
+  String? _textoTarifaEspecial(Map<String, dynamic> c) {
+    final e = _especialActiva;
+    if (e != null) {
+      final ef = (e['monto_efectivo'] as num?)?.toDouble();
+      final tr = (e['monto_transferencia'] as num?)?.toDouble();
+      final partes = <String>[];
+      if (ef != null) partes.add('efectivo ${fmtMonto(ef)} CUP');
+      if (tr != null) {
+        partes.add('transferencia ${fmtMonto(tr)} CUP');
+      }
+      if (partes.isEmpty) return null;
+      return '${partes.join(' · ')} (${e['periodo'] ?? 'mensual'})';
+    }
+    if (!_tieneRegistroTarifa) {
+      final legacy = (c['tarifa_especial_transferencia'] as num?)
+          ?.toDouble();
+      if (legacy != null) {
+        return '${fmtMonto(legacy)} CUP por transferencia (legacy)';
+      }
+    }
+    return null;
   }
 
   Future<void> _pagar() async {
@@ -666,25 +712,13 @@ class _FichaScreenState extends State<FichaScreen> {
         TextEditingController(text: '${c['telefono'] ?? ''}');
     final carnet =
         TextEditingController(text: '${c['carnet'] ?? ''}');
-    // v0.6.0 (Pieza A): tarifa especial por transferencia (vacío = sin
-    // especial; rige el precio general por transferencia).
-    final tarifaActual = (c['tarifa_especial_transferencia'] as num?)
-        ?.toDouble();
-    final tarifa = TextEditingController(
-        text: tarifaActual == null
-            ? ''
-            : (tarifaActual == tarifaActual.roundToDouble()
-                ? '${tarifaActual.toInt()}'
-                : '$tarifaActual'));
+    // v1.10.0 (Bloque 2, Argón ajuste 4): este diálogo edita SOLO
+    // datos BÁSICOS (nombre, teléfono, carnet, sexo). La tarifa
+    // especial ya NO vive aquí: va por el modal D6. El pagado_hasta
+    // tampoco: solo lo fija el dueño desde «Datos sensibles».
     String sexo = '${c['sexo'] ?? 'M'}';
     // v1.5.0 (Bloque G): aviso de fecha de carnet imposible (no bloquea).
     var carnetInvalido = carnetFechaInvalida(carnet.text);
-    // Fecha de vencimiento vigente (v1.0.11)
-    DateTime? pagadoHasta;
-    final phRaw = c['pagado_hasta'] as String?;
-    if (phRaw != null && phRaw.isNotEmpty) {
-      pagadoHasta = DateTime.tryParse(phRaw);
-    }
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => StatefulBuilder(
@@ -762,67 +796,6 @@ class _FichaScreenState extends State<FichaScreen> {
                             setS(() => sexo = 'F')),
                   ],
                 ),
-                const SizedBox(height: 8),
-                // Selector de vencimiento vigente (v1.0.11)
-                InkWell(
-                  onTap: () async {
-                    final picked = await showDatePicker(
-                      context: ctx,
-                      initialDate: pagadoHasta ?? DateTime.now(),
-                      firstDate: DateTime(2020),
-                      lastDate: DateTime(2030),
-                      helpText: 'Pagado hasta',
-                    );
-                    if (picked != null) {
-                      setS(() => pagadoHasta = picked);
-                    }
-                  },
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 12, vertical: 12),
-                    decoration: BoxDecoration(
-                      border: Border.all(
-                          color: AppColores.borde(context)),
-                      borderRadius: BorderRadius.circular(4),
-                    ),
-                    child: Row(
-                      children: [
-                        const Icon(Icons.calendar_today, size: 18),
-                        const SizedBox(width: 8),
-                        Text(
-                          pagadoHasta == null
-                              ? 'Pagado hasta: —'
-                              : 'Pagado hasta: ${pagadoHasta!.day.toString().padLeft(2, '0')}/'
-                                  '${pagadoHasta!.month.toString().padLeft(2, '0')}/'
-                                  '${pagadoHasta!.year}',
-                          style: const TextStyle(fontSize: 15),
-                        ),
-                        const Spacer(),
-                        Icon(Icons.edit,
-                            size: 16,
-                            color: AppColores.textoSecundario(context)),
-                      ],
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 8),
-                TextField(
-                    controller: tarifa,
-                    keyboardType: const TextInputType.numberWithOptions(
-                        decimal: true),
-                    inputFormatters: [
-                      // Panel v0.6.0 (BAJO): como máximo un punto
-                      // decimal y dos decimales (antes «1.2.3»
-                      // pasaba el filtro y reventaba al guardar).
-                      FilteringTextInputFormatter.allow(
-                          RegExp(r'^\d*\.?\d{0,2}$'))
-                    ],
-                    decoration: const InputDecoration(
-                        labelText:
-                            'Tarifa especial por transferencia (CUP)',
-                        helperText:
-                            'Vacío = precio general por transferencia',
-                        border: OutlineInputBorder())),
               ],
             ),
           ),
@@ -864,32 +837,11 @@ class _FichaScreenState extends State<FichaScreen> {
           const SnackBar(content: Text('El nombre no puede estar vacío')));
       return;
     }
-    final phStr = pagadoHasta == null
-        ? null
-        : '${pagadoHasta!.year.toString().padLeft(4, '0')}-'
-            '${pagadoHasta!.month.toString().padLeft(2, '0')}-'
-            '${pagadoHasta!.day.toString().padLeft(2, '0')}';
-    // v0.6.0 (Pieza A): tarifa especial por transferencia.
-    final tarifaTxt = tarifa.text.trim();
-    double? nuevaTarifa;
-    if (tarifaTxt.isNotEmpty) {
-      nuevaTarifa = double.tryParse(tarifaTxt);
-      // Panel v0.6.0: mismo rango que el servidor (0, 1000000];
-      // sin el tope, el espejo optimista mostraba un valor que el
-      // servidor iba a rechazar.
-      if (nuevaTarifa == null ||
-          nuevaTarifa <= 0 ||
-          nuevaTarifa > 1000000) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-            content: Text(
-                'Tarifa especial inválida: monto mayor que 0 o vacío')));
-        return;
-      }
-    }
-    final tarifaOrig =
-        (c['tarifa_especial_transferencia'] as num?)?.toDouble();
-    // Argón B7: enviar SIEMPRE todos los campos (como v1.2.9) para
-    // no depender de que el backend maneje payload parcial.
+    // Argón B7: enviar SIEMPRE todos los campos básicos (como v1.2.9)
+    // para no depender de que el backend maneje payload parcial.
+    // NUNCA viajan campos sensibles por aquí (ajuste 4): ni
+    // pagado_hasta (va por _editarSensible, solo dueño), ni tarifa
+    // especial (va por el modal D6), ni Casa/permisos/accesos.
     final orig = _c ?? {};
     final nuevoNombre = nombre.text.trim();
     final nuevoTel = tel.isEmpty ? null : tel;
@@ -898,40 +850,150 @@ class _FichaScreenState extends State<FichaScreen> {
     final huboCambios = nuevoNombre != '${orig['nombre'] ?? ''}' ||
         nuevoTel != (orig['telefono'] as String?) ||
         nuevoCar != (orig['carnet'] as String?) ||
-        sexo != orig['sexo'] ||
-        phStr != (orig['pagado_hasta'] as String?) ||
-        nuevaTarifa != tarifaOrig;
+        sexo != orig['sexo'];
     if (!huboCambios) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Sin cambios')));
       return;
     }
-    final payload = <String, dynamic>{
-      'cliente_id': widget.clienteId,
-      'nombre': nuevoNombre,
-      'telefono': nuevoTel,
-      'carnet': nuevoCar,
-      'sexo': sexo,
-      'pagado_hasta': phStr,
-      // v0.6.0: siempre presente desde este diálogo (null = quitar la
-      // tarifa especial; el servidor distingue clave ausente en ops
-      // parciales de otros flujos).
-      'tarifa_especial_transferencia': nuevaTarifa,
-    };
+    final payload = payloadBasico(
+      clienteId: widget.clienteId,
+      nombre: nuevoNombre,
+      telefono: nuevoTel,
+      carnet: nuevoCar,
+      sexo: sexo,
+    );
     await LocalDb.instance.queueOp(
       opUuid: const Uuid().v4(),
       tipo: 'editar_cliente',
       payload: payload,
     );
-    // Panel v0.6.0: el parche optimista va DESPUÉS de encolar (si
-    // queueOp falla, el espejo no debe mostrar una tarifa que
-    // nunca salió del teléfono).
-    if (nuevaTarifa != tarifaOrig) {
-      await LocalDb.instance
-          .updateMirrorTarifaTransferencia(widget.clienteId, nuevaTarifa);
-    }
+    // El parche optimista va DESPUÉS de encolar (si queueOp falla,
+    // el espejo no debe mostrar un cambio que nunca salió).
+    await LocalDb.instance.updateMirrorBasico(widget.clienteId, {
+      'nombre': nuevoNombre,
+      'telefono': nuevoTel,
+      'carnet': nuevoCar,
+      'sexo': sexo,
+    });
     // v1.3.1 (Argón regresión 2): sin dispose. Controllers locales de _editar().
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Cambios guardados (se sincronizarán)')));
+    _cargar();
+    SyncEngine.instance.push();
+  }
+
+  /// v1.10.0 (Bloque 2, Argón ajuste 4): datos SENSIBLES, solo dueño.
+  /// Hoy el único escalar sensible editable aquí es pagado_hasta
+  /// (solo lo fija el dueño, regla de MODO ESTRICTO). Casa, permisos
+  /// y accesos tienen sus flujos dedicados y NO se duplican en este
+  /// modal: desde aquí se enlaza a ellos. Encola la op NUEVA
+  /// update_cliente_sensible (el servidor deberá validarla después).
+  Future<void> _editarSensible() async {
+    final c = _c;
+    if (c == null || !AuthService().isOwner) return;
+    DateTime? pagadoHasta;
+    final phRaw = c['pagado_hasta'] as String?;
+    if (phRaw != null && phRaw.isNotEmpty) {
+      pagadoHasta = DateTime.tryParse(phRaw);
+    }
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setS) => DialogoApp(
+          titulo: 'Datos sensibles',
+          iconoTitulo: Icons.security,
+          contenido: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text(
+                'Solo el dueño cambia estos datos. La Cuenta a la '
+                'Casa, los permisos y los accesos tienen sus propios '
+                'controles en el Panel del dueño.',
+                style: AppTexto.secundario,
+              ),
+              const SizedBox(height: 12),
+              InkWell(
+                onTap: () async {
+                  final picked = await showDatePicker(
+                    context: ctx,
+                    initialDate: pagadoHasta ?? DateTime.now(),
+                    firstDate: DateTime(2020),
+                    lastDate: DateTime(2030),
+                    helpText: 'Pagado hasta',
+                  );
+                  if (picked != null) {
+                    setS(() => pagadoHasta = picked);
+                  }
+                },
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 12, vertical: 12),
+                  decoration: BoxDecoration(
+                    border: Border.all(
+                        color: AppColores.borde(context)),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.calendar_today, size: 18),
+                      const SizedBox(width: 8),
+                      Text(
+                        pagadoHasta == null
+                            ? 'Pagado hasta: —'
+                            : 'Pagado hasta: ${pagadoHasta!.day.toString().padLeft(2, '0')}/'
+                                '${pagadoHasta!.month.toString().padLeft(2, '0')}/'
+                                '${pagadoHasta!.year}',
+                        style: const TextStyle(fontSize: 15),
+                      ),
+                      const Spacer(),
+                      Icon(Icons.edit,
+                          size: 16,
+                          color: AppColores.textoSecundario(context)),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+          acciones: [
+            TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('Cancelar')),
+            ElevatedButton(
+                onPressed: () => Navigator.pop(ctx, true),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColores.naranja,
+                  foregroundColor: Colors.white,
+                ),
+                child: const Text('Guardar')),
+          ],
+        ),
+      ),
+    );
+    if (ok != true || !mounted) return;
+    final phStr = pagadoHasta == null
+        ? null
+        : '${pagadoHasta!.year.toString().padLeft(4, '0')}-'
+            '${pagadoHasta!.month.toString().padLeft(2, '0')}-'
+            '${pagadoHasta!.day.toString().padLeft(2, '0')}';
+    if (phStr == (c['pagado_hasta'] as String?)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Sin cambios')));
+      return;
+    }
+    await LocalDb.instance.queueOp(
+      opUuid: const Uuid().v4(),
+      tipo: 'update_cliente_sensible',
+      payload: payloadSensible(
+          clienteId: widget.clienteId, pagadoHasta: phStr),
+    );
+    if (phStr != null) {
+      await LocalDb.instance
+          .updateMirrorPagadoHasta(widget.clienteId, phStr);
+    }
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Cambios guardados (se sincronizarán)')));
@@ -1285,123 +1347,6 @@ class _FichaScreenState extends State<FichaScreen> {
   /// estadísticas, diseño de Argón) y después la confirmación
   /// fuerte de siempre: escribir "ELIMINAR".
   /// Revisado por Gemini 2026-10-13. Backend lo maneja directo.
-  Future<void> _eliminarDefinitivo() async {
-    final nombre = '${_c?['nombre'] ?? ''}';
-    // Candado 3: si debe un fiado, el modo conservar lo da por
-    // incobrable; el diálogo lo avisa antes de elegir.
-    String? avisoFiado;
-    try {
-      final fiado = await LocalDb.instance
-          .fiadoPendienteDeCliente(widget.clienteId);
-      final partes = <String>[
-        if ((fiado['CUP'] ?? 0) > 0)
-          '${fmtMonto(fiado['CUP']!)} CUP',
-        if ((fiado['USD'] ?? 0) > 0)
-          '${fmtMonto(fiado['USD']!)} USD',
-      ];
-      if (partes.isNotEmpty) {
-        avisoFiado = '⚠️ Tiene un fiado pendiente de '
-            '${partes.join(' y ')}: al eliminar conservando, la '
-            'deuda se dará por incobrable.';
-      }
-    } catch (_) {
-      // Sin lectura de fiados no se bloquea la baja: el servidor
-      // cierra el fiado igualmente en la misma op.
-    }
-    if (!mounted) return;
-    final modo = await elegirModoEliminacion(
-      context,
-      titulo: 'Eliminar definitivamente',
-      avisoFiado: avisoFiado,
-    );
-    if (modo == null || !mounted) return;
-
-    // Segunda confirmación: escribir ELIMINAR
-    // (Gemini: palabra fija evita problemas de acentos/mayúsculas)
-    final ctrl = TextEditingController();
-    var coincide = false;
-    final ok2 = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setState) => AlertDialog(
-          title: const Text('Confirmación final'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Text(
-                'Escribe ELIMINAR en mayúsculas para confirmar.',
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: ctrl,
-                textCapitalization:
-                    TextCapitalization.characters,
-                decoration: const InputDecoration(
-                  labelText: 'ELIMINAR',
-                  border: OutlineInputBorder(),
-                ),
-                onChanged: (v) => setState(
-                    () => coincide = v.trim() == 'ELIMINAR'),
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-                onPressed: () =>
-                    Navigator.pop(ctx, false),
-                child: const Text('Cancelar')),
-            ElevatedButton(
-                // Gemini: deshabilitar hasta que coincida
-                onPressed: coincide
-                    ? () => Navigator.pop(ctx, true)
-                    : null,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.red,
-                  foregroundColor: Colors.white,
-                ),
-                child: const Text('Eliminar')),
-          ],
-        ),
-      ),
-    );
-    ctrl.dispose();
-    if (ok2 != true || !mounted) return;
-
-    if (modo == 'conservar') {
-      // Optimista ATÓMICO (corrección del panel, v1.8.0): la op y
-      // el marcado de la cáscara local (estado='eliminado', que lo
-      // saca de todas las listas al momento) van en UNA
-      // transacción; si el proceso muere a mitad, no puede quedar
-      // la op encolada con la persona visible. El pull traerá la
-      // fila anonimizada completa.
-      await LocalDb.instance.queueOpYMarcarEliminado(
-        opUuid: const Uuid().v4(),
-        payload: payloadOpEliminarCliente(
-            clienteId: widget.clienteId, modo: modo),
-        clienteId: widget.clienteId,
-      );
-    } else {
-      // En modo 'todo' no se toca el espejo: el borrado baja por
-      // su tombstone, como siempre.
-      await LocalDb.instance.queueOp(
-        opUuid: const Uuid().v4(),
-        tipo: 'eliminar_cliente',
-        payload: payloadOpEliminarCliente(
-            clienteId: widget.clienteId, modo: modo),
-      );
-    }
-    AppLog.info('clientes', 'eliminar_definitivo',
-        d: 'id=${widget.clienteId} nombre=$nombre modo=$modo');
-
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(modo == 'conservar'
-            ? 'Cliente eliminado conservando estadísticas'
-            : 'Cliente eliminado definitivamente')));
-    Navigator.of(context).pop();
-    SyncEngine.instance.push();
-  }
-
   /// Congelar/descongelar membresía (v1.0.9).
   /// El cliente congelado no aparece en vencidos.
   Future<void> _congelar() async {
@@ -1447,7 +1392,11 @@ class _FichaScreenState extends State<FichaScreen> {
   }
 
   /// Corregir pago (solo admin): editar monto/fecha o anular, con doble
-  /// confirmación. Encola 'editar_pago' / 'anular_pago'.
+  /// confirmación y MOTIVO obligatorio (v1.10.0, Bloque 2, Argón
+  /// ajuste 4: ninguna corrección contable sin motivo registrado).
+  /// Ventas cerradas y adelantos aplicados NO tienen edición inline
+  /// en la ficha (nunca la tuvieron): van por sus flujos de reverso.
+  /// Encola 'editar_pago' / 'anular_pago'.
   Future<void> _corregirPago(Map<String, dynamic> p) async {
     final pagoId = p['id'] as int?;
     if (pagoId == null) return;
@@ -1475,14 +1424,27 @@ class _FichaScreenState extends State<FichaScreen> {
     if (accion == null || !mounted) return;
 
     if (accion == 'anular') {
+      final motivoCtrl = TextEditingController();
       final ok = await showDialog<bool>(
         context: context,
         builder: (ctx) => DialogoApp(
           titulo: 'Anular pago',
           iconoTitulo: Icons.cancel,
-          contenido: const Text(
-              '¿Seguro? El pago quedará anulado en el sistema. '
-              'Esta acción se sincronizará.'),
+          contenido: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text(
+                  '¿Seguro? El pago quedará anulado en el sistema. '
+                  'Esta acción se sincronizará.'),
+              const SizedBox(height: 12),
+              TextField(
+                controller: motivoCtrl,
+                decoration: const InputDecoration(
+                    labelText: 'Motivo (obligatorio)',
+                    border: OutlineInputBorder()),
+              ),
+            ],
+          ),
           acciones: [
             TextButton(
                 onPressed: () => Navigator.pop(ctx, false),
@@ -1496,10 +1458,16 @@ class _FichaScreenState extends State<FichaScreen> {
         ),
       );
       if (ok != true || !mounted) return;
+      final motivo = motivoCtrl.text.trim();
+      if (motivo.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('Falta el motivo de la anulación.')));
+        return;
+      }
       await LocalDb.instance.queueOp(
         opUuid: const Uuid().v4(),
         tipo: 'anular_pago',
-        payload: {'pago_id': pagoId},
+        payload: {'pago_id': pagoId, 'motivo': motivo},
       );
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
@@ -1514,6 +1482,7 @@ class _FichaScreenState extends State<FichaScreen> {
         text: fmtMonto(p['monto']));
     final fechaCtrl = TextEditingController(
         text: (p['fecha'] as String? ?? '').substring(0, 10));
+    final motivoCtrl = TextEditingController();
     String metodo = '${p['metodo'] ?? 'efectivo'}';
     final datos = await showDialog<Map<String, String>>(
       context: context,
@@ -1558,6 +1527,13 @@ class _FichaScreenState extends State<FichaScreen> {
                 ),
               ],
             ),
+            const SizedBox(height: 8),
+            TextField(
+              controller: motivoCtrl,
+              decoration: const InputDecoration(
+                  labelText: 'Motivo (obligatorio)',
+                  border: OutlineInputBorder()),
+            ),
           ],
         ),
         acciones: [
@@ -1569,6 +1545,7 @@ class _FichaScreenState extends State<FichaScreen> {
                     'monto': montoCtrl.text,
                     'fecha': fechaCtrl.text,
                     'metodo': metodo,
+                    'motivo': motivoCtrl.text,
                   }),
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppColores.naranja,
@@ -1587,10 +1564,16 @@ class _FichaScreenState extends State<FichaScreen> {
     final monto =
         double.tryParse(datos['monto']!.replaceAll(',', '.'));
     final fecha = datos['fecha']!.trim();
+    final motivo = (datos['motivo'] ?? '').trim();
     final fechaOk = RegExp(r'^\d{4}-\d{2}-\d{2}$').hasMatch(fecha);
     if (monto == null || monto <= 0 || !fechaOk) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
           content: Text('Monto o fecha inválidos')));
+      return;
+    }
+    if (motivo.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Falta el motivo de la corrección.')));
       return;
     }
     final confirma = await showDialog<bool>(
@@ -1600,7 +1583,8 @@ class _FichaScreenState extends State<FichaScreen> {
         iconoTitulo: Icons.check_circle,
         contenido: Text(
             'De: ${fmtMonto(p['monto'])} CUP — ${fmtFecha(p['fecha'] as String?)} — ${p['metodo'] ?? ''}\n'
-            'A: ${fmtMonto(monto)} CUP — $fecha — ${datos['metodo']}'),
+            'A: ${fmtMonto(monto)} CUP — $fecha — ${datos['metodo']}\n'
+            'Motivo: $motivo'),
         acciones: [
           TextButton(
               onPressed: () => Navigator.pop(ctx, false),
@@ -1624,6 +1608,7 @@ class _FichaScreenState extends State<FichaScreen> {
         'monto': monto,
         'fecha': fecha,
         'metodo': datos['metodo'],
+        'motivo': motivo,
       },
     );
     if (!mounted) return;
@@ -2069,17 +2054,16 @@ class _FichaScreenState extends State<FichaScreen> {
                                 _pagos.isEmpty
                                     ? '—'
                                     : etiquetaPeriodo(_pagos.first)),
-                            // Bloque 1: tarifa especial visible (hoy
-                            // solo existe la de transferencia, que
-                            // vive en el espejo; la de efectivo de
-                            // Kevin llega con la entidad D6).
-                            if ((c['tarifa_especial_transferencia']
-                                    as num?) !=
-                                null)
+                            // v1.10.0 (Bloque 2, D6): la entidad
+                            // manda. Legacy solo si NO existe ningún
+                            // registro en tarifa_especial (ajuste 3:
+                            // si existe aunque sea inactivo, la
+                            // legacy se ignora para siempre).
+                            if (_textoTarifaEspecial(c) != null)
                               _filaInfo(
                                   Icons.local_offer,
                                   'Tarifa especial',
-                                  '${fmtMonto(c['tarifa_especial_transferencia'])} CUP por transferencia'),
+                                  _textoTarifaEspecial(c)!),
                             _filaInfo(
                                 Icons.date_range,
                                 'Inscripción',
@@ -2231,15 +2215,62 @@ class _FichaScreenState extends State<FichaScreen> {
                                 dense: true,
                                 contentPadding: EdgeInsets.zero,
                                 leading: const Icon(
-                                    Icons.delete_forever,
-                                    color: Colors.red,
+                                    Icons.local_offer,
+                                    color: AppColores.naranja,
                                     size: 20),
                                 title: const Text(
-                                    'Eliminar definitivamente',
-                                    style: TextStyle(
-                                        color: Colors.red)),
-                                onTap: _eliminarDefinitivo,
+                                    'Tarifa especial',
+                                    style: AppTexto.cuerpo),
+                                subtitle: const Text(
+                                    'Otorgar, editar o revocar (con motivo e historial)',
+                                    style: AppTexto.secundario),
+                                onTap: () async {
+                                  await mostrarModalTarifaEspecial(
+                                    context,
+                                    clienteId: widget.clienteId,
+                                    clienteNombre:
+                                        '${_c?['nombre'] ?? ''}',
+                                  );
+                                  _cargar();
+                                },
                               ),
+                              ListTile(
+                                dense: true,
+                                contentPadding: EdgeInsets.zero,
+                                leading: const Icon(
+                                    Icons.security,
+                                    color: AppColores.naranja,
+                                    size: 20),
+                                title: const Text(
+                                    'Datos sensibles',
+                                    style: AppTexto.cuerpo),
+                                subtitle: const Text(
+                                    'Pagado hasta (solo el dueño)',
+                                    style: AppTexto.secundario),
+                                onTap: _editarSensible,
+                              ),
+                              ListTile(
+                                dense: true,
+                                contentPadding: EdgeInsets.zero,
+                                leading: const Icon(
+                                    Icons.help_outline,
+                                    color: AppColores.naranja,
+                                    size: 20),
+                                title: const Text(
+                                    'Permisos explicados',
+                                    style: AppTexto.cuerpo),
+                                subtitle: const Text(
+                                    'Qué permite cada permiso, en sencillo',
+                                    style: AppTexto.secundario),
+                                onTap: () =>
+                                    mostrarPermisosExplicados(context),
+                              ),
+                              // v1.10.0 (Bloque 2, Argón ajuste 4):
+                              // el borrado físico SALE de la ficha.
+                              // Archivar = enviar a papelera (ya
+                              // existe en TarjetaAccionesCliente).
+                              // El borrado físico deliberado vive
+                              // solo en la Papelera del Panel.
                             ],
                           ),
                         ),

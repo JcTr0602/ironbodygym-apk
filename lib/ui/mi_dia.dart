@@ -9,6 +9,7 @@ import 'dart:io';
 import '../fotos.dart';
 import '../localdb.dart';
 import '../negocio.dart';
+import '../tiempo.dart';
 import '../auth.dart';
 import 'componentes.dart';
 import 'diseno.dart';
@@ -32,6 +33,9 @@ class _MiDiaScreenState extends State<MiDiaScreen> {
   Map<String, Map<String, dynamic>> _porEntrenador = {};
   Map<String, Map<String, double>> _diariosPorTurno = {};
   List<String> _turnosSinReporte = [];
+  // v1.10.0 (Bloque 2, A1): píldora de estado de sync, siempre visible.
+  DateTime? _ultimoPull;
+  int _opsPendientes = 0;
   // v1.3.3: navegación Mes → Día → Turno.
   // _modo: 0 = Hoy (vista actual), 1 = Mes, 2 = Detalle de día.
   int _modo = 0;
@@ -108,6 +112,16 @@ class _MiDiaScreenState extends State<MiDiaScreen> {
     // v1.3.2: pagos diarios por turno y turnos sin reporte.
     final diariosPorTurno = await resumenDiarioPorTurno(hoy, soloTelegramId: soloTid);
     final sinReporte = await turnosSinReporte(hoy, soloTelegramId: soloTid);
+    // v1.10.0 (Bloque 2, A1): frescura de sync para la píldora.
+    DateTime? ultimoPull;
+    var opsPendientes = 0;
+    try {
+      final ts = await LocalDb.instance.getMeta('ultimo_pull_ts');
+      ultimoPull = ts == null ? null : DateTime.tryParse(ts);
+    } catch (_) {}
+    try {
+      opsPendientes = await LocalDb.instance.countPendingOps();
+    } catch (_) {}
     if (mounted) {
       setState(() {
         _cobrados = cobrados;
@@ -118,6 +132,8 @@ class _MiDiaScreenState extends State<MiDiaScreen> {
         _porEntrenador = porEntrenador;
         _diariosPorTurno = diariosPorTurno;
         _turnosSinReporte = sinReporte;
+        _ultimoPull = ultimoPull;
+        _opsPendientes = opsPendientes;
         _cargando = false;
       });
     }
@@ -327,6 +343,13 @@ class _MiDiaScreenState extends State<MiDiaScreen> {
                     },
                   ),
                 ),
+                // v1.10.0 (Bloque 2, A1): píldora de estado de sync,
+                // siempre visible. Mismo texto de frescura que Buscar.
+                Padding(
+                  padding:
+                      const EdgeInsets.fromLTRB(16, 8, 16, 0),
+                  child: _pildoraSync(),
+                ),
                 Expanded(
                   child: _modo == 1
                       ? _vistaMes()
@@ -336,6 +359,54 @@ class _MiDiaScreenState extends State<MiDiaScreen> {
                 ),
               ],
             ),
+    );
+  }
+
+  /// v1.10.0 (Bloque 2, A1): píldora de estado de sync. Texto de
+  /// frescura igual al de Buscar; si hay ops en cola, se cuentan.
+  Widget _pildoraSync() {
+    final ts = _ultimoPull;
+    String frescura;
+    if (ts == null) {
+      frescura = 'Sin registro de actualización';
+    } else {
+      final diff = ahoraHabana().difference(ts);
+      if (diff.inMinutes < 1) {
+        frescura = 'Actualizado ahora mismo';
+      } else if (diff.inMinutes < 60) {
+        frescura = 'hace ${diff.inMinutes} min';
+      } else if (diff.inHours < 24) {
+        frescura = 'hace ${diff.inHours} h';
+      } else {
+        frescura = 'hace ${diff.inDays} días';
+      }
+    }
+    final pendientes = _opsPendientes;
+    final texto = ts == null && pendientes == 0
+        ? frescura
+        : pendientes == 0
+            ? 'Sincronizado · $frescura'
+            : ts == null
+                ? '$frescura · $pendientes ops pendientes de subir'
+                : 'Sincronizado $frescura · $pendientes ops pendientes de subir';
+    final color =
+        pendientes == 0 ? AppColores.exito : AppColores.alerta;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: color.withValues(alpha: 0.4)),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.sync, size: 16, color: color),
+          const SizedBox(width: 8),
+          Expanded(
+              child: Text(texto, style: const TextStyle(fontSize: 13))),
+        ],
+      ),
     );
   }
 

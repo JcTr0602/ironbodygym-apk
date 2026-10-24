@@ -9,6 +9,9 @@ import 'package:flutter/services.dart';
 
 import '../localdb.dart';
 import '../negocio.dart';
+import '../precio_cobro.dart';
+import '../tarifa_especial.dart';
+import '../tiempo.dart';
 import '../tipos_pago.dart';
 import 'componentes.dart';
 import 'diseno.dart';
@@ -21,12 +24,18 @@ class PeriodoSel {
   final double monto; // calculado o manual
   // v1.0.16: id del tipo de pago dinámico elegido (si aplica)
   final String? tipoId;
+  // v1.10.0 (Bloque 2, D6): escalón que decidió el monto (ver
+  // precio_cobro.dart) y avisos no bloqueantes (especial vencida...).
+  final String escalon;
+  final List<String> avisos;
   const PeriodoSel(
       {required this.periodo,
       this.meses = 1,
       this.dias = 0,
       required this.monto,
-      this.tipoId});
+      this.tipoId,
+      this.escalon = 'estandar',
+      this.avisos = const []});
 }
 
 int _diasDe(PeriodoSel s) {
@@ -79,6 +88,69 @@ Future<Map<String, dynamic>?> pagoDialogo(
   final tiposDisp = menor
       ? tipos.where((t) => t.id != 'mensual').toList()
       : tipos;
+  // v1.10.0 (Bloque 2, D6): contexto de precio ÚNICO. Se carga una
+  // vez (especiales del cliente + precios) y actual() usa la función
+  // pura calcularPrecioCobro con la selección vigente. Los 3 puntos
+  // de cobro ya bloquean Casa antes de llegar aquí; si aun así llega
+  // una Casa, no se cobra (defensa, no camino normal).
+  final esCasa =
+      cliente['cuenta_casa'] == 1 || cliente['cuenta_casa'] == true;
+  if (esCasa) {
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Una Cuenta a la Casa no paga mensualidad.')));
+    }
+    return null;
+  }
+  final clienteId = (cliente['id'] as num?)?.toInt() ?? 0;
+  var filasEspecial = <Map<String, dynamic>>[];
+  if (clienteId > 0) {
+    try {
+      filasEspecial = await tarifasDeCliente(clienteId);
+    } catch (_) {}
+  }
+  final tieneRegistroEsp = filasEspecial.isNotEmpty;
+  double montoTipo(String id, double def) {
+    for (final t in tipos) {
+      if (t.id == id) return t.monto;
+    }
+    return def;
+  }
+
+  final preciosMapa = <String, double>{
+    'mensual': montoTipo('mensual', 2000),
+    'menores': montoTipo('menores', 1500),
+    'transfer': transfer,
+    'semanal': montoTipo('semanal', 600),
+    'quincenal': montoTipo('quincenal', 1200),
+  };
+
+  /// Especial aplicable a (periodo motor, método): fila activa de ese
+  /// periodo, o la legacy sintética (solo si NO hay ningún registro
+  /// y es transferencia mensual; ajuste 3).
+  Map<String, dynamic>? especialPara(String periodoMotor, String met) {
+    for (final f in filasEspecial) {
+      if (f['activa'] == 1 && '${f['periodo']}' == periodoMotor) {
+        return f;
+      }
+    }
+    if (!tieneRegistroEsp &&
+        periodoMotor == 'mensual' &&
+        met == 'transferencia') {
+      final legacy =
+          (cliente['tarifa_especial_transferencia'] as num?)?.toDouble();
+      if (legacy != null) {
+        return {
+          'periodo': 'mensual',
+          'monto_transferencia': legacy,
+          'monto_efectivo': null,
+          'vigente_desde': null,
+          'vigente_hasta': null,
+        };
+      }
+    }
+    return null;
+  }
   TipoPago tipoSel =
       tiposDisp.firstWhere((t) => t.id == (menor ? 'menores' : 'mensual'),
           orElse: () => tiposDisp.first);
@@ -147,10 +219,15 @@ Future<Map<String, dynamic>?> pagoDialogo(
   /// Mapea el tipo elegido al período del motor del servidor.
   /// Los 4 fijos usan su período nativo; los personalizados van como
   /// 'personalizado' (días + monto), sin cambios en el servidor.
+  /// v1.10.0 (Bloque 2, D6): los 4 fijos pasan por calcularPrecioCobro
+  /// (función ÚNICA): especial > menores > Oferta > estándar. Los
+  /// tipos personalizados (Oferta) conservan su propio monto.
   PeriodoSel actual() {
     double monto;
     String periodo;
     int dias = 0;
+    String escalon = 'estandar';
+    List<String> avisos = const [];
     final id = tipoSel.id;
     if (id == 'personalizado') {
       periodo = 'personalizado';
@@ -158,31 +235,75 @@ Future<Map<String, dynamic>?> pagoDialogo(
       monto = double.tryParse(
               montoCtrl.text.trim().replaceAll(',', '.')) ??
           0;
-    } else if (id == 'semanal') {
-      periodo = 'semanal';
-      monto = tipoSel.monto;
-    } else if (id == 'quincenal') {
-      periodo = 'quincenal';
-      monto = tipoSel.monto;
+    } else if (id == 'semanal' || id == 'quincenal') {
+      periodo = id;
+      final r = calcularPrecioCobro(
+          periodo: id,
+          metodo: metodo,
+          esCasa: false,
+          esMenor: menor,
+          precios: preciosMapa,
+          especial: especialPara(id, metodo),
+          hoyHabana: hoyHabanaIso());
+      monto = r.monto;
+      escalon = r.escalon;
+      avisos = r.avisos;
     } else if (id == 'mensual' || id == 'menores') {
       periodo = 'mensual';
-      // transferencia solo afecta al mensual normal
-      final unit = (metodo == 'transferencia' && id == 'mensual')
-          ? transfer
-          : tipoSel.monto;
-      monto = unit * meses;
+      final r = calcularPrecioCobro(
+          periodo: 'mensual',
+          metodo: metodo,
+          esCasa: false,
+          esMenor: menor,
+          precios: preciosMapa,
+          especial: especialPara('mensual', metodo),
+          hoyHabana: hoyHabanaIso());
+      monto = r.monto * meses;
+      escalon = r.escalon;
+      avisos = r.avisos;
     } else {
       // Tipo personalizado de Jc -> motor 'personalizado'
       periodo = 'personalizado';
       dias = tipoSel.dias;
       monto = tipoSel.monto;
+      escalon = 'oferta';
     }
     return PeriodoSel(
         periodo: periodo,
         meses: meses,
         dias: dias,
         monto: monto,
-        tipoId: id == 'personalizado' ? null : id);
+        tipoId: id == 'personalizado' ? null : id,
+        escalon: escalon,
+        avisos: avisos);
+  }
+
+  /// Precio que mostraría la etiqueta de un tipo en el desplegable
+  /// (meses = 1): el mismo que cobraría actual() con ese tipo.
+  double montoEtiqueta(TipoPago t) {
+    if (t.id == 'mensual' || t.id == 'menores') {
+      return calcularPrecioCobro(
+              periodo: 'mensual',
+              metodo: metodo,
+              esCasa: false,
+              esMenor: menor,
+              precios: preciosMapa,
+              especial: especialPara('mensual', metodo),
+              hoyHabana: hoyHabanaIso())
+          .monto;
+    }
+    if (t.id == 'semanal' || t.id == 'quincenal') {
+      return calcularPrecioCobro(
+              periodo: t.id,
+              metodo: metodo,
+              esCasa: false,
+              esMenor: menor,
+              precios: preciosMapa,
+              especial: especialPara(t.id, metodo),
+              hoyHabana: hoyHabanaIso())
+          .monto;
+    }
+    return t.monto;
   }
 
   bool valido(PeriodoSel s) {
@@ -341,8 +462,8 @@ Future<Map<String, dynamic>?> pagoDialogo(
                     for (final t in tiposDisp)
                       DropdownMenuItem(
                           value: t.id,
-                            child: Text(
-                                '${t.nombre} (${fmtMonto((metodo == 'transferencia' && t.id == 'mensual') ? transfer : t.monto)} CUP)')),
+                          child: Text(
+                              '${t.nombre} (${fmtMonto(montoEtiqueta(t))} CUP)')),
                     const DropdownMenuItem(
                         value: 'personalizado',
                         child: Text('Personalizado…')),
@@ -436,6 +557,23 @@ Future<Map<String, dynamic>?> pagoDialogo(
                 Text('Monto: ${fmtMonto(s.monto)} CUP',
                     style:
                         const TextStyle(fontWeight: FontWeight.bold)),
+                // v1.10.0 (Bloque 2, D6): chip + avisos del escalón
+                // que decidió el precio (no bloquean, informan).
+                if (s.escalon == 'especial')
+                  const Padding(
+                    padding: EdgeInsets.only(top: 4),
+                    child: Chip(
+                      label: Text('Tarifa especial'),
+                      visualDensity: VisualDensity.compact,
+                    ),
+                  ),
+                for (final a in s.avisos)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 2),
+                    child: Text(a,
+                        style: const TextStyle(
+                            fontSize: 13, color: Colors.orange)),
+                  ),
                 Text('Nuevo vencimiento: ${fmtFecha(nuevo)}',
                     style:
                         const TextStyle(fontWeight: FontWeight.bold)),

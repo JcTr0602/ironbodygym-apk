@@ -54,6 +54,14 @@ import 'reportes_plus.dart';
 import 'reservas.dart';
 import 'suplementos.dart';
 import 'widgets.dart';
+import 'mi_dia.dart';
+import 'panel_bloque2.dart';
+import 'centro_compras.dart';
+import 'plantillas_mensaje.dart';
+import 'tarifas_especiales.dart';
+import 'usuarios.dart';
+import 'servicios_admin.dart';
+import 'cumpleanos.dart';
 
 class AdminScreen extends StatefulWidget {
   const AdminScreen({super.key});
@@ -1022,6 +1030,8 @@ class _AdminScreenState extends State<AdminScreen> {
                         _lineaCuentasCasa(),
                         _tituloSeccion('MÓDULOS'),
                         _tarjetasModulos(),
+                        _tituloSeccion('BLOQUE 2 · PANEL'),
+                        _bloque2(),
                         Padding(
                           padding: const EdgeInsets.fromLTRB(24, 16, 24, 4),
                           child: Text(
@@ -1120,6 +1130,91 @@ class _AdminScreenState extends State<AdminScreen> {
 
   /// Título de bloque del panel (mockup v2): versalitas con tracking;
   /// naranja en «Necesita tu atención», gris en el resto.
+  /// v1.10.0 (Bloque 2 NÚCLEO): sección del Panel con el núcleo
+  /// operativo. A1 es ACCESO DIRECTO al resumen que ya existe (no
+  /// una pantalla nueva): al tocarlo dispara un pull/push silencioso
+  /// y abre MiDiaScreen, que muestra la píldora de estado. G2 y los
+  /// ítems C/F/H NO están aquí: van a la 1.11.0.
+  Widget _bloque2() {
+    Widget fila(IconData icono, String titulo, String? subtitulo,
+        VoidCallback onTap) {
+      return ListTile(
+        dense: true,
+        contentPadding: EdgeInsets.zero,
+        leading: Icon(icono, color: AppColores.naranja, size: 20),
+        title: Text(titulo, style: AppTexto.cuerpo),
+        subtitle:
+            subtitulo == null ? null : Text(subtitulo, style: AppTexto.secundario),
+        trailing: const Icon(Icons.chevron_right, size: 18),
+        onTap: onTap,
+      );
+    }
+
+    void ir(Widget pantalla) {
+      Navigator.push(
+          context, MaterialPageRoute(builder: (_) => pantalla));
+    }
+
+    return Tarjeta(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          fila(Icons.today, 'Resumen del día', 'Abre el Día del gym',
+              () {
+            // A1: pull/push silencioso (best-effort, sin bloquear)
+            // y luego abrir la vista que ya existe.
+            _syncSilencioso();
+            ir(const MiDiaScreen());
+          }),
+          fila(Icons.receipt_long, 'Centro de Compras y Extracto',
+              'E4 · Todo | Suplementos | Servicios, con subtotales',
+              () => ir(const CentroComprasScreen())),
+          fila(Icons.message, 'Plantillas de mensajes',
+              'G1 · Solo variables blancas, aviso si la sync es vieja',
+              () => ir(const PlantillasScreen())),
+          fila(Icons.local_offer, 'Tarifas',
+              'D1 + D6 · Estándar y especiales, otorgar y revocar',
+              () => ir(const TarifasScreen())),
+          fila(Icons.home_rounded, 'Cuentas a la Casa',
+              'B5 · Precio 0, solo el dueño las otorga',
+              () => ir(const CuentasCasaScreen())),
+          fila(Icons.warning_amber, 'Productos sin foto o sin precio',
+              'E5 · Señalados para completar el catálogo',
+              () => ir(const SinFotoPrecioScreen())),
+          fila(Icons.event, 'Vencimientos próximos',
+              'D3 · Vencidos + próximos 7 días, con acción',
+              () => ir(const VencimientosProximosScreen())),
+          fila(Icons.security, 'Permisos explicados',
+              'B2 · Qué permite cada permiso, en sencillo',
+              () => mostrarPermisosExplicados(context)),
+          fila(Icons.manage_accounts, 'Entrenadores y usuarios APK',
+              'B4 · Crear entrenador y compartir credenciales',
+              () => ir(const UsuariosScreen())),
+          fila(Icons.group, 'Solicitudes de invitados',
+              'B6 · Por atender', () => ir(const InvitadosScreen())),
+          fila(Icons.cake, 'Cumpleaños del mes',
+              'D2 · Regalo en un toque desde la ficha',
+              () => ir(const CumpleanosScreen())),
+          fila(Icons.fitness_center, 'Catálogo de suplementos',
+              'E2 · Con foto, precio y margen',
+              () => ir(const SuplementosScreen())),
+          fila(Icons.inventory_2, 'Botes y lotes',
+              'E3 · Desde Administración',
+              () => ir(const ServiciosAdminScreen())),
+        ],
+      ),
+    );
+  }
+
+  /// A1: pull/push silencioso en segundo plano. Best-effort: si no
+  /// hay red, no se avisa ni se bloquea nada.
+  void _syncSilencioso() async {
+    try {
+      await SyncEngine.instance.push();
+      await SyncEngine.instance.pull();
+    } catch (_) {}
+  }
+
   Widget _tituloSeccion(String titulo,
       {bool naranja = false, String? derecha}) {
     return Padding(

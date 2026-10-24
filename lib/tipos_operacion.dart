@@ -57,6 +57,26 @@ const Map<String, TipoOperacionInfo> kTiposOperacion = {
   'cobrar_reserva':
       TipoOperacionInfo('Cobrar reserva', Icons.payments),
   'gasto': TipoOperacionInfo('Gasto', Icons.receipt),
+  // v1.10.0 (Bloque 2 NÚCLEO, Argón ajuste 8): la app ya puede
+  // ENCOLAR estos tipos. El handler del servidor y la ampliación
+  // del CHECK de sync_ops llegan por otra vía: NO compilar antes
+  // de eso, porque PostgREST rechazaría las ops en silencio.
+  // upsert_panel_config se registra pero aún no se encola en
+  // ningún flujo (los ítems C/F/H que lo usarían van a la 1.11.0).
+  'upsert_tarifa_especial':
+      TipoOperacionInfo('Tarifa especial', Icons.local_offer),
+  'revoke_tarifa_especial':
+      TipoOperacionInfo('Revocar tarifa especial', Icons.cancel),
+  'update_cliente_sensible':
+      TipoOperacionInfo('Edición sensible de cliente', Icons.security),
+  'upsert_compra': TipoOperacionInfo('Compra registrada', Icons.receipt_long),
+  'anular_compra': TipoOperacionInfo('Anulación de compra', Icons.cancel),
+  'upsert_plantilla_mensaje':
+      TipoOperacionInfo('Plantilla de mensaje', Icons.message),
+  'delete_plantilla_mensaje':
+      TipoOperacionInfo('Eliminar plantilla', Icons.delete_outline),
+  'upsert_panel_config':
+      TipoOperacionInfo('Configuración del panel', Icons.settings),
   'crear_suplemento':
       TipoOperacionInfo('Nuevo suplemento', Icons.fitness_center),
   'editar_suplemento':
