@@ -102,17 +102,13 @@ class _PagaronMesScreenState extends State<PagaronMesScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // Gate propio (defensa en profundidad, mismo patrón que
-    // ControlAccesoScreen): la lista es información del dueño
-    // aunque se llegue a ella por cualquier ruta.
-    if (!AuthService().isOwner) {
-      return Scaffold(
-        appBar: AppBar(title: const Text('Pagaron este mes')),
-        body: const Center(
-          child: Text('Solo el dueño puede ver los pagos del mes.'),
-        ),
-      );
-    }
+    // B1 (Jc, 2026-10-24, para la nómina de octubre): la lista ya NO
+    // es solo del dueño. El entrenador la ve para verificar su base
+    // (cada cliente que pagó = 150 CUP), en SOLO LECTURA: sin dueño
+    // no hay chevron ni navegación a la ficha desde aquí (la ficha
+    // sigue alcanzable por sus rutas habituales, sin cambio).
+    // La lista en sí no tiene ninguna acción de edición.
+    final esDueno = AuthService().isOwner;
     return Scaffold(
       appBar: AppBar(
         title: Text(_cargando
@@ -164,10 +160,10 @@ class _PagaronMesScreenState extends State<PagaronMesScreen> {
                                         '${fmtFecha(c['pagado_hasta'] as String?)}',
                                 style: const TextStyle(fontSize: 12),
                               ),
-                              trailing: sinDatos
+                              trailing: sinDatos || !esDueno
                                   ? null
                                   : const Icon(Icons.chevron_right),
-                              onTap: sinDatos
+                              onTap: sinDatos || !esDueno
                                   ? null
                                   : () => Navigator.of(context)
                                       .push(MaterialPageRoute(
