@@ -6,6 +6,7 @@ import '../localdb.dart';
 import '../negocio.dart' show fmtMonto;
 import '../permisos_entrenador.dart';
 import '../servicios.dart';
+import '../sync.dart';
 import '../tiempo.dart';
 import 'componentes.dart';
 import 'diseno.dart';
@@ -33,6 +34,7 @@ class ServiciosScreen extends StatefulWidget {
 
 class _ServiciosScreenState extends State<ServiciosScreen> {
   bool _cargando = true;
+  bool _actualizando = false;
   bool _esDueno = false;
   ({double sinAgua, double conAgua, double agua, double comision})?
       _precios;
@@ -159,6 +161,38 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
         if (mounted) _vender(widget.tipoInicial!);
       });
     }
+  }
+
+  /// Actualizar de la sección: baja SOLO las tablas de Servicios
+  /// (scope 'servicios') y luego recarga la vista local. La subida
+  /// sigue siendo global: la cola se sube en orden y no se puede
+  /// partir por sección sin romper la idempotencia.
+  /// Da señal siempre: spinner mientras trabaja y aviso al final.
+  /// El éxito se detecta por 'ultimo_pull_ts': el scope sync solo
+  /// lo actualiza cuando el pull termina bien (los errores los
+  /// traga en su stream, no lanza).
+  Future<void> _actualizar() async {
+    if (_actualizando) return;
+    setState(() => _actualizando = true);
+    var ok = false;
+    try {
+      final antes = await LocalDb.instance.getMeta('ultimo_pull_ts');
+      await SyncEngine.instance.sincronizarScope('servicios');
+      final despues = await LocalDb.instance.getMeta('ultimo_pull_ts');
+      ok = antes != despues;
+      await _cargar();
+    } catch (_) {
+      ok = false;
+      try {
+        await _cargar();
+      } catch (_) {}
+    }
+    if (!mounted) return;
+    setState(() => _actualizando = false);
+    _aviso(
+      ok ? 'Servicios actualizados' : 'Sin conexión, mostrando datos locales',
+      error: !ok,
+    );
   }
 
   Map<String, dynamic>? get _loteActual {
@@ -638,15 +672,21 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
         actions: [
           IconButton(
             tooltip: 'Actualizar',
-            icon: const Icon(Icons.refresh),
-            onPressed: _cargar,
+            icon: _actualizando
+                ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.refresh),
+            onPressed: _actualizando ? null : _actualizar,
           ),
         ],
       ),
       body: _cargando
           ? const Center(child: CircularProgressIndicator())
           : RefreshIndicator(
-              onRefresh: _cargar,
+              onRefresh: _actualizar,
               child: ListView(
                 padding: const EdgeInsets.all(AppEspacio.lg),
                 children: [

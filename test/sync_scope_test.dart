@@ -37,6 +37,28 @@ void main() {
           lessThan(t.indexOf('ventas_suplementos')));
     });
 
+    test('servicios: solo tablas de la sección, catálogo primero', () {
+      final t = SyncScope.resolver('servicios');
+      expect(
+          t,
+          containsAll([
+            'categorias_suplemento',
+            'suplementos',
+            'servicio_botes',
+            'servicio_lotes',
+            'servicio_ventas',
+            'servicio_salidas',
+            'servicio_agua_movimientos',
+            'servicio_compras',
+          ]));
+      expect(t.indexOf('categorias_suplemento'),
+          lessThan(t.indexOf('suplementos')));
+      // Nada fuera de la sección: ni clientes ni pagos ni caja.
+      expect(t, isNot(contains('clientes')));
+      expect(t, isNot(contains('pagos')));
+      expect(t, isNot(contains('ventas_suplementos')));
+    });
+
     test('scope desconocido: lista vacía', () {
       expect(SyncScope.resolver('no_existe'), isEmpty);
     });
@@ -48,6 +70,7 @@ void main() {
         'pagos',
         'cobrar',
         'suplementos',
+        'servicios',
         'pago_diario',
         'inscribir',
         'buscar_cliente',

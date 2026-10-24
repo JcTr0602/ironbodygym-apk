@@ -168,6 +168,19 @@ class SyncScope {
       'ventas_suplementos',
       'reservas'
     ],
+    // Servicios (dosis, 2026-10-24): botes, lotes, ventas, salidas,
+    // agua y compras, más el catálogo para nombrar los productos.
+    // Los ajustes (precios) bajan siempre con cada pull vía sync_estado.
+    'servicios': [
+      'categorias_suplemento',
+      'suplementos',
+      'servicio_botes',
+      'servicio_lotes',
+      'servicio_ventas',
+      'servicio_salidas',
+      'servicio_agua_movimientos',
+      'servicio_compras',
+    ],
     'ventas': ['ventas_suplementos'],
     'incidencias': ['incidencia_eventos'],
     'gastos': ['gastos'],
@@ -1278,6 +1291,7 @@ class SyncEngine {
           'pagos': 'pagos',
           'cobrar': 'cobros',
           'suplementos': 'suplementos',
+          'servicios': 'servicios',
           'arqueo': 'arqueo de caja', // v1.3.6
           'incidencias_sync': 'incidencias de sync', // v1.3.6
         }[scope] ?? scope;
