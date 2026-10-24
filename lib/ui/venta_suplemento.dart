@@ -355,8 +355,11 @@ class _VentaSuplementoScreenState
   }) async {
     final nombreProd = '${widget.suplemento['nombre'] ?? ''}';
     final fecha = hoyHabanaIso();
-    // Teléfono del cliente (solo si es cliente del gym).
+    // Ficha local del cliente (solo si es cliente del gym):
+    // de ella salen el teléfono para WhatsApp y, con promo,
+    // el vencimiento actual para calcular el nuevo.
     String? waNum;
+    String? nuevoVencimiento;
     if (_tipoComprador == 'cliente' && _clienteId != null) {
       final clientes = await LocalDb.instance.allMirror('clientes');
       final cli = clientes.cast<Map<String, dynamic>?>().firstWhere(
@@ -365,22 +368,28 @@ class _VentaSuplementoScreenState
           );
       final tel = '${cli?['telefono'] ?? ''}'.trim();
       if (tel.isNotEmpty) waNum = normalizarTelefonoWaMe(tel);
+      // v1.8.1: con promo, la nueva fecha de vencimiento sale
+      // de previewHasta sobre la ficha local: la MISMA regla
+      // que el servidor aplica al insertar el pago promo
+      // (max(vencimiento, hoy) + 30 días).
+      if (conPromo) {
+        final hastaActual = '${cli?['pagado_hasta'] ?? ''}'.trim();
+        nuevoVencimiento =
+            previewHasta(hastaActual.isEmpty ? null : hastaActual, 1);
+      }
     }
-    // Texto del comprobante.
-    final buf = StringBuffer()
-      ..writeln('*Iron Body Gym* — Comprobante de compra')
-      ..writeln('Producto: $nombreProd')
-      ..writeln('Cantidad: $_cantidad')
-      ..writeln('Precio: ${precio.toStringAsFixed(2)} $_moneda')
-      ..writeln('Total: ${total.toStringAsFixed(2)} $_moneda')
-      ..writeln('Comprador: $nombreComprador')
-      ..writeln('Fecha: $fecha');
-    if (conPromo) {
-      buf.writeln('');
-      buf.writeln('🎁 *Promo aplicada:* 1 mes de mensualidad GRATIS');
-      buf.writeln('asignado a tu cuenta por esta compra.');
-    }
-    final textoComprobante = buf.toString().trim();
+    final textoComprobante = textoComprobanteCompra(
+      nombreProducto: nombreProd,
+      cantidad: _cantidad,
+      precio: precio,
+      moneda: _moneda,
+      total: total,
+      nombreComprador: nombreComprador,
+      fechaIso: fecha,
+      conPromo: conPromo,
+      nuevoVencimientoIso: nuevoVencimiento,
+      esFiado: _esFiado && _tipoComprador == 'cliente',
+    );
     if (!mounted) return;
     await showDialog(
       context: context,
