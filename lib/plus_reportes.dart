@@ -107,6 +107,11 @@ class ReportePlus {
   final String movilOrigen;
   final DateTime? creadoEn;
 
+  /// Fecha de resolución (confirmación/rechazo) si la RPC la trae.
+  /// C5 (1.11.0) fecha el ingreso Plus por resueltoEn (cuando el
+  /// dinero se confirmó) y solo si falta usa creadoEn (reporte).
+  final DateTime? resueltoEn;
+
   /// Bandera calculada por el servidor: la referencia de ESTE
   /// reporte ya apareció en un reporte rechazado. Se muestra
   /// como alerta en la fila; NO bloquea la confirmación.
@@ -122,6 +127,7 @@ class ReportePlus {
     required this.banco,
     required this.movilOrigen,
     required this.creadoEn,
+    this.resueltoEn,
     this.alertaReferenciaRechazada = false,
   });
 
@@ -151,6 +157,7 @@ class ReportePlus {
       banco: '${j['banco'] ?? ''}',
       movilOrigen: '${j['movil_origen'] ?? ''}',
       creadoEn: instanteServidorHabana(j['creado_en']),
+      resueltoEn: instanteServidorHabana(j['resuelto_en']),
       alertaReferenciaRechazada:
           alerta == true || alerta == 1 || alerta == 'true',
     );
@@ -193,6 +200,30 @@ class PlusReportesService {
   Future<List<ReportePlus>> pendientes() async {
     const params = {
       'p_estado': kEstadoReportesPendientes,
+      'p_limite': kLimiteReportesPlus,
+      'p_desde': 0,
+    };
+    final dynamic res;
+    final f = _rpcInyectado;
+    if (f != null) {
+      res = await f(kRpcListarReportesPlus, params);
+    } else {
+      res = await _c.rpc(kRpcListarReportesPlus, params: params);
+    }
+    final lista = parsearReportesPlus(res);
+    lista.sort((a, b) => (a.creadoEn ?? DateTime(9999))
+        .compareTo(b.creadoEn ?? DateTime(9999)));
+    return lista;
+  }
+
+  /// Reportes Plus CONFIRMADOS (para la línea propia de C5 en la
+  /// 1.11.0). El llamador filtra por rango y tolera el fallo: si la
+  /// RPC no acepta el estado o no hay red, la pantalla C5 muestra
+  /// la línea Plus como «sin datos del servidor» en vez de inventar
+  /// un número (el espejo local de ingresos_plus no existe en la app).
+  Future<List<ReportePlus>> confirmados() async {
+    const params = {
+      'p_estado': 'confirmado',
       'p_limite': kLimiteReportesPlus,
       'p_desde': 0,
     };

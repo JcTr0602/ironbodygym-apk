@@ -56,6 +56,10 @@ import 'suplementos.dart';
 import 'widgets.dart';
 import 'mi_dia.dart';
 import 'panel_bloque2.dart';
+import 'panel_resto_caja.dart';
+import 'panel_resto_config.dart';
+import 'panel_resto_sistema.dart';
+import 'recordatorios.dart';
 import 'centro_compras.dart';
 import 'plantillas_mensaje.dart';
 import 'tarifas_especiales.dart';
@@ -1032,6 +1036,8 @@ class _AdminScreenState extends State<AdminScreen> {
                         _tarjetasModulos(),
                         _tituloSeccion('BLOQUE 2 · PANEL'),
                         _bloque2(),
+                        _tituloSeccion('BLOQUE 2 · RESTO (1.11.0)'),
+                        _bloque2Resto(),
                         Padding(
                           padding: const EdgeInsets.fromLTRB(24, 16, 24, 4),
                           child: Text(
@@ -1213,6 +1219,79 @@ class _AdminScreenState extends State<AdminScreen> {
       await SyncEngine.instance.push();
       await SyncEngine.instance.pull();
     } catch (_) {}
+  }
+
+  /// BLOQUE 2 · RESTO (1.11.0, Argón AMARILLO): G2 + C + F + H.
+  /// Mismo patrón de filas que _bloque2().
+  Widget _bloque2Resto() {
+    Widget fila(IconData icono, String titulo, String? subtitulo,
+        VoidCallback onTap) {
+      return ListTile(
+        dense: true,
+        contentPadding: EdgeInsets.zero,
+        leading: Icon(icono, color: AppColores.naranja, size: 20),
+        title: Text(titulo, style: AppTexto.cuerpo),
+        subtitle:
+            subtitulo == null ? null : Text(subtitulo, style: AppTexto.secundario),
+        trailing: const Icon(Icons.chevron_right, size: 18),
+        onTap: onTap,
+      );
+    }
+
+    void ir(Widget pantalla) {
+      Navigator.push(
+          context, MaterialPageRoute(builder: (_) => pantalla));
+    }
+
+    return Tarjeta(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          fila(Icons.notifications, 'Recordatorios automáticos',
+              'G2 · Hoy, con anti-duplicado; masivos solo en tu teléfono',
+              () => ir(const RecordatoriosScreen())),
+          fila(Icons.handshake, 'Arqueo de entrega de efectivo',
+              'C1 · Liquidar por delta, nunca pendiente = 0',
+              () => ir(const ArqueoEntregaScreen())),
+          fila(Icons.fact_check, 'Nómina pre-calculada',
+              'C2 · Solo lectura, vista previa hasta el 31',
+              () => ir(const NominaPrecalculadaScreen())),
+          fila(Icons.payments, 'Adelantos',
+              'C3 · Lista con filtro por mes',
+              () => ir(const AdelantosListaScreen())),
+          fila(Icons.bar_chart, 'Ingresos por período',
+              'C5 · Plus como línea propia, sin doble conteo',
+              () => ir(const IngresosPeriodoScreen())),
+          fila(Icons.tune, 'Precios por método',
+              'C6 · Única fuente de precios',
+              () => ir(const PreciosMetodoScreen())),
+          fila(Icons.history, 'Auditoría',
+              'F1 · General y por persona, con filtros',
+              () => ir(const AuditoriaPanelScreen())),
+          fila(Icons.sync_problem, 'Errores de sync',
+              'F3 · En sencillo, sin «Descartar» para ops de datos',
+              () => ir(const ErroresSyncPanelScreen())),
+          fila(Icons.sync, 'Estado de sync',
+              'F4 · Contadores y fechas, no contenidos',
+              () => ir(const EstadoSyncScreen())),
+          fila(Icons.build, 'Mantenimiento',
+              'F5 · Lista cerrada, con confirmación y auditoría',
+              () => ir(const MantenimientoScreen())),
+          fila(Icons.settings, 'Ajustes del gym',
+              'H1 · Enlaza C6 y D6; edita métodos y textos',
+              () => ir(const AjustesGymScreen())),
+          fila(Icons.book, 'Registro mensual',
+              'H2 · Visor + copiar resumen en Markdown',
+              () => ir(const RegistroMensualScreen())),
+          fila(Icons.schedule, 'Turnos y horarios',
+              'H4 · Enlaza el editor único de Turnos',
+              () => ir(const TurnosPanelScreen())),
+          fila(Icons.backup, 'Copia de seguridad',
+              'H5 · Exportar solo, copia en frío sin fotos',
+              () => ir(const CopiaSeguridadScreen())),
+        ],
+      ),
+    );
   }
 
   Widget _tituloSeccion(String titulo,

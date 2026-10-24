@@ -77,6 +77,19 @@ const Map<String, TipoOperacionInfo> kTiposOperacion = {
       TipoOperacionInfo('Eliminar plantilla', Icons.delete_outline),
   'upsert_panel_config':
       TipoOperacionInfo('Configuración del panel', Icons.settings),
+  // v1.11.0 (Bloque 2 RESTO, Argón AMARILLO): la app ya puede
+  // ENCOLAR estos tipos. El handler del servidor y la ampliación
+  // del CHECK de sync_ops llegan por otra vía (el SQL de la 1.11.0
+  // está en entregas/): NO compilar antes de eso, porque PostgREST
+  // rechazaría las ops.
+  'liquidar_entrega_efectivo':
+      TipoOperacionInfo('Entrega de efectivo', Icons.handshake),
+  'actualizar_config_gym':
+      TipoOperacionInfo('Configuración del gym', Icons.tune),
+  'upsert_recordatorio_config':
+      TipoOperacionInfo('Recordatorio', Icons.notifications),
+  'delete_recordatorio_config':
+      TipoOperacionInfo('Eliminar recordatorio', Icons.notifications_off),
   'crear_suplemento':
       TipoOperacionInfo('Nuevo suplemento', Icons.fitness_center),
   'editar_suplemento':

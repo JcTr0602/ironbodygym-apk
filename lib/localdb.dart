@@ -40,7 +40,7 @@ class LocalDb {
   /// v1.4.0 (Argón): versión actual del esquema local. Los tests de
   /// migración comparan contra esta constante en vez de un número
   /// fijo, para no caer en cascada de fallos con cada migración.
-  static const int versionActual = 41;
+  static const int versionActual = 42;
 
   /// v37: marcas de información pública pendiente de republicar,
   /// UNA FILA POR CLAVE (compartido entre onCreate y la migración
@@ -1113,6 +1113,11 @@ class LocalDb {
           // que onCreate (paridad garantizada, no SQL copiado).
           await _crearTablasBloque2(db);
         }
+        if (oldV < 42) {
+          // v1.11.0 (Bloque 2 RESTO, Argón AMARILLO): MISMO método
+          // que onCreate (paridad garantizada, no SQL copiado).
+          await _crearTablasBloque2Resto(db);
+        }
       },
     );
     // v1.2.5+28: repara el índice FTS si la migración lo omitió y el
@@ -1822,6 +1827,9 @@ class LocalDb {
     // onUpgrade (ver _crearTablasBloque2) para que la paridad de
     // esquema no dependa de copiar el SQL dos veces.
     await _crearTablasBloque2(db);
+    // v1.11.0 (v42, Bloque 2 RESTO, Argón AMARILLO): G2 + C1. MISMO
+    // método en onCreate y en onUpgrade (ver _crearTablasBloque2Resto).
+    await _crearTablasBloque2Resto(db);
     // v1.4.0 (v31): caché del pre-cálculo de nómina. Solo guarda el
     // conteo de clientes que pagaron el mes + huella de insumos +
     // cuándo se calculó. Bonos y tarifa se leen siempre en vivo.
@@ -2034,6 +2042,60 @@ class LocalDb {
         'creada_ts TEXT NOT NULL, '
         'op_uuid TEXT)');
     await _sembrarTarifasEspeciales(db);
+  }
+
+  /// Tablas locales del Bloque 2 RESTO (v1.11.0, Argón AMARILLO).
+  /// Se llama desde onCreate (_crearTablas) Y desde onUpgrade
+  /// (oldV < 42) para que el esquema sea idéntico en instalación
+  /// limpia y en migración (paridad de esquema, mismo patrón que
+  /// _crearTablasBloque2).
+  ///
+  /// - recordatorio_config: G2. `alcance` es 'solo_mio' o 'todos';
+  ///   `tipo` es 'cumpleanos' | 'vencimiento' | 'personalizado'.
+  ///   `target_key` es 'cliente:<id>' (cumpleaños/vencimiento) o
+  ///   'todos' (personalizado masivo). `disparado_en_fecha_habana`
+  ///   es el estado sincronizado anti-duplicado de los masivos: el
+  ///   teléfono del dueño lo escribe al disparar y viaja por la op
+  ///   upsert_recordatorio_config; los demás teléfonos lo leen y no
+  ///   vuelven a disparar ese día.
+  /// - recordatorio_disparos_log: G2 anti-duplicado LOCAL. PK triple
+  ///   (recordatorio_id, fecha_habana, target_key): el mismo disparo
+  ///   no puede registrarse dos veces ni en este teléfono.
+  /// - entregas_efectivo: C1. Libro local de entregas de efectivo
+  ///   (una fila por op_uuid). El pendiente delta se calcula como
+  ///   pendienteEntrega() menos la suma de este libro: las entregas
+  ///   viejas ya están reflejadas en el espejo (filas marcadas
+  ///   entregado=1) y no se vuelven a restar.
+  static Future<void> _crearTablasBloque2Resto(
+      DatabaseExecutor db) async {
+    await db.execute('CREATE TABLE IF NOT EXISTS recordatorio_config ('
+        'id TEXT PRIMARY KEY, '
+        'titulo TEXT NOT NULL, '
+        'tipo TEXT NOT NULL, '
+        'alcance TEXT NOT NULL DEFAULT \'solo_mio\', '
+        'target_key TEXT NOT NULL DEFAULT \'todos\', '
+        'dias_anticipacion INTEGER NOT NULL DEFAULT 3, '
+        'fecha_fija TEXT, '
+        'activa INTEGER NOT NULL DEFAULT 1, '
+        'creado_por INTEGER, '
+        'disparado_en_fecha_habana TEXT, '
+        'creada_ts TEXT NOT NULL, '
+        'actualizada_ts TEXT NOT NULL)');
+    await db.execute('CREATE TABLE IF NOT EXISTS recordatorio_disparos_log ('
+        'recordatorio_id TEXT NOT NULL, '
+        'fecha_habana TEXT NOT NULL, '
+        'target_key TEXT NOT NULL, '
+        'disparada_ts TEXT NOT NULL, '
+        'PRIMARY KEY (recordatorio_id, fecha_habana, target_key))');
+    await db.execute('CREATE TABLE IF NOT EXISTS entregas_efectivo ('
+        'op_uuid TEXT PRIMARY KEY, '
+        'entrenador_telegram_id INTEGER NOT NULL, '
+        'monto_entregado REAL NOT NULL, '
+        'fecha_habana TEXT NOT NULL, '
+        'autor_dueno_id INTEGER, '
+        'creada_ts TEXT NOT NULL)');
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_entregas_entrenador '
+        'ON entregas_efectivo(entrenador_telegram_id)');
   }
 
   /// Siembra inicial D6 (Argón ajuste 3): IDs deterministas, INSERT OR
@@ -4888,6 +4950,86 @@ class LocalDb {
 
   Future<void> setAjustes(Map<String, dynamic> a) =>
       setMeta('ajustes', jsonEncode(a));
+
+  // -- Bloque 2 RESTO (v1.11.0, G2 + C1) ------------------------------
+  // Recordatorios: CRUD local + log anti-duplicado. La sincronización
+  // viaja por ops upsert/delete_recordatorio_config (otra vía: el
+  // handler del servidor); aquí solo se guarda local y se encola
+  // desde bloque2_resto.dart / la pantalla de Recordatorios.
+
+  Future<List<Map<String, dynamic>>> listarRecordatorios() async {
+    final d = await db;
+    return d.query('recordatorio_config', orderBy: 'creada_ts ASC');
+  }
+
+  Future<void> guardarRecordatorio(Map<String, dynamic> fila) async {
+    final d = await db;
+    await d.insert('recordatorio_config', fila,
+        conflictAlgorithm: ConflictAlgorithm.replace);
+  }
+
+  Future<void> borrarRecordatorio(String id) async {
+    final d = await db;
+    await d.delete('recordatorio_config', where: 'id = ?', whereArgs: [id]);
+  }
+
+  Future<void> marcarRecordatorioDisparadoMasivo(
+      String id, String fechaHabana) async {
+    final d = await db;
+    await d.update(
+        'recordatorio_config',
+        {
+          'disparado_en_fecha_habana': fechaHabana,
+          'actualizada_ts': isoHabana(ahoraHabana()),
+        },
+        where: 'id = ?',
+        whereArgs: [id]);
+  }
+
+  /// Registra un disparo en el log anti-duplicado. Devuelve true si
+  /// era nuevo (se disparó) o false si ya existía (no se dispara dos
+  /// veces el mismo día para el mismo destino). INSERT OR IGNORE
+  /// sobre la PK triple: la garantía vive en SQLite, no en la UI.
+  Future<bool> registrarDisparoRecordatorio({
+    required String recordatorioId,
+    required String fechaHabana,
+    required String targetKey,
+  }) async {
+    final d = await db;
+    final id = await d.rawInsert(
+        'INSERT OR IGNORE INTO recordatorio_disparos_log '
+        '(recordatorio_id, fecha_habana, target_key, disparada_ts) '
+        'VALUES (?, ?, ?, ?)',
+        [
+          recordatorioId,
+          fechaHabana,
+          targetKey,
+          isoHabana(ahoraHabana()),
+        ]);
+    return id != 0;
+  }
+
+  Future<bool> yaDisparadoRecordatorio({
+    required String recordatorioId,
+    required String fechaHabana,
+    required String targetKey,
+  }) async {
+    final d = await db;
+    final rows = await d.query('recordatorio_disparos_log',
+        where: 'recordatorio_id = ? AND fecha_habana = ? AND target_key = ?',
+        whereArgs: [recordatorioId, fechaHabana, targetKey],
+        limit: 1);
+    return rows.isNotEmpty;
+  }
+
+  Future<List<Map<String, dynamic>>> listarEntregasEfectivo(
+      int telegramId) async {
+    final d = await db;
+    return d.query('entregas_efectivo',
+        where: 'entrenador_telegram_id = ?',
+        whereArgs: [telegramId],
+        orderBy: 'creada_ts DESC');
+  }
 
   // -- cola de operaciones ---------------------------------------------
   // Estados: 'pendiente' (por subir), 'error' (fallo transitorio, se
