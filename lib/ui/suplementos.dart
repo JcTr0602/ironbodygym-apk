@@ -6,6 +6,8 @@
 library;
 
 import 'dart:async';
+
+import '../etiqueta_producto.dart';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -170,9 +172,14 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
           .toList();
     }
     if (_busqueda.isNotEmpty) {
-      final q = _busqueda.toLowerCase();
+      // Ítem 13 (Argón): el buscador filtra sobre la cadena compuesta
+      // «Nombre · Categoría», no solo sobre el nombre.
+      final cats = mapaCategoriasSuplemento(_categorias);
       res = res
-          .where((s) => '${s['nombre'] ?? ''}'.toLowerCase().contains(q))
+          .where((s) => coincideBusquedaProducto(
+              _busqueda,
+              '${s['nombre'] ?? ''}',
+              categoriaDeSuplemento(s, cats)))
           .toList();
     }
     // v1.2.3: para el dueño, ordenar sin-stock al final

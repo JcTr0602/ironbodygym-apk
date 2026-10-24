@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../auth.dart';
+import '../etiqueta_producto.dart';
 import '../localdb.dart';
 import '../negocio.dart' show fmtMonto;
 import '../servicios.dart';
@@ -49,10 +50,13 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
     final agua = await stockAguaLocal();
     final lotes = await lotesActivosLocal(responsableId: tid);
     // Nombre del producto en cada lote: lote → bote → suplemento.
+    // Ítem 13: etiqueta compuesta «Nombre · Categoría».
+    final cats = mapaCategoriasSuplemento(
+        await LocalDb.instance.allMirror('categorias_suplemento'));
     final nombreSup = <int, String>{
       for (final s in await LocalDb.instance.allMirror('suplementos'))
         if ((s['id'] as num?) != null)
-          (s['id'] as num).toInt(): '${s['nombre'] ?? ''}',
+          (s['id'] as num).toInt(): etiquetaDeSuplemento(s, cats),
     };
     final boteSup = <int, int>{
       for (final b in await LocalDb.instance.allMirror('servicio_botes'))

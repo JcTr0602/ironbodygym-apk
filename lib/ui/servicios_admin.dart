@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:uuid/uuid.dart';
 
 import '../auth.dart';
+import '../etiqueta_producto.dart';
 import '../localdb.dart';
 import '../negocio.dart' show fmtMonto;
 import '../servicios.dart';
@@ -29,6 +30,7 @@ class _ServiciosAdminScreenState extends State<ServiciosAdminScreen> {
   List<Map<String, dynamic>> _botes = [];
   List<Map<String, dynamic>> _lotes = [];
   List<Map<String, dynamic>> _suplementos = [];
+  Map<int, String> _categorias = {};
   Map<int, String> _personas = {}; // telegram_id → nombre
   final _sinAguaCtrl = TextEditingController();
   final _conAguaCtrl = TextEditingController();
@@ -50,9 +52,13 @@ class _ServiciosAdminScreenState extends State<ServiciosAdminScreen> {
     super.dispose();
   }
 
+  /// Ítem 13: «Nombre · Categoría» en toda identificación de producto
+  /// de esta pantalla (selector de Abrir bote, botes y lotes).
   String _nombreSup(int? id) {
     for (final s in _suplementos) {
-      if ((s['id'] as num?)?.toInt() == id) return '${s['nombre'] ?? ''}';
+      if ((s['id'] as num?)?.toInt() == id) {
+        return etiquetaDeSuplemento(s, _categorias);
+      }
     }
     return 'Suplemento #$id';
   }
@@ -67,6 +73,8 @@ class _ServiciosAdminScreenState extends State<ServiciosAdminScreen> {
     final lotes = await LocalDb.instance.allMirror('servicio_lotes');
     final suplementos =
         await LocalDb.instance.allMirror('suplementos');
+    final categorias =
+        await LocalDb.instance.allMirror('categorias_suplemento');
     // Personas conocidas (para responsables y nombres): el dueño +
     // quien haya registrado pagos o ventas de suplementos.
     final personas = <int, String>{};
@@ -95,6 +103,7 @@ class _ServiciosAdminScreenState extends State<ServiciosAdminScreen> {
       _botes = botes;
       _lotes = lotes;
       _suplementos = suplementos;
+      _categorias = mapaCategoriasSuplemento(categorias);
       _personas = personas;
       _sinAguaCtrl.text = precios.sinAgua.toStringAsFixed(0);
       _conAguaCtrl.text = precios.conAgua.toStringAsFixed(0);
@@ -267,7 +276,7 @@ class _ServiciosAdminScreenState extends State<ServiciosAdminScreen> {
                   for (final s in _suplementos)
                     DropdownMenuItem(
                       value: (s['id'] as num).toInt(),
-                      child: Text('${s['nombre']}'),
+                      child: Text(etiquetaDeSuplemento(s, _categorias)),
                     ),
                 ],
                 onChanged: (v) => setD(() => supId = v ?? supId),
