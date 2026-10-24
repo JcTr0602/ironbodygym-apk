@@ -35,6 +35,7 @@ class EntrenadorPermiso {
     ('can_gestionar_turnos', 'Gestionar turnos', 'Marcar y corregir turnos de apertura'),
     ('can_ver_todos_pagos', 'Ver todos los pagos', 'Ver pagos registrados por otros entrenadores'),
     ('can_ver_cifras', 'Ver cifras', 'Ver totales de dinero del panel'),
+    ('can_ver_ranking_servicios', 'Ver ranking de Servicios', 'Ver quién compra más dosis y agua del gym'),
   ];
 }
 

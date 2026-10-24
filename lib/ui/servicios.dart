@@ -4,10 +4,12 @@ import '../auth.dart';
 import '../etiqueta_producto.dart';
 import '../localdb.dart';
 import '../negocio.dart' show fmtMonto;
+import '../permisos_entrenador.dart';
 import '../servicios.dart';
 import '../tiempo.dart';
 import 'componentes.dart';
 import 'diseno.dart';
+import 'ranking_servicios.dart';
 import 'servicios_admin.dart';
 import 'servicios_estadisticas.dart';
 
@@ -683,6 +685,26 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                           ),
                         ),
                       ],
+                    ),
+                  ],
+                  // Ítem 9: ranking de compradores — dueño siempre;
+                  // entrenador solo con su permiso (apagado por
+                  // defecto, fail-closed sin foto de permisos).
+                  if (_esDueno ||
+                      PermisosEntrenador().canVerRankingServicios) ...[
+                    const SizedBox(height: AppEspacio.md),
+                    SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton.icon(
+                        onPressed: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                              builder: (_) =>
+                                  const RankingServiciosScreen()),
+                        ),
+                        icon: const Icon(Icons.emoji_events_outlined),
+                        label: const Text('Ranking de compradores'),
+                      ),
                     ),
                   ],
                   const SizedBox(height: AppEspacio.lg),

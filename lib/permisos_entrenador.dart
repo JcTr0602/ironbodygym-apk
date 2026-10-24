@@ -67,6 +67,7 @@ class PermisosEntrenador {
           'can_gestionar_turnos': true,
           'can_ver_todos_pagos': true,
           'can_ver_cifras': true,
+          'can_ver_ranking_servicios': true,
         };
         _activo = true;
         _habilitado = true;
@@ -129,4 +130,9 @@ class PermisosEntrenador {
   bool get canGestionarTurnos => _check('can_gestionar_turnos');
   bool get canVerTodosPagos => _check('can_ver_todos_pagos');
   bool get canVerCifras => _check('can_ver_cifras');
+
+  /// post-1.8.0 (ítem 9): ranking de compradores de Servicios.
+  /// Apagado por defecto: sin la clave en su JSONB, no.
+  bool get canVerRankingServicios =>
+      _check('can_ver_ranking_servicios');
 }

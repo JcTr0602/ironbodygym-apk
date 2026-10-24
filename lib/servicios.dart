@@ -736,3 +736,61 @@ Future<String> cerrarLoteServicio({
 Future<String> cerrarBoteServicio({required int boteId}) async {
   return _encolar('cerrar_bote_servicio', {'bote_id': boteId});
 }
+
+/// post-1.8.0 (ítem 9, Argón): ranking de compradores de Servicios.
+/// PURO (testeable): recibe las filas del espejo `servicio_ventas`.
+///
+/// Reglas: solo ventas identificadas (`cliente_id` no nulo); los
+/// reversos (cantidad negativa) netean contra su cliente; queda
+/// fuera quien netee ≤ 0 CUP; orden por monto neto desc y, a
+/// igualdad, por unidades netas desc. Las columnas cuentan UNIDADES
+/// netas por subtipo: raciones solas, combos y agua suelta (en la
+/// ficha del cliente el combo cuenta además como dosis + pomo: son
+/// dos lecturas distintas, no una discrepancia).
+/// [desde] (prefijo 'YYYY-MM-DD') limita a ventas con fecha >= desde.
+List<Map<String, dynamic>> rankingServicios(
+  List<Map<String, dynamic>> ventas, {
+  String? desde,
+}) {
+  final porCliente = <int, Map<String, dynamic>>{};
+  for (final v in ventas) {
+    final cid = (v['cliente_id'] as num?)?.toInt();
+    if (cid == null) continue;
+    if (desde != null && '${v['fecha'] ?? ''}'.compareTo(desde) < 0) {
+      continue;
+    }
+    final cant = (v['cantidad'] as num?)?.toInt() ?? 0;
+    final monto =
+        ((v['precio_unitario'] as num?)?.toDouble() ?? 0) * cant;
+    final e = porCliente.putIfAbsent(cid, () => {
+          'cliente_id': cid,
+          'cliente_nombre': '${v['cliente_nombre'] ?? 'Cliente $cid'}',
+          'monto': 0.0,
+          'unidades': 0,
+          'raciones': 0,
+          'combos': 0,
+          'aguas': 0,
+        });
+    e['monto'] = (e['monto'] as double) + monto;
+    e['unidades'] = (e['unidades'] as int) + cant;
+    switch ('${v['tipo']}') {
+      case 'dosis_con_agua':
+        e['combos'] = (e['combos'] as int) + cant;
+      case 'agua_suelta':
+        e['aguas'] = (e['aguas'] as int) + cant;
+      default:
+        e['raciones'] = (e['raciones'] as int) + cant;
+    }
+    final nombre = '${v['cliente_nombre'] ?? ''}';
+    if (nombre.isNotEmpty) e['cliente_nombre'] = nombre;
+  }
+  final lista = porCliente.values
+      .where((e) => (e['monto'] as double) > 0)
+      .toList()
+    ..sort((a, b) {
+      final c = (b['monto'] as double).compareTo(a['monto'] as double);
+      if (c != 0) return c;
+      return (b['unidades'] as int).compareTo(a['unidades'] as int);
+    });
+  return lista;
+}

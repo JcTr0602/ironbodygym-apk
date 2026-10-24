@@ -8,10 +8,12 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../acceso_app_cache.dart';
+import '../auth.dart';
 import '../negocio.dart' show tiempoRelativo;
 import 'acciones_acceso.dart';
 import 'diseno.dart';
 import 'ficha.dart';
+import 'foto_personal_ficha.dart';
 
 class FichaAccesoScreen extends StatefulWidget {
   final int clienteId;
@@ -107,6 +109,12 @@ class _FichaAccesoScreenState extends State<FichaAccesoScreen> {
                   padding: const EdgeInsets.all(AppEspacio.lg),
                   children: [
                     _seccionDatos(),
+                    // Ítem 12: foto personal del cliente — SOLO el
+                    // dueño: con otro rol el widget ni se construye.
+                    if (AuthService().isOwner) ...[
+                      const SizedBox(height: AppEspacio.lg),
+                      SeccionFotoPersonal(clienteId: widget.clienteId),
+                    ],
                     const SizedBox(height: AppEspacio.lg),
                     _seccionAcciones(),
                     const SizedBox(height: AppEspacio.lg),
