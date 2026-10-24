@@ -713,6 +713,12 @@ class _HomeScreenState extends State<HomeScreen>
         onCobrar: () => _ir(const PagoScreen()),
         onPagoDiario: () => _ir(const PagoDiarioScreen()),
         onInscribir: () => _ir(const InscribirScreen()),
+        onVenderAgua: () =>
+            _ir(const ServiciosScreen(tipoInicial: 'agua_suelta')),
+        onVenderRacion: () =>
+            _ir(const ServiciosScreen(tipoInicial: 'dosis_sin_agua')),
+        onVenderCombo: () =>
+            _ir(const ServiciosScreen(tipoInicial: 'dosis_con_agua')),
       ),
       body: SafeArea(
         child: RefreshIndicator(
@@ -1964,11 +1970,19 @@ class _FabAccionesRapidas extends StatefulWidget {
   final VoidCallback onCobrar;
   final VoidCallback onPagoDiario;
   final VoidCallback onInscribir;
+  // Ítem 5 (post-1.8.0, pedido de Jc): Servicios protagonistas en el
+  // rayo — venta directa de agua, ración y combo.
+  final VoidCallback onVenderAgua;
+  final VoidCallback onVenderRacion;
+  final VoidCallback onVenderCombo;
 
   const _FabAccionesRapidas({
     required this.onCobrar,
     required this.onPagoDiario,
     required this.onInscribir,
+    required this.onVenderAgua,
+    required this.onVenderRacion,
+    required this.onVenderCombo,
   });
 
   @override
@@ -2070,13 +2084,25 @@ class _FabAccionesRapidasState extends State<_FabAccionesRapidas>
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
-                    _accionAnimada(0, Icons.payments_rounded, 'Cobrar',
+                    _accionAnimada(0, Icons.water_drop_rounded,
+                        'Vender agua',
+                        () => _irCerrando(widget.onVenderAgua)),
+                    const SizedBox(height: 8),
+                    _accionAnimada(1, Icons.science_rounded,
+                        'Vender ración',
+                        () => _irCerrando(widget.onVenderRacion)),
+                    const SizedBox(height: 8),
+                    _accionAnimada(2, Icons.local_drink_rounded,
+                        'Vender combo',
+                        () => _irCerrando(widget.onVenderCombo)),
+                    const SizedBox(height: 8),
+                    _accionAnimada(3, Icons.payments_rounded, 'Cobrar',
                         () => _irCerrando(widget.onCobrar)),
                     const SizedBox(height: 8),
-                    _accionAnimada(1, Icons.today_rounded, 'Pago diario',
+                    _accionAnimada(4, Icons.today_rounded, 'Pago diario',
                         () => _irCerrando(widget.onPagoDiario)),
                     const SizedBox(height: 8),
-                    _accionAnimada(2, Icons.person_add_alt_1_rounded,
+                    _accionAnimada(5, Icons.person_add_alt_1_rounded,
                         'Inscribir', () => _irCerrando(widget.onInscribir)),
                   ],
                 ),
@@ -2133,9 +2159,12 @@ class _FabAccionesRapidasState extends State<_FabAccionesRapidas>
   /// escalonada según su índice (la de arriba sale última).
   Widget _accionAnimada(
       int index, IconData icono, String texto, VoidCallback onTap) {
-    // Orden visual: Cobrar (0) abajo … Inscribir (2) arriba.
-    // La animación entra de abajo hacia arriba.
-    final inicio = 0.15 * (2 - index);
+    // Orden visual: Vender agua (0) arriba … Inscribir (5) junto al
+    // rayo. La animación entra de abajo hacia arriba. Con 6 píldoras
+    // el escalonado se reparte en el mismo tramo total (0.3) que con
+    // 3 para que ningún Interval pase de 1.0.
+    const total = 6;
+    final inicio = (0.3 / (total - 1)) * (total - 1 - index);
     final itemAnim = CurvedAnimation(
       parent: _ctrl,
       curve: Interval(inicio, inicio + 0.7, curve: Curves.easeOutCubic),

@@ -32,9 +32,19 @@ class _ServiciosAdminScreenState extends State<ServiciosAdminScreen> {
   List<Map<String, dynamic>> _suplementos = [];
   Map<int, String> _categorias = {};
   Map<int, String> _personas = {}; // telegram_id → nombre
-  final _sinAguaCtrl = TextEditingController();
-  final _conAguaCtrl = TextEditingController();
-  final _aguaCtrl = TextEditingController();
+  // Ítem 7: un controlador por clave precio_<producto>_<método> y el
+  // estado de cada interruptor activo_<producto>_<método>.
+  static const _stemsPrecio = ['racion', 'combo', 'agua'];
+  final _precioCtrl = <String, TextEditingController>{
+    for (final s in _stemsPrecio)
+      for (final m in const ['efectivo', 'transferencia'])
+        '${s}_$m': TextEditingController(),
+  };
+  final _activoMet = <String, bool>{
+    for (final s in _stemsPrecio)
+      for (final m in const ['efectivo', 'transferencia'])
+        '${s}_$m': true,
+  };
   final _comisionCtrl = TextEditingController();
 
   @override
@@ -45,9 +55,9 @@ class _ServiciosAdminScreenState extends State<ServiciosAdminScreen> {
 
   @override
   void dispose() {
-    _sinAguaCtrl.dispose();
-    _conAguaCtrl.dispose();
-    _aguaCtrl.dispose();
+    for (final c in _precioCtrl.values) {
+      c.dispose();
+    }
     _comisionCtrl.dispose();
     super.dispose();
   }
@@ -68,6 +78,7 @@ class _ServiciosAdminScreenState extends State<ServiciosAdminScreen> {
 
   Future<void> _cargar() async {
     final precios = await preciosServicios();
+    final ajustes = await LocalDb.instance.getAjustes();
     final agua = await stockAguaLocal();
     final botes = await LocalDb.instance.allMirror('servicio_botes');
     final lotes = await LocalDb.instance.allMirror('servicio_lotes');
@@ -105,9 +116,20 @@ class _ServiciosAdminScreenState extends State<ServiciosAdminScreen> {
       _suplementos = suplementos;
       _categorias = mapaCategoriasSuplemento(categorias);
       _personas = personas;
-      _sinAguaCtrl.text = precios.sinAgua.toStringAsFixed(0);
-      _conAguaCtrl.text = precios.conAgua.toStringAsFixed(0);
-      _aguaCtrl.text = precios.agua.toStringAsFixed(0);
+      // Ítem 7: los campos nacen con los valores RESUELTOS vigentes
+      // (lo que publica el servidor), no con claves sueltas.
+      for (final s in _stemsPrecio) {
+        final tipo = s == 'racion'
+            ? 'dosis_sin_agua'
+            : s == 'combo'
+                ? 'dosis_con_agua'
+                : 'agua_suelta';
+        for (final m in const ['efectivo', 'transferencia']) {
+          _precioCtrl['${s}_$m']!.text =
+              precioServicioMetodo(ajustes, tipo, m).toStringAsFixed(0);
+          _activoMet['${s}_$m'] = metodoServicioActivo(ajustes, tipo, m);
+        }
+      }
       _comisionCtrl.text = precios.comision.toStringAsFixed(0);
       _cargando = false;
     });
@@ -128,38 +150,65 @@ class _ServiciosAdminScreenState extends State<ServiciosAdminScreen> {
   // Precios
   // ---------------------------------------------------------------
 
+  String _tipoDeStem(String stem) => stem == 'racion'
+      ? 'dosis_sin_agua'
+      : stem == 'combo'
+          ? 'dosis_con_agua'
+          : 'agua_suelta';
+
   Future<void> _guardarPrecios() async {
-    final pr = _precios;
-    if (pr == null) return;
-    final nuevos = <String, double>{
-      'servicio_precio_sin_agua':
-          double.tryParse(_sinAguaCtrl.text.trim()) ?? -1,
-      'servicio_precio_con_agua':
-          double.tryParse(_conAguaCtrl.text.trim()) ?? -1,
-      'servicio_precio_agua':
-          double.tryParse(_aguaCtrl.text.trim()) ?? -1,
-      'servicio_comision_dosis':
-          double.tryParse(_comisionCtrl.text.trim()) ?? -1,
-    };
-    final actuales = <String, double>{
-      'servicio_precio_sin_agua': pr.sinAgua,
-      'servicio_precio_con_agua': pr.conAgua,
-      'servicio_precio_agua': pr.agua,
-      'servicio_comision_dosis': pr.comision,
-    };
-    // Precios de dosis: > 0. Agua y comisión admiten 0.
-    if (nuevos['servicio_precio_sin_agua']! <= 0 ||
-        nuevos['servicio_precio_con_agua']! <= 0 ||
-        nuevos['servicio_precio_agua']! < 0 ||
-        nuevos['servicio_comision_dosis']! < 0) {
-      _aviso('Revisa los valores: las dosis deben costar más de 0',
-          error: true);
+    // Ítem 7: se guardan las claves por (producto, método) que hayan
+    // cambiado contra lo VIGENTE resuelto, más la comisión.
+    final ajustes = await LocalDb.instance.getAjustes();
+    final cambios = <String, num>{};
+    for (final s in _stemsPrecio) {
+      final tipo = _tipoDeStem(s);
+      for (final m in const ['efectivo', 'transferencia']) {
+        final valor = double.tryParse(
+                _precioCtrl['${s}_$m']!.text.trim().replaceAll(',', '.')) ??
+            -1;
+        // Las dosis deben costar más de 0; el agua admite 0 (sin
+        // fijar) y la comisión también.
+        if (s == 'agua' ? valor < 0 : valor <= 0) {
+          _aviso('Revisa los valores: las dosis deben costar más de 0',
+              error: true);
+          return;
+        }
+        if (valor != precioServicioMetodo(ajustes, tipo, m)) {
+          cambios['servicio_precio_${s}_$m'] = valor;
+        }
+        final activo = _activoMet['${s}_$m']! ? 1 : 0;
+        if (activo != (metodoServicioActivo(ajustes, tipo, m) ? 1 : 0)) {
+          cambios['servicio_activo_${s}_$m'] = activo;
+        }
+      }
+    }
+    final comision = double.tryParse(
+            _comisionCtrl.text.trim().replaceAll(',', '.')) ??
+        -1;
+    if (comision < 0) {
+      _aviso('Revisa la comisión', error: true);
       return;
     }
-    final cambios = <String, double>{
-      for (final e in nuevos.entries)
-        if (e.value != actuales[e.key]) e.key: e.value,
+    final pr = _precios;
+    if (pr != null && comision != pr.comision) {
+      cambios['servicio_comision_dosis'] = comision;
+    }
+    // Compatibilidad: el precio único legacy de cada producto sigue
+    // al de EFECTIVO, para las versiones viejas aún instaladas.
+    const legacyDe = {
+      'racion': 'servicio_precio_sin_agua',
+      'combo': 'servicio_precio_con_agua',
+      'agua': 'servicio_precio_agua',
     };
+    for (final s in _stemsPrecio) {
+      final ef = cambios['servicio_precio_${s}_efectivo'];
+      if (ef != null &&
+          ef.toDouble() !=
+              (ajustes[legacyDe[s]] as num?)?.toDouble()) {
+        cambios[legacyDe[s]!] = ef;
+      }
+    }
     if (cambios.isEmpty) {
       _aviso('Sin cambios');
       return;
@@ -172,10 +221,26 @@ class _ServiciosAdminScreenState extends State<ServiciosAdminScreen> {
       );
     }
     // Actualización optimista del espejo local de ajustes (patrón
-    // de AdminScreen).
+    // de AdminScreen): claves sueltas Y la estructura resuelta que
+    // leen los formularios, para que el cambio se vea sin esperar
+    // al próximo pull.
     final aj = await LocalDb.instance.getAjustes();
     for (final e in cambios.entries) {
       aj[e.key] = e.value;
+    }
+    final pub = aj['servicio_precios_metodo'];
+    if (pub is Map) {
+      for (final e in cambios.entries) {
+        final partes = e.key.split('_');
+        if (partes.length == 4 && partes[0] == 'servicio') {
+          final prod = pub[partes[2]];
+          if (prod is Map) {
+            prod[partes[1] == 'precio'
+                ? partes[3]
+                : 'activo_${partes[3]}'] = e.value;
+          }
+        }
+      }
     }
     await LocalDb.instance.setAjustes(aj);
     SyncEngine.instance.push();
@@ -241,6 +306,85 @@ class _ServiciosAdminScreenState extends State<ServiciosAdminScreen> {
                 0,
       );
       _aviso('Entrada de agua registrada');
+      await _cargar();
+    } catch (e) {
+      _aviso(_limpio(e), error: true);
+    }
+  }
+
+  /// Ítem 11: salida sin venta del stock común de agua (solo el
+  /// dueño la ve; el servidor la exige). Para pomos rotos, regalados
+  /// o consumidos sin pasar por una venta.
+  Future<void> _salidaAgua() async {
+    var motivo = 'merma';
+    final cantCtrl = TextEditingController(text: '1');
+    final notaCtrl = TextEditingController();
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setD) => DialogoApp(
+          titulo: 'Salida de agua sin venta',
+          iconoTitulo: Icons.water_drop_outlined,
+          contenido: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                'Stock actual: ${_agua.saldo} pomos. La salida queda '
+                'registrada con su motivo y descuenta del inventario.',
+                style: AppTexto.secundario,
+              ),
+              const SizedBox(height: 8),
+              DropdownButtonFormField<String>(
+                value: motivo,
+                decoration:
+                    const InputDecoration(labelText: 'Motivo'),
+                items: const [
+                  DropdownMenuItem(
+                      value: 'merma', child: Text('Merma / rotura')),
+                  DropdownMenuItem(
+                      value: 'cortesia', child: Text('Cortesía')),
+                  DropdownMenuItem(
+                      value: 'consumo_staff',
+                      child: Text('Consumo del staff')),
+                  DropdownMenuItem(
+                      value: 'ajuste', child: Text('Ajuste')),
+                ],
+                onChanged: (v) => setD(() => motivo = v ?? 'merma'),
+              ),
+              TextField(
+                controller: cantCtrl,
+                keyboardType: TextInputType.number,
+                decoration:
+                    const InputDecoration(labelText: 'Pomos'),
+              ),
+              TextField(
+                controller: notaCtrl,
+                decoration: const InputDecoration(
+                    labelText: 'Nota (opcional)'),
+              ),
+            ],
+          ),
+          acciones: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancelar'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Registrar salida'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (ok != true) return;
+    try {
+      await registrarSalidaAguaServicio(
+        cantidad: int.tryParse(cantCtrl.text.trim()) ?? 0,
+        motivo: motivo,
+        nota: notaCtrl.text.trim().isEmpty ? null : notaCtrl.text.trim(),
+      );
+      _aviso('Salida de agua registrada');
       await _cargar();
     } catch (e) {
       _aviso(_limpio(e), error: true);
@@ -523,6 +667,36 @@ class _ServiciosAdminScreenState extends State<ServiciosAdminScreen> {
             decoration: InputDecoration(labelText: etiqueta),
           ),
         );
+    Widget interruptor(String stem, String metodo, String etiqueta) =>
+        Expanded(
+          child: SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            title: Text(etiqueta, style: AppTexto.cuerpo),
+            value: _activoMet['${stem}_$metodo']!,
+            onChanged: (v) =>
+                setState(() => _activoMet['${stem}_$metodo'] = v),
+          ),
+        );
+    Widget bloque(String titulo, String stem) => Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(titulo,
+                style:
+                    AppTexto.cuerpo.copyWith(fontWeight: FontWeight.w600)),
+            Row(children: [
+              campo('Efectivo (CUP)', _precioCtrl['${stem}_efectivo']!),
+              const SizedBox(width: AppEspacio.sm),
+              campo('Transferencia (CUP)',
+                  _precioCtrl['${stem}_transferencia']!),
+            ]),
+            Row(children: [
+              interruptor(stem, 'efectivo', 'Cobrar en efectivo'),
+              interruptor(
+                  stem, 'transferencia', 'Cobrar por transferencia'),
+            ]),
+            const SizedBox(height: 4),
+          ],
+        );
     return Tarjeta(
       padding: const EdgeInsets.all(AppEspacio.md),
       child: Column(
@@ -531,21 +705,20 @@ class _ServiciosAdminScreenState extends State<ServiciosAdminScreen> {
           Text('Precios y comisión',
               style: AppTexto.titulo.copyWith(fontSize: 16)),
           const SizedBox(height: 8),
+          // Ítem 7: precio y métodos habilitados POR PRODUCTO.
+          bloque('Ración (dosis sin agua)', 'racion'),
+          bloque('Combo (dosis con agua)', 'combo'),
+          bloque('Pomo de agua suelto', 'agua'),
           Row(children: [
-            campo('Dosis sin agua (CUP)', _sinAguaCtrl),
-            const SizedBox(width: AppEspacio.sm),
-            campo('Dosis con agua (CUP)', _conAguaCtrl),
-          ]),
-          Row(children: [
-            campo('Pomo de agua (CUP)', _aguaCtrl),
-            const SizedBox(width: AppEspacio.sm),
             campo('Comisión por dosis (CUP)', _comisionCtrl),
+            const Expanded(child: SizedBox()),
           ]),
           const SizedBox(height: 4),
           const Text(
             'Agua en 0 = precio sin fijar (no se puede vender suelta). '
             'Comisión en 0 = sin comisión. La comisión se paga con la '
-            'nómina del mes.',
+            'nómina del mes. Apagar ambos métodos de un producto lo '
+            'deja invendible (la Cuenta a la Casa no se afecta).',
             style: TextStyle(fontSize: 12, color: Colors.grey),
           ),
           Align(
@@ -586,9 +759,19 @@ class _ServiciosAdminScreenState extends State<ServiciosAdminScreen> {
               ],
             ),
           ),
-          FilledButton(
-            onPressed: _reponerAgua,
-            child: const Text('Reponer'),
+          Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              FilledButton(
+                onPressed: _reponerAgua,
+                child: const Text('Reponer'),
+              ),
+              const SizedBox(height: 6),
+              OutlinedButton(
+                onPressed: _salidaAgua,
+                child: const Text('Salida sin venta'),
+              ),
+            ],
           ),
         ],
       ),

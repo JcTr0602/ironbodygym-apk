@@ -58,6 +58,65 @@ Future<({
   );
 }
 
+/// Ítem 7 (post-1.8.0, Argón): nombre de producto en las claves de
+/// precios por método — ración = dosis sin agua, combo = dosis con
+/// agua, agua = agua suelta.
+const kStemServicio = {
+  'dosis_sin_agua': 'racion',
+  'dosis_con_agua': 'combo',
+  'agua_suelta': 'agua',
+};
+
+/// Precio vigente de (tipo, método) desde el mapa de ajustes. El
+/// servidor publica `servicio_precios_metodo` YA resuelto (cadena:
+/// clave del método → clave de efectivo → precio único legacy); si la
+/// estructura no está (servidor viejo o ajustes sin sincronizar), se
+/// cae al precio único de siempre para ambos métodos. PURO.
+double precioServicioMetodo(
+    Map<String, dynamic> ajustes, String tipo, String metodo) {
+  final pub = ajustes['servicio_precios_metodo'];
+  if (pub is Map) {
+    final prod = pub[kStemServicio[tipo]];
+    if (prod is Map) {
+      final v = prod[metodo];
+      if (v is num) return v.toDouble();
+    }
+  }
+  double v(String k, double d) => (ajustes[k] as num?)?.toDouble() ?? d;
+  return switch (tipo) {
+    'dosis_sin_agua' => v('servicio_precio_sin_agua', 600),
+    'dosis_con_agua' => v('servicio_precio_con_agua', 900),
+    _ => v('servicio_precio_agua', 0),
+  };
+}
+
+/// ¿El método está habilitado para el producto? Sin la estructura por
+/// método, todo habilitado (comportamiento histórico). PURO.
+bool metodoServicioActivo(
+    Map<String, dynamic> ajustes, String tipo, String metodo) {
+  final pub = ajustes['servicio_precios_metodo'];
+  if (pub is Map) {
+    final prod = pub[kStemServicio[tipo]];
+    if (prod is Map) {
+      final v = prod['activo_$metodo'];
+      if (v is num) return v.toInt() != 0;
+      if (v is bool) return v;
+    }
+  }
+  return true;
+}
+
+/// Primer método habilitado del producto (efectivo antes que
+/// transferencia) o null si ambos están deshabilitados. Lo usan el
+/// formulario de venta y el speed dial (ítems 5 y 7). PURO.
+String? primerMetodoServicioActivo(
+    Map<String, dynamic> ajustes, String tipo) {
+  for (final m in const ['efectivo', 'transferencia']) {
+    if (metodoServicioActivo(ajustes, tipo, m)) return m;
+  }
+  return null;
+}
+
 // ------------------------------------------------------------------
 // Cálculos puros (testeables sin BD)
 // ------------------------------------------------------------------
@@ -201,6 +260,12 @@ int saldoLoteDesde({
         final subtipo = '${p['tipo'] ?? ''}';
         if (subtipo == 'dosis_con_agua' || subtipo == 'agua_suelta') {
           salida((p['cantidad'] as num?)?.toInt() ?? 1);
+        }
+      case 'salida_servicio':
+        // Ítem 11: la salida de AGUA pendiente resta del stock común
+        // (las de dosis no llevan tipo_item y no tocan el agua).
+        if ('${p['tipo_item'] ?? ''}' == 'agua') {
+          salida((p['cantidad'] as num?)?.toInt() ?? 0);
         }
     }
   }
@@ -521,16 +586,16 @@ Future<String> registrarVentaServicio({
     }
   }
   final pr = await preciosServicios();
-  final double precio;
-  if (casa) {
-    precio = 0;
-  } else if (tipo == 'dosis_sin_agua') {
-    precio = pr.sinAgua;
-  } else if (tipo == 'dosis_con_agua') {
-    precio = pr.conAgua;
-  } else {
-    precio = pr.agua;
+  // Ítem 7: el precio sale del (producto, método) vigente y viaja
+  // como snapshot en la op — si el dueño cambia precios o deshabilita
+  // el método después, el servidor acepta la venta tal cual se cobró.
+  final aj = await LocalDb.instance.getAjustes();
+  if (!casa && !metodoServicioActivo(aj, tipo, metodo!)) {
+    throw Exception(
+        'Ese método de cobro está deshabilitado para este producto');
   }
+  final double precio =
+      casa ? 0 : precioServicioMetodo(aj, tipo, metodo!);
   if (!casa && precio <= 0) {
     throw Exception(
         'El precio de este servicio aún no está fijado '
@@ -565,6 +630,26 @@ Future<String> registrarSalidaServicio({
   return _encolar('salida_servicio', {
     'lote_id': loteId,
     'dosis': dosis,
+    'motivo': motivo,
+    if (nota != null && nota.isNotEmpty) 'nota': nota,
+    'fecha': hoyHabanaIso(),
+  });
+}
+
+/// Ítem 11 (post-1.8.0, Argón): salida sin venta del stock común de
+/// AGUA (merma, rotura, cortesía...). Solo el dueño — el servidor lo
+/// re-impone. La op viaja con tipo_item='agua' y sin lote_id: el
+/// servidor la registra en servicio_salidas (lote NULL) enlazada a su
+/// movimiento de kardex.
+Future<String> registrarSalidaAguaServicio({
+  required int cantidad,
+  required String motivo, // merma | cortesia | consumo_staff | ajuste
+  String? nota,
+}) async {
+  if (cantidad < 1) throw Exception('La salida debe ser de al menos 1 pomo');
+  return _encolar('salida_servicio', {
+    'tipo_item': 'agua',
+    'cantidad': cantidad,
     'motivo': motivo,
     if (nota != null && nota.isNotEmpty) 'nota': nota,
     'fecha': hoyHabanaIso(),

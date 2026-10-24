@@ -18,7 +18,12 @@ import 'servicios_estadisticas.dart';
 /// estadísticas. La lógica vive en lib/servicios.dart; aquí solo
 /// se presenta y se captura la intención.
 class ServiciosScreen extends StatefulWidget {
-  const ServiciosScreen({super.key});
+  /// Ítem 5 (post-1.8.0): el speed dial de Home abre la pantalla ya
+  /// posicionada en un tipo de venta ('dosis_sin_agua' |
+  /// 'dosis_con_agua' | 'agua_suelta') y el formulario se abre solo.
+  final String? tipoInicial;
+
+  const ServiciosScreen({super.key, this.tipoInicial});
 
   @override
   State<ServiciosScreen> createState() => _ServiciosScreenState();
@@ -29,6 +34,8 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
   bool _esDueno = false;
   ({double sinAgua, double conAgua, double agua, double comision})?
       _precios;
+  Map<String, dynamic> _ajustes = const {};
+  bool _dialogoInicialAbierto = false;
   ({int saldo, double cpp}) _agua = (saldo: 0, cpp: 0);
   List<Map<String, dynamic>> _misLotes = [];
   int? _loteSel;
@@ -47,6 +54,7 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
     final tid = auth.telegramId;
     final hoy = hoyHabanaIso();
     final precios = await preciosServicios();
+    final ajustes = await LocalDb.instance.getAjustes();
     final agua = await stockAguaLocal();
     final lotes = await lotesActivosLocal(responsableId: tid);
     // Nombre del producto en cada lote: lote → bote → suplemento.
@@ -91,6 +99,7 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
     setState(() {
       _esDueno = auth.isOwner;
       _precios = precios;
+      _ajustes = ajustes;
       _agua = agua;
       _misLotes = lotes;
       if (_loteSel == null && lotes.isNotEmpty) {
@@ -101,6 +110,14 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
       _reversadas = reversadas;
       _cargando = false;
     });
+    // Ítem 5: llegada desde el speed dial de Home → el formulario de
+    // ese tipo se abre solo, una vez, con lotes y precios ya cargados.
+    if (widget.tipoInicial != null && !_dialogoInicialAbierto) {
+      _dialogoInicialAbierto = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _vender(widget.tipoInicial!);
+      });
+    }
   }
 
   Map<String, dynamic>? get _loteActual {
@@ -137,8 +154,6 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
   }
 
   Future<void> _vender(String tipo) async {
-    final pr = _precios;
-    if (pr == null) return;
     if (tipo != 'agua_suelta' && _loteActual == null) {
       _aviso(
           _esDueno
@@ -149,7 +164,10 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
     }
     Map<String, dynamic>? cliente;
     var paraDuenoCasa = false;
-    var metodo = 'efectivo';
+    // Ítems 5 y 7 (Argón): el formulario nace posicionado en el
+    // primer método HABILITADO del producto.
+    var metodo =
+        primerMetodoServicioActivo(_ajustes, tipo) ?? 'efectivo';
     var cantidad = 1;
     final ok = await showDialog<bool>(
       context: context,
@@ -158,11 +176,14 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
           final esCasaCliente = cliente != null &&
               (cliente!['cuenta_casa'] as num?)?.toInt() == 1;
           final esCasa = esCasaCliente || paraDuenoCasa;
-          final precioUnit = tipo == 'dosis_sin_agua'
-              ? pr.sinAgua
-              : tipo == 'dosis_con_agua'
-                  ? pr.conAgua
-                  : pr.agua;
+          // Ítem 7: el precio depende del método elegido y se
+          // recalcula en vivo al alternar Efectivo/Transferencia.
+          final metodosActivos = <String>[
+            for (final m in const ['efectivo', 'transferencia'])
+              if (metodoServicioActivo(_ajustes, tipo, m)) m,
+          ];
+          final precioUnit =
+              precioServicioMetodo(_ajustes, tipo, metodo);
           return DialogoApp(
             titulo: tipo == 'dosis_sin_agua'
                 ? 'Dosis sin agua'
@@ -258,21 +279,34 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                   ),
                 if (!esCasa) ...[
                   const SizedBox(height: 8),
-                  // v1.8.1: sin iconos — con icono, «Transferencia»
-                  // se partía en dos líneas en el diálogo (visto por
-                  // Jc en campo el 2026-10-23).
-                  SegmentedButton<String>(
-                    segments: const [
-                      ButtonSegment(
-                          value: 'efectivo', label: Text('Efectivo')),
-                      ButtonSegment(
-                          value: 'transferencia',
-                          label: Text('Transferencia')),
-                    ],
-                    selected: {metodo},
-                    onSelectionChanged: (s) =>
-                        setD(() => metodo = s.first),
-                  ),
+                  // Ítem 7: solo se ofrecen los métodos HABILITADOS
+                  // del producto; sin ninguno, aviso claro y el
+                  // botón Cobrar queda deshabilitado (la Casa no
+                  // cobra y no se ve afectada).
+                  if (metodosActivos.isEmpty)
+                    Text(
+                      '⚠️ Este producto no tiene métodos de cobro '
+                      'habilitados (Administración → Servicios).',
+                      style: AppTexto.secundario.copyWith(
+                          color: AppColores.error),
+                    )
+                  else
+                    // v1.8.1: sin iconos — con icono, «Transferencia»
+                    // se partía en dos líneas en el diálogo (visto por
+                    // Jc en campo el 2026-10-23).
+                    SegmentedButton<String>(
+                      segments: [
+                        for (final m in metodosActivos)
+                          ButtonSegment(
+                              value: m,
+                              label: Text(m == 'efectivo'
+                                  ? 'Efectivo'
+                                  : 'Transferencia')),
+                      ],
+                      selected: {metodo},
+                      onSelectionChanged: (s) =>
+                          setD(() => metodo = s.first),
+                    ),
                 ],
                 if (tipo == 'agua_suelta') ...[
                   const SizedBox(height: 12),
@@ -305,7 +339,9 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                 child: const Text('Cancelar'),
               ),
               FilledButton(
-                onPressed: () => Navigator.pop(ctx, true),
+                onPressed: (esCasa || metodosActivos.isNotEmpty)
+                    ? () => Navigator.pop(ctx, true)
+                    : null,
                 child: Text(esCasa ? 'Registrar' : 'Cobrar'),
               ),
             ],

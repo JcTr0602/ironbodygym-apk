@@ -176,4 +176,88 @@ void main() {
       expect(r.importe, 0.0);
     });
   });
+
+  group('ítem 7: precios por método (puros)', () {
+    final aj = <String, dynamic>{
+      'servicio_precio_sin_agua': 600.0,
+      'servicio_precio_con_agua': 900.0,
+      'servicio_precio_agua': 300.0,
+      'servicio_precios_metodo': {
+        'racion': {
+          'efectivo': 500.0,
+          'transferencia': 700.0,
+          'activo_efectivo': 1,
+          'activo_transferencia': 1,
+        },
+        'combo': {
+          'efectivo': 900.0,
+          'transferencia': 900.0,
+          'activo_efectivo': 1,
+          'activo_transferencia': 0,
+        },
+        'agua': {
+          'efectivo': 300.0,
+          'transferencia': 300.0,
+          'activo_efectivo': 0,
+          'activo_transferencia': 0,
+        },
+      },
+    };
+    test('el precio sale del (producto, método) publicado', () {
+      expect(precioServicioMetodo(aj, 'dosis_sin_agua', 'efectivo'), 500.0);
+      expect(
+          precioServicioMetodo(aj, 'dosis_sin_agua', 'transferencia'), 700.0);
+      expect(precioServicioMetodo(aj, 'agua_suelta', 'efectivo'), 300.0);
+    });
+    test('métodos deshabilitados y primer método activo', () {
+      expect(metodoServicioActivo(aj, 'dosis_con_agua', 'transferencia'),
+          isFalse);
+      expect(primerMetodoServicioActivo(aj, 'dosis_con_agua'), 'efectivo');
+      expect(primerMetodoServicioActivo(aj, 'agua_suelta'), isNull);
+    });
+    test('sin estructura por método: legacy para ambos, todo activo',
+        () {
+      final viejo = <String, dynamic>{
+        'servicio_precio_sin_agua': 650.0,
+        'servicio_precio_agua': 0.0,
+      };
+      expect(precioServicioMetodo(viejo, 'dosis_sin_agua', 'efectivo'),
+          650.0);
+      expect(
+          precioServicioMetodo(viejo, 'dosis_sin_agua', 'transferencia'),
+          650.0);
+      expect(metodoServicioActivo(viejo, 'agua_suelta', 'efectivo'), isTrue);
+      expect(primerMetodoServicioActivo(viejo, 'agua_suelta'), 'efectivo');
+    });
+  });
+
+  group('ítem 11: salida de agua pendiente en aguaDesde', () {
+    test('la salida de agua en cola resta del stock común', () {
+      final r = aguaDesde(
+        movimientosEspejo: [
+          {'id': 1, 'op_uuid': 'e1', 'tipo': 'entrada', 'cantidad': 10, 'costo_unitario': 100.0},
+        ],
+        opsPendientes: [
+          _op('salida_servicio',
+              {'tipo_item': 'agua', 'cantidad': 3, 'motivo': 'merma'},
+              's9'),
+          // Una salida de DOSIS en cola no toca el agua.
+          _op('salida_servicio',
+              {'lote_id': 7, 'dosis': 2, 'motivo': 'merma'}, 's10'),
+        ],
+      );
+      expect(r.saldo, 7);
+    });
+    test('el movimiento espejo salida_sin_venta suma tal cual (negativo)',
+        () {
+      final r = aguaDesde(
+        movimientosEspejo: [
+          {'id': 1, 'op_uuid': 'e1', 'tipo': 'entrada', 'cantidad': 10, 'costo_unitario': 100.0},
+          {'id': 2, 'op_uuid': 's1', 'tipo': 'salida_sin_venta', 'cantidad': -3, 'costo_unitario': 100.0},
+        ],
+        opsPendientes: const [],
+      );
+      expect(r.saldo, 7);
+    });
+  });
 }
