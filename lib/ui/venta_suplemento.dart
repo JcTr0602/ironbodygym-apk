@@ -267,22 +267,19 @@ class _VentaSuplementoScreenState
         (_tipoComprador == 'cliente' ||
             _tipoComprador == 'inscribir_nuevo');
     final oficialRef = _oficialEnMoneda ?? _precioOficial;
-    final lineaMoneda = 'Precio: ${precio.toStringAsFixed(2)} $_moneda'
-        '${tasa != null ? ' (tasa ${tasa.toStringAsFixed(2)} CUP/USD)' : ''}'
-        '${difiere ? '\n⚠️ Vas a vender a un precio distinto al oficial'
-            ' (oficial: ${oficialRef.toStringAsFixed(2)} $_moneda)' : ''}\n'
-        'Total: ${textoTotalVenta(total, _moneda, tasa)}';
 
-    final ok = await DialogoApp.confirmar(
-      context,
-      titulo: 'Confirmar venta',
-      icono: Icons.point_of_sale,
-      mensaje: '${widget.suplemento['nombre']}\n'
-          'Cantidad: $_cantidad\n'
-          '$lineaMoneda\n'
-          'Comprador: $nombreComprador'
-          '${conPromo ? '\n\nSe le asignará 1 mes de mensualidad gratis (promo activa).' : ''}',
-      aceptar: 'Confirmar venta',
+    // v1.8.1 (pedido de Jc tras la venta duplicada del 2026-10-23):
+    // la confirmación es la VISTA PREVIA del comprobante completo,
+    // tal cual saldrá por WhatsApp. Antes el resumen era genérico y
+    // el comprobante solo se veía DESPUÉS de registrar: Jc entró dos
+    // veces «solo a ver el mensaje» y registró la venta dos veces.
+    final ok = await _confirmarConVistaPrevia(
+      nombreComprador: nombreComprador,
+      total: total,
+      conPromo: conPromo,
+      precio: precio,
+      difiere: difiere,
+      oficialRef: oficialRef,
     );
     if (!ok) {
       return;
@@ -344,10 +341,14 @@ class _VentaSuplementoScreenState
     }
   }
 
-  /// v1.3.7: muestra el comprobante de la venta con opción de enviarlo
-  /// por WhatsApp al cliente (si tiene móvil en su ficha).
-  /// Pedido de Jc: comprobante + detalles de la promo (mes gratis).
-  Future<void> _mostrarComprobante({
+  /// v1.8.1: arma el comprobante de la venta — lo usan la VISTA
+  /// PREVIA (antes de registrar) y el diálogo «Venta registrada».
+  /// Devuelve el texto y, si el cliente tiene móvil, el número
+  /// listo para wa.me. Con promo, la nueva fecha de vencimiento
+  /// sale de previewHasta sobre la ficha local: la MISMA regla
+  /// que el servidor aplica al insertar el pago promo
+  /// (max(vencimiento, hoy) + 30 días).
+  Future<({String texto, String? waNum})> _construirComprobante({
     required String nombreComprador,
     required double total,
     required bool conPromo,
@@ -355,9 +356,6 @@ class _VentaSuplementoScreenState
   }) async {
     final nombreProd = '${widget.suplemento['nombre'] ?? ''}';
     final fecha = hoyHabanaIso();
-    // Ficha local del cliente (solo si es cliente del gym):
-    // de ella salen el teléfono para WhatsApp y, con promo,
-    // el vencimiento actual para calcular el nuevo.
     String? waNum;
     String? nuevoVencimiento;
     if (_tipoComprador == 'cliente' && _clienteId != null) {
@@ -368,17 +366,13 @@ class _VentaSuplementoScreenState
           );
       final tel = '${cli?['telefono'] ?? ''}'.trim();
       if (tel.isNotEmpty) waNum = normalizarTelefonoWaMe(tel);
-      // v1.8.1: con promo, la nueva fecha de vencimiento sale
-      // de previewHasta sobre la ficha local: la MISMA regla
-      // que el servidor aplica al insertar el pago promo
-      // (max(vencimiento, hoy) + 30 días).
       if (conPromo) {
         final hastaActual = '${cli?['pagado_hasta'] ?? ''}'.trim();
         nuevoVencimiento =
             previewHasta(hastaActual.isEmpty ? null : hastaActual, 1);
       }
     }
-    final textoComprobante = textoComprobanteCompra(
+    final texto = textoComprobanteCompra(
       nombreProducto: nombreProd,
       cantidad: _cantidad,
       precio: precio,
@@ -390,6 +384,95 @@ class _VentaSuplementoScreenState
       nuevoVencimientoIso: nuevoVencimiento,
       esFiado: _esFiado && _tipoComprador == 'cliente',
     );
+    return (texto: texto, waNum: waNum);
+  }
+
+  /// v1.8.1 (pedido de Jc tras la venta duplicada del 2026-10-23):
+  /// ventana de revisión ANTES de registrar — muestra el
+  /// comprobante completo en una burbuja estilo WhatsApp y solo
+  /// al tocar «Confirmar venta» se encola la operación. Tras
+  /// registrar, el botón de WhatsApp solo abre el chat (no
+  /// registra nada), así que revisar el mensaje nunca duplica.
+  Future<bool> _confirmarConVistaPrevia({
+    required String nombreComprador,
+    required double total,
+    required bool conPromo,
+    required double precio,
+    required bool difiere,
+    required double oficialRef,
+  }) async {
+    final c = await _construirComprobante(
+      nombreComprador: nombreComprador,
+      total: total,
+      conPromo: conPromo,
+      precio: precio,
+    );
+    if (!mounted) return false;
+    final r = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => DialogoApp(
+        titulo: 'Confirma la venta',
+        iconoTitulo: Icons.point_of_sale,
+        contenido: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Revisa el comprobante tal y como lo recibirá el cliente:',
+              style: TextStyle(fontWeight: FontWeight.w600),
+            ),
+            const SizedBox(height: 8),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: const Color(0xFFE7F6EC),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Text(c.texto.replaceAll('*', '')),
+            ),
+            if (difiere) ...[
+              const SizedBox(height: 10),
+              Text(
+                '⚠️ Precio distinto al oficial '
+                '(${oficialRef.toStringAsFixed(2)} $_moneda).',
+                style: const TextStyle(color: Colors.red),
+              ),
+            ],
+          ],
+        ),
+        acciones: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancelar'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Confirmar venta'),
+          ),
+        ],
+      ),
+    );
+    return r == true;
+  }
+
+  /// v1.3.7: muestra el comprobante de la venta con opción de enviarlo
+  /// por WhatsApp al cliente (si tiene móvil en su ficha).
+  /// Pedido de Jc: comprobante + detalles de la promo (mes gratis).
+  Future<void> _mostrarComprobante({
+    required String nombreComprador,
+    required double total,
+    required bool conPromo,
+    required double precio,
+  }) async {
+    final c = await _construirComprobante(
+      nombreComprador: nombreComprador,
+      total: total,
+      conPromo: conPromo,
+      precio: precio,
+    );
+    final textoComprobante = c.texto;
+    final waNum = c.waNum;
     if (!mounted) return;
     await showDialog(
       context: context,
