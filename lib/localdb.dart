@@ -4760,6 +4760,12 @@ class LocalDb {
       required String tipo,
       required Map<String, dynamic> payload,
       String? fotoPath,
+      // Bloque 1 (Argón AMARILLO, 2026-10-24): retención Deshacer 15 s.
+      // Si se pasa, la op nace con proximo_reintento en el futuro y
+      // pendientesParaEnvio (sin forzar) la salta hasta entonces. Al
+      // vencer, el push la toma normal; si falla, bumpOp reescribe el
+      // campo con su backoff. Solo lo usa el flujo de cobro.
+      String? retenerHastaIso,
       DatabaseExecutor? txn}) async {
     final DatabaseExecutor ex = txn ?? await db;
     // v1.0.16: guardar autoría para no atribuir ops ajenas al sincronizar.
@@ -4796,6 +4802,8 @@ class LocalDb {
       'foto_path': fotoPath,
       'user_id': userId,
       'telegram_id': telegramId,
+      // Bloque 1: null = sin retención (comportamiento de siempre).
+      'proximo_reintento': retenerHastaIso,
     });
     // v1.2.5 (D12): marca COMMIT local real (no optimista).
     try {

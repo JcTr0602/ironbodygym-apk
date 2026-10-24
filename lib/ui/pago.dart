@@ -19,6 +19,7 @@ import '../sync.dart';
 import 'buscar.dart';
 import 'componentes.dart';
 import 'dialogo_pago.dart';
+import 'preview_cobro.dart';
 import 'diseno.dart';
 import 'ficha.dart';
 import 'widgets.dart';
@@ -216,18 +217,24 @@ class _PagoScreenState extends State<PagoScreen> {
   }
 
   Future<void> _pagar(Map<String, dynamic> c) async {
+    // Bloque 1 (Argón AMARILLO): Casa no paga mensualidad, y todo
+    // cobro pasa por Preview + Recibo (sin atajos).
+    if (await mostrarBloqueoCasa(context, c)) return;
+    if (!mounted) return;
     final payload = await pagoDialogo(context, c);
     if (payload == null || !mounted) return;
-    await LocalDb.instance.queueOp(
-      opUuid: const Uuid().v4(),
-      tipo: 'pago_mensual',
+    final deshecho = await cobrarConPreviewYRecibo(
+      context: context,
+      nombreCliente: '${c['nombre'] ?? ''}',
       payload: payload,
     );
     // v1.0.15: vibración de confirmación (caja rápida).
-    HapticFeedback.lightImpact();
+    if (!deshecho) HapticFeedback.lightImpact();
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Pago de ${c['nombre']} guardado')));
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(deshecho
+            ? 'Cobro deshecho'
+            : 'Pago de ${c['nombre']} guardado')));
     SyncEngine.instance.push();
     _cargarDatos();
     _buscar();

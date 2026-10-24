@@ -440,6 +440,18 @@ class PerfilService {
   /// v1.2.5 (3.4): alto contraste (objetivo WCAG AA).
   Future<bool> getAltoContraste() async =>
       (await _p).getBool('alto_contraste') ?? false;
+
+  /// Bloque 1: acción al deslizar una fila en Buscar cliente.
+  /// Lista CERRADA: 'ninguna' | 'cobrar' | 'diario' | 'venta' |
+  /// 'editar'. Local por teléfono, sin sincronizar (aprobado).
+  Future<String> getSwipeBuscarDer() async =>
+      (await _p).getString('buscar_swipe_der') ?? 'cobrar';
+  Future<void> setSwipeBuscarDer(String v) async =>
+      (await _p).setString('buscar_swipe_der', v);
+  Future<String> getSwipeBuscarIzq() async =>
+      (await _p).getString('buscar_swipe_izq') ?? 'ninguna';
+  Future<void> setSwipeBuscarIzq(String v) async =>
+      (await _p).setString('buscar_swipe_izq', v);
   Future<void> setAltoContraste(bool v) async =>
       (await _p).setBool('alto_contraste', v);
 

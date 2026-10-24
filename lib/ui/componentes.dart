@@ -297,6 +297,21 @@ class BotonPeligro extends StatelessWidget {
 // ---------------------------------------------------------------------------
 
 /// Tarjeta estándar del sistema: radio grande, sombra sutil, padding 16.
+/// Bloque 1: fundido suave de entrada (250 ms). Solo anima al
+/// montar: con el mismo tween no se repite en cada setState ni
+/// retrasa las tarjetas al hacer scroll.
+class FadeEntrada extends StatelessWidget {
+  final Widget child;
+  const FadeEntrada({super.key, required this.child});
+  @override
+  Widget build(BuildContext context) => TweenAnimationBuilder<double>(
+        tween: Tween(begin: 0.0, end: 1.0),
+        duration: const Duration(milliseconds: 250),
+        builder: (ctx, v, ch) => Opacity(opacity: v, child: ch),
+        child: child,
+      );
+}
+
 class Tarjeta extends StatelessWidget {
   final Widget child;
   final EdgeInsetsGeometry padding;

@@ -3,15 +3,14 @@ library;
 
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
-import 'package:uuid/uuid.dart';
 
 import '../localdb.dart';
 import '../negocio.dart';
 import '../sync.dart';
 import 'buscar.dart';
 import 'componentes.dart';
-import 'confirmacion_cobro.dart';
 import 'dialogo_pago.dart';
+import 'preview_cobro.dart';
 import 'diseno.dart';
 import 'ficha.dart';
 import 'widgets.dart';
@@ -93,28 +92,23 @@ class _ListasScreenState extends State<ListasScreen>
   }
 
   Future<void> _pagoRapido(Map<String, dynamic> c) async {
+    // Bloque 1 (Argón AMARILLO): Casa no paga mensualidad, y el
+    // «cobro en 2 toques» ya no existe: todo cobro pasa por el
+    // Preview obligatorio + Recibo con Deshacer, sin excepciones.
+    if (await mostrarBloqueoCasa(context, c)) return;
+    if (!mounted) return;
     final payload = await pagoDialogo(context, c);
     if (payload == null || !mounted) return;
-    await LocalDb.instance.queueOp(
-      opUuid: const Uuid().v4(),
-      tipo: 'pago_mensual',
+    final deshecho = await cobrarConPreviewYRecibo(
+      context: context,
+      nombreCliente: '${c['nombre'] ?? ''}',
       payload: payload,
     );
     if (!mounted) return;
-    // Confirmación a pantalla completa (cobro en 2 toques)
-    final monto = '${payload['monto'] ?? ''} CUP';
-    final venc = '${payload['pagado_hasta'] ?? ''}';
-    await Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => ConfirmacionCobroScreen(
-          nombreCliente: '${c['nombre'] ?? ''}',
-          monto: monto,
-          nuevoVencimiento:
-              venc.length >= 10 ? venc.substring(0, 10) : venc,
-        ),
-      ),
-    );
-    if (!mounted) return;
+    if (deshecho) {
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Cobro deshecho')));
+    }
     _cargar();
     SyncEngine.instance.push();
   }

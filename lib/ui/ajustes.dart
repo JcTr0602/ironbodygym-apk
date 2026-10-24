@@ -54,6 +54,8 @@ class _AjustesScreenState extends State<AjustesScreen> {
   String _tema = 'sistema';
   double _tamanoLetra = 1.0;
   int _bloqueoMinutos = 0;
+  String _swipeDer = 'cobrar'; // Bloque 1: deslizar en Buscar
+  String _swipeIzq = 'ninguna';
   String? _espacioTexto;
   bool _buscandoUpdate = false;
 
@@ -84,6 +86,8 @@ class _AjustesScreenState extends State<AjustesScreen> {
     final tema = await _perfil.getTema();
     final letra = await _perfil.getTamanoLetra();
     final bloq = await _perfil.getBloqueoMinutos();
+    final swipeDer = await _perfil.getSwipeBuscarDer();
+    final swipeIzq = await _perfil.getSwipeBuscarIzq();
     if (mounted) {
       setState(() {
         _nombreVisible = nv;
@@ -100,6 +104,8 @@ class _AjustesScreenState extends State<AjustesScreen> {
         _tema = tema;
         _tamanoLetra = letra;
         _bloqueoMinutos = bloq;
+        _swipeDer = swipeDer;
+        _swipeIzq = swipeIzq;
       });
     }
   }
@@ -363,6 +369,52 @@ class _AjustesScreenState extends State<AjustesScreen> {
     if (sel != null) {
       await _perfil.setHorasAviso(sel);
       if (mounted) setState(() => _horasAviso = sel);
+    }
+  }
+
+  // ---------- Bloque 1: deslizables de Buscar ----------
+
+  String _etiquetaSwipe(String v) => switch (v) {
+        'cobrar' => 'Cobrar mes',
+        'diario' => 'Pago diario',
+        'venta' => 'Venta de suplemento',
+        'editar' => 'Editar',
+        _ => 'Ninguna',
+      };
+
+  Future<void> _elegirSwipe(bool derecha) async {
+    final actual = derecha ? _swipeDer : _swipeIzq;
+    final sel = await showDialog<String>(
+      context: context,
+      builder: (ctx) => SimpleDialog(
+        title: Text(derecha
+            ? 'Deslizar a la derecha'
+            : 'Deslizar a la izquierda'),
+        children: [
+          for (final v in ['ninguna', 'cobrar', 'diario', 'venta', 'editar'])
+            SimpleDialogOption(
+              onPressed: () => Navigator.pop(ctx, v),
+              child: Row(
+                children: [
+                  Text(_etiquetaSwipe(v)),
+                  const Spacer(),
+                  if (actual == v)
+                    const Icon(Icons.check,
+                        color: AppColores.naranja),
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
+    if (sel != null) {
+      if (derecha) {
+        await _perfil.setSwipeBuscarDer(sel);
+        if (mounted) setState(() => _swipeDer = sel);
+      } else {
+        await _perfil.setSwipeBuscarIzq(sel);
+        if (mounted) setState(() => _swipeIzq = sel);
+      }
     }
   }
 
@@ -1223,6 +1275,20 @@ class _AjustesScreenState extends State<AjustesScreen> {
                   ),
                 ),
 
+                // Bloque 1: acciones al deslizar en Buscar.
+                _seccion('Buscar cliente'),
+                _opcion(
+                  icono: Icons.swipe_right,
+                  titulo: 'Deslizar a la derecha',
+                  subtitulo: _etiquetaSwipe(_swipeDer),
+                  onTap: () => _elegirSwipe(true),
+                ),
+                _opcion(
+                  icono: Icons.swipe_left,
+                  titulo: 'Deslizar a la izquierda',
+                  subtitulo: _etiquetaSwipe(_swipeIzq),
+                  onTap: () => _elegirSwipe(false),
+                ),
                 // ----- NOTIFICACIONES -----
                 _seccion('Notificaciones'),
                 _opcion(

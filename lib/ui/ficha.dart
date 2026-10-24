@@ -7,7 +7,6 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_contacts/flutter_contacts.dart';
 import 'package:image_picker/image_picker.dart';
@@ -30,7 +29,7 @@ import '../sync.dart';
 import '../acceso_app_cache.dart';
 import 'componentes.dart';
 import 'dialogo_pago.dart';
-import 'confirmacion_cobro.dart';
+import 'preview_cobro.dart';
 import 'diseno.dart';
 import 'editor_foto.dart';
 import 'modal_pin_acceso.dart';
@@ -40,7 +39,12 @@ import 'widgets.dart';
 
 class FichaScreen extends StatefulWidget {
   final int clienteId;
-  const FichaScreen({super.key, required this.clienteId});
+
+  /// Bloque 1: si es true, al cargar la ficha abre directo el
+  /// diálogo Editar (acción al deslizar en Buscar).
+  final bool editarAlAbrir;
+  const FichaScreen(
+      {super.key, required this.clienteId, this.editarAlAbrir = false});
   @override
   State<FichaScreen> createState() => _FichaScreenState();
 }
@@ -68,6 +72,10 @@ class _FichaScreenState extends State<FichaScreen> {
   bool _accesoSinConexion = false;
   // v1.8.0: historial de servicios por dosis del cliente.
   List<Map<String, dynamic>> _serviciosHist = [];
+  // Bloque 1: filtro de la línea de tiempo ('todo' | 'pagos' | 'ventas').
+  String _filtroHistorial = 'todo';
+  // Bloque 1: ya se abrió Editar por editarAlAbrir (una sola vez).
+  bool _editoAlAbrir = false;
 
   @override
   void initState() {
@@ -103,6 +111,14 @@ class _FichaScreenState extends State<FichaScreen> {
         _foto = null;
         _regaloAnio = regaloAnio;
         _accesoSinConexion = accesoSinConexion;
+      });
+    }
+    // Bloque 1: abrir directo en Editar (deslizar en Buscar).
+    // Post-frame: _c ya está cargado y la ficha ya se dibujó.
+    if (widget.editarAlAbrir && !_editoAlAbrir && mounted && c != null) {
+      _editoAlAbrir = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _editar();
       });
     }
     // v1.3.6 (reporte de campo): la foto carga en SEGUNDO PLANO sin
@@ -362,20 +378,14 @@ class _FichaScreenState extends State<FichaScreen> {
   Future<void> _pagar() async {
     final c = _c;
     if (c == null) return;
-    // v1.7.0: cobrar a una Cuenta a la Casa es permitido pero
-    // inútil (nunca vence y no necesita pagar): aviso previo.
-    if (esCuentaCasa(c)) {
-      final seguir = await DialogoApp.confirmar(
-        context,
-        titulo: 'Cuenta a la Casa',
-        mensaje: 'Esta cuenta no necesita pagar: tiene acceso '
-            'permanente sin vencimiento. Cobrarle un mes no cambia '
-            'nada.\n\n¿Cobrar igual?',
-        aceptar: 'Cobrar igual',
-        icono: Icons.home_rounded,
-      );
-      if (seguir != true || !mounted) return;
-    }
+    // Bloque 1 (Argón AMARILLO, 2026-10-24): una Cuenta a la Casa NO
+    // paga mensualidad. Antes se avisaba y se permitía cobrar igual;
+    // ahora se bloquea: cobrarle un mes no cambia nada, y el botón
+    // existe para que nadie lo haga por error. Si de verdad hay que
+    // cobrarle, primero se quita la Cuenta a la Casa en el panel
+    // del dueño.
+    if (await mostrarBloqueoCasa(context, c)) return;
+    if (!mounted) return;
     final payload = await pagoDialogo(context, c);
     if (payload == null || !mounted) return;
     // v1.0.11: si es el dueño quien cobra, se marca entregado automáticamente
@@ -383,25 +393,18 @@ class _FichaScreenState extends State<FichaScreen> {
     if (AuthService().isOwner) {
       payload['entregado'] = 1;
     }
-    await LocalDb.instance.queueOp(
-      opUuid: const Uuid().v4(),
-      tipo: 'pago_mensual',
+    // Bloque 1: Preview obligatorio + Recibo con Deshacer 15 s.
+    // Ningún cobro se guarda sin pasar por el preview.
+    final deshecho = await cobrarConPreviewYRecibo(
+      context: context,
+      nombreCliente: '${c['nombre'] ?? ''}',
       payload: payload,
     );
     if (!mounted) return;
-    // Pantalla de confirmación fullscreen (v1.0.6)
-    final monto = '${payload['monto'] ?? ''} CUP';
-    final venc = '${payload['pagado_hasta'] ?? ''}'.substring(0, 10);
-    await Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => ConfirmacionCobroScreen(
-          nombreCliente: '${c['nombre'] ?? ''}',
-          monto: monto,
-          nuevoVencimiento: venc,
-        ),
-      ),
-    );
-    if (!mounted) return;
+    if (deshecho) {
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Cobro deshecho')));
+    }
     _cargar();
     SyncEngine.instance.push();
   }
@@ -1639,56 +1642,21 @@ class _FichaScreenState extends State<FichaScreen> {
     // v1.7.0: Cuenta a la Casa (distintivo dorado; el predicado
     // vive en negocio.dart/LocalDb).
     final esCasa = c != null && esCuentaCasa(c);
+    // Bloque 1: marco de la foto en color de estado (3 dp): verde al día,
+    // ámbar por vencer, rojo vencido, dorado Cuenta a la Casa.
+    final colorMarco = esCasa
+        ? const Color(0xFFB8860B)
+        : dias < 0
+            ? AppColores.error
+            : dias <= 7
+                ? AppColores.alerta
+                : AppColores.exito;
     final nombre = c == null ? '…' : '${c['nombre']}';
     return Scaffold(
       appBar: AppBar(
         title: Text(nombre),
         actions: [
           if (c != null) ...[
-            // v1.2.9+47: menú overflow con eliminar definitivo (solo dueño)
-            if (AuthService().isOwner)
-              PopupMenuButton<String>(
-                icon: const Icon(Icons.more_vert),
-                onSelected: (v) {
-                  if (v == 'eliminar') {
-                    _eliminarDefinitivo();
-                  } else if (v == 'casa_on') {
-                    _cambiarCuentaCasa(true);
-                  } else if (v == 'casa_off') {
-                    _cambiarCuentaCasa(false);
-                  }
-                },
-                itemBuilder: (ctx) => [
-                  // v1.7.0: Cuenta a la Casa (solo dueño; el menú
-                  // ya es solo del dueño).
-                  PopupMenuItem(
-                    value: esCasa ? 'casa_off' : 'casa_on',
-                    child: Row(
-                      children: [
-                        const Icon(Icons.home_rounded,
-                            color: Color(0xFFB8860B), size: 20),
-                        const SizedBox(width: 8),
-                        Text(esCasa
-                            ? 'Quitar Cuenta a la Casa'
-                            : 'Pasar a Cuenta a la Casa'),
-                      ],
-                    ),
-                  ),
-                  const PopupMenuItem(
-                    value: 'eliminar',
-                    child: Row(
-                      children: [
-                        Icon(Icons.delete_forever,
-                            color: Colors.red, size: 20),
-                        SizedBox(width: 8),
-                        Text('Eliminar definitivamente',
-                            style:
-                                TextStyle(color: Colors.red)),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
             IconButton(
                 tooltip: 'Verificar con servidor',
                 icon: _verificando
@@ -1704,6 +1672,27 @@ class _FichaScreenState extends State<FichaScreen> {
           ],
         ],
       ),
+      // Bloque 1: UN único botón Cobrar, fijo abajo (el de
+      // cuerpo se eliminó; _pagar ya bloquea Casa internamente).
+      bottomNavigationBar: c == null
+          ? null
+          : SafeArea(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(
+                    AppEspacio.lg,
+                    AppEspacio.sm,
+                    AppEspacio.lg,
+                    AppEspacio.sm),
+                child: SizedBox(
+                  width: double.infinity,
+                  child: BotonPrimario(
+                    texto: 'Registrar pago',
+                    icono: Icons.payments,
+                    onPressed: _pagar,
+                  ),
+                ),
+              ),
+            ),
       body: Column(
         children: [
           const SyncBanner(),
@@ -1711,7 +1700,8 @@ class _FichaScreenState extends State<FichaScreen> {
             child: c == null
                 ? const Center(
                     child: CircularProgressIndicator())
-                : ListView(
+                : FadeEntrada(
+                    child: ListView(
                     padding: const EdgeInsets.all(
                         AppEspacio.lg),
                     children: [
@@ -1749,8 +1739,8 @@ class _FichaScreenState extends State<FichaScreen> {
                                     shape: BoxShape.circle,
                                     border: Border.all(
                                         color:
-                                            AppColores.naranja,
-                                        width: 2),
+                                            colorMarco,
+                                        width: 3),
                                   ),
                                   child: ClipRRect(
                                     borderRadius:
@@ -1769,8 +1759,8 @@ class _FichaScreenState extends State<FichaScreen> {
                                 decoration: BoxDecoration(
                                   shape: BoxShape.circle,
                                   border: Border.all(
-                                      color: AppColores.naranja,
-                                      width: 2),
+                                      color: colorMarco,
+                                      width: 3),
                                 ),
                                 child: CircleAvatar(
                                 radius: 57,
@@ -1843,52 +1833,59 @@ class _FichaScreenState extends State<FichaScreen> {
                       ),
                       const SizedBox(
                           height: AppEspacio.lg),
-                      // Acciones principales
-                      Row(
-                        children: [
-                          Expanded(
-                            child: BotonPrimario(
-                              texto: 'Registrar pago',
-                              icono: Icons.payments,
-                              onPressed: _pagar,
-                            ),
-                          ),
-                          const SizedBox(
-                              width: AppEspacio.sm),
-                          Expanded(
-                            child: BotonSecundario(
-                              texto: 'Editar',
-                              icono: Icons.edit,
-                              onPressed: _editar,
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(
-                          height: AppEspacio.lg),
-                      // v1.3.3: regalar mensualidad de cumpleaños (solo dueño).
-                      // Argón spec 2: si ya se regaló este año, el botón
-                      // pasa a "Reenviar WhatsApp" (no aplica otro mes).
-                      // v1.7.0 (regla firme de Argón): en una Cuenta a
-                      // la Casa la celebración NO ofrece «regalo de
-                      // mes» — el botón no aparece.
-                      if (AuthService().isOwner && !esCasa)
+                      // Bloque 1: cumpleaños destacado cuando toca
+                      // (fecha de nacimiento desde el carnet, misma
+                      // fuente que la edad: fechaNacDeCarnet).
+                      if (_esCumpleHoy(c))
                         Padding(
                           padding: const EdgeInsets.only(
                               bottom: AppEspacio.sm),
-                          child: SizedBox(
-                            width: double.infinity,
-                            child: BotonSecundario(
-                              texto: _regaloAnio != null
-                                  ? '📲 Reenviar WhatsApp'
-                                  : '🎁 Regalar mensualidad',
-                              icono: _regaloAnio != null
-                                  ? Icons.send
-                                  : Icons.card_giftcard,
-                              onPressed: _regalarMes,
+                          child: Center(
+                            child: Container(
+                              padding:
+                                  const EdgeInsets.symmetric(
+                                      horizontal: 12,
+                                      vertical: 5),
+                              decoration: BoxDecoration(
+                                color: AppColores.naranja
+                                    .withValues(alpha: 0.12),
+                                borderRadius:
+                                    BorderRadius.circular(999),
+                                border: Border.all(
+                                    color: AppColores.naranja),
+                              ),
+                              child: const Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Text('🎂',
+                                      style: TextStyle(
+                                          fontSize: 14)),
+                                  SizedBox(width: 6),
+                                  Text('¡Cumpleaños hoy!',
+                                      style: TextStyle(
+                                          fontSize: 12.5,
+                                          fontWeight:
+                                              FontWeight.w700,
+                                          color: AppColores
+                                              .naranja)),
+                                ],
+                              ),
                             ),
                           ),
                         ),
+                      // Bloque 1: el único botón de cobro es el
+                      // fijo de abajo (bottomNavigationBar); aquí
+                      // queda solo Editar a ancho completo.
+                      SizedBox(
+                        width: double.infinity,
+                        child: BotonSecundario(
+                          texto: 'Editar',
+                          icono: Icons.edit,
+                          onPressed: _editar,
+                        ),
+                      ),
+                      const SizedBox(
+                          height: AppEspacio.lg),
                       const SizedBox(
                           height: AppEspacio.lg),
                       // Información personal
@@ -1939,10 +1936,44 @@ class _FichaScreenState extends State<FichaScreen> {
                                 Icons.person,
                                 'Sexo',
                                 '${c['sexo'] ?? '—'}'),
-                            _filaInfo(
-                                Icons.phone,
-                                'Teléfono',
-                                '${c['telefono'] ?? '—'}'),
+                            // Bloque 1: teléfono tocable para
+                            // WhatsApp (abre wa.me, no registra nada).
+                            InkWell(
+                              onTap: _abrirWhatsAppTelefono,
+                              borderRadius: BorderRadius.circular(
+                                  AppRadio.sm),
+                              child: Padding(
+                                padding:
+                                    const EdgeInsets.symmetric(
+                                        vertical: AppEspacio.sm),
+                                child: Row(
+                                  children: [
+                                    const Icon(Icons.phone,
+                                        color: AppColores.naranja,
+                                        size: 20),
+                                    const SizedBox(
+                                        width: AppEspacio.md),
+                                    const Expanded(
+                                        child: Text('Teléfono',
+                                            style:
+                                                AppTexto.cuerpo)),
+                                    Expanded(
+                                      flex: 2,
+                                      child: Text(
+                                        '${c['telefono'] ?? '—'}',
+                                        style: AppTexto.cuerpo
+                                            .copyWith(
+                                                fontWeight:
+                                                    FontWeight.w600,
+                                                color: Colors.green),
+                                        textAlign:
+                                            TextAlign.right,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
                             _filaInfo(
                                 Icons.person_add,
                                 'Inscrito por',
@@ -2038,12 +2069,27 @@ class _FichaScreenState extends State<FichaScreen> {
                                 _pagos.isEmpty
                                     ? '—'
                                     : etiquetaPeriodo(_pagos.first)),
+                            // Bloque 1: tarifa especial visible (hoy
+                            // solo existe la de transferencia, que
+                            // vive en el espejo; la de efectivo de
+                            // Kevin llega con la entidad D6).
+                            if ((c['tarifa_especial_transferencia']
+                                    as num?) !=
+                                null)
+                              _filaInfo(
+                                  Icons.local_offer,
+                                  'Tarifa especial',
+                                  '${fmtMonto(c['tarifa_especial_transferencia'])} CUP por transferencia'),
                             _filaInfo(
                                 Icons.date_range,
                                 'Inscripción',
                                 fmtFecha(c[
                                         'fecha_inscripcion']
                                     as String?)),
+                            // Bloque 1: barra del mes pagado (del
+                            // último pago al vencimiento). En Casa
+                            // no hay vencimiento: no se muestra.
+                            if (!esCasa) _barraMes(),
                           ],
                         ),
                       ),
@@ -2052,173 +2098,14 @@ class _FichaScreenState extends State<FichaScreen> {
                       // Resumen 360
                       if (_pagos.isNotEmpty)
                         _resumen360(),
-                      // Historial de pagos
-                      Tarjeta(
-                        child: Column(
-                          crossAxisAlignment:
-                              CrossAxisAlignment.start,
-                          children: [
-                            const Text(
-                                'Historial de pagos',
-                                style: AppTexto.titulo),
-                            const SizedBox(
-                                height: AppEspacio.sm),
-                            if (_pagos.isEmpty)
-                              Text(
-                                  'Sin pagos registrados',
-                                  style: TextStyle(
-                                      color:
-                                          AppColores.textoSecundario(context))),
-                            for (final p in _pagos)
-                              ListTile(
-                                dense: true,
-                                contentPadding:
-                                    EdgeInsets.zero,
-                                title: Text(
-                                    '${fmtMonto(p['monto'])} CUP — ${p['metodo'] ?? ''}',
-                                    style:
-                                        AppTexto.cuerpo),
-                                subtitle: Text(
-                                    '${fmtFecha(p['fecha'] as String?)} · ${p['periodo'] ?? 'mensual'}\n'
-                                    '${textoCobradoPor(p['registrado_por'])}',
-                                    style: AppTexto
-                                        .secundario),
-                                trailing:
-                                    AuthService().isAdmin
-                                        ? IconButton(
-                                            tooltip:
-                                                'Corregir pago',
-                                            icon: const Icon(
-                                                Icons.tune,
-                                                size: 20),
-                                            onPressed: () =>
-                                                _corregirPago(
-                                                    p),
-                                          )
-                                        : null,
-                              ),
-                          ],
-                        ),
-                      ),
+                      // Bloque 1: línea de tiempo única (pagos +
+                      // ventas de suplementos y servicios) con
+                      // filtros. Absorbe las 3 tarjetas sueltas
+                      // anteriores (C4 fuera: no más tarjetas
+                      // sueltas de historial).
+                      _tarjetaHistorial(),
                       const SizedBox(
                           height: AppEspacio.md),
-                      // v1.2.2: Historial de suplementos comprados
-                      if (_suplementos.isNotEmpty)
-                        Tarjeta(
-                          child: Column(
-                            crossAxisAlignment:
-                                CrossAxisAlignment.start,
-                            children: [
-                              const Text(
-                                  'Suplementos comprados',
-                                  style: AppTexto.titulo),
-                              const SizedBox(
-                                  height: AppEspacio.sm),
-                              for (final s in _suplementos)
-                                ListTile(
-                                  dense: true,
-                                  contentPadding:
-                                      EdgeInsets.zero,
-                                  title: Text(
-                                      '${s['suplemento_nombre'] ?? s['nombre'] ?? 'Suplemento'} x${s['cantidad'] ?? 1}',
-                                      style:
-                                          AppTexto.cuerpo),
-                                  subtitle: Text(
-                                      '${fmtFecha(s['fecha'] as String?)} · ${(s['moneda'] ?? 'CUP')}',
-                                      style: AppTexto
-                                          .secundario),
-                                  trailing: Text(
-                                      '${fmtMonto((s['precio'] as num?)?.toDouble() ?? 0)} ${(s['moneda'] ?? 'CUP')}',
-                                      style: AppTexto.cuerpo.copyWith(
-                                          fontWeight: FontWeight.bold,
-                                          color: AppColores.naranja)),
-                                ),
-                            ],
-                          ),
-                        ),
-                      if (_suplementos.isNotEmpty)
-                        const SizedBox(
-                            height: AppEspacio.md),
-                      // v1.8.0: Historial de servicios por dosis
-                      if (_serviciosHist.isNotEmpty)
-                        Tarjeta(
-                          child: Column(
-                            crossAxisAlignment:
-                                CrossAxisAlignment.start,
-                            children: [
-                              const Text(
-                                  'Servicios (dosis y agua)',
-                                  style: AppTexto.titulo),
-                              // v1.8.1 (idea de Jc): acumulado del
-                              // cliente para detectar frecuentes.
-                              Builder(builder: (_) {
-                                final r = servicios_svc
-                                    .resumenServiciosDeCliente(
-                                        _serviciosHist);
-                                final partes = <String>[
-                                  if (r.dosis > 0) '${r.dosis} dosis',
-                                  if (r.pomos > 0)
-                                    '${r.pomos} pomos de agua',
-                                  if (r.importe > 0)
-                                    '${fmtMonto(r.importe)} CUP en compras',
-                                ];
-                                if (partes.isEmpty) {
-                                  return const SizedBox.shrink();
-                                }
-                                return Padding(
-                                  padding: const EdgeInsets.only(top: 2),
-                                  child: Text(
-                                    'Acumulado: ${partes.join(' · ')}',
-                                    style: AppTexto.secundario,
-                                  ),
-                                );
-                              }),
-                              const SizedBox(
-                                  height: AppEspacio.sm),
-                              for (final s in _serviciosHist)
-                                ListTile(
-                                  dense: true,
-                                  contentPadding:
-                                      EdgeInsets.zero,
-                                  leading: Icon(
-                                    (s['reverso_de'] as num?) != null
-                                        ? Icons.undo
-                                        : Icons.bolt,
-                                    size: 20,
-                                    color: AppColores.naranja,
-                                  ),
-                                  title: Text(
-                                      switch ('${s['tipo']}') {
-                                        'dosis_sin_agua' =>
-                                          'Dosis sin agua',
-                                        'dosis_con_agua' =>
-                                          'Dosis con agua',
-                                        'agua_suelta' =>
-                                          'Pomo de agua',
-                                        _ => 'Servicio',
-                                      },
-                                      style:
-                                          AppTexto.cuerpo),
-                                  subtitle: Text(
-                                      '${fmtFecha(s['fecha'] as String?)} · '
-                                      '${(s['casa'] as num?)?.toInt() == 1 ? 'Cuenta a la Casa' : (s['metodo'] ?? '')}'
-                                      ' · ${s['registrado_por_nombre'] ?? ''}',
-                                      style: AppTexto
-                                          .secundario),
-                                  trailing: Text(
-                                      (s['casa'] as num?)?.toInt() == 1
-                                          ? 'Casa'
-                                          : '${fmtMonto(((s['precio_unitario'] as num?)?.toDouble() ?? 0) * ((s['cantidad'] as num?)?.toDouble() ?? 0))} CUP',
-                                      style: AppTexto.cuerpo.copyWith(
-                                          fontWeight: FontWeight.bold,
-                                          color: AppColores.naranja)),
-                                ),
-                            ],
-                          ),
-                        ),
-                      if (_serviciosHist.isNotEmpty)
-                        const SizedBox(
-                            height: AppEspacio.md),
                       // v1.2.5 (#10): incidencias relacionadas con el cliente.
                       if (_incidencias.isNotEmpty) ...[
                         Tarjeta(
@@ -2292,14 +2179,107 @@ class _FichaScreenState extends State<FichaScreen> {
                         onCongelar: _congelar,
                         onPapelera: _aPapelera,
                       ),
+                      // Bloque 1: panel del dueño (antes disperso
+                      // en el menú ⋮): regalo, Cuenta a la Casa y
+                      // eliminar definitivo, agrupados y solo dueño.
+                      if (AuthService().isOwner)
+                        Tarjeta(
+                          child: Column(
+                            crossAxisAlignment:
+                                CrossAxisAlignment.start,
+                            children: [
+                              const Text('Panel del dueño',
+                                  style: AppTexto.titulo),
+                              const SizedBox(
+                                  height: AppEspacio.sm),
+                              if (!esCasa)
+                                ListTile(
+                                  dense: true,
+                                  contentPadding: EdgeInsets.zero,
+                                  leading: Icon(
+                                      _regaloAnio != null
+                                          ? Icons.send
+                                          : Icons.card_giftcard,
+                                      color: AppColores.naranja,
+                                      size: 20),
+                                  title: Text(
+                                      _regaloAnio != null
+                                          ? 'Reenviar WhatsApp de regalo'
+                                          : 'Regalar mensualidad',
+                                      style: AppTexto.cuerpo),
+                                  subtitle: const Text(
+                                      'Cumpleaños: regala un mes',
+                                      style: AppTexto.secundario),
+                                  onTap: _regalarMes,
+                                ),
+                              ListTile(
+                                dense: true,
+                                contentPadding: EdgeInsets.zero,
+                                leading: const Icon(
+                                    Icons.home_rounded,
+                                    color: Color(0xFFB8860B),
+                                    size: 20),
+                                title: Text(
+                                    esCasa
+                                        ? 'Quitar Cuenta a la Casa'
+                                        : 'Pasar a Cuenta a la Casa',
+                                    style: AppTexto.cuerpo),
+                                onTap: () =>
+                                    _cambiarCuentaCasa(!esCasa),
+                              ),
+                              ListTile(
+                                dense: true,
+                                contentPadding: EdgeInsets.zero,
+                                leading: const Icon(
+                                    Icons.delete_forever,
+                                    color: Colors.red,
+                                    size: 20),
+                                title: const Text(
+                                    'Eliminar definitivamente',
+                                    style: TextStyle(
+                                        color: Colors.red)),
+                                onTap: _eliminarDefinitivo,
+                              ),
+                            ],
+                          ),
+                        ),
+                      if (AuthService().isOwner)
+                        const SizedBox(
+                            height: AppEspacio.md),
                       const SizedBox(
                           height: AppEspacio.lg),
                     ],
+                    ),
                   ),
           ),
         ],
       ),
     );
+  }
+
+  /// Bloque 1: ¿el cliente cumple años hoy? Usa fechaNacDeCarnet,
+  /// la misma fuente única que la edad (el carnet de 6 dígitos es
+  /// la fecha de nacimiento; no hay otro campo que mande).
+  bool _esCumpleHoy(Map<String, dynamic>? c) {
+    final nac = fechaNacDeCarnet('${c?['carnet'] ?? ''}');
+    if (nac == null) return false;
+    final hoy = ahoraHabana();
+    return nac.month == hoy.month && nac.day == hoy.day;
+  }
+
+  /// Bloque 1: teléfono tocable para WhatsApp. Solo abre wa.me: NO
+  /// guarda nada en el historial (regla «compartir nunca registra»).
+  Future<void> _abrirWhatsAppTelefono() async {
+    final tel = _normalizarTelefono('${_c?['telefono'] ?? ''}');
+    if (tel.length < 8) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content:
+              Text('Este cliente no tiene un teléfono válido registrado.')));
+      return;
+    }
+    final url = Uri.parse('https://wa.me/$tel');
+    await launchUrl(url, mode: LaunchMode.externalApplication);
   }
 
   /// Iniciales para el placeholder de foto.
@@ -2324,6 +2304,62 @@ class _FichaScreenState extends State<FichaScreen> {
       }
     }
     return ini.isEmpty ? '?' : ini;
+  }
+
+  /// Bloque 1: barra del mes pagado (del último pago al
+  /// vencimiento). Si no hay fechas válidas, no ocupa espacio.
+  Widget _barraMes() {
+    if (_pagos.isEmpty) return const SizedBox.shrink();
+    final iniRaw = '${_pagos.first['fecha'] ?? ''}';
+    final finRaw = '${_c?['pagado_hasta'] ?? ''}';
+    if (iniRaw.length < 10 || finRaw.length < 10) {
+      return const SizedBox.shrink();
+    }
+    final ini = DateTime.tryParse(iniRaw.substring(0, 10));
+    final fin = DateTime.tryParse(finRaw.substring(0, 10));
+    if (ini == null || fin == null || !fin.isAfter(ini)) {
+      return const SizedBox.shrink();
+    }
+    final hoy = ahoraHabana();
+    final hoyDia = DateTime(hoy.year, hoy.month, hoy.day);
+    final total = fin.difference(ini).inDays;
+    var usado = hoyDia.difference(ini).inDays;
+    if (usado < 0) usado = 0;
+    if (usado > total) usado = total;
+    final frac = total == 0 ? 1.0 : usado / total;
+    final diasRest = fin.difference(hoyDia).inDays;
+    final color = diasRest < 0
+        ? AppColores.error
+        : diasRest <= 7
+            ? AppColores.alerta
+            : AppColores.exito;
+    return Padding(
+      padding: const EdgeInsets.only(top: AppEspacio.sm),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          ClipRRect(
+            borderRadius: BorderRadius.circular(999),
+            child: LinearProgressIndicator(
+              value: frac,
+              minHeight: 8,
+              backgroundColor:
+                  AppColores.borde(context).withValues(alpha: 0.3),
+              valueColor: AlwaysStoppedAnimation<Color>(color),
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            diasRest < 0
+                ? 'Vencido hace ${-diasRest} día${-diasRest == 1 ? '' : 's'}'
+                : diasRest == 0
+                    ? 'Vence hoy'
+                    : 'Quedan $diasRest días del mes pagado',
+            style: AppTexto.secundario,
+          ),
+        ],
+      ),
+    );
   }
 
   /// Fila de información con icono.
@@ -2526,18 +2562,10 @@ class _FichaScreenState extends State<FichaScreen> {
                   onPressed: _abrirVistaPrevia,
                 ),
               ),
-              const SizedBox(height: AppEspacio.sm),
-              // v1.3.9 Sprint 1 (#2): avisar por WhatsApp
-              SizedBox(
-                width: double.infinity,
-                child: OutlinedButton.icon(
-                  icon: const Icon(Icons.chat,
-                      size: 18, color: Colors.green),
-                  label: const Text('Avisar por WhatsApp'),
-                  onPressed: () =>
-                      _mostrarAvisosWhatsApp(context),
-                ),
-              ),
+              // Bloque 1 (decisión de Jc, 2026-10-24): el botón
+              // «Avisar por WhatsApp» se quitó de la ficha. El
+              // teléfono tocable sigue abriendo WhatsApp, y los
+              // avisos viven en «Avisos WhatsApp de hoy».
             ],
           ),
         ),
@@ -2546,136 +2574,8 @@ class _FichaScreenState extends State<FichaScreen> {
     );
   }
 
-  /// Limpia un teléfono cubano para wa.me (Argón).
-  String _limpiarTelefonoCuba(String raw) {
-    final digitos = raw.replaceAll(RegExp(r'[^0-9]'), '');
-    if (digitos.length == 8 &&
-        (digitos.startsWith('5') || digitos.startsWith('6'))) {
-      return '53$digitos';
-    }
-    return digitos;
-  }
-
-  /// v1.3.9 Sprint 1 (#2): avisos por WhatsApp con plantillas editables.
-  Future<void> _mostrarAvisosWhatsApp(BuildContext context) async {
-    final cli = _c;
-    final String nombre = '${cli?['nombre'] ?? 'atleta'}';
-    final String telefonoRaw = '${cli?['telefono'] ?? ''}';
-    final String fechaVenc = '${cli?['pagado_hasta'] ?? 'próximamente'}';
-
-    final telLimpio = _limpiarTelefonoCuba(telefonoRaw);
-    if (telLimpio.length < 8) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-              content: Text(
-                  'Este cliente no tiene un teléfono válido registrado.')),
-        );
-      }
-      return;
-    }
-
-    final prefs = await SharedPreferences.getInstance();
-    final ultimaPromo = prefs.getString('ultima_plantilla_promo') ??
-        'Hola $nombre, tenemos una promoción especial para ti en Iron Body Gym: ';
-
-    if (!context.mounted) return;
-
-    final plantillas = {
-      'vencimiento':
-          'Hola $nombre, te recordamos que tu membresía en Iron Body Gym vence el $fechaVenc. ¡Te esperamos para renovar!',
-      'recordatorio':
-          'Hola $nombre, ¡hace días no te vemos por Iron Body Gym! Recuerda que la constancia es la clave. ¡Te esperamos hoy!',
-      'promo': ultimaPromo,
-      'libre': 'Hola $nombre, ',
-    };
-
-    final tipoSeleccionado = await showModalBottomSheet<String>(
-      context: context,
-      builder: (ctx) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const ListTile(
-              title: Text('Avisar por WhatsApp',
-                  style: TextStyle(fontWeight: FontWeight.bold)),
-              subtitle: Text(
-                  'Selecciona una plantilla para editar antes de enviar'),
-            ),
-            ListTile(
-              leading:
-                  const Icon(Icons.schedule, color: Colors.orange),
-              title: const Text('Vencimiento próximo'),
-              onTap: () => Navigator.pop(ctx, 'vencimiento'),
-            ),
-            ListTile(
-              leading: const Icon(Icons.fitness_center,
-                  color: Colors.blue),
-              title: const Text('Recordatorio de asistencia'),
-              onTap: () => Navigator.pop(ctx, 'recordatorio'),
-            ),
-            ListTile(
-              leading: const Icon(Icons.local_offer,
-                  color: Colors.purple),
-              title:
-                  const Text('Promoción (guarda último texto)'),
-              onTap: () => Navigator.pop(ctx, 'promo'),
-            ),
-            ListTile(
-              leading:
-                  const Icon(Icons.edit, color: Colors.teal),
-              title: const Text('Texto libre'),
-              onTap: () => Navigator.pop(ctx, 'libre'),
-            ),
-          ],
-        ),
-      ),
-    );
-
-    if (tipoSeleccionado == null || !context.mounted) return;
-
-    final ctrl =
-        TextEditingController(text: plantillas[tipoSeleccionado]);
-
-    final textoFinal = await showDialog<String>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Confirmar mensaje'),
-        content: TextField(
-          controller: ctrl,
-          maxLines: 5,
-          decoration: const InputDecoration(
-            border: OutlineInputBorder(),
-            hintText: 'Escribe el mensaje...',
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('CANCELAR'),
-          ),
-          ElevatedButton.icon(
-            icon: const Icon(Icons.send, size: 16),
-            label: const Text('ABRIR WHATSAPP'),
-            onPressed: () =>
-                Navigator.pop(ctx, ctrl.text.trim()),
-          ),
-        ],
-      ),
-    );
-
-    if (textoFinal == null || textoFinal.isEmpty) return;
-
-    // Si usó la plantilla promo, guardar para el próximo cliente
-    if (tipoSeleccionado == 'promo') {
-      await prefs.setString('ultima_plantilla_promo', textoFinal);
-    }
-
-    final uri = Uri.parse(
-      'https://wa.me/$telLimpio?text=${Uri.encodeComponent(textoFinal)}',
-    );
-    await launchUrl(uri, mode: LaunchMode.externalApplication);
-  }
+  // Bloque 1 (Jc, 2026-10-24): _mostrarAvisosWhatsApp y
+  // _limpiarTelefonoCuba se eliminaron con el botón «Avisar».
 
   Future<void> _reintentarCargaAcceso() async {
     final ok = await AccesoAppCache.instance.cargar();
@@ -2788,6 +2688,167 @@ class _FichaScreenState extends State<FichaScreen> {
   }
 
   /// Resumen 360: totales del cliente.
+  /// Bloque 1: línea de tiempo única de la ficha (pagos + ventas de
+  /// suplementos y servicios), con filtros Todo / Pagos / Ventas.
+  /// Los pagos conservan su color por método (efectivo verde,
+  /// transferencia azul, como en Pagos del día) y el botón de
+  /// corregir del dueño. El acumulado de servicios (idea de Jc
+  /// v1.8.1) se conserva arriba cuando se ven ventas.
+  Widget _tarjetaHistorial() {
+    final entradas = <Map<String, dynamic>>[];
+    for (final p in _pagos) {
+      final metodo = '${p['metodo'] ?? ''}';
+      entradas.add({
+        'tipo': 'pago',
+        'fecha': '${p['fecha'] ?? ''}',
+        'titulo': '${fmtMonto(p['monto'])} CUP — $metodo',
+        'subtitulo':
+            '${fmtFecha(p['fecha'] as String?)} · ${p['periodo'] ?? 'mensual'}\n'
+            '${textoCobradoPor(p['registrado_por'])}',
+        'icono': metodo == 'transferencia'
+            ? Icons.smartphone
+            : Icons.payments,
+        'color': metodo == 'transferencia'
+            ? AppColores.info
+            : AppColores.exito,
+        'pago': p,
+      });
+    }
+    for (final s in _suplementos) {
+      entradas.add({
+        'tipo': 'venta',
+        'fecha': '${s['fecha'] ?? ''}',
+        'titulo':
+            '${s['suplemento_nombre'] ?? s['nombre'] ?? 'Suplemento'} x${s['cantidad'] ?? 1}',
+        'subtitulo':
+            '${fmtFecha(s['fecha'] as String?)} · ${(s['moneda'] ?? 'CUP')}',
+        'trailing':
+            '${fmtMonto((s['precio'] as num?)?.toDouble() ?? 0)} ${(s['moneda'] ?? 'CUP')}',
+        'icono': Icons.shopping_bag,
+        'color': AppColores.naranja,
+      });
+    }
+    for (final s in _serviciosHist) {
+      final casa = (s['casa'] as num?)?.toInt() == 1;
+      entradas.add({
+        'tipo': 'venta',
+        'fecha': '${s['fecha'] ?? ''}',
+        'titulo': switch ('${s['tipo']}') {
+          'dosis_sin_agua' => 'Dosis sin agua',
+          'dosis_con_agua' => 'Dosis con agua',
+          'agua_suelta' => 'Pomo de agua',
+          _ => 'Servicio',
+        },
+        'subtitulo': '${fmtFecha(s['fecha'] as String?)} · '
+            '${casa ? 'Cuenta a la Casa' : (s['metodo'] ?? '')}'
+            ' · ${s['registrado_por_nombre'] ?? ''}',
+        'trailing': casa
+            ? 'Casa'
+            : '${fmtMonto(((s['precio_unitario'] as num?)?.toDouble() ?? 0) * ((s['cantidad'] as num?)?.toDouble() ?? 0))} CUP',
+        'icono': (s['reverso_de'] as num?) != null
+            ? Icons.undo
+            : Icons.bolt,
+        'color': AppColores.naranja,
+      });
+    }
+    DateTime? fechaDe(Map<String, dynamic> e) {
+      final f = '${e['fecha'] ?? ''}';
+      if (f.length < 10) return null;
+      return DateTime.tryParse(f.substring(0, 10));
+    }
+
+    entradas.sort((a, b) {
+      final fa = fechaDe(a);
+      final fb = fechaDe(b);
+      if (fa == null && fb == null) return 0;
+      if (fa == null) return 1;
+      if (fb == null) return -1;
+      return fb.compareTo(fa);
+    });
+    final visibles = switch (_filtroHistorial) {
+      'pagos' => entradas.where((e) => e['tipo'] == 'pago').toList(),
+      'ventas' => entradas.where((e) => e['tipo'] == 'venta').toList(),
+      _ => entradas,
+    };
+    Widget chipFiltro(String valor, String texto) {
+      final activo = _filtroHistorial == valor;
+      return ChoiceChip(
+        label: Text(texto),
+        selected: activo,
+        onSelected: (_) {
+          if (mounted) setState(() => _filtroHistorial = valor);
+        },
+      );
+    }
+
+    return Tarjeta(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text('Historial', style: AppTexto.titulo),
+          const SizedBox(height: AppEspacio.sm),
+          Wrap(
+            spacing: 8,
+            children: [
+              chipFiltro('todo', 'Todo'),
+              chipFiltro('pagos', 'Solo pagos'),
+              chipFiltro('ventas', 'Solo ventas'),
+            ],
+          ),
+          // v1.8.1 (idea de Jc): acumulado de servicios, solo
+          // cuando se ven ventas.
+          if (_serviciosHist.isNotEmpty && _filtroHistorial != 'pagos')
+            Builder(builder: (_) {
+              final r = servicios_svc
+                  .resumenServiciosDeCliente(_serviciosHist);
+              final partes = <String>[
+                if (r.dosis > 0) '${r.dosis} dosis',
+                if (r.pomos > 0) '${r.pomos} pomos de agua',
+                if (r.importe > 0)
+                  '${fmtMonto(r.importe)} CUP en compras',
+              ];
+              if (partes.isEmpty) return const SizedBox.shrink();
+              return Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Text(
+                  'Acumulado: ${partes.join(' · ')}',
+                  style: AppTexto.secundario,
+                ),
+              );
+            }),
+          const SizedBox(height: AppEspacio.sm),
+          if (visibles.isEmpty)
+            Text('Sin movimientos en este filtro',
+                style: TextStyle(
+                    color: AppColores.textoSecundario(context))),
+          for (final e in visibles)
+            ListTile(
+              dense: true,
+              contentPadding: EdgeInsets.zero,
+              leading: Icon(e['icono'] as IconData,
+                  size: 20, color: e['color'] as Color),
+              title: Text('${e['titulo']}', style: AppTexto.cuerpo),
+              subtitle: Text('${e['subtitulo']}',
+                  style: AppTexto.secundario),
+              trailing: e['tipo'] == 'pago'
+                  ? (AuthService().isAdmin
+                      ? IconButton(
+                          tooltip: 'Corregir pago',
+                          icon: const Icon(Icons.tune, size: 20),
+                          onPressed: () =>
+                              _corregirPago(e['pago'] as Map<String, dynamic>),
+                        )
+                      : null)
+                  : Text('${e['trailing'] ?? ''}',
+                      style: AppTexto.cuerpo.copyWith(
+                          fontWeight: FontWeight.bold,
+                          color: AppColores.naranja)),
+            ),
+        ],
+      ),
+    );
+  }
+
   Widget _resumen360() {    final total = _pagos.fold<double>(
         0,
         (s, p) =>

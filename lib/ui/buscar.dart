@@ -8,9 +8,16 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 
 import '../fotos.dart';
+import '../localdb.dart';
+import '../perfil.dart';
 import '../negocio.dart';
+import '../tiempo.dart';
 import '../sync.dart';
 import 'componentes.dart';
+import 'dialogo_pago.dart';
+import 'pago_diario.dart';
+import 'preview_cobro.dart';
+import 'suplementos.dart';
 import 'diseno.dart';
 import 'ficha.dart';
 import 'widgets.dart';
@@ -28,11 +35,37 @@ class _BuscarScreenState extends State<BuscarScreen> {
   String _filtro = 'todos'; // todos | aldia | vencidos | porvencer | sinfoto
   bool _enNotas = false; // v1.0.15: búsqueda avanzada en notas
   String _rangoEdad = 'todas'; // v1.0.15: todas | 18-25 | 26-35 | 36-50 | 50+
+  // Bloque 1: contadores por estado (siempre visibles), frescura
+  // de la lista, deslizables configurables y salto por letra.
+  Map<String, int> _conteos = {};
+  DateTime? _ultimoPull;
+  String _swipeDer = 'cobrar';
+  String _swipeIzq = 'ninguna';
+  final _scroll = ScrollController();
+  Map<String, int> _indiceLetras = {};
 
   @override
   void initState() {
     super.initState();
+    _cargarConfig();
     _buscar(); // lista completa por defecto
+  }
+
+  /// Bloque 1: config local de deslizables + última bajada
+  /// registrada por el motor de sync (meta ultimo_pull_ts).
+  /// Un valor guardado fuera de la lista cerrada se ignora y
+  /// vuelve al default (nunca se ejecuta una acción desconocida).
+  Future<void> _cargarConfig() async {
+    const cerrada = {'ninguna', 'cobrar', 'diario', 'venta', 'editar'};
+    final der = await PerfilService.instance.getSwipeBuscarDer();
+    final izq = await PerfilService.instance.getSwipeBuscarIzq();
+    final ts = await LocalDb.instance.getMeta('ultimo_pull_ts');
+    if (!mounted) return;
+    setState(() {
+      _swipeDer = cerrada.contains(der) ? der : 'cobrar';
+      _swipeIzq = cerrada.contains(izq) ? izq : 'ninguna';
+      _ultimoPull = ts == null ? null : DateTime.tryParse(ts);
+    });
   }
 
   int _gen = 0;
@@ -55,6 +88,29 @@ class _BuscarScreenState extends State<BuscarScreen> {
       r = [...r, ...extra];
       r.sort(
           compararPorNombre);
+    }
+    // Bloque 1: contadores por estado (sobre la búsqueda,
+    // ANTES del filtro de estado: siempre visibles).
+    final conteos = <String, int>{
+      'todos': r.length,
+      'aldia': 0,
+      'porvencer': 0,
+      'vencidos': 0,
+      'sinfoto': 0,
+    };
+    for (final c in r) {
+      final dias = diasRestantes(c['pagado_hasta'] as String?);
+      if (dias != null && dias > 7) {
+        conteos['aldia'] = conteos['aldia']! + 1;
+      } else if (dias != null && dias >= 0 && dias <= 7) {
+        conteos['porvencer'] = conteos['porvencer']! + 1;
+      } else if (dias == null || dias < 0) {
+        conteos['vencidos'] = conteos['vencidos']! + 1;
+      }
+      final ref = c['foto_storage'] as String?;
+      if (ref == null || ref.isEmpty) {
+        conteos['sinfoto'] = conteos['sinfoto']! + 1;
+      }
     }
     // Filtros de estado de mensualidad.
     // v1.3.1: sin fecha = vencido (no "al día").
@@ -102,9 +158,19 @@ class _BuscarScreenState extends State<BuscarScreen> {
       }).toList();
     }
     if (mounted && gen == _gen) {
+      // Bloque 1: índice letra → primer puesto (para la barra
+      // discreta de letras; solo letras presentes).
+      final indice = <String, int>{};
+      for (var i = 0; i < r.length; i++) {
+        final nombre = '${r[i]['nombre'] ?? ''}'.trim();
+        if (nombre.isEmpty) continue;
+        indice.putIfAbsent(nombre[0].toUpperCase(), () => i);
+      }
       setState(() {
         _res = r;
         _busco = true;
+        _conteos = conteos;
+        _indiceLetras = indice;
       });
     }
   }
@@ -114,6 +180,11 @@ class _BuscarScreenState extends State<BuscarScreen> {
     // v1.3.1: manejar fallo de red (offline-first en Cuba).
     try {
       await SyncEngine.instance.pull();
+      // Bloque 1: la bajada quedó registrada en ultimo_pull_ts.
+      final ts = await LocalDb.instance.getMeta('ultimo_pull_ts');
+      if (mounted && ts != null) {
+        setState(() => _ultimoPull = DateTime.tryParse(ts));
+      }
       await _buscar();
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -129,6 +200,7 @@ class _BuscarScreenState extends State<BuscarScreen> {
   @override
   void dispose() {
     _q.dispose();
+    _scroll.dispose();
     super.dispose();
   }
 
@@ -160,14 +232,53 @@ class _BuscarScreenState extends State<BuscarScreen> {
           Padding(
             padding:
                 const EdgeInsets.symmetric(horizontal: 12),
-            child: Align(
-              alignment: Alignment.centerLeft,
-              child: Text('${_res.length} cliente(s)',
-                  style: TextStyle(
-                      color: AppColores.textoSecundario(context),
-                      fontSize: 12)),
+            child: Row(
+              children: [
+                Text('${_res.length} cliente(s)',
+                    style: TextStyle(
+                        color: AppColores.textoSecundario(context),
+                        fontSize: 12)),
+                const Spacer(),
+                Text(_textoActualizado(),
+                    style: TextStyle(
+                        color: AppColores.textoSecundario(context),
+                        fontSize: 12)),
+              ],
             ),
           ),
+          // Bloque 1: cartel de lista vieja a las 24 h sin bajar
+          // cambios (12 h alertaría cada mañana; 24 h no).
+          if (_ultimoPull != null &&
+              ahoraHabana().difference(_ultimoPull!).inHours >= 24)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 6, 12, 0),
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(
+                  color: AppColores.alerta.withValues(alpha: 0.12),
+                  borderRadius:
+                      BorderRadius.circular(AppRadio.md),
+                  border: Border.all(color: AppColores.alerta),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.warning_amber,
+                        size: 18, color: AppColores.alerta),
+                    const SizedBox(width: 8),
+                    const Expanded(
+                      child: Text(
+                          'Lista desactualizada: hace más de 24 h sin bajar cambios',
+                          style: TextStyle(fontSize: 12.5)),
+                    ),
+                    TextButton(
+                      onPressed: _actualizar,
+                      child: const Text('Actualizar'),
+                    ),
+                  ],
+                ),
+              ),
+            ),
           // v1.0.15: filtros rápidos
           SingleChildScrollView(
             scrollDirection: Axis.horizontal,
@@ -175,15 +286,23 @@ class _BuscarScreenState extends State<BuscarScreen> {
                 const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
             child: Row(
               children: [
-                _chipFiltro('todos', 'Todos'),
+                _chipFiltro('todos',
+                    'Todos (${_conteos['todos'] ?? 0})'),
                 const SizedBox(width: 6),
-                _chipFiltro('aldia', 'Al día', punto: AppColores.exito),
+                _chipFiltro('aldia',
+                    'Al día (${_conteos['aldia'] ?? 0})',
+                    punto: AppColores.exito),
                 const SizedBox(width: 6),
-                _chipFiltro('porvencer', 'Por vencer', punto: AppColores.alerta),
+                _chipFiltro('porvencer',
+                    'Por vencer (${_conteos['porvencer'] ?? 0})',
+                    punto: AppColores.alerta),
                 const SizedBox(width: 6),
-                _chipFiltro('vencidos', 'Vencidos', punto: AppColores.error),
+                _chipFiltro('vencidos',
+                    'Vencidos (${_conteos['vencidos'] ?? 0})',
+                    punto: AppColores.error),
                 const SizedBox(width: 6),
-                _chipFiltro('sinfoto', 'Sin foto'),
+                _chipFiltro('sinfoto',
+                    'Sin foto (${_conteos['sinfoto'] ?? 0})'),
               ],
             ),
           ),
@@ -237,39 +356,254 @@ class _BuscarScreenState extends State<BuscarScreen> {
                         ? 'Prueba con otro nombre, carnet o teléfono'
                         : null,
                   )
-                : RefreshIndicator(
-                    onRefresh: _actualizar,
-                    child: ListView.builder(
-                      itemCount: _res.length,
-                      itemBuilder: (ctx, i) {
-                        final c = _res[i];
-                        // v1.0.15: Buscar es consulta/gestión — el tap abre
-                        // la ficha. Sin cobro rápido (eso vive en
-                        // "Agregar pago").
-                        // v1.3.1: usar wrapper público (ValueKey por id).
-                        return FilaCliente(
-                          cliente: c,
-                          onTap: () {
-                            final id = c['id'];
-                            final cid =
-                                id is int ? id : int.tryParse('$id');
-                            if (cid == null) return;
-                            Navigator.of(context)
-                                .push(MaterialPageRoute(
-                                    builder: (_) =>
-                                        FichaScreen(clienteId: cid)))
-                                .then((_) {
-                              if (mounted) _buscar();
-                            });
-                          },
-                        );
-                      },
-                    ),
+                : Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(
+                        child: RefreshIndicator(
+                          onRefresh: _actualizar,
+                          child: FadeEntrada(
+                            child: ListView.builder(
+                              controller: _scroll,
+                              itemCount: _res.length,
+                              itemBuilder: (ctx, i) {
+                                final c = _res[i];
+                                // Bloque 1 (A1): cada fila es una
+                                // tarjeta; el tap abre la ficha.
+                                // v1.3.1: ValueKey por id.
+                                final fila = Card(
+                                  margin: const EdgeInsets.symmetric(
+                                      horizontal: 12, vertical: 4),
+                                  elevation: 0,
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius:
+                                        BorderRadius.circular(
+                                            AppRadio.md),
+                                    side: BorderSide(
+                                        color: AppColores.borde(
+                                            context)),
+                                  ),
+                                  child: FilaCliente(
+                                    cliente: c,
+                                    onTap: () {
+                                      final id = c['id'];
+                                      final cid = id is int
+                                          ? id
+                                          : int.tryParse('$id');
+                                      if (cid == null) return;
+                                      Navigator.of(context)
+                                          .push(MaterialPageRoute(
+                                              builder: (_) => FichaScreen(
+                                                  clienteId: cid)))
+                                          .then((_) {
+                                        if (mounted) _buscar();
+                                      });
+                                    },
+                                  ),
+                                );
+                                // Bloque 1: deslizables configurables
+                                // desde Ajustes (lista cerrada). Sin
+                                // acción configurada no hay Dismissible.
+                                final tieneDer =
+                                    _swipeDer != 'ninguna';
+                                final tieneIzq =
+                                    _swipeIzq != 'ninguna';
+                                if (!tieneDer && !tieneIzq) {
+                                  return fila;
+                                }
+                                final dir = tieneDer && tieneIzq
+                                    ? DismissDirection.horizontal
+                                    : tieneDer
+                                        ? DismissDirection
+                                            .startToEnd
+                                        : DismissDirection
+                                            .endToStart;
+                                return Dismissible(
+                                  key: ValueKey(
+                                      'buscar_${c['id']}'),
+                                  direction: dir,
+                                  background: _fondoSwipe(
+                                      _swipeDer, true),
+                                  secondaryBackground: _fondoSwipe(
+                                      _swipeIzq, false),
+                                  // La fila nunca se borra: la acción
+                                  // se ejecuta y la fila se queda.
+                                  confirmDismiss: (d) async {
+                                    final accion = d ==
+                                            DismissDirection
+                                                .startToEnd
+                                        ? _swipeDer
+                                        : _swipeIzq;
+                                    await _ejecutarSwipe(accion, c);
+                                    return false;
+                                  },
+                                  child: fila,
+                                );
+                              },
+                            ),
+                          ),
+                        ),
+                      ),
+                      // Bloque 1: barra de letras discreta (solo
+                      // letras presentes; salta al primer cliente).
+                      if (_indiceLetras.isNotEmpty)
+                        SizedBox(
+                          width: 22,
+                          child: Column(
+                            mainAxisAlignment:
+                                MainAxisAlignment.center,
+                            children: [
+                              for (final letra
+                                  in _letrasOrdenadas())
+                                GestureDetector(
+                                  onTap: () =>
+                                      _saltarALetra(letra),
+                                  child: Padding(
+                                    padding: const EdgeInsets
+                                        .symmetric(vertical: 1.5),
+                                    child: Text(letra,
+                                        style: TextStyle(
+                                            fontSize: 10,
+                                            color: AppColores
+                                                .textoSecundario(
+                                                    context))),
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ),
+                    ],
                   ),
           ),
         ],
       ),
     );
+  }
+
+  /// Bloque 1: texto de frescura de la lista.
+  String _textoActualizado() {
+    final ts = _ultimoPull;
+    if (ts == null) return 'Sin registro de actualización';
+    final mins = ahoraHabana().difference(ts).inMinutes;
+    if (mins < 1) return 'Actualizado ahora mismo';
+    if (mins < 60) return 'Actualizado hace $mins min';
+    final horas = mins ~/ 60;
+    if (horas < 24) return 'Actualizado hace $horas h';
+    final dias = horas ~/ 24;
+    return 'Actualizado hace $dias día${dias == 1 ? '' : 's'}';
+  }
+
+  List<String> _letrasOrdenadas() {
+    final letras = _indiceLetras.keys.toList()..sort();
+    return letras;
+  }
+
+  /// Bloque 1: salto por letra. Altura estimada por tarjeta
+  /// (~84 px: foto 56 + rellenos + margen); el destino se acota
+  /// al máximo del scroll para no pasarse al final.
+  void _saltarALetra(String letra) {
+    final idx = _indiceLetras[letra];
+    if (idx == null || !_scroll.hasClients) return;
+    final pos = idx * 84.0;
+    final max = _scroll.position.maxScrollExtent;
+    _scroll.jumpTo(pos > max ? max : pos);
+  }
+
+  String _etiquetaSwipeAccion(String v) => switch (v) {
+        'cobrar' => 'Cobrar mes',
+        'diario' => 'Pago diario',
+        'venta' => 'Venta',
+        'editar' => 'Editar',
+        _ => '',
+      };
+
+  Widget _fondoSwipe(String accion, bool derecha) {
+    Color color;
+    IconData icono;
+    switch (accion) {
+      case 'cobrar':
+        color = AppColores.exito;
+        icono = Icons.payments;
+      case 'diario':
+        color = AppColores.info;
+        icono = Icons.today;
+      case 'venta':
+        color = AppColores.naranja;
+        icono = Icons.shopping_bag;
+      case 'editar':
+        color = Colors.grey;
+        icono = Icons.edit;
+      default:
+        color = Colors.grey;
+        icono = Icons.block;
+    }
+    return Container(
+      color: color,
+      alignment:
+          derecha ? Alignment.centerLeft : Alignment.centerRight,
+      padding: const EdgeInsets.symmetric(horizontal: 20),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icono, color: Colors.white, size: 22),
+          const SizedBox(width: 8),
+          Text(_etiquetaSwipeAccion(accion),
+              style: const TextStyle(
+                  color: Colors.white, fontWeight: FontWeight.w600)),
+        ],
+      ),
+    );
+  }
+
+  /// Bloque 1: ejecuta la acción al deslizar. Cobrar pasa por el
+  /// Preview obligatorio (nunca cobra directo); el resto navega
+  /// a su pantalla (Editar abre la ficha directo en Editar).
+  Future<void> _ejecutarSwipe(
+      String accion, Map<String, dynamic> c) async {
+    switch (accion) {
+      case 'cobrar':
+        if (await mostrarBloqueoCasa(context, c)) return;
+        if (!mounted) return;
+        final payload = await pagoDialogo(context, c);
+        if (payload == null || !mounted) return;
+        final deshecho = await cobrarConPreviewYRecibo(
+          context: context,
+          nombreCliente: '${c['nombre'] ?? ''}',
+          payload: payload,
+        );
+        if (!mounted) return;
+        if (deshecho) {
+          ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Cobro deshecho')));
+        }
+        await _buscar();
+        SyncEngine.instance.push();
+        return;
+      case 'diario':
+        if (!mounted) return;
+        await Navigator.of(context).push(
+            MaterialPageRoute(builder: (_) => const PagoDiarioScreen()));
+        if (mounted) await _buscar();
+        return;
+      case 'venta':
+        if (!mounted) return;
+        await Navigator.of(context).push(
+            MaterialPageRoute(
+                builder: (_) => const SuplementosScreen()));
+        if (mounted) await _buscar();
+        return;
+      case 'editar':
+        final id = c['id'];
+        final cid = id is int ? id : int.tryParse('$id');
+        if (cid == null || !mounted) return;
+        await Navigator.of(context).push(MaterialPageRoute(
+            builder: (_) =>
+                FichaScreen(clienteId: cid, editarAlAbrir: true)));
+        if (mounted) await _buscar();
+        return;
+      default:
+        return;
+    }
   }
 
   Widget _chipFiltro(String valor, String etiqueta,
