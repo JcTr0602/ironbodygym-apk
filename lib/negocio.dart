@@ -565,6 +565,61 @@ bool esPendiente(dynamic v) => v == 0 || v == false;
 /// v1.2.4 (Hark): texto de un total de venta con su equivalente en la
 /// otra moneda cuando se conoce la tasa (CUP por 1 USD). Regla única para
 /// venta, inscripción+venta, venta rápida e historial.
+/// v1.8.1 (pedido de Jc 2026-10-23): comprobante de compra de
+/// suplemento para WhatsApp, embellecido: emojis funcionales,
+/// negritas de WhatsApp, separadores y — si la compra llevó
+/// la promo del mes gratis — la NUEVA fecha de vencimiento del
+/// cliente (calculada con previewHasta, la misma regla del
+/// servidor: max(vencimiento actual, hoy) + 30 días).
+/// Función pura: la pantalla solo le pasa los datos.
+String textoComprobanteCompra({
+  required String nombreProducto,
+  required int cantidad,
+  required double precio,
+  required String moneda,
+  required double total,
+  required String nombreComprador,
+  required String fechaIso,
+  bool conPromo = false,
+  String? nuevoVencimientoIso,
+  bool esFiado = false,
+}) {
+  String fechaBonita(String iso) {
+    final p = iso.substring(0, 10).split('-');
+    return p.length == 3 ? '${p[2]}/${p[1]}/${p[0]}' : iso;
+  }
+
+  final buf = StringBuffer()
+    ..writeln('🏋️ *IRON BODY GYM* 🏋️')
+    ..writeln('🧾 *Comprobante de compra*')
+    ..writeln('━━━━━━━━━━━━━━━')
+    ..writeln('💊 *Producto:* $nombreProducto')
+    ..writeln('🔢 *Cantidad:* $cantidad')
+    ..writeln('💵 *Precio:* ${precio.toStringAsFixed(2)} $moneda')
+    ..writeln('━━━━━━━━━━━━━━━')
+    ..writeln('💰 *TOTAL: ${total.toStringAsFixed(2)} $moneda*')
+    ..writeln('━━━━━━━━━━━━━━━')
+    ..writeln('👤 *Comprador:* $nombreComprador')
+    ..writeln('📅 *Fecha:* ${fechaBonita(fechaIso)}');
+  if (esFiado) {
+    buf.writeln('📝 *Estado:* Fiado (pendiente de pago)');
+  }
+  if (conPromo) {
+    buf
+      ..writeln('')
+      ..writeln('🎁 *¡Promoción aplicada!*')
+      ..writeln('✅ 1 mes de mensualidad *GRATIS* sumado a tu cuenta.');
+    if (nuevoVencimientoIso != null) {
+      buf.writeln(
+          '🗓️ *Tu nueva fecha de vencimiento:* ${fechaBonita(nuevoVencimientoIso)}');
+    }
+  }
+  buf
+    ..writeln('━━━━━━━━━━━━━━━')
+    ..writeln('💪 ¡Gracias por tu compra! A seguir entrenando.');
+  return buf.toString().trim();
+}
+
 String textoTotalVenta(double total, String moneda, double? tasa) {
   final hayTasa = tasa != null && tasa > 0;
   if (moneda == 'USD') {
