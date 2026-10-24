@@ -2147,8 +2147,32 @@ class _FichaScreenState extends State<FichaScreen> {
                                 CrossAxisAlignment.start,
                             children: [
                               const Text(
-                                  'Servicios (dosis)',
+                                  'Servicios (dosis y agua)',
                                   style: AppTexto.titulo),
+                              // v1.8.1 (idea de Jc): acumulado del
+                              // cliente para detectar frecuentes.
+                              Builder(builder: (_) {
+                                final r = servicios_svc
+                                    .resumenServiciosDeCliente(
+                                        _serviciosHist);
+                                final partes = <String>[
+                                  if (r.dosis > 0) '${r.dosis} dosis',
+                                  if (r.pomos > 0)
+                                    '${r.pomos} pomos de agua',
+                                  if (r.importe > 0)
+                                    '${fmtMonto(r.importe)} CUP en compras',
+                                ];
+                                if (partes.isEmpty) {
+                                  return const SizedBox.shrink();
+                                }
+                                return Padding(
+                                  padding: const EdgeInsets.only(top: 2),
+                                  child: Text(
+                                    'Acumulado: ${partes.join(' · ')}',
+                                    style: AppTexto.secundario,
+                                  ),
+                                );
+                              }),
                               const SizedBox(
                                   height: AppEspacio.sm),
                               for (final s in _serviciosHist)

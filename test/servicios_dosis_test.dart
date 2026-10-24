@@ -149,4 +149,31 @@ void main() {
       expect(r.total, -50.0);
     });
   });
+
+  group('resumenServiciosDeCliente (acumulado de la ficha)', () {
+    test('suma dosis y pomos; el reverso (cantidad negativa) neta', () {
+      final r = resumenServiciosDeCliente([
+        {'tipo': 'dosis_con_agua', 'cantidad': 1, 'precio_unitario': 900.0, 'casa': 0},
+        {'tipo': 'dosis_sin_agua', 'cantidad': 2, 'precio_unitario': 600.0, 'casa': 0},
+        {'tipo': 'dosis_sin_agua', 'cantidad': -1, 'precio_unitario': 600.0, 'casa': 0},
+        {'tipo': 'agua_suelta', 'cantidad': 3, 'precio_unitario': 300.0, 'casa': 0},
+      ]);
+      expect(r.dosis, 2);
+      expect(r.pomos, 3);
+      expect(r.importe, 900.0 + 600.0 + 900.0);
+    });
+    test('Casa cuenta como consumo pero no como importe', () {
+      final r = resumenServiciosDeCliente([
+        {'tipo': 'dosis_sin_agua', 'cantidad': 1, 'precio_unitario': 0.0, 'casa': 1},
+      ]);
+      expect(r.dosis, 1);
+      expect(r.importe, 0.0);
+    });
+    test('sin ventas: todo en cero', () {
+      final r = resumenServiciosDeCliente([]);
+      expect(r.dosis, 0);
+      expect(r.pomos, 0);
+      expect(r.importe, 0.0);
+    });
+  });
 }

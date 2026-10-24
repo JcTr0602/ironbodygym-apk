@@ -121,6 +121,34 @@ int saldoLoteDesde({
   return saldo;
 }
 
+/// v1.8.1 (idea de Jc 2026-10-23): acumulado de servicios de UN
+/// cliente para su ficha — detectar frecuentes («este cliente ha
+/// comprado 15 raciones de pre-entreno») y hacerles ofertas o
+/// regalos Casa. PURO. Los reversos llevan cantidad NEGATIVA
+/// (convención del servidor), así que todo netea sumando con
+/// signo. El importe excluye las filas Casa (no son compra); las
+/// cantidades Casa SÍ cuentan como consumo recibido.
+({int dosis, int pomos, double importe}) resumenServiciosDeCliente(
+    List<Map<String, dynamic>> ventas) {
+  var dosis = 0;
+  var pomos = 0;
+  var importe = 0.0;
+  for (final v in ventas) {
+    final cant = (v['cantidad'] as num?)?.toInt() ?? 0;
+    final tipo = '${v['tipo']}';
+    if (tipo == 'agua_suelta') {
+      pomos += cant;
+    } else if (tipo == 'dosis_sin_agua' || tipo == 'dosis_con_agua') {
+      dosis += cant;
+    }
+    if ((v['casa'] as num?)?.toInt() != 1) {
+      importe +=
+          ((v['precio_unitario'] as num?)?.toDouble() ?? 0) * cant;
+    }
+  }
+  return (dosis: dosis, pomos: pomos, importe: importe);
+}
+
 /// (saldo, CPP) del agua común: replay de movimientos espejo en
 /// orden de id + ops pendientes en orden de cola. El CPP sigue la
 /// fórmula de Argón E1: al entrar agua, CPP = (saldo×CPP +
