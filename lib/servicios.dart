@@ -387,43 +387,65 @@ Future<Map<String, dynamic>> cuadreServiciosDia(
     int telegramId, String fechaIso) async {
   var dosisSin = 0, dosisCon = 0, aguas = 0, casaN = 0;
   var efectivo = 0.0, transferencia = 0.0, comision = 0.0;
-  void sumar(String tipo, int cant, double precio, double com,
-      String? metodo, bool esCasa) {
+  // Ítem 8: el cuadre se reparte por ROLES — las ventas cuentan al
+  // VENDEDOR, el efectivo a entregar al RESPONSABLE y la comisión a
+  // quien la gana. Sin columnas de roles (filas previas al ítem 8)
+  // todo recae en quien registró, como antes.
+  void sumar(
+      String tipo,
+      int cant,
+      double precio,
+      double com,
+      double? montoCom,
+      String? metodo,
+      bool esCasa,
+      int? vendedor,
+      int? responsable,
+      int? comisionero) {
     if (esCasa) {
-      casaN += cant;
+      if (vendedor == telegramId) casaN += cant;
       return;
     }
-    switch (tipo) {
-      case 'dosis_sin_agua':
-        dosisSin += cant;
-      case 'dosis_con_agua':
-        dosisCon += cant;
-      case 'agua_suelta':
-        aguas += cant;
+    if (vendedor == telegramId) {
+      switch (tipo) {
+        case 'dosis_sin_agua':
+          dosisSin += cant;
+        case 'dosis_con_agua':
+          dosisCon += cant;
+        case 'agua_suelta':
+          aguas += cant;
+      }
+      if (metodo == 'transferencia') {
+        transferencia += precio * cant;
+      }
     }
-    comision += com * cant;
-    if (metodo == 'transferencia') {
-      transferencia += precio * cant;
-    } else {
+    if (metodo != 'transferencia' && responsable == telegramId) {
       efectivo += precio * cant;
+    }
+    if (comisionero == telegramId) {
+      comision += montoCom ?? com * cant;
     }
   }
 
   final uuidsEspejo = <String>{};
   for (final v in await LocalDb.instance.allMirror('servicio_ventas')) {
     uuidsEspejo.add('${v['op_uuid'] ?? ''}');
-    if (LocalDb.normalizarTelegramId(v['registrado_por']) != telegramId) {
-      continue;
-    }
     if ('${v['fecha'] ?? ''}'.length >= 10 &&
         '${v['fecha']}'.substring(0, 10) == fechaIso) {
+      final reg = LocalDb.normalizarTelegramId(v['registrado_por']);
       sumar(
         '${v['tipo']}',
         (v['cantidad'] as num?)?.toInt() ?? 0,
         (v['precio_unitario'] as num?)?.toDouble() ?? 0,
         (v['comision_unitaria'] as num?)?.toDouble() ?? 0,
+        (v['comision_monto'] as num?)?.toDouble(),
         v['metodo'] as String?,
         (v['casa'] as num?)?.toInt() == 1,
+        LocalDb.normalizarTelegramId(v['vendedor_id']) ?? reg,
+        LocalDb.normalizarTelegramId(v['responsable_efectivo_id']) ??
+            reg,
+        LocalDb.normalizarTelegramId(v['comision_entrenador_id']) ??
+            reg,
       );
     }
   }
@@ -434,13 +456,19 @@ Future<Map<String, dynamic>> cuadreServiciosDia(
     if ('${p['fecha'] ?? ''}' != '' && '${p['fecha']}' != fechaIso) {
       continue;
     }
+    final reg = (op['telegram_id'] as num?)?.toInt();
+    final vend = (p['vendedor_id'] as num?)?.toInt() ?? reg;
     sumar(
       '${p['tipo']}',
       (p['cantidad'] as num?)?.toInt() ?? 1,
       (p['precio_unitario'] as num?)?.toDouble() ?? 0,
       (p['comision_unitaria'] as num?)?.toDouble() ?? 0,
+      (p['comision_monto'] as num?)?.toDouble(),
       p['metodo'] as String?,
       p['casa'] == true,
+      vend,
+      (p['responsable_efectivo_id'] as num?)?.toInt() ?? vend,
+      vend,
     );
   }
   return {
@@ -526,7 +554,13 @@ Future<String> registrarVentaServicio({
   String? metodo, // 'efectivo' | 'transferencia' (no Casa)
   bool casa = false,
   String? beneficiario, // 'dueno' si Casa para el dueño
+  // Ítem 8: «vendedorEsDueno» describe al VENDEDOR (no a quien
+  // registra): true si quien vende es el dueño. Los demás roles
+  // solo los envía el dueño al vender «a nombre de» otro.
   required bool vendedorEsDueno,
+  int? vendedorId,
+  int? responsableEfectivoId,
+  double? comisionUnitaria,
 }) async {
   if (!kTiposVentaServicio.contains(tipo)) {
     throw Exception('Tipo de servicio inválido');
@@ -574,7 +608,11 @@ Future<String> registrarVentaServicio({
       throw Exception('El lote no está activo');
     }
     final saldo = await saldoLoteLocal(loteId);
-    if (saldo <= 0) {
+    // Ítem 6 (lote ciego): el bloqueo por saldo local solo aplica
+    // cuando vende el DUEÑO (él sí conoce la cantidad de su pomo).
+    // Al entrenador no se le bloquea ni se le revela el saldo: el
+    // servidor nunca rechaza la venta por stock teórico (A3).
+    if (saldo <= 0 && vendedorEsDueno) {
       throw Exception('El lote no tiene dosis disponibles');
     }
   }
@@ -601,9 +639,13 @@ Future<String> registrarVentaServicio({
         'El precio de este servicio aún no está fijado '
         '(Administración → Servicios)');
   }
-  // A5: comisión 0 en agua suelta y en ventas del dueño.
-  final comision =
-      (casa || tipo == 'agua_suelta' || vendedorEsDueno) ? 0.0 : pr.comision;
+  // A5: comisión 0 en agua suelta y cuando el VENDEDOR es el dueño.
+  // Ítem 8: la UI del dueño puede fijar otra comisión para esta
+  // venta «a nombre de» (comisionUnitaria ya la trae calculada).
+  final comision = comisionUnitaria ??
+      ((casa || tipo == 'agua_suelta' || vendedorEsDueno)
+          ? 0.0
+          : pr.comision);
   return _encolar('venta_servicio', {
     if (tipo != 'agua_suelta') 'lote_id': loteId,
     'tipo': tipo,
@@ -614,6 +656,9 @@ Future<String> registrarVentaServicio({
     if (!casa) 'metodo': metodo,
     'precio_unitario': precio,
     'comision_unitaria': comision,
+    if (vendedorId != null) 'vendedor_id': vendedorId,
+    if (responsableEfectivoId != null)
+      'responsable_efectivo_id': responsableEfectivoId,
     'fecha': hoyHabanaIso(),
   });
 }

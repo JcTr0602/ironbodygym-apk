@@ -27,6 +27,7 @@ class DetallePendienteScreen extends StatefulWidget {
 class _DetallePendienteScreenState extends State<DetallePendienteScreen> {
   bool _cargando = true;
   List<Map<String, dynamic>> _items = [];
+  double _adelantos = 0;
 
   @override
   void initState() {
@@ -36,12 +37,88 @@ class _DetallePendienteScreenState extends State<DetallePendienteScreen> {
 
   Future<void> _cargar() async {
     final items = await detallePendienteEntrenador(widget.trainerId);
+    final adelantos = await adelantosEnPendiente(widget.trainerId);
     if (mounted) {
       setState(() {
         _items = items;
+        _adelantos = adelantos;
         _cargando = false;
       });
     }
+  }
+
+  /// post-1.8.0 (ítem 10, Argón): resumen por categorías — los
+  /// servicios se separan en raciones, combos y pomos de agua (no un
+  /// solo saco), y al pie van los adelantos de gaveta si los hay.
+  Widget _resumenCategorias(BuildContext context) {
+    double suma(bool Function(Map<String, dynamic>) f) => _items
+        .where(f)
+        .fold(
+            0.0,
+            (s, e) =>
+                s +
+                ((e['tipo'] == 'pago' ? e['monto'] : e['total']) as num)
+                    .toDouble() *
+                    ((e['moneda'] as String? ?? 'CUP') == 'USD' ? 0 : 1));
+    final filas = <(String, double)>[
+      ('Mensualidades', suma((e) => e['tipo'] == 'pago')),
+      ('Pagos diarios', suma((e) => e['tipo'] == 'diario')),
+      ('Suplementos', suma((e) => e['tipo'] == 'suplemento')),
+      (
+        'Raciones (dosis)',
+        suma((e) =>
+            e['tipo'] == 'servicio' && e['servicio_tipo'] == 'dosis_sin_agua')
+      ),
+      (
+        'Combos',
+        suma((e) =>
+            e['tipo'] == 'servicio' && e['servicio_tipo'] == 'dosis_con_agua')
+      ),
+      (
+        'Pomos de agua',
+        suma((e) =>
+            e['tipo'] == 'servicio' && e['servicio_tipo'] == 'agua_suelta')
+      ),
+    ]..removeWhere((f) => f.$2 == 0);
+    if (filas.length < 2 && _adelantos <= 0) {
+      return const SizedBox.shrink();
+    }
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
+      child: Tarjeta(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            for (final f in filas)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 2),
+                child: Row(
+                  children: [
+                    Text(f.$1),
+                    const Spacer(),
+                    Text('${fmtMonto(f.$2)} CUP',
+                        style: const TextStyle(
+                            fontWeight: FontWeight.w600)),
+                  ],
+                ),
+              ),
+            if (_adelantos > 0) ...[
+              const Divider(height: 14),
+              Row(
+                children: [
+                  const Text('Menos adelantos de gaveta'),
+                  const Spacer(),
+                  Text('−${fmtMonto(_adelantos)} CUP',
+                      style: const TextStyle(
+                          fontWeight: FontWeight.w600,
+                          color: Colors.red)),
+                ],
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
   }
 
   @override
@@ -83,6 +160,7 @@ class _DetallePendienteScreenState extends State<DetallePendienteScreen> {
                 ],
               ),
             ),
+          if (!_cargando && _items.isNotEmpty) _resumenCategorias(context),
           Expanded(
             child: _cargando
                 ? const Center(
@@ -117,6 +195,36 @@ class _DetallePendienteScreenState extends State<DetallePendienteScreen> {
                                       '${(it['nota'] as String).isNotEmpty ? ' · ${it['nota']}' : ''}'),
                                   trailing: Text(
                                       '${fmtMonto((it['total'] as num).toDouble())} ${it['moneda']}',
+                                      style: const TextStyle(
+                                          fontWeight:
+                                              FontWeight.bold)),
+                                ),
+                              ),
+                            );
+                          }
+                          if (it['tipo'] == 'servicio') {
+                            return Padding(
+                              padding: const EdgeInsets.only(
+                                  bottom: 8),
+                              child: Tarjeta(
+                                padding: EdgeInsets.zero,
+                                child: ListTile(
+                                  leading: const Icon(
+                                      Icons.bolt,
+                                      color: AppColores.naranja,
+                                      size: 24),
+                                  title: Text(switch (
+                                      '${it['servicio_tipo']}') {
+                                    'dosis_con_agua' =>
+                                      'Combo (dosis con agua)',
+                                    'agua_suelta' => 'Pomo de agua',
+                                    _ => 'Ración (dosis)',
+                                  }),
+                                  subtitle: Text(
+                                      '${fmtFecha(it['fecha'])}'
+                                      '${(it['cliente_nombre'] as String).isNotEmpty ? ' · ${it['cliente_nombre']}' : ''}'),
+                                  trailing: Text(
+                                      '${fmtMonto((it['total'] as num).toDouble())} CUP',
                                       style: const TextStyle(
                                           fontWeight:
                                               FontWeight.bold)),

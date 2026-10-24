@@ -127,6 +127,13 @@ class PendienteDia {
       .where((p) => p.tipo == 'suplemento')
       .map((p) => p.id)
       .toList();
+
+  /// post-1.8.0 (ítem 10): IDs de ventas de servicios (dosis, combos
+  /// y pomos de agua en efectivo) para confirmar su entrega.
+  List<int> get servicioIds => pagos
+      .where((p) => p.tipo == 'servicio')
+      .map((p) => p.id)
+      .toList();
 }
 
 /// UID único para optimistic UI (tipo + id).

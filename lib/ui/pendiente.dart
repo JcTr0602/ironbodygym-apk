@@ -31,6 +31,7 @@ class _PendienteScreenState extends State<PendienteScreen> {
   // Vista entrenador: su propio pendiente.
   List<Map<String, dynamic>> _mens = [];
   List<Map<String, dynamic>> _diarios = [];
+  List<Map<String, dynamic>> _servicios = [];
   // v1.3.0 (Pendiente v2): agrupado Entrenador > Días.
   List<EntrenadorPendiente> _entrenadores = [];
   List<Map<String, dynamic>> _crudos = [];
@@ -76,13 +77,14 @@ class _PendienteScreenState extends State<PendienteScreen> {
       }
     } else {
       final tid = auth.telegramId;
-      final (m, d) = await detallePendiente(tid);
+      final (m, d, s) = await detallePendiente(tid);
       // Gemini: USD separado del CUP.
       final usd = await pendienteEntregaUsd(tid);
       if (mounted) {
         setState(() {
           _mens = m;
           _diarios = d;
+          _servicios = s;
           _totalUsd = usd;
           _cargando = false;
         });
@@ -97,6 +99,10 @@ class _PendienteScreenState extends State<PendienteScreen> {
     }
     for (final d in _diarios) {
       t += (d['total'] as num?)?.toDouble() ?? 0;
+    }
+    for (final s in _servicios) {
+      t += ((s['precio_unitario'] as num?)?.toDouble() ?? 0) *
+          ((s['cantidad'] as num?)?.toDouble() ?? 0);
     }
     return t;
   }
@@ -172,6 +178,8 @@ class _PendienteScreenState extends State<PendienteScreen> {
         diarioIds: dia.diarioIds,
         // v1.3.1 (Alto #1): incluir ventas de suplementos o reaparecen.
         suplementoIds: dia.suplementoIds,
+        // Ítem 10: y las de servicios, con los ids que se ven.
+        servicioIds: dia.servicioIds,
         entrenadorNombre: nombre,
         trainerTelegramId: int.tryParse(trainerTelegramId),
       );
@@ -321,7 +329,28 @@ class _PendienteScreenState extends State<PendienteScreen> {
                   '${fmtFecha(d['fecha'] as String?)} · ${d['turno'] ?? ''} x${d['cantidad'] ?? '?'}'),
             ),
         ],
-        if (_mens.isEmpty && _diarios.isEmpty)
+        if (_servicios.isNotEmpty) ...[
+          const Text('Servicios (dosis y agua):',
+              style: TextStyle(fontWeight: FontWeight.bold)),
+          const SizedBox(height: 8),
+          for (final s in _servicios)
+            ListTile(
+              dense: true,
+              leading: const Icon(Icons.bolt,
+                  color: AppColores.naranja, size: 18),
+              title: Text(
+                  '${fmtMonto(((s['precio_unitario'] as num?)?.toDouble() ?? 0) * ((s['cantidad'] as num?)?.toDouble() ?? 0))} CUP — '
+                  '${switch ('${s['tipo']}') {
+                    'dosis_con_agua' => 'Combo',
+                    'agua_suelta' => 'Pomo de agua',
+                    _ => 'Ración',
+                  }}'),
+              subtitle: Text(
+                  '${fmtFecha(s['fecha'] as String?)}'
+                  '${'${s['cliente_nombre'] ?? ''}'.isNotEmpty ? ' · ${s['cliente_nombre']}' : ''}'),
+            ),
+        ],
+        if (_mens.isEmpty && _diarios.isEmpty && _servicios.isEmpty)
           const Padding(
             padding: EdgeInsets.only(top: 32),
             child: Text(
@@ -715,7 +744,9 @@ class _DiaTileState extends State<_DiaTile> {
                       Icon(
                         p.tipo == 'mensual'
                             ? Icons.calendar_month
-                            : Icons.today,
+                            : p.tipo == 'servicio'
+                                ? Icons.bolt
+                                : Icons.today,
                         size: 14,
                         color: Colors.grey.shade600,
                       ),

@@ -53,7 +53,7 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
     final hist = await historialTurno(tid, dias: 60);
     final ult = await ultimaEntregaConfirmada(tid);
     final mes = await cobradoMes(tid);
-    final (pm, pd) = await detallePendiente(tid);
+    final (pm, pd, _) = await detallePendiente(tid);
     double ef = 0, tr = 0;
     if (hist.isNotEmpty) {
       final hoy = hist.firstWhere(

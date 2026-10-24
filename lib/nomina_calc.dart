@@ -215,8 +215,16 @@ class NominaCalc {
     var dosis = 0;
     var total = 0.0;
     for (final v in ventas) {
-      if (LocalDb.normalizarTelegramId(v['registrado_por']) !=
-          telegramId) {
+      // Ítem 8: la comisión es de quien la GANÓ (comision_entrenador
+      // _id), no de quien registró; sin la columna (filas previas)
+      // recae en registrado_por. El monto snapshot manda cuando
+      // está (el dueño pudo fijar otra comisión para esa venta);
+      // si no, unitaria × cantidad (el reverso netea por su
+      // cantidad negativa).
+      final duenoComision =
+          LocalDb.normalizarTelegramId(v['comision_entrenador_id']) ??
+              LocalDb.normalizarTelegramId(v['registrado_por']);
+      if (duenoComision != telegramId) {
         continue;
       }
       final f = '${v['fecha'] ?? ''}';
@@ -225,7 +233,7 @@ class NominaCalc {
       final cant = (v['cantidad'] as num?)?.toInt() ?? 0;
       final com = (v['comision_unitaria'] as num?)?.toDouble() ?? 0;
       if (com > 0) dosis += cant;
-      total += com * cant;
+      total += (v['comision_monto'] as num?)?.toDouble() ?? com * cant;
     }
     return (dosis: dosis, total: total);
   }

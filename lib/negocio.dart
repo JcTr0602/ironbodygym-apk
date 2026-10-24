@@ -966,7 +966,11 @@ Future<double> pendienteEntrega(int? telegramId) async {
   // reverso llevan cantidad negativa y netan solas; Casa queda fuera
   // por su entregado=1 en el servidor, y se excluye por si acaso).
   for (final v in await LocalDb.instance.allMirror('servicio_ventas')) {
-    if (LocalDb.normalizarTelegramId(v['registrado_por']) == telegramId &&
+    // Ítems 8/10: la gaveta es del RESPONSABLE del efectivo.
+    final resp =
+        LocalDb.normalizarTelegramId(v['responsable_efectivo_id']) ??
+            LocalDb.normalizarTelegramId(v['registrado_por']);
+    if (resp == telegramId &&
         (v['metodo'] as String?) == 'efectivo' &&
         (v['casa'] as num?)?.toInt() != 1 &&
         esPendiente(v['entregado'])) {
@@ -2215,15 +2219,19 @@ Future<int> conteoPagosDia(int? telegramId, {String? fecha}) async {
   return n;
 }
 
-/// Desglose del pendiente: (mensualidades, diarios).
+/// Desglose del pendiente: (mensualidades, diarios, servicios).
+/// post-1.8.0 (ítem 10): los servicios son las ventas en efectivo de
+/// SU gaveta (responsable del efectivo, ítem 8) aún sin entregar.
 Future<
     (
+      List<Map<String, dynamic>>,
       List<Map<String, dynamic>>,
       List<Map<String, dynamic>>
     )> detallePendiente(int? telegramId) async {
   final mens = <Map<String, dynamic>>[];
   final diarios = <Map<String, dynamic>>[];
-  if (telegramId == null) return (mens, diarios);
+  final servicios = <Map<String, dynamic>>[];
+  if (telegramId == null) return (mens, diarios, servicios);
   // v1.3.4 (B2): filtro por columnas indexadas (v26);
   // 'entregado' no tiene columna y sigue filtrándose en Dart.
   for (final p in await LocalDb.instance
@@ -2238,9 +2246,21 @@ Future<
       diarios.add(d);
     }
   }
+  for (final v in await LocalDb.instance.allMirror('servicio_ventas')) {
+    final resp =
+        LocalDb.normalizarTelegramId(v['responsable_efectivo_id']) ??
+            LocalDb.normalizarTelegramId(v['registrado_por']);
+    if (resp == telegramId &&
+        (v['metodo'] as String?) == 'efectivo' &&
+        (v['casa'] as num?)?.toInt() != 1 &&
+        esPendiente(v['entregado'])) {
+      servicios.add(v);
+    }
+  }
   mens.sort((a, b) => '${b['fecha']}'.compareTo('${a['fecha']}'));
   diarios.sort((a, b) => '${b['fecha']}'.compareTo('${a['fecha']}'));
-  return (mens, diarios);
+  servicios.sort((a, b) => '${b['fecha']}'.compareTo('${a['fecha']}'));
+  return (mens, diarios, servicios);
 }
 
 /// Historial diario del entrenador: lista de días con lo cobrado,
@@ -2839,6 +2859,31 @@ Future<List<Map<String, dynamic>>> detallePendienteEntrenador(
       'nota': '${s['nota'] ?? ''}',
     });
   }
+  // post-1.8.0 (ítem 10): servicios en efectivo de SU gaveta — la
+  // gaveta es del RESPONSABLE del efectivo (ítem 8), no de quien
+  // registró; sin la columna se cae a registrado_por. Los reversos
+  // traen cantidad negativa y netean en el total.
+  for (final s in await LocalDb.instance.allMirror('servicio_ventas')) {
+    if (!esPendiente(s['entregado'])) continue;
+    if ('${s['metodo']}' != 'efectivo') continue;
+    if (((s['casa'] as num?)?.toInt() ?? 0) == 1) continue;
+    final resp =
+        LocalDb.normalizarTelegramId(s['responsable_efectivo_id']) ??
+            LocalDb.normalizarTelegramId(s['registrado_por']);
+    if (resp != tid) continue;
+    items.add({
+      'tipo': 'servicio',
+      'servicio_id': (s['id'] as num?)?.toInt(),
+      'fecha': '${s['fecha'] ?? ''}',
+      'servicio_tipo': '${s['tipo'] ?? ''}',
+      'cantidad': (s['cantidad'] as num?)?.toInt() ?? 1,
+      'total': ((s['precio_unitario'] as num?)?.toDouble() ?? 0) *
+          ((s['cantidad'] as num?)?.toDouble() ?? 0),
+      'moneda': 'CUP',
+      'cliente_nombre': '${s['cliente_nombre'] ?? ''}',
+      'nota': '',
+    });
+  }
   items.sort((a, b) =>
       '${b['fecha']}'.compareTo('${a['fecha']}'));
   return items;
@@ -2905,6 +2950,34 @@ Future<List<Map<String, dynamic>>> pagosPendientesDetalle(
       'trainer_telegram_id': tid,
     });
   }
+  // post-1.8.0 (ítem 10): servicios en efectivo pendientes, por
+  // RESPONSABLE del efectivo (ítem 8) con fallback a registrado_por.
+  for (final s in await LocalDb.instance.allMirror('servicio_ventas')) {
+    if (!esPendiente(s['entregado'])) continue;
+    if ('${s['metodo']}' != 'efectivo') continue;
+    if (((s['casa'] as num?)?.toInt() ?? 0) == 1) continue;
+    final tid =
+        LocalDb.normalizarTelegramId(s['responsable_efectivo_id']) ??
+            LocalDb.normalizarTelegramId(s['registrado_por']);
+    if (tid == null) continue;
+    if (excluirTid != null && tid == excluirTid) continue;
+    final cant = (s['cantidad'] as num?)?.toInt() ?? 1;
+    lista.add({
+      'id': s['id'],
+      'monto': ((s['precio_unitario'] as num?)?.toDouble() ?? 0) * cant,
+      'moneda': 'CUP',
+      'creada_en': s['fecha'],
+      'tipo': 'servicio',
+      'descripcion': switch ('${s['tipo']}') {
+        'dosis_con_agua' => 'Combo (dosis con agua)',
+        'agua_suelta' => 'Pomo de agua',
+        _ => 'Ración (dosis)',
+      },
+      'entrenador_nombre':
+          '${s['registrado_por_nombre'] ?? 'Entrenador $tid'}',
+      'trainer_telegram_id': tid,
+    });
+  }
   // Orden descendente por fecha.
   lista.sort((a, b) =>
       '${b['creada_en']}'.compareTo('${a['creada_en']}'));
@@ -2920,6 +2993,7 @@ Future<void> confirmarEntregaPorIds({
   required List<int> mensualIds,
   required List<int> diarioIds,
   List<int> suplementoIds = const [],
+  List<int> servicioIds = const [],
   required String entrenadorNombre,
   int? trainerTelegramId,
 }) async {
@@ -2955,6 +3029,7 @@ Future<void> confirmarEntregaPorIds({
     await marcarEntregados(txn, 'pagos', mensualIds);
     await marcarEntregados(txn, 'pagos_diarios', diarioIds);
     await marcarEntregados(txn, 'ventas_suplementos', suplementoIds);
+    await marcarEntregados(txn, 'servicio_ventas', servicioIds);
     // 2. Encolar la op en la misma transacción.
     await txn.insert('ops_queue', {
       'op_uuid': opUuid,
@@ -2967,6 +3042,11 @@ Future<void> confirmarEntregaPorIds({
         'pago_ids': mensualIds,
         'pago_diario_ids': diarioIds,
         'suplemento_ids': suplementoIds,
+        // Ítem 10 (Argón): la confirmación va SIEMPRE por lista de
+        // ids explícita — también «confirmar todo»: la pantalla
+        // empaqueta los ids que está mostrando, nunca una orden
+        // ciega por categoría o por entrenador.
+        'servicio_ids': servicioIds,
       }),
       'estado': 'pendiente',
       'creada_ts': ahora,
@@ -3048,6 +3128,21 @@ Future<List<Map<String, dynamic>>> pendientePorEntrenador(
     if (excluirTid != null && tid == excluirTid) continue;
     sumaUsd(tid, '${v['registrado_por_nombre'] ?? 'Entrenador $tid'}',
         totalVentaUsd(v));
+  }
+  // post-1.8.0 (ítem 10): servicios en efectivo pendientes, por
+  // RESPONSABLE del efectivo (ítem 8) con fallback a registrado_por.
+  for (final v in await LocalDb.instance.allMirror('servicio_ventas')) {
+    if (!esPendiente(v['entregado'])) continue;
+    if ('${v['metodo']}' != 'efectivo') continue;
+    if (((v['casa'] as num?)?.toInt() ?? 0) == 1) continue;
+    final tid =
+        LocalDb.normalizarTelegramId(v['responsable_efectivo_id']) ??
+            LocalDb.normalizarTelegramId(v['registrado_por']);
+    if (tid == null) continue;
+    if (excluirTid != null && tid == excluirTid) continue;
+    suma(tid, '${v['registrado_por_nombre'] ?? 'Entrenador $tid'}',
+        ((v['precio_unitario'] as num?)?.toDouble() ?? 0) *
+            ((v['cantidad'] as num?)?.toDouble() ?? 0));
   }
   final l = mapa.values.toList()
     ..sort((a, b) {

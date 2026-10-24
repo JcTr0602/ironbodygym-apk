@@ -42,6 +42,8 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
   Map<String, dynamic> _cuadre = const {};
   List<Map<String, dynamic>> _ventasHoy = [];
   Set<int> _reversadas = {};
+  Map<int, String> _personas = {};
+  int? _miTid;
 
   @override
   void initState() {
@@ -56,7 +58,28 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
     final precios = await preciosServicios();
     final ajustes = await LocalDb.instance.getAjustes();
     final agua = await stockAguaLocal();
-    final lotes = await lotesActivosLocal(responsableId: tid);
+    // Personas conocidas (para nombrar al dueño de cada lote):
+    // quien haya registrado pagos o ventas de suplementos.
+    final personas = <int, String>{};
+    if (tid != null) {
+      personas[tid] = auth.isOwner ? 'Yo (dueño)' : 'Yo';
+    }
+    for (final p in await LocalDb.instance.allMirror('pagos')) {
+      final ptid = LocalDb.normalizarTelegramId(p['telegram_user_id']);
+      final nombre = '${p['registrado_por'] ?? ''}';
+      if (ptid != null && nombre.isNotEmpty) {
+        personas.putIfAbsent(ptid, () => nombre);
+      }
+    }
+    for (final v
+        in await LocalDb.instance.allMirror('ventas_suplementos')) {
+      final ptid = LocalDb.normalizarTelegramId(v['registrado_por']);
+      if (ptid != null) personas.putIfAbsent(ptid, () => 'Entrenador');
+    }
+    // Ítem 8: el dueño ve TODOS los lotes activos (vende de
+    // cualquiera); el entrenador solo los suyos.
+    final lotes = await lotesActivosLocal(
+        responsableId: auth.isOwner ? null : tid);
     // Nombre del producto en cada lote: lote → bote → suplemento.
     // Ítem 13: etiqueta compuesta «Nombre · Categoría».
     final cats = mapaCategoriasSuplemento(
@@ -74,6 +97,11 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
     for (final l in lotes) {
       final supId = boteSup[(l['bote_id'] as num?)?.toInt()];
       l['producto_nombre'] = nombreSup[supId] ?? 'Servicio';
+      final respTid =
+          LocalDb.normalizarTelegramId(l['responsable_id']);
+      l['responsable_nombre'] =
+          respTid == null ? '—' : (personas[respTid] ?? 'Entrenador');
+      l['responsable_tid'] = respTid;
     }
     final ventas = await LocalDb.instance.allMirror('servicio_ventas');
     final reversadas = <int>{
@@ -81,13 +109,22 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
         if ((v['reverso_de'] as num?) != null)
           (v['reverso_de'] as num).toInt(),
     };
+    final misLotesIds = <int>{
+      for (final l in lotes)
+        if ((l['id'] as num?) != null) (l['id'] as num).toInt(),
+    };
     final deHoy = ventas.where((v) {
       if ('${v['fecha'] ?? ''}'.length < 10 ||
           '${v['fecha']}'.substring(0, 10) != hoy) {
         return false;
       }
-      return auth.isOwner ||
-          LocalDb.normalizarTelegramId(v['registrado_por']) == tid;
+      if (auth.isOwner) return true;
+      // Ítem 8 (trazabilidad): el entrenador ve las ventas donde es
+      // el VENDEDOR y las hechas de SU lote (p. ej. por el dueño).
+      final vend = LocalDb.normalizarTelegramId(v['vendedor_id']) ??
+          LocalDb.normalizarTelegramId(v['registrado_por']);
+      return vend == tid ||
+          misLotesIds.contains((v['lote_id'] as num?)?.toInt());
     }).toList()
       ..sort((a, b) =>
           ((b['id'] as num?)?.toInt() ?? 0)
@@ -100,6 +137,8 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
       _esDueno = auth.isOwner;
       _precios = precios;
       _ajustes = ajustes;
+      _personas = personas;
+      _miTid = tid;
       _agua = agua;
       _misLotes = lotes;
       if (_loteSel == null && lotes.isNotEmpty) {
@@ -169,6 +208,17 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
     var metodo =
         primerMetodoServicioActivo(_ajustes, tipo) ?? 'efectivo';
     var cantidad = 1;
+    // Ítem 8 (solo el dueño los usa): roles de la venta. Precarga de
+    // Argón: la venta nace «a nombre de» el dueño del lote (para el
+    // entrenador y para el agua, de sí mismo) y el responsable del
+    // efectivo sigue al vendedor.
+    final loteRespTid = tipo == 'agua_suelta'
+        ? _miTid
+        : ((_loteActual!['responsable_tid'] as int?) ?? _miTid);
+    var vendedorSel = loteRespTid;
+    var responsableSel = loteRespTid;
+    final comisionCtrl = TextEditingController(
+        text: (_precios?.comision ?? 0).toStringAsFixed(0));
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => StatefulBuilder(
@@ -307,6 +357,77 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                       onSelectionChanged: (s) =>
                           setD(() => metodo = s.first),
                     ),
+                  // Ítem 8: el dueño vende «a nombre de» otro y
+                  // decide quién gana la comisión y quién entrega
+                  // el efectivo de ESTA venta.
+                  if (_esDueno) ...[
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        const Text('A nombre de:'),
+                        const SizedBox(width: 8),
+                        DropdownButton<int>(
+                          value: vendedorSel,
+                          items: [
+                            if (loteRespTid != null &&
+                                loteRespTid != _miTid)
+                              DropdownMenuItem(
+                                  value: loteRespTid,
+                                  child: Text(_personas[loteRespTid] ??
+                                      'Entrenador')),
+                            if (_miTid != null)
+                              DropdownMenuItem(
+                                  value: _miTid,
+                                  child: const Text('Yo (dueño)')),
+                            if (tipo == 'agua_suelta')
+                              for (final e in _personas.entries)
+                                if (e.key != _miTid &&
+                                    e.key != loteRespTid)
+                                  DropdownMenuItem(
+                                      value: e.key,
+                                      child: Text(e.value)),
+                          ],
+                          onChanged: (v) => setD(() {
+                            vendedorSel = v ?? vendedorSel;
+                            responsableSel = vendedorSel;
+                          }),
+                        ),
+                      ],
+                    ),
+                    if (vendedorSel != _miTid)
+                      TextField(
+                        controller: comisionCtrl,
+                        keyboardType: const TextInputType
+                            .numberWithOptions(decimal: true),
+                        decoration: InputDecoration(
+                            labelText: 'Comisión para '
+                                '${_personas[vendedorSel] ?? 'el entrenador'} (CUP)'),
+                      ),
+                    if (metodo == 'efectivo' &&
+                        vendedorSel != _miTid)
+                      Row(
+                        children: [
+                          const Text('Efectivo lo entrega:'),
+                          const SizedBox(width: 8),
+                          DropdownButton<int>(
+                            value: responsableSel,
+                            items: [
+                              DropdownMenuItem(
+                                  value: vendedorSel,
+                                  child: Text(_personas[vendedorSel] ??
+                                      'El vendedor')),
+                              if (_miTid != null)
+                                DropdownMenuItem(
+                                    value: _miTid,
+                                    child: const Text('Yo (dueño)')),
+                            ],
+                            onChanged: (v) => setD(
+                                () => responsableSel =
+                                    v ?? responsableSel),
+                          ),
+                        ],
+                      ),
+                  ],
                 ],
                 if (tipo == 'agua_suelta') ...[
                   const SizedBox(height: 12),
@@ -363,7 +484,23 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
         metodo: metodo,
         casa: esCasaCliente || paraDuenoCasa,
         beneficiario: paraDuenoCasa ? 'dueno' : null,
-        vendedorEsDueno: _esDueno,
+        // Ítem 8: el vendedor es el dueño solo si vende a su nombre.
+        vendedorEsDueno: _esDueno && vendedorSel == _miTid,
+        vendedorId: _esDueno ? vendedorSel : null,
+        responsableEfectivoId: _esDueno &&
+                !esCasaCliente &&
+                !paraDuenoCasa &&
+                metodo == 'efectivo'
+            ? responsableSel
+            : null,
+        comisionUnitaria: _esDueno &&
+                vendedorSel != _miTid &&
+                !esCasaCliente &&
+                !paraDuenoCasa
+            ? (double.tryParse(
+                    comisionCtrl.text.trim().replaceAll(',', '.')) ??
+                _precios?.comision)
+            : null,
       );
       _aviso('Venta registrada');
       await _cargar();
@@ -580,7 +717,11 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                 child: Text(
                   lote == null
                       ? 'Sin lote activo'
-                      : 'Mi lote · ${lote['producto_nombre'] ?? 'Servicio'}',
+                      : (!_esDueno ||
+                              lote['responsable_tid'] == _miTid
+                          ? 'Mi lote · ${lote['producto_nombre'] ?? 'Servicio'}'
+                          : 'Lote de ${lote['responsable_nombre']} · '
+                              '${lote['producto_nombre'] ?? 'Servicio'}'),
                   style: AppTexto.titulo.copyWith(fontSize: 16),
                 ),
               ),
@@ -591,8 +732,13 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                     for (final l in _misLotes)
                       DropdownMenuItem(
                         value: (l['id'] as num).toInt(),
-                        child: Text(
-                            '${l['producto_nombre'] ?? 'Lote'} (${l['saldo_local']})'),
+                        // Ítem 6 (lote ciego): el entrenador NO ve
+                        // saldos; el dueño ve producto, dueño y saldo.
+                        child: Text(_esDueno
+                            ? '${l['producto_nombre'] ?? 'Lote'} · '
+                                '${l['responsable_nombre']} '
+                                '(${l['saldo_local']})'
+                            : '${l['producto_nombre'] ?? 'Lote'}'),
                       ),
                   ],
                   onChanged: (v) => setState(() => _loteSel = v),
@@ -605,8 +751,12 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                 ? (_esDueno
                     ? 'Crea un lote en Administración para empezar a vender.'
                     : 'Pide al dueño que te reparta un lote.')
-                : 'Saldo: ${lote['saldo_local']} dosis · '
-                    'Agua común: ${_agua.saldo} pomos',
+                : _esDueno
+                    ? 'Saldo: ${lote['saldo_local']} dosis · '
+                        'Agua común: ${_agua.saldo} pomos'
+                    // Ítem 6: al entrenador solo el agua común
+                    // (el saldo de su lote es ciego para él).
+                    : 'Agua común: ${_agua.saldo} pomos',
             style: AppTexto.cuerpo,
           ),
           if (lote != null)
@@ -624,14 +774,21 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
   }
 
   Widget _botonesVenta() {
-    final pr = _precios;
-    if (pr == null) return const SizedBox.shrink();
+    if (_precios == null) return const SizedBox.shrink();
+    // Ítem 7: la etiqueta muestra el precio del primer método
+    // habilitado del producto (el que el formulario preselecciona).
+    double precioDe(String tipo) => precioServicioMetodo(_ajustes,
+        tipo, primerMetodoServicioActivo(_ajustes, tipo) ?? 'efectivo');
     Widget boton(String tipo, String etiqueta, double precio,
         IconData icono, Color color) {
+      // Ítem 6: el saldo del lote solo deshabilita para el DUEÑO
+      // (él conoce la cantidad); al entrenador ciego nunca se le
+      // bloquea la venta por saldo.
       final deshabilitado = tipo == 'agua_suelta'
-          ? _agua.saldo <= 0 || pr.agua <= 0
+          ? _agua.saldo <= 0 || precio <= 0
           : _loteActual == null ||
-              ((_loteActual!['saldo_local'] as int?) ?? 0) <= 0;
+              (_esDueno &&
+                  ((_loteActual!['saldo_local'] as int?) ?? 0) <= 0);
       return Expanded(
         child: FilledButton.icon(
           style: FilledButton.styleFrom(
@@ -647,7 +804,7 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                   style: const TextStyle(
                       fontWeight: FontWeight.bold, fontSize: 13)),
               Text(
-                pr.agua <= 0 && tipo == 'agua_suelta'
+                precio <= 0 && tipo == 'agua_suelta'
                     ? 'sin precio'
                     : '${fmtMonto(precio)} CUP',
                 style: const TextStyle(fontSize: 11),
@@ -661,14 +818,14 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        boton('dosis_sin_agua', 'Dosis', pr.sinAgua, Icons.bolt,
-            AppColores.naranja),
+        boton('dosis_sin_agua', 'Dosis', precioDe('dosis_sin_agua'),
+            Icons.bolt, AppColores.naranja),
         const SizedBox(width: AppEspacio.sm),
-        boton('dosis_con_agua', 'Dosis + agua', pr.conAgua,
-            Icons.water_drop, Colors.blue),
+        boton('dosis_con_agua', 'Dosis + agua',
+            precioDe('dosis_con_agua'), Icons.water_drop, Colors.blue),
         const SizedBox(width: AppEspacio.sm),
-        boton('agua_suelta', 'Pomo agua', pr.agua, Icons.local_drink,
-            Colors.teal),
+        boton('agua_suelta', 'Pomo agua', precioDe('agua_suelta'),
+            Icons.local_drink, Colors.teal),
       ],
     );
   }
@@ -722,6 +879,25 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
       'agua_suelta' => 'Pomo de agua ×${v['cantidad']}',
       _ => '${v['tipo']}',
     };
+    // Ítem 8 (trazabilidad para el entrenador): si la venta salió
+    // de MI lote pero el vendedor fue otro (el dueño), se dice con
+    // su insignia; si el dueño la registró a MI nombre, también.
+    final vendTid = LocalDb.normalizarTelegramId(v['vendedor_id']);
+    final regTid = LocalDb.normalizarTelegramId(v['registrado_por']);
+    final loteEsMio = _misLotes
+        .any((l) => (l['id'] as num?)?.toInt() == (v['lote_id'] as num?)?.toInt());
+    String? insignia;
+    if (!_esDueno && !esReverso && !esCasa && vendTid != null) {
+      if (loteEsMio && vendTid != _miTid) {
+        final respTid = LocalDb.normalizarTelegramId(
+            v['responsable_efectivo_id']);
+        insignia = 'Vendida por el dueño de tu pomo · '
+            'Comisión: ${fmtMonto((v['comision_monto'] as num?)?.toDouble() ?? 0)} CUP · '
+            'Efectivo: ${v['metodo'] == 'transferencia' ? '—' : (respTid == _miTid ? 'Tú' : 'Dueño')}';
+      } else if (vendTid == _miTid && regTid != _miTid) {
+        insignia = 'Registrada por el dueño a tu nombre';
+      }
+    }
     return Card(
       margin: const EdgeInsets.only(bottom: 8),
       child: ListTile(
@@ -741,7 +917,8 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
         subtitle: Text(
           '${v['cliente_nombre'] ?? 'Sin identificar'}'
           '${esCasa ? ' · Casa' : ' · ${v['metodo'] ?? ''}'}'
-          ' · ${v['registrado_por_nombre'] ?? ''}',
+          ' · ${v['registrado_por_nombre'] ?? ''}'
+          '${insignia != null ? '\n$insignia' : ''}',
         ),
         trailing: Row(
           mainAxisSize: MainAxisSize.min,
