@@ -11,6 +11,7 @@ import 'package:sqflite/sqflite.dart';
 
 import '../errores_sync.dart';
 import '../fotos_qos.dart';
+import '../bloque3.dart';
 import '../app_log.dart';
 import '../localdb.dart';
 import '../negocio.dart';
@@ -223,6 +224,11 @@ class _ColaScreenState extends State<ColaScreen> {
   // v1.2.5 (D15): ops bloqueadas que necesitan revisión manual.
   List<Map<String, dynamic>> _bloqueadas = [];
   SyncDetalle _det = const SyncDetalle();
+  // v1.12.0 (E1/E2): resumen en sencillo + retenidas en ventana
+  // de edición (retenerHasta → proximo_reintento futuro).
+  int _retenidas = 0;
+  int _totalPendientes = 0;
+  String? _masAntiguaIso;
   bool _sincronizando = false;
   // v1.4.0: progreso visible de la sincronización manual.
   SyncProgress? _progresoSync;
@@ -326,6 +332,18 @@ class _ColaScreenState extends State<ColaScreen> {
         limit: 50,
       );
     } catch (_) {}
+    // v1.12.0 (E1/E2): totales reales (la lista visible tiene
+    // límite) + retenidas + la más antigua, para el resumen en
+    // sencillo y el botón «Subir ahora».
+    var retenidas = 0;
+    var totalPendientes = 0;
+    String? masAntiguaIso;
+    try {
+      retenidas = await LocalDb.instance.countOpsRetenidas();
+      totalPendientes = await LocalDb.instance.countPendingOps();
+      masAntiguaIso =
+          await LocalDb.instance.isoOpPendienteMasAntigua();
+    } catch (_) {}
     if (mounted) {
       setState(() {
         _ops = ops;
@@ -335,6 +353,9 @@ class _ColaScreenState extends State<ColaScreen> {
         _fotosSubiendo = fSub;
         _fotosError = fErr;
         _fotosDetalle = fDet;
+        _retenidas = retenidas;
+        _totalPendientes = totalPendientes;
+        _masAntiguaIso = masAntiguaIso;
       });
     }
   }
@@ -455,6 +476,110 @@ class _ColaScreenState extends State<ColaScreen> {
     }
     // Resumen post-sync (solo en sincronización manual desde aquí)
     if (mounted) _mostrarResumen(resultado);
+  }
+
+  /// v1.12.0 (E1): resumen de la cola en palabras claras.
+  Widget _tarjetaColaEnSencillo() {
+    if (_totalPendientes == 0) {
+      return Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: AppColores.exito.withValues(alpha: 0.10),
+          borderRadius: BorderRadius.circular(AppRadio.md),
+        ),
+        child: const Text(
+          '✅ No tienes operaciones por subir. Todo está al día.',
+          style: AppTexto.cuerpo,
+        ),
+      );
+    }
+    // Desglose por tipo sobre las ops cargadas (la lista tiene
+    // límite: si hay más que las cargadas, se dice).
+    final porTipo = <String, int>{};
+    for (final o in [..._ops, ..._bloqueadas]) {
+      final t = describirTipoOp('${o['tipo'] ?? ''}');
+      porTipo[t] = (porTipo[t] ?? 0) + 1;
+    }
+    final desglose = porTipo.entries
+        .map((e) => '${e.value} ${e.key.toLowerCase()}')
+        .join(', ');
+    final masAntigua = _masAntiguaIso != null
+        ? parseFecha(_masAntiguaIso)
+        : null;
+    // E3 (mismo umbral que Mi nómina, 6 h): si la operación más
+    // antigua lleva 6 horas o más sin subir, aviso ámbar aquí
+    // también, que es donde el entrenador viene a subir.
+    final horasSinSubir =
+        horasSinSubirDesde(_masAntiguaIso, ahoraHabana());
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppColores.alerta.withValues(alpha: 0.10),
+        borderRadius: BorderRadius.circular(AppRadio.md),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Tienes $_totalPendientes operación'
+            '${_totalPendientes == 1 ? '' : 'es'} por subir'
+            '${masAntigua != null ? ' · la más antigua es de ${hace(masAntigua)}' : ''}.',
+            style: AppTexto.cuerpo
+                .copyWith(fontWeight: FontWeight.w600),
+          ),
+          if (desglose.isNotEmpty) ...[
+            const SizedBox(height: 4),
+            Text(desglose, style: AppTexto.secundario),
+          ],
+          if (horasSinSubir != null &&
+              horasSinSubir >= kHorasAvisoSinSubir) ...[
+            const SizedBox(height: 4),
+            Text(
+              '⚠ Llevas ${horasSinSubir.toStringAsFixed(0)} horas sin subir '
+              'operaciones. Toca «Sincronizar ahora» cuando tengas conexión.',
+              style: AppTexto.cuerpo.copyWith(
+                  color: AppColores.alerta, fontWeight: FontWeight.w600),
+            ),
+          ],
+          if (_retenidas > 0) ...[
+            const SizedBox(height: 4),
+            Text(
+              '$_retenidas recién creada(s) en ventana de edición: '
+              'suben solas en unos segundos, o toca «Subir ahora».',
+              style: AppTexto.secundario,
+            ),
+          ],
+          if (_fotosPendientes > 0) ...[
+            const SizedBox(height: 4),
+            Text(
+              'Además, $_fotosPendientes foto(s) por subir.',
+              style: AppTexto.secundario,
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  /// v1.12.0 (E2): el toque actúa como forzado explícito — libera
+  /// lo retenido y corre la sincronización normal.
+  Future<void> _subirAhora() async {
+    final n = _retenidas;
+    final ok = await DialogoApp.confirmar(
+      context,
+      titulo: 'Subir ahora',
+      mensaje: 'Tienes $n operación'
+          '${n == 1 ? '' : 'es'} recién creada'
+          '${n == 1 ? '' : 's'} en ventana de edición. '
+          '¿Subir todo ya?',
+      aceptar: 'Subir todo ya',
+    );
+    if (ok != true || !mounted) return;
+    await LocalDb.instance.liberarOpsRetenidas();
+    await _cargar();
+    if (mounted) _sincronizar();
   }
 
   /// v1.2.5 (D15): reintento manual de una bloqueada. La devuelve a
@@ -1291,6 +1416,11 @@ class _ColaScreenState extends State<ColaScreen> {
               ],
             ),
             const SizedBox(height: 16),
+            // v1.12.0 (E1): la cola en sencillo — cuántas, de qué
+            // y desde cuándo (totales reales, no solo la lista
+            // visible que tiene límite). Sin operaciones, lo dice.
+            _tarjetaColaEnSencillo(),
+            const SizedBox(height: 16),
             // Botón sincronizar
             BotonPrimario(
               texto:
@@ -1298,6 +1428,24 @@ class _ColaScreenState extends State<ColaScreen> {
               icono: Icons.sync,
               onPressed: _sincronizando ? null : _sincronizar,
             ),
+            // v1.12.0 (E2): «Subir ahora» libera lo retenido por
+            // retenerHasta. Solo se muestra si hay retenidas; el
+            // toque pide confirmación explícita y luego corre la
+            // sincronización normal (cuyo resumen dice lo que
+            // realmente subió, nunca «Subida completada» en
+            // silencio).
+            if (_retenidas > 0 && !_sincronizando) ...[
+              const SizedBox(height: 8),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  icon: const Icon(Icons.rocket_launch_rounded,
+                      size: 18),
+                  label: Text('Subir ahora ($_retenidas retenidas)'),
+                  onPressed: _subirAhora,
+                ),
+              ),
+            ],
             // v1.4.0: progreso visible bajo el botón (el mensaje va
             // fuera del botón porque dentro se truncaría).
             if (_sincronizando) ...[

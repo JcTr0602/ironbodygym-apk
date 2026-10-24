@@ -173,7 +173,11 @@ Future<void> revertirBDaV24(Database db) async {
   for (final ix in [
     'idx_pagos_fecha',
     'idx_pagos_cliente',
-    'idx_pagos_telegram'
+    'idx_pagos_telegram',
+    // v43 (G2): índice sobre la columna v26 `metodo`; si no se
+    // suelta antes, SQLite rechaza el DROP COLUMN de abajo
+    // («error in index idx_pagos_metodo after drop column»).
+    'idx_pagos_metodo',
   ]) {
     await db.execute('DROP INDEX IF EXISTS $ix');
   }

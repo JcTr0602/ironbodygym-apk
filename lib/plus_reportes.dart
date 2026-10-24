@@ -117,6 +117,12 @@ class ReportePlus {
   /// como alerta en la fila; NO bloquea la confirmación.
   final bool alertaReferenciaRechazada;
 
+  /// v1.12.0 (C5): estado de atención del reporte (contrato
+  /// servidor 59f2ffd: cada fila de plus_reportes_listar trae
+  /// estado_atencion; la bandeja de pendientes filtra por
+  /// 'pendiente', DESACOPLADO de telegram_enviado).
+  final String? estadoAtencion;
+
   const ReportePlus({
     required this.id,
     required this.invitadoId,
@@ -129,6 +135,7 @@ class ReportePlus {
     required this.creadoEn,
     this.resueltoEn,
     this.alertaReferenciaRechazada = false,
+    this.estadoAtencion,
   });
 
   /// El `reporte_id` del contrato es entero (el id viaja como
@@ -160,6 +167,7 @@ class ReportePlus {
       resueltoEn: instanteServidorHabana(j['resuelto_en']),
       alertaReferenciaRechazada:
           alerta == true || alerta == 1 || alerta == 'true',
+      estadoAtencion: j['estado_atencion'] as String?,
     );
   }
 }
@@ -197,9 +205,12 @@ class PlusReportesService {
   /// el orden local es solo un seguro). Lanza si la RPC falla:
   /// el llamador decide (el Panel la envuelve en su segundo pase
   /// tolerante; la pantalla muestra error con reintento).
+  /// v1.12.0 (C5): se filtra por estado_atencion = 'pendiente'
+  /// (DESACOPLADO de telegram_enviado; contrato servidor 59f2ffd).
   Future<List<ReportePlus>> pendientes() async {
     const params = {
       'p_estado': kEstadoReportesPendientes,
+      'p_estado_atencion': 'pendiente',
       'p_limite': kLimiteReportesPlus,
       'p_desde': 0,
     };

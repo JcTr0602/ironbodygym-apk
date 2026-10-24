@@ -9,20 +9,26 @@
 /// (ajuste 5 de Argón).
 library;
 
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../auth.dart';
+import '../bloque3.dart';
 import '../invitados.dart';
 import '../localdb.dart';
 import '../negocio.dart';
+import '../plus_reportes.dart';
 import '../sync.dart';
 import '../tiempo.dart';
+import 'admin.dart';
 import 'componentes.dart';
 import 'diseno.dart';
 import 'ficha.dart';
 import 'horario_gym.dart';
 import 'inscribir.dart';
+import 'reportes_plus.dart';
 import 'widgets.dart';
 
 // ---------------------------------------------------------------------------
@@ -58,6 +64,9 @@ class _InvitadosScreenState extends State<InvitadosScreen> {
     (id: 'solicitudes', etiqueta: 'Solicitudes'),
     (id: 'nuevos', etiqueta: 'Nuevos'),
     (id: 'por_expirar', etiqueta: 'Cuenta por expirar'),
+    // v1.12.0 (A): filtro de caducados (vía del servidor: mismo
+    // vocabulario de filtros de invitados_listar).
+    (id: 'caducados', etiqueta: 'Caducados'),
     (id: 'plus', etiqueta: 'Plus'),
     (id: 'plus_por_vencer', etiqueta: 'Plus por vencer'),
     (id: 'convertidos', etiqueta: 'Convertidos'),
@@ -70,7 +79,10 @@ class _InvitadosScreenState extends State<InvitadosScreen> {
   // v1.6.0: ids de clientes de la base LOCAL, para contar la historia
   // completa del convertido (si su cliente ya no existe aquí, fue
   // eliminado después de la conversión).
-  Set<String> _idsClientes = {};
+  // v1.12.0 (B3/B4): mapa id → fila del espejo (para leer estado y
+  // fecha de eliminación) + fechas del registro local de bajas.
+  Map<String, Map<String, dynamic>> _clientesPorId = {};
+  Map<int, String> _fechasEliminados = {};
   // v1.8.0: conteos de cabecera (del servidor), modo offline de
   // SOLO LECTURA (J3/G1) y multiselección para acciones en lote.
   InvitadosConteos? _conteos;
@@ -78,6 +90,62 @@ class _InvitadosScreenState extends State<InvitadosScreen> {
   DateTime? _cacheAt;
   final Set<String> _seleccion = {};
   bool get _modoSeleccion => _seleccion.isNotEmpty;
+  // v1.12.0 (A): buscador, orden y barra de letras sobre la página
+  // cargada (la bandeja pagina en el servidor: se ordena y busca
+  // sobre lo cargado y se muestra «X de Y cargados»).
+  final _busquedaCtrl = TextEditingController();
+  final _scroll = ScrollController();
+  String _busqueda = '';
+  String _orden = 'servidor';
+  // v1.12.0 (C5): reportes Plus por atender (best-effort; null si
+  // no se pudo consultar: no se pinta nada en vez de un 0 falso).
+  int? _reportesPlusPendientes;
+
+  @override
+  void dispose() {
+    _busquedaCtrl.dispose();
+    _scroll.dispose();
+    super.dispose();
+  }
+
+  /// Lista visible: filtro de caducados defensivo (si el servidor
+  /// aún no soporta el filtro, las filas que no son caducadas se
+  /// descartan aquí en vez de mostrarse como caducadas) + búsqueda
+  /// + orden. Los conteos de cabecera NO se recalculan desde aquí:
+  /// siguen siendo los del servidor (F4).
+  List<InvitadoResumen> get _listaVisible {
+    var lista = _lista;
+    if (_filtro == 'caducados') {
+      lista = [for (final i in lista) if (i.caducado) i];
+    }
+    lista = filtrarInvitadosBusqueda(lista, _busqueda);
+    if (_orden != 'servidor') lista = ordenarInvitados(lista, _orden);
+    return lista;
+  }
+
+  Map<String, int> get _indiceLetras => letrasInvitados(_listaVisible);
+
+  /// Estado B3/B4 de un convertido de la lista (veredicto de Argón:
+  /// 3 estados, nunca «eliminado» falso por retraso del espejo).
+  ({EstadoConvertido estado, String? eliminadoEn}) _estadoConvertidoLista(
+      InvitadoResumen inv) {
+    final local = _locales[inv.id];
+    final enCurso = local != null &&
+        (local.estado == EstadoConversion.preparada ||
+            local.estado == EstadoConversion.opEncolada);
+    final fila = inv.clienteId == null
+        ? null
+        : _clientesPorId['${inv.clienteId}'];
+    final fecha = inv.clienteId == null
+        ? null
+        : _fechasEliminados[inv.clienteId];
+    return resolverEstadoConvertido(
+      conversionEnCurso: enCurso,
+      filaCliente: fila,
+      enRegistroEliminados: fecha != null,
+      fechaRegistroEliminados: fecha,
+    );
+  }
 
   @override
   void initState() {
@@ -104,6 +172,27 @@ class _InvitadosScreenState extends State<InvitadosScreen> {
       final conteos = await _svc.resumen();
       final locales = await ConversionInvitadoStore().todas();
       final clientes = await LocalDb.instance.allMirror('clientes');
+      // v1.12.0 (B4): fechas de bajas ya registradas + sellar las
+      // shells estado='eliminado' que se ven por primera vez (solo
+      // las que faltan: INSERT OR IGNORE, sin reescribir fechas).
+      var fechas = await LocalDb.instance.fechasClientesEliminados();
+      var hayShellEliminada = false;
+      for (final c in clientes) {
+        if ('${c['estado'] ?? ''}' != 'eliminado') continue;
+        hayShellEliminada = true;
+        final cid = (c['id'] as num?)?.toInt();
+        if (cid == null || fechas.containsKey(cid)) continue;
+        await LocalDb.instance.registrarClienteEliminadoVisto(cid);
+      }
+      if (hayShellEliminada) {
+        fechas = await LocalDb.instance.fechasClientesEliminados();
+      }
+      // v1.12.0 (C5): reportes Plus por atender (best-effort).
+      int? reportesPendientes;
+      try {
+        reportesPendientes =
+            (await PlusReportesService().pendientes()).length;
+      } catch (_) {}
       if (!mounted) return;
       // G1: la caché guarda SOLO el par {resumen, lista «Todos»}.
       if (_filtro == 'todos') {
@@ -117,7 +206,11 @@ class _InvitadosScreenState extends State<InvitadosScreen> {
         _cacheAt = null;
         _seleccion.clear();
         _locales = {for (final c in locales) c.invitadoId: c};
-        _idsClientes = {for (final c in clientes) '${c['id']}'};
+        _clientesPorId = {
+          for (final c in clientes) '${c['id']}': c,
+        };
+        _fechasEliminados = fechas;
+        _reportesPlusPendientes = reportesPendientes;
         _cargando = false;
       });
     } catch (e) {
@@ -154,9 +247,10 @@ class _InvitadosScreenState extends State<InvitadosScreen> {
     if (c == null) return null;
     switch (c.estado) {
       case EstadoConversion.preparada:
-        return 'Conversión preparada';
+        // v1.12.0 (B5): wording del veredicto.
+        return 'Conversión en curso';
       case EstadoConversion.opEncolada:
-        return 'Inscripción por sincronizar';
+        return 'Conversión en curso (pendiente de sincronizar)';
       case EstadoConversion.confirmada:
         return 'Convertido desde este teléfono';
       case EstadoConversion.opRechazada:
@@ -209,6 +303,17 @@ class _InvitadosScreenState extends State<InvitadosScreen> {
             const Text('·', style: AppTexto.secundario),
             seg('${c.plusPorVencer} Plus por vencer',
                 'plus_por_vencer'),
+          ],
+          // v1.12.0 (F4): caducados y convertidos con los mismos
+          // números que la lista (del servidor; si la oleada aún no
+          // los envía, no se pintan en vez de inventarlos).
+          if (c.caducados != null) ...[
+            const Text('·', style: AppTexto.secundario),
+            seg('${c.caducados} caducados', 'caducados'),
+          ],
+          if (c.convertidos != null) ...[
+            const Text('·', style: AppTexto.secundario),
+            seg('${c.convertidos} convertidos', 'convertidos'),
           ],
         ],
       ),
@@ -315,6 +420,32 @@ class _InvitadosScreenState extends State<InvitadosScreen> {
           SnackBar(content: Text(error ?? 'Sin respuesta.')));
       return;
     }
+    // v1.12.0 (E4): el resumen se persiste en SQLite ANTES de
+    // pintarlo, para que sobreviva a muerte del proceso.
+    try {
+      await LocalDb.instance.guardarResultadoLote(
+        loteId: _loteInvitados.opIdActual,
+        accion: accion,
+        resultadoJson: jsonEncode({
+          'accion': res.accion,
+          'aplicados': res.aplicados,
+          'omitidos': res.omitidos,
+          'fallidos': res.fallidos,
+          'repetida': res.repetida,
+          'items': [
+            for (final it in res.items)
+              {
+                'id': it.id,
+                'ok': it.ok,
+                'codigo': it.codigo,
+                'motivo': it.motivo,
+                'plus_hasta': it.plusHasta?.toIso8601String(),
+                'caduca_en': it.caducaEn?.toIso8601String(),
+              },
+          ],
+        }),
+      );
+    } catch (_) {}
     // Los fallidos quedan seleccionados para reintento (con op_id
     // NUEVO, G4.3: la respuesta ya consumió la intención).
     final fallidos = {
@@ -331,6 +462,68 @@ class _InvitadosScreenState extends State<InvitadosScreen> {
       builder: (_) =>
           _DialogoResultadoLote(res: res!, nombres: nombres),
     );
+    if (mounted) _cargar();
+  }
+
+  /// v1.12.0 (F1): limpiar caducados en un toque. NO es un lote:
+  /// una sola RPC del dueño (`invitados_purgar_vencidos`, contrato
+  /// servidor 59f2ffd) que purga las cuentas vencidas; las ya
+  /// convertidas se conservan 90 días desde la conversión. La
+  /// confirmación previa explica el alcance con el conteo.
+  Future<void> _limpiarCaducados() async {
+    final n = _listaVisible.length;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Limpiar caducados'),
+        content: Text(
+          'Se eliminarán las $n cuentas de invitado caducadas '
+          'que están a la vista.\n\nLas ya convertidas en clientes '
+          'se conservan 90 días desde su conversión y no se tocan '
+          'aquí. Esta acción no se puede deshacer.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Limpiar'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    try {
+      final res = await _svc.purgarVencidos();
+      if (!mounted) return;
+      await showDialog<void>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Limpieza completada'),
+          content: Text(
+            res.purgados > 0
+                ? 'Se eliminaron ${res.purgados} cuentas de '
+                    'invitado caducadas.'
+                : 'No quedaba ninguna cuenta caducada por eliminar.',
+          ),
+          actions: [
+            FilledButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: const Text('Entendido'),
+            ),
+          ],
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(e is InvitadoError
+              ? e.mensaje
+              : 'No se pudo limpiar los caducados.')));
+      return;
+    }
     if (mounted) _cargar();
   }
 
@@ -395,7 +588,7 @@ class _InvitadosScreenState extends State<InvitadosScreen> {
                 TextButton(
                   onPressed: () => setState(() {
                     _seleccion.addAll(
-                        [for (final i in _lista.take(50)) i.id]);
+                        [for (final i in _listaVisible.take(50)) i.id]);
                   }),
                   child: const Text('Seleccionar los cargados'),
                 ),
@@ -448,8 +641,91 @@ class _InvitadosScreenState extends State<InvitadosScreen> {
               ],
             ),
           ),
+        // v1.12.0 (A): buscador + orden sobre la página cargada.
+        if (!_offline && !_cargando)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(
+                AppEspacio.lg, AppEspacio.sm, AppEspacio.lg, 0),
+            child: Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _busquedaCtrl,
+                    decoration: const InputDecoration(
+                      hintText: 'Buscar por nombre o teléfono',
+                      prefixIcon: Icon(Icons.search_rounded, size: 20),
+                      border: OutlineInputBorder(),
+                      isDense: true,
+                    ),
+                    onChanged: (v) => setState(() => _busqueda = v),
+                  ),
+                ),
+                const SizedBox(width: AppEspacio.sm),
+                DropdownButton<String>(
+                  value: _orden,
+                  underline: const SizedBox.shrink(),
+                  items: const [
+                    DropdownMenuItem(
+                        value: 'servidor',
+                        child: Text('Orden del servidor')),
+                    DropdownMenuItem(
+                        value: 'nombre', child: Text('Nombre A–Z')),
+                    DropdownMenuItem(
+                        value: 'registro',
+                        child: Text('Registro reciente')),
+                    DropdownMenuItem(
+                        value: 'caduca', child: Text('Caduca antes')),
+                  ],
+                  onChanged: (v) =>
+                      setState(() => _orden = v ?? 'servidor'),
+                ),
+              ],
+            ),
+          ),
         if (_conteos != null) _lineaConteos(),
-        Expanded(child: _cuerpo()),
+        // v1.12.0 (C5): enlace a los reportes Plus por atender (solo
+        // si hay pendientes; sin red o sin pendientes no se pinta).
+        if (!_offline &&
+            (_reportesPlusPendientes ?? 0) > 0)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(
+                AppEspacio.lg, AppEspacio.sm, AppEspacio.lg, 0),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton.icon(
+                icon: const Icon(Icons.star_rounded, size: 18),
+                label: Text('Reportes Plus por atender '
+                    '($_reportesPlusPendientes)'),
+                onPressed: () => Navigator.of(context).push(
+                  MaterialPageRoute(
+                      builder: (_) => const ReportesPlusScreen()),
+                ),
+              ),
+            ),
+          ),
+        // v1.12.0 (F1): limpiar caducados en un toque (solo dueño,
+        // solo con el filtro de caducados a la vista). La acción va
+        // por la MISMA RPC atómica de lote (lote_id), no por bucle.
+        if (!_offline &&
+            AuthService().isOwner &&
+            _filtro == 'caducados' &&
+            _listaVisible.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(
+                AppEspacio.lg, AppEspacio.sm, AppEspacio.lg, 0),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: OutlinedButton.icon(
+                icon: const Icon(Icons.cleaning_services_rounded,
+                    size: 18),
+                label: Text(
+                    'Limpiar caducados (${_listaVisible.length})'),
+                onPressed: _limpiarCaducados,
+              ),
+            ),
+          ),
+        // v1.12.0 (G3): entrada suave transversal.
+        Expanded(child: FadeEntrada(child: _cuerpo())),
         if (_modoSeleccion && !_offline) _barraLote(),
       ],
     );
@@ -496,7 +772,7 @@ class _InvitadosScreenState extends State<InvitadosScreen> {
         ),
       );
     }
-    if (_lista.isEmpty) {
+    if (_listaVisible.isEmpty) {
       return const Center(
         child: Padding(
           padding: EdgeInsets.all(AppEspacio.xl),
@@ -509,14 +785,42 @@ class _InvitadosScreenState extends State<InvitadosScreen> {
         ),
       );
     }
-    return RefreshIndicator(
-      onRefresh: _cargar,
-      child: ListView.builder(
-        padding: const EdgeInsets.all(AppEspacio.lg),
-        itemCount: _lista.length,
-        itemBuilder: (ctx, i) {
-          final inv = _lista[i];
-          final badge = _badgeLocal(_locales[inv.id]);
+    final visible = _listaVisible;
+    final filtrado = visible.length != _lista.length;
+    final letras = _indiceLetras;
+    return Column(
+      children: [
+        if (filtrado)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(
+                AppEspacio.lg, AppEspacio.sm, AppEspacio.lg, 0),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                '${visible.length} de ${_lista.length} cargados',
+                style: AppTexto.secundario,
+              ),
+            ),
+          ),
+        Expanded(
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: RefreshIndicator(
+                  onRefresh: _cargar,
+                  child: ListView.builder(
+                    controller: _scroll,
+                    padding: const EdgeInsets.all(AppEspacio.lg),
+                    itemCount: visible.length,
+                    itemBuilder: (ctx, i) {
+                      final inv = visible[i];
+                      final badge = _badgeLocal(_locales[inv.id]);
+                      // v1.12.0 (B3/B4): estado del convertido por el
+                      // resolver (3 estados, nunca «eliminado» falso).
+                      final estConv = inv.convertido
+                          ? _estadoConvertidoLista(inv)
+                          : null;
           final seleccionado = _seleccion.contains(inv.id);
           void alternar() => setState(() {
                 if (seleccionado) {
@@ -613,27 +917,38 @@ class _InvitadosScreenState extends State<InvitadosScreen> {
                             AppColores.alertaOscuro),
                       if (badge != null)
                         _chip(badge, AppColores.infoOscuro),
-                      // v1.6.0: el cliente vinculado ya no existe en
-                      // la base local: fue eliminado tras convertir.
-                      // La inferencia por ausencia SOLO vale si el
-                      // espejo de clientes tiene filas: con el espejo
-                      // vacío (reinstalación, primer sync pendiente)
-                      // la ausencia no prueba ninguna eliminación.
-                      if (inv.convertido &&
-                          inv.clienteId != null &&
-                          _idsClientes.isNotEmpty &&
-                          !_idsClientes.contains('${inv.clienteId}'))
-                        _chip('Cliente eliminado', AppColores.error),
+                      // v1.12.0 (B3/B4): estado del convertido por el
+                      // resolver (3 estados). NUNCA «eliminado» por
+                      // retraso del espejo: sin fila y sin registro
+                      // de baja es «sincronizando ficha».
+                      if (estConv != null) ...[
+                        if (estConv.estado ==
+                            EstadoConvertido.eliminado)
+                          _chip('Cliente eliminado',
+                              AppColores.error)
+                        else if (estConv.estado ==
+                            EstadoConvertido.sincronizandoFicha)
+                          _chip('Sincronizando ficha',
+                              AppColores.infoOscuro),
+                      ],
                     ],
                   ),
-                  // v1.6.0: la tarjeta del convertido cuenta su
-                  // historia: cuándo se convirtió y a qué cliente.
+                  // v1.12.0 (B3/B4): la línea del convertido según su
+                  // estado (sin enlace roto cuando fue eliminado).
                   if (inv.convertido) ...[
                     const SizedBox(height: 4),
                     Text(
-                      'Convertido'
-                      '${inv.convertidoEn != null ? ' el ${fechaAbsoluta(inv.convertidoEn)}' : ''}'
-                      '${inv.clienteId != null ? ' · Cliente #${inv.clienteId}' : ''}',
+                      switch (estConv?.estado) {
+                        EstadoConvertido.eliminado =>
+                          'Cliente eliminado'
+                          '${estConv!.eliminadoEn != null ? ' el ${fechaAbsoluta(parseFecha(estConv.eliminadoEn))}' : ''}',
+                        EstadoConvertido.sincronizandoFicha =>
+                          'Convertido (sincronizando ficha...)',
+                        _ =>
+                          'Convertido'
+                          '${inv.convertidoEn != null ? ' el ${fechaAbsoluta(inv.convertidoEn)}' : ''}'
+                          '${inv.clienteId != null ? ' · Cliente #${inv.clienteId}' : ''}',
+                      },
                       style: AppTexto.secundario,
                     ),
                   ],
@@ -653,6 +968,20 @@ class _InvitadosScreenState extends State<InvitadosScreen> {
                         fontWeight: FontWeight.w600,
                       ),
                     ),
+                    // v1.12.0 (C2): aviso urgente a 3 días, distinto
+                    // del filtro de exploración a 7 días.
+                    if (inv.plusPorVencerPronto)
+                      const SizedBox(height: 2),
+                    if (inv.plusPorVencerPronto)
+                      Text(
+                        '⚠ El Plus vence en '
+                        '${inv.plusDiasRestantes} día(s): avísale '
+                        'antes de que se le acabe.',
+                        style: AppTexto.secundario.copyWith(
+                          color: AppColores.alertaOscuro,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
                   ],
                 ],
               ),
@@ -660,7 +989,54 @@ class _InvitadosScreenState extends State<InvitadosScreen> {
             ),
           );
         },
-      ),
+                    ),
+                  ),
+                ),
+                // v1.12.0 (A): barra de letras discreta (patrón de
+                // Buscar, Bloque 1): solo letras presentes; al tocar,
+                // salta al primer invitado de esa letra (estimación
+                // de alto de tarjeta, igual que en Buscar).
+                if (letras.isNotEmpty)
+                  SizedBox(
+                    width: 22,
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        for (final letra
+                            in (letras.keys.toList()..sort()))
+                          GestureDetector(
+                            onTap: () => _saltarALetra(letra),
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(
+                                  vertical: 1.5),
+                              child: Text(
+                                letra,
+                                style: const TextStyle(
+                                    fontSize: 10,
+                                    color: Colors.grey),
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ],
+      );
+    }
+
+  /// Salta al primer invitado de la letra (alto estimado 170 por
+  /// tarjeta, aproximado: las tarjetas varían con los chips).
+  void _saltarALetra(String letra) {
+    final idx = _indiceLetras[letra];
+    if (idx == null || !_scroll.hasClients) return;
+    final max = _scroll.position.maxScrollExtent;
+    _scroll.animateTo(
+      (idx * 170.0).clamp(0.0, max),
+      duration: const Duration(milliseconds: 250),
+      curve: Curves.easeOut,
     );
   }
 }
@@ -729,10 +1105,15 @@ class _DialogoLoteState extends State<_DialogoLote> {
   int _dias = 30;
   String? _motivoChip;
   final _motivoCtrl = TextEditingController();
+  // v1.12.0 (F3): vida personalizada al extender (contrato
+  // servidor 59f2ffd: vida_extender acepta 1–365 días). Si el
+  // campo trae un número válido, manda sobre los presets.
+  final _diasCtrl = TextEditingController();
 
   @override
   void dispose() {
     _motivoCtrl.dispose();
+    _diasCtrl.dispose();
     super.dispose();
   }
 
@@ -746,6 +1127,27 @@ class _DialogoLoteState extends State<_DialogoLote> {
       _motivoCtrl.text.trim(),
     ].where((s) => s.isNotEmpty);
     return partes.join(': ');
+  }
+
+  /// v1.12.0 (F3): días efectivos — el personalizado (1–365) manda
+  /// sobre el preset; vacío o inválido fuera de rango bloquea el
+  /// botón (el servidor rechazaría fuera de 1–365 de todos modos).
+  int get _diasEfectivos {
+    final n = int.tryParse(_diasCtrl.text.trim());
+    if (widget.accion == 'vida_extender' &&
+        n != null &&
+        n >= 1 &&
+        n <= 365) {
+      return n;
+    }
+    return _dias;
+  }
+
+  bool get _diasInvalido {
+    final t = _diasCtrl.text.trim();
+    if (widget.accion != 'vida_extender' || t.isEmpty) return false;
+    final n = int.tryParse(t);
+    return n == null || n < 1 || n > 365;
   }
 
   @override
@@ -803,6 +1205,21 @@ class _DialogoLoteState extends State<_DialogoLote> {
                     ),
                 ],
               ),
+              // v1.12.0 (F3): días personalizados (1–365) solo al
+              // extender vida; vacío = usa el preset elegido.
+              if (widget.accion == 'vida_extender') ...[
+                const SizedBox(height: AppEspacio.sm),
+                TextField(
+                  controller: _diasCtrl,
+                  keyboardType: TextInputType.number,
+                  onChanged: (_) => setState(() {}),
+                  decoration: const InputDecoration(
+                    hintText: 'Días personalizados (1–365, opcional)',
+                    border: OutlineInputBorder(),
+                    isDense: true,
+                  ),
+                ),
+              ],
             ],
             const SizedBox(height: AppEspacio.md),
             Text(
@@ -848,10 +1265,11 @@ class _DialogoLoteState extends State<_DialogoLote> {
         ),
         FilledButton(
           onPressed: n == 0 ||
-                  (_motivoObligatorio && _motivo.isEmpty)
+                  (_motivoObligatorio && _motivo.isEmpty) ||
+                  _diasInvalido
               ? null
               : () => Navigator.of(context)
-                  .pop((dias: _dias, motivo: _motivo)),
+                  .pop((dias: _diasEfectivos, motivo: _motivo)),
           child: const Text('Confirmar'),
         ),
       ],
@@ -941,8 +1359,13 @@ class _InvitadoDetalleScreenState extends State<InvitadoDetalleScreen> {
   String? _error;
   InvitadoDetalle? _d;
   ConversionInvitado? _local;
-  // v1.6.0: el cliente vinculado ya no está en la base local.
-  bool _clienteEliminado = false;
+  // v1.12.0 (B3/B4): estado del convertido por el resolver (3
+  // estados) + fecha de la baja si se conoce. D5: detalle en caché
+  // con marca de frescura cuando no hay conexión.
+  EstadoConvertido? _estadoConvertido;
+  String? _eliminadoEn;
+  bool _offlineCache = false;
+  DateTime? _cacheAt;
 
   @override
   void initState() {
@@ -973,26 +1396,68 @@ class _InvitadoDetalleScreenState extends State<InvitadoDetalleScreen> {
       if (local != null) {
         local = await _svc.reconciliarPreparadaObsoleta(d, local);
       }
-      // v1.6.0: ¿el cliente vinculado sigue existiendo en la base
-      // local? Si no está, fue eliminado después de la conversión.
-      // Panel 1.6.0: la inferencia por ausencia solo aplica con el
-      // espejo NO vacío; vacío (reinstalación/sin primer sync) no
-      // prueba eliminación: ni se marca ni se oculta «Ver ficha».
-      var clienteEliminado = false;
-      if (d.clienteId != null) {
+      // v1.12.0 (B3/B4): estado del convertido por el resolver.
+      // El espejo de clientes puede traer la shell estado=
+      // 'eliminado' (entonces se sella la baja en el registro
+      // local) o no traer la fila (tombstone ya procesado: el
+      // registro local es la única constancia que queda).
+      EstadoConvertido? estadoConvertido;
+      String? eliminadoEn;
+      if (d.convertido && d.clienteId != null) {
         final clientes = await LocalDb.instance.allMirror('clientes');
-        clienteEliminado = clientes.isNotEmpty &&
-            !clientes.any((c) => '${c['id']}' == '${d.clienteId}');
+        Map<String, dynamic>? fila;
+        for (final c in clientes) {
+          if ('${c['id']}' == '${d.clienteId}') {
+            fila = c;
+            break;
+          }
+        }
+        if (fila != null && '${fila['estado'] ?? ''}' == 'eliminado') {
+          await LocalDb.instance
+              .registrarClienteEliminadoVisto(d.clienteId!);
+        }
+        final fechas =
+            await LocalDb.instance.fechasClientesEliminados();
+        final fecha = fechas[d.clienteId];
+        final res = resolverEstadoConvertido(
+          conversionEnCurso: local != null &&
+              (local.estado == EstadoConversion.preparada ||
+                  local.estado == EstadoConversion.opEncolada),
+          filaCliente: fila,
+          enRegistroEliminados: fecha != null,
+          fechaRegistroEliminados: fecha,
+        );
+        estadoConvertido = res.estado;
+        eliminadoEn = res.eliminadoEn;
       }
       if (!mounted) return;
       setState(() {
         _d = d;
         _local = local;
-        _clienteEliminado = clienteEliminado;
+        _estadoConvertido = estadoConvertido;
+        _eliminadoEn = eliminadoEn;
+        _offlineCache = false;
+        _cacheAt = null;
         _cargando = false;
       });
     } catch (e) {
       if (!mounted) return;
+      // v1.12.0 (D5): sin conexión, el detalle en caché se muestra
+      // en SOLO LECTURA con su marca de frescura (nunca acciones).
+      if (e is InvitadoError && e.codigo == 'RED') {
+        final cache = await _svc.leerDetalleCache(widget.invitadoId);
+        if (!mounted) return;
+        if (cache != null) {
+          setState(() {
+            _d = cache.detalle;
+            _offlineCache = true;
+            _cacheAt = cache.cachedAt;
+            _cargando = false;
+            _error = null;
+          });
+          return;
+        }
+      }
       setState(() {
         _error = e is InvitadoError
             ? e.mensaje
@@ -1021,6 +1486,11 @@ class _InvitadoDetalleScreenState extends State<InvitadoDetalleScreen> {
   }
 
   Future<void> _atender() async {
+    // v1.12.0 (D5): en caché de solo lectura no hay acciones.
+    if (_offlineCache) {
+      _snack('Sin conexión: el detalle está en solo lectura.');
+      return;
+    }
     setState(() => _actuando = true);
     try {
       final n = await _svc.atenderSolicitud(widget.invitadoId);
@@ -1037,6 +1507,11 @@ class _InvitadoDetalleScreenState extends State<InvitadoDetalleScreen> {
 
   Future<void> _convertir() async {
     final d = _d!;
+    // v1.12.0 (D5): en caché de solo lectura no hay acciones.
+    if (_offlineCache) {
+      _snack('Sin conexión: el detalle está en solo lectura.');
+      return;
+    }
     setState(() => _actuando = true);
     try {
       final datos = await _svc.prepararConversion(d);
@@ -1130,7 +1605,8 @@ class _InvitadoDetalleScreenState extends State<InvitadoDetalleScreen> {
       body: Column(
         children: [
           const SyncBanner(compact: true),
-          Expanded(child: _cuerpo()),
+          // v1.12.0 (G3): entrada suave transversal.
+          Expanded(child: FadeEntrada(child: _cuerpo())),
         ],
       ),
     );
@@ -1168,6 +1644,23 @@ class _InvitadoDetalleScreenState extends State<InvitadoDetalleScreen> {
       child: ListView(
         padding: const EdgeInsets.all(AppEspacio.lg),
         children: [
+          // v1.12.0 (D5): caché en solo lectura con su frescura.
+          if (_offlineCache)
+            Container(
+              padding: const EdgeInsets.all(AppEspacio.md),
+              margin: const EdgeInsets.only(bottom: AppEspacio.md),
+              decoration: BoxDecoration(
+                color: AppColores.alerta.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Text(
+                '📴 Sin conexión · datos de '
+                '${_cacheAt != null ? hace(_cacheAt) : 'antes'}'
+                ' · solo lectura (sin acciones)',
+                style: AppTexto.cuerpo.copyWith(
+                    fontWeight: FontWeight.w600),
+              ),
+            ),
           _tarjetaDatos(d),
           if (d.solicitud != null) ...[
             const SizedBox(height: AppEspacio.md),
@@ -1187,6 +1680,14 @@ class _InvitadoDetalleScreenState extends State<InvitadoDetalleScreen> {
           ],
           const SizedBox(height: AppEspacio.md),
           _tarjetaAcciones(d),
+          // v1.12.0 (D6): tarjeta separada del dueño. El gate exterior
+          // incluye admins: Ajustar acceso es de admin (no solo del
+          // dueño); Eliminar sigue gated por isOwner dentro.
+          if ((AuthService().isOwner || AuthService().isAdmin) &&
+              !d.convertido) ...[
+            const SizedBox(height: AppEspacio.md),
+            _tarjetaAccionesDueno(d),
+          ],
         ],
       ),
     );
@@ -1208,6 +1709,13 @@ class _InvitadoDetalleScreenState extends State<InvitadoDetalleScreen> {
           ),
           const SizedBox(height: AppEspacio.sm),
           _chip('⚠ Teléfono no verificado', AppColores.alertaOscuro),
+          const SizedBox(height: 2),
+          // v1.12.0 (D1): texto aprobado por Jc (letra pequeña).
+          const Text(
+            'Esta cuenta de invitado no está asociada a una '
+            'inscripción del gym.',
+            style: AppTexto.secundario,
+          ),
           const SizedBox(height: AppEspacio.sm),
           _linea('📱 Teléfono', d.telefono),
           if (d.fechaNac != null)
@@ -1253,6 +1761,10 @@ class _InvitadoDetalleScreenState extends State<InvitadoDetalleScreen> {
 
   Widget _tarjetaSolicitud(InvitadoDetalle d) {
     final s = d.solicitud!;
+    // v1.12.0 (B2): una solicitud rechazada se distingue de una
+    // atendida normal por el resultado que devuelve el servidor.
+    final esRechazo =
+        (s.resultado ?? '').toLowerCase().contains('rechaz');
     return Tarjeta(
       color: s.pendiente
           ? AppColores.alerta.withValues(alpha: 0.10)
@@ -1273,9 +1785,13 @@ class _InvitadoDetalleScreenState extends State<InvitadoDetalleScreen> {
           Text(
             s.pendiente
                 ? 'Pendiente desde ${fechaAbsoluta(s.creadaEn)}'
-                : 'Atendida ${s.atendidaEn != null ? fechaAbsoluta(s.atendidaEn) : ''}'
-                    '${s.atendidoPor != null ? ' por ${s.atendidoPor}' : ''}'
-                    '${s.resultado != null ? ' · ${s.resultado}' : ''}',
+                : esRechazo
+                    ? 'Rechazada ${s.atendidaEn != null ? fechaAbsoluta(s.atendidaEn) : ''}'
+                        '${s.atendidoPor != null ? ' por ${s.atendidoPor}' : ''}'
+                        '${s.resultado != null ? ' · ${s.resultado}' : ''}'
+                    : 'Atendida ${s.atendidaEn != null ? fechaAbsoluta(s.atendidaEn) : ''}'
+                        '${s.atendidoPor != null ? ' por ${s.atendidoPor}' : ''}'
+                        '${s.resultado != null ? ' · ${s.resultado}' : ''}',
             style: AppTexto.cuerpo,
           ),
           if (s.pendiente) ...[
@@ -1285,10 +1801,65 @@ class _InvitadoDetalleScreenState extends State<InvitadoDetalleScreen> {
               icono: Icons.done_all_rounded,
               onPressed: _actuando ? null : _atender,
             ),
+            // v1.12.0 (B2): rechazar con motivo (solo dueño; la RPC
+            // es rechazar_solicitud_invitado, contrato 59f2ffd).
+            if (AuthService().isOwner) ...[
+              const SizedBox(height: AppEspacio.sm),
+              BotonSecundario(
+                texto: 'Rechazar con motivo',
+                icono: Icons.block_rounded,
+                onPressed: _actuando ? null : _rechazar,
+              ),
+            ],
           ],
         ],
       ),
     );
+  }
+
+  /// v1.12.0 (B2): diálogo de motivo obligatorio → RPC de rechazo.
+  Future<void> _rechazar() async {
+    final motivoCtrl = TextEditingController();
+    final motivo = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Rechazar solicitud'),
+        content: TextField(
+          controller: motivoCtrl,
+          decoration: const InputDecoration(
+            labelText: 'Motivo del rechazo',
+            hintText: 'Ej.: cupo lleno este mes',
+            border: OutlineInputBorder(),
+          ),
+          maxLength: 120,
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () =>
+                Navigator.of(ctx).pop(motivoCtrl.text.trim()),
+            child: const Text('Rechazar'),
+          ),
+        ],
+      ),
+    );
+    if (motivo == null || motivo.isEmpty || !mounted) return;
+    setState(() => _actuando = true);
+    try {
+      final ok =
+          await _svc.rechazarSolicitud(widget.invitadoId, motivo);
+      _snack(ok
+          ? 'Solicitud rechazada'
+          : 'La solicitud ya estaba atendida');
+      await _cargar();
+    } on InvitadoError catch (e) {
+      _snack(e.mensaje);
+    } finally {
+      if (mounted) setState(() => _actuando = false);
+    }
   }
 
   /// Ajuste 5 de Argón: lo sincronizado se ve ANTES de convertir;
@@ -1333,6 +1904,14 @@ class _InvitadoDetalleScreenState extends State<InvitadoDetalleScreen> {
             'se pierden.',
             style: AppTexto.secundario,
           ),
+          // v1.12.0 (D3): solo lectura — el entrenador NO escribe
+          // medidas aquí (D4 queda diferido a la 1.13.0).
+          const SizedBox(height: AppEspacio.xs),
+          const Text(
+            'Solo lectura: las medidas se consultan, no se editan '
+            'desde esta pantalla.',
+            style: AppTexto.secundario,
+          ),
         ],
       ),
     );
@@ -1369,12 +1948,22 @@ class _InvitadoDetalleScreenState extends State<InvitadoDetalleScreen> {
               '${d.clienteId != null ? ' · Cliente #${d.clienteId}' : ''}.',
               style: AppTexto.cuerpo,
             ),
-            if (_clienteEliminado) ...[
+            if (_estadoConvertido == EstadoConvertido.eliminado) ...[
               const SizedBox(height: AppEspacio.sm),
               Text(
-                'El cliente vinculado fue eliminado.',
+                'El cliente vinculado fue eliminado.'
+                '${_eliminadoEn != null ? ' (baja registrada el ${fechaAbsoluta(parseFecha(_eliminadoEn))})' : ''}',
                 style: AppTexto.cuerpo.copyWith(
                     color: AppColores.error, fontWeight: FontWeight.w600),
+              ),
+            ],
+            if (_estadoConvertido ==
+                EstadoConvertido.sincronizandoFicha) ...[
+              const SizedBox(height: AppEspacio.sm),
+              const Text(
+                'Convertido (sincronizando ficha...): el cliente '
+                'existe pero su ficha aún no baja a este teléfono.',
+                style: AppTexto.secundario,
               ),
             ],
             if (_local?.resultadoMedidas != null) ...[
@@ -1382,7 +1971,14 @@ class _InvitadoDetalleScreenState extends State<InvitadoDetalleScreen> {
               Text(_local!.resultadoMedidas!.texto,
                   style: AppTexto.secundario),
             ],
-            if (d.clienteId != null && !_clienteEliminado) ...[
+            // Ver ficha solo si el cliente está activo en este
+            // teléfono (eliminado → sin enlace roto; sincronizando
+            // o en curso → la ficha aún no está aquí).
+            if (d.clienteId != null &&
+                _estadoConvertido != EstadoConvertido.eliminado &&
+                _estadoConvertido !=
+                    EstadoConvertido.sincronizandoFicha &&
+                _estadoConvertido != EstadoConvertido.enCurso) ...[
               const SizedBox(height: AppEspacio.md),
               BotonPrimario(
                 texto: 'Ver ficha del cliente',
@@ -1637,24 +2233,63 @@ class _InvitadoDetalleScreenState extends State<InvitadoDetalleScreen> {
           const Text('Invitado Plus', style: AppTexto.subtitulo),
           const SizedBox(height: AppEspacio.sm),
           Text(textoEstado(), style: AppTexto.cuerpo),
+          // v1.12.0 (C2): aviso urgente a 3 días (mismo umbral que
+          // la lista; distinto del filtro de exploración a 7 días).
+          if (p.activo &&
+              p.diasRestantes != null &&
+              p.diasRestantes! <= kDiasAvisoPlusPorVencer)
+            Padding(
+              padding: const EdgeInsets.only(top: AppEspacio.xs),
+              child: Text(
+                '⚠ El Plus vence en ${p.diasRestantes} día(s): '
+                'avísale antes de que se le acabe.',
+                style: AppTexto.cuerpo.copyWith(
+                    color: AppColores.alertaOscuro,
+                    fontWeight: FontWeight.w600),
+              ),
+            ),
           if (d.convertido)
             const Padding(
               padding: EdgeInsets.only(top: AppEspacio.xs),
               child: Text(
-                'Ya es cliente: el Plus residual queda inerte y '
-                'revive solo si su mensualidad cae.',
+                // v1.12.0 (C1): regla completa, no cambio de regla.
+                'Ya es cliente: su Plus sigue vigente hasta su '
+                'vencimiento SIN dar crédito (la mensualidad manda), '
+                'queda inerte mientras paga el mes y revive solo si '
+                'su mensualidad cae. No se puede quitar desde la app.',
                 style: AppTexto.secundario,
               ),
             ),
           if (p.historial.isNotEmpty) ...[
             const SizedBox(height: AppEspacio.sm),
             const Text('Historial', style: AppTexto.secundario),
+            // v1.12.0 (C3): historial en tarjetas, no en líneas.
             for (final h in p.historial)
-              Padding(
-                padding: const EdgeInsets.only(top: 2),
+              Container(
+                width: double.infinity,
+                margin: const EdgeInsets.only(top: 6),
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 10, vertical: 8),
+                decoration: BoxDecoration(
+                  color: Colors.grey.withValues(alpha: 0.10),
+                  borderRadius: BorderRadius.circular(10),
+                ),
                 child: Text(textoHistorial(h),
                     style: AppTexto.secundario),
               ),
+          ],
+          // v1.12.0 (C4): el precio del Plus se edita SOLO en
+          // Administración; desde aquí solo un enlace.
+          if (esDueno) ...[
+            const SizedBox(height: AppEspacio.sm),
+            TextButton.icon(
+              icon: const Icon(Icons.tune_rounded, size: 18),
+              label: const Text(
+                  'Editar precio del Plus en Administración'),
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const AdminScreen()),
+              ),
+            ),
           ],
           if (esDueno && !d.convertido) ...[
             const SizedBox(height: AppEspacio.md),
@@ -1731,6 +2366,11 @@ class _InvitadoDetalleScreenState extends State<InvitadoDetalleScreen> {
   Future<void> _accionUnica(String accion) async {
     final d = _d;
     if (d == null) return;
+    // v1.12.0 (D5): en caché de solo lectura no hay acciones.
+    if (_offlineCache) {
+      _snack('Sin conexión: el detalle está en solo lectura.');
+      return;
+    }
     final resumen = InvitadoResumen(
       id: d.id,
       nombre: d.nombre,
@@ -1757,6 +2397,32 @@ class _InvitadoDetalleScreenState extends State<InvitadoDetalleScreen> {
         motivo: params.motivo.isEmpty ? null : params.motivo,
       );
       if (!mounted) return;
+      // v1.12.0 (E4): el resumen se persiste en SQLite ANTES de
+      // pintarlo, para que sobreviva a muerte del proceso.
+      try {
+        await LocalDb.instance.guardarResultadoLote(
+          loteId: _loteInvitados.opIdActual,
+          accion: accion,
+          resultadoJson: jsonEncode({
+            'accion': res.accion,
+            'aplicados': res.aplicados,
+            'omitidos': res.omitidos,
+            'fallidos': res.fallidos,
+            'repetida': res.repetida,
+            'items': [
+              for (final it in res.items)
+                {
+                  'id': it.id,
+                  'ok': it.ok,
+                  'codigo': it.codigo,
+                  'motivo': it.motivo,
+                  'plus_hasta': it.plusHasta?.toIso8601String(),
+                  'caduca_en': it.caducaEn?.toIso8601String(),
+                },
+            ],
+          }),
+        );
+      } catch (_) {}
       await showDialog<void>(
         context: context,
         builder: (_) => _DialogoResultadoLote(
@@ -1775,12 +2441,6 @@ class _InvitadoDetalleScreenState extends State<InvitadoDetalleScreen> {
   }
 
   Widget _tarjetaAcciones(InvitadoDetalle d) {
-    final esAdmin = AuthService().isAdmin;
-    // G4: con una conversión sin resolver, Eliminar queda
-    // deshabilitado (la op podría crear el cliente después y la
-    // conversión quedaría imposible de confirmar).
-    final eliminarBloqueado = eliminarInvitadoBloqueado(
-        local: _local, enServidor: d.conversionPreparada);
     return Tarjeta(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1802,18 +2462,38 @@ class _InvitadoDetalleScreenState extends State<InvitadoDetalleScreen> {
                   : () => _accionUnica('vida_extender'),
             ),
           ],
+        ],
+      ),
+    );
+  }
+
+  /// v1.12.0 (D6): acciones del dueño en tarjeta SEPARADA (patrón
+  /// del Panel del dueño): ajustar acceso y eliminar no se mezclan
+  /// con las acciones generales.
+  Widget _tarjetaAccionesDueno(InvitadoDetalle d) {
+    final esAdmin = AuthService().isAdmin;
+    // G4: con una conversión sin resolver, Eliminar queda
+    // deshabilitado (la op podría crear el cliente después y la
+    // conversión quedaría imposible de confirmar).
+    final eliminarBloqueado = eliminarInvitadoBloqueado(
+        local: _local, enServidor: d.conversionPreparada);
+    return Tarjeta(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text('Acciones del dueño', style: AppTexto.subtitulo),
+          const SizedBox(height: AppEspacio.md),
           if (esAdmin && !d.convertido) ...[
-            const SizedBox(height: AppEspacio.sm),
             OutlinedButton.icon(
               icon: const Icon(Icons.key_rounded),
               label: const Text('Ajustar acceso (clave)'),
               onPressed: _actuando ? null : _ajustarClave,
             ),
+            const SizedBox(height: AppEspacio.sm),
           ],
           // J1 (v1.8.0): eliminar invitado es SOLO del dueño; el
           // servidor lo refuerza con el error limpio 42501 (G2).
           if (AuthService().isOwner && !d.convertido) ...[
-            const SizedBox(height: AppEspacio.sm),
             OutlinedButton.icon(
               icon: const Icon(Icons.delete_outline_rounded,
                   color: AppColores.error),
@@ -1932,6 +2612,11 @@ class _InvitadoDetalleScreenState extends State<InvitadoDetalleScreen> {
 
   Future<void> _eliminar() async {
     final d = _d!;
+    // v1.12.0 (D5): en caché de solo lectura no hay acciones.
+    if (_offlineCache) {
+      _snack('Sin conexión: el detalle está en solo lectura.');
+      return;
+    }
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => DialogoApp(

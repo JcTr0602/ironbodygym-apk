@@ -40,7 +40,7 @@ class LocalDb {
   /// v1.4.0 (Argón): versión actual del esquema local. Los tests de
   /// migración comparan contra esta constante en vez de un número
   /// fijo, para no caer en cascada de fallos con cada migración.
-  static const int versionActual = 42;
+  static const int versionActual = 43;
 
   /// v37: marcas de información pública pendiente de republicar,
   /// UNA FILA POR CLAVE (compartido entre onCreate y la migración
@@ -1118,6 +1118,11 @@ class LocalDb {
           // que onCreate (paridad garantizada, no SQL copiado).
           await _crearTablasBloque2Resto(db);
         }
+        if (oldV < 43) {
+          // v1.12.0 (Bloque 3, Argón AMARILLO + sync Fase C G1/G2):
+          // MISMO método que onCreate (paridad garantizada).
+          await _crearTablasBloque3(db);
+        }
       },
     );
     // v1.2.5+28: repara el índice FTS si la migración lo omitió y el
@@ -1575,6 +1580,21 @@ class LocalDb {
     return fila;
   }
 
+  /// v1.12.0 (G2): crea un índice solo si su tabla existe. Misma
+  /// tolerancia que [_crearIndicesPagosSiExiste]: el onUpgrade no
+  /// debe reventar en BDs mínimas (tests) donde la tabla nunca se
+  /// creó; en una BD real todas estas tablas existen y el índice
+  /// se crea igual.
+  static Future<void> _crearIndiceSiExisteTabla(
+      DatabaseExecutor db, String tabla, String sql) async {
+    try {
+      final t = await db.rawQuery(
+          "SELECT name FROM sqlite_master WHERE type='table' AND name='$tabla'");
+      if (t.isEmpty) return;
+      await db.execute(sql);
+    } catch (_) {}
+  }
+
   /// v1.3.4 (ítem 2): crea los índices del espejo `pagos` solo si la
   /// tabla existe. Tolerante como [_addColumnIfMissing]: el onUpgrade
   /// no debe reventar en BDs mínimas (tests) donde el espejo nunca se
@@ -1830,6 +1850,8 @@ class LocalDb {
     // v1.11.0 (v42, Bloque 2 RESTO, Argón AMARILLO): G2 + C1. MISMO
     // método en onCreate y en onUpgrade (ver _crearTablasBloque2Resto).
     await _crearTablasBloque2Resto(db);
+    // v1.12.0 (v43) se crea DESPUÉS de `meta` (ver abajo): sus
+    // siembras de cursores necesitan la tabla meta ya creada.
     // v1.4.0 (v31): caché del pre-cálculo de nómina. Solo guarda el
     // conteo de clientes que pagaron el mes + huella de insumos +
     // cuándo se calculó. Bonos y tarifa se leen siempre en vivo.
@@ -1859,8 +1881,15 @@ class LocalDb {
     // No se crean columnas generadas para cada campo JSON: con cientos de
     // filas, el costo de escritura no compensa; los demás filtros ya van
     // en Dart sobre listas acotadas o por FTS5.
-    await db.execute(
-        "CREATE INDEX IF NOT EXISTS idx_ventas_cliente ON ventas_suplementos(json_extract(data, '\$.cliente_id'))");
+    // v1.12.0 (G1): con try-catch como en onUpgrade — un índice que
+    // falla (JSON1 ausente) NO puede abortar el onCreate antes de
+    // crear ops_queue, fotos_cola y meta.
+    try {
+      await db.execute(
+          "CREATE INDEX IF NOT EXISTS idx_ventas_cliente ON ventas_suplementos(json_extract(data, '\$.cliente_id'))");
+    } catch (_) {
+      // JSON1 puede faltar en algunos teléfonos.
+    }
     // v1.3 (auditoría Gemini 2026-10-12): índice de expresión para
     // mirrorPorEstado(). También en onUpgrade(oldV < 14) para upgrades.
     try {
@@ -1920,9 +1949,20 @@ class LocalDb {
             'modulo TEXT NOT NULL, '
             'evento TEXT NOT NULL, '
             'detalle TEXT, '
-            "nivel TEXT NOT NULL DEFAULT 'info')");
+            "nivel TEXT NOT NULL DEFAULT 'info', "
+            // v1.12.0 (G2, paridad con onUpgrade): las columnas que
+            // onUpgrade añade a app_log nacen ya aquí en limpio.
+            'contexto TEXT, '
+            'op_id TEXT, '
+            'stack TEXT)');
         await db.execute(
             'CREATE INDEX IF NOT EXISTS idx_app_log_ts ON app_log(ts)');
+        // v1.12.0 (G2): índices de app_log con prioridad no anulable
+        // en onCreate (en onUpgrade ya existen desde v1.3.0).
+        await db.execute(
+            'CREATE INDEX IF NOT EXISTS idx_applog_op ON app_log(op_id)');
+        await db.execute(
+            'CREATE INDEX IF NOT EXISTS idx_applog_nivel ON app_log(nivel)');
         await db.execute(
             'CREATE TABLE meta (k TEXT PRIMARY KEY, v TEXT NOT NULL)');
         // v37: marcas de info pública pendiente, una fila por
@@ -1932,6 +1972,10 @@ class LocalDb {
         // también en instalación limpia (panel Gestión 2026-10-21).
         await db.rawInsert(
             "INSERT OR IGNORE INTO meta (k, v) VALUES ('wm_reservas', '0')");
+        // v1.12.0 (v43, Bloque 3 + sync Fase C G1/G2). MISMO método
+        // en onCreate y en onUpgrade (ver _crearTablasBloque3).
+        // Aquí (tras `meta`) porque siembra cursores propios.
+        await _crearTablasBloque3(db);
         // v1.2.4: incidencias (diseño ChatGPT: bidireccional, offline-first).
         // incidencias_local: creadas en este dispositivo, pendientes de subir.
         // incidencias_mirror: copia de la tabla central de Supabase.
@@ -1943,6 +1987,11 @@ class LocalDb {
             'resuelta_por TEXT, resuelta_en TEXT, nota_resolucion TEXT, '
             'visibilidad TEXT NOT NULL DEFAULT \'compartida\', '
             'version INTEGER NOT NULL DEFAULT 1, '
+            // v1.12.0 (G1): op_uuid nace en la creación (antes solo
+            // existía en _crearEsquemaIncidencias, donde el CREATE
+            // IF NOT EXISTS ya no hacía nada porque la tabla ya
+            // existía sin la columna).
+            'op_uuid TEXT, '
             'sincronizada INTEGER NOT NULL DEFAULT 0)');
         await db.execute('CREATE TABLE IF NOT EXISTS incidencias_mirror ('
             'id TEXT PRIMARY KEY, tipo TEXT NOT NULL, '
@@ -2098,6 +2147,98 @@ class LocalDb {
         'ON entregas_efectivo(entrenador_telegram_id)');
   }
 
+  /// v1.12.0 (v43, Bloque 3 + sync Fase C G1/G2). MISMO método en
+  /// onCreate y en onUpgrade (paridad garantizada, no SQL copiado).
+  ///
+  /// Espejos nuevos (pull de lectura, id TEXT: la PK TEXT acepta ids
+  /// enteros de gym.db y UUID del puente sin romper el batch del
+  /// pull — la afinidad TEXT convierte el entero al guardar y la
+  /// comparación `id = ?` aplica la misma afinidad al parámetro).
+  /// Sus cursores propios se siembran en 0 (nunca heredan el global:
+  /// heredar saltaría filas con sync_seq menor que ya existen).
+  static Future<void> _crearTablasBloque3(
+      DatabaseExecutor db) async {
+    // G1 (Fase C): TODA tabla nueva nace CON op_uuid, aunque hoy
+    // no se use en espejos (los espejos siguen el patrón
+    // id/data/sync_seq; la columna queda NULL y no afecta a los
+    // inserts). Así ninguna tabla futura nace sin ella.
+    // F3: espejo de solicitudes de adelanto. NUNCA se mezclan con la
+    // tabla adelantos (1.8.0): una solicitud pendiente no descuenta
+    // en NominaCalc; solo al aprobar nace el adelanto (servidor).
+    await db.execute('CREATE TABLE IF NOT EXISTS solicitudes_adelanto ('
+        'id TEXT PRIMARY KEY, data TEXT NOT NULL, '
+        'sync_seq INTEGER NOT NULL, op_uuid TEXT)');
+    // F4: espejo de avisos del dueño (solo lectura en el teléfono
+    // del entrenador; el dueño los escribe por sync_ops).
+    await db.execute('CREATE TABLE IF NOT EXISTS avisos_entrenadores ('
+        'id TEXT PRIMARY KEY, data TEXT NOT NULL, '
+        'sync_seq INTEGER NOT NULL, op_uuid TEXT)');
+    // F4: vistos puramente LOCALES (nunca viajan por sync_ops).
+    // En modo 'una_vez' se inserta al MONTARSE el PopUp; en modo
+    // 'descartable', al tocar «Entendido / Cerrar». Así un reintento
+    // de sync o una muerte del proceso jamás re-dispara el aviso.
+    await db.execute('CREATE TABLE IF NOT EXISTS avisos_vistos_local ('
+        'aviso_id TEXT PRIMARY KEY, visto_en TEXT NOT NULL, '
+        'descartado INTEGER NOT NULL DEFAULT 0, op_uuid TEXT)');
+    // B4: registro local de clientes eliminados que este teléfono YA
+    // procesó (tombstone consumido o shell estado='eliminado' vista).
+    // Sin este registro, un cliente eliminado y uno aún sin bajar
+    // serían indistinguibles (ambos sin fila en el espejo) y el
+    // veredicto B3/B4 prohíbe el «eliminado» falso por retraso.
+    await db.execute('CREATE TABLE IF NOT EXISTS clientes_eliminados_vistos ('
+        'cliente_id INTEGER PRIMARY KEY, visto_en TEXT NOT NULL, '
+        'op_uuid TEXT)');
+    // D5: caché del detalle del invitado (solo lectura offline, con
+    // marca de frescura). Solo se guarda el último detalle visto.
+    await db.execute('CREATE TABLE IF NOT EXISTS invitados_detalle_cache ('
+        'invitado_id TEXT PRIMARY KEY, json TEXT NOT NULL, '
+        'cached_at TEXT NOT NULL, op_uuid TEXT)');
+    // E4: resultado del lote persistido ANTES de pintar el resumen.
+    // lote_id = op_id (UUID de idempotencia) de la RPC atómica.
+    await db.execute('CREATE TABLE IF NOT EXISTS invitados_resultados_lote ('
+        'lote_id TEXT PRIMARY KEY, accion TEXT NOT NULL, '
+        'resultado_json TEXT NOT NULL, creado_en TEXT NOT NULL, '
+        'op_uuid TEXT)');
+    // G2: índices _seq de los espejos nuevos + de las 9 tablas
+    // v38–v40 que aún no los tenían (servicio_*, turnos_apertura,
+    // adelantos, nomina_liquidada) + índice en metodo del espejo
+    // pagos. CREATE INDEX IF NOT EXISTS: idempotente en ambos
+    // caminos (onCreate y onUpgrade pasan por aquí).
+    // G2: índices _seq en las tablas que faltaban. Con la misma
+    // tolerancia que _crearIndicesPagosSiExiste: en BDs mínimas
+    // (tests viejos) alguna tabla puede no existir y un índice que
+    // falla NO puede abortar el onUpgrade entero (eso tumbó
+    // migracion_test y migracion_v25_test con idx_pagos_metodo).
+    for (final t in [
+      'solicitudes_adelanto',
+      'avisos_entrenadores',
+      'servicio_botes',
+      'servicio_lotes',
+      'servicio_ventas',
+      'servicio_salidas',
+      'servicio_agua_movimientos',
+      'servicio_compras',
+      'turnos_apertura',
+      'adelantos',
+      'nomina_liquidada',
+    ]) {
+      await _crearIndiceSiExisteTabla(
+          db, t, 'CREATE INDEX IF NOT EXISTS idx_${t}_seq ON $t(sync_seq)');
+    }
+    await _crearIndiceSiExisteTabla(db, 'pagos',
+        'CREATE INDEX IF NOT EXISTS idx_pagos_metodo ON pagos(metodo)');
+    // Cursores propios en 0 (INSERT OR IGNORE: un teléfono que ya
+    // los tenga no retrocede su progreso).
+    await db.rawInsert(
+        "INSERT OR IGNORE INTO meta (k, v) VALUES ('wm_solicitudes_adelanto', '0')");
+    await db.rawInsert(
+        "INSERT OR IGNORE INTO meta (k, v) VALUES ('wm_avisos_entrenadores', '0')");
+    await db.rawInsert(
+        "INSERT OR IGNORE INTO meta (k, v) VALUES ('wm_gympedia_articulos', '0')");
+    await db.rawInsert(
+        "INSERT OR IGNORE INTO meta (k, v) VALUES ('wm_gympedia_borrados', '0')");
+  }
+
   /// Siembra inicial D6 (Argón ajuste 3): IDs deterministas, INSERT OR
   /// IGNORE, SIN encolar ningún sync_op. Si un teléfono ya tiene la
   /// fila (o la tuvo y se inactivó), el IGNORE no la reescribe ni la
@@ -2221,6 +2362,9 @@ class LocalDb {
       visibilidad TEXT NOT NULL DEFAULT 'compartida'
     )''');
     // Garantizar columnas v19 si las tablas ya existían (Argón).
+    // v1.12.0 (G1): op_uuid en la lista — sin esto, una tabla creada
+    // por el onCreate viejo (sin la columna) nunca la recibía porque
+    // el CREATE IF NOT EXISTS de arriba ya no hacía nada.
     for (final col in [
       ['tipo_id', 'TEXT'],
       ['asignado_a', 'TEXT'],
@@ -2229,6 +2373,7 @@ class LocalDb {
       ['ubicacion', 'TEXT'],
       ['actualizado_en', 'TEXT'],
       ['sync_estado', "TEXT NOT NULL DEFAULT 'synced'"],
+      ['op_uuid', 'TEXT'],
     ]) {
       await _addColumnIfMissing(
           db, 'incidencias_local', col[0], col[1]);
@@ -3662,23 +3807,75 @@ class LocalDb {
   /// Consulta filtrada en SQL sobre campos del JSON (evita full scans).
   /// [filtros] es un mapa campo→valor para igualdad exacta.
   /// Ejemplo: mirrorFiltrado('pagos', {'telegram_user_id': 123})
+  ///
+  /// v1.12.0 (G2): en el espejo `pagos`, los filtros sobre columnas
+  /// indexadas (fecha, cliente_id, telegram_user_id, metodo) usan la
+  /// columna en vez del escaneo json_extract — mismo resultado, con
+  /// índice. Las claves sin columna dedicada siguen por json_extract.
+  /// OJO: la columna puede ser NULL en filas que no entraron por el
+  /// pull (inserts crudos, upsertMirrorTexto): el camino indexado
+  /// es `col = ? OR col IS NULL` y la verificación final se hace en
+  /// Dart contra el valor ORIGINAL del filtro, para que el resultado
+  /// sea idéntico al escaneo JSON (sin esto, pendienteArqueo perdía
+  /// los pagos: migracion_v28_test 4500 vs 500).
   Future<List<Map<String, dynamic>>> mirrorFiltrado(
       String tabla, Map<String, dynamic> filtros) async {
     final d = await db;
     if (filtros.isEmpty) return allMirror(tabla);
-    final where =
-        filtros.keys.map((k) => "json_extract(data, '\$.$k') = ?").join(' AND ');
-    final args = filtros.values.toList();
+    final partes = <String>[];
+    final args = <dynamic>[];
+    for (final e in filtros.entries) {
+      final esPagosIndexado = tabla == 'pagos' &&
+          (e.key == 'fecha' ||
+              e.key == 'cliente_id' ||
+              e.key == 'telegram_user_id' ||
+              e.key == 'metodo');
+      if (esPagosIndexado) {
+        if (e.key == 'cliente_id' || e.key == 'telegram_user_id') {
+          final norm = normalizarTelegramId(e.value);
+          if (norm != null) {
+            partes.add('(${e.key} = ? OR ${e.key} IS NULL)');
+            args.add(norm);
+            continue;
+          }
+          // Valor no normalizable: cae al camino JSON (sin índice).
+        } else if (e.value is String) {
+          partes.add('(${e.key} = ? OR ${e.key} IS NULL)');
+          args.add(e.value);
+          continue;
+        }
+      }
+      partes.add("json_extract(data, '\$.${e.key}') = ?");
+      args.add(e.value);
+    }
+    final where = partes.join(' AND ');
     try {
       final rows =
           await d.rawQuery('SELECT id, data FROM $tabla WHERE $where', args);
-      return [
-        for (final r in rows)
-          {
-            ...jsonDecode(r['data'] as String) as Map<String, dynamic>,
-            'id': r['id'],
+      final res = <Map<String, dynamic>>[];
+      for (final r in rows) {
+        try {
+          final m = jsonDecode(r['data'] as String) as Map<String, dynamic>;
+          var ok = true;
+          for (final e in filtros.entries) {
+            // Ids: comparación normalizada (un filtro String contra
+            // un JSON int coincidía antes vía json_extract; si se
+            // exigiera == estricto, ese caso se perdería).
+            if (e.key == 'cliente_id' || e.key == 'telegram_user_id') {
+              if (normalizarTelegramId(m[e.key]) !=
+                  normalizarTelegramId(e.value)) {
+                ok = false;
+                break;
+              }
+            } else if (m[e.key] != e.value) {
+              ok = false;
+              break;
+            }
           }
-      ];
+          if (ok) res.add({...m, 'id': r['id']});
+        } catch (_) {}
+      }
+      return res;
     } catch (_) {
       // Si JSON1 no está disponible, fallback al método anterior.
       final todos = await allMirror(tabla);
@@ -4037,8 +4234,11 @@ class LocalDb {
   /// Una op atascada solo retiene sus propios registros, no toda la tabla.
   Future<void> marcarTiposComentariosSincronizados() async {
     final d = await db;
+    // v1.12.0 (G1): 'rechazada' bloquea marcar synced — un comentario
+    // rechazado por el servidor NO se marca como sincronizado (antes
+    // se perdía en silencio como si hubiera subido).
     const estadosPend =
-        "'pendiente','enviada','error','necesita_revision'";
+        "'pendiente','enviada','error','necesita_revision','rechazada'";
     // v1.3.1 (Argón): dos ramas — con op_uuid se cruza por op_uuid; sin
     // op_uuid (filas previas a la migración v22) se verifica que no haya
     // ninguna op del TIPO correspondiente pendiente en la cola.
@@ -4615,6 +4815,11 @@ class LocalDb {
   /// [turnoId] (la más reciente). Veredicto de Argón: fallback sin
   /// json_extract (módulos SQLite opcionales) igual que en
   /// reescribirTurnoIdEnCola().
+  /// v1.12.0 (G1): el fallback SOLO se usa ante un error de JSON1;
+  /// cualquier otro error de BD se propaga (antes el catch-all del
+  /// fallback tragaba el fallo y devolvía null, indistinguible de
+  /// «sin registro»). Los errores de JSON por fila se toleran (una
+  /// fila corrupta no oculta a las demás).
   Future<String?> opUuidTurno(String tipo, String turnoId) async {
     final d = await db;
     try {
@@ -4624,25 +4829,32 @@ class LocalDb {
           "ORDER BY rowid DESC LIMIT 1",
           [tipo, turnoId]);
       if (rows.isNotEmpty) return '${rows.first['op_uuid']}';
-    } catch (_) {
+    } catch (e) {
+      if (!_esErrorJson1(e)) rethrow;
       // Fallback sin JSON1: filtrar en Dart.
-      try {
-        final rows = await d.query('ops_queue',
-            columns: ['op_uuid', 'payload'],
-            where: 'tipo=?',
-            whereArgs: [tipo],
-            orderBy: 'rowid DESC');
-        for (final r in rows) {
-          try {
-            final p = jsonDecode('${r['payload']}') as Map<String, dynamic>;
-            if ('${p['turno_id']}' == turnoId) {
-              return '${r['op_uuid']}';
-            }
-          } catch (_) {}
-        }
-      } catch (_) {}
+      final rows = await d.query('ops_queue',
+          columns: ['op_uuid', 'payload'],
+          where: 'tipo=?',
+          whereArgs: [tipo],
+          orderBy: 'rowid DESC');
+      for (final r in rows) {
+        try {
+          final p = jsonDecode('${r['payload']}') as Map<String, dynamic>;
+          if ('${p['turno_id']}' == turnoId) {
+            return '${r['op_uuid']}';
+          }
+        } catch (_) {}
+      }
     }
     return null;
+  }
+
+  /// ¿El error es «falta JSON1» (no otra cosa)? Solo entonces vale el
+  /// fallback en Dart; un error de BD real debe propagarse, no
+  /// tragarse (G1).
+  static bool _esErrorJson1(Object e) {
+    final t = '$e';
+    return t.contains('json_extract') || t.contains('no such function');
   }
 
   /// Reescribe turno_id en el payload de las ops en cola
@@ -4722,7 +4934,10 @@ class LocalDb {
           [tipo, turnoId]);
       if (rows.isEmpty) return null;
       return '${rows.first['estado']}';
-    } catch (_) {
+    } catch (e) {
+      // v1.12.0 (G1): solo el error de JSON1 usa el fallback; un
+      // error de BD real se propaga (no se traga).
+      if (!_esErrorJson1(e)) rethrow;
       // JSON1 puede faltar: fallback decodificando el payload.
       final rows = await d.query('ops_queue',
           columns: ['estado', 'payload'],
@@ -4731,8 +4946,7 @@ class LocalDb {
           orderBy: 'rowid DESC');
       for (final r in rows) {
         try {
-          final p =
-              jsonDecode(r['payload'] as String) as Map<String, dynamic>;
+          final p = jsonDecode(r['payload'] as String) as Map<String, dynamic>;
           if ('${p['turno_id']}' == turnoId) {
             return '${r['estado']}';
           }
@@ -4891,6 +5105,14 @@ class LocalDb {
     'servicio_salidas',
     'servicio_agua_movimientos',
     'servicio_compras',
+    // v1.12.0 (G2): GymPedia, reservas y los dos espejos nuevos del
+    // Bloque 3. Sin ellos, getWatermarkMinimo no evaluaba si su
+    // descarga estaba completa.
+    'gympedia_articulos',
+    'gympedia_borrados',
+    'reservas',
+    'solicitudes_adelanto',
+    'avisos_entrenadores',
   ];
 
   Future<int> getWatermarkTabla(String tabla) async {
@@ -4902,6 +5124,9 @@ class LocalDb {
     // v1.4.4 (v33): GymPedia tampoco hereda el global (nace en v33 con
     // el global ya avanzado; heredar saltaría todos los artículos).
     if (tabla == 'gympedia_articulos') return 0;
+    // v1.12.0 (G2): las tumbas de GymPedia tampoco heredan el global
+    // (nacen con la tabla; heredar saltaría tumbas viejas).
+    if (tabla == 'gympedia_borrados') return 0;
     // Reservas v2 (v34): mismo motivo — la proyección nace con la
     // tabla y debe descargarse desde cero.
     if (tabla == 'reservas') return 0;
@@ -4912,6 +5137,12 @@ class LocalDb {
     if (tabla == 'turnos_apertura') return 0;
     // v1.8.0 (v40): adelantos y liquidaciones, mismo motivo.
     if (tabla == 'adelantos' || tabla == 'nomina_liquidada') return 0;
+    // v1.12.0 (G2): los espejos nuevos del Bloque 3 nacen con la
+    // tabla y deben descargarse desde cero, por el mismo motivo.
+    if (tabla == 'solicitudes_adelanto' ||
+        tabla == 'avisos_entrenadores') {
+      return 0;
+    }
     return getWatermark(); // hereda el global (migración)
   }
 
@@ -5839,6 +6070,164 @@ class LocalDb {
     final r = await d.rawQuery(
         'SELECT COUNT(*) c FROM $tabla${where == null ? '' : ' WHERE $where'}');
     return (r.first['c'] as int?) ?? 0;
+  }
+
+  // -- Bloque 3 (v1.12.0) ---------------------------------------------
+  // E2: cuántas ops están retenidas por retenerHasta (Bloque 1).
+  Future<int> countOpsRetenidas() async {
+    final d = await db;
+    final ahora = isoHabana(ahoraHabana());
+    final r = await d.rawQuery(
+        "SELECT COUNT(*) c FROM ops_queue WHERE estado IN ('pendiente','error') "
+        'AND proximo_reintento IS NOT NULL AND proximo_reintento > ?',
+        [ahora]);
+    return (r.first['c'] as int?) ?? 0;
+  }
+
+  /// E2: libera lo retenido por retenerHasta. Las ops vuelven a ser
+  /// elegibles para el push normal (pendientesParaEnvio sin forzar).
+  /// Devuelve cuántas liberó. El toque «Subir ahora» llama a esto y
+  /// luego al push: nunca se anuncia «Subida completada» dejando
+  /// cobros retenidos en el teléfono.
+  Future<int> liberarOpsRetenidas() async {
+    final d = await db;
+    final ahora = isoHabana(ahoraHabana());
+    return d.rawUpdate(
+        "UPDATE ops_queue SET proximo_reintento=NULL "
+        "WHERE estado IN ('pendiente','error') "
+        'AND proximo_reintento IS NOT NULL AND proximo_reintento > ?',
+        [ahora]);
+  }
+
+  /// ISO (Habana) de la op pendiente más antigua, o null si la cola
+  /// está vacía. E3: si esa antigüedad supera el umbral, avisa.
+  Future<String?> isoOpPendienteMasAntigua() async {
+    final d = await db;
+    final rows = await d.query('ops_queue',
+        columns: ['creada_ts'],
+        where: "estado IN ('pendiente','error')",
+        orderBy: 'creada_ts ASC',
+        limit: 1);
+    if (rows.isEmpty) return null;
+    return rows.first['creada_ts'] as String?;
+  }
+
+  /// F4: marca un aviso como visto en SQLite local. INSERT OR IGNORE:
+  /// el PRIMER visto es el que manda (un segundo PopUp jamás debe
+  /// reescribir la fecha ni revivir el aviso).
+  Future<void> marcarAvisoVisto(String avisoId,
+      {bool descartado = false}) async {
+    final d = await db;
+    await d.insert(
+      'avisos_vistos_local',
+      {
+        'aviso_id': avisoId,
+        'visto_en': isoHabana(ahoraHabana()),
+        'descartado': descartado ? 1 : 0,
+      },
+      conflictAlgorithm: ConflictAlgorithm.ignore,
+    );
+  }
+
+  Future<Set<String>> avisosVistosIds() async {
+    final d = await db;
+    final rows = await d.query('avisos_vistos_local', columns: ['aviso_id']);
+    return {for (final r in rows) '${r['aviso_id']}'};
+  }
+
+  /// B4: registra que este teléfono ya procesó la eliminación del
+  /// cliente (tombstone consumido o shell estado='eliminado' vista).
+  /// INSERT OR IGNORE: la primera fecha es la que se muestra.
+  Future<void> registrarClienteEliminadoVisto(int clienteId) async {
+    final d = await db;
+    await d.insert(
+      'clientes_eliminados_vistos',
+      {
+        'cliente_id': clienteId,
+        'visto_en': isoHabana(ahoraHabana()),
+      },
+      conflictAlgorithm: ConflictAlgorithm.ignore,
+    );
+  }
+
+  Future<Map<int, String>> fechasClientesEliminados() async {
+    final d = await db;
+    final rows = await d.query('clientes_eliminados_vistos');
+    return {
+      for (final r in rows)
+        (r['cliente_id'] as int): '${r['visto_en']}',
+    };
+  }
+
+  /// E4: persiste el resultado del lote ANTES de pintar el resumen.
+  /// lote_id = op_id (UUID de idempotencia) de la RPC atómica.
+  Future<void> guardarResultadoLote({
+    required String loteId,
+    required String accion,
+    required String resultadoJson,
+  }) async {
+    final d = await db;
+    await d.insert(
+      'invitados_resultados_lote',
+      {
+        'lote_id': loteId,
+        'accion': accion,
+        'resultado_json': resultadoJson,
+        'creado_en': isoHabana(ahoraHabana()),
+      },
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+  }
+
+  Future<Map<String, dynamic>?> leerResultadoLote(String loteId) async {
+    final d = await db;
+    final rows = await d.query('invitados_resultados_lote',
+        where: 'lote_id=?', whereArgs: [loteId], limit: 1);
+    if (rows.isEmpty) return null;
+    return Map<String, dynamic>.from(rows.first);
+  }
+
+  /// D5: guarda el último detalle visto del invitado (caché de solo
+  /// lectura offline, con marca de frescura).
+  Future<void> guardarDetalleCacheInvitado(
+      String invitadoId, String json) async {
+    final d = await db;
+    await d.insert(
+      'invitados_detalle_cache',
+      {
+        'invitado_id': invitadoId,
+        'json': json,
+        'cached_at': isoHabana(ahoraHabana()),
+      },
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+  }
+
+  Future<({String json, DateTime? cachedAt})?> leerDetalleCacheInvitado(
+      String invitadoId) async {
+    final d = await db;
+    final rows = await d.query('invitados_detalle_cache',
+        where: 'invitado_id=?', whereArgs: [invitadoId], limit: 1);
+    if (rows.isEmpty) return null;
+    final r = rows.first;
+    return (
+      json: '${r['json']}',
+      cachedAt: DateTime.tryParse('${r['cached_at']}'),
+    );
+  }
+
+  /// Actualización optimista local de una fila espejo con id TEXT
+  /// (solicitudes_adelanto, avisos_entrenadores): al resolver una
+  /// solicitud o editar un aviso, la UI deja de ofrecer la acción
+  /// sin esperar al pull. El pull posterior confirma o corrige con
+  /// el dato del servidor (el sync_seq se conserva).
+  Future<void> actualizarMirrorTextoOptimista(
+      String tabla, String id, Map<String, dynamic> data) async {
+    final d = await db;
+    final rows = await d.query(tabla,
+        columns: ['sync_seq'], where: 'id=?', whereArgs: [id], limit: 1);
+    final seq = rows.isEmpty ? 0 : (rows.first['sync_seq'] as int? ?? 0);
+    await upsertMirrorTexto(tabla, id, data, seq);
   }
 
   /// Cierra la base de datos (para reemplazar el archivo al importar).

@@ -47,6 +47,8 @@ import 'pagos_por_metodo.dart';
 import 'incidencias/lista_incidencias.dart';
 import 'historial_caja.dart';
 import 'invitados.dart';
+import 'solicitudes_adelanto.dart';
+import 'avisos_entrenador.dart';
 import 'exportar_excel.dart';
 import 'incidencias_sync.dart';
 import 'pago.dart';
@@ -1198,6 +1200,15 @@ class _AdminScreenState extends State<AdminScreen> {
               () => ir(const UsuariosScreen())),
           fila(Icons.group, 'Solicitudes de invitados',
               'B6 · Por atender', () => ir(const InvitadosScreen())),
+          // v1.12.0 (F3): solicitudes de adelanto de entrenadores
+          // (el dueño resuelve eligiendo el destino).
+          fila(Icons.request_page, 'Solicitudes de adelanto',
+              'F3 · Aprobar (Nómina / Pendiente) o rechazar',
+              () => ir(const SolicitudesAdelantoScreen())),
+          // v1.12.0 (F4): avisos PopUp para los entrenadores.
+          fila(Icons.campaign, 'Avisos para entrenadores',
+              'F4 · PopUp en el Home de cada entrenador',
+              () => ir(const AvisosEntrenadorScreen())),
           fila(Icons.cake, 'Cumpleaños del mes',
               'D2 · Regalo en un toque desde la ficha',
               () => ir(const CumpleanosScreen())),

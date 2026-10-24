@@ -90,6 +90,16 @@ const Map<String, TipoOperacionInfo> kTiposOperacion = {
       TipoOperacionInfo('Recordatorio', Icons.notifications),
   'delete_recordatorio_config':
       TipoOperacionInfo('Eliminar recordatorio', Icons.notifications_off),
+  // v1.12.0 (Bloque 3): tipos con handler + CHECK en el servidor
+  // (bot 59f2ffd, SQL_112_20261024.txt, CHECK 78). D4
+  // (registrar_medicion_cliente) queda DIFERIDO a la 1.13.0 por
+  // decisión de Jc: NO se registra aquí.
+  'solicitar_adelanto':
+      TipoOperacionInfo('Solicitud de adelanto', Icons.request_page),
+  'resolver_solicitud_adelanto':
+      TipoOperacionInfo('Resolución de adelanto', Icons.rule),
+  'upsert_aviso_entrenador':
+      TipoOperacionInfo('Aviso para entrenadores', Icons.campaign),
   'crear_suplemento':
       TipoOperacionInfo('Nuevo suplemento', Icons.fitness_center),
   'editar_suplemento':

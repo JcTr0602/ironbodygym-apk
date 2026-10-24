@@ -9,6 +9,7 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../auth.dart';
+import '../bloque3.dart';
 import '../invitados.dart' as invitados_svc;
 import '../localdb.dart';
 import '../negocio.dart';
@@ -35,6 +36,7 @@ import 'cumpleanos.dart';
 import 'dashboard.dart';
 import 'diseno.dart';
 import 'inscribir.dart';
+import 'mi_nomina.dart';
 import 'servicios.dart';
 import 'invitados.dart';
 import 'listas.dart';
@@ -289,6 +291,11 @@ class _HomeScreenState extends State<HomeScreen>
     _cargar();
     // v1.3.9 Sprint 1 (#14): cargar permisos y verificar suspensión
     _verificarPermisos();
+    // v1.12.0 (F4): avisos del dueño al montar (tras el primer
+    // cuadro, para que el contexto admita diálogos).
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _mostrarAvisosDueno();
+    });
     // v1.3.9 Sprint 4 (#9): verificar cierres automáticos
     _verificarCierresAuto();
     // Auto-actualiza contadores cuando termina una sincronización.
@@ -700,6 +707,51 @@ class _HomeScreenState extends State<HomeScreen>
         .then((_) {
       if (mounted) _cargar(forceRefresh: true);
     });
+  }
+
+  /// v1.12.0 (F4): avisos del dueño en PopUp al montar Home (solo
+  /// entrenadores; el dueño gestiona sus avisos en Administración).
+  /// En modo 'una_vez' se marca visto AL MONTARSE el PopUp (en
+  /// SQLite, antes de mostrar: si el proceso muere con el diálogo
+  /// abierto, el aviso NO vuelve). En modo 'descartable' se marca
+  /// al cerrarse el diálogo (cualquier forma de cierre). El sync
+  /// jamás dispara el PopUp: solo esta pantalla observa la lista.
+  Future<void> _mostrarAvisosDueno() async {
+    if (AuthService().isOwner) return;
+    List<AvisoEntrenador> avisos;
+    try {
+      avisos = await AvisosEntrenadorService.instance.vigentesSinVer();
+    } catch (_) {
+      return;
+    }
+    if (!mounted || avisos.isEmpty) return;
+    for (final aviso in avisos) {
+      if (!mounted) return;
+      if (aviso.modo == 'una_vez') {
+        try {
+          await AvisosEntrenadorService.instance.marcarVisto(aviso);
+        } catch (_) {}
+      }
+      await showDialog<void>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: Text(aviso.titulo),
+          content: Text(aviso.mensaje),
+          actions: [
+            FilledButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: const Text('Entendido'),
+            ),
+          ],
+        ),
+      );
+      if (aviso.modo == 'descartable') {
+        try {
+          await AvisosEntrenadorService.instance
+              .marcarVisto(aviso, descartado: true);
+        } catch (_) {}
+      }
+    }
   }
 
   @override
@@ -1135,6 +1187,17 @@ class _HomeScreenState extends State<HomeScreen>
                         AppColores.exito,
                         () => _ir(const NominaScreen()))),
               ],
+            ),
+            const SizedBox(height: AppEspacio.sm),
+            // v1.12.0 (B3): vista previa de nómina en vivo.
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                icon: const Icon(Icons.account_balance_wallet_rounded,
+                    size: 18),
+                label: const Text('Mi nómina (vista previa)'),
+                onPressed: () => _ir(const MiNominaScreen()),
+              ),
             ),
             const SizedBox(height: AppEspacio.sm),
             // v1.3.3: abrir/cerrar turno (botones rápidos con estado real).

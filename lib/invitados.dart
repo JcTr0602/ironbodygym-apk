@@ -263,7 +263,17 @@ class InvitadoResumen {
   bool get caducado => !convertido && diasRestantes <= 0;
   bool get plusPorVencer =>
       plusActivo && (plusDiasRestantes ?? 99) <= 7;
+
+  /// C2 (Bloque 3, umbral fijado por Jc 2026-10-24): aviso urgente
+  /// cuando al Plus le quedan 3 días o menos. Distinto del filtro
+  /// 'plus_por_vencer' de la bandeja (servidor, 7 días): el aviso
+  /// es el que apura, el filtro es el que explora.
+  bool get plusPorVencerPronto =>
+      plusActivo && (plusDiasRestantes ?? 99) <= kDiasAvisoPlusPorVencer;
 }
+
+/// C2 (Bloque 3): días del aviso «Plus por vencer» (Jc, 2026-10-24).
+const int kDiasAvisoPlusPorVencer = 3;
 
 /// Conteos de cabecera (`invitados_resumen`): vienen del servidor,
 /// NUNCA de la página cargada (con paginación mentirían).
@@ -274,6 +284,14 @@ class InvitadosConteos {
   final int solicitudes;
   final int porExpirar;
   final int nuevos;
+
+  /// F4 (Bloque 3): totales de caducados y convertidos, con los
+  /// mismos números que la lista. null = el servidor aún no los
+  /// envía (oleada pendiente): la cabecera no los pinta en vez de
+  /// inventarlos desde la página.
+  final int? caducados;
+  final int? convertidos;
+
   const InvitadosConteos({
     this.total = 0,
     this.plus = 0,
@@ -281,6 +299,8 @@ class InvitadosConteos {
     this.solicitudes = 0,
     this.porExpirar = 0,
     this.nuevos = 0,
+    this.caducados,
+    this.convertidos,
   });
   factory InvitadosConteos.fromJson(Map<String, dynamic> j) =>
       InvitadosConteos(
@@ -290,6 +310,8 @@ class InvitadosConteos {
         solicitudes: (j['solicitudes'] as num?)?.toInt() ?? 0,
         porExpirar: (j['por_expirar'] as num?)?.toInt() ?? 0,
         nuevos: (j['nuevos'] as num?)?.toInt() ?? 0,
+        caducados: (j['caducados'] as num?)?.toInt(),
+        convertidos: (j['convertidos'] as num?)?.toInt(),
       );
   Map<String, dynamic> toJson() => {
         'total': total,
@@ -298,6 +320,8 @@ class InvitadosConteos {
         'solicitudes': solicitudes,
         'por_expirar': porExpirar,
         'nuevos': nuevos,
+        if (caducados != null) 'caducados': caducados,
+        if (convertidos != null) 'convertidos': convertidos,
       };
 }
 
@@ -1154,6 +1178,11 @@ class AccionLoteInvitados {
   String _opId = const Uuid().v4();
   String _huella = '';
 
+  /// El op_id (UUID de idempotencia) usado por la última llamada a
+  /// [ejecutar]. E4 lo persiste como lote_id junto al resultado
+  /// ANTES de pintar el resumen.
+  String get opIdActual => _opId;
+
   static String _huellaDe(
           List<String> ids, String accion, int? dias, String? motivo) =>
       '$accion|${dias ?? ''}|${motivo ?? ''}|${ids.join(',')}';
@@ -1374,8 +1403,34 @@ class InvitadosService {
       throw const InvitadoError(
           'RED', 'Respuesta inesperada del servidor.');
     }
+    // D5: la respuesta cruda queda en caché local para abrir el
+    // detalle sin red (con marca de frescura). Nunca se cachea un
+    // detalle de otro invitado bajo esta clave.
+    try {
+      await LocalDb.instance.guardarDetalleCacheInvitado(
+          invitadoId, jsonEncode(res));
+    } catch (_) {}
     return InvitadoDetalle.fromJson(
         res.map((k, v) => MapEntry('$k', v)));
+  }
+
+  /// D5: detalle cacheado (solo lectura offline) con su marca de
+  /// frescura. null si nunca se abrió este detalle con red.
+  Future<({InvitadoDetalle detalle, DateTime? cachedAt})?>
+      leerDetalleCache(String invitadoId) async {
+    try {
+      final c =
+          await LocalDb.instance.leerDetalleCacheInvitado(invitadoId);
+      if (c == null) return null;
+      final j = jsonDecode(c.json) as Map<String, dynamic>;
+      return (
+        detalle: InvitadoDetalle.fromJson(
+            j.map((k, v) => MapEntry('$k', v))),
+        cachedAt: c.cachedAt,
+      );
+    } catch (_) {
+      return null;
+    }
   }
 
   /// Devuelve cuántas solicitudes pendientes se atendieron.
@@ -1383,6 +1438,49 @@ class InvitadosService {
     final res = await _rpc(
         'invitado_atender_solicitud', {'p_invitado_id': invitadoId});
     return res is Map ? ((res['atendidas'] as num?)?.toInt() ?? 0) : 0;
+  }
+
+  /// B2 (Bloque 3): rechazar la solicitud con motivo registrado.
+  /// RPC `invitado_rechazar_solicitud` (vía del servidor: columna
+  /// motivo_rechazo + rechazado_en; p_motivo TEXT DEFAULT NULL para
+  /// no romper versiones viejas). Devuelve true si el servidor
+  /// marcó la solicitud como rechazada.
+  /// v1.12.0 (B2): rechazar una solicitud con motivo. RPC del dueño
+  /// (contrato servidor 59f2ffd): `rechazar_solicitud_invitado`
+  /// (p_solicitud_id bigint, p_invitado_id uuid, p_motivo text)
+  /// → {ok, rechazadas: 0|1, solicitud_id}. La solicitud del
+  /// detalle no trae su id numérico, así que se rechaza por
+  /// invitado (el servidor resuelve la solicitud pendiente).
+  Future<bool> rechazarSolicitud(
+      String invitadoId, String motivo) async {
+    final res = await _rpc('rechazar_solicitud_invitado', {
+      'p_invitado_id': invitadoId,
+      'p_motivo': motivo.trim(),
+    });
+    if (res is! Map) return false;
+    if (res['ok'] == false) return false;
+    final n = (res['rechazadas'] as num?)?.toInt();
+    // Sin contador en la respuesta, una respuesta sin error es éxito.
+    return n == null ? true : n > 0;
+  }
+
+  /// v1.12.0 (F1): limpiar caducados en un toque. RPC del dueño
+  /// (contrato servidor 59f2ffd): `invitados_purgar_vencidos`
+  /// (p_dias_convertido, por defecto 90) — purga las cuentas de
+  /// invitado vencidas; las ya convertidas se conservan 90 días
+  /// desde la conversión. NO es un lote: es una sola llamada.
+  Future<({bool ok, int purgados})> purgarVencidos(
+      {int diasConvertido = 90}) async {
+    final res = await _rpc(
+        'invitados_purgar_vencidos', {'p_dias_convertido': diasConvertido});
+    if (res is Map) {
+      final n = res['purgados'] ?? res['eliminados'] ?? res['borrados'];
+      return (
+        ok: res['ok'] != false,
+        purgados: (n as num?)?.toInt() ?? 0,
+      );
+    }
+    return (ok: true, purgados: 0);
   }
 
   /// Prepara la conversión en Supabase y registra el estado local

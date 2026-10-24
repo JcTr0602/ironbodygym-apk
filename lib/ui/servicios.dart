@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../auth.dart';
+import '../bloque3.dart';
 import '../etiqueta_producto.dart';
 import '../localdb.dart';
 import '../negocio.dart' show fmtMonto;
@@ -821,6 +822,23 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                     : 'Agua común: ${_agua.saldo} pomos',
             style: AppTexto.cuerpo,
           ),
+          // v1.12.0 (C6): aviso de lote por agotarse (< 5, umbral
+          // fijo de Jc). NO revela el saldo exacto al entrenador
+          // (lote ciego, ítem 6): solo que quedan pocas dosis.
+          // NUNCA bloquea la venta, solo advierte.
+          if (lote != null &&
+              avisoLotePorAgotarse(
+                  (lote['saldo_local'] as num?)?.toInt() ?? 999))
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Text(
+                '⚠ Te quedan pocas dosis en este lote (menos de 5): '
+                'avisa al dueño para que te reponga.',
+                style: AppTexto.cuerpo.copyWith(
+                    color: AppColores.alertaOscuro,
+                    fontWeight: FontWeight.w600),
+              ),
+            ),
           if (lote != null)
             Align(
               alignment: Alignment.centerRight,

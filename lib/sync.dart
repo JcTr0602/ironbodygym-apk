@@ -2279,6 +2279,43 @@ class SyncEngine {
       data['id'] = id;
       return {'id': id, 'dataJson': jsonEncode(data), 'esTexto': true};
     }
+    // v1.12.0 (Bloque 3, F3/F4): espejos planos con id TEXT (UUID).
+    // Contrato servidor 59f2ffd: sin columna 'data'; el JSON local
+    // se arma con las columnas exactas del espejo.
+    if (tabla == 'solicitudes_adelanto' || tabla == 'avisos_entrenadores') {
+      final id = '${m['id'] ?? ''}';
+      if (id.isEmpty) return null;
+      final data = <String, dynamic>{'id': id};
+      if (tabla == 'solicitudes_adelanto') {
+        data.addAll({
+          'entrenador_telegram_id': m['entrenador_telegram_id'],
+          'entrenador_nombre': m['entrenador_nombre'],
+          'entrenador': m['entrenador'],
+          'monto': m['monto'],
+          'motivo': m['motivo'],
+          'estado': m['estado'],
+          'creado_en': m['creado_en'],
+          'resuelto_en': m['resuelto_en'],
+          'resuelto_por': m['resuelto_por'],
+          'resuelto_por_nombre': m['resuelto_por_nombre'],
+          'motivo_resolucion': m['motivo_resolucion'],
+          'destino_resolucion': m['destino_resolucion'],
+        });
+      } else {
+        data.addAll({
+          'titulo': m['titulo'],
+          'mensaje': m['mensaje'],
+          'modo': m['modo'],
+          'activo': m['activo'],
+          'vigente_desde': m['vigente_desde'],
+          'vigente_hasta': m['vigente_hasta'],
+          'creado_por': m['creado_por'],
+          'creada_ts': m['creada_ts'],
+          'actualizada_ts': m['actualizada_ts'],
+        });
+      }
+      return {'id': id, 'dataJson': jsonEncode(data), 'esTexto': true};
+    }
     final id = (m['id'] as int?) ?? 0;
     if (id == 0) return null;
     // gastos usa columnas planas en Supabase (sin 'data' JSON)
@@ -2339,6 +2376,11 @@ class SyncEngine {
       'servicio_salidas',
       'servicio_agua_movimientos',
       'servicio_compras',
+      // v1.12.0 (Bloque 3, F3/F4): si la tabla sync_* aún no existe
+      // en Supabase, el pull la marca ausente y la omite (mismo
+      // patrón que los servicios en v1.8.0).
+      'solicitudes_adelanto',
+      'avisos_entrenadores',
     ];
     final tablas = tablasFiltro ?? todasTablas;
     // v1.2.5 (D19): si el manifiesto marcó algún ámbito divergente,
@@ -2514,6 +2556,11 @@ class SyncEngine {
       'servicio_salidas': 'sync_servicio_salidas',
       'servicio_agua_movimientos': 'sync_servicio_agua_movimientos',
       'servicio_compras': 'sync_servicio_compras',
+      // v1.12.0 (Bloque 3, F3/F4): espejos nuevos del puente
+      // (contrato servidor 59f2ffd: esquemas PLANOS, sin columna
+      // 'data' — ver la rama de select abajo y _prepararFilaMirror).
+      'solicitudes_adelanto': 'sync_solicitudes_adelanto',
+      'avisos_entrenadores': 'sync_avisos_entrenadores',
     };
     var ti = 0;
     for (final tabla in tablas) {
@@ -2560,6 +2607,16 @@ class SyncEngine {
               'id,op_uuid,tipo,payload,error,dispositivo,user_id,'
                   'creada_en,estado,resuelta_por,resuelta_en,'
                   'nota_resolucion,sync_seq',
+            // v1.12.0 (Bloque 3, F3/F4): espejos planos con id TEXT
+            // (contrato servidor 59f2ffd — columnas exactas).
+            'solicitudes_adelanto' =>
+              'id,entrenador_telegram_id,entrenador_nombre,entrenador,'
+                  'monto,motivo,estado,creado_en,resuelto_en,resuelto_por,'
+                  'resuelto_por_nombre,motivo_resolucion,'
+                  'destino_resolucion,sync_seq',
+            'avisos_entrenadores' =>
+              'id,titulo,mensaje,modo,activo,vigente_desde,vigente_hasta,'
+                  'creado_por,creada_ts,actualizada_ts,sync_seq',
             _ => 'id,data,sync_seq',
           };
           // v1.2.9+47 (AppLog): medir latencia del lote.
@@ -2932,7 +2989,17 @@ class SyncEngine {
             aplicadas++;
             contarEnDetallePull(porTabla, tabla);
           } else {
-            await _db.deleteMirror(tabla, (m['entidad_id'] as int?) ?? -1);
+            final entidadIdBorrado = (m['entidad_id'] as int?) ?? -1;
+            await _db.deleteMirror(tabla, entidadIdBorrado);
+            // v1.12.0 (B4): el tombstone BORRA la fila del espejo, así
+            // que sin un registro local sería imposible distinguir
+            // «cliente eliminado» de «cliente aún sin bajar». Se deja
+            // constancia (fecha en que este teléfono procesó la baja)
+            // para que el estado B4 sea exacto en adelante. NO cambia
+            // la semántica del borrado: la fila sigue eliminada.
+            if (entidad == 'clientes' && entidadIdBorrado >= 0) {
+              await _db.registrarClienteEliminadoVisto(entidadIdBorrado);
+            }
             // v1.3.5 (auditoría 2026-10-16): ver comentario arriba.
             aplicadas++;
             contarEnDetallePull(porTabla, tabla);
@@ -2984,7 +3051,15 @@ class SyncEngine {
           final r = await _getAuth(Uri.parse(
               '$_base/rest/v1/sync_gympedia_borrados?select=id,sync_seq'
               '&sync_seq=gt.$gbMax&order=sync_seq.asc&limit=100'));
+          // v1.12.0 (G2): como en _download, una tabla ausente (404)
+          // marca su flag para que getWatermarkMinimo no la evalúe
+          // (si no, el mínimo quedaría clavado en 0 para siempre).
+          if (r.statusCode == 404 || r.statusCode == 400) {
+            await _db.setMeta('wm_gympedia_borrados_ausente', '1');
+            break;
+          }
           if (r.statusCode != 200) break; // ausente/sin permiso: omitir
+          await _db.setMeta('wm_gympedia_borrados_ausente', '');
           final rows = jsonDecode(r.body) as List;
           if (rows.isEmpty) break;
           var paginaCortada = false;
