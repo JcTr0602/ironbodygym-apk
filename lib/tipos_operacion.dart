@@ -91,9 +91,17 @@ const Map<String, TipoOperacionInfo> kTiposOperacion = {
   'delete_recordatorio_config':
       TipoOperacionInfo('Eliminar recordatorio', Icons.notifications_off),
   // v1.12.0 (Bloque 3): tipos con handler + CHECK en el servidor
-  // (bot 59f2ffd, SQL_112_20261024.txt, CHECK 78). D4
-  // (registrar_medicion_cliente) queda DIFERIDO a la 1.13.0 por
-  // decisión de Jc: NO se registra aquí.
+  // (bot 59f2ffd, SQL_112_20261024.txt, CHECK 78).
+  // v1.13.0 (Bloque 4): D4 (registrar_medicion_cliente, diferido
+  // desde la 1.12.0 por decisión de Jc) + reponer_lote. NO compilar
+  // antes de que Jc ejecute SQL_113 (CHECK 80): el salvavidas 23514
+  // (G3) deja estas ops en reintento, no las marca rechazadas.
+  // La reversión D3 NO añade tipo: reutiliza revertir_venta_servicio
+  // (desde la 1.9.0, separado de anular_pago).
+  'registrar_medicion_cliente':
+      TipoOperacionInfo('Medición de cliente', Icons.straighten),
+  'reponer_lote':
+      TipoOperacionInfo('Reponer lote', Icons.add_circle_outline),
   'solicitar_adelanto':
       TipoOperacionInfo('Solicitud de adelanto', Icons.request_page),
   'resolver_solicitud_adelanto':

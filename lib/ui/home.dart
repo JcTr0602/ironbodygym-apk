@@ -1682,93 +1682,63 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
-  /// v1.3.3: tira horizontal de chips de alerta. Solo se muestran
-  /// los que tienen contador > 0.
+  /// v1.13.0 (Bloque 4): «Atención hoy» reemplaza la tira de chips.
+  /// Una sola tarjeta, una fila por alerta (solo las de contador >
+  /// 0), número grande a la derecha, color SOLO en el icono (el
+  /// resto del texto neutro). Cada fila navega a su destino actual.
   Widget _tiraAlertas() {
-    final chips = <Widget>[];
+    final filas = <({IconData icono, String texto, int conteo, Color color, VoidCallback ir})>[];
     if (_vencen > 0) {
-      chips.add(_chipAlerta(Icons.event_available,
-          'Vencen hoy', '$_vencen', AppColores.error,
-          () => _ir(const ListasScreen(inicial: 0))));
+      filas.add((icono: Icons.event_available,
+          texto: 'Vencen hoy', conteo: _vencen, color: AppColores.error,
+          ir: () => _ir(const ListasScreen(inicial: 0))));
     }
     if (_atras > 0) {
-      chips.add(_chipAlerta(Icons.schedule,
-          'Atrasados', '$_atras', AppColores.alerta,
-          () => _ir(const ListasScreen(inicial: 2))));
+      filas.add((icono: Icons.schedule,
+          texto: 'Atrasados', conteo: _atras, color: AppColores.alerta,
+          ir: () => _ir(const ListasScreen(inicial: 2))));
     }
     if (_cumpleHoy > 0) {
-      chips.add(_chipAlerta(Icons.cake,
-          'Cumpleaños', '$_cumpleHoy', AppColores.info,
-          () => _ir(const CumpleanosScreen())));
+      filas.add((icono: Icons.cake,
+          texto: 'Cumpleaños', conteo: _cumpleHoy, color: AppColores.info,
+          ir: () => _ir(const CumpleanosScreen())));
     }
     if (_incidenciasAbiertas > 0) {
-      chips.add(_chipAlerta(
-          Icons.report_problem_outlined,
-          'Incidencias',
-          '$_incidenciasAbiertas',
-          AppColores.alertaOscuro,
-          () => _ir(
-              const ListaIncidenciasScreen())));
+      filas.add((icono: Icons.report_problem_outlined,
+          texto: 'Incidencias', conteo: _incidenciasAbiertas,
+          color: AppColores.alertaOscuro,
+          ir: () => _ir(const ListaIncidenciasScreen())));
     }
-    if (chips.isEmpty) return const SizedBox.shrink();
+    if (filas.isEmpty) return const SizedBox.shrink();
     return Padding(
       padding: const EdgeInsets.fromLTRB(
-          AppEspacio.lg, AppEspacio.md, 0, 0),
-      child: SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        child: Row(
+          AppEspacio.lg, AppEspacio.md, AppEspacio.lg, 0),
+      child: Tarjeta(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            for (var i = 0; i < chips.length; i++) ...[
-              if (i > 0)
-                const SizedBox(
-                    width: AppEspacio.sm),
-              chips[i],
-            ],
-          ],
-        ),
-      ),
-    );
-  }
-
-  /// Chip de alerta individual.
-  Widget _chipAlerta(IconData icono, String texto,
-      String conteo, Color color, VoidCallback onTap) {
-    return InkWell(
-      borderRadius: BorderRadius.circular(20),
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(
-            horizontal: AppEspacio.md,
-            vertical: AppEspacio.sm),
-        decoration: BoxDecoration(
-          color: color.withValues(alpha: 0.12),
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(
-              color: color.withValues(alpha: 0.4)),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icono, size: 16, color: color),
-            const SizedBox(width: 6),
-            Text(texto,
-                style: AppTexto.secundario
-                    .copyWith(color: color)),
-            const SizedBox(width: 6),
-            Container(
-              padding: const EdgeInsets.symmetric(
-                  horizontal: 7, vertical: 1),
-              decoration: BoxDecoration(
-                color: color,
-                borderRadius:
-                    BorderRadius.circular(10),
+            const Text('Atención hoy', style: AppTexto.titulo),
+            const SizedBox(height: AppEspacio.sm),
+            for (final f in filas)
+              InkWell(
+                borderRadius: BorderRadius.circular(8),
+                onTap: f.ir,
+                child: Padding(
+                  padding:
+                      const EdgeInsets.symmetric(vertical: 6),
+                  child: Row(
+                    children: [
+                      Icon(f.icono, size: 20, color: f.color),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(f.texto, style: AppTexto.cuerpo),
+                      ),
+                      Text('${f.conteo}',
+                          style: AppTexto.titulo.copyWith(fontSize: 20)),
+                    ],
+                  ),
+                ),
               ),
-              child: Text(conteo,
-                  style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 11,
-                      fontWeight: FontWeight.bold)),
-            ),
           ],
         ),
       ),

@@ -9,9 +9,10 @@
 ///   reintentar, o avisar al dueño. El descarte directo sin
 ///   reconciliar solo existe para fotos huérfanas (regla G5).
 /// - F4: estado de sync del dueño: contadores y fechas, NUNCA
-///   contenidos de ops. El dato «teléfonos con sync vieja» sale de
-///   `ultimo_sync_at` del servidor cuando lo provea; hoy la app lo
-///   dice así, sin adivinar.
+///   contenidos de ops. El dato «teléfonos con sync vieja» sale del
+///   espejo real `sync_ultimo_sync` (CONTRATO_F4_20261024, 1.13.0):
+///   una fila por usuario con su última sync efectiva (solo ops
+///   APLICADAS); sin fila, «Sin registro de sync».
 /// - F5: lista CERRADA de herramientas (reintentar cola, re-descargar
 ///   espejo, descartar huérfanas, tamaño de BD). PROHIBIDO: borrar
 ///   datos a mano, VACUUM, podar applied_ops, tocar watermarks o
@@ -26,7 +27,9 @@ import '../bloque2_resto.dart';
 import '../errores_sync.dart';
 import '../localdb.dart';
 import '../sync.dart';
+import '../tiempo.dart';
 import '../tipos_operacion.dart';
+import '../ultimo_sync.dart';
 import 'auditoria.dart';
 import 'auditoria_persona.dart';
 import 'componentes.dart';
@@ -266,6 +269,7 @@ class _EstadoSyncScreenState extends State<EstadoSyncScreen> {
   int _pendientes = 0;
   String? _ultimoPull;
   String? _ultimoPush;
+  List<Map<String, dynamic>> _ultimoSync = [];
 
   @override
   void initState() {
@@ -278,11 +282,15 @@ class _EstadoSyncScreenState extends State<EstadoSyncScreen> {
       final p = await LocalDb.instance.countPendingOps();
       final pull = await LocalDb.instance.getMeta('ultimo_pull_ts');
       final push = await LocalDb.instance.getMeta('ultimo_push_ts');
+      // v1.13.0 (F4): filas reales del espejo sync_ultimo_sync
+      // (solo lectura; el puente es el único escritor).
+      final filas = await ultimoSyncPorTelefono();
       if (mounted) {
         setState(() {
           _pendientes = p;
           _ultimoPull = pull;
           _ultimoPush = push;
+          _ultimoSync = filas;
           _cargando = false;
         });
       }
@@ -321,21 +329,51 @@ class _EstadoSyncScreenState extends State<EstadoSyncScreen> {
                   ),
                 ),
                 const SizedBox(height: 12),
-                const Tarjeta(
+                // v1.13.0 (F4, CONTRATO_F4_20261024): teléfonos con
+                // sync vieja desde el espejo real sync_ultimo_sync
+                // (una fila por usuario, solo ops APLICADAS). La
+                // nota de la 1.11.0 («el servidor aún no lo
+                // provee») SE QUITA: el dato ya es real. Un usuario
+                // sin fila aún no sincronizó nunca: aparece aquí
+                // tras su primera sync efectiva.
+                Tarjeta(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text('Teléfonos con sync vieja',
+                      const Text('Teléfonos con sync vieja',
                           style: AppTexto.cuerpo),
-                      SizedBox(height: 4),
-                      Text(
-                        'Este dato sale de ultimo_sync_at del servidor '
-                        '(marca por teléfono al hacer pull/push). El '
-                        'servidor aún no lo provee: cuando lo haga, '
-                        'aparecerá aquí. No se adivina desde el '
-                        'teléfono local.',
+                      const SizedBox(height: 4),
+                      const Text(
+                        'Espejo sync_ultimo_sync: última sync '
+                        'efectiva por usuario (solo cuentan las '
+                        'operaciones aplicadas).',
                         style: AppTexto.secundario,
                       ),
+                      const SizedBox(height: 8),
+                      if (_ultimoSync.isEmpty)
+                        const Text(
+                          'Sin registro de sync todavía: ningún '
+                          'usuario sincronizó con éxito aún.',
+                          style: AppTexto.secundario,
+                        )
+                      else
+                        ..._ultimoSync.map((f) => Padding(
+                              padding:
+                                  const EdgeInsets.only(bottom: 6),
+                              child: Row(
+                                children: [
+                                  Expanded(
+                                    child: Text('${f['nombre']}',
+                                        style: AppTexto.cuerpo),
+                                  ),
+                                  Text(
+                                    etiquetaUltimoSync(
+                                        f, ahoraHabana()),
+                                    style: AppTexto.secundario,
+                                  ),
+                                ],
+                              ),
+                            )),
                     ],
                   ),
                 ),

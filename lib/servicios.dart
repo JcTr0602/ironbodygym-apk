@@ -13,12 +13,24 @@ import 'tiempo.dart';
 ///
 /// Modelo: el dueño abre un BOTE del catálogo y lo reparte en LOTES
 /// (pomos) por vendedor. El saldo de un lote SIEMPRE se deriva
-/// (iniciales − ventas − salidas), nunca se guarda. El agua es stock
-/// común con costo promedio ponderado (CPP). Las ventas NO se
-/// insertan en el espejo local: viven en ops_queue hasta que el
-/// servidor las confirma y bajan por pull (mismo patrón que
+/// (iniciales + reposiciones − ventas − salidas), nunca se guarda.
+/// El agua es stock común con costo promedio ponderado (CPP). Las
+/// ventas NO se insertan en el espejo local: viven en ops_queue hasta
+/// que el servidor las confirma y bajan por pull (mismo patrón que
 /// ventas_suplementos); los cálculos locales suman espejo + ops
 /// pendientes aún no espejadas (por op_uuid, sin doble conteo).
+///
+/// v1.13.0 (Bloque 4, Argón AMARILLO):
+/// - `dosis_repuestas` (reponer_lote, solo dueño) suma al saldo; el
+///   «sin repartir» del bote resta las reposiciones de sus lotes.
+///   La reposición se refleja optimista en el espejo local al
+///   encolar (el espejo ES la fuente del saldo); si el servidor la
+///   rechaza, el gancho de rechazo la revierte (ver sync.dart).
+/// - Venta múltiple: 1 op por subtipo con `venta_grupo_id` común
+///   (dosis_con_agua × M + dosis_sin_agua × (N−M) cuando 0 < M < N).
+/// - Deshacer (E3): 15 s exactos + op aún 'pendiente' (la venta de
+///   dosis nace retenida 15 s por retenerHastaIso, como el cobro del
+///   Bloque 1); si no, solo cabe Reversión (D3, motivo obligatorio).
 ///
 /// Reglas de la casa aplicadas aquí (el servidor las re-impone):
 /// - En el teléfono se bloquea vender si el saldo local es 0
@@ -133,6 +145,10 @@ Map<String, dynamic> _payloadDeOp(Map<String, dynamic> op) {
 /// Saldo derivado de un lote: espejo + ops pendientes cuyo op_uuid
 /// aún no aparece en el espejo (las ya espejadas no se descuentan
 /// dos veces). PURO.
+/// v1.13.0: el saldo suma `dosis_repuestas` (espejo; la reposición
+/// optimista local ya vive en la fila del espejo, así que las ops
+/// `reponer_lote` pendientes NO se suman aquí: doble conteo si se
+/// hiciera). Los reversos pendientes restauran por venta espejo.
 int saldoLoteDesde({
   required Map<String, dynamic> lote,
   required List<Map<String, dynamic>> ventasEspejo,
@@ -140,6 +156,7 @@ int saldoLoteDesde({
   required List<Map<String, dynamic>> opsPendientes,
 }) {
   var saldo = (lote['dosis_iniciales'] as num?)?.toInt() ?? 0;
+  saldo += (lote['dosis_repuestas'] as num?)?.toInt() ?? 0;
   final uuidsEspejo = <String>{
     for (final v in ventasEspejo) '${v['op_uuid'] ?? ''}',
     for (final s in salidasEspejo) '${s['op_uuid'] ?? ''}',
@@ -272,6 +289,87 @@ int saldoLoteDesde({
   return (saldo: saldo, cpp: cpp);
 }
 
+/// v1.13.0 (Bloque 4, Argón ajuste 1): bloqueo de stock SEPARADO
+/// dosis vs pomos — nunca un interruptor único. PURO.
+///
+/// - Dosis sin agua: se apaga solo si el DUEÑO ve saldo 0 («No
+///   quedan dosis en el lote activo»). Al entrenador ciego NUNCA se
+///   le bloquea por saldo del lote (regla lote ciego 1.9.0 ítem 6:
+///   el servidor nunca rechaza por stock teórico); su botón solo se
+///   apaga sin lote o sin precio.
+/// - Dosis con agua: igual que sin agua, y además se apaga sin pomos
+///   («Sin pomos de agua en stock») para todos.
+/// - Agua suelta: solo depende de los pomos (para todos).
+/// Sin precio fijado, cualquier botón se apaga («Precio sin fijar»).
+({bool habilitado, String? motivo}) estadoBotonVentaServicio({
+  required String tipo,
+  required bool tieneLote,
+  required int dosisRestantes,
+  required int pomos,
+  required bool esDueno,
+  required double precio,
+}) {
+  if (precio <= 0) {
+    return (habilitado: false, motivo: 'Precio sin fijar');
+  }
+  if (tipo == 'agua_suelta') {
+    if (pomos <= 0) {
+      return (habilitado: false, motivo: 'Sin pomos de agua en stock');
+    }
+    return (habilitado: true, motivo: null);
+  }
+  if (!tieneLote) {
+    return (habilitado: false, motivo: 'Sin lote activo');
+  }
+  if (esDueno && dosisRestantes <= 0) {
+    return (
+      habilitado: false,
+      motivo: 'No quedan dosis en el lote activo',
+    );
+  }
+  if (tipo == 'dosis_con_agua' && pomos <= 0) {
+    return (habilitado: false, motivo: 'Sin pomos de agua en stock');
+  }
+  return (habilitado: true, motivo: null);
+}
+
+/// v1.13.0: desglose del saldo de un lote para la tarjeta del dueño
+/// (iniciales + reposiciones − ventas − salidas). PURO: recibe las
+/// filas del espejo ya filtradas por lote.
+({int iniciales, int repuestas, int ventas, int salidas, int saldo})
+    desgloseLote({
+  required Map<String, dynamic> lote,
+  required List<Map<String, dynamic>> ventasEspejo,
+  required List<Map<String, dynamic>> salidasEspejo,
+}) {
+  var ventas = 0;
+  for (final v in ventasEspejo) {
+    ventas += (v['cantidad'] as num?)?.toInt() ?? 0;
+  }
+  var salidas = 0;
+  for (final s in salidasEspejo) {
+    salidas += (s['dosis'] as num?)?.toInt() ?? 0;
+  }
+  final iniciales = (lote['dosis_iniciales'] as num?)?.toInt() ?? 0;
+  final repuestas = (lote['dosis_repuestas'] as num?)?.toInt() ?? 0;
+  return (
+    iniciales: iniciales,
+    repuestas: repuestas,
+    ventas: ventas,
+    salidas: salidas,
+    saldo: iniciales + repuestas - ventas - salidas,
+  );
+}
+
+/// v1.13.0 (E3): ¿sigue abierta la ventana de Deshacer? 15 segundos
+/// exactos desde el cobro. PURO. La segunda condición (op aún
+/// 'pendiente', synced == 0) la verifica [deshacerVentaServicio]
+/// contra ops_queue: una op ya subida o con retención forzada no se
+/// puede deshacer aunque no hayan pasado los 15 s.
+bool puedeDeshacerVenta(DateTime cobradoEn, DateTime ahora) =>
+    ahora.difference(cobradoEn) <= const Duration(seconds: 15) &&
+    !ahora.isBefore(cobradoEn);
+
 // ------------------------------------------------------------------
 // Lecturas locales (espejo + pendientes)
 // ------------------------------------------------------------------
@@ -351,6 +449,8 @@ Future<List<Map<String, dynamic>>> lotesActivosLocal(
 }
 
 /// Dosis sin repartir de un bote (espejo): rendimiento − Σ lotes.
+/// v1.13.0: las reposiciones también salen del «sin repartir» del
+/// mismo bote (el lote repuesto crece a costa del pool sin asignar).
 Future<int> sinRepartirLocal(int boteId) async {
   final botes = await LocalDb.instance.allMirror('servicio_botes');
   final bote =
@@ -361,6 +461,7 @@ Future<int> sinRepartirLocal(int boteId) async {
   for (final l in await LocalDb.instance.allMirror('servicio_lotes')) {
     if ((l['bote_id'] as num?)?.toInt() == boteId) {
       repartidas += (l['dosis_iniciales'] as num?)?.toInt() ?? 0;
+      repartidas += (l['dosis_repuestas'] as num?)?.toInt() ?? 0;
       // Los sobrantes de lotes cerrados vuelven a «sin repartir».
       repartidas -= (l['conteo_cierre'] as num?)?.toInt() ?? 0;
     }
@@ -486,12 +587,36 @@ Future<Map<String, dynamic>> cuadreServiciosDia(
 // Acciones (encolan la op y disparan push)
 // ------------------------------------------------------------------
 
-Future<String> _encolar(String tipo, Map<String, dynamic> payload) async {
+Future<String> _encolar(String tipo, Map<String, dynamic> payload,
+    {String? retenerHastaIso}) async {
   final opUuid = const Uuid().v4();
-  await LocalDb.instance
-      .queueOp(opUuid: opUuid, tipo: tipo, payload: payload);
+  await LocalDb.instance.queueOp(
+      opUuid: opUuid,
+      tipo: tipo,
+      payload: payload,
+      retenerHastaIso: retenerHastaIso);
   unawaited(SyncEngine.instance.push().then((_) {}, onError: (_) {}));
   return opUuid;
+}
+
+/// v1.13.0 (E3): Deshacer de una venta de dosis (simple o múltiple).
+/// Borra TODAS las ops del grupo de la cola si y solo si: no pasaron
+/// 15 s exactos desde el cobro Y cada op sigue 'pendiente'
+/// (synced == 0: aún no subió; la retención de 15 s lo garantiza
+/// salvo «Subir ahora» forzado). Si alguna ya subió, no se toca
+/// nada y solo cabe Reversión (D3). Devuelve true si deshizo.
+Future<bool> deshacerVentaServicio(
+    List<String> opUuids, DateTime cobradoEn) async {
+  if (!puedeDeshacerVenta(cobradoEn, ahoraHabana())) return false;
+  final db = LocalDb.instance;
+  for (final uuid in opUuids) {
+    final op = await db.opEnCola(uuid);
+    if (op == null || '${op['estado']}' != 'pendiente') return false;
+  }
+  for (final uuid in opUuids) {
+    await db.deleteOp(uuid);
+  }
+  return true;
 }
 
 /// Solo dueño (lo impone el servidor): abre un bote del catálogo.
@@ -546,6 +671,12 @@ int? _edadCliente(Map<String, dynamic> cliente) {
 
 /// Registra una venta de servicio (o consumo Casa). Único punto de
 /// venta de servicios de la app, como manda el patrón de la casa.
+///
+/// v1.13.0: [cantidad] > 1 en dosis solo con [ventaGrupoId] (venta
+/// múltiple B2: 1 op por subtipo con el mismo grupo). Las ventas de
+/// dosis nacen RETENIDAS 15 s (retenerHastaIso, como el cobro del
+/// Bloque 1): es la ventana de Deshacer E3; al vencer, el push las
+/// toma normal. Devuelve el op_uuid de la op encolada.
 Future<String> registrarVentaServicio({
   required String tipo, // dosis_sin_agua | dosis_con_agua | agua_suelta
   int? loteId,
@@ -561,13 +692,17 @@ Future<String> registrarVentaServicio({
   int? vendedorId,
   int? responsableEfectivoId,
   double? comisionUnitaria,
+  // v1.13.0 (B2): grupo de venta múltiple; obligatorio si cantidad
+  // > 1 en dosis. Viaja en el payload para Deshacer y servidor.
+  String? ventaGrupoId,
 }) async {
   if (!kTiposVentaServicio.contains(tipo)) {
     throw Exception('Tipo de servicio inválido');
   }
   if (cantidad < 1) throw Exception('Cantidad inválida');
-  if (tipo != 'agua_suelta' && cantidad != 1) {
-    throw Exception('La dosis se vende de una en una');
+  if (tipo != 'agua_suelta' && cantidad != 1 && ventaGrupoId == null) {
+    throw Exception(
+        'La dosis se vende de una en una; para varias usa venta múltiple');
   }
   final db = LocalDb.instance;
   Map<String, dynamic>? cliente;
@@ -646,21 +781,106 @@ Future<String> registrarVentaServicio({
       ((casa || tipo == 'agua_suelta' || vendedorEsDueno)
           ? 0.0
           : pr.comision);
-  return _encolar('venta_servicio', {
-    if (tipo != 'agua_suelta') 'lote_id': loteId,
-    'tipo': tipo,
-    'cantidad': cantidad,
-    if (clienteId != null) 'cliente_id': clienteId,
-    if (casa) 'casa': true,
-    if (casa && beneficiario != null) 'beneficiario': beneficiario,
-    if (!casa) 'metodo': metodo,
-    'precio_unitario': precio,
-    'comision_unitaria': comision,
-    if (vendedorId != null) 'vendedor_id': vendedorId,
-    if (responsableEfectivoId != null)
-      'responsable_efectivo_id': responsableEfectivoId,
-    'fecha': hoyHabanaIso(),
-  });
+  // v1.13.0 (E3): la venta de dosis nace retenida 15 s exactos para
+  // la ventana de Deshacer; el agua suelta sube de inmediato (sin
+  // Deshacer especificado para ella).
+  final retener = tipo == 'agua_suelta'
+      ? null
+      : isoHabana(ahoraHabana().add(const Duration(seconds: 15)));
+  final opUuid = const Uuid().v4();
+  // v1.13.0 (Estadísticas C): la hora Habana de la venta viaja en el
+  // payload para la agrupación por franja (las ventas viejas no la
+  // traen y caen en «Sin hora registrada»).
+  final ahora = ahoraHabana();
+  final horaTxt =
+      '${ahora.hour.toString().padLeft(2, '0')}:${ahora.minute.toString().padLeft(2, '0')}';
+  await LocalDb.instance.queueOp(
+      opUuid: opUuid,
+      tipo: 'venta_servicio',
+      payload: {
+        if (tipo != 'agua_suelta') 'lote_id': loteId,
+        'tipo': tipo,
+        'cantidad': cantidad,
+        if (clienteId != null) 'cliente_id': clienteId,
+        if (casa) 'casa': true,
+        if (casa && beneficiario != null) 'beneficiario': beneficiario,
+        if (!casa) 'metodo': metodo,
+        'precio_unitario': precio,
+        'comision_unitaria': comision,
+        if (vendedorId != null) 'vendedor_id': vendedorId,
+        if (responsableEfectivoId != null)
+          'responsable_efectivo_id': responsableEfectivoId,
+        if (ventaGrupoId != null) 'venta_grupo_id': ventaGrupoId,
+        'fecha': hoyHabanaIso(),
+        'hora': horaTxt,
+      },
+      retenerHastaIso: retener);
+  unawaited(SyncEngine.instance.push().then((_) {}, onError: (_) {}));
+  return opUuid;
+}
+
+/// v1.13.0 (B2): venta múltiple de dosis desde Servicios.
+/// N dosis (2 ≤ N ≤ topeDosis) con M pomos (0 ≤ M ≤ N, topado a
+/// topePomos). En sync_ops es UN grupo transaccional con
+/// `venta_grupo_id` común: 1 op si M == 0 (sin agua × N) o M == N
+/// (con agua × N); 2 ops si 0 < M < N (con agua × M + sin agua ×
+/// (N−M)). Deshacer E3 borra el grupo completo. Devuelve los
+/// op_uuids del grupo.
+Future<List<String>> registrarVentaMultipleServicio({
+  required int loteId,
+  required int dosisN,
+  required int pomosM,
+  int? clienteId,
+  String? metodo,
+  bool casa = false,
+  String? beneficiario,
+  required bool vendedorEsDueno,
+  int? vendedorId,
+  int? responsableEfectivoId,
+  double? comisionUnitaria,
+  required int topeDosis,
+  required int topePomos,
+}) async {
+  if (dosisN < 2) {
+    throw Exception('La venta múltiple es de 2 dosis en adelante');
+  }
+  if (dosisN > topeDosis) {
+    throw Exception('Solo quedan $topeDosis dosis en el lote');
+  }
+  if (pomosM < 0 || pomosM > dosisN) {
+    throw Exception('Los pomos van de 0 a $dosisN');
+  }
+  if (pomosM > topePomos) {
+    throw Exception('Solo quedan $topePomos pomos de agua');
+  }
+  final grupo = const Uuid().v4();
+  final uuids = <String>[];
+  Future<void> una(String tipo, int cant) async {
+    uuids.add(await registrarVentaServicio(
+      tipo: tipo,
+      loteId: loteId,
+      cantidad: cant,
+      clienteId: clienteId,
+      metodo: metodo,
+      casa: casa,
+      beneficiario: beneficiario,
+      vendedorEsDueno: vendedorEsDueno,
+      vendedorId: vendedorId,
+      responsableEfectivoId: responsableEfectivoId,
+      comisionUnitaria: comisionUnitaria,
+      ventaGrupoId: grupo,
+    ));
+  }
+
+  if (pomosM == 0) {
+    await una('dosis_sin_agua', dosisN);
+  } else if (pomosM == dosisN) {
+    await una('dosis_con_agua', dosisN);
+  } else {
+    await una('dosis_con_agua', pomosM);
+    await una('dosis_sin_agua', dosisN - pomosM);
+  }
+  return uuids;
 }
 
 /// Salida sin venta contra un lote. Cortesía y consumo de staff los
@@ -703,8 +923,96 @@ Future<String> registrarSalidaAguaServicio({
 
 /// Reverso auditable de una venta ya espejada (la UI solo lo ofrece
 /// sobre filas del espejo; el servidor valida el resto).
-Future<String> revertirVentaServicio({required int ventaId}) async {
-  return _encolar('revertir_venta_servicio', {'venta_id': ventaId});
+///
+/// v1.13.0 (D3, Híbrido A de la 1.9.0): [motivo] OBLIGATORIO y viaja
+/// en el payload (el servidor lo guarda con el reverso). El servidor
+/// debe: descontar caja, restar la comisión (50 × cantidad), devolver
+/// la dosis al lote activo y el pomo al agua común, y BLOQUEAR el
+/// reverso si el lote ya fue cerrado por el dueño (la UI también lo
+/// bloquea con el motivo visible). Si [polvoPerdido] es true, la
+/// dosis no volvió físicamente: tras el reverso se encola una salida
+/// no vendida (merma) por la misma cantidad, así el lote queda neto
+/// en cero y la pérdida queda registrada.
+Future<List<String>> revertirVentaServicio({
+  required int ventaId,
+  required String motivo,
+  bool polvoPerdido = false,
+  // Solo para polvoPerdido: lote y cantidad de la venta original
+  // (la UI los tiene de la fila del espejo).
+  int? loteId,
+  int? cantidad,
+}) async {
+  if (motivo.trim().isEmpty) {
+    throw Exception('La reversión exige un motivo');
+  }
+  final uuids = <String>[
+    await _encolar('revertir_venta_servicio', {
+      'venta_id': ventaId,
+      'motivo': motivo.trim(),
+      if (polvoPerdido) 'polvo_perdido': true,
+    }),
+  ];
+  if (polvoPerdido) {
+    if (loteId == null || cantidad == null || cantidad < 1) {
+      throw Exception(
+          'Para registrar la pérdida hace falta el lote y la cantidad');
+    }
+    uuids.add(await _encolar('salida_servicio', {
+      'lote_id': loteId,
+      'dosis': cantidad,
+      'motivo': 'merma',
+      'nota': 'Pérdida física tras reversión de venta #$ventaId',
+      'fecha': hoyHabanaIso(),
+    }));
+  }
+  return uuids;
+}
+
+/// v1.13.0 (Bloque 4, Argón ajuste 3): reponer un lote SOLO el dueño,
+/// desde el «sin repartir» del MISMO bote. Op nueva `reponer_lote`
+/// (CHECK previo, otra vía) + reflejo optimista inmediato en el
+/// espejo local: la fila del lote suma X a `dosis_repuestas`, así el
+/// saldo y el «sin repartir» se actualizan sin esperar al pull.
+/// Op y espejo se escriben en UNA transacción (si el proceso muere
+/// entre ambos, no queda ni op sin espejo ni espejo sin op). Si el
+/// servidor rechaza la op, el gancho de rechazo (sync.dart)
+/// revierte el optimismo.
+Future<String> reponerLoteServicio({
+  required int loteId,
+  required int dosis,
+}) async {
+  if (dosis < 1) throw Exception('La reposición debe ser de al menos 1 dosis');
+  final db = LocalDb.instance;
+  final lotes = await db.allMirror('servicio_lotes');
+  final lote =
+      lotes.where((l) => (l['id'] as num?)?.toInt() == loteId).toList();
+  if (lote.isEmpty || '${lote.first['estado']}' != 'activo') {
+    throw Exception('El lote no está activo');
+  }
+  final boteId = (lote.first['bote_id'] as num?)?.toInt();
+  if (boteId == null) throw Exception('El lote no tiene bote');
+  final sinRepartir = await sinRepartirLocal(boteId);
+  if (dosis > sinRepartir) {
+    throw Exception('Solo quedan $sinRepartir dosis sin repartir');
+  }
+  final opUuid = const Uuid().v4();
+  final conn = await db.db;
+  await conn.transaction((txn) async {
+    await db.queueOp(
+      opUuid: opUuid,
+      tipo: 'reponer_lote',
+      payload: {
+        'lote_id': loteId,
+        'bote_id': boteId,
+        'dosis': dosis,
+        'fecha': hoyHabanaIso(),
+      },
+      txn: txn,
+    );
+    await db.actualizarDosisRepuestasLote(loteId, dosis, txn: txn);
+  });
+  unawaited(SyncEngine.instance.push().then((_) {}, onError: (_) {}));
+  return opUuid;
 }
 
 /// Solo dueño: repone el stock común de agua con su costo (CPP).

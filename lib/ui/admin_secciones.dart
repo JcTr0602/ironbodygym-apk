@@ -11,6 +11,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../auth.dart';
+import '../app_log.dart';
 import '../config.dart';
 import '../errores_sync.dart';
 
@@ -826,6 +827,75 @@ class _SeccionDiagnosticoScreenState extends State<SeccionDiagnosticoScreen> {
         content: Text('Informe copiado. Pégalo en Telegram o WhatsApp.')));
   }
 
+  /// v1.13.0 (G4): «Reparar lista de clientes» — re-descarga
+  /// completa del espejo clientes (bandera forzar_redescarga +
+  /// scope 'clientes'). Con ops pendientes, se NIEGA (primero hay
+  /// que subir la cola: purgar con una op en vuelo podría borrar
+  /// un cliente recién creado que aún no subió) y se ofrece subir.
+  /// La bandera la consume el pull DESPUÉS de validar la purga
+  /// (G4: si la purga se omite, la bandera sobrevive).
+  Future<void> _repararClientes() async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => DialogoApp(
+        titulo: 'Reparar lista de clientes',
+        iconoTitulo: Icons.build,
+        contenido: const Text(
+          'Vuelve a descargar la lista completa de clientes desde '
+          'el servidor (para cuando la lista local quedó desfasada '
+          'o con clientes que ya no existen). No borra tus '
+          'operaciones pendientes.',
+        ),
+        acciones: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Reparar'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    final pendientes = await LocalDb.instance.countPendingOps();
+    if (pendientes > 0) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text(
+              'Primero sube la cola: hay operaciones pendientes.'),
+          action: SnackBarAction(
+            label: 'Subir cola',
+            onPressed: () async {
+              await SyncEngine.instance.push();
+              await _cargar();
+            },
+          ),
+        ),
+      );
+      return;
+    }
+    try {
+      await LocalDb.instance
+          .setMeta('forzar_redescarga_clientes', '1');
+      AppLog.info('sync', 'reparar_clientes_ini');
+      await SyncEngine.instance.sincronizarScope('clientes');
+      AppLog.info('sync', 'reparar_clientes_fin');
+      await _cargar();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('Lista de clientes reparada.')));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text('No se pudo reparar: $e')));
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -856,6 +926,23 @@ class _SeccionDiagnosticoScreenState extends State<SeccionDiagnosticoScreen> {
                           style: const TextStyle(
                               color: AppColores.error, fontSize: 13)),
                     ]),
+                  // v1.13.0 (G4): reparar la lista de clientes.
+                  seccionAdmin(
+                      context, Icons.build_circle_outlined, 'Reparar lista', [
+                    Text(
+                      'Si la lista de clientes quedó desfasada, '
+                      're-descárgala completa desde el servidor.',
+                      style: TextStyle(
+                          color: AppColores.textoSecundario(context),
+                          fontSize: 12),
+                    ),
+                    const SizedBox(height: 8),
+                    BotonPrimario(
+                      texto: 'Reparar lista de clientes',
+                      icono: Icons.build,
+                      onPressed: _repararClientes,
+                    ),
+                  ]),
                   // v1.3.6 (ítem 1C): cola de incidencias de sync del dueño.
                   seccionAdmin(
                       context, Icons.sync_problem_rounded, 'Incidencias de sync', [

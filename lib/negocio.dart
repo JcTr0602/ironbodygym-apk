@@ -1498,6 +1498,9 @@ Future<List<Map<String, dynamic>>> avisosWhatsappHoy() async {
       'cliente_id': cid,
       'nombre': nombreDe(c),
       'telefono': telDe(c),
+      // v1.13.0 (Bloque 4): días de atraso numéricos para los
+      // subgrupos de la bandeja (1–7 / 8–30 días).
+      'dias_atraso': dias,
       'detalle': dias > 0
           ? 'Vencido hace $dias día${dias == 1 ? '' : 's'}'
           : 'Mensualidad vencida',

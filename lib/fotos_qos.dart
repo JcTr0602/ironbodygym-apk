@@ -31,6 +31,10 @@ const double kVelocidadMinBytesPorSeg = 128 * 1024 / 5;
 /// el Foreground Service se apagara antes de reclamarla y el reloj
 /// de holgura (en RAM, por isolate) nunca acumulaba los minutos
 /// exigidos — la foto quedaba atrapada días en campo.
+///
+/// v1.13.0 (G5): BYPASS RETIRADO. La constante queda solo como
+/// referencia histórica: procesarCola ya no la usa para saltar la
+/// puerta QoS (toda 'original' espera a originalPermitidoFallback).
 const int kTamanoMaxOriginalInmediato = 512 * 1024;
 
 /// ¿Puede reclamarse la variante 'original'?

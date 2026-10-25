@@ -1,12 +1,19 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:share_plus/share_plus.dart';
 
 import '../auth.dart';
+import '../estadisticas_servicios.dart';
 import '../localdb.dart';
 import '../negocio.dart' show fmtMonto;
 import '../servicios.dart';
 import '../tiempo.dart';
 import 'componentes.dart';
 import 'diseno.dart';
+import 'reporte_margenes.dart';
 
 /// v1.8.0: Estadísticas de servicios (SOLO DUEÑO), diseño 🟢 Argón
 /// (DISENO_DOSIS_ESTADISTICAS): dos tarjetas separadas —
@@ -25,8 +32,17 @@ class _ServiciosEstadisticasScreenState
     extends State<ServiciosEstadisticasScreen> {
   bool _cargando = true;
   String _periodo = 'mes'; // 'mes' | 'todo'
+  String _tab = 'servicios'; // H6: 'servicios' | 'suplementos'
   Map<String, dynamic> _a = const {}; // 1A rendimiento
   Map<String, dynamic> _b = const {}; // 1B inversión
+  // v1.13.0 (Bloque 4): agrupaciones Habana, indicadores por bote
+  // (con guarda NaN) y resumen semanal I3.
+  Map<int, ({int dosis, double ingresos})> _porDia = const {};
+  Map<String, int> _porFranja = const {};
+  Map<int, ({bool pendiente, double? margenPct, double? puntoEquilibrioDosis})>
+      _indBote = const {};
+  String _semanaTexto = '';
+  String _semanaRango = '';
 
   @override
   void initState() {
@@ -194,9 +210,94 @@ class _ServiciosEstadisticasScreenState
     final autonomia =
         dosisDia > 0 ? (saldoTotal / dosisDia).floor() : null;
 
+    // v1.13.0 (Bloque 4, ajuste 6): indicadores por bote con guarda
+    // NaN (bote nuevo o solo Casa/mermas → «Pendiente de primeras
+    // ventas»), agrupaciones por día de semana y franja (fechas
+    // truncadas explícitamente en Habana, agua en POMOS).
+    final ingBote = <int, double>{};
+    final dosisBote = <int, int>{};
+    final costoBoteV = <int, double>{};
+    for (final v in ventasP) {
+      if ((v['casa'] as num?)?.toInt() == 1) continue;
+      final tipo = '${v['tipo']}';
+      if (!tipo.startsWith('dosis')) continue;
+      final boteId = boteDeLote[(v['lote_id'] as num?)?.toInt()];
+      if (boteId == null) continue;
+      final cant = (v['cantidad'] as num?)?.toInt() ?? 0;
+      final precio = (v['precio_unitario'] as num?)?.toDouble() ?? 0;
+      ingBote[boteId] = (ingBote[boteId] ?? 0) + precio * cant;
+      dosisBote[boteId] = (dosisBote[boteId] ?? 0) + cant;
+      costoBoteV[boteId] = (costoBoteV[boteId] ?? 0) +
+          (((v['costo_dosis_snapshot'] as num?)?.toDouble() ?? 0) * cant);
+    }
+    final indBote = <int, ({bool pendiente, double? margenPct, double? puntoEquilibrioDosis})>{};
+    for (final b in botes) {
+      final id = (b['id'] as num?)?.toInt();
+      if (id == null) continue;
+      indBote[id] = indicadoresBote(
+        costoBote: (b['costo_bote'] as num?)?.toDouble() ?? 0,
+        rendimiento: (b['dosis_rendimiento'] as num?)?.toInt() ?? 0,
+        ingresosComerciales: ingBote[id] ?? 0,
+        dosisComerciales: dosisBote[id] ?? 0,
+        costosComerciales: costoBoteV[id] ?? 0,
+      );
+    }
+    final porDia = agruparPorDiaSemana(ventasP);
+    final porFranja = agruparPorFranja(ventasP);
+
+    // v1.13.0 (I3): resumen de la semana CERRADA Habana (lunes a
+    // domingo ya terminada). Se genera al abrir Estadísticas y se
+    // copia con J1; jamás se envía solo. J4 PDF está ELIMINADO.
+    final hoyH = ahoraHabana();
+    final lunesEstaSemana =
+        hoyH.subtract(Duration(days: hoyH.weekday - 1));
+    final lunesCerrada = lunesEstaSemana.subtract(const Duration(days: 7));
+    final domingoCerrada = lunesCerrada.add(const Duration(days: 6));
+    String fDia(DateTime d) =>
+        '${d.year}-${d.month.toString().padLeft(2, '0')}-'
+        '${d.day.toString().padLeft(2, '0')}';
+    final lunesTxt = fDia(lunesCerrada);
+    final domingoTxt = fDia(domingoCerrada);
+    var semDosis = 0, semPomos = 0;
+    var semIng = 0.0, semCom = 0.0;
+    for (final v in ventas) {
+      final f = '${v['fecha'] ?? ''}';
+      if (f.length < 10) continue;
+      final dia = f.substring(0, 10);
+      if (dia.compareTo(lunesTxt) < 0 || dia.compareTo(domingoTxt) > 0) {
+        continue;
+      }
+      final cant = (v['cantidad'] as num?)?.toInt() ?? 0;
+      final precio = (v['precio_unitario'] as num?)?.toDouble() ?? 0;
+      final tipo = '${v['tipo']}';
+      if (tipo == 'agua_suelta') {
+        semPomos += cant;
+        semIng += precio * cant;
+      } else if (tipo.startsWith('dosis') &&
+          (v['casa'] as num?)?.toInt() != 1) {
+        semDosis += cant;
+        semIng += precio * cant;
+        semCom +=
+            ((v['comision_unitaria'] as num?)?.toDouble() ?? 0) * cant;
+      }
+    }
+    final semanaTexto = textoResumenSemanal(
+      lunes: lunesTxt,
+      domingo: domingoTxt,
+      dosis: semDosis,
+      pomosSueltos: semPomos,
+      ingresos: semIng,
+      comisiones: semCom,
+    );
+
     if (!mounted) return;
     setState(() {
       _a = {'porBote': porBote};
+      _porDia = porDia;
+      _porFranja = porFranja;
+      _indBote = indBote;
+      _semanaTexto = semanaTexto;
+      _semanaRango = '$lunesTxt al $domingoTxt';
       _b = {
         'inversion_botes': inversionBotes,
         'inversion_agua': inversionAgua,
@@ -249,28 +350,280 @@ class _ServiciosEstadisticasScreenState
           : ListView(
               padding: const EdgeInsets.all(AppEspacio.lg),
               children: [
+                // v1.13.0 (H6): pestañas Servicios / Suplementos.
+                // Suplementos reutiliza el reporte de márgenes
+                // existente (no se crea otra pantalla de stats).
                 SegmentedButton<String>(
                   segments: const [
                     ButtonSegment(
-                        value: 'mes', label: Text('Este mes')),
+                        value: 'servicios',
+                        label: Text('Servicios')),
                     ButtonSegment(
-                        value: 'todo', label: Text('Todo')),
+                        value: 'suplementos',
+                        label: Text('Suplementos')),
                   ],
-                  selected: {_periodo},
-                  onSelectionChanged: (s) {
-                    setState(() {
-                      _periodo = s.first;
-                      _cargando = true;
-                    });
-                    _cargar();
-                  },
+                  selected: {_tab},
+                  onSelectionChanged: (s) =>
+                      setState(() => _tab = s.first),
                 ),
                 const SizedBox(height: AppEspacio.md),
-                _tarjetaRendimiento(),
-                const SizedBox(height: AppEspacio.md),
-                _tarjetaInversion(),
+                if (_tab == 'suplementos') ...[
+                  const Text(
+                    'Márgenes de suplementos: el reporte existente '
+                    '(mismo cálculo, sin duplicar).',
+                    style: AppTexto.secundario,
+                  ),
+                  const SizedBox(height: AppEspacio.md),
+                  FilledButton.icon(
+                    onPressed: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                          builder: (_) =>
+                              const ReporteMargenesScreen()),
+                    ),
+                    icon: const Icon(Icons.bar_chart, size: 20),
+                    label: const Text(
+                        'Abrir reporte de márgenes de suplementos'),
+                  ),
+                ] else ...[
+                  SegmentedButton<String>(
+                    segments: const [
+                      ButtonSegment(
+                          value: 'mes', label: Text('Este mes')),
+                      ButtonSegment(
+                          value: 'todo', label: Text('Todo')),
+                    ],
+                    selected: {_periodo},
+                    onSelectionChanged: (s) {
+                      setState(() {
+                        _periodo = s.first;
+                        _cargando = true;
+                      });
+                      _cargar();
+                    },
+                  ),
+                  const SizedBox(height: AppEspacio.md),
+                  _tarjetaRendimiento(),
+                  const SizedBox(height: AppEspacio.md),
+                  _tarjetaInversion(),
+                  const SizedBox(height: AppEspacio.md),
+                  _tarjetaAgrupaciones(),
+                  const SizedBox(height: AppEspacio.md),
+                  _tarjetaSemana(),
+                  const SizedBox(height: AppEspacio.md),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: _abrirSimulador,
+                          icon: const Icon(Icons.calculate, size: 20),
+                          label: const Text('Simulador de precios'),
+                        ),
+                      ),
+                      const SizedBox(width: AppEspacio.sm),
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: _exportarCsv,
+                          icon: const Icon(Icons.download, size: 20),
+                          label: const Text('Exportar CSV'),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
               ],
             ),
+    );
+  }
+
+  /// v1.13.0 (B6): hoja calculadora EFÍMERA en memoria (2
+  /// deslizadores sobre el costo del bote actual). No escribe BD.
+  Future<void> _abrirSimulador() async {
+    final botes = await LocalDb.instance.allMirror('servicio_botes');
+    final activos = botes
+        .where((b) => '${b['estado']}' == 'activo')
+        .toList();
+    if (!mounted) return;
+    if (activos.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('No hay un bote activo para simular.')));
+      return;
+    }
+    var bote = activos.first;
+    var precioSin = 600.0;
+    var precioCon = 900.0;
+    await showModalBottomSheet<void>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setD) {
+          final costo =
+              (bote['costo_bote'] as num?)?.toDouble() ?? 0;
+          final rend =
+              (bote['dosis_rendimiento'] as num?)?.toInt() ?? 0;
+          final sim = simularPrecios(
+            costoBote: costo,
+            rendimiento: rend,
+            precioSinAgua: precioSin,
+            precioConAgua: precioCon,
+          );
+          return Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('Simulador de precios (solo cálculo, '
+                    'no guarda nada)',
+                    style: AppTexto.titulo),
+                const SizedBox(height: 8),
+                DropdownButton<Map<String, dynamic>>(
+                  value: bote,
+                  items: [
+                    for (final b in activos)
+                      DropdownMenuItem(
+                          value: b,
+                          child: Text('Bote #${b['id']}')),
+                  ],
+                  onChanged: (v) =>
+                      setD(() => bote = v ?? bote),
+                ),
+                Text(
+                  'Costo del bote: ${fmtMonto(costo)} CUP · '
+                  'Rendimiento: $rend dosis · '
+                  'Costo por dosis: ${fmtMonto(sim.costoPorDosis)} CUP',
+                  style: AppTexto.cuerpo,
+                ),
+                const SizedBox(height: 8),
+                Text(
+                    'Precio sin agua: ${fmtMonto(precioSin)} CUP '
+                    '(margen ${fmtMonto(sim.margenSinAgua)} CUP/dosis)'),
+                Slider(
+                  value: precioSin,
+                  min: 0,
+                  max: 2000,
+                  divisions: 40,
+                  label: fmtMonto(precioSin),
+                  onChanged: (v) => setD(() => precioSin = v),
+                ),
+                Text(
+                    'Precio con agua: ${fmtMonto(precioCon)} CUP '
+                    '(margen ${fmtMonto(sim.margenConAgua)} CUP/dosis)'),
+                Slider(
+                  value: precioCon,
+                  min: 0,
+                  max: 2000,
+                  divisions: 40,
+                  label: fmtMonto(precioCon),
+                  onChanged: (v) => setD(() => precioCon = v),
+                ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  /// v1.13.0 (J2/J3): exportar las estadísticas a CSV y compartir.
+  Future<void> _exportarCsv() async {
+    try {
+      final porBote =
+          (_a['porBote'] as Map<int, Map<String, dynamic>>?) ?? const {};
+      final filas = <List<String>>[];
+      for (final e in porBote.entries) {
+        final ind = _indBote[e.key];
+        filas.add([
+          '${e.value['nombre']}',
+          '${e.value['servidas']}',
+          '${e.value['merma']}',
+          ind == null || ind.pendiente
+              ? 'Pendiente de primeras ventas'
+              : '${ind.margenPct?.toStringAsFixed(1)} %',
+          ind == null || ind.pendiente || ind.puntoEquilibrioDosis == null
+              ? 'Pendiente de primeras ventas'
+              : '${ind.puntoEquilibrioDosis!.toStringAsFixed(0)} dosis',
+        ]);
+      }
+      final csv = csvEstadisticas(
+        ['Bote', 'Dosis servidas', 'Mermas', 'Margen %',
+         'Punto de equilibrio'],
+        filas,
+      );
+      final dir = await getTemporaryDirectory();
+      final f = await File(
+              '${dir.path}/estadisticas_servicios_${hoyHabanaIso()}.csv')
+          .writeAsString(csv);
+      await Share.shareXFiles([XFile(f.path)],
+          text: 'Estadísticas de Servicios Iron Body Gym');
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('No se pudo exportar: $e')));
+      }
+    }
+  }
+
+  Widget _tarjetaAgrupaciones() {
+    return Tarjeta(
+      padding: const EdgeInsets.all(AppEspacio.md),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Por día de semana (Habana)',
+              style: AppTexto.titulo.copyWith(fontSize: 16)),
+          const SizedBox(height: 4),
+          for (var d = 1; d <= 7; d++)
+            _fila(
+              kNombresDiaSemana[d] ?? 'Día $d',
+              '${_porDia[d]?.dosis ?? 0} dosis · '
+              '${fmtMonto(_porDia[d]?.ingresos ?? 0)} CUP',
+            ),
+          const Divider(height: 20),
+          Text('Por franja horaria (Habana)',
+              style: AppTexto.titulo.copyWith(fontSize: 16)),
+          const SizedBox(height: 4),
+          for (final e in kNombresFranja.entries)
+            _fila(e.value, '${_porFranja[e.key] ?? 0} dosis'),
+          const Text(
+            'Las ventas sin hora (anteriores a la 1.13.0) caen en '
+            '«Sin hora registrada»: no se inventa su franja.',
+            style: AppTexto.secundario,
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// v1.13.0 (I3 + J1): tarjeta de la semana cerrada Habana con
+  /// botón copiar. Jamás se envía sola.
+  Widget _tarjetaSemana() {
+    return Tarjeta(
+      padding: const EdgeInsets.all(AppEspacio.md),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Resumen semanal (semana cerrada)',
+              style: AppTexto.titulo.copyWith(fontSize: 16)),
+          const SizedBox(height: 4),
+          Text(_semanaRango, style: AppTexto.secundario),
+          const SizedBox(height: 8),
+          Text(_semanaTexto, style: AppTexto.cuerpo),
+          const SizedBox(height: 8),
+          OutlinedButton.icon(
+            onPressed: () async {
+              await Clipboard.setData(
+                  ClipboardData(text: _semanaTexto));
+              if (mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                        content: Text('Resumen copiado')));
+              }
+            },
+            icon: const Icon(Icons.copy, size: 18),
+            label: const Text('Copiar resumen'),
+          ),
+        ],
+      ),
     );
   }
 
@@ -320,6 +673,34 @@ class _ServiciosEstadisticasScreenState
               _fila('Mermas', '${e.value['merma']}'),
               _fila('Cortesías', '${e.value['cortesia']}'),
               _fila('Consumo del staff', '${e.value['staff']}'),
+              // v1.13.0 (ajuste 6): punto de equilibrio y margen %
+              // con guarda NaN: bote nuevo o solo Casa/mermas →
+              // «Pendiente de primeras ventas», nunca división
+              // entre cero.
+              Builder(builder: (_) {
+                final ind = _indBote[e.key];
+                if (ind == null || ind.pendiente) {
+                  return Column(
+                    children: [
+                      _fila('Punto de equilibrio',
+                          'Pendiente de primeras ventas'),
+                      _fila('Margen %',
+                          'Pendiente de primeras ventas'),
+                    ],
+                  );
+                }
+                return Column(
+                  children: [
+                    _fila(
+                        'Punto de equilibrio',
+                        ind.puntoEquilibrioDosis == null
+                            ? 'Sin equilibrio a estos precios'
+                            : '${ind.puntoEquilibrioDosis!.toStringAsFixed(0)} dosis'),
+                    _fila('Margen %',
+                        '${ind.margenPct?.toStringAsFixed(1)} %'),
+                  ],
+                );
+              }),
               if (e.value['diferencia_rendimiento'] != null)
                 _fila('Diferencia de rendimiento (cierre)',
                     '${e.value['diferencia_rendimiento']} dosis',

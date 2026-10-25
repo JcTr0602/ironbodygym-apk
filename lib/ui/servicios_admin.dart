@@ -542,6 +542,72 @@ class _ServiciosAdminScreenState extends State<ServiciosAdminScreen> {
     }
   }
 
+  /// v1.13.0 (Bloque 4, reponer_lote — solo dueño): devuelve dosis
+  /// del «sin repartir» del MISMO bote al lote activo (movimiento
+  /// propio en el historial). El diálogo muestra el sin repartir
+  /// disponible; la función valida dosis ≥ 1, lote activo y tope.
+  Future<void> _reponerLote(Map<String, dynamic> lote) async {
+    final loteId = (lote['id'] as num).toInt();
+    final boteId = (lote['bote_id'] as num?)?.toInt();
+    if (boteId == null) {
+      _aviso('El lote no tiene bote asociado', error: true);
+      return;
+    }
+    final sinRepartir = await sinRepartirLocal(boteId);
+    if (sinRepartir <= 0) {
+      _aviso('No quedan dosis sin repartir en este bote', error: true);
+      return;
+    }
+    final dosisCtrl = TextEditingController(text: '1');
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => DialogoApp(
+        titulo: 'Reponer lote',
+        iconoTitulo: Icons.add_circle_outline,
+        contenido: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Sin repartir del bote: $sinRepartir dosis. '
+              'Se mueven al lote activo y quedan en su historial '
+              'como reposición.',
+              style: AppTexto.cuerpo,
+            ),
+            TextField(
+              controller: dosisCtrl,
+              keyboardType: TextInputType.number,
+              autofocus: true,
+              decoration: const InputDecoration(
+                  labelText: 'Dosis a reponer'),
+            ),
+          ],
+        ),
+        acciones: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Reponer'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    try {
+      await reponerLoteServicio(
+        loteId: loteId,
+        dosis: int.tryParse(dosisCtrl.text.trim()) ?? 0,
+      );
+      _aviso('Lote repuesto (se sincronizará)');
+      await _cargar();
+    } catch (e) {
+      _aviso(_limpio(e), error: true);
+    }
+  }
+
   Future<void> _cerrarLote(Map<String, dynamic> lote) async {
     final conteoCtrl = TextEditingController(
         text: '${lote['saldo_local'] ?? 0}');
@@ -868,9 +934,18 @@ class _ServiciosAdminScreenState extends State<ServiciosAdminScreen> {
                   '${l['conteo_cierre'] != null ? ' · Conteo cierre: ${l['conteo_cierre']}' : ''}',
                 ),
                 trailing: '${l['estado']}' == 'activo'
-                    ? TextButton(
-                        onPressed: () => _cerrarLote(l),
-                        child: const Text('Cerrar'),
+                    ? Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          TextButton(
+                            onPressed: () => _reponerLote(l),
+                            child: const Text('Reponer'),
+                          ),
+                          TextButton(
+                            onPressed: () => _cerrarLote(l),
+                            child: const Text('Cerrar'),
+                          ),
+                        ],
                       )
                     : null,
               ),

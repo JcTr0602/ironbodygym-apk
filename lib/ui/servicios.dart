@@ -46,6 +46,8 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
   int? _loteSel;
   Map<String, dynamic> _cuadre = const {};
   List<Map<String, dynamic>> _ventasHoy = [];
+  List<Map<String, dynamic>> _ventasTodas = [];
+  List<Map<String, dynamic>> _salidas = [];
   Set<int> _reversadas = {};
   Map<int, String> _personas = {};
   int? _miTid;
@@ -109,6 +111,8 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
       l['responsable_tid'] = respTid;
     }
     final ventas = await LocalDb.instance.allMirror('servicio_ventas');
+    final salidas =
+        await LocalDb.instance.allMirror('servicio_salidas');
     final reversadas = <int>{
       for (final v in ventas)
         if ((v['reverso_de'] as num?) != null)
@@ -151,6 +155,8 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
       }
       _cuadre = cuadre;
       _ventasHoy = deHoy;
+      _ventasTodas = ventas;
+      _salidas = salidas;
       _reversadas = reversadas;
       _cargando = false;
     });
@@ -511,7 +517,7 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
     final esCasaCliente = cliente != null &&
         (cliente!['cuenta_casa'] as num?)?.toInt() == 1;
     try {
-      await registrarVentaServicio(
+      final opUuid = await registrarVentaServicio(
         tipo: tipo,
         loteId: tipo == 'agua_suelta'
             ? null
@@ -539,8 +545,223 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                 _precios?.comision)
             : null,
       );
-      _aviso('Venta registrada');
+      final cobradoEn = ahoraHabana();
       await _cargar();
+      // v1.13.0 (E3): Deshacer 15 s exactos desde el cobro (solo
+      // dosis; el agua suelta sube de inmediato y no tiene Deshacer).
+      if (tipo != 'agua_suelta') {
+        _mostrarDeshacer([opUuid], cobradoEn);
+      } else {
+        _aviso('Venta registrada');
+      }
+    } catch (e) {
+      _aviso(_limpio(e), error: true);
+    }
+  }
+
+  /// Snackbar Deshacer E3 (15 s): si la op sigue 'pendiente' y no
+  /// pasaron 15 s, se borra la venta completa (en múltiple, todo el
+  /// grupo). Si no, solo cabe Reversión.
+  void _mostrarDeshacer(List<String> opUuids, DateTime cobradoEn) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: const Text('Venta registrada'),
+        duration: const Duration(seconds: 15),
+        action: SnackBarAction(
+          label: 'Deshacer',
+          onPressed: () async {
+            final ok = await deshacerVentaServicio(opUuids, cobradoEn);
+            if (!mounted) return;
+            if (ok) {
+              _aviso('Venta deshecha');
+              await _cargar();
+            } else {
+              _aviso('Ya no se puede deshacer: solo cabe Reversión',
+                  error: true);
+            }
+          },
+        ),
+      ),
+    );
+  }
+
+  /// v1.13.0 (Bloque 4, B2 + D1): venta múltiple con contadores N/M.
+  /// N dosis (2 ≤ N ≤ tope) y M pomos (0 ≤ M ≤ N, topado a pomos).
+  /// El dueño tiene tope local (saldo del lote); el entrenador es
+  /// ciego al lote y no tiene tope local (el servidor aplica).
+  Future<void> _ventaMultiple() async {
+    final lote = _loteActual;
+    if (lote == null) {
+      _aviso('No tienes un lote activo', error: true);
+      return;
+    }
+    final topeDosis =
+        _esDueno ? ((lote['saldo_local'] as num?)?.toInt() ?? 0) : 999999;
+    if (_esDueno && topeDosis < 2) {
+      _aviso('No quedan dosis suficientes en el lote', error: true);
+      return;
+    }
+    final topePomos = _agua.saldo;
+    var n = 2;
+    var m = 0;
+    Map<String, dynamic>? cliente;
+    var metodo =
+        primerMetodoServicioActivo(_ajustes, 'dosis_con_agua') ?? 'efectivo';
+    final metodosActivos = <String>[
+      for (final x in const ['efectivo', 'transferencia'])
+        if (metodoServicioActivo(_ajustes, 'dosis_con_agua', x)) x,
+    ];
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setD) {
+          final precioSin =
+              precioServicioMetodo(_ajustes, 'dosis_sin_agua', metodo);
+          final precioCon =
+              precioServicioMetodo(_ajustes, 'dosis_con_agua', metodo);
+          final total = (n - m) * precioSin + m * precioCon;
+          final comision = (_precios?.comision ?? 50) * n;
+          return DialogoApp(
+            titulo: 'Venta múltiple',
+            iconoTitulo: Icons.library_add,
+            contenido: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (!_esDueno)
+                  const Text(
+                    'Tu lote es ciego: sin tope local de dosis. '
+                    'El servidor aplica la venta.',
+                    style: AppTexto.secundario,
+                  ),
+                if (_esDueno)
+                  Text('Dosis en el lote: $topeDosis',
+                      style: AppTexto.secundario),
+                Text('Pomos en stock: $topePomos',
+                    style: AppTexto.secundario),
+                const SizedBox(height: 12),
+                InkWell(
+                  onTap: () async {
+                    final sel = await _elegirCliente();
+                    if (sel != null) setD(() => cliente = sel);
+                  },
+                  child: Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 12, vertical: 10),
+                    decoration: BoxDecoration(
+                      border: Border.all(color: Colors.grey.shade400),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.person_search, size: 20),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            cliente == null
+                                ? 'Elegir cliente'
+                                : '${cliente!['nombre']}',
+                            style: AppTexto.cuerpo,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    const Text('Dosis:'),
+                    IconButton(
+                      onPressed:
+                          n > 2 ? () => setD(() => n--) : null,
+                      icon: const Icon(Icons.remove_circle_outline),
+                    ),
+                    Text('$n',
+                        style: AppTexto.titulo.copyWith(fontSize: 16)),
+                    IconButton(
+                      onPressed: n < topeDosis
+                          ? () => setD(() => n++)
+                          : null,
+                      icon: const Icon(Icons.add_circle_outline),
+                    ),
+                    const SizedBox(width: 16),
+                    const Text('Pomos:'),
+                    IconButton(
+                      onPressed:
+                          m > 0 ? () => setD(() => m--) : null,
+                      icon: const Icon(Icons.remove_circle_outline),
+                    ),
+                    Text('$m',
+                        style: AppTexto.titulo.copyWith(fontSize: 16)),
+                    IconButton(
+                      onPressed:
+                          m < n && m < topePomos
+                              ? () => setD(() => m++)
+                              : null,
+                      icon: const Icon(Icons.add_circle_outline),
+                    ),
+                  ],
+                ),
+                if (metodosActivos.length > 1) ...[
+                  const SizedBox(height: 8),
+                  SegmentedButton<String>(
+                    segments: [
+                      for (final x in metodosActivos)
+                        ButtonSegment(
+                            value: x,
+                            label: Text(x == 'efectivo'
+                                ? 'Efectivo'
+                                : 'Transferencia')),
+                    ],
+                    selected: {metodo},
+                    onSelectionChanged: (s) =>
+                        setD(() => metodo = s.first),
+                  ),
+                ],
+                const SizedBox(height: 12),
+                Text(
+                  '$n dosis ($m con agua · ${n - m} sin agua)\n'
+                  'Total: ${fmtMonto(total)} CUP · '
+                  'Comisión: ${fmtMonto(comision)} CUP',
+                  style: AppTexto.cuerpo,
+                ),
+              ],
+            ),
+            acciones: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('Cancelar'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(ctx, true),
+                child: const Text('Cobrar'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+    if (ok != true) return;
+    try {
+      final opUuids = await registrarVentaMultipleServicio(
+        loteId: (lote['id'] as num).toInt(),
+        dosisN: n,
+        pomosM: m,
+        clienteId: (cliente?['id'] as num?)?.toInt(),
+        metodo: metodo,
+        vendedorEsDueno: _esDueno,
+        vendedorId: null,
+        responsableEfectivoId:
+            _esDueno && metodo == 'efectivo' ? _miTid : null,
+        topeDosis: topeDosis,
+        topePomos: topePomos,
+      );
+      final cobradoEn = ahoraHabana();
+      await _cargar();
+      _mostrarDeshacer(opUuids, cobradoEn);
     } catch (e) {
       _aviso(_limpio(e), error: true);
     }
@@ -628,32 +849,89 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
     }
   }
 
+  /// v1.13.0 (Bloque 4, D3 + Híbrido A 1.9.0): Reversión con motivo
+  /// OBLIGATORIO + «polvo perdido» + guardarraíl de lote cerrado.
+  /// Deshacer E3 (15 s + synced==0) es otro camino: este diálogo es
+  /// solo para cuando ya no cabe Deshacer.
   Future<void> _revertir(Map<String, dynamic> v) async {
+    final loteId = (v['lote_id'] as num?)?.toInt();
+    // Guardarraíl: si el lote ya fue cerrado por el dueño, la
+    // reversión está BLOQUEADA con motivo visible (la dosis no
+    // puede volver a un lote cerrado).
+    if (loteId != null) {
+      final lotes = await LocalDb.instance.allMirror('servicio_lotes');
+      final lote = lotes.where(
+          (l) => (l['id'] as num?)?.toInt() == loteId).toList();
+      if (lote.isNotEmpty &&
+          '${lote.first['estado'] ?? ''}' != 'activo') {
+        _aviso('El lote de esta venta ya fue cerrado por el dueño',
+            error: true);
+        return;
+      }
+    }
+    final motivoCtrl = TextEditingController();
+    var polvoPerdido = false;
     final ok = await showDialog<bool>(
       context: context,
-      builder: (ctx) => DialogoApp(
-        titulo: 'Revertir venta',
-        iconoTitulo: Icons.undo,
-        contenido: Text(
-            'Se registrará un reverso auditable de esta venta '
-            '(${fmtMonto(((v['precio_unitario'] as num?)?.toDouble() ?? 0) * ((v['cantidad'] as num?)?.toDouble() ?? 0))} CUP). '
-            'La dosis vuelve al lote y el dinero sale de la caja.'),
-        acciones: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancelar'),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setD) => DialogoApp(
+          titulo: 'Revertir venta',
+          iconoTitulo: Icons.undo,
+          contenido: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                  'Se registrará un reverso auditable de esta venta '
+                  '(${fmtMonto(((v['precio_unitario'] as num?)?.toDouble() ?? 0) * ((v['cantidad'] as num?)?.toDouble() ?? 0))} CUP). '
+                  'La dosis vuelve al lote, el pomo al agua común y '
+                  'se restan los 50 CUP de comisión.'),
+              const SizedBox(height: 12),
+              TextField(
+                controller: motivoCtrl,
+                decoration: const InputDecoration(
+                    labelText: 'Motivo (obligatorio)'),
+              ),
+              CheckboxListTile(
+                value: polvoPerdido,
+                contentPadding: EdgeInsets.zero,
+                title: const Text(
+                    'El polvo se perdió físicamente'),
+                subtitle: const Text(
+                    'La reversión anula cobro y comisión y la '
+                    'pérdida queda como salida no vendida.'),
+                onChanged: (x) =>
+                    setD(() => polvoPerdido = x ?? false),
+              ),
+            ],
           ),
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Revertir'),
-          ),
-        ],
+          acciones: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancelar'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Revertir'),
+            ),
+          ],
+        ),
       ),
     );
     if (ok != true) return;
+    final motivo = motivoCtrl.text.trim();
+    if (motivo.isEmpty) {
+      _aviso('Escribe el motivo de la reversión', error: true);
+      return;
+    }
     try {
       await revertirVentaServicio(
-          ventaId: (v['id'] as num).toInt());
+        ventaId: (v['id'] as num).toInt(),
+        motivo: motivo,
+        polvoPerdido: polvoPerdido,
+        loteId: loteId,
+        cantidad: (v['cantidad'] as num?)?.toInt(),
+      );
       _aviso('Reverso registrado');
       await _cargar();
     } catch (e) {
@@ -822,6 +1100,30 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                     : 'Agua común: ${_agua.saldo} pomos',
             style: AppTexto.cuerpo,
           ),
+          // v1.13.0 (Bloque 4): desglose del lote para el dueño
+          // (iniciales + reposiciones − ventas − salidas, espejo).
+          if (lote != null && _esDueno)
+            Builder(builder: (ctx) {
+              final lid = (lote['id'] as num?)?.toInt();
+              final d = desgloseLote(
+                lote: lote,
+                ventasEspejo: _ventasTodas
+                    .where((v) => (v['lote_id'] as num?)?.toInt() == lid)
+                    .toList(),
+                salidasEspejo: _salidas
+                    .where((s) => (s['lote_id'] as num?)?.toInt() == lid)
+                    .toList(),
+              );
+              return Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Text(
+                  'Historial del lote: ${d.iniciales} iniciales + '
+                  '${d.repuestas} repuestas − ${d.ventas} vendidas − '
+                  '${d.salidas} salidas = ${d.saldo} dosis',
+                  style: AppTexto.secundario,
+                ),
+              );
+            }),
           // v1.12.0 (C6): aviso de lote por agotarse (< 5, umbral
           // fijo de Jc). NO revela el saldo exacto al entrenador
           // (lote ciego, ítem 6): solo que quedan pocas dosis.
@@ -861,51 +1163,85 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
         tipo, primerMetodoServicioActivo(_ajustes, tipo) ?? 'efectivo');
     Widget boton(String tipo, String etiqueta, double precio,
         IconData icono, Color color) {
-      // Ítem 6: el saldo del lote solo deshabilita para el DUEÑO
-      // (él conoce la cantidad); al entrenador ciego nunca se le
-      // bloquea la venta por saldo.
-      final deshabilitado = tipo == 'agua_suelta'
-          ? _agua.saldo <= 0 || precio <= 0
-          : _loteActual == null ||
-              (_esDueno &&
-                  ((_loteActual!['saldo_local'] as int?) ?? 0) <= 0);
+      // v1.13.0 (Bloque 4, Argón ajuste 1): bloqueo SEPARADO
+      // dosis vs pomos (nunca un interruptor único) + motivo
+      // visible bajo el botón apagado. El entrenador sigue ciego
+      // al saldo del lote (ítem 6 de la 1.9.0): solo se le bloquea
+      // por falta de lote o de pomos (el agua común sí la ve).
+      final est = estadoBotonVentaServicio(
+        tipo: tipo,
+        tieneLote: _loteActual != null,
+        dosisRestantes: (_loteActual?['saldo_local'] as num?)?.toInt() ?? 0,
+        pomos: _agua.saldo,
+        esDueno: _esDueno,
+        precio: precio,
+      );
       return Expanded(
-        child: FilledButton.icon(
-          style: FilledButton.styleFrom(
-            backgroundColor: color,
-            padding: const EdgeInsets.symmetric(vertical: 14),
-          ),
-          onPressed: deshabilitado ? null : () => _vender(tipo),
-          icon: Icon(icono, size: 20),
-          label: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(etiqueta,
-                  style: const TextStyle(
-                      fontWeight: FontWeight.bold, fontSize: 13)),
-              Text(
-                precio <= 0 && tipo == 'agua_suelta'
-                    ? 'sin precio'
-                    : '${fmtMonto(precio)} CUP',
-                style: const TextStyle(fontSize: 11),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            FilledButton.icon(
+              style: FilledButton.styleFrom(
+                backgroundColor: color,
+                padding: const EdgeInsets.symmetric(vertical: 14),
               ),
-            ],
-          ),
+              onPressed:
+                  est.habilitado ? () => _vender(tipo) : null,
+              icon: Icon(icono, size: 20),
+              label: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(etiqueta,
+                      style: const TextStyle(
+                          fontWeight: FontWeight.bold, fontSize: 13)),
+                  Text(
+                    precio <= 0 && tipo == 'agua_suelta'
+                        ? 'sin precio'
+                        : '${fmtMonto(precio)} CUP',
+                    style: const TextStyle(fontSize: 11),
+                  ),
+                ],
+              ),
+            ),
+            if (!est.habilitado && est.motivo != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Text(
+                  est.motivo!,
+                  style: AppTexto.secundario,
+                  textAlign: TextAlign.center,
+                ),
+              ),
+          ],
         ),
       );
     }
 
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        boton('dosis_sin_agua', 'Dosis', precioDe('dosis_sin_agua'),
-            Icons.bolt, AppColores.naranja),
-        const SizedBox(width: AppEspacio.sm),
-        boton('dosis_con_agua', 'Dosis + agua',
-            precioDe('dosis_con_agua'), Icons.water_drop, Colors.blue),
-        const SizedBox(width: AppEspacio.sm),
-        boton('agua_suelta', 'Pomo agua', precioDe('agua_suelta'),
-            Icons.local_drink, Colors.teal),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            boton('dosis_sin_agua', 'Dosis',
+                precioDe('dosis_sin_agua'), Icons.bolt, AppColores.naranja),
+            const SizedBox(width: AppEspacio.sm),
+            boton('dosis_con_agua', 'Dosis + agua',
+                precioDe('dosis_con_agua'), Icons.water_drop, Colors.blue),
+            const SizedBox(width: AppEspacio.sm),
+            boton('agua_suelta', 'Pomo agua',
+                precioDe('agua_suelta'), Icons.local_drink, Colors.teal),
+          ],
+        ),
+        // v1.13.0 (Bloque 4, B2): venta múltiple con contador N/M
+        // (hoja D1). El flujo normal sigue siendo 1 dosis sin
+        // selector; la múltiple es una entrada aparte.
+        const SizedBox(height: AppEspacio.sm),
+        OutlinedButton.icon(
+          onPressed: _loteActual == null ? null : _ventaMultiple,
+          icon: const Icon(Icons.library_add, size: 20),
+          label: const Text('Venta múltiple (varias dosis a la vez)'),
+        ),
       ],
     );
   }
@@ -941,9 +1277,75 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                   color: AppColores.exito,
                   fontWeight: FontWeight.w600),
             ),
+          // v1.13.0 (Bloque 4): el dueño cierra el lote desde aquí
+          // (mismo patrón que ServiciosAdminScreen._cerrarLote:
+          // conteo físico; la diferencia queda registrada y lo que
+          // sobre vuelve a «sin repartir» del bote).
+          if (_esDueno && _loteActual != null)
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton.icon(
+                onPressed: () => _cerrarLote(_loteActual!),
+                icon: const Icon(Icons.lock, size: 18),
+                label: const Text('Cerrar lote'),
+              ),
+            ),
         ],
       ),
     );
+  }
+
+  Future<void> _cerrarLote(Map<String, dynamic> lote) async {
+    final conteoCtrl = TextEditingController(
+        text: '${lote['saldo_local'] ?? 0}');
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => DialogoApp(
+        titulo: 'Cerrar lote',
+        iconoTitulo: Icons.lock,
+        contenido: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Saldo según el sistema: ${lote['saldo_local']} dosis. '
+              'Cuenta el polvo físico y escribe lo que hay de verdad: '
+              'la diferencia queda registrada y lo que sobre vuelve '
+              'a «sin repartir» del bote.',
+              style: AppTexto.cuerpo,
+            ),
+            TextField(
+              controller: conteoCtrl,
+              keyboardType: TextInputType.number,
+              autofocus: true,
+              decoration: const InputDecoration(
+                  labelText: 'Conteo físico (dosis que quedan)'),
+            ),
+          ],
+        ),
+        acciones: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Cerrar lote'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    try {
+      await cerrarLoteServicio(
+        loteId: (lote['id'] as num).toInt(),
+        conteoFisico: int.tryParse(conteoCtrl.text.trim()) ?? -1,
+      );
+      _aviso('Cierre registrado (se sincronizará)');
+      await _cargar();
+    } catch (e) {
+      _aviso(_limpio(e), error: true);
+    }
   }
 
   Widget _filaVenta(Map<String, dynamic> v) {

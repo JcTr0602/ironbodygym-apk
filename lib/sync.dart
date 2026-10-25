@@ -185,11 +185,16 @@ class SyncScope {
     'incidencias': ['incidencia_eventos'],
     'gastos': ['gastos'],
     // v1.3.6 (ítems 1B+1C): arqueo de caja e incidencias de sync.
+    // v1.13.0 (G4): el arqueo también refresca servicio_ventas y
+    // adelantos (antes el arqueo no veía ventas de dosis ni
+    // adelantos del día y podía mostrar un cuadre viejo).
     'arqueo': [
       'liquidaciones_caja',
       'pagos',
       'pagos_diarios',
-      'ventas_suplementos'
+      'ventas_suplementos',
+      'servicio_ventas',
+      'adelantos',
     ],
     'incidencias_sync': ['incidencias_sync'],
     // v1.4.4 (v33): refresco puntual del espejo de GymPedia.
@@ -1414,13 +1419,21 @@ class SyncEngine {
             {'sync_estado': 'retry'},
             where: "sync_estado = 'uploading'");
       } catch (_) {}
-      await subirFotosIncidencias();
-      // v1.2.9+46 (Gemini): acumular ambos lotes para last_uploaded.
-      // v1.3.5 (detalle Subidos): acumular también los UUIDs.
+      // v1.13.0 (G3, Fase D): los COBROS van primero. Antes las
+      // fotos de incidencias subían ANTES de _uploadOps y podían
+      // retener cobros hasta 30 min en red lenta. Ahora: ops
+      // primero, fotos de incidencias después.
       final resPush1 = await _uploadOps(forzar: forzar);
       var totalOps = resPush1.aplicadas;
       final uuidsPush = <String>[...resPush1.uuids];
       AppLog.info('sync', 'ops_enviadas', d: 'n=$totalOps');
+      try {
+        await subirFotosIncidencias();
+      } catch (e) {
+        // Las fotos de incidencias nunca tumban el push de ops.
+        debugPrint('WARN subirFotosIncidencias falló: $e');
+        AppLog.error('sync', 'fotos_incidencias_fallo', d: '$e');
+      }
       // v1.2.9+46: las fotos SIEMPRE se suben en cada sincronización,
       // como en v1.2.3. La puerta de ahorro de datos se eliminó por
       // orden de Jc (2026-10-13): hacía que las fotos nunca se intentaran.
@@ -1611,6 +1624,18 @@ class SyncEngine {
       if (incidenciasOk) {
         await _db.setMeta(
             'last_pull_ok', DateTime.now().toIso8601String());
+      }
+      // v1.13.0 (F4, CONTRATO_F4_20261024): pull del espejo
+      // sync_ultimo_sync (una fila por usuario). No bloquea
+      // last_pull_ok: es informativo y la pantalla degrada a
+      // «Sin registro de sync» si la tabla aún no existe (SQL_113
+      // sin ejecutar → 404 tolerado dentro de _pullUltimoSync).
+      try {
+        await _pullUltimoSync();
+        await _db.setMeta('last_pull_ultimo_sync_error', '');
+      } catch (e) {
+        AppLog.error('sync', 'pull_ultimo_sync_fallo', d: '$e');
+        await _db.setMeta('last_pull_ultimo_sync_error', '$e');
       }
       // v1.3.1 (E5): el pull silencioso del push no pisa el contador.
       if (!silencioso) {
@@ -1883,9 +1908,32 @@ class SyncEngine {
           await _db.bumpOp(uuid, 'HTTP ${r.statusCode}',
               httpStatus: r.statusCode);
         } else if (r.statusCode >= 400 && r.statusCode < 500) {
-          await _db.markOp(uuid, 'rechazada',
-              error: 'El servidor la rechazó (HTTP ${r.statusCode}). '
-                  'Revisa los datos o cancela la operación.');
+          // v1.13.0 (G3, Fase D): conservar el body (antes se
+          // descartaba y la cola solo decía el código). Salvavidas
+          // 23514: violación del CHECK de sync_ops (el servidor aún
+          // no conoce el tipo) NUNCA es 'rechazada' definitiva: queda
+          // en reintento para cuando el CHECK se amplíe.
+          final cuerpo = r.body.length > 500
+              ? r.body.substring(0, 500)
+              : r.body;
+          if (cuerpo.contains('23514')) {
+            await _db.bumpOp(uuid,
+                'CHECK del servidor aún no conoce este tipo (23514): '
+                'en espera de ampliación',
+                httpStatus: r.statusCode);
+          } else {
+            await _db.markOp(uuid, 'rechazada',
+                error: 'El servidor la rechazó (HTTP ${r.statusCode}). '
+                    '$cuerpo Revisa los datos o cancela la operación.');
+            if (op['tipo'] == 'reponer_lote') {
+              // Revierte el optimismo local de la reposición.
+              try {
+                final p =
+                    jsonDecode(op['payload'] as String) as Map<String, dynamic>;
+                await _db.revertirOptimismoReponerLote(p);
+              } catch (_) {}
+            }
+          }
         } else {
           await _db.bumpOp(uuid, 'HTTP ${r.statusCode}',
               httpStatus: r.statusCode);
@@ -2013,6 +2061,14 @@ class SyncEngine {
     if (rec.estado == 'rechazada' ||
         (rec.estado == 'aplicada' && rechazadaPorPuente)) {
       await _marcarRechazadaServidor(uuid, rec);
+      if (op['tipo'] == 'reponer_lote') {
+        // Revierte el optimismo local de la reposición.
+        try {
+          final p =
+              jsonDecode(op['payload'] as String) as Map<String, dynamic>;
+          await _db.revertirOptimismoReponerLote(p);
+        } catch (_) {}
+      }
       return false;
     }
     if (rec.estado == 'necesita_revision') {
@@ -2829,11 +2885,13 @@ class SyncEngine {
         // v1.3.1 (Argón pull): la tabla completó sin errores: limpiar
         // su error guardado.
         await _db.setMeta('wm_err_$tabla', '');
-        // v1.3.6 (Argón): la tabla se re-descargó completa con éxito:
-        // recién ahora se consume el flag forzar_redescarga_<tabla>.
-        if (tablasReseteadas.contains(tabla)) {
-          await _db.setMeta('forzar_redescarga_$tabla', '');
-        }
+        // v1.13.0 (G4, Fase D): la bandera forzar_redescarga_<tabla>
+        // YA NO se consume aquí (antes se borraba antes de validar
+        // la purga: si la purga se omitía, la re-descarga forzada
+        // se perdía para siempre). Se consume DESPUÉS del bloque
+        // de purga de abajo, solo si la purga validó (o si la tabla
+        // no purga). Si la purga se omite, la bandera sobrevive
+        // para el próximo ciclo.
         // v1.4.4: purga por reconciliación de esta tabla. Solo con
         // la pasada completa y sin errores (este bloque) y con las
         // revalidaciones del panel: (a) la cola de ops sigue vacía
@@ -2845,6 +2903,9 @@ class SyncEngine {
         // producción: un 200 [] ahí es lectura rota, no verdad).
         // Si algo no se cumple, la marca queda y se reintenta en
         // el próximo ciclo.
+        // v1.13.0 (G4): la bandera forzar_redescarga_<tabla> se
+        // consume solo si la purga validó (o la tabla no purga).
+        var purgaValidada = true;
         if (tablasPurga.contains(tabla)) {
           var viable = await _db.countPendingOps() == 0;
           if (viable) {
@@ -2870,7 +2931,8 @@ class SyncEngine {
           final conjuntoFiable = idsPurga.isNotEmpty ||
               filasLocales == 0 ||
               !troncales.contains(tabla);
-          if (viable && conjuntoFiable) {
+          purgaValidada = viable && conjuntoFiable;
+          if (purgaValidada) {
             final borradas =
                 await _db.purgarMirrorAusentes(tabla, idsPurga);
             if (borradas.isNotEmpty) {
@@ -2883,6 +2945,9 @@ class SyncEngine {
                 d: '$tabla viable=$viable fiable=$conjuntoFiable '
                     'locales=$filasLocales');
           }
+        }
+        if (tablasReseteadas.contains(tabla) && purgaValidada) {
+          await _db.setMeta('forzar_redescarga_$tabla', '');
         }
         final wmActual = await _db.getWatermarkTabla(tabla);
         if (wmActual < serverSeq) {
@@ -3138,14 +3203,10 @@ class SyncEngine {
   /// `forzar_redescarga_<tabla>`, que el próximo pull consume
   /// (re-descarga granular desde 0 de la tabla afectada).
   ///
-  /// Diseñada para lanzarse con `unawaited(...)` tras un sync exitoso:
-  /// nunca lanza (toda excepción se loguea y se continúa) y no bloquea
-  /// el sync ni el arranque. La última ejecución queda en la meta
-  /// 'ultimo_manifiesto' como fecha ISO (yyyy-MM-dd) de La Habana,
-  /// mismo patrón que `podaOpsDiariaSiToca` en localdb.dart.
-  ///
-  /// [verificar] es un seam de testeo: en producción se usa el
-  /// [verificarManifiesto] real (con red); en tests se inyecta un fake.
+  /// v1.13.0 (G4): la verificación solo se SELLA (meta
+  /// ultimo_manifiesto = hoy) cuando el resultado es ≥ 0. Un -1
+  /// (RPC ausente o red caída) NO sella: antes sellaba siempre y la
+  /// verificación quedaba muda un día entero tras un fallo.
   Future<void> manifiestoDiarioSiToca({
     Future<int> Function()? verificar,
   }) async {
@@ -3154,6 +3215,12 @@ class SyncEngine {
       if (await _db.getMeta('ultimo_manifiesto') == hoy) return;
       if (await _db.countPendingOps() > 0) return; // cola no limpia
       final divergentes = await (verificar ?? verificarManifiesto)();
+      if (divergentes < 0) {
+        // Verificación no concluyente (RPC ausente o red caída):
+        // NO sella, se reintenta mañana (o en el próximo ciclo).
+        AppLog.aviso('sync', 'manifiesto_no_concluyente', d: 'dia=$hoy');
+        return;
+      }
       await _db.setMeta('ultimo_manifiesto', hoy);
       AppLog.info('sync', 'manifiesto_diario',
           d: 'divergentes=$divergentes dia=$hoy');
@@ -3169,6 +3236,10 @@ class SyncEngine {
   /// espejo local. Si falta una fila o el servidor tiene sync_seq mayor,
   /// el bucket diverge y se fuerza su re-descarga.
   /// Retorna la cantidad de buckets divergentes (0 = todo coincide).
+  /// v1.13.0 (G4): retorna -1 si la verificación NO fue concluyente
+  /// (algún bucket con RPC 404/400 o excepción de red): antes
+  /// devolvía 0 y manifiestoDiarioSiToca sellaba el día como si todo
+  /// coincidiera, escondiendo el fallo.
   Future<int> verificarManifiesto({int nBuckets = 8}) async {
     const tablas = {
       'sync_clientes': 'clientes',
@@ -3181,6 +3252,7 @@ class SyncEngine {
       'sync_incidencias': 'incidencias_mirror',
     };
     var divergentes = 0;
+    var concluyente = true;
     for (final entry in tablas.entries) {
       final supTabla = entry.key;
       final localTabla = entry.value;
@@ -3195,7 +3267,9 @@ class SyncEngine {
                     'p_n_buckets': nBuckets,
                   }));
           if (r.statusCode == 404 || r.statusCode == 400) {
-            // RPC aún no aplicado en Supabase: se omite sin abortar.
+            // RPC aún no aplicado en Supabase: verificación NO
+            // concluyente (antes se omitía en silencio y se sellaba).
+            concluyente = false;
             break;
           }
           if (r.statusCode != 200) continue;
@@ -3228,11 +3302,13 @@ class SyncEngine {
             await _db.setMeta('forzar_redescarga_$localTabla', '1');
           }
         } catch (_) {
-          // Error de red: no cuenta como divergencia, se reintentará.
+          // Error de red: verificación NO concluyente (antes se
+          // ignoraba y se sellaba el día como si todo coincidiera).
+          concluyente = false;
         }
       }
     }
-    return divergentes;
+    return concluyente ? divergentes : -1;
   }
 
   /// v1.2.5 (D18): verifica que el reloj del dispositivo no esté muy
@@ -4012,6 +4088,27 @@ class SyncEngine {
   /// v1.3.0: Pull de tipos de incidencia (antes que incidencias, por FK).
   /// Fix #11 (Sol): no silenciar errores; lanzar para que el pull
   /// exterior no marque last_pull_ok.
+  /// v1.13.0 (F4, CONTRATO_F4_20261024): pull del espejo tipado
+  /// `sync_ultimo_sync` (una fila por usuario: dueño + entrenadores).
+  /// Watermark = MAX(sync_seq) local (0 si vacío); GET con
+  /// `sync_seq=gt.<watermark>&order=sync_seq`; INSERT OR REPLACE por
+  /// telegram_user_id (idempotente ante re-pulls). 404/400 = el
+  /// espejo aún no existe (SQL_113 sin ejecutar): se tolera y se
+  /// devuelve 0 sin romper el pull. Cualquier otro error se lanza
+  /// (el llamador lo registra en meta).
+  Future<int> _pullUltimoSync() async {
+    final wm = await _db.watermarkUltimoSync();
+    final r = await _getAuth(Uri.parse(
+        '$_base/rest/v1/sync_ultimo_sync?sync_seq=gt.$wm&order=sync_seq'));
+    if (r.statusCode == 404 || r.statusCode == 400) return 0;
+    if (r.statusCode != 200) {
+      throw Exception('sync_ultimo_sync HTTP ${r.statusCode}');
+    }
+    final rows = jsonDecode(r.body) as List;
+    await _db.upsertUltimoSync(rows);
+    return rows.length;
+  }
+
   Future<void> _pullTiposIncidencia() async {
     final wm =
         await _db.getWatermarkTabla('incidencias_tipos');

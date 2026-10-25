@@ -1,4 +1,7 @@
 /// Centro de Compras y Extracto (E4, Bloque 2 NÚCLEO, 1.10.0,
+/// EXTENDIDO en 1.13.0, Bloque 4: la vista de ventas SE LLAMA
+/// Extracto y muestra el nombre visible del producto en cada fila
+/// de servicio, sin duplicar el E4).
 /// Argón AMARILLO ajuste 5).
 ///
 /// «Un solo sitio» = esta pantalla dentro del Panel. La pantalla
@@ -59,6 +62,23 @@ class _CentroComprasScreenState extends State<CentroComprasScreen> {
     final suplementos =
         await LocalDb.instance.allMirror('suplementos');
     final clientes = await LocalDb.instance.allMirror('clientes');
+    // v1.13.0 (Extracto): nombre visible del producto en las filas
+    // de servicio (venta → lote → bote → suplemento).
+    final lotes =
+        await LocalDb.instance.allMirror('servicio_lotes');
+    final botes =
+        await LocalDb.instance.allMirror('servicio_botes');
+    final boteDeLote = <int, int>{
+      for (final l in lotes)
+        if ((l['id'] as num?) != null)
+          (l['id'] as num).toInt(): (l['bote_id'] as num?)?.toInt() ?? -1,
+    };
+    final supDeBote = <int, int>{
+      for (final b in botes)
+        if ((b['id'] as num?) != null)
+          (b['id'] as num).toInt():
+              (b['suplemento_id'] as num?)?.toInt() ?? -1,
+    };
     final nombreSup = <int, String>{};
     for (final s in suplementos) {
       final id = (s['id'] as num?)?.toInt();
@@ -99,10 +119,18 @@ class _CentroComprasScreenState extends State<CentroComprasScreen> {
       final cant = (v['cantidad'] as num?)?.toInt() ?? 0;
       final cid = (v['cliente_id'] as num?)?.toInt();
       final subtipo = '${v['tipo'] ?? 'servicio'}';
+      // v1.13.0: nombre del producto visible en la fila de servicio.
+      final boteId = boteDeLote[(v['lote_id'] as num?)?.toInt()];
+      final supId = boteId == null ? null : supDeBote[boteId];
+      final nombreProd =
+          supId == null ? null : nombreSup[supId];
+      final concepto = _conceptoServicio(subtipo, cant);
       filas.add({
         'origen': 'servicio',
         'tipo': 'servicio',
-        'concepto': _conceptoServicio(subtipo, cant),
+        'concepto': nombreProd == null
+            ? concepto
+            : '$concepto · $nombreProd',
         'cliente': '${v['cliente_nombre'] ?? ''}'.isNotEmpty
             ? '${v['cliente_nombre']}'
             : (cid != null ? (nombreCli[cid] ?? 'Cliente $cid') : '—'),
@@ -158,7 +186,9 @@ class _CentroComprasScreenState extends State<CentroComprasScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Centro de Compras')),
+      // v1.13.0: la vista de ventas se llama Extracto (E4 extendido,
+      // no duplicado). El registro manual de compras sigue aquí.
+      appBar: AppBar(title: const Text('Extracto de compras')),
       floatingActionButton: AuthService().isOwner
           ? FloatingActionButton.extended(
               onPressed: () async {

@@ -266,8 +266,46 @@ class FotosColaService {
     AppLog.info('fotos', 'qos_ciclo',
         d: 'inicio despachador; display_rapido=$_ultimoDisplayRapido');
 
+    // v1.13.0 (G5, P6-H2): LEASE GLOBAL de worker en meta
+    // ('fotos_worker_lease' = 'workerId|expiryIso'). El reclamo por
+    // fila no basta: el isolate de UI y el Foreground Service
+    // pueden reclamar filas DISTINTAS a la vez. El lease se reclama
+    // atómicamente (UPDATE…WHERE sobre el ISO: la comparación
+    // lexicográfica vale porque el formato es fijo) y se refresca
+    // cada iteración; si otro worker tiene un lease vigente, este
+    // ciclo devuelve 0 de inmediato. Se libera en finally solo si
+    // seguimos siendo dueños (si no, otro ya tomó el relevo).
+    await db.rawInsert(
+        "INSERT OR IGNORE INTO meta (k, v) VALUES ('fotos_worker_lease', '')");
+    var leaseValor =
+        '$workerId|${isoHabana(ahoraHabana().add(const Duration(minutes: 10)))}';
+    final leaseReclamado = await db.rawUpdate(
+      "UPDATE meta SET v = ? WHERE k = 'fotos_worker_lease' AND "
+      "(v = '' OR v NOT LIKE '%|%' OR substr(v, instr(v, '|') + 1) < ?)",
+      [leaseValor, isoHabana(ahoraHabana())],
+    );
+    if (leaseReclamado != 1) {
+      AppLog.aviso('fotos', 'worker_activo',
+          d: 'otro despachador tiene el lease; ciclo omitido');
+      return 0;
+    }
+    // v1.13.0 (G5): barrido de huérfanas viejas (filas en 'error'
+    // por problemas del op padre, escritas por el código anterior).
+    await _descartarHuerfanasViejas(db);
+
     var redVerificada = false;
-    while (true) {
+    try {
+      while (true) {
+        // Refrescar el lease global cada iteración; si ya no somos
+        // dueños, salir (el finally libera solo si aún lo somos).
+        final leaseNuevo =
+            '$workerId|${isoHabana(ahoraHabana().add(const Duration(minutes: 10)))}';
+        final refrescado = await db.rawUpdate(
+          "UPDATE meta SET v = ? WHERE k = 'fotos_worker_lease' AND v = ?",
+          [leaseNuevo, leaseValor],
+        );
+        if (refrescado != 1) break;
+        leaseValor = leaseNuevo;
       // v1.3.4 Ítem 5 (Argón, Bug A1.1+A1.2) — REGLA DE HIERRO por
       // iteración: las operaciones transaccionales (pagos, turnos,
       // clientes) son sagradas y nunca compiten con fotos por ancho de
@@ -336,9 +374,15 @@ class FotosColaService {
         where: "estado = 'pendiente' AND intentos < 5 "
             "AND (proximo_intento_en IS NULL OR proximo_intento_en <= ?)"
             // v1.3.10: el reintento manual (forzar_qos=1) salta el filtro QoS.
-            // v1.4.0 (Argón): una 'original' ligera (<=512 KB, ya
-            // comprimida) tampoco se retiene: sube en este ciclo.
-            "${puedeOriginal ? '' : " AND (tipo != 'original' OR forzar_qos = 1 OR (tamano_bytes IS NOT NULL AND tamano_bytes <= $kTamanoMaxOriginalInmediato))"}",
+            // v1.13.0 (G5): ELIMINADO el bypass de 'original' ligera
+            // (<=512 KB) de la v1.4.0: una original liviana ya NO
+            // salta la puerta QoS. Razón: el Foreground Service
+            // podía cerrarse antes de reclamarla, pero el bypass
+            // dejaba subir originales con ops en cola en red lenta.
+            // Ahora toda 'original' espera a originalPermitidoFallback
+            // (5 min de holgura + display rápido, o 15 min de holgura
+            // extendida sin medición).
+            "${puedeOriginal ? '' : " AND (tipo != 'original' OR forzar_qos = 1)"}",
         whereArgs: [ahoraIso],
         orderBy: "CASE tipo WHEN 'thumb' THEN 0 "
             "WHEN 'display' THEN 1 ELSE 2 END, creado_en ASC",
@@ -385,18 +429,20 @@ class FotosColaService {
         );
 
         if (opPadre.isEmpty) {
-          // La operación padre no existe: foto huérfana corrupta.
-          await _marcarError(
-              f['id'] as int, 'op padre no existe en ops_queue',
-              permanente: true);
+          // La operación padre no existe: foto huérfana. Decisión
+          // de Jc (G5): DESCARTAR, no conservar: la fila se borra y
+          // queda en AppLog (el op padre nunca existió o ya se
+          // podó; la foto no puede vincularse jamás).
+          await _descartarHuerfana(
+              db, f['id'] as int, 'op padre no existe en ops_queue');
           continue;
         }
 
         final estadoPadre = opPadre.first['estado'] as String?;
         if (estadoPadre == 'rechazada') {
           // La entidad fue rechazada por el servidor: nunca existirá.
-          await _marcarError(f['id'] as int,
-              'op padre rechazada por el servidor', permanente: true);
+          await _descartarHuerfana(db, f['id'] as int,
+              'op padre rechazada por el servidor');
           continue;
         }
         // Si está pendiente/enviada/error: esperar (el lock de abajo lo maneja).
@@ -420,17 +466,9 @@ class FotosColaService {
           final estadoOp = opRows.first['estado'] as String?;
           if (estadoOp == 'rechazada') {
             // La op fue rechazada por el servidor: el cliente/suplemento
-            // jamás se creó. Marcar la foto como error, no esperar eterno.
-            await db.update(
-              'fotos_cola',
-              {
-                'estado': 'error',
-                'ultimo_error': 'op rechazada por el servidor',
-                'actualizado_en': isoHabana(ahoraHabana()),
-              },
-              where: 'id = ?',
-              whereArgs: [f['id']],
-            );
+            // jamás se creó. G5: descartar la huérfana (no error eterno).
+            await _descartarHuerfana(
+                db, f['id'] as int, 'op rechazada por el servidor');
             continue;
           }
           if (estadoOp != 'aplicada') {
@@ -567,8 +605,33 @@ class FotosColaService {
         if (exitoVinculacion) {
           subidas++;
         } else {
-          debugPrint(
-              '[Fotos] Foto $id no completada (lease expirado o fallo).');
+          // v1.13.0 (G5, P6-H3): antes la fila quedaba en 'subiendo'
+          // con su lease hasta expirar (10 min) sin reintento. Ahora:
+          // si el worker SIGUE siendo dueño, vuelve a 'pendiente'
+          // con backoff de 2 min CONSERVANDO storage_path (los bytes
+          // ya están subidos: _subirUna reutiliza el path sin
+          // re-subir). Si el lease se perdió, no se toca nada.
+          // Sin quemar un intento: reintentar la vinculación es
+          // barato (no hay subida de bytes).
+          final devuelta = await db.update(
+            'fotos_cola',
+            {
+              'estado': 'pendiente',
+              'worker_id': null,
+              'lease_hasta': null,
+              'proximo_intento_en':
+                  isoHabana(ahoraHabana().add(const Duration(minutes: 2))),
+              'actualizado_en': isoHabana(ahoraHabana()),
+            },
+            where: "id = ? AND worker_id = ? AND estado = 'subiendo'",
+            whereArgs: [id, workerId],
+          );
+          if (devuelta == 1) {
+            AppLog.aviso('fotos', 'vinculacion_reintentable',
+                d: 'id=$id a pendiente con backoff 2min (path conservado)');
+          } else {
+            debugPrint('[Fotos] Foto $id: lease perdido, no se toca.');
+          }
         }
       } else {
         // v1.2.9+43 (Gemini R2 B3): si falló por IDs no resueltos (no por
@@ -651,6 +714,13 @@ class FotosColaService {
           }
         }
       }
+      } // fin while (el siguiente } cierra el try)
+    } finally {
+      // Liberar el lease global solo si seguimos siendo dueños.
+      await db.rawUpdate(
+        "UPDATE meta SET v = '' WHERE k = 'fotos_worker_lease' AND v = ?",
+        [leaseValor],
+      );
     }
     return subidas;
   }
@@ -842,6 +912,46 @@ class FotosColaService {
   /// Si el archivo no existe o es irrecuperable, la foto debe morir
   /// aunque otro worker la haya tomado (evita reintentos infinitos).
   /// Errores transitorios solo los marca el worker dueño.
+  /// v1.13.0 (G5, higiene de huérfanas — decisión de Jc: DESCARTAR,
+  /// no conservar): borra la fila de fotos_cola y deja constancia en
+  /// AppLog. El op padre nunca existió o fue rechazado: la foto no
+  /// puede vincularse jamás y su fila no debe quedarse en 'error'
+  /// para siempre. NO borra el archivo local (lo limpia
+  /// limpiarHuerfanos por antigüedad).
+  Future<void> _descartarHuerfana(
+      DatabaseExecutor db, int id, String motivo) async {
+    await db.delete('fotos_cola', where: 'id = ?', whereArgs: [id]);
+    AppLog.info('fotos', 'huerfana_descartada',
+        d: 'id=$id motivo=$motivo');
+  }
+
+  /// v1.13.0 (G5): barrido de huérfanas VIEJAS escritas por el código
+  /// anterior (filas en 'error' cuyo ultimo_error menciona problemas
+  /// del op padre). Solo filas con más de 24 h (o sin marca de
+  /// actualización): un error reciente de padre podría ser una
+  /// poda en curso. Las filas 'archivo no existe' NO se tocan
+  /// (siguen siendo errores reales a revisar).
+  Future<void> _descartarHuerfanasViejas(DatabaseExecutor db) async {
+    try {
+      final corte = isoHabana(
+          ahoraHabana().subtract(const Duration(hours: 24)));
+      final n = await db.delete(
+        'fotos_cola',
+        where: "estado = 'error' AND "
+            "(ultimo_error LIKE '%op padre%' OR "
+            "ultimo_error LIKE '%op rechazada%') AND "
+            "(actualizado_en IS NULL OR actualizado_en < ?)",
+        whereArgs: [corte],
+      );
+      if (n > 0) {
+        AppLog.info('fotos', 'huerfanas_viejas_descartadas', d: 'n=$n');
+      }
+    } catch (e) {
+      // El barrido nunca tumba el ciclo de fotos.
+      AppLog.error('fotos', 'barrido_huerfanas_fallo', d: '$e');
+    }
+  }
+
   Future<void> _marcarError(int id, String error,
       {bool permanente = false, String? workerId}) async {
     final db = await LocalDb.instance.db;
@@ -1061,7 +1171,7 @@ class FotosColaService {
         "SELECT COUNT(*) as n FROM fotos_cola WHERE estado = 'pendiente' "
         "AND intentos < 5 "
         "AND (proximo_intento_en IS NULL OR proximo_intento_en <= ?)"
-        "${puedeOriginal ? '' : " AND (tipo != 'original' OR forzar_qos = 1 OR (tamano_bytes IS NOT NULL AND tamano_bytes <= $kTamanoMaxOriginalInmediato))"}",
+        "${puedeOriginal ? '' : " AND (tipo != 'original' OR forzar_qos = 1)"}",
         [ahoraIso]);
     return (r.first['n'] as int? ?? 0);
   }

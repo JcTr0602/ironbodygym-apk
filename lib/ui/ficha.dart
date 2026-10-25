@@ -37,6 +37,7 @@ import 'tarifas_especiales.dart';
 import 'diseno.dart';
 import 'editor_foto.dart';
 import 'modal_pin_acceso.dart';
+import 'medidas_cliente.dart';
 import 'pestana_progreso.dart';
 import 'vista_previa_cliente.dart';
 import 'widgets.dart';
@@ -2088,6 +2089,11 @@ class _FichaScreenState extends State<FichaScreen> {
                       // anteriores (C4 fuera: no más tarjetas
                       // sueltas de historial).
                       _tarjetaHistorial(),
+                      const SizedBox(
+                          height: AppEspacio.md),
+                      // v1.13.0 (D4): medidas del entrenador (filas
+                      // inmutables, op registrar_medicion_cliente).
+                      TarjetaMedidas(clienteId: widget.clienteId),
                       const SizedBox(
                           height: AppEspacio.md),
                       // v1.2.5 (#10): incidencias relacionadas con el cliente.

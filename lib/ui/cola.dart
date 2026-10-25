@@ -979,13 +979,13 @@ class _ColaScreenState extends State<ColaScreen> {
     // el QoS (pendiente, sin forzar, sin error) no está fallando:
     // está "Esperando buena conexión". El botón de reintento de la
     // fila activa forzar_qos ("Subir ahora").
-    final tamanoFoto = f['tamano_bytes'] as int?;
+    // v1.13.0 (G5): TODA 'original' pendiente espera la puerta QoS
+    // (el bypass de <=512 KB se eliminó): la etiqueta ya no depende
+    // del tamaño, solo de que no esté forzada manualmente.
     final esperandoConexion = estado == 'pendiente' &&
         tipo == 'original' &&
         (f['forzar_qos'] as int? ?? 0) != 1 &&
-        (error == null || error.isEmpty) &&
-        (tamanoFoto == null ||
-            tamanoFoto > kTamanoMaxOriginalInmediato);
+        (error == null || error.isEmpty);
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 6),
       child: Row(

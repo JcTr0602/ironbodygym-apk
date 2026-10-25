@@ -40,7 +40,7 @@ class LocalDb {
   /// v1.4.0 (Argón): versión actual del esquema local. Los tests de
   /// migración comparan contra esta constante en vez de un número
   /// fijo, para no caer en cascada de fallos con cada migración.
-  static const int versionActual = 43;
+  static const int versionActual = 44;
 
   /// v37: marcas de información pública pendiente de republicar,
   /// UNA FILA POR CLAVE (compartido entre onCreate y la migración
@@ -1123,6 +1123,11 @@ class LocalDb {
           // MISMO método que onCreate (paridad garantizada).
           await _crearTablasBloque3(db);
         }
+        if (oldV < 44) {
+          // v1.13.0 (Bloque 4, Argón AMARILLO + sync Fase D):
+          // MISMO método que onCreate (paridad garantizada).
+          await _crearTablasBloque4(db);
+        }
       },
     );
     // v1.2.5+28: repara el índice FTS si la migración lo omitió y el
@@ -1976,6 +1981,9 @@ class LocalDb {
         // en onCreate y en onUpgrade (ver _crearTablasBloque3).
         // Aquí (tras `meta`) porque siembra cursores propios.
         await _crearTablasBloque3(db);
+        // v1.13.0 (v44, Bloque 4 + sync Fase D G3/G4/G5). MISMO método
+        // en onCreate y en onUpgrade (ver _crearTablasBloque4).
+        await _crearTablasBloque4(db);
         // v1.2.4: incidencias (diseño ChatGPT: bidireccional, offline-first).
         // incidencias_local: creadas en este dispositivo, pendientes de subir.
         // incidencias_mirror: copia de la tabla central de Supabase.
@@ -2237,6 +2245,49 @@ class LocalDb {
         "INSERT OR IGNORE INTO meta (k, v) VALUES ('wm_gympedia_articulos', '0')");
     await db.rawInsert(
         "INSERT OR IGNORE INTO meta (k, v) VALUES ('wm_gympedia_borrados', '0')");
+  }
+
+  /// v1.13.0 (v44, Bloque 4 + sync Fase D). MISMO método en onCreate
+  /// y en onUpgrade (paridad garantizada, no SQL copiado).
+  ///
+  /// - avisos_wa_contactados: progreso de «Avisos WhatsApp de hoy»
+  ///   en SQLite local (Argón ajuste 5): Android mata el proceso al
+  ///   ir a WhatsApp y el estado NO puede vivir solo en RAM (antes
+  ///   vivía en SharedPreferences; se migra al primer uso). PK
+  ///   triple (cliente_id, tipo, fecha_habana): el mismo cliente
+  ///   puede tener aviso vencido + recibo + cumpleaños el mismo día.
+  /// - cliente_mediciones: espejo de medidas por filas inmutables
+  ///   (D4, diferido desde la 1.12.0). id TEXT = medicion_id UUID
+  ///   del servidor. El pull lo puebla cuando el manifiesto del
+  ///   servidor lo incluya (otra vía; hasta entonces la lectura
+  ///   combina espejo + ops pendientes del propio teléfono).
+  static Future<void> _crearTablasBloque4(
+      DatabaseExecutor db) async {
+    await db.execute('CREATE TABLE IF NOT EXISTS avisos_wa_contactados ('
+        'cliente_id INTEGER NOT NULL, '
+        'tipo TEXT NOT NULL, '
+        'fecha_habana TEXT NOT NULL, '
+        'contactado_en TEXT NOT NULL, '
+        'op_uuid TEXT, '
+        'PRIMARY KEY (cliente_id, tipo, fecha_habana))');
+    await db.execute('CREATE TABLE IF NOT EXISTS cliente_mediciones ('
+        'id TEXT PRIMARY KEY, data TEXT NOT NULL, '
+        'sync_seq INTEGER NOT NULL, op_uuid TEXT)');
+    await _crearIndiceSiExisteTabla(db, 'cliente_mediciones',
+        'CREATE INDEX IF NOT EXISTS idx_cliente_mediciones_seq '
+        'ON cliente_mediciones(sync_seq)');
+    await db.rawInsert(
+        "INSERT OR IGNORE INTO meta (k, v) VALUES ('wm_cliente_mediciones', '0')");
+    // v1.13.0 (F4, CONTRATO_F4_20261024): espejo local tipado de
+    // `public.sync_ultimo_sync` (SOLO lectura: el puente es el único
+    // escritor; la app NUNCA escribe en el espejo del servidor).
+    // Una fila por usuario (dueño + entrenadores); el usuario sin
+    // fila nunca sincronizó y se muestra «Sin registro de sync».
+    await db.execute('CREATE TABLE IF NOT EXISTS ultimo_sync ('
+        'telegram_user_id INTEGER PRIMARY KEY, '
+        'nombre TEXT NOT NULL, '
+        'ultimo_sync_at TEXT NOT NULL, '
+        'sync_seq INTEGER NOT NULL)');
   }
 
   /// Siembra inicial D6 (Argón ajuste 3): IDs deterministas, INSERT OR
@@ -3065,6 +3116,136 @@ class LocalDb {
     data['telefono'] = telefono;
     await d.update('clientes', {'data': jsonEncode(data)},
         where: 'id=?', whereArgs: [clienteId]);
+  }
+
+  /// v1.13.0 (Bloque 4, reponer_lote): suma [delta] (negativo para
+  /// revertir) a `dosis_repuestas` de la fila del espejo
+  /// servicio_lotes. Es el reflejo optimista de la reposición: el
+  /// pull del servidor reemplaza la fila entera con el total real,
+  /// así que no hay doble conteo. Si la fila no existe, no hace nada.
+  Future<void> actualizarDosisRepuestasLote(int loteId, int delta,
+      {DatabaseExecutor? txn}) async {
+    final DatabaseExecutor ex = txn ?? await db;
+    final rows = await ex.query('servicio_lotes',
+        where: 'id=?', whereArgs: [loteId], limit: 1);
+    if (rows.isEmpty) return;
+    final data =
+        jsonDecode(rows.first['data'] as String) as Map<String, dynamic>;
+    final actual = (data['dosis_repuestas'] as num?)?.toInt() ?? 0;
+    data['dosis_repuestas'] = actual + delta;
+    await ex.update('servicio_lotes', {'data': jsonEncode(data)},
+        where: 'id=?', whereArgs: [loteId]);
+  }
+
+  /// v1.13.0 (Bloque 4, reponer_lote): revierte el optimismo de una
+  /// reposición rechazada por el servidor. La llama sync.dart cuando
+  /// una op `reponer_lote` queda 'rechazada' (en el POST o en el
+  /// barrido de confirmación). El salvavidas 23514 (G3) NO pasa por
+  /// aquí: un CHECK aún no ampliado deja la op en reintento, no la
+  /// rechaza, así que el optimismo se mantiene hasta que aplique.
+  Future<void> revertirOptimismoReponerLote(
+      Map<String, dynamic> payload) async {
+    final loteId = (payload['lote_id'] as num?)?.toInt();
+    final dosis = (payload['dosis'] as num?)?.toInt() ?? 0;
+    if (loteId == null || dosis == 0) return;
+    await actualizarDosisRepuestasLote(loteId, -dosis);
+  }
+
+  /// Una op de la cola por su uuid (para Deshacer E3: verificar que
+  /// sigue 'pendiente' antes de borrarla). null si no está.
+  Future<Map<String, dynamic>?> opEnCola(String opUuid) async {
+    final d = await db;
+    final rows = await d.query('ops_queue',
+        where: 'op_uuid=?', whereArgs: [opUuid], limit: 1);
+    return rows.isEmpty ? null : rows.first;
+  }
+
+  /// v1.13.0 (Avisos WhatsApp, Argón ajuste 5): marca un aviso como
+  /// contactado en SQLite local (cliente_id + tipo + fecha Habana).
+  /// INSERT OR REPLACE: remarcar actualiza la hora, no duplica.
+  Future<void> marcarAvisoWaContactado(
+      int clienteId, String tipo, String fechaHabana) async {
+    final d = await db;
+    await d.insert(
+      'avisos_wa_contactados',
+      {
+        'cliente_id': clienteId,
+        'tipo': tipo,
+        'fecha_habana': fechaHabana,
+        'contactado_en': isoHabana(ahoraHabana()),
+      },
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+  }
+
+  /// Desmarca un aviso contactado (el «deshacer» de la bandeja).
+  Future<void> desmarcarAvisoWaContactado(
+      int clienteId, String tipo, String fechaHabana) async {
+    final d = await db;
+    await d.delete(
+      'avisos_wa_contactados',
+      where: 'cliente_id=? AND tipo=? AND fecha_habana=?',
+      whereArgs: [clienteId, tipo, fechaHabana],
+    );
+  }
+
+  /// Contactados de un día (fecha Habana 'YYYY-MM-DD'): claves
+  /// 'tipo_clienteId' para comparar con la bandeja.
+  Future<Set<String>> avisosWaContactados(String fechaHabana) async {
+    final d = await db;
+    final rows = await d.query(
+      'avisos_wa_contactados',
+      columns: ['cliente_id', 'tipo'],
+      where: 'fecha_habana=?',
+      whereArgs: [fechaHabana],
+    );
+    return {
+      for (final r in rows) '${r['tipo']}_${r['cliente_id']}',
+    };
+  }
+
+  /// v1.13.0 (F4, CONTRATO_F4_20261024): watermark del pull de
+  /// ultimo_sync = MAX(sync_seq) local (0 si la tabla está vacía).
+  Future<int> watermarkUltimoSync() async {
+    final d = await db;
+    final rows = await d
+        .rawQuery('SELECT MAX(sync_seq) AS m FROM ultimo_sync');
+    final m = rows.isEmpty ? null : rows.first['m'];
+    return (m as num?)?.toInt() ?? 0;
+  }
+
+  /// v1.13.0 (F4): upsert de filas del espejo `sync_ultimo_sync`
+  /// (INSERT OR REPLACE por telegram_user_id). Idempotente ante
+  /// re-pulls: el espejo ya trae solo la última fecha por usuario.
+  /// Las filas sin telegram_user_id o sin ultimo_sync_at se ignoran
+  /// (nunca se guarda una fila a medias).
+  Future<void> upsertUltimoSync(List<dynamic> filas) async {
+    final d = await db;
+    await d.transaction((txn) async {
+      for (final f in filas) {
+        if (f is! Map) continue;
+        final tid = (f['telegram_user_id'] as num?)?.toInt();
+        final at = f['ultimo_sync_at'];
+        if (tid == null || at == null || '$at'.isEmpty) continue;
+        await txn.insert(
+          'ultimo_sync',
+          {
+            'telegram_user_id': tid,
+            'nombre': '${f['nombre'] ?? 'Usuario $tid'}',
+            'ultimo_sync_at': '$at',
+            'sync_seq': (f['sync_seq'] as num?)?.toInt() ?? 0,
+          },
+          conflictAlgorithm: ConflictAlgorithm.replace,
+        );
+      }
+    });
+  }
+
+  /// v1.13.0 (F4): todas las filas locales de ultimo_sync,
+  /// ordenadas por nombre (la pantalla las muestra tal cual).
+  Future<List<Map<String, dynamic>>> filasUltimoSync() async {
+    final d = await db;
+    return d.query('ultimo_sync', orderBy: 'nombre ASC');
   }
 
   /// Actualización optimista de los campos BÁSICOS de la ficha
