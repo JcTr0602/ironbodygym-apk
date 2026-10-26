@@ -1,4 +1,4 @@
-/// Subpantallas del hub de Administración (A–G).
+/// Subpantallas de los módulos de Administración (1.14: sin letras A–G).
 ///
 /// Cada sección agrupa contenido relacionado de la antigua pantalla
 /// de scroll. El interior de cada sección conserva el diseño original;
@@ -104,7 +104,7 @@ class SeccionResumenScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('A · Resumen')),
+      appBar: AppBar(title: const Text('Resumen')),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
@@ -174,7 +174,7 @@ class _SeccionCobrosScreenState extends State<SeccionCobrosScreen> {
         (caja['efectivo'] ?? 0) + (caja['transferencia'] ?? 0);
     final neto = cobradoHoy - gastosHoy;
     return Scaffold(
-      appBar: AppBar(title: const Text('B · Cobros')),
+      appBar: AppBar(title: const Text('Cobros')),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
@@ -317,7 +317,7 @@ class SeccionSistemaScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('D · Sistema')),
+      appBar: AppBar(title: const Text('Sistema')),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
@@ -582,7 +582,7 @@ class _SeccionGastosScreenState extends State<SeccionGastosScreen> {
   Widget build(BuildContext context) {
     final gastos = widget.getGastos();
     return Scaffold(
-      appBar: AppBar(title: const Text('F · Gastos')),
+      appBar: AppBar(title: const Text('Gastos')),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
@@ -622,7 +622,7 @@ class SeccionSuplementosScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('G · Suplementos')),
+      appBar: AppBar(title: const Text('Suplementos')),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
@@ -913,7 +913,7 @@ class _SeccionDiagnosticoScreenState extends State<SeccionDiagnosticoScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('H · Diagnóstico'),
+        title: const Text('Diagnóstico'),
         actions: [
           IconButton(
             tooltip: 'Copiar informe',

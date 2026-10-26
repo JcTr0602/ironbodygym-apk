@@ -28,6 +28,7 @@ import '../tiempo.dart';
 import '../tipos_pago.dart';
 import 'componentes.dart';
 import 'diseno.dart';
+import 'buscar.dart';
 import 'admin_secciones.dart';
 import 'arqueo.dart';
 import 'gympedia.dart';
@@ -110,6 +111,9 @@ class _AdminScreenState extends State<AdminScreen> {
   // _cargarSolicitudesInvitados).
   bool _solicitudesCargando = true;
   int _solicitudesGen = 0;
+  // 1.14 (rediseño): el bloque de atención muestra 5 alertas y
+  // despliega el resto (hasta 9) al tocar «Ver más».
+  bool _atencionExpandida = false;
   // G2 (v1.7.0): reportes App Plus pendientes (misma pauta de dos
   // fases que las solicitudes: la RPC no bloquea el pintado; si
   // falla, la fila no aparece) y contador de Cuentas a la Casa
@@ -1002,15 +1006,21 @@ class _AdminScreenState extends State<AdminScreen> {
         text: 'Iron Body Gym — clientes y pagos del mes');
   }
 
-  // -- UI (Panel del dueño, v1.6.0) -----------------------------------------
-  // Rediseño según el mockup v2 aprobado y el consenso del panel de
-  // diseño (2026-10-22): la Administración pasa a ser la consola del
-  // dueño como estación de trabajo diaria. Orden estricto de bloques:
-  // 1) Necesita tu atención (solo decisiones del dueño, con botón,
-  //    máx. 5), 2) Acciones rápidas (Cobrar · Arqueo · Cierre),
-  // 3) Resumen del mes, 4) Módulos (las entradas de siempre agrupadas
-  //    y renombradas a lenguaje de tarea; cada una navega a donde
-  //    navegaba en el hub v1.3.7).
+  // -- UI (Panel del dueño, v1.6.0; rediseño 1.14) ---------------------------
+  // Rediseño según el mockup v2 aprobado, el consenso del panel de
+  // diseño (2026-10-22) y el veredicto de Argón (2026-10-26): la
+  // Administración pasa a ser la consola del dueño como estación de
+  // trabajo diaria. Orden estricto de bloques: 1) cabecera con
+  // píldora de sync tocable, 2) Necesita tu atención (solo
+  // decisiones del dueño, con botón; 5 visibles, resto desplegable),
+  // 3) Estación diaria 2×2 (Cobrar · Mi Día · Arqueo · Cierre),
+  // 4) Pulso del mes (3 KPIs tocables + Cuentas a la Casa tocable),
+  // 5) 6 módulos con subsecciones. Las dos listas planas del
+  // Bloque 2 (Panel y Resto) desaparecen: cada una de sus filas
+  // vive ahora en exactamente un módulo (auditoría 1:1, sin
+  // funciones perdidas). Solo UI: ninguna pantalla, permiso,
+  // RPC ni lógica cambia; al volver de un módulo se recarga
+  // igual que antes (Fix 6, vía _ir).
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -1028,18 +1038,14 @@ class _AdminScreenState extends State<AdminScreen> {
                       children: [
                         _cabeceraPanel(),
                         _bloqueAtencion(),
-                        _tituloSeccion('ACCIONES RÁPIDAS'),
-                        _accionesRapidas(),
-                        _tituloSeccion('RESUMEN DEL MES',
+                        _tituloSeccion('ESTACIÓN DIARIA'),
+                        _estacionDiaria(),
+                        _tituloSeccion('PULSO DEL MES',
                             derecha: _textoActualizado()),
                         _resumenMes(),
                         _lineaCuentasCasa(),
                         _tituloSeccion('MÓDULOS'),
                         _tarjetasModulos(),
-                        _tituloSeccion('BLOQUE 2 · PANEL'),
-                        _bloque2(),
-                        _tituloSeccion('BLOQUE 2 · RESTO (1.11.0)'),
-                        _bloque2Resto(),
                         Padding(
                           padding: const EdgeInsets.fromLTRB(24, 16, 24, 4),
                           child: Text(
@@ -1107,211 +1113,39 @@ class _AdminScreenState extends State<AdminScreen> {
           ),
         ),
         const SizedBox(width: 8),
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-          decoration: BoxDecoration(
-            color: chipColor.withValues(alpha: 0.14),
-            borderRadius: BorderRadius.circular(999),
-            border: Border.all(color: chipColor.withValues(alpha: 0.4)),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                width: 8,
-                height: 8,
-                decoration:
-                    BoxDecoration(color: chipColor, shape: BoxShape.circle),
-              ),
-              const SizedBox(width: 6),
-              Text(chipTxt,
-                  style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w700,
-                      color: chipColor)),
-            ],
+        // 1.14 (rediseño): la píldora es tocable — abre el
+        // diagnóstico de sync, el mismo destino de la fila
+        // «Problema de sincronización» del bloque de atención.
+        InkWell(
+          borderRadius: BorderRadius.circular(999),
+          onTap: () => _ir(const SeccionDiagnosticoScreen()),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+            decoration: BoxDecoration(
+              color: chipColor.withValues(alpha: 0.14),
+              borderRadius: BorderRadius.circular(999),
+              border: Border.all(color: chipColor.withValues(alpha: 0.4)),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 8,
+                  height: 8,
+                  decoration:
+                      BoxDecoration(color: chipColor, shape: BoxShape.circle),
+                ),
+                const SizedBox(width: 6),
+                Text(chipTxt,
+                    style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                        color: chipColor)),
+              ],
+            ),
           ),
         ),
       ],
-    );
-  }
-
-  /// Título de bloque del panel (mockup v2): versalitas con tracking;
-  /// naranja en «Necesita tu atención», gris en el resto.
-  /// v1.10.0 (Bloque 2 NÚCLEO): sección del Panel con el núcleo
-  /// operativo. A1 es ACCESO DIRECTO al resumen que ya existe (no
-  /// una pantalla nueva): al tocarlo dispara un pull/push silencioso
-  /// y abre MiDiaScreen, que muestra la píldora de estado. G2 y los
-  /// ítems C/F/H NO están aquí: van a la 1.11.0.
-  Widget _bloque2() {
-    Widget fila(IconData icono, String titulo, String? subtitulo,
-        VoidCallback onTap) {
-      return ListTile(
-        dense: true,
-        contentPadding: EdgeInsets.zero,
-        leading: Icon(icono, color: AppColores.naranja, size: 20),
-        title: Text(titulo, style: AppTexto.cuerpo),
-        subtitle:
-            subtitulo == null ? null : Text(subtitulo, style: AppTexto.secundario),
-        trailing: const Icon(Icons.chevron_right, size: 18),
-        onTap: onTap,
-      );
-    }
-
-    // 1.14 (D18): recargar al volver. Antes se volvía con los
-    // datos viejos (KPIs, pendientes) hasta un refresh manual;
-    // el mismo archivo ya usa este patrón en _ir/_irYRecargar.
-    void ir(Widget pantalla) {
-      Navigator.push(
-          context, MaterialPageRoute(builder: (_) => pantalla))
-          .then((_) {
-        if (mounted) _cargar();
-      });
-    }
-
-    return Tarjeta(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          fila(Icons.today, 'Resumen del día', 'Abre el Día del gym',
-              () {
-            // A1: pull/push silencioso (best-effort, sin bloquear)
-            // y luego abrir la vista que ya existe.
-            _syncSilencioso();
-            ir(const MiDiaScreen());
-          }),
-          fila(Icons.receipt_long, 'Centro de Compras y Extracto',
-              'E4 · Todo | Suplementos | Servicios, con subtotales',
-              () => ir(const CentroComprasScreen())),
-          fila(Icons.message, 'Plantillas de mensajes',
-              'G1 · Solo variables blancas, aviso si la sync es vieja',
-              () => ir(const PlantillasScreen())),
-          fila(Icons.local_offer, 'Tarifas',
-              'D1 + D6 · Estándar y especiales, otorgar y revocar',
-              () => ir(const TarifasScreen())),
-          fila(Icons.home_rounded, 'Cuentas a la Casa',
-              'B5 · Precio 0, solo el dueño las otorga',
-              () => ir(const CuentasCasaScreen())),
-          fila(Icons.warning_amber, 'Productos sin foto o sin precio',
-              'E5 · Señalados para completar el catálogo',
-              () => ir(const SinFotoPrecioScreen())),
-          fila(Icons.event, 'Vencimientos próximos',
-              'D3 · Vencidos + próximos 7 días, con acción',
-              () => ir(const VencimientosProximosScreen())),
-          fila(Icons.security, 'Permisos explicados',
-              'B2 · Qué permite cada permiso, en sencillo',
-              () => mostrarPermisosExplicados(context)),
-          fila(Icons.manage_accounts, 'Entrenadores y usuarios APK',
-              'B4 · Crear entrenador y compartir credenciales',
-              () => ir(const UsuariosScreen())),
-          fila(Icons.group, 'Solicitudes de invitados',
-              'B6 · Por atender', () => ir(const InvitadosScreen())),
-          // v1.12.0 (F3): solicitudes de adelanto de entrenadores
-          // (el dueño resuelve eligiendo el destino).
-          fila(Icons.request_page, 'Solicitudes de adelanto',
-              'F3 · Aprobar (Nómina / Pendiente) o rechazar',
-              () => ir(const SolicitudesAdelantoScreen())),
-          // v1.12.0 (F4): avisos PopUp para los entrenadores.
-          fila(Icons.campaign, 'Avisos para entrenadores',
-              'F4 · PopUp en el Home de cada entrenador',
-              () => ir(const AvisosEntrenadorScreen())),
-          fila(Icons.cake, 'Cumpleaños del mes',
-              'D2 · Regalo en un toque desde la ficha',
-              () => ir(const CumpleanosScreen())),
-          fila(Icons.fitness_center, 'Catálogo de suplementos',
-              'E2 · Con foto, precio y margen',
-              () => ir(const SuplementosScreen())),
-          fila(Icons.inventory_2, 'Botes y lotes',
-              'E3 · Desde Administración',
-              () => ir(const ServiciosAdminScreen())),
-        ],
-      ),
-    );
-  }
-
-  /// A1: pull/push silencioso en segundo plano. Best-effort: si no
-  /// hay red, no se avisa ni se bloquea nada.
-  void _syncSilencioso() async {
-    try {
-      await SyncEngine.instance.push();
-      await SyncEngine.instance.pull();
-    } catch (_) {}
-  }
-
-  /// BLOQUE 2 · RESTO (1.11.0, Argón AMARILLO): G2 + C + F + H.
-  /// Mismo patrón de filas que _bloque2().
-  Widget _bloque2Resto() {
-    Widget fila(IconData icono, String titulo, String? subtitulo,
-        VoidCallback onTap) {
-      return ListTile(
-        dense: true,
-        contentPadding: EdgeInsets.zero,
-        leading: Icon(icono, color: AppColores.naranja, size: 20),
-        title: Text(titulo, style: AppTexto.cuerpo),
-        subtitle:
-            subtitulo == null ? null : Text(subtitulo, style: AppTexto.secundario),
-        trailing: const Icon(Icons.chevron_right, size: 18),
-        onTap: onTap,
-      );
-    }
-
-    // 1.14 (D18): recargar al volver (igual que en _bloque2).
-    void ir(Widget pantalla) {
-      Navigator.push(
-          context, MaterialPageRoute(builder: (_) => pantalla))
-          .then((_) {
-        if (mounted) _cargar();
-      });
-    }
-
-    return Tarjeta(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          fila(Icons.notifications, 'Recordatorios automáticos',
-              'G2 · Hoy, con anti-duplicado; masivos solo en tu teléfono',
-              () => ir(const RecordatoriosScreen())),
-          fila(Icons.handshake, 'Arqueo de entrega de efectivo',
-              'C1 · Liquidar por delta, nunca pendiente = 0',
-              () => ir(const ArqueoEntregaScreen())),
-          fila(Icons.fact_check, 'Nómina pre-calculada',
-              'C2 · Solo lectura, vista previa hasta el 31',
-              () => ir(const NominaPrecalculadaScreen())),
-          fila(Icons.payments, 'Adelantos',
-              'C3 · Lista con filtro por mes',
-              () => ir(const AdelantosListaScreen())),
-          fila(Icons.bar_chart, 'Ingresos por período',
-              'C5 · Plus como línea propia, sin doble conteo',
-              () => ir(const IngresosPeriodoScreen())),
-          fila(Icons.tune, 'Precios por método',
-              'C6 · Única fuente de precios',
-              () => ir(const PreciosMetodoScreen())),
-          fila(Icons.history, 'Auditoría',
-              'F1 · General y por persona, con filtros',
-              () => ir(const AuditoriaPanelScreen())),
-          fila(Icons.sync_problem, 'Errores de sync',
-              'F3 · En sencillo, sin «Descartar» para ops de datos',
-              () => ir(const ErroresSyncPanelScreen())),
-          fila(Icons.sync, 'Estado de sync',
-              'F4 · Contadores y fechas, no contenidos',
-              () => ir(const EstadoSyncScreen())),
-          fila(Icons.build, 'Mantenimiento',
-              'F5 · Lista cerrada, con confirmación y auditoría',
-              () => ir(const MantenimientoScreen())),
-          fila(Icons.settings, 'Ajustes del gym',
-              'H1 · Enlaza C6 y D6; edita métodos y textos',
-              () => ir(const AjustesGymScreen())),
-          fila(Icons.book, 'Registro mensual',
-              'H2 · Visor + copiar resumen en Markdown',
-              () => ir(const RegistroMensualScreen())),
-          fila(Icons.schedule, 'Turnos y horarios',
-              'H4 · Enlaza el editor único de Turnos',
-              () => ir(const TurnosPanelScreen())),
-          fila(Icons.backup, 'Copia de seguridad',
-              'H5 · Exportar solo, copia en frío sin fotos',
-              () => ir(const CopiaSeguridadScreen())),
-        ],
-      ),
     );
   }
 
@@ -1517,7 +1351,10 @@ class _AdminScreenState extends State<AdminScreen> {
       ));
     }
 
-    final visibles = pendientes.take(5).toList();
+    // 1.14 (rediseño): 5 visibles y el resto (hasta 9 en total)
+    // desplegable, en vez de quedarse fuera con una nota.
+    final visibles =
+        _atencionExpandida ? pendientes : pendientes.take(5).toList();
     final ocultos = pendientes.length - visibles.length;
     final oscuro = Theme.of(context).brightness == Brightness.dark;
     return Column(
@@ -1565,14 +1402,21 @@ class _AdminScreenState extends State<AdminScreen> {
                 for (var i = 0; i < visibles.length; i++)
                   _filaAtencion(visibles[i],
                       ultima: i == visibles.length - 1 && ocultos == 0),
-                if (ocultos > 0)
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(14, 0, 14, 10),
-                    child: Text(
-                      '+$ocultos pendiente(s) más en los módulos',
-                      style: TextStyle(
-                          fontSize: 11.5,
-                          color: AppColores.textoSecundario(context)),
+                if (pendientes.length > 5)
+                  InkWell(
+                    onTap: () => setState(
+                        () => _atencionExpandida = !_atencionExpandida),
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(14, 0, 14, 10),
+                      child: Text(
+                        _atencionExpandida
+                            ? 'Ver menos'
+                            : '+$ocultos pendiente(s) más',
+                        style: const TextStyle(
+                            fontSize: 11.5,
+                            fontWeight: FontWeight.w700,
+                            color: AppColores.naranja),
+                      ),
                     ),
                   ),
               ],
@@ -1707,25 +1551,53 @@ class _AdminScreenState extends State<AdminScreen> {
     );
   }
 
-  /// Bloque 2 · Acciones rápidas: Cobrar · Arqueo · Cierre, a un toque
-  /// a los flujos de siempre (consenso del panel de diseño).
-  Widget _accionesRapidas() {
-    return Row(
+  /// A1: pull/push silencioso en segundo plano. Best-effort: si no
+  /// hay red, no se avisa ni se bloquea nada.
+  void _syncSilencioso() async {
+    try {
+      await SyncEngine.instance.push();
+      await SyncEngine.instance.pull();
+    } catch (_) {}
+  }
+
+  /// 1.14 (rediseño) · Estación diaria 2×2: Cobrar · Mi Día ·
+  /// Arqueo rápido · Cierre / caja hoy, a un toque a los flujos de
+  /// siempre. Mi Día dispara primero el pull/push silencioso, como
+  /// hacía la fila del Bloque 2 (A1).
+  Widget _estacionDiaria() {
+    return Column(
       children: [
-        Expanded(
-          child: _accionRapida(Icons.payments_rounded, 'Cobrar',
-              primario: true, onTap: () => _ir(const PagoScreen())),
+        Row(
+          children: [
+            Expanded(
+              child: _accionRapida(Icons.payments_rounded, 'Cobrar',
+                  primario: true, onTap: () => _ir(const PagoScreen())),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: _accionRapida(Icons.today_rounded, 'Mi Día',
+                  onTap: () {
+                _syncSilencioso();
+                _ir(const MiDiaScreen());
+              }),
+            ),
+          ],
         ),
-        const SizedBox(width: 10),
-        Expanded(
-          child: _accionRapida(
-              Icons.account_balance_wallet_rounded, 'Arqueo',
-              onTap: () => _ir(const ArqueoScreen())),
-        ),
-        const SizedBox(width: 10),
-        Expanded(
-          child: _accionRapida(Icons.point_of_sale_rounded, 'Cierre',
-              onTap: () => _ir(_pantallaCierre())),
+        const SizedBox(height: 10),
+        Row(
+          children: [
+            Expanded(
+              child: _accionRapida(
+                  Icons.account_balance_wallet_rounded, 'Arqueo rápido',
+                  onTap: () => _ir(const ArqueoScreen())),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: _accionRapida(
+                  Icons.point_of_sale_rounded, 'Cierre / caja hoy',
+                  onTap: () => _ir(_pantallaCierre())),
+            ),
+          ],
         ),
       ],
     );
@@ -1785,9 +1657,18 @@ class _AdminScreenState extends State<AdminScreen> {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        // 1.14 (rediseño): los 3 KPIs son tocables. Ingresos abre
+        // las estadísticas del mes; Clientes activos abre la lista
+        // de clientes (Buscar), donde se filtra por estado.
         Expanded(
             child: _kpi('\$${fmtMonto(_ingresos)}', 'Ingresos de $mes',
-                color: AppColores.exito)),
+                color: AppColores.exito,
+                onTap: () => _ir(SeccionResumenScreen(
+                      ingresos: _ingresos,
+                      inscMes: _inscMes,
+                      morosos: _morosos,
+                      inscPorEntrenador: _inscPorEntrenador,
+                    )))),
         const SizedBox(width: 10),
         // v1.6.0 (Jc, añadido 7): «Pagos este mes» abre el LISTADO
         // exacto de los que pagaron el mes (PagaronMesScreen, el
@@ -1797,7 +1678,9 @@ class _AdminScreenState extends State<AdminScreen> {
             child: _kpi('$_pagosMes', 'Pagos este mes',
                 onTap: () => _ir(const PagaronMesScreen()))),
         const SizedBox(width: 10),
-        Expanded(child: _kpi('$_clientesActivos', 'Clientes activos')),
+        Expanded(
+            child: _kpi('$_clientesActivos', 'Clientes activos',
+                onTap: () => _ir(const BuscarScreen()))),
       ],
     );
   }
@@ -1807,23 +1690,32 @@ class _AdminScreenState extends State<AdminScreen> {
   /// cuentas, no ocupa espacio.
   Widget _lineaCuentasCasa() {
     if (_cuentasCasa <= 0) return const SizedBox.shrink();
+    // 1.14 (rediseño): la línea es tocable — abre la pantalla de
+    // Cuentas a la Casa, el mismo destino del módulo 2.
     return Padding(
       padding: const EdgeInsets.only(top: 10),
-      child: Row(
-        children: [
-          const Icon(Icons.home_rounded,
-              size: 16, color: Color(0xFFB8860B)),
-          const SizedBox(width: 6),
-          Text(
-            _cuentasCasa == 1
-                ? 'Cuentas a la Casa activas: 1'
-                : 'Cuentas a la Casa activas: $_cuentasCasa',
-            style: const TextStyle(
-                fontSize: 12.5,
-                fontWeight: FontWeight.w600,
-                color: Color(0xFFB8860B)),
-          ),
-        ],
+      child: InkWell(
+        borderRadius: BorderRadius.circular(8),
+        onTap: () => _ir(const CuentasCasaScreen()),
+        child: Row(
+          children: [
+            const Icon(Icons.home_rounded,
+                size: 16, color: Color(0xFFB8860B)),
+            const SizedBox(width: 6),
+            Text(
+              _cuentasCasa == 1
+                  ? 'Cuentas a la Casa activas: 1'
+                  : 'Cuentas a la Casa activas: $_cuentasCasa',
+              style: const TextStyle(
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w600,
+                  color: Color(0xFFB8860B)),
+            ),
+            const SizedBox(width: 4),
+            const Icon(Icons.chevron_right_rounded,
+                size: 16, color: Color(0xFFB8860B)),
+          ],
+        ),
       ),
     );
   }
@@ -1853,53 +1745,64 @@ class _AdminScreenState extends State<AdminScreen> {
     );
   }
 
-  /// Bloque 4 · Módulos: las 5 filas del mockup v2. Cada fila abre un
-  /// contenedor con las tarjetas de destino de siempre.
+  /// 1.14 (rediseño) · Módulos: 6 filas. Cada fila abre un
+  /// contenedor con las tarjetas de destino de siempre, agrupadas
+  /// en subsecciones. Las filas de las dos listas planas del
+  /// Bloque 2 viven ahora aquí (auditoría 1:1: ninguna función
+  /// se pierde y ninguna pantalla cambia por dentro).
   Widget _tarjetasModulos() {
     final modulos =
         <({IconData icono, Color tinte, String titulo, String resumen, int? badge, List<Widget> Function() tarjetas})>[
       (
         icono: Icons.attach_money_rounded,
         tinte: AppColores.exito,
-        titulo: 'Caja y dinero',
-        resumen: 'Arqueo · Cierre · Últimos gastos · Nómina · Historial',
+        titulo: 'Caja, Cobros y Nómina',
+        resumen: 'Arqueo · Cierre · Nómina · Adelantos',
         badge: null,
-        tarjetas: _tarjetasCaja,
+        tarjetas: _tarjetasModuloCaja,
       ),
       (
         icono: Icons.people_rounded,
         tinte: AppColores.info,
-        titulo: 'Clientes y equipo',
-        resumen: 'Usuarios · Por recuperar · Congelados · Papelera',
+        titulo: 'Clientes, Invitados y Comunicación',
+        resumen: 'Clientes · Invitados · Plantillas · Avisos',
         badge: _solicitudesInvitados.isEmpty
             ? null
             : _solicitudesInvitados.length,
-        tarjetas: _tarjetasClientes,
+        tarjetas: _tarjetasModuloClientes,
+      ),
+      (
+        icono: Icons.groups_rounded,
+        tinte: AppColores.naranja,
+        titulo: 'Equipo, Turnos y Permisos',
+        resumen: 'Entrenadores · Turnos · Permisos',
+        badge: null,
+        tarjetas: _tarjetasModuloEquipo,
       ),
       (
         icono: Icons.inventory_2_rounded,
         tinte: const Color(0xFFA855F7),
-        titulo: 'Suplementos y contenido',
-        resumen: 'Suplementos · Reservas · Reportes A++ · GymPedia',
+        titulo: 'Suplementos, Dosis y App Plus',
+        resumen: 'Suplementos · Botes y lotes · Plus · GymPedia',
         badge:
             _reservasSolicitadas.isEmpty ? null : _reservasSolicitadas.length,
-        tarjetas: _tarjetasSuplementosModulo,
+        tarjetas: _tarjetasModuloSuplementos,
+      ),
+      (
+        icono: Icons.price_change_rounded,
+        tinte: const Color(0xFF9AA3B2),
+        titulo: 'Precios, Tarifas y Configuración',
+        resumen: 'Precios · Tarifas · Ajustes · Pago base',
+        badge: null,
+        tarjetas: _tarjetasModuloPrecios,
       ),
       (
         icono: Icons.bar_chart_rounded,
         tinte: const Color(0xFF14B8A6),
-        titulo: 'Control y sistema',
-        resumen: 'Estadísticas · Auditoría · Anomalías · Sincronización',
+        titulo: 'Control, Auditoría y Sistema',
+        resumen: 'Estadísticas · Auditoría · Sync · Sistema',
         badge: null,
-        tarjetas: _tarjetasControl,
-      ),
-      (
-        icono: Icons.settings_rounded,
-        tinte: const Color(0xFF9AA3B2),
-        titulo: 'Configuración y datos',
-        resumen: 'Tipos de pago · Tarifas especiales · Datos bancarios',
-        badge: null,
-        tarjetas: _tarjetasConfig,
+        tarjetas: _tarjetasModuloControl,
       ),
     ];
     return Container(
@@ -1990,12 +1893,31 @@ class _AdminScreenState extends State<AdminScreen> {
   }
 
   // -- Módulo · Caja y dinero -------------------------------------------------
-  List<Widget> _tarjetasCaja() {
+  /// Subsección dentro de un módulo (versalitas, sin el margen
+  /// superior grande del título de bloque principal).
+  Widget _subModulo(String titulo) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(4, 16, 4, 8),
+      child: Text(
+        titulo,
+        style: TextStyle(
+          fontSize: 12,
+          fontWeight: FontWeight.w800,
+          letterSpacing: 1.6,
+          color: AppColores.textoSecundario(context),
+        ),
+      ),
+    );
+  }
+
+  // -- Módulo 1 · Caja, Cobros y Nómina --------------------------------------
+  List<Widget> _tarjetasModuloCaja() {
     final cajaTotal = (_caja['efectivo'] ?? 0) + (_caja['transferencia'] ?? 0);
     final netoHoy = cajaTotal - _gastosHoy;
     final pendTotal =
         _pend.fold<double>(0, (s, e) => s + (e['total'] as double? ?? 0));
     return [
+      _subModulo('COBROS Y CAJA'),
       _tarjetaFlujo(
         Icons.account_balance_wallet_rounded,
         'Arqueo de caja',
@@ -2011,6 +1933,18 @@ class _AdminScreenState extends State<AdminScreen> {
         () => _ir(_pantallaCierre()),
       ),
       _tarjetaFlujo(
+        Icons.handshake,
+        'Arqueo de entrega de efectivo',
+        'C1 · Liquidar por delta, nunca pendiente = 0',
+        () => _ir(const ArqueoEntregaScreen()),
+      ),
+      _tarjetaFlujo(
+        Icons.receipt_long,
+        'Centro de Compras y Extracto',
+        'E4 · Todo | Suplementos | Servicios, con subtotales',
+        () => _ir(const CentroComprasScreen()),
+      ),
+      _tarjetaFlujo(
         Icons.receipt_long_rounded,
         'Últimos gastos',
         'Hoy: ${fmtMonto(_gastosHoy)} CUP',
@@ -2018,12 +1952,6 @@ class _AdminScreenState extends State<AdminScreen> {
           getGastos: () => _gastos,
           onAgregarGasto: _agregarGasto,
         )),
-      ),
-      _tarjetaFlujo(
-        Icons.payments_rounded,
-        'Nómina del mes',
-        'Proyección: clientes pagados × 150 CUP',
-        () => _ir(const NominaScreen()),
       ),
       _tarjetaFlujo(
         Icons.history_outlined,
@@ -2043,12 +1971,45 @@ class _AdminScreenState extends State<AdminScreen> {
         'Este mes vs anterior',
         () => _ir(const ComparativaMensual()),
       ),
+      _tarjetaFlujo(
+        Icons.bar_chart,
+        'Ingresos por período',
+        'C5 · Plus como línea propia, sin doble conteo',
+        () => _ir(const IngresosPeriodoScreen()),
+      ),
+      _subModulo('NÓMINA'),
+      _tarjetaFlujo(
+        Icons.payments_rounded,
+        'Nómina del mes',
+        // 1.14: el pago base ya es configurable (módulo 5), no 150 fijo.
+        'Proyección: clientes pagados × $_pagoEntrenador CUP',
+        () => _ir(const NominaScreen()),
+      ),
+      _tarjetaFlujo(
+        Icons.fact_check,
+        'Nómina pre-calculada',
+        'C2 · Solo lectura, vista previa hasta el 31',
+        () => _ir(const NominaPrecalculadaScreen()),
+      ),
+      _tarjetaFlujo(
+        Icons.payments,
+        'Adelantos',
+        'C3 · Lista con filtro por mes',
+        () => _ir(const AdelantosListaScreen()),
+      ),
+      _tarjetaFlujo(
+        Icons.request_page,
+        'Solicitudes de adelanto',
+        'F3 · Aprobar (Nómina / Pendiente) o rechazar',
+        () => _ir(const SolicitudesAdelantoScreen()),
+      ),
     ];
   }
 
-  // -- Módulo · Clientes y equipo ---------------------------------------------
-  List<Widget> _tarjetasClientes() {
+  // -- Módulo 2 · Clientes, Invitados y Comunicación --------------------------
+  List<Widget> _tarjetasModuloClientes() {
     return [
+      _subModulo('CLIENTES'),
       // v1.6.0 (pedido de Jc): Entrenadores, Clientes e Invitados
       // viven en una misma zona «Usuarios» (ControlAccesoScreen con
       // la bandeja de Invitados como tercera pestaña). Ya no hay
@@ -2061,15 +2022,6 @@ class _AdminScreenState extends State<AdminScreen> {
             : 'Entrenadores, clientes e invitados · '
                 '${_solicitudesInvitados.length} solicitud(es) por atender',
         () => _ir(const ControlAccesoScreen()),
-      ),
-      // v1.6.0 (Jc): UNA sola puerta «Turnos» — el hub agrupa el
-      // plan semanal y los ajustes por fecha con la línea de
-      // precedencia (antes eran dos entradas sueltas y confusas).
-      _tarjetaFlujo(
-        Icons.calendar_month_rounded,
-        'Turnos',
-        'Plan semanal y ajustes por fecha',
-        () => _ir(const TurnosHubScreen()),
       ),
       _tarjetaFlujo(
         Icons.warning_amber_rounded,
@@ -2084,23 +2036,116 @@ class _AdminScreenState extends State<AdminScreen> {
         () => _ir(const CongeladosScreen()),
       ),
       _tarjetaFlujo(
+        Icons.delete_outline_rounded,
+        'Papelera',
+        'Clientes eliminados (recuperables)',
+        () => _ir(const PapeleraScreen()),
+      ),
+      _tarjetaFlujo(
+        Icons.home_rounded,
+        'Cuentas a la Casa',
+        'B5 · Precio 0, solo el dueño las otorga',
+        () => _ir(const CuentasCasaScreen()),
+      ),
+      _tarjetaFlujo(
+        Icons.event,
+        'Vencimientos próximos',
+        'D3 · Vencidos + próximos 7 días, con acción',
+        () => _ir(const VencimientosProximosScreen()),
+      ),
+      _tarjetaFlujo(
         Icons.cake_rounded,
         'Cumpleaños',
         'Próximos 30 días',
         () => _ir(const CumpleanosMes()),
       ),
       _tarjetaFlujo(
-        Icons.delete_outline_rounded,
-        'Papelera',
-        'Clientes eliminados (recuperables)',
-        () => _ir(const PapeleraScreen()),
+        Icons.cake,
+        'Cumpleaños del mes',
+        'D2 · Regalo en un toque desde la ficha',
+        () => _ir(const CumpleanosScreen()),
+      ),
+      _subModulo('INVITADOS'),
+      _tarjetaFlujo(
+        Icons.group,
+        'Solicitudes de invitados',
+        'B6 · Por atender',
+        () => _ir(const InvitadosScreen()),
+      ),
+      _subModulo('COMUNICACIÓN'),
+      _tarjetaFlujo(
+        Icons.message,
+        'Plantillas de mensajes',
+        'G1 · Solo variables blancas, aviso si la sync es vieja',
+        () => _ir(const PlantillasScreen()),
+      ),
+      _tarjetaFlujo(
+        Icons.campaign,
+        'Avisos para entrenadores',
+        'F4 · PopUp en el Home de cada entrenador',
+        () => _ir(const AvisosEntrenadorScreen()),
+      ),
+      _tarjetaFlujo(
+        Icons.notifications,
+        'Recordatorios automáticos',
+        'G2 · Hoy, con anti-duplicado; masivos solo en tu teléfono',
+        () => _ir(const RecordatoriosScreen()),
+      ),
+      _tarjetaFlujo(
+        Icons.public_rounded,
+        'Información pública',
+        'Redes, contactos y precios para invitados',
+        () => _ir(const InfoPublicaScreen()),
       ),
     ];
   }
 
-  // -- Módulo · Suplementos y contenido ---------------------------------------
-  List<Widget> _tarjetasSuplementosModulo() {
+  // -- Módulo 3 · Equipo, Turnos y Permisos -----------------------------------
+  List<Widget> _tarjetasModuloEquipo() {
     return [
+      _subModulo('EQUIPO'),
+      _tarjetaFlujo(
+        Icons.manage_accounts,
+        'Entrenadores y usuarios APK',
+        'B4 · Crear entrenador y compartir credenciales',
+        () => _ir(const UsuariosScreen()),
+      ),
+      _subModulo('TURNOS'),
+      // v1.6.0 (Jc): UNA sola puerta «Turnos» — el hub agrupa el
+      // plan semanal y los ajustes por fecha con la línea de
+      // precedencia (antes eran dos entradas sueltas y confusas).
+      _tarjetaFlujo(
+        Icons.calendar_month_rounded,
+        'Turnos',
+        'Plan semanal y ajustes por fecha',
+        () => _ir(const TurnosHubScreen()),
+      ),
+      _tarjetaFlujo(
+        Icons.schedule,
+        'Turnos y horarios',
+        'H4 · Enlaza el editor único de Turnos',
+        () => _ir(const TurnosPanelScreen()),
+      ),
+      _tarjetaFlujo(
+        Icons.schedule_rounded,
+        'Horario del Gym',
+        'Configurar turnos',
+        () => _ir(const HorarioGym()),
+      ),
+      _subModulo('PERMISOS'),
+      _tarjetaFlujo(
+        Icons.security,
+        'Permisos explicados',
+        'B2 · Qué permite cada permiso, en sencillo',
+        () => mostrarPermisosExplicados(context),
+      ),
+    ];
+  }
+
+  // -- Módulo 4 · Suplementos, Dosis y App Plus -------------------------------
+  List<Widget> _tarjetasModuloSuplementos() {
+    return [
+      _subModulo('SUPLEMENTOS'),
       _tarjetaFlujo(
         Icons.inventory_2_rounded,
         'Suplementos',
@@ -2110,13 +2155,25 @@ class _AdminScreenState extends State<AdminScreen> {
         )),
       ),
       _tarjetaFlujo(
-        Icons.inbox_rounded,
-        'Reservas',
-        _reservasSolicitadas.isEmpty
-            ? 'Bandeja de reservas de los clientes'
-            : '${_reservasSolicitadas.length} por confirmar',
-        () => _ir(const ReservasScreen()),
+        Icons.fitness_center,
+        'Catálogo de suplementos',
+        'E2 · Con foto, precio y margen',
+        () => _ir(const SuplementosScreen()),
       ),
+      _tarjetaFlujo(
+        Icons.warning_amber,
+        'Productos sin foto o sin precio',
+        'E5 · Señalados para completar el catálogo',
+        () => _ir(const SinFotoPrecioScreen()),
+      ),
+      _subModulo('DOSIS'),
+      _tarjetaFlujo(
+        Icons.inventory_2,
+        'Botes y lotes',
+        'E3 · Desde Administración',
+        () => _ir(const ServiciosAdminScreen()),
+      ),
+      _subModulo('APP PLUS'),
       _tarjetaFlujo(
         Icons.star_rounded,
         'Reportes App Plus',
@@ -2128,23 +2185,85 @@ class _AdminScreenState extends State<AdminScreen> {
         () => _ir(const ReportesPlusScreen()),
       ),
       _tarjetaFlujo(
+        Icons.inbox_rounded,
+        'Reservas',
+        _reservasSolicitadas.isEmpty
+            ? 'Bandeja de reservas de los clientes'
+            : '${_reservasSolicitadas.length} por confirmar',
+        () => _ir(const ReservasScreen()),
+      ),
+      _tarjetaFlujo(
         Icons.menu_book_rounded,
         'GymPedia',
         'Artículos para la app de clientes',
         () => _ir(const GympediaScreen()),
       ),
+    ];
+  }
+
+  // -- Módulo 5 · Precios, Tarifas y Configuración ----------------------------
+  List<Widget> _tarjetasModuloPrecios() {
+    return [
+      _subModulo('PRECIOS Y TARIFAS'),
       _tarjetaFlujo(
-        Icons.public_rounded,
-        'Información pública',
-        'Redes, contactos y precios para invitados',
-        () => _ir(const InfoPublicaScreen()),
+        Icons.payments_outlined,
+        'Tipos de pago',
+        '${_tipos.length} tipos configurados',
+        () => _ir(_pantallaAjustes(seccion: 'tipos')),
+      ),
+      _tarjetaFlujo(
+        Icons.price_change_rounded,
+        'Tarifas especiales',
+        'Mensualidades, diario, tasa USD',
+        () => _ir(_pantallaAjustes(seccion: 'precios')),
+      ),
+      _tarjetaFlujo(
+        Icons.local_offer,
+        'Tarifas',
+        'D1 + D6 · Estándar y especiales, otorgar y revocar',
+        () => _ir(const TarifasScreen()),
+      ),
+      _tarjetaFlujo(
+        Icons.tune,
+        'Precios por método',
+        'C6 · Única fuente de precios',
+        () => _ir(const PreciosMetodoScreen()),
+      ),
+      // 1.14 (rediseño): _elegirPagoEntrenador llevaba huérfano
+      // desde la v1.6.0 (sin botón). Vuelve como «Pago base a
+      // entrenadores»: el mismo diálogo de siempre.
+      _tarjetaFlujo(
+        Icons.payments_rounded,
+        'Pago base a entrenadores',
+        '$_pagoEntrenador CUP por cliente que pagó',
+        () => _elegirPagoEntrenador(),
+      ),
+      _subModulo('CONFIGURACIÓN'),
+      _tarjetaFlujo(
+        Icons.settings,
+        'Ajustes del gym',
+        'H1 · Enlaza C6 y D6; edita métodos y textos',
+        () => _ir(const AjustesGymScreen()),
+      ),
+      _tarjetaFlujo(
+        Icons.account_balance_rounded,
+        'Datos bancarios',
+        'Tarjetas y móvil de confirmación',
+        () => _ir(_pantallaAjustes(seccion: 'bancarios')),
+      ),
+      _tarjetaFlujo(
+        Icons.book,
+        'Registro mensual',
+        'H2 · Visor + copiar resumen en Markdown',
+        () => _ir(const RegistroMensualScreen()),
       ),
     ];
   }
 
-  // -- Módulo · Control y sistema ---------------------------------------------
-  List<Widget> _tarjetasControl() {
+  // -- Módulo 6 · Control, Auditoría y Sistema --------------------------------
+  List<Widget> _tarjetasModuloControl() {
     return [
+      _subModulo('CONTROL'),
       // Estado y último error: las tarjetas compactas de siempre.
       _tarjetaCompacta(
         _pendientesSubir > 0
@@ -2176,18 +2295,6 @@ class _AdminScreenState extends State<AdminScreen> {
         )),
       ),
       _tarjetaFlujo(
-        Icons.fact_check_rounded,
-        'Auditoría',
-        'Quién hizo qué y cuándo',
-        () => _ir(const AuditoriaScreen()),
-      ),
-      _tarjetaFlujo(
-        Icons.radar_rounded,
-        'Anomalías',
-        'Detección silenciosa (solo dueño)',
-        () => _ir(const AuditoriaSilenciosaScreen()),
-      ),
-      _tarjetaFlujo(
         Icons.sync_rounded,
         'Sincronización',
         _pendientesSubir > 0
@@ -2196,47 +2303,54 @@ class _AdminScreenState extends State<AdminScreen> {
         () => _ir(const SeccionDiagnosticoScreen()),
       ),
       _tarjetaFlujo(
+        Icons.sync,
+        'Estado de sync',
+        'F4 · Contadores y fechas, no contenidos',
+        () => _ir(const EstadoSyncScreen()),
+      ),
+      _tarjetaFlujo(
         Icons.warning_amber_rounded,
         'Incidencias',
         'Errores que requieren atención',
-        () {
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (_) => const ListaIncidenciasScreen(),
-            ),
-          );
-        },
-      ),
-    ];
-  }
-
-  // -- Módulo · Configuración y datos -----------------------------------------
-  List<Widget> _tarjetasConfig() {
-    return [
-      _tarjetaFlujo(
-        Icons.payments_outlined,
-        'Tipos de pago',
-        '${_tipos.length} tipos configurados',
-        () => _ir(_pantallaAjustes(seccion: 'tipos')),
+        () => _ir(const ListaIncidenciasScreen()),
       ),
       _tarjetaFlujo(
-        Icons.price_change_rounded,
-        'Tarifas especiales',
-        'Mensualidades, diario, tasa USD',
-        () => _ir(_pantallaAjustes(seccion: 'precios')),
+        Icons.sync_problem,
+        'Errores de sync',
+        'F3 · En sencillo, sin «Descartar» para ops de datos',
+        () => _ir(const ErroresSyncPanelScreen()),
+      ),
+      _subModulo('AUDITORÍA'),
+      _tarjetaFlujo(
+        Icons.fact_check_rounded,
+        'Auditoría',
+        'Quién hizo qué y cuándo',
+        () => _ir(const AuditoriaScreen()),
       ),
       _tarjetaFlujo(
-        Icons.account_balance_rounded,
-        'Datos bancarios',
-        'Tarjetas y móvil de confirmación',
-        () => _ir(_pantallaAjustes(seccion: 'bancarios')),
+        Icons.history,
+        'Auditoría detallada',
+        'F1 · General y por persona, con filtros',
+        () => _ir(const AuditoriaPanelScreen()),
       ),
       _tarjetaFlujo(
-        Icons.schedule_rounded,
-        'Horario del Gym',
-        'Configurar turnos',
-        () => _ir(const HorarioGym()),
+        Icons.radar_rounded,
+        'Anomalías',
+        'Detección silenciosa (solo dueño)',
+        () => _ir(const AuditoriaSilenciosaScreen()),
+      ),
+      _subModulo('SISTEMA'),
+      _tarjetaFlujo(
+        Icons.build,
+        'Mantenimiento',
+        'F5 · Lista cerrada, con confirmación y auditoría',
+        () => _ir(const MantenimientoScreen()),
+      ),
+      _tarjetaFlujo(
+        Icons.backup,
+        'Copia de seguridad',
+        'H5 · Exportar solo, copia en frío sin fotos',
+        () => _ir(const CopiaSeguridadScreen()),
       ),
       _tarjetaFlujo(
         Icons.file_download_rounded,
