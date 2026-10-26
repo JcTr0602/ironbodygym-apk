@@ -872,6 +872,7 @@ class _NominaScreenState extends State<NominaScreen> {
                     mes: pref,
                     entrenadorId: persona.id,
                     entrenadorNombre: persona.nombre,
+                    entrenadorTelegramId: persona.telegramId,
                   );
                   if (mounted) {
                     ScaffoldMessenger.of(context).showSnackBar(

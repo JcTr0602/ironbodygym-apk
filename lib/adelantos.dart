@@ -237,20 +237,23 @@ class AdelantosService {
   /// op pendiente de este teléfono).
   Future<bool> nominaLiquidada(
       String mes, String entrenadorId) async {
+    // 1.14 (D17): la liquidación puede venir keyada por id APK/UID
+    // o consultarse por telegram_id (adelantos aprobados guardan
+    // el telegram_id como `entrenador`). Se compara por ambas
+    // columnas, en espejo y en ops pendientes.
+    bool coincide(Map<String, dynamic> fila) =>
+        '${fila['mes']}' == mes &&
+        ('${fila['entrenador']}' == entrenadorId ||
+            '${fila['entrenador_telegram_id']}' == entrenadorId);
     for (final l in await _db.allMirror('nomina_liquidada')) {
-      if ('${l['mes']}' == mes && '${l['entrenador']}' == entrenadorId) {
-        return true;
-      }
+      if (coincide(l)) return true;
     }
     for (final op in await _db.pendingOps()) {
       if (op['tipo'] != 'liquidar_nomina') continue;
       try {
         final p = jsonDecode(op['payload'] as String)
             as Map<String, dynamic>;
-        if ('${p['mes']}' == mes &&
-            '${p['entrenador']}' == entrenadorId) {
-          return true;
-        }
+        if (coincide(p)) return true;
       } catch (_) {}
     }
     return false;
@@ -336,11 +339,18 @@ class AdelantosService {
     required String mes,
     required String entrenadorId,
     required String entrenadorNombre,
+    int? entrenadorTelegramId,
   }) =>
       _queueYEmpujar('liquidar_nomina', {
         'mes': mes,
         'entrenador': entrenadorId,
         'entrenador_nombre': entrenadorNombre,
+        // 1.14 (D17): el servidor guarda el telegram_id en la
+        // liquidación para que el chequeo de mes liquidado
+        // funcione también desde la vía de aprobación (que solo
+        // conoce el telegram_id).
+        if (entrenadorTelegramId != null)
+          'entrenador_telegram_id': entrenadorTelegramId,
       });
 
   /// El mes en curso ('YYYY-MM') en hora de La Habana.
