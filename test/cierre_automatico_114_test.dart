@@ -95,4 +95,40 @@ void main() {
         ),
         isFalse);
   });
+
+  test('día imposible (2026-10-33) no cierra aunque normalice a lunes',
+      () {
+    // Sin la validación, DateTime normaliza a lunes 2026-11-02 y
+    // cerraría con el horario de ese lunes.
+    expect(cierra('2026-10-33', 'Mañana', DateTime(2026, 11, 2, 13, 0)),
+        isFalse);
+  });
+
+  test('hora de cierre fuera de rango (25:00) no cierra', () {
+    final hor = <Map<String, dynamic>>[
+      {'dia_semana': 1, 'abierto': true, 'cierre_1': '12:00', 'cierre_2': '25:00'},
+    ];
+    expect(
+        debeAutoCerrarTurno(
+          fechaTurno: '2026-10-26',
+          turno: 'Tarde',
+          horarios: hor,
+          ahora: DateTime(2026, 10, 27, 2, 0),
+        ),
+        isFalse);
+  });
+
+  test('minuto de cierre fuera de rango (21:60) no cierra', () {
+    final hor = <Map<String, dynamic>>[
+      {'dia_semana': 1, 'abierto': true, 'cierre_1': '12:00', 'cierre_2': '21:60'},
+    ];
+    expect(
+        debeAutoCerrarTurno(
+          fechaTurno: '2026-10-26',
+          turno: 'Tarde',
+          horarios: hor,
+          ahora: DateTime(2026, 10, 26, 23, 0),
+        ),
+        isFalse);
+  });
 }
