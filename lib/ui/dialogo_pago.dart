@@ -64,6 +64,36 @@ String _etiquetaPeriodo(PeriodoSel s) {
   }
 }
 
+/// Métodos aceptados efectivos (panel 1.14, Luna + Kimi; pura y
+/// probada): parsea el ajuste H1 (lista o texto por comas) y
+/// devuelve (efectivo, transferencia). Sin dato o lista vacía →
+/// ambos (no bloquear un cobro). Si el ajuste trae valores pero
+/// NINGUNO es reconocido (p. ej. 'tarjeta', o 'transfer' en vez de
+/// 'transferencia'), se ofrecen ambos: un ajuste mal escrito no
+/// puede dejar el diálogo sin método visible (antes quedaba
+/// 'transferencia' oculto como método por defecto).
+({bool efectivo, bool transferencia}) metodosAceptadosEfectivos(
+    Object? metodosRaw) {
+  final metodosAceptados = metodosRaw is List
+      ? metodosRaw.map((m) => '$m'.trim().toLowerCase()).toSet()
+      : metodosRaw is String
+          ? metodosRaw
+              .split(',')
+              .map((s) => s.trim().toLowerCase())
+              .where((s) => s.isNotEmpty)
+              .toSet()
+          : <String>{};
+  if (metodosAceptados.isEmpty) {
+    return (efectivo: true, transferencia: true);
+  }
+  final efectivo = metodosAceptados.contains('efectivo');
+  final transferencia = metodosAceptados.contains('transferencia');
+  if (!efectivo && !transferencia) {
+    return (efectivo: true, transferencia: true);
+  }
+  return (efectivo: efectivo, transferencia: transferencia);
+}
+
 /// Muestra el diálogo de pago para [cliente].
 /// Devuelve el payload listo para encolar, o null si se canceló.
 Future<Map<String, dynamic>?> pagoDialogo(
@@ -74,20 +104,9 @@ Future<Map<String, dynamic>?> pagoDialogo(
   // Antes el ajuste se guardaba pero nadie lo leía y el diálogo
   // ofrecía transferencia siempre. Sin dato (o lista vacía) se
   // ofrecen ambos para no bloquear un cobro.
-  final metodosRaw = aj['metodos_aceptados'];
-  final metodosAceptados = metodosRaw is List
-      ? metodosRaw.map((m) => '$m'.trim().toLowerCase()).toSet()
-      : metodosRaw is String
-          ? metodosRaw
-              .split(',')
-              .map((s) => s.trim().toLowerCase())
-              .where((s) => s.isNotEmpty)
-              .toSet()
-          : <String>{'efectivo', 'transferencia'};
-  final aceptaEfectivo = metodosAceptados.isEmpty ||
-      metodosAceptados.contains('efectivo');
-  final aceptaTransfer = metodosAceptados.isEmpty ||
-      metodosAceptados.contains('transferencia');
+  final metodos = metodosAceptadosEfectivos(aj['metodos_aceptados']);
+  final aceptaEfectivo = metodos.efectivo;
+  final aceptaTransfer = metodos.transferencia;
   if (!context.mounted) return null;
 
   // v1.0.16: tipos dinámicos; menores ven precio reducido automáticamente

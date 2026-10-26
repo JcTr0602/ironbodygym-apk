@@ -63,4 +63,27 @@ void main() {
       expect(v, 3500);
     });
   });
+
+  group('montoCobradoCupOp pago_mensual con periodo tipo: (panel 1.14)', () {
+    test('tipo:oferta50 en efectivo vale el monto real, no 2000', () async {
+      final v = await montoCobradoCupOp(_op('pago_mensual', {
+        'periodo': 'tipo:oferta50',
+        'meses': 1,
+        'monto': 1000,
+        'metodo': 'efectivo',
+      }));
+      expect(v, 1000);
+    });
+
+    test('tipo:oferta50 por transferencia también vale el monto real',
+        () async {
+      final v = await montoCobradoCupOp(_op('pago_mensual', {
+        'periodo': 'tipo:oferta50',
+        'meses': 1,
+        'monto': 1000,
+        'metodo': 'transferencia',
+      }));
+      expect(v, 1000);
+    });
+  });
 }

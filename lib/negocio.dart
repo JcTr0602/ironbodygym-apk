@@ -864,6 +864,9 @@ Future<double> montoCobradoCupOp(Map<String, dynamic> op) async {
   double mensualidad(String periodo, int meses, String metodo,
       double? montoManual, String? tipoId) {
     if (periodo == 'personalizado') return montoManual ?? 0;
+    // Panel 1.14 (Luna + Kimi): igual que montoEfectivoOp — un
+    // periodo 'tipo:' usa el monto real del payload, no el estándar.
+    if (periodo.startsWith('tipo:')) return montoManual ?? 0;
     if (periodo == 'semanal') return pr['semanal']!;
     if (periodo == 'quincenal') return pr['quincenal']!;
     // v1.3.1: tarifa de menores (igual que el servidor).
