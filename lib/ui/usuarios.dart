@@ -26,6 +26,18 @@ class UsuariosScreen extends StatefulWidget {
   State<UsuariosScreen> createState() => _UsuariosScreenState();
 }
 
+/// Validación para crear un usuario APK (1.14, M6.9): el nombre
+/// se recorta (un nombre de solo espacios no vale) y la
+/// contraseña exige mínimo 6 caracteres, sin recortar (los
+/// espacios cuentan). Devuelve el mensaje de error o null si
+/// vale. La pantalla encola 'admin_usuario' solo si vale.
+String? validarNuevoUsuarioApk(String nombre, String password) {
+  if (nombre.trim().isEmpty || password.length < 6) {
+    return 'Nombre vacío o contraseña muy corta (mín. 6)';
+  }
+  return null;
+}
+
 class _UsuariosScreenState extends State<UsuariosScreen> {
   List<Map<String, dynamic>> _usuarios = [];
   bool _cargando = true;
@@ -351,9 +363,11 @@ Hola $username, estas son tus credenciales para la app del gym:
     if (ok != true || !mounted) return;
     final nombre = nombreCtrl.text.trim();
     final pass = passCtrl.text;
-    if (nombre.isEmpty || pass.length < 6) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('Nombre vacío o contraseña muy corta (mín. 6)')));
+    // 1.14 (M6.9): la regla vive en validarNuevoUsuarioApk.
+    final error = validarNuevoUsuarioApk(nombre, pass);
+    if (error != null) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(error)));
       return;
     }
     await LocalDb.instance.queueOp(
