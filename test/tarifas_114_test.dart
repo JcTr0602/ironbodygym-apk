@@ -100,4 +100,60 @@ void main() {
     final res = aplicarOpsPendientesTarifas(fusionadas, ops);
     expect(res.single['activa'], 1);
   });
+
+  test('upsert viejo no resucita una fila desactivada en local', () {
+    // Regresión Fix 4 (bloque2_test): otorgar dos veces seguidas
+    // deja el primer upsert en cola y la fila vieja desactivada
+    // en local; el overlay no debe volverla activa.
+    final fusionadas = [
+      {
+        'id': 't1',
+        'cliente_id': 900002,
+        'activa': 0,
+        'monto_efectivo': 1000,
+        'actualizada_ts': '2026-10-26T10:00:01',
+      },
+    ];
+    final ops = [
+      {
+        'tipo': 'upsert_tarifa_especial',
+        'payload': jsonEncode({
+          'id': 't1',
+          'cliente_id': 900002,
+          'monto_efectivo': 1000,
+          'activa': 1,
+        }),
+      },
+    ];
+    final res = aplicarOpsPendientesTarifas(fusionadas, ops);
+    expect(res.single['activa'], 0);
+  });
+
+  test('upsert pendiente sí refresca valores de una fila activa', () {
+    // El escenario Fix 4 original sigue valiendo: espejo más
+    // reciente no tapa el cambio local sin subir.
+    final fusionadas = [
+      {
+        'id': 't1',
+        'cliente_id': 145,
+        'activa': 1,
+        'monto_efectivo': 1200,
+        'actualizada_ts': '2026-10-26T10:00:01',
+      },
+    ];
+    final ops = [
+      {
+        'tipo': 'upsert_tarifa_especial',
+        'payload': jsonEncode({
+          'id': 't1',
+          'cliente_id': 145,
+          'monto_efectivo': 1000,
+          'activa': 1,
+        }),
+      },
+    ];
+    final res = aplicarOpsPendientesTarifas(fusionadas, ops);
+    expect(res.single['activa'], 1);
+    expect(res.single['monto_efectivo'], 1000);
+  });
 }

@@ -140,7 +140,20 @@ List<Map<String, dynamic>> aplicarOpsPendientesTarifas(
     }
     final f = porId[id];
     if (f != null) {
+      // 1.14 (Fix 4, corrección): otorgar una tarifa nueva
+      // desactiva la previa con una escritura local DIRECTA, sin
+      // encolar revoke (el servidor la inactiva al aplicar el
+      // upsert nuevo). Un upsert pendiente VIEJO de esa fila no
+      // debe resucitarla: con dos otorgamientos seguidos, el
+      // primero seguía en cola y volvía activa a la tarifa vieja,
+      // con lo que tarifaActivaPara devolvía la equivocada
+      // (bloque2_test en rojo). El estado activa lo mandan las
+      // escrituras locales y los revoke; el overlay solo refresca
+      // valores. Si el espejo trae una desactivación más reciente
+      // que la op pendiente, se muestra el espejo hasta subir.
+      final estabaInactiva = ((f['activa'] as num?)?.toInt() ?? 0) == 0;
       for (final k in camposUpsert) {
+        if (k == 'activa' && estabaInactiva) continue;
         if (p.containsKey(k)) f[k] = p[k];
       }
     } else {
