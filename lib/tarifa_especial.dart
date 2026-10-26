@@ -27,13 +27,22 @@ const kSeedTarifaYennifer = 'seed_esp_145';
 const kSeedTarifaKevin = 'seed_esp_70';
 
 /// PURO (testeable sin BD): fusiona la tabla local de tarifas con
-/// el espejo bajado (D6, Fase A 2026-10-25). El espejo (verdad del
-/// servidor) gana por id: lo otorgado/revocado en otro teléfono
-/// aparece aquí. Las filas inactivas del espejo SE conservan (no
-/// como en recordatorios): una tarifa revocada debe seguir
-/// contando como «algún registro» para que el fallback legacy no
-/// resucite. El historial del espejo llega como lista JSON y se
-/// normaliza a texto JSON, como lo guarda la tabla local.
+/// el espejo bajado (D6, Fase A 2026-10-25). El espejo gana por id
+/// SALVO que la fila local sea más reciente: lo otorgado/revocado
+/// en otro teléfono aparece aquí, pero un cambio local aún sin
+/// subir (p. ej. una revocación offline) no lo pisa el espejo
+/// viejo. Corrección del panel 1.10: antes el espejo ganaba
+/// siempre y una revocación offline volvía a aparecer activa
+/// hasta que la op subiera y el espejo corregido bajara. La
+/// comparación es lexicográfica sobre actualizada_ts ISO; el
+/// espejo sin ts ('') se trata como el más viejo, lo cual es
+/// seguro porque las filas locales solo son propias o semillas
+/// (los ids son UUID salvo las semillas idénticas).
+/// Las filas inactivas del espejo SE conservan (no como en
+/// recordatorios): una tarifa revocada debe seguir contando como
+/// «algún registro» para que el fallback legacy no resucite. El
+/// historial del espejo llega como lista JSON y se normaliza a
+/// texto JSON, como lo guarda la tabla local.
 List<Map<String, dynamic>> fusionarTarifasEspeciales(
     List<Map<String, dynamic>> locales,
     List<Map<String, dynamic>> espejo) {
@@ -44,6 +53,13 @@ List<Map<String, dynamic>> fusionarTarifasEspeciales(
   for (final e in espejo) {
     final id = '${e['id'] ?? ''}';
     if (id.isEmpty) continue;
+    final local = porId[id];
+    if (local != null &&
+        '${local['actualizada_ts'] ?? ''}'
+                .compareTo('${e['actualizada_ts'] ?? ''}') >
+            0) {
+      continue;
+    }
     final hist = e['historial'];
     porId[id] = {
       'id': id,
@@ -201,6 +217,21 @@ Future<String> otorgarTarifaEspecial({
   final id = const Uuid().v4();
   final ts = isoHabana(ahoraHabana());
   final desde = vigenteDesde ?? hoyHabanaIso();
+  // Corrección panel 1.10 (MEDIO): una previa activa que solo vive
+  // en el espejo (otorgada en otro teléfono) también debe dejar de
+  // mostrarse activa aquí. El servidor ya la inactiva al aplicar
+  // este upsert, así que NO se encola un revoke extra (si el
+  // upsert se rechazara, la vieja quedaría revocada por error):
+  // basta una copia local inactiva, que la fusión respeta por ser
+  // más reciente que el espejo viejo.
+  final fusionadasPrevias = await _todasFusionadas();
+  final previasEspejo = [
+    for (final f in fusionadasPrevias)
+      if ((f['cliente_id'] as num?)?.toInt() == clienteId &&
+          '${f['periodo']}' == periodo &&
+          ((f['activa'] as num?)?.toInt() ?? 0) == 1)
+        f,
+  ];
   await db.transaction((txn) async {
     final previas = await txn.query('tarifa_especial',
         where: 'cliente_id=? AND periodo=? AND activa=1',
@@ -216,6 +247,34 @@ Future<String> otorgarTarifaEspecial({
           {'activa': 0, 'historial': hist, 'actualizada_ts': ts},
           where: 'id=?',
           whereArgs: [p['id']]);
+    }
+    for (final f in previasEspejo) {
+      final fid = '${f['id']}';
+      final yaLocal = await txn.query('tarifa_especial',
+          where: 'id=?', whereArgs: [fid]);
+      if (yaLocal.isNotEmpty) continue;
+      final hist = historialAppend(f['historial'] as String?, {
+        'evento': 'inactivada_por_nueva',
+        'en': ts,
+        'nueva_id': id,
+      });
+      await txn.insert('tarifa_especial', {
+        'id': fid,
+        'cliente_id': clienteId,
+        'nombre': '${f['nombre'] ?? ''}',
+        'monto_efectivo': (f['monto_efectivo'] as num?)?.toDouble(),
+        'monto_transferencia':
+            (f['monto_transferencia'] as num?)?.toDouble(),
+        'periodo': periodo,
+        'vigente_desde': f['vigente_desde'],
+        'vigente_hasta': f['vigente_hasta'],
+        'motivo': '${f['motivo'] ?? ''}',
+        'otorgado_por': (f['otorgado_por'] as num?)?.toInt(),
+        'activa': 0,
+        'historial': hist,
+        'creada_ts': '${f['creada_ts'] ?? ts}',
+        'actualizada_ts': ts,
+      });
     }
     await txn.insert('tarifa_especial', {
       'id': id,
@@ -297,20 +356,59 @@ Future<void> revocarTarifaEspecial({
 }) async {
   final db = await LocalDb.instance.db;
   final ts = isoHabana(ahoraHabana());
+  // Corrección panel 1.10 (BLOQUEANTE): antes, si la tarifa solo
+  // vivía en el espejo (otorgada en otro teléfono), esta función
+  // retornaba sin encolar nada y la UI se cerraba sin error, pero
+  // la tarifa seguía activa en el servidor. Ahora se crea una
+  // copia local inactiva y SÍ se encola la revocación; el servidor
+  // la aplica aunque en este teléfono no hubiera fila local.
+  // Solo si el id no existe ni local ni en el espejo se retorna
+  // (id inexistente de verdad, no una tarifa del espejo).
+  final fusionadas = await _todasFusionadas();
+  final filaEspejo = fusionadas.firstWhere((f) => '${f['id']}' == id,
+      orElse: () => <String, dynamic>{});
   await db.transaction((txn) async {
     final rows =
         await txn.query('tarifa_especial', where: 'id=?', whereArgs: [id]);
-    if (rows.isEmpty) return;
-    final hist = historialAppend(rows.first['historial'] as String?, {
-      'evento': 'revocada',
-      'en': ts,
-      'motivo': motivo,
-    });
-    await txn.update(
-        'tarifa_especial',
-        {'activa': 0, 'historial': hist, 'actualizada_ts': ts},
-        where: 'id=?',
-        whereArgs: [id]);
+    if (rows.isEmpty) {
+      if (filaEspejo.isEmpty) return;
+      final hist = historialAppend(filaEspejo['historial'] as String?, {
+        'evento': 'revocada',
+        'en': ts,
+        'motivo': motivo,
+      });
+      await txn.insert('tarifa_especial', {
+        'id': id,
+        'cliente_id':
+            (filaEspejo['cliente_id'] as num?)?.toInt() ?? 0,
+        'nombre': '${filaEspejo['nombre'] ?? ''}',
+        'monto_efectivo':
+            (filaEspejo['monto_efectivo'] as num?)?.toDouble(),
+        'monto_transferencia':
+            (filaEspejo['monto_transferencia'] as num?)?.toDouble(),
+        'periodo': '${filaEspejo['periodo'] ?? 'mensual'}',
+        'vigente_desde': filaEspejo['vigente_desde'],
+        'vigente_hasta': filaEspejo['vigente_hasta'],
+        'motivo': '${filaEspejo['motivo'] ?? ''}',
+        'otorgado_por':
+            (filaEspejo['otorgado_por'] as num?)?.toInt(),
+        'activa': 0,
+        'historial': hist,
+        'creada_ts': '${filaEspejo['creada_ts'] ?? ts}',
+        'actualizada_ts': ts,
+      });
+    } else {
+      final hist = historialAppend(rows.first['historial'] as String?, {
+        'evento': 'revocada',
+        'en': ts,
+        'motivo': motivo,
+      });
+      await txn.update(
+          'tarifa_especial',
+          {'activa': 0, 'historial': hist, 'actualizada_ts': ts},
+          where: 'id=?',
+          whereArgs: [id]);
+    }
     await LocalDb.instance.queueOp(
       opUuid: const Uuid().v4(),
       tipo: 'revoke_tarifa_especial',

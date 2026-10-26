@@ -17,6 +17,7 @@ import 'package:flutter/material.dart';
 import '../auth.dart';
 import '../localdb.dart';
 import '../negocio.dart';
+import '../sync.dart';
 import '../tarifa_especial.dart';
 import '../tiempo.dart';
 import 'componentes.dart';
@@ -286,6 +287,17 @@ Future<void> _formularioTarifa(
       desdeCtrl.text = '${previa['vigente_desde'] ?? hoyHabanaIso()}';
       hastaCtrl.text = '${previa['vigente_hasta'] ?? ''}';
       motivoCtrl.text = '${previa['motivo'] ?? ''}';
+    } else {
+      // Corrección panel 1.10 (BAJO): sin previa, el formulario
+      // es «Nueva tarifa» y NO debe conservar los valores del
+      // periodo anterior (antes se guardaban como si fueran de
+      // este periodo).
+      nombreCtrl.clear();
+      efectivoCtrl.clear();
+      transferCtrl.clear();
+      desdeCtrl.text = hoyHabanaIso();
+      hastaCtrl.clear();
+      motivoCtrl.clear();
     }
   }
 
@@ -386,6 +398,11 @@ Future<void> _formularioTarifa(
                   if (motivo == null || !context.mounted) return;
                   await revocarTarifaEspecial(
                       id: '${activaPrevia!['id']}', motivo: motivo);
+                  // Corrección panel 1.10: subir la revocación en
+                  // cuanto se confirma, no esperar al próximo push
+                  // (antes la ventana en que el espejo viejo
+                  // volvía a mostrarla activa duraba un turno).
+                  SyncEngine.instance.push();
                   // Cerrar SIN guardar: false hace que el código de
                   // abajo retorne sin otorgar nada nuevo.
                   if (ctx.mounted) Navigator.pop(ctx, false);
@@ -479,6 +496,8 @@ Future<void> _formularioTarifa(
     motivo: motivoCtrl.text.trim(),
     otorgadoPor: AuthService().telegramId,
   );
+  // Como tras revocar: subir en cuanto se guarda.
+  SyncEngine.instance.push();
   if (!context.mounted) return;
   ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('Tarifa especial guardada')));
