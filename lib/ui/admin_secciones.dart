@@ -884,9 +884,22 @@ class _SeccionDiagnosticoScreenState extends State<SeccionDiagnosticoScreen> {
       await SyncEngine.instance.sincronizarScope('clientes');
       AppLog.info('sync', 'reparar_clientes_fin');
       await _cargar();
+      // 1.14 (Fix 3): sincronizarScope traga los errores y la purga
+      // puede omitirse (una op apareció tras el push, o el pull
+      // falló), dejando la bandera viva. No anunciar éxito si no
+      // purgó: la bandera sobrevive y el próximo ciclo con la cola
+      // limpia reintenta la purga solo.
+      final banderaViva =
+          await LocalDb.instance.getMeta('forzar_redescarga_clientes') ==
+              '1';
+      final colaSucia = await LocalDb.instance.countPendingOps() > 0;
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-            content: Text('Lista de clientes reparada.')));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text(banderaViva || colaSucia
+                ? 'No se completó la purga (la cola no quedó limpia). '
+                    'Quedó pendiente y se reintentará sola en la '
+                    'próxima sincronización.'
+                : 'Lista de clientes reparada.')));
       }
     } catch (e) {
       if (mounted) {

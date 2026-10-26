@@ -2486,6 +2486,27 @@ class SyncEngine {
   /// aplicar todos los cambios. Si algo falla a mitad, el watermark no se
   /// mueve y la próxima bajada re-aplica (idempotente) desde el mismo
   /// punto. No hay ningún camino donde el watermark avance sin aplicar.
+  /// 1.14 (Fix 3): ¿se consume la bandera `forzar_redescarga_<tabla>`
+  /// tras el pull de esa tabla? Reglas:
+  /// - Sin reseteo forzado, no hay nada que consumir.
+  /// - Si la tabla no purga (espejo de solo lectura), el reseteo
+  ///   completo ya es la reparación: se consume.
+  /// - Si la tabla purga pero su purga ni corrió (cola sucia al
+  ///   arrancar el pull), la bandera sobrevive para el próximo
+  ///   ciclo; consumirla perdería la reparación pendiente.
+  /// - Si la purga corrió, solo se consume cuando validó.
+  static bool banderaRedescargaSeConsume({
+    required bool esPurgable,
+    required bool fueReseteada,
+    required bool entroEnPurga,
+    required bool purgaValidada,
+  }) {
+    if (!fueReseteada) return false;
+    if (!esPurgable) return true;
+    if (!entroEnPurga) return false;
+    return purgaValidada;
+  }
+
   Future<({int aplicadas, Map<String, int> porTabla})> _download(
       {bool silencioso = false, List<String>? tablasFiltro}) async {
     // v1.2.8 (Paso 1): si se pasa tablasFiltro (scope), solo esas tablas.
@@ -3064,7 +3085,19 @@ class SyncEngine {
                     'locales=$filasLocales');
           }
         }
-        if (tablasReseteadas.contains(tabla) && purgaValidada) {
+        // 1.14 (Fix 3): la bandera solo se consume si la purga
+        // validó o si la tabla no purga. Si la tabla purga pero su
+        // purga ni corrió (la cola no estaba limpia al arrancar el
+        // pull y por eso no entró en tablasPurga), la bandera
+        // SOBREVIVE: consumirla aquí perdía la re-descarga forzada
+        // y el fantasma (caso 196) quedaba para siempre hasta otro
+        // toque manual de Reparar.
+        if (banderaRedescargaSeConsume(
+          esPurgable: tablasPurgables.contains(tabla),
+          fueReseteada: tablasReseteadas.contains(tabla),
+          entroEnPurga: tablasPurga.contains(tabla),
+          purgaValidada: purgaValidada,
+        )) {
           await _db.setMeta('forzar_redescarga_$tabla', '');
         }
         final wmActual = await _db.getWatermarkTabla(tabla);
