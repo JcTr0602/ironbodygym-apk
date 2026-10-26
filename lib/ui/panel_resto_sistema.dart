@@ -40,6 +40,12 @@ Widget _soloDueno(String titulo) => Scaffold(
       body: const Center(child: Text('Solo el dueño ve esta pantalla.')),
     );
 
+/// Guardia F5 (1.14, M6.26): re-descargar un espejo solo con la
+/// cola limpia. Con ops pendientes, el espejo bajado pisaría
+/// cobros sin subir. -1 (aún cargando) también bloquea, como
+/// antes: el botón solo se habilitaba con exactamente 0.
+bool puedeRedescargarEspejo(int pendientes) => pendientes == 0;
+
 Future<bool> _confirmar(BuildContext context, String titulo, String texto) async {
   final ok = await showDialog<bool>(
     context: context,
@@ -509,7 +515,7 @@ class _MantenimientoScreenState extends State<MantenimientoScreen> {
                 Align(
                   alignment: Alignment.centerRight,
                   child: TextButton(
-                    onPressed: _pendientes == 0
+                    onPressed: puedeRedescargarEspejo(_pendientes)
                         ? () async {
                             if (!await _confirmar(context,
                                 'Re-descargar $_tabla',
