@@ -4,7 +4,7 @@ import '../auth.dart';
 import '../bloque3.dart';
 import '../etiqueta_producto.dart';
 import '../localdb.dart';
-import '../negocio.dart' show fmtMonto;
+import '../negocio.dart' show edadDeCarnet, fmtMonto;
 import '../permisos_entrenador.dart';
 import '../servicios.dart';
 import '../sync.dart';
@@ -268,6 +268,10 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
         builder: (ctx, setD) {
           final esCasaCliente = cliente != null &&
               (cliente!['cuenta_casa'] as num?)?.toInt() == 1;
+          // 1.14 (D14): carnet + edad del elegido, para verificar
+          // antes de confirmar la venta.
+          final subCliente =
+              cliente == null ? '' : subtituloClienteVenta(cliente!);
           final esCasa = esCasaCliente || paraDuenoCasa;
           // Ítem 7: el precio depende del método elegido y se
           // recalcula en vivo al alternar Efectivo/Transferencia.
@@ -339,7 +343,8 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                           child: Text(
                             cliente == null
                                 ? 'Cliente: sin identificar — toca para elegir del gym'
-                                : 'Cliente: ${cliente!['nombre']}',
+                                : 'Cliente: ${cliente!['nombre']}'
+                                    '${subCliente.isEmpty ? '' : ' · $subCliente'}',
                             style: AppTexto.cuerpo,
                           ),
                         ),
@@ -616,6 +621,10 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setD) {
+          // 1.14 (D14): carnet + edad del elegido, para verificar
+          // antes de confirmar la venta.
+          final subCliente =
+              cliente == null ? '' : subtituloClienteVenta(cliente!);
           final precioSin =
               precioServicioMetodo(_ajustes, 'dosis_sin_agua', metodo);
           final precioCon =
@@ -662,7 +671,8 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                           child: Text(
                             cliente == null
                                 ? 'Elegir cliente'
-                                : '${cliente!['nombre']}',
+                                : '${cliente!['nombre']}'
+                                    '${subCliente.isEmpty ? '' : ' · $subCliente'}',
                             style: AppTexto.cuerpo,
                           ),
                         ),
@@ -1422,6 +1432,21 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
   }
 }
 
+/// 1.14 (D14): subtítulo del cliente en el selector de venta:
+/// carnet + edad. Sin esto, dos hermanos con el mismo apellido
+/// son indistinguibles y la venta cae en el equivocado (caso
+/// 121/34 de 2026-10-26: la dosis se registró a Richard en vez
+/// de a Cristian). La edad sale del carnet (6 primeros dígitos
+/// = AAMMDD); con fecha imposible no se muestra edad, solo el
+/// carnet. Se usa también en el cliente ya elegido, para
+/// verificar ANTES de confirmar la venta.
+String subtituloClienteVenta(Map<String, dynamic> c) {
+  final carnet = '${c['carnet'] ?? ''}'.trim();
+  if (carnet.isEmpty) return '';
+  final edad = edadDeCarnet(carnet);
+  return edad == null ? 'Carnet $carnet' : 'Carnet $carnet · $edad años';
+}
+
 /// Selector de cliente (lista completa del espejo + buscador).
 class _DialogoCliente extends StatefulWidget {
   final List<Map<String, dynamic>> clientes;
@@ -1443,12 +1468,22 @@ class _DialogoClienteState extends State<_DialogoCliente> {
   @override
   Widget build(BuildContext context) {
     final q = _ctrl.text.trim().toLowerCase();
+    // 1.14 (D14): buscar también por carnet (solo dígitos), para
+    // distinguir homónimos por el documento y no solo por nombre.
+    final qDigitos = q.replaceAll(RegExp(r'[^0-9]'), '');
     final filtrados = q.isEmpty
         ? widget.clientes
-        : widget.clientes
-            .where((c) =>
-                '${c['nombre'] ?? ''}'.toLowerCase().contains(q))
-            .toList();
+        : widget.clientes.where((c) {
+            if ('${c['nombre'] ?? ''}'.toLowerCase().contains(q)) {
+              return true;
+            }
+            if (qDigitos.isNotEmpty) {
+              final carnet =
+                  '${c['carnet'] ?? ''}'.replaceAll(RegExp(r'[^0-9]'), '');
+              if (carnet.contains(qDigitos)) return true;
+            }
+            return false;
+          }).toList();
     return DialogoApp(
       titulo: 'Cliente del gym',
       iconoTitulo: Icons.person_search,
@@ -1494,8 +1529,10 @@ class _DialogoClienteState extends State<_DialogoCliente> {
                         final c = filtrados[i];
                         final casa =
                             (c['cuenta_casa'] as num?)?.toInt() == 1;
+                        final sub = subtituloClienteVenta(c);
                         return ListTile(
                           title: Text('${c['nombre'] ?? ''}'),
+                          subtitle: sub.isEmpty ? null : Text(sub),
                           trailing: casa
                               ? const Chip(
                                   label: Text('⭐ Casa'),
