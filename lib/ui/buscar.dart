@@ -42,7 +42,6 @@ class _BuscarScreenState extends State<BuscarScreen> {
   String _swipeDer = 'cobrar';
   String _swipeIzq = 'ninguna';
   final _scroll = ScrollController();
-  Map<String, int> _indiceLetras = {};
 
   @override
   void initState() {
@@ -158,19 +157,10 @@ class _BuscarScreenState extends State<BuscarScreen> {
       }).toList();
     }
     if (mounted && gen == _gen) {
-      // Bloque 1: índice letra → primer puesto (para la barra
-      // discreta de letras; solo letras presentes).
-      final indice = <String, int>{};
-      for (var i = 0; i < r.length; i++) {
-        final nombre = '${r[i]['nombre'] ?? ''}'.trim();
-        if (nombre.isEmpty) continue;
-        indice.putIfAbsent(nombre[0].toUpperCase(), () => i);
-      }
       setState(() {
         _res = r;
         _busco = true;
         _conteos = conteos;
-        _indiceLetras = indice;
       });
     }
   }
@@ -444,34 +434,6 @@ class _BuscarScreenState extends State<BuscarScreen> {
                           ),
                         ),
                       ),
-                      // Bloque 1: barra de letras discreta (solo
-                      // letras presentes; salta al primer cliente).
-                      if (_indiceLetras.isNotEmpty)
-                        SizedBox(
-                          width: 22,
-                          child: Column(
-                            mainAxisAlignment:
-                                MainAxisAlignment.center,
-                            children: [
-                              for (final letra
-                                  in _letrasOrdenadas())
-                                GestureDetector(
-                                  onTap: () =>
-                                      _saltarALetra(letra),
-                                  child: Padding(
-                                    padding: const EdgeInsets
-                                        .symmetric(vertical: 1.5),
-                                    child: Text(letra,
-                                        style: TextStyle(
-                                            fontSize: 10,
-                                            color: AppColores
-                                                .textoSecundario(
-                                                    context))),
-                                  ),
-                                ),
-                            ],
-                          ),
-                        ),
                     ],
                   ),
           ),
@@ -491,22 +453,6 @@ class _BuscarScreenState extends State<BuscarScreen> {
     if (horas < 24) return 'Actualizado hace $horas h';
     final dias = horas ~/ 24;
     return 'Actualizado hace $dias día${dias == 1 ? '' : 's'}';
-  }
-
-  List<String> _letrasOrdenadas() {
-    final letras = _indiceLetras.keys.toList()..sort();
-    return letras;
-  }
-
-  /// Bloque 1: salto por letra. Altura estimada por tarjeta
-  /// (~84 px: foto 56 + rellenos + margen); el destino se acota
-  /// al máximo del scroll para no pasarse al final.
-  void _saltarALetra(String letra) {
-    final idx = _indiceLetras[letra];
-    if (idx == null || !_scroll.hasClients) return;
-    final pos = idx * 84.0;
-    final max = _scroll.position.maxScrollExtent;
-    _scroll.jumpTo(pos > max ? max : pos);
   }
 
   String _etiquetaSwipeAccion(String v) => switch (v) {
