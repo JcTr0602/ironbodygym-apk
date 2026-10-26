@@ -1158,9 +1158,15 @@ class _AdminScreenState extends State<AdminScreen> {
       );
     }
 
+    // 1.14 (D18): recargar al volver. Antes se volvía con los
+    // datos viejos (KPIs, pendientes) hasta un refresh manual;
+    // el mismo archivo ya usa este patrón en _ir/_irYRecargar.
     void ir(Widget pantalla) {
       Navigator.push(
-          context, MaterialPageRoute(builder: (_) => pantalla));
+          context, MaterialPageRoute(builder: (_) => pantalla))
+          .then((_) {
+        if (mounted) _cargar();
+      });
     }
 
     return Tarjeta(
@@ -1249,9 +1255,13 @@ class _AdminScreenState extends State<AdminScreen> {
       );
     }
 
+    // 1.14 (D18): recargar al volver (igual que en _bloque2).
     void ir(Widget pantalla) {
       Navigator.push(
-          context, MaterialPageRoute(builder: (_) => pantalla));
+          context, MaterialPageRoute(builder: (_) => pantalla))
+          .then((_) {
+        if (mounted) _cargar();
+      });
     }
 
     return Tarjeta(
