@@ -22,6 +22,58 @@ import 'componentes.dart';
 import 'diseno.dart';
 import 'widgets.dart';
 
+/// Construye el payload de la op 'inscripcion_venta_suplemento'.
+///
+/// Función pura (testeable sin montar la pantalla): el método de pago
+/// viaja en el tope del payload y el servidor lo aplica a la
+/// inscripción y, por defecto, también a la venta.
+Map<String, dynamic> payloadInscripcionVentaSuplemento({
+  required String nombre,
+  String? telefono,
+  String? sexo,
+  String? carnet,
+  required int suplementoId,
+  required int cantidad,
+  required double precio,
+  required String moneda,
+  required double precioOficial,
+  String? notaPrecio,
+  double? usdTasa,
+  required String fecha,
+  required String metodoPago,
+}) {
+  return {
+    'cliente': {
+      'nombre': nombre,
+      if (telefono != null && telefono.isNotEmpty)
+        'telefono': telefono,
+      if (sexo != null) 'sexo': sexo,
+      if (carnet != null && carnet.isNotEmpty) 'carnet': carnet,
+    },
+    'venta': {
+      'suplemento_id': suplementoId,
+      'cantidad': cantidad,
+      'precio': precio,
+      'moneda': moneda,
+      'precio_oficial': precioOficial,
+      if (notaPrecio != null && notaPrecio.isNotEmpty)
+        'nota_precio': notaPrecio,
+      if (usdTasa != null && usdTasa > 0) 'usd_tasa': usdTasa,
+    },
+    'fecha': fecha,
+    'metodo_pago': metodoPago,
+  };
+}
+
+/// 'entregado' optimista de la fila espejo de la venta: la
+/// transferencia va directo a la cuenta del dueño y nunca queda
+/// pendiente, la registre quien la registre.
+int entregadoOptimistaInscripcionVenta({
+  required bool esDueno,
+  required String metodoPago,
+}) =>
+    (esDueno || metodoPago == 'transferencia') ? 1 : 0;
+
 class VentaSuplementoInscripcionScreen extends StatefulWidget {
   final Map<String, dynamic> suplemento;
   final int cantidad;
@@ -53,6 +105,11 @@ class _VentaSuplementoInscripcionScreenState
   final _telefono = TextEditingController();
   final _carnet = TextEditingController();
   String? _sexo; // 'M' | 'F' | null (sin especificar)
+  // Fase A 1.9: método de pago real de la inscripción + venta.
+  // Antes no se elegía ni se enviaba y el servidor caía en
+  // 'efectivo' por omisión, descuadrando la caja al pagar por
+  // transferencia. El servidor ya acepta 'metodo_pago' (B2).
+  String _metodo = 'efectivo'; // 'efectivo' | 'transferencia'
   bool _promoActiva = false;
   bool _guardando = false;
 
@@ -105,6 +162,7 @@ class _VentaSuplementoInscripcionScreenState
       titulo: 'Confirmar inscripción + venta',
       icono: Icons.person_add,
       mensaje: 'Cliente: $nombre\n'
+          'Método: ${_metodo == 'efectivo' ? 'Efectivo' : 'Transferencia'}\n'
           'Venta: ${widget.suplemento['nombre']} x${widget.cantidad}'
           ' = $totalTxt'
           '${_promoActiva ? '\n\nSe le asignará 1 mes de mensualidad gratis (promo activa).' : ''}',
@@ -121,30 +179,21 @@ class _VentaSuplementoInscripcionScreenState
       await LocalDb.instance.queueOp(
         opUuid: opUuid,
         tipo: 'inscripcion_venta_suplemento',
-        payload: {
-          'cliente': {
-            'nombre': nombre,
-            if (telefono.isNotEmpty) 'telefono': telefono,
-            if (_sexo != null) 'sexo': _sexo,
-            if (carnet.isNotEmpty) 'carnet': carnet,
-          },
-          'venta': {
-            'suplemento_id': widget.suplemento['id'],
-            'cantidad': widget.cantidad,
-            'precio': widget.precio,
-            'moneda': widget.moneda,
-            // Auditoría: precio oficial y nota viajan para que el
-            // servidor no dependa del payload manipulable.
-            'precio_oficial': widget.precioOficial,
-            if (widget.notaPrecio != null &&
-                widget.notaPrecio!.isNotEmpty)
-              'nota_precio': widget.notaPrecio,
-            // v1.2.4: la tasa se guarda siempre que se conozca (USD y CUP).
-            if (widget.usdTasa != null && widget.usdTasa! > 0)
-              'usd_tasa': widget.usdTasa,
-          },
-          'fecha': hoy,
-        },
+        payload: payloadInscripcionVentaSuplemento(
+          nombre: nombre,
+          telefono: telefono,
+          sexo: _sexo,
+          carnet: carnet,
+          suplementoId: widget.suplemento['id'],
+          cantidad: widget.cantidad,
+          precio: widget.precio,
+          moneda: widget.moneda,
+          precioOficial: widget.precioOficial,
+          notaPrecio: widget.notaPrecio,
+          usdTasa: widget.usdTasa,
+          fecha: hoy,
+          metodoPago: _metodo,
+        ),
       );
       // Actualización optimista: la venta aparece en el historial
       // sin esperar al sync. Id temporal negativo; se elimina cuando
@@ -173,9 +222,13 @@ class _VentaSuplementoInscripcionScreenState
           'fecha': hoy,
           'via_inscripcion': 1,
           'promo_mes': _promoActiva ? 1 : 0,
+          'metodo': _metodo,
           // Regla de Jc: el efectivo (CUP o USD) del entrenador
-          // queda pendiente; lo del dueño queda entregado.
-          'entregado': auth.isOwner ? 1 : 0,
+          // queda pendiente; lo del dueño queda entregado. La
+          // transferencia va directo a la cuenta de Jc: nunca
+          // queda pendiente, la registre quien la registre.
+          'entregado': entregadoOptimistaInscripcionVenta(
+              esDueno: auth.isOwner, metodoPago: _metodo),
         },
         0,
       );
@@ -271,16 +324,44 @@ class _VentaSuplementoInscripcionScreenState
             const AvisoFechaCarnet(),
           const SizedBox(height: AppEspacio.md),
           const EncabezadoSeccion(
+              titulo: 'Método de pago'),
+          const Text('Inscripción y venta se pagan con el mismo método.',
+              style: AppTexto.secundario),
+          const SizedBox(height: 4),
+          Wrap(
+            spacing: AppEspacio.sm,
+            children: [
+              ChoiceChip(
+                label: const Text('Efectivo'),
+                selected: _metodo == 'efectivo',
+                selectedColor: AppColores.naranja
+                    .withValues(alpha: 0.2),
+                onSelected: (_) =>
+                    setState(() => _metodo = 'efectivo'),
+              ),
+              ChoiceChip(
+                label: const Text('Transferencia'),
+                selected: _metodo == 'transferencia',
+                selectedColor: AppColores.naranja
+                    .withValues(alpha: 0.2),
+                onSelected: (_) =>
+                    setState(() => _metodo = 'transferencia'),
+              ),
+            ],
+          ),
+          const SizedBox(height: AppEspacio.md),
+          const EncabezadoSeccion(
               titulo: 'Mensualidad inicial'),
-          const Tarjeta(
+          Tarjeta(
             child: Row(
               children: [
-                Icon(Icons.payments_outlined,
+                const Icon(Icons.payments_outlined,
                     color: AppColores.naranja),
-                SizedBox(width: AppEspacio.sm),
+                const SizedBox(width: AppEspacio.sm),
                 Expanded(
                   child: Text(
-                    'Se cobrará la mensualidad vigente en efectivo al inscribir.',
+                    'Se cobrará la mensualidad vigente '
+                    '${_metodo == 'efectivo' ? 'en efectivo' : 'por transferencia'} al inscribir.',
                     style: AppTexto.cuerpo,
                   ),
                 ),
