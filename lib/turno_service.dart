@@ -44,12 +44,22 @@ String turnoIdDe(DateTime h) {
   return 'noche';
 }
 
-/// "HH:mm" de un ISO (acepta con o sin offset).
+/// "HH:mm" de un ISO (acepta con o sin offset), SIEMPRE en hora
+/// de La Habana. 1.14 (D12): antes se usaba d.hour directo y Dart
+/// convierte a la zona del TELÉFONO: un turno guardado 06:53
+/// Habana se pintaba 10:53 en un teléfono con otra zona.
+/// Con offset explícito (o Z) se convierte el instante a Habana
+/// con aHabana(); sin offset, los dígitos ya son wall-clock
+/// habanero y se usan tal cual (convertirlos desplazaría dos
+/// veces: el parse ingenuo ya los deja como hora local).
 String horaCorta(String iso) {
   try {
-    final d = DateTime.parse(iso);
-    return '${d.hour.toString().padLeft(2, '0')}:'
-        '${d.minute.toString().padLeft(2, '0')}';
+    final s = iso.trim();
+    final d = DateTime.parse(s);
+    final conOffset = RegExp(r'(Z|[+-]\d{2}:?\d{2})$').hasMatch(s);
+    final h = conOffset ? aHabana(d) : d;
+    return '${h.hour.toString().padLeft(2, '0')}:'
+        '${h.minute.toString().padLeft(2, '0')}';
   } catch (_) {
     return '';
   }

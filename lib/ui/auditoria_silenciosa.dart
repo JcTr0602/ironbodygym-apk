@@ -4,6 +4,7 @@ import '../auth.dart';
 import '../localdb.dart';
 import '../negocio.dart';
 import '../tiempo.dart';
+import '../turno_service.dart';
 import 'componentes.dart';
 import 'diseno.dart';
 
@@ -96,16 +97,16 @@ class _AuditoriaSilenciosaScreenState
           'turno_corto',
           'Turno de $min min (${t['turno'] ?? '?'})',
           'Entrenador ID ${t['telegram_id'] ?? '?'} · '
-              'apertura ${_horaCorta(ap)} · cierre ${_horaCorta(ci)}',
+              // 1.14 (D12): la misma hora corrida del Home: usar la
+              // horaCorta compartida (Habana) en vez del helper
+              // local que pintaba en zona del teléfono.
+              'apertura ${horaCorta('${t['hora_apertura']}')} · '
+              'cierre ${horaCorta('${t['hora_cierre']}')}',
           '${t['fecha_turno'] ?? ''}',
         ));
       }
     }
   }
-
-  String _horaCorta(DateTime dt) =>
-      '${dt.hour.toString().padLeft(2, '0')}:'
-      '${dt.minute.toString().padLeft(2, '0')}';
 
   /// (b) Ediciones de pagos en los últimos [_Umbrales.edicionesDias] días.
   /// Nota de Argón: solo se listan las ediciones SIN movimiento de caja
