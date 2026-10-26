@@ -1136,10 +1136,25 @@ Future<String> cerrarBoteServicio({required int boteId}) async {
 /// ficha del cliente el combo cuenta además como dosis + pomo: son
 /// dos lecturas distintas, no una discrepancia).
 /// [desde] (prefijo 'YYYY-MM-DD') limita a ventas con fecha >= desde.
+/// 1.14 (D13): [nombresPorId] es el padrón local (espejo clientes)
+/// para resolver el nombre cuando la fila de venta no lo trae: sin
+/// él, las ventas viejas (anteriores al enriquecimiento del puente)
+/// quedaban como «Cliente 121» anónimo. Patrón de
+/// detalle_entrenador.dart. Las fotos en el ranking quedan para
+/// después (lista de Argón): aquí solo se arregla el nombre.
 List<Map<String, dynamic>> rankingServicios(
   List<Map<String, dynamic>> ventas, {
   String? desde,
+  Map<int, String>? nombresPorId,
 }) {
+  String nombreDe(int cid, Map<String, dynamic> v) {
+    final propio = '${v['cliente_nombre'] ?? ''}'.trim();
+    if (propio.isNotEmpty) return propio;
+    final local = nombresPorId?[cid];
+    if (local != null && local.trim().isNotEmpty) return local;
+    return 'Cliente $cid';
+  }
+
   final porCliente = <int, Map<String, dynamic>>{};
   for (final v in ventas) {
     final cid = (v['cliente_id'] as num?)?.toInt();
@@ -1152,7 +1167,7 @@ List<Map<String, dynamic>> rankingServicios(
         ((v['precio_unitario'] as num?)?.toDouble() ?? 0) * cant;
     final e = porCliente.putIfAbsent(cid, () => {
           'cliente_id': cid,
-          'cliente_nombre': '${v['cliente_nombre'] ?? 'Cliente $cid'}',
+          'cliente_nombre': nombreDe(cid, v),
           'monto': 0.0,
           'unidades': 0,
           'raciones': 0,
@@ -1169,8 +1184,18 @@ List<Map<String, dynamic>> rankingServicios(
       default:
         e['raciones'] = (e['raciones'] as int) + cant;
     }
-    final nombre = '${v['cliente_nombre'] ?? ''}';
-    if (nombre.isNotEmpty) e['cliente_nombre'] = nombre;
+    // La fila propia manda si trae nombre; si no, el padrón local
+    // rescata una fila que nació anónima — pero una fila vacía
+    // jamás debe tapar un nombre ya resuelto con «Cliente $cid».
+    final propio = '${v['cliente_nombre'] ?? ''}'.trim();
+    if (propio.isNotEmpty) {
+      e['cliente_nombre'] = propio;
+    } else {
+      final local = nombresPorId?[cid]?.trim() ?? '';
+      if (local.isNotEmpty && e['cliente_nombre'] == 'Cliente $cid') {
+        e['cliente_nombre'] = local;
+      }
+    }
   }
   final lista = porCliente.values
       .where((e) => (e['monto'] as double) > 0)

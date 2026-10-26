@@ -1074,25 +1074,37 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                           : 'Lote de ${lote['responsable_nombre']} · '
                               '${lote['producto_nombre'] ?? 'Servicio'}'),
                   style: AppTexto.titulo.copyWith(fontSize: 16),
+                  // 1.14 (D16): una línea con puntos suspensivos. Sin
+                  // esto, con varios lotes el desplegable (hijo sin
+                  // flex) acaparaba el ancho y el título quedaba en
+                  // una columna estrecha, apilado en vertical.
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                 ),
               ),
               if (_misLotes.length > 1)
-                DropdownButton<int>(
-                  value: _loteSel,
-                  items: [
-                    for (final l in _misLotes)
-                      DropdownMenuItem(
-                        value: (l['id'] as num).toInt(),
-                        // Ítem 6 (lote ciego): el entrenador NO ve
-                        // saldos; el dueño ve producto, dueño y saldo.
-                        child: Text(_esDueno
-                            ? '${l['producto_nombre'] ?? 'Lote'} · '
-                                '${l['responsable_nombre']} '
-                                '(${l['saldo_local']})'
-                            : '${l['producto_nombre'] ?? 'Lote'}'),
-                      ),
-                  ],
-                  onChanged: (v) => setState(() => _loteSel = v),
+                Flexible(
+                  child: DropdownButton<int>(
+                    value: _loteSel,
+                    items: [
+                      for (final l in _misLotes)
+                        DropdownMenuItem(
+                          value: (l['id'] as num).toInt(),
+                          // Ítem 6 (lote ciego): el entrenador NO ve
+                          // saldos; el dueño ve producto, dueño y saldo.
+                          child: Text(
+                            _esDueno
+                                ? '${l['producto_nombre'] ?? 'Lote'} · '
+                                    '${l['responsable_nombre']} '
+                                    '(${l['saldo_local']})'
+                                : '${l['producto_nombre'] ?? 'Lote'}',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                    ],
+                    onChanged: (v) => setState(() => _loteSel = v),
+                  ),
                 ),
             ],
           ),

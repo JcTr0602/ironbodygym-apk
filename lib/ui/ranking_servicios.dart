@@ -28,6 +28,8 @@ class _RankingServiciosScreenState extends State<RankingServiciosScreen> {
   bool _esteMes = false;
   List<Map<String, dynamic>> _todas = [];
   List<Map<String, dynamic>> _filas = [];
+  // 1.14 (D13): padrón local para el fallback de nombres.
+  Map<int, String> _nombresPorId = {};
 
   @override
   void initState() {
@@ -38,9 +40,17 @@ class _RankingServiciosScreenState extends State<RankingServiciosScreen> {
   Future<void> _cargar() async {
     final ventas =
         await LocalDb.instance.allMirror('servicio_ventas');
+    final clientes = await LocalDb.instance.allMirror('clientes');
+    final nombres = <int, String>{};
+    for (final c in clientes) {
+      final id = (c['id'] as num?)?.toInt();
+      final nombre = '${c['nombre'] ?? ''}'.trim();
+      if (id != null && nombre.isNotEmpty) nombres[id] = nombre;
+    }
     if (mounted) {
       setState(() {
         _todas = ventas;
+        _nombresPorId = nombres;
         _cargando = false;
         _recalcular();
       });
@@ -54,7 +64,8 @@ class _RankingServiciosScreenState extends State<RankingServiciosScreen> {
       desde = '${n.year.toString().padLeft(4, '0')}-'
           '${n.month.toString().padLeft(2, '0')}-01';
     }
-    _filas = rankingServicios(_todas, desde: desde);
+    _filas = rankingServicios(_todas,
+        desde: desde, nombresPorId: _nombresPorId);
   }
 
   @override
