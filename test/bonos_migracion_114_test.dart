@@ -60,4 +60,21 @@ void main() {
     final ops = await LocalDb.instance.pendingOps();
     expect(ops.length, 2);
   });
+
+  test('dos migraciones concurrentes no duplican (sello dentro de txn)',
+      () async {
+    await _abrirDbVacia();
+    final bonos = [
+      {'entrenador': 'gabriel', 'monto': 500.0, 'nota': 'extra'},
+    ];
+    // Sin el re-chequeo dentro de la transacción, ambas llamadas
+    // pasaban el chequeo previo antes de que ninguna escribiera el
+    // sello y encolaban el bono dos veces.
+    await Future.wait([
+      BonosNominaService.instance.migrarDesdePrefs(bonos, '2026-10'),
+      BonosNominaService.instance.migrarDesdePrefs(bonos, '2026-10'),
+    ]);
+    final ops = await LocalDb.instance.pendingOps();
+    expect(ops.length, 1);
+  });
 }

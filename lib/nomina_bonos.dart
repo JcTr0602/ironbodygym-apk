@@ -200,6 +200,14 @@ class BonosNominaService {
     if (await _db.getMeta(sello) == '1') return;
     final d = await _db.db;
     await d.transaction((txn) async {
+      // Panel 1.14 (Luna + Kimi): el chequeo previo NO basta — dos
+      // llamadas concurrentes podían pasar el chequeo antes de que
+      // la primera transacción escribiera el sello y duplicar los
+      // bonos. Se re-chequea DENTRO de la transacción: sqflite
+      // serializa las transacciones, así que la segunda ve el sello.
+      final ya = await txn.query('meta',
+          columns: ['v'], where: 'k = ?', whereArgs: [sello]);
+      if (ya.isNotEmpty && '${ya.first['v']}' == '1') return;
       for (final b in bonosViejos) {
         final monto = (b['monto'] as num?)?.toDouble() ?? 0;
         if (monto == 0) continue;

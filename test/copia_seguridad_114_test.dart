@@ -57,4 +57,34 @@ void main() {
     expect(filas.single['nombre'], 'Prueba copia');
     await copia.close();
   });
+
+  test('checkpoint ocupado: no se comparte una copia incompleta', () async {
+    await _abrirDbVacia();
+    final db = await LocalDb.instance.db;
+    // Tiene que haber algo en el WAL: con el WAL vacío el
+    // checkpoint es un no-op y no se puede probar el busy.
+    await db.insert('tarifa_especial', {
+      'id': 'copia-busy',
+      'cliente_id': 900002,
+      'nombre': 'Prueba busy',
+      'periodo': 'mensual',
+      'activa': 1,
+      'creada_ts': '2026-10-26T08:00:00',
+      'actualizada_ts': '2026-10-26T08:00:00',
+    });
+    final dir = await getDatabasesPath();
+    final dbPath = p.join(dir, 'ironbody.db');
+    // Segunda conexión con una lectura abierta: el checkpoint
+    // TRUNCATE no puede completarse y la exportación debe fallar
+    // en vez de compartir una copia sin los últimos commits.
+    final lector = await openDatabase(dbPath);
+    await lector.rawQuery('BEGIN');
+    await lector.rawQuery('SELECT COUNT(*) FROM tarifa_especial');
+    try {
+      await expectLater(exportarCopiaFria(), throwsStateError);
+    } finally {
+      await lector.rawQuery('ROLLBACK');
+      await lector.close();
+    }
+  });
 }
