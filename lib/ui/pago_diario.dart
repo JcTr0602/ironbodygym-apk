@@ -125,6 +125,11 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
         'cantidad': cantidad,
         // v1.3.1: total calculado + registrado_por para deduplicación.
         'total': cantidad * _precio,
+        // Fase A 2026-10-25 (A1): la UI de diarios es solo
+        // efectivo; el método va explícito para que el espejo y
+        // el pendiente puedan filtrarlo (antes no viajaba y el
+        // pendiente sumaba cualquier diario sin distinguir).
+        'metodo': 'efectivo',
         'registrado_por': AuthService().telegramId,
         if (nota != null && nota.isNotEmpty) 'nota': nota,
       },

@@ -92,14 +92,66 @@ Map<String, dynamic> payloadLiquidarEntrega({
       'movimiento': 'entrega_efectivo_dueno',
     };
 
+/// PURO (testeable sin BD): fusiona el libro local de entregas C1
+/// con el espejo bajado (sync_entregas_efectivo, Fase A 2026-10-25).
+/// La llave es op_uuid en ambos lados (la fila optimista local y
+/// la del servidor llevan el mismo op_uuid, así que no se duplica);
+/// el espejo gana por op_uuid. Así una entrega registrada en otro
+/// teléfono descuenta también aquí.
+List<Map<String, dynamic>> fusionarEntregasEfectivo(
+    List<Map<String, dynamic>> locales,
+    List<Map<String, dynamic>> espejo) {
+  final porUuid = <String, Map<String, dynamic>>{};
+  for (final l in locales) {
+    porUuid['${l['op_uuid']}'] = Map<String, dynamic>.from(l);
+  }
+  for (final e in espejo) {
+    final uuid = '${e['op_uuid'] ?? e['id'] ?? ''}';
+    if (uuid.isEmpty) continue;
+    porUuid[uuid] = {
+      'op_uuid': uuid,
+      'entrenador_telegram_id':
+          LocalDb.normalizarTelegramId(e['entrenador_telegram_id']),
+      'monto_entregado': (e['monto_entregado'] as num?)?.toDouble() ?? 0,
+      'fecha_habana': '${e['fecha_habana'] ?? ''}',
+      'autor_dueno_id': e['autor_dueno_id'],
+      'movimiento': e['movimiento'],
+      'creada_ts': '${e['creada_ts'] ?? ''}',
+    };
+  }
+  return porUuid.values.toList();
+}
+
+/// Libro local + espejo fusionados para un entrenador. Si el espejo
+/// aún no existe (BD de test mínima), se lee solo lo local.
+Future<List<Map<String, dynamic>>> _entregasFusionadas(
+    int telegramId) async {
+  final d = await LocalDb.instance.db;
+  final locales = await d.query('entregas_efectivo',
+      where: 'entrenador_telegram_id = ?', whereArgs: [telegramId]);
+  List<Map<String, dynamic>> espejo = const [];
+  try {
+    final todas =
+        await LocalDb.instance.allMirror('espejo_entregas_efectivo');
+    espejo = [
+      for (final e in todas)
+        if (LocalDb.normalizarTelegramId(e['entrenador_telegram_id']) ==
+            telegramId)
+          e,
+    ];
+  } catch (_) {}
+  return fusionarEntregasEfectivo(
+      locales.map((r) => Map<String, dynamic>.from(r)).toList(), espejo);
+}
+
 /// Suma de entregas C1 registradas en el libro local para un entrenador.
 Future<double> entregasEfectivoRegistradas(int telegramId) async {
-  final d = await LocalDb.instance.db;
-  final r = await d.rawQuery(
-      'SELECT COALESCE(SUM(monto_entregado), 0) AS t FROM entregas_efectivo '
-      'WHERE entrenador_telegram_id = ?',
-      [telegramId]);
-  return (r.first['t'] as num?)?.toDouble() ?? 0;
+  final filas = await _entregasFusionadas(telegramId);
+  var total = 0.0;
+  for (final f in filas) {
+    total += (f['monto_entregado'] as num?)?.toDouble() ?? 0;
+  }
+  return total;
 }
 
 /// Pendiente delta C1 de un entrenador: pendiente vigente menos las
@@ -115,11 +167,10 @@ Future<double> pendienteDeltaC1(int telegramId) async {
 /// Historial de entregas C1 del libro local (más recientes primero).
 Future<List<Map<String, dynamic>>> historialEntregasC1(
     int telegramId) async {
-  final d = await LocalDb.instance.db;
-  return d.query('entregas_efectivo',
-      where: 'entrenador_telegram_id = ?',
-      whereArgs: [telegramId],
-      orderBy: 'creada_ts DESC');
+  final filas = await _entregasFusionadas(telegramId);
+  filas.sort(
+      (a, b) => '${b['creada_ts']}'.compareTo('${a['creada_ts']}'));
+  return filas;
 }
 
 /// Registra una entrega C1 (solo dueño): libro local + op

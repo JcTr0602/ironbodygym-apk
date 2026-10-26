@@ -15,8 +15,6 @@
 /// venta, solo advierte; nada de DateTime.now() crudo en lógica.
 library;
 
-import 'dart:convert';
-
 import 'package:uuid/uuid.dart';
 
 import 'auth.dart';
@@ -496,6 +494,21 @@ class SolicitudAdelanto {
       };
 }
 
+/// PURO (testeable sin BD): destino efectivo de una solicitud
+/// F3 aprobada (B1, Fase A 2026-10-25). Una transferencia NO
+/// puede salir de la gaveta del entrenador (el pendiente a
+/// entregar es efectivo en mano): transferencia + destino
+/// 'pendiente' se fuerza a 'nomina'. El servidor aplica la
+/// misma regla; la app la aplica antes de enviar para no
+/// mostrar un destino que no se va a cumplir.
+String destinoEfectivoF3(
+    {required String metodo, required String destino}) {
+  if (metodo == 'transferencia' && destino == 'pendiente') {
+    return 'nomina';
+  }
+  return destino;
+}
+
 class SolicitudesAdelantoService {
   SolicitudesAdelantoService._();
   static final SolicitudesAdelantoService instance =
@@ -552,14 +565,25 @@ class SolicitudesAdelantoService {
   /// {solicitud_id, decision: 'aprobado' | 'rechazado', motivo?,
   /// destino: 'nomina' | 'pendiente'} — destino solo aplica al
   /// aprobar ('nomina' por defecto si no viene). Semántica:
-  /// 'nomina' → origen fondo_dueno, solo descuenta de la nómina;
-  /// 'pendiente' → origen caja_turno, descuenta del pendiente a
-  /// entregar y ADEMÁS aparece en el libro de nómina.
+  /// Resolver (SOLO dueño). Al aprobar, el adelanto nace en el
+  /// servidor dentro de la misma transacción (solicitud_id como
+  /// llave de idempotencia); al rechazar, queda el motivo.
+  /// Payload del contrato (59f2ffd + destino a7556fd):
+  /// {solicitud_id, decision: 'aprobado' | 'rechazado', motivo?,
+  /// destino: 'nomina' | 'pendiente', metodo} — destino solo
+  /// aplica al aprobar ('nomina' por defecto si no viene).
+  /// Semántica: 'nomina' → origen fondo_dueno, solo descuenta
+  /// de la nómina; 'pendiente' → origen caja_turno, descuenta
+  /// del pendiente a entregar y ADEMÁS aparece en el libro de
+  /// nómina. [metodo] es cómo se paga el adelanto ('efectivo'
+  /// por defecto): con transferencia, 'pendiente' se fuerza a
+  /// 'nomina' (B1).
   Future<void> resolver({
     required SolicitudAdelanto solicitud,
     required bool aprobar,
     String? motivo,
     String destino = 'nomina',
+    String metodo = 'efectivo',
   }) async {
     if (!AuthService().isOwner) {
       throw Exception('Solo el dueño puede resolver solicitudes');
@@ -570,6 +594,14 @@ class SolicitudesAdelantoService {
     if (aprobar && destino != 'nomina' && destino != 'pendiente') {
       throw Exception('Destino no válido');
     }
+    if (aprobar && metodo != 'efectivo' && metodo != 'transferencia') {
+      throw Exception('Método no válido');
+    }
+    // B1: el destino efectivo (forzado) es el que viaja y el que
+    // se refleja en la fila optimista, no el elegido en crudo.
+    final destinoEfectivo = aprobar
+        ? destinoEfectivoF3(metodo: metodo, destino: destino)
+        : destino;
     final ahora = isoHabana(ahoraHabana());
     await LocalDb.instance.queueOp(
       opUuid: const Uuid().v4(),
@@ -578,7 +610,8 @@ class SolicitudesAdelantoService {
         'solicitud_id': solicitud.id,
         'decision': aprobar ? 'aprobado' : 'rechazado',
         if (!aprobar) 'motivo': motivo!.trim(),
-        if (aprobar) 'destino': destino,
+        if (aprobar) 'destino': destinoEfectivo,
+        if (aprobar) 'metodo': metodo,
       },
     );
     // Optimista local: la solicitud deja de ofrecerse como pendiente
@@ -588,7 +621,7 @@ class SolicitudesAdelantoService {
       ..['resuelto_en'] = ahora
       ..['resuelto_por'] = AuthService().telegramId;
     if (!aprobar) fila['motivo_resolucion'] = motivo!.trim();
-    if (aprobar) fila['destino_resolucion'] = destino;
+    if (aprobar) fila['destino_resolucion'] = destinoEfectivo;
     await LocalDb.instance.actualizarMirrorTextoOptimista(
         'solicitudes_adelanto', solicitud.id, fila);
   }

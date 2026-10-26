@@ -718,9 +718,22 @@ Future<Map<String, double>> preciosVigentes() async {
   };
 }
 
+/// v1.3.2 (Argón #4) + Fase A 2026-10-25 (A1): método de un pago
+/// diario del espejo. Las filas viejas (sin columna/método en el
+/// JSON) son efectivo: la UI de diarios siempre fue solo efectivo
+/// y el método explícito solo existe desde esta versión. Una fila
+/// con método distinto de 'efectivo' NO es pendiente a entregar.
+bool esPagoDiarioEfectivo(Map<String, dynamic> d) {
+  final m = d['metodo'];
+  if (m == null) return true;
+  return '$m' == 'efectivo';
+}
+
 /// Monto en efectivo que representa una op encolada (0 si no aplica).
 /// Solo cuenta lo que el entrenador cobró en efectivo y aún no entrega.
-double _montoEfectivoOp(
+/// Pública (sin guion bajo) para poder testearla sin BD: los tests
+/// le pasan ops falsas y un mapa de precios.
+double montoEfectivoOp(
     Map<String, dynamic> op, Map<String, double> pr) {
   final tipo = '${op['tipo']}';
   Map<String, dynamic> payload;
@@ -788,19 +801,27 @@ double _montoEfectivoOp(
     return cant * precio;
   }
   if (tipo == 'inscripcion_venta_suplemento') {
+    // Fase A 2026-10-25 (hallazgo A): la pantalla ya envía el
+    // método real en 'metodo_pago' (commit 15db85f); leerlo como
+    // hace 'inscribir'. Una inscripción+venta por transferencia
+    // va directo a la cuenta del dueño y NO suma al pendiente en
+    // efectivo: ni la mensualidad ni la venta. Sin método (ops
+    // viejas) se asume efectivo, como antes.
+    final metodoPago = '${payload['metodo_pago'] ?? 'efectivo'}';
     double t = 0;
     final c = payload['cliente'];
     if (c is Map<String, dynamic>) {
       t += mensualidad(
           '${c['periodo'] ?? 'mensual'}',
           (c['meses'] as num?)?.toInt() ?? 1,
-          'efectivo',
+          metodoPago,
           (c['monto'] as num?)?.toDouble(),
           c['tipo_id'] as String?);
     }
     final v = payload['venta'];
     if (v is Map<String, dynamic>) {
-      if ('${v['moneda'] ?? 'CUP'}'.toUpperCase() == 'CUP') {
+      if (metodoPago == 'efectivo' &&
+          '${v['moneda'] ?? 'CUP'}'.toUpperCase() == 'CUP') {
         final cant = (v['cantidad'] as num?)?.toDouble() ?? 0;
         final precio = (v['precio'] as num?)?.toDouble() ?? 0;
         t += cant * precio;
@@ -812,17 +833,17 @@ double _montoEfectivoOp(
 }
 
 /// Monto en efectivo que representan una lista de ops encoladas.
-/// Suma lo cobrado en efectivo según [_montoEfectivoOp].
+/// Suma lo cobrado en efectivo según [montoEfectivoOp].
 Future<double> montoEfectivoOps(List<Map<String, dynamic>> ops) async {
   final pr = await preciosVigentes();  double total = 0;
   for (final op in ops) {
-    total += _montoEfectivoOp(op, pr);
+    total += montoEfectivoOp(op, pr);
   }
   return total;
 }
 
 /// v1.3.3: monto en CUP cobrado que representa una op encolada.
-/// Como [_montoEfectivoOp] pero SIN filtrar por método de pago ni por
+/// Como [montoEfectivoOp] pero SIN filtrar por método de pago ni por
 /// entrega: para el KPI "Total cobrado" de Actividad reciente.
 /// Sigue la misma regla de precios que el servidor (_precio_metodo).
 Future<double> montoCobradoCupOp(Map<String, dynamic> op) async {
@@ -951,7 +972,7 @@ Future<double> pendienteEntrega(int? telegramId) async {
   }
   for (final d in await LocalDb.instance
       .mirrorFiltrado('pagos_diarios', {'registrado_por': telegramId})) {
-    if (esPendiente(d['entregado'])) {
+    if (esPendiente(d['entregado']) && esPagoDiarioEfectivo(d)) {
       total += (d['total'] as num?)?.toDouble() ?? 0;
     }
   }
@@ -980,7 +1001,7 @@ Future<double> pendienteEntrega(int? telegramId) async {
   }
   final pr = await preciosVigentes();
   for (final op in await LocalDb.instance.pendingOps()) {
-    total += _montoEfectivoOp(op, pr);
+    total += montoEfectivoOp(op, pr);
   }
   // v1.8.0: los adelantos de su gaveta ya salieron de su mano.
   total -= await adelantosEnPendiente(telegramId);
@@ -1022,7 +1043,7 @@ Future<double> pendienteRecoger({int? excluirTelegramId}) async {
     }
   }
   for (final d in await LocalDb.instance.allMirror('pagos_diarios')) {
-    if (esPendiente(d['entregado'])) {
+    if (esPendiente(d['entregado']) && esPagoDiarioEfectivo(d)) {
       final tid = LocalDb.normalizarTelegramId(d['registrado_por']);
       if (excluirTelegramId != null && tid == excluirTelegramId) continue;
       total += (d['total'] as num?)?.toDouble() ?? 0;
@@ -1104,7 +1125,9 @@ Future<({double cup, double usd})> pendienteArqueo(int? telegramId) async {
   for (final d in await LocalDb.instance
       .mirrorFiltrado('pagos_diarios', {'registrado_por': telegramId})) {
     if (cubiertos.contains('pagos_diarios:${d['id']}')) continue;
-    if (esPendiente(d['entregado'])) {
+    // Fase A 2026-10-25 (A1): solo efectivo (sin método = efectivo
+    // legacy); una transferencia nunca es pendiente a entregar.
+    if (esPendiente(d['entregado']) && esPagoDiarioEfectivo(d)) {
       cup += (d['total'] as num?)?.toDouble() ?? 0;
     }
   }
@@ -1183,7 +1206,9 @@ Future<Map<String, List<int>>> idsPendienteArqueo(int? telegramId,
       .mirrorFiltrado('pagos_diarios', {'registrado_por': telegramId})) {
     if (esUsd) continue; // los pagos diarios siempre son CUP
     if (cubiertos.contains('pagos_diarios:${d['id']}')) continue;
-    if (esPendiente(d['entregado'])) {
+    // Fase A 2026-10-25 (A1): solo efectivo (sin método = efectivo
+    // legacy); una transferencia no entra en op_ids de liquidación.
+    if (esPendiente(d['entregado']) && esPagoDiarioEfectivo(d)) {
       final id = (d['id'] as num?)?.toInt();
       if (id != null) res['pagos_diarios']!.add(id);
     }
@@ -2161,7 +2186,7 @@ Future<(double, double)> miTurnoHoy(int? telegramId, {String? fecha}) async {
           jsonDecode(op['payload'] as String) as Map<String, dynamic>;
       final fecha = (payload['fecha'] as String?)?.substring(0, 10) ?? '';
       if (fecha != hoy) continue;
-      cobrado += _montoEfectivoOp(op, pr);
+      cobrado += montoEfectivoOp(op, pr);
     } catch (_) {}
   }
   final pendiente = await pendienteEntrega(telegramId);
@@ -2214,9 +2239,9 @@ Future<int> conteoPagosDia(int? telegramId, {String? fecha}) async {
           jsonDecode(op['payload'] as String) as Map<String, dynamic>;
       final fecha = (payload['fecha'] as String?)?.substring(0, 10) ?? '';
       if (fecha != hoy) continue;
-      // Solo tipos que representan un cobro (igual que _montoEfectivoOp
+      // Solo tipos que representan un cobro (igual que montoEfectivoOp
       // cubre); el resto no cuenta como "pago".
-      if (_montoEfectivoOp(op, pr) > 0) n++;
+      if (montoEfectivoOp(op, pr) > 0) n++;
     } catch (_) {}
   }
   return n;

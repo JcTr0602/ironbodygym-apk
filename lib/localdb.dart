@@ -40,7 +40,7 @@ class LocalDb {
   /// v1.4.0 (Argón): versión actual del esquema local. Los tests de
   /// migración comparan contra esta constante en vez de un número
   /// fijo, para no caer en cascada de fallos con cada migración.
-  static const int versionActual = 44;
+  static const int versionActual = 45;
 
   /// v37: marcas de información pública pendiente de republicar,
   /// UNA FILA POR CLAVE (compartido entre onCreate y la migración
@@ -1128,6 +1128,11 @@ class LocalDb {
           // MISMO método que onCreate (paridad garantizada).
           await _crearTablasBloque4(db);
         }
+        if (oldV < 45) {
+          // Fase A 2026-10-25 (A1 + A4 + pulls 1.10/1.11):
+          // MISMO método que onCreate (paridad garantizada).
+          await _crearTablasFaseA(db);
+        }
       },
     );
     // v1.2.5+28: repara el índice FTS si la migración lo omitió y el
@@ -1236,6 +1241,18 @@ class LocalDb {
       'telegram_user_id': normalizarTelegramId(data['telegram_user_id']),
       'metodo': data['metodo'] is String ? data['metodo'] as String : null,
     };
+  }
+
+  /// Fase A 2026-10-25 (A1): método de un pago diario desde su JSON.
+  /// 'efectivo' salvo que el JSON traiga otro método explícito no
+  /// vacío (las filas viejas no traen método y son efectivo).
+  /// Único punto de verdad: lo usan upsertMirror y
+  /// filaParaBatchMirror para poblar la columna `metodo` del
+  /// espejo pagos_diarios.
+  static String metodoPagoDiarioDe(Map<String, dynamic> data) {
+    final m = data['metodo'];
+    if (m is String && m.trim().isNotEmpty) return m.trim();
+    return 'efectivo';
   }
 
   /// v1.4.6 (v35): moneda de un suplemento o de una reserva desde
@@ -1558,6 +1575,17 @@ class LocalDb {
         fila.addAll(
             columnasPagos(jsonDecode(dataJson) as Map<String, dynamic>));
       } catch (_) {}
+    }
+    // Fase A 2026-10-25 (A1): la fila del batch también puebla la
+    // columna método de pagos_diarios (mismo punto de verdad que
+    // upsertMirror: sin método en el JSON es 'efectivo').
+    if (tabla == 'pagos_diarios') {
+      try {
+        fila['metodo'] =
+            metodoPagoDiarioDe(jsonDecode(dataJson) as Map<String, dynamic>);
+      } catch (_) {
+        fila['metodo'] = 'efectivo';
+      }
     }
     // v1.4.6 (v35): la fila del batch también puebla la columna
     // moneda de suplementos y reservas.
@@ -1984,6 +2012,10 @@ class LocalDb {
         // v1.13.0 (v44, Bloque 4 + sync Fase D G3/G4/G5). MISMO método
         // en onCreate y en onUpgrade (ver _crearTablasBloque4).
         await _crearTablasBloque4(db);
+        // Fase A 2026-10-25 (v45, A1 + A4 + pulls 1.10/1.11). MISMO
+        // método en onCreate y en onUpgrade (ver _crearTablasFaseA).
+        // Aquí (tras `meta`) porque siembra cursores propios.
+        await _crearTablasFaseA(db);
         // v1.2.4: incidencias (diseño ChatGPT: bidireccional, offline-first).
         // incidencias_local: creadas en este dispositivo, pendientes de subir.
         // incidencias_mirror: copia de la tabla central de Supabase.
@@ -2046,9 +2078,12 @@ class LocalDb {
   ///   de Administración es solo visual: al otorgar a N clientes se
   ///   crean N filas). Unicidad: UNA sola fila activa por
   ///   (cliente_id, periodo) con ambos montos, garantizada por el
-  ///   índice único parcial idx_tarifa_esp_unica. NO es espejo: el
-  ///   servidor aún no tiene handler (llega por otra vía); los cambios
-  ///   del usuario viajan por ops upsert/revoke_tarifa_especial.
+  ///   índice único parcial idx_tarifa_esp_unica. NO es espejo: es
+  ///   la tabla de trabajo local; los cambios del usuario viajan
+  ///   por ops upsert/revoke_tarifa_especial y el espejo
+  ///   sync_tarifas_especiales (puente, Fase A 2026-10-25) baja a
+  ///   `espejo_tarifas_especiales`, que los lectores fusionan con
+  ///   esta tabla (ver tarifa_especial.dart).
   /// - plantilla_mensaje: plantillas G1 (lista blanca en
   ///   plantilla_mensaje.dart, no en la tabla).
   /// - compras: compras MANUALES del Centro de Compras E4 (las ventas
@@ -2288,6 +2323,44 @@ class LocalDb {
         'nombre TEXT NOT NULL, '
         'ultimo_sync_at TEXT NOT NULL, '
         'sync_seq INTEGER NOT NULL)');
+  }
+
+  /// Tablas de la Fase A 2026-10-25 (v45). Se llama desde onCreate
+  /// (_crearTablas) Y desde onUpgrade (oldV < 45) para que el
+  /// esquema sea idéntico en instalación limpia y en migración
+  /// (paridad de esquema, mismo patrón que _crearTablasBloque4).
+  ///
+  /// - Columna `metodo` en el espejo pagos_diarios (A1): las filas
+  ///   viejas quedan en 'efectivo' por el DEFAULT del ALTER (la UI
+  ///   de diarios siempre fue solo efectivo); las nuevas se
+  ///   pueblan desde el JSON en upsertMirror/filaParaBatchMirror.
+  /// - Espejos de lectura (id TEXT, como liquidaciones_caja):
+  ///   `nomina_bonos` (A4, bonos manuales sincronizados),
+  ///   `espejo_tarifas_especiales` (D6, 1.10),
+  ///   `espejo_entregas_efectivo` (C1, 1.11) y
+  ///   `espejo_recordatorio_config` (G2, 1.11). Los tres últimos
+  ///   NO sustituyen a las tablas locales de trabajo
+  ///   (tarifa_especial, entregas_efectivo, recordatorio_config):
+  ///   los lectores fusionan espejo + local (el espejo gana por
+  ///   id), para que lo otorgado en otro teléfono aparezca aquí
+  ///   sin tocar la escritura optimista local. Sus cursores
+  ///   propios se siembran en 0 (nunca heredan el global).
+  static Future<void> _crearTablasFaseA(Database db) async {
+    await _addColumnIfMissing(
+        db, 'pagos_diarios', 'metodo', "TEXT NOT NULL DEFAULT 'efectivo'");
+    for (final t in [
+      'nomina_bonos',
+      'espejo_tarifas_especiales',
+      'espejo_entregas_efectivo',
+      'espejo_recordatorio_config',
+    ]) {
+      await db.execute('CREATE TABLE IF NOT EXISTS $t (id TEXT PRIMARY KEY, '
+          'data TEXT NOT NULL, sync_seq INTEGER NOT NULL)');
+      await db.execute(
+          'CREATE INDEX IF NOT EXISTS idx_${t}_seq ON $t(sync_seq)');
+      await db.rawInsert(
+          "INSERT OR IGNORE INTO meta (k, v) VALUES ('wm_$t', '0')");
+    }
   }
 
   /// Siembra inicial D6 (Argón ajuste 3): IDs deterministas, INSERT OR
@@ -2589,6 +2662,12 @@ class LocalDb {
       // filaParaBatchMirror en sync.dart; si se olvida uno, el índice
       // queda vacío.)
       if (tabla == 'pagos') fila.addAll(columnasPagos(data));
+      // Fase A 2026-10-25 (A1): columna método del espejo
+      // pagos_diarios. Sin método en el JSON (filas viejas) es
+      // 'efectivo': la UI de diarios siempre fue solo efectivo.
+      if (tabla == 'pagos_diarios') {
+        fila['metodo'] = metodoPagoDiarioDe(data);
+      }
       // v1.4.6 (v35): poblar la columna moneda del espejo reservas.
       if (tabla == 'reservas') fila.addAll(columnasMoneda(data));
       // v1.7.0 (v36): poblar las columnas cuenta_casa del espejo.
@@ -5294,6 +5373,15 @@ class LocalDb {
     'reservas',
     'solicitudes_adelanto',
     'avisos_entrenadores',
+    // Fase A 2026-10-25 (v45): mismo motivo para los espejos de
+    // bonos, tarifas, entregas y recordatorios. Una tabla ausente
+    // en Supabase (p. ej. sync_nomina_bonos antes de que el
+    // servidor la publique) queda marcada ausente y no bloquea
+    // el «completo» (ver getWatermarkMinimo).
+    'nomina_bonos',
+    'espejo_tarifas_especiales',
+    'espejo_entregas_efectivo',
+    'espejo_recordatorio_config',
   ];
 
   Future<int> getWatermarkTabla(String tabla) async {
@@ -5322,6 +5410,15 @@ class LocalDb {
     // tabla y deben descargarse desde cero, por el mismo motivo.
     if (tabla == 'solicitudes_adelanto' ||
         tabla == 'avisos_entrenadores') {
+      return 0;
+    }
+    // Fase A 2026-10-25 (v45): los espejos de bonos, tarifas,
+    // entregas y recordatorios nacen con la tabla y deben
+    // descargarse desde cero, por el mismo motivo.
+    if (tabla == 'nomina_bonos' ||
+        tabla == 'espejo_tarifas_especiales' ||
+        tabla == 'espejo_entregas_efectivo' ||
+        tabla == 'espejo_recordatorio_config') {
       return 0;
     }
     return getWatermark(); // hereda el global (migración)
@@ -5371,7 +5468,64 @@ class LocalDb {
 
   Future<List<Map<String, dynamic>>> listarRecordatorios() async {
     final d = await db;
-    return d.query('recordatorio_config', orderBy: 'creada_ts ASC');
+    final locales = await d.query('recordatorio_config',
+        orderBy: 'creada_ts ASC');
+    // Fase A 2026-10-25 (G2): fusionar con el espejo bajado
+    // (sync_recordatorio_config): lo creado/disparado en otro
+    // teléfono aparece aquí. Si el espejo aún no existe (BD de
+    // test mínima), se lee solo lo local.
+    List<Map<String, dynamic>> espejo = const [];
+    try {
+      espejo = await allMirror('espejo_recordatorio_config');
+    } catch (_) {}
+    return fusionarRecordatorios(
+        locales.map((r) => Map<String, dynamic>.from(r)).toList(),
+        espejo);
+  }
+
+  /// PURO (testeable sin BD): fusiona la tabla local de
+  /// recordatorios con el espejo bajado (G2, Fase A 2026-10-25).
+  /// El espejo (verdad del servidor) gana por id: así el
+  /// `disparado_en_fecha_habana` que el dueño escribió al
+  /// disparar un masivo llega a los demás teléfonos y no vuelven
+  /// a disparar ese día. Un espejo inactivo SIN fila local es un
+  /// borrado suave ya propagado: no resucita en la lista (la
+  /// pantalla lo mostraría como «pausado» aunque el usuario lo
+  /// eliminó en otro teléfono).
+  static List<Map<String, dynamic>> fusionarRecordatorios(
+      List<Map<String, dynamic>> locales,
+      List<Map<String, dynamic>> espejo) {
+    final porId = <String, Map<String, dynamic>>{};
+    for (final l in locales) {
+      porId['${l['id']}'] = Map<String, dynamic>.from(l);
+    }
+    for (final e in espejo) {
+      final id = '${e['id'] ?? ''}';
+      if (id.isEmpty) continue;
+      final norm = <String, dynamic>{
+        'id': id,
+        'titulo': '${e['titulo'] ?? ''}',
+        'tipo': '${e['tipo'] ?? ''}',
+        'alcance': '${e['alcance'] ?? 'solo_mio'}',
+        'target_key': '${e['target_key'] ?? 'todos'}',
+        'dias_anticipacion':
+            (e['dias_anticipacion'] as num?)?.toInt() ?? 3,
+        'fecha_fija': e['fecha_fija'],
+        'activa': e['activa'] == true || e['activa'] == 1
+            ? 1
+            : (e['activa'] is num ? (e['activa'] as num).toInt() : 0),
+        'creado_por': e['creado_por'],
+        'disparado_en_fecha_habana': e['disparado_en_fecha_habana'],
+        'creada_ts': '${e['creada_ts'] ?? ''}',
+        'actualizada_ts': '${e['actualizada_ts'] ?? ''}',
+      };
+      if (!porId.containsKey(id) && norm['activa'] != 1) continue;
+      porId[id] = norm;
+    }
+    final out = porId.values.toList()
+      ..sort((a, b) =>
+          '${a['creada_ts']}'.compareTo('${b['creada_ts']}'));
+    return out;
   }
 
   Future<void> guardarRecordatorio(Map<String, dynamic> fila) async {

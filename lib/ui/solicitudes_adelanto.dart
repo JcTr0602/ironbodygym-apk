@@ -62,8 +62,13 @@ class _SolicitudesAdelantoScreenState
 
   /// Diálogo de aprobación con el selector de destino OBLIGATORIO
   /// antes de confirmar (el dueño ve qué significa cada destino).
+  /// Fase A 2026-10-25 (B1): también se elige CÓMO se paga el
+  /// adelanto; por transferencia, «Pendiente a entregar» no está
+  /// disponible (una transferencia no sale de la gaveta) y el
+  /// destino se fuerza a «Nómina» antes de enviar.
   Future<void> _aprobar(SolicitudAdelanto s) async {
     var destino = 'nomina';
+    var metodo = 'efectivo';
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => StatefulBuilder(
@@ -78,6 +83,35 @@ class _SolicitudesAdelantoScreenState
                 ' · ${fmtMonto(s.monto)} CUP'
                 '${s.motivo.isNotEmpty ? ' · «${s.motivo}»' : ''}',
                 style: AppTexto.cuerpo,
+              ),
+              const SizedBox(height: AppEspacio.md),
+              const Text('¿Cómo se paga?',
+                  style: AppTexto.subtitulo),
+              RadioListTile<String>(
+                value: 'efectivo',
+                groupValue: metodo,
+                onChanged: (v) => setS(() => metodo = v ?? 'efectivo'),
+                title: const Text('Efectivo'),
+                subtitle: const Text(
+                  'Sale de la caja del turno.',
+                  style: AppTexto.secundario,
+                ),
+              ),
+              RadioListTile<String>(
+                value: 'transferencia',
+                groupValue: metodo,
+                onChanged: (v) => setS(() {
+                  metodo = v ?? 'efectivo';
+                  // B1: por transferencia no hay gaveta de donde
+                  // descontar: el destino vuelve a Nómina solo.
+                  if (metodo == 'transferencia') destino = 'nomina';
+                }),
+                title: const Text('Transferencia'),
+                subtitle: const Text(
+                  'Va directo a su cuenta; no descuenta del '
+                  'pendiente a entregar.',
+                  style: AppTexto.secundario,
+                ),
               ),
               const SizedBox(height: AppEspacio.md),
               const Text('¿De dónde sale el dinero?',
@@ -95,7 +129,11 @@ class _SolicitudesAdelantoScreenState
               RadioListTile<String>(
                 value: 'pendiente',
                 groupValue: destino,
-                onChanged: (v) => setS(() => destino = v ?? 'nomina'),
+                // B1: deshabilitado por transferencia (el destino
+                // efectivo sería Nómina de todos modos).
+                onChanged: metodo == 'transferencia'
+                    ? null
+                    : (v) => setS(() => destino = v ?? 'nomina'),
                 title: const Text('Pendiente a entregar'),
                 subtitle: const Text(
                   'Descuenta del pendiente a entregar de su '
@@ -103,6 +141,12 @@ class _SolicitudesAdelantoScreenState
                   style: AppTexto.secundario,
                 ),
               ),
+              if (metodo == 'transferencia')
+                const Text(
+                  'Por transferencia el destino es Nómina: el '
+                  'pendiente a entregar es efectivo en mano.',
+                  style: AppTexto.secundario,
+                ),
             ],
           ),
           actions: [
@@ -119,12 +163,18 @@ class _SolicitudesAdelantoScreenState
       ),
     );
     if (ok != true || !mounted) return;
+    // B1: el destino efectivo (forzado) es el que se muestra.
+    final destinoFinal =
+        destinoEfectivoF3(metodo: metodo, destino: destino);
     setState(() => _actuando = true);
     try {
-      await SolicitudesAdelantoService.instance
-          .resolver(solicitud: s, aprobar: true, destino: destino);
+      await SolicitudesAdelantoService.instance.resolver(
+          solicitud: s,
+          aprobar: true,
+          destino: destino,
+          metodo: metodo);
       _snack('Adelanto aprobado '
-          '(${destino == 'nomina' ? 'Nómina' : 'Pendiente a entregar'}).');
+          '(${destinoFinal == 'nomina' ? 'Nómina' : 'Pendiente a entregar'}).');
       await _cargar();
     } catch (e) {
       _snack('No se pudo aprobar: $e');

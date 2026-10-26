@@ -9,8 +9,15 @@
 ///
 /// Precedencia cerrada (ajuste 2 + respuesta 1 de Argón):
 ///   Casa (0) > especial vigente del cliente para ese método Y ese
-///   periodo > menores > Oferta (monto personalizado explícito) >
-///   estándar global.
+///   periodo > MIN(menores, Oferta) > estándar global.
+///
+/// Fase A 2026-10-25 (MIN): entre precio de menor y precio de
+/// oferta rige el MENOR de los dos. Antes el escalón menores
+/// devolvía 1500 sin mirar la oferta: un menor con Oferta 50%
+/// (1000) pagaba 1500. Ahora, si hay oferta y es más barata,
+/// rige la oferta (escalón 'oferta'); si la oferta es más cara
+/// que la tarifa de menores, rige menores. Sin oferta, menores
+/// como siempre.
 /// - Método en null en la especial → cae al siguiente escalón
 ///   (menores/Oferta), NUNCA directo al estándar.
 /// - Especial vencida (hoy_habana > vigente_hasta) o aún no vigente
@@ -21,7 +28,11 @@
 ///   NO aplica (el periodo debe coincidir).
 /// - Tipos personalizados (Oferta): el diálogo los resuelve con su
 ///   propio monto y NO pasa por aquí; si un llamador pasa
-///   [montoOferta], ese es el escalón Oferta de la cadena.
+///   [montoOferta], ese es el escalón Oferta de la cadena. Fase A
+///   (MIN): el diálogo sí reenvía como [montoOferta] una oferta
+///   mensual vigente (tipo personalizado de 30 días) cuando se
+///   cobra por el camino fijo mensual/menores, para que el menor
+///   no pague más que la oferta.
 ///
 /// El monto devuelto es UNITARIO (por periodo); el diálogo multiplica
 /// por meses solo en mensual/menores, como siempre.
@@ -122,9 +133,17 @@ PrecioCobro _siguienteEscalon({
   double? montoOferta,
   List<String> avisos = const [],
 }) {
-  // 3. Menores (solo aplica al periodo mensual).
+  // 3. Menores (solo aplica al periodo mensual). Fase A (MIN):
+  // si hay oferta, rige el menor de ambos precios.
   if (esMenor && periodo == 'mensual') {
-    return PrecioCobro(precios['menores'] ?? 1500, 'menores', avisos);
+    final menor = precios['menores'] ?? 1500;
+    if (montoOferta != null && montoOferta < menor) {
+      return PrecioCobro(montoOferta, 'oferta', [
+        ...avisos,
+        'Oferta más barata que la tarifa de menores: rige la oferta',
+      ]);
+    }
+    return PrecioCobro(menor, 'menores', avisos);
   }
   // 4. Oferta (monto personalizado explícito del llamador).
   if (montoOferta != null) {
@@ -157,6 +176,10 @@ Future<PrecioCobro> precioCobroParaCliente({
   required String periodo,
   required String metodo,
   Map<String, double>? precios,
+  // Fase A 2026-10-25 (MIN): oferta mensual vigente que el
+  // llamador conozca (p. ej. una Oferta 50%): si es más barata
+  // que la tarifa de menores, rige ella. Sin oferta, null.
+  double? montoOferta,
 }) async {
   final pr = precios ?? await preciosVigentes();
   final clienteId = (cliente['id'] as num?)?.toInt() ?? 0;
@@ -189,6 +212,7 @@ Future<PrecioCobro> precioCobroParaCliente({
     esMenor: menor,
     precios: pr,
     especial: especial,
+    montoOferta: montoOferta,
     hoyHabana: hoyHabanaIso(),
   );
 }

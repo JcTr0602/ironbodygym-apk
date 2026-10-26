@@ -145,6 +145,11 @@ const Map<String, TipoOperacionInfo> kTiposOperacion = {
       TipoOperacionInfo('Anulación de adelanto', Icons.undo),
   'liquidar_nomina':
       TipoOperacionInfo('Nómina liquidada', Icons.fact_check),
+  // Fase A 2026-10-25 (A4): bonos manuales sincronizados.
+  'registrar_bono_nomina':
+      TipoOperacionInfo('Bono de nómina', Icons.card_giftcard),
+  'eliminar_bono_nomina':
+      TipoOperacionInfo('Bono de nómina eliminado', Icons.undo),
 };
 
 /// v1.4.4: etiquetas de la op 'ajuste' según su clave. Antes TODA

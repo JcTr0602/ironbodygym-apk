@@ -9,6 +9,13 @@ import 'tiempo.dart';
 /// base × tarifa + bonos aplicables. La tarifa la define Jc
 /// (PerfilService.getPagoEntrenador; 150 CUP por defecto).
 ///
+/// Fase A 2026-10-25 (A3, regla cerrada por Jc): SOLO las
+/// mensualidades generan los 150 CUP. Semanas, quincenas y diarios
+/// NO generan comisión (los diarios ni siquiera viven en `pagos`).
+/// El filtro es explícito por tipo de pago ([esPagoMensualidad]),
+/// no por `pagado_hasta`: un cliente que solo pagó semanal en un
+/// mes cerrado contaba antes y ya no cuenta.
+///
 /// Excepción del MES EN CURSO (Jc, 2026-10-21): un cliente cuyo
 /// `pagado_hasta` cae DENTRO del propio mes en curso NO entra en la
 /// base de ese mes (ese pago todavía no corresponde a la nómina del
@@ -16,7 +23,8 @@ import 'tiempo.dart';
 /// NO se aplica a meses pasados: el `pagado_hasta` actual no
 /// reconstruye la cobertura que el cliente tenía al cierre de un mes
 /// anterior, así que los meses cerrados conservan la regla histórica
-/// (panel de revisión 2026-10-21).
+/// (panel de revisión 2026-10-21). La excepción se aplica DESPUÉS
+/// del filtro de tipo: nunca se usa como filtro de tipo.
 class NominaCalc {
   /// Prefijo del mes Habana en curso: 'YYYY-MM'.
   static String prefMesActual() => hoyHabanaIso().substring(0, 7);
@@ -57,7 +65,16 @@ class NominaCalc {
   static Future<Set<int>?> _conjunto(String pref) async {
     try {
       final pagos = await LocalDb.instance.pagosDelMes(pref);
-      final vistos = idsDesdePagos(pagos);
+      // Fase A 2026-10-25 (A3): la base solo cuenta mensualidades.
+      // El filtro va ANTES de cualquier otra exclusión (Casa, mes
+      // en curso): semanas/quincenas/personalizados cortos no
+      // generan comisión aunque el cliente no sea Casa ni esté
+      // en la excepción del mes en curso.
+      final mensuales = [
+        for (final p in pagos)
+          if (esPagoMensualidad(p)) p,
+      ];
+      final vistos = idsDesdePagos(mensuales);
       // v1.7.0 (Argón, separación estricta): la contabilidad
       // filtra cuenta_casa=0. Una Cuenta a la Casa no genera los
       // 150 CUP ni entra en «pagaron el mes» aunque tenga un pago
@@ -86,6 +103,32 @@ class NominaCalc {
     } catch (_) {
       return null;
     }
+  }
+
+  /// PURO (testeable sin BD): ¿este pago del espejo `pagos`
+  /// genera comisión de nómina? Fase A 2026-10-25 (A3, regla
+  /// cerrada por Jc): SOLO las mensualidades.
+  ///
+  /// - `periodo == 'mensual'` → sí (mensual, menores y especiales
+  ///   mensuales; el tipo_id no importa).
+  /// - Sin `periodo` → sí: el resto del código usa 'mensual'
+  ///   como default del campo (etiquetaPeriodo, payloads de cobro).
+  /// - `personalizado` o `tipo:<id>` (ofertas) → solo si cubre
+  ///   un mes o más (`dias >= 30`): una Oferta 50% a 30 días ES
+  ///   una mensualidad; una personalizada de 15 días es una
+  ///   quincena y NO genera. Sin `dias` interpretable → no (no
+  ///   se puede probar cobertura mensual; el filtro debe ser
+  ///   explícito, no por defecto).
+  /// - `semanal`, `quincenal` y cualquier otro → no.
+  static bool esPagoMensualidad(Map<String, dynamic> p) {
+    final periodo = '${p['periodo'] ?? 'mensual'}';
+    if (periodo == 'mensual') return true;
+    if (periodo == 'semanal' || periodo == 'quincenal') return false;
+    if (periodo == 'personalizado' || periodo.startsWith('tipo:')) {
+      final dias = (p['dias'] as num?)?.toInt();
+      return dias != null && dias >= 30;
+    }
+    return false;
   }
 
   /// PURO (testeable sin BD): ids únicos de cliente presentes en

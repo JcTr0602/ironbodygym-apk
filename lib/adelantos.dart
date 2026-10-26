@@ -285,8 +285,41 @@ class AdelantosService {
     });
   }
 
-  Future<void> anular(int adelantoId) =>
-      _queueYEmpujar('anular_adelanto', {'adelanto_id': adelantoId});
+  /// Anula un adelanto (solo dueño en el servidor).
+  ///
+  /// Fase A 2026-10-25 (M1): si el mes de nómina de ese adelanto
+  /// ya está liquidado para su entrenador, se RECHAZA antes de
+  /// encolar (la misma fuente de verdad que usa la UI:
+  /// [nominaLiquidada], espejo `nomina_liquidada` + op
+  /// `liquidar_nomina` pendiente). Sin entrenador/mes explícitos,
+  /// se buscan en el espejo por id; si no se encuentran (fila
+  /// provisional o espejo incompleto), se deja pasar: el servidor
+  /// es la última guarda y la UI ya oculta el botón cuando sabe
+  /// que el mes está liquidado.
+  Future<void> anular(int adelantoId,
+      {String? entrenadorId, String? mesNomina}) async {
+    var ent = entrenadorId;
+    var mes = mesNomina;
+    if (ent == null || mes == null) {
+      for (final a in await _db.allMirror('adelantos')) {
+        if ((a['id'] as num?)?.toInt() == adelantoId) {
+          ent ??= '${a['entrenador'] ?? ''}';
+          final m = '${a['mes_nomina'] ?? ''}';
+          if (mes == null && m.length == 7) mes = m;
+          break;
+        }
+      }
+    }
+    if (ent != null &&
+        ent.isNotEmpty &&
+        mes != null &&
+        await nominaLiquidada(mes, ent)) {
+      throw StateError(
+          'La nómina de $mes ya está liquidada: no se puede anular '
+          'este adelanto.');
+    }
+    return _queueYEmpujar('anular_adelanto', {'adelanto_id': adelantoId});
+  }
 
   Future<void> liquidarNomina({
     required String mes,

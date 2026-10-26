@@ -154,6 +154,12 @@ Future<Map<String, dynamic>?> pagoDialogo(
   TipoPago tipoSel =
       tiposDisp.firstWhere((t) => t.id == (menor ? 'menores' : 'mensual'),
           orElse: () => tiposDisp.first);
+  // NOTA Fase A 2026-10-25 (MIN): el motor (precio_cobro) ya
+  // aplica MIN(menor, oferta) cuando el llamador pasa montoOferta
+  // explícito. NO se auto-aplica aquí la oferta mensual vigente
+  // al menor: elegir qué oferta le corresponde es decisión de
+  // negocio pendiente de Jc (una oferta global no es lo mismo
+  // que la oferta propia del cliente).
   int meses = 1;
   String metodo = 'efectivo';
   final diasCtrl = TextEditingController();

@@ -11,9 +11,10 @@ import 'tiempo.dart';
 /// Lo único caro de la nómina es contar los clientes únicos que
 /// pagaron el mes (escaneo del espejo `pagos`). Ese conteo se cachea
 /// en la tabla local `nomina_precalc` junto con una HUELLA de los
-/// insumos. Los bonos y la tarifa NO se cachean: viven en preferencias
-/// y se leen siempre en vivo al componer el total, así un bono recién
-/// guardado se refleja al instante.
+/// insumos. Los bonos y la tarifa NO se cachean: los bonos viven
+/// en gym.db sincronizado (Fase A 2026-10-25, A4) y la tarifa en
+/// el perfil; se leen siempre en vivo al componer el total, así
+/// un bono recién guardado se refleja al instante.
 ///
 /// Frescura: la huella se recalcula al leer; si no coincide con la
 /// guardada, la caché se considera vieja y se recalcula. La huella

@@ -75,8 +75,8 @@ void main() {
     expect(filas, hasLength(2));
   });
 
-  test('versión actual de la BD es 44', () async {
+  test('versión actual de la BD es 45', () async {
     await _abrirDbVacia();
-    expect(LocalDb.versionActual, 44);
+    expect(LocalDb.versionActual, 45);
   });
 }

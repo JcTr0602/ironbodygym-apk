@@ -7,6 +7,7 @@ import '../auth.dart';
 import '../localdb.dart';
 import '../adelantos.dart';
 import '../negocio.dart';
+import '../nomina_bonos.dart';
 import '../nomina_calc.dart';
 import '../nomina_precalc.dart';
 import '../perfil.dart';
@@ -94,7 +95,11 @@ class _NominaScreenState extends State<NominaScreen> {
       // La pantalla pudo cerrarse durante los awaits: no seguir
       // hasta el setState con el widget desmontado (auditoría, terra).
       if (!mounted) return;
-      // v1.3.9: leer lista de bonos (migrar bono simple viejo si existe)
+      // Fase A 2026-10-25 (A4): los bonos ya NO viven en
+      // SharedPreferences sino en gym.db sincronizado. La lista
+      // vieja de prefs (si queda) se migra UNA vez: se encola
+      // como ops y luego se borran las claves, para no duplicar
+      // en la próxima apertura.
       List<Map<String, dynamic>> bonos = [];
       final jsonStr = prefs.getString(_bonosKey(ahoraHabana()));
       if (jsonStr != null && jsonStr.isNotEmpty) {
@@ -116,12 +121,16 @@ class _NominaScreenState extends State<NominaScreen> {
             'nota': 'Migrado del sistema anterior',
             'creado_en': ahoraHabana().toIso8601String(),
           });
-          await prefs.setString(
-              _bonosKey(ahoraHabana()), jsonEncode(bonos));
-          await prefs.remove(
-              'nomina_bono_${ahora.year}_${ahora.month}');
         }
       }
+      if (bonos.isNotEmpty) {
+        await BonosNominaService.instance
+            .migrarDesdePrefs(bonos, pref);
+        await prefs.remove(_bonosKey(ahoraHabana()));
+        await prefs.remove(
+            'nomina_bono_${ahora.year}_${ahora.month}');
+      }
+      bonos = await BonosNominaService.instance.leerBonos(pref);
       final tarifa =
           await PerfilService.instance.getPagoEntrenador();
       // v1.8.0: comisión por dosis del mes (espejo de ventas de
@@ -266,17 +275,18 @@ class _NominaScreenState extends State<NominaScreen> {
       );
       return;
     }
-    final prefs = await SharedPreferences.getInstance();
-    final nuevo = {
-      'id': DateTime.now().millisecondsSinceEpoch.toString(),
-      'entrenador': _bonoEntrenador,
-      'monto': monto,
-      'nota': _bonoNotaCtrl.text.trim(),
-      'creado_en': ahoraHabana().toIso8601String(),
-    };
-    final actualizados = [..._bonos, nuevo];
-    await prefs.setString(
-        _bonosKey(ahoraHabana()), jsonEncode(actualizados));
+    // Fase A 2026-10-25 (A4): el bono se guarda sincronizado
+    // (espejo + op), no en SharedPreferences.
+    final pref = hoyHabanaIso().substring(0, 7);
+    await BonosNominaService.instance.agregar(
+      mes: pref,
+      entrenador: _bonoEntrenador,
+      monto: monto,
+      nota: _bonoNotaCtrl.text.trim(),
+    );
+    final actualizados =
+        await BonosNominaService.instance.leerBonos(pref);
+    if (!mounted) return;
     setState(() {
       _bonos = actualizados;
       _bonoMontoCtrl.clear();
@@ -290,11 +300,13 @@ class _NominaScreenState extends State<NominaScreen> {
   }
 
   Future<void> _eliminarBono(String id) async {
-    final prefs = await SharedPreferences.getInstance();
+    // Fase A 2026-10-25 (A4): encola la eliminación; la lectura
+    // fusionada lo oculta al instante.
+    await BonosNominaService.instance.eliminar(id);
+    final pref = hoyHabanaIso().substring(0, 7);
     final actualizados =
-        _bonos.where((b) => '${b['id']}' != id).toList();
-    await prefs.setString(
-        _bonosKey(ahoraHabana()), jsonEncode(actualizados));
+        await BonosNominaService.instance.leerBonos(pref);
+    if (!mounted) return;
     setState(() => _bonos = actualizados);
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -809,7 +821,10 @@ class _NominaScreenState extends State<NominaScreen> {
                 style: AppTexto.cuerpo)
           else
             for (final e in items)
-              _filaAdelanto(context, e, anulados, esDueno),
+              _filaAdelanto(context, e, anulados, esDueno,
+                  liquidada: liquidada,
+                  entrenadorId: persona.id,
+                  mesNomina: pref),
           if (libro != null && libro.deudaSaliente > 0)
             Padding(
               padding: const EdgeInsets.only(top: 4),
@@ -874,7 +889,10 @@ class _NominaScreenState extends State<NominaScreen> {
   }
 
   Widget _filaAdelanto(BuildContext context, Map<String, dynamic> e,
-      Set<int> anulados, bool esDueno) {
+      Set<int> anulados, bool esDueno,
+      {bool liquidada = false,
+      String? entrenadorId,
+      String? mesNomina}) {
     final id = (e['id'] as num?)?.toInt();
     final esReverso = e['reverso_de'] != null;
     final estaAnulado = id != null && anulados.contains(id);
@@ -936,6 +954,7 @@ class _NominaScreenState extends State<NominaScreen> {
             ),
           ),
           if (esDueno &&
+              !liquidada &&
               !esReverso &&
               !estaAnulado &&
               !anulacionPendiente &&
@@ -969,7 +988,19 @@ class _NominaScreenState extends State<NominaScreen> {
                   ),
                 );
                 if (ok != true) return;
-                await AdelantosService.instance.anular(id);
+                try {
+                  await AdelantosService.instance.anular(id,
+                      entrenadorId: entrenadorId,
+                      mesNomina: mesNomina);
+                } catch (err) {
+                  // M1: mes liquidado (u otro rechazo): se avisa
+                  // y no se recarga como si hubiera funcionado.
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text('$err')));
+                  }
+                  return;
+                }
                 if (mounted) _cargar();
               },
             ),

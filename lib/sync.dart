@@ -2372,6 +2372,84 @@ class SyncEngine {
       }
       return {'id': id, 'dataJson': jsonEncode(data), 'esTexto': true};
     }
+    // Fase A 2026-10-25 (A4 + pulls 1.10/1.11): espejos planos
+    // con id TEXT (mismo patrón que solicitudes_adelanto). Las
+    // tablas locales se llaman espejo_* porque el nombre corto
+    // ya lo ocupan las tablas de trabajo locales.
+    if (tabla == 'espejo_tarifas_especiales' ||
+        tabla == 'espejo_entregas_efectivo' ||
+        tabla == 'espejo_recordatorio_config') {
+      final id = tabla == 'espejo_entregas_efectivo'
+          ? '${m['op_uuid'] ?? ''}'
+          : '${m['id'] ?? ''}';
+      if (id.isEmpty) return null;
+      final data = <String, dynamic>{'id': id};
+      if (tabla == 'espejo_tarifas_especiales') {
+        data.addAll({
+          'cliente_id': m['cliente_id'],
+          'nombre': m['nombre'],
+          'periodo': m['periodo'],
+          'monto_efectivo': m['monto_efectivo'],
+          'monto_transferencia': m['monto_transferencia'],
+          'vigente_desde': m['vigente_desde'],
+          'vigente_hasta': m['vigente_hasta'],
+          'motivo': m['motivo'],
+          'otorgado_por': m['otorgado_por'],
+          'activa': m['activa'],
+          'historial': m['historial'],
+        });
+      } else if (tabla == 'espejo_entregas_efectivo') {
+        data.addAll({
+          'op_uuid': id,
+          'entrenador_telegram_id': m['entrenador_telegram_id'],
+          'monto_entregado': m['monto_entregado'],
+          'fecha_habana': m['fecha_habana'],
+          'autor_dueno_id': m['autor_dueno_id'],
+          'movimiento': m['movimiento'],
+          'creada_ts': m['creada_ts'],
+        });
+      } else {
+        data.addAll({
+          'titulo': m['titulo'],
+          'tipo': m['tipo'],
+          'alcance': m['alcance'],
+          'target_key': m['target_key'],
+          'dias_anticipacion': m['dias_anticipacion'],
+          'fecha_fija': m['fecha_fija'],
+          'activa': m['activa'],
+          'creado_por': m['creado_por'],
+          'disparado_en_fecha_habana': m['disparado_en_fecha_habana'],
+          'creada_ts': m['creada_ts'],
+          'actualizada_ts': m['actualizada_ts'],
+        });
+      }
+      return {'id': id, 'dataJson': jsonEncode(data), 'esTexto': true};
+    }
+    // Fase A 2026-10-25 (A4): espejo de bonos manuales. Contrato
+    // para el servidor (ver nomina_bonos.dart): vista plana con
+    // bono_uuid como llave; si algún día llegara con columna
+    // 'data' JSON, se usa tal cual.
+    if (tabla == 'nomina_bonos') {
+      final rawData = m['data'];
+      final Map<String, dynamic> data;
+      if (rawData is Map) {
+        data = Map<String, dynamic>.from(rawData);
+      } else {
+        data = {
+          'bono_uuid': m['bono_uuid'],
+          'mes': m['mes'],
+          'entrenador': m['entrenador'],
+          'monto': m['monto'],
+          'nota': m['nota'],
+          'creado_en': m['creado_en'],
+        };
+      }
+      final uuid = '${data['bono_uuid'] ?? m['id'] ?? ''}';
+      if (uuid.isEmpty) return null;
+      data['bono_uuid'] = uuid;
+      data['id'] = uuid;
+      return {'id': uuid, 'dataJson': jsonEncode(data), 'esTexto': true};
+    }
     final id = (m['id'] as int?) ?? 0;
     if (id == 0) return null;
     // gastos usa columnas planas en Supabase (sin 'data' JSON)
@@ -2437,6 +2515,13 @@ class SyncEngine {
       // patrón que los servicios en v1.8.0).
       'solicitudes_adelanto',
       'avisos_entrenadores',
+      // Fase A 2026-10-25 (A4 + pulls 1.10/1.11): mismo patrón de
+      // tabla ausente (el puente ya publica las tres de Fase A;
+      // sync_nomina_bonos la publica cuando el servidor la tenga).
+      'nomina_bonos',
+      'espejo_tarifas_especiales',
+      'espejo_entregas_efectivo',
+      'espejo_recordatorio_config',
     ];
     final tablas = tablasFiltro ?? todasTablas;
     // v1.2.5 (D19): si el manifiesto marcó algún ámbito divergente,
@@ -2617,6 +2702,16 @@ class SyncEngine {
       // 'data' — ver la rama de select abajo y _prepararFilaMirror).
       'solicitudes_adelanto': 'sync_solicitudes_adelanto',
       'avisos_entrenadores': 'sync_avisos_entrenadores',
+      // Fase A 2026-10-25 (A4 + pulls 1.10/1.11): espejos planos
+      // del puente (columnas exactas en la rama de select y en
+      // _prepararFilaMirror). Los nombres locales llevan el
+      // prefijo espejo_ porque las tablas de trabajo locales
+      // (tarifa_especial, entregas_efectivo, recordatorio_config)
+      // ya ocupan el nombre corto.
+      'nomina_bonos': 'sync_nomina_bonos',
+      'espejo_tarifas_especiales': 'sync_tarifas_especiales',
+      'espejo_entregas_efectivo': 'sync_entregas_efectivo',
+      'espejo_recordatorio_config': 'sync_recordatorio_config',
     };
     var ti = 0;
     for (final tabla in tablas) {
@@ -2673,6 +2768,26 @@ class SyncEngine {
             'avisos_entrenadores' =>
               'id,titulo,mensaje,modo,activo,vigente_desde,vigente_hasta,'
                   'creado_por,creada_ts,actualizada_ts,sync_seq',
+            // Fase A 2026-10-25 (A4 + pulls 1.10/1.11): columnas
+            // exactas del puente (publicar_tarifas_especiales,
+            // publicar_entregas_efectivo, publicar_recordatorio_
+            // config en sync_bridge.py). sync_nomina_bonos es el
+            // contrato nuevo para el servidor (ver nomina_bonos.dart).
+            'nomina_bonos' =>
+              'id,bono_uuid,mes,entrenador,monto,nota,creado_en,sync_seq',
+            'espejo_tarifas_especiales' =>
+              'id,cliente_id,nombre,periodo,monto_efectivo,'
+                  'monto_transferencia,vigente_desde,vigente_hasta,'
+                  'motivo,otorgado_por,activa,historial,sync_seq',
+            'espejo_entregas_efectivo' =>
+              'op_uuid,entrenador_telegram_id,monto_entregado,'
+                  'fecha_habana,autor_dueno_id,movimiento,creada_ts,'
+                  'sync_seq',
+            'espejo_recordatorio_config' =>
+              'id,titulo,tipo,alcance,target_key,dias_anticipacion,'
+                  'fecha_fija,activa,creado_por,'
+                  'disparado_en_fecha_habana,creada_ts,actualizada_ts,'
+                  'sync_seq',
             _ => 'id,data,sync_seq',
           };
           // v1.2.9+47 (AppLog): medir latencia del lote.
