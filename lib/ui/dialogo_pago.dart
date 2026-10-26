@@ -154,12 +154,11 @@ Future<Map<String, dynamic>?> pagoDialogo(
   TipoPago tipoSel =
       tiposDisp.firstWhere((t) => t.id == (menor ? 'menores' : 'mensual'),
           orElse: () => tiposDisp.first);
-  // NOTA Fase A 2026-10-25 (MIN): el motor (precio_cobro) ya
-  // aplica MIN(menor, oferta) cuando el llamador pasa montoOferta
-  // explícito. NO se auto-aplica aquí la oferta mensual vigente
-  // al menor: elegir qué oferta le corresponde es decisión de
-  // negocio pendiente de Jc (una oferta global no es lo mismo
-  // que la oferta propia del cliente).
+  // Decisión Jc 2026-10-25 (MIN): NO se auto-aplica la oferta
+  // al menor, pero SÍ es la opción por defecto. El valor inicial
+  // de abajo es provisional; tras definir montoEtiqueta se
+  // recalcula con tipoInicialPago (menor: opción mensual de
+  // 30 días más barata, cambiable en el desplegable).
   int meses = 1;
   String metodo = 'efectivo';
   final diasCtrl = TextEditingController();
@@ -310,6 +309,15 @@ Future<Map<String, dynamic>?> pagoDialogo(
           .monto;
     }
     return t.monto;
+  }
+
+  // Default MIN (Jc 2026-10-25): para menores, el tipo inicial es
+  // la opción mensual más barata (menores u oferta de 30 días).
+  // Es solo el valor preseleccionado: el desplegable sigue
+  // permitiendo cambiarlo y nada se cobra sin la vista previa.
+  if (menor) {
+    tipoSel =
+        tipoInicialPago(tiposDisp, menor: true, monto: montoEtiqueta);
   }
 
   bool valido(PeriodoSel s) {
