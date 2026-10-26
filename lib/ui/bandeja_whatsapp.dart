@@ -38,13 +38,18 @@ class BandejaWhatsappScreen extends StatefulWidget {
       _BandejaWhatsappScreenState();
 }
 
-class _BandejaWhatsappScreenState extends State<BandejaWhatsappScreen> {
+class _BandejaWhatsappScreenState extends State<BandejaWhatsappScreen>
+    with WidgetsBindingObserver {
   bool _cargando = true;
   List<Map<String, dynamic>> _avisos = [];
   // Claves SQLite 'tipo_clienteId' del día (tabla
   // avisos_wa_contactados). NUNCA solo en RAM.
   Set<String> _tocados = {};
   late String _hoy;
+  // Corrección panel 1.13: el aviso que se abrió en WhatsApp y
+  // espera confirmación al volver (sin marcar todavía).
+  Map<String, dynamic>? _confirmarAlVolver;
+  bool _confirmarEnLote = false;
   // v1.13.0: filtros de la bandeja.
   bool _soloConTelefono = false;
   String _busqueda = '';
@@ -53,14 +58,71 @@ class _BandejaWhatsappScreenState extends State<BandejaWhatsappScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _hoy = hoyHabanaIso();
     _cargar();
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _busquedaCtrl.dispose();
     super.dispose();
+  }
+
+  /// Corrección panel 1.13 (MEDIO): al volver de WhatsApp se
+  /// pregunta si el mensaje se envió, en vez de marcar atendido
+  /// al abrir wa.me. El temporizador del Deshacer corría
+  /// mientras WhatsApp estaba en primer plano y ya había
+  /// expirado al volver; y si no se enviaba nada, el aviso
+  /// quedaba marcado igual. Sin confirmar, sigue pendiente
+  /// (fallo seguro: no se pierde ningún aviso).
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed) return;
+    final a = _confirmarAlVolver;
+    if (a == null || !mounted) return;
+    _confirmarAlVolver = null;
+    final enLote = _confirmarEnLote;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+            '¿Enviaste el mensaje a ${a['nombre'] ?? 'este cliente'}?'),
+        action: SnackBarAction(
+          label: 'Sí, enviado',
+          onPressed: () async {
+            await _setAtendido(a, true);
+            if (!mounted) return;
+            if (enLote) {
+              final quedan = _pendientesLote();
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text(quedan > 0
+                      ? 'Contactado. Quedan $quedan en el lote.'
+                      : 'Lote completo.'),
+                  action: quedan > 0
+                      ? SnackBarAction(
+                          label: 'Siguiente',
+                          onPressed: _enviarLote,
+                        )
+                      : null,
+                ),
+              );
+            } else {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: const Text('Marcado como contactado.'),
+                  action: SnackBarAction(
+                    label: 'Deshacer',
+                    onPressed: () => _setAtendido(a, false),
+                  ),
+                ),
+              );
+            }
+          },
+        ),
+      ),
+    );
   }
 
   /// Clave de "Atendido" en SQLite: tipo + cliente_id (la fecha va
@@ -73,42 +135,42 @@ class _BandejaWhatsappScreenState extends State<BandejaWhatsappScreen> {
   /// claves atendido_YYYY-MM-DD_* de HOY pasan a SQLite y se borran
   /// de prefs; las de días viejos solo se borran. Después de esto,
   /// prefs ya no se usa para el progreso de la bandeja.
+  ///
+  /// Corrección panel 1.13 (MEDIO): el tipo puede llevar guion
+  /// bajo (vence_hoy, por_vencer). El parseo viejo tomaba solo
+  /// el primer segmento como tipo y el resto como id, así que
+  /// el id salía «hoy_123», el parse fallaba y la clave se
+  /// borraba igual: el progreso se perdía. Ahora el id es el
+  /// ÚLTIMO segmento y el tipo es todo lo del medio; y una
+  /// clave de hoy con valor true que no parsea NO se borra,
+  /// para no perderla en un reintento futuro.
   Future<void> _migrarDesdePrefs() async {
     try {
       final prefs = await SharedPreferences.getInstance();
       for (final k in prefs.getKeys().toList()) {
+        String? prefijo;
         if (k.startsWith('wa_tocado_')) {
-          // Formato viejo: wa_tocado_YYYY-MM-DD_tipo_id.
-          final resto = k.substring('wa_tocado_'.length);
-          final partes = resto.split('_');
-          if (partes.length >= 3 &&
-              partes[0] == _hoy &&
-              prefs.getBool(k) == true) {
-            final cid = int.tryParse(partes.sublist(2).join('_'));
-            if (cid != null) {
-              await LocalDb.instance.marcarAvisoWaContactado(
-                  cid, partes[1], _hoy);
-            }
-          }
-          await prefs.remove(k);
+          prefijo = 'wa_tocado_';
+        } else if (k.startsWith('atendido_')) {
+          prefijo = 'atendido_';
+        } else {
           continue;
         }
-        if (!k.startsWith('atendido_')) continue;
-        // Formato: atendido_YYYY-MM-DD_tipo_id.
-        final resto = k.substring('atendido_'.length);
+        final resto = k.substring(prefijo.length);
         final partes = resto.split('_');
         if (partes.length < 3) {
           await prefs.remove(k);
           continue;
         }
         final fecha = partes[0];
-        if (fecha == _hoy && prefs.getBool(k) == true) {
-          final cid = int.tryParse(partes.sublist(2).join('_'));
-          if (cid != null) {
-            await LocalDb.instance
-                .marcarAvisoWaContactado(cid, partes[1], _hoy);
-          }
+        if (fecha != _hoy || prefs.getBool(k) != true) {
+          await prefs.remove(k);
+          continue;
         }
+        final cid = int.tryParse(partes.last);
+        if (cid == null) continue; // No borrar: reintento futuro.
+        final tipo = partes.sublist(1, partes.length - 1).join('_');
+        await LocalDb.instance.marcarAvisoWaContactado(cid, tipo, _hoy);
         await prefs.remove(k);
       }
     } catch (_) {}
@@ -218,37 +280,15 @@ class _BandejaWhatsappScreenState extends State<BandejaWhatsappScreen> {
         'https://wa.me/$waNum?text=${Uri.encodeComponent('${a['mensaje']}')}');
     try {
       await launchUrl(url, mode: LaunchMode.externalApplication);
-      // Marcar como atendido (SQLite, al instante).
-      await _setAtendido(a, true);
+      // Corrección panel 1.13: NO marcar aquí. launchUrl resuelve
+      // al abrir WhatsApp, no al volver; marcar al instante
+      // dejaba el aviso como contactado aunque no se enviara
+      // nada, y el Deshacer expiraba fuera de la app. La
+      // confirmación llega en didChangeAppLifecycleState al
+      // volver a primer plano.
       if (!mounted) return;
-      if (enLote) {
-        // Modo lote: el snackbar ofrece el siguiente aviso.
-        final quedan = _pendientesLote();
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(quedan > 0
-                ? 'Contactado. Quedan $quedan en el lote.'
-                : 'Lote completo.'),
-            action: quedan > 0
-                ? SnackBarAction(
-                    label: 'Siguiente',
-                    onPressed: _enviarLote,
-                  )
-                : null,
-          ),
-        );
-      } else {
-        // Al volver de wa.me: snackbar con Deshacer.
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: const Text('Marcado como contactado.'),
-            action: SnackBarAction(
-              label: 'Deshacer',
-              onPressed: () => _setAtendido(a, false),
-            ),
-          ),
-        );
-      }
+      _confirmarAlVolver = a;
+      _confirmarEnLote = enLote;
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(

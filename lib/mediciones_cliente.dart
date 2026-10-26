@@ -91,12 +91,29 @@ Future<List<Map<String, dynamic>>> medicionesClienteLocal(
     if ((r['cliente_id'] as num?)?.toInt() != clienteId) continue;
     final id = '${r['id'] ?? r['medicion_id'] ?? ''}';
     if (id.isEmpty) continue;
+    // Corrección panel 1.13 (D4): el espejo baja la fila en
+    // columnas planas (peso_kg, fecha, ...) dentro de data, no
+    // como mapa 'medidas' ni 'fecha_medicion'. Sin reconstruir,
+    // una medición sincronizada se veía vacía en la pantalla.
+    const clavesMedida = [
+      'peso_kg',
+      'grasa_pct',
+      'pecho_cm',
+      'brazo_cm',
+      'cintura_cm',
+      'cadera_cm',
+      'muslo_cm',
+    ];
+    final medidasEspejo = r['medidas'] is Map
+        ? Map<String, dynamic>.from(r['medidas'] as Map)
+        : <String, dynamic>{
+            for (final k in clavesMedida)
+              if (r[k] != null) k: r[k],
+          };
     porId[id] = {
       'medicion_id': id,
-      'fecha_medicion': '${r['fecha_medicion'] ?? ''}',
-      'medidas': r['medidas'] is Map
-          ? Map<String, dynamic>.from(r['medidas'] as Map)
-          : <String, dynamic>{},
+      'fecha_medicion': '${r['fecha_medicion'] ?? r['fecha'] ?? ''}',
+      'medidas': medidasEspejo,
       'espejado': true,
     };
   }

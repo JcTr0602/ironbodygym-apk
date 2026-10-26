@@ -676,8 +676,18 @@ int? _edadCliente(Map<String, dynamic> cliente) {
 /// múltiple B2: 1 op por subtipo con el mismo grupo). Las ventas de
 /// dosis nacen RETENIDAS 15 s (retenerHastaIso, como el cobro del
 /// Bloque 1): es la ventana de Deshacer E3; al vencer, el push las
-/// toma normal. Devuelve el op_uuid de la op encolada.
-Future<String> registrarVentaServicio({
+/// Payload de una venta de servicio: TODAS las validaciones y
+/// lecturas, SIN escribir nada. La venta múltiple calcula los
+/// payloads de sus subventas primero (si uno falla, no se encola
+/// ninguno) y luego encola todos en UNA transacción.
+/// Corrección panel 1.13 (2º intento): la 1ª versión pasaba la
+/// transacción a registrarVentaServicio, pero sus lecturas por
+/// `LocalDb.instance.db` dentro del callback se bloqueaban con
+/// la transacción abierta (deadlock de sqflite: el test de
+/// bloque4 se quedó colgado sin CPU). Las lecturas van FUERA
+/// de la transacción; dentro solo van los queueOp.
+Future<({Map<String, dynamic> payload, String? retener})>
+    _payloadVentaServicio({
   required String tipo, // dosis_sin_agua | dosis_con_agua | agua_suelta
   int? loteId,
   int cantidad = 1,
@@ -787,34 +797,69 @@ Future<String> registrarVentaServicio({
   final retener = tipo == 'agua_suelta'
       ? null
       : isoHabana(ahoraHabana().add(const Duration(seconds: 15)));
-  final opUuid = const Uuid().v4();
   // v1.13.0 (Estadísticas C): la hora Habana de la venta viaja en el
   // payload para la agrupación por franja (las ventas viejas no la
   // traen y caen en «Sin hora registrada»).
   final ahora = ahoraHabana();
   final horaTxt =
       '${ahora.hour.toString().padLeft(2, '0')}:${ahora.minute.toString().padLeft(2, '0')}';
+  return (
+    payload: {
+      if (tipo != 'agua_suelta') 'lote_id': loteId,
+      'tipo': tipo,
+      'cantidad': cantidad,
+      if (clienteId != null) 'cliente_id': clienteId,
+      if (casa) 'casa': true,
+      if (casa && beneficiario != null) 'beneficiario': beneficiario,
+      if (!casa) 'metodo': metodo,
+      'precio_unitario': precio,
+      'comision_unitaria': comision,
+      if (vendedorId != null) 'vendedor_id': vendedorId,
+      if (responsableEfectivoId != null)
+        'responsable_efectivo_id': responsableEfectivoId,
+      if (ventaGrupoId != null) 'venta_grupo_id': ventaGrupoId,
+      'fecha': hoyHabanaIso(),
+      'hora': horaTxt,
+    },
+    retener: retener,
+  );
+}
+
+/// toma normal. Devuelve el op_uuid de la op encolada.
+Future<String> registrarVentaServicio({
+  required String tipo,
+  int? loteId,
+  int cantidad = 1,
+  int? clienteId,
+  String? metodo,
+  bool casa = false,
+  String? beneficiario,
+  required bool vendedorEsDueno,
+  int? vendedorId,
+  int? responsableEfectivoId,
+  double? comisionUnitaria,
+  String? ventaGrupoId,
+}) async {
+  final calc = await _payloadVentaServicio(
+    tipo: tipo,
+    loteId: loteId,
+    cantidad: cantidad,
+    clienteId: clienteId,
+    metodo: metodo,
+    casa: casa,
+    beneficiario: beneficiario,
+    vendedorEsDueno: vendedorEsDueno,
+    vendedorId: vendedorId,
+    responsableEfectivoId: responsableEfectivoId,
+    comisionUnitaria: comisionUnitaria,
+    ventaGrupoId: ventaGrupoId,
+  );
+  final opUuid = const Uuid().v4();
   await LocalDb.instance.queueOp(
       opUuid: opUuid,
       tipo: 'venta_servicio',
-      payload: {
-        if (tipo != 'agua_suelta') 'lote_id': loteId,
-        'tipo': tipo,
-        'cantidad': cantidad,
-        if (clienteId != null) 'cliente_id': clienteId,
-        if (casa) 'casa': true,
-        if (casa && beneficiario != null) 'beneficiario': beneficiario,
-        if (!casa) 'metodo': metodo,
-        'precio_unitario': precio,
-        'comision_unitaria': comision,
-        if (vendedorId != null) 'vendedor_id': vendedorId,
-        if (responsableEfectivoId != null)
-          'responsable_efectivo_id': responsableEfectivoId,
-        if (ventaGrupoId != null) 'venta_grupo_id': ventaGrupoId,
-        'fecha': hoyHabanaIso(),
-        'hora': horaTxt,
-      },
-      retenerHastaIso: retener);
+      payload: calc.payload,
+      retenerHastaIso: calc.retener);
   unawaited(SyncEngine.instance.push().then((_) {}, onError: (_) {}));
   return opUuid;
 }
@@ -854,9 +899,16 @@ Future<List<String>> registrarVentaMultipleServicio({
     throw Exception('Solo quedan $topePomos pomos de agua');
   }
   final grupo = const Uuid().v4();
-  final uuids = <String>[];
-  Future<void> una(String tipo, int cant) async {
-    uuids.add(await registrarVentaServicio(
+  // Corrección panel 1.13 (BLOQUEANTE): primero se calculan los
+  // payloads de las subventas (lecturas + validaciones, sin
+  // escribir); si uno falla, no se encola ninguno. Luego los
+  // queueOp van en UNA transacción y el push una sola vez al
+  // final. Antes cada subventa encolaba y empujaba por su lado:
+  // una caída entre ambas dejaba el grupo a medias y el Deshacer
+  // no podía garantizar borrarlo completo.
+  Future<({Map<String, dynamic> payload, String? retener})> una(
+      String tipo, int cant) {
+    return _payloadVentaServicio(
       tipo: tipo,
       loteId: loteId,
       cantidad: cant,
@@ -869,17 +921,35 @@ Future<List<String>> registrarVentaMultipleServicio({
       responsableEfectivoId: responsableEfectivoId,
       comisionUnitaria: comisionUnitaria,
       ventaGrupoId: grupo,
-    ));
+    );
   }
 
+  final List<({Map<String, dynamic> payload, String? retener})> calcs;
   if (pomosM == 0) {
-    await una('dosis_sin_agua', dosisN);
+    calcs = [await una('dosis_sin_agua', dosisN)];
   } else if (pomosM == dosisN) {
-    await una('dosis_con_agua', dosisN);
+    calcs = [await una('dosis_con_agua', dosisN)];
   } else {
-    await una('dosis_con_agua', pomosM);
-    await una('dosis_sin_agua', dosisN - pomosM);
+    calcs = [
+      await una('dosis_con_agua', pomosM),
+      await una('dosis_sin_agua', dosisN - pomosM),
+    ];
   }
+  final uuids = <String>[];
+  final db = await LocalDb.instance.db;
+  await db.transaction((txn) async {
+    for (final c in calcs) {
+      final opUuid = const Uuid().v4();
+      await LocalDb.instance.queueOp(
+          opUuid: opUuid,
+          tipo: 'venta_servicio',
+          payload: c.payload,
+          retenerHastaIso: c.retener,
+          txn: txn);
+      uuids.add(opUuid);
+    }
+  });
+  unawaited(SyncEngine.instance.push().then((_) {}, onError: (_) {}));
   return uuids;
 }
 
@@ -945,6 +1015,15 @@ Future<List<String>> revertirVentaServicio({
   if (motivo.trim().isEmpty) {
     throw Exception('La reversión exige un motivo');
   }
+  // Corrección panel 1.13 (BLOQUEANTE/ALTO): validar ANTES de
+  // encolar. Antes el reverso se encolaba (y empujaba) primero y
+  // la validación de lote/cantidad venía después: si faltaban,
+  // la excepción dejaba el reverso encolado sin su merma.
+  if (polvoPerdido &&
+      (loteId == null || cantidad == null || cantidad < 1)) {
+    throw Exception(
+        'Para registrar la pérdida hace falta el lote y la cantidad');
+  }
   final uuids = <String>[
     await _encolar('revertir_venta_servicio', {
       'venta_id': ventaId,
@@ -953,16 +1032,17 @@ Future<List<String>> revertirVentaServicio({
     }),
   ];
   if (polvoPerdido) {
-    if (loteId == null || cantidad == null || cantidad < 1) {
-      throw Exception(
-          'Para registrar la pérdida hace falta el lote y la cantidad');
-    }
     uuids.add(await _encolar('salida_servicio', {
       'lote_id': loteId,
       'dosis': cantidad,
       'motivo': 'merma',
       'nota': 'Pérdida física tras reversión de venta #$ventaId',
       'fecha': hoyHabanaIso(),
+      // Corrección panel 1.13: la merma va ligada a su venta.
+      // El servidor la rechaza si el reverso aún no se aplicó
+      // (lote cerrado entre tanto, reverso rechazado): sin este
+      // enlace, la merma podía aplicarse sola, fantasma.
+      'venta_id': ventaId,
     }));
   }
   return uuids;

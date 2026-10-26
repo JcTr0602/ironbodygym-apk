@@ -479,6 +479,13 @@ void main() {
       expect(franjaDeHora('xx'), 'sin_hora');
     });
 
+    test('franja: horas inválidas caen en sin_hora (panel 1.13)', () {
+      expect(franjaDeHora('99:99'), 'sin_hora');
+      expect(franjaDeHora('24:00'), 'sin_hora');
+      expect(franjaDeHora('12:60'), 'sin_hora');
+      expect(franjaDeHora('23:59'), 'noche');
+    });
+
     test('agrupar por día: Casa y agua suelta no cuentan', () {
       final ventas = [
         {'tipo': 'dosis_sin_agua', 'cantidad': 2,

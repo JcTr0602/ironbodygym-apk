@@ -16,16 +16,51 @@
 ///   telegram_user_id (ver SyncEngine._pullUltimoSync).
 library;
 
+import 'dart:convert';
+
 import 'localdb.dart';
 import 'tiempo.dart';
 
 /// Filas locales de ultimo_sync (una por usuario con historial),
-/// ordenadas por nombre. La pantalla las cruza con los usuarios
-/// conocidos: el que no tiene fila sale «Sin registro de sync».
+/// ordenadas por nombre, CRUZADAS con los usuarios conocidos de
+/// la app (meta usuarios_apk): el que no tiene fila sale también,
+/// con ultimo_sync_at null, y la pantalla lo muestra como
+/// «Sin registro de sync».
+/// Corrección panel 1.13 (ALTO): antes se devolvían solo las
+/// filas del espejo, así que un teléfono que nunca sincronizó
+/// era invisible (salvo que la lista entera estuviera vacía).
 /// NO usa ultimo_pull_ts ni contadores de cola (prohibido por el
 /// contrato para esta pantalla).
 Future<List<Map<String, dynamic>>> ultimoSyncPorTelefono() async {
-  return LocalDb.instance.filasUltimoSync();
+  final filas = await LocalDb.instance.filasUltimoSync();
+  final conFila = <int>{};
+  for (final f in filas) {
+    final tid = LocalDb.normalizarTelegramId(f['telegram_user_id']);
+    if (tid != null) conFila.add(tid);
+  }
+  final todas = [...filas];
+  try {
+    final raw = await LocalDb.instance.getMeta('usuarios_apk');
+    if (raw != null && raw.isNotEmpty) {
+      for (final u in jsonDecode(raw) as List) {
+        final m = Map<String, dynamic>.from(u as Map);
+        final tid = LocalDb.normalizarTelegramId(m['telegram_id']);
+        if (tid == null || conFila.contains(tid)) continue;
+        final nombre = (m['nombre'] as String?)?.trim().isNotEmpty == true
+            ? m['nombre'] as String
+            : '${m['username'] ?? ''}';
+        if (nombre.isEmpty) continue;
+        todas.add({
+          'telegram_user_id': tid,
+          'nombre': nombre,
+          'ultimo_sync_at': null,
+        });
+      }
+    }
+  } catch (_) {}
+  todas.sort((a, b) =>
+      '${a['nombre'] ?? ''}'.compareTo('${b['nombre'] ?? ''}'));
+  return todas;
 }
 
 /// «Hace X» desde un timestamptz ISO Habana con offset, tal cual lo

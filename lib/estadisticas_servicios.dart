@@ -95,9 +95,15 @@ Map<int, ({int dosis, double ingresos})> agruparPorDiaSemana(
 /// tarde 12–18, noche 18–24. La hora sale de la 'hora' HH:MM Habana
 /// del payload (1.13.0); sin ella, «sin_hora».
 String franjaDeHora(String? hora) {
-  if (hora == null || hora.length < 2) return 'sin_hora';
+  // Corrección panel 1.13 (BAJO): validar el rango completo
+  // HH:MM; antes «99:99» caía en «noche» y contaminaba las
+  // estadísticas con filas espejadas o datos viejos inválidos.
+  if (hora == null || hora.length < 5) return 'sin_hora';
   final h = int.tryParse(hora.substring(0, 2));
-  if (h == null) return 'sin_hora';
+  final m = int.tryParse(hora.substring(3, 5));
+  if (h == null || m == null || h < 0 || h > 23 || m < 0 || m > 59) {
+    return 'sin_hora';
+  }
   if (h < 6) return 'madrugada';
   if (h < 12) return 'manana';
   if (h < 18) return 'tarde';

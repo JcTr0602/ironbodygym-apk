@@ -2774,7 +2774,7 @@ class SyncEngine {
             // config en sync_bridge.py). sync_nomina_bonos es el
             // contrato nuevo para el servidor (ver nomina_bonos.dart).
             'nomina_bonos' =>
-              'id,bono_uuid,mes,entrenador,monto,nota,creado_en,sync_seq',
+              'id,bono_uuid,mes,entrenador,monto,nota,creado_en,eliminada,sync_seq',
             'espejo_tarifas_especiales' =>
               'id,cliente_id,nombre,periodo,monto_efectivo,'
                   'monto_transferencia,vigente_desde,vigente_hasta,'

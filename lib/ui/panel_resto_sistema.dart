@@ -333,9 +333,10 @@ class _EstadoSyncScreenState extends State<EstadoSyncScreen> {
                 // sync vieja desde el espejo real sync_ultimo_sync
                 // (una fila por usuario, solo ops APLICADAS). La
                 // nota de la 1.11.0 («el servidor aún no lo
-                // provee») SE QUITA: el dato ya es real. Un usuario
-                // sin fila aún no sincronizó nunca: aparece aquí
-                // tras su primera sync efectiva.
+                // provee») SE QUITA: el dato ya es real.
+                // Corrección panel 1.13: un usuario conocido sin
+                // fila (nunca sincronizó) también aparece, como
+                // «Sin registro de sync».
                 Tarjeta(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
