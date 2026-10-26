@@ -70,6 +70,24 @@ Future<Map<String, dynamic>?> pagoDialogo(
     BuildContext context, Map<String, dynamic> cliente) async {
   final aj = await LocalDb.instance.getAjustes();
   final transfer = (aj['transferencia'] as num?)?.toDouble() ?? 2500;
+  // 1.14 (D9): respetar los métodos aceptados en Ajustes (H1).
+  // Antes el ajuste se guardaba pero nadie lo leía y el diálogo
+  // ofrecía transferencia siempre. Sin dato (o lista vacía) se
+  // ofrecen ambos para no bloquear un cobro.
+  final metodosRaw = aj['metodos_aceptados'];
+  final metodosAceptados = metodosRaw is List
+      ? metodosRaw.map((m) => '$m'.trim().toLowerCase()).toSet()
+      : metodosRaw is String
+          ? metodosRaw
+              .split(',')
+              .map((s) => s.trim().toLowerCase())
+              .where((s) => s.isNotEmpty)
+              .toSet()
+          : <String>{'efectivo', 'transferencia'};
+  final aceptaEfectivo = metodosAceptados.isEmpty ||
+      metodosAceptados.contains('efectivo');
+  final aceptaTransfer = metodosAceptados.isEmpty ||
+      metodosAceptados.contains('transferencia');
   if (!context.mounted) return null;
 
   // v1.0.16: tipos dinámicos; menores ven precio reducido automáticamente
@@ -160,7 +178,7 @@ Future<Map<String, dynamic>?> pagoDialogo(
   // recalcula con tipoInicialPago (menor: opción mensual de
   // 30 días más barata, cambiable en el desplegable).
   int meses = 1;
-  String metodo = 'efectivo';
+  String metodo = aceptaEfectivo ? 'efectivo' : 'transferencia';
   final diasCtrl = TextEditingController();
   final montoCtrl = TextEditingController();
   DateTime fechaPago = DateTime.now(); // v1.1: permite elegir fecha del pago
@@ -548,22 +566,25 @@ Future<Map<String, dynamic>?> pagoDialogo(
                 Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    ChoiceChip(
-                        label: const Text('Efectivo'),
-                        avatar: const Icon(Icons.payments,
-                            size: 18),
-                        selected: metodo == 'efectivo',
-                        onSelected: (_) =>
-                            setS(() => metodo = 'efectivo')),
-                    const SizedBox(width: 8),
-                    ChoiceChip(
-                        label: const Text('Transfer.'),
-                        avatar: const Icon(
-                            Icons.smartphone,
-                            size: 18),
-                        selected: metodo == 'transferencia',
-                        onSelected: (_) =>
-                            setS(() => metodo = 'transferencia')),
+                    if (aceptaEfectivo)
+                      ChoiceChip(
+                          label: const Text('Efectivo'),
+                          avatar: const Icon(Icons.payments,
+                              size: 18),
+                          selected: metodo == 'efectivo',
+                          onSelected: (_) =>
+                              setS(() => metodo = 'efectivo')),
+                    if (aceptaEfectivo && aceptaTransfer)
+                      const SizedBox(width: 8),
+                    if (aceptaTransfer)
+                      ChoiceChip(
+                          label: const Text('Transfer.'),
+                          avatar: const Icon(
+                              Icons.smartphone,
+                              size: 18),
+                          selected: metodo == 'transferencia',
+                          onSelected: (_) => setS(
+                              () => metodo = 'transferencia')),
                   ],
                 ),
                 const SizedBox(height: 12),

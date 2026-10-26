@@ -779,6 +779,10 @@ double montoEfectivoOp(
         payload['tipo_id'] as String?);
   }
   if (tipo == 'pago_diario') {
+    // 1.14 (D17): un diario por transferencia no es efectivo a
+    // entregar. Sin método (ops viejas) se asume efectivo, como
+    // la UI de diarios, que hoy es solo efectivo.
+    if ('${payload['metodo'] ?? 'efectivo'}' != 'efectivo') return 0;
     final cant = (payload['cantidad'] as num?)?.toInt() ?? 0;
     return cant * pr['diario']!;
   }
@@ -898,13 +902,20 @@ Future<double> montoCobradoCupOp(Map<String, dynamic> op) async {
     return cant * precio;
   }
   if (tipo == 'inscripcion_venta_suplemento') {
+    // 1.14 (D17): el precio de la mensualidad sigue el método real
+    // (Fase A lo envía en 'metodo_pago'). Antes se forzaba
+    // 'efectivo' y una inscripción+venta por transferencia se
+    // infravaloraba (2000 en vez de 2500) en el desglose de
+    // pendientes y en Actividad. La venta sí se suma con cualquier
+    // método: esto es total cobrado, no solo efectivo.
+    final metodoPago = '${payload['metodo_pago'] ?? 'efectivo'}';
     double t = 0;
     final c = payload['cliente'];
     if (c is Map<String, dynamic>) {
       t += mensualidad(
           '${c['periodo'] ?? 'mensual'}',
           (c['meses'] as num?)?.toInt() ?? 1,
-          'efectivo',
+          metodoPago,
           (c['monto'] as num?)?.toDouble(),
           c['tipo_id'] as String?);
     }

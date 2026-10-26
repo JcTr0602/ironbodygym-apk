@@ -93,6 +93,28 @@ void main() {
     });
   });
 
+  group('1.14 (D17): pago_diario y método en montoEfectivoOp', () {
+    test('diario en efectivo suma', () {
+      final v = montoEfectivoOp(
+          _op('pago_diario', {'cantidad': 3, 'metodo': 'efectivo'}),
+          _precios);
+      expect(v, 600);
+    });
+
+    test('diario sin método (op vieja) se asume efectivo', () {
+      final v = montoEfectivoOp(
+          _op('pago_diario', {'cantidad': 3}), _precios);
+      expect(v, 600);
+    });
+
+    test('diario por transferencia NO suma al pendiente en efectivo', () {
+      final v = montoEfectivoOp(
+          _op('pago_diario', {'cantidad': 3, 'metodo': 'transferencia'}),
+          _precios);
+      expect(v, 0);
+    });
+  });
+
   group('A3: solo las mensualidades generan comisión', () {
     test('mensual cuenta; semanal y quincenal no', () {
       expect(NominaCalc.esPagoMensualidad({'periodo': 'mensual'}), isTrue);
