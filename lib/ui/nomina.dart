@@ -195,8 +195,8 @@ class _NominaScreenState extends State<NominaScreen> {
       final liquidadas = <String, bool>{};
       for (final e in personasAdelantos.entries) {
         if (e.value.id.isEmpty) continue;
-        final eventos =
-            await AdelantosService.instance.eventosDe(e.value.id);
+        final eventos = await AdelantosService.instance
+            .eventosDe(e.value.id, telegramId: e.value.telegramId);
         eventosPorEnt[e.key] = eventos;
         var primero = pref;
         for (final ev in eventos) {

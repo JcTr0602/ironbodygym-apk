@@ -178,10 +178,21 @@ class AdelantosService {
   /// registrar_adelanto aún pendientes de ESTE teléfono (con
   /// id == null = provisionales) y la marca de anulación
   /// pendiente sobre su original.
-  Future<List<Map<String, dynamic>>> eventosDe(String entrenadorId) async {
+  /// Corrección panel 1.12: además de la llave APK, se acepta
+  /// el telegram_id del entrenador. Los adelantos F3 aprobados
+  /// llevan como clave el telegram_id autenticado (el servidor
+  /// no puede resolver el id APK desde telegram_id), así que sin
+  /// este segundo criterio no aparecían en su libro de nómina.
+  Future<List<Map<String, dynamic>>> eventosDe(String entrenadorId,
+      {int? telegramId}) async {
     final filas = [
       for (final a in await _db.allMirror('adelantos'))
-        if ('${a['entrenador']}' == entrenadorId) a,
+        if ('${a['entrenador']}' == entrenadorId ||
+            (telegramId != null &&
+                LocalDb.normalizarTelegramId(
+                        a['entrenador_telegram_id']) ==
+                    telegramId))
+          a,
     ];
     final anulacionesPendientes = <int>{};
     for (final op in await _db.pendingOps()) {

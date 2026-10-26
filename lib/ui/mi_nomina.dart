@@ -93,7 +93,8 @@ class _MiNominaScreenState extends State<MiNominaScreen> {
     final miId = await _miIdUsuarioApk();
     final eventos = miId.isEmpty
         ? <Map<String, dynamic>>[]
-        : await AdelantosService.instance.eventosDe(miId);
+        : await AdelantosService.instance
+            .eventosDe(miId, telegramId: tid);
     MesLibroAdelantos? libro;
     try {
       final libros = libroAdelantos(
