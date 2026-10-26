@@ -14,6 +14,7 @@
 ///   con el contador de ops pendientes visible ANTES de exportar.
 library;
 
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -60,16 +61,41 @@ class _AjustesGymScreenState extends State<AjustesGymScreen> {
 
   Future<void> _cargar() async {
     final aj = await LocalDb.instance.getAjustes();
-    _metodosCtrl.text = '${aj['metodos_aceptados'] ?? 'efectivo, transferencia'}';
-    _textosCtrl.text = '${aj['textos_base'] ?? ''}';
+    final metodos = aj['metodos_aceptados'];
+    _metodosCtrl.text = metodos is List
+        ? metodos.map((m) => '$m').join(', ')
+        : '${metodos ?? 'efectivo, transferencia'}';
+    final textos = aj['textos_base'];
+    _textosCtrl.text =
+        textos is Map ? jsonEncode(textos) : '${textos ?? ''}';
     if (mounted) setState(() => _cargando = false);
   }
 
   Future<void> _guardar() async {
     try {
+      // Corrección panel 1.11 (ALTO): el servidor exige lista para
+      // metodos_aceptados y mapa para textos_base; antes se
+      // enviaban ambos como String y la op se rechazaba, mientras
+      // la app ya había guardado el cambio en local (el dueño lo
+      // veía aplicado y los entrenadores conservaban lo viejo).
+      final metodos = _metodosCtrl.text
+          .split(',')
+          .map((s) => s.trim())
+          .where((s) => s.isNotEmpty)
+          .toList();
+      Map<String, dynamic>? textos;
+      final tb = _textosCtrl.text.trim();
+      if (tb.isNotEmpty) {
+        final dec = jsonDecode(tb);
+        if (dec is! Map) {
+          throw Exception(
+              'textos_base debe ser un mapa JSON, ej: {"saludo": "Hola"}');
+        }
+        textos = Map<String, dynamic>.from(dec);
+      }
       await guardarConfigGym({
-        'metodos_aceptados': _metodosCtrl.text.trim(),
-        'textos_base': _textosCtrl.text.trim(),
+        'metodos_aceptados': metodos,
+        if (textos != null) 'textos_base': textos,
       });
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(

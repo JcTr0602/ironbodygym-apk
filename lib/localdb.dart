@@ -5485,10 +5485,13 @@ class LocalDb {
 
   /// PURO (testeable sin BD): fusiona la tabla local de
   /// recordatorios con el espejo bajado (G2, Fase A 2026-10-25).
-  /// El espejo (verdad del servidor) gana por id: así el
-  /// `disparado_en_fecha_habana` que el dueño escribió al
+  /// El espejo gana por id SALVO que la fila local sea más
+  /// reciente (misma corrección del panel 1.10 para tarifas):
+  /// así el `disparado_en_fecha_habana` que el dueño escribió al
   /// disparar un masivo llega a los demás teléfonos y no vuelven
-  /// a disparar ese día. Un espejo inactivo SIN fila local es un
+  /// a disparar ese día, pero un pull viejo no reabre un
+  /// recordatorio pausado/eliminado offline ni pierde un disparo
+  /// local pendiente. Un espejo inactivo SIN fila local es un
   /// borrado suave ya propagado: no resucita en la lista (la
   /// pantalla lo mostraría como «pausado» aunque el usuario lo
   /// eliminó en otro teléfono).
@@ -5502,6 +5505,13 @@ class LocalDb {
     for (final e in espejo) {
       final id = '${e['id'] ?? ''}';
       if (id.isEmpty) continue;
+      final local = porId[id];
+      if (local != null &&
+          '${local['actualizada_ts'] ?? ''}'
+                  .compareTo('${e['actualizada_ts'] ?? ''}') >
+              0) {
+        continue;
+      }
       final norm = <String, dynamic>{
         'id': id,
         'titulo': '${e['titulo'] ?? ''}',

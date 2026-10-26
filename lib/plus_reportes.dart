@@ -232,23 +232,34 @@ class PlusReportesService {
   /// RPC no acepta el estado o no hay red, la pantalla C5 muestra
   /// la línea Plus como «sin datos del servidor» en vez de inventar
   /// un número (el espejo local de ingresos_plus no existe en la app).
+  /// Corrección panel 1.11 (ALTO): pagina hasta agotar. Antes era
+  /// una sola llamada con límite 100 y al superar 100 confirmados
+  /// en total, los meses viejos desaparecían del C5 en silencio
+  /// (la pantalla contaba solo lo recibido).
   Future<List<ReportePlus>> confirmados() async {
-    const params = {
-      'p_estado': 'confirmado',
-      'p_limite': kLimiteReportesPlus,
-      'p_desde': 0,
-    };
-    final dynamic res;
-    final f = _rpcInyectado;
-    if (f != null) {
-      res = await f(kRpcListarReportesPlus, params);
-    } else {
-      res = await _c.rpc(kRpcListarReportesPlus, params: params);
+    final todos = <ReportePlus>[];
+    var desde = 0;
+    while (true) {
+      final params = {
+        'p_estado': 'confirmado',
+        'p_limite': kLimiteReportesPlus,
+        'p_desde': desde,
+      };
+      final dynamic res;
+      final f = _rpcInyectado;
+      if (f != null) {
+        res = await f(kRpcListarReportesPlus, params);
+      } else {
+        res = await _c.rpc(kRpcListarReportesPlus, params: params);
+      }
+      final pagina = parsearReportesPlus(res);
+      todos.addAll(pagina);
+      if (pagina.length < kLimiteReportesPlus) break;
+      desde += kLimiteReportesPlus;
     }
-    final lista = parsearReportesPlus(res);
-    lista.sort((a, b) => (a.creadoEn ?? DateTime(9999))
+    todos.sort((a, b) => (a.creadoEn ?? DateTime(9999))
         .compareTo(b.creadoEn ?? DateTime(9999)));
-    return lista;
+    return todos;
   }
 }
 

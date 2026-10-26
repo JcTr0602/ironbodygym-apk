@@ -123,6 +123,16 @@ class RecordatoriosService {
         !_soyDueno) {
       throw Exception('Solo el dueño puede eliminar recordatorios de otros');
     }
+    // Corrección panel 1.11 (MEDIO): mismo bloqueo que
+    // cambiarActiva para los «solo_mio» ajenos. Antes el borrado
+    // local pasaba (el servidor lo rechazaba y el próximo pull lo
+    // devolvía, pero la pantalla engañaba en el medio).
+    if (cfg.isNotEmpty &&
+        '${cfg['alcance']}' == 'solo_mio' &&
+        cfg['creado_por'] != _yo &&
+        !_soyDueno) {
+      throw Exception('Ese recordatorio no es tuyo');
+    }
     await LocalDb.instance.borrarRecordatorio(id);
     await LocalDb.instance.queueOp(
       opUuid: const Uuid().v4(),
@@ -219,31 +229,52 @@ class RecordatoriosService {
   /// Dispara un debido: escribe el log (INSERT OR IGNORE). Si es
   /// masivo y soy el dueño, además marca el estado sincronizado y lo
   /// encola. Devuelve true si el disparo era nuevo.
+  /// Corrección panel 1.11 (ALTO): los tres pasos van en UNA
+  /// transacción. Antes, si la app moría entre el log y el
+  /// encolado, este teléfono creía haber disparado y el servidor
+  /// nunca lo sabía: otros teléfonos podían volver a disparar el
+  /// mismo masivo. Si la transacción falla, no queda ningún paso
+  /// a medias y el disparo se puede reintentar limpio.
   Future<bool> disparar(RecordatorioDebido debido,
       {String? hoyHabana}) async {
     final hoy = hoyHabana ?? hoyHabanaIso();
     if (!debido.puedoDisparar) return false;
-    final nuevo = await LocalDb.instance.registrarDisparoRecordatorio(
-      recordatorioId: debido.recordatorioId,
-      fechaHabana: hoy,
-      targetKey: debido.targetKey,
-    );
-    if (!nuevo) return false;
-    if (debido.alcance == 'todos' && _soyDueno) {
-      await LocalDb.instance.marcarRecordatorioDisparadoMasivo(
-          debido.recordatorioId, hoy);
-      final configs = await LocalDb.instance.listarRecordatorios();
-      final cfg = configs.firstWhere(
-          (c) => c['id'] == debido.recordatorioId,
-          orElse: () => {});
-      if (cfg.isNotEmpty) {
-        await LocalDb.instance.queueOp(
-          opUuid: const Uuid().v4(),
-          tipo: kTipoOpUpsertRecordatorio,
-          payload: {'recordatorio': cfg},
-        );
+    final db = await LocalDb.instance.db;
+    var nuevo = false;
+    await db.transaction((txn) async {
+      final id = await txn.rawInsert(
+          'INSERT OR IGNORE INTO recordatorio_disparos_log '
+          '(recordatorio_id, fecha_habana, target_key, disparada_ts) '
+          'VALUES (?, ?, ?, ?)',
+          [
+            debido.recordatorioId,
+            hoy,
+            debido.targetKey,
+            isoHabana(ahoraHabana()),
+          ]);
+      nuevo = id != 0;
+      if (!nuevo) return;
+      if (debido.alcance == 'todos' && _soyDueno) {
+        await txn.update(
+            'recordatorio_config',
+            {
+              'disparado_en_fecha_habana': hoy,
+              'actualizada_ts': isoHabana(ahoraHabana()),
+            },
+            where: 'id = ?',
+            whereArgs: [debido.recordatorioId]);
+        final filas = await txn.query('recordatorio_config',
+            where: 'id = ?', whereArgs: [debido.recordatorioId]);
+        if (filas.isNotEmpty) {
+          await LocalDb.instance.queueOp(
+            opUuid: const Uuid().v4(),
+            tipo: kTipoOpUpsertRecordatorio,
+            payload: {'recordatorio': filas.first},
+            txn: txn,
+          );
+        }
       }
-    }
-    return true;
+    });
+    return nuevo;
   }
 }

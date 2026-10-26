@@ -31,6 +31,7 @@ class _RecordatoriosScreenState extends State<RecordatoriosScreen> {
   List<Map<String, dynamic>> _configs = [];
 
   bool get _soyDueno => AuthService().isOwner;
+  int? get _yo => AuthService().telegramId;
 
   @override
   void initState() {
@@ -44,10 +45,20 @@ class _RecordatoriosScreenState extends State<RecordatoriosScreen> {
       final debidos =
           await RecordatoriosService.instance.debidosHoy();
       final configs = await LocalDb.instance.listarRecordatorios();
+      // Corrección panel 1.11 (MEDIO): los «solo_mio» de otros
+      // creadores NO se listan aquí (debidosHoy ya los filtraba;
+      // esta lista no). Sin filtro, un entrenador veía títulos,
+      // tipos y estado privados ajenos con botones pausar/eliminar.
+      final visibles = configs
+          .where((c) =>
+              '${c['alcance']}' != 'solo_mio' ||
+              _soyDueno ||
+              c['creado_por'] == _yo)
+          .toList();
       if (mounted) {
         setState(() {
           _debidos = debidos;
-          _configs = configs;
+          _configs = visibles;
           _cargando = false;
         });
       }
