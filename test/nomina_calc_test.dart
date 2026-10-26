@@ -53,6 +53,53 @@ void main() {
     });
   });
 
+  group('NominaCalc.totalVivo', () {
+    test('base + bono + comisión - adelantos - deuda', () {
+      expect(
+          NominaCalc.totalVivo(
+            base: 13500,
+            bono: 2000,
+            comision: 500,
+            adelantos: 3000,
+            deudaEntrante: 1000,
+          ),
+          12000);
+    });
+
+    test('sin bonos ni descuentos es la base', () {
+      expect(
+          NominaCalc.totalVivo(
+            base: 13500,
+            bono: 0,
+            comision: 0,
+            adelantos: 0,
+            deudaEntrante: 0,
+          ),
+          13500);
+    });
+
+    test('nunca negativo: el exceso queda como deuda, no neto', () {
+      expect(
+          NominaCalc.totalVivo(
+            base: 1000,
+            bono: 0,
+            comision: 0,
+            adelantos: 5000,
+            deudaEntrante: 0,
+          ),
+          0);
+      expect(
+          NominaCalc.totalVivo(
+            base: 1000,
+            bono: 500,
+            comision: 0,
+            adelantos: 0,
+            deudaEntrante: 2000,
+          ),
+          0);
+    });
+  });
+
   group('NominaCalc.prefMesActual', () {
     test('formato YYYY-MM', () {
       expect(NominaCalc.prefMesActual(),

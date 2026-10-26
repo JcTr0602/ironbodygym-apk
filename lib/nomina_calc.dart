@@ -243,6 +243,22 @@ class NominaCalc {
   }) =>
       baseClientes * tarifa + bonos;
 
+  /// Total VIVO de la fila de nómina (1.14, M5.1): base + bonos +
+  /// comisión por dosis, menos adelantos del mes y deuda
+  /// arrastrada; nunca negativo (el exceso queda como deuda en
+  /// el libro, no como neto negativo). Es la fórmula que la
+  /// pantalla de Nómina mostraba incrustada en el build.
+  static double totalVivo({
+    required double base,
+    required double bono,
+    required double comision,
+    required double adelantos,
+    required double deudaEntrante,
+  }) {
+    final total = base + bono + comision - adelantos - deudaEntrante;
+    return total < 0 ? 0 : total;
+  }
+
   /// v1.8.0 (diseño dosis, Argón E-integración): comisión por dosis
   /// de un entrenador en el mes [pref] ('YYYY-MM'), desde el espejo
   /// de ventas de servicios. PURO. La comisión ya viene SNAPSOTEADA

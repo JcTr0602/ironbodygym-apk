@@ -375,9 +375,14 @@ class _NominaScreenState extends State<NominaScreen> {
       final libro = _libroMes[ent];
       final adelantosMes = libro?.adelantos ?? 0;
       final deudaEntrante = libro?.deudaEntrante ?? 0;
-      final brutoTotal = base + bono + comision.total;
-      var total = brutoTotal - adelantosMes - deudaEntrante;
-      if (total < 0) total = 0;
+      // 1.14 (M5.1): la fórmula vive en NominaCalc.totalVivo.
+      final total = NominaCalc.totalVivo(
+        base: base,
+        bono: bono,
+        comision: comision.total,
+        adelantos: adelantosMes,
+        deudaEntrante: deudaEntrante,
+      );
       final liquidada = _nominaLiquidadaMes[ent] ?? false;
       return Padding(
         padding: const EdgeInsets.only(bottom: 8),
