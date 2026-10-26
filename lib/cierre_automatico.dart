@@ -7,6 +7,60 @@ import 'dart:convert';
 import 'tiempo.dart';
 import 'turno_service.dart';
 
+/// Decisión pura del auto-cierre (1.14, M1.30): ¿ya pasaron 30 min
+/// del cierre configurado para este turno? El día y la hora salen
+/// del TURNO (fecha_turno + cierre del día de semana del turno),
+/// nunca de «ahora». Recibe [ahora] como parámetro para poder
+/// probarse sin depender del reloj. Devuelve false ante cualquier
+/// dato inválido (fecha rota, día cerrado, sin hora de cierre).
+bool debeAutoCerrarTurno({
+  required String fechaTurno,
+  required String turno,
+  required List<Map<String, dynamic>> horarios,
+  required DateTime ahora,
+}) {
+  DateTime baseFecha;
+  try {
+    final fp = fechaTurno.split('-');
+    baseFecha = DateTime(
+      int.parse(fp[0]),
+      int.parse(fp[1]),
+      int.parse(fp[2]),
+    );
+  } catch (_) {
+    return false;
+  }
+  final diaSemanaTurno = baseFecha.weekday;
+  final horarioDia = horarios.firstWhere(
+    (h) => (h['dia_semana'] as num?)?.toInt() == diaSemanaTurno,
+    orElse: () => {},
+  );
+  if (horarioDia.isEmpty || horarioDia['abierto'] != true) {
+    return false;
+  }
+  final turnoNombre = turno.toLowerCase();
+  String? horaCierreStr;
+  if (turnoNombre.contains('mañana') || turnoNombre.contains('manana')) {
+    horaCierreStr = horarioDia['cierre_1']?.toString();
+  } else {
+    horaCierreStr =
+        horarioDia['cierre_2']?.toString() ?? horarioDia['cierre_1']?.toString();
+  }
+  if (horaCierreStr == null || horaCierreStr.length < 5) return false;
+  final partes = horaCierreStr.substring(0, 5).split(':');
+  final hCierre = int.tryParse(partes[0]) ?? 0;
+  final mCierre = int.tryParse(partes.length > 1 ? partes[1] : '0') ?? 0;
+  final fechaCierre = DateTime(
+    baseFecha.year,
+    baseFecha.month,
+    baseFecha.day,
+    hCierre,
+    mCierre,
+  );
+  final limiteCierre = fechaCierre.add(const Duration(minutes: 30));
+  return ahora.isAfter(limiteCierre);
+}
+
 /// Verifica y ejecuta cierres automáticos pendientes.
 /// Retorna true si se ejecutó algún auto-cierre.
 Future<bool> verificarCierresAutomaticos() async {
@@ -40,84 +94,26 @@ Future<bool> verificarCierresAutomaticos() async {
         continue;
       }
 
-      // Parsear fecha del turno primero (Argón: usar día del turno,
-      // no de "ahora")
-      DateTime baseFecha;
+      // La decisión vive en debeAutoCerrarTurno (pura, probada):
+      // día y hora del turno, nunca de «ahora», +30 min de gracia.
+      if (!debeAutoCerrarTurno(
+        fechaTurno: fechaTurnoStr,
+        turno: '${turno['turno'] ?? ''}',
+        horarios: horarios,
+        ahora: ahora,
+      )) {
+        continue;
+      }
       try {
-        final fp = fechaTurnoStr.split('-');
-        baseFecha = DateTime(
-          int.parse(fp[0]),
-          int.parse(fp[1]),
-          int.parse(fp[2]),
+        await TurnoService.instance.confirmarCierre(
+          turnoId: turnoId,
+          forzado: true,
         );
+        // Marcar como automático en la BD local
+        // (se hace vía el campo tipo_cierre si existe)
+        ejecutoAlguno = true;
       } catch (_) {
-        continue;
-      }
-
-      // Buscar el horario del día en que ocurrió el turno
-      final diaSemanaTurno = baseFecha.weekday;
-      final horarioDia = horarios.firstWhere(
-        (h) =>
-            (h['dia_semana'] as num?)?.toInt() ==
-            diaSemanaTurno,
-        orElse: () => {},
-      );
-      if (horarioDia.isEmpty ||
-          horarioDia['abierto'] != true) {
-        continue;
-      }
-
-      // Determinar hora de cierre según el turno
-      final turnoNombre =
-          '${turno['turno'] ?? ''}'.toLowerCase();
-      String? horaCierreStr;
-      if (turnoNombre.contains('mañana') ||
-          turnoNombre.contains('manana')) {
-        horaCierreStr =
-            horarioDia['cierre_1']?.toString();
-      } else {
-        horaCierreStr =
-            horarioDia['cierre_2']?.toString() ??
-                horarioDia['cierre_1']?.toString();
-      }
-      if (horaCierreStr == null ||
-          horaCierreStr.length < 5) continue;
-
-      // Parsear hora de cierre
-      final partes =
-          horaCierreStr.substring(0, 5).split(':');
-      final hCierre =
-          int.tryParse(partes[0]) ?? 0;
-      final mCierre = int.tryParse(
-              partes.length > 1 ? partes[1] : '0') ??
-          0;
-
-      final fechaTurno = DateTime(
-        baseFecha.year,
-        baseFecha.month,
-        baseFecha.day,
-        hCierre,
-        mCierre,
-      );
-
-      // Agregar 30 min de gracia
-      final limiteCierre = fechaTurno
-          .add(const Duration(minutes: 30));
-
-      // Si ya pasó el límite, auto-cerrar
-      if (ahora.isAfter(limiteCierre)) {
-        try {
-          await TurnoService.instance
-              .confirmarCierre(
-            turnoId: turnoId,
-            forzado: true,
-          );
-          // Marcar como automático en la BD local
-          // (se hace vía el campo tipo_cierre si existe)
-          ejecutoAlguno = true;
-        } catch (_) {
-          // Continuar con el siguiente turno
-        }
+        // Continuar con el siguiente turno
       }
     }
     return ejecutoAlguno;
