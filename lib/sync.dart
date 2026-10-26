@@ -2397,6 +2397,8 @@ class SyncEngine {
           'otorgado_por': m['otorgado_por'],
           'activa': m['activa'],
           'historial': m['historial'],
+          'creada_ts': m['creada_ts'],
+          'actualizada_ts': m['actualizada_ts'],
         });
       } else if (tabla == 'espejo_entregas_efectivo') {
         data.addAll({
@@ -2778,7 +2780,8 @@ class SyncEngine {
             'espejo_tarifas_especiales' =>
               'id,cliente_id,nombre,periodo,monto_efectivo,'
                   'monto_transferencia,vigente_desde,vigente_hasta,'
-                  'motivo,otorgado_por,activa,historial,sync_seq',
+                  'motivo,otorgado_por,activa,historial,creada_ts,'
+                  'actualizada_ts,sync_seq',
             'espejo_entregas_efectivo' =>
               'op_uuid,entrenador_telegram_id,monto_entregado,'
                   'fecha_habana,autor_dueno_id,movimiento,creada_ts,'
