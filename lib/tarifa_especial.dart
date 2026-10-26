@@ -86,7 +86,78 @@ List<Map<String, dynamic>> fusionarTarifasEspeciales(
   return porId.values.toList();
 }
 
-/// Tabla local + espejo fusionados. Si el espejo aún no existe
+/// PURO (testeable sin BD): aplica las ops pendientes de tarifas
+/// SOBRE la fusión local+espejo. La comparación por ts protege el
+/// cambio local frente al espejo VIEJO, pero si el espejo trae una
+/// fila más reciente para el mismo id (cambio de otro teléfono
+/// aplicado en el servidor después del cambio local), taparía el
+/// cambio local aún sin subir. La op en cola tapa al espejo: un
+/// upsert pendiente impone sus valores y activa la fila; un revoke
+/// pendiente la inactiva. Al subir la op, el espejo corregido baja
+/// y el overlay deja de ser necesario (la op ya no está pendiente).
+/// Mismo patrón que los bonos («la op pendiente lo tapa»).
+List<Map<String, dynamic>> aplicarOpsPendientesTarifas(
+    List<Map<String, dynamic>> fusionadas,
+    List<Map<String, dynamic>> ops) {
+  final porId = <String, Map<String, dynamic>>{
+    for (final f in fusionadas)
+      '${f['id']}': Map<String, dynamic>.from(f),
+  };
+  const camposUpsert = [
+    'cliente_id',
+    'nombre',
+    'monto_efectivo',
+    'monto_transferencia',
+    'periodo',
+    'vigente_desde',
+    'vigente_hasta',
+    'motivo',
+    'otorgado_por',
+    'activa',
+  ];
+  for (final op in ops) {
+    final tipo = '${op['tipo']}';
+    if (tipo != 'upsert_tarifa_especial' &&
+        tipo != 'revoke_tarifa_especial') {
+      continue;
+    }
+    Map<String, dynamic>? p;
+    try {
+      final raw = op['payload'];
+      p = raw is String
+          ? Map<String, dynamic>.from(
+              jsonDecode(raw) as Map<String, dynamic>)
+          : Map<String, dynamic>.from(raw as Map);
+    } catch (_) {
+      continue;
+    }
+    final id = '${p['id'] ?? ''}';
+    if (id.isEmpty) continue;
+    if (tipo == 'revoke_tarifa_especial') {
+      final f = porId[id];
+      if (f != null) f['activa'] = 0;
+      continue;
+    }
+    final f = porId[id];
+    if (f != null) {
+      for (final k in camposUpsert) {
+        if (p.containsKey(k)) f[k] = p[k];
+      }
+    } else {
+      // Sin fila local (otorgar la escribe en la misma transacción
+      // que la op, así que no debería pasar; si la fila se perdió,
+      // el payload la reconstruye en vez de perder el cambio).
+      porId[id] = {
+        'id': id,
+        for (final k in camposUpsert) k: p[k],
+      };
+    }
+  }
+  return porId.values.toList();
+}
+
+/// Tabla local + espejo fusionados, con el overlay de ops
+/// pendientes encima (1.14, Fix 4). Si el espejo aún no existe
 /// (BD de test mínima), se lee solo lo local.
 Future<List<Map<String, dynamic>>> _todasFusionadas() async {
   final db = await LocalDb.instance.db;
@@ -95,8 +166,14 @@ Future<List<Map<String, dynamic>>> _todasFusionadas() async {
   try {
     espejo = await LocalDb.instance.allMirror('espejo_tarifas_especiales');
   } catch (_) {}
-  return fusionarTarifasEspeciales(
+  final fusionadas = fusionarTarifasEspeciales(
       locales.map((r) => Map<String, dynamic>.from(r)).toList(), espejo);
+  try {
+    return aplicarOpsPendientesTarifas(
+        fusionadas, await LocalDb.instance.pendingOps());
+  } catch (_) {
+    return fusionadas;
+  }
 }
 
 /// Todas las filas de un cliente (activas primero, luego por

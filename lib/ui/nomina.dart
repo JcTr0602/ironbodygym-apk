@@ -124,8 +124,16 @@ class _NominaScreenState extends State<NominaScreen> {
         }
       }
       if (bonos.isNotEmpty) {
-        await BonosNominaService.instance
-            .migrarDesdePrefs(bonos, pref);
+        // 1.14 (Fix 4): si el sello ya existe, la migración YA
+        // entró (cierre entre el commit y el borrado de prefs):
+        // no se re-encola, solo se borran las prefs. Si no hay
+        // sello, migrarDesdePrefs encola + sella en una sola
+        // transacción y luego se borran las prefs.
+        final sello = BonosNominaService.claveSelloMigracionPrefs(pref);
+        if (await LocalDb.instance.getMeta(sello) != '1') {
+          await BonosNominaService.instance
+              .migrarDesdePrefs(bonos, pref);
+        }
         await prefs.remove(_bonosKey(ahoraHabana()));
         await prefs.remove(
             'nomina_bono_${ahora.year}_${ahora.month}');

@@ -13,10 +13,13 @@
 ///   ([fusionarBonosNomina], pura y testeable).
 /// - La primera lectura del mes en curso migra los bonos que
 ///   queden en SharedPreferences (la UI pasa la lista vieja a
-///   [migrarDesdePrefs] y luego borra las claves; si la app se
-///   cierra a mitad, la migración se reintenta sin duplicar
-///   porque cada bono migrado lleva un uuid nuevo y las claves
-///   solo se borran tras encolar).
+///   [migrarDesdePrefs] y luego borra las claves. 1.14 (Fix 4):
+///   el sello de migración vive en la MISMA transacción SQLite
+///   que las ops: si la app se cierra a mitad, o no entró nada
+///   (rollback: se reintenta limpio) o entró todo con sello (la
+///   UI ve el sello, no re-encola y solo borra las prefs). El
+///   comentario viejo («cada bono lleva un uuid nuevo») NO
+///   evitaba duplicar: un uuid nuevo por reintento DUPLICA.
 ///
 /// CONTRATO PENDIENTE PARA EL SERVIDOR (no implementado aquí;
 /// lo ejecuta el agente del servidor, no esta app):
@@ -178,30 +181,44 @@ class BonosNominaService {
         payload: {'bono_uuid': bonoUuid},
       );
 
+  /// Clave del sello de migración en meta (misma BD que la cola).
+  static String claveSelloMigracionPrefs(String mes) =>
+      'bonos_prefs_migrados_$mes';
+
   /// Migración desde SharedPreferences (primera lectura del mes
   /// en curso): cada bono viejo se encola como registrar con un
-  /// uuid nuevo. La UI borra las claves de prefs DESPUÉS de
-  /// llamar aquí; la ventana entre encolar y borrar es de
-  /// milisegundos (un cierre justo ahí duplicaría los bonos del
-  /// mes, visibles y borrables desde la UI; no se pierde nada).
+  /// uuid nuevo. 1.14 (Fix 4, atomicidad): las ops y el sello se
+  /// escriben EN LA MISMA transacción SQLite. Un cierre a mitad
+  /// deja o nada (rollback: la UI reintenta limpio) o todo con
+  /// sello (la UI ve el sello, no re-encola y solo borra las
+  /// prefs). Antes la UI borraba las prefs DESPUÉS de encolar y
+  /// un cierre en esa ventana duplicaba los bonos del mes.
   /// Los bonos con monto 0 o sin monto se ignoran (nunca sumaban).
   Future<void> migrarDesdePrefs(
       List<Map<String, dynamic>> bonosViejos, String mes) async {
-    for (final b in bonosViejos) {
-      final monto = (b['monto'] as num?)?.toDouble() ?? 0;
-      if (monto == 0) continue;
-      await _db.queueOp(
-        opUuid: const Uuid().v4(),
-        tipo: kTipoOpRegistrarBonoNomina,
-        payload: {
-          'bono_uuid': const Uuid().v4(),
-          'mes': mes,
-          'entrenador': '${b['entrenador'] ?? 'ambos'}',
-          'monto': monto,
-          'nota': '${b['nota'] ?? ''}',
-          'creado_en': '${b['creado_en'] ?? ''}',
-        },
-      );
-    }
+    final sello = claveSelloMigracionPrefs(mes);
+    if (await _db.getMeta(sello) == '1') return;
+    final d = await _db.db;
+    await d.transaction((txn) async {
+      for (final b in bonosViejos) {
+        final monto = (b['monto'] as num?)?.toDouble() ?? 0;
+        if (monto == 0) continue;
+        await _db.queueOp(
+          opUuid: const Uuid().v4(),
+          tipo: kTipoOpRegistrarBonoNomina,
+          payload: {
+            'bono_uuid': const Uuid().v4(),
+            'mes': mes,
+            'entrenador': '${b['entrenador'] ?? 'ambos'}',
+            'monto': monto,
+            'nota': '${b['nota'] ?? ''}',
+            'creado_en': '${b['creado_en'] ?? ''}',
+          },
+          txn: txn,
+        );
+      }
+      await txn.rawUpdate(
+          "INSERT OR REPLACE INTO meta(k,v) VALUES(?,?)", [sello, '1']);
+    });
   }
 }
