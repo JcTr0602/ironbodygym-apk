@@ -15,6 +15,16 @@ class Novedad {
 }
 
 const novedades = [
+  Novedad('1.14.0', [
+    'Administración reorganizada: la pantalla principal ahora abre con lo que necesita tu atención, una estación diaria (Cobrar, Mi Día, Arqueo, Cierre) y los números del mes que se pueden tocar para ver el detalle; todo lo demás quedó agrupado en 6 módulos por tarea',
+    'Cobros por transferencia bien valorados: una inscripción con venta por transferencia ya se muestra a su precio real (2500) en Actividad y pendientes, no a precio de efectivo',
+    'Nómina: el mes liquidado ya se ve liquidado también cuando se aprueba desde las solicitudes de los entrenadores',
+    'Reparar lista de clientes ahora purga de verdad: si un cliente eliminado seguía apareciendo, con la cola limpia desaparece al tocar Reparar',
+    'Venta de servicios: cada cliente muestra su carnet y su edad, y el buscador también busca por carnet, para no confundir hermanos o tocayos',
+    'Turnos: las horas se muestran en hora de Cuba aunque el teléfono esté en otra zona',
+    'Ranking de servicios: las ventas viejas ya muestran el nombre del cliente en vez de «Cliente 121»',
+    'Copia de seguridad: la exportación en frío ahora avisa si no pudo volcar los últimos datos, en vez de compartir una copia incompleta',
+  ]),
   Novedad('1.8.0', [
     'Eliminar conservando estadísticas: al eliminar definitivamente a un cliente (desde su ficha o desde la Papelera) ahora puedes elegir — «Eliminar conservando estadísticas» hace desaparecer a la persona pero sus pagos y ventas quedan anónimos, para que las estadísticas y la nómina de meses pasados no cambien; «Eliminar todo» borra también el dinero, como siempre',
     'Si el cliente debe un fiado, el diálogo avisa el monto: al eliminar conservando, la deuda se da por incobrable',
