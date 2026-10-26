@@ -38,7 +38,7 @@
 /// por meses solo en mensual/menores, como siempre.
 library;
 
-import 'negocio.dart' show esMenor, preciosVigentes;
+import 'negocio.dart' show esMenor, fmtMonto, preciosVigentes;
 import 'tarifa_especial.dart';
 import 'tiempo.dart';
 
@@ -261,28 +261,44 @@ Map<String, dynamic> payloadSensible({
 
 /// --- Extracto E4 (Argón ajuste 5): resumen puro ----------------.
 ///
-/// [filas]: {tipo: 'suplemento'|'servicio', monto, anulada}.
-/// Las anuladas NO suman. El total general y los dos subtotales van
-/// SIEMPRE juntos en la cabecera del Extracto.
+/// [filas]: {tipo: 'suplemento'|'servicio', monto, anulada,
+/// moneda: 'CUP'|'USD'}. Las anuladas NO suman.
+///
+/// Corrección 2026-10-26: los totales van POR MONEDA, nunca
+/// mezclados. La venta trae su moneda (ventas_suplementos.moneda);
+/// la versión anterior sumaba USD + CUP en un solo número y lo
+/// etiquetaba «CUP», así que 25 USD aparecían como 25 CUP.
 class ResumenExtracto {
-  final double total;
-  final double suplementos;
-  final double servicios;
+  final Map<String, double> total;
+  final Map<String, double> suplementos;
+  final Map<String, double> servicios;
   const ResumenExtracto(this.total, this.suplementos, this.servicios);
 }
 
+/// Formatea un mapa moneda→monto: «1200 CUP · 125 USD» (CUP
+/// primero, resto alfabético). Mapa vacío o todo cero → «0 CUP».
+String textoMontosPorMoneda(Map<String, double> montos) {
+  final partes = <String>[];
+  for (final moneda in ['CUP', ...montos.keys.where((m) => m != 'CUP').toList()..sort()]) {
+    final v = montos[moneda] ?? 0;
+    if (v != 0) partes.add('${fmtMonto(v)} $moneda');
+  }
+  return partes.isEmpty ? '0 CUP' : partes.join(' · ');
+}
+
 ResumenExtracto resumenExtracto(List<Map<String, dynamic>> filas) {
-  var total = 0.0;
-  var sup = 0.0;
-  var ser = 0.0;
+  final total = <String, double>{};
+  final sup = <String, double>{};
+  final ser = <String, double>{};
   for (final f in filas) {
     if (f['anulada'] == 1 || f['anulada'] == true) continue;
     final monto = (f['monto'] as num?)?.toDouble() ?? 0;
-    total += monto;
+    final moneda = '${f['moneda'] ?? 'CUP'}';
+    total[moneda] = (total[moneda] ?? 0) + monto;
     if (f['tipo'] == 'servicio') {
-      ser += monto;
+      ser[moneda] = (ser[moneda] ?? 0) + monto;
     } else {
-      sup += monto;
+      sup[moneda] = (sup[moneda] ?? 0) + monto;
     }
   }
   return ResumenExtracto(total, sup, ser);

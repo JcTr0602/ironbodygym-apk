@@ -216,9 +216,27 @@ void main() {
         {'tipo': 'suplemento', 'monto': 5000, 'anulada': 1},
         {'tipo': 'servicio', 'monto': 900, 'anulada': true},
       ]);
-      expect(r.total, 1600);
-      expect(r.suplementos, 1000);
-      expect(r.servicios, 600);
+      expect(r.total, {'CUP': 1600.0});
+      expect(r.suplementos, {'CUP': 1000.0});
+      expect(r.servicios, {'CUP': 600.0});
+    });
+
+    test('monedas NO se mezclan: USD aparte de CUP', () {
+      // Caso real 2026-10-26: 3 ventas USD (25 + 40 + 60) que el
+      // Extracto pintaba como CUP y sumaba con los CUP de dosis.
+      final r = resumenExtracto([
+        {'tipo': 'suplemento', 'monto': 25, 'moneda': 'USD', 'anulada': 0},
+        {'tipo': 'suplemento', 'monto': 40, 'moneda': 'USD', 'anulada': 0},
+        {'tipo': 'suplemento', 'monto': 60, 'moneda': 'USD', 'anulada': 0},
+        {'tipo': 'servicio', 'monto': 1200, 'moneda': 'CUP', 'anulada': 0},
+        {'tipo': 'suplemento', 'monto': 999, 'moneda': 'USD', 'anulada': 1},
+      ]);
+      expect(r.total, {'USD': 125.0, 'CUP': 1200.0});
+      expect(r.suplementos, {'USD': 125.0});
+      expect(r.servicios, {'CUP': 1200.0});
+      expect(textoMontosPorMoneda(r.total), '1200 CUP · 125 USD');
+      expect(textoMontosPorMoneda(r.suplementos), '125 USD');
+      expect(textoMontosPorMoneda({}), '0 CUP');
     });
   });
 

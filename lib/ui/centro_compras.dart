@@ -46,7 +46,7 @@ class _CentroComprasScreenState extends State<CentroComprasScreen> {
   var _cargando = true;
   var _filtro = 'todo'; // todo | suplemento | servicio
   List<Map<String, dynamic>> _filas = [];
-  ResumenExtracto _resumen = const ResumenExtracto(0, 0, 0);
+  ResumenExtracto _resumen = const ResumenExtracto({}, {}, {});
 
   @override
   void initState() {
@@ -109,6 +109,10 @@ class _CentroComprasScreenState extends State<CentroComprasScreen> {
             ? (nombreCli[cid] ?? 'Cliente $cid')
             : '—',
         'monto': total,
+        // Corrección 2026-10-26: la venta trae su moneda (el espejo
+        // publica la fila entera, moneda incluida). Antes se
+        // ignoraba y todo se pintaba CUP.
+        'moneda': '${v['moneda'] ?? 'CUP'}',
         'fecha': '${v['fecha'] ?? ''}',
         'anulada': 0,
         'detalle': v,
@@ -135,6 +139,9 @@ class _CentroComprasScreenState extends State<CentroComprasScreen> {
             ? '${v['cliente_nombre']}'
             : (cid != null ? (nombreCli[cid] ?? 'Cliente $cid') : '—'),
         'monto': precio * cant,
+        // Servicios (dosis/agua): servicio_ventas no tiene moneda;
+        // sus precios son CUP por diseño.
+        'moneda': 'CUP',
         'fecha': '${v['fecha'] ?? ''}',
         'anulada': 0,
         'detalle': v,
@@ -149,6 +156,8 @@ class _CentroComprasScreenState extends State<CentroComprasScreen> {
             ? '${m['cliente_nombre']}'
             : '—',
         'monto': (m['monto'] as num?)?.toDouble() ?? 0,
+        // Compras manuales: el formulario es solo CUP.
+        'moneda': 'CUP',
         'fecha': '${m['fecha'] ?? ''}',
         'anulada': (m['anulada'] as int?) ?? 0,
         'idManual': '${m['id']}',
@@ -233,12 +242,15 @@ class _CentroComprasScreenState extends State<CentroComprasScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Total general: ${fmtMonto(_resumen.total)} CUP',
+            Text(
+                'Total general: ${textoMontosPorMoneda(_resumen.total)}',
                 style: AppTexto.titulo),
             const SizedBox(height: 4),
             Text(
-                'Subtotal Suplementos: ${fmtMonto(_resumen.suplementos)} CUP · '
-                'Subtotal Servicios: ${fmtMonto(_resumen.servicios)} CUP',
+                'Subtotal Suplementos: '
+                '${textoMontosPorMoneda(_resumen.suplementos)} · '
+                'Subtotal Servicios: '
+                '${textoMontosPorMoneda(_resumen.servicios)}',
                 style: AppTexto.cuerpo),
             const Text(
               'Las anuladas no suman. Las ventas del turno aparecen '
@@ -281,7 +293,8 @@ class _CentroComprasScreenState extends State<CentroComprasScreen> {
                 decoration:
                     anulada ? TextDecoration.lineThrough : null)),
         subtitle: Text('${f['fecha'] ?? ''} · ${f['cliente'] ?? '—'}'),
-        trailing: Text('${fmtMonto((f['monto'] as num).toDouble())} CUP',
+        trailing: Text(
+            '${fmtMonto((f['monto'] as num).toDouble())} ${f['moneda'] ?? 'CUP'}',
             style: AppTexto.cuerpo),
         onTap: () => _detalle(f),
       ),
@@ -302,7 +315,8 @@ class _CentroComprasScreenState extends State<CentroComprasScreen> {
           children: [
             Text('Fecha: ${f['fecha'] ?? '—'}'),
             Text('Cliente: ${f['cliente'] ?? '—'}'),
-            Text('Monto: ${fmtMonto((f['monto'] as num).toDouble())} CUP'),
+            Text(
+                'Monto: ${fmtMonto((f['monto'] as num).toDouble())} ${f['moneda'] ?? 'CUP'}'),
             Text('Origen: ${esManual ? 'Manual (Panel)' : 'Venta del turno'}'),
             if (!esManual)
               const Padding(
