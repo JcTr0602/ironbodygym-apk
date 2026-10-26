@@ -170,22 +170,17 @@ class _MiNominaScreenState extends State<MiNominaScreen> {
     return n < 0 ? 0 : n;
   }
 
-  String get _recibo {
-    final b = StringBuffer();
-    b.writeln(kSelloVistaPreviaNomina);
-    b.writeln(_syncTexto);
-    b.writeln('Mes: $_pref');
-    b.writeln(
-        'Base: $_clientesPagados clientes × $_tarifa = ${fmtMonto(_base)} CUP');
-    b.writeln(
-        'Comisión dosis: $_dosis dosis = ${fmtMonto(_comision)} CUP');
-    b.writeln('Adelantos del mes: -${fmtMonto(_adelantosMes)} CUP');
-    b.writeln('Deuda arrastrada: -${fmtMonto(_deudaEntrante)} CUP');
-    b.writeln('NETO ESTIMADO: ${fmtMonto(_neto)} CUP');
-    b.writeln(
-        'Sin bonos (los gestiona el dueño). El pago se hace el último día del mes.');
-    return b.toString();
-  }
+  String get _recibo => textoReciboNomina(
+        pref: _pref,
+        clientesPagados: _clientesPagados,
+        tarifa: _tarifa,
+        dosis: _dosis,
+        comision: _comision,
+        adelantosMes: _adelantosMes,
+        deudaEntrante: _deudaEntrante,
+        sello: kSelloVistaPreviaNomina,
+        syncTexto: _syncTexto,
+      );
 
   Future<void> _copiarRecibo() async {
     await Clipboard.setData(ClipboardData(text: _recibo));
@@ -571,4 +566,37 @@ class _MiNominaScreenState extends State<MiNominaScreen> {
       ),
     );
   }
+}
+
+/// Texto del recibo de nómina del entrenador (1.14, M5.2): el
+/// mismo que la pantalla copiaba al portapapeles, con su sello de
+/// vista previa y la línea de última sync. El neto nunca es
+/// negativo (el exceso queda como deuda en el libro).
+String textoReciboNomina({
+  required String pref,
+  required int clientesPagados,
+  required int tarifa,
+  required int dosis,
+  required double comision,
+  required double adelantosMes,
+  required double deudaEntrante,
+  required String sello,
+  required String syncTexto,
+}) {
+  final base = clientesPagados * tarifa.toDouble();
+  var neto = base + comision - adelantosMes - deudaEntrante;
+  if (neto < 0) neto = 0;
+  final b = StringBuffer();
+  b.writeln(sello);
+  b.writeln(syncTexto);
+  b.writeln('Mes: $pref');
+  b.writeln(
+      'Base: $clientesPagados clientes × $tarifa = ${fmtMonto(base)} CUP');
+  b.writeln('Comisión dosis: $dosis dosis = ${fmtMonto(comision)} CUP');
+  b.writeln('Adelantos del mes: -${fmtMonto(adelantosMes)} CUP');
+  b.writeln('Deuda arrastrada: -${fmtMonto(deudaEntrante)} CUP');
+  b.writeln('NETO ESTIMADO: ${fmtMonto(neto)} CUP');
+  b.writeln(
+      'Sin bonos (los gestiona el dueño). El pago se hace el último día del mes.');
+  return b.toString();
 }
