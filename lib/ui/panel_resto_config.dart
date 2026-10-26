@@ -15,16 +15,14 @@
 library;
 
 import 'dart:convert';
-import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:path/path.dart' as p;
 import 'package:share_plus/share_plus.dart';
-import 'package:sqflite/sqflite.dart';
 
 import '../auth.dart';
 import '../bloque2_resto.dart';
+import '../copia_seguridad.dart';
 import '../localdb.dart';
 import '../nomina_calc.dart';
 import '../tiempo.dart';
@@ -381,16 +379,8 @@ class _CopiaSeguridadScreenState extends State<CopiaSeguridadScreen> {
   Future<void> _exportar() async {
     setState(() => _exportando = true);
     try {
-      final d = await LocalDb.instance.db;
-      // Copia en frío: volcar el WAL a la BD antes de copiar, para
-      // que el archivo no salga incompleto ni corrupto. NUNCA VACUUM
-      // sobre la BD activa.
-      await d.rawQuery('PRAGMA wal_checkpoint(TRUNCATE)');
-      final dir = await getDatabasesPath();
-      final origen = File(p.join(dir, 'ironbody.db'));
-      final tmp = await Directory.systemTemp.createTemp('ironbody_backup');
-      final destino = File(p.join(tmp.path, 'ironbody_backup.db'));
-      await origen.copy(destino.path);
+      // 1.14 (M6.30): la copia en frío vive en exportarCopiaFria.
+      final destino = await exportarCopiaFria();
       await registrarAccionMantenimiento(
           'f5_exportar_copia', {'pendientes_al_exportar': _pendientes});
       await Share.shareXFiles([XFile(destino.path)],
