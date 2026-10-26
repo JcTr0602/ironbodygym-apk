@@ -42,6 +42,29 @@ import 'pestana_progreso.dart';
 import 'vista_previa_cliente.dart';
 import 'widgets.dart';
 
+/// Payload de la renovación rápida (1 mes en efectivo).
+/// Función pura (testeable sin montar la pantalla): el preview
+/// necesita 'monto' y 'pagado_hasta' — sin ellos mostraría 0 CUP
+/// y sin vencimiento. Igual que _pagar, el dueño no se debe a sí
+/// mismo ('entregado': 1).
+Map<String, dynamic> payloadRenovacionRapida({
+  required int clienteId,
+  required double mensualidad,
+  required String nuevoVencimiento,
+  required String fecha,
+  required bool esDueno,
+}) =>
+    {
+      'cliente_id': clienteId,
+      'periodo': 'mensual',
+      'meses': 1,
+      'metodo': 'efectivo',
+      'fecha': fecha,
+      'monto': mensualidad,
+      'pagado_hasta': nuevoVencimiento,
+      if (esDueno) 'entregado': 1,
+    };
+
 class FichaScreen extends StatefulWidget {
   final int clienteId;
 
@@ -1257,53 +1280,42 @@ class _FichaScreenState extends State<FichaScreen> {
     SyncEngine.instance.push();
   }
 
-  /// Renovación rápida con un toque: 1 mes en efectivo (punto 30).
+  /// Renovación rápida: 1 mes en efectivo (punto 30). Panel 1.9:
+  /// pasa por preview + recibo con deshacer como todo cobro, y
+  /// bloquea Cuenta a la Casa igual que _pagar.
   Future<void> _renovar() async {
     final c = _c;
     if (c == null) return;
+    // Panel 1.9 (Luna BLOQUEANTE): la renovación rápida NO puede
+    // saltarse el preview ni el bloqueo Casa: antes encolaba
+    // pago_mensual directo y el botón se mostraba con solo estar
+    // vencido (una Cuenta a la Casa vencida podía cobrarse).
+    // Ahora bloquea Casa y pasa por el mismo preview + recibo
+    // con deshacer 15 s que el cobro normal.
+    if (await mostrarBloqueoCasa(context, c)) return;
+    if (!mounted) return;
     final aj = await LocalDb.instance.getAjustes();
+    if (!mounted) return;
     final mensual = (aj['mensualidad'] as num?)?.toDouble() ?? 2000;
     final nuevo =
         previewHastaDias(c['pagado_hasta'] as String?, 30);
-    if (!mounted) return;
-    final ok = await showDialog<bool>(
+    final payload = payloadRenovacionRapida(
+      clienteId: widget.clienteId,
+      mensualidad: mensual,
+      nuevoVencimiento: nuevo,
+      fecha: isoHabana(ahoraHabana()).substring(0, 10), // v1.3.3 (Argón): hora de La Habana
+      esDueno: AuthService().isOwner,
+    );
+    final deshecho = await cobrarConPreviewYRecibo(
       context: context,
-      builder: (ctx) => DialogoApp(
-        titulo: 'Renovación rápida',
-        iconoTitulo: Icons.autorenew,
-        contenido: Text('${c['nombre']}\n'
-            '1 mes — ${fmtMonto(mensual)} CUP en efectivo\n'
-            'Nuevo vencimiento: ${fmtFecha(nuevo)}'),
-        acciones: [
-          TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Cancelar')),
-          ElevatedButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppColores.naranja,
-                foregroundColor: Colors.white,
-              ),
-              child: const Text('Renovar')),
-        ],
-      ),
-    );
-    if (ok != true || !mounted) return;
-    await LocalDb.instance.queueOp(
-      opUuid: const Uuid().v4(),
-      tipo: 'pago_mensual',
-      payload: {
-        'cliente_id': widget.clienteId,
-        'periodo': 'mensual',
-        'meses': 1,
-        'metodo': 'efectivo',
-        'fecha':
-            isoHabana(ahoraHabana()).substring(0, 10), // v1.3.3 (Argón): hora de La Habana
-      },
+      nombreCliente: '${c['nombre'] ?? ''}',
+      payload: payload,
     );
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Renovado (se sincronizará)')));
+    if (deshecho) {
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Cobro deshecho')));
+    }
     _cargar();
     SyncEngine.instance.push();
   }

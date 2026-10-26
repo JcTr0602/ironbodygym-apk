@@ -289,6 +289,18 @@ class _PagoScreenState extends State<PagoScreen> {
         return;
       }
     } else if (u.pagoId != null) {
+      // Panel 1.9 (Luna, rebajado a MEDIO tras verificar el
+      // servidor): anular_pago EXIGE dueño en el servidor
+      // (_require_owner), así que ofrecerlo al entrenador solo
+      // produce un mensaje engañoso de éxito y una op rechazada.
+      // Sin ser dueño, avisar y no encolar.
+      if (!_auth.isOwner) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text(
+                'Solo el dueño puede anular un pago ya sincronizado')));
+        return;
+      }
       await LocalDb.instance.queueOp(
         opUuid: const Uuid().v4(),
         tipo: 'anular_pago',
