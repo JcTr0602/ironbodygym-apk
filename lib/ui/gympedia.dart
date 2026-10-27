@@ -13,7 +13,11 @@ import 'diseno.dart';
 import 'gympedia_editor.dart';
 
 class GympediaScreen extends StatefulWidget {
-  const GympediaScreen({super.key});
+  /// Si es true, se muestra sin Scaffold/AppBar (pestaña dentro de
+  /// Biblioteca): el cuerpo trae sus propios botones de acción.
+  final bool embebida;
+
+  const GympediaScreen({super.key, this.embebida = false});
 
   @override
   State<GympediaScreen> createState() => _GympediaScreenState();
@@ -104,6 +108,7 @@ class _GympediaScreenState extends State<GympediaScreen> {
             child: Text('Solo el dueño administra la GymPedia.')),
       );
     }
+    if (widget.embebida) return _cuerpo();
     return Scaffold(
       appBar: AppBar(
         title: const Text('GymPedia'),
@@ -125,11 +130,40 @@ class _GympediaScreenState extends State<GympediaScreen> {
         icon: const Icon(Icons.add),
         label: const Text('Nuevo artículo'),
       ),
-      body: _cargando
-          ? const Center(child: CircularProgressIndicator())
-          : ListView(
+      body: _cuerpo(),
+    );
+  }
+
+  /// Cuerpo de la lista (compartido entre la pantalla propia y la
+  /// pestaña embebida en Biblioteca).
+  Widget _cuerpo() {
+    if (_cargando) return const Center(child: CircularProgressIndicator());
+    return ListView(
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 96),
               children: [
+        if (widget.embebida) ...[
+          Row(
+            children: [
+              Expanded(
+                child: FilledButton.icon(
+                  onPressed: _sincronizando ? null : _sincronizar,
+                  icon: const Icon(Icons.sync),
+                  label: const Text('Actualizar'),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: () => _abrirEditor(),
+                  icon: const Icon(Icons.add),
+                  label: const Text('Nuevo artículo'),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+        ],
+
                 if (_borradores.isNotEmpty) ...[
                   Text('Borradores', style: AppTexto.subtitulo),
                   const SizedBox(height: 4),
@@ -215,7 +249,6 @@ class _GympediaScreenState extends State<GympediaScreen> {
                   style: TextStyle(fontSize: 12, color: Colors.grey),
                 ),
               ],
-            ),
-    );
+            );
   }
 }

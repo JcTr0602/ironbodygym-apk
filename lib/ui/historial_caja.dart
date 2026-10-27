@@ -37,11 +37,12 @@ class _HistorialCajaScreenState extends State<HistorialCajaScreen> {
     }
     // v1.2.5-rev6: cobrado del día en UNA pasada por los espejos
     // (antes era una query con json_extract por cada cierre).
-    final cobrados = await _cobradosPorDia(cierres);
+    final cobrados = await _cobradosPorFranja(cierres);
     final res = <Map<String, dynamic>>[];
     for (final c in cierres) {
       final tid = _telegramIdDe(c);
-      final key = '${c['fecha']}|$tid';
+      final key =
+          '${c['fecha']}|${c['turno'] ?? '—'}|$tid';
       res.add({...c, 'cobrado': cobrados[key] ?? 0.0});
     }
     if (mounted) {
@@ -53,44 +54,106 @@ class _HistorialCajaScreenState extends State<HistorialCajaScreen> {
   }
 
   static int? _telegramIdDe(Map<String, dynamic> c) {
-    final t = c['telegram_id'];
-    if (t is int) return t;
-    return int.tryParse('$t');
+    return LocalDb.normalizarTelegramId(c['telegram_id']);
   }
 
-  /// Suma por (fecha, telegram_id) de pagos + pagos diarios, en una sola
-  /// pasada por los espejos. La atribución (telegram_user_id /
-  /// registrado_por) es la misma que ve el entrenador en "Mi turno".
-  Future<Map<String, double>> _cobradosPorDia(
+  /// Franja (manana/tarde/noche) de una fila, por su turno explícito
+  /// (diarios) o por la hora de su fecha/hora. Sin hora determinable
+  /// devuelve null (el llamador la asigna al primer cierre del día,
+  /// para que la suma de las tarjetas siga siendo el total del día).
+  static String? _franjaDe(Map<String, dynamic> r) {
+    final turno = '${r['turno'] ?? ''}'.toLowerCase();
+    if (turno.contains('mañana') || turno == 'manana') return 'manana';
+    if (turno.contains('tarde')) return 'tarde';
+    if (turno.contains('noche')) return 'noche';
+    var horaStr = '${r['hora'] ?? ''}';
+    if (horaStr.isEmpty) {
+      final f = '${r['fecha'] ?? ''}';
+      // Fecha ISO con hora ('2026-10-16T14:30:00').
+      if (f.length > 11 && f.contains('T')) horaStr = f.substring(11);
+    }
+    final h =
+        horaStr.length >= 2 ? int.tryParse(horaStr.substring(0, 2)) : null;
+    if (h == null) return null;
+    if (h >= 5 && h < 12) return 'manana';
+    if (h >= 12 && h < 18) return 'tarde';
+    return 'noche';
+  }
+
+  /// Cobrado por (fecha, franja, telegram_id). 1.15-turnos (#10):
+  /// antes solo sumaba pagos + diarios y agrupaba por día (dos
+  /// cierres el mismo día mostraban el mismo total). Ahora suma
+  /// también suplementos CUP y servicios (responsable del
+  /// efectivo, sin Casa), normaliza el telegram_id, y agrupa por
+  /// franja; las filas sin hora caen en el primer cierre del día
+  /// para no perder ni duplicar montos.
+  Future<Map<String, double>> _cobradosPorFranja(
       List<Map<String, dynamic>> cierres) async {
-    final pares = <String>{};
+    final paresDia = <String>{};
+    final claves = <String>{};
+    final primerTurno = <String, String>{};
+    const orden = {'manana': 0, 'tarde': 1, 'noche': 2};
     for (final c in cierres) {
       final tid = _telegramIdDe(c);
       if (tid == null) continue;
-      pares.add('${c['fecha']}|$tid');
+      final fecha = '${c['fecha'] ?? ''}';
+      if (fecha.length < 10) continue;
+      final f10 = fecha.substring(0, 10);
+      paresDia.add('$f10|$tid');
+      final turno = '${c['turno'] ?? '—'}';
+      claves.add('$f10|$turno|$tid');
+      final dk = '$f10|$tid';
+      final prev = primerTurno[dk];
+      if (prev == null ||
+          (orden[turno] ?? 99) < (orden[prev] ?? 99)) {
+        primerTurno[dk] = turno;
+      }
     }
     final res = <String, double>{};
-    void suma(String? fecha, int? tid, double monto) {
+    void suma(String? fecha, String? turnoFila, int? tid, double monto) {
       if (fecha == null || fecha.length < 10 || tid == null) return;
-      final k = '${fecha.substring(0, 10)}|$tid';
-      if (!pares.contains(k)) return;
+      final f10 = fecha.substring(0, 10);
+      final dk = '$f10|$tid';
+      if (!paresDia.contains(dk)) return;
+      var turno = turnoFila;
+      if (turno == null || !claves.contains('$f10|$turno|$tid')) {
+        turno = primerTurno[dk];
+      }
+      if (turno == null) return;
+      final k = '$f10|$turno|$tid';
       res[k] = (res[k] ?? 0) + monto;
     }
     // v1.3.4 (ítem 2): columnas indexadas (fecha, telegram_user_id)
     // en vez de allMirror. La pertenencia exacta al par la sigue
-    // aplicando suma() con `pares`.
-    for (final p in await LocalDb.instance.pagosPorParesDiaEntrenador(pares)) {
+    // aplicando suma() con `paresDia`.
+    for (final p in await LocalDb.instance.pagosPorParesDiaEntrenador(paresDia)) {
       // v1.3.4 (Argón, luz roja condicional): normalizar fecha a 10 chars.
       // Si el JSON trae hora ('2026-10-16T14:30:00'), la clave 'fecha|tid'
       // no coincidiría con pares (que usa YYYY-MM-DD) y el pago se perdía.
       final f = '${p['fecha'] ?? ''}';
       final fecha10 = f.length >= 10 ? f.substring(0, 10) : f;
-      suma(fecha10, LocalDb.normalizarTelegramId(p['telegram_user_id']),
+      suma(fecha10, _franjaDe(p),
+          LocalDb.normalizarTelegramId(p['telegram_user_id']),
           (p['monto'] as num?)?.toDouble() ?? 0);
     }
     for (final d in await LocalDb.instance.allMirror('pagos_diarios')) {
-      suma('${d['fecha']}', d['registrado_por'] as int?,
+      suma('${d['fecha']}', _franjaDe(d),
+          LocalDb.normalizarTelegramId(d['registrado_por']),
           (d['total'] as num?)?.toDouble() ?? 0);
+    }
+    for (final v in await ventasSuplementosCup()) {
+      suma('${v['fecha']}', _franjaDe(v),
+          LocalDb.normalizarTelegramId(v['registrado_por']),
+          totalVentaCup(v));
+    }
+    for (final v in await LocalDb.instance.allMirror('servicio_ventas')) {
+      if ((v['casa'] as num?)?.toInt() == 1) continue;
+      final resp =
+          LocalDb.normalizarTelegramId(v['responsable_efectivo_id']) ??
+              LocalDb.normalizarTelegramId(v['registrado_por']);
+      suma('${v['fecha']}', _franjaDe(v), resp,
+          ((v['precio_unitario'] as num?)?.toDouble() ?? 0) *
+              ((v['cantidad'] as num?)?.toDouble() ?? 0));
     }
     return res;
   }

@@ -3,6 +3,7 @@
 // 🎂 Hoy + 📅 Próximos 30 días. Maneja cambio de año.
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
+import '../cliente_protegido.dart';
 import '../localdb.dart';
 import '../negocio.dart';
 import '../tiempo.dart';
@@ -43,17 +44,6 @@ class _CumpleanosMesState
     _cargar();
   }
 
-  String _limpiarTelefono(String raw) {
-    final digitos =
-        raw.replaceAll(RegExp(r'[^0-9]'), '');
-    if (digitos.length == 8 &&
-        (digitos.startsWith('5') ||
-            digitos.startsWith('6'))) {
-      return '53$digitos';
-    }
-    return digitos;
-  }
-
   Future<void> _cargar() async {
     setState(() => _cargando = true);
     try {
@@ -69,6 +59,9 @@ class _CumpleanosMesState
         // Solo activos: no eliminados y no vencidos hace >60 días
         if (c['eliminado'] == true ||
             c['eliminado'] == 1) continue;
+        // Argón #10-2: un entrenador no ve clientes protegidos
+        // del dueño (nombres, fechas ni teléfonos).
+        if (esVistaProtegida(c)) continue;
         // Filtrar clientes inactivos hace mucho tiempo
         final pagadoHasta =
             '${c['pagado_hasta'] ?? ''}';
@@ -146,8 +139,11 @@ class _CumpleanosMesState
 
   Future<void> _felicitar(
       Cumpleanero c) async {
-    final tel = _limpiarTelefono(c.telefono);
-    if (tel.length < 8) {
+    // Argón #10-5: usar el normalizador canónico (un fijo de 8
+    // dígitos pasaba como válido y fallaba en wa.me) y no reventar
+    // si no hay app que abra el enlace.
+    final tel = normalizarTelefonoWaMe(c.telefono);
+    if (tel.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
             content: Text(
@@ -160,8 +156,17 @@ class _CumpleanosMesState
     final uri = Uri.parse(
       'https://wa.me/$tel?text=${Uri.encodeComponent(texto)}',
     );
-    await launchUrl(uri,
-        mode: LaunchMode.externalApplication);
+    try {
+      await launchUrl(uri,
+          mode: LaunchMode.externalApplication);
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+              content: Text('No se pudo abrir WhatsApp')),
+        );
+      }
+    }
   }
 
   @override

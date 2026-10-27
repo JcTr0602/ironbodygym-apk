@@ -20,6 +20,7 @@ import 'package:uuid/uuid.dart';
 
 import 'auth.dart';
 import 'bloque2_resto.dart';
+import 'cliente_protegido.dart';
 import 'localdb.dart';
 import 'tiempo.dart';
 
@@ -45,6 +46,24 @@ class RecordatorioDebido {
     required this.yaDisparado,
     required this.puedoDisparar,
   });
+}
+
+/// Estado de un debido POR CLIENTE (Argón #10-1, PURO).
+/// El marcador masivo `disparado_en_fecha_habana` de la config NO se
+/// consulta aquí: disparar el cumpleaños de un cliente no debe
+/// bloquear a los demás del mismo día. Cada cliente se decide por su
+/// propio registro en recordatorio_disparos_log. Los masivos solo los
+/// dispara el dueño; los «solo_mio» ya vienen filtrados por creador
+/// en debidosHoy.
+({bool yaDisparado, bool puedoDisparar}) estadoDebidoPorCliente({
+  required bool esDueno,
+  required String alcance,
+  required bool yaEnLog,
+}) {
+  return (
+    yaDisparado: yaEnLog,
+    puedoDisparar: alcance == 'todos' ? esDueno && !yaEnLog : !yaEnLog,
+  );
 }
 
 class RecordatoriosService {
@@ -84,12 +103,19 @@ class RecordatoriosService {
       'creada_ts': ahora,
       'actualizada_ts': ahora,
     };
-    await LocalDb.instance.guardarRecordatorio(fila);
-    await LocalDb.instance.queueOp(
-      opUuid: const Uuid().v4(),
-      tipo: kTipoOpUpsertRecordatorio,
-      payload: {'recordatorio': fila},
-    );
+    // Panel 9/10 (Luna): guardar y encolar en UNA transacción. Dos
+    // pasos separados dejaban el cambio local sin op si la app se
+    // cerraba entre ambos (el servidor nunca se enteraba).
+    final d = await LocalDb.instance.db;
+    await d.transaction((txn) async {
+      await LocalDb.instance.guardarRecordatorio(fila, txn: txn);
+      await LocalDb.instance.queueOp(
+        opUuid: const Uuid().v4(),
+        tipo: kTipoOpUpsertRecordatorio,
+        payload: {'recordatorio': fila},
+        txn: txn,
+      );
+    });
     return id;
   }
 
@@ -106,13 +132,26 @@ class RecordatoriosService {
         !_soyDueno) {
       throw Exception('Ese recordatorio no es tuyo');
     }
-    final fila = {...cfg, 'activa': activa ? 1 : 0};
-    await LocalDb.instance.guardarRecordatorio(fila);
-    await LocalDb.instance.queueOp(
-      opUuid: const Uuid().v4(),
-      tipo: kTipoOpUpsertRecordatorio,
-      payload: {'recordatorio': fila},
-    );
+    final fila = {
+      ...cfg,
+      'activa': activa ? 1 : 0,
+      // Argón #10-6: sin sellar actualizada_ts, un pull con la fila
+      // vieja podía pisar el cambio de estado (Last-Write-Wins).
+      'actualizada_ts': isoHabana(ahoraHabana()),
+    };
+    // Panel 9/10 (Luna): guardar y encolar en UNA transacción. Dos
+    // pasos separados dejaban el cambio local sin op si la app se
+    // cerraba entre ambos (el servidor nunca se enteraba).
+    final d = await LocalDb.instance.db;
+    await d.transaction((txn) async {
+      await LocalDb.instance.guardarRecordatorio(fila, txn: txn);
+      await LocalDb.instance.queueOp(
+        opUuid: const Uuid().v4(),
+        tipo: kTipoOpUpsertRecordatorio,
+        payload: {'recordatorio': fila},
+        txn: txn,
+      );
+    });
   }
 
   Future<void> eliminar(String id) async {
@@ -147,6 +186,13 @@ class RecordatoriosService {
   Future<List<RecordatorioDebido>> debidosHoy(
       {String? hoyHabana}) async {
     final hoy = hoyHabana ?? hoyHabanaIso();
+    // Argón #10-3: honrar los interruptores globales de «Mis avisos».
+    // Sin esto, apagar «Cumpleaños» o «Vencimientos» no apagaba nada.
+    // Ausente = activado; solo '0' apaga.
+    final avisoVenc =
+        (await LocalDb.instance.getMeta('aviso_vencimientos')) != '0';
+    final avisoCumple =
+        (await LocalDb.instance.getMeta('aviso_cumpleanos')) != '0';
     final mmDd = hoy.substring(5, 10);
     final configs = await LocalDb.instance.listarRecordatorios();
     final clientes = await LocalDb.instance.allMirror('clientes');
@@ -160,6 +206,8 @@ class RecordatoriosService {
       final tipo = '${cfg['tipo']}';
       final titulo = '${cfg['titulo']}';
       final dias = (cfg['dias_anticipacion'] as num?)?.toInt() ?? 3;
+      if (tipo == 'vencimiento' && !avisoVenc) continue;
+      if (tipo == 'cumpleanos' && !avisoCumple) continue;
       final disparadoMasivoHoy =
           cfg['disparado_en_fecha_habana'] == hoy;
       if (tipo == 'personalizado') {
@@ -192,6 +240,11 @@ class RecordatoriosService {
       for (final c in clientes) {
         final cid = (c['id'] as num?)?.toInt();
         if (cid == null) continue;
+        // Argón #10-2: ni eliminados ni protegidos generan avisos
+        // para entrenadores (para el dueño esVistaProtegida es
+        // false y los sigue viendo todos).
+        if (c['eliminado'] == true || c['eliminado'] == 1) continue;
+        if (esVistaProtegida(c, esDueno: _soyDueno)) continue;
         final target = 'cliente:$cid';
         bool aplica = false;
         if (tipo == 'cumpleanos') {
@@ -201,9 +254,15 @@ class RecordatoriosService {
               c['pagado_hasta'] as String?, hoy, dias);
         }
         if (!aplica) continue;
-        final ya = disparadoMasivoHoy ||
-            await LocalDb.instance.yaDisparadoRecordatorio(
-                recordatorioId: id, fechaHabana: hoy, targetKey: target);
+        final yaLog = await LocalDb.instance.yaDisparadoRecordatorio(
+            recordatorioId: id, fechaHabana: hoy, targetKey: target);
+        // Argón #10-1: el estado por cliente NO consulta el marcador
+        // masivo de la config (ver estadoDebidoPorCliente).
+        final est = estadoDebidoPorCliente(
+          esDueno: _soyDueno,
+          alcance: alcance,
+          yaEnLog: yaLog,
+        );
         out.add(RecordatorioDebido(
           recordatorioId: id,
           titulo: titulo,
@@ -212,14 +271,8 @@ class RecordatoriosService {
           targetKey: target,
           clienteId: cid,
           clienteNombre: '${c['nombre'] ?? ''}',
-          yaDisparado: ya,
-          puedoDisparar: alcance == 'todos'
-              ? puedeDispararMasivo(
-                  esTelefonoDueno: _soyDueno,
-                  disparadoEnFechaHabana:
-                      cfg['disparado_en_fecha_habana'] as String?,
-                  hoyHabana: hoy)
-              : !ya,
+          yaDisparado: est.yaDisparado,
+          puedoDisparar: est.puedoDisparar,
         ));
       }
     }
@@ -254,7 +307,13 @@ class RecordatoriosService {
           ]);
       nuevo = id != 0;
       if (!nuevo) return;
-      if (debido.alcance == 'todos' && _soyDueno) {
+      // Argón #10-1: el marcador masivo solo se escribe para avisos
+      // SIN cliente (targetKey 'todos', personalizados). Un debido
+      // por cliente vive solo en su fila del log; escribir el flag
+      // aquí bloqueaba a todos los demás clientes del día.
+      if (debido.alcance == 'todos' &&
+          debido.targetKey == 'todos' &&
+          _soyDueno) {
         await txn.update(
             'recordatorio_config',
             {

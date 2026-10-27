@@ -38,7 +38,11 @@ void initForegroundFotos() {
 /// Inicia el servicio si hay fotos en cola.
 Future<void> iniciarSubidaFotosForeground() async {
   if (await FlutterForegroundTask.isRunningService) return;
-  final pendientes = await FotosColaService.instance.contarPendientes();
+  // Argón #8-7: contar solo reclamables o el servicio arrancaba
+  // para detenerse al primer tick cuando solo quedaba una
+  // 'original' diferida por QoS.
+  final pendientes =
+      await FotosColaService.instance.contarPendientesReclamables();
   if (pendientes == 0) return;
   await FlutterForegroundTask.startService(
     notificationTitle: 'Subiendo fotos',

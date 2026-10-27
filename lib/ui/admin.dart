@@ -17,6 +17,7 @@ import 'package:share_plus/share_plus.dart';
 import 'package:uuid/uuid.dart';
 
 import '../auth.dart';
+import '../cliente_protegido.dart';
 import '../invitados.dart' as invitados_svc;
 import '../localdb.dart';
 import '../plus_reportes.dart';
@@ -31,7 +32,7 @@ import 'diseno.dart';
 import 'buscar.dart';
 import 'admin_secciones.dart';
 import 'arqueo.dart';
-import 'gympedia.dart';
+import 'guia.dart';
 import 'auditoria.dart';
 import 'auditoria_silenciosa.dart';
 import 'nomina.dart';
@@ -956,7 +957,22 @@ class _AdminScreenState extends State<AdminScreen> {
   }
 
   Future<void> _exportar() async {
+    // Cliente protegido (2026-10-26, Protegido 2 H8): exportar es
+    // solo del dueño; además, ningún protegido viaja en los CSV
+    // (ni sus pagos) aunque el llamado llegue por otro camino.
+    if (!AuthService().isOwner) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('Solo el dueño puede exportar datos')));
+      }
+      return;
+    }
     final clientes = await LocalDb.instance.allMirror('clientes');
+    final protegidos = <int>{};
+    for (final c in clientes) {
+      final id = (c['id'] as num?)?.toInt();
+      if (id != null && esVistaProtegida(c)) protegidos.add(id);
+    }
     final csvClientes = _csv(
       ['id', 'nombre', 'carnet', 'telefono', 'sexo', 'estado',
        'pagado_hasta', 'fecha_inscripcion'],
@@ -964,7 +980,7 @@ class _AdminScreenState extends State<AdminScreen> {
         // v1.8.0: sin cáscaras (estado='eliminado') en el listado
         // de personas; sus pagos del mes sí se exportan abajo.
         for (final c in clientes)
-          if (!esClienteEliminado(c))
+          if (!esClienteEliminado(c) && !esVistaProtegida(c))
           [
             '${c['id'] ?? ''}',
             '${c['nombre'] ?? ''}',
@@ -986,6 +1002,7 @@ class _AdminScreenState extends State<AdminScreen> {
       ['id', 'cliente_id', 'fecha', 'monto', 'metodo', 'periodo'],
       [
         for (final p in pagosMes)
+          if (!protegidos.contains((p['cliente_id'] as num?)?.toInt()))
           [
             '${p['id'] ?? ''}',
             '${p['cliente_id'] ?? ''}',
@@ -1935,13 +1952,13 @@ class _AdminScreenState extends State<AdminScreen> {
       _tarjetaFlujo(
         Icons.handshake,
         'Arqueo de entrega de efectivo',
-        'C1 · Liquidar por delta, nunca pendiente = 0',
+        'Liquidar por delta, nunca pendiente = 0',
         () => _ir(const ArqueoEntregaScreen()),
       ),
       _tarjetaFlujo(
         Icons.receipt_long,
         'Centro de Compras y Extracto',
-        'E4 · Todo | Suplementos | Servicios, con subtotales',
+        'Todo | Suplementos | Servicios, con subtotales',
         () => _ir(const CentroComprasScreen()),
       ),
       _tarjetaFlujo(
@@ -1974,7 +1991,7 @@ class _AdminScreenState extends State<AdminScreen> {
       _tarjetaFlujo(
         Icons.bar_chart,
         'Ingresos por período',
-        'C5 · Plus como línea propia, sin doble conteo',
+        'Plus como línea propia, sin doble conteo',
         () => _ir(const IngresosPeriodoScreen()),
       ),
       _subModulo('NÓMINA'),
@@ -1988,19 +2005,19 @@ class _AdminScreenState extends State<AdminScreen> {
       _tarjetaFlujo(
         Icons.fact_check,
         'Nómina pre-calculada',
-        'C2 · Solo lectura, vista previa hasta el 31',
+        'Solo lectura, vista previa hasta el 31',
         () => _ir(const NominaPrecalculadaScreen()),
       ),
       _tarjetaFlujo(
         Icons.payments,
         'Adelantos',
-        'C3 · Lista con filtro por mes',
+        'Lista con filtro por mes',
         () => _ir(const AdelantosListaScreen()),
       ),
       _tarjetaFlujo(
         Icons.request_page,
         'Solicitudes de adelanto',
-        'F3 · Aprobar (Nómina / Pendiente) o rechazar',
+        'Aprobar (Nómina / Pendiente) o rechazar',
         () => _ir(const SolicitudesAdelantoScreen()),
       ),
     ];
@@ -2044,13 +2061,13 @@ class _AdminScreenState extends State<AdminScreen> {
       _tarjetaFlujo(
         Icons.home_rounded,
         'Cuentas a la Casa',
-        'B5 · Precio 0, solo el dueño las otorga',
+        'Precio 0, solo el dueño las otorga',
         () => _ir(const CuentasCasaScreen()),
       ),
       _tarjetaFlujo(
         Icons.event,
         'Vencimientos próximos',
-        'D3 · Vencidos + próximos 7 días, con acción',
+        'Vencidos + próximos 7 días, con acción',
         () => _ir(const VencimientosProximosScreen()),
       ),
       _tarjetaFlujo(
@@ -2062,33 +2079,33 @@ class _AdminScreenState extends State<AdminScreen> {
       _tarjetaFlujo(
         Icons.cake,
         'Cumpleaños del mes',
-        'D2 · Regalo en un toque desde la ficha',
+        'Regalo en un toque desde la ficha',
         () => _ir(const CumpleanosScreen()),
       ),
       _subModulo('INVITADOS'),
       _tarjetaFlujo(
         Icons.group,
         'Solicitudes de invitados',
-        'B6 · Por atender',
+        'Por atender',
         () => _ir(const InvitadosScreen()),
       ),
       _subModulo('COMUNICACIÓN'),
       _tarjetaFlujo(
         Icons.message,
         'Plantillas de mensajes',
-        'G1 · Solo variables blancas, aviso si la sync es vieja',
+        'Solo variables blancas, aviso si la sync es vieja',
         () => _ir(const PlantillasScreen()),
       ),
       _tarjetaFlujo(
         Icons.campaign,
         'Avisos para entrenadores',
-        'F4 · PopUp en el Home de cada entrenador',
+        'PopUp en el Home de cada entrenador',
         () => _ir(const AvisosEntrenadorScreen()),
       ),
       _tarjetaFlujo(
         Icons.notifications,
         'Recordatorios automáticos',
-        'G2 · Hoy, con anti-duplicado; masivos solo en tu teléfono',
+        'Hoy, con anti-duplicado; masivos solo en tu teléfono',
         () => _ir(const RecordatoriosScreen()),
       ),
       _tarjetaFlujo(
@@ -2107,7 +2124,7 @@ class _AdminScreenState extends State<AdminScreen> {
       _tarjetaFlujo(
         Icons.manage_accounts,
         'Entrenadores y usuarios APK',
-        'B4 · Crear entrenador y compartir credenciales',
+        'Crear entrenador y compartir credenciales',
         () => _ir(const UsuariosScreen()),
       ),
       _subModulo('TURNOS'),
@@ -2123,7 +2140,7 @@ class _AdminScreenState extends State<AdminScreen> {
       _tarjetaFlujo(
         Icons.schedule,
         'Turnos y horarios',
-        'H4 · Enlaza el editor único de Turnos',
+        'Enlaza el editor único de Turnos',
         () => _ir(const TurnosPanelScreen()),
       ),
       _tarjetaFlujo(
@@ -2136,7 +2153,7 @@ class _AdminScreenState extends State<AdminScreen> {
       _tarjetaFlujo(
         Icons.security,
         'Permisos explicados',
-        'B2 · Qué permite cada permiso, en sencillo',
+        'Qué permite cada permiso, en sencillo',
         () => mostrarPermisosExplicados(context),
       ),
     ];
@@ -2157,20 +2174,20 @@ class _AdminScreenState extends State<AdminScreen> {
       _tarjetaFlujo(
         Icons.fitness_center,
         'Catálogo de suplementos',
-        'E2 · Con foto, precio y margen',
+        'Con foto, precio y margen',
         () => _ir(const SuplementosScreen()),
       ),
       _tarjetaFlujo(
         Icons.warning_amber,
         'Productos sin foto o sin precio',
-        'E5 · Señalados para completar el catálogo',
+        'Señalados para completar el catálogo',
         () => _ir(const SinFotoPrecioScreen()),
       ),
       _subModulo('DOSIS'),
       _tarjetaFlujo(
         Icons.inventory_2,
         'Botes y lotes',
-        'E3 · Desde Administración',
+        'Desde Administración',
         () => _ir(const ServiciosAdminScreen()),
       ),
       _subModulo('APP PLUS'),
@@ -2194,9 +2211,9 @@ class _AdminScreenState extends State<AdminScreen> {
       ),
       _tarjetaFlujo(
         Icons.menu_book_rounded,
-        'GymPedia',
-        'Artículos para la app de clientes',
-        () => _ir(const GympediaScreen()),
+        'Biblioteca',
+        'GymPedia y Guía para la app de clientes',
+        () => _ir(const BibliotecaScreen()),
       ),
     ];
   }
@@ -2226,7 +2243,7 @@ class _AdminScreenState extends State<AdminScreen> {
       _tarjetaFlujo(
         Icons.tune,
         'Precios por método',
-        'C6 · Única fuente de precios',
+        'Única fuente de precios',
         () => _ir(const PreciosMetodoScreen()),
       ),
       // 1.14 (rediseño): _elegirPagoEntrenador llevaba huérfano
@@ -2242,7 +2259,7 @@ class _AdminScreenState extends State<AdminScreen> {
       _tarjetaFlujo(
         Icons.settings,
         'Ajustes del gym',
-        'H1 · Enlaza C6 y D6; edita métodos y textos',
+        'Enlaza C6 y D6; edita métodos y textos',
         () => _ir(const AjustesGymScreen()),
       ),
       _tarjetaFlujo(
@@ -2254,7 +2271,7 @@ class _AdminScreenState extends State<AdminScreen> {
       _tarjetaFlujo(
         Icons.book,
         'Registro mensual',
-        'H2 · Visor + copiar resumen en Markdown',
+        'Visor + copiar resumen en Markdown',
         () => _ir(const RegistroMensualScreen()),
       ),
     ];
@@ -2305,7 +2322,7 @@ class _AdminScreenState extends State<AdminScreen> {
       _tarjetaFlujo(
         Icons.sync,
         'Estado de sync',
-        'F4 · Contadores y fechas, no contenidos',
+        'Contadores y fechas, no contenidos',
         () => _ir(const EstadoSyncScreen()),
       ),
       _tarjetaFlujo(
@@ -2317,7 +2334,7 @@ class _AdminScreenState extends State<AdminScreen> {
       _tarjetaFlujo(
         Icons.sync_problem,
         'Errores de sync',
-        'F3 · En sencillo, sin «Descartar» para ops de datos',
+        'En sencillo, sin «Descartar» para ops de datos',
         () => _ir(const ErroresSyncPanelScreen()),
       ),
       _subModulo('AUDITORÍA'),
@@ -2330,7 +2347,7 @@ class _AdminScreenState extends State<AdminScreen> {
       _tarjetaFlujo(
         Icons.history,
         'Auditoría detallada',
-        'F1 · General y por persona, con filtros',
+        'General y por persona, con filtros',
         () => _ir(const AuditoriaPanelScreen()),
       ),
       _tarjetaFlujo(
@@ -2343,13 +2360,13 @@ class _AdminScreenState extends State<AdminScreen> {
       _tarjetaFlujo(
         Icons.build,
         'Mantenimiento',
-        'F5 · Lista cerrada, con confirmación y auditoría',
+        'Lista cerrada, con confirmación y auditoría',
         () => _ir(const MantenimientoScreen()),
       ),
       _tarjetaFlujo(
         Icons.backup,
         'Copia de seguridad',
-        'H5 · Exportar solo, copia en frío sin fotos',
+        'Exportar solo, copia en frío sin fotos',
         () => _ir(const CopiaSeguridadScreen()),
       ),
       _tarjetaFlujo(

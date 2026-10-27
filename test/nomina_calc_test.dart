@@ -142,14 +142,14 @@ void main() {
       expect(ids, {3, 4, 5});
     });
 
-    test('mes pasado: NO excluye aunque el hasta caiga en ese mes',
-        () {
+    test('mes cerrado: SÍ excluye (1.15 M4c-01: la base no cambia '
+        'al cruzar la medianoche)', () {
       final ids = {1, 2};
       NominaCalc.excluirVencidosDentroDelMes(ids, '2020-01', {
         1: '2020-01-15',
         2: '2020-01-31',
       });
-      expect(ids, {1, 2});
+      expect(ids, isEmpty);
     });
   });
 }

@@ -1,8 +1,9 @@
-/// Regla de nómina del mes en curso (Jc, 2026-10-21; diseño v2 del
-/// panel): un cliente cuyo pagado_hasta cae DENTRO del mes en curso
-/// no entra en la base de ese mes. Solo mes en curso; los meses
-/// cerrados conservan la regla histórica. La huella del pre-cálculo
-/// (v2) cubre también los pagado_hasta de clientes.
+/// Regla de nómina (Jc, 2026-10-21; diseño v2 del panel; 1.15 M4c-01):
+/// un cliente cuyo pagado_hasta cae DENTRO del mes no entra en la
+/// base de ese mes. Vale para CUALQUIER mes, no solo el mes en
+/// curso: antes, la base de un mes cerrado cambiaba al cruzar la
+/// medianoche (la excepción dejaba de aplicarse). La huella del
+/// pre-cálculo (v2) cubre también los pagado_hasta de clientes.
 library;
 
 import 'dart:convert';
@@ -145,23 +146,24 @@ void main() {
     await db.close();
   });
 
-  test('mes pasado: la excepción NO se aplica (regla histórica)', () async {
+  test('mes cerrado: la excepción TAMBIÉN se aplica (1.15 M4c-01: '
+      'la base no cambia al cruzar la medianoche)', () async {
     final db = await _abrirDbVacia();
     await _pago(db, id: 1, clienteId: 10, fecha: '2020-01-10');
     await _cliente(db, id: 10, pagadoHasta: '2020-01-20');
-    expect(await NominaCalc.clientesQuePagaronElMes('2020-01'), 1);
+    expect(await NominaCalc.clientesQuePagaronElMes('2020-01'), 0);
     await db.close();
   });
 
-  test('precalc v3: cambiar solo pagado_hasta invalida la caché', () async {
+  test('precalc v4: cambiar solo pagado_hasta invalida la caché', () async {
     final db = await _abrirDbVacia();
     final pref = NominaCalc.prefMesActual();
     await _pago(db, id: 1, clienteId: 10, fecha: '$pref-05');
     await _cliente(db, id: 10, pagadoHasta: '${_mesSiguiente(pref)}-05');
     expect(await NominaPrecalc.instance.asegurar(pref), 1);
     final filas = await db.query('nomina_precalc');
-    expect(filas.first['huella'], startsWith('v3|'),
-        reason: 'toda caché nueva nace con la huella v3');
+    expect(filas.first['huella'], startsWith('v4|'),
+        reason: 'toda caché nueva nace con la huella v4');
 
     // Cambia SOLO el vencimiento (entra al mes): sin tocar pagos.
     await db.update(
@@ -179,7 +181,7 @@ void main() {
         whereArgs: [10]);
     final cache = await NominaPrecalc.instance.leer(pref);
     expect(cache!.fresco, isFalse,
-        reason: 'la huella v3 detecta el cambio de pagado_hasta');
+        reason: 'la huella v4 detecta el cambio de pagado_hasta');
     expect(await NominaPrecalc.instance.asegurar(pref), 0);
     await db.close();
   });
@@ -189,7 +191,7 @@ void main() {
   // (fuera+fuera frente a dentro+dentro) daban la misma huella y
   // la caché vieja se servía como fresca. Con el hash canónico
   // las huellas difieren SIEMPRE que difiera algún vencimiento.
-  test('precalc v3: la huella no colisiona con sumas equivalentes',
+  test('precalc v4: la huella no colisiona con sumas equivalentes',
       () async {
     final db = await _abrirDbVacia();
     final pref = NominaCalc.prefMesActual();

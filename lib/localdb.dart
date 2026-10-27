@@ -40,7 +40,7 @@ class LocalDb {
   /// v1.4.0 (Argón): versión actual del esquema local. Los tests de
   /// migración comparan contra esta constante en vez de un número
   /// fijo, para no caer en cascada de fallos con cada migración.
-  static const int versionActual = 45;
+  static const int versionActual = 47;
 
   /// v37: marcas de información pública pendiente de republicar,
   /// UNA FILA POR CLAVE (compartido entre onCreate y la migración
@@ -72,6 +72,25 @@ class LocalDb {
       'sello TEXT NOT NULL DEFAULT \'verde\', '
       'nivel TEXT NOT NULL DEFAULT \'plus\', '
       'related_ids TEXT NOT NULL DEFAULT \'[]\', '
+      'tiene_imagen INTEGER NOT NULL DEFAULT 0, '
+      'imagen_cambiada INTEGER NOT NULL DEFAULT 0, '
+      'imagen_local TEXT NOT NULL DEFAULT \'\', '
+      'base_revision INTEGER NOT NULL DEFAULT 0, '
+      'actualizado_ts TEXT NOT NULL DEFAULT \'\')';
+
+  /// Biblioteca / Guía (v47): DDL de borradores de fichas
+  /// (compartido entre onCreate y la migración v47, como
+  /// _ddlGympediaBorradores). El borrador guarda el documento
+  /// en `data` JSON + columnas equipoId/esencial para listar
+  /// sin parsear; `base_revision` = revisión publicada de la
+  /// que partió (0 si es nuevo): si el espejo la supera, el
+  /// borrador quedó obsoleto (misma regla que GymPedia).
+  static const String _ddlGuiaBorradores =
+      'CREATE TABLE IF NOT EXISTS guia_borradores ('
+      'slug TEXT PRIMARY KEY, '
+      'data TEXT NOT NULL DEFAULT \'{}\', '
+      'equipoId TEXT NOT NULL DEFAULT \'\', '
+      'esencial INTEGER NOT NULL DEFAULT 0, '
       'tiene_imagen INTEGER NOT NULL DEFAULT 0, '
       'imagen_cambiada INTEGER NOT NULL DEFAULT 0, '
       'imagen_local TEXT NOT NULL DEFAULT \'\', '
@@ -1133,6 +1152,36 @@ class LocalDb {
           // MISMO método que onCreate (paridad garantizada).
           await _crearTablasFaseA(db);
         }
+        if (oldV < 46) {
+          // 1.15-turnos: libro C1 con marca (ids cubiertos + resto
+          // sin ids). Aditivo: las filas viejas quedan sin op_ids
+          // (legado: restan su monto entero).
+          await _addColumnIfMissing(
+              db, 'entregas_efectivo', 'op_ids_json', 'TEXT');
+          await _addColumnIfMissing(
+              db, 'entregas_efectivo', 'resto_sin_ids', 'REAL');
+        }
+        if (oldV < 47) {
+          // Biblioteca / Guía (Fase 3): espejos + borradores.
+          // Cursores propios en 0 (mismo patrón que GymPedia):
+          // la tabla nace vacía y debe descargarse desde cero
+          // aunque el global vaya por 80000+.
+          await db.execute(
+              'CREATE TABLE IF NOT EXISTS guia_fichas (id TEXT PRIMARY KEY, data TEXT NOT NULL, sync_seq INTEGER NOT NULL)');
+          await db.execute(
+              'CREATE TABLE IF NOT EXISTS guia_equipos (id TEXT PRIMARY KEY, data TEXT NOT NULL, equipoNombre TEXT NOT NULL DEFAULT \'\', orden INTEGER NOT NULL DEFAULT 0, activo INTEGER NOT NULL DEFAULT 1, sync_seq INTEGER NOT NULL)');
+          await db.execute(_ddlGuiaBorradores);
+          await db.execute(
+              'CREATE INDEX IF NOT EXISTS idx_guia_fichas_seq ON guia_fichas(sync_seq)');
+          await db.execute(
+              'CREATE INDEX IF NOT EXISTS idx_guia_equipos_seq ON guia_equipos(sync_seq)');
+          await db.rawInsert(
+              "INSERT OR IGNORE INTO meta (k, v) VALUES ('wm_guia_fichas', '0')");
+          await db.rawInsert(
+              "INSERT OR IGNORE INTO meta (k, v) VALUES ('wm_guia_equipos', '0')");
+          await db.rawInsert(
+              "INSERT OR IGNORE INTO meta (k, v) VALUES ('wm_guia_borrados', '0')");
+        }
       },
     );
     // v1.2.5+28: repara el índice FTS si la migración lo omitió y el
@@ -1415,6 +1464,25 @@ class LocalDb {
     return {'nivel': nivelGympediaDe(data)};
   }
 
+  /// Biblioteca / Guía (v47): columnas derivadas del espejo de
+  /// equipos desde su JSON (mismo patrón que columnasGympedia).
+  /// La PK local es `id` con el valor de equipoId (convención
+  /// universal de espejos de la app); el JSON trae equipoId
+  /// explícito (D-1) y los métodos lo exponen como equipoId.
+  static Map<String, Object?> columnasGuiaEquipos(
+      Map<String, dynamic> data) {
+    final orden = (data['orden'] as num?)?.toInt() ?? 0;
+    final activoRaw = data['activo'];
+    final activo = activoRaw is bool
+        ? (activoRaw ? 1 : 0)
+        : (activoRaw as num?)?.toInt() ?? 1;
+    return {
+      'equipoNombre': '${data['equipoNombre'] ?? ''}',
+      'orden': orden,
+      'activo': activo,
+    };
+  }
+
   /// v1.7.0 (v36): rellena la columna `nivel` de las filas ya
   /// existentes de gympedia_articulos desde su JSON (o por slug si
   /// el JSON aún no lo trae). Tolerante como [_backfillMoneda].
@@ -1558,6 +1626,26 @@ class LocalDb {
         whereArgs: [clienteId]);
   }
 
+  /// Cliente protegido (2026-10-26): reflejo optimista local del
+  /// interruptor de la ficha. Mismo patrón que
+  /// [updateMirrorCuentaCasa]: la marca vive en el JSON del espejo
+  /// (el pull la confirma o la pisa con la verdad del servidor).
+  Future<void> updateMirrorProtegido(int clienteId,
+      {required bool activar}) async {
+    final d = await db;
+    final rows = await d.query('clientes',
+        where: 'id=?', whereArgs: [clienteId], limit: 1);
+    if (rows.isEmpty) return;
+    final data =
+        jsonDecode(rows.first['data'] as String) as Map<String, dynamic>;
+    data['protegido'] = activar ? 1 : 0;
+    await d.update(
+        'clientes',
+        {'data': jsonEncode(data), ...columnasClientes(data)},
+        where: 'id=?',
+        whereArgs: [clienteId]);
+  }
+
   /// v1.3.4 (ítem 2): construye el mapa de columnas para el INSERT del
   /// batch del pull (sync.dart). Para `pagos` incluye las 4 columnas
   /// indexadas extraídas del JSON; las demás tablas quedan igual.
@@ -1608,6 +1696,15 @@ class LocalDb {
         final data = jsonDecode(dataJson) as Map<String, dynamic>;
         data['id'] = '$id';
         fila.addAll(columnasGympedia(data));
+      } catch (_) {}
+    }
+    // Biblioteca / Guía (v47): columnas derivadas del espejo de
+    // equipos (el otro camino —upsertMirrorTexto— hace lo mismo).
+    if (tabla == 'guia_equipos') {
+      try {
+        final data = jsonDecode(dataJson) as Map<String, dynamic>;
+        data['equipoId'] = '$id';
+        fila.addAll(columnasGuiaEquipos(data));
       } catch (_) {}
     }
     return fila;
@@ -1838,6 +1935,17 @@ class LocalDb {
     await _addColumnIfMissing(db, 'gympedia_articulos', 'nivel',
         "TEXT NOT NULL DEFAULT 'plus'");
     await db.execute(_ddlGympediaBorradores);
+    // Biblioteca / Guía (v47): espejo de fichas publicadas (id TEXT
+    // = slug) + espejo de equipos (id TEXT = equipoId; las columnas
+    // equipoNombre/orden/activo se pueblan desde el JSON, como el
+    // nivel de GymPedia) + borradores 100% locales del dueño (por
+    // sync solo viajan las ops guia_upsert_publicado/retirar/
+    // guia_equipo_upsert).
+    await db.execute(
+        'CREATE TABLE IF NOT EXISTS guia_fichas (id TEXT PRIMARY KEY, data TEXT NOT NULL, sync_seq INTEGER NOT NULL)');
+    await db.execute(
+        'CREATE TABLE IF NOT EXISTS guia_equipos (id TEXT PRIMARY KEY, data TEXT NOT NULL, equipoNombre TEXT NOT NULL DEFAULT \'\', orden INTEGER NOT NULL DEFAULT 0, activo INTEGER NOT NULL DEFAULT 1, sync_seq INTEGER NOT NULL)');
+    await db.execute(_ddlGuiaBorradores);
     // Reservas v2 (v34): espejo de la proyección sync_reservas
     // (id entero = id de la reserva en gym.db). El cursor propio
     // se siembra explícito también en instalación limpia (panel
@@ -1905,6 +2013,8 @@ class LocalDb {
       'ventas_suplementos', 'categorias_suplemento', 'turnos_cierre',
       'liquidaciones_caja', 'incidencias_sync', // v1.3.6 (v28)
       'gympedia_articulos', // v1.4.4 (v33)
+      'guia_fichas', // Biblioteca / Guía (v47)
+      'guia_equipos', // Biblioteca / Guía (v47)
       'reservas', // Reservas v2 (v34)
     ]) {
       await db.execute('CREATE INDEX IF NOT EXISTS idx_${t}_seq ON $t(sync_seq)');
@@ -2185,7 +2295,10 @@ class LocalDb {
         'monto_entregado REAL NOT NULL, '
         'fecha_habana TEXT NOT NULL, '
         'autor_dueno_id INTEGER, '
-        'creada_ts TEXT NOT NULL)');
+        'creada_ts TEXT NOT NULL, '
+        // 1.15-turnos: libro C1 con marca (ids cubiertos + resto).
+        'op_ids_json TEXT, '
+        'resto_sin_ids REAL)');
     await db.execute('CREATE INDEX IF NOT EXISTS idx_entregas_entrenador '
         'ON entregas_efectivo(entrenador_telegram_id)');
   }
@@ -2280,6 +2393,12 @@ class LocalDb {
         "INSERT OR IGNORE INTO meta (k, v) VALUES ('wm_gympedia_articulos', '0')");
     await db.rawInsert(
         "INSERT OR IGNORE INTO meta (k, v) VALUES ('wm_gympedia_borrados', '0')");
+    await db.rawInsert(
+        "INSERT OR IGNORE INTO meta (k, v) VALUES ('wm_guia_fichas', '0')");
+    await db.rawInsert(
+        "INSERT OR IGNORE INTO meta (k, v) VALUES ('wm_guia_equipos', '0')");
+    await db.rawInsert(
+        "INSERT OR IGNORE INTO meta (k, v) VALUES ('wm_guia_borrados', '0')");
   }
 
   /// v1.13.0 (v44, Bloque 4 + sync Fase D). MISMO método en onCreate
@@ -2721,6 +2840,50 @@ class LocalDb {
     return {'cambio': oldJson != nuevoJson, 'oldFoto': oldFoto};
   }
 
+  /// Argón (sync adaptativa, paso 2b, 2026-10-27): variante en lote
+  /// de [verificarCambioMirror]: una sola consulta por página en
+  /// vez de una por fila. Semántica idéntica: para cada par
+  /// ({'id', 'dataJson'}) devuelve {'cambio': bool, 'oldFoto': String?};
+  /// los ids ausentes dan cambio=true y oldFoto=null; oldFoto solo
+  /// se extrae para 'clientes' y 'suplementos'. No escribe nada: la
+  /// consulta corre antes del batch de la página, igual que las
+  /// llamadas sueltas. Si dos pares traen el mismo id, ambos ven el
+  /// mismo valor (la fila vieja), igual que antes.
+  Future<Map<Object, Map<String, dynamic>>> verificarCambiosMirror(
+      String tabla, List<Map<String, dynamic>> pares) async {
+    final resultado = <Object, Map<String, dynamic>>{};
+    if (pares.isEmpty) return resultado;
+    final d = await db;
+    final ids = pares.map((p) => p['id'] as Object).toList();
+    final placeholders = List.filled(ids.length, '?').join(',');
+    final rows = await d.query(tabla,
+        columns: ['id', 'data'],
+        where: 'id IN ($placeholders)',
+        whereArgs: ids);
+    final porId = <Object, String>{};
+    for (final r in rows) {
+      porId[r['id'] as Object] = r['data'] as String;
+    }
+    for (final p in pares) {
+      final id = p['id'] as Object;
+      final nuevoJson = p['dataJson'] as String;
+      final oldJson = porId[id];
+      if (oldJson == null) {
+        resultado[id] = {'cambio': true, 'oldFoto': null};
+        continue;
+      }
+      String? oldFoto;
+      if (tabla == 'clientes' || tabla == 'suplementos') {
+        try {
+          final oldMap = jsonDecode(oldJson) as Map<String, dynamic>;
+          oldFoto = oldMap['foto_storage'] as String?;
+        } catch (_) {}
+      }
+      resultado[id] = {'cambio': oldJson != nuevoJson, 'oldFoto': oldFoto};
+    }
+    return resultado;
+  }
+
   /// v1.2.7: verifica si una fila mirror cambiaría (wrapper simple).
   /// Preferir verificarCambioMirror cuando se necesite oldFoto.
   Future<bool> filaMirrorCambio(
@@ -2773,6 +2936,12 @@ class LocalDb {
     if (tabla == 'gympedia_articulos') {
       fila.addAll(columnasGympedia({...data, 'id': data['id'] ?? id}));
     }
+    // Biblioteca / Guía (v47): columnas derivadas del espejo de
+    // equipos (el otro camino —batch del pull— lo hace vía
+    // filaParaBatchMirror).
+    if (tabla == 'guia_equipos') {
+      fila.addAll(columnasGuiaEquipos({...data, 'equipoId': id}));
+    }
     await d.insert(tabla, fila,
         conflictAlgorithm: ConflictAlgorithm.replace);
     return true;
@@ -2822,6 +2991,23 @@ class LocalDb {
         } catch (_) {}
       }
     }
+  }
+
+  /// Panel 9/10 (Luna): borrar un suplemento del espejo y encolar su
+  /// op en UNA transacción. Antes eran dos pasos: un cierre entre
+  /// ambos dejaba el borrado sin op y el siguiente pull restauraba
+  /// el suplemento.
+  Future<void> eliminarSuplementoLocal(int id) async {
+    final d = await db;
+    await d.transaction((txn) async {
+      await deleteMirror('suplementos', id, txn: txn);
+      await queueOp(
+        opUuid: const Uuid().v4(),
+        tipo: 'eliminar_suplemento',
+        payload: {'suplemento_id': id},
+        txn: txn,
+      );
+    });
   }
 
   /// Variante de [deleteMirror] para espejos con id TEXT (turnos_cierre).
@@ -2982,6 +3168,162 @@ class LocalDb {
       final f = File(ruta);
       if (await f.exists()) await f.delete();
     } catch (_) {}
+  }
+
+  // ── Biblioteca / Guía (v47) ─────────────────────────────────────
+
+  /// Fichas publicadas del espejo local, decodificadas, en el
+  /// orden en que llegaron (sync_seq). La UI agrupa por equipo.
+  Future<List<Map<String, dynamic>>> guiaPublicadas() async {
+    final d = await db;
+    final rows = await d.query('guia_fichas', orderBy: 'sync_seq ASC');
+    final out = <Map<String, dynamic>>[];
+    for (final r in rows) {
+      try {
+        final m = Map<String, dynamic>.from(
+            jsonDecode('${r['data']}') as Map);
+        m['id'] = '${r['id']}';
+        out.add(m);
+      } catch (_) {}
+    }
+    return out;
+  }
+
+  /// Una ficha publicada del espejo (o null si no está).
+  Future<Map<String, dynamic>?> guiaPublicada(String slug) async {
+    final d = await db;
+    final rows = await d.query('guia_fichas',
+        where: 'id=?', whereArgs: [slug], limit: 1);
+    if (rows.isEmpty) return null;
+    try {
+      final m =
+          Map<String, dynamic>.from(jsonDecode('${rows.first['data']}') as Map);
+      m['id'] = '${rows.first['id']}';
+      return m;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Borradores locales de fichas (filas crudas de la tabla).
+  Future<List<Map<String, dynamic>>> guiaBorradores() async {
+    final d = await db;
+    return d.query('guia_borradores', orderBy: 'actualizado_ts DESC');
+  }
+
+  /// Un borrador por slug (o null).
+  Future<Map<String, dynamic>?> guiaBorrador(String slug) async {
+    final d = await db;
+    final rows = await d.query('guia_borradores',
+        where: 'slug=?', whereArgs: [slug], limit: 1);
+    return rows.isEmpty ? null : rows.first;
+  }
+
+  /// Crea o actualiza un borrador (INSERT OR REPLACE por slug).
+  Future<void> guiaGuardarBorrador(Map<String, dynamic> b) async {
+    final d = await db;
+    await d.insert('guia_borradores', b,
+        conflictAlgorithm: ConflictAlgorithm.replace);
+  }
+
+  /// Elimina un borrador (al publicar con éxito de encolado o a mano).
+  Future<void> guiaEliminarBorrador(String slug) async {
+    final d = await db;
+    await d.delete('guia_borradores', where: 'slug=?', whereArgs: [slug]);
+  }
+
+  /// Aplica una tumba de la Guía SOLO si la fila local no es más
+  /// nueva que la tumba (misma regla que GymPedia): si la ficha
+  /// se republicó (sync_seq mayor que el de la tumba), la versión
+  /// vigente sobrevive; la tumba se considera igualmente aplicada.
+  Future<void> guiaAplicarTumba(String slug, int seqTumba) async {
+    final d = await db;
+    await d.delete('guia_fichas',
+        where: 'id=? AND sync_seq<=?', whereArgs: [slug, seqTumba]);
+  }
+
+  /// Borra la ficha publicada del espejo local (al retirar: el
+  /// servidor la tombstonea y el pull confirma).
+  Future<void> guiaEliminarPublicada(String slug) async {
+    final d = await db;
+    await d.delete('guia_fichas', where: 'id=?', whereArgs: [slug]);
+  }
+
+  /// Equipos del espejo local en orden canónico. Cada fila expone
+  /// equipoId (desde la PK `id`), equipoNombre, orden y activo.
+  Future<List<Map<String, dynamic>>> guiaEquipos() async {
+    final d = await db;
+    final rows = await d.query('guia_equipos', orderBy: 'orden ASC');
+    return [
+      for (final r in rows)
+        {
+          'equipoId': '${r['id']}',
+          'equipoNombre': '${r['equipoNombre'] ?? ''}',
+          'orden': (r['orden'] as num?)?.toInt() ?? 0,
+          'activo': ((r['activo'] as num?)?.toInt() ?? 1) == 1,
+        }
+    ];
+  }
+
+  /// Guarda (o reemplaza) un equipo del espejo local. Lo usa el
+  /// espejo optimista al encolar una op de equipo y el pull.
+  Future<void> guiaGuardarEquipo(Map<String, dynamic> e) async {
+    final d = await db;
+    final id = '${e['equipoId'] ?? e['id'] ?? ''}';
+    if (id.isEmpty) return;
+    final data = Map<String, dynamic>.from(e);
+    data['equipoId'] = id;
+    await d.insert(
+        'guia_equipos',
+        {
+          'id': id,
+          'data': jsonEncode(data),
+          ...columnasGuiaEquipos(data),
+          'sync_seq': (e['sync_seq'] as num?)?.toInt() ?? 0,
+        },
+        conflictAlgorithm: ConflictAlgorithm.replace);
+  }
+
+  Future<Directory> _dirImagenesBorradorGuia() async {
+    final base = await getDatabasesPath();
+    final dir = Directory(p.join(base, 'guia_borrador_img'));
+    if (!await dir.exists()) await dir.create(recursive: true);
+    return dir;
+  }
+
+  /// Guarda en disco local la imagen NUEVA elegida para un borrador
+  /// (misma regla que GymPedia): NO se sube al bucket al elegirla
+  /// — la subida ocurre al publicar, para que un borrador jamás
+  /// altere la imagen ya publicada. Devuelve la ruta del archivo.
+  Future<String> guiaGuardarImagenLocal(
+      String slug, List<int> bytes) async {
+    final dir = await _dirImagenesBorradorGuia();
+    final f = File(p.join(dir.path, '$slug.webp'));
+    await f.writeAsBytes(bytes, flush: true);
+    return f.path;
+  }
+
+  /// Borra un archivo de imagen local de borrador (si existe).
+  Future<void> guiaBorrarImagenLocal(String ruta) async {
+    if (ruta.isEmpty) return;
+    try {
+      final f = File(ruta);
+      if (await f.exists()) await f.delete();
+    } catch (_) {}
+  }
+
+  /// Actividad reciente de la Biblioteca: ops ya aplicadas DE ESTE
+  /// TELÉFONO de GymPedia y de la Guía (fecha, tipo y ficha). NO
+  /// es un historial global: otro teléfono no aparece aquí.
+  Future<List<Map<String, dynamic>>> opsRecientesBiblioteca(
+      {int limite = 20}) async {
+    final d = await db;
+    return d.query('ops_queue',
+        columns: ['tipo', 'payload', 'creada_ts'],
+        where: "estado='aplicada' AND (tipo LIKE 'gympedia_%' "
+            "OR tipo LIKE 'guia_%')",
+        orderBy: 'creada_ts DESC',
+        limit: limite);
   }
 
   /// Normaliza para búsqueda: minúsculas, sin tildes.
@@ -3351,6 +3693,65 @@ class LocalDb {
     }
     await d.update('clientes', {'data': jsonEncode(data)},
         where: 'id=?', whereArgs: [clienteId]);
+  }
+
+  /// ¿Hay operaciones sin aplicar para este cliente? (Argón #7B-1:
+  /// refrescar el espejo desde el servidor con cambios locales
+  /// pendientes revertiría visualmente lo aún no sincronizado.)
+  Future<bool> tieneOpsPendientesParaCliente(int clienteId) async {
+    final d = await db;
+    final rows = await d.query('ops_queue',
+        columns: ['payload'],
+        where: "estado NOT IN ('aplicada', 'rechazada', 'archivada')");
+    for (final r in rows) {
+      try {
+        final p =
+            jsonDecode(r['payload'] as String) as Map<String, dynamic>;
+        if (p['cliente_id'] == clienteId) return true;
+      } catch (_) {}
+    }
+    return false;
+  }
+
+  /// Refresca el espejo de un cliente con datos del servidor sin
+  /// pisar las columnas dedicadas (Argón #7B-1: el insert con
+  /// replace crudo reseteaba cuenta_casa a sus defaults).
+  /// Devuelve false si se omitió por cambios locales pendientes.
+  /// Panel Luna (sobre #7B-1): la comprobación de pendientes y la
+  /// actualización van DENTRO de una sola transacción; si se hacían
+  /// en dos pasos separados, una op encolada entre ambos pisaba el
+  /// espejo aunque siguiera pendiente. Dentro de la transacción solo
+  /// se usa txn, nunca LocalDb.instance.db (deadlock sqflite).
+  Future<bool> refrescarMirrorCliente(
+      int clienteId, String dataJson, int syncSeq) async {
+    final decoded = jsonDecode(dataJson);
+    final data = decoded is Map
+        ? Map<String, dynamic>.from(decoded)
+        : null;
+    final valores = <String, Object?>{
+      'data': dataJson,
+      'sync_seq': syncSeq,
+      if (data != null) ...columnasClientes(data),
+    };
+    final d = await db;
+    return d.transaction((txn) async {
+      final rows = await txn.query('ops_queue',
+          columns: ['payload'],
+          where: "estado NOT IN ('aplicada', 'rechazada', 'archivada')");
+      for (final r in rows) {
+        try {
+          final p =
+              jsonDecode(r['payload'] as String) as Map<String, dynamic>;
+          if (p['cliente_id'] == clienteId) return false;
+        } catch (_) {}
+      }
+      final n = await txn.update('clientes', valores,
+          where: 'id = ?', whereArgs: [clienteId]);
+      if (n == 0) {
+        await txn.insert('clientes', {'id': clienteId, ...valores});
+      }
+      return true;
+    });
   }
 
   /// Actualización optimista de la tarifa especial por transferencia
@@ -5370,6 +5771,12 @@ class LocalDb {
     // descarga estaba completa.
     'gympedia_articulos',
     'gympedia_borrados',
+    // Biblioteca / Guía (v47): mismo motivo. Las tablas ausentes
+    // en Supabase (antes de ejecutar el SQL) se marcan ausentes
+    // y no bloquean el «completo».
+    'guia_fichas',
+    'guia_equipos',
+    'guia_borrados',
     'reservas',
     'solicitudes_adelanto',
     'avisos_entrenadores',
@@ -5396,6 +5803,14 @@ class LocalDb {
     // v1.12.0 (G2): las tumbas de GymPedia tampoco heredan el global
     // (nacen con la tabla; heredar saltaría tumbas viejas).
     if (tabla == 'gympedia_borrados') return 0;
+    // Biblioteca 1.15 (H2): las tablas de la Guía tampoco heredan el
+    // global (nacen con el global ya avanzado; heredar saltaría toda
+    // la descarga inicial del catálogo).
+    if (tabla == 'guia_fichas' ||
+        tabla == 'guia_equipos' ||
+        tabla == 'guia_borrados') {
+      return 0;
+    }
     // Reservas v2 (v34): mismo motivo — la proyección nace con la
     // tabla y debe descargarse desde cero.
     if (tabla == 'reservas') return 0;
@@ -5538,9 +5953,10 @@ class LocalDb {
     return out;
   }
 
-  Future<void> guardarRecordatorio(Map<String, dynamic> fila) async {
-    final d = await db;
-    await d.insert('recordatorio_config', fila,
+  Future<void> guardarRecordatorio(Map<String, dynamic> fila,
+      {DatabaseExecutor? txn}) async {
+    final ex = txn ?? await db;
+    await ex.insert('recordatorio_config', fila,
         conflictAlgorithm: ConflictAlgorithm.replace);
   }
 
@@ -6119,6 +6535,29 @@ class LocalDb {
     return (r.first['c'] as int?) ?? 0;
   }
 
+  /// 1.15 (campo 2026-10-26): desglose POR TIPO del mismo conjunto
+  /// que [countPendingOps] (pendiente + enviada + error), contado
+  /// en la BD y no sobre la lista reciente limitada. Antes la
+  /// tarjeta de la cola agrupaba las últimas 30 ops de CUALQUIER
+  /// estado (incluidas aplicadas y rechazadas) y las presentaba
+  /// como si fueran lo pendiente: con 1 op en vuelo el desglose
+  /// sumaba 30. 'necesita_revision' NO va aquí: tiene su propia
+  /// sección en la pantalla.
+  Future<Map<String, int>> conteoPendientesPorTipo() async {
+    final d = await db;
+    final filas = await d.rawQuery(
+        'SELECT tipo, COUNT(*) c FROM ops_queue '
+        "WHERE estado IN ('pendiente', 'enviada', 'error') "
+        'GROUP BY tipo ORDER BY c DESC, tipo ASC');
+    final out = <String, int>{};
+    for (final f in filas) {
+      final t = f['tipo']?.toString() ?? '';
+      if (t.isEmpty) continue;
+      out[t] = (f['c'] as int?) ?? 0;
+    }
+    return out;
+  }
+
   /// v1.8.0 (Frente 5): conteo de pendientes por categoría, para que
   /// el resumen de la sincronización diga la VERDAD al cerrar un
   /// ciclo (nada de «todo al día» con la cola llena). Categorías
@@ -6450,7 +6889,11 @@ class LocalDb {
     final d = await db;
     final rows = await d.query('ops_queue',
         columns: ['creada_ts'],
-        where: "estado IN ('pendiente','error')",
+        // 1.15 (caso a): incluye 'enviada' — una única op en vuelo
+        // más de 6 horas también debe activar el aviso de
+        // antigüedad (simetría con countPendingOps). countOpsRetenidas
+        // (backoff futuro) se deja como está: es otro concepto.
+        where: "estado IN ('pendiente','enviada','error')",
         orderBy: 'creada_ts ASC',
         limit: 1);
     if (rows.isEmpty) return null;

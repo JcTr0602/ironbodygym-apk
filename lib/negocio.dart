@@ -11,6 +11,7 @@ import 'package:sqflite/sqflite.dart';
 import 'package:uuid/uuid.dart';
 
 import 'auth.dart';
+import 'cliente_protegido.dart';
 import 'localdb.dart';
 import 'adelantos.dart';
 import 'sync.dart';
@@ -749,6 +750,12 @@ double montoEfectivoOp(
   double mensualidad(String periodo, int meses, String metodo,
       double? montoManual, String? tipoId) {
     if (metodo != 'efectivo') return 0;
+    // 1.15 (M2e-02, verificado: mismo hueco que montoCobradoCupOp):
+    // el monto real del payload manda sobre la tarifa estándar
+    // (cubre especiales, como los 1000 en efectivo de Kevin, y
+    // Casa, cuyo diálogo manda 0). Solo las ops viejas sin monto
+    // caen a la tarifa.
+    if (montoManual != null) return montoManual;
     if (periodo == 'personalizado') return montoManual ?? 0;
     // v1.3.9: tipo de pago personalizado (ej. "Oferta 50%") —
     // usa el monto real del payload, no el precio estándar.
@@ -787,8 +794,11 @@ double montoEfectivoOp(
     return cant * pr['diario']!;
   }
   // v1.3.2 (Argón #4): ventas de suplementos en CUP suman al pendiente.
+  // 1.15 (M2e-01, verificado: mismo hueco que montoCobradoCupOp):
+  // un fiado no es efectivo en mano, no suma al pendiente.
   if (tipo == 'venta_suplemento') {
     if ('${payload['moneda'] ?? 'CUP'}'.toUpperCase() != 'CUP') return 0;
+    if (payload['es_fiado'] == 1 || payload['es_fiado'] == true) return 0;
     final cant = (payload['cantidad'] as num?)?.toDouble() ?? 0;
     final precio = (payload['precio'] as num?)?.toDouble() ?? 0;
     return cant * precio;
@@ -833,10 +843,24 @@ double montoEfectivoOp(
     }
     return t;
   }
+  // 1.15 V2: cobro de un fiado. Espejo de montoCobradoCupOp para el
+  // pendiente CUP: SOLO el efectivo suma (la transferencia va
+  // directo a la cuenta del dueño y no queda por entregar).
+  // Sin 'metodo' (ops viejas, anteriores al selector de la 1.15)
+  // se asume efectivo, igual que el servidor. El monto y la
+  // moneda viajan en el payload desde la 1.15: esta función es
+  // síncrona y no puede leer la venta del espejo (eso lo hace
+  // montoCobradoCupOp); una op vieja sin monto vale 0 aquí y el
+  // pull la confirma en el espejo.
+  if (tipo == 'saldar_fiado_suplemento') {
+    if ('${payload['metodo'] ?? 'efectivo'}' != 'efectivo') return 0;
+    if ('${payload['moneda'] ?? 'CUP'}'.toUpperCase() != 'CUP') {
+      return 0;
+    }
+    return (payload['monto'] as num?)?.toDouble() ?? 0;
+  }
   return 0;
 }
-
-/// Monto en efectivo que representan una lista de ops encoladas.
 /// Suma lo cobrado en efectivo según [montoEfectivoOp].
 Future<double> montoEfectivoOps(List<Map<String, dynamic>> ops) async {
   final pr = await preciosVigentes();  double total = 0;
@@ -844,6 +868,23 @@ Future<double> montoEfectivoOps(List<Map<String, dynamic>> ops) async {
     total += montoEfectivoOp(op, pr);
   }
   return total;
+}
+
+/// 1.15 (M2e-02): ¿el cliente del espejo es Cuenta a la Casa? Sin
+/// fila, sin id interpretable o sin espejo legible → false (se
+/// conserva el comportamiento viejo, no se rompe el KPI).
+Future<bool> _esCuentaCasaEspejo(dynamic clienteId) async {
+  final id =
+      clienteId is num ? clienteId.toInt() : int.tryParse('$clienteId');
+  if (id == null || id <= 0) return false;
+  try {
+    final filas = await LocalDb.instance.mirrorPorIds('clientes', [id]);
+    if (filas.isEmpty) return false;
+    final casa = filas.first['cuenta_casa'];
+    return casa == 1 || casa == true;
+  } catch (_) {
+    return false;
+  }
 }
 
 /// v1.3.3: monto en CUP cobrado que representa una op encolada.
@@ -862,7 +903,17 @@ Future<double> montoCobradoCupOp(Map<String, dynamic> op) async {
   }
 
   double mensualidad(String periodo, int meses, String metodo,
-      double? montoManual, String? tipoId) {
+      double? montoManual, String? tipoId,
+      {bool esCasa = false}) {
+    // 1.15 (M2e-02): Casa cobra 0 aunque el diálogo haya mandado monto.
+    if (esCasa) return 0;
+    // 1.15 (M2e-02): el monto real del payload manda sobre la tarifa
+    // estándar (cubre especiales y cambios de tarifa entre el
+    // diálogo y el sync). Solo las ops viejas sin monto caen a la
+    // tarifa; la especial en efectivo de Kevin (1000) vive solo en
+    // el payload, no en ningún campo, así que sin esto se contaba
+    // 2000.
+    if (montoManual != null) return montoManual;
     if (periodo == 'personalizado') return montoManual ?? 0;
     // Panel 1.14 (Luna + Kimi): igual que montoEfectivoOp — un
     // periodo 'tipo:' usa el monto real del payload, no el estándar.
@@ -882,7 +933,9 @@ Future<double> montoCobradoCupOp(Map<String, dynamic> op) async {
         (payload['meses'] as num?)?.toInt() ?? 1,
         '${payload['metodo'] ?? 'efectivo'}',
         (payload['monto'] as num?)?.toDouble(),
-        payload['tipo_id'] as String?);
+        payload['tipo_id'] as String?,
+        esCasa: payload['casa'] == true ||
+            await _esCuentaCasaEspejo(payload['cliente_id']));
   }
   if (tipo == 'inscribir') {
     // v1.3.9 (Bug 2): usar el método de pago del payload (fallback 'efectivo'
@@ -892,7 +945,9 @@ Future<double> montoCobradoCupOp(Map<String, dynamic> op) async {
         (payload['meses'] as num?)?.toInt() ?? 1,
         '${payload['metodo_pago'] ?? 'efectivo'}',
         (payload['monto'] as num?)?.toDouble(),
-        payload['tipo_id'] as String?);
+        payload['tipo_id'] as String?,
+        esCasa: payload['casa'] == true ||
+            await _esCuentaCasaEspejo(payload['cliente_id']));
   }
   if (tipo == 'pago_diario' || tipo == 'diario') {
     final cant = (payload['cantidad'] as num?)?.toInt() ?? 0;
@@ -900,9 +955,29 @@ Future<double> montoCobradoCupOp(Map<String, dynamic> op) async {
   }
   if (tipo == 'venta_suplemento') {
     if ('${payload['moneda'] ?? 'CUP'}'.toUpperCase() != 'CUP') return 0;
+    // 1.15 (M2e-01): un fiado no es cobro: no hay dinero en mano.
+    if (payload['es_fiado'] == 1 || payload['es_fiado'] == true) return 0;
     final cant = (payload['cantidad'] as num?)?.toDouble() ?? 0;
     final precio = (payload['precio'] as num?)?.toDouble() ?? 0;
     return cant * precio;
+  }
+  if (tipo == 'saldar_fiado_suplemento') {
+    // 1.15 (M2e-01): la op no trae monto (solo venta_id + fecha):
+    // se lee la venta del espejo. Sin fila (aún no sincronizada
+    // la venta original) no se puede valorar: 0, el pull lo
+    // confirmará. Solo CUP entra al KPI CUP.
+    final ventaId = (payload['venta_id'] as num?)?.toInt();
+    if (ventaId == null) return 0;
+    try {
+      final filas = await LocalDb.instance
+          .mirrorPorIds('ventas_suplementos', [ventaId]);
+      if (filas.isEmpty) return 0;
+      final v = filas.first;
+      if ((v['moneda'] as String?) != 'CUP') return 0;
+      return totalVentaCup(v);
+    } catch (_) {
+      return 0;
+    }
   }
   if (tipo == 'inscripcion_venta_suplemento') {
     // 1.14 (D17): el precio de la mensualidad sigue el método real
@@ -1015,6 +1090,34 @@ Future<double> pendienteEntrega(int? telegramId) async {
   }
   final pr = await preciosVigentes();
   for (final op in await LocalDb.instance.pendingOps()) {
+    // 1.15 V6: para cada op venta_servicio, UN solo beneficiario:
+    // responsable_efectivo_id del payload si viene; si no,
+    // el autor (op['telegram_id']). Comparar con telegramId y
+    // llamar a montoEfectivoOp una sola vez (sin este desvío, la
+    // venta a nombre de otro se atribuía al autor y el pendiente
+    // del responsable quedaba corto, o se contaba dos veces).
+    // Demás tipos de op conservan el filtro por autor.
+    if ('${op['tipo']}' == 'venta_servicio') {
+      Map<String, dynamic>? pay;
+      try {
+        pay = jsonDecode(op['payload'] as String)
+            as Map<String, dynamic>;
+      } catch (_) {
+        pay = null;
+      }
+      final resp = pay == null
+          ? null
+          : LocalDb.normalizarTelegramId(
+              pay['responsable_efectivo_id']);
+      final benef =
+          resp ?? LocalDb.normalizarTelegramId(op['telegram_id']);
+      if (benef != telegramId) continue;
+      total += montoEfectivoOp(op, pr);
+      continue;
+    }
+    // 1.15-turnos (#7): la cola del teléfono es de SU dueño: sin
+    // este filtro se sumaba al pendiente de cualquier entrenador.
+    if (op['telegram_id'] != telegramId) continue;
     total += montoEfectivoOp(op, pr);
   }
   // v1.8.0: los adelantos de su gaveta ya salieron de su mano.
@@ -1037,6 +1140,8 @@ Future<double> pendienteEntregaUsd(int? telegramId) async {
     }
   }
   for (final op in await LocalDb.instance.pendingOps()) {
+    // 1.15-turnos (#7): igual que en CUP, la cola es de su dueño.
+    if (op['telegram_id'] != telegramId) continue;
     total += _montoUsdOp(op);
   }
   return total;
@@ -1070,6 +1175,31 @@ Future<double> pendienteRecoger({int? excluirTelegramId}) async {
       total += totalVentaCup(v);
     }
   }
+  // 1.15-turnos (#6): los servicios en efectivo también se recogen,
+  // y los adelantos vivos ya salieron de la gaveta (restan).
+  for (final v in await LocalDb.instance.allMirror('servicio_ventas')) {
+    final resp =
+        LocalDb.normalizarTelegramId(v['responsable_efectivo_id']) ??
+            LocalDb.normalizarTelegramId(v['registrado_por']);
+    if (excluirTelegramId != null && resp == excluirTelegramId) {
+      continue;
+    }
+    if ((v['metodo'] as String?) == 'efectivo' &&
+        (v['casa'] as num?)?.toInt() != 1 &&
+        esPendiente(v['entregado'])) {
+      total += ((v['precio_unitario'] as num?)?.toDouble() ?? 0) *
+          ((v['cantidad'] as num?)?.toDouble() ?? 0);
+    }
+  }
+  for (final a in await LocalDb.instance.allMirror('adelantos')) {
+    final tid = LocalDb.normalizarTelegramId(a['descuenta_a']);
+    if (excluirTelegramId != null && tid == excluirTelegramId) {
+      continue;
+    }
+    if ((a['en_pendiente'] as num?)?.toInt() == 1) {
+      total -= (a['monto'] as num?)?.toDouble() ?? 0;
+    }
+  }
   return total;
 }
 
@@ -1096,7 +1226,7 @@ Future<double> pendienteRecogerUsd({int? excluirTelegramId}) async {
 /// Se usa para no contar dos veces: un pago en op_ids de una liquidación
 /// ya está saldado aunque su fila espejo aún no traiga entregado=1
 /// (ventana entre pulls de tablas distintas).
-Future<Set<String>> _idsLiquidados(int telegramId) async {
+Future<Set<String>> idsLiquidados(int telegramId) async {
   final cubiertos = <String>{};
   for (final l
       in await LocalDb.instance.allMirror('liquidaciones_caja')) {
@@ -1109,7 +1239,15 @@ Future<Set<String>> _idsLiquidados(int telegramId) async {
       final opIds = raw is String
           ? jsonDecode(raw) as Map<String, dynamic>
           : Map<String, dynamic>.from(raw as Map);
-      for (final tabla in ['pagos', 'pagos_diarios', 'ventas_suplementos']) {
+      for (final tabla in [
+        'pagos',
+        'pagos_diarios',
+        'ventas_suplementos',
+        // 1.15-turnos: el servidor liquida también servicios; sin
+        // esta clave, un servicio liquidado contaba dos veces en
+        // la ventana pre-pull (espejo aún sin marcar).
+        'servicio_ventas',
+      ]) {
         for (final x in (opIds[tabla] as List?) ?? const []) {
           cubiertos.add('$tabla:$x');
         }
@@ -1119,13 +1257,195 @@ Future<Set<String>> _idsLiquidados(int telegramId) async {
   return cubiertos;
 }
 
-/// Pendiente CONFIRMADO de un entrenador (invariante 2 de Argón, ítem 1B):
+/// IDs cubiertos por el libro C1 de un entrenador, como
+/// 'tabla:id'. Fusiona el libro local con el espejo (un teléfono
+/// que no registró la entrega la ve por el espejo). Las filas sin
+/// op_ids (legado) no cubren ids concretos: restan por monto.
+Future<Set<String>> idsCubiertosLibroC1(int? telegramId) async {
+  final cubiertos = <String>{};
+  if (telegramId == null) return cubiertos;
+  void agregar(dynamic raw) {
+    if (raw == null) return;
+    try {
+      final doc = raw is String ? jsonDecode(raw) : raw;
+      if (doc is! Map) return;
+      for (final e in doc.entries) {
+        final ids = e.value;
+        if (ids is! List) continue;
+        for (final x in ids) {
+          final id = (x as num?)?.toInt();
+          if (id != null) cubiertos.add('${e.key}:$id');
+        }
+      }
+    } catch (_) {}
+  }
+
+  try {
+    final d = await LocalDb.instance.db;
+    final locales = await d.query('entregas_efectivo',
+        where: 'entrenador_telegram_id = ?', whereArgs: [telegramId]);
+    for (final f in locales) {
+      agregar(f['op_ids_json']);
+    }
+  } catch (_) {}
+  try {
+    for (final e
+        in await LocalDb.instance.allMirror('espejo_entregas_efectivo')) {
+      if (LocalDb.normalizarTelegramId(e['entrenador_telegram_id']) ==
+          telegramId) {
+        agregar(e['op_ids_json']);
+      }
+    }
+  } catch (_) {}
+  return cubiertos;
+}
+
+/// Cuánto resta el libro C1 al pendiente de un entrenador, con
+/// marca (1.15-turnos, mecanismo único). Por fila: el resto sin
+/// ids MÁS el monto de los ids cubiertos que SIGUEN sin marcar
+/// (si un id se marca después por otra vía, su monto deja de
+/// restarse aquí porque ya salió del pendiente por entregado=1 o
+/// por estar en otra liquidación: el invariante impide el doble
+/// descuento en cualquier orden de marcado). Las filas viejas sin
+/// op_ids restan su monto entero (legado).
+Future<double> contribucionLibroC1(int? telegramId) async {
+  if (telegramId == null) return 0;
+  // Filas fusionadas local + espejo (por op_uuid, como el libro).
+  final porUuid = <String, Map<String, dynamic>>{};
+  try {
+    final d = await LocalDb.instance.db;
+    final locales = await d.query('entregas_efectivo',
+        where: 'entrenador_telegram_id = ?', whereArgs: [telegramId]);
+    for (final f in locales) {
+      final uuid = '${f['op_uuid'] ?? ''}';
+      if (uuid.isNotEmpty) {
+        porUuid[uuid] = Map<String, dynamic>.from(f);
+      }
+    }
+  } catch (_) {}
+  try {
+    for (final e
+        in await LocalDb.instance.allMirror('espejo_entregas_efectivo')) {
+      if (LocalDb.normalizarTelegramId(e['entrenador_telegram_id']) !=
+          telegramId) {
+        continue;
+      }
+      final uuid = '${e['op_uuid'] ?? e['id'] ?? ''}';
+      if (uuid.isEmpty) continue;
+      porUuid[uuid] = {
+        'op_uuid': uuid,
+        'monto_entregado':
+            (e['monto_entregado'] as num?)?.toDouble() ?? 0,
+        'op_ids_json': e['op_ids_json'],
+        'resto_sin_ids': e['resto_sin_ids'],
+      };
+    }
+  } catch (_) {}
+  // Estado de marcado actual (espejo + liquidaciones).
+  final liquidados = await idsLiquidados(telegramId);
+  bool marcado(String tabla, int id) {
+    if (liquidados.contains('$tabla:$id')) return true;
+    return false;
+  }
+
+  final pagosMarcados = <int, double>{};
+  for (final p in await LocalDb.instance
+      .mirrorFiltrado('pagos', {'telegram_user_id': telegramId})) {
+    final id = (p['id'] as num?)?.toInt();
+    if (id != null) {
+      pagosMarcados[id] = esPendiente(p['entregado'])
+          ? (p['monto'] as num?)?.toDouble() ?? 0
+          : -1;
+    }
+  }
+  final diariosMarcados = <int, double>{};
+  for (final d in await LocalDb.instance.allMirror('pagos_diarios')) {
+    if (LocalDb.normalizarTelegramId(d['registrado_por']) != telegramId) {
+      continue;
+    }
+    final id = (d['id'] as num?)?.toInt();
+    if (id != null) {
+      diariosMarcados[id] = esPendiente(d['entregado'])
+          ? (d['total'] as num?)?.toDouble() ?? 0
+          : -1;
+    }
+  }
+  final supMarcados = <int, double>{};
+  for (final v in await ventasSuplementosCup()) {
+    if (LocalDb.normalizarTelegramId(v['registrado_por']) != telegramId) {
+      continue;
+    }
+    final id = (v['id'] as num?)?.toInt();
+    if (id == null) continue;
+    supMarcados[id] = esPendiente(v['entregado']) ? totalVentaCup(v) : -1;
+  }
+  final servMarcados = <int, double>{};
+  for (final v in await LocalDb.instance.allMirror('servicio_ventas')) {
+    final resp =
+        LocalDb.normalizarTelegramId(v['responsable_efectivo_id']) ??
+            LocalDb.normalizarTelegramId(v['registrado_por']);
+    if (resp != telegramId) continue;
+    final id = (v['id'] as num?)?.toInt();
+    if (id == null) continue;
+    servMarcados[id] = esPendiente(v['entregado'])
+        ? ((v['precio_unitario'] as num?)?.toDouble() ?? 0) *
+            ((v['cantidad'] as num?)?.toDouble() ?? 0)
+        : -1;
+  }
+
+  double total = 0;
+  for (final f in porUuid.values) {
+    final monto = (f['monto_entregado'] as num?)?.toDouble() ?? 0;
+    final raw = f['op_ids_json'];
+    Map? doc;
+    try {
+      doc = raw == null
+          ? null
+          : (raw is String ? jsonDecode(raw) : raw) as Map?;
+    } catch (_) {
+      doc = null;
+    }
+    if (doc == null || doc.isEmpty) {
+      total += monto;
+      continue;
+    }
+    total += (f['resto_sin_ids'] as num?)?.toDouble() ?? 0;
+    for (final e in doc.entries) {
+      final tabla = '${e.key}';
+      final ids = e.value;
+      if (ids is! List) continue;
+      for (final x in ids) {
+        final id = (x as num?)?.toInt();
+        if (id == null || marcado(tabla, id)) continue;
+        switch (tabla) {
+          case 'pagos':
+            final m = pagosMarcados[id];
+            if (m != null && m >= 0) total += m;
+            break;
+          case 'pagos_diarios':
+            final m = diariosMarcados[id];
+            if (m != null && m >= 0) total += m;
+            break;
+          case 'ventas_suplementos':
+            final m = supMarcados[id];
+            if (m != null && m >= 0) total += m;
+            break;
+          case 'servicio_ventas':
+            final m = servMarcados[id];
+            if (m != null && m >= 0) total += m;
+            break;
+        }
+      }
+    }
+  }
+  return total;
+}
 /// solo filas espejo con sync_seq, IGNORANDO ops_queue. Es la base del
 /// monto_esperado de una liquidación: lo que el servidor ya vio.
 /// Incluye el saldo de arrastre de liquidaciones parciales.
 Future<({double cup, double usd})> pendienteArqueo(int? telegramId) async {
   if (telegramId == null) return (cup: 0.0, usd: 0.0);
-  final cubiertos = await _idsLiquidados(telegramId);
+  final cubiertos = await idsLiquidados(telegramId);
   var cup = 0.0;
   var usd = 0.0;
   for (final p in await LocalDb.instance
@@ -1161,8 +1481,13 @@ Future<({double cup, double usd})> pendienteArqueo(int? telegramId) async {
   }
   // v1.8.0: ventas de servicios en efectivo (CUP) pendientes de
   // arqueo; los reversos (cantidad negativa) netan solos.
+  // 1.15-turnos: la gaveta es del RESPONSABLE (igual que en
+  // pendienteEntrega), no de quien registró la venta.
   for (final v in await LocalDb.instance.allMirror('servicio_ventas')) {
-    if (LocalDb.normalizarTelegramId(v['registrado_por']) != telegramId) {
+    final resp =
+        LocalDb.normalizarTelegramId(v['responsable_efectivo_id']) ??
+            LocalDb.normalizarTelegramId(v['registrado_por']);
+    if (resp != telegramId) {
       continue;
     }
     if (cubiertos.contains('servicio_ventas:${v['id']}')) continue;
@@ -1175,6 +1500,10 @@ Future<({double cup, double usd})> pendienteArqueo(int? telegramId) async {
   }
   // v1.8.0: adelantos vivos de su gaveta (A2) — descuentan.
   cup -= await adelantosEnPendiente(telegramId);
+  // 1.15-turnos (#2, mecanismo único): el libro C1 ya descontó
+  // lo que cubre; el arqueo no vuelve a contar esos montos.
+  // (La resta con marca vive en bloque2_resto.)
+  cup -= await contribucionLibroC1(telegramId);
   // Saldo de arrastre de liquidaciones parciales (sin partir ops).
   for (final l
       in await LocalDb.instance.allMirror('liquidaciones_caja')) {
@@ -1204,12 +1533,15 @@ Future<Map<String, List<int>>> idsPendienteArqueo(int? telegramId,
     'adelantos': [], // v1.8.0: la liquidación los saca del pendiente
   };
   if (telegramId == null) return res;
-  final cubiertos = await _idsLiquidados(telegramId);
+  final cubiertos = await idsLiquidados(telegramId);
+  // 1.15-turnos (#2): ids ya cubiertos por el libro C1.
+  final cubiertosLibro = await idsCubiertosLibroC1(telegramId);
   final esUsd = moneda == 'USD';
   for (final p in await LocalDb.instance
       .mirrorFiltrado('pagos', {'telegram_user_id': telegramId})) {
     if (esUsd) continue; // los pagos siempre son CUP
     if (cubiertos.contains('pagos:${p['id']}')) continue;
+    if (cubiertosLibro.contains('pagos:${p['id']}')) continue;
     if ((p['metodo'] as String?) == 'efectivo' &&
         esPendiente(p['entregado'])) {
       final id = (p['id'] as num?)?.toInt();
@@ -1220,6 +1552,7 @@ Future<Map<String, List<int>>> idsPendienteArqueo(int? telegramId,
       .mirrorFiltrado('pagos_diarios', {'registrado_por': telegramId})) {
     if (esUsd) continue; // los pagos diarios siempre son CUP
     if (cubiertos.contains('pagos_diarios:${d['id']}')) continue;
+    if (cubiertosLibro.contains('pagos_diarios:${d['id']}')) continue;
     // Fase A 2026-10-25 (A1): solo efectivo (sin método = efectivo
     // legacy); una transferencia no entra en op_ids de liquidación.
     if (esPendiente(d['entregado']) && esPagoDiarioEfectivo(d)) {
@@ -1233,6 +1566,9 @@ Future<Map<String, List<int>>> idsPendienteArqueo(int? telegramId,
       continue;
     }
     if (cubiertos.contains('ventas_suplementos:${v['id']}')) continue;
+    if (cubiertosLibro.contains('ventas_suplementos:${v['id']}')) {
+      continue;
+    }
     if (esPendiente(v['entregado'])) {
       final id = (v['id'] as num?)?.toInt();
       if (id != null) res['ventas_suplementos']!.add(id);
@@ -1240,10 +1576,18 @@ Future<Map<String, List<int>>> idsPendienteArqueo(int? telegramId,
   }
   if (!esUsd) {
     for (final v in await LocalDb.instance.allMirror('servicio_ventas')) {
-      if (LocalDb.normalizarTelegramId(v['registrado_por']) != telegramId) {
+      final resp =
+          LocalDb.normalizarTelegramId(v['responsable_efectivo_id']) ??
+              LocalDb.normalizarTelegramId(v['registrado_por']);
+      if (resp != telegramId) {
         continue;
       }
       if (cubiertos.contains('servicio_ventas:${v['id']}')) continue;
+      // 1.15-turnos (#2): un id cubierto por el libro C1 no se
+      // ofrece para liquidar (el libro ya descontó su monto).
+      if (cubiertosLibro.contains('servicio_ventas:${v['id']}')) {
+        continue;
+      }
       if ((v['metodo'] as String?) == 'efectivo' &&
           (v['casa'] as num?)?.toInt() != 1 &&
           esPendiente(v['entregado'])) {
@@ -1469,6 +1813,10 @@ Future<List<Map<String, dynamic>>> listaClientes([String q = '']) async {
     res = rows.where((c) {
       final norm = (c['nombre_norm'] as String?) ?? _norm('${c['nombre']}');
       if (nq.isNotEmpty && norm.contains(nq)) return true;
+      // Cliente protegido (2026-10-26, Protegido 2 H1): al
+      // protegido solo se llega por nombre; los dígitos (carnet,
+      // teléfono) no lo encuentran para un no-dueño.
+      if (esVistaProtegida(c)) return false;
       if (digitos.isNotEmpty) {
         for (final k in ['telefono', 'movil', 'carnet']) {
           final v = '${c[k] ?? ''}'.replaceAll(RegExp(r'[^0-9]'), '');
@@ -1714,17 +2062,18 @@ bool validarCarnet(String v) {
 }
 
 /// Edad calculada desde el carnet (los 6 primeros dígitos = AAMMDD).
+/// Argón #7A-4: [fechaNacDeCarnet] es la única fuente de verdad (hace
+/// round-trip con DateTime); el parseo manual aceptaba fechas
+/// inexistentes como el 31 de febrero.
 int? edadDeCarnet(String? carnet) {
-  final d = (carnet ?? '').replaceAll(RegExp(r'[^0-9]'), '');
-  if (d.length < 6) return null;
+  final nac = fechaNacDeCarnet(carnet);
+  if (nac == null) return null;
   final hoy = ahoraHabana();
-  var anio = int.tryParse(d.substring(0, 2)) ?? 0;
-  final mes = int.tryParse(d.substring(2, 4)) ?? 0;
-  final dia = int.tryParse(d.substring(4, 6)) ?? 0;
-  if (mes < 1 || mes > 12 || dia < 1 || dia > 31) return null;
-  anio += (anio <= hoy.year % 100) ? 2000 : 1900;
-  var edad = hoy.year - anio;
-  if (hoy.month < mes || (hoy.month == mes && hoy.day < dia)) edad--;
+  var edad = hoy.year - nac.year;
+  if (hoy.month < nac.month ||
+      (hoy.month == nac.month && hoy.day < nac.day)) {
+    edad--;
+  }
   return edad < 0 || edad > 120 ? null : edad;
 }
 
@@ -1856,7 +2205,12 @@ Future<List<Map<String, dynamic>>> posiblesDuplicados(
         ('${c['telefono'] ?? ''}'.replaceAll(RegExp(r'[^0-9]'), '') == dt ||
             '${c['movil'] ?? ''}'.replaceAll(RegExp(r'[^0-9]'), '') == dt)) {
       motivo = 'mismo teléfono';
-    } else if (nn.isNotEmpty && (cn.contains(nn) || nn.contains(cn))) {
+    } else if (nn.isNotEmpty &&
+        // Argón #7A-3: un nombre_norm vacío hace que
+        // nn.contains('') sea true y marque a todos los legados
+        // sin nombre como 'nombre parecido'.
+        cn.isNotEmpty &&
+        (cn.contains(nn) || nn.contains(cn))) {
       motivo = 'nombre parecido';
     }
     if (motivo.isNotEmpty) {
@@ -1864,6 +2218,42 @@ Future<List<Map<String, dynamic>>> posiblesDuplicados(
     }
   }
   return res;
+}
+
+/// Decisión de bloqueo al editar (panel Luna sobre #7B-3):
+/// posiblesDuplicados devuelve UN motivo por cliente con prioridad
+/// carnet > teléfono, así que una fila que coincide en carnet de 6
+/// dígitos Y en teléfono llegaba con motivo 'mismo carnet' y el filtro
+/// de _editar no veía el teléfono duplicado. Esta función decide por
+/// los datos crudos, no por el motivo: 'teléfono' si el teléfono
+/// coincide, 'carnet' si el carnet tiene 11 dígitos, null si no
+/// bloquea. El carnet de 6 dígitos solo nunca bloquea (dos personas
+/// nacidas el mismo día comparten AAMMDD).
+String? motivoBloqueoEdicion(Map<String, dynamic> fila, int clienteId,
+    String carnetDigitos, String telDigitos) {
+  if (fila['id'] == clienteId) return null;
+  if (telDigitos.isNotEmpty &&
+      ((fila['telefono'] as String? ?? '')
+                  .replaceAll(RegExp(r'[^0-9]'), '') ==
+              telDigitos ||
+          (fila['movil'] as String? ?? '')
+                  .replaceAll(RegExp(r'[^0-9]'), '') ==
+              telDigitos)) {
+    return 'teléfono';
+  }
+  // Panel 1.15 (Terra MEDIO, R1): el bloqueo por carnet NO se fía
+  // del motivo precomputado de posiblesDuplicados: compara el
+  // carnet normalizado de la fila contra el introducido, y exige
+  // los 11 dígitos (el carnet de 6 de cliente nunca bloquea).
+  if (carnetDigitos.length == 11 &&
+      (fila['carnet'] as String? ?? '')
+              .replaceAll(RegExp(r'[^0-9]'), '') ==
+          carnetDigitos) {
+    return 'carnet';
+  }
+  // Respaldo: fila sin columnas de teléfono pero con el motivo.
+  if (fila['_motivo'] == 'mismo teléfono') return 'teléfono';
+  return null;
 }
 
 /// Pagos diarios de hoy (del espejo).
@@ -1938,7 +2328,12 @@ Future<List<Map<String, dynamic>>> diariosDeHoy(
       final clave =
           "$fecha|$hora|${payload['turno']}|${payload['cantidad']}|${payload['registrado_por']}";
       if (clavesMirror.contains(clave)) continue; // ya en mirror
-      clavesMirror.add(clave);
+      // 2026-10-27 (bug Gabriel): NO añadir la clave pendiente al
+      // conjunto. Dos pagos pendientes legítimos (mismo turno,
+      // misma cantidad, mismo entrenador, mismo segundo) colapsaban
+      // a uno solo porque isoHabana() trunca creado_en a segundos.
+      // Cada op_uuid es un pago distinto: los pendientes nunca se
+      // deduplican entre sí; el conjunto solo trae claves del mirror.
       payload['op_uuid'] = op['op_uuid'];
       payload['es_optimista'] = true;
       // Normalizar campos que la UI espera del mirror
@@ -3810,18 +4205,39 @@ Future<Map<String, double>> cobradoHoyPorMetodo(
     }
     if ('${d['fecha'] ?? ''}'.length >= 10 &&
         '${d['fecha']}'.substring(0, 10) == hoy) {
-      ef += (d['total'] as num?)?.toDouble() ?? 0;
+      // 1.15-turnos (#5): un diario por transferencia va directo
+      // a la cuenta del dueño, no al efectivo en mano.
+      if (esPagoDiarioEfectivo(d)) {
+        ef += (d['total'] as num?)?.toDouble() ?? 0;
+      } else {
+        tr += (d['total'] as num?)?.toDouble() ?? 0;
+      }
     }
   }
   // v1.3.2 (Argón #5): suplementos en CUP van a efectivo.
+  // 1.15-turnos (#5): ANTES no se filtraba por entrenador y el
+  // arqueo de uno sumaba las ventas de los demás.
   for (final v in await ventasSuplementosCup()) {
+    if (soloTelegramId != null &&
+        LocalDb.normalizarTelegramId(v['registrado_por']) !=
+            soloTelegramId) {
+      continue;
+    }
     final f = '${v['fecha'] ?? ''}';
     if (f.length >= 10 && f.substring(0, 10) == hoy) {
       ef += totalVentaCup(v);
     }
   }
   // v1.8.0: servicios del día por método (Casa fuera: precio 0).
+  // 1.15-turnos (#5): la gaveta es del RESPONSABLE del efectivo,
+  // no de quien registró la venta.
   for (final v in await LocalDb.instance.allMirror('servicio_ventas')) {
+    if (soloTelegramId != null) {
+      final resp =
+          LocalDb.normalizarTelegramId(v['responsable_efectivo_id']) ??
+              LocalDb.normalizarTelegramId(v['registrado_por']);
+      if (resp != soloTelegramId) continue;
+    }
     final f = '${v['fecha'] ?? ''}';
     if (f.length < 10 || f.substring(0, 10) != hoy) continue;
     if ((v['casa'] as num?)?.toInt() == 1) continue;

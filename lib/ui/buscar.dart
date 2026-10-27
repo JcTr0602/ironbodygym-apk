@@ -13,6 +13,7 @@ import '../perfil.dart';
 import '../negocio.dart';
 import '../tiempo.dart';
 import '../sync.dart';
+import '../cliente_protegido.dart';
 import 'componentes.dart';
 import 'dialogo_pago.dart';
 import 'pago_diario.dart';
@@ -81,8 +82,11 @@ class _BuscarScreenState extends State<BuscarScreen> {
       final todos = await listaClientes('');
       if (gen != _gen) return;
       final vistos = <dynamic>{for (final c in r) c['id']};
+      // Cliente protegido (2026-10-26, Protegido 2 H2): las notas
+      // de un protegido nunca lo hacen aparecer en la búsqueda.
       final extra = todos.where((c) =>
           !vistos.contains(c['id']) &&
+          !esVistaProtegida(c) &&
           '${c['notas'] ?? ''}'.toLowerCase().contains(nq));
       r = [...r, ...extra];
       r.sort(
@@ -98,13 +102,17 @@ class _BuscarScreenState extends State<BuscarScreen> {
       'sinfoto': 0,
     };
     for (final c in r) {
-      final dias = diasRestantes(c['pagado_hasta'] as String?);
-      if (dias != null && dias > 7) {
-        conteos['aldia'] = conteos['aldia']! + 1;
-      } else if (dias != null && dias >= 0 && dias <= 7) {
-        conteos['porvencer'] = conteos['porvencer']! + 1;
-      } else if (dias == null || dias < 0) {
-        conteos['vencidos'] = conteos['vencidos']! + 1;
+      // Cliente protegido (2026-10-26, Protegido 2 H2): su estado
+      // de pago no alimenta los contadores (revelaría si pagó).
+      if (!esVistaProtegida(c)) {
+        final dias = diasRestantes(c['pagado_hasta'] as String?);
+        if (dias != null && dias > 7) {
+          conteos['aldia'] = conteos['aldia']! + 1;
+        } else if (dias != null && dias >= 0 && dias <= 7) {
+          conteos['porvencer'] = conteos['porvencer']! + 1;
+        } else if (dias == null || dias < 0) {
+          conteos['vencidos'] = conteos['vencidos']! + 1;
+        }
       }
       final ref = c['foto_storage'] as String?;
       if (ref == null || ref.isEmpty) {
@@ -115,6 +123,9 @@ class _BuscarScreenState extends State<BuscarScreen> {
     // v1.3.1: sin fecha = vencido (no "al día").
     if (_filtro != 'todos' && _filtro != 'sinfoto') {
       r = r.where((c) {
+        // Cliente protegido (2026-10-26, Protegido 2 H2): ningún
+        // filtro de estado lo deja pasar (su estado no se revela).
+        if (esVistaProtegida(c)) return false;
         final dias = diasRestantes(c['pagado_hasta'] as String?);
         switch (_filtro) {
           case 'aldia':
@@ -131,6 +142,9 @@ class _BuscarScreenState extends State<BuscarScreen> {
     // v1.0.15: filtro por rango de edad (edad desde el carnet).
     if (_rangoEdad != 'todas') {
       r = r.where((c) {
+        // Cliente protegido (2026-10-26, Protegido 2 H2): la edad
+        // sale del carnet, que es dato protegido.
+        if (esVistaProtegida(c)) return false;
         final edad = edadDeCarnet('${c['carnet'] ?? ''}');
         if (edad == null) return false;
         switch (_rangoEdad) {
@@ -686,6 +700,49 @@ class _FilaClienteState extends State<_FilaCliente> {
       }
     }
     if (iniciales.isEmpty) iniciales = '?';
+    // Foto (mismo widget en la rama normal y en la protegida).
+    final foto = _foto != null
+        ? ClipRRect(
+            borderRadius: BorderRadius.circular(28),
+            child: Image.file(_foto!,
+                width: 56, height: 56, fit: BoxFit.cover),
+          )
+        : CircleAvatar(
+            radius: 28,
+            backgroundColor:
+                AppColores.naranja.withValues(alpha: 0.15),
+            child: Text(iniciales,
+                style: const TextStyle(
+                    color: AppColores.naranja,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 20)),
+          );
+    // Cliente protegido (2026-10-26, A1 Argón): el entrenador solo
+    // ve avatar, nombre y candado. Sin badge, sin días, sin
+    // leading (selección de papelera) y sin trailing (acciones
+    // rápidas como cobro o WhatsApp). El onTap se conserva: abrir
+    // la ficha muestra la vista bloqueada (foto + nombre).
+    if (esVistaProtegida(c)) {
+      return InkWell(
+        onTap: widget.onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(
+              horizontal: AppEspacio.lg, vertical: AppEspacio.sm),
+          child: Row(
+            children: [
+              foto,
+              const SizedBox(width: AppEspacio.md),
+              Expanded(
+                child: Text(nombre,
+                    style:
+                        AppTexto.subtitulo.copyWith(fontSize: 16)),
+              ),
+              const Icon(Icons.lock, color: AppColores.naranja),
+            ],
+          ),
+        ),
+      );
+    }
     // v1.1: badge según días restantes (con icono + texto, nunca solo color)
     final dias = d ?? 999999;
     final badge = BadgeEstado.desdeDias(dias);
@@ -711,25 +768,8 @@ class _FilaClienteState extends State<_FilaCliente> {
               widget.leading!,
               const SizedBox(width: AppEspacio.sm),
             ],
-            // Foto
-            _foto != null
-                ? ClipRRect(
-                    borderRadius: BorderRadius.circular(28),
-                    child: Image.file(_foto!,
-                        width: 56,
-                        height: 56,
-                        fit: BoxFit.cover),
-                  )
-                : CircleAvatar(
-                    radius: 28,
-                    backgroundColor: AppColores.naranja
-                        .withValues(alpha: 0.15),
-                    child: Text(iniciales,
-                        style: const TextStyle(
-                            color: AppColores.naranja,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 20)),
-                  ),
+            // Foto (definida arriba, compartida con la rama protegida).
+            foto,
             const SizedBox(width: AppEspacio.md),
             // Nombre + badge + días
             Expanded(

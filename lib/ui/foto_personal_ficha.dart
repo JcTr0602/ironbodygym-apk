@@ -173,8 +173,20 @@ class _SeccionFotoPersonalState extends State<SeccionFotoPersonal> {
                     color: Colors.grey.shade200,
                     borderRadius: BorderRadius.circular(10),
                   ),
-                  child: const Center(
-                      child: Text('No se pudo descargar la foto')),
+                  // Argón #8-5: sin botón de reintento, el dueño
+                  // tenía que salir y volver a entrar a la ficha.
+                  child: Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        const Text('No se pudo descargar la foto'),
+                        TextButton(
+                          onPressed: _consultar,
+                          child: const Text('Reintentar'),
+                        ),
+                      ],
+                    ),
+                  ),
                 ),
               if (_actualizadaEn != null) ...[
                 const SizedBox(height: AppEspacio.xs),

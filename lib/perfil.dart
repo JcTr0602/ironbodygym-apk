@@ -518,9 +518,19 @@ class PerfilService {
   Future<void> setMetricasHome(List<String> v) async =>
       (await _p).setStringList('metricas_home', v);
 
+  /// 1.15: el avatar es POR CUENTA, no por teléfono. Completa el
+  /// fix v1.2.2 de _key, que dejó fuera este archivo: con la ruta
+  /// fija, un entrenador veía la foto del anterior en el mismo
+  /// móvil (reporte Jc 2026-10-26, cuenta Duany mostrando la foto
+  /// del dueño). Sin migración del avatar.jpg viejo a propósito:
+  /// su dueño es desconocido y heredarlo pegaría una foto ajena;
+  /// cada cuenta pone su foto una vez.
   Future<File> avatarFile() async {
     final dir = await getApplicationDocumentsDirectory();
-    return File('${dir.path}/avatar.jpg');
+    final username = AuthService().username;
+    final nombre =
+        username.isEmpty ? 'avatar.jpg' : 'avatar_$username.jpg';
+    return File('${dir.path}/$nombre');
   }
 
   Future<bool> tieneAvatar() async => await (await avatarFile()).exists();

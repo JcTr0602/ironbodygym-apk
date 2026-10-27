@@ -149,15 +149,20 @@ class _NominaScreenState extends State<NominaScreen> {
         final ventasServ =
             await LocalDb.instance.allMirror('servicio_ventas');
         final miTid = AuthService().telegramId;
-        final nombrePorTid = <int, String>{};
-        for (final v in ventasServ) {
-          final tid =
-              LocalDb.normalizarTelegramId(v['registrado_por']);
-          if (tid != null) {
-            nombrePorTid.putIfAbsent(
-                tid, () => '${v['registrado_por_nombre'] ?? ''}');
+        // Fix 1.15 (caso 2026-10-27): iterar también a quienes
+        // GANARON comisión, no solo a quienes registraron. El
+        // nombre del que solo ganó sale de usuarios_apk.
+        final usuariosApk = <Map<String, dynamic>>[];
+        try {
+          final rawApk = await LocalDb.instance.getMeta('usuarios_apk');
+          if (rawApk != null && rawApk.isNotEmpty) {
+            for (final u in jsonDecode(rawApk) as List) {
+              usuariosApk.add(Map<String, dynamic>.from(u as Map));
+            }
           }
-        }
+        } catch (_) {}
+        final nombrePorTid = NominaCalc.tidsConComisionServicio(
+            ventasServ, usuariosApk);
         for (final tid in nombrePorTid.keys) {
           final r = NominaCalc.comisionDosisDesdeVentas(
               ventasServ, tid, pref);

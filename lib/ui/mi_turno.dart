@@ -7,6 +7,8 @@ library;
 
 import 'package:flutter/material.dart';
 
+import 'dart:convert';
+
 import '../auth.dart';
 import '../localdb.dart';
 import '../negocio.dart';
@@ -29,11 +31,16 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
   double _efectivoHoy = 0;
   double _transferHoy = 0;
   double _pendiente = 0;
+  double _pendienteUsd = 0;
   double _cobradoMes = 0;
   Map<String, dynamic>? _ultimaEntrega;
   List<Map<String, dynamic>> _historial = [];
   List<Map<String, dynamic>> _pendMens = [];
   List<Map<String, dynamic>> _pendDiarios = [];
+  List<Map<String, dynamic>> _pendServicios = [];
+  List<Map<String, dynamic>> _pendSuplementos = [];
+  List<Map<String, dynamic>> _pendAdelantos = [];
+  List<(String, double)> _pendOps = [];
   // v1.0.16: mejoras para entrenadores
   List<Map<String, dynamic>> _vencimientos = [];
   double _cobradoAyer = 0;
@@ -53,7 +60,37 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
     final hist = await historialTurno(tid, dias: 60);
     final ult = await ultimaEntregaConfirmada(tid);
     final mes = await cobradoMes(tid);
-    final (pm, pd, _) = await detallePendiente(tid);
+    final (pm, pd, ps) = await detallePendiente(tid);
+    // 1.15-turnos (#9): el detalle por día cubre también servicios,
+    // suplementos, adelantos y la cola local (misma cobertura que
+    // pendienteEntrega, salvo el USD que va en su propia línea).
+    final sup = <Map<String, dynamic>>[];
+    for (final v in await ventasSuplementosCup()) {
+      if (LocalDb.normalizarTelegramId(v['registrado_por']) == tid &&
+          esPendiente(v['entregado'])) {
+        sup.add(v);
+      }
+    }
+    final adel = <Map<String, dynamic>>[];
+    for (final a in await LocalDb.instance.allMirror('adelantos')) {
+      if (LocalDb.normalizarTelegramId(a['descuenta_a']) == tid &&
+          (a['en_pendiente'] as num?)?.toInt() == 1) {
+        adel.add(a);
+      }
+    }
+    final opsDia = <(String, double)>[];
+    final pr = await preciosVigentes();
+    for (final op in await LocalDb.instance.pendingOps()) {
+      if (op['telegram_id'] != tid) continue;
+      try {
+        final payload =
+            jsonDecode(op['payload'] as String) as Map<String, dynamic>;
+        final fecha =
+            (payload['fecha'] as String?)?.substring(0, 10) ?? '';
+        opsDia.add((fecha, montoEfectivoOp(op, pr)));
+      } catch (_) {}
+    }
+    final pendUsd = await pendienteEntregaUsd(tid);
     double ef = 0, tr = 0;
     if (hist.isNotEmpty) {
       final hoy = hist.firstWhere(
@@ -92,6 +129,11 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
         _historial = hist;
         _pendMens = pm;
         _pendDiarios = pd;
+        _pendServicios = ps;
+        _pendSuplementos = sup;
+        _pendAdelantos = adel;
+        _pendOps = opsDia;
+        _pendienteUsd = pendUsd;
         _cobradoAyer = cobradoAyer;
         _semanaAnt = semanaAnt;
         _vencimientos = vencimientos;
@@ -452,6 +494,8 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
   }
 
   /// Pendiente agrupado por día (para el detalle).
+  /// 1.15-turnos (#9): antes solo sumaba mensuales y diarios; ahora
+  /// cubre servicios, suplementos, adelantos (restan) y ops en cola.
   Map<String, double> get _pendPorDia {
     final m = <String, double>{};
     void suma(String? f, double v) {
@@ -464,6 +508,22 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
     }
     for (final d in _pendDiarios) {
       suma(d['fecha'] as String?, (d['total'] as num?)?.toDouble() ?? 0);
+    }
+    for (final v in _pendServicios) {
+      suma(
+          v['fecha'] as String?,
+          ((v['precio_unitario'] as num?)?.toDouble() ?? 0) *
+              ((v['cantidad'] as num?)?.toDouble() ?? 0));
+    }
+    for (final v in _pendSuplementos) {
+      suma(v['fecha'] as String?, totalVentaCup(v));
+    }
+    for (final a in _pendAdelantos) {
+      suma(a['fecha'] as String?,
+          -((a['monto'] as num?)?.toDouble() ?? 0));
+    }
+    for (final o in _pendOps) {
+      suma(o.$1, o.$2);
     }
     final dias = m.keys.toList()..sort((a, b) => b.compareTo(a));
     return {for (final d in dias) d: m[d]!};
@@ -586,7 +646,7 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
                           const SizedBox(
                               height: AppEspacio.sm),
                           Text(
-                              'Hoy cobraste ${fmtMonto(_cobrado)} CUP en efectivo '
+                              'Hoy cobraste ${fmtMonto(_efectivoHoy)} CUP en efectivo '
                               '(+ ${fmtMonto(_transferHoy)} por transferencia, que va directo).',
                               style: AppTexto.cuerpo),
                           const SizedBox(height: 4),
@@ -595,6 +655,14 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
                             style: AppTexto.subtitulo.copyWith(
                                 color: AppColores.naranja),
                           ),
+                          if (_pendienteUsd > 0) ...[
+                            const SizedBox(height: 4),
+                            Text(
+                              'Total USD a entregar: ${_pendienteUsd.toStringAsFixed(2)} USD',
+                              style: AppTexto.subtitulo.copyWith(
+                                  color: AppColores.naranja),
+                            ),
+                          ],
                         ],
                       ),
                     ),
@@ -791,7 +859,9 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
                                   color: AppColores.exito),
                               label: Text(
                                   'Turno cerrado (${_turnoActual().toLowerCase()})'),
-                              onPressed: _cierreTurno,
+                              // 1.15-turnos (#3): un turno cerrado no
+                              // se vuelve a cerrar (botón deshabilitado).
+                              onPressed: null,
                             )
                           : ElevatedButton.icon(
                               icon:

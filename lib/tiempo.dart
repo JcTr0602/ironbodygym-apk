@@ -36,9 +36,12 @@ String fechaAbsoluta(DateTime? fecha) {
 }
 
 /// Parsea un ISO string de forma segura (null si falla).
+/// 1.15 (S1.4): sin `.toLocal()`: con offset explícito el parseo ya
+/// es el instante correcto; convertir a hora local del dispositivo
+/// desplazaba el instante cuando la zona del teléfono no era Habana.
 DateTime? parseFecha(String? iso) {
   if (iso == null || iso.isEmpty) return null;
-  return DateTime.tryParse(iso)?.toLocal();
+  return DateTime.tryParse(iso);
 }
 
 // ---------------------------------------------------------------------------
@@ -139,13 +142,28 @@ String fmtFechaHabana(DateTime dt) {
 /// coherente con la fecha/franja calculadas en hora de La Habana
 /// (auditoría ChatGPT #13).
 ///
-/// v1.3.4 (Argón, veredicto final): el offset se evalúa contra el UTC real
-/// actual (no contra habana.toUtc(), que con la bandera UTC falsa evaluaba
-/// el corte DST con la hora habanera creyendo que era UTC); además se quita
-/// cualquier 'Z' residual antes de añadir el offset explícito.
+/// 1.15 (S1.3): el offset se evalúa sobre EL PROPIO INSTANTE, no sobre
+/// el ahora. La entrada es un wall-clock de La Habana (como devuelve
+/// [ahoraHabana()]). Convergencia en una iteración: se reinterpretan
+/// sus campos como UTC, se evalúa [offsetHabana], y se re-evalúa una
+/// vez restando ese offset (instante estimado = campos − offset).
+/// Una iteración converge salvo la hora ambigua 01:00–02:00 del
+/// fall-back (1-nov), donde la segunda evaluación prefiere la
+/// segunda ocurrencia (hora estándar, -05:00) y así se documenta.
+/// NO se cambia la norma DST de [offsetHabana] en este fix.
+/// Se mantienen split('.') / quitar 'Z' / formato.
 String isoHabana(DateTime habana) {
-  final utcReal = DateTime.now().toUtc();
-  final off = offsetHabana(utcReal);
+  final comoUtc = DateTime.utc(
+    habana.year,
+    habana.month,
+    habana.day,
+    habana.hour,
+    habana.minute,
+    habana.second,
+    habana.millisecond,
+    habana.microsecond,
+  );
+  final off = offsetHabana(comoUtc.subtract(offsetHabana(comoUtc)));
   final sign = off.isNegative ? '-' : '+';
   final h = off.inHours.abs().toString().padLeft(2, '0');
   final m = (off.inMinutes.abs() % 60).toString().padLeft(2, '0');

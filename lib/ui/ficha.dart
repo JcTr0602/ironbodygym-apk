@@ -11,14 +11,12 @@ import 'package:flutter/services.dart';
 import 'package:flutter_contacts/flutter_contacts.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package:sqflite/sqflite.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:uuid/uuid.dart';
 
 import '../auth.dart';
 import '../permisos_entrenador.dart';
-import '../app_log.dart';
 import '../precio_cobro.dart';
 import '../tarifa_especial.dart';
 import '../tiempo.dart';
@@ -28,6 +26,7 @@ import '../localdb.dart';
 import '../negocio.dart';
 import '../servicios.dart' as servicios_svc;
 import '../sync.dart';
+import '../cliente_protegido.dart';
 import '../acceso_app_cache.dart';
 import 'componentes.dart';
 import 'dialogo_pago.dart';
@@ -277,24 +276,27 @@ class _FichaScreenState extends State<FichaScreen> {
       // Llamada RPC puntual (no dispara el pipeline de sync).
       final res = await Supabase.instance.client
           .rpc('obtener_estado_cliente', params: {'p_id': widget.clienteId});
+      var omitidoPorPendientes = false;
       if (res != null) {
         // Actualizar solo este cliente en el mirror local.
         final data = res is String ? jsonDecode(res) : Map<String, dynamic>.from(res as Map);
         final dataJson = jsonEncode(data['data'] ?? data);
-        final db = await LocalDb.instance.db;
-        await db.insert(
-          'clientes',
-          {
-            'id': widget.clienteId,
-            'data': dataJson,
-            'sync_seq': (data['sync_seq'] as int?) ?? 0,
-          },
-          conflictAlgorithm: ConflictAlgorithm.replace,
+        // Argón #7B-1: nada de insert con replace crudo (reseteaba
+        // cuenta_casa a sus defaults) ni de pisar el espejo con
+        // cambios locales pendientes sin sincronizar.
+        final refrescado = await LocalDb.instance.refrescarMirrorCliente(
+          widget.clienteId,
+          dataJson,
+          (data['sync_seq'] as int?) ?? 0,
         );
-        // Actualizar FTS también.
-        try {
-          await LocalDb.instance.actualizarFtsCliente(widget.clienteId, dataJson, null);
-        } catch (_) {}
+        if (refrescado) {
+          // Actualizar FTS también.
+          try {
+            await LocalDb.instance.actualizarFtsCliente(widget.clienteId, dataJson, null);
+          } catch (_) {}
+        } else {
+          omitidoPorPendientes = true;
+        }
       }
       await _cargar();
       if (!mounted) return;
@@ -314,7 +316,15 @@ class _FichaScreenState extends State<FichaScreen> {
           }
         }
       }
-      if (cambios.isEmpty) {
+      if (omitidoPorPendientes) {
+        messenger.showSnackBar(
+          const SnackBar(
+            content: Text(
+                'Hay cambios locales pendientes: no se pisó el espejo'),
+            duration: Duration(seconds: 3),
+          ),
+        );
+      } else if (cambios.isEmpty) {
         messenger.showSnackBar(
           const SnackBar(
             content: Text('Datos al día con el servidor'),
@@ -393,7 +403,8 @@ class _FichaScreenState extends State<FichaScreen> {
         ],
       ),
     );
-    ctrl.dispose();
+    // Argón #7B-6: sin dispose tras showDialog (el TextField sigue
+    // montado durante la animación de cierre; el GC recoge el local).
     if (motivo == null || !mounted) return;
     await LocalDb.instance.queueOp(
       opUuid: const Uuid().v4(),
@@ -416,6 +427,61 @@ class _FichaScreenState extends State<FichaScreen> {
         content: Text(activar
             ? 'Cuenta a la Casa activada (se sincronizará)'
             : 'Cuenta a la Casa retirada (se sincronizará)')));
+    SyncEngine.instance.push();
+    _cargar();
+  }
+
+  /// Cliente protegido (2026-10-26): interruptor del Panel del
+  /// dueño. La op la acepta solo el dueño en el servidor; aquí el
+  /// panel ya es solo dueño (ver build) y el handler revalida.
+  /// Reflejo optimista en el espejo para que la ficha y las listas
+  /// lo muestren sin esperar el pull.
+  Future<void> _cambiarProtegido(bool activar) async {
+    final c = _c;
+    if (c == null || !AuthService().isOwner) return;
+    final nombre = '${c['nombre'] ?? ''}';
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => DialogoApp(
+        titulo: activar
+            ? 'Marcar cliente protegido'
+            : 'Quitar protección',
+        iconoTitulo: Icons.lock,
+        contenido: Text(activar
+            ? '$nombre solo mostrará foto y nombre a los '
+                'entrenadores, y solo tú podrás modificarlo.'
+            : '$nombre volverá a ser un cliente normal para los '
+                'entrenadores.'),
+        acciones: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text(activar ? 'Proteger' : 'Quitar'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    await LocalDb.instance.queueOp(
+      opUuid: const Uuid().v4(),
+      tipo: 'set_cliente_protegido',
+      payload: {
+        'cliente_id': widget.clienteId,
+        'protegido': activar ? 1 : 0,
+      },
+    );
+    await LocalDb.instance.updateMirrorProtegido(
+      widget.clienteId,
+      activar: activar,
+    );
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(activar
+            ? 'Cliente protegido (se sincronizará)'
+            : 'Protección retirada (se sincronizará)')));
     SyncEngine.instance.push();
     _cargar();
   }
@@ -881,6 +947,40 @@ class _FichaScreenState extends State<FichaScreen> {
           const SnackBar(content: Text('Sin cambios')));
       return;
     }
+    // Argón #7B-3: sin duplicados de carnet ni teléfono de otro
+    // cliente. El carnet solo bloquea con 11 dígitos (con 6, dos
+    // personas nacidas el mismo día comparten AAMMDD); el teléfono
+    // siempre bloquea. posiblesDuplicados mira solo activos, igual
+    // que en inscribir.
+    if (nuevoTel != (orig['telefono'] as String?) ||
+        nuevoCar != (orig['carnet'] as String?)) {
+      final dups = await posiblesDuplicados(
+        nombre: nuevoNombre,
+        telefono: nuevoTel,
+        carnet: nuevoCar,
+      );
+      final carnetDigitos =
+          (nuevoCar ?? '').replaceAll(RegExp(r'[^0-9]'), '');
+      final telDigitos =
+          (nuevoTel ?? '').replaceAll(RegExp(r'[^0-9]'), '');
+      // Panel Luna sobre #7B-3: el bloqueo se decide por los datos
+      // crudos (motivoBloqueoEdicion), no por el motivo único de
+      // posiblesDuplicados, que prioriza carnet y enmascaraba el
+      // teléfono cuando ambos coincidían.
+      final bloqueos = dups
+          .map((d) => MapEntry(d,
+              motivoBloqueoEdicion(d, widget.clienteId, carnetDigitos, telDigitos)))
+          .where((e) => e.value != null)
+          .toList();
+      if (bloqueos.isNotEmpty && mounted) {
+        final c0 = bloqueos.first.key;
+        final mot = bloqueos.first.value!;
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text(
+                'El $mot ya pertenece a "${c0['nombre']}"')));
+        return;
+      }
+    }
     final payload = payloadBasico(
       clienteId: widget.clienteId,
       nombre: nuevoNombre,
@@ -941,11 +1041,21 @@ class _FichaScreenState extends State<FichaScreen> {
               const SizedBox(height: 12),
               InkWell(
                 onTap: () async {
+                  // Argón #7B-5: initialDate fuera de [first, last]
+                  // rompe el diálogo; hoy en hora Habana y límites
+                  // con holgura.
+                  final hoyHab = ahoraHabana();
+                  final minDate = DateTime(2020);
+                  final maxDate = DateTime(hoyHab.year + 10, 12, 31);
+                  var initDate = pagadoHasta ??
+                      DateTime(hoyHab.year, hoyHab.month, hoyHab.day);
+                  if (initDate.isBefore(minDate)) initDate = minDate;
+                  if (initDate.isAfter(maxDate)) initDate = maxDate;
                   final picked = await showDatePicker(
                     context: ctx,
-                    initialDate: pagadoHasta ?? DateTime.now(),
-                    firstDate: DateTime(2020),
-                    lastDate: DateTime(2030),
+                    initialDate: initDate,
+                    firstDate: minDate,
+                    lastDate: maxDate,
                     helpText: 'Pagado hasta',
                   );
                   if (picked != null) {
@@ -1065,6 +1175,10 @@ class _FichaScreenState extends State<FichaScreen> {
         'notas': ctrl.text.trim().isEmpty ? null : ctrl.text.trim(),
       },
     );
+    // Argón #7B-2: reflejo optimista o _cargar() relee la nota vieja.
+    await LocalDb.instance.updateMirrorBasico(widget.clienteId, {
+      'notas': ctrl.text.trim().isEmpty ? null : ctrl.text.trim(),
+    });
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Nota guardada (se sincronizará)')));
@@ -1094,7 +1208,7 @@ class _FichaScreenState extends State<FichaScreen> {
       if (d.startsWith('53') && d.length > 8) {
         d = d.substring(2);
       }
-      if (d.length == 8 && d.startsWith('5')) {
+      if (d.length == 8 && validarTelefono(d)) {
         return d;
       }
     }
@@ -1348,6 +1462,10 @@ class _FichaScreenState extends State<FichaScreen> {
       tipo: 'cambiar_estado',
       payload: {'cliente_id': widget.clienteId, 'estado': 'inactivo'},
     );
+    // Argón #7B-2: reflejo optimista o el cliente sigue activo en
+    // las listas locales hasta sincronizar.
+    await LocalDb.instance
+        .updateMirrorBasico(widget.clienteId, {'estado': 'inactivo'});
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Enviado a la papelera')));
@@ -1395,6 +1513,9 @@ class _FichaScreenState extends State<FichaScreen> {
         'estado': esCongelado ? 'activo' : 'congelado'
       },
     );
+    // Argón #7B-2: reflejo optimista o _cargar() relee el estado viejo.
+    await LocalDb.instance.updateMirrorBasico(widget.clienteId,
+        {'estado': esCongelado ? 'activo' : 'congelado'});
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
         content: Text(esCongelado
@@ -1640,6 +1761,8 @@ class _FichaScreenState extends State<FichaScreen> {
     // v1.7.0: Cuenta a la Casa (distintivo dorado; el predicado
     // vive en negocio.dart/LocalDb).
     final esCasa = c != null && esCuentaCasa(c);
+    // Cliente protegido (2026-10-26): marca del espejo local.
+    final protegido = c != null && clienteEstaProtegido(c);
     // Bloque 1: marco de la foto en color de estado (3 dp): verde al día,
     // ámbar por vencer, rojo vencido, dorado Cuenta a la Casa.
     final colorMarco = esCasa
@@ -1650,6 +1773,54 @@ class _FichaScreenState extends State<FichaScreen> {
                 ? AppColores.alerta
                 : AppColores.exito;
     final nombre = c == null ? '…' : '${c['nombre']}';
+    // Cliente protegido (2026-10-26, diseño Argón): el entrenador
+    // solo ve foto y nombre. Sin datos, sin botones, sin panel y
+    // sin botón Cobrar abajo. Ver la foto en grande sí está
+    // permitido: ver no es modificar.
+    if (c != null && esVistaProtegida(c)) {
+      return Scaffold(
+        appBar: AppBar(title: Text(nombre)),
+        body: Column(
+          children: [
+            const SyncBanner(),
+            Container(
+              width: double.infinity,
+              color: AppColores.naranja.withValues(alpha: 0.12),
+              padding: const EdgeInsets.all(AppEspacio.md),
+              child: const Row(
+                children: [
+                  Icon(Icons.lock, color: AppColores.naranja),
+                  SizedBox(width: AppEspacio.sm),
+                  Expanded(
+                    child: Text(bannerClienteProtegido,
+                        style: AppTexto.subtitulo),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: AppEspacio.lg),
+            GestureDetector(
+              onTap: _foto != null ? _verFotoGrande : null,
+              child: _foto != null
+                  ? ClipRRect(
+                      borderRadius: BorderRadius.circular(80),
+                      child: Image.file(_foto!,
+                          width: 160, height: 160, fit: BoxFit.cover),
+                    )
+                  : CircleAvatar(
+                      radius: 80,
+                      backgroundColor: AppColores.naranja
+                          .withValues(alpha: 0.15),
+                      child: const Icon(Icons.person,
+                          size: 80, color: AppColores.naranja),
+                    ),
+            ),
+            const SizedBox(height: AppEspacio.md),
+            Text(nombre, style: AppTexto.titulo),
+          ],
+        ),
+      );
+    }
     return Scaffold(
       appBar: AppBar(
         title: Text(nombre),
@@ -2229,6 +2400,28 @@ class _FichaScreenState extends State<FichaScreen> {
                                 onTap: () =>
                                     _cambiarCuentaCasa(!esCasa),
                               ),
+                              // Cliente protegido (2026-10-26): solo
+                              // el dueño ve este panel; el handler
+                              // revalida y el servidor solo acepta
+                              // la op del dueño.
+                              ListTile(
+                                dense: true,
+                                contentPadding: EdgeInsets.zero,
+                                leading: const Icon(
+                                    Icons.lock,
+                                    color: AppColores.naranja,
+                                    size: 20),
+                                title: Text(
+                                    protegido
+                                        ? 'Quitar Cliente protegido'
+                                        : 'Marcar Cliente protegido',
+                                    style: AppTexto.cuerpo),
+                                subtitle: const Text(
+                                    'Solo foto y nombre para entrenadores',
+                                    style: AppTexto.secundario),
+                                onTap: () =>
+                                    _cambiarProtegido(!protegido),
+                              ),
                               ListTile(
                                 dense: true,
                                 contentPadding: EdgeInsets.zero,
@@ -2754,9 +2947,11 @@ class _FichaScreenState extends State<FichaScreen> {
         'subtitulo':
             '${fmtFecha(p['fecha'] as String?)} · ${p['periodo'] ?? 'mensual'}\n'
             '${textoCobradoPor(p['registrado_por'])}',
-        'icono': metodo == 'transferencia'
-            ? Icons.smartphone
-            : Icons.payments,
+        'icono': metodo == 'cortesia'
+            ? Icons.card_giftcard
+            : metodo == 'transferencia'
+                ? Icons.smartphone
+                : Icons.payments,
         'color': metodo == 'transferencia'
             ? AppColores.info
             : AppColores.exito,
@@ -2803,7 +2998,9 @@ class _FichaScreenState extends State<FichaScreen> {
     DateTime? fechaDe(Map<String, dynamic> e) {
       final f = '${e['fecha'] ?? ''}';
       if (f.length < 10) return null;
-      return DateTime.tryParse(f.substring(0, 10));
+      // Argón #7B-7: no truncar la hora o los movimientos del mismo
+      // día pierden su orden intradía.
+      return DateTime.tryParse(f) ?? DateTime.tryParse(f.substring(0, 10));
     }
 
     entradas.sort((a, b) {
@@ -2898,14 +3095,19 @@ class _FichaScreenState extends State<FichaScreen> {
     );
   }
 
-  Widget _resumen360() {    final total = _pagos.fold<double>(
+  Widget _resumen360() {
+    // Argón #7B-7: la cortesía (regalo, monto 0) no es un pago ni
+    // un método preferido.
+    final pagosReales =
+        _pagos.where((p) => p['metodo'] != 'cortesia').toList();
+    final total = pagosReales.fold<double>(
         0,
         (s, p) =>
             s +
             ((p['monto'] as num?)?.toDouble() ??
                 0));
     final metodos = <String, int>{};
-    for (final p in _pagos) {
+    for (final p in pagosReales) {
       final m = (p['metodo'] as String?) ?? 'efectivo';
       metodos[m] = (metodos[m] ?? 0) + 1;
     }
@@ -2927,7 +3129,7 @@ class _FichaScreenState extends State<FichaScreen> {
           children: [
             Column(
               children: [
-                Text('${_pagos.length}',
+                Text('${pagosReales.length}',
                     style: AppTexto.displayPequeno
                         .copyWith(
                             color:

@@ -15,9 +15,45 @@ import '../negocio.dart';
 import '../auth.dart';
 import '../localdb.dart';
 import '../sync.dart';
+import '../cliente_protegido.dart';
 import 'componentes.dart';
 import 'diseno.dart';
 import 'widgets.dart';
+
+/// Totales del historial excluyendo ventas de clientes protegidos
+/// (Argón #9, ALTO). La tarjeta ya oculta fecha y total de la venta
+/// protegida, pero _totales() sumaba todas las filas: con pocas
+/// ventas, el total superior revelaba el monto oculto. Para el dueño
+/// (esDueno: true) no se excluye nada. El conteo de ventas no se
+/// toca (no revela montos). PURO.
+({double cup, double usd}) totalesHistorialVentas(
+    List<Map<String, dynamic>> ventas,
+    Map<int, Map<String, dynamic>> clientesPorId, {
+    bool esDueno = false,
+  }) {
+  var cup = 0.0;
+  var usd = 0.0;
+  for (final v in ventas) {
+    final cidVenta = (v['cliente_id'] as num?)?.toInt() ??
+        (v['fiado_cliente_id'] as num?)?.toInt();
+    final clienteVenta =
+        cidVenta != null ? clientesPorId[cidVenta] : null;
+    if (clienteVenta != null &&
+        esVistaProtegida(clienteVenta, esDueno: esDueno)) {
+      continue;
+    }
+    final precio = (v['precio'] as num?)?.toDouble() ?? 0;
+    final cant = (v['cantidad'] as num?)?.toInt() ?? 0;
+    final total =
+        (v['total'] as num?)?.toDouble() ?? precio * cant;
+    if ((v['moneda'] as String?) == 'USD') {
+      usd += total;
+    } else {
+      cup += total;
+    }
+  }
+  return (cup: cup, usd: usd);
+}
 
 class HistorialVentasScreen extends StatefulWidget {
   /// v1.2.1: si es true, filtra solo las ventas del entrenador actual.
@@ -33,6 +69,9 @@ class _HistorialVentasScreenState
     extends State<HistorialVentasScreen> {
   List<Map<String, dynamic>> _ventas = [];
   Map<int, Map<String, dynamic>> _productos = {};
+  // Cliente protegido (2026-10-26, A5): mapa para resolver el
+  // candado del comprador en cada fila (el espejo ya lo trae).
+  Map<int, Map<String, dynamic>> _clientes = {};
   bool _cargando = true;
 
   @override
@@ -61,12 +100,23 @@ class _HistorialVentasScreenState
       final id = (p['id'] as num?)?.toInt();
       if (id != null) mapa[id] = p;
     }
+    // Cliente protegido (2026-10-26, A5): solo la marca, para el
+    // candado de la fila. El entrenador ya ve estos nombres en
+    // listas; no se expone nada nuevo.
+    final todosClientes =
+        await LocalDb.instance.allMirror('clientes');
+    final mapaClientes = <int, Map<String, dynamic>>{};
+    for (final c in todosClientes) {
+      final id = (c['id'] as num?)?.toInt();
+      if (id != null) mapaClientes[id] = c;
+    }
     ventas.sort((a, b) =>
         '${b['fecha'] ?? ''}'.compareTo('${a['fecha'] ?? ''}'));
     if (!mounted) return;
     setState(() {
       _ventas = ventas;
       _productos = mapa;
+      _clientes = mapaClientes;
       _cargando = false;
     });
   }
@@ -112,18 +162,12 @@ class _HistorialVentasScreenState
   }
 
   Widget _totales() {
-    double cup = 0, usd = 0;
-    for (final v in _ventas) {
-      final precio = (v['precio'] as num?)?.toDouble() ?? 0;
-      final cant = (v['cantidad'] as num?)?.toInt() ?? 0;
-      final total =
-          (v['total'] as num?)?.toDouble() ?? precio * cant;
-      if ((v['moneda'] as String?) == 'USD') {
-        usd += total;
-      } else {
-        cup += total;
-      }
-    }
+    // Argón #9 (ALTO): los totales excluían nada y revelaban el
+    // monto de ventas protegidas que la tarjeta oculta con candado.
+    final t = totalesHistorialVentas(_ventas, _clientes,
+        esDueno: AuthService().isOwner);
+    final cup = t.cup;
+    final usd = t.usd;
     return Padding(
       padding: const EdgeInsets.fromLTRB(
           AppEspacio.md, AppEspacio.sm, AppEspacio.md, 0),
@@ -191,6 +235,15 @@ class _HistorialVentasScreenState
     final vendedor =
         '${v['registrado_por_nombre'] ?? v['registrado_por'] ?? '?'}';
     final comprador = '${v['comprador_nombre'] ?? '?'}';
+    // Cliente protegido (2026-10-26, A5): candado junto al nombre
+    // del comprador. Anular ya es solo dueño (v1.2.1), así que no
+    // hay botón que ocultar en la fila.
+    final cidVenta = (v['cliente_id'] as num?)?.toInt() ??
+        (v['fiado_cliente_id'] as num?)?.toInt();
+    final clienteVenta =
+        cidVenta != null ? _clientes[cidVenta] : null;
+    final ventaProtegida =
+        clienteVenta != null && esVistaProtegida(clienteVenta);
     final fecha = '${v['fecha'] ?? ''}'.length >= 10
         ? '${v['fecha']}'.substring(0, 10)
         : '${v['fecha'] ?? ''}';
@@ -229,7 +282,7 @@ class _HistorialVentasScreenState
                       texto: 'Inscripción + venta',
                       color: AppColores.naranja,
                       icono: Icons.person_add),
-                if (difiere)
+                if (difiere && !ventaProtegida)
                   const ChipEstado(
                       texto: 'Precio diferente',
                       color: AppColores.alerta,
@@ -245,11 +298,15 @@ class _HistorialVentasScreenState
               ],
             ),
             const SizedBox(height: 4),
-            Text(
-              lineaTotal,
-              style: AppTexto.cuerpo,
-            ),
-            if (nota.isNotEmpty)
+            // Cliente protegido (2026-10-26, Protegido 2 residual
+            // #9): la tarjeta no muestra fecha ni total de la venta
+            // (quedan producto + comprador + candado).
+            if (!ventaProtegida)
+              Text(
+                lineaTotal,
+                style: AppTexto.cuerpo,
+              ),
+            if (nota.isNotEmpty && !ventaProtegida)
               Padding(
                 padding: const EdgeInsets.only(top: 2),
                 child: Row(
@@ -268,10 +325,21 @@ class _HistorialVentasScreenState
                 ),
               ),
             const SizedBox(height: 4),
-            Text(
-              '$fecha · $vendedor → $comprador'
-              '${conPromo ? ' · +1 mes gratis' : ''}',
-              style: AppTexto.secundario,
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    ventaProtegida
+                        ? '$vendedor → $comprador'
+                        : '$fecha · $vendedor → $comprador'
+                            '${conPromo ? ' · +1 mes gratis' : ''}',
+                    style: AppTexto.secundario,
+                  ),
+                ),
+                if (ventaProtegida)
+                  const Icon(Icons.lock,
+                      size: 16, color: AppColores.naranja),
+              ],
             ),
           ],
         ),
@@ -337,7 +405,23 @@ class _HistorialVentasScreenState
               const EncabezadoSeccion(titulo: 'Cliente'),
               fila('Nombre',
                   '${v['comprador_nombre'] ?? cliente?['nombre'] ?? '?'}'),
-              if (cliente != null) ...[
+              // Cliente protegido (2026-10-26, A5): el entrenador
+              // NO ve teléfono, estado ni vencimiento del comprador
+              // protegido; solo el nombre y el candado. El resto de
+              // la venta (producto, precio) no es personal.
+              if (cliente != null && esVistaProtegida(cliente))
+                const Row(
+                  children: [
+                    Icon(Icons.lock,
+                        size: 16, color: AppColores.naranja),
+                    SizedBox(width: 4),
+                    Expanded(
+                      child: Text(bannerClienteProtegido,
+                          style: AppTexto.secundario),
+                    ),
+                  ],
+                )
+              else if (cliente != null) ...[
                 fila('Teléfono',
                     '${cliente['telefono'] ?? '—'}'),
                 fila('Estado',

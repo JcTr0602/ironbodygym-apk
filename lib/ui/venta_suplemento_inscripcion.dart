@@ -14,7 +14,6 @@ import 'package:flutter/material.dart';
 import 'package:uuid/uuid.dart';
 
 import '../negocio.dart';
-import '../auth.dart';
 import '../localdb.dart';
 import '../sync.dart';
 import '../tiempo.dart';
@@ -176,77 +175,62 @@ class _VentaSuplementoInscripcionScreenState
       // v1.4.0 (Argón §8): fecha de negocio en hora de La Habana.
       final hoy = hoyHabanaIso();
       final telefono = _telefono.text.trim();
-      await LocalDb.instance.queueOp(
-        opUuid: opUuid,
-        tipo: 'inscripcion_venta_suplemento',
-        payload: payloadInscripcionVentaSuplemento(
-          nombre: nombre,
-          telefono: telefono,
-          sexo: _sexo,
-          carnet: carnet,
-          suplementoId: widget.suplemento['id'],
-          cantidad: widget.cantidad,
-          precio: widget.precio,
-          moneda: widget.moneda,
-          precioOficial: widget.precioOficial,
-          notaPrecio: widget.notaPrecio,
-          usdTasa: widget.usdTasa,
-          fecha: hoy,
-          metodoPago: _metodo,
-        ),
-      );
-      // Actualización optimista: la venta aparece en el historial
-      // sin esperar al sync. Id temporal negativo; se elimina cuando
-      // la op queda aplicada (limpiarOptimista en el push).
-      final auth = AuthService();
-      final tempId = -DateTime.now().millisecondsSinceEpoch;
-      await LocalDb.instance.upsertMirror(
-        'ventas_suplementos',
-        tempId,
-        {
-          'id': tempId,
-          'op_uuid': opUuid,
-          'optimista': 1,
-          'suplemento_id': widget.suplemento['id'],
-          'cantidad': widget.cantidad,
-          'precio': widget.precio,
-          'moneda': widget.moneda,
-          if (widget.usdTasa != null && widget.usdTasa! > 0)
-            'usd_tasa': widget.usdTasa,
-          'total': _total,
-          'comprador_tipo': 'cliente',
-          'comprador_nombre': nombre,
-          'cliente_id': null,
-          'registrado_por': auth.telegramId,
-          'registrado_por_nombre': auth.displayName,
-          'fecha': hoy,
-          'via_inscripcion': 1,
-          'promo_mes': _promoActiva ? 1 : 0,
-          'metodo': _metodo,
-          // Regla de Jc: el efectivo (CUP o USD) del entrenador
-          // queda pendiente; lo del dueño queda entregado. La
-          // transferencia va directo a la cuenta de Jc: nunca
-          // queda pendiente, la registre quien la registre.
-          'entregado': entregadoOptimistaInscripcionVenta(
-              esDueno: auth.isOwner, metodoPago: _metodo),
-        },
-        0,
-      );
-      // Gemini: reducción optimista de stock local (evita sobreventa offline).
-      // La tabla espejo usa columna data (JSON); no hay columna stock directa.
-      final db = await LocalDb.instance.db;
-      final sid2 = widget.suplemento['id'] as int?;
-      if (sid2 != null) {
-        final rows = await db.query('suplementos',
-            columns: ['data'], where: 'id = ?', whereArgs: [sid2]);
-        if (rows.isNotEmpty) {
+      // Argón #9 (ALTO): verificación de stock + descuento + encolado
+      // en UNA sola transacción, igual que registrarVentaSuplemento.
+      // Antes eran tres pasos sueltos sin validar stock: una venta
+      // con cantidad > stock se encolaba igual y el stock quedaba
+      // clampado a 0. Y NO se inserta fila optimista en
+      // ventas_suplementos: ese espejo es puro (lo puebla el pull);
+      // las lectoras de caja (ventasSuplementosCup/Usd) no filtraban
+      // optimista == 1, así que la fila optimista contaba doble
+      // mientras la op seguía en cola. La venta aparece en el
+      // historial al sincronizar, igual que una venta normal.
+      // (limpiarOptimista sigue limpiando filas optimistas viejas.)
+      try {
+        final sid = (widget.suplemento['id'] as num?)?.toInt();
+        if (sid == null) throw Exception('Suplemento sin identificador');
+        final db = await LocalDb.instance.db;
+        await db.transaction((txn) async {
+          final rows = await txn.query('suplementos',
+              columns: ['data'], where: 'id = ?', whereArgs: [sid]);
+          if (rows.isEmpty) throw Exception('Suplemento no encontrado');
           final data =
               jsonDecode(rows.first['data'] as String) as Map<String, dynamic>;
           final stockActual = (data['stock'] as num?)?.toInt() ?? 0;
-          data['stock'] = (stockActual - widget.cantidad).clamp(0, 999999);
-          await db.update('suplementos', {'data': jsonEncode(data)},
-              where: 'id = ?', whereArgs: [sid2]);
+          if (widget.cantidad > stockActual) {
+            throw Exception(
+                'Stock insuficiente (quedan $stockActual)');
+          }
+          data['stock'] = stockActual - widget.cantidad;
+          await txn.update('suplementos', {'data': jsonEncode(data)},
+              where: 'id = ?', whereArgs: [sid]);
+          await LocalDb.instance.queueOp(
+            opUuid: opUuid,
+            tipo: 'inscripcion_venta_suplemento',
+            payload: payloadInscripcionVentaSuplemento(
+              nombre: nombre,
+              telefono: telefono,
+              sexo: _sexo,
+              carnet: carnet,
+              suplementoId: widget.suplemento['id'],
+              cantidad: widget.cantidad,
+              precio: widget.precio,
+              moneda: widget.moneda,
+              precioOficial: widget.precioOficial,
+              notaPrecio: widget.notaPrecio,
+              usdTasa: widget.usdTasa,
+              fecha: hoy,
+              metodoPago: _metodo,
+            ),
+            txn: txn,
+          );
+        });
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('No se registró: $e')));
         }
+        return;
       }
       unawaited(SyncEngine.instance.push());
       if (mounted) Navigator.pop(context, true);

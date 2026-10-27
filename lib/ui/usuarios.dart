@@ -4,11 +4,9 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:uuid/uuid.dart';
 
 import '../auth.dart';
-import '../config.dart';
 import '../fotos.dart';
 import '../localdb.dart';
 import '../negocio.dart';
@@ -28,15 +26,45 @@ class UsuariosScreen extends StatefulWidget {
 
 /// Validación para crear un usuario APK (1.14, M6.9): el nombre
 /// se recorta (un nombre de solo espacios no vale) y la
-/// contraseña exige mínimo 6 caracteres, sin recortar (los
-/// espacios cuentan). Devuelve el mensaje de error o null si
-/// vale. La pantalla encola 'admin_usuario' solo si vale.
+/// contraseña exige mínimo 6 caracteres. La función valida la
+/// cadena que recibe tal cual: el llamador debe pasarla ya
+/// normalizada (ver normalizarPasswordNuevoUsuario y P6 1.15).
+/// Devuelve el mensaje de error o null si vale. La pantalla
+/// encola 'admin_usuario' solo si vale.
 String? validarNuevoUsuarioApk(String nombre, String password) {
   if (nombre.trim().isEmpty || password.length < 6) {
     return 'Nombre vacío o contraseña muy corta (mín. 6)';
   }
   return null;
 }
+
+/// 1.15 P6: la contraseña de un usuario nuevo se normaliza con
+/// trim ANTES de validar, encolar y compartir: una clave de 6
+/// caracteres que tras trim queda en menos debe rechazarse, y la
+/// encolada/compartida debe ser exactamente la validada (antes
+/// se validaba sin recortar pero se encolaba el texto crudo).
+String normalizarPasswordNuevoUsuario(String crudo) => crudo.trim();
+
+/// 1.15 P2: guard de acciones de administración de usuarios.
+/// Solo el dueño ejecuta crear/administrar/foto (patrón
+/// PanelPermisos: AuthService().isOwner). BLOQUEA la acción,
+/// no solo oculta el botón: cada método de acción lo comprueba
+/// antes de cualquier diálogo o escritura.
+bool puedeEjecutarAccionesUsuarios(bool esDueno) => esDueno;
+
+/// 1.15 P2: payload de la op `admin_usuario` para cambiar la foto
+/// de un usuario. CONTRATO con el servidor: accion='cambiar_foto',
+/// payload {username, foto_base64} con el base64 de los bytes
+/// elegidos (comprimidos por el picker). La app NUNCA sube la
+/// foto directa a Storage: la encola y el servidor la sube
+/// tras validar que quien la pide es el dueño.
+Map<String, dynamic> payloadCambiarFotoUsuario(
+        {required String username, required List<int> bytes}) =>
+    {
+      'accion': 'cambiar_foto',
+      'username': username,
+      'foto_base64': base64Encode(bytes),
+    };
 
 class _UsuariosScreenState extends State<UsuariosScreen> {
   List<Map<String, dynamic>> _usuarios = [];
@@ -75,6 +103,14 @@ class _UsuariosScreenState extends State<UsuariosScreen> {
   Future<void> _accion(
       String username, String accion, String titulo,
       {String? rol}) async {
+    // 1.15 P2: guard de acción (no solo de botón): sin dueño,
+    // nada se encola ni se dialoga.
+    if (!puedeEjecutarAccionesUsuarios(AuthService().isOwner)) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Solo el dueño puede gestionar usuarios.')));
+      return;
+    }
     if (accion == 'eliminar') {
       final ok = await DialogoApp.confirmar(
         context,
@@ -269,8 +305,21 @@ Hola $username, estas son tus credenciales para la app del gym:
     );
   }
 
-  /// v1.0.14: foto del entrenador (bucket fotos-clientes/usuarios/).
+  /// v1.0.14: foto del entrenador (1.15 P2: ya NO sube directa
+  /// a Storage). Se encola la op `admin_usuario` con
+  /// accion='cambiar_foto' y el base64 de la imagen elegida; el
+  /// servidor valida al dueño y sube la foto. Una foto encolada
+  /// sin conexión NO aparenta estar subida: el aviso dice
+  /// «encolada», no «actualizada», y no se invalida la caché
+  /// ni se repinta el avatar hasta que el pull la confirme.
   Future<void> _cambiarFoto(String username) async {
+    // 1.15 P2: guard de acción.
+    if (!puedeEjecutarAccionesUsuarios(AuthService().isOwner)) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Solo el dueño puede gestionar usuarios.')));
+      return;
+    }
     final picker = ImagePicker();
     final img = await picker.pickImage(
       source: ImageSource.gallery,
@@ -279,25 +328,24 @@ Hola $username, estas son tus credenciales para la app del gym:
       imageQuality: 75, // Gemini: compresión obligatoria para Cuba
     );
     if (img == null || !mounted) return;
-    final path = 'usuarios/${username.toLowerCase()}.jpg';
     try {
       final bytes = await File(img.path).readAsBytes();
-      await AuthService().storage
-          .from(AppConfig.bucketFotos)
-          .uploadBinary(path, bytes,
-              fileOptions:
-                  const FileOptions(upsert: true));
-      // Invalidar caché local para que se vea la nueva
-      await FotoCache.instance.invalidar(path);
+      await LocalDb.instance.queueOp(
+        opUuid: const Uuid().v4(),
+        tipo: 'admin_usuario',
+        payload: payloadCambiarFotoUsuario(
+            username: username, bytes: bytes),
+      );
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Foto actualizada')),
+        const SnackBar(
+            content: Text('Foto encolada (se sincronizará)')),
       );
-      setState(() {});
+      SyncEngine.instance.push();
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('No se pudo subir: $e')),
+        SnackBar(content: Text('No se pudo encolar la foto: $e')),
       );
     }
   }
@@ -305,6 +353,13 @@ Hola $username, estas son tus credenciales para la app del gym:
   /// v1.0.14: cambiar rol desde la lista.
   Future<void> _cambiarRol(
       String username, String rolActual) async {
+    // 1.15 P2: guard de acción.
+    if (!puedeEjecutarAccionesUsuarios(AuthService().isOwner)) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Solo el dueño puede gestionar usuarios.')));
+      return;
+    }
     final nuevoRol =
         rolActual == 'admin' ? 'entrenador' : 'admin';
     final ok = await DialogoApp.confirmar(
@@ -322,6 +377,13 @@ Hola $username, estas son tus credenciales para la app del gym:
   }
 
   Future<void> _crear() async {
+    // 1.15 P2: guard de acción.
+    if (!puedeEjecutarAccionesUsuarios(AuthService().isOwner)) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Solo el dueño puede gestionar usuarios.')));
+      return;
+    }
     final nombreCtrl = TextEditingController();
     final passCtrl = TextEditingController();
     final ok = await showDialog<bool>(
@@ -362,7 +424,10 @@ Hola $username, estas son tus credenciales para la app del gym:
     );
     if (ok != true || !mounted) return;
     final nombre = nombreCtrl.text.trim();
-    final pass = passCtrl.text;
+    // 1.15 P6: la contraseña se recorta ANTES de validar, encolar
+    // y compartir: la validada, la encolada y la compartida son
+    // la MISMA cadena normalizada.
+    final pass = normalizarPasswordNuevoUsuario(passCtrl.text);
     // 1.14 (M6.9): la regla vive en validarNuevoUsuarioApk.
     final error = validarNuevoUsuarioApk(nombre, pass);
     if (error != null) {

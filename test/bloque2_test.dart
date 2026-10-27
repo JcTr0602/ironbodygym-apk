@@ -238,6 +238,15 @@ void main() {
       expect(textoMontosPorMoneda(r.suplementos), '125 USD');
       expect(textoMontosPorMoneda({}), '0 CUP');
     });
+
+    test('1.15 M1c-01: moneda en minúsculas suma con su mayúscula', () {
+      final r = resumenExtracto([
+        {'tipo': 'suplemento', 'monto': 25, 'moneda': 'usd', 'anulada': 0},
+        {'tipo': 'suplemento', 'monto': 40, 'moneda': 'USD', 'anulada': 0},
+        {'tipo': 'suplemento', 'monto': 100, 'moneda': ' cup ', 'anulada': 0},
+      ]);
+      expect(r.total, {'USD': 65.0, 'CUP': 100.0});
+    });
   });
 
   group('lista blanca G1 (pura)', () {

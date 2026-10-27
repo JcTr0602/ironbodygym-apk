@@ -17,6 +17,7 @@ import 'package:flutter/services.dart';
 import '../adelantos.dart';
 import '../auth.dart';
 import '../bloque3.dart';
+import '../cliente_protegido.dart';
 import '../localdb.dart';
 import '../negocio.dart';
 import '../nomina_calc.dart';
@@ -45,6 +46,9 @@ class _MiNominaScreenState extends State<MiNominaScreen> {
   List<SolicitudAdelanto> _solicitudes = [];
   List<Map<String, dynamic>> _ventas = [];
   Map<int, String> _nombresClientes = {};
+  // Cliente protegido (2026-10-26, Protegido 2 H7): ids de
+  // clientes protegidos, para ocultar su nombre en _textoVenta.
+  Set<int> _protegidos = {};
   double? _horasSinSubir;
   String _syncTexto = '';
   bool _pidiendo = false;
@@ -132,10 +136,12 @@ class _MiNominaScreenState extends State<MiNominaScreen> {
               .compareTo('${a['fecha'] ?? a['creada_en'] ?? ''}'));
     }
     final nombres = <int, String>{};
+    final protegidos = <int>{};
     for (final c in await LocalDb.instance.allMirror('clientes')) {
       final id = (c['id'] as num?)?.toInt();
       if (id != null && '${c['nombre'] ?? ''}'.isNotEmpty) {
         nombres[id] = '${c['nombre']}';
+        if (clienteEstaProtegido(c)) protegidos.add(id);
       }
     }
     double? horasSinSubir;
@@ -156,6 +162,7 @@ class _MiNominaScreenState extends State<MiNominaScreen> {
       _solicitudes = solicitudes;
       _ventas = ventas;
       _nombresClientes = nombres;
+      _protegidos = protegidos;
       _horasSinSubir = horasSinSubir;
       _syncTexto = syncTexto;
       _cargando = false;
@@ -538,9 +545,13 @@ class _MiNominaScreenState extends State<MiNominaScreen> {
   String _textoVenta(Map<String, dynamic> v) {    final fecha = '${v['fecha'] ?? v['creada_en'] ?? ''}';
     final fechaCorta = fecha.length >= 10 ? fecha.substring(0, 10) : fecha;
     final cid = (v['cliente_id'] as num?)?.toInt();
-    final cliente = cid != null
-        ? (_nombresClientes[cid] ?? 'Cliente #$cid')
-        : ('${v['cliente_nombre'] ?? ''}');
+    // Cliente protegido (2026-10-26, Protegido 2 H7): el nombre se
+    // oculta, pero el monto se queda para cuadrar la comisión.
+    final cliente = cid != null && _protegidos.contains(cid)
+        ? 'Cliente protegido 🔒'
+        : (cid != null
+            ? (_nombresClientes[cid] ?? 'Cliente #$cid')
+            : ('${v['cliente_nombre'] ?? ''}'));
     final tipo = v['origen'] == 'suplemento'
         ? 'suplemento'
         : ('${v['tipo'] ?? 'servicio'}');

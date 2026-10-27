@@ -10,6 +10,8 @@ class AppConfig {
   static const bucketFotos = 'fotos-clientes';
   // v1.4.4 (v33): imágenes de artículos GymPedia (<slug>.webp).
   static const bucketGympedia = 'gympedia-imagenes';
+  // Biblioteca / Guía (v47): bucket público de imágenes de fichas.
+  static const bucketGuia = 'guia-imagenes';
 
   // Datos de transferencia (Transfermóvil/Enzona) — fijos del negocio.
   //

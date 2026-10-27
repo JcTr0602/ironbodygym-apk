@@ -14,10 +14,10 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:share_plus/share_plus.dart';
-import 'package:uuid/uuid.dart';
 
 import '../app_log.dart';
 import '../auth.dart';
+import '../cliente_protegido.dart';
 import '../fotos.dart';
 import '../localdb.dart';
 import '../negocio.dart';
@@ -247,19 +247,40 @@ class _DialogoVentaRapidaState extends State<_DialogoVentaRapida> {
                 icono: Icons.person_search,
                 onChanged: (_) => setState(() {}),
               ),
-              ..._coincidencias.map((c) => ListTile(
-                    dense: true,
-                    contentPadding: EdgeInsets.zero,
-                    title: Text('${c['nombre'] ?? ''}'),
-                    trailing: const Icon(Icons.add_circle_outline,
-                        color: AppColores.naranja),
-                    onTap: () => setState(() {
-                      _clienteId =
-                          (c['id'] as num?)?.toInt();
-                      _clienteNombre = '${c['nombre'] ?? ''}';
-                      _busqueda.clear();
-                    }),
-                  )),
+              ..._coincidencias.map((c) {
+                    // Argón #9 (ALTO): venta rápida sin candado A3:
+                    // un cliente protegido se podía asociar aquí y
+                    // el servidor rechazaba la venta en el sync, con
+                    // el stock ya descontado. Igual que
+                    // venta_suplemento.dart: candado + aviso, sin
+                    // seleccionar.
+                    final protegido = esVistaProtegida(c);
+                    return ListTile(
+                      dense: true,
+                      contentPadding: EdgeInsets.zero,
+                      title: Text('${c['nombre'] ?? ''}'),
+                      trailing: Icon(
+                          protegido
+                              ? Icons.lock_outline
+                              : Icons.add_circle_outline,
+                          color: AppColores.naranja),
+                      onTap: () {
+                        if (protegido) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                  content:
+                                      Text(mensajeClienteProtegido)));
+                          return;
+                        }
+                        setState(() {
+                          _clienteId =
+                              (c['id'] as num?)?.toInt();
+                          _clienteNombre = '${c['nombre'] ?? ''}';
+                          _busqueda.clear();
+                        });
+                      },
+                    );
+                  }),
             ] else
               _clienteSeleccionado(),
             const SizedBox(height: AppEspacio.sm),
@@ -729,6 +750,10 @@ class DetalleSuplementoScreen extends StatelessWidget {
             ),
           ),
           // v1.3.7 (Fase B §6.2): margen por bote, SOLO dueño.
+          // Argón #9 (MEDIO): el costo es USD y el precio está en
+          // la moneda del suplemento. En CUP se convierte con la
+          // tasa; sin tasa válida no se muestra (un margen CUP-USD
+          // sería un número falso etiquetado USD).
           if (AuthService().isOwner)
             Builder(builder: (ctx) {
               final costo =
@@ -736,7 +761,16 @@ class DetalleSuplementoScreen extends StatelessWidget {
               if (costo <= 0 || precio <= 0) {
                 return const SizedBox.shrink();
               }
-              final margen = precio - costo;
+              double? precioUsd;
+              if (monedaSup == 'USD') {
+                precioUsd = precio;
+              } else if (tasaUsd != null && tasaUsd! > 1.0) {
+                precioUsd = precio / tasaUsd!;
+              }
+              if (precioUsd == null) {
+                return const SizedBox.shrink();
+              }
+              final margen = precioUsd - costo;
               final pct =
                   costo > 0 ? (margen / costo * 100) : 0.0;
               return Column(
@@ -821,6 +855,39 @@ Future<void> _eliminarSuplemento(
     return;
   }
 
+  // Argón #9 (ALTO): el espejo solo trae ventas ya sincronizadas.
+  // Una venta recién hecha vive en ops_queue (detrás del pull) y un
+  // bote abierto vive en servicio_botes: borrar ahora dejaría la op
+  // de eliminar detrás de la venta pendiente. Solo cuentan ops
+  // vivas (pendiente/enviada/en revisión): aplicada ya está en el
+  // espejo y rechazada no se aplicará.
+  final pendientes = await d.rawQuery(
+    "SELECT COUNT(*) as n FROM ops_queue WHERE tipo IN "
+    "('venta_suplemento', 'inscripcion_venta_suplemento', "
+    "'abrir_bote_servicio') AND estado NOT IN ('aplicada', 'rechazada') "
+    "AND (json_extract(payload, '\$.suplemento_id') = ? "
+    "OR json_extract(payload, '\$.venta.suplemento_id') = ?)",
+    [id, id],
+  );
+  final nPendientes = (pendientes.first['n'] as int?) ?? 0;
+  final botesAbiertos = await d.rawQuery(
+    "SELECT COUNT(*) as n FROM servicio_botes WHERE "
+    "json_extract(data, '\$.suplemento_id') = ? AND "
+    "json_extract(data, '\$.estado') = 'abierto'",
+    [id],
+  );
+  final nBotes = (botesAbiertos.first['n'] as int?) ?? 0;
+  if (nPendientes > 0 || nBotes > 0) {
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text(
+            'No se puede eliminar: tiene ventas pendientes o botes abiertos.'),
+      ),
+    );
+    return;
+  }
+
   if (!context.mounted) return;
   final nombre = '${s['nombre'] ?? 'suplemento'}';
   final ok = await DialogoApp.confirmar(
@@ -831,14 +898,10 @@ Future<void> _eliminarSuplemento(
   );
   if (ok != true || !context.mounted) return;
 
-  // Marcar como eliminado localmente.
-  await d.delete('suplementos', where: 'id = ?', whereArgs: [id]);
-
-  await db.queueOp(
-    opUuid: const Uuid().v4(),
-    tipo: 'eliminar_suplemento',
-    payload: {'suplemento_id': id},
-  );
+  // Marcar como eliminado localmente y encolar la op en UNA
+  // transacción (panel 9/10 Luna): dos pasos separados dejaban el
+  // borrado sin op si la app se cerraba entre ambos.
+  await db.eliminarSuplementoLocal((id as num).toInt());
   AppLog.info('suplementos', 'eliminar', d: 'id=$id nombre=$nombre');
 
   if (!context.mounted) return;

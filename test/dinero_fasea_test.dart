@@ -117,16 +117,35 @@ void main() {
 
   group('A3: solo las mensualidades generan comisión', () {
     test('mensual cuenta; semanal y quincenal no', () {
-      expect(NominaCalc.esPagoMensualidad({'periodo': 'mensual'}), isTrue);
+      expect(
+          NominaCalc.esPagoMensualidad(
+              {'periodo': 'mensual', 'monto': 2000}),
+          isTrue);
       expect(NominaCalc.esPagoMensualidad({'periodo': 'semanal'}), isFalse);
       expect(
           NominaCalc.esPagoMensualidad({'periodo': 'quincenal'}), isFalse);
     });
 
     test('sin periodo = mensual (default del resto del código)', () {
-      expect(NominaCalc.esPagoMensualidad({}), isTrue);
+      expect(NominaCalc.esPagoMensualidad({'monto': 2000}), isTrue);
       expect(
-          NominaCalc.esPagoMensualidad({'tipo_id': 'menores'}), isTrue);
+          NominaCalc.esPagoMensualidad(
+              {'tipo_id': 'menores', 'monto': 1500}),
+          isTrue);
+    });
+
+    test('1.15 M4c-02: promo y monto 0 NO generan comisión', () {
+      expect(
+          NominaCalc.esPagoMensualidad(
+              {'periodo': 'mensual', 'metodo': 'promo', 'monto': 2000}),
+          isFalse);
+      expect(
+          NominaCalc.esPagoMensualidad(
+              {'periodo': 'mensual', 'monto': 0}),
+          isFalse);
+      expect(
+          NominaCalc.esPagoMensualidad({'periodo': 'mensual'}),
+          isFalse);
     });
 
     test('personalizado y ofertas: solo si cubren 30 días o más', () {
@@ -136,11 +155,11 @@ void main() {
           isFalse);
       expect(
           NominaCalc.esPagoMensualidad(
-              {'periodo': 'personalizado', 'dias': 30}),
+              {'periodo': 'personalizado', 'dias': 30, 'monto': 1000}),
           isTrue);
       expect(
           NominaCalc.esPagoMensualidad(
-              {'periodo': 'tipo:oferta50', 'dias': 30}),
+              {'periodo': 'tipo:oferta50', 'dias': 30, 'monto': 1000}),
           isTrue);
       expect(
           NominaCalc.esPagoMensualidad(

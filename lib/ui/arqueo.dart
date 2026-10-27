@@ -252,10 +252,11 @@ class _DetalleArqueoScreenState extends State<_DetalleArqueoScreen> {
     final opIds =
         await idsPendienteArqueo(widget.telegramId, moneda: _moneda);
     final totalIds = opIds.values.fold<int>(0, (s, l) => s + l.length);
-    if (totalIds == 0) {
-      _aviso('No hay operaciones confirmadas para liquidar.');
-      return;
-    }
+    // 1.15-turnos (#8): el arrastre puro SÍ se puede liquidar: el
+    // servidor permite op_ids vacío cuando hay arrastre pendiente.
+    // Antes esta guarda atrapaba ese caso (esperado > 0 sin ops
+    // nuevas). El servidor sigue siendo el backstop (rechaza el
+    // vacío sin arrastre y con esperado > 0.01).
     final parcial = entregado < esperado - 0.01;
     if (!mounted) return;
     final ok = await showDialog<bool>(

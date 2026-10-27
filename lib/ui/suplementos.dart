@@ -1147,6 +1147,9 @@ class _EditarSuplementoScreenState
     _stock.dispose();
     _pesoValor.dispose();
     _servicios.dispose();
+    // Argón #9 (BAJO): _costo y _umbral también se liberan.
+    _costo.dispose();
+    _umbral.dispose();
     super.dispose();
   }
 

@@ -84,6 +84,12 @@ Future<Map<String, String>> _generarVariantes(
   return variantes;
 }
 
+/// Argón (sync adaptativa, paso 3): la subida TUS se pausó por un
+/// cobro recién encolado. No es un error: _subirUna ya devolvió
+/// la fila a 'pendiente' sin backoff y procesarCola debe salir
+/// del bucle de inmediato.
+class _PausaQosCola implements Exception {}
+
 class FotosColaService {
   FotosColaService._();
   static final FotosColaService instance = FotosColaService._();
@@ -114,6 +120,28 @@ class FotosColaService {
   /// subió rápido (< 5 s para 128 KB)? Default false = conservador: el
   /// 'original' espera hasta ver una subida rápida real.
   static bool _ultimoDisplayRapido = false;
+
+  /// Argón (sync adaptativa, paso 3): persistir el estado QoS en
+  /// meta (no solo RAM): el Foreground Service puede morir y el
+  /// reloj de holgura / la medición de velocidad se perdían,
+  /// dejando la 'original' atrapada. Se restaura al inicio de
+  /// procesarCola. Un fallo de persistencia se ignora (el estado
+  /// en RAM sigue valiendo para este ciclo).
+  static Future<void> _guardarOpsVaciaDesde(DateTime? v) async {
+    _opsVaciaDesde = v;
+    try {
+      await LocalDb.instance.setMeta(
+          'qos_ops_vacia_desde', v == null ? '' : isoHabana(v));
+    } catch (_) {}
+  }
+
+  static Future<void> _guardarDisplayRapido(bool v) async {
+    _ultimoDisplayRapido = v;
+    try {
+      await LocalDb.instance
+          .setMeta('qos_ultimo_display_rapido', v ? '1' : '0');
+    } catch (_) {}
+  }
 
   /// Genera variantes WebP en background y las encola.
   /// Si la compresión falla, encola solo el original como fallback.
@@ -263,6 +291,22 @@ class FotosColaService {
     // Worker ID único para esta instancia del despachador.
     final workerId = const Uuid().v4();
 
+    // Argón (sync adaptativa, paso 3): restaurar el estado QoS
+    // persistido en meta (ver _guardarOpsVaciaDesde). Sin esto,
+    // cada reinicio del servicio exigía la holgura completa de
+    // nuevo y la 'original' quedaba atrapada.
+    try {
+      final desde = await LocalDb.instance.getMeta('qos_ops_vacia_desde');
+      if (desde == null || desde.isEmpty) {
+        _opsVaciaDesde = null;
+      } else {
+        _opsVaciaDesde = DateTime.tryParse(desde);
+      }
+      _ultimoDisplayRapido =
+          await LocalDb.instance.getMeta('qos_ultimo_display_rapido') ==
+              '1';
+    } catch (_) {}
+
     AppLog.info('fotos', 'qos_ciclo',
         d: 'inicio despachador; display_rapido=$_ultimoDisplayRapido');
 
@@ -320,7 +364,7 @@ class FotosColaService {
       // _opsVaciaDesde: no son trabajo transaccional del usuario.
       final opsPendientes = await LocalDb.instance.countPendingOpsNoFoto();
       if (opsPendientes > 0) {
-        _opsVaciaDesde = null; // vuelve a haber trabajo: la holgura se reinicia
+        await _guardarOpsVaciaDesde(null); // vuelve a haber trabajo: la holgura se reinicia
         AppLog.aviso('fotos', 'pausa_qos',
             d: 'ops_queue con $opsPendientes pendientes (sin foto): '
                 'fotos en pausa');
@@ -328,7 +372,9 @@ class FotosColaService {
       }
       // ops_queue (sin foto) vacía: arrancar o mantener el reloj de
       // holgura (hora Habana, estándar v1.3.4).
-      _opsVaciaDesde ??= ahoraHabana();
+      if (_opsVaciaDesde == null) {
+        await _guardarOpsVaciaDesde(ahoraHabana());
+      }
 
       // v1.2.9+43 (Gemini R3): limpieza continua de leases expirados.
       // Si el proceso corre en segundo plano, los leases que expiran
@@ -510,7 +556,19 @@ class FotosColaService {
       // v1.2.9+46 (AppLog).
       AppLog.info('fotos', 'despachada',
           d: 'id=$id tipo=${f['tipo']} intento=${f['intentos']}');
-      final storagePath = await _subirUna(f, workerId);
+      // Argón (sync adaptativa, paso 3): si la subida se pausó
+      // por un cobro recién encolado, salir del bucle de
+      // inmediato (la fila ya quedó en 'pendiente' sin backoff
+      // y el segundo _uploadOps empujará el cobro).
+      // Se usa una temporal y luego una final: el cierre de la
+      // transacción de vinculación solo promueve variables final.
+      String? storagePathTmp;
+      try {
+        storagePathTmp = await _subirUna(f, workerId);
+      } on _PausaQosCola {
+        break;
+      }
+      final storagePath = storagePathTmp;
       if (storagePath != null) {
         // v1.2.9+43 (Gemini R3): BLINDAJE DE RED.
         // Persistir storage_path INMEDIATAMENTE después de la subida HTTP.
@@ -605,18 +663,23 @@ class FotosColaService {
         if (exitoVinculacion) {
           subidas++;
         } else {
-          // v1.13.0 (G5, P6-H3): antes la fila quedaba en 'subiendo'
-          // con su lease hasta expirar (10 min) sin reintento. Ahora:
-          // si el worker SIGUE siendo dueño, vuelve a 'pendiente'
+          // Argón #8-3: un fallo determinista de vinculación (ej.
+          // JSON corrupto) NO puede reintentarse para siempre sin
+          // quemar intentos: a los 5 va a 'error' como el resto.
+          // Si el worker SIGUE siendo dueño, vuelve a 'pendiente'
           // con backoff de 2 min CONSERVANDO storage_path (los bytes
           // ya están subidos: _subirUna reutiliza el path sin
           // re-subir). Si el lease se perdió, no se toca nada.
-          // Sin quemar un intento: reintentar la vinculación es
-          // barato (no hay subida de bytes).
+          final nuevosIntentos =
+              (fFresco['intentos'] as int? ?? f['intentos'] as int? ?? 0) +
+                  1;
           final devuelta = await db.update(
             'fotos_cola',
             {
-              'estado': 'pendiente',
+              'estado': nuevosIntentos >= 5 ? 'error' : 'pendiente',
+              'intentos': nuevosIntentos,
+              if (nuevosIntentos >= 5)
+                'ultimo_error': 'vinculación fallida',
               'worker_id': null,
               'lease_hasta': null,
               'proximo_intento_en':
@@ -629,6 +692,12 @@ class FotosColaService {
           if (devuelta == 1) {
             AppLog.aviso('fotos', 'vinculacion_reintentable',
                 d: 'id=$id a pendiente con backoff 2min (path conservado)');
+            // Argón #8-8: si display murió también por aquí (no solo
+            // por fallo de red), el fallback de original debe correr
+            // igual que en la rama de red.
+            if (nuevosIntentos >= 5 && f['tipo'] == 'display') {
+              await _vincularOriginalCompletada(db, f['op_uuid'] as String);
+            }
           } else {
             debugPrint('[Fotos] Foto $id: lease perdido, no se toca.');
           }
@@ -651,11 +720,19 @@ class FotosColaService {
             check.first['suplemento_id'] == null;
 
         if (sinIds) {
-          // IDs no resueltos: esperar, no es fallo de red.
+          // Argón #8-1: IDs nunca resueltos con el padre ya aplicado
+          // (o inexistente) NO pueden reintentarse para siempre sin
+          // quemar intentos: a los 5 van a 'error' como el resto.
+          // (El filtro de reclamo ya es intentos < 5, así que un
+          // tope de 10 nunca se alcanzaría.)
+          final nuevosIntentos = (f['intentos'] as int? ?? 0) + 1;
           await db.update(
             'fotos_cola',
             {
-              'estado': 'pendiente',
+              'estado': nuevosIntentos >= 5 ? 'error' : 'pendiente',
+              'intentos': nuevosIntentos,
+              if (nuevosIntentos >= 5)
+                'ultimo_error': 'ID de entidad nunca resuelto',
               'worker_id': null,
               'lease_hasta': null,
               'proximo_intento_en':
@@ -690,28 +767,7 @@ class FotosColaService {
         // v1.2.9+43 (Gemini R2 B2): si display murió definitivamente,
         // verificar si original ya está completada y vincularla.
         if (intentos >= 5 && f['tipo'] == 'display') {
-          final orig = await db.query(
-            'fotos_cola',
-            where: "op_uuid = ? AND tipo = 'original' AND estado = 'completada'",
-            whereArgs: [f['op_uuid']],
-            limit: 1,
-          );
-          if (orig.isNotEmpty && orig.first['storage_path'] != null) {
-            try {
-              await db.transaction((txn) async {
-                await _vincularEnTransaccion(
-                  txn,
-                  orig.first['id'] as int,
-                  orig.first,
-                  orig.first['storage_path'] as String,
-                );
-              });
-              debugPrint(
-                  '[Fotos] Original vinculada tras muerte de display ${f['op_uuid']}');
-            } catch (e) {
-              debugPrint('[Fotos] Error vinculando original fallback: $e');
-            }
-          }
+          await _vincularOriginalCompletada(db, f['op_uuid'] as String);
         }
       }
       } // fin while (el siguiente } cierra el try)
@@ -731,6 +787,25 @@ class FotosColaService {
   /// #3: retorna ResultadoSubidaFoto con storagePath.
   /// #4: ruta determinista con entidad/tipo/extensión real.
   /// #5: timer de lease con cancel() en finally.
+  /// Argón (sync adaptativa, paso 3): devolver una fila a
+  /// 'pendiente' por pausa de QoS, SIN incrementar intentos ni
+  /// backoff (las claves TUS quedan para reanudar). Solo toca la
+  /// fila si este worker sigue siendo dueño.
+  Future<void> pausarFilaPorQos(int id, String workerId) async {
+    final db = await LocalDb.instance.db;
+    await db.update(
+      'fotos_cola',
+      {
+        'estado': 'pendiente',
+        'worker_id': null,
+        'lease_hasta': null,
+        'actualizado_en': isoHabana(ahoraHabana()),
+      },
+      where: 'id = ? AND worker_id = ?',
+      whereArgs: [id, workerId],
+    );
+  }
+
   Future<String?> _subirUna(Map<String, dynamic> f, String workerId) async {
     final id = f['id'] as int;
     final opUuid = f['op_uuid'] as String;
@@ -859,11 +934,17 @@ class FotosColaService {
         bytes: bytes,
         claveTusLoc: claveTusLoc,
         claveTusOffset: claveTusOffset,
+        // Argón (sync adaptativa, paso 3): antes de cada chunk,
+        // si entró trabajo transaccional, pausar (el cobro manda).
+        debePausarPorCobro: () async =>
+            await LocalDb.instance.countPendingOpsNoFoto() > 0,
       );
       final finChunk = ahoraHabana();
-      if (tipo == 'display') {
-        _ultimoDisplayRapido = res.estado == EstadoSubida.subida &&
-            chunkDisplayRapido(bytes.length, inicioChunk, finChunk);
+      if (tipo == 'display' && res.estado != EstadoSubida.pausadaPorQos) {
+        // Una pausa no es una muestra de velocidad (ni rápida ni
+        // lenta): no toca la medición.
+        await _guardarDisplayRapido(res.estado == EstadoSubida.subida &&
+            chunkDisplayRapido(bytes.length, inicioChunk, finChunk));
       }
 
       switch (res.estado) {
@@ -871,6 +952,14 @@ class FotosColaService {
           // Corrección Gemini #6 (limpieza): solo tras éxito definitivo.
           // subirFotoCola ya limpió las claves TUS exactas.
           return res.storagePath ?? objectPath;
+        case EstadoSubida.pausadaPorQos:
+          // Argón (sync adaptativa, paso 3): el cobro tiene
+          // prioridad. La fila vuelve a 'pendiente' SIN
+          // incrementar intentos ni backoff (las claves TUS
+          // quedan para reanudar) y el despachador sale del
+          // bucle de inmediato.
+          await pausarFilaPorQos(id, workerId);
+          throw _PausaQosCola();
         case EstadoSubida.permanente:
           // Fix crítico 3: error permanente, sin backoff.
           await _marcarError(id, res.error ?? 'error permanente',
@@ -895,7 +984,7 @@ class FotosColaService {
     } catch (e) {
       // v1.3.4 Ítem 5: una excepción a mitad de subida invalida la
       // medición de velocidad (el último display no subió rápido).
-      if (tipo == 'display') _ultimoDisplayRapido = false;
+      if (tipo == 'display') await _guardarDisplayRapido(false);
       await _marcarError(id, '$e', workerId: workerId);
       // v1.2.9+46 (AppLog).
       AppLog.error('fotos', 'excepcion_subida', d: 'id=$id error=$e');
@@ -1011,6 +1100,34 @@ class FotosColaService {
   /// nada: drenan en el próximo push normal (timer 60 min o cualquier
   /// acción del usuario que lo dispare); en el path de UI, sync.dart
   /// ya hace un segundo _uploadOps tras procesarCola si subidas > 0.
+  /// Argón #8-8: si display murió (por red o por vinculación),
+  /// vincular la variante original ya completada, si existe.
+  Future<void> _vincularOriginalCompletada(
+      dynamic db, String opUuid) async {
+    final orig = await db.query(
+      'fotos_cola',
+      where: "op_uuid = ? AND tipo = 'original' AND estado = 'completada'",
+      whereArgs: [opUuid],
+      limit: 1,
+    );
+    if (orig.isNotEmpty && orig.first['storage_path'] != null) {
+      try {
+        await db.transaction((txn) async {
+          await _vincularEnTransaccion(
+            txn,
+            orig.first['id'] as int,
+            orig.first,
+            orig.first['storage_path'] as String,
+          );
+        });
+        debugPrint(
+            '[Fotos] Original vinculada tras muerte de display $opUuid');
+      } catch (e) {
+        debugPrint('[Fotos] Error vinculando original fallback: $e');
+      }
+    }
+  }
+
   Future<void> _vincularEnTransaccion(
       dynamic txn, int fotoId, Map<String, dynamic> f, String storagePath) async {
     final opUuid = f['op_uuid'] as String;
@@ -1057,6 +1174,10 @@ class FotosColaService {
 
         data['foto_storage'] = storagePath;
         data['foto_uuid'] = opUuid;
+        // Argón #8-4: foto_local apuntaba al archivo en fotosDir que
+        // limpiarHuerfanos borra a los 7 días; con foto_storage ya
+        // vinculado, la UI baja de la nube en vez de un archivo muerto.
+        data.remove('foto_local');
         await txn.update('suplementos', {'data': jsonEncode(data)},
             where: 'id = ?', whereArgs: [suplementoId]);
       }
@@ -1195,7 +1316,7 @@ class FotosColaService {
           isoHabana(ahoraHabana().subtract(const Duration(days: 7)));
       final viejas = await db.query(
         'fotos_cola',
-        columns: ['id', 'ruta_local'],
+        columns: ['id', 'ruta_local', 'suplemento_id'],
         where: "estado IN ('completada', 'error') AND actualizado_en < ?",
         whereArgs: [limite],
       );
@@ -1205,6 +1326,31 @@ class FotosColaService {
           if (await f.exists()) await f.delete();
           borrados++;
         } catch (_) {}
+        // Argón #8-4 (legado): si el suplemento aún apunta a este
+        // archivo con foto_local, soltar la referencia o la UI
+        // mostraría un archivo ya borrado en vez de foto_storage.
+        final supId = v['suplemento_id'] as int?;
+        if (supId != null) {
+          try {
+            final srows = await db.query('suplementos',
+                columns: ['data'],
+                where: 'id = ?',
+                whereArgs: [supId],
+                limit: 1);
+            if (srows.isNotEmpty) {
+              final sdata = Map<String, dynamic>.from(
+                  srows.first['data'] is String
+                      ? jsonDecode(srows.first['data'] as String)
+                      : srows.first['data'] as Map);
+              if (sdata['foto_local'] == v['ruta_local']) {
+                sdata.remove('foto_local');
+                await db.update('suplementos',
+                    {'data': jsonEncode(sdata)},
+                    where: 'id = ?', whereArgs: [supId]);
+              }
+            }
+          } catch (_) {}
+        }
         await db.delete('fotos_cola',
             where: 'id = ?', whereArgs: [v['id']]);
       }
@@ -1213,6 +1359,11 @@ class FotosColaService {
       // Los .tmp son escrituras en progreso (rename atómico pendiente).
       // Solo se borran si tienen más de 24h (proceso colgado).
       // Los archivos finales se borran si no están referenciados y tienen +2h.
+      // NOTA (desviación deliberada de Argón #8-4): lastModified()
+      // es hora local del dispositivo, así que el umbral también
+      // debe ser hora local del dispositivo (DateTime.now()), no
+      // hora Habana: con el dispositivo fuera de Cuba, ahoraHabana
+      // desplazaría los umbrales.
       final umbralTmp = DateTime.now().subtract(const Duration(hours: 24));
       final umbralFinal = DateTime.now().subtract(const Duration(hours: 2));
       await for (final e in fotosDir.list()) {

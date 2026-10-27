@@ -118,6 +118,30 @@ bool metodoServicioActivo(
   return true;
 }
 
+/// 1.15 V5: el checkbox «polvo perdido» de la reversión solo lo
+/// ve el dueño (patrón AuthService().isOwner en la pantalla).
+/// La regla del servidor no cambia. PURO.
+bool mostrarCheckboxPolvoPerdido(bool esDueno) => esDueno;
+
+/// 1.15 V7: totales que muestra el diálogo de venta múltiple.
+/// Casa elegible: total cero y comisión cero (mismo trato que la
+/// venta simple); en otro caso, la suma por variantes y la
+/// comisión unitaria por dosis. PURO.
+({double total, double comision}) totalesVentaMultipleServicio({
+  required bool esCasa,
+  required int dosisN,
+  required int pomosM,
+  required double precioSinAgua,
+  required double precioConAgua,
+  required double comisionUnitaria,
+}) {
+  if (esCasa) return (total: 0.0, comision: 0.0);
+  return (
+    total: (dosisN - pomosM) * precioSinAgua + pomosM * precioConAgua,
+    comision: comisionUnitaria * dosisN,
+  );
+}
+
 /// Primer método habilitado del producto (efectivo antes que
 /// transferencia) o null si ambos están deshabilitados. Lo usan el
 /// formulario de venta y el speed dial (ítems 5 y 7). PURO.
@@ -731,6 +755,14 @@ Future<({Map<String, dynamic> payload, String? retener})>
     }
   }
   if (casa) {
+    // Panel Grupo B V7: beneficiario 'dueno' solo sin cliente y
+    // vendiendo el dueño (defensa en profundidad: la UI ya lo
+    // impide, pero el helper no debe confiar en el llamador).
+    if (beneficiario == 'dueno' &&
+        (cliente != null || !vendedorEsDueno)) {
+      throw Exception(
+          'Casa para el dueño: sin cliente y solo la marca el dueño');
+    }
     final esCasaCliente =
         cliente != null && (cliente['cuenta_casa'] as num?)?.toInt() == 1;
     if (beneficiario != 'dueno' && !esCasaCliente) {
@@ -1142,6 +1174,32 @@ Future<String> cerrarBoteServicio({required int boteId}) async {
 /// quedaban como «Cliente 121» anónimo. Patrón de
 /// detalle_entrenador.dart. Las fotos en el ranking quedan para
 /// después (lista de Argón): aquí solo se arregla el nombre.
+/// Ventas de servicio sin reversos ni ventas ya reversadas (Argón #9,
+/// ALTO parcial). El servidor crea el reverso con cantidad NEGATIVA y
+/// el mismo lote_id, así que las sumas de una misma ventana ya netean
+/// solas; pero un reverso cae en su propio día (fecha = hoy), no en
+/// el de la venta original: en estadísticas por periodo/semana/día y
+/// en el extracto, la ventana de la original quedaba sobreestimada
+/// (y la del reverso, en negativo sola). Para estadísticas, una
+/// venta reversada es como si no hubiera ocurrido: fuera la fila de
+/// reverso (reverso_de != null) y fuera la original reversada.
+/// PURO. La pista de auditoría completa sigue viva en ServiciosScreen
+/// (fila original + fila «Reverso»).
+List<Map<String, dynamic>> ventasServicioSinReversos(
+    List<Map<String, dynamic>> ventas) {
+  final reversadas = <int>{
+    for (final v in ventas)
+      if ((v['reverso_de'] as num?) != null)
+        (v['reverso_de'] as num).toInt(),
+  };
+  return ventas.where((v) {
+    if ((v['reverso_de'] as num?) != null) return false;
+    final id = (v['id'] as num?)?.toInt();
+    if (id != null && reversadas.contains(id)) return false;
+    return true;
+  }).toList();
+}
+
 List<Map<String, dynamic>> rankingServicios(
   List<Map<String, dynamic>> ventas, {
   String? desde,
@@ -1159,6 +1217,12 @@ List<Map<String, dynamic>> rankingServicios(
   for (final v in ventas) {
     final cid = (v['cliente_id'] as num?)?.toInt();
     if (cid == null) continue;
+    // Argón #9 (BAJO): el ranking mide compradores COMERCIALES.
+    // Las cortesías Casa (casa == 1, precio 0) no suman unidades ni
+    // raciones/combos: un cliente con compras + cortesías veía sus
+    // cortesías inflando el ranking. (resumenServiciosDeCliente sí
+    // las cuenta como consumo recibido; aquí no.)
+    if ((v['casa'] as num?)?.toInt() == 1) continue;
     if (desde != null && '${v['fecha'] ?? ''}'.compareTo(desde) < 0) {
       continue;
     }

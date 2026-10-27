@@ -9,6 +9,7 @@ import '../permisos_entrenador.dart';
 import '../servicios.dart';
 import '../sync.dart';
 import '../tiempo.dart';
+import '../cliente_protegido.dart';
 import 'componentes.dart';
 import 'diseno.dart';
 import 'ranking_servicios.dart';
@@ -611,6 +612,8 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
     var n = 2;
     var m = 0;
     Map<String, dynamic>? cliente;
+    // 1.15 V7: Casa para el dueño (mismo trato que la venta simple).
+    var paraDuenoCasa = false;
     var metodo =
         primerMetodoServicioActivo(_ajustes, 'dosis_con_agua') ?? 'efectivo';
     final metodosActivos = <String>[
@@ -625,12 +628,27 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
           // antes de confirmar la venta.
           final subCliente =
               cliente == null ? '' : subtituloClienteVenta(cliente!);
+          // 1.15 V7: Casa elegible = cliente con cuenta_casa=1 o
+          // consumo del dueño. Solo así hay total/comisión cero y
+          // se omite el método de cobro; un cliente no elegible
+          // nunca llega a Casa (no hay casilla para él).
+          final esCasaCliente = cliente != null &&
+              (cliente!['cuenta_casa'] as num?)?.toInt() == 1;
+          final esCasa = esCasaCliente || paraDuenoCasa;
           final precioSin =
               precioServicioMetodo(_ajustes, 'dosis_sin_agua', metodo);
           final precioCon =
               precioServicioMetodo(_ajustes, 'dosis_con_agua', metodo);
-          final total = (n - m) * precioSin + m * precioCon;
-          final comision = (_precios?.comision ?? 50) * n;
+          final resumen = totalesVentaMultipleServicio(
+            esCasa: esCasa,
+            dosisN: n,
+            pomosM: m,
+            precioSinAgua: precioSin,
+            precioConAgua: precioCon,
+            comisionUnitaria: _precios?.comision ?? 50,
+          );
+          final total = resumen.total;
+          final comision = resumen.comision;
           return DialogoApp(
             titulo: 'Venta múltiple',
             iconoTitulo: Icons.library_add,
@@ -653,7 +671,12 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                 InkWell(
                   onTap: () async {
                     final sel = await _elegirCliente();
-                    if (sel != null) setD(() => cliente = sel);
+                    if (sel != null) {
+                      setD(() {
+                        cliente = sel;
+                        paraDuenoCasa = false;
+                      });
+                    }
                   },
                   child: Container(
                     width: double.infinity,
@@ -680,6 +703,22 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                     ),
                   ),
                 ),
+                // 1.15 V7: consumo Casa del dueño (solo dueño y
+                // sin cliente elegido), igual que la venta simple.
+                if (esCasaCliente)
+                  const Chip(
+                    label: Text('⭐ Cuenta a la Casa'),
+                    visualDensity: VisualDensity.compact,
+                  ),
+                if (_esDueno && cliente == null)
+                  CheckboxListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title:
+                        const Text('Consumo Casa (para el dueño)'),
+                    value: paraDuenoCasa,
+                    onChanged: (v) =>
+                        setD(() => paraDuenoCasa = v ?? false),
+                  ),
                 const SizedBox(height: 12),
                 Row(
                   children: [
@@ -715,7 +754,8 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                     ),
                   ],
                 ),
-                if (metodosActivos.length > 1) ...[
+                // 1.15 V7: Casa no ofrece método de cobro.
+                if (!esCasa && metodosActivos.length > 1) ...[
                   const SizedBox(height: 8),
                   SegmentedButton<String>(
                     segments: [
@@ -733,9 +773,11 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                 ],
                 const SizedBox(height: 12),
                 Text(
-                  '$n dosis ($m con agua · ${n - m} sin agua)\n'
-                  'Total: ${fmtMonto(total)} CUP · '
-                  'Comisión: ${fmtMonto(comision)} CUP',
+                  esCasa
+                      ? 'Cuenta a la Casa — sin cobro'
+                      : '$n dosis ($m con agua · ${n - m} sin agua)\n'
+                          'Total: ${fmtMonto(total)} CUP · '
+                          'Comisión: ${fmtMonto(comision)} CUP',
                   style: AppTexto.cuerpo,
                 ),
               ],
@@ -746,8 +788,13 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                 child: const Text('Cancelar'),
               ),
               FilledButton(
-                onPressed: () => Navigator.pop(ctx, true),
-                child: const Text('Cobrar'),
+                // 1.15 V7: Casa registra sin cobrar (como la venta
+                // simple); sin métodos activos y sin Casa, no hay
+                // cobro posible.
+                onPressed: (esCasa || metodosActivos.isNotEmpty)
+                    ? () => Navigator.pop(ctx, true)
+                    : null,
+                child: Text(esCasa ? 'Registrar' : 'Cobrar'),
               ),
             ],
           );
@@ -755,6 +802,11 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
       ),
     );
     if (ok != true) return;
+    // 1.15 V7: Casa de la venta múltiple, igual que la simple:
+    // cliente con cuenta_casa=1 o consumo del dueño.
+    final esCasaCliente = cliente != null &&
+        (cliente!['cuenta_casa'] as num?)?.toInt() == 1;
+    final esCasa = esCasaCliente || paraDuenoCasa;
     try {
       final opUuids = await registrarVentaMultipleServicio(
         loteId: (lote['id'] as num).toInt(),
@@ -762,10 +814,12 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
         pomosM: m,
         clienteId: (cliente?['id'] as num?)?.toInt(),
         metodo: metodo,
+        casa: esCasa,
+        beneficiario: paraDuenoCasa ? 'dueno' : null,
         vendedorEsDueno: _esDueno,
         vendedorId: null,
         responsableEfectivoId:
-            _esDueno && metodo == 'efectivo' ? _miTid : null,
+            _esDueno && !esCasa && metodo == 'efectivo' ? _miTid : null,
         topeDosis: topeDosis,
         topePomos: topePomos,
       );
@@ -881,6 +935,12 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
     }
     final motivoCtrl = TextEditingController();
     var polvoPerdido = false;
+    // Argón #9 (BAJO): la comisión del diálogo era un texto fijo
+    // («50 CUP») aunque la comisión es configurable y puede ser 0
+    // (dueño, agua suelta, Casa). Se usa la real de la fila.
+    final com = (v['comision_monto'] as num?)?.toDouble() ??
+        ((v['comision_unitaria'] as num?)?.toDouble() ?? 0) *
+            ((v['cantidad'] as num?)?.toInt() ?? 0);
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => StatefulBuilder(
@@ -894,25 +954,31 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
               Text(
                   'Se registrará un reverso auditable de esta venta '
                   '(${fmtMonto(((v['precio_unitario'] as num?)?.toDouble() ?? 0) * ((v['cantidad'] as num?)?.toDouble() ?? 0))} CUP). '
-                  'La dosis vuelve al lote, el pomo al agua común y '
-                  'se restan los 50 CUP de comisión.'),
+                  'La dosis vuelve al lote, el pomo al agua común'
+                  '${com > 0 ? ' y se restan los ${fmtMonto(com)} CUP de comisión' : ''}.'),
               const SizedBox(height: 12),
               TextField(
                 controller: motivoCtrl,
                 decoration: const InputDecoration(
                     labelText: 'Motivo (obligatorio)'),
               ),
-              CheckboxListTile(
-                value: polvoPerdido,
-                contentPadding: EdgeInsets.zero,
-                title: const Text(
-                    'El polvo se perdió físicamente'),
-                subtitle: const Text(
-                    'La reversión anula cobro y comisión y la '
-                    'pérdida queda como salida no vendida.'),
-                onChanged: (x) =>
-                    setD(() => polvoPerdido = x ?? false),
-              ),
+              // 1.15 V5: «polvo perdido» solo lo marca el dueño
+              // (patrón AuthService().isOwner vía _esDueno). La
+              // regla del servidor no cambia: sin salida por merma
+              // autorizada, la dosis no vuelve al saldo con una
+              // reversión ordinaria.
+              if (mostrarCheckboxPolvoPerdido(_esDueno))
+                CheckboxListTile(
+                  value: polvoPerdido,
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text(
+                      'El polvo se perdió físicamente'),
+                  subtitle: const Text(
+                      'La reversión anula cobro y comisión y la '
+                      'pérdida queda como salida no vendida.'),
+                  onChanged: (x) =>
+                      setD(() => polvoPerdido = x ?? false),
+                ),
             ],
           ),
           acciones: [
@@ -1163,7 +1229,10 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                     fontWeight: FontWeight.w600),
               ),
             ),
-          if (lote != null)
+          // 1.15 (decisión Jc 2026-10-26): salida sin venta SOLO
+          // dueño, sin importar el motivo. El servidor rechaza
+          // además (OPS_SOLO_ADMIN + _require_owner).
+          if (lote != null && _esDueno)
             Align(
               alignment: Alignment.centerRight,
               child: TextButton.icon(
@@ -1489,6 +1558,9 @@ class _DialogoClienteState extends State<_DialogoCliente> {
             if ('${c['nombre'] ?? ''}'.toLowerCase().contains(q)) {
               return true;
             }
+            // Cliente protegido (2026-10-26, Protegido 2 H4): al
+            // protegido solo se llega por nombre, nunca por carnet.
+            if (esVistaProtegida(c)) return false;
             if (qDigitos.isNotEmpty) {
               final carnet =
                   '${c['carnet'] ?? ''}'.replaceAll(RegExp(r'[^0-9]'), '');
@@ -1542,17 +1614,35 @@ class _DialogoClienteState extends State<_DialogoCliente> {
                         final casa =
                             (c['cuenta_casa'] as num?)?.toInt() == 1;
                         final sub = subtituloClienteVenta(c);
+                        // Cliente protegido (2026-10-26, A3):
+                        // solo nombre y candado (sin subtítulo con
+                        // carnet/edad) y la selección se intercepta
+                        // en el acto; el diálogo queda abierto.
                         return ListTile(
                           title: Text('${c['nombre'] ?? ''}'),
-                          subtitle: sub.isEmpty ? null : Text(sub),
-                          trailing: casa
-                              ? const Chip(
-                                  label: Text('⭐ Casa'),
-                                  visualDensity:
-                                      VisualDensity.compact,
-                                )
-                              : null,
-                          onTap: () => Navigator.pop(context, c),
+                          subtitle: esVistaProtegida(c)
+                              ? null
+                              : (sub.isEmpty ? null : Text(sub)),
+                          trailing: esVistaProtegida(c)
+                              ? const Icon(Icons.lock,
+                                  color: AppColores.naranja)
+                              : casa
+                                  ? const Chip(
+                                      label: Text('⭐ Casa'),
+                                      visualDensity:
+                                          VisualDensity.compact,
+                                    )
+                                  : null,
+                          onTap: () {
+                            if (esVistaProtegida(c)) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                      content: Text(
+                                          mensajeClienteProtegido)));
+                              return;
+                            }
+                            Navigator.pop(context, c);
+                          },
                         );
                       },
                     ),

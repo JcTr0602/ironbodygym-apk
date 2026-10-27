@@ -12,6 +12,7 @@ import '../negocio.dart';
 import '../permisos_entrenador.dart';
 import '../permisos_visibilidad.dart';
 import '../sync.dart';
+import '../cliente_protegido.dart';
 import 'componentes.dart';
 import 'diseno.dart';
 import 'ficha.dart';
@@ -151,6 +152,11 @@ class _PagosRealizadosScreenState extends State<PagosRealizadosScreen> {
     for (final cid in porCliente.keys) {
       final c = porId[cid];
       if (c == null) continue;
+      // Cliente protegido (2026-10-26, Protegido 2 H3): la fila
+      // se omite entera para un no-dueño (la pantalla se titula
+      // «clientes que pagaron este mes»: la presencia ya revela
+      // el estado de pago).
+      if (esVistaProtegida(c)) continue;
       final pago = porCliente[cid]!;
       lista.add({
         'id': cid,
@@ -165,6 +171,9 @@ class _PagosRealizadosScreenState extends State<PagosRealizadosScreen> {
         // v1.3.6 (Jc): miniaturas en lugar del check verde. enCache solo
         // lee disco/memoria (no descarga), así que no hay tormenta de red.
         'foto_storage': c['foto_storage'],
+        // Cliente protegido (2026-10-26, A5): la fila muestra el
+        // candado junto al nombre cuando el cliente lo está.
+        'protegido': c['protegido'],
       });
     }
     // Ordenar por fecha de pago (más reciente primero)
@@ -240,8 +249,15 @@ class _PagosRealizadosScreenState extends State<PagosRealizadosScreen> {
                                 style:
                                     const TextStyle(fontSize: 12),
                               ),
-                              trailing: const Icon(
-                                  Icons.chevron_right),
+                              // Cliente protegido (2026-10-26,
+                              // A5): candado en vez de chevron. El
+                              // tap sigue abriendo la ficha
+                              // bloqueada (foto + nombre).
+                              trailing: esVistaProtegida(c)
+                                  ? const Icon(Icons.lock,
+                                      color: AppColores.naranja)
+                                  : const Icon(
+                                      Icons.chevron_right),
                               onTap: () => Navigator.of(context)
                                   .push(MaterialPageRoute(
                                 builder: (_) => FichaScreen(

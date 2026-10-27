@@ -148,6 +148,27 @@ void main() {
       expect(r.dosis, -1);
       expect(r.total, -50.0);
     });
+
+    test('1.15 M4c-02: casa como bool no revienta y queda fuera', () {
+      final r = NominaCalc.comisionDosisDesdeVentas([
+        {'registrado_por': 111, 'fecha': '2026-10-09', 'cantidad': 1, 'comision_unitaria': 50.0, 'casa': true},
+        {'registrado_por': 111, 'fecha': '2026-10-10', 'cantidad': 1, 'comision_unitaria': 50.0, 'casa': '1'},
+        {'registrado_por': 111, 'fecha': '2026-10-11', 'cantidad': 1, 'comision_unitaria': 50.0, 'casa': 0},
+      ], 111, '2026-10');
+      expect(r.dosis, 1);
+      expect(r.total, 50.0);
+    });
+
+    test('1.15 M4c-02: monto snapshot manda sobre la unitaria', () {
+      final r = NominaCalc.comisionDosisDesdeVentas([
+        // Unitaria 50 pero monto 0: sin comisión, sin dosis.
+        {'registrado_por': 111, 'fecha': '2026-10-09', 'cantidad': 1, 'comision_unitaria': 50.0, 'comision_monto': 0.0, 'casa': 0},
+        // Dueño fijó otra comisión: manda el snapshot (80).
+        {'registrado_por': 111, 'fecha': '2026-10-10', 'cantidad': 1, 'comision_unitaria': 50.0, 'comision_monto': 80.0, 'casa': 0},
+      ], 111, '2026-10');
+      expect(r.dosis, 1);
+      expect(r.total, 80.0);
+    });
   });
 
   group('resumenServiciosDeCliente (acumulado de la ficha)', () {

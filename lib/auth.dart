@@ -9,6 +9,7 @@ import 'dart:async';
 
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import 'acceso_app_cache.dart';
 import 'config.dart';
 import 'localdb.dart';
 
@@ -127,6 +128,12 @@ class AuthService {
   }
 
   Future<void> signOut() async {
+    // 1.15 P3: limpiar el caché de accesos a la App de Clientes
+    // AL INICIO del cierre, antes de operaciones que puedan
+    // fallar (purga local o signOut remoto). Así, aunque la
+    // purga falle y el cierre continúe, no quedan permisos
+    // viejos en memoria para la siguiente sesión.
+    AccesoAppCache.instance.limpiar();
     // v1.3.1 (M3): purgar datos sensibles antes de cerrar sesión.
     await LocalDb.purgaAlCerrarSesion();
     await _c.auth.signOut();

@@ -37,7 +37,12 @@ Map<String, dynamic> _op(String tipo, Map<String, dynamic> payload) => {
 
 Map<String, dynamic> _payloadInscripcionVenta(String? metodo) => {
       if (metodo != null) 'metodo_pago': metodo,
-      'cliente': {'periodo': 'mensual', 'meses': 1, 'monto': 2000},
+      // La app real (payloadInscripcionVentaSuplemento) NO manda
+      // monto en el mapa del cliente: el precio lo decide la tarifa
+      // según el método. La fixture vieja llevaba 'monto': 2000 y
+      // con la prioridad 1.15 del monto del payload habría tapado
+      // el caso D17 (transferencia = 2500, no 2000).
+      'cliente': {'periodo': 'mensual', 'meses': 1},
       'venta': {'moneda': 'CUP', 'cantidad': 2, 'precio': 500},
     };
 

@@ -478,6 +478,14 @@ class _ServiciosAdminScreenState extends State<ServiciosAdminScreen> {
       _aviso('Este bote ya está repartido completo', error: true);
       return;
     }
+    // Argón #9 (MEDIO): _personas solo trae al dueño + quien haya
+    // registrado pagos/ventas; vacío → keys.first reventaba con
+    // «Bad state: No element». No hay espejo de usuarios en la app
+    // del que poblar entrenadores sin historial, así que se avisa.
+    if (_personas.isEmpty) {
+      _aviso('No hay responsables disponibles', error: true);
+      return;
+    }
     var responsable = _personas.keys.first;
     final dosisCtrl =
         TextEditingController(text: '$sinRepartir');

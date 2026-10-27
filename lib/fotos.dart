@@ -68,15 +68,28 @@ class FotoCache {
     if (storagePath == null || storagePath.isEmpty) return null;
     final mem = _memoria[storagePath];
     if (mem != null && await mem.exists()) {
-      await _tocar(mem);
-      return mem;
+      // Argón #8-6: un caché truncado (0 bytes) no vale: forzar
+      // re-descarga en vez de devolverlo siempre.
+      if (await mem.length() > 0) {
+        await _tocar(mem);
+        return mem;
+      }
+      _memoria.remove(storagePath);
+      try {
+        await mem.delete();
+      } catch (_) {}
     }
     final d = await _dir();
     final f = _archivoCache(d, storagePath);
     if (await f.exists()) {
-      _memoria[storagePath] = f;
-      await _tocar(f);
-      return f;
+      if (await f.length() > 0) {
+        _memoria[storagePath] = f;
+        await _tocar(f);
+        return f;
+      }
+      try {
+        await f.delete();
+      } catch (_) {}
     }
     return null;
   }
@@ -106,7 +119,12 @@ class FotoCache {
       final d = await _dir();
       // v1.3.3: preservar la extensión original (el servidor sube .webp).
       final f = _archivoCache(d, storagePath);
-      await f.writeAsBytes(r.bodyBytes);
+      // Argón #8-6: escritura atómica (tmp + rename) o un corte a
+      // mitad dejaba un archivo truncado que enCache devolvía siempre.
+      final tmp = File(
+          '${f.path}.${DateTime.now().microsecondsSinceEpoch}.tmp');
+      await tmp.writeAsBytes(r.bodyBytes, flush: true);
+      await tmp.rename(f.path);
       _memoria[storagePath] = f;
       await _aplicarLRU();
       return f;

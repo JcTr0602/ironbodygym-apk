@@ -24,6 +24,7 @@ import '../localdb.dart';
 import '../negocio.dart';
 import '../permisos.dart';
 import '../tiempo.dart';
+import '../cliente_protegido.dart';
 import 'componentes.dart';
 import 'diseno.dart';
 import 'venta_suplemento_inscripcion.dart';
@@ -36,6 +37,47 @@ class VentaSuplementoScreen extends StatefulWidget {
   @override
   State<VentaSuplementoScreen> createState() =>
       _VentaSuplementoScreenState();
+}
+
+/// 1.15 V1: el fiado solo existe en CUP y solo con cliente del gym.
+/// El switch se muestra solo si ambas condiciones se cumplen.
+bool mostrarSwitchFiadoVenta(
+        {required String tipoComprador, required String moneda}) =>
+    tipoComprador == 'cliente' && moneda == 'CUP';
+
+/// 1.15 V1: al pasar a USD el fiado se apaga (un fiado en USD no
+/// existe); en cualquier otro cambio se conserva el valor actual.
+bool fiadoTrasCambiarMonedaVenta(
+        String monedaNueva, bool esFiadoActual) =>
+    monedaNueva == 'USD' ? false : esFiadoActual;
+
+/// 1.15 V1: la promo «mes gratis» nunca se promete a un fiado:
+/// ni la vista previa ni el comprobante la anuncian si la venta
+/// es a fiado (el fiado no es un cobro y no genera el mes).
+bool conPromoVentaSuplemento(
+        {required bool promoActiva,
+        required String tipoComprador,
+        required bool esFiado}) =>
+    promoActiva &&
+    (tipoComprador == 'cliente' || tipoComprador == 'inscribir_nuevo') &&
+    !esFiado;
+
+/// 1.15 V3: precio oficial convertido a la moneda de la venta,
+/// para el camino inscripción+venta. null = referencia no
+/// convertible (falta tasa válida): ese camino se BLOQUEA, no
+/// se cae al crudo en silencio (un oficial CUP guardado como si
+/// fuera USD falsearía el precio).
+double? oficialConvertidoSuplemento(
+    {required String monedaSuplemento,
+    required double precioOficial,
+    required String monedaVenta,
+    required double? tasaUsd}) {
+  if (monedaSuplemento == 'USD') {
+    return precioOficialEn(monedaVenta, precioOficial, tasaUsd);
+  }
+  if (monedaVenta == 'CUP') return precioOficial;
+  if (tasaUsd == null || tasaUsd <= 0 || !tasaUsd.isFinite) return null;
+  return precioOficial / tasaUsd;
 }
 
 class _VentaSuplementoScreenState
@@ -74,17 +116,14 @@ class _VentaSuplementoScreenState
   /// conserva EXACTAMENTE el comportamiento histórico (v1.2.4:
   /// [precioOficialEn], con redondeo a decenas al pasar a CUP); si
   /// es CUP, a CUP va tal cual y a USD se divide por la tasa.
-  double? _oficialEn(String m) {
-    if (_monedaSuplemento == 'USD') {
-      return precioOficialEn(m, _precioOficial, _tasaUsd);
-    }
-    if (m == 'CUP') return _precioOficial;
-    final tasa = _tasaUsd;
-    // Delta panel: tampoco una tasa infinita produce referencia válida
-    // (alineado con el fail-closed del servidor).
-    if (tasa == null || tasa <= 0 || !tasa.isFinite) return null;
-    return _precioOficial / tasa;
-  }
+  /// 1.15 V3: la conversión vive en oficialConvertidoSuplemento
+  /// (testeable); este método solo la aplica al estado actual.
+  double? _oficialEn(String m) => oficialConvertidoSuplemento(
+        monedaSuplemento: _monedaSuplemento,
+        precioOficial: _precioOficial,
+        monedaVenta: m,
+        tasaUsd: _tasaUsd,
+      );
 
   /// v1.2.4: precio oficial en la moneda elegida (CUP = oficial × tasa).
   double? get _oficialEnMoneda => _oficialEn(_moneda);
@@ -109,6 +148,8 @@ class _VentaSuplementoScreenState
         (anterior != null && (actual - anterior).abs() < 0.01);
     setState(() {
       _moneda = m;
+      // 1.15 V1: al pasar a USD el fiado se apaga (no hay fiado USD).
+      _esFiado = fiadoTrasCambiarMonedaVenta(m, _esFiado);
       final nuevo = _oficialEn(m);
       if (sinTocar || nuevo == null) {
         // v1.3.1: sin conversión posible, no arrastrar el importe
@@ -263,9 +304,11 @@ class _VentaSuplementoScreenState
             ? _compradorNombre.text.trim()
             : 'Cliente externo';
     final total = _total;
-    final conPromo = _promoActiva &&
-        (_tipoComprador == 'cliente' ||
-            _tipoComprador == 'inscribir_nuevo');
+    final conPromo = conPromoVentaSuplemento(
+      promoActiva: _promoActiva,
+      tipoComprador: _tipoComprador,
+      esFiado: _esFiado,
+    );
     final oficialRef = _oficialEnMoneda ?? _precioOficial;
 
     // v1.8.1 (pedido de Jc tras la venta duplicada del 2026-10-23):
@@ -564,6 +607,24 @@ class _VentaSuplementoScreenState
       return;
     }
     if (!mounted) return;
+    // 1.15 V3: el camino inscripción+venta envía el oficial
+    // CONVERTIDO a la moneda de la venta, nunca el crudo. Si no
+    // hay conversión válida (falta tasa para USD): BLOQUEAR la
+    // navegación y pedir una valoración válida; NO caer al
+    // crudo en silencio (hoy el fallback a _precioOficial vive
+    // en la venta simple y en el texto de referencia, y ahí se
+    // queda: este camino es el único que cambia).
+    final oficialConvertido = _oficialEnMoneda;
+    if (oficialConvertido == null) {
+      await DialogoApp.confirmar(context,
+          titulo: 'Revisa la valoración',
+          mensaje: 'No se pudo convertir el precio oficial a '
+              '$_moneda sin una tasa válida. Revisa la tasa del '
+              'día antes de inscribir.',
+          aceptar: 'Entendido',
+          cancelar: '');
+      return;
+    }
     final ok = await Navigator.push<bool>(
       context,
       MaterialPageRoute(
@@ -573,7 +634,7 @@ class _VentaSuplementoScreenState
           precio: precio,
           moneda: _moneda,
           usdTasa: _moneda == 'CUP' ? _tasaUsd : null,
-          precioOficial: _precioOficial,
+          precioOficial: oficialConvertido,
           notaPrecio:
               difiere && notaPrecio.isNotEmpty ? notaPrecio : null,
         ),
@@ -682,7 +743,10 @@ class _VentaSuplementoScreenState
           const EncabezadoSeccion(titulo: 'Comprador'),
           _selectorComprador(),
           // v1.3.7 (Fase B §6.2): fiado solo con cliente del gym.
-          if (_tipoComprador == 'cliente') ...[
+          // 1.15 V1: y solo en CUP (en USD el switch ni se muestra
+          // y _cambiarMoneda ya apagó el fiado al pasar a USD).
+          if (mostrarSwitchFiadoVenta(
+              tipoComprador: _tipoComprador, moneda: _moneda)) ...[
             const SizedBox(height: AppEspacio.sm),
             SwitchListTile(
               value: _esFiado,
@@ -927,9 +991,27 @@ class _DialogoBuscarClienteState extends State<_DialogoBuscarCliente> {
                       itemCount: filtrados.length,
                       itemBuilder: (_, i) {
                         final c = filtrados[i];
+                        // Cliente protegido (2026-10-26, A3):
+                        // candado junto al nombre y la selección se
+                        // intercepta en el acto (el diálogo queda
+                        // abierto); el servidor rechazaría la venta
+                        // de todos modos.
                         return ListTile(
                           title: Text('${c['nombre'] ?? ''}'),
-                          onTap: () => Navigator.pop(context, c),
+                          trailing: esVistaProtegida(c)
+                              ? const Icon(Icons.lock,
+                                  color: AppColores.naranja)
+                              : null,
+                          onTap: () {
+                            if (esVistaProtegida(c)) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                      content: Text(
+                                          mensajeClienteProtegido)));
+                              return;
+                            }
+                            Navigator.pop(context, c);
+                          },
                         );
                       },
                     ),

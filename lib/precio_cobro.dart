@@ -57,6 +57,19 @@ class PrecioCobro {
   const PrecioCobro(this.monto, this.escalon, [this.avisos = const []]);
 }
 
+/// 1.15 (M1c-01): ¿la especial está vigente en [hoy]? Misma lógica
+/// de fechas que el escalón 2 de [calcularPrecioCobro]: sin fecha
+/// de inicio, vigente; sin fecha de fin, sin vencimiento.
+bool _especialVigente(Map<String, dynamic> especial, String hoy) {
+  final desde = '${especial['vigente_desde'] ?? ''}';
+  if (desde.isNotEmpty && hoy.compareTo(desde) < 0) return false;
+  final hasta = especial['vigente_hasta'] as String?;
+  if (hasta != null && hasta.isNotEmpty && hoy.compareTo(hasta) > 0) {
+    return false;
+  }
+  return true;
+}
+
 /// Función pura: toda la precedencia, sin tocar la BD (testeable).
 PrecioCobro calcularPrecioCobro({
   required String periodo,
@@ -71,7 +84,12 @@ PrecioCobro calcularPrecioCobro({
   // 1. Casa: precio 0 aunque haya especial (con aviso si la hay).
   if (esCasa) {
     final avisos = <String>[];
-    if (especial != null) {
+    // 1.15 (M1c-01): el aviso solo si la especial regiría (mismo
+    // periodo y vigente); una especial de otro periodo, aún no
+    // vigente o vencida no cambia nada y no debe alarmar.
+    if (especial != null &&
+        '${especial['periodo'] ?? ''}' == periodo &&
+        _especialVigente(especial, hoyHabana)) {
       avisos.add('Es Casa y tiene tarifa especial: rige Casa (0 CUP)');
     }
     return PrecioCobro(0, 'casa', avisos);
@@ -184,7 +202,7 @@ Future<PrecioCobro> precioCobroParaCliente({
   final pr = precios ?? await preciosVigentes();
   final clienteId = (cliente['id'] as num?)?.toInt() ?? 0;
   final esCasa = cliente['cuenta_casa'] == 1 || cliente['cuenta_casa'] == true;
-  final menor = esMenor(cliente['carnet'] as String?);
+  final menor = esMenor(cliente['carnet']?.toString());
   Map<String, dynamic>? especial;
   if (clienteId > 0) {
     especial = await tarifaActivaPara(clienteId, periodo);
@@ -293,7 +311,10 @@ ResumenExtracto resumenExtracto(List<Map<String, dynamic>> filas) {
   for (final f in filas) {
     if (f['anulada'] == 1 || f['anulada'] == true) continue;
     final monto = (f['monto'] as num?)?.toDouble() ?? 0;
-    final moneda = '${f['moneda'] ?? 'CUP'}';
+    // 1.15 (M1c-01): la moneda se normaliza (espacios y minúsculas):
+    // 'usd' y 'USD' son la misma moneda y no deben sumar aparte.
+    final cruda = '${f['moneda'] ?? 'CUP'}'.trim().toUpperCase();
+    final moneda = cruda.isEmpty ? 'CUP' : cruda;
     total[moneda] = (total[moneda] ?? 0) + monto;
     if (f['tipo'] == 'servicio') {
       ser[moneda] = (ser[moneda] ?? 0) + monto;

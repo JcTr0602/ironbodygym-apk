@@ -139,12 +139,52 @@ class _InscribirScreenState extends State<InscribirScreen> {
         File('${dir.path}/foto_${DateTime.now().millisecondsSinceEpoch}.jpg');
     await File(img.path).copy(destino.path);
     // Editor simple: permite zoom/mover para centrar la cara
-    if (!mounted) return;
+    if (!mounted) {
+      // Panel 1.15 (Luna MEDIO + Terra BAJO, R2): la pantalla pudo
+      // cerrarse entre la copia y este punto; sin borrar, destino
+      // quedaba huérfano.
+      try {
+        await destino.delete();
+      } catch (_) {}
+      return;
+    }
     final editada = await mostrarEditorFoto(context, destino);
+    if (!mounted) {
+      // Panel Luna: la pantalla pudo cerrarse con el editor abierto;
+      // sin esta guarda, el setState de abajo caía sobre un estado
+      // desmontado y la copia temporal quedaba huérfana cuando el
+      // archivo editado era el propio destino. La foto anterior NO
+      // se toca: sigue siendo la vigente en _foto.
+      try {
+        await destino.delete();
+      } catch (_) {}
+      // R2 (Terra): el editor puede devolver otro temporal; si la
+      // pantalla se cerró, ese también quedaría huérfano.
+      if (editada != null && editada.path != destino.path) {
+        try {
+          await editada.delete();
+        } catch (_) {}
+      }
+      return;
+    }
     if (editada == null) {
       // usuario canceló: borra la copia temporal
       try { await destino.delete(); } catch (_) {}
       return;
+    }
+    // Argón #7A-5: sin huérfanos: la foto anterior sustituida y la
+    // copia temporal sobrante se borran cuando el editor devuelve
+    // otro archivo.
+    final anterior = _foto;
+    if (anterior != null && anterior.path != editada.path) {
+      try {
+        await anterior.delete();
+      } catch (_) {}
+    }
+    if (editada.path != destino.path) {
+      try {
+        await destino.delete();
+      } catch (_) {}
     }
     setState(() => _foto = editada);
   }
@@ -187,6 +227,11 @@ class _InscribirScreenState extends State<InscribirScreen> {
   String _etiquetaPeriodo() {
     if (_periodo == 'semanal') return 'Semana';
     if (_periodo == 'quincenal') return 'Quincena';
+    // Argón #7A-1: el tipo personalizado muestra su nombre, no los
+    // meses residuales de una selección mensual anterior.
+    if (_periodo.startsWith('tipo:')) {
+      return _tipoCustomSel?.nombre ?? 'Personalizado';
+    }
     if (_periodo == 'personalizado') {
       return '${_dias.text.trim()} días (personalizado)';
     }
@@ -213,6 +258,9 @@ class _InscribirScreenState extends State<InscribirScreen> {
           content: Text('Carnet inválido: 6 a 11 dígitos')));
       return;
     }
+    // Argón #7A-2: el precio de menor no puede depender de la carga
+    // lanzada sin await en initState; refrescarlo antes de calcular.
+    await _cargarPrecioMenor();
     final precios0 = await _precios();
     if (!mounted) return;
     if (!_cuentaCasa &&
@@ -621,7 +669,12 @@ class _InscribirScreenState extends State<InscribirScreen> {
                               {
                                 'mensual': 2000.0,
                                 'semanal': 600.0,
-                                'quincenal': 1200.0
+                                'quincenal': 1200.0,
+                                // Argón #7A-2: el mapa de respaldo debe
+                                // traer 'transfer' o el chip de
+                                // transferencia rompe el primer frame
+                                // con pr['transfer']!.
+                                'transfer': 2500.0,
                               };
                           return Column(
                             crossAxisAlignment:
@@ -698,11 +751,15 @@ class _InscribirScreenState extends State<InscribirScreen> {
                                           'personalizado') {
                                     _periodo = v!;
                                     _tipoCustomSel = null;
+                                    // Argón #7A-1: sin meses residuales.
+                                    _meses = 1;
                                   } else if (v!
                                       .startsWith(
                                           'tipo:')) {
                                     // v1.3.9: tipo personalizado
                                     _periodo = v;
+                                    // Argón #7A-1: sin meses residuales.
+                                    _meses = 1;
                                     final id = v
                                         .substring(5);
                                     _tipoCustomSel =

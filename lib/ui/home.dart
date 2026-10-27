@@ -10,6 +10,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../auth.dart';
 import '../bloque3.dart';
+import '../cliente_protegido.dart';
 import '../invitados.dart' as invitados_svc;
 import '../localdb.dart';
 import '../negocio.dart';
@@ -511,9 +512,20 @@ class _HomeScreenState extends State<HomeScreen>
             hoyHabanaIso().substring(0, 7)), // 16
         PerfilService.instance.getPagoEntrenador(), // 17
       ]);
-      final v = res[0] as List;
-      final a = res[1] as List;
-      final a30 = res[2] as List;
+      // Cliente protegido (2026-10-26, Protegido 2 H6): los
+      // contadores de la principal no cuentan protegidos para un
+      // no-dueño (esVistaProtegida ya es owner-safe: al dueño no
+      // le quita nada). Se filtra aquí, en la vista, no en los
+      // helpers de negocio, para no dejar al dueño sin alertas.
+      final v = (res[0] as List)
+          .where((c) => !esVistaProtegida(c as Map<String, dynamic>))
+          .toList();
+      final a = (res[1] as List)
+          .where((c) => !esVistaProtegida(c as Map<String, dynamic>))
+          .toList();
+      final a30 = (res[2] as List)
+          .where((c) => !esVistaProtegida(c as Map<String, dynamic>))
+          .toList();
       final p = res[3] as double;
       final porSubir = res[4] as int;
       final det = res[5] as dynamic;
@@ -524,7 +536,12 @@ class _HomeScreenState extends State<HomeScreen>
       final horasUmbral = res[10] as int;
       final acts = res[11] as Map<String, DateTime>;
       final porRecoger = res[12] as double;
-      final cumple = res[13] as List;
+      // Cliente protegido (2026-10-26, Protegido 2 H6): igual que
+      // los vencimientos, los cumpleaños de hoy no cuentan
+      // protegidos para un no-dueño.
+      final cumple = (res[13] as List)
+          .where((c) => !esVistaProtegida(c as Map<String, dynamic>))
+          .toList();
       final incidAbiertas = res[14] as int;
       // v1.3.3 (Argón): turnos de hoy sin reporte real (solo dueño).
       // Antes el chip usaba _entrenadoresSinSync, que mide inactividad

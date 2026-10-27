@@ -25,6 +25,8 @@
 /// no duplicar los flujos de reverso que ya existen).
 library;
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:uuid/uuid.dart';
 
@@ -32,6 +34,8 @@ import '../auth.dart';
 import '../localdb.dart';
 import '../negocio.dart';
 import '../precio_cobro.dart';
+import '../servicios.dart';
+import '../sync.dart';
 import '../tiempo.dart';
 import 'componentes.dart';
 import 'diseno.dart';
@@ -118,7 +122,10 @@ class _CentroComprasScreenState extends State<CentroComprasScreen> {
         'detalle': v,
       });
     }
-    for (final v in servicios) {
+    // Argón #9 (ALTO parcial): el extracto no suma reversos ni
+    // ventas reversadas (ver ventasServicioSinReversos). La pista
+    // de auditoría completa sigue en ServiciosScreen.
+    for (final v in ventasServicioSinReversos(servicios)) {
       final precio = (v['precio_unitario'] as num?)?.toDouble() ?? 0;
       final cant = (v['cantidad'] as num?)?.toInt() ?? 0;
       final cid = (v['cliente_id'] as num?)?.toInt();
@@ -391,6 +398,9 @@ class _CentroComprasScreenState extends State<CentroComprasScreen> {
     if (!mounted) return;
     ScaffoldMessenger.of(context)
         .showSnackBar(const SnackBar(content: Text('Compra anulada')));
+    // Argón #9 (BAJO): sin push, la op quedaba estancada hasta que
+    // otra pantalla disparara un push.
+    unawaited(SyncEngine.instance.push());
   }
 
   Future<void> _registrarManual(BuildContext context) async {
@@ -525,6 +535,9 @@ class _CentroComprasScreenState extends State<CentroComprasScreen> {
     if (!context.mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Compra registrada')));
+    // Argón #9 (BAJO): sin push, la op quedaba estancada hasta que
+    // otra pantalla disparara un push.
+    unawaited(SyncEngine.instance.push());
   }
 
   Future<String?> _elegirClienteNombre(BuildContext context) async {

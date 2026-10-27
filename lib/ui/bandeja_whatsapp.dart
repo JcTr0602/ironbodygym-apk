@@ -177,6 +177,11 @@ class _BandejaWhatsappScreenState extends State<BandejaWhatsappScreen>
   }
 
   Future<void> _cargar() async {
+    // Argón #10-4: _hoy se fijaba solo en initState. Si la app
+    // quedaba abierta de un día para otro y se refrescaba, los
+    // avisos eran del día nuevo pero las marcas de contactado se
+    // guardaban bajo la fecha vieja. Se refresca en cada carga.
+    _hoy = hoyHabanaIso();
     setState(() => _cargando = true);
     // v1.3.6 (auditoría Argón, Fix 1a): la bandeja es solo del dueño.
     // Guard en la pantalla además del botón oculto en Home.

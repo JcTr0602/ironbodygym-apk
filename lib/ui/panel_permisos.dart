@@ -53,6 +53,12 @@ class _PanelPermisosState extends State<PanelPermisos> {
   List<EntrenadorPermiso> _entrenadores = [];
   bool _cargando = true;
 
+  /// 1.15 (campo): entrenadores con la lista de permisos
+  /// desplegada. Por defecto todo colapsado: la tarjeta muestra
+  /// solo cabecera + ACTIVO y una fila «Permisos · N de 14»;
+  /// los interruptores salen solo al tocar esa fila.
+  final Set<String> _expandidos = {};
+
   /// v1.4.4 (panel de código): serializa las operaciones por
   /// entrenador. Sin esto, dos toques rápidos sobre el mismo
   /// entrenador se solapaban y la relectura/reversión de la operación
@@ -312,6 +318,10 @@ class _PanelPermisosState extends State<PanelPermisos> {
   }
 
   Widget _buildEntrenadorCard(EntrenadorPermiso ent) {
+    // 1.15 (campo): colapsado por defecto; el conteo se lee sin abrir.
+    final expandido = _expandidos.contains(ent.email);
+    final activos =
+        ent.permisos.values.where((v) => v).length;
     return Card(
       margin: const EdgeInsets.only(bottom: 16),
       child: Padding(
@@ -372,19 +382,51 @@ class _PanelPermisosState extends State<PanelPermisos> {
               ],
             ),
             const Divider(),
-            ...EntrenadorPermiso.permisosDisponibles.map(
-              (p) => SwitchListTile(
-                title: Text(p.$2,
-                    style: const TextStyle(fontSize: 14)),
-                subtitle: Text(p.$3,
-                    style: const TextStyle(fontSize: 12)),
-                value: ent.permisos[p.$1] ?? false,
-                onChanged: ent.activo
-                    ? (v) => _togglePermiso(ent, p.$1, v)
-                    : null,
-                dense: true,
+            InkWell(
+              onTap: () => setState(() {
+                if (expandido) {
+                  _expandidos.remove(ent.email);
+                } else {
+                  _expandidos.add(ent.email);
+                }
+              }),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        'Permisos · $activos de '
+                        '${EntrenadorPermiso.permisosDisponibles.length} activos',
+                        style: const TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                    Icon(
+                      expandido
+                          ? Icons.expand_less
+                          : Icons.expand_more,
+                    ),
+                  ],
+                ),
               ),
             ),
+            if (expandido)
+              ...EntrenadorPermiso.permisosDisponibles.map(
+                (p) => SwitchListTile(
+                  title: Text(p.$2,
+                      style: const TextStyle(fontSize: 14)),
+                  subtitle: Text(p.$3,
+                      style: const TextStyle(fontSize: 12)),
+                  value: ent.permisos[p.$1] ?? false,
+                  onChanged: ent.activo
+                      ? (v) => _togglePermiso(ent, p.$1, v)
+                      : null,
+                  dense: true,
+                ),
+              ),
           ],
         ),
       ),

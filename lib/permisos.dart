@@ -6,6 +6,19 @@ import 'auth.dart';
 /// - Dueño: control total (Jc).
 /// - Administrador: casi todo, sin gestión de usuarios ni borrado definitivo.
 /// - Entrenador: operación diaria (cobrar, inscribir, listas).
+///
+/// 1.15 P7 (LEGACY): esta clase está DEPRECADA. NO es la autoridad
+/// de permisos de operaciones: los permisos granulares vivos viven
+/// en [PermisosEntrenador] (lib/permisos_entrenador.dart, desde el
+/// JSONB del servidor) y los candados de visibilidad en
+/// lib/permisos_visibilidad.dart. Se conserva solo porque dos
+/// pantallas la importan todavía (detalle_suplemento, venta_
+/// suplemento); no añadirle claves nuevas ni usarla para decidir
+/// si una operación está permitida.
+@Deprecated(
+    'Legacy: no es autoridad de permisos de operaciones. '
+    'Usa PermisosEntrenador (granulares) o los candados de '
+    'permisos_visibilidad.dart.')
 class Permisos {
   final AuthService _auth = AuthService();
 

@@ -7,6 +7,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../localdb.dart';
 import '../negocio.dart';
 import '../sync.dart';
+import '../cliente_protegido.dart';
 import 'buscar.dart';
 import 'componentes.dart';
 import 'dialogo_pago.dart';
@@ -48,13 +49,19 @@ class _ListasScreenState extends State<ListasScreen>
     final p30 = await atrasados(masDe30: true);
     final pv = await porVencer(dias: 3);
     final ad = await clientesAlDia(); // v1.2.1
+    // Cliente protegido (2026-10-26, Protegido 2 H6): estas listas
+    // muestran teléfono y botón de WhatsApp; un no-dueño no ve
+    // protegidos en ninguna.
+    List<Map<String, dynamic>> sinProtegidos(
+        List<Map<String, dynamic>> l) =>
+        l.where((c) => !esVistaProtegida(c)).toList();
     if (mounted) {
       setState(() {
-        _hoy = h;
-        _menos30 = m30;
-        _mas30 = p30;
-        _porVencer = pv;
-        _alDia = ad;
+        _hoy = sinProtegidos(h);
+        _menos30 = sinProtegidos(m30);
+        _mas30 = sinProtegidos(p30);
+        _porVencer = sinProtegidos(pv);
+        _alDia = sinProtegidos(ad);
       });
     }
   }

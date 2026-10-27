@@ -83,20 +83,30 @@ class NominaCalc {
         excluirCuentasCasa(
             vistos, await LocalDb.instance.idsCuentasCasa());
       }
-      // Excepción del mes en curso (ver la nota de la clase): se
-      // excluye al cliente cuyo pagado_hasta cae en
-      // [inicioMes, inicioMesSiguiente). Cliente sin fila en el
-      // espejo o sin fecha interpretable: SE CONSERVA en el conteo
-      // (fallback ante sync incompleta; panel 2026-10-21). Un error
-      // de lectura del espejo cae en el catch y devuelve null, como
-      // cualquier otro error de lectura.
-      if (vistos.isNotEmpty && pref == prefMesActual()) {
+      // Excepción del mes (ver la nota de la clase): se excluye
+      // al cliente cuyo pagado_hasta cae en [pref]. 1.15 (M4c-01):
+      // aplica a CUALQUIER mes, no solo al mes en curso: antes,
+      // la base de un mes cerrado cambiaba al cruzar la medianoche
+      // (la excepción dejaba de aplicarse y clientes excluidos
+      // volvían a entrar, descuadrando la nómina ya liquidada).
+      // Cliente sin fila en el espejo o sin fecha interpretable:
+      // SE CONSERVA en el conteo (fallback ante sync incompleta;
+      // panel 2026-10-21). Un error de lectura del espejo cae en
+      // el catch y devuelve null, como cualquier otro error de
+      // lectura.
+      if (vistos.isNotEmpty) {
         final filas = await LocalDb.instance
             .mirrorPorIds('clientes', vistos.toList());
-        final hastaPorId = <int, String?>{
+        // 1.15 (N1 + n7): el snapshot del pago manda sobre el espejo
+        // actual; el espejo solo es fallback para pagos antiguos sin
+        // snapshot. El id de la fila se parsea tolerante (n7): una
+        // fila con id no interpretable se ignora sin abortar el
+        // conjunto (antes un cast directo devolvía null para todo).
+        final hastaPorId = hastaSnapshotPorCliente(mensuales, {
           for (final f in filas)
-            (f['id'] as num).toInt(): _fechaCalendario(f['pagado_hasta']),
-        };
+            if (idTolerante(f['id']) != null)
+              idTolerante(f['id'])!: _fechaCalendario(f['pagado_hasta']),
+        });
         excluirVencidosDentroDelMes(vistos, pref, hastaPorId);
       }
       return vistos;
@@ -105,14 +115,37 @@ class NominaCalc {
     }
   }
 
+  /// Parseo numérico tolerante (1.15, N3/N5): un número llegado
+  /// como String por JSON ('2000', '2000.5') también vale; lo no
+  /// interpretable es null, nunca una excepción.
+  static double? montoTolerante(dynamic v) {
+    if (v is num) return v.toDouble();
+    if (v is String) return double.tryParse(v.trim());
+    return null;
+  }
+
+  /// Parseo entero tolerante (1.15, n7/N5): num (10.0 → 10) o String
+  /// ('10', '10.0'); lo no interpretable es null.
+  static int? idTolerante(dynamic v) {
+    if (v is num) return v.toInt();
+    if (v is String) {
+      final t = v.trim();
+      final i = int.tryParse(t);
+      if (i != null) return i;
+      return double.tryParse(t)?.toInt();
+    }
+    return null;
+  }
+
   /// PURO (testeable sin BD): ¿este pago del espejo `pagos`
   /// genera comisión de nómina? Fase A 2026-10-25 (A3, regla
   /// cerrada por Jc): SOLO las mensualidades.
   ///
   /// - `periodo == 'mensual'` → sí (mensual, menores y especiales
   ///   mensuales; el tipo_id no importa).
-  /// - Sin `periodo` → sí: el resto del código usa 'mensual'
-  ///   como default del campo (etiquetaPeriodo, payloads de cobro).
+  /// - Sin `periodo` o `periodo == ''` → sí: el resto del código
+  ///   usa 'mensual' como default del campo (1.15, N3: '' se
+  ///   normaliza a mensual).
   /// - `personalizado` o `tipo:<id>` (ofertas) → solo si cubre
   ///   un mes o más (`dias >= 30`): una Oferta 50% a 30 días ES
   ///   una mensualidad; una personalizada de 15 días es una
@@ -120,15 +153,63 @@ class NominaCalc {
   ///   se puede probar cobertura mensual; el filtro debe ser
   ///   explícito, no por defecto).
   /// - `semanal`, `quincenal` y cualquier otro → no.
+  ///
+  /// 1.15 (N3): el filtro de promo y monto positivo se valida
+  /// ANTES de ramificar, en TODAS las ramas (antes vivía solo en
+  /// la mensual): una promo no genera comisión (mes gratis por
+  /// la compra) y un cobro de 0 CUP tampoco (regalo, ajuste),
+  /// tampoco en personalizados ni ofertas. El monto se parsea
+  /// tolerante (num o String numérico).
   static bool esPagoMensualidad(Map<String, dynamic> p) {
-    final periodo = '${p['periodo'] ?? 'mensual'}';
+    var periodo = '${p['periodo'] ?? 'mensual'}';
+    if (periodo.isEmpty) periodo = 'mensual';
+    if (p['metodo'] == 'promo') return false;
+    final monto = montoTolerante(p['monto']);
+    if (monto == null || monto <= 0) return false;
     if (periodo == 'mensual') return true;
     if (periodo == 'semanal' || periodo == 'quincenal') return false;
     if (periodo == 'personalizado' || periodo.startsWith('tipo:')) {
-      final dias = (p['dias'] as num?)?.toInt();
+      final dias = idTolerante(p['dias']);
       return dias != null && dias >= 30;
     }
     return false;
+  }
+
+  /// PURO (1.15, N1): `pagado_hasta` de elegibilidad por cliente
+  /// para el mes que se está contando.
+  ///
+  /// CONGELAMIENTO: el snapshot lo da el propio pago del mes
+  /// (`pagado_hasta` que el cobro dejó calculado: el diálogo de
+  /// pago lo incluye en el payload). Si un cliente tiene varios
+  /// pagos mensuales en el mes, manda el snapshot MÁXIMO (la
+  /// cobertura al cierre del mes, no la de un pago intermedio).
+  /// Un pago posterior en otro mes NO entra en esta lista, así
+  /// que no puede cambiar la base de un mes ya cerrado.
+  ///
+  /// FALLBACK EXPLÍCITO: pagos antiguos sin snapshot en su fila
+  /// usan el `pagado_hasta` actual del espejo (comportamiento
+  /// anterior). Límite documentado: para esos pagos viejos el
+  /// congelamiento total exige que el servidor refleje el
+  /// `pagado_hasta` del cobro en la fila del espejo `pagos` (o
+  /// una columna snapshot local futura); mientras tanto, el
+  /// fallback conserva la regla histórica y los tests vigentes.
+  static Map<int, String?> hastaSnapshotPorCliente(
+      List<Map<String, dynamic>> pagosDelMes,
+      Map<int, String?> hastaEspejo) {
+    final out = Map<int, String?>.from(hastaEspejo);
+    final porCliente = <int, String>{};
+    for (final p in pagosDelMes) {
+      final id = idTolerante(p['cliente_id']);
+      if (id == null) continue;
+      final snap = _fechaCalendario(p['pagado_hasta']);
+      if (snap == null) continue;
+      final previo = porCliente[id];
+      if (previo == null || snap.compareTo(previo) > 0) {
+        porCliente[id] = snap;
+      }
+    }
+    out.addAll(porCliente);
+    return out;
   }
 
   /// PURO (testeable sin BD): ids únicos de cliente presentes en
@@ -138,8 +219,7 @@ class NominaCalc {
   static Set<int> idsDesdePagos(List<Map<String, dynamic>> pagos) {
     final vistos = <int>{};
     for (final p in pagos) {
-      final cid = p['cliente_id'];
-      final id = cid is num ? cid.toInt() : int.tryParse('$cid');
+      final id = idTolerante(p['cliente_id']);
       if (id != null) vistos.add(id);
     }
     return vistos;
@@ -155,13 +235,14 @@ class NominaCalc {
   }
 
   /// PURO (testeable sin BD): aplica sobre [ids] la excepción del
-  /// mes en curso — quita a quien tenga `pagado_hasta` dentro de
-  /// [pref], según [hastaPorId] (id → fecha calendario 'YYYY-MM-DD'
+  /// mes — quita a quien tenga `pagado_hasta` dentro de [pref],
+  /// según [hastaPorId] (id → fecha calendario 'YYYY-MM-DD'
   /// ya normalizada, o null si no es interpretable: ese se
-  /// CONSERVA). Si [pref] no es el mes en curso, no toca nada.
+  /// CONSERVA). 1.15 (M4c-01): vale para cualquier mes, no solo
+  /// el mes en curso, para que la base de un mes cerrado no
+  /// cambie al cruzar la medianoche.
   static void excluirVencidosDentroDelMes(
       Set<int> ids, String pref, Map<int, String?> hastaPorId) {
-    if (pref != prefMesActual()) return;
     final inicio = '$pref-01';
     final siguiente = _inicioMesSiguiente(pref);
     ids.removeWhere((id) {
@@ -202,6 +283,17 @@ class NominaCalc {
       if (dt.year != y || dt.month != mo || dt.day != d) return null;
       return v;
     }
+    // Panel Grupo B: igual que normalizarFechaCobro — tryParse
+    // normaliza fechas imposibles; validar la parte fecha con
+    // round-trip ANTES de convertir. Ojo: NO comparar con la fecha
+    // convertida, que legítimamente puede diferir un día por offset.
+    final parte = RegExp(r'^(\d{4})-(\d{2})-(\d{2})').firstMatch(v);
+    if (parte == null) return null;
+    final y = int.parse(parte.group(1)!);
+    final mo = int.parse(parte.group(2)!);
+    final d = int.parse(parte.group(3)!);
+    final chk = DateTime.utc(y, mo, d);
+    if (chk.year != y || chk.month != mo || chk.day != d) return null;
     final dt = DateTime.tryParse(v);
     if (dt == null) return null;
     return isoHabana(aHabana(dt)).substring(0, 10);
@@ -216,7 +308,8 @@ class NominaCalc {
     for (final b in bonos) {
       final para = '${b['entrenador'] ?? 'ambos'}';
       if (para == 'ambos' || para == entrenador) {
-        total += (b['monto'] as num?)?.toDouble() ?? 0;
+        // 1.15 (N5): monto tolerante (String numérico también vale).
+        total += montoTolerante(b['monto']) ?? 0;
       }
     }
     return total;
@@ -229,7 +322,8 @@ class NominaCalc {
     for (final b in bonos) {
       final para = '${b['entrenador'] ?? 'ambos'}';
       if (para == 'ambos') {
-        total += (b['monto'] as num?)?.toDouble() ?? 0;
+        // 1.15 (N5): monto tolerante (String numérico también vale).
+        total += montoTolerante(b['monto']) ?? 0;
       }
     }
     return total;
@@ -286,14 +380,72 @@ class NominaCalc {
       if (duenoComision != telegramId) {
         continue;
       }
-      final f = '${v['fecha'] ?? ''}';
-      if (f.length < 7 || f.substring(0, 7) != pref) continue;
-      if ((v['casa'] as num?)?.toInt() == 1) continue;
-      final cant = (v['cantidad'] as num?)?.toInt() ?? 0;
-      final com = (v['comision_unitaria'] as num?)?.toDouble() ?? 0;
-      if (com > 0) dosis += cant;
-      total += (v['comision_monto'] as num?)?.toDouble() ?? com * cant;
+      // 1.15 (N4): mes en hora Habana, no substring crudo: un
+      // ISO con hora en UTC puede pertenecer a otro día/mes en
+      // Habana. Fecha no interpretable → se ignora la fila.
+      final fechaCal = _fechaCalendario(v['fecha']);
+      if (fechaCal == null || fechaCal.substring(0, 7) != pref) continue;
+      // 1.15 (M4c-02): casa tolerante (1, true o '1'): un bool
+      // llegado por JSON revienta el cast a num.
+      final casa = v['casa'];
+      if (casa == 1 || casa == true || casa == '1') continue;
+      // 1.15 (N5): parseo tolerante en cantidad y comisiones.
+      final cant = idTolerante(v['cantidad']) ?? 0;
+      final com = montoTolerante(v['comision_unitaria']) ?? 0;
+      // 1.15 (M4c-02): el monto snapshot manda: si es 0, no hay
+      // comisión aunque la unitaria sea > 0 (antes la dosis se
+      // contaba por la unitaria y el total por el monto, y podían
+      // discrepar).
+      // 1.15 (N5, reverso): cantidad negativa con snapshot
+      // positivo → se RESTA el monto; si el snapshot ya es
+      // negativo, se conserva ese signo. Sin snapshot, la
+      // fórmula unitaria × cantidad ya da negativo sola.
+      final snap = montoTolerante(v['comision_monto']);
+      var montoCom = snap ?? com * cant;
+      if (snap != null && cant < 0 && montoCom > 0) {
+        montoCom = -montoCom;
+      }
+      if (montoCom != 0) dosis += cant;
+      total += montoCom;
     }
     return (dosis: dosis, total: total);
+  }
+
+  /// Nómina del dueño (fix 1.15, PURO): entrenadores a evaluar para
+  /// la comisión = unión de quienes REGISTRARON ventas de servicios
+  /// y quienes GANARON comisión (comision_entrenador_id). Sin la
+  /// segunda pata, una venta registrada por el dueño a nombre de un
+  /// entrenador nunca entraba en la iteración de la pantalla y su
+  /// comisión no se calculaba (caso real 2026-10-27: 4 dosis de
+  /// Duany registradas por Jc, 0 filas con registrado_por=Duany).
+  /// Devuelve tid → nombre: de registrado_por_nombre, o de
+  /// usuarios_apk cuando el tid solo ganó comisión (o el nombre
+  /// registrado venía vacío); '' si no se conoce el nombre (el
+  /// tid igual se itera: el cálculo por tid no depende del nombre,
+  /// solo el mapeo a la cubeta duany/gabriel de la pantalla).
+  static Map<int, String> tidsConComisionServicio(
+      List<Map<String, dynamic>> ventasServ,
+      List<Map<String, dynamic>> usuariosApk) {
+    final nombres = <int, String>{};
+    for (final v in ventasServ) {
+      final tid = LocalDb.normalizarTelegramId(v['registrado_por']);
+      if (tid != null) {
+        nombres.putIfAbsent(
+            tid, () => '${v['registrado_por_nombre'] ?? ''}');
+      }
+      final earn =
+          LocalDb.normalizarTelegramId(v['comision_entrenador_id']);
+      if (earn != null) nombres.putIfAbsent(earn, () => '');
+    }
+    for (final u in usuariosApk) {
+      final tid = LocalDb.normalizarTelegramId(u['telegram_id']);
+      if (tid != null &&
+          nombres.containsKey(tid) &&
+          nombres[tid]!.isEmpty) {
+        final nombre = '${u['nombre'] ?? u['username'] ?? ''}';
+        if (nombre.isNotEmpty) nombres[tid] = nombre;
+      }
+    }
+    return nombres;
   }
 }

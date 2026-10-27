@@ -228,6 +228,11 @@ class _ColaScreenState extends State<ColaScreen> {
   // de edición (retenerHasta → proximo_reintento futuro).
   int _retenidas = 0;
   int _totalPendientes = 0;
+  // 1.15: desglose por tipo de LO PENDIENTE (mismo conjunto que
+  // _totalPendientes), contado en la BD. Antes se agrupaba la
+  // lista reciente (30 ops de cualquier estado) y el desglose
+  // sumaba 30 con solo 1 op en vuelo.
+  Map<String, int> _desglosePendientes = {};
   String? _masAntiguaIso;
   bool _sincronizando = false;
   // v1.4.0: progreso visible de la sincronización manual.
@@ -337,10 +342,13 @@ class _ColaScreenState extends State<ColaScreen> {
     // sencillo y el botón «Subir ahora».
     var retenidas = 0;
     var totalPendientes = 0;
+    var desglosePendientes = <String, int>{};
     String? masAntiguaIso;
     try {
       retenidas = await LocalDb.instance.countOpsRetenidas();
       totalPendientes = await LocalDb.instance.countPendingOps();
+      desglosePendientes =
+          await LocalDb.instance.conteoPendientesPorTipo();
       masAntiguaIso =
           await LocalDb.instance.isoOpPendienteMasAntigua();
     } catch (_) {}
@@ -355,6 +363,7 @@ class _ColaScreenState extends State<ColaScreen> {
         _fotosDetalle = fDet;
         _retenidas = retenidas;
         _totalPendientes = totalPendientes;
+        _desglosePendientes = desglosePendientes;
         _masAntiguaIso = masAntiguaIso;
       });
     }
@@ -494,12 +503,14 @@ class _ColaScreenState extends State<ColaScreen> {
         ),
       );
     }
-    // Desglose por tipo sobre las ops cargadas (la lista tiene
-    // límite: si hay más que las cargadas, se dice).
+    // 1.15: desglose por tipo de LO PENDIENTE, contado en la BD
+    // (mismo conjunto que _totalPendientes). Antes se agrupaba
+    // la lista reciente (30 ops de cualquier estado) y el
+    // desglose no cuadraba con el encabezado.
     final porTipo = <String, int>{};
-    for (final o in [..._ops, ..._bloqueadas]) {
-      final t = describirTipoOp('${o['tipo'] ?? ''}');
-      porTipo[t] = (porTipo[t] ?? 0) + 1;
+    for (final e in _desglosePendientes.entries) {
+      final t = describirTipoOp(e.key);
+      porTipo[t] = (porTipo[t] ?? 0) + e.value;
     }
     final desglose = porTipo.entries
         .map((e) => '${e.value} ${e.key.toLowerCase()}')

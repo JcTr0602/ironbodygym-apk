@@ -1,7 +1,9 @@
 /// Diálogo unificado de pago (ficha del cliente y Agregar Pago).
 ///
 /// Períodos: semana, quincena, meses y personalizado (días + monto
-/// manuales). Siempre pide confirmación con resumen antes de registrar.
+/// manuales). 1.15 (M5): este diálogo YA NO pide confirmación
+/// propia: devuelve el payload al terminar el Paso 1 y la ÚNICA
+/// confirmación antes de encolar es PreviewCobroScreen.
 library;
 
 import 'package:flutter/material.dart';
@@ -50,6 +52,126 @@ int _diasDe(PeriodoSel s) {
       return 30 * s.meses;
   }
 }
+
+/// Fecha 'YYYY-MM-DD' de un [DateTime] wall-clock de La Habana
+/// (campos tal cual, sin conversión: ya viene de [ahoraHabana()]).
+String isoFechaHabana(DateTime d) =>
+    '${d.year.toString().padLeft(4, '0')}-'
+    '${d.month.toString().padLeft(2, '0')}-'
+    '${d.day.toString().padLeft(2, '0')}';
+
+/// 1.15 (C2, pura y probada): fecha calendario de un valor de cobro.
+///
+/// - 'YYYY-MM-DD' que sea una fecha REAL → tal cual.
+/// - ISO con hora y offset/Z → se convierte a hora Habana PRIMERO
+///   (vía [aHabana]) y luego se toma el día. NUNCA se toman los
+///   primeros 10 caracteres de un timestamp UTC: pueden cambiar
+///   el día en Habana (p. ej. 2026-10-26T02:30:00Z es 25-oct en
+///   Habana).
+/// - ISO con hora SIN offset → se toma su fecha tal cual (se
+///   interpreta como wall-clock Habana, no como UTC).
+/// - Fecha imposible ('2026-02-30') o texto no interpretable → null.
+///
+/// Un [DateTime] se lee por sus campos: en este diálogo los
+/// DateTime ya son wall-clock Habana (ver [ahoraHabana]).
+String? normalizarFechaCobro(dynamic v) {
+  if (v is DateTime) return isoFechaHabana(v);
+  if (v is! String || v.isEmpty) return null;
+  final m = RegExp(r'^(\d{4})-(\d{2})-(\d{2})$').firstMatch(v);
+  if (m != null) {
+    final y = int.parse(m.group(1)!);
+    final mo = int.parse(m.group(2)!);
+    final d = int.parse(m.group(3)!);
+    final dt = DateTime.utc(y, mo, d);
+    if (dt.year != y || dt.month != mo || dt.day != d) return null;
+    return v;
+  }
+  final conOffset = v.contains('Z') ||
+      RegExp(r'[+-]\d{2}:?\d{2}$').hasMatch(v);
+  if (conOffset) {
+    // Panel Grupo B: DateTime.tryParse NORMALIZA fechas imposibles
+    // ('2026-02-30' → 2026-03-02); validar la parte fecha con
+    // round-trip ANTES de convertir, igual que la rama YYYY-MM-DD.
+    final parte = RegExp(r'^(\d{4})-(\d{2})-(\d{2})').firstMatch(v);
+    if (parte == null) return null;
+    final y = int.parse(parte.group(1)!);
+    final mo = int.parse(parte.group(2)!);
+    final d = int.parse(parte.group(3)!);
+    final chk = DateTime.utc(y, mo, d);
+    if (chk.year != y || chk.month != mo || chk.day != d) return null;
+  }
+  final dt = DateTime.tryParse(v);
+  if (dt == null) return null;
+  if (conOffset) {
+    final h = aHabana(dt);
+    return isoFechaHabana(h);
+  }
+  final fecha = RegExp(r'^(\d{4})-(\d{2})-(\d{2})').firstMatch(v);
+  if (fecha == null) return null;
+  return normalizarFechaCobro(
+      '${fecha.group(1)}-${fecha.group(2)}-${fecha.group(3)}');
+}
+
+/// 1.15 (C3, pura y probada): días vencidos entre un `pagado_hasta`
+/// y una fecha de pago, ambas ya normalizadas a 'YYYY-MM-DD'.
+/// null si alguna no es interpretable.
+int? diasVencidosCobro(String? pagadoHasta, String fechaPagoIso) {
+  final ph = normalizarFechaCobro(pagadoHasta);
+  final fp = normalizarFechaCobro(fechaPagoIso);
+  if (ph == null || fp == null) return null;
+  // Panel Grupo B (DST): medianoches locales truncan un día al
+  // cruzar un cambio de hora (un día DST dura 23 h en Habana).
+  // Como ph/fp ya son 'YYYY-MM-DD' validados, la diferencia se
+  // calcula sobre fechas de calendario en UTC. Solo alimenta el
+  // texto «hace N días»; la DECISIÓN de vencido usa compareTo.
+  DateTime aUtc(String iso) {
+    final p = iso.split('-');
+    return DateTime.utc(
+        int.parse(p[0]), int.parse(p[1]), int.parse(p[2]));
+  }
+
+  return aUtc(fp).difference(aUtc(ph)).inDays;
+}
+
+/// 1.15 (C3, pura y probada): qué pasa con la decisión de
+/// «siguió viniendo» cuando cambia la fecha del pago.
+///
+/// La decisión anterior SIEMPRE se invalida: [base] vuelve null.
+/// - Si con la fecha nueva ya NO está vencida → no hay que
+///   preguntar ([necesitaPregunta] false) y la base queda null.
+/// - Si sigue vencida → hay que volver a preguntar antes de
+///   aceptar ([necesitaPregunta] true); la base se fija con la
+///   respuesta nueva, nunca con la anterior.
+({bool necesitaPregunta, String? base}) recalcularBaseAlCambiarFecha({
+  String? pagadoHasta,
+  required String fechaPagoIso,
+}) {
+  final ph = normalizarFechaCobro(pagadoHasta);
+  final fp = normalizarFechaCobro(fechaPagoIso);
+  if (ph == null || fp == null || ph.compareTo(fp) >= 0) {
+    return (necesitaPregunta: false, base: null);
+  }
+  return (necesitaPregunta: true, base: null);
+}
+
+/// 1.15 (C4, pura y probada): id de cliente tolerante para el
+/// cobro: num (10.0 → 10) o String numérico ('10'); lo no
+/// interpretable es 0 (flujo detenido, nunca encolado).
+int idClienteCobro(Map<String, dynamic> cliente) {
+  final v = cliente['id'];
+  if (v is num) return v.toInt();
+  if (v is String) {
+    final i = int.tryParse(v.trim());
+    if (i != null) return i;
+    return double.tryParse(v.trim())?.toInt() ?? 0;
+  }
+  return 0;
+}
+
+/// 1.15 (m8, pura y probada): un pago personalizado es válido
+/// solo con 1 <= días <= 3650 y monto positivo y finito.
+bool validoPagoPersonalizado({required int dias, required double monto}) =>
+    dias >= 1 && dias <= 3650 && monto > 0 && monto.isFinite;
 
 String _etiquetaPeriodo(PeriodoSel s) {
   switch (s.periodo) {
@@ -130,8 +252,9 @@ Future<Map<String, dynamic>?> pagoDialogo(
   // pura calcularPrecioCobro con la selección vigente. Los 3 puntos
   // de cobro ya bloquean Casa antes de llegar aquí; si aun así llega
   // una Casa, no se cobra (defensa, no camino normal).
-  final esCasa =
-      cliente['cuenta_casa'] == 1 || cliente['cuenta_casa'] == true;
+  // 1.15 (M6): punto único de verdad, no comparación manual:
+  // esCuentaCasa normaliza 1/true/'1' (y el resto es 0).
+  final esCasa = esCuentaCasa(cliente);
   if (esCasa) {
     if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
@@ -139,7 +262,9 @@ Future<Map<String, dynamic>?> pagoDialogo(
     }
     return null;
   }
-  final clienteId = (cliente['id'] as num?)?.toInt() ?? 0;
+  // 1.15 (C4): id ya convertido y reutilizado en todo el flujo
+  // (antes el payload hacía un cast directo a int? sin bloqueo).
+  final clienteId = idClienteCobro(cliente);
   var filasEspecial = <Map<String, dynamic>>[];
   if (clienteId > 0) {
     try {
@@ -200,7 +325,9 @@ Future<Map<String, dynamic>?> pagoDialogo(
   String metodo = aceptaEfectivo ? 'efectivo' : 'transferencia';
   final diasCtrl = TextEditingController();
   final montoCtrl = TextEditingController();
-  DateTime fechaPago = DateTime.now(); // v1.1: permite elegir fecha del pago
+  // 1.15 (C1): fecha del pago en hora Habana, no DateTime.now()
+  // crudo (la zona del dispositivo no es necesariamente Habana).
+  DateTime fechaPago = ahoraHabana(); // v1.1: permite elegir fecha del pago
   // v1.3.1 (Argón regresión 2): sin try/finally con dispose. Esta es una
   // función global, no un StatefulWidget; los controllers locales los
   // recoge el GC. El dispose tras showDialog causaba
@@ -212,16 +339,14 @@ Future<Map<String, dynamic>?> pagoDialogo(
   // - No → comportamiento actual (desde la fecha del pago).
   String? basePago; // null = desde fechaPago (comportamiento actual)
   {
-    final pagadoHasta = cliente['pagado_hasta'] as String?;
-    final fpIso = '${fechaPago.year.toString().padLeft(4, '0')}-'
-        '${fechaPago.month.toString().padLeft(2, '0')}-'
-        '${fechaPago.day.toString().padLeft(2, '0')}';
+    // 1.15 (C2): vencimiento normalizado a día Habana, nunca el
+    // substring crudo de un timestamp con hora.
+    final pagadoHasta = normalizarFechaCobro(cliente['pagado_hasta']);
+    final fpIso = isoFechaHabana(fechaPago);
     final vencido =
         pagadoHasta != null && pagadoHasta.compareTo(fpIso) < 0;
     if (vencido && context.mounted) {
-      final diasVencido = DateTime.parse(fpIso)
-          .difference(DateTime.parse(pagadoHasta!))
-          .inDays;
+      final diasVencido = diasVencidosCobro(pagadoHasta, fpIso) ?? 0;
       // Preview con el período por defecto (mensual 30 días) para mostrar
       // la consecuencia de cada opción. El preview exacto se recalcula
       // en el paso 1 con el período elegido.
@@ -282,7 +407,7 @@ Future<Map<String, dynamic>?> pagoDialogo(
       final r = calcularPrecioCobro(
           periodo: id,
           metodo: metodo,
-          esCasa: false,
+          esCasa: esCasa,
           esMenor: menor,
           precios: preciosMapa,
           especial: especialPara(id, metodo),
@@ -295,7 +420,7 @@ Future<Map<String, dynamic>?> pagoDialogo(
       final r = calcularPrecioCobro(
           periodo: 'mensual',
           metodo: metodo,
-          esCasa: false,
+          esCasa: esCasa,
           esMenor: menor,
           precios: preciosMapa,
           especial: especialPara('mensual', metodo),
@@ -327,7 +452,7 @@ Future<Map<String, dynamic>?> pagoDialogo(
       return calcularPrecioCobro(
               periodo: 'mensual',
               metodo: metodo,
-              esCasa: false,
+              esCasa: esCasa,
               esMenor: menor,
               precios: preciosMapa,
               especial: especialPara('mensual', metodo),
@@ -338,7 +463,7 @@ Future<Map<String, dynamic>?> pagoDialogo(
       return calcularPrecioCobro(
               periodo: t.id,
               metodo: metodo,
-              esCasa: false,
+              esCasa: esCasa,
               esMenor: menor,
               precios: preciosMapa,
               especial: especialPara(t.id, metodo),
@@ -357,8 +482,12 @@ Future<Map<String, dynamic>?> pagoDialogo(
         tipoInicialPago(tiposDisp, menor: true, monto: montoEtiqueta);
   }
 
+  // 1.15 (m8): el personalizado delega en la función pura
+  // (1 <= días <= 3650, monto positivo y finito).
   bool valido(PeriodoSel s) {
-    if (s.periodo == 'personalizado') return s.dias > 0 && s.monto > 0;
+    if (s.periodo == 'personalizado') {
+      return validoPagoPersonalizado(dias: s.dias, monto: s.monto);
+    }
     return true;
   }
 
@@ -368,11 +497,11 @@ Future<Map<String, dynamic>?> pagoDialogo(
     builder: (ctx) => StatefulBuilder(
       builder: (ctx, setS) {
         final s = actual();
-        final fpIso = '${fechaPago.year.toString().padLeft(4, '0')}-'
-            '${fechaPago.month.toString().padLeft(2, '0')}-'
-            '${fechaPago.day.toString().padLeft(2, '0')}';
+        final fpIso = isoFechaHabana(fechaPago);
         final nuevo = previewHastaDias(
-            cliente['pagado_hasta'] as String?, _diasDe(s),
+            // 1.15 (C2): vencimiento normalizado a día Habana.
+            normalizarFechaCobro(cliente['pagado_hasta']),
+            _diasDe(s),
             fechaPago: fpIso, base: basePago);
         return DialogoApp(
           titulo: 'Pago — ${cliente['nombre']}',
@@ -418,8 +547,9 @@ Future<Map<String, dynamic>?> pagoDialogo(
                   ),
                 // v1.0.14: aviso claro si paga por adelantado
                 Builder(builder: (_) {
+                  // 1.15 (C2): vencimiento normalizado a día Habana.
                   final ph =
-                      cliente['pagado_hasta'] as String?;
+                      normalizarFechaCobro(cliente['pagado_hasta']);
                   if (ph != null && ph.compareTo(fpIso) > 0) {
                     final diasRest = DateTime.parse(ph)
                         .difference(DateTime.parse(fpIso))
@@ -469,12 +599,76 @@ Future<Map<String, dynamic>?> pagoDialogo(
                       context: ctx,
                       initialDate: fechaPago,
                       firstDate: DateTime(2020),
-                      lastDate: DateTime.now(),
+                      // 1.15 (C1): límite del selector en fecha Habana.
+                      lastDate: ahoraHabana(),
                       helpText: 'Fecha del pago',
                     );
-                    if (picked != null) {
-                      setS(() => fechaPago = picked);
+                    if (picked == null) return;
+                    // 1.15 (C3): al cambiar la fecha, la decisión
+                    // anterior se invalida y se recalcula todo con
+                    // la fecha elegida. Si ya no está vencida, la
+                    // base queda null; si sigue vencida, se vuelve
+                    // a preguntar ANTES de aceptar. Sin respuesta,
+                    // se conserva la fecha y la decisión anteriores.
+                    final fechaAnterior = fechaPago;
+                    final baseAnterior = basePago;
+                    final pickedIso = isoFechaHabana(picked);
+                    final phNorm =
+                        normalizarFechaCobro(cliente['pagado_hasta']);
+                    final rec = recalcularBaseAlCambiarFecha(
+                        pagadoHasta: phNorm, fechaPagoIso: pickedIso);
+                    if (!rec.necesitaPregunta) {
+                      if (ctx.mounted) {
+                        setS(() {
+                          fechaPago = picked;
+                          basePago = null;
+                        });
+                      }
+                      return;
                     }
+                    final diasV =
+                        diasVencidosCobro(phNorm, pickedIso) ?? 0;
+                    final hastaSi = previewHastaDias(phNorm, 30,
+                        fechaPago: pickedIso, base: phNorm);
+                    final hastaNo = previewHastaDias(phNorm, 30,
+                        fechaPago: pickedIso);
+                    if (!ctx.mounted) return;
+                    final r = await showDialog<bool>(
+                      context: ctx,
+                      barrierDismissible: false,
+                      builder: (ctx2) => AlertDialog(
+                        title: const Text('Cliente vencido'),
+                        content: Text(
+                          'Venció el ${fmtFecha(phNorm)} '
+                          '(hace $diasV día${diasV == 1 ? '' : 's'}).\n'
+                          '¿Siguió viniendo después del vencimiento?\n\n'
+                          'Sí → nuevo vencimiento: ${fmtFecha(hastaSi)}\n'
+                          'No → nuevo vencimiento: ${fmtFecha(hastaNo)}',
+                        ),
+                        actions: [
+                          TextButton(
+                            onPressed: () => Navigator.pop(ctx2, false),
+                            child: const Text('No, dejó de venir'),
+                          ),
+                          FilledButton(
+                            onPressed: () => Navigator.pop(ctx2, true),
+                            child: const Text('Sí, siguió viniendo'),
+                          ),
+                        ],
+                      ),
+                    );
+                    if (!ctx.mounted) return;
+                    if (r == null) {
+                      setS(() {
+                        fechaPago = fechaAnterior;
+                        basePago = baseAnterior;
+                      });
+                      return;
+                    }
+                    setS(() {
+                      fechaPago = picked;
+                      basePago = r ? phNorm : null;
+                    });
                   },
                   child: Container(
                     padding: const EdgeInsets.symmetric(
@@ -574,6 +768,14 @@ Future<Map<String, dynamic>?> pagoDialogo(
                     keyboardType:
                         const TextInputType.numberWithOptions(
                             decimal: true),
+                    // 1.15 (m8): solo dígitos y un separador
+                    // decimal válido (punto o coma; el parseo
+                    // posterior convierte la coma y lo inválido
+                    // cae a monto 0 → inválido, nunca se cobra).
+                    inputFormatters: [
+                      FilteringTextInputFormatter.allow(
+                          RegExp(r'[0-9.,]')),
+                    ],
                     decoration: const InputDecoration(
                         labelText: 'Monto (CUP)',
                         border: OutlineInputBorder()),
@@ -653,58 +855,24 @@ Future<Map<String, dynamic>?> pagoDialogo(
   );
   if (paso1 == null || !context.mounted) return null;
 
-  // Paso 2: confirmación con resumen.
+  // 1.15 (M5): ELIMINADO el diálogo interno «Confirmar pago»:
+  // el payload se devuelve al terminar el Paso 1 y la ÚNICA
+  // confirmación antes del encolado es PreviewCobroScreen
+  // (cobrarConPreviewYRecibo), que muestra cliente, monto,
+  // método, período y vencimiento. La vista previa obligatoria
+  // NO se quita: queda como único paso.
+  // 1.15 (C4): detener el flujo antes de cobrar si el id no es
+  // válido (0 o no interpretable): nunca se encola un cobro
+  // sin cliente.
+  if (clienteId <= 0) return null;
   final s = paso1;
-  final fpIso2 = '${fechaPago.year.toString().padLeft(4, '0')}-'
-      '${fechaPago.month.toString().padLeft(2, '0')}-'
-      '${fechaPago.day.toString().padLeft(2, '0')}';
+  final fpIso2 = isoFechaHabana(fechaPago);
   final nuevo = previewHastaDias(
-      cliente['pagado_hasta'] as String?, _diasDe(s),
+      normalizarFechaCobro(cliente['pagado_hasta']), _diasDe(s),
       fechaPago: fpIso2, base: basePago);
-  final ok = await showDialog<bool>(
-    context: context,
-    builder: (ctx) => DialogoApp(
-      titulo: 'Confirmar pago',
-      iconoTitulo: Icons.check_circle,
-      contenido: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text('Cliente: ${cliente['nombre']}'),
-          Text('Período: ${_etiquetaPeriodo(s)}'),
-          Text('Método: ${metodo == 'efectivo' ? 'Efectivo' : 'Transferencia'}'),
-          // v1.0.15: monto prominente en la confirmación de cobro.
-          const SizedBox(height: 8),
-          Center(
-            child: Text('${fmtMonto(s.monto)} CUP',
-                style: const TextStyle(
-                    fontSize: 34,
-                    fontWeight: FontWeight.bold,
-                    color: AppColores.naranja)),
-          ),
-          const SizedBox(height: 8),
-          Text('Nuevo vencimiento: ${fmtFecha(nuevo)}',
-              style: const TextStyle(fontWeight: FontWeight.bold)),
-        ],
-      ),
-      acciones: [
-        TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancelar')),
-        ElevatedButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppColores.naranja,
-              foregroundColor: Colors.white,
-            ),
-            child: const Text('Confirmar')),
-      ],
-    ),
-  );
-  if (ok != true) return null;
 
   return {
-    'cliente_id': (cliente['id'] as int?) ?? 0,
+    'cliente_id': clienteId,
     'periodo': s.periodo,
     // v1.3.1: tipo_id para que el servidor aplique el precio correcto
     // (ej. 2500 con transferencia en vez de 2000).
@@ -721,8 +889,6 @@ Future<Map<String, dynamic>?> pagoDialogo(
     // El servidor la respeta en record_payment.
     if (basePago != null) 'base': basePago,
     'siguio_viniendo': basePago != null,
-    'fecha': '${fechaPago.year.toString().padLeft(4, '0')}-'
-        '${fechaPago.month.toString().padLeft(2, '0')}-'
-        '${fechaPago.day.toString().padLeft(2, '0')}',
+    'fecha': isoFechaHabana(fechaPago),
   };
 }

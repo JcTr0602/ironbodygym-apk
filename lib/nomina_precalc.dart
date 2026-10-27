@@ -59,10 +59,48 @@ class NominaPrecalc {
     final r = rows.first;
     final pagosParte =
         '${r['c']}|${r['ss']}|${r['sc']}|${r['mi']}|${r['sf']}|${r['cn']}|${r['sn']}';
-    // v3 (ronda 2): el componente de clientes cambió de algoritmo
-    // (de sumas a hash canónico); el prefijo nuevo invalida de una
-    // vez toda caché v2 sin depender de que los formatos difieran.
-    return 'v3|$pagosParte|${await _huellaClientes()}';
+    // v4 (1.15, N2+N6): el componente de clientes ahora incluye
+    // cuenta_casa normalizado y el componente de pagos es un hash
+    // canónico de los campos de negocio que usa esPagoMensualidad.
+    // El prefijo nuevo invalida de una vez toda caché v3.
+    return 'v4|$pagosParte|${await _huellaPagosNegocio()}|${await _huellaClientes()}';
+  }
+
+  /// Componente de huella sobre el espejo `pagos`: hash canónico
+  /// determinista por pago (1.15, N6) con los campos de negocio
+  /// que usa [NominaCalc.esPagoMensualidad] (cliente, período,
+  /// método, monto, días) además de la fecha. Editar cualquiera
+  /// de ellos invalida la caché; cambiar otros campos (p. ej.
+  /// registrado_por) no la toca.
+  Future<String> _huellaPagosNegocio() async {
+    final d = await LocalDb.instance.db;
+    final rows = await d.query('pagos', columns: ['id', 'data']);
+    final partes = <String>[];
+    for (final r in rows) {
+      String estado;
+      try {
+        final data = jsonDecode(r['data'] as String) as Map<String, dynamic>;
+        final cliente = NominaCalc.idTolerante(data['cliente_id']) ?? 0;
+        var periodo = '${data['periodo'] ?? 'mensual'}';
+        if (periodo.isEmpty) periodo = 'mensual';
+        final metodo = '${data['metodo'] ?? ''}';
+        final monto = NominaCalc.montoTolerante(data['monto']);
+        final montoStr = monto == null
+            ? '<null>'
+            : (monto == monto.roundToDouble()
+                ? '${monto.toInt()}'
+                : '$monto');
+        final dias = NominaCalc.idTolerante(data['dias']);
+        final fecha = data['fecha'] == null ? '<null>' : '${data['fecha']}';
+        estado =
+            '$cliente|$periodo|$metodo|$montoStr|${dias ?? '<null>'}|$fecha';
+      } catch (_) {
+        estado = '<ilegible>';
+      }
+      partes.add('${r['id']}:$estado');
+    }
+    partes.sort();
+    return 'p${partes.length}:${_fnv1a64(partes.join('|'))}';
   }
 
   /// Componente de huella sobre el espejo `clientes`: detecta altas,
@@ -88,7 +126,11 @@ class NominaPrecalc {
       try {
         final data = jsonDecode(r['data'] as String) as Map<String, dynamic>;
         final h = data['pagado_hasta'];
-        estado = h == null ? '<null>' : '$h';
+        // 1.15 (N2): cuenta_casa normalizado (1/true/'1' → 1;
+        // resto → 0, mismo punto único de verdad que el resto del
+        // código). Un cambio de Casa invalida la caché.
+        final casa = LocalDb.cuentaCasaDe(data) ? 1 : 0;
+        estado = '${h == null ? '<null>' : '$h'}:$casa';
       } catch (_) {
         estado = '<ilegible>';
       }
@@ -122,13 +164,12 @@ class NominaPrecalc {
       final r = rows.first;
       final h = await huella();
       // Guarda de transición de mes (ronda 2, Luna, ALTA latente):
-      // una fila calculada cuando su mes era el EN CURSO lleva la
-      // excepción de vencimiento; al cerrar el mes, ese mismo mes
-      // pasa a la regla histórica y la huella de datos NO cambia.
-      // Hoy la única pantalla lectora solo pide el mes actual,
-      // pero por construcción: la caché de un mes ya pasado NUNCA
-      // se sirve como fresca — quien la pida recalcula vía
-      // asegurar() con la regla que le corresponde.
+      // 1.15 (M4c-01): la excepción de vencimiento vale para
+      // cualquier mes, así que un mes cerrado ya NO cambia de
+      // regla al cerrar; aun así, por construcción, la caché de
+      // un mes ya pasado NUNCA se sirve como fresca — quien la
+      // pida recalcula vía asegurar() con la regla vigente.
+      // Hoy la única pantalla lectora solo pide el mes actual.
       final esMesActual = pref == NominaCalc.prefMesActual();
       return (
         clientes: (r['clientes_pagados'] as num).toInt(),
@@ -143,6 +184,12 @@ class NominaPrecalc {
   /// Garantiza una caché fresca para [pref] y devuelve el conteo.
   /// Serializado por mes: llamadas simultáneas comparten el cálculo.
   Future<int> asegurar(String pref) async {
+    // 1.15 (n8): un mes que NO es el actual se calcula directo,
+    // sin leer ni escribir caché: su base ya no cambia por
+    // definición y una caché vieja no debe servirse ni reescribirse.
+    if (pref != NominaCalc.prefMesActual()) {
+      return NominaCalc.clientesQuePagaronElMes(pref);
+    }
     final cache = await leer(pref);
     if (cache != null && cache.fresco) return cache.clientes;
     final enCurso = _enCurso[pref];
@@ -183,7 +230,9 @@ class NominaPrecalc {
                 'mes': pref,
                 'clientes_pagados': n,
                 'huella': h2,
-                'calculado_en': ahoraHabana().toIso8601String(),
+                // 1.15 (n8): marca con offset Habana explícito,
+                // no el ISO local sin offset del dispositivo.
+                'calculado_en': isoHabana(ahoraHabana()),
               },
               conflictAlgorithm: ConflictAlgorithm.replace,
             );

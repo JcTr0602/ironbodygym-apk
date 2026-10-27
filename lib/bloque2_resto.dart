@@ -39,13 +39,23 @@
 ///   JAMÁS escribe el archivo maestro.
 library;
 
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:uuid/uuid.dart';
 
 import 'auth.dart';
 import 'localdb.dart';
-import 'negocio.dart' show pendienteEntrega;
+import 'negocio.dart'
+    show
+        pendienteEntrega,
+        contribucionLibroC1,
+        idsCubiertosLibroC1,
+        idsLiquidados,
+        esPendiente,
+        esPagoDiarioEfectivo,
+        ventasSuplementosCup,
+        totalVentaCup;
 import 'sync.dart' show SyncEngine;
 import 'tiempo.dart';
 
@@ -83,6 +93,8 @@ Map<String, dynamic> payloadLiquidarEntrega({
   required double montoEntregado,
   required String fechaHoraHabana,
   required int autorDuenoId,
+  Map<String, List<int>>? opIds,
+  double? restoSinIds,
 }) =>
     {
       'entrenador_id': entrenadorTelegramId,
@@ -90,6 +102,10 @@ Map<String, dynamic> payloadLiquidarEntrega({
       'fecha_hora_havana': fechaHoraHabana,
       'autor_dueno_id': autorDuenoId,
       'movimiento': 'entrega_efectivo_dueno',
+      // 1.15-turnos: libro con marca (ids + resto). Sin opIds, el
+      // servidor aplica el legado (libro sin marca).
+      if (opIds != null) 'op_ids': opIds,
+      if (restoSinIds != null) 'resto_sin_ids': restoSinIds,
     };
 
 /// PURO (testeable sin BD): fusiona el libro local de entregas C1
@@ -117,6 +133,9 @@ List<Map<String, dynamic>> fusionarEntregasEfectivo(
       'autor_dueno_id': e['autor_dueno_id'],
       'movimiento': e['movimiento'],
       'creada_ts': '${e['creada_ts'] ?? ''}',
+      // 1.15-turnos: el espejo trae las columnas del libro con marca.
+      'op_ids_json': e['op_ids_json'],
+      'resto_sin_ids': e['resto_sin_ids'],
     };
   }
   return porUuid.values.toList();
@@ -145,14 +164,12 @@ Future<List<Map<String, dynamic>>> _entregasFusionadas(
 }
 
 /// Suma de entregas C1 registradas en el libro local para un entrenador.
-Future<double> entregasEfectivoRegistradas(int telegramId) async {
-  final filas = await _entregasFusionadas(telegramId);
-  var total = 0.0;
-  for (final f in filas) {
-    total += (f['monto_entregado'] as num?)?.toDouble() ?? 0;
-  }
-  return total;
-}
+/// 1.15-turnos (mecanismo único): es la contribución con marca de
+/// negocio.contribucionLibroC1 (resto + ids aún sin marcar; las
+/// filas viejas sin ids restan su monto entero). Los llamadores
+/// viejos (pendienteDeltaC1) no cambian de firma.
+Future<double> entregasEfectivoRegistradas(int telegramId) =>
+    contribucionLibroC1(telegramId);
 
 /// Pendiente delta C1 de un entrenador: pendiente vigente menos las
 /// entregas C1 ya registradas. Ver el encabezado del archivo para la
@@ -177,7 +194,46 @@ Future<List<Map<String, dynamic>>> historialEntregasC1(
 /// `liquidar_entrega_efectivo` en UNA transacción, y push en segundo
 /// plano. Lanza si no es dueño, si el monto no es positivo o si
 /// supera el pendiente vigente (con 0.01 de tolerancia por redondeo).
+/// Panel 1.15 (Terra BLOQUEANTE, R4): cadena que serializa las
+/// liquidaciones de efectivo. La validación del pendiente ocurre
+/// FUERA de la transacción de escritura (leer por mirror dentro de
+/// una transacción sqflite es deadlock), así que dos llamadas
+/// concurrentes leían el mismo pendiente y ambas registraban la
+/// entrega completa. La cadena cubre leer-validar-escribir; el
+/// push posterior queda fuera (la op ya está encolada). Global y
+/// no por entrenador: liquidar es solo del dueño, infrecuente, y
+/// la serialización total es estrictamente más segura.
+Future<void> _turnoLiquidacion = Future.value();
+
+Future<T> _enSerieLiquidacion<T>(Future<T> Function() trabajo) {
+  // CORRECCIÓN (test R4 lo demostró): el enlace a la cadena DEBE
+  // ser síncrono, ANTES de cualquier await. La versión anterior
+  // hacía `await _turnoLiquidacion` primero: dos llamadas en el
+  // mismo bloque síncrono capturaban la misma Future ya
+  // completada y ambas entraban a la vez (el test mostró libro=2).
+  // Aquí leer la cola anterior e instalar la nueva es síncrono:
+  // el segundo llamador queda encadenado detrás del primero.
+  // whenComplete completa el turno aunque el trabajo falle, para
+  // que un error no atasque la cadena; el error lo recibe solo el
+  // llamador que lo produjo (el turno se completa normal).
+  final anterior = _turnoLiquidacion;
+  final turno = Completer<void>();
+  _turnoLiquidacion = turno.future;
+  return anterior.then((_) => trabajo()).whenComplete(turno.complete);
+}
+
 Future<String> registrarEntregaEfectivo({
+  required int entrenadorTelegramId,
+  required double montoEntregado,
+  required int autorDuenoId,
+}) =>
+    _enSerieLiquidacion(() => _registrarEntregaEfectivoImpl(
+          entrenadorTelegramId: entrenadorTelegramId,
+          montoEntregado: montoEntregado,
+          autorDuenoId: autorDuenoId,
+        ));
+
+Future<String> _registrarEntregaEfectivoImpl({
   required int entrenadorTelegramId,
   required double montoEntregado,
   required int autorDuenoId,
@@ -185,7 +241,10 @@ Future<String> registrarEntregaEfectivo({
   if (!AuthService().isOwner) {
     throw Exception('Solo el dueño puede liquidar entregas de efectivo');
   }
-  if (montoEntregado <= 0) {
+  // Panel 1.15 (Luna MEDIO, R3): NaN pasa `<= 0` (false) y
+  // `NaN - pendiente > 0.01` (false): sin isFinite, un monto
+  // inválido colaba la validación. Se rechaza de entrada.
+  if (!montoEntregado.isFinite || montoEntregado <= 0) {
     throw Exception('El monto entregado debe ser positivo');
   }
   final pendiente = await pendienteDeltaC1(entrenadorTelegramId);
@@ -193,6 +252,113 @@ Future<String> registrarEntregaEfectivo({
     throw Exception(
         'Lo entregado ($montoEntregado) supera el pendiente ($pendiente)');
   }
+  // 1.15-turnos (#2, libro con marca): las filas confirmadas que
+  // cubre esta entrega, en orden FIFO (las más viejas primero),
+  // con ajuste completo (una fila entra entera o no entra). El
+  // resto (parcial de la última fila, arrastre, ops aún sin
+  // sincronizar del propio teléfono) viaja como resto_sin_ids.
+  // Se excluyen las ya cubiertas por el libro y las ya incluidas
+  // en otra liquidación (el servidor las rechazaría).
+  final cubiertosLibro =
+      await idsCubiertosLibroC1(entrenadorTelegramId);
+  final liquidados = await idsLiquidados(entrenadorTelegramId);
+  final candidatos = <({String tabla, int id, double monto, String fecha})>[];
+  for (final p in await LocalDb.instance.mirrorFiltrado(
+      'pagos', {'telegram_user_id': entrenadorTelegramId})) {
+    final id = (p['id'] as num?)?.toInt();
+    if (id == null ||
+        cubiertosLibro.contains('pagos:$id') ||
+        liquidados.contains('pagos:$id')) {
+      continue;
+    }
+    if ((p['metodo'] as String?) == 'efectivo' &&
+        esPendiente(p['entregado'])) {
+      candidatos.add((
+        tabla: 'pagos',
+        id: id,
+        monto: (p['monto'] as num?)?.toDouble() ?? 0,
+        fecha: '${p['fecha'] ?? ''}',
+      ));
+    }
+  }
+  for (final d in await LocalDb.instance.allMirror('pagos_diarios')) {
+    final id = (d['id'] as num?)?.toInt();
+    if (id == null ||
+        cubiertosLibro.contains('pagos_diarios:$id') ||
+        liquidados.contains('pagos_diarios:$id')) {
+      continue;
+    }
+    if (LocalDb.normalizarTelegramId(d['registrado_por']) ==
+            entrenadorTelegramId &&
+        esPendiente(d['entregado']) &&
+        esPagoDiarioEfectivo(d)) {
+      candidatos.add((
+        tabla: 'pagos_diarios',
+        id: id,
+        monto: (d['total'] as num?)?.toDouble() ?? 0,
+        fecha: '${d['fecha'] ?? ''}',
+      ));
+    }
+  }
+  for (final v in await ventasSuplementosCup()) {
+    final id = (v['id'] as num?)?.toInt();
+    if (id == null ||
+        cubiertosLibro.contains('ventas_suplementos:$id') ||
+        liquidados.contains('ventas_suplementos:$id')) {
+      continue;
+    }
+    if (LocalDb.normalizarTelegramId(v['registrado_por']) ==
+            entrenadorTelegramId &&
+        esPendiente(v['entregado'])) {
+      candidatos.add((
+        tabla: 'ventas_suplementos',
+        id: id,
+        monto: totalVentaCup(v),
+        fecha: '${v['fecha'] ?? ''}',
+      ));
+    }
+  }
+  for (final v in await LocalDb.instance.allMirror('servicio_ventas')) {
+    final id = (v['id'] as num?)?.toInt();
+    if (id == null ||
+        cubiertosLibro.contains('servicio_ventas:$id') ||
+        liquidados.contains('servicio_ventas:$id')) {
+      continue;
+    }
+    final resp =
+        LocalDb.normalizarTelegramId(v['responsable_efectivo_id']) ??
+            LocalDb.normalizarTelegramId(v['registrado_por']);
+    if (resp == entrenadorTelegramId &&
+        (v['metodo'] as String?) == 'efectivo' &&
+        (v['casa'] as num?)?.toInt() != 1 &&
+        esPendiente(v['entregado'])) {
+      candidatos.add((
+        tabla: 'servicio_ventas',
+        id: id,
+        monto: ((v['precio_unitario'] as num?)?.toDouble() ?? 0) *
+            ((v['cantidad'] as num?)?.toDouble() ?? 0),
+        fecha: '${v['fecha'] ?? ''}',
+      ));
+    }
+  }
+  candidatos.sort((a, b) {
+    final c = a.fecha.compareTo(b.fecha);
+    return c != 0 ? c : a.id.compareTo(b.id);
+  });
+  final opIds = <String, List<int>>{
+    'pagos': [],
+    'pagos_diarios': [],
+    'ventas_suplementos': [],
+    'servicio_ventas': [],
+  };
+  var marcado = 0.0;
+  for (final c in candidatos) {
+    if (marcado + c.monto - montoEntregado > 0.01) break;
+    opIds[c.tabla]!.add(c.id);
+    marcado += c.monto;
+  }
+  final resto = montoEntregado - marcado;
+  final opIdsJson = jsonEncode(opIds);
   final opUuid = const Uuid().v4();
   final ahora = isoHabana(ahoraHabana());
   final d = await LocalDb.instance.db;
@@ -204,6 +370,8 @@ Future<String> registrarEntregaEfectivo({
       'fecha_habana': hoyHabanaIso(),
       'autor_dueno_id': autorDuenoId,
       'creada_ts': ahora,
+      'op_ids_json': opIdsJson,
+      'resto_sin_ids': resto,
     });
     await LocalDb.instance.queueOp(
       opUuid: opUuid,
@@ -213,6 +381,8 @@ Future<String> registrarEntregaEfectivo({
         montoEntregado: montoEntregado,
         fechaHoraHabana: ahora,
         autorDuenoId: autorDuenoId,
+        opIds: opIds,
+        restoSinIds: resto,
       ),
       txn: txn,
     );

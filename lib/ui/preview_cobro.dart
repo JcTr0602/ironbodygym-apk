@@ -28,7 +28,10 @@ import 'diseno.dart';
 
 /// Paso A: preview obligatorio antes de guardar el cobro.
 /// Devuelve true solo si el usuario tocó «Confirmar cobro».
-class PreviewCobroScreen extends StatelessWidget {
+/// 1.15 (Cobro 2): Stateful con guard local: tras el primer toque
+/// el botón queda deshabilitado, así un doble tap no puede hacer
+/// dos pop(true) y cerrar también la ruta anterior.
+class PreviewCobroScreen extends StatefulWidget {
   final String nombreCliente;
   final String montoTexto;
   final String metodoTexto;
@@ -45,6 +48,13 @@ class PreviewCobroScreen extends StatelessWidget {
   });
 
   @override
+  State<PreviewCobroScreen> createState() => _PreviewCobroScreenState();
+}
+
+class _PreviewCobroScreenState extends State<PreviewCobroScreen> {
+  var _confirmado = false;
+
+  @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('Revisar cobro')),
@@ -58,16 +68,16 @@ class PreviewCobroScreen extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      _fila(context, 'Cliente', nombreCliente),
+                      _fila(context, 'Cliente', widget.nombreCliente),
                       const Divider(),
-                      _fila(context, 'Monto', montoTexto),
+                      _fila(context, 'Monto', widget.montoTexto),
                       const Divider(),
-                      _fila(context, 'Método', metodoTexto),
+                      _fila(context, 'Método', widget.metodoTexto),
                       const Divider(),
-                      _fila(context, 'Período', periodoTexto),
+                      _fila(context, 'Período', widget.periodoTexto),
                       const Divider(),
                       _fila(context, 'Nuevo vencimiento',
-                          nuevoVencimientoTexto),
+                          widget.nuevoVencimientoTexto),
                     ],
                   ),
                 ),
@@ -88,8 +98,13 @@ class PreviewCobroScreen extends StatelessWidget {
                     width: double.infinity,
                     child: BotonPrimario(
                       texto: 'Confirmar cobro',
-                      onPressed: () =>
-                          Navigator.of(context).pop(true),
+                      cargando: _confirmado,
+                      onPressed: _confirmado
+                          ? null
+                          : () {
+                              setState(() => _confirmado = true);
+                              Navigator.of(context).pop(true);
+                            },
                     ),
                   ),
                   const SizedBox(height: 8),
@@ -158,9 +173,19 @@ Future<bool> mostrarBloqueoCasa(
   return true;
 }
 
-String _periodoTexto(Map<String, dynamic> payload) {
-  switch ('${payload['periodo'] ?? ''}') {
+int _diasPayload(dynamic v) =>
+    v is num ? v.toInt() : int.tryParse('$v') ?? 0;
+
+/// Texto del período para el preview (pública y probada).
+/// 1.15 (M7): mensual con 'N meses' cuando meses > 1;
+/// personalizado con 'N días' usando `dias`, también para
+/// ofertas (que viajan como personalizado o `tipo:<id>`).
+String periodoTextoPreview(Map<String, dynamic> payload) {
+  final periodo = '${payload['periodo'] ?? ''}';
+  switch (periodo) {
     case 'mensual':
+      final meses = (payload['meses'] as num?)?.toInt() ?? 1;
+      if (meses > 1) return '$meses meses';
       return '${payload['tipo_id'] ?? ''}' == 'menores'
           ? 'Menores'
           : 'Mensual';
@@ -169,9 +194,14 @@ String _periodoTexto(Map<String, dynamic> payload) {
     case 'quincenal':
       return 'Quincenal';
     case 'personalizado':
-      return 'Personalizado';
+      final dias = _diasPayload(payload['dias']);
+      return dias > 0 ? 'Personalizado ($dias días)' : 'Personalizado';
     default:
-      return '${payload['periodo'] ?? ''}';
+      if (periodo.startsWith('tipo:')) {
+        final dias = _diasPayload(payload['dias']);
+        return dias > 0 ? 'Personalizado ($dias días)' : 'Personalizado';
+      }
+      return periodo;
   }
 }
 
@@ -197,7 +227,7 @@ Future<bool> cobrarConPreviewYRecibo({
             '${payload['metodo'] ?? ''}' == 'transferencia'
                 ? 'Transferencia'
                 : 'Efectivo',
-        periodoTexto: _periodoTexto(payload),
+        periodoTexto: periodoTextoPreview(payload),
         nuevoVencimientoTexto:
             vencRaw.length >= 10 ? fmtFecha(vencRaw) : vencRaw,
       ),

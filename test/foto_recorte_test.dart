@@ -224,15 +224,20 @@ void main() {
       );
     });
 
-    test('prepararFotoTrabajo: sin EXIF trabaja el original',
-        () async {
+    test('prepararFotoTrabajo: sin EXIF escribe copia orientada '
+        '(Argón #8-2: nunca devuelve el original)', () async {
       final f = File('test/fixtures/foto_sin_exif.jpg');
       final t = await prepararFotoTrabajo(f,
           rutaOrientada: '${tmp.path}/orientada.jpg');
       expect(t, isNotNull);
-      expect(t!.archivo.path, f.path);
+      // Nuevo contrato: el trabajo SIEMPRE es un archivo físico con
+      // los píxeles ya orientados, nunca el original con etiqueta.
+      expect(t!.archivo.path, '${tmp.path}/orientada.jpg');
       expect(t.ancho, 120);
       expect(t.alto, 80);
+      final dec = img.decodeImage(await t.archivo.readAsBytes())!;
+      expect(dec.width, 120);
+      expect(dec.height, 80);
     });
 
     test('prepararFotoTrabajo: EXIF 6 orienta (dims de pantalla '
@@ -244,9 +249,9 @@ void main() {
       final t = await prepararFotoTrabajo(f,
           rutaOrientada: '${tmp.path}/orientada.jpg');
       expect(t, isNotNull);
-      // Rama del decodificador: no se crea copia; el trabajo ES
-      // el archivo original (ver el test de decodeImage directo).
-      expect(t!.archivo.path, f.path);
+      // Argón #8-2: el trabajo es la copia orientada escrita, no el
+      // original con la etiqueta EXIF 6 en disco.
+      expect(t!.archivo.path, '${tmp.path}/orientada.jpg');
       expect(t.ancho, 80);
       expect(t.alto, 120);
       final dec = img.decodeImage(await t.archivo.readAsBytes())!;

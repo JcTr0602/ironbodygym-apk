@@ -11,6 +11,7 @@ import 'package:uuid/uuid.dart';
 import 'dart:async';
 
 import '../auth.dart';
+import '../cliente_protegido.dart';
 import '../localdb.dart';
 import '../negocio.dart';
 import '../sync.dart';
@@ -60,8 +61,12 @@ class _PapeleraScreenState extends State<PapeleraScreen> {
     // re-inserta un cliente con op eliminar_cliente en vuelo ('pendiente'
     // o 'enviada'), no debe revivir ante los ojos del usuario.
     final zombies = await LocalDb.instance.clientesConBorradoEnVuelo();
+    // Cliente protegido (2026-10-26, Protegido 2 H5): estar en la
+    // papelera revela inactividad; un no-dueño no los ve aquí.
     final filtrados = r
-        .where((c) => !zombies.contains((c['id'] as int?) ?? 0))
+        .where((c) =>
+            !zombies.contains((c['id'] as int?) ?? 0) &&
+            !esVistaProtegida(c))
         .toList();
     if (mounted) setState(() => _res = filtrados);
   }

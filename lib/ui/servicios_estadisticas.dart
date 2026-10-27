@@ -81,7 +81,16 @@ class _ServiciosEstadisticasScreenState
     };
 
     bool enP(Map<String, dynamic> r) => _enPeriodo(r['fecha'] as String?);
-    final ventasP = ventas.where(enP).toList();
+    // Argón #9 (ALTO parcial): estadísticas sin reversos ni ventas
+    // reversadas (ver ventasServicioSinReversos). El reverso lleva
+    // cantidad negativa y la misma ventana netea sola, pero el
+    // reverso cae en su propio día (fecha = hoy), no en el de la
+    // venta original: en periodo/semana/día, la ventana de la
+    // original quedaba sobreestimada (y la del reverso, en negativo
+    // sola). Para estadísticas, reversada es como si no hubiera
+    // ocurrido. El CSV exporta estos mismos agregados.
+    final ventasSinReversos = ventasServicioSinReversos(ventas);
+    final ventasP = ventasSinReversos.where(enP).toList();
     final salidasP = salidas.where(enP).toList();
 
     // ---- 1A: rendimiento por bote ----
@@ -260,7 +269,7 @@ class _ServiciosEstadisticasScreenState
     final domingoTxt = fDia(domingoCerrada);
     var semDosis = 0, semPomos = 0;
     var semIng = 0.0, semCom = 0.0;
-    for (final v in ventas) {
+    for (final v in ventasSinReversos) {
       final f = '${v['fecha'] ?? ''}';
       if (f.length < 10) continue;
       final dia = f.substring(0, 10);
@@ -440,16 +449,19 @@ class _ServiciosEstadisticasScreenState
   /// deslizadores sobre el costo del bote actual). No escribe BD.
   Future<void> _abrirSimulador() async {
     final botes = await LocalDb.instance.allMirror('servicio_botes');
-    final activos = botes
-        .where((b) => '${b['estado']}' == 'activo')
+    // Argón #9 (MEDIO): los botes abiertos tienen estado 'abierto';
+    // 'activo' es el estado de los LOTES. Con 'activo' la lista
+    // salía siempre vacía y el simulador era inutilizable.
+    final abiertos = botes
+        .where((b) => '${b['estado']}' == 'abierto')
         .toList();
     if (!mounted) return;
-    if (activos.isEmpty) {
+    if (abiertos.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('No hay un bote activo para simular.')));
+          content: Text('No hay un bote abierto para simular.')));
       return;
     }
-    var bote = activos.first;
+    var bote = abiertos.first;
     var precioSin = 600.0;
     var precioCon = 900.0;
     await showModalBottomSheet<void>(
@@ -479,7 +491,7 @@ class _ServiciosEstadisticasScreenState
                 DropdownButton<Map<String, dynamic>>(
                   value: bote,
                   items: [
-                    for (final b in activos)
+                    for (final b in abiertos)
                       DropdownMenuItem(
                           value: b,
                           child: Text('Bote #${b['id']}')),

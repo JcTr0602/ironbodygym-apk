@@ -16,6 +16,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:uuid/uuid.dart';
 
 import '../auth.dart';
+import '../cliente_protegido.dart';
 import '../localdb.dart';
 import '../negocio.dart';
 import '../sync.dart';
@@ -75,10 +76,21 @@ class _CumpleanosScreenState extends State<CumpleanosScreen>
   String _claveFelicitado(int id) => 'felicitado_${_anio}_$id';
 
   Future<void> _cargar() async {
+    // Argón #10-4: _anio se fijaba solo en initState. Si la app
+    // quedaba abierta de un año para otro y se refrescaba, las
+    // claves de felicitado/regalo usaban el año viejo.
+    _anio = '${ahoraHabana().year}';
     setState(() => _cargando = true);
     try {
-      final proximos = await cumpleanosProximos(dias: 7);
-      final mes = await cumpleanosDelMes();
+      // Cliente protegido (2026-10-26, Protegido 2 H6): la pantalla
+      // de cumpleaños trae regalar, agregar teléfono y WhatsApp;
+      // un no-dueño no ve protegidos aquí.
+      final proximos = (await cumpleanosProximos(dias: 7))
+          .where((c) => !esVistaProtegida(c))
+          .toList();
+      final mes = (await cumpleanosDelMes())
+          .where((c) => !esVistaProtegida(c))
+          .toList();
       final prefs = await SharedPreferences.getInstance();
       final felicitados = <String>{};
       for (final c in [...proximos, ...mes]) {
@@ -179,6 +191,9 @@ class _CumpleanosScreenState extends State<CumpleanosScreen>
   Future<void> _regalarYFelicitar(Map<String, dynamic> c) async {
     final id = (c['id'] as num?)?.toInt() ?? 0;
     if (id <= 0 || !mounted) return;
+    // Misma clase que #10-4: la clave anual del regalo debe usar
+    // el año actual, no el de cuando se abrió la pantalla.
+    _anio = '${ahoraHabana().year}';
     // Bloqueo anti-duplicado: operación real en BD (Argón).
     if (await _regaloAplicado(id)) {
       if (mounted) {

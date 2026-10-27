@@ -199,6 +199,8 @@ class SyncScope {
     'incidencias_sync': ['incidencias_sync'],
     // v1.4.4 (v33): refresco puntual del espejo de GymPedia.
     'gympedia': ['gympedia_articulos'],
+    // Biblioteca / Guía (v47): refresco puntual de fichas y equipos.
+    'guia': ['guia_fichas', 'guia_equipos'],
   };
 
   /// Resuelve las tablas del scope en orden topológico (padres primero).
@@ -418,7 +420,13 @@ class SessionExpired implements Exception {
 }
 
 /// v1.2.9: estado tipado de subida (corrección Gemini #3).
-enum EstadoSubida { subida, reintentable, permanente, permitirFallback }
+enum EstadoSubida { subida, reintentable, permanente, permitirFallback, pausadaPorQos }
+
+/// Argón (sync adaptativa, paso 3): pausa de QoS a mitad de una
+/// subida TUS. No es un error: el offset ya quedó guardado tras
+/// cada chunk confirmado y las claves TUS se conservan, así que
+/// el próximo ciclo reanuda en el último chunk confirmado.
+class _PausaQos implements Exception {}
 
 /// v1.2.9: resultado estructurado (corrección Gemini #3).
 class ResultadoSubidaFoto {
@@ -487,6 +495,58 @@ class LoteAdaptativo {
     _racha = 0;
     _tam = minimo;
   }
+}
+
+/// Argón (sync adaptativa, paso 4, 2026-10-27): escalera de tamaño
+/// de página para el pull, análoga a [LoteAdaptativo]. Arranca en
+/// 100 (el piso histórico seguro); una página rápida (≥ 8 KB en
+/// < 1,5 s, incluyendo TTFB) sube al siguiente nivel (100 → 250 →
+/// 500); cualquier fallo (timeout, error de socket, 429, 5xx)
+/// vuelve a 100. Una página lenta o pequeña NO baja ni sube: se
+/// queda. La medición usa r.body.length (caracteres tras
+/// descomprimir gzip, no bytes exactos en el cable): es un proxy
+/// consistente para decidir, no una medición de red exacta.
+class EscaleraPaginas {
+  static const int inicial = 100;
+  static const int intermedio = 250;
+  static const int maximo = 500;
+  static const int minBytesParaMedir = 8000;
+  static const int maxMsRapida = 1500;
+
+  int _limite = inicial;
+  int get limite => _limite;
+
+  /// Una página descargó bien: si fue rápida y con suficientes
+  /// bytes, subir al siguiente nivel.
+  void exito(int bytes, int ms) {
+    if (bytes < minBytesParaMedir || ms >= maxMsRapida) return;
+    if (_limite < intermedio) {
+      _limite = intermedio;
+    } else if (_limite < maximo) {
+      _limite = maximo;
+    }
+  }
+
+  /// Timeout, error de socket, 429 o 5xx: volver al piso.
+  void fallo() {
+    _limite = inicial;
+  }
+}
+
+/// S3 (panel 1.15, decisión A de Jc): tope del marcador de página
+/// del pull. El marcador solo avanza hasta el último renglón bueno
+/// seguido: si la fila con seq 101 no se pudo verificar y la 102
+/// sí, el marcador queda en 100 para que la próxima bajada repita
+/// desde 101 (la bajada es idempotente: las filas ya aplicadas se
+/// detectan como sin cambios). Sin este tope, la 101 quedaba
+/// saltada para siempre cuando otra posterior avanzaba el marcador.
+/// Nunca retrocede bajo el inicio de la página: una fila sin seq
+/// válido (o con seq anterior al cursor) no puede rebobinarlo.
+int topePaginaSeguro(int paginaMax, int pageWm, int? minSinVerificar) {
+  if (minSinVerificar == null) return paginaMax;
+  final tope = minSinVerificar - 1;
+  if (tope < pageWm) return pageWm;
+  return tope < paginaMax ? tope : paginaMax;
 }
 
 /// Normaliza una fila del RPC `op_aplicada_con_resultado_batch`
@@ -698,6 +758,12 @@ class SyncEngine {
     _emit(_current.phase, error: _current.lastError);
   }
   bool _running = false;
+  // Cliente protegido (2026-10-26, A4 Argón): se marca cuando en
+  // este ciclo se descartó una op por CLIENTE_PROTEGIDO. Se consume
+  // al final de cada punto de entrada (run/pull/push/
+  // sincronizarScope) con un pull silencioso extra, para pisar el
+  // estado optimista local sin esperar al ciclo de 2 minutos.
+  bool _pullProtegidoPendiente = false;
 
   /// Se llama cuando el servidor rechaza la sesión (401).
   void Function()? onSessionExpired;
@@ -766,6 +832,10 @@ class SyncEngine {
         return 'ventas de suplementos';
       case 'gympedia_articulos':
         return 'GymPedia';
+      case 'guia_fichas':
+        return 'Guía';
+      case 'guia_equipos':
+        return 'Equipos de la Guía';
       case 'reservas':
         return 'reservas';
       default:
@@ -865,7 +935,7 @@ class SyncEngine {
     // v1.0.17: conservar el último resumen salvo que se pase uno nuevo
     final res = resumen ?? _current.ultimoResumen;
     final resHora =
-        resumen != null ? DateTime.now() : _current.ultimoResumenHora;
+        resumen != null ? ahoraHabana() : _current.ultimoResumenHora;
     // v1.2.5 (D11/D12): 3 dimensiones + marcas de guardado/sincronizado.
     bool enLinea = true;
     try {
@@ -900,7 +970,7 @@ class SyncEngine {
   Future<void> marcarGuardado() async {
     try {
       await _db.setMeta(
-          'ultimo_guardado_local', DateTime.now().toIso8601String());
+          'ultimo_guardado_local', isoHabana(ahoraHabana()));
     } catch (_) {}
   }
 
@@ -909,7 +979,7 @@ class SyncEngine {
   Future<void> marcarSincronizado() async {
     try {
       await _db.setMeta(
-          'ultimo_sincronizado', DateTime.now().toIso8601String());
+          'ultimo_sincronizado', isoHabana(ahoraHabana()));
     } catch (_) {}
   }
 
@@ -957,7 +1027,7 @@ class SyncEngine {
   }
 
   Future<void> _marcarOk() =>
-      _db.setMeta('last_sync_ok', DateTime.now().toIso8601String());
+      _db.setMeta('last_sync_ok', isoHabana(ahoraHabana()));
 
   Future<SyncDetalle> detalle() async {
     DateTime? pull, push;
@@ -1089,10 +1159,10 @@ class SyncEngine {
           AppLog.error('sync', 'push_fallo', d: '$e');
         }
         // v1.8.0 (Frente 5, punto E): si el push murió ANTES de su
-        // barrido interno (p. ej. falló la subida de fotos de
-        // incidencias), la confirmación de las ops que el servidor
-        // ya aplicó no queda rehén de ese fallo: barrido directo,
-        // tolerante (si también falla la red, no se marca nada).
+        // barrido interno (p. ej. falló la red a mitad del push),
+        // la confirmación de las ops que el servidor ya aplicó no
+        // queda rehén de ese fallo: barrido directo, tolerante
+        // (si también falla la red, no se marca nada).
         if (!pushOk) {
           try {
             subidos += (await barridoConfirmacion()).confirmadas;
@@ -1161,6 +1231,8 @@ class SyncEngine {
                 if (bajados > 0) '↓ $bajados nuevo${bajados == 1 ? '' : 's'}',
               ].join(' · ');
         _emit(SyncPhase.idle, resumen: resumen);
+        // Cliente protegido (2026-10-26, A4): ídem que en pull().
+        await _pullSiProtegidoPendiente();
         // v1.5.0 (Bloque G): ciclo completo sin error de push →
         // avisar al gancho (confirmación de conversiones).
         _avisarSyncExitoso();
@@ -1180,6 +1252,8 @@ class SyncEngine {
     if (noCorrio != null) {
       return SyncResultado.noCorrio(noCorrio);
     }
+    // S2: fotos fuera del candado (ver _lanzarFotosIncidencias).
+    _lanzarFotosIncidencias();
     // Pendientes al cierre, contados de la cola real: el resumen
     // de la UI se construye con esto y jamás dirá «al día» si
     // queda algo por sincronizar.
@@ -1242,7 +1316,7 @@ class SyncEngine {
   Future<void> sincronizarScope(String scope) async {
     final tablas = SyncScope.resolver(scope);
     if (tablas.isEmpty) return;
-    await _conLock(() async {
+    final noCorrioScope = await _conLock(() async {
       try {
         // Push global primero (nunca filtrado por scope).
         await _doPush();
@@ -1272,7 +1346,7 @@ class SyncEngine {
           n = resScope.aplicadas;
           porTablaScope = resScope.porTabla;
         }
-        await _db.setMeta('last_pull_ok', DateTime.now().toIso8601String());
+        await _db.setMeta('last_pull_scope_ok', isoHabana(ahoraHabana()));
         // v1.3.1 (E5): scope sync es manual, siempre refleja el ciclo real.
         await _db.setMeta('last_downloaded', '$n');
         await _db.setMeta('last_scope', scope);
@@ -1304,6 +1378,10 @@ class SyncEngine {
             resumen: n == 0
                 ? 'Sin cambios en $nombreScope'
                 : 'Sincronizado: $nombreScope ($n)');
+        // Cliente protegido (2026-10-26, A4): el alcance no trae
+        // todas las tablas; el pull extra garantiza que el espejo
+        // del cliente quede pisado aunque el alcance no lo cubra.
+        await _pullSiProtegidoPendiente();
         // v1.5.0 (Bloque G): el push del alcance es global → el
         // gancho de fin de sync también corre aquí.
         _avisarSyncExitoso();
@@ -1314,6 +1392,8 @@ class SyncEngine {
         _emit(SyncPhase.idle);
       }
     });
+    // S2: fotos fuera del candado (ver _lanzarFotosIncidencias).
+    if (noCorrioScope == null) _lanzarFotosIncidencias();
   }
 
   /// ¿Hay sesión activa? Defensivo: si el acceso a la sesión
@@ -1380,10 +1460,14 @@ class SyncEngine {
       try {
         bajados = await _doPull(silencioso: true);
       } catch (_) {}
+      // Cliente protegido (2026-10-26, A4): ídem que en pull().
+      await _pullSiProtegidoPendiente();
       // v1.5.0 (Bloque G): push exitoso → gancho de fin de sync.
       _avisarSyncExitoso();
     });
     if (noCorrio != null) return SyncResultado.noCorrio(noCorrio);
+    // S2: fotos fuera del candado (ver _lanzarFotosIncidencias).
+    _lanzarFotosIncidencias();
     final conteo = await _conteoPendientesSeguro();
     return SyncResultado(
       corrio: true,
@@ -1421,19 +1505,15 @@ class SyncEngine {
       } catch (_) {}
       // v1.13.0 (G3, Fase D): los COBROS van primero. Antes las
       // fotos de incidencias subían ANTES de _uploadOps y podían
-      // retener cobros hasta 30 min en red lenta. Ahora: ops
-      // primero, fotos de incidencias después.
+      // retener cobros hasta 30 min en red lenta. Desde 1.15 (S2,
+      // decisión de Jc: las fotos no deben retrasar cobros) las
+      // fotos ya NO viven en _doPush: push()/run()/
+      // sincronizarScope() las lanzan con _lanzarFotosIncidencias
+      // al soltar el candado, sin esperarlas.
       final resPush1 = await _uploadOps(forzar: forzar);
       var totalOps = resPush1.aplicadas;
       final uuidsPush = <String>[...resPush1.uuids];
       AppLog.info('sync', 'ops_enviadas', d: 'n=$totalOps');
-      try {
-        await subirFotosIncidencias();
-      } catch (e) {
-        // Las fotos de incidencias nunca tumban el push de ops.
-        debugPrint('WARN subirFotosIncidencias falló: $e');
-        AppLog.error('sync', 'fotos_incidencias_fallo', d: '$e');
-      }
       // v1.2.9+46: las fotos SIEMPRE se suben en cada sincronización,
       // como en v1.2.3. La puerta de ahorro de datos se eliminó por
       // orden de Jc (2026-10-13): hacía que las fotos nunca se intentaran.
@@ -1474,7 +1554,16 @@ class SyncEngine {
       }
       // Si se subieron fotos y se generaron ops de vinculación,
       // vaciar ops_queue hacia Supabase de inmediato.
-      if (fotosSubidas > 0) {
+      // Argón (sync adaptativa, paso 3): también si quedó
+      // CUALQUIER op pendiente (no solo si subieron fotos): un
+      // cobro encolado a mitad del ciclo —o una foto pausada
+      // por QoS, que deja fotosSubidas en 0— no espera al
+      // próximo ciclo.
+      var pendientesTrasFotos = 0;
+      try {
+        pendientesTrasFotos = await _db.countPendingOps();
+      } catch (_) {}
+      if (fotosSubidas > 0 || pendientesTrasFotos > 0) {
         // v1.2.9+46 (Gemini): sumar al total para last_uploaded.
         final resPush2 = await _uploadOps(forzar: forzar);
         totalOps += resPush2.aplicadas;
@@ -1533,6 +1622,17 @@ class SyncEngine {
       // v1.0.12: cierre remoto de sesión (el dueño lo forzó)
       await _verificarCierreForzado();
       bajados = await _doPull();
+      // 1.15 (caso c): verificación silenciosa si hay ops
+      // 'enviada' cuya confirmación pudo perderse. Silenciosa de
+      // verdad: un fallo aquí no rompe el pull (el barrido ya es
+      // triestado y el próximo ciclo reintenta).
+      try {
+        await barridoSiHayEnviadas();
+      } catch (_) {}
+      // Cliente protegido (2026-10-26, A4): si en este pull se
+      // descartó una op por CLIENTE_PROTEGIDO, un pull silencioso
+      // extra pisa el estado optimista local.
+      await _pullSiProtegidoPendiente();
       // v1.5.0 (Bloque G): pull exitoso (trae los resultados de
       // las ops) → gancho de fin de sync.
       _avisarSyncExitoso();
@@ -1611,7 +1711,7 @@ class SyncEngine {
         await _pullIncidenciasComentarios();
         await _pullIncidenciasHistorial();
         await _db.setMeta('last_pull_incidencias_ok',
-            DateTime.now().toIso8601String());
+            isoHabana(ahoraHabana()));
       } catch (e) {
         incidenciasOk = false;
         AppLog.error(
@@ -1623,7 +1723,7 @@ class SyncEngine {
       // Fix #11: solo marcar OK si todo (incl. incidencias) funcionó.
       if (incidenciasOk) {
         await _db.setMeta(
-            'last_pull_ok', DateTime.now().toIso8601String());
+            'last_pull_ok', isoHabana(ahoraHabana()));
       }
       // v1.13.0 (F4, CONTRATO_F4_20261024): pull del espejo
       // sync_ultimo_sync (una fila por usuario). No bloquea
@@ -1654,6 +1754,42 @@ class SyncEngine {
       _emit(SyncPhase.idle);
       rethrow;
     }
+  }
+
+  /// 1.15 (S1.7, pura y probada): ¿corresponde barrer tras el paso 2
+  /// del push? Se barre si había ops 'enviada' anteriores o si algún
+  /// envío pudo ser aceptado; NO se barre tras fallos inequívocos de
+  /// red sin ops previamente enviadas; NUNCA se omite el barrido
+  /// cuando el resultado del POST es ambiguo (timeout, 5xx: el
+  /// servidor pudo haber aceptado). Sin POST ni fallo, se mantiene
+  /// el barrido heredado (inocuo: el barrido es triestado y no
+  /// marca nada si la lectura falla).
+  static bool debeBarrerTrasPush({
+    required bool habiaEnviadas,
+    required bool algunEnvioAceptado,
+    required bool resultadoAmbiguo,
+    required bool falloInequivoco,
+  }) {
+    if (habiaEnviadas || algunEnvioAceptado || resultadoAmbiguo) {
+      return true;
+    }
+    if (falloInequivoco) return false;
+    return true;
+  }
+
+  /// 1.15 (caso c): verificación silenciosa del pull — solo barre
+  /// cuando existen ops 'enviada'. Ops solo 'pendiente' o 'error'
+  /// NO disparan el barrido (aún no salieron; no hay nada que
+  /// confirmar en el servidor).
+  Future<({int confirmadas, List<String> uuids})> barridoSiHayEnviadas({
+    Future<Map<String, ResultadoOpServidor>> Function(List<String> uuids)?
+        verificar,
+  }) async {
+    final enviadas = await _db.opsByEstado('enviada');
+    if (enviadas.isEmpty) {
+      return (confirmadas: 0, uuids: <String>[]);
+    }
+    return barridoConfirmacion(verificar: verificar);
   }
 
   /// v1.8.0 (Frente 5, punto E): barrido de confirmación — verifica
@@ -1729,6 +1865,18 @@ class SyncEngine {
     // v1.3.5 (detalle Subidos): UUIDs confirmados en esta corrida, para
     // que el detalle liste exactamente lo que cuenta last_uploaded.
     final uuids = <String>[];
+    // 1.15 (S1.7): estado previo y resultado del paso 2, para decidir
+    // si corresponde el barrido del paso 3 (ver debeBarrerTrasPush).
+    // Se captura ANTES de la reactivación de 'enviada' > 2 min: una
+    // op que ya había salido sigue contando como "previamente
+    // enviada" aunque el reset la devuelva a 'pendiente'.
+    var habiaEnviadas = false;
+    try {
+      habiaEnviadas = (await _db.opsByEstado('enviada')).isNotEmpty;
+    } catch (_) {}
+    var algunEnvioAceptado = false;
+    var resultadoAmbiguo = false;
+    var falloInequivoco = false;
     // v1.2.9+46 (Gemini): las ops en 'enviada' por más de 2 minutos
     // vuelven a 'pendiente' para reintento idempotente. Evita que
     // queden en limbo perpetuo si la confirmación falló.
@@ -1833,11 +1981,15 @@ class SyncEngine {
             await _db.markOp(op['op_uuid'] as String, 'enviada');
           }
           loteOk = true;
+          algunEnvioAceptado = true;
         } else if (r.statusCode >= 400 && r.statusCode < 500) {
           // error de cliente: reintenta op por op para aislar la
           // culpable en vez de atascar el lote entero
           await _uploadUnaPorUna(lote);
         } else {
+          // 1.15 (S1.7): 5xx es AMBIGUO (el servidor pudo haber
+          // aceptado antes de fallar): el barrido NO se omite.
+          resultadoAmbiguo = true;
           // v1.2.5 (D14/D15): clasifica y aplica backoff o revisión.
           for (final op in lote) {
             await _db.bumpOp(op['op_uuid'] as String, 'HTTP ${r.statusCode}',
@@ -1846,6 +1998,13 @@ class SyncEngine {
         }
       } catch (e) {
         if (e is SessionExpired) rethrow;
+        // 1.15 (S1.7): un timeout es ambiguo (el POST pudo llegar);
+        // cualquier otro fallo de transporte es inequívoco.
+        if (e is TimeoutException) {
+          resultadoAmbiguo = true;
+        } else {
+          falloInequivoco = true;
+        }
         for (final op in lote) {
           await _db.bumpOp(op['op_uuid'] as String, e);
         }
@@ -1864,9 +2023,18 @@ class SyncEngine {
     // v1.8.0 (Frente 5): extraído a [barridoConfirmacion] — mismo
     // comportamiento, ahora reutilizable fuera del push y testeable
     // sin red.
-    final barrido = await barridoConfirmacion();
-    aplicadas += barrido.confirmadas;
-    uuids.addAll(barrido.uuids);
+    // 1.15 (S1.7): el barrido se omite SOLO tras fallos inequívocos
+    // sin ops previamente enviadas; en cualquier otro caso corre.
+    if (debeBarrerTrasPush(
+      habiaEnviadas: habiaEnviadas,
+      algunEnvioAceptado: algunEnvioAceptado,
+      resultadoAmbiguo: resultadoAmbiguo,
+      falloInequivoco: falloInequivoco,
+    )) {
+      final barrido = await barridoConfirmacion();
+      aplicadas += barrido.confirmadas;
+      uuids.addAll(barrido.uuids);
+    }
     // Argón B1: marcar tipos y comentarios como synced tras push.
     if (aplicadas > 0) {
       try {
@@ -2049,6 +2217,19 @@ class SyncEngine {
     return rec.estado == 'aplicada';
   }
 
+  /// Cliente protegido (2026-10-26, A4 Argón): si hay un pull
+  /// pendiente por un rechazo CLIENTE_PROTEGIDO, lo ejecuta ahora
+  /// (silencioso, dentro del lock del ciclo en curso: _doPull nunca
+  /// adquiere el lock, así que no hay auto-bloqueo). Solo corre
+  /// cuando hubo un rechazo real, así que el costo es despreciable.
+  Future<void> _pullSiProtegidoPendiente() async {
+    if (!_pullProtegidoPendiente) return;
+    _pullProtegidoPendiente = false;
+    try {
+      await _doPull(silencioso: true);
+    } catch (_) {}
+  }
+
   Future<bool> _aplicarEstadoServidor(
       Map<String, dynamic> op, ResultadoOpServidor rec) async {
     final uuid = op['op_uuid'] as String;
@@ -2061,6 +2242,19 @@ class SyncEngine {
     if (rec.estado == 'rechazada' ||
         (rec.estado == 'aplicada' && rechazadaPorPuente)) {
       await _marcarRechazadaServidor(uuid, rec);
+      // 1.15 (fix4): la fila optimista (id negativo) también se limpia
+      // cuando la op es RECHAZADA, no solo cuando es aplicada: si no,
+      // una venta al fiado o una categoría rechazada quedaba fantasma
+      // en el teléfono (el pull nunca trae la fila real).
+      await _limpiarOptimistaDeOp(op);
+      // Cliente protegido (2026-10-26, A4): el pull de fin de
+      // ciclo pisa el estado optimista local (p. ej. un pago que
+      // la pantalla ya dio por aplicado).
+      final motivo = motivoRechazo(rec.resultado, rec.error) ?? '';
+      if (motivo.contains('CLIENTE_PROTEGIDO') ||
+          (rec.error ?? '').contains('CLIENTE_PROTEGIDO')) {
+        _pullProtegidoPendiente = true;
+      }
       if (op['tipo'] == 'reponer_lote') {
         // Revierte el optimismo local de la reposición.
         try {
@@ -2316,7 +2510,9 @@ class SyncEngine {
     }
     // v1.4.4 (v33): GymPedia — espejo con id TEXT (slug) y la fila
     // entera en 'data' (jsonb de sync_gympedia, como suplementos).
-    if (tabla == 'gympedia_articulos') {
+    // Biblioteca / Guía (v47): guia_fichas tiene la misma forma
+    // (id TEXT = slug, documento en `data`).
+    if (tabla == 'gympedia_articulos' || tabla == 'guia_fichas') {
       final id = '${m['id'] ?? ''}';
       if (id.isEmpty) return null;
       final rawData = m['data'];
@@ -2333,6 +2529,28 @@ class SyncEngine {
         return null;
       }
       data['id'] = id;
+      return {'id': id, 'dataJson': jsonEncode(data), 'esTexto': true};
+    }
+    // Biblioteca / Guía (v47): equipos — la fila del espejo trae
+    // equipo_id como PK (no `id`) y el documento en `data` (que ya
+    // incluye equipoId por D-1). La PK local es `id` con ese valor.
+    if (tabla == 'guia_equipos') {
+      final id = '${m['equipo_id'] ?? ''}';
+      if (id.isEmpty) return null;
+      final rawData = m['data'];
+      final Map<String, dynamic> data;
+      if (rawData is Map) {
+        data = Map<String, dynamic>.from(rawData);
+      } else if (rawData is String) {
+        try {
+          data = Map<String, dynamic>.from(jsonDecode(rawData) as Map);
+        } catch (_) {
+          return null;
+        }
+      } else {
+        return null;
+      }
+      data['equipoId'] = id;
       return {'id': id, 'dataJson': jsonEncode(data), 'esTexto': true};
     }
     // v1.12.0 (Bloque 3, F3/F4): espejos planos con id TEXT (UUID).
@@ -2507,6 +2725,17 @@ class SyncEngine {
     return purgaValidada;
   }
 
+  // Argón (sync adaptativa, paso 1, 2026-10-27): piso histórico
+  // seguro de paginación. El bucle de cada tabla SOLO se detiene
+  // con 0 filas o menos del piso, NUNCA con menos del límite
+  // pedido: si el servidor topa en silencio por debajo del límite,
+  // el bucle sigue pidiendo páginas hasta el final real. Con
+  // límite 100 el piso no cambia nada (100 == límite); su efecto
+  // es blindar la subida futura del límite (paso 4). El piso es
+  // 100 porque el servidor siempre entregó hasta 100 filas: si
+  // topase por debajo, la app ya perdería filas hoy.
+  static const int kPisoPagina = 100;
+
   Future<({int aplicadas, Map<String, int> porTabla})> _download(
       {bool silencioso = false, List<String>? tablasFiltro}) async {
     // v1.2.8 (Paso 1): si se pasa tablasFiltro (scope), solo esas tablas.
@@ -2515,9 +2744,9 @@ class SyncEngine {
       'pagos',
       'pagos_diarios',
       'gastos',
+      'categorias_suplemento', // v1.2.1 (orden topológico, Argón paso 2)
       'suplementos',
       'ventas_suplementos',
-      'categorias_suplemento', // v1.2.1
       'turnos_cierre', // v1.2.5-rev5
       'turnos_apertura', // v1.8.0 (v39): espejo para la Auditoría
       'adelantos', // v1.8.0 (v40)
@@ -2525,6 +2754,8 @@ class SyncEngine {
       'liquidaciones_caja', // v1.3.6 (v28, ítem 1B)
       'incidencias_sync', // v1.3.6 (v28, ítem 1C)
       'gympedia_articulos', // v1.4.4 (v33)
+      'guia_fichas', // Biblioteca / Guía (v47)
+      'guia_equipos', // Biblioteca / Guía (v47)
       'reservas', // Reservas v2 (v34)
       // v1.8.0 (v38): servicios por dosis.
       'servicio_botes',
@@ -2628,6 +2859,14 @@ class SyncEngine {
     } catch (_) {}
     // ajustes + server_seq (para verificación de sincronización)
     int? serverSeq;
+    // Argón (sync adaptativa, paso 2a): fecha del servidor de la
+    // última página exitosa del pull. Se captura en el bucle
+    // principal y en el de borrados; el bloque de cierre la usa
+    // en vez de un GET extra a sync_estado.
+    String? ultimoDateHdr;
+    // Argón (sync adaptativa, paso 4): escalera de páginas de
+    // este pull (por sesión, no por tabla): arranca en 100.
+    final escalera = EscaleraPaginas();
     try {
       final r = await _getAuth(Uri.parse('$_base/rest/v1/sync_estado?id=eq.1'
           '&select=server_seq,ajustes,usuarios,actividad'));
@@ -2710,6 +2949,10 @@ class SyncEngine {
       'incidencias_sync': 'sync_incidencias_sync',
       // v1.4.4 (v33): espejo de artículos GymPedia.
       'gympedia_articulos': 'sync_gympedia',
+      // Biblioteca / Guía (v47): espejos que publica el puente
+      // (si la oleada SQL no está, se omiten como ausentes).
+      'guia_fichas': 'sync_guia_ejercicios',
+      'guia_equipos': 'sync_equipos_guia',
       // Reservas v2 (v34): proyección que publica el puente.
       'reservas': 'sync_reservas',
       // v1.8.0 (v38): servicios por dosis (si la tabla sync_* aún no
@@ -2759,6 +3002,12 @@ class SyncEngine {
       }
       var pageWm = cursor;
       var tablaMax = cursor;
+      // S3 (panel 1.15, decisión A de Jc): si alguna página de
+      // esta tabla quedó con filas sin verificar, la pasada NO
+      // fue completa: no se purga ni se fuerza el marcador a
+      // serverSeq al cierre (ambos asumirían una pasada completa
+      // y saltarían las filas pendientes).
+      var tablaConSinVerificar = false;
       // v1.4.4: ids vistos en la pasada completa (purga).
       final recolectarPurga = tablasPurga.contains(tabla);
       final idsPurga = <Object>{};
@@ -2815,10 +3064,22 @@ class SyncEngine {
             _ => 'id,data,sync_seq',
           };
           // v1.2.9+47 (AppLog): medir latencia del lote.
+          // Argón (sync adaptativa, paso 4): la latencia y los
+          // bytes ya medidos aquí alimentan la escalera de
+          // páginas (no una medición nueva).
           final t0 = DateTime.now();
-          final r =
-              await _getAuth(Uri.parse('$_base/rest/v1/$supTabla?select=$select'
-                  '&sync_seq=gt.$pageWm&order=sync_seq.asc&limit=100'));
+          http.Response? rTmp;
+          try {
+            rTmp = await _getAuth(Uri.parse(
+                '$_base/rest/v1/$supTabla?select=$select'
+                '&sync_seq=gt.$pageWm&order=sync_seq.asc'
+                '&limit=${escalera.limite}'));
+          } catch (_) {
+            // Timeout/socket: escalera a 100 y mismo error por tabla.
+            escalera.fallo();
+            rethrow;
+          }
+          final r = rTmp;
           final latencia =
               DateTime.now().difference(t0).inMilliseconds;
           // v1.2.9+47 (AppLog): log por lote.
@@ -2859,6 +3120,17 @@ class SyncEngine {
           }
           // La tabla responde con permiso: limpiar marca de sin_permiso.
           await _db.setMeta('wm_${tabla}_sin_permiso', '');
+          // Argón (sync adaptativa, paso 4): 429/5xx son fallos
+          // de transporte, no "tabla ausente" ni "sin permiso":
+          // bajar la escalera a 100 y fallar esta tabla (el
+          // bucle sigue con las demás, como antes).
+          if (r.statusCode == 429 ||
+              (r.statusCode >= 500 && r.statusCode < 600)) {
+            escalera.fallo();
+            AppLog.error('sync', 'pull_tabla_429_5xx',
+                d: '$tabla http=${r.statusCode}');
+            throw Exception('bajada $tabla: HTTP ${r.statusCode}');
+          }
     if (r.statusCode != 200) {
             // v1.2.9+47 (AppLog): fallo HTTP con fragmento sanitizado.
             final frag = r.body.length > 200
@@ -2871,6 +3143,16 @@ class SyncEngine {
                 'bajada $tabla: HTTP ${r.statusCode}');
           }
           final rows = jsonDecode(r.body) as List;
+          // Argón (sync adaptativa, paso 2a): guardar la fecha del
+          // servidor de esta página para el cierre del pull.
+          final dateHdrPagina = r.headers['date'];
+          if (dateHdrPagina != null) ultimoDateHdr = dateHdrPagina;
+          // Argón (sync adaptativa, paso 4): página exitosa →
+          // alimentar la escalera (bytes + latencia ya medidos).
+          // Panel 1.15 (Terra MEDIO, S1): medir BYTES reales, no
+          // caracteres: con no-ASCII, r.body.length subestima y
+          // la escalera sube más lento de lo debido.
+          escalera.exito(r.bodyBytes.length, latencia);
           // v1.2.9+47 (AppLog): lote OK.
           AppLog.info('sync', 'pull_lote_ok',
               d: '$tabla filas=${rows.length}');
@@ -2881,42 +3163,122 @@ class SyncEngine {
           // Si la página falla, no se avanza el cursor y se reintenta limpio.
           final opsPagina = <Map<String, dynamic>>[];
           var paginaMax = pageWm;
+          // S3 (panel 1.15, decisión A de Jc): menor seq de la
+          // página que quedó SIN verificar (fallo en la 1ª o 2ª
+          // pasada). El marcador se topa a ese valor menos 1
+          // antes del commit (ver topePaginaSeguro).
+          int? minSinVerificar;
+          // Argón (sync adaptativa, paso 2b): primera pasada sin
+          // tocar la BD: preparar todas las filas de la página.
+          // La verificación contra el espejo va en la segunda
+          // pasada, en una sola consulta (ver abajo).
+          final prepsPagina = <Map<String, dynamic>>[];
           for (final row in rows) {
             vistas++;
+            // S3: el seq se iza fuera del try porque el catch no
+            // puede ver variables declaradas dentro de él; sin
+            // esto, una fila que fallara aquí no toparía el
+            // marcador y quedaría saltada (ver topePaginaSeguro).
+            var seqEnCurso = 0;
             try {
               final m = Map<String, dynamic>.from(row as Map);
               if (recolectarPurga && m['id'] != null) {
                 idsPurga.add(m['id'] as Object);
               }
               final seq = (m['sync_seq'] as int?) ?? 0;
+              seqEnCurso = seq;
               final prep = _prepararFilaMirror(tabla, m);
               if (prep != null) {
-                // v1.2.5 (D20): cuenta aplicadas vs sin cambios de verdad.
-                // v1.2.7 fix Gemini: capturar oldFoto ANTES del batch.
-                final verif = await _db.verificarCambioMirror(
-                    tabla, prep['id'], prep['dataJson']);
-                if (verif['cambio'] as bool) {
-                  opsPagina.add({
-                    'id': prep['id'],
-                    'dataJson': prep['dataJson'],
-                    'seq': seq,
-                    'esTexto': prep['esTexto'],
-                    'oldFoto': verif['oldFoto'],
-                  });
-                  aplicadas++;
-                  // v1.3.5 (detalle Bajados): conteo por tabla.
-                  contarEnDetallePull(porTabla, tabla);
-                } else {
-                  sinCambios++;
-                }
+                prepsPagina.add({
+                  'id': prep['id'],
+                  'dataJson': prep['dataJson'],
+                  'seq': seq,
+                  'esTexto': prep['esTexto'],
+                });
               } else {
                 sinCambios++;
+                if (seq > paginaMax) paginaMax = seq;
+                if (seq > tablaMax) tablaMax = seq;
               }
-              if (seq > paginaMax) paginaMax = seq;
-              if (seq > tablaMax) tablaMax = seq;
             } catch (_) {
               fallidas++;
+              // S3: la fila que falló en la 1ª pasada también
+              // topa el marcador (si otra posterior avanzara,
+              // la saltaría para siempre).
+              final minActual = minSinVerificar;
+              if (seqEnCurso > 0 &&
+                  (minActual == null || seqEnCurso < minActual)) {
+                minSinVerificar = seqEnCurso;
+              }
             }
+          }
+          // Argón (sync adaptativa, paso 2b): segunda pasada. UNA
+          // consulta para toda la página (antes era una por fila).
+          // Sin escrituras entre ambas pasadas, el resultado es
+          // idéntico al de las llamadas sueltas. Si el lote falla,
+          // se cae a las llamadas sueltas de siempre (misma
+          // semántica de fallos por fila).
+          Map<Object, Map<String, dynamic>> verifs;
+          try {
+            verifs = await _db.verificarCambiosMirror(tabla, prepsPagina);
+          } catch (_) {
+            verifs = {};
+            for (final p in prepsPagina) {
+              try {
+                verifs[p['id'] as Object] =
+                    await _db.verificarCambioMirror(
+                        tabla, p['id'], p['dataJson']);
+              } catch (_) {
+                fallidas++;
+              }
+            }
+          }
+          for (final p in prepsPagina) {
+            final verif = verifs[p['id'] as Object];
+            if (verif == null) {
+              // S3: fila sin verificar (el lote y la suelta
+              // fallaron) → topa el marcador, como en la 1ª
+              // pasada. Sin esto, la fila posterior que sí se
+              // verificó avanzaba paginaMax y la saltaba.
+              final seqP = p['seq'] as int;
+              final minActual = minSinVerificar;
+              if (seqP > 0 &&
+                  (minActual == null || seqP < minActual)) {
+                minSinVerificar = seqP;
+              }
+              continue;
+            }
+            // La secuencia solo avanza para filas con verificación
+            // (una fila cuya verificación falló no avanza, igual
+            // que antes cuando el await lanzaba dentro del try).
+            final seqP = p['seq'] as int;
+            if (seqP > paginaMax) paginaMax = seqP;
+            if (seqP > tablaMax) tablaMax = seqP;
+            // v1.2.5 (D20): cuenta aplicadas vs sin cambios de verdad.
+            // v1.2.7 fix Gemini: capturar oldFoto ANTES del batch.
+            if (verif['cambio'] as bool) {
+              opsPagina.add({
+                'id': p['id'],
+                'dataJson': p['dataJson'],
+                'seq': seqP,
+                'esTexto': p['esTexto'],
+                'oldFoto': verif['oldFoto'],
+              });
+              aplicadas++;
+              // v1.3.5 (detalle Bajados): conteo por tabla.
+              contarEnDetallePull(porTabla, tabla);
+            } else {
+              sinCambios++;
+            }
+          }
+          // S3 (decisión A de Jc): topar el marcador al último
+          // renglón bueno seguido ANTES del commit, porque el
+          // commit guarda paginaMax como wm de la página. La
+          // tabla queda marcada incompleta para el cierre (sin
+          // purga ni salto a serverSeq, ver abajo).
+          if (minSinVerificar != null) {
+            tablaConSinVerificar = true;
+            paginaMax = topePaginaSeguro(paginaMax, pageWm, minSinVerificar);
           }
           // Commit atómico: filas + watermark de la página juntos.
           if (opsPagina.isNotEmpty || paginaMax > pageWm) {
@@ -2986,7 +3348,17 @@ class SyncEngine {
               }
             }
           }
-          if (rows.length < 100) break;
+          // S3: si el tope impidió avanzar (la fila sin verificar
+          // sigue siendo la primera pendiente), no re-pedir la
+          // misma página en este ciclo: el próximo ciclo reintenta
+          // desde el tope. Sin esto, una fila que falla siempre
+          // dejaría el pull girando sobre la misma página llena.
+          // Costo conocido de la opción A: mientras el fallo no se
+          // resuelve, las páginas posteriores a la fila esperan
+          // (el pull vuelve, la app funciona, y los fallos
+          // pasajeros se recuperan en el ciclo siguiente).
+          if (paginaMax <= pageWm) break;
+          if (rows.length < kPisoPagina) break;
           pageWm = paginaMax;
         }
       } catch (e) {
@@ -3013,6 +3385,11 @@ class SyncEngine {
       // ausente o sin_permiso (el break no lanza excepción, así que no
       // está en erroresTablas). Si se forzara, al recuperar el permiso
       // o crearse la tabla el teléfono no descargaría el historial.
+      // S3: tampoco si la pasada quedó incompleta (filas sin
+      // verificar): la purga asumiría un conjunto completo y el
+      // salto a serverSeq desharía el tope del marcador en el
+      // mismo ciclo. La tabla reintenta desde el tope en el
+      // próximo ciclo.
       final ausente =
           await _db.getMeta('wm_${tabla}_ausente') == '1';
       final sinPermiso =
@@ -3020,6 +3397,7 @@ class SyncEngine {
       if (serverSeq != null &&
           !ausente &&
           !sinPermiso &&
+          !tablaConSinVerificar &&
           !erroresTablas.any((e) => e.startsWith('$tabla:'))) {
         // v1.3.1 (Argón pull): la tabla completó sin errores: limpiar
         // su error guardado.
@@ -3172,6 +3550,8 @@ class SyncEngine {
           throw Exception('bajada borrados: HTTP ${r.statusCode}');
         }
         final rows = jsonDecode(r.body) as List;
+        final dateHdrBorrados = r.headers['date'];
+        if (dateHdrBorrados != null) ultimoDateHdr = dateHdrBorrados;
         if (rows.isEmpty) break;
         for (final row in rows) {
           final m = Map<String, dynamic>.from(row as Map);
@@ -3222,7 +3602,7 @@ class SyncEngine {
           }
           if (seq > borradosMax) borradosMax = seq;
         }
-        if (rows.length < 100) break;
+        if (rows.length < kPisoPagina) break;
         pageWm = borradosMax;
       }
     } catch (e) {
@@ -3297,10 +3677,52 @@ class SyncEngine {
             contarEnDetallePull(porTabla, 'gympedia_articulos');
             if (seq > gbMax) gbMax = seq;
           }
-          if (paginaCortada || rows.length < 100) break;
+          if (paginaCortada || rows.length < kPisoPagina) break;
         }
         if (gbMax > cursorGb) {
           await _db.setMeta('wm_gympedia_borrados', '$gbMax');
+        }
+      } catch (_) {}
+    }
+    // Biblioteca / Guía (v47): tombstones de fichas. Misma forma
+    // que GymPedia (tabla propia sync_guia_borrados, cursor propio
+    // en meta, jamás salta a server_seq, tolerante a fallos).
+    if (tablas.contains('guia_fichas')) {
+      try {
+        final cursorGuia =
+            int.tryParse(await _db.getMeta('wm_guia_borrados') ?? '0') ??
+                0;
+        var guiaMax = cursorGuia;
+        while (true) {
+          final r = await _getAuth(Uri.parse(
+              '$_base/rest/v1/sync_guia_borrados?select=id,sync_seq'
+              '&sync_seq=gt.$guiaMax&order=sync_seq.asc&limit=100'));
+          if (r.statusCode == 404 || r.statusCode == 400) {
+            await _db.setMeta('wm_guia_borrados_ausente', '1');
+            break;
+          }
+          if (r.statusCode != 200) break; // ausente/sin permiso: omitir
+          await _db.setMeta('wm_guia_borrados_ausente', '');
+          final rows = jsonDecode(r.body) as List;
+          if (rows.isEmpty) break;
+          var paginaCortada = false;
+          for (final row in rows) {
+            final m = Map<String, dynamic>.from(row as Map);
+            final slug = '${m['id'] ?? ''}';
+            final seq = (m['sync_seq'] as num?)?.toInt() ?? 0;
+            if (slug.isEmpty || seq <= 0) {
+              paginaCortada = true;
+              break;
+            }
+            await _db.guiaAplicarTumba(slug, seq);
+            aplicadas++;
+            contarEnDetallePull(porTabla, 'guia_fichas');
+            if (seq > guiaMax) guiaMax = seq;
+          }
+          if (paginaCortada || rows.length < kPisoPagina) break;
+        }
+        if (guiaMax > cursorGuia) {
+          await _db.setMeta('wm_guia_borrados', '$guiaMax');
         }
       } catch (_) {}
     }
@@ -3315,10 +3737,14 @@ class SyncEngine {
     }
     // v1.2.5 (D17): marca por ámbito con HORA DEL SERVIDOR (header Date),
     // no del dispositivo (D18: el reloj local puede estar mal).
+    // Argón (sync adaptativa, paso 2a): la fecha ya viene en las
+    // respuestas del propio pull (ultimoDateHdr); se elimina el GET
+    // extra a sync_estado al cierre. horaServidor solo alimenta
+    // last_remote_sync_ok (metadato), no marcas ni decisiones. Si
+    // ningún pull tuvo éxito, se cae al mismo respaldo de siempre
+    // (hora del dispositivo).
     try {
-      final r = await _getAuth(
-          Uri.parse('$_base/rest/v1/sync_estado?id=eq.1&select=server_seq'));
-      final dateHdr = r.headers['date'];
+      final dateHdr = ultimoDateHdr;
       final horaServidor = dateHdr != null
           ? HttpDate.parse(dateHdr).toIso8601String()
           : DateTime.now().toUtc().toIso8601String();
@@ -3829,6 +4255,9 @@ class SyncEngine {
     required Uint8List bytes,
     required String claveTusLoc,
     required String claveTusOffset,
+    // Argón (sync adaptativa, paso 3): si devuelve true antes de
+    // un chunk, la subida se pausa (ver _PausaQos).
+    Future<bool> Function()? debePausarPorCobro,
   }) async {
     if (bytes.isEmpty) {
       return const ResultadoSubidaFoto(
@@ -3842,6 +4271,7 @@ class SyncEngine {
         claveTusOffset: claveTusOffset,
         objectPath: objectPath,
         bytes: bytes,
+        debePausarPorCobro: debePausarPorCobro,
       );
       if (tus == true) {
         // Corrección Gemini #6: limpiar claves TUS exactas tras éxito.
@@ -3877,6 +4307,13 @@ class SyncEngine {
         estado: EstadoSubida.reintentable,
         error: 'TUS falló, se reintentará',
       );
+    } on _PausaQos {
+      // Argón (sync adaptativa, paso 3): pausa, no error. NO se
+      // limpian las claves TUS: loc/path/offset quedan para
+      // reanudar en el próximo ciclo.
+      return const ResultadoSubidaFoto(
+        estado: EstadoSubida.pausadaPorQos,
+      );
     } on _TusPermanente catch (e) {
       // Luna #1: 403/permisos es PERMANENTE, no reintentable.
       // Limpiar estado TUS para no dejar basura.
@@ -3907,12 +4344,14 @@ class SyncEngine {
   /// - offset > bytes.length → descartar URL y crear nueva (no reset a 0).
   /// - Claves TUS atadas al objectPath (validar antes de reanudar).
   /// Retorna: true=subida, false=reintentable, null=TUS no disponible,
-  /// lanza _TusPermanente en 403/permisos.
+  /// lanza _TusPermanente en 403/permisos, lanza _PausaQos si
+  /// [debePausarPorCobro] pide pausar antes de un chunk.
   Future<bool?> _subirFotoTusCola({
     required String claveTusLoc,
     required String claveTusOffset,
     required String objectPath,
     required Uint8List bytes,
+    Future<bool> Function()? debePausarPorCobro,
   }) async {
     // Luna #11: atar las claves al objectPath.
     final claveTusPath = '${claveTusLoc}_path';
@@ -3971,6 +4410,23 @@ class SyncEngine {
     // sabotearía con el timeout en redes lentas.
     const chunk = 128 * 1024;
     while (offset < bytes.length) {
+      // Argón (sync adaptativa, paso 3): preempción por cobro.
+      // Antes de cada chunk de 128 KB, si entró trabajo
+      // transaccional (un cobro), pausar: el offset ya quedó
+      // guardado tras el chunk anterior y las claves TUS se
+      // conservan, así que el próximo ciclo reanuda sin
+      // re-subir nada. Un fallo del propio chequeo NO pausa
+      // (seguir subiendo es más seguro que abortar por un
+      // error de lectura).
+      if (debePausarPorCobro != null) {
+        bool pausar = false;
+        try {
+          pausar = await debePausarPorCobro();
+        } catch (_) {
+          pausar = false;
+        }
+        if (pausar) throw _PausaQos();
+      }
       final fin =
           (offset + chunk < bytes.length) ? offset + chunk : bytes.length;
       var okChunk = false;
@@ -4703,6 +5159,31 @@ class SyncEngine {
   /// Se llama con unawaited() tras el push de metadatos.
   /// Fix #13 (Sol): claim atómico, encolado antes de marcar synced,
   /// y reintentos con backoff en vez de 'error' permanente.
+  /// S2 (panel 1.15, decisión de Jc: las fotos no deben retrasar
+  /// cobros): las fotos de incidencias suben FUERA del candado de
+  /// sync. Antes vivían dentro de _doPush: un cobro nuevo que
+  /// llegaba mientras subían fotos esperaba al candado y al
+  /// siguiente disparo. Ahora los puntos de entrada las lanzan al
+  /// soltar el candado, sin esperarlas. El guard evita dos
+  /// subidas en paralelo (el siguiente disparo recoge lo que
+  /// quede); se pone en síncrono antes del primer await para que
+  /// dos lanzadores en el mismo bloque no entren a la vez (la
+  /// lección del mutex de liquidación R4: un await antes de
+  /// enlazar rompe la exclusión). Las ops
+  /// registrar_foto_incidencia que produce se recogen en el push
+  /// siguiente, igual que antes. Las fotos_cola (TUS) no se
+  /// tocan: ya ceden por QoS.
+  bool _fotosIncidenciasEnCurso = false;
+
+  void _lanzarFotosIncidencias() {
+    if (_fotosIncidenciasEnCurso) return;
+    _fotosIncidenciasEnCurso = true;
+    unawaited(subirFotosIncidencias().then<void>((_) {}, onError: (Object e) {
+      debugPrint('WARN subirFotosIncidencias falló: $e');
+      AppLog.error('sync', 'fotos_incidencias_fallo', d: '$e');
+    }).whenComplete(() => _fotosIncidenciasEnCurso = false));
+  }
+
   Future<void> subirFotosIncidencias() async {
     final d = await _db.db;
     final pendientes = await d.query(

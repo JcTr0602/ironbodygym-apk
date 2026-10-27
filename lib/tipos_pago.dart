@@ -54,17 +54,23 @@ class TipoPago {
 ///   y las ofertas de 30 días, comparando con [monto] (en el diálogo
 ///   es el precio de etiqueta, que ya incluye la especial vigente).
 ///   Solo se comparan tipos de 30 días: una oferta semanal o de otro
-///   período no es comparable con una mensualidad. En empate gana el
-///   primer candidato (en el orden de la lista, 'menores' va antes
-///   que las ofertas), así que no cambia el default sin motivo.
+///   período no es comparable con una mensualidad. En empate gana
+///   'menores' sin importar el orden de la lista (1.15 M1d-01: el
+///   orden del blob no está garantizado y el primer candidato
+///   podía ser 'mensual' u otra oferta).
 /// - Sin candidato mensual: 'menores' si existe, si no el primero.
 ///
-/// [tiposDisp] no debe estar vacía (el diálogo ya lo garantiza).
+/// [tiposDisp] no debe estar vacía (el diálogo ya lo garantiza);
+/// si llega vacía, se lanza ArgumentError en vez del StateError
+/// críptico de `.first`.
 TipoPago tipoInicialPago(
   List<TipoPago> tiposDisp, {
   required bool menor,
   required double Function(TipoPago tipo) monto,
 }) {
+  if (tiposDisp.isEmpty) {
+    throw ArgumentError('tipoInicialPago: lista de tipos vacía');
+  }
   if (!menor) {
     return tiposDisp.firstWhere((t) => t.id == 'mensual',
         orElse: () => tiposDisp.first);
@@ -79,7 +85,8 @@ TipoPago tipoInicialPago(
   var mejorMonto = monto(mejor);
   for (final t in candidatos.skip(1)) {
     final m = monto(t);
-    if (m < mejorMonto) {
+    if (m < mejorMonto ||
+        (m == mejorMonto && t.id == 'menores' && mejor.id != 'menores')) {
       mejor = t;
       mejorMonto = m;
     }

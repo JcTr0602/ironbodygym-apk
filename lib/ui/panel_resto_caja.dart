@@ -51,13 +51,12 @@ class _ArqueoEntregaScreenState extends State<ArqueoEntregaScreen> {
     setState(() => _cargando = true);
     try {
       final lista = await entrenadoresConPendiente();
-      // El pendiente C1 resta las entregas ya registradas en el libro.
+      // 1.15-turnos (#2, mecanismo único): e['cup'] ya es
+      // pendienteArqueo, que descuenta el libro C1 con marca; NO
+      // se resta otra vez (antes el arqueo no restaba el libro y
+      // esta resta era necesaria; restarla ahora duplicaría).
       for (final e in lista) {
-        final tid = e['telegram_id'] as int?;
-        if (tid != null) {
-          final entregas = await entregasEfectivoRegistradas(tid);
-          e['pendiente_c1'] = (e['cup'] as double) - entregas;
-        }
+        e['pendiente_c1'] = e['cup'] as double;
       }
       if (mounted) {
         setState(() {

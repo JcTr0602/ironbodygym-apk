@@ -172,19 +172,14 @@ Future<void> _escribirAtomico(String ruta, List<int> bytes) async {
   }
 }
 
-/// Prepara la copia de trabajo del editor. Dos caminos, mismo
-/// resultado (los píxeles que devuelve decodeImage son los que
-/// se ven en pantalla y las dimensiones devueltas son las de
-/// pantalla):
-/// - El decodificador JPEG de package:image APLICA la
-///   orientación EXIF al decodificar y la consume (verificado
-///   con fixtures reales de PIL, orientaciones 6 y 2): el trabajo
-///   es el archivo original y no hay nada que hornear.
-/// - Si un formato expusiera la orientación SIN aplicarla
-///   (exif presente y != 1 tras decodificar), se hornea con
-///   bakeOrientation y el trabajo es la copia escrita en
-///   [rutaOrientada] (sin etiqueta EXIF: la vista previa la
-///   muestra tal cual, idéntica a lo que se recorta).
+/// Prepara la copia de trabajo del editor: SIEMPRE un archivo
+/// físico con los píxeles ya orientados en [rutaOrientada] (sin
+/// depender de que el consumidor respete la etiqueta EXIF).
+/// El decodificador JPEG de package:image APLICA la orientación
+/// EXIF al decodificar y la consume (verificado con fixtures
+/// reales de PIL, orientaciones 6 y 2); si un formato la expusiera
+/// SIN aplicarla (exif presente y != 1 tras decodificar), se
+/// hornea con bakeOrientation antes de escribir.
 /// Devuelve null si la foto no se pudo decodificar o escribir
 /// (el editor entonces avisa y ofrece usar la foto completa
 /// sin recorte garantizado).
@@ -196,19 +191,25 @@ Future<FotoTrabajo?> prepararFotoTrabajo(
     final bytes = await origen.readAsBytes();
     final im = img.decodeImage(bytes);
     if (im == null) return null;
+    // Argón #8-2: el trabajo SIEMPRE es un archivo físico con los
+    // píxeles ya orientados. Devolver `origen` cuando el
+    // decodificador ya aplicó el EXIF dejaba la etiqueta en disco
+    // y cualquier consumidor que no respete EXIF (o la copia cruda
+    // de `original` si la compresión falla) mostraba la foto girada.
+    // bake solo si el decodificador NO aplicó la orientación
+    // (post-decode != 1); si ya la aplicó, hornear de nuevo giraría
+    // dos veces.
     final ifd = im.exif.imageIfd;
     final orientacion = ifd.hasOrientation ? ifd.orientation : null;
-    if (orientacion == null || orientacion == 1) {
-      return FotoTrabajo(
-          archivo: origen, ancho: im.width, alto: im.height);
-    }
-    final baked = img.bakeOrientation(im);
+    final orientada = (orientacion != null && orientacion != 1)
+        ? img.bakeOrientation(im)
+        : im;
     await _escribirAtomico(
-        rutaOrientada, img.encodeJpg(baked, quality: 92));
+        rutaOrientada, img.encodeJpg(orientada, quality: 92));
     return FotoTrabajo(
       archivo: File(rutaOrientada),
-      ancho: baked.width,
-      alto: baked.height,
+      ancho: orientada.width,
+      alto: orientada.height,
     );
   } catch (_) {
     // [rutaOrientada] es una ruta de trabajo del llamador

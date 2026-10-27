@@ -61,6 +61,25 @@ void main() {
       expect(r.id, 'menores');
     });
 
+    test('1.15 M1d-01: empate mantiene menores aunque la oferta '
+        'vaya primera en la lista', () {
+      const ofertaIgual = TipoPago(
+          id: 'oferta_igual',
+          nombre: 'Oferta igual',
+          monto: 1500,
+          dias: 30);
+      final r = tipoInicialPago([ofertaIgual, menores],
+          menor: true, monto: monto);
+      expect(r.id, 'menores');
+    });
+
+    test('1.15 M1d-01: lista vacía lanza ArgumentError claro', () {
+      expect(() => tipoInicialPago([], menor: true, monto: monto),
+          throwsArgumentError);
+      expect(() => tipoInicialPago([], menor: false, monto: monto),
+          throwsArgumentError);
+    });
+
     test('adulto sigue en mensual aunque la oferta sea más barata', () {
       final r = tipoInicialPago([mensual, ofertaBarata],
           menor: false, monto: monto);
