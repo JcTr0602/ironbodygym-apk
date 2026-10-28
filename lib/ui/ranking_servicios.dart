@@ -7,8 +7,10 @@ library;
 
 import 'package:flutter/material.dart';
 
+import '../auth.dart';
 import '../localdb.dart';
 import '../negocio.dart' show fmtMonto;
+import '../permisos_entrenador.dart';
 import '../servicios.dart';
 import '../tiempo.dart';
 import 'componentes.dart';
@@ -70,6 +72,16 @@ class _RankingServiciosScreenState extends State<RankingServiciosScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // Argón stats MEDIO: el docstring promete dueño + permiso
+    // can_ver_ranking_servicios, pero el build no lo comprobaba y
+    // dependía de que el menú ocultara el botón.
+    if (!AuthService().isOwner &&
+        !PermisosEntrenador().canVerRankingServicios) {
+      return Scaffold(
+          appBar: AppBar(title: const Text('Ranking de Servicios')),
+          body: const Center(
+              child: Text('No tienes permiso para ver el ranking.')));
+    }
     return Scaffold(
       appBar: AppBar(title: const Text('Ranking de Servicios')),
       body: _cargando

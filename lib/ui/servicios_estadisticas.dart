@@ -14,6 +14,7 @@ import '../tiempo.dart';
 import 'componentes.dart';
 import 'diseno.dart';
 import 'reporte_margenes.dart';
+import 'widgets.dart';
 
 /// v1.8.0: Estadísticas de servicios (SOLO DUEÑO), diseño 🟢 Argón
 /// (DISENO_DOSIS_ESTADISTICAS): dos tarjetas separadas —
@@ -63,8 +64,6 @@ class _ServiciosEstadisticasScreenState
         await LocalDb.instance.allMirror('servicio_salidas');
     final botes = await LocalDb.instance.allMirror('servicio_botes');
     final lotes = await LocalDb.instance.allMirror('servicio_lotes');
-    final compras =
-        await LocalDb.instance.allMirror('servicio_compras');
     final movsAgua = await LocalDb.instance
         .allMirror('servicio_agua_movimientos');
     final suplementos =
@@ -103,6 +102,7 @@ class _ServiciosEstadisticasScreenState
             'Bote #$id',
         'rendimiento': (b['dosis_rendimiento'] as num?)?.toInt() ?? 0,
         'servidas': 0,
+        'casa': 0,
         'merma': 0,
         'cortesia': 0,
         'staff': 0,
@@ -117,8 +117,15 @@ class _ServiciosEstadisticasScreenState
       if (fila == null) continue;
       final tipo = '${v['tipo']}';
       if (tipo.startsWith('dosis')) {
-        fila['servidas'] =
-            (fila['servidas'] as int) + ((v['cantidad'] as num?)?.toInt() ?? 0);
+        // Argón stats MEDIO 2 (1A): la Casa no es venta comercial:
+        // va a su propia fila, no a servidas (1B ya la separa).
+        if ((v['casa'] as num?)?.toInt() == 1) {
+          fila['casa'] =
+              (fila['casa'] as int) + ((v['cantidad'] as num?)?.toInt() ?? 0);
+        } else {
+          fila['servidas'] = (fila['servidas'] as int) +
+              ((v['cantidad'] as num?)?.toInt() ?? 0);
+        }
       }
     }
     for (final s in salidasP) {
@@ -138,76 +145,25 @@ class _ServiciosEstadisticasScreenState
       }
     }
 
-    // ---- 1B: inversión y margen ----
-    var inversionBotes = 0.0;
-    for (final c in compras) {
-      if ('${c['tipo']}' == 'bote') {
-        inversionBotes += (c['costo'] as num?)?.toDouble() ?? 0;
-      }
-    }
-    var inversionAgua = 0.0;
-    for (final m in movsAgua) {
-      if ('${m['tipo']}' == 'entrada') {
-        inversionAgua += ((m['cantidad'] as num?)?.toDouble() ?? 0) *
-            ((m['costo_unitario'] as num?)?.toDouble() ?? 0);
-      }
-    }
-    var ingSin = 0.0, ingCon = 0.0, ingAgua = 0.0;
-    var costoDosis = 0.0, costoAguaVendida = 0.0, comision = 0.0;
-    var nDosis = 0, nConAgua = 0;
-    for (final v in ventasP) {
-      final cant = (v['cantidad'] as num?)?.toInt() ?? 0;
-      final precio = (v['precio_unitario'] as num?)?.toDouble() ?? 0;
-      switch ('${v['tipo']}') {
-        case 'dosis_sin_agua':
-          ingSin += precio * cant;
-          nDosis += cant;
-        case 'dosis_con_agua':
-          ingCon += precio * cant;
-          nDosis += cant;
-          nConAgua += cant;
-        case 'agua_suelta':
-          ingAgua += precio * cant;
-      }
-      costoDosis +=
-          ((v['costo_dosis_snapshot'] as num?)?.toDouble() ?? 0) * cant;
-      costoAguaVendida +=
-          ((v['costo_agua_snapshot'] as num?)?.toDouble() ?? 0) * cant;
-      comision +=
-          ((v['comision_unitaria'] as num?)?.toDouble() ?? 0) * cant;
-    }
-    // Mermas a costo: costo unitario del bote (snapshot de la dosis
-    // del lote; si el bote no tiene ventas, rendimiento como base).
-    var mermasCosto = 0.0;
-    final costoDosisPorBote = <int, double>{};
-    for (final b in botes) {
-      final id = (b['id'] as num?)?.toInt();
-      if (id == null) continue;
-      final rend = (b['dosis_rendimiento'] as num?)?.toInt() ?? 0;
-      final costo = (b['costo_bote'] as num?)?.toDouble() ?? 0;
-      costoDosisPorBote[id] = rend > 0 ? costo / rend : 0;
-    }
-    for (final s in salidasP) {
-      final boteId = boteDeLote[(s['lote_id'] as num?)?.toInt()];
-      mermasCosto += ((s['dosis'] as num?)?.toDouble() ?? 0) *
-          (costoDosisPorBote[boteId] ?? 0);
-    }
-    // Casa a costo (nunca como pérdida comercial, Argón E3).
-    var casaCosto = 0.0, casaN = 0;
-    for (final v in ventasP) {
-      if ((v['casa'] as num?)?.toInt() != 1) continue;
-      final cant = (v['cantidad'] as num?)?.toInt() ?? 0;
-      casaN += cant;
-      casaCosto +=
-          ((v['costo_dosis_snapshot'] as num?)?.toDouble() ?? 0) * cant +
-              ((v['costo_agua_snapshot'] as num?)?.toDouble() ?? 0) *
-                  cant;
-    }
-    final ingresos = ingSin + ingCon + ingAgua;
-    final costos = costoDosis + costoAguaVendida + mermasCosto;
-    final margen = ingresos - costos;
+    // ---- 1B: inversión y margen (puro, testeable: calcular1B) ----
+    final agg1B = calcular1B(
+      ventas: ventasP,
+      salidas: salidasP,
+      botes: botes,
+      boteDeLote: boteDeLote,
+      movsAgua: movsAgua,
+    );
+    final ingBote = agg1B.ingBote;
+    final dosisBote = agg1B.dosisBote;
+    final costoBoteV = agg1B.costoBoteV;
+    final nDosis = agg1B.nDosis;
     // Indicadores (Argón E5).
-    final dias = _periodo == 'mes' ? ahoraHabana().day : 30;
+    // Argón stats MEDIO 2 (autonomía): en modo 'todo', días desde la
+    // primera venta, no 30 fijos (con 30 fijos, dosisDia se infla y
+    // la autonomía se subestima desde el segundo mes).
+    final dias = _periodo == 'mes'
+        ? ahoraHabana().day
+        : diasDesdePrimeraVenta(ventasP, ahoraHabana());
     var saldoTotal = 0;
     for (final l in lotes) {
       if ('${l['estado']}' == 'activo') {
@@ -223,22 +179,6 @@ class _ServiciosEstadisticasScreenState
     // NaN (bote nuevo o solo Casa/mermas → «Pendiente de primeras
     // ventas»), agrupaciones por día de semana y franja (fechas
     // truncadas explícitamente en Habana, agua en POMOS).
-    final ingBote = <int, double>{};
-    final dosisBote = <int, int>{};
-    final costoBoteV = <int, double>{};
-    for (final v in ventasP) {
-      if ((v['casa'] as num?)?.toInt() == 1) continue;
-      final tipo = '${v['tipo']}';
-      if (!tipo.startsWith('dosis')) continue;
-      final boteId = boteDeLote[(v['lote_id'] as num?)?.toInt()];
-      if (boteId == null) continue;
-      final cant = (v['cantidad'] as num?)?.toInt() ?? 0;
-      final precio = (v['precio_unitario'] as num?)?.toDouble() ?? 0;
-      ingBote[boteId] = (ingBote[boteId] ?? 0) + precio * cant;
-      dosisBote[boteId] = (dosisBote[boteId] ?? 0) + cant;
-      costoBoteV[boteId] = (costoBoteV[boteId] ?? 0) +
-          (((v['costo_dosis_snapshot'] as num?)?.toDouble() ?? 0) * cant);
-    }
     final indBote = <int, ({bool pendiente, double? margenPct, double? puntoEquilibrioDosis})>{};
     for (final b in botes) {
       final id = (b['id'] as num?)?.toInt();
@@ -308,25 +248,7 @@ class _ServiciosEstadisticasScreenState
       _semanaTexto = semanaTexto;
       _semanaRango = '$lunesTxt al $domingoTxt';
       _b = {
-        'inversion_botes': inversionBotes,
-        'inversion_agua': inversionAgua,
-        'ing_sin': ingSin,
-        'ing_con': ingCon,
-        'ing_agua': ingAgua,
-        'ingresos': ingresos,
-        'costo_dosis': costoDosis,
-        'costo_agua': costoAguaVendida,
-        'mermas_costo': mermasCosto,
-        'margen': margen,
-        'comision': comision,
-        'neto_dueno': margen - comision,
-        'casa_costo': casaCosto,
-        'casa_n': casaN,
-        'margen_medio': nDosis > 0
-            ? (ingSin + ingCon - costoDosis) / nDosis
-            : 0.0,
-        'pct_con_agua':
-            nDosis > 0 ? (nConAgua * 100 / nDosis) : 0.0,
+        ...agg1B.b,
         'autonomia_dias': autonomia,
         'saldo_total': saldoTotal,
       };
@@ -359,6 +281,10 @@ class _ServiciosEstadisticasScreenState
           : ListView(
               padding: const EdgeInsets.all(AppEspacio.lg),
               children: [
+                // Argón stats MEDIO 2: sin banner, el dueño veía
+                // números viejos sin advertencia de sync pendiente.
+                // Al tocarlo se sincroniza; el refresh recarga.
+                const SyncBanner(),
                 // v1.13.0 (H6): pestañas Servicios / Suplementos.
                 // Suplementos reutiliza el reporte de márgenes
                 // existente (no se crea otra pantalla de stats).
@@ -449,6 +375,19 @@ class _ServiciosEstadisticasScreenState
   /// deslizadores sobre el costo del bote actual). No escribe BD.
   Future<void> _abrirSimulador() async {
     final botes = await LocalDb.instance.allMirror('servicio_botes');
+    // Argón stats MENOR: el desplegable mostraba solo 'Bote #id'.
+    final suplementos =
+        await LocalDb.instance.allMirror('suplementos');
+    final nombreSup = <int, String>{
+      for (final s in suplementos)
+        if ((s['id'] as num?) != null)
+          (s['id'] as num).toInt(): '${s['nombre'] ?? ''}',
+    };
+    // Costo del pomo para el margen con agua: última entrada de agua
+    // (por fecha e id, no por orden del espejo: ver
+    // ultimaEntradaAguaCosto).
+    final costoAgua = ultimaEntradaAguaCosto(await LocalDb.instance
+        .allMirror('servicio_agua_movimientos'));
     // Argón #9 (MEDIO): los botes abiertos tienen estado 'abierto';
     // 'activo' es el estado de los LOTES. Con 'activo' la lista
     // salía siempre vacía y el simulador era inutilizable.
@@ -464,6 +403,15 @@ class _ServiciosEstadisticasScreenState
     var bote = abiertos.first;
     var precioSin = 600.0;
     var precioCon = 900.0;
+    // Etiquetas del desplegable (nombre + id, para no confundir dos
+    // botes abiertos del mismo suplemento).
+    final etiquetasBote = <String>[];
+    for (final b in abiertos) {
+      final nom = nombreSup[(b['suplemento_id'] as num?)?.toInt()];
+      etiquetasBote.add(nom == null || nom.isEmpty
+          ? 'Bote #${b['id']}'
+          : '$nom · Bote #${b['id']}');
+    }
     await showModalBottomSheet<void>(
       context: context,
       builder: (ctx) => StatefulBuilder(
@@ -477,6 +425,7 @@ class _ServiciosEstadisticasScreenState
             rendimiento: rend,
             precioSinAgua: precioSin,
             precioConAgua: precioCon,
+            costoAgua: costoAgua,
           );
           return Padding(
             padding: const EdgeInsets.all(16),
@@ -491,10 +440,10 @@ class _ServiciosEstadisticasScreenState
                 DropdownButton<Map<String, dynamic>>(
                   value: bote,
                   items: [
-                    for (final b in abiertos)
+                    for (var i = 0; i < abiertos.length; i++)
                       DropdownMenuItem(
-                          value: b,
-                          child: Text('Bote #${b['id']}')),
+                          value: abiertos[i],
+                          child: Text(etiquetasBote[i])),
                   ],
                   onChanged: (v) =>
                       setD(() => bote = v ?? bote),
@@ -502,7 +451,8 @@ class _ServiciosEstadisticasScreenState
                 Text(
                   'Costo del bote: ${fmtMonto(costo)} CUP · '
                   'Rendimiento: $rend dosis · '
-                  'Costo por dosis: ${fmtMonto(sim.costoPorDosis)} CUP',
+                  'Costo por dosis: ${fmtMonto(sim.costoPorDosis)} CUP · '
+                  'Pomo de agua: ${fmtMonto(costoAgua)} CUP',
                   style: AppTexto.cuerpo,
                 ),
                 const SizedBox(height: 8),
@@ -682,6 +632,7 @@ class _ServiciosEstadisticasScreenState
               _fila('Rendimiento del bote',
                   '${e.value['rendimiento']} dosis'),
               _fila('Dosis servidas', '${e.value['servidas']}'),
+              _fila('Casa', '${e.value['casa']}'),
               _fila('Mermas', '${e.value['merma']}'),
               _fila('Cortesías', '${e.value['cortesia']}'),
               _fila('Consumo del staff', '${e.value['staff']}'),
@@ -734,8 +685,10 @@ class _ServiciosEstadisticasScreenState
           Text('1B · Inversión y margen',
               style: AppTexto.titulo.copyWith(fontSize: 16)),
           const Divider(height: 20),
-          _fila('Inversión en botes', cup('inversion_botes')),
-          _fila('Inversión en agua', cup('inversion_agua')),
+          _fila('Inversión en botes (acumulada)',
+              cup('inversion_botes')),
+          _fila('Inversión en agua (acumulada)',
+              cup('inversion_agua')),
           const Divider(height: 20),
           _fila('Ingresos dosis sin agua', cup('ing_sin')),
           _fila('Ingresos dosis con agua', cup('ing_con')),

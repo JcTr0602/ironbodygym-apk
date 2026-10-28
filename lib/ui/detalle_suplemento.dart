@@ -87,12 +87,17 @@ class _DialogoVentaRapidaState extends State<_DialogoVentaRapida> {
   bool _promoActiva = false;
   bool _aceptaSinPromo = false;
   bool _guardando = false;
+  // Panel Luna P2 (lote 3): la confirmación de precio tiene un await
+  // antes de activar _guardando; sin esta bandera, dos toques
+  // rápidos podían abrir dos confirmaciones y vender dos veces.
+  bool _confirmandoPrecio = false;
   List<Map<String, dynamic>> _clientes = [];
 
+  // Lote 1 Argón: lectura estricta del oficial, igual que la pantalla
+  // de venta. Antes caía al campo legado `precio` y la venta rápida
+  // precargaba un valor distinto al que muestra el detalle.
   double get _precioOficial =>
-      (widget.sup['precio_oficial'] as num?)?.toDouble() ??
-      (widget.sup['precio'] as num?)?.toDouble() ??
-      0;
+      (widget.sup['precio_oficial'] as num?)?.toDouble() ?? 0;
 
   /// v1.4.6: la venta rápida se registra en la moneda del
   /// suplemento (antes 'USD' fijo: un suplemento en CUP habría
@@ -169,7 +174,27 @@ class _DialogoVentaRapidaState extends State<_DialogoVentaRapida> {
   }
 
   Future<void> _confirmar() async {
-    if (!_puedeConfirmar || _guardando) return;
+    if (!_puedeConfirmar || _guardando || _confirmandoPrecio) return;
+    // Lote 1 Argón: la venta rápida ejecutaba directo aunque el precio
+    // difiriera del oficial (la pantalla de venta exige vista previa).
+    // Con precio distinto, confirmación explícita con ambos precios.
+    if (_precioDifiere) {
+      _confirmandoPrecio = true;
+      bool? ok;
+      try {
+        ok = await DialogoApp.confirmar(context,
+            titulo: 'Confirma la venta',
+            mensaje: 'Vas a vender a '
+                '${_precioVenta!.toStringAsFixed(2)} $_monedaSup '
+                '(oficial: ${_precioOficial.toStringAsFixed(2)} '
+                '$_monedaSup).',
+            aceptar: 'Confirmar venta',
+            cancelar: 'Cancelar');
+      } finally {
+        _confirmandoPrecio = false;
+      }
+      if (ok != true || !mounted) return;
+    }
     setState(() => _guardando = true);
     try {
       final sid = (widget.sup['id'] as num?)?.toInt();

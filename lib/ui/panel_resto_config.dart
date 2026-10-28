@@ -52,6 +52,14 @@ class _AjustesGymScreenState extends State<AjustesGymScreen> {
   final _textosCtrl = TextEditingController();
 
   @override
+  void dispose() {
+    // Argón lote 4 MENOR: faltaban los dispose.
+    _metodosCtrl.dispose();
+    _textosCtrl.dispose();
+    super.dispose();
+  }
+
+  @override
   void initState() {
     super.initState();
     _cargar();
@@ -81,6 +89,11 @@ class _AjustesGymScreenState extends State<AjustesGymScreen> {
           .map((s) => s.trim())
           .where((s) => s.isNotEmpty)
           .toList();
+      // Argón lote 4 MEDIO: vaciar el texto dejaba metodos_aceptados
+      // en [] y la app sin métodos de pago válidos. Se rechaza.
+      if (metodos.isEmpty) {
+        throw Exception('Debe quedar al menos un método de pago');
+      }
       Map<String, dynamic>? textos;
       final tb = _textosCtrl.text.trim();
       if (tb.isNotEmpty) {
@@ -93,7 +106,9 @@ class _AjustesGymScreenState extends State<AjustesGymScreen> {
       }
       await guardarConfigGym({
         'metodos_aceptados': metodos,
-        if (textos != null) 'textos_base': textos,
+        // Argón lote 4 MEDIO: omitir la clave dejaba el valor VIEJO
+        // (vaciar el texto no lo limpiaba). Mapa vacío = limpio.
+        'textos_base': textos ?? {},
       });
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
@@ -111,12 +126,12 @@ class _AjustesGymScreenState extends State<AjustesGymScreen> {
   Widget build(BuildContext context) {
     if (!AuthService().isOwner) {
       return Scaffold(
-          appBar: AppBar(title: const Text('Ajustes del gym (H1)')),
+          appBar: AppBar(title: const Text('Ajustes del gym')),
           body: const Center(
               child: Text('Solo el dueño cambia ajustes.')));
     }
     return Scaffold(
-      appBar: AppBar(title: const Text('Ajustes del gym (H1)')),
+      appBar: AppBar(title: const Text('Ajustes del gym')),
       body: _cargando
           ? const Center(child: CircularProgressIndicator())
           : ListView(
@@ -124,7 +139,7 @@ class _AjustesGymScreenState extends State<AjustesGymScreen> {
               children: [
                 const Text(
                   'Los precios y períodos NO se editan aquí: viven en '
-                  'una sola pantalla (C6). Esto enlaza, no duplica.',
+                  'una sola pantalla de precios. Esto enlaza, no duplica.',
                   style: AppTexto.secundario,
                 ),
                 const SizedBox(height: 12),
@@ -133,7 +148,7 @@ class _AjustesGymScreenState extends State<AjustesGymScreen> {
                     contentPadding: EdgeInsets.zero,
                     leading: const Icon(Icons.tune,
                         color: AppColores.naranja),
-                    title: const Text('Precios por método (C6)',
+                    title: const Text('Precios por método',
                         style: AppTexto.cuerpo),
                     trailing:
                         const Icon(Icons.chevron_right, size: 18),
@@ -145,7 +160,7 @@ class _AjustesGymScreenState extends State<AjustesGymScreen> {
                     contentPadding: EdgeInsets.zero,
                     leading: const Icon(Icons.local_offer,
                         color: AppColores.naranja),
-                    title: const Text('Tarifas especiales (D6)',
+                    title: const Text('Tarifas especiales',
                         style: AppTexto.cuerpo),
                     trailing:
                         const Icon(Icons.chevron_right, size: 18),
@@ -207,6 +222,9 @@ class _RegistroMensualScreenState extends State<RegistroMensualScreen> {
   }
 
   Future<void> _cargar() async {
+    // Argón lote 4 MEDIO: el visor muestra todos los ingresos brutos;
+    // sin gate, un entrenador por ruta lo veía. Dueño en build y aquí.
+    if (!AuthService().isOwner) return;
     final mes = mesHabanaActual();
     try {
       final filas = <FilaIngreso>[];
@@ -245,12 +263,18 @@ class _RegistroMensualScreenState extends State<RegistroMensualScreen> {
 
   @override
   Widget build(BuildContext context) {
+    if (!AuthService().isOwner) {
+      return Scaffold(
+          appBar: AppBar(title: const Text('Registro mensual')),
+          body: const Center(
+              child: Text('Solo el dueño ve el registro mensual.')));
+    }
     final r = _resumen;
     final md = r == null
         ? ''
         : resumenMensualMarkdown(mes: _mes, ingresos: r, pagaron: _pagaron);
     return Scaffold(
-      appBar: AppBar(title: const Text('Registro mensual (H2)')),
+      appBar: AppBar(title: const Text('Registro mensual')),
       body: _cargando
           ? const Center(child: CircularProgressIndicator())
           : ListView(
@@ -319,7 +343,7 @@ class TurnosPanelScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Turnos y horarios (H4)')),
+      appBar: AppBar(title: const Text('Turnos y horarios')),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
@@ -399,12 +423,12 @@ class _CopiaSeguridadScreenState extends State<CopiaSeguridadScreen> {
   Widget build(BuildContext context) {
     if (!AuthService().isOwner) {
       return Scaffold(
-          appBar: AppBar(title: const Text('Copia de seguridad (H5)')),
+          appBar: AppBar(title: const Text('Copia de seguridad')),
           body: const Center(
               child: Text('Exportar la BD es solo el dueño.')));
     }
     return Scaffold(
-      appBar: AppBar(title: const Text('Copia de seguridad (H5)')),
+      appBar: AppBar(title: const Text('Copia de seguridad')),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [

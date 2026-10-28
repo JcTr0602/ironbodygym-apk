@@ -169,6 +169,8 @@ class _AccesosClientesTabState extends State<AccesosClientesTab> {
   }
 
   Future<void> _cargar() async {
+    // Lote 1 Argón: sin dueño no se dispara el RPC.
+    if (!AuthService().isOwner) return;
     setState(() {
       _cargando = true;
       _error = null;
@@ -286,6 +288,14 @@ class _AccesosClientesTabState extends State<AccesosClientesTab> {
 
   @override
   Widget build(BuildContext context) {
+    // Lote 1 Argón: la pestaña es pública y puede montarse fuera del
+    // hub (que es el único gate hoy). Defensa propia: sin dueño no
+    // se muestra nada ni se dispara ningún RPC.
+    if (!AuthService().isOwner) {
+      return const Center(
+        child: Text('Solo el dueño puede gestionar los accesos.'),
+      );
+    }
     return Column(
       children: [
         const SyncBanner(compact: true),
@@ -333,6 +343,10 @@ class _AccesosClientesTabState extends State<AccesosClientesTab> {
     final sinAccesoFiltrados = _sinAcceso
         .where((c) => _coincideBusqueda(c.nombre, c.telefono))
         .toList();
+    // Lote 1 Argón: seleccionados visibles (misma intersección que
+    // usa _generarMasivo): el botón cuenta solo lo que se ve.
+    final selVisibles = _seleccion.intersection(
+        sinAccesoFiltrados.map((c) => c.clienteId).toSet());
 
     return Column(
       children: [
@@ -515,7 +529,7 @@ class _AccesosClientesTabState extends State<AccesosClientesTab> {
               ),
             ),
           ),
-        if (_vista == 'sinacceso' && _seleccion.isNotEmpty)
+        if (_vista == 'sinacceso' && selVisibles.isNotEmpty)
           SafeArea(
             child: Padding(
               padding: const EdgeInsets.all(AppEspacio.lg),
@@ -524,8 +538,9 @@ class _AccesosClientesTabState extends State<AccesosClientesTab> {
                 child: FilledButton.icon(
                   icon: const Icon(Icons.group_add, size: 18),
                   label: Text(
-                      'Generar acceso a ${_seleccion.length} seleccionados'),
-                  onPressed: _generarMasivo,
+                      'Generar acceso a ${selVisibles.length} seleccionados'),
+                  onPressed:
+                      _generandoAcceso ? null : _generarMasivo,
                 ),
               ),
             ),
@@ -554,7 +569,16 @@ class _AccesosClientesTabState extends State<AccesosClientesTab> {
       padding: const EdgeInsets.only(right: AppEspacio.sm),
       child: InkWell(
         borderRadius: BorderRadius.circular(12),
-        onTap: () => setState(() => _vista = vista),
+        onTap: () {
+          // Lote 1 Argón: la selección pertenece a la vista sinacceso;
+          // al cambiar de tarjeta se limpia para no arrastrar
+          // seleccionados invisibles a la generación masiva.
+          if (_vista == vista) return;
+          setState(() {
+            _vista = vista;
+            _seleccion.clear();
+          });
+        },
         child: Container(
           width: 108,
           padding: const EdgeInsets.all(AppEspacio.md),
@@ -687,6 +711,12 @@ class _AccesosClientesTabState extends State<AccesosClientesTab> {
   /// terminar cualquier acción se recarga TODO (lista, sin-acceso y
   /// contadores) vía _cargar.
   /// v1.4.1 (panel R2, Sol): exclusión por cliente. Sin ella, con la
+  /// Lote 1 Argón: la generación (individual y masiva) no usaba
+  /// _conExclusion: un doble toque disparaba dos RPC y el segundo
+  /// PIN invalidaba el primero. Una sola bandera para ambas vías
+  /// (actúan sobre la misma lista y no pueden solaparse).
+  bool _generandoAcceso = false;
+
   /// conexión lenta el dueño podía confirmar dos acciones rápidas
   /// sobre el mismo acceso (p. ej. dos reseteos de PIN: el segundo
   /// invalida el primero mientras su modal sigue en pantalla). La
@@ -712,6 +742,7 @@ class _AccesosClientesTabState extends State<AccesosClientesTab> {
   }
 
   Future<void> _menuAcciones(AccesoCliente a) async {
+    if (!AuthService().isOwner) return;
     await _conExclusion(
       a,
       () => mostrarMenuAccionesAcceso(
@@ -724,6 +755,7 @@ class _AccesosClientesTabState extends State<AccesosClientesTab> {
   }
 
   Future<void> _desbloqueoRapido(AccesoCliente a) async {
+    if (!AuthService().isOwner) return;
     await _conExclusion(
       a,
       () => accionSimpleAcceso(
@@ -815,7 +847,8 @@ class _AccesosClientesTabState extends State<AccesosClientesTab> {
             subtitle: Text(
                 c.telefono.isNotEmpty ? c.telefono : 'Sin teléfono'),
             trailing: TextButton(
-              onPressed: () => _generarPin(c),
+              onPressed:
+                  _generandoAcceso ? null : () => _generarPin(c),
               child: const Text('GENERAR PIN'),
             ),
           ),
@@ -843,6 +876,11 @@ class _AccesosClientesTabState extends State<AccesosClientesTab> {
       ),
     );
     if (ok != true || !mounted) return;
+    // Lote 1 Argón: gate propio + bandera anti-doble-toque (ver campo
+    // _generandoAcceso). Sin esto, dos toques disparaban dos RPC y el
+    // segundo PIN invalidaba el primero.
+    if (!AuthService().isOwner || _generandoAcceso) return;
+    setState(() => _generandoAcceso = true);
     try {
       final res = await Supabase.instance.client.rpc(
         'generar_acceso_cliente',
@@ -868,11 +906,21 @@ class _AccesosClientesTabState extends State<AccesosClientesTab> {
           SnackBar(content: Text('Error: $e')),
         );
       }
+    } finally {
+      if (mounted) setState(() => _generandoAcceso = false);
     }
   }
 
   Future<void> _generarMasivo() async {
-    final ids = _seleccion.toList();
+    // Lote 1 Argón: solo los seleccionados VISIBLES con el buscador
+    // actual. La selección sobrevive al tecleo y al cambio de tarjeta;
+    // sin esta intersección se generaban PINs a clientes ocultos.
+    final visibles = _sinAcceso
+        .where((c) => _coincideBusqueda(c.nombre, c.telefono))
+        .map((c) => c.clienteId)
+        .toSet();
+    final ids = _seleccion.intersection(visibles).toList();
+    if (ids.isEmpty) return;
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -894,6 +942,10 @@ class _AccesosClientesTabState extends State<AccesosClientesTab> {
       ),
     );
     if (ok != true || !mounted) return;
+    // Lote 1 Argón: gate propio + bandera anti-doble-toque (igual que
+    // _generarPin: dos masivas solapadas duplicaban PINs).
+    if (!AuthService().isOwner || _generandoAcceso) return;
+    setState(() => _generandoAcceso = true);
     try {
       final res = await Supabase.instance.client.rpc(
         'generacion_masiva_accesos',
@@ -926,6 +978,8 @@ class _AccesosClientesTabState extends State<AccesosClientesTab> {
           SnackBar(content: Text('Error: $e')),
         );
       }
+    } finally {
+      if (mounted) setState(() => _generandoAcceso = false);
     }
   }
 
@@ -1046,6 +1100,8 @@ class _AuditoriaAccesosScreenState extends State<AuditoriaAccesosScreen> {
   }
 
   Future<void> _cargar() async {
+    // Lote 1 Argón: sin dueño no se dispara el RPC.
+    if (!AuthService().isOwner) return;
     setState(() => _cargando = true);
     try {
       final res = await Supabase.instance.client.rpc(
@@ -1070,6 +1126,18 @@ class _AuditoriaAccesosScreenState extends State<AuditoriaAccesosScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // Lote 1 Argón: pantalla pública; gate propio (el hub no es la
+    // única vía posible hasta aquí).
+    if (!AuthService().isOwner) {
+      return Scaffold(
+        appBar: AppBar(
+          title: const Text('Auditoría de accesos'),
+        ),
+        body: const Center(
+          child: Text('Solo el dueño puede ver la auditoría.'),
+        ),
+      );
+    }
     return Scaffold(
       appBar: AppBar(
         title: const Text('Auditoría de accesos'),

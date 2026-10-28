@@ -19,6 +19,19 @@ import 'diseno.dart';
 import 'reporte_mensual_diarios.dart';
 import 'widgets.dart';
 
+/// ¿Puede este usuario editar/anular un registro de pago diario?
+/// PURO. Dueño: todo. Entrenador: solo lo suyo. Sin autor conocido
+/// o sin identidad propia: no (fail-closed). Terra lote-4 MEDIO: el
+/// gate debe cubrir también la rama optimista (cancelar de la cola),
+/// no solo los registros sincronizados; y no puede depender del
+/// filtro de la lista.
+bool puedeEditarRegistroDiario({
+  required bool esDueno,
+  required int? yo,
+  required int? autor,
+}) =>
+    esDueno || (yo != null && autor == yo);
+
 class PagoDiarioScreen extends StatefulWidget {
   const PagoDiarioScreen({super.key});
   @override
@@ -29,13 +42,14 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
   String _turno = 'mañana';
   int _cantidad = 1;
   bool _guardando = false;
+  bool _editandoRegistro = false;
   double _precio = 200;
   List<Map<String, dynamic>> _hoy = [];
   final _notaCtrl = TextEditingController();
 
   // v1.0.15: modo reporte
   bool _modoReporte = false;
-  DateTime _fechaReporte = DateTime.now();
+  DateTime _fechaReporte = ahoraHabana();
   List<Map<String, dynamic>> _reporteDatos = [];
   Map<String, Map<String, double>> _reporteTurnos = {};
   List<Map<String, dynamic>> _ultimos7 = [];
@@ -62,7 +76,15 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
   }
 
   Future<void> _cargarHoy() async {
-    final h = await diariosDeHoy();
+    // Argón lote 4 MEDIO: sin filtro, el entrenador veía los diarios
+    // de todos y podía editarlos (ver _editarRegistro). El dueño ve
+    // todo; el entrenador, solo lo suyo.
+    // Terra lote-4: si el entrenador no tiene telegram_id, null era
+    // "sin filtro" (veía TODOS). Con -1 no ve ninguno (fail-closed).
+    final h = await diariosDeHoy(
+        soloTelegramId: AuthService().isOwner
+            ? null
+            : (AuthService().telegramId ?? -1));
     if (mounted) setState(() => _hoy = h);
   }
 
@@ -91,7 +113,7 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
       context: context,
       initialDate: _fechaReporte,
       firstDate: DateTime(2024),
-      lastDate: DateTime.now(),
+      lastDate: ahoraHabana(),
     );
     if (picked != null) {
       setState(() => _fechaReporte = picked);
@@ -108,9 +130,46 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
     return t;
   }
 
-  /// Guarda un pago diario. Devuelve el op_uuid para poder deshacer.
+  /// Guarda un pago diario. Devuelve el op_uuid para poder deshacer,
+  /// o null si el usuario declinó el aviso de duplicado.
   Future<String?> _guardarOp(
       {required int cantidad, String? nota}) async {
+    // Argón lote 4 MEDIO: la cabecera promete evitar duplicados pero
+    // nada advertía al registrar otro lote del mismo turno/día. Se
+    // avisa (no se bloquea: un segundo lote puede ser legítimo) y
+    // solo se encola si el usuario confirma. Sin autor = optimista
+    // propio (la cola es del propio teléfono).
+    final yo = AuthService().telegramId;
+    final ya = _hoy.any((r) {
+      if ('${r['turno'] ?? ''}' != _turno) return false;
+      final autor = LocalDb.normalizarTelegramId(r['registrado_por']);
+      return autor == null || autor == yo;
+    });
+    if (ya && mounted) {
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => DialogoApp(
+          titulo: 'Turno ya registrado',
+          iconoTitulo: Icons.warning_amber_rounded,
+          contenido: Text(
+              'El turno $_turno ya tiene un pago registrado hoy. '
+              '¿Registrar otro pago para el mismo turno?'),
+          acciones: [
+            TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('Cancelar')),
+            ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColores.naranja,
+                  foregroundColor: Colors.white,
+                ),
+                onPressed: () => Navigator.pop(ctx, true),
+                child: const Text('Registrar otro')),
+          ],
+        ),
+      );
+      if (ok != true) return null;
+    }
     final uuid = const Uuid().v4();
     await LocalDb.instance.queueOp(
       opUuid: uuid,
@@ -181,6 +240,7 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
             ? null
             : _notaCtrl.text.trim(),
       );
+      if (uuid == null) return;
       _notaCtrl.clear();
       setState(() => _cantidad = 1);
       _trasGuardar(uuid, cantGuardada);
@@ -195,6 +255,7 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
     setState(() => _guardando = true);
     try {
       final uuid = await _guardarOp(cantidad: 1);
+      if (uuid == null) return;
       _trasGuardar(uuid, 1);
     } finally {
       if (mounted) setState(() => _guardando = false);
@@ -203,8 +264,33 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
 
   /// Editar o eliminar un registro del día.
   Future<void> _editarRegistro(Map<String, dynamic> d) async {
+    // Argón lote 4 MEDIO: sin guardia de reentrada, dos toques
+    // abrían dos diálogos y podían encolar dos ops.
+    if (_editandoRegistro) return;
+    setState(() => _editandoRegistro = true);
+    try {
+      await _editarRegistroAhora(d);
+    } finally {
+      if (mounted) setState(() => _editandoRegistro = false);
+    }
+  }
+
+  Future<void> _editarRegistroAhora(Map<String, dynamic> d) async {
     final id = d['id'] as int?;
     final opUuid = d['op_uuid'] as String?;
+    // Terra lote-4 MEDIO: el gate va ANTES de separar la rama
+    // optimista. Antes, cancelar un pendiente (id == null) llegaba
+    // a cancelOp sin comprobar autoría; la lista filtrada no
+    // sustituye un gate en la operación destructiva.
+    final yo = AuthService().telegramId;
+    final autor = LocalDb.normalizarTelegramId(d['registrado_por']);
+    if (!puedeEditarRegistroDiario(
+        esDueno: AuthService().isOwner, yo: yo, autor: autor)) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Solo puedes editar tus propios registros.')));
+      return;
+    }
     // v1.3.1: si es optimista (sin id), solo permite eliminar de la cola.
     if (id == null) {
       if (opUuid == null) return;
@@ -239,6 +325,8 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
       }
       return;
     }
+    // (El gate de autoría ya se aplicó arriba, antes de la rama
+    // optimista; no se duplica aquí.)
     final cantCtrl = TextEditingController(
         text: '${d['cantidad'] ?? 1}');
     final notaCtrl =
@@ -354,6 +442,10 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
         'pago_diario_id': id,
         'cantidad': cantidad,
         'nota': notaTexto,
+        // Argón lote 4 MEDIO: el espejo local ya actualizaba total
+        // pero el payload no lo llevaba; si la tarifa cambió o el
+        // servidor no recalcula igual, espejo y servidor divergen.
+        'total': cantidad * _precio,
       },
     );
     _cargarHoy();
@@ -370,15 +462,20 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
         title: const Text('Pago diario'),
         actions: [
           // v1.0.15: alternar entre registrar y reporte
-          TextButton.icon(
-            icon: Icon(
-                _modoReporte ? Icons.edit_outlined : Icons.bar_chart),
-            label: Text(_modoReporte ? 'Registrar' : 'Reporte'),
-            onPressed: () {
-              setState(() => _modoReporte = !_modoReporte);
-              if (_modoReporte) _cargarReporte();
-            },
-          ),
+          // Argón PASADA 2 MEDIO: el reporte muestra totales globales
+          // y filas de todos; solo el dueño lo abre. Sin botón, el
+          // modo reporte es inalcanzable (este es el único sitio que
+          // pone _modoReporte en true).
+          if (AuthService().isOwner)
+            TextButton.icon(
+              icon: Icon(
+                  _modoReporte ? Icons.edit_outlined : Icons.bar_chart),
+              label: Text(_modoReporte ? 'Registrar' : 'Reporte'),
+              onPressed: () {
+                setState(() => _modoReporte = !_modoReporte);
+                if (_modoReporte) _cargarReporte();
+              },
+            ),
         ],
       ),
       body: Column(
@@ -605,9 +702,7 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
                     onPressed: _fechaReporte
                             .toIso8601String()
                             .substring(0, 10) ==
-                        DateTime.now()
-                            .toIso8601String()
-                            .substring(0, 10)
+                        hoyHabanaIso()
                         ? null
                         : () {
                             setState(() {

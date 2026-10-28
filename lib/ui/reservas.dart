@@ -10,6 +10,7 @@ import '../permisos_entrenador.dart';
 import '../sync.dart';
 import '../tiempo.dart';
 import 'componentes.dart';
+import 'dialogo_pago.dart' show metodosAceptadosEfectivos;
 
 /// Reservas v2 — bandeja del gimnasio.
 ///
@@ -291,6 +292,43 @@ class _ReservasScreenState extends State<ReservasScreen> {
       String mensajeOk) async {
     final rid = _entero(payload['reserva_id']);
     if (rid <= 0 || _bloqueada(rid)) return;
+    // Lote 2 Argón: revalidar contra el espejo ACTUAL y la cola
+    // fresca. La tarjeta se renderizó antes del diálogo; mientras
+    // estaba abierto, un sync puede haber cambiado el estado
+    // (expirada, pagada, cancelada) o encolado otra op. Sin esto se
+    // encolaba una acción sobre un estado incompatible.
+    const estadosRequeridos = {
+      'confirmar_reserva': {'solicitada'},
+      'rechazar_reserva': {'solicitada'},
+      'cancelar_reserva': {'reservada'},
+      'cobrar_reserva': {'reservada'},
+    };
+    final requeridos = estadosRequeridos[tipo];
+    if (requeridos != null) {
+      final espejo = await LocalDb.instance.allMirror('reservas');
+      final filas =
+          espejo.where((r) => _entero(r['id']) == rid).toList();
+      final estadoActual =
+          filas.isEmpty ? null : '${filas.first['estado'] ?? ''}';
+      final opsFrescas = await LocalDb.instance.pendingOps();
+      final conOp = reservasConOpPendiente(opsFrescas).contains(rid);
+      if (estadoActual == null ||
+          !requeridos.contains(estadoActual) ||
+          conOp) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+              content: Text('La reserva cambió mientras confirmabas. '
+                  'Se actualizó la bandeja; revisa su estado actual.')));
+          await _cargar();
+        }
+        return;
+      }
+    }
+    // Lote 3 (panel Luna P2): revalidar el bloqueo DESPUÉS de los
+    // awaits. Dos llamados simultáneos pasaban juntos el chequeo
+    // inicial; entre este punto y el setState no hay awaits, así
+    // que el segundo chequeo es atómico.
+    if (_bloqueada(rid)) return;
     // Bloqueo SINCRÓNICO, antes del primer await (panel).
     setState(() => _enCurso.add(rid));
     try {
@@ -406,7 +444,13 @@ class _ReservasScreenState extends State<ReservasScreen> {
 
   Future<void> _cobrar(ReservaVista r) async {
     if (_bloqueada(r.id)) return;
-    var metodo = 'efectivo';
+    // Lote 2 Argón: respetar los métodos aceptados del gimnasio
+    // (antes ofrecía efectivo/transferencia fijos aunque el ajuste
+    // H1 dijera otra cosa; mismo helper que pagoDialogo).
+    final aj = await LocalDb.instance.getAjustes();
+    if (!mounted) return;
+    final metodos = metodosAceptadosEfectivos(aj['metodos_aceptados']);
+    var metodo = metodos.efectivo ? 'efectivo' : 'transferencia';
     final dif = r.diferenciaTotal;
     final avisoMoneda = avisoMonedaReserva(r);
     final ok = await showDialog<bool>(
@@ -443,15 +487,17 @@ class _ReservasScreenState extends State<ReservasScreen> {
                 ),
               const SizedBox(height: 12),
               SegmentedButton<String>(
-                segments: const [
-                  ButtonSegment(
-                      value: 'efectivo',
-                      label: Text('Efectivo'),
-                      icon: Icon(Icons.money)),
-                  ButtonSegment(
-                      value: 'transferencia',
-                      label: Text('Transferencia'),
-                      icon: Icon(Icons.account_balance)),
+                segments: [
+                  if (metodos.efectivo)
+                    const ButtonSegment(
+                        value: 'efectivo',
+                        label: Text('Efectivo'),
+                        icon: Icon(Icons.money)),
+                  if (metodos.transferencia)
+                    const ButtonSegment(
+                        value: 'transferencia',
+                        label: Text('Transferencia'),
+                        icon: Icon(Icons.account_balance)),
                 ],
                 selected: {metodo},
                 onSelectionChanged: (s) =>

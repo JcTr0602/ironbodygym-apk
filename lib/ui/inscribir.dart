@@ -239,6 +239,21 @@ class _InscribirScreenState extends State<InscribirScreen> {
   }
 
   Future<void> _guardar() async {
+    // Argón lote 4 BLOQUEANTE: la bandera se activaba DESPUÉS de los
+    // awaits y los diálogos; un doble toque rápido abría dos
+    // diálogos y encolaba dos veces al mismo cliente. Ahora se
+    // activa antes del primer await y el finally del envoltorio la
+    // limpia en TODAS las salidas (validaciones, diálogos, errores).
+    if (_guardando) return;
+    setState(() => _guardando = true);
+    try {
+      await _guardarAhora();
+    } finally {
+      if (mounted) setState(() => _guardando = false);
+    }
+  }
+
+  Future<void> _guardarAhora() async {
     final nombre = _nombre.text.trim();
     if (nombre.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -252,11 +267,40 @@ class _InscribirScreenState extends State<InscribirScreen> {
               'Teléfono inválido: 8 dígitos empezando con 5 o 6')));
       return;
     }
+    // Argón lote 4 MEDIO: con 'crear acceso' activo, el subtítulo
+    // exige teléfono de 8 dígitos, pero se podía inscribir con
+    // telefono null y el servidor fallaba en silencio al crear la
+    // cuenta. Se exige aquí, antes de cualquier await.
+    if (_crearAccesoApp && !validarTelefono(tel)) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text(
+              'Para crear el acceso de la app escribe un teléfono '
+              'válido de 8 dígitos.')));
+      return;
+    }
     final carnet = _carnet.text.trim();
     if (carnet.isNotEmpty && !validarCarnet(carnet)) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
           content: Text('Carnet inválido: 6 a 11 dígitos')));
       return;
+    }
+    // Argón lote 4 MEDIO: la fecha inválida solo avisaba en la UI y
+    // pasaba en silencio. Decisión de Jc 2026-10-22: NO bloquear
+    // (un tecleo invertido no puede impedir inscribir); se pide
+    // confirmación explícita para que no pase inadvertido.
+    if (carnet.isNotEmpty && carnetFechaInvalida(carnet)) {
+      final seguir = await DialogoApp.confirmar(
+        context,
+        titulo: 'Fecha del carnet dudosa',
+        mensaje:
+            'Los 6 primeros dígitos del carnet no forman una fecha '
+            'real (ej. mes 23). Puede ser día/mes invertidos. '
+            '¿Guardarlo así de todos modos?',
+        aceptar: 'Guardar así',
+        icono: Icons.warning_amber_rounded,
+      );
+      if (seguir != true) return;
+      if (!mounted) return;
     }
     // Argón #7A-2: el precio de menor no puede depender de la carga
     // lanzada sin await en initState; refrescarlo antes de calcular.
@@ -778,7 +822,7 @@ class _InscribirScreenState extends State<InscribirScreen> {
                                     _tipoCustomSel =
                                         null;
                                     _meses = int.parse(
-                                        v!.split(
+                                        v.split(
                                             ':')[1]);
                                   }
                                 }),

@@ -2208,13 +2208,24 @@ Future<List<Map<String, dynamic>>> posiblesDuplicados(
   for (final c in rows) {
     final cn = (c['nombre_norm'] as String?) ?? _norm('${c['nombre']}');
     var motivo = '';
-    if (dc.isNotEmpty &&
-        '${c['carnet'] ?? ''}'.replaceAll(RegExp(r'[^0-9]'), '') == dc) {
+    final rc =
+        '${c['carnet'] ?? ''}'.replaceAll(RegExp(r'[^0-9]'), '');
+    if (dc.isNotEmpty && rc == dc) {
       motivo = 'mismo carnet';
     } else if (dt.isNotEmpty &&
         ('${c['telefono'] ?? ''}'.replaceAll(RegExp(r'[^0-9]'), '') == dt ||
             '${c['movil'] ?? ''}'.replaceAll(RegExp(r'[^0-9]'), '') == dt)) {
       motivo = 'mismo teléfono';
+    } else if (dc.length >= 6 &&
+        rc.length >= 6 &&
+        dc.substring(0, 6) == rc.substring(0, 6) &&
+        dc != rc) {
+      // Argón lote 4 MEDIO: un carnet de 6 dígitos re-inscrito
+      // contra un registro de 11 no producía ningún aviso (la
+      // comparación exacta fallaba). Misma fecha de nacimiento =
+      // aviso 'posible duplicado', NUNCA bloqueo duro: dos personas
+      // nacidas el mismo día comparten AAMMDD (regla de la casa).
+      motivo = 'misma fecha de carnet';
     } else if (nn.isNotEmpty &&
         // Argón #7A-3: un nombre_norm vacío hace que
         // nn.contains('') sea true y marque a todos los legados
@@ -3775,6 +3786,11 @@ Future<double> ingresosMesAnterior() async {
       t += totalVentaCup(v);
     }
   }
+  for (final v in await _servicioVentasNetas()) {
+    if ('${v['fecha'] ?? ''}'.startsWith(pref)) {
+      t += _montoServicioVenta(v);
+    }
+  }
   return t;
 }
 
@@ -3783,7 +3799,7 @@ Future<Map<String, double>> ingresosPorMetodo() async {
   final n = ahoraHabana();
   final pref = '${n.year.toString().padLeft(4, '0')}-'
       '${n.month.toString().padLeft(2, '0')}';
-  double efectivo = 0, transferencia = 0, suplementos = 0;
+  double efectivo = 0, transferencia = 0, suplementos = 0, servicios = 0;
   for (final p in await LocalDb.instance.pagosDelMes(pref)) {
     final m = (p['monto'] as num?)?.toDouble() ?? 0;
     if ('${p['metodo']}' == 'transferencia') {
@@ -3802,10 +3818,16 @@ Future<Map<String, double>> ingresosPorMetodo() async {
       suplementos += totalVentaCup(v);
     }
   }
+  for (final v in await _servicioVentasNetas()) {
+    if ('${v['fecha'] ?? ''}'.startsWith(pref)) {
+      servicios += _montoServicioVenta(v);
+    }
+  }
   return {
     'efectivo': efectivo,
     'transferencia': transferencia,
-    'suplementos': suplementos
+    'suplementos': suplementos,
+    'servicios': servicios
   };
 }
 
@@ -3814,7 +3836,7 @@ Future<Map<String, double>> ingresosPorTipo() async {
   final n = ahoraHabana();
   final pref = '${n.year.toString().padLeft(4, '0')}-'
       '${n.month.toString().padLeft(2, '0')}';
-  double mensual = 0, diario = 0, suplementos = 0;
+  double mensual = 0, diario = 0, suplementos = 0, servicios = 0;
   for (final p in await LocalDb.instance.pagosDelMes(pref)) {
     mensual += (p['monto'] as num?)?.toDouble() ?? 0;
   }
@@ -3828,7 +3850,17 @@ Future<Map<String, double>> ingresosPorTipo() async {
       suplementos += totalVentaCup(v);
     }
   }
-  return {'mensual': mensual, 'diario': diario, 'suplementos': suplementos};
+  for (final v in await _servicioVentasNetas()) {
+    if ('${v['fecha'] ?? ''}'.startsWith(pref)) {
+      servicios += _montoServicioVenta(v);
+    }
+  }
+  return {
+    'mensual': mensual,
+    'diario': diario,
+    'suplementos': suplementos,
+    'servicios': servicios
+  };
 }
 
 /// v1.0.15: proyección de cierre de mes.
@@ -4038,6 +4070,34 @@ Future<int> inactivosCount() async {
   return c;
 }
 
+/// Ventas de Servicios netas (sin reversos ni Casa), con la misma regla
+/// de neteo que ventasServicioSinReversos (servicios.dart): se descartan
+/// las filas reverso (reverso_de != null) y las originales referenciadas
+/// por un reverso. No se importa de servicios.dart para evitar un ciclo
+/// (servicios.dart importa negocio.dart).
+/// Argón stats MEDIO (dashboard): el dinero de Servicios (dosis y agua)
+/// no aparecía en ningún total del dashboard; es ingreso real y debe
+/// sumar igual que mensualidades, diarios y suplementos.
+Future<List<Map<String, dynamic>>> _servicioVentasNetas() async {
+  final ventas = await LocalDb.instance.allMirror('servicio_ventas');
+  final reversadas = <int>{
+    for (final v in ventas)
+      if ((v['reverso_de'] as num?) != null)
+        (v['reverso_de'] as num).toInt(),
+  };
+  return ventas.where((v) {
+    if ((v['reverso_de'] as num?) != null) return false;
+    final id = (v['id'] as num?)?.toInt();
+    if (id != null && reversadas.contains(id)) return false;
+    if ((v['casa'] as num?)?.toInt() == 1) return false;
+    return true;
+  }).toList();
+}
+
+double _montoServicioVenta(Map<String, dynamic> v) =>
+    ((v['precio_unitario'] as num?)?.toDouble() ?? 0) *
+    ((v['cantidad'] as num?)?.toInt() ?? 0);
+
 Future<double> ingresosMes() async {
   final n = ahoraHabana();
   final pref = '${n.year.toString().padLeft(4, '0')}-'
@@ -4058,6 +4118,11 @@ Future<double> ingresosMes() async {
   for (final v in await ventasSuplementosCup()) {
     if ('${v['fecha'] ?? ''}'.startsWith(pref)) {
       t += totalVentaCup(v);
+    }
+  }
+  for (final v in await _servicioVentasNetas()) {
+    if ('${v['fecha'] ?? ''}'.startsWith(pref)) {
+      t += _montoServicioVenta(v);
     }
   }
   return t;
@@ -4095,6 +4160,13 @@ Future<Map<String, double>> ingresosPorDia() async {
       porDia[dia] = (porDia[dia] ?? 0) + totalVentaCup(v);
     }
   }
+  for (final v in await _servicioVentasNetas()) {
+    final f = '${v['fecha'] ?? ''}';
+    if (f.length >= 10) {
+      final dia = f.substring(0, 10);
+      porDia[dia] = (porDia[dia] ?? 0) + _montoServicioVenta(v);
+    }
+  }
   return porDia;
 }
 
@@ -4114,6 +4186,12 @@ Future<double> ingresosHoy() async {
     final f = '${v['fecha'] ?? ''}';
     if (f.length >= 10 && f.substring(0, 10) == hoy) {
       t += totalVentaCup(v);
+    }
+  }
+  for (final v in await _servicioVentasNetas()) {
+    final f = '${v['fecha'] ?? ''}';
+    if (f.length >= 10 && f.substring(0, 10) == hoy) {
+      t += _montoServicioVenta(v);
     }
   }
   return t;
@@ -4147,6 +4225,15 @@ Future<double> ingresosSemana() async {
       }
     }
   }
+  for (final v in await _servicioVentasNetas()) {
+    final f = '${v['fecha'] ?? ''}';
+    if (f.length >= 10) {
+      final dia = f.substring(0, 10);
+      if (dia.compareTo(desdeIso) >= 0 && dia.compareTo(hoyIso) <= 0) {
+        t += _montoServicioVenta(v);
+      }
+    }
+  }
   return t;
 }
 
@@ -4175,9 +4262,9 @@ Future<List<Map<String, dynamic>>> pagosDelPeriodo(
     hastaIso = iso(DateTime(hoy.year, hoy.month + 1, 0));
   }
   final out = <Map<String, dynamic>>[];
-  // Cada fila lleva su ORIGEN ('pago' | 'diario' | 'suplemento')
-  // para que el detalle del dashboard haga una partición real:
-  // antes diarios y suplementos viajaban plegados como
+  // Cada fila lleva su ORIGEN ('pago' | 'diario' | 'suplemento' |
+  // 'servicios') para que el detalle del dashboard haga una partición
+  // real: antes diarios y suplementos viajaban plegados como
   // metodo='efectivo' y el detalle los sumaba dos veces
   // (panel 2026-10-21).
   // v1.3.4 (ítem 2): mirrorPorFecha usa la columna indexada `fecha`
@@ -4216,6 +4303,22 @@ Future<List<Map<String, dynamic>>> pagosDelPeriodo(
           'monto': totalVentaCup(v),
           'metodo': 'efectivo',
           'origen': 'suplemento',
+        });
+      }
+    }
+  }
+  // Argón stats MEDIO (dashboard): Servicios (dosis y agua) como
+  // origen propio; sin esto el detalle no sumaba la tarjeta.
+  for (final v in await _servicioVentasNetas()) {
+    final f = '${v['fecha'] ?? ''}';
+    if (f.length >= 10) {
+      final dia = f.substring(0, 10);
+      if (dia.compareTo(desdeIso) >= 0 &&
+          dia.compareTo(hastaIso) <= 0) {
+        out.add({
+          'monto': _montoServicioVenta(v),
+          'metodo': 'efectivo',
+          'origen': 'servicios',
         });
       }
     }

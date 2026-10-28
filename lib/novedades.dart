@@ -15,6 +15,14 @@ class Novedad {
 }
 
 const novedades = [
+  Novedad('1.16.0', [
+    'Pantalla principal rediseñada por zonas: acciones rápidas arriba (Cobrar, Pago diario, Inscribir, Dosis) a un toque, los números del mes se tocan para ver el detalle, la bandeja de avisos de WhatsApp del día subió arriba y la tarjeta del turno quedó compacta',
+    'Servicios rediseñado: botones grandes para dosis, dosis con agua, agua suelta y venta múltiple; cada pomo con su nombre, su saldo y su historial a la vista, y el cuadre con tu comisión del día',
+    'Historial de Servicios nuevo: todas las operaciones (raciones, combos, agua suelta y salidas sin venta) de nuevas a viejas, con filtros por tipo y por vendedor; las ventas revertidas salen marcadas y nada se borra',
+    '«Pago de entrenadores» en la principal ya muestra el neto real (base + comisiones por dosis − adelantos − deudas arrastradas), no el bruto',
+    'Correcciones de auditoría: la venta en dólares sin tasa ya no se guarda mal, las estadísticas de servicios ya cuadran (inversión, costo y margen), y Ajustes, Reservas y accesos quedaron con sus permisos cerrados',
+    'Limpieza: los textos de la app ya no muestran códigos internos de las funciones',
+  ]),
   Novedad('1.14.0', [
     'Administración reorganizada: la pantalla principal ahora abre con lo que necesita tu atención, una estación diaria (Cobrar, Mi Día, Arqueo, Cierre) y los números del mes que se pueden tocar para ver el detalle; todo lo demás quedó agrupado en 6 módulos por tarea',
     'Cobros por transferencia bien valorados: una inscripción con venta por transferencia ya se muestra a su precio real (2500) en Actividad y pendientes, no a precio de efectivo',

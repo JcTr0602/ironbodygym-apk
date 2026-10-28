@@ -86,8 +86,9 @@ class _MiNominaScreenState extends State<MiNominaScreen> {
     final tarifa = await PerfilService.instance.getPagoEntrenador();
     var dosis = 0;
     var comision = 0.0;
+    List<Map<String, dynamic>> ventasServicio = [];
     if (tid != null) {
-      final ventasServicio =
+      ventasServicio =
           await LocalDb.instance.allMirror('servicio_ventas');
       final c = NominaCalc.comisionDosisDesdeVentas(
           ventasServicio, tid, pref);
@@ -101,10 +102,40 @@ class _MiNominaScreenState extends State<MiNominaScreen> {
             .eventosDe(miId, telegramId: tid);
     MesLibroAdelantos? libro;
     try {
+      // Argón lote 4 BLOQUEANTE (cadena histórica rota): pasar solo
+      // el mes actual convertía todos los adelantos viejos en deuda
+      // entrante falsa y hundía el neto a 0. Igual que la pantalla
+      // del dueño (ui/nomina.dart): cadena desde el primer mes con
+      // eventos, con bruto y comisiones de CADA mes.
+      var primero = pref;
+      for (final ev in eventos) {
+        final mm = '${ev['mes_nomina'] ?? ''}';
+        if (mm.length == 7 && mm.compareTo(primero) < 0) {
+          primero = mm;
+        }
+      }
+      final brutoPorMes = <String, double>{};
+      var mesCadena = primero;
+      while (mesCadena.compareTo(pref) <= 0) {
+        final n =
+            await NominaCalc.clientesQuePagaronElMes(mesCadena);
+        brutoPorMes[mesCadena] = n * tarifa.toDouble();
+        mesCadena = mesSiguiente(mesCadena);
+      }
       final libros = libroAdelantos(
         eventos: eventos,
-        brutoPorMes: {pref: clientesPagados * tarifa.toDouble()},
-        comisionesPorMes: {pref: comision},
+        brutoPorMes: brutoPorMes,
+        // Terra lote-4 MEDIO (verificado NO-problema, se documenta):
+        // con tid == null, _miIdUsuarioApk() devuelve '' y eventos
+        // es [] por construcción, y comision es 0 en esa rama; el
+        // libro sale trivialmente en ceros, sin deuda falsa. Si
+        // algún día _miIdUsuarioApk dejara de exigir tid, esta rama
+        // habría que revisarla: no se puede inventar comisión sin
+        // identidad atribuible.
+        comisionesPorMes: tid == null
+            ? {pref: comision}
+            : NominaCalc.comisionesPorMesDesdeVentas(
+                ventasServicio, tid, primero, pref),
         hastaMes: pref,
       );
       for (final m in libros) {
@@ -243,17 +274,28 @@ class _MiNominaScreenState extends State<MiNominaScreen> {
         ],
       ),
     );
+    // Argón lote 4 MEDIO: los controladores nunca hacían dispose.
+    // El diálogo ya cerró: se captura el texto y se liberan en
+    // ambos caminos (también al cancelar).
+    final montoTexto = montoCtrl.text.trim();
+    final motivoTexto = motivoCtrl.text.trim();
+    montoCtrl.dispose();
+    motivoCtrl.dispose();
     if (ok != true || !mounted) return;
-    final monto = double.tryParse(montoCtrl.text.trim());
-    if (monto == null || monto <= 0) {
+    // La etiqueta pide pesos enteros: se parsea entero, no double.
+    // Tope 100000 como guarda contra ceros de más (no es un límite
+    // de negocio: un adelanto real no llega ahí).
+    final monto = int.tryParse(montoTexto);
+    if (monto == null || monto <= 0 || monto > 100000) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('Escribe un monto válido mayor que 0.')));
+          content: Text(
+              'Escribe un monto entero mayor que 0 (máx. 100000).')));
       return;
     }
     setState(() => _pidiendo = true);
     try {
       await SolicitudesAdelantoService.instance
-          .pedir(monto: monto, motivo: motivoCtrl.text);
+          .pedir(monto: monto.toDouble(), motivo: motivoTexto);
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
           content: Text('Solicitud enviada. El dueño la decidirá.')));
@@ -362,7 +404,7 @@ class _MiNominaScreenState extends State<MiNominaScreen> {
                       style: AppTexto.subtitulo),
                   const SizedBox(height: AppEspacio.sm),
                   _linea('Base', fmtMonto(_base)),
-                  _linea('Comisión dosis (C2)',
+                  _linea('Comisión dosis',
                       '$_dosis dosis · ${fmtMonto(_comision)}'),
                   _linea(
                       'Adelantos del mes', '-${fmtMonto(_adelantosMes)}'),

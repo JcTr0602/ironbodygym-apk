@@ -72,6 +72,33 @@ void main() {
               d['id'] == 2 && d['_motivo'] == 'nombre parecido'),
           isTrue);
     });
+
+    test('carnet de 6 contra registro de 11: aviso, no silencio', () async {
+      // Argón lote 4 MEDIO: la entrada de 6 contra un registro de 11
+      // no producía ningún aviso (la comparación exacta fallaba).
+      await LocalDb.instance.upsertMirror('clientes', 3, {
+        'nombre': 'Viejo',
+        'estado': 'activo',
+        'carnet': '99010112345'
+      }, 1);
+      final dups6 = await posiblesDuplicados(
+          nombre: 'Otro Nombre', carnet: '990101');
+      expect(
+          dups6.any((d) =>
+              d['id'] == 3 && d['_motivo'] == 'misma fecha de carnet'),
+          isTrue);
+      // Entrada de 11 exacta: sigue siendo 'mismo carnet' (bloqueo).
+      final dups11 = await posiblesDuplicados(
+          nombre: 'Otro Nombre', carnet: '99010112345');
+      expect(
+          dups11.any(
+              (d) => d['id'] == 3 && d['_motivo'] == 'mismo carnet'),
+          isTrue);
+      // Otra fecha: ningún motivo para ese registro.
+      final dupsOtra = await posiblesDuplicados(
+          nombre: 'Otro Nombre', carnet: '000101');
+      expect(dupsOtra.where((d) => d['id'] == 3), isEmpty);
+    });
   });
 
   group('Argón #7B-1 refrescarMirrorCliente', () {

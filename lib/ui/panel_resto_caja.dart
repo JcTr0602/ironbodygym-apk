@@ -40,6 +40,10 @@ class ArqueoEntregaScreen extends StatefulWidget {
 class _ArqueoEntregaScreenState extends State<ArqueoEntregaScreen> {
   bool _cargando = true;
   List<Map<String, dynamic>> _entrenadores = [];
+  // Lote 3 (MEDIO): bloquea el doble toque sobre "Liquidar" mientras
+  // el primer llamado espera el pendiente (sin esto se apilaban dos
+  // diálogos independientes).
+  bool _liquidando = false;
 
   @override
   void initState() {
@@ -70,8 +74,23 @@ class _ArqueoEntregaScreenState extends State<ArqueoEntregaScreen> {
   }
 
   Future<void> _liquidar(Map<String, dynamic> e) async {
+    // Lote 3 (MEDIO): la guarda no puede vivir solo en build; el
+    // método también la exige, y la bandera bloquea el doble toque.
+    if (!AuthService().isOwner) return;
+    if (_liquidando) return;
     final tid = e['telegram_id'] as int?;
     if (tid == null) return;
+    setState(() => _liquidando = true);
+    try {
+      await _liquidarAhora(e, tid);
+    } finally {
+      if (mounted) setState(() => _liquidando = false);
+    }
+  }
+
+  /// Cuerpo real de _liquidar, separado para que la bandera viva en
+  /// el finally del llamador aunque el diálogo se cancele o falle.
+  Future<void> _liquidarAhora(Map<String, dynamic> e, int tid) async {
     final nombre = '${e['nombre'] ?? 'Entrenador'}';
     // Re-leer el pendiente en el momento de confirmar (diseño C1).
     var pendiente = await pendienteDeltaC1(tid);
@@ -122,7 +141,10 @@ class _ArqueoEntregaScreenState extends State<ArqueoEntregaScreen> {
           ],
         ),
       );
-      if (ok != true) return;
+      if (ok != true) {
+        montoCtrl.dispose();
+        return;
+      }
       final monto = double.tryParse(montoCtrl.text.trim()) ?? -1;
       // Si el pendiente cambió desde que se abrió el diálogo, se
       // muestra el nuevo y se pide confirmar de nuevo (diseño C1).
@@ -161,21 +183,25 @@ class _ArqueoEntregaScreenState extends State<ArqueoEntregaScreen> {
           ScaffoldMessenger.of(context)
               .showSnackBar(SnackBar(content: Text('$err')));
         }
+        montoCtrl.dispose();
         return;
       }
     }
+    // Lote 3 (MEDIO): el controlador se creaba en cada llamado y
+    // nunca se liberaba en ningún camino de salida.
+    montoCtrl.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     if (!AuthService().isOwner) {
       return Scaffold(
-          appBar: AppBar(title: const Text('Arqueo de entrega (C1)')),
+          appBar: AppBar(title: const Text('Arqueo de entrega')),
           body: const Center(
               child: Text('Solo el dueño ve esta pantalla.')));
     }
     return Scaffold(
-      appBar: AppBar(title: const Text('Arqueo de entrega (C1)')),
+      appBar: AppBar(title: const Text('Arqueo de entrega')),
       body: _cargando
           ? const Center(child: CircularProgressIndicator())
           : ListView(
@@ -183,7 +209,7 @@ class _ArqueoEntregaScreenState extends State<ArqueoEntregaScreen> {
               children: [
                 const Text(
                   'Pendiente = efectivo cobrado − adelantos de gaveta '
-                  '− entregas C1. Un cobro offline que llegue después '
+                  '− entregas ya registradas. Un cobro offline que llegue después '
                   'de liquidar suma limpio, sin descontarse dos veces.',
                   style: AppTexto.secundario,
                 ),
@@ -204,7 +230,8 @@ class _ArqueoEntregaScreenState extends State<ArqueoEntregaScreen> {
                             '${((e['usd'] as double) > 0) ? ' · USD aparte: ${(e['usd'] as double).toStringAsFixed(0)}' : ''}',
                             style: AppTexto.secundario),
                         trailing: TextButton(
-                            onPressed: () => _liquidar(e),
+                            onPressed:
+                                _liquidando ? null : () => _liquidar(e),
                             child: const Text('Liquidar')),
                       ),
                     ),
@@ -240,6 +267,11 @@ class _NominaPrecalculadaScreenState extends State<NominaPrecalculadaScreen> {
   }
 
   Future<void> _cargar() async {
+    // Lote 3 (BLOQUEANTE): solo el dueño puede abrir esta pantalla.
+    // Sin esta guarda, un entrenador la abría y el cálculo de
+    // "dueño ×300" se hacía contra SU telegram_id (él quedaba ×300
+    // y el dueño real ×150). Con el gate, `yo` es siempre el dueño.
+    if (!AuthService().isOwner) return;
     final mes = mesHabanaActual();
     try {
       final pagos = await LocalDb.instance.pagosDelMes(mes);
@@ -253,6 +285,17 @@ class _NominaPrecalculadaScreenState extends State<NominaPrecalculadaScreen> {
         nombres[tid] ??= '${p['registrado_por'] ?? ''}';
       }
       final casa = await LocalDb.instance.idsCuentasCasa();
+      // Lote 3 (MENOR): espejo y cola se cargan UNA vez, fuera del
+      // bucle por entrenador (antes allMirror corría en cada vuelta).
+      final espejoAdelantos =
+          await LocalDb.instance.allMirror('adelantos');
+      final opsPendientes = await LocalDb.instance.pendingOps();
+      // UUIDs ya en espejo: una op en cola que ya bajó al espejo no
+      // se suma dos veces.
+      final uuidsEspejo = <String>{
+        for (final a in espejoAdelantos)
+          if (a['op_uuid'] != null) '${a['op_uuid']}',
+      };
       final filas = <Map<String, dynamic>>[];
       var baseEnt = 0.0;
       var baseDue = 0.0;
@@ -270,6 +313,10 @@ class _NominaPrecalculadaScreenState extends State<NominaPrecalculadaScreen> {
           };
           NominaCalc.excluirVencidosDentroDelMes(ids, mes, hasta);
         }
+        // Válido solo porque la pantalla es solo-dueño (gate en
+        // build y en _cargar): `yo` es el telegram_id del dueño, no
+        // del espectador. Con un segundo dueño habría que comparar
+        // contra el id real del negocio, no contra el espectador.
         final esDueno = yo != null && tid == yo;
         final base = ids.length * (esDueno ? 300.0 : 150.0);
         if (esDueno) {
@@ -278,11 +325,29 @@ class _NominaPrecalculadaScreenState extends State<NominaPrecalculadaScreen> {
           baseEnt += base;
         }
         double adelantos = 0;
-        for (final a in await LocalDb.instance.allMirror('adelantos')) {
+        for (final a in espejoAdelantos) {
           if ('${a['entrenador']}' == '$tid' &&
               '${a['mes_nomina'] ?? ''}' == mes) {
             adelantos += (a['monto'] as num?)?.toDouble() ?? 0;
           }
+        }
+        // Lote 3 (MENOR): registrar_adelanto aún en cola en este
+        // teléfono (mismo criterio que C3: mes de la fecha, sin
+        // duplicar lo que ya bajó al espejo).
+        for (final op in opsPendientes) {
+          if (op['tipo'] != 'registrar_adelanto') continue;
+          final uuid = op['op_uuid'] ?? op['uuid'];
+          if (uuid != null && uuidsEspejo.contains('$uuid')) continue;
+          try {
+            final p = jsonDecode(op['payload'] as String)
+                as Map<String, dynamic>;
+            final fecha = '${p['fecha'] ?? ''}';
+            if ('${p['entrenador']}' == '$tid' &&
+                fecha.length >= 7 &&
+                fecha.substring(0, 7) == mes) {
+              adelantos += (p['monto'] as num?)?.toDouble() ?? 0;
+            }
+          } catch (_) {}
         }
         filas.add({
           'tid': tid,
@@ -313,8 +378,15 @@ class _NominaPrecalculadaScreenState extends State<NominaPrecalculadaScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // Lote 3 (BLOQUEANTE): ver guarda en _cargar.
+    if (!AuthService().isOwner) {
+      return Scaffold(
+          appBar: AppBar(title: const Text('Nómina pre-calculada')),
+          body: const Center(
+              child: Text('Solo el dueño ve esta pantalla.')));
+    }
     return Scaffold(
-      appBar: AppBar(title: const Text('Nómina pre-calculada (C2)')),
+      appBar: AppBar(title: const Text('Nómina pre-calculada')),
       body: _cargando
           ? const Center(child: CircularProgressIndicator())
           : ListView(
@@ -439,7 +511,7 @@ class _AdelantosListaScreenState extends State<AdelantosListaScreen> {
             .where((f) => '${f['mes_nomina']}' == _filtroMes)
             .toList();
     return Scaffold(
-      appBar: AppBar(title: const Text('Adelantos (C3)')),
+      appBar: AppBar(title: const Text('Adelantos')),
       body: _cargando
           ? const Center(child: CircularProgressIndicator())
           : ListView(
@@ -607,7 +679,7 @@ class _IngresosPeriodoScreenState extends State<IngresosPeriodoScreen> {
   Widget build(BuildContext context) {
     final r = _resumen;
     return Scaffold(
-      appBar: AppBar(title: const Text('Ingresos por período (C5)')),
+      appBar: AppBar(title: const Text('Ingresos por período')),
       body: _cargando
           ? const Center(child: CircularProgressIndicator())
           : ListView(
@@ -713,6 +785,16 @@ class _PreciosMetodoScreenState extends State<PreciosMetodoScreen> {
   final _ctrls = <String, TextEditingController>{};
 
   @override
+  void dispose() {
+    // Lote 3 (MENOR): los 7 controladores se creaban en _cargar y
+    // nunca se liberaban.
+    for (final c in _ctrls.values) {
+      c.dispose();
+    }
+    super.dispose();
+  }
+
+  @override
   void initState() {
     super.initState();
     _cargar();
@@ -757,12 +839,12 @@ class _PreciosMetodoScreenState extends State<PreciosMetodoScreen> {
   Widget build(BuildContext context) {
     if (!AuthService().isOwner) {
       return Scaffold(
-          appBar: AppBar(title: const Text('Precios por método (C6)')),
+          appBar: AppBar(title: const Text('Precios por método')),
           body: const Center(
               child: Text('Solo el dueño cambia precios.')));
     }
     return Scaffold(
-      appBar: AppBar(title: const Text('Precios por método (C6)')),
+      appBar: AppBar(title: const Text('Precios por método')),
       body: _cargando
           ? const Center(child: CircularProgressIndicator())
           : ListView(
@@ -772,7 +854,7 @@ class _PreciosMetodoScreenState extends State<PreciosMetodoScreen> {
                   'Única fuente de precios: todo lo que cambias aquí '
                   'alimenta a calcularPrecioCobro() en todos los '
                   'teléfonos. Las tarifas especiales NO se editan '
-                  'aquí: tienen su pantalla (Tarifas, D6). Los '
+                  'aquí: tienen su pantalla en Tarifas. Los '
                   'cambios rigen hacia adelante: los cobros ya hechos '
                   'conservan su monto congelado.',
                   style: AppTexto.secundario,

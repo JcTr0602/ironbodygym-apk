@@ -56,26 +56,53 @@ void main() {
     });
   });
 
-  group('entregadoOptimistaInscripcionVenta', () {
-    test('efectivo del entrenador queda pendiente', () {
-      expect(
-          entregadoOptimistaInscripcionVenta(
-              esDueno: false, metodoPago: 'efectivo'),
-          0);
+  group('bloqueo USD sin tasa (lote 3)', () {
+    Map<String, dynamic> usd({double? tasa}) =>
+        payloadInscripcionVentaSuplemento(
+          nombre: 'Prueba',
+          suplementoId: 7,
+          cantidad: 1,
+          precio: 100,
+          moneda: 'USD',
+          precioOficial: 100,
+          usdTasa: tasa,
+          fecha: '2026-10-25',
+          metodoPago: 'efectivo',
+        );
+
+    test('USD sin usdTasa lanza', () {
+      expect(() => usd(), throwsArgumentError);
     });
 
-    test('transferencia del entrenador NO queda pendiente', () {
-      expect(
-          entregadoOptimistaInscripcionVenta(
-              esDueno: false, metodoPago: 'transferencia'),
-          1);
+    test('USD con tasa 0 o negativa lanza', () {
+      expect(() => usd(tasa: 0), throwsArgumentError);
+      expect(() => usd(tasa: -5), throwsArgumentError);
     });
 
-    test('efectivo del dueño queda entregado', () {
+    test('USD con tasa NaN o infinita lanza (Luna lote-3)', () {
+      // NaN e infinito pasaban `<= 0` y se encolaban sin tasa.
+      expect(() => usd(tasa: double.nan), throwsArgumentError);
       expect(
-          entregadoOptimistaInscripcionVenta(
-              esDueno: true, metodoPago: 'efectivo'),
-          1);
+          () => usd(tasa: double.infinity), throwsArgumentError);
+    });
+
+    test('USD con tasa válida incluye usd_tasa', () {
+      final p = usd(tasa: 400);
+      expect((p['venta'] as Map)['usd_tasa'], 400);
+    });
+
+    test('CUP sin tasa sigue permitido', () {
+      final p = payloadInscripcionVentaSuplemento(
+        nombre: 'Prueba',
+        suplementoId: 7,
+        cantidad: 1,
+        precio: 100,
+        moneda: 'CUP',
+        precioOficial: 100,
+        fecha: '2026-10-25',
+        metodoPago: 'efectivo',
+      );
+      expect((p['venta'] as Map).containsKey('usd_tasa'), isFalse);
     });
   });
 }

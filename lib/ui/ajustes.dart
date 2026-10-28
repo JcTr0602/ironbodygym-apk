@@ -166,7 +166,7 @@ class _AjustesScreenState extends State<AjustesScreen> {
     required String? valorActual,
     required String etiqueta,
     TextInputType teclado = TextInputType.text,
-    required Future<void> Function(String) guardar,
+    required Future<void> Function(String?) guardar,
   }) async {
     final ctrl = TextEditingController(text: valorActual ?? '');
     final ok = await showDialog<bool>(
@@ -198,7 +198,16 @@ class _AjustesScreenState extends State<AjustesScreen> {
       ),
     );
     if (ok != true || !mounted) return;
-    await guardar(ctrl.text.trim());
+    final texto = ctrl.text.trim();
+    // Lote 2 Argón: vacío se normaliza a null (antes guardaba "" y el
+    // subtítulo quedaba en blanco en vez de 'Igual que la cuenta';
+    // setNombreVisible(null) borra la preferencia). Sin límite, un
+    // texto larguísimo rompería la UI: tope 60 con aviso.
+    if (texto.length > 60) {
+      _msg('El texto es demasiado largo (máx. 60 caracteres).');
+      return;
+    }
+    await guardar(texto.isEmpty ? null : texto);
     _cargar();
   }
 
@@ -673,8 +682,28 @@ class _AjustesScreenState extends State<AjustesScreen> {
     try {
       // Vaciar el WAL al archivo principal para una copia consistente.
       // v1.2.1: wal_checkpoint retorna una fila, usar rawQuery (no execute).
+      // Lote 2 Argón (bloqueante): LEER la fila. Sin lectores activos
+      // el volcado puede ser parcial (busy != 0 o log != checkpointed)
+      // sin lanzar excepción: compartir esa copia sería compartir una
+      // base truncada. En esta pila, un checkpoint bloqueado además
+      // puede lanzar SQLITE_LOCKED, que ya cae en el catch de abajo.
       final db = await LocalDb.instance.db;
-      await db.rawQuery('PRAGMA wal_checkpoint(TRUNCATE)');
+      final chk = await db.rawQuery('PRAGMA wal_checkpoint(TRUNCATE)');
+      if (chk.isEmpty) {
+        _msg('No se pudo exportar: no se pudo vaciar la base. '
+            'Inténtalo de nuevo en un momento.');
+        return;
+      }
+      final filaChk = chk.first;
+      final busy = (filaChk['busy'] as num?)?.toInt() ?? 1;
+      final log = (filaChk['log'] as num?)?.toInt() ?? -1;
+      final checkpointed =
+          (filaChk['checkpointed'] as num?)?.toInt() ?? -2;
+      if (busy != 0 || log != checkpointed) {
+        _msg('No se pudo exportar: la base está en uso. '
+            'Inténtalo de nuevo en un momento.');
+        return;
+      }
       final ruta = await LocalDb.instance.dbPath();
       final tmp = await getTemporaryDirectory();
       final fecha =
@@ -691,6 +720,12 @@ class _AjustesScreenState extends State<AjustesScreen> {
 
   /// v1.2.9+46 (AppLog): exportar la bitácora local para diagnóstico.
   Future<void> _exportarBitacora() async {
+    // Lote 2 Argón: defensa en profundidad (el botón ya era
+    // solo-dueño, el método no).
+    if (!_auth.isOwner) {
+      _msg('Solo el dueño puede exportar la bitácora');
+      return;
+    }
     try {
       _msg('Generando bitácora…');
       final path = await AppLog.exportar();
@@ -701,10 +736,17 @@ class _AjustesScreenState extends State<AjustesScreen> {
     }
   }
 
-  /// Importar respaldo de la BD (item 17: entrenadores también).
+  /// Importar respaldo de la BD (SOLO DUEÑO desde lote 2 Argón:
+  /// antes estaba abierto a entrenadores y cualquiera podía
+  /// reemplazar la base viva del teléfono, perdiendo la cola
+  /// pendiente de subir).
   /// Importación segura por etapas: el archivo se valida ANTES de tocar
   /// la base actual, y se guarda una copia de recuperación por si falla.
   Future<void> _importarRespaldo() async {
+    if (!_auth.isOwner) {
+      _msg('Solo el dueño puede importar un respaldo');
+      return;
+    }
     // v1.2.1: pickFiles dentro del try para mostrar error si falla
     // (antes la excepción quedaba sin capturar y parecía "no hacer nada").
     // Gemini-2: FileType.any en vez de custom (en Android 13/14 los .db
@@ -872,6 +914,12 @@ class _AjustesScreenState extends State<AjustesScreen> {
 
   /// Limpiar caché de fotos (item 19).
   Future<void> _limpiarCache() async {
+    // Lote 2 Argón: solo dueño (antes cualquier rol podía borrar la
+    // caché y purgar subidas fallidas de más de 7 días).
+    if (!_auth.isOwner) {
+      _msg('Solo el dueño puede limpiar la caché');
+      return;
+    }
     final ok = await DialogoApp.confirmar(
       context,
       titulo: 'Limpiar caché de fotos',
@@ -899,6 +947,12 @@ class _AjustesScreenState extends State<AjustesScreen> {
 
   /// v1.2.2: Resincroniza fotos de clientes o suplementos.
   Future<void> _resincronizarFotos(String tipo) async {
+    // Lote 2 Argón: defensa en profundidad (el botón ya era
+    // solo-dueño, el método no).
+    if (!_auth.isOwner) {
+      _msg('Solo el dueño puede resincronizar fotos');
+      return;
+    }
     final titulo = tipo == 'clientes'
         ? 'Resincronizar fotos de clientes'
         : 'Resincronizar fotos de suplementos';
@@ -1054,6 +1108,12 @@ class _AjustesScreenState extends State<AjustesScreen> {
 
   /// Restablecer ajustes (item 24).
   Future<void> _restablecer() async {
+    // Lote 2 Argón: solo dueño (antes cualquier rol podía devolver
+    // los ajustes a sus valores por defecto).
+    if (!_auth.isOwner) {
+      _msg('Solo el dueño puede restablecer los ajustes');
+      return;
+    }
     final ok = await DialogoApp.confirmar(
       context,
       titulo: 'Restablecer ajustes',
@@ -1428,13 +1488,14 @@ class _AjustesScreenState extends State<AjustesScreen> {
                         'Guarda la base de datos para compartirla',
                     onTap: _exportarRespaldo,
                   ),
-                _opcion(
-                  icono: Icons.cloud_download_outlined,
-                  titulo: 'Importar respaldo',
-                  subtitulo:
-                      'Restaura los datos desde un archivo',
-                  onTap: _importarRespaldo,
-                ),
+                if (_auth.isOwner)
+                  _opcion(
+                    icono: Icons.cloud_download_outlined,
+                    titulo: 'Importar respaldo',
+                    subtitulo:
+                        'Restaura los datos desde un archivo',
+                    onTap: _importarRespaldo,
+                  ),
                 _opcion(
                   icono: Icons.storage_outlined,
                   titulo: 'Espacio usado',
@@ -1444,13 +1505,14 @@ class _AjustesScreenState extends State<AjustesScreen> {
                       'Toca para ver el detalle',
                   onTap: _verEspacio,
                 ),
-                _opcion(
-                  icono: Icons.cleaning_services_outlined,
-                  titulo: 'Limpiar caché de fotos',
-                  subtitulo:
-                      'Libera espacio; se descargan al sincronizar',
-                  onTap: _limpiarCache,
-                ),
+                if (_auth.isOwner)
+                  _opcion(
+                    icono: Icons.cleaning_services_outlined,
+                    titulo: 'Limpiar caché de fotos',
+                    subtitulo:
+                        'Libera espacio; se descargan al sincronizar',
+                    onTap: _limpiarCache,
+                  ),
                 // v1.2.3: resincronizar fotos (solo dueño) - implementado
                 if (AuthService().isOwner)
                   _opcion(
@@ -1509,13 +1571,14 @@ class _AjustesScreenState extends State<AjustesScreen> {
                   subtitulo: 'Escríbenos por WhatsApp',
                   onTap: _reportarWhatsApp,
                 ),
-                _opcion(
-                  icono: Icons.restart_alt_outlined,
-                  titulo: 'Restablecer ajustes',
-                  subtitulo:
-                      'Volver a los valores por defecto',
-                  onTap: _restablecer,
-                ),
+                if (_auth.isOwner)
+                  _opcion(
+                    icono: Icons.restart_alt_outlined,
+                    titulo: 'Restablecer ajustes',
+                    subtitulo:
+                        'Volver a los valores por defecto',
+                    onTap: _restablecer,
+                  ),
                 const SizedBox(height: 24),
                 Center(
                   child: Text('© Creado por JcTr0602',

@@ -25,10 +25,23 @@ class PerfilService {
   Future<SharedPreferences> get _p async =>
       SharedPreferences.getInstance();
 
+  /// Usuario limpio y único para claves locales, avatar y Supabase
+  /// (auditoría perfil: _key usaba el username crudo y el sync el
+  /// prefijo limpio; una variante con mayúsculas, espacios o correo
+  /// completo generaba claves distintas). usernameToEmail recorta,
+  /// pasa a minúsculas, quita tildes y caracteres raros; para los
+  /// usuarios reales (gabriel, duany, jc...) el resultado es
+  /// idéntico al username actual, así que ninguna clave existente
+  /// cambia. Vacío se devuelve vacío (usernameToEmail lanzaría).
+  String _cleanUsername(String username) {
+    if (username.trim().isEmpty) return '';
+    return usernameToEmail(username).split('@').first;
+  }
+
   String _key(String base) {
     // v1.2.2: guardar por usuario, no por teléfono (Hark #4).
     // Si otro entrenador inicia sesión en el mismo móvil, no ve los datos del anterior.
-    final username = AuthService().username;
+    final username = _cleanUsername(AuthService().username);
     return username.isEmpty ? base : '${base}_$username';
   }
 
@@ -56,13 +69,13 @@ class PerfilService {
     // SyncEngine.run() reintenta con [sincronizarSiPendiente].
     await p0.setBool(_key('perfil_sucio'), true);
     try {
-      final username = AuthService().username;
+      final username = _cleanUsername(AuthService().username);
       if (username.isEmpty) return false;
       final p = await _p;
       final movil = p.getString(_key('perfil_movil'));
       final carnet = p.getString(_key('perfil_carnet'));
       await Supabase.instance.client.from('sync_usuarios_perfil').upsert({
-        'username': usernameToEmail(username).split('@').first,
+        'username': username,
         'movil': movil,
         'carnet': carnet,
         // NOTA: updated_at lo pone el trigger en Supabase, no el teléfono
@@ -94,9 +107,9 @@ class PerfilService {
       final faltaMovil = movilLocal == null || movilLocal.isEmpty;
       final faltaCarnet = carnetLocal == null || carnetLocal.isEmpty;
       if (!faltaMovil && !faltaCarnet) return;
-      final username = AuthService().username;
+      final username = _cleanUsername(AuthService().username);
       if (username.isEmpty) return;
-      final emailPrefix = usernameToEmail(username).split('@').first;
+      final emailPrefix = username;
       final res = await Supabase.instance.client
           .from('sync_usuarios_perfil')
           .select('movil, carnet')
@@ -130,12 +143,14 @@ class PerfilService {
       (await _p).setBool('seg_vincular_dispositivo', v);
 
   /// ID único de este dispositivo (se genera una vez).
+  /// Auditoría perfil: antes se armaba con la hora en microsegundos
+  /// (predecible y con riesgo de colisión); ahora UUID v4. El id ya
+  /// guardado se conserva tal cual.
   Future<String> getDeviceId() async {
     final p = await _p;
     var id = p.getString('seg_device_id');
     if (id == null || id.isEmpty) {
-      id = DateTime.now().microsecondsSinceEpoch.toRadixString(36) +
-          (1000 + (DateTime.now().microsecond % 9000)).toString();
+      id = const Uuid().v4();
       await p.setString('seg_device_id', id);
     }
     return id;
@@ -151,6 +166,17 @@ class PerfilService {
       (await _p).remove('seg_vinculado_$username');
 
 
+  /// Clave histórica (pre-_cleanUsername): username crudo, sin limpiar.
+  /// Solo para lectura de compatibilidad: si una clave vieja se guardó
+  /// con mayúsculas/espacios/tildes, la nueva _key no la encontraría.
+  /// En la práctica los usernames reales ya salen limpios (el getter
+  /// de AuthService pasa a minúsculas y las cuentas se crean con
+  /// usernameToEmail), así que esto es un seguro, no el camino normal.
+  String _keyLegado(String base) {
+    final username = AuthService().username;
+    return username.isEmpty ? base : '${base}_$username';
+  }
+
   /// Hash del PIN rápido (4 dígitos). Null = sin PIN.
   ///
   /// v1.0.16: esquema endurecido. Formato `v2$<salt_hex>$<hash_hex>` donde
@@ -158,8 +184,24 @@ class PerfilService {
   /// El esquema viejo (`v1`, sha256('ironbody-pin-$pin') sin salt) se
   /// reconoce por no tener el prefijo `v2$`; al configurar un PIN nuevo
   /// siempre se usa el esquema nuevo.
-  Future<String?> getPinHash() async =>
-      (await _p).getString(_key('seg_pin_hash'));
+  ///
+  /// Compat (Terra panel perfil): si la clave nueva no existe, se
+  /// intenta la clave histórica y, si se encuentra, se migra a la
+  /// nueva. Sin esto, un PIN guardado bajo un username crudo
+  /// parecería inexistente tras la actualización. Los fallos/ciclos/
+  /// bloqueo NO llevan fallback: son estado transitorio y perderlos
+  /// al actualizar solo acorta un bloqueo, nunca deja a nadie fuera.
+  Future<String?> getPinHash() async {
+    final p = await _p;
+    var h = p.getString(_key('seg_pin_hash'));
+    if (h == null) {
+      h = p.getString(_keyLegado('seg_pin_hash'));
+      if (h != null) {
+        await p.setString(_key('seg_pin_hash'), h);
+      }
+    }
+    return h;
+  }
   Future<void> setPinHash(String? h) async {
     final p = await _p;
     if (h == null) {
@@ -170,10 +212,18 @@ class PerfilService {
   }
 
   /// Salt aleatorio de 16 bytes (hex) para el PIN. Se genera una vez
-  /// por instalación y se reutiliza.
+  /// por instalación y se reutiliza. Compat igual que getPinHash: el
+  /// salt debe viajar con su hash, o un hash migrado con un salt
+  /// recién generado no verificaría nunca.
   Future<String> getPinSalt() async {
     final p = await _p;
     var salt = p.getString(_key('seg_pin_salt'));
+    if (salt == null || salt.isEmpty) {
+      salt = p.getString(_keyLegado('seg_pin_salt'));
+      if (salt != null && salt.isNotEmpty) {
+        await p.setString(_key('seg_pin_salt'), salt);
+      }
+    }
     if (salt == null || salt.isEmpty) {
       final rnd = Random.secure();
       final bytes = List<int>.generate(16, (_) => rnd.nextInt(256));
@@ -237,7 +287,11 @@ class PerfilService {
       // Retroceso >1 min con bloqueo activo: no acortar.
       return false;
     }
-    await p.setInt(_key('seg_pin_ultima_vez'), ahora);
+    // Auditoría perfil: antes se sobrescribía incondicionalmente y
+    // atrasar el reloj en saltos de <60 s iba erosionando la línea
+    // base sin ser detectado. Solo avanza, nunca retrocede.
+    await p.setInt(
+        _key('seg_pin_ultima_vez'), ahora > ultimaVez ? ahora : ultimaVez);
     if (hasta > 0) {
       // Hay bloqueo activo: decidir con el reloj monotónico.
       final durMs = p.getInt(_key('seg_pin_duracion_ms')) ?? 0;
@@ -271,6 +325,11 @@ class PerfilService {
     final ok = _pinCoincide(pin, guardado, await getPinSalt());
     if (ok) {
       await _setPinFallos(0);
+      // Auditoría perfil: antes no se limpiaban los ciclos y un
+      // entrenador que acertaba seguía acumulando castigos de por
+      // vida (a los meses, el mismo 5.º fallo caía con 5 min, luego
+      // 15...). Acertar demuestra propiedad: se reinicia la escala.
+      await p.setInt(_key('seg_pin_ciclos_bloqueo'), 0);
       return true;
     }
     final fallos = await getPinFallos() + 1;
@@ -339,12 +398,22 @@ class PerfilService {
   }
 
   /// Hash v2: 10000 iteraciones de SHA-256(salt + pin + anterior).
+  /// Auditoría perfil: antes cada iteración armaba 2 listas nuevas
+  /// ([...actual, ...pinBytes] + List.from) en el hilo principal.
+  /// Ahora un único buffer reutilizable: la primera iteración usa
+  /// salt+pin+pin (longitud variable) y las 9999 restantes siempre
+  /// 32 bytes + pin. El digest resultante es IDÉNTICO al anterior
+  /// (cubierto por test con un hash precalculado con el algoritmo
+  /// viejo): ningún PIN guardado deja de funcionar.
   static String _hashPinV2(String pin, String saltHex) {
-    List<int> actual = utf8.encode(saltHex + pin);
     final pinBytes = utf8.encode(pin);
-    for (var i = 0; i < 10000; i++) {
-      actual =
-          List<int>.from(sha256.convert([...actual, ...pinBytes]).bytes);
+    var actual = sha256
+        .convert([...utf8.encode(saltHex + pin), ...pinBytes]).bytes;
+    final buf = Uint8List(32 + pinBytes.length);
+    for (var i = 1; i < 10000; i++) {
+      buf.setRange(0, 32, actual);
+      buf.setRange(32, buf.length, pinBytes);
+      actual = sha256.convert(buf).bytes;
     }
     return actual.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
   }
@@ -363,14 +432,19 @@ class PerfilService {
       (await _p).setString('ultima_version_vista', v);
 
   /// Nombre visible (item 5): override local del displayName.
+  /// Auditoría perfil: antes era clave global y un entrenador
+  /// heredaba el alias del anterior en el mismo teléfono. Ahora
+  /// por cuenta; el valor viejo bajo la clave global queda huérfano
+  /// a propósito (migrarlo reintroduciría la fuga): cada cuenta
+  /// escribe su nombre una vez.
   Future<String?> getNombreVisible() async =>
-      (await _p).getString('nombre_visible');
+      (await _p).getString(_key('nombre_visible'));
   Future<void> setNombreVisible(String? v) async {
     final p = await _p;
     if (v == null || v.trim().isEmpty) {
-      await p.remove('nombre_visible');
+      await p.remove(_key('nombre_visible'));
     } else {
-      await p.setString('nombre_visible', v.trim());
+      await p.setString(_key('nombre_visible'), v.trim());
     }
   }
 
@@ -469,6 +543,8 @@ class PerfilService {
   /// v1.2.5 (3.4): alto contraste (objetivo WCAG AA).
   Future<bool> getAltoContraste() async =>
       (await _p).getBool('alto_contraste') ?? false;
+  Future<void> setAltoContraste(bool v) async =>
+      (await _p).setBool('alto_contraste', v);
 
   /// Bloque 1: acción al deslizar una fila en Buscar cliente.
   /// Lista CERRADA: 'ninguna' | 'cobrar' | 'diario' | 'venta' |
@@ -481,8 +557,6 @@ class PerfilService {
       (await _p).getString('buscar_swipe_izq') ?? 'ninguna';
   Future<void> setSwipeBuscarIzq(String v) async =>
       (await _p).setString('buscar_swipe_izq', v);
-  Future<void> setAltoContraste(bool v) async =>
-      (await _p).setBool('alto_contraste', v);
 
   /// Escala de letra 0.85–1.30 (item 8).
   Future<double> getTamanoLetra() async =>
@@ -497,30 +571,38 @@ class PerfilService {
   Future<void> setBloqueoMinutos(int m) async =>
       (await _p).setInt('bloqueo_minutos', m);
   Future<int> getUltimaActividad() async =>
-      (await _p).getInt('ultima_actividad') ?? 0;
+      (await _p).getInt(_key('ultima_actividad')) ?? 0;
   Future<void> setUltimaActividad(int ts) async =>
-      (await _p).setInt('ultima_actividad', ts);
+      (await _p).setInt(_key('ultima_actividad'), ts);
 
   /// Restablece todos los ajustes a sus valores por defecto (item 24).
   /// No toca el avatar, el PIN ni la vinculación de dispositivo.
+  /// Auditoría perfil: antes borraba _key('perfil_movil') y
+  /// _key('perfil_carnet') sin limpiar _key('perfil_sucio'): con un
+  /// cambio pendiente sin conexión, el siguiente sync subía nulls
+  /// y borraba el perfil en la nube — y el diálogo promete "no se
+  /// borran tus datos". Móvil y carnet son identidad, no ajustes:
+  /// ya no se tocan (y perfil_sucio sigue guardando su cambio
+  /// pendiente, que es lo correcto). Se añaden las claves de
+  /// deslizamiento que faltaban y las dos claves que ahora son por
+  /// cuenta.
   Future<void> resetAjustes() async {
     final p = await _p;
     for (final k in [
-      'nombre_visible',
+      _key('nombre_visible'),
       'horas_aviso_sync',
       'aviso_fallo_sync',
       'auto_sync_abrir',
       'tema',
       'tamano_letra',
       'bloqueo_minutos',
-      'ultima_actividad',
-      // v1.3.1: usar _key() para claves por usuario.
-      _key('perfil_movil'),
-      _key('perfil_carnet'),
+      _key('ultima_actividad'),
       'pref_recordatorio_sync',
       'metricas_home',
       'vibracion_haptica',
       'alto_contraste',
+      'buscar_swipe_der',
+      'buscar_swipe_izq',
     ]) {
       await p.remove(k);
     }
@@ -556,7 +638,7 @@ class PerfilService {
   /// cada cuenta pone su foto una vez.
   Future<File> avatarFile() async {
     final dir = await getApplicationDocumentsDirectory();
-    final username = AuthService().username;
+    final username = _cleanUsername(AuthService().username);
     final nombre =
         username.isEmpty ? 'avatar.jpg' : 'avatar_$username.jpg';
     return File('${dir.path}/$nombre');

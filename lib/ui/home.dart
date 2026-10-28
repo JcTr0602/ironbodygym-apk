@@ -17,6 +17,7 @@ import '../negocio.dart';
 import '../plus_reportes.dart';
 import '../nomina_calc.dart';
 import '../nomina_precalc.dart';
+import '../nomina_total.dart';
 import '../novedades.dart';
 import '../perfil.dart';
 import '../permisos_entrenador.dart';
@@ -47,7 +48,6 @@ import 'nomina.dart';
 import 'pago.dart';
 import 'pago_diario.dart';
 import 'pagaron_mes.dart';
-import 'pagos_realizados.dart';
 import 'suplementos.dart';
 import 'papelera.dart';
 import 'pendiente.dart';
@@ -109,6 +109,8 @@ class _HomeScreenState extends State<HomeScreen>
   double _pendiente = 0; // v1.3.3: pendiente a entregar (entrenador)
   int _pagaronMes = 0; // v1.4.0: clientes únicos que pagaron el mes
   int _tarifaMes = 150; // v1.4.0: tarifa por cliente (base del entrenador)
+  double _pagoEntrenadoresNeto =
+      0; // post-1.15: neto a pagar (suma de la nómina, no bruto ×300)
   double _porRecoger = 0; // v1.3.3: pendiente por recoger (dueño)
   int _noLeidas = 0;
   double _cobradoHoy = 0;
@@ -511,6 +513,11 @@ class _HomeScreenState extends State<HomeScreen>
         NominaCalc.clientesQuePagaronElMes(
             hoyHabanaIso().substring(0, 7)), // 16
         PerfilService.instance.getPagoEntrenador(), // 17
+        // post-1.15: neto a pagar a entrenadores (solo dueño;
+        // null si no se pudo calcular: se conserva el anterior).
+        _auth.isOwner
+            ? totalNetoNominaMes(hoyHabanaIso().substring(0, 7))
+            : Future.value(null), // 18
       ]);
       // Cliente protegido (2026-10-26, Protegido 2 H6): los
       // contadores de la principal no cuentan protegidos para un
@@ -624,6 +631,8 @@ class _HomeScreenState extends State<HomeScreen>
           _avisosPendientes = res[15] as int;
           _pagaronMes = res[16] as int;
           _tarifaMes = res[17] as int;
+          final neto = res[18] as double?;
+          if (neto != null) _pagoEntrenadoresNeto = neto;
           _avisoSync = aviso;
           _nombreVisible = nombreVisible;
           _entrenadoresSinSync = sinSync;
@@ -799,73 +808,30 @@ class _HomeScreenState extends State<HomeScreen>
               children: [
                 // v1.3.3: cabecera compacta
                 _cabecera(),
-                // Aviso "llevas +Xh sin subir"
-                if (_avisoSync != null)
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(
-                        AppEspacio.lg,
-                        AppEspacio.md,
-                        AppEspacio.lg,
-                        0),
-                    child: Tarjeta(
-                      color: AppColores.alerta
-                          .withValues(alpha: 0.12),
-                      onTap: () =>
-                          _ir(const ColaScreen()),
-                      child: Row(
-                        children: [
-                          const Icon(
-                              Icons.warning_amber,
-                              color: AppColores.alerta),
-                          const SizedBox(
-                              width: AppEspacio.sm),
-                          Expanded(
-                            child: Text(
-                              '$_avisoSync\nToca para sincronizar ahora',
-                              style: AppTexto.secundario,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                // Aviso de fallo de sincronización (item 11)
-                if (_falloSync != null)
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(
-                        AppEspacio.lg,
-                        AppEspacio.md,
-                        AppEspacio.lg,
-                        0),
-                    child: Tarjeta(
-                      color: AppColores.error
-                          .withValues(alpha: 0.12),
-                      child: Row(
-                        children: [
-                          const Icon(
-                              Icons.sync_problem,
-                              color: AppColores.error),
-                          const SizedBox(
-                              width: AppEspacio.sm),
-                          const Expanded(
-                            child: Text(
-                              'La sincronización falló. Revisa tu conexión e inténtalo de nuevo.',
-                              style: AppTexto.secundario,
-                            ),
-                          ),
-                          IconButton(
-                            icon: const Icon(Icons.close,
-                                size: 18),
-                            onPressed: () => setState(
-                                () => _falloSync = null),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
+                // Rediseño Argón: un solo banner de sync (ver
+                // _bannerSync): si coexisten fallo y aviso, manda
+                // el fallo; al descartarlo reaparece el aviso.
+                _bannerSync(),
                 // v1.3.6: el dock fijo se reemplazó por el botón flotante de
                 // acciones rápidas (speed dial); se elimina del scroll para
                 // no duplicar las acciones.
+                // Zona 2 — Mostrador rápido (rediseño Argón):
+                // buscar + 4 acciones a 1 toque, antes de la
+                // tarjeta financiera.
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(
+                      AppEspacio.lg,
+                      AppEspacio.md,
+                      AppEspacio.lg,
+                      0),
+                  child: Column(
+                    children: [
+                      _botonBuscarCliente(),
+                      const SizedBox(height: AppEspacio.sm),
+                      _mostradorRapido(),
+                    ],
+                  ),
+                ),
                 // v1.3.3: tarjeta financiera por rol
                 Padding(
                   padding: const EdgeInsets.fromLTRB(
@@ -875,35 +841,31 @@ class _HomeScreenState extends State<HomeScreen>
                       0),
                   child: _tarjetaFinanciera(esDueno),
                 ),
+                // Zona 4 — Atención hoy (rediseño Argón): la
+                // bandeja del dueño sube aquí, sobre la tira de
+                // alertas. SOLO del dueño (abre su WhatsApp y el
+                // check vive en su teléfono; si un entrenador la
+                // usara, el dueño re-escribiría al mismo cliente
+                // sin saberlo).
+                if (_auth.isOwner)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(
+                        AppEspacio.lg,
+                        AppEspacio.md,
+                        AppEspacio.lg,
+                        0),
+                    child: _botonBandejaWhatsapp(),
+                  ),
                 // v1.3.3: tira de alertas (solo si hay algo)
                 _tiraAlertas(),
-                // v1.3.3: grid de módulos
+                // v1.3.3: grid de módulos (rediseño Argón: solo el
+                // grid; Buscar, Servicios y Bandeja subieron a las
+                // zonas 2 y 4).
                 const EncabezadoSeccion(titulo: 'MÓDULOS'),
                 Padding(
                   padding: const EdgeInsets.symmetric(
                       horizontal: AppEspacio.lg),
-                  child: Column(
-                    children: [
-                      _gridModulos(),
-                      // v1.3.6 (Jc): Buscar cliente como botón horizontal de
-                      // ancho completo al cierre de la sección (función muy
-                      // usada; así no queda espacio vacío en el grid).
-                      const SizedBox(height: AppEspacio.sm),
-                      _botonBuscarCliente(),
-                      // v1.8.0: Servicios por dosis — botón de ancho
-                      // completo bajo Buscar (venta rápida del día).
-                      const SizedBox(height: AppEspacio.sm),
-                      _botonServicios(),
-                      // v1.3.6 (ítem 1A, auditoría Argón): la bandeja es
-                      // SOLO del dueño (abre su WhatsApp y el check vive
-                      // en su teléfono; si un entrenador la usara, el
-                      // dueño re-escribiría al mismo cliente sin saberlo).
-                      if (_auth.isOwner) ...[
-                        const SizedBox(height: AppEspacio.sm),
-                        _botonBandejaWhatsapp(),
-                      ],
-                    ],
-                  ),
+                  child: _gridModulos(),
                 ),
                 // v1.3.3: resto de herramientas (ninguna pantalla se pierde)
                 const EncabezadoSeccion(titulo: 'MÁS'),
@@ -950,6 +912,120 @@ class _HomeScreenState extends State<HomeScreen>
   /// v1.3.3: cabecera compacta con avatar (Ajustes), iconos de
   /// sincronización (badge), actividad (badge) y ayuda, más
   /// saludo, chip de rol, fecha/turno y SyncPill.
+  /// Rediseño Argón (vista principal): un solo banner de sync.
+  /// Si coexisten fallo y aviso, se muestra solo el de fallo
+  /// (rojo, con toque a la cola y X que descarta SOLO el error);
+  /// al descartarlo reaparece el aviso. El fallo gana onTap a
+  /// la cola (hallazgo de código Argón: la tarjeta roja no
+  /// respondía al toque, mientras la amarilla sí).
+  Widget _bannerSync() {
+    if (_falloSync != null) {
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(
+            AppEspacio.lg, AppEspacio.md, AppEspacio.lg, 0),
+        child: Tarjeta(
+          color: AppColores.error.withValues(alpha: 0.12),
+          onTap: () => _ir(const ColaScreen()),
+          child: Row(
+            children: [
+              const Icon(Icons.sync_problem,
+                  color: AppColores.error),
+              const SizedBox(width: AppEspacio.sm),
+              const Expanded(
+                child: Text(
+                  'La sincronización falló. Revisa tu conexión e inténtalo de nuevo.',
+                  style: AppTexto.secundario,
+                ),
+              ),
+              IconButton(
+                icon: const Icon(Icons.close, size: 18),
+                onPressed: () =>
+                    setState(() => _falloSync = null),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+    if (_avisoSync != null) {
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(
+            AppEspacio.lg, AppEspacio.md, AppEspacio.lg, 0),
+        child: Tarjeta(
+          color: AppColores.alerta.withValues(alpha: 0.12),
+          onTap: () => _ir(const ColaScreen()),
+          child: Row(
+            children: [
+              const Icon(Icons.warning_amber,
+                  color: AppColores.alerta),
+              const SizedBox(width: AppEspacio.sm),
+              Expanded(
+                child: Text(
+                  '$_avisoSync\nToca para sincronizar ahora',
+                  style: AppTexto.secundario,
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+    return const SizedBox.shrink();
+  }
+
+  /// Zona 2 — Mostrador rápido (rediseño Argón): 4 acciones a 1
+  /// toque en fila de 52 px. En teléfonos estrechos, si la fila
+  /// aprieta las etiquetas, el plan B es cuadrícula 2x2.
+  Widget _mostradorRapido() {
+    Widget accion(IconData icono, String texto, VoidCallback ir) {
+      return Expanded(
+        child: SizedBox(
+          height: 52,
+          child: ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColores.naranja,
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(horizontal: 4),
+            ),
+            onPressed: ir,
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(icono, size: 20),
+                const SizedBox(height: 2),
+                // FittedBox para que "Pago diario" no se trunque
+                // en móviles estrechos o con texto ampliado.
+                Flexible(
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Text(texto,
+                        style: const TextStyle(fontSize: 11)),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Row(
+      children: [
+        accion(Icons.payments_rounded, 'Cobrar',
+            () => _ir(const PagoScreen())),
+        const SizedBox(width: AppEspacio.sm),
+        accion(Icons.today_rounded, 'Pago diario',
+            () => _ir(const PagoDiarioScreen())),
+        const SizedBox(width: AppEspacio.sm),
+        accion(Icons.person_add_alt_1_rounded, 'Inscribir',
+            () => _ir(const InscribirScreen())),
+        const SizedBox(width: AppEspacio.sm),
+        accion(Icons.bolt_rounded, 'Dosis',
+            () => _ir(const ServiciosScreen())),
+      ],
+    );
+  }
+
   Widget _cabecera() {
     final nombre = _nombreVisible ?? _auth.displayName;
     return Container(
@@ -960,7 +1036,7 @@ class _HomeScreenState extends State<HomeScreen>
             bottom: Radius.circular(AppRadio.xl)),
       ),
       padding: const EdgeInsets.fromLTRB(AppEspacio.lg,
-          AppEspacio.sm, AppEspacio.lg, AppEspacio.xl),
+          AppEspacio.sm, AppEspacio.lg, AppEspacio.md),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -1000,9 +1076,9 @@ class _HomeScreenState extends State<HomeScreen>
               ),
               _iconoSync(),
               _campana(),
-              // v1.3.6 (Jc): la lupa salió del banner; Buscar cliente vive como
-        // botón horizontal al final de la sección MÓDULOS.
-        IconButton(
+              // v1.3.6 (Jc): la lupa salió del banner; Buscar cliente vive
+              // en el Mostrador Rápido (rediseño Argón, zona 2).
+              IconButton(
                 tooltip: 'Ayuda',
                 color: Colors.white70,
                 icon: const Icon(Icons.help_outline),
@@ -1132,7 +1208,8 @@ class _HomeScreenState extends State<HomeScreen>
 
   /// v1.3.3: tarjeta financiera contextual por rol.
   /// Entrenador: "Mi Turno Hoy" con cobrado hoy + pendiente a
-  /// entregar + botón "Cerrar turno".
+  /// entregar + botón "Cerrar turno". Rediseño Argón: cabecera
+  /// en una línea con chip de estado + 2x2 + fila nómina/acción.
   /// Dueño: "Estadísticas Rápidas" (antes "Pulso del Día") con cobrado
   /// hoy (-> Dashboard) + por recoger (-> Pendiente) + alerta de
   /// turnos sin reporte.
@@ -1148,26 +1225,43 @@ class _HomeScreenState extends State<HomeScreen>
   /// «Mi Turno Hoy» sigue llevando a Mi Turno.
   Widget _tarjetaFinanciera(bool esDueno) {
     if (!esDueno) {
+      // Rediseño Argón: cabecera en una línea (título + chip
+      // compacto), 2x2 de métricas y una sola fila de acciones
+      // (nómina + acción de turno). Sin acción (turno ya
+      // cerrado), la nómina ocupa todo el ancho.
+      final chip = _chipTurnoCompacto();
+      final accion = _botonAccionTurno();
       return Tarjeta(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            InkWell(
-              borderRadius: BorderRadius.circular(AppRadio.md),
-              onTap: () => _ir(const MiTurnoScreen()),
-              child: const Row(
-                children: [
-                  Icon(Icons.schedule,
-                      size: 18,
-                      color: AppColores.naranja),
-                  SizedBox(width: 6),
-                  Text('Mi Turno Hoy',
-                      style: AppTexto.subtitulo),
-                  Spacer(),
-                  Icon(Icons.chevron_right,
-                      color: Colors.grey, size: 18),
+            Row(
+              children: [
+                Expanded(
+                  child: InkWell(
+                    borderRadius:
+                        BorderRadius.circular(AppRadio.md),
+                    onTap: () => _ir(const MiTurnoScreen()),
+                    child: const Row(
+                      children: [
+                        Icon(Icons.schedule,
+                            size: 18,
+                            color: AppColores.naranja),
+                        SizedBox(width: 6),
+                        Text('Mi Turno Hoy',
+                            style: AppTexto.subtitulo),
+                        SizedBox(width: 4),
+                        Icon(Icons.chevron_right,
+                            color: Colors.grey, size: 18),
+                      ],
+                    ),
+                  ),
+                ),
+                if (chip != null) ...[
+                  const SizedBox(width: AppEspacio.sm),
+                  chip,
                 ],
-              ),
+              ],
             ),
             const SizedBox(height: AppEspacio.sm),
             Row(
@@ -1207,19 +1301,35 @@ class _HomeScreenState extends State<HomeScreen>
             ),
             const SizedBox(height: AppEspacio.sm),
             // v1.12.0 (B3): vista previa de nómina en vivo.
-            SizedBox(
-              width: double.infinity,
-              child: OutlinedButton.icon(
-                icon: const Icon(Icons.account_balance_wallet_rounded,
-                    size: 18),
-                label: const Text('Mi nómina (vista previa)'),
-                onPressed: () => _ir(const MiNominaScreen()),
+            if (accion == null)
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  icon: const Icon(Icons.account_balance_wallet_rounded,
+                      size: 18),
+                  label: const Text('Mi nómina (vista previa)'),
+                  onPressed: () => _ir(const MiNominaScreen()),
+                ),
+              )
+            else
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      icon: const Icon(
+                          Icons.account_balance_wallet_rounded,
+                          size: 18),
+                      label: const Text('Mi nómina'),
+                      onPressed: () => _ir(const MiNominaScreen()),
+                    ),
+                  ),
+                  const SizedBox(width: AppEspacio.sm),
+                  Expanded(child: accion),
+                ],
               ),
-            ),
-            const SizedBox(height: AppEspacio.sm),
-            // v1.3.3: abrir/cerrar turno (botones rápidos con estado real).
-            _botonesTurno(),
             // v1.3.3: turnos abiertos sin resolver (auditoría ChatGPT #2).
+            // Solo se pinta si los hay (el método ya devuelve
+            // shrink cuando está vacío).
             _turnosPendientesCard(),
           ],
         ),
@@ -1264,9 +1374,11 @@ class _HomeScreenState extends State<HomeScreen>
           // el LISTADO exacto de los que pagaron el mes
           // (PagaronMesScreen, mismo conjunto NominaCalc que la
           // cifra; antes abría la Nómina, que no es lo que la cifra
-          // cuenta); la base se renombra «Pago de entrenadores»
-          // (mismo valor: lo que hay que pagarles en el mes) y es
-          // la que abre la Nómina.
+          // cuenta).
+          // post-1.15 (fix Jc): «Pago de entrenadores» ya NO es la
+          // base ×300 (bruto sin adelantos ni comisiones): es el
+          // NETO a pagar, suma de las filas de la Nómina
+          // (totalNetoNominaMes), y sigue abriendo la Nómina.
           Row(
             children: [
               Expanded(
@@ -1278,7 +1390,7 @@ class _HomeScreenState extends State<HomeScreen>
               Expanded(
                   child: _datoFinancieroTappable(
                       'Pago de entrenadores',
-                      fmtMonto(_pagaronMes * 300),
+                      fmtMonto(_pagoEntrenadoresNeto),
                       AppColores.exito,
                       () => _ir(const NominaScreen()))),
             ],
@@ -1364,72 +1476,88 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
-  /// v1.3.3: botones Abrir/Cerrar turno según el estado real del turno.
-  /// - Sin turno hoy → "🟢 Abrir turno".
-  /// - Abierto → "Turno abierto ✓ HH:mm" + "🔴 Cerrar turno".
-  /// - cerrado_sincronizado → "Turno cerrado ✓" (+ ⚠️ si tiene_incidencias).
-  /// - cerrado_local → "Turno cerrado ⏳ (pendiente de sincronizar)".
-  /// - (v25) tiene_incidencias es columna aparte: el ⚠️ se combina con
-  ///   el chip de estado, no es un estado propio.
-  /// - no_cerrado → chip informativo (ver sección Turnos pendientes).
-  /// - Estado desconocido → chip explícito (nunca cae al botón de cierre).
-  Widget _botonesTurno() {
+  /// v1.3.3: estado real del turno, desdoblado por el rediseño
+  /// Argón en chip compacto (cabecera) + botón de acción (fila
+  /// inferior). Misma lógica que el viejo _botonesTurno:
+  /// - Sin turno hoy → acción "Abrir turno" (verde), sin chip.
+  /// - Abierto → chip "Abierto ✓ HH:mm" + acción "Cerrar turno".
+  /// - cerrado_sincronizado → chip "Cerrado ✓" (+ aviso si incidencias).
+  /// - cerrado_local → chip "Cerrado ⏳" (+ aviso si incidencias).
+  /// - no_cerrado → chip "Sin cerrar" (ver Turnos pendientes).
+  /// - Estado desconocido → chip explícito, nunca botón de cierre.
+  /// (v25) tiene_incidencias es columna aparte: el aviso se combina
+  /// con el chip de estado, no es un estado propio.
+  Widget? _chipTurnoCompacto() {
     final t = _turnoActual;
-    final estado = '${t?['estado'] ?? ''}';
-    final tieneIncidencias = (t?['tiene_incidencias'] as int?) == 1;
-    final procesando = _procesandoTurno;
-
-    // Sin turno hoy: botón verde de apertura.
-    if (t == null) {
-      return SizedBox(
-        width: double.infinity,
-        child: ElevatedButton.icon(
-          icon: const Icon(Icons.play_arrow, size: 18),
-          label: Text(procesando ? 'Abriendo…' : 'Abrir turno'),
-          style: ElevatedButton.styleFrom(
-            backgroundColor: AppColores.exito,
-            foregroundColor: Colors.white,
-          ),
-          onPressed: procesando ? null : _abrirTurno,
-        ),
-      );
-    }
-
+    if (t == null) return null;
+    final estado = '${t['estado'] ?? ''}';
+    final tieneIncidencias = (t['tiene_incidencias'] as int?) == 1;
+    final sufijoInc = tieneIncidencias ? ' ⚠️' : '';
     final horaAp = horaCorta('${t['hora_apertura'] ?? ''}');
-    // (v25) El ⚠️ de incidencias se combina con el chip de estado.
-    final sufijoInc = tieneIncidencias ? ' con incidencias ⚠️' : '';
     switch (estado) {
-      case 'cerrado_sincronizado':
-        return _estadoTurnoChip(Icons.check_circle,
-            'Turno cerrado ✓$sufijoInc', AppColores.exito);
-      case 'cerrado_local':
-        return _estadoTurnoChip(
-            Icons.hourglass_bottom,
-            'Turno cerrado ⏳ (pendiente de sincronizar)$sufijoInc',
-            AppColores.alerta);
-      case 'no_cerrado':
-        return _estadoTurnoChip(Icons.history,
-            'Turno anterior sin cerrar — ver abajo', AppColores.alerta);
       case 'abierto_local':
       case 'abierto_sincronizado':
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            _estadoTurnoChip(Icons.check_circle,
-                'Turno abierto ✓ $horaAp', AppColores.exito),
-            const SizedBox(height: 8),
-            OutlinedButton.icon(
-              icon: const Icon(Icons.lock_open, size: 18),
-              label: Text(procesando ? 'Procesando…' : 'Cerrar turno'),
-              onPressed: procesando ? null : _cierreRapido,
-            ),
-          ],
+        return _chipTurnoTexto(
+            'Abierto ✓ $horaAp', AppColores.exito);
+      case 'cerrado_sincronizado':
+        return _chipTurnoTexto(
+            'Cerrado ✓$sufijoInc', AppColores.exito);
+      case 'cerrado_local':
+        return _chipTurnoTexto(
+            'Cerrado ⏳$sufijoInc', AppColores.alerta);
+      case 'no_cerrado':
+        return _chipTurnoTexto('Sin cerrar', AppColores.alerta);
+      default:
+        AppLog.error('home', 'turno_estado_desconocido', d: estado);
+        return _chipTurnoTexto('Desconocido', AppColores.alerta);
+    }
+  }
+
+  Widget _chipTurnoTexto(String texto, Color color) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: color.withValues(alpha: 0.4)),
+      ),
+      child: Text(texto,
+          style: TextStyle(
+              color: color,
+              fontSize: 12,
+              fontWeight: FontWeight.w600)),
+    );
+  }
+
+  /// Botón de acción del turno para la fila inferior de la
+  /// tarjeta del entrenador. Null cuando no hay acción (turno
+  /// ya cerrado, sin cerrar o desconocido): en ese caso la
+  /// nómina ocupa todo el ancho.
+  Widget? _botonAccionTurno() {
+    final t = _turnoActual;
+    final estado = '${t?['estado'] ?? ''}';
+    final procesando = _procesandoTurno;
+    if (t == null) {
+      return ElevatedButton.icon(
+        icon: const Icon(Icons.play_arrow, size: 18),
+        label: Text(procesando ? 'Abriendo…' : 'Abrir turno'),
+        style: ElevatedButton.styleFrom(
+          backgroundColor: AppColores.exito,
+          foregroundColor: Colors.white,
+        ),
+        onPressed: procesando ? null : _abrirTurno,
+      );
+    }
+    switch (estado) {
+      case 'abierto_local':
+      case 'abierto_sincronizado':
+        return OutlinedButton.icon(
+          icon: const Icon(Icons.lock_open, size: 18),
+          label: Text(procesando ? 'Procesando…' : 'Cerrar turno'),
+          onPressed: procesando ? null : _cierreRapido,
         );
       default:
-        // Estado desconocido: chip explícito, nunca botón de cierre.
-        AppLog.error('home', 'turno_estado_desconocido', d: estado);
-        return _estadoTurnoChip(Icons.help_outline,
-            'Estado de turno desconocido', AppColores.alerta);
+        return null;
     }
   }
 
@@ -1489,29 +1617,6 @@ class _HomeScreenState extends State<HomeScreen>
       default:
         return t;
     }
-  }
-
-  Widget _estadoTurnoChip(IconData icono, String texto, Color color) {
-    return Container(
-      padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.1),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: color.withValues(alpha: 0.4)),
-      ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(icono, size: 18, color: color),
-          const SizedBox(width: 8),
-          Flexible(
-            child: Text(texto,
-                style: TextStyle(
-                    color: color, fontWeight: FontWeight.w600)),
-          ),
-        ],
-      ),
-    );
   }
 
   /// v1.3.3: abre el turno (idempotente, offline-first).
@@ -1688,14 +1793,39 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
-  /// Dato financiero tocable (navega al detalle).
+  /// Dato financiero tocable (navega al detalle). Rediseño
+  /// Argón: cada celda lleva superficie sutil + micro-chevron
+  /// para que se vea que es un botón independiente (antes
+  /// parecían texto estático).
   Widget _datoFinancieroTappable(String titulo,
       String valor, Color color, VoidCallback onTap) {
     return InkWell(
       borderRadius:
           BorderRadius.circular(AppRadio.md),
       onTap: onTap,
-      child: _datoFinanciero(titulo, valor, color),
+      child: Container(
+        padding: const EdgeInsets.all(AppEspacio.sm),
+        decoration: BoxDecoration(
+          color: Theme.of(context)
+              .scaffoldBackgroundColor
+              .withValues(alpha: 0.5),
+          borderRadius: BorderRadius.circular(AppRadio.sm),
+        ),
+        child: Stack(
+          children: [
+            Padding(
+              padding: const EdgeInsets.only(right: 16),
+              child: _datoFinanciero(titulo, valor, color),
+            ),
+            const Positioned(
+              top: 0,
+              right: 0,
+              child: Icon(Icons.arrow_outward_rounded,
+                  size: 12, color: Colors.grey),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -1778,11 +1908,13 @@ class _HomeScreenState extends State<HomeScreen>
         _modulo(Icons.inventory_2_rounded, 'Suplementos',
             () => _ir(const SuplementosScreen())),
         _modulo(Icons.event_busy_rounded, 'Vencimientos',
-            () => _ir(const ListasScreen())),
+            () => _ir(const ListasScreen()),
+            badge: _vencen + _atras),
         _modulo(Icons.report_rounded,
             'Incidencias',
             () =>
-                _ir(const ListaIncidenciasScreen())),
+                _ir(const ListaIncidenciasScreen()),
+            badge: _incidenciasAbiertas),
         _modulo(Icons.dashboard_rounded, 'Dashboard',
             () => _ir(const DashboardScreen())),
         if (_auth.isAdmin)
@@ -1802,8 +1934,8 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   /// v1.3.6 (Jc): botón horizontal de ancho completo para Buscar cliente
-  /// al cierre de la sección MÓDULOS. v1.3.6 (Argón, diseño): badge
-  /// squircle de acción + chevron_rounded al extremo.
+  /// en el Mostrador Rápido (rediseño Argón, zona 2). v1.3.6 (Argón,
+  /// diseño): badge squircle de acción + chevron_rounded al extremo.
   Widget _botonBuscarCliente() {
     return Tarjeta(
       onTap: () => _ir(const BuscarScreen()),
@@ -1816,31 +1948,6 @@ class _HomeScreenState extends State<HomeScreen>
           const SizedBox(width: AppEspacio.sm),
           Expanded(
             child: Text('Buscar cliente',
-                style: AppTexto.secundario
-                    .copyWith(fontWeight: FontWeight.w600)),
-          ),
-          Icon(Icons.chevron_right_rounded,
-              size: 20,
-              color: AppColores.naranja.withValues(alpha: 0.5)),
-        ],
-      ),
-    );
-  }
-
-  /// v1.8.0: botón horizontal de ancho completo para Servicios por
-  /// dosis (mismo patrón visual que Buscar cliente).
-  Widget _botonServicios() {
-    return Tarjeta(
-      onTap: () => _ir(const ServiciosScreen()),
-      padding: const EdgeInsets.symmetric(
-          horizontal: AppEspacio.md, vertical: AppEspacio.md),
-      child: Row(
-        children: [
-          IconoModuloBadge.naranja(Icons.bolt_rounded,
-              tamanoIcono: 22),
-          const SizedBox(width: AppEspacio.sm),
-          Expanded(
-            child: Text('Servicios ⚡ dosis',
                 style: AppTexto.secundario
                     .copyWith(fontWeight: FontWeight.w600)),
           ),
@@ -1871,7 +1978,7 @@ class _HomeScreenState extends State<HomeScreen>
               tamanoIcono: 21),
           const SizedBox(width: AppEspacio.sm),
           Expanded(
-            child: Text('Avisos WhatsApp de hoy',
+            child: Text('Bandeja WhatsApp · Avisos de hoy',
                 style: AppTexto.secundario
                     .copyWith(fontWeight: FontWeight.w600)),
           ),
@@ -1942,9 +2049,11 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
-  /// v1.3.3: resto de herramientas. Ninguna pantalla existente
-  /// se pierde: Pagos realizados, Papelera, Transferencia,
-  /// Cumpleaños, Mis cobros (admin) y Salir siguen aquí.
+  /// v1.3.3: resto de herramientas.
+  /// post-1.15 (Jc): «Pagos realizados» sale de MÁS: es la misma
+  /// lista que «Pagaron el mes» en Estadísticas Rápidas, así que
+  /// el botón era redundante. La pantalla sigue en el código por
+  /// si se recupera, pero sin entrada en el grid.
   Widget _gridMas() {
     return GridView.count(
       crossAxisCount: 3,
@@ -1954,21 +2063,19 @@ class _HomeScreenState extends State<HomeScreen>
       crossAxisSpacing: AppEspacio.sm,
       childAspectRatio: 1.4,
       children: [
-        _herramienta(Icons.verified_rounded, 'Pagos realizados',
-            () => _ir(const PagosRealizadosScreen())),
-        _herramienta(Icons.delete_rounded, 'Papelera',
-            () => _ir(const PapeleraScreen())),
         _herramienta(Icons.account_balance_rounded,
             'Transferencia',
             () => _ir(const TransferenciaScreen())),
-        _herramienta(Icons.cake_rounded, 'Cumpleaños',
-            () => _ir(const CumpleanosScreen())),
         // v1.5.0 (Bloque G): bandeja de invitados de la app de clientes.
         _herramienta(Icons.person_add_alt_rounded, 'Invitados',
             () => _ir(const InvitadosScreen())),
+        _herramienta(Icons.cake_rounded, 'Cumpleaños',
+            () => _ir(const CumpleanosScreen())),
         if (_auth.isAdmin)
           _herramienta(Icons.badge_rounded, 'Mis cobros',
               () => _ir(const MiTurnoScreen())),
+        _herramienta(Icons.delete_rounded, 'Papelera',
+            () => _ir(const PapeleraScreen())),
         _herramienta(Icons.logout_rounded, 'Salir', _salir,
             color: AppColores.error),
       ],
@@ -2104,12 +2211,15 @@ class _FabAccionesRapidasState extends State<_FabAccionesRapidas>
               ignoring: !_abierto,
               child: GestureDetector(
                 behavior: HitTestBehavior.opaque,
-                onTap: () => setState(() => _abierto = false),
+                // Rediseño Argón: el fondo cierra con _toggle
+                // (antes solo ponía _abierto = false y la animación
+                // quedaba a medias, sin _ctrl.reverse()).
+                onTap: _toggle,
                 child: AnimatedOpacity(
                   duration: const Duration(milliseconds: 200),
                   opacity: _abierto ? 1.0 : 0.0,
                   child: Container(
-                    color: Colors.black.withOpacity(0.55),
+                    color: Colors.black.withValues(alpha: 0.55),
                   ),
                 ),
               ),
@@ -2134,26 +2244,29 @@ class _FabAccionesRapidasState extends State<_FabAccionesRapidas>
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
-                    _accionAnimada(0, Icons.water_drop_rounded,
+                    // Rediseño Argón: membresías primero (las 3
+                    // más usadas) y dosis después, con separador
+                    // de 12 px entre bloques.
+                    _accionAnimada(0, Icons.payments_rounded, 'Cobrar',
+                        () => _irCerrando(widget.onCobrar)),
+                    const SizedBox(height: 8),
+                    _accionAnimada(1, Icons.today_rounded, 'Pago diario',
+                        () => _irCerrando(widget.onPagoDiario)),
+                    const SizedBox(height: 8),
+                    _accionAnimada(2, Icons.person_add_alt_1_rounded,
+                        'Inscribir', () => _irCerrando(widget.onInscribir)),
+                    const SizedBox(height: 12),
+                    _accionAnimada(3, Icons.water_drop_rounded,
                         'Vender agua',
                         () => _irCerrando(widget.onVenderAgua)),
                     const SizedBox(height: 8),
-                    _accionAnimada(1, Icons.science_rounded,
+                    _accionAnimada(4, Icons.science_rounded,
                         'Vender ración',
                         () => _irCerrando(widget.onVenderRacion)),
                     const SizedBox(height: 8),
-                    _accionAnimada(2, Icons.local_drink_rounded,
+                    _accionAnimada(5, Icons.local_drink_rounded,
                         'Vender combo',
                         () => _irCerrando(widget.onVenderCombo)),
-                    const SizedBox(height: 8),
-                    _accionAnimada(3, Icons.payments_rounded, 'Cobrar',
-                        () => _irCerrando(widget.onCobrar)),
-                    const SizedBox(height: 8),
-                    _accionAnimada(4, Icons.today_rounded, 'Pago diario',
-                        () => _irCerrando(widget.onPagoDiario)),
-                    const SizedBox(height: 8),
-                    _accionAnimada(5, Icons.person_add_alt_1_rounded,
-                        'Inscribir', () => _irCerrando(widget.onInscribir)),
                   ],
                 ),
               ),
@@ -2209,10 +2322,11 @@ class _FabAccionesRapidasState extends State<_FabAccionesRapidas>
   /// escalonada según su índice (la de arriba sale última).
   Widget _accionAnimada(
       int index, IconData icono, String texto, VoidCallback onTap) {
-    // Orden visual: Vender agua (0) arriba … Inscribir (5) junto al
-    // rayo. La animación entra de abajo hacia arriba. Con 6 píldoras
-    // el escalonado se reparte en el mismo tramo total (0.3) que con
-    // 3 para que ningún Interval pase de 1.0.
+    // Orden visual (rediseño Argón): Cobrar (0) arriba …
+    // Vender combo (5) junto al rayo. La animación entra de abajo
+    // hacia arriba. Con 6 píldoras el escalonado se reparte en el
+    // mismo tramo total (0.3) que con 3 para que ningún Interval
+    // pase de 1.0.
     const total = 6;
     final inicio = (0.3 / (total - 1)) * (total - 1 - index);
     final itemAnim = CurvedAnimation(

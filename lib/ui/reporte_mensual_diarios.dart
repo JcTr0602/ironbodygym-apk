@@ -5,7 +5,9 @@ library;
 
 import 'package:flutter/material.dart';
 
+import '../auth.dart';
 import '../negocio.dart';
+import '../tiempo.dart';
 import 'componentes.dart';
 import 'diseno.dart';
 
@@ -20,8 +22,11 @@ class ReporteMensualDiariosScreen extends StatefulWidget {
 class _ReporteMensualDiariosScreenState
     extends State<ReporteMensualDiariosScreen> {
   bool _cargando = true;
+  // Argón stats MEDIO: DateTime.now() local en vez de hora Habana
+  // (el último día del mes después de las 7-8 PM abría el mes
+  // siguiente en teléfonos con zona distinta).
   DateTime _mes = DateTime(
-      DateTime.now().year, DateTime.now().month);
+      ahoraHabana().year, ahoraHabana().month);
   Map<String, dynamic> _datos = {};
 
   static const _meses = [
@@ -38,8 +43,14 @@ class _ReporteMensualDiariosScreenState
 
   Future<void> _cargar() async {
     setState(() => _cargando = true);
-    final datos =
-        await resumenMensualDiarios(_mes.year, _mes.month);
+    // Argón stats MENOR: la pantalla la abre también el entrenador
+    // desde Pago diario. El dueño ve todo; el entrenador, solo lo
+    // suyo (resumenMensualDiarios ya soporta soloTelegramId; -1 si
+    // no hay id, para no mostrar nada en vez de todo).
+    final datos = await resumenMensualDiarios(_mes.year, _mes.month,
+        soloTelegramId: AuthService().isOwner
+            ? null
+            : (AuthService().telegramId ?? -1));
     if (mounted) {
       setState(() {
         _datos = datos;
@@ -94,7 +105,7 @@ class _ReporteMensualDiariosScreenState
                       icon: const Icon(
                           Icons.chevron_right),
                       onPressed: () {
-                        final ahora = DateTime.now();
+                        final ahora = ahoraHabana();
                         final limite = DateTime(
                             ahora.year, ahora.month);
                         if (_mes.isBefore(limite)) {
@@ -178,6 +189,31 @@ class _ReporteMensualDiariosScreenState
                       ),
                   ],
                 ),
+                // Argón stats MENOR: resumenMensualDiarios agrupa
+                // también 'noche'; sin tarjeta, ese dinero sumaba en
+                // el total sin aparecer en ninguna tarjeta de turno.
+                if (((porTurno['noche']?['total'] as num?)?.toDouble() ??
+                        0) >
+                    0)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: Tarjeta(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text('Noche', style: AppTexto.secundario),
+                          Text(
+                            '${fmtMonto((porTurno['noche']?['total'] as num?)?.toDouble() ?? 0)} CUP',
+                            style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 18),
+                          ),
+                          Text(
+                              '${((porTurno['noche']?['cantidad'] as num?)?.toDouble() ?? 0).toInt()} pagos'),
+                        ],
+                      ),
+                    ),
+                  ),
                 const SizedBox(height: 16),
                 // Por entrenador
                 const Text('Por entrenador',

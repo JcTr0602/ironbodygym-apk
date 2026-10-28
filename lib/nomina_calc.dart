@@ -411,6 +411,34 @@ class NominaCalc {
     return (dosis: dosis, total: total);
   }
 
+  /// Comisiones por dosis MES A MES (fix Argón post-1.15, MEDIO):
+  /// el libro de adelantos arrastra deuda mes a mes, así que
+  /// necesita la comisión de CADA mes, no solo la del mes en
+  /// curso. Con solo el mes en curso, un mes anterior con
+  /// adelantos por encima de su base pero cubiertos por sus
+  /// dosis generaba una deuda entrante falsa en el mes actual.
+  /// Puro sobre el espejo de ventas (misma función que el mes
+  /// en curso). El avance de mes es local para no importar el
+  /// libro de adelantos (DateTime normaliza dic→ene solo).
+  static Map<String, double> comisionesPorMesDesdeVentas(
+    List<Map<String, dynamic>> ventas,
+    int telegramId,
+    String primero,
+    String hastaMes,
+  ) {
+    final out = <String, double>{};
+    var mes = primero;
+    while (mes.compareTo(hastaMes) <= 0) {
+      out[mes] = comisionDosisDesdeVentas(ventas, telegramId, mes).total;
+      final y = int.parse(mes.substring(0, 4));
+      final m = int.parse(mes.substring(5, 7));
+      final f = DateTime(y, m + 1);
+      mes = '${f.year.toString().padLeft(4, '0')}-'
+          '${f.month.toString().padLeft(2, '0')}';
+    }
+    return out;
+  }
+
   /// Nómina del dueño (fix 1.15, PURO): entrenadores a evaluar para
   /// la comisión = unión de quienes REGISTRARON ventas de servicios
   /// y quienes GANARON comisión (comision_entrenador_id). Sin la

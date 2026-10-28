@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../auth.dart';
 import '../localdb.dart';
 import 'diseno.dart';
 
@@ -111,6 +112,15 @@ class _ReporteMargenesScreenState
 
   @override
   Widget build(BuildContext context) {
+    // Argón stats MEDIO: el docstring dice solo dueño, pero no había
+    // gate (un entrenador por ruta veía costos USD y márgenes).
+    if (!AuthService().isOwner) {
+      return Scaffold(
+          appBar: AppBar(
+              title: const Text('Márgenes de Suplementos')),
+          body: const Center(
+              child: Text('Solo el dueño ve este reporte.')));
+    }
     double totalMargenInventario = 0;
     for (final r in _datos) {
       totalMargenInventario +=
@@ -203,7 +213,9 @@ class _ReporteMargenesScreenState
                             Text(
                               margenUnit == null
                                   ? '—'
-                                  : '+\$${margenUnit.toStringAsFixed(2)}',
+                                  : margenUnit < 0
+                                      ? '-\$${(-margenUnit).toStringAsFixed(2)}'
+                                      : '+\$${margenUnit.toStringAsFixed(2)}',
                               style: TextStyle(
                                 fontWeight:
                                     FontWeight.bold,

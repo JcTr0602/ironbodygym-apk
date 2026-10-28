@@ -41,6 +41,18 @@ Map<String, dynamic> payloadInscripcionVentaSuplemento({
   required String fecha,
   required String metodoPago,
 }) {
+  // Lote 3 (BLOQUEANTE): USD sin tasa válida no se puede encolar
+  // (antes se omitía usd_tasa en silencio y la venta quedaba en USD
+  // sin conversión, igual que el bloqueo de la venta simple del
+  // lote 1). La pantalla además avisa antes de confirmar.
+  // Luna lote-3 MEDIO: NaN e infinito pasaban `<= 0` (NaN no es
+  // menor ni mayor que 0; infinito tampoco es <= 0). Se exige
+  // finito explícito.
+  if (moneda == 'USD' &&
+      (usdTasa == null || !usdTasa.isFinite || usdTasa <= 0)) {
+    throw ArgumentError(
+        'Venta en USD sin tasa válida (usdTasa requerido)');
+  }
   return {
     'cliente': {
       'nombre': nombre,
@@ -63,15 +75,6 @@ Map<String, dynamic> payloadInscripcionVentaSuplemento({
     'metodo_pago': metodoPago,
   };
 }
-
-/// 'entregado' optimista de la fila espejo de la venta: la
-/// transferencia va directo a la cuenta del dueño y nunca queda
-/// pendiente, la registre quien la registre.
-int entregadoOptimistaInscripcionVenta({
-  required bool esDueno,
-  required String metodoPago,
-}) =>
-    (esDueno || metodoPago == 'transferencia') ? 1 : 0;
 
 class VentaSuplementoInscripcionScreen extends StatefulWidget {
   final Map<String, dynamic> suplemento;
@@ -155,6 +158,23 @@ class _VentaSuplementoInscripcionScreenState
       return;
     }
 
+    // Lote 3 (BLOQUEANTE, espejo del bloqueo USD de la venta simple):
+    // sin tasa válida no se puede confirmar una venta en USD.
+    // Luna lote-3 MEDIO: NaN e infinito también pasan `<= 0`.
+    if (widget.moneda == 'USD' &&
+        (widget.usdTasa == null ||
+            !widget.usdTasa!.isFinite ||
+            widget.usdTasa! <= 0)) {
+      await DialogoApp.confirmar(context,
+          titulo: 'Revisa la valoración',
+          mensaje: 'Esta venta es en USD pero no hay una tasa válida. '
+              'Vuelve a la pantalla anterior y revisa la valoración '
+              'antes de inscribir.',
+          aceptar: 'Entendido',
+          cancelar: '');
+      return;
+    }
+
     final totalTxt = textoTotalVenta(_total, widget.moneda, widget.usdTasa);
     final ok = await DialogoApp.confirmar(
       context,
@@ -233,6 +253,20 @@ class _VentaSuplementoInscripcionScreenState
         return;
       }
       unawaited(SyncEngine.instance.push());
+      // Lote 3 (MEDIO): sin conexión (o antes del pull) el cliente
+      // recién inscrito aún no existe en el espejo local: no aparece
+      // en la lista ni en Control de Acceso hasta sincronizar. Se
+      // avisa antes de salir, en vez de dejarlo descubrirlo.
+      if (mounted) {
+        await DialogoApp.confirmar(context,
+            titulo: 'Inscripción en cola',
+            mensaje: 'Cliente, mes gratis y venta quedaron encolados. '
+                'El cliente aparecerá en la lista de clientes, en '
+                'Control de Acceso y en la gaveta del turno cuando el '
+                'teléfono sincronice.',
+            aceptar: 'Entendido',
+            cancelar: '');
+      }
       if (mounted) Navigator.pop(context, true);
     } finally {
       if (mounted) setState(() => _guardando = false);

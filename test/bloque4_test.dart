@@ -546,10 +546,12 @@ void main() {
         rendimiento: 100,
         precioSinAgua: 600,
         precioConAgua: 900,
+        // Argón stats MENOR: el margen con agua resta el pomo.
+        costoAgua: 220,
       );
       expect(sim.costoPorDosis, 100);
       expect(sim.margenSinAgua, 500);
-      expect(sim.margenConAgua, 800);
+      expect(sim.margenConAgua, 580);
     });
 
     test('CSV escapa comas y comillas', () {

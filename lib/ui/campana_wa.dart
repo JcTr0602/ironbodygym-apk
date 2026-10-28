@@ -22,6 +22,7 @@ import '../acceso_app_cache.dart';
 import '../auth.dart';
 import '../localdb.dart';
 import '../negocio.dart';
+import '../tiempo.dart';
 import 'diseno.dart';
 
 class CampanaWaScreen extends StatefulWidget {
@@ -34,6 +35,12 @@ class CampanaWaScreen extends StatefulWidget {
 class _CampanaWaScreenState extends State<CampanaWaScreen> {
   static const _clavePrefs = 'campana_wa_v1';
   static const _tope = 40;
+  // Historial de enviados del día (lote 3, Argón MEDIO): al cerrar
+  // una tanda se borra su estado (_clavePrefs) pero NO quién ya
+  // recibió mensaje hoy. Sin esto, una segunda tanda el mismo día
+  // reconstruía la audiencia desde cero y repetía los primeros 40
+  // (y los del 41 en adelante nunca avanzaban).
+  static const _claveEnviadosPrefijo = 'campana_wa_enviados_';
 
   static const _textoActivacion =
       'Hola {nombre} 👋 Soy de Iron Body Gym. Tu acceso a la app de '
@@ -212,10 +219,56 @@ class _CampanaWaScreenState extends State<CampanaWaScreen> {
     ];
   }
 
+  String get _claveEnviadosHoy =>
+      '$_claveEnviadosPrefijo${hoyHabanaIso()}';
+
+  Future<Set<int>> _enviadosHoy() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString(_claveEnviadosHoy);
+      if (raw == null || raw.isEmpty) return <int>{};
+      return {
+        for (final e in jsonDecode(raw) as List)
+          if (e is num) e.toInt()
+      };
+    } catch (_) {
+      return <int>{};
+    }
+  }
+
+  Future<void> _registrarEnviadoHoy(int clienteId) async {
+    if (clienteId <= 0) return;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final enviados = await _enviadosHoy();
+      // Luna lote-3 MENOR: podar ANTES de la salida por id repetido;
+      // antes, si el id ya estaba registrado, el return evitaba la
+      // poda y las claves de días viejos se acumulaban.
+      for (final k in prefs.getKeys()) {
+        if (k.startsWith(_claveEnviadosPrefijo) &&
+            k != _claveEnviadosHoy) {
+          await prefs.remove(k);
+        }
+      }
+      if (!enviados.add(clienteId)) return;
+      await prefs.setString(
+          _claveEnviadosHoy, jsonEncode(enviados.toList()));
+    } catch (_) {}
+  }
+
   Future<List<Map<String, dynamic>>> _construirAudiencia() async {
     final lista = _audiencia == 'sin_acceso'
         ? await _audienciaSinAcceso()
         : _audienciaDesdeCache();
+    // Lote 3: excluir a quienes ya recibieron mensaje hoy, ANTES del
+    // tope, para que una segunda tanda avance más allá de los 40.
+    final enviados = await _enviadosHoy();
+    if (enviados.isNotEmpty) {
+      lista.removeWhere((a) {
+        final cid = (a['cliente_id'] as num?)?.toInt() ?? 0;
+        return cid > 0 && enviados.contains(cid);
+      });
+    }
     lista.sort((a, b) =>
         '${a['nombre']}'.toLowerCase().compareTo('${b['nombre']}'.toLowerCase()));
     return lista.take(_tope).toList();
@@ -345,6 +398,12 @@ class _CampanaWaScreenState extends State<CampanaWaScreen> {
 
   Future<void> _resolver(Map<String, dynamic> item, String estado) async {
     item['estado'] = estado;
+    // Lote 3: el envío real queda registrado en el historial del día
+    // aunque falle el guardado de la tanda (el mensaje ya salió).
+    if (estado == 'enviado') {
+      final cid = (item['cliente_id'] as num?)?.toInt() ?? 0;
+      await _registrarEnviadoHoy(cid);
+    }
     final ok = await _persistir();
     if (!mounted) return;
     if (!ok) {
@@ -364,6 +423,9 @@ class _CampanaWaScreenState extends State<CampanaWaScreen> {
 
   Future<void> _guardarPlantillas(
       List<Map<String, dynamic>> nuevas) async {
+    // Lote 3 (MENOR): la guarda no puede vivir solo en el botón
+    // (oculto para no-dueños); el método también la exige.
+    if (!AuthService().isOwner) return;
     await LocalDb.instance.queueOp(
       opUuid: const Uuid().v4(),
       tipo: 'ajuste',
@@ -386,6 +448,7 @@ class _CampanaWaScreenState extends State<CampanaWaScreen> {
   }
 
   Future<void> _editarPlantilla({Map<String, dynamic>? existente}) async {
+    if (!AuthService().isOwner) return;
     final nomCtrl =
         TextEditingController(text: existente?['nombre'] as String? ?? '');
     final txtCtrl =
@@ -459,6 +522,7 @@ class _CampanaWaScreenState extends State<CampanaWaScreen> {
   }
 
   Future<void> _gestionarPlantillas() async {
+    if (!AuthService().isOwner) return;
     await showModalBottomSheet(
       context: context,
       builder: (ctx) => SafeArea(

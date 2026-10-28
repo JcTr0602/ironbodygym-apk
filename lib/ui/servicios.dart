@@ -15,6 +15,7 @@ import 'diseno.dart';
 import 'ranking_servicios.dart';
 import 'servicios_admin.dart';
 import 'servicios_estadisticas.dart';
+import 'servicios_historial.dart';
 
 /// v1.8.0: Servicios por dosis — pantalla de venta y cuadre.
 ///
@@ -48,7 +49,9 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
   Map<String, dynamic> _cuadre = const {};
   List<Map<String, dynamic>> _ventasHoy = [];
   List<Map<String, dynamic>> _ventasTodas = [];
+  List<Map<String, dynamic>> _ventasHistorial = [];
   List<Map<String, dynamic>> _salidas = [];
+  List<Map<String, dynamic>> _salidasHistorial = [];
   Set<int> _reversadas = {};
   Map<int, String> _personas = {};
   int? _miTid;
@@ -118,11 +121,11 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
       for (final l in pomos)
         if ((l['id'] as num?) != null) (l['id'] as num).toInt(),
     };
-    final deHoy = ventas.where((v) {
-      if ('${v['fecha'] ?? ''}'.length < 10 ||
-          '${v['fecha']}'.substring(0, 10) != hoy) {
-        return false;
-      }
+    // Historial (pedido Jc 2026-10-28): el mismo predicado de rol
+    // que «Ventas de hoy», sin el filtro de fecha. Las salidas sin
+    // venta solo las registra el dueño, así que al entrenador no
+    // le llega ninguna.
+    bool visibleParaMi(Map<String, dynamic> v) {
       if (auth.isOwner) return true;
       // Ítem 8 (trazabilidad): el entrenador ve las ventas donde es
       // el VENDEDOR y las hechas de SU pomo (p. ej. por el dueño).
@@ -132,10 +135,21 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
           LocalDb.normalizarTelegramId(v['registrado_por']);
       return vend == tid ||
           misPomosIds.contains((v['pomo_id'] as num?)?.toInt());
+    }
+
+    final deHoy = ventas.where((v) {
+      if ('${v['fecha'] ?? ''}'.length < 10 ||
+          '${v['fecha']}'.substring(0, 10) != hoy) {
+        return false;
+      }
+      return visibleParaMi(v);
     }).toList()
       ..sort((a, b) =>
           ((b['id'] as num?)?.toInt() ?? 0)
               .compareTo((a['id'] as num?)?.toInt() ?? 0));
+    final historial = ventas.where(visibleParaMi).toList();
+    final salidasHistorial =
+        auth.isOwner ? salidas : <Map<String, dynamic>>[];
     final cuadre = tid == null
         ? const <String, dynamic>{}
         : await cuadreServiciosDia(tid, hoy);
@@ -161,7 +175,9 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
       _cuadre = cuadre;
       _ventasHoy = deHoy;
       _ventasTodas = ventas;
+      _ventasHistorial = historial;
       _salidas = salidas;
+      _salidasHistorial = salidasHistorial;
       _reversadas = reversadas;
       _cargando = false;
     });
@@ -1045,6 +1061,42 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
       appBar: AppBar(
         title: const Text('Servicios ⚡'),
         actions: [
+          // Rediseño opción A (Jc 2026-10-28): Administración,
+          // Estadísticas y Ranking suben al AppBar; el cuerpo queda
+          // para Mostrador, Cuadre y Ventas. Ítem 9: ranking — dueño
+          // siempre; entrenador solo con su permiso (fail-closed).
+          if (_esDueno ||
+              PermisosEntrenador().canVerRankingServicios)
+            IconButton(
+              tooltip: 'Ranking de compradores',
+              icon: const Icon(Icons.emoji_events_outlined),
+              onPressed: () => Navigator.push(
+                context,
+                MaterialPageRoute(
+                    builder: (_) => const RankingServiciosScreen()),
+              ),
+            ),
+          if (_esDueno)
+            IconButton(
+              tooltip: 'Estadísticas',
+              icon: const Icon(Icons.bar_chart),
+              onPressed: () => Navigator.push(
+                context,
+                MaterialPageRoute(
+                    builder: (_) =>
+                        const ServiciosEstadisticasScreen()),
+              ).then((_) => _cargar()),
+            ),
+          if (_esDueno)
+            IconButton(
+              tooltip: 'Administración',
+              icon: const Icon(Icons.tune),
+              onPressed: () => Navigator.push(
+                context,
+                MaterialPageRoute(
+                    builder: (_) => const ServiciosAdminScreen()),
+              ).then((_) => _cargar()),
+            ),
           IconButton(
             tooltip: 'Actualizar',
             icon: _actualizando
@@ -1070,72 +1122,112 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                   _botonesVenta(),
                   const SizedBox(height: AppEspacio.md),
                   _tarjetaCuadre(),
-                  if (_esDueno) ...[
-                    const SizedBox(height: AppEspacio.md),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: OutlinedButton.icon(
-                            onPressed: () => Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                  builder: (_) =>
-                                      const ServiciosAdminScreen()),
-                            ).then((_) => _cargar()),
-                            icon: const Icon(Icons.tune),
-                            label: const Text('Administración'),
-                          ),
-                        ),
-                        const SizedBox(width: AppEspacio.sm),
-                        Expanded(
-                          child: OutlinedButton.icon(
-                            onPressed: () => Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                  builder: (_) =>
-                                      const ServiciosEstadisticasScreen()),
-                            ),
-                            icon: const Icon(Icons.bar_chart),
-                            label: const Text('Estadísticas'),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                  // Ítem 9: ranking de compradores — dueño siempre;
-                  // entrenador solo con su permiso (apagado por
-                  // defecto, fail-closed sin foto de permisos).
-                  if (_esDueno ||
-                      PermisosEntrenador().canVerRankingServicios) ...[
-                    const SizedBox(height: AppEspacio.md),
-                    SizedBox(
-                      width: double.infinity,
-                      child: OutlinedButton.icon(
+                  const SizedBox(height: AppEspacio.lg),
+                  // Historial completo (pedido Jc 2026-10-28):
+                  // todas las operaciones de raciones, combos y
+                  // agua, más salidas sin venta, con filtros.
+                  Row(
+                    children: [
+                      Text('Ventas de hoy',
+                          style:
+                              AppTexto.titulo.copyWith(fontSize: 16)),
+                      const Spacer(),
+                      TextButton.icon(
+                        icon: const Icon(Icons.history, size: 18),
+                        label: const Text('Historial'),
                         onPressed: () => Navigator.push(
                           context,
                           MaterialPageRoute(
-                              builder: (_) =>
-                                  const RankingServiciosScreen()),
+                            builder: (_) => ServiciosHistorialScreen(
+                              ventas: _ventasHistorial,
+                              salidas: _salidasHistorial,
+                              reversadas: _reversadas,
+                              esDueno: _esDueno,
+                              personas: _personas,
+                            ),
+                          ),
                         ),
-                        icon: const Icon(Icons.emoji_events_outlined),
-                        label: const Text('Ranking de compradores'),
                       ),
-                    ),
-                  ],
-                  const SizedBox(height: AppEspacio.lg),
-                  Text('Ventas de hoy',
-                      style: AppTexto.titulo.copyWith(fontSize: 16)),
+                    ],
+                  ),
                   const SizedBox(height: AppEspacio.sm),
                   if (_ventasHoy.isEmpty)
-                    Text('Sin ventas registradas hoy.',
-                        style: AppTexto.cuerpo.copyWith(
-                            color: AppColores.textoSecundario(
-                                context)))
+                    Center(
+                      child: Container(
+                        padding: const EdgeInsets.all(AppEspacio.lg),
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(12),
+                          color: AppColores.textoSecundario(context)
+                              .withValues(alpha: 0.08),
+                        ),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              Icons.receipt_long,
+                              color: AppColores.textoSecundario(context)
+                                  .withValues(alpha: 0.5),
+                            ),
+                            const SizedBox(height: AppEspacio.sm),
+                            Text('Sin ventas registradas hoy.',
+                                style: AppTexto.cuerpo.copyWith(
+                                    color: AppColores.textoSecundario(
+                                        context))),
+                          ],
+                        ),
+                      ),
+                    )
                   else
                     for (final v in _ventasHoy) _filaVenta(v),
                 ],
               ),
             ),
+    );
+  }
+
+  // Rediseño opción A: etiqueta pequeña del encabezado del pomo.
+  // Misma semántica que el título viejo (rol + principal + titular).
+  String _etiquetaPomo(Map<String, dynamic>? pomo) {
+    if (pomo == null) return 'SIN POMO ACTIVO';
+    if (!_esDueno || pomo['titular_tid'] == _miTid) return 'MI POMO';
+    if ((pomo['es_principal'] as num?)?.toInt() == 1) {
+      return 'POMO PRINCIPAL';
+    }
+    return 'POMO DE ${(pomo['titular_nombre'] ?? '').toString().toUpperCase()}';
+  }
+
+  // 1.15 (decisión Jc 2026-10-26): salida sin venta SOLO dueño,
+  // sin importar el motivo. El servidor rechaza además
+  // (OPS_SOLO_ADMIN + _require_owner). Compacta, arriba a la derecha.
+  Widget _botonSalidaCompacto() {
+    return TextButton.icon(
+      style: TextButton.styleFrom(
+        padding: const EdgeInsets.symmetric(horizontal: 8),
+        minimumSize: const Size(0, 32),
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      ),
+      onPressed: _salida,
+      icon: const Icon(Icons.outbox, size: 18),
+      label: const Text('Salida sin venta'),
+    );
+  }
+
+  Widget _pildora(String texto, {bool destacado = false}) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(20),
+        color: destacado
+            ? AppColores.naranja.withValues(alpha: 0.15)
+            : AppColores.textoSecundario(context)
+                .withValues(alpha: 0.10),
+      ),
+      child: Text(
+        texto,
+        style: AppTexto.cuerpo.copyWith(
+            fontWeight:
+                destacado ? FontWeight.w600 : FontWeight.w400),
+      ),
     );
   }
 
@@ -1146,70 +1238,94 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              IconoModuloBadge.naranja(Icons.local_drink),
-              const SizedBox(width: AppEspacio.sm),
-              Expanded(
-                child: Text(
-                  pomo == null
-                      ? 'Sin pomo activo'
-                      : (!_esDueno || pomo['titular_tid'] == _miTid
-                          ? 'Mi pomo · ${pomo['producto_nombre'] ?? 'Servicio'}'
-                          : (pomo['es_principal'] as num?)?.toInt() == 1
-                              ? 'Pomo principal · ${pomo['producto_nombre'] ?? 'Servicio'}'
-                              : 'Pomo de ${pomo['titular_nombre']} · ${pomo['producto_nombre'] ?? 'Servicio'}'),
-                  style: AppTexto.titulo.copyWith(fontSize: 16),
-                  // 1.14 (D16): una línea con puntos suspensivos. Sin
-                  // esto, con varios lotes el desplegable (hijo sin
-                  // flex) acaparaba el ancho y el título quedaba en
-                  // una columna estrecha, apilado en vertical.
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
+          // Nivel 1 — encabezado. Con más de un pomo, el encabezado
+          // entero es el selector de ancho completo; con uno solo,
+          // fila limpia (insignia + etiqueta pequeña + nombre).
+          if (_misPomos.length > 1)
+            Row(
+              children: [
+                Text(_etiquetaPomo(pomo),
+                    style:
+                        AppTexto.secundario.copyWith(fontSize: 11)),
+                const Spacer(),
+                if (pomo != null && _esDueno) _botonSalidaCompacto(),
+              ],
+            ),
+          if (_misPomos.length > 1)
+            DropdownButtonHideUnderline(
+              child: DropdownButton<int>(
+                isExpanded: true,
+                value: _pomoSel,
+                items: [
+                  for (final l in _misPomos)
+                    DropdownMenuItem(
+                      value: (l['id'] as num).toInt(),
+                      // Ítem 6 (pomo ciego): el entrenador NO ve
+                      // saldos; el dueño ve producto, titular y saldo.
+                      child: Text(
+                        _esDueno
+                            ? '${l['producto_nombre'] ?? 'Pomo'} · '
+                                '${(l['es_principal'] as num?)?.toInt() == 1 ? 'Principal' : l['titular_nombre']} '
+                                '(${l['saldo_local']})'
+                            : '${l['producto_nombre'] ?? 'Pomo'}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                ],
+                onChanged: (v) => setState(() => _pomoSel = v),
               ),
-              if (_misPomos.length > 1)
-                Flexible(
-                  child: DropdownButton<int>(
-                    value: _pomoSel,
-                    items: [
-                      for (final l in _misPomos)
-                        DropdownMenuItem(
-                          value: (l['id'] as num).toInt(),
-                          // Ítem 6 (pomo ciego): el entrenador NO ve
-                          // saldos; el dueño ve producto, titular y saldo.
-                          child: Text(
-                            _esDueno
-                                ? '${l['producto_nombre'] ?? 'Pomo'} · '
-                                    '${(l['es_principal'] as num?)?.toInt() == 1 ? 'Principal' : l['titular_nombre']} '
-                                    '(${l['saldo_local']})'
-                                : '${l['producto_nombre'] ?? 'Pomo'}',
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
+            )
+          else
+            Row(
+              children: [
+                IconoModuloBadge.naranja(Icons.local_drink),
+                const SizedBox(width: AppEspacio.sm),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(_etiquetaPomo(pomo),
+                          style: AppTexto.secundario
+                              .copyWith(fontSize: 11)),
+                      Text(
+                        pomo == null
+                            ? 'Sin pomo activo'
+                            : '${pomo['producto_nombre'] ?? 'Servicio'}',
+                        style: AppTexto.titulo.copyWith(fontSize: 16),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ],
-                    onChanged: (v) => setState(() => _pomoSel = v),
                   ),
                 ),
-            ],
-          ),
+                if (pomo != null && _esDueno) _botonSalidaCompacto(),
+              ],
+            ),
           const SizedBox(height: 8),
-          Text(
-            pomo == null
-                ? (_esDueno
-                    ? 'Abre un bote en Administración para tener principal.'
-                    : 'Pide al dueño que te rellene un pomo.')
-                : _esDueno
-                    ? 'Saldo: ${pomo['saldo_local']} dosis · '
-                        'Agua común: ${_agua.saldo} pomos'
-                    // Ítem 6: al entrenador solo el agua común
-                    // (el saldo de su pomo es ciego para él).
-                    : 'Agua común: ${_agua.saldo} pomos',
-            style: AppTexto.cuerpo,
-          ),
+          // Nivel 2 — píldoras. Ítem 6: el saldo del pomo solo lo ve
+          // el dueño; al entrenador solo el agua común (pomo ciego).
+          if (pomo == null)
+            Text(
+              _esDueno
+                  ? 'Abre un bote en Administración para tener principal.'
+                  : 'Pide al dueño que te rellene un pomo.',
+              style: AppTexto.cuerpo,
+            )
+          else
+            Wrap(
+              spacing: AppEspacio.sm,
+              runSpacing: AppEspacio.sm,
+              children: [
+                if (_esDueno)
+                  _pildora('Saldo: ${pomo['saldo_local']} dosis',
+                      destacado: true),
+                _pildora('Agua común: ${_agua.saldo} pomos'),
+              ],
+            ),
           // v1.13.0 (Bloque 4): desglose del pomo para el dueño
           // (asignadas − repartidas − ventas − salidas, espejo).
+          // Al pie, tras un divisor, como micro-datos.
           if (pomo != null && _esDueno)
             Builder(builder: (ctx) {
               final pid = (pomo['id'] as num?)?.toInt();
@@ -1222,45 +1338,45 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                     .where((s) => (s['pomo_id'] as num?)?.toInt() == pid)
                     .toList(),
               );
-              return Padding(
-                padding: const EdgeInsets.only(top: 4),
-                child: Text(
-                  'Historial del pomo: ${d.asignadas} asignadas − '
-                  '${d.repartidas} repartidas − ${d.ventas} vendidas − '
-                  '${d.salidas} salidas = ${d.saldo} dosis',
-                  style: AppTexto.secundario,
-                ),
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Divider(height: 24),
+                  Text(
+                    'Asignadas: ${d.asignadas} · '
+                    'Repartidas: ${d.repartidas} · '
+                    'Vendidas: ${d.ventas} · Salidas: ${d.salidas}',
+                    style:
+                        AppTexto.secundario.copyWith(fontSize: 11),
+                  ),
+                ],
               );
             }),
           // v1.12.0 (C6): aviso de pomo por agotarse (< 5, umbral
           // fijo de Jc). NO revela el saldo exacto al entrenador
           // (pomo ciego, ítem 6): solo que quedan pocas dosis.
-          // NUNCA bloquea la venta, solo advierte.
+          // NUNCA bloquea la venta, solo advierte. Banda ámbar.
           if (pomo != null &&
               avisoLotePorAgotarse(
                   (pomo['saldo_local'] as num?)?.toInt() ?? 999))
             Padding(
-              padding: const EdgeInsets.only(top: 4),
-              child: Text(
-                _esDueno
-                    ? '⚠ Quedan pocas dosis en este pomo (menos de 5).'
-                    : '⚠ Te quedan pocas dosis en este pomo (menos de 5): '
-                        'avisa al dueño para que te rellene.',
-                style: AppTexto.cuerpo.copyWith(
-                    color: AppColores.alertaOscuro,
-                    fontWeight: FontWeight.w600),
-              ),
-            ),
-          // 1.15 (decisión Jc 2026-10-26): salida sin venta SOLO
-          // dueño, sin importar el motivo. El servidor rechaza
-          // además (OPS_SOLO_ADMIN + _require_owner).
-          if (pomo != null && _esDueno)
-            Align(
-              alignment: Alignment.centerRight,
-              child: TextButton.icon(
-                onPressed: _salida,
-                icon: const Icon(Icons.outbox, size: 18),
-                label: const Text('Salida sin venta'),
+              padding: const EdgeInsets.only(top: 8),
+              child: Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(8),
+                  color: AppColores.alertaOscuro
+                      .withValues(alpha: 0.15),
+                ),
+                child: Text(
+                  _esDueno
+                      ? '⚠ Quedan pocas dosis en este pomo (menos de 5).'
+                      : '⚠ Te quedan pocas dosis en este pomo (menos de 5): '
+                          'avisa al dueño para que te rellene.',
+                  style: AppTexto.cuerpo.copyWith(
+                      color: AppColores.alertaOscuro,
+                      fontWeight: FontWeight.w600),
+                ),
               ),
             ),
         ],
@@ -1275,7 +1391,7 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
     double precioDe(String tipo) => precioServicioMetodo(_ajustes,
         tipo, primerMetodoServicioActivo(_ajustes, tipo) ?? 'efectivo');
     Widget boton(String tipo, String etiqueta, double precio,
-        IconData icono, Color color) {
+        IconData icono, Color color, {bool grande = false}) {
       // v1.13.0 (Bloque 4, Argón ajuste 1): bloqueo SEPARADO
       // dosis vs pomos (nunca un interruptor único) + motivo
       // visible bajo el botón apagado. El entrenador sigue ciego
@@ -1296,7 +1412,11 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
             FilledButton.icon(
               style: FilledButton.styleFrom(
                 backgroundColor: color,
-                padding: const EdgeInsets.symmetric(vertical: 14),
+                // Rediseño post-1.15 (Argón, opción A): la fila
+                // principal es más alta (64px) para el pulgar en
+                // el mostrador; la secundaria mantiene su altura.
+                padding: EdgeInsets.symmetric(
+                    vertical: grande ? 20 : 14),
               ),
               onPressed:
                   est.habilitado ? () => _vender(tipo) : null,
@@ -1330,6 +1450,11 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
       );
     }
 
+    // Rediseño post-1.15 (Argón, opción A, jerarquía 2 + 2): la
+    // venta del servicio (dosis sola o con agua) ocupa la fila
+    // principal a lo ancho; el agua suelta y la venta múltiple
+    // bajan a una fila secundaria. Precios, estados, motivos y
+    // flujos (_vender, _ventaMultiple) intactos.
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -1337,23 +1462,42 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             boton('dosis_sin_agua', 'Dosis',
-                precioDe('dosis_sin_agua'), Icons.bolt, AppColores.naranja),
+                precioDe('dosis_sin_agua'), Icons.bolt, AppColores.naranja,
+                grande: true),
             const SizedBox(width: AppEspacio.sm),
             boton('dosis_con_agua', 'Dosis + agua',
-                precioDe('dosis_con_agua'), Icons.water_drop, Colors.blue),
-            const SizedBox(width: AppEspacio.sm),
-            boton('agua_suelta', 'Pomo agua',
-                precioDe('agua_suelta'), Icons.local_drink, Colors.teal),
+                precioDe('dosis_con_agua'), Icons.water_drop, Colors.blue,
+                grande: true),
           ],
         ),
-        // v1.13.0 (Bloque 4, B2): venta múltiple con contador N/M
-        // (hoja D1). El flujo normal sigue siendo 1 dosis sin
-        // selector; la múltiple es una entrada aparte.
         const SizedBox(height: AppEspacio.sm),
-        OutlinedButton.icon(
-          onPressed: _pomoActual == null ? null : _ventaMultiple,
-          icon: const Icon(Icons.library_add, size: 20),
-          label: const Text('Venta múltiple (varias dosis a la vez)'),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // «Solo agua» (antes «Pomo agua»): mismo precio y
+            // mismo bloqueo; el nombre ya no se confunde con
+            // «Dosis + agua».
+            boton('agua_suelta', 'Solo agua',
+                precioDe('agua_suelta'), Icons.local_drink, Colors.teal),
+            const SizedBox(width: AppEspacio.sm),
+            Expanded(
+              child: OutlinedButton.icon(
+                onPressed:
+                    _pomoActual == null ? null : _ventaMultiple,
+                icon: const Icon(Icons.library_add, size: 20),
+                label: const Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text('Venta múltiple',
+                        style: TextStyle(
+                            fontWeight: FontWeight.bold, fontSize: 13)),
+                    Text('Varias dosis',
+                        style: TextStyle(fontSize: 11)),
+                  ],
+                ),
+              ),
+            ),
+          ],
         ),
       ],
     );
@@ -1364,32 +1508,106 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
     if (c.isEmpty) return const SizedBox.shrink();
     final dosis = ((c['dosis_sin_agua'] as int?) ?? 0) +
         ((c['dosis_con_agua'] as int?) ?? 0);
+    final comision = (c['comision'] as double?) ?? 0;
     return Tarjeta(
       padding: const EdgeInsets.all(AppEspacio.md),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('Cuadre de hoy',
-              style: AppTexto.titulo.copyWith(fontSize: 16)),
+          Row(
+            children: [
+              Expanded(
+                child: Text('Cuadre de hoy',
+                    style: AppTexto.titulo.copyWith(fontSize: 16)),
+              ),
+              if (comision != 0)
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 10, vertical: 6),
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(20),
+                    color:
+                        AppColores.exito.withValues(alpha: 0.15),
+                  ),
+                  child: Text(
+                    'Tu comisión: ${fmtMonto(comision)} CUP',
+                    style: AppTexto.cuerpo.copyWith(
+                        color: AppColores.exito,
+                        fontWeight: FontWeight.w600),
+                  ),
+                ),
+            ],
+          ),
           const SizedBox(height: 8),
-          Text(
-            'Dosis: $dosis (${c['dosis_sin_agua']} sin agua · '
-            '${c['dosis_con_agua']} con agua) · '
-            'Pomos sueltos: ${c['agua_suelta']} · Casa: ${c['casa']}',
-            style: AppTexto.cuerpo,
+          Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('Efectivo a entregar',
+                        style: AppTexto.secundario),
+                    Text('${fmtMonto(c['efectivo'])} CUP',
+                        style: AppTexto.titulo.copyWith(fontSize: 16)),
+                  ],
+                ),
+              ),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('Transferencia',
+                        style: AppTexto.secundario),
+                    Text('${fmtMonto(c['transferencia'])} CUP',
+                        style: AppTexto.titulo.copyWith(fontSize: 16)),
+                  ],
+                ),
+              ),
+            ],
           ),
-          Text(
-            'Efectivo a entregar: ${fmtMonto(c['efectivo'])} CUP · '
-            'Transferencia: ${fmtMonto(c['transferencia'])} CUP',
-            style: AppTexto.cuerpo,
+          const Divider(height: 24),
+          Row(
+            children: [
+              Expanded(
+                child: Column(
+                  children: [
+                    Text('$dosis',
+                        style: AppTexto.titulo.copyWith(fontSize: 16)),
+                    Text('Dosis hoy',
+                        style: AppTexto.secundario
+                            .copyWith(fontSize: 11)),
+                    Text(
+                        '${c['dosis_sin_agua']} sin agua · '
+                        '${c['dosis_con_agua']} con agua',
+                        style: AppTexto.secundario
+                            .copyWith(fontSize: 11)),
+                  ],
+                ),
+              ),
+              Expanded(
+                child: Column(
+                  children: [
+                    Text('${c['agua_suelta']}',
+                        style: AppTexto.titulo.copyWith(fontSize: 16)),
+                    Text('Pomos sueltos',
+                        style: AppTexto.secundario
+                            .copyWith(fontSize: 11)),
+                  ],
+                ),
+              ),
+              Expanded(
+                child: Column(
+                  children: [
+                    Text('${c['casa']}',
+                        style: AppTexto.titulo.copyWith(fontSize: 16)),
+                    Text('Cuenta Casa',
+                        style: AppTexto.secundario
+                            .copyWith(fontSize: 11)),
+                  ],
+                ),
+              ),
+            ],
           ),
-          if (((c['comision'] as double?) ?? 0) != 0)
-            Text(
-              'Tu comisión de hoy: ${fmtMonto(c['comision'])} CUP',
-              style: AppTexto.cuerpo.copyWith(
-                  color: AppColores.exito,
-                  fontWeight: FontWeight.w600),
-            ),
         ],
       ),
     );

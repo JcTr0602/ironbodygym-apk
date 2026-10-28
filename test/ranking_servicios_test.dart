@@ -10,6 +10,7 @@ void main() {
     int cantidad = 1,
     double precio = 600,
     String fecha = '2026-10-23',
+    int casa = 0,
   }) =>
       {
         'cliente_id': clienteId,
@@ -18,6 +19,7 @@ void main() {
         'cantidad': cantidad,
         'precio_unitario': precio,
         'fecha': fecha,
+        'casa': casa,
       };
 
   test('ordena por monto neto desc y desempata por unidades', () {
@@ -61,5 +63,20 @@ void main() {
     ], desde: '2026-10-01');
     expect(r.single['unidades'], 1);
     expect(r.single['monto'], 600);
+  });
+
+  test('Casa con cliente identificado no suma al ranking', () {
+    // Argón stats M8: la guarda casa==1 de rankingServicios ya
+    // existe (Argón #9 BAJO); este test la fija para que un
+    // entrenador registrado como cliente no infle su ranking con
+    // cortesías.
+    final r = rankingServicios([
+      venta(clienteId: 10, nombre: 'Ana', cantidad: 2),
+      venta(clienteId: 10, nombre: 'Ana', cantidad: 5, casa: 1),
+      venta(clienteId: 11, nombre: 'Beto', cantidad: 1),
+    ]);
+    expect(r.map((e) => e['cliente_id']), [10, 11]);
+    expect(r.firstWhere((e) => e['cliente_id'] == 10)['unidades'], 2);
+    expect(r.firstWhere((e) => e['cliente_id'] == 10)['monto'], 1200);
   });
 }

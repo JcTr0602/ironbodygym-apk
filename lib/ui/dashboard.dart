@@ -185,7 +185,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
     // suplementos tienen su fila propia y ya NO se pliegan dentro
     // de Efectivo (antes se contaban dos veces).
     final pagos = await pagosDelPeriodo(periodo);
-    double efectivo = 0, transferencia = 0, diario = 0, suplementos = 0;
+    double efectivo = 0,
+        transferencia = 0,
+        diario = 0,
+        suplementos = 0,
+        servicios = 0;
     for (final p in pagos) {
       final m = (p['monto'] as num?)?.toDouble() ?? 0;
       switch ('${p['origen'] ?? 'pago'}') {
@@ -193,6 +197,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
           diario += m;
         case 'suplemento':
           suplementos += m;
+        case 'servicios':
+          servicios += m;
         default:
           if ('${p['metodo']}' == 'transferencia') {
             transferencia += m;
@@ -201,7 +207,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
           }
       }
     }
-    final total = efectivo + transferencia + diario + suplementos;
+    final total =
+        efectivo + transferencia + diario + suplementos + servicios;
     if (!mounted) return;
     showModalBottomSheet(
       context: context,
@@ -221,6 +228,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
             if (diario > 0) _filaDetalle('Pago diario', diario),
             if (suplementos > 0)
               _filaDetalle('Suplementos', suplementos),
+            if (servicios > 0) _filaDetalle('Servicios', servicios),
             const Divider(),
             _filaDetalle('Total', total, negrita: true),
             const SizedBox(height: 8),
@@ -544,9 +552,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final ef = _porMetodo['efectivo'] ?? 0;
     final tr = _porMetodo['transferencia'] ?? 0;
     final supM = _porMetodo['suplementos'] ?? 0;
+    final servM = _porMetodo['servicios'] ?? 0;
     final men = _porTipo['mensual'] ?? 0;
     final dia = _porTipo['diario'] ?? 0;
     final supT = _porTipo['suplementos'] ?? 0;
+    final servT = _porTipo['servicios'] ?? 0;
     final total = _mes;
     return Tarjeta(
       child: Column(
@@ -559,10 +569,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
             _filaDesglose('Efectivo', ef, total),
             _filaDesglose('Transferencia', tr, total),
             _filaDesglose('Suplementos', supM, total),
+            _filaDesglose('Servicios', servM, total),
             const Divider(height: 16),
             _filaDesglose('Mensualidades', men, total),
             _filaDesglose('Pago diario', dia, total),
             _filaDesglose('Suplementos', supT, total),
+            _filaDesglose('Servicios', servT, total),
             if (_proyeccion > 0) ...[
               const Divider(height: 16),
               Row(
@@ -719,7 +731,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
   /// de las propias filas de la hoja (el monto de la barra puede
   /// estar viejo si hubo un sync entre la carga y el toque).
   Future<void> _detalleDia(String fechaIso) async {
-    double efectivo = 0, transferencia = 0, diario = 0, suplementos = 0;
+    double efectivo = 0,
+        transferencia = 0,
+        diario = 0,
+        suplementos = 0,
+        servicios = 0;
     int n = 0;
     // v1.3.4 (ítem 2): columna `fecha` indexada en vez de allMirror.
     for (final p in await LocalDb.instance.pagosDelDia(fechaIso)) {
@@ -746,7 +762,31 @@ class _DashboardScreenState extends State<DashboardScreen> {
         n++;
       }
     }
-    final total = efectivo + transferencia + diario + suplementos;
+    // Argón stats MEDIO (dashboard): Servicios del día, con la misma
+    // regla de neteo que ventasServicioSinReversos: fuera reversos y
+    // originales reversados (si no, un día con venta + reverso
+    // quedaría sobreestimado).
+    final ventasServ =
+        await LocalDb.instance.allMirror('servicio_ventas');
+    final reversadasServ = <int>{
+      for (final v in ventasServ)
+        if ((v['reverso_de'] as num?) != null)
+          (v['reverso_de'] as num).toInt(),
+    };
+    for (final v in ventasServ) {
+      final f = '${v['fecha'] ?? ''}';
+      if (f.length < 10 || f.substring(0, 10) != fechaIso) continue;
+      if ((v['reverso_de'] as num?) != null) continue;
+      final idServ = (v['id'] as num?)?.toInt();
+      if (idServ != null && reversadasServ.contains(idServ)) continue;
+      if ((v['casa'] as num?)?.toInt() == 1) continue;
+      servicios +=
+          ((v['precio_unitario'] as num?)?.toDouble() ?? 0) *
+              ((v['cantidad'] as num?)?.toInt() ?? 0);
+      n++;
+    }
+    final total =
+        efectivo + transferencia + diario + suplementos + servicios;
     if (!mounted) return;
     showModalBottomSheet(
       context: context,
@@ -766,6 +806,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
             _filaDetalle('Pago diario', diario),
             if (suplementos > 0)
               _filaDetalle('Suplementos', suplementos),
+            if (servicios > 0) _filaDetalle('Servicios', servicios),
             const Divider(),
             _filaDetalle('Total', total, negrita: true),
             const SizedBox(height: 8),

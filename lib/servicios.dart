@@ -159,6 +159,70 @@ bool mostrarCheckboxPolvoPerdido(bool esDueno) => esDueno;
   );
 }
 
+/// Entradas normalizadas del Historial de Servicios (pantalla
+/// ServiciosHistorialScreen, pedido de Jc 2026-10-28): ventas de los
+/// 3 tipos (ración = dosis_sin_agua, combo = dosis_con_agua, agua
+/// suelta) + salidas sin venta, ordenadas de nuevas a viejas
+/// (fecha desc, id desc). PURO. Las ventas reversadas quedan
+/// marcadas (yaReversada) y los reversos como tales (esReverso).
+/// El llamador ya filtra por rol antes de pasar las listas (el
+/// dueño ve todo; el entrenador solo lo suyo; las salidas solo las
+/// registra el dueño, así que al entrenador no le llega ninguna).
+List<Map<String, dynamic>> entradasHistorialServicios({
+  required List<Map<String, dynamic>> ventas,
+  required List<Map<String, dynamic>> salidas,
+  required Set<int> reversadas,
+}) {
+  final entradas = <Map<String, dynamic>>[];
+  for (final v in ventas) {
+    final id = (v['id'] as num?)?.toInt() ?? 0;
+    entradas.add({
+      'kind': 'venta',
+      'id': id,
+      'fecha': '${v['fecha'] ?? ''}',
+      'hora': '${v['hora'] ?? ''}',
+      'tipo': '${v['tipo'] ?? ''}',
+      'cantidad': (v['cantidad'] as num?)?.toInt() ?? 1,
+      'cliente': '${v['cliente_nombre'] ?? 'Sin identificar'}',
+      'vendedorId': v['vendedor_id'],
+      'registradoPorId': v['registrado_por'],
+      'registradoPor': '${v['registrado_por_nombre'] ?? ''}',
+      'monto': ((v['precio_unitario'] as num?)?.toDouble() ?? 0) *
+          ((v['cantidad'] as num?)?.toDouble() ?? 0),
+      'metodo': '${v['metodo'] ?? ''}',
+      'casa': (v['casa'] as num?)?.toInt() == 1,
+      'esReverso': (v['reverso_de'] as num?) != null,
+      'yaReversada': reversadas.contains(id),
+    });
+  }
+  for (final s in salidas) {
+    entradas.add({
+      'kind': 'salida',
+      'id': (s['id'] as num?)?.toInt() ?? 0,
+      'fecha': '${s['fecha'] ?? ''}',
+      'hora': '',
+      'tipo': '${s['tipo_item'] ?? ''}',
+      'cantidad': (s['dosis'] as num?)?.toInt() ?? 0,
+      'motivo': '${s['motivo'] ?? ''}',
+      'monto': 0.0,
+      'casa': false,
+      'esReverso': false,
+      'yaReversada': false,
+    });
+  }
+  String f10(Map<String, dynamic> e) {
+    final f = '${e['fecha']}';
+    return f.length >= 10 ? f.substring(0, 10) : f;
+  }
+
+  entradas.sort((a, b) {
+    final porFecha = f10(b).compareTo(f10(a));
+    if (porFecha != 0) return porFecha;
+    return ((b['id'] as int)).compareTo((a['id'] as int));
+  });
+  return entradas;
+}
+
 /// Primer método habilitado del producto (efectivo antes que
 /// transferencia) o null si ambos están deshabilitados. Lo usan el
 /// formulario de venta y el speed dial (ítems 5 y 7). PURO.

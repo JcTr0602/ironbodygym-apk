@@ -430,6 +430,12 @@ Future<Map<String, dynamic>?> pagoDialogo(
       avisos = r.avisos;
     } else {
       // Tipo personalizado de Jc -> motor 'personalizado'
+      // Lote 2 Argón (verificado, NO es bug): el monto es fijo por
+      // diseño, igual que semanal/quincenal (que tampoco distinguen
+      // método). El servidor liquida el monto del payload tal cual
+      // para personalizado y tipo: (sync.py: monto_custom validado,
+      // sin distinción por método), así que la vista previa y el
+      // backend coinciden aunque se cambie el chip de método.
       periodo = 'personalizado';
       dias = tipoSel.dias;
       monto = tipoSel.monto;
@@ -470,6 +476,8 @@ Future<Map<String, dynamic>?> pagoDialogo(
               hoyHabana: hoyHabanaIso())
           .monto;
     }
+    // Lote 2 Argón (verificado, NO es bug): los tipos personalizados
+    // devuelven su monto fijo (ver comentario en actual()).
     return t.monto;
   }
 

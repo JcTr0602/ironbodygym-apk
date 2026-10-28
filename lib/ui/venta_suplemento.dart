@@ -256,6 +256,23 @@ class _VentaSuplementoScreenState
           cancelar: '');
       return;
     }
+    // Lote 1 Argón (bloqueante): sin conversión válida NO se vende.
+    // Antes el fallback caía al precio crudo etiquetado con la moneda
+    // de la venta (15000 CUP guardados como 15000 USD) y _precioDifiere
+    // devolvía false (ref null), así que ni siquiera pedía nota.
+    // El camino inscripción+venta ya se bloqueaba así desde 1.15 V3;
+    // la venta simple queda igual.
+    final oficialConvertido = _oficialEnMoneda;
+    if (oficialConvertido == null) {
+      await DialogoApp.confirmar(context,
+          titulo: 'Revisa la valoración',
+          mensaje: 'No se pudo convertir el precio oficial a '
+              '$_moneda sin una tasa válida. Revisa la tasa del '
+              'día antes de vender.',
+          aceptar: 'Entendido',
+          cancelar: '');
+      return;
+    }
     if (_tipoComprador == 'cliente' && _clienteId == null) {
       await DialogoApp.confirmar(context,
           titulo: 'Falta el comprador',
@@ -309,7 +326,7 @@ class _VentaSuplementoScreenState
       tipoComprador: _tipoComprador,
       esFiado: _esFiado,
     );
-    final oficialRef = _oficialEnMoneda ?? _precioOficial;
+    final oficialRef = oficialConvertido;
 
     // v1.8.1 (pedido de Jc tras la venta duplicada del 2026-10-23):
     // la confirmación es la VISTA PREVIA del comprobante completo,
@@ -687,7 +704,10 @@ class _VentaSuplementoScreenState
           Padding(
             padding: const EdgeInsets.only(bottom: AppEspacio.sm),
             child: Text(
-              'Precio oficial: ${(_oficialEnMoneda ?? _precioOficial).toStringAsFixed(2)} $_moneda',
+              // Lote 1 Argón: sin conversión, el oficial se muestra en
+              // SU moneda (antes se mostraba el crudo etiquetado con
+              // la moneda de la venta).
+              'Precio oficial: ${(_oficialEnMoneda ?? _precioOficial).toStringAsFixed(2)} ${_oficialEnMoneda != null ? _moneda : _monedaSuplemento}',
               style: AppTexto.secundario,
             ),
           ),
@@ -824,8 +844,11 @@ class _VentaSuplementoScreenState
             const SizedBox(width: AppEspacio.sm),
             Expanded(
               child: Text(
+                // Lote 1 Argón: el oficial convertido a la moneda de la
+                // venta (antes mostraba el crudo con la moneda fija
+                // del suplemento).
                 'Vas a vender a un precio distinto al oficial '
-                '(${_precioOficial.toStringAsFixed(2)} $_monedaSuplemento). '
+                '(${(_oficialEnMoneda ?? _precioOficial).toStringAsFixed(2)} $_moneda). '
                 'Quedarán registrados ambos precios para auditoría.',
                 style: AppTexto.secundario,
               ),

@@ -145,8 +145,9 @@ class _NominaScreenState extends State<NominaScreen> {
       // servicios; función pura de NominaCalc). La clave sale del
       // nombre registrado del vendedor.
       final comisionDosis = <String, ({int dosis, double total})>{};
+      var ventasServ = <Map<String, dynamic>>[];
       try {
-        final ventasServ =
+        ventasServ =
             await LocalDb.instance.allMirror('servicio_ventas');
         final miTid = AuthService().telegramId;
         // Fix 1.15 (caso 2026-10-27): iterar también a quienes
@@ -182,8 +183,12 @@ class _NominaScreenState extends State<NominaScreen> {
       // v1.8.0: adelantos — libro corrido hasta el mes en curso.
       // El bruto de cada mes sale de la MISMA definición de
       // «pagaron el mes» (NominaCalc) para que la cadena de deuda
-      // sea auditable; las comisiones pasadas no se conocen (la
-      // función es nueva) y entran en 0.
+      // sea auditable; las comisiones de cada mes salen del
+      // espejo de ventas (fix Argón post-1.15: con solo la del
+      // mes en curso, un mes anterior con adelantos por encima
+      // de su base pero cubiertos por sus dosis generaba una
+      // deuda entrante falsa). La lista de ventas se izó fuera
+      // del try de comisiones para poder usarla aquí.
       final personasAdelantos =
           <String, ({String id, int? telegramId, String nombre})>{};
       try {
@@ -228,9 +233,10 @@ class _NominaScreenState extends State<NominaScreen> {
         final libro = libroAdelantos(
           eventos: eventos,
           brutoPorMes: brutoPorMes,
-          comisionesPorMes: {
-            pref: comisionDosis[e.key]?.total ?? 0,
-          },
+          comisionesPorMes: e.value.telegramId == null
+              ? {pref: comisionDosis[e.key]?.total ?? 0}
+              : NominaCalc.comisionesPorMesDesdeVentas(
+                  ventasServ, e.value.telegramId!, primero, pref),
           hastaMes: pref,
         );
         for (final m in libro) {

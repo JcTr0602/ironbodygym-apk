@@ -8,6 +8,7 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../auth.dart';
 import 'componentes.dart';
 import 'diseno.dart';
 
@@ -32,6 +33,17 @@ class _EstadisticasAdopcionScreenState
   }
 
   Future<void> _cargar() async {
+    // Argón stats MENOR: el servidor ya exige es_admin, pero no hay
+    // que disparar la RPC fallida si un entrenador llega a la ruta.
+    if (!AuthService().isOwner) {
+      if (mounted) {
+        setState(() {
+          _cargando = false;
+          _error = 'Solo el dueño ve estas estadísticas.';
+        });
+      }
+      return;
+    }
     setState(() {
       _cargando = true;
       _error = null;

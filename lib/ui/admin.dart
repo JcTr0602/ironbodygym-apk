@@ -2336,7 +2336,7 @@ class _AdminScreenState extends State<AdminScreen> {
       _tarjetaFlujo(
         Icons.local_offer,
         'Tarifas',
-        'D1 + D6 · Estándar y especiales, otorgar y revocar',
+        'Estándar y especiales, otorgar y revocar',
         () => _ir(const TarifasScreen()),
       ),
       _tarjetaFlujo(
@@ -2358,7 +2358,7 @@ class _AdminScreenState extends State<AdminScreen> {
       _tarjetaFlujo(
         Icons.settings,
         'Ajustes del gym',
-        'Enlaza C6 y D6; edita métodos y textos',
+        'Precios, tarifas, métodos y textos',
         () => _ir(const AjustesGymScreen()),
       ),
       _tarjetaFlujo(

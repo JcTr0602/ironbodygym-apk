@@ -71,6 +71,40 @@ class _PapeleraScreenState extends State<PapeleraScreen> {
     if (mounted) setState(() => _res = filtrados);
   }
 
+  /// Lote 1 Argón: validación compartida por _recuperar y
+  /// _recuperarYRenovar, en la ACCIÓN (no solo al cargar la lista:
+  /// el diálogo puede estar abierto mientras un sync cambia el
+  /// estado). Devuelve el id válido o null (con aviso). Antes un id
+  /// nulo encolaba una op a cliente_id 0.
+  Future<int?> _idRecuperable(Map<String, dynamic> c) async {
+    final id = (c['id'] as num?)?.toInt();
+    if (id == null || id <= 0) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text(
+                'No se pudo recuperar: cliente sin identificador válido.')));
+      }
+      return null;
+    }
+    if (esVistaProtegida(c)) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text(mensajeClienteProtegido)));
+      }
+      return null;
+    }
+    final zombies = await LocalDb.instance.clientesConBorradoEnVuelo();
+    if (zombies.contains(id)) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text(
+                'Este cliente tiene un borrado en curso; no se puede recuperar ahora.')));
+      }
+      return null;
+    }
+    return id;
+  }
+
   Future<void> _recuperar(Map<String, dynamic> c) async {
     final ok = await DialogoApp.confirmar(
       context,
@@ -81,13 +115,12 @@ class _PapeleraScreenState extends State<PapeleraScreen> {
       icono: Icons.restore_from_trash,
     );
     if (ok != true || !mounted) return;
+    final id = await _idRecuperable(c);
+    if (id == null || !mounted) return;
     await LocalDb.instance.queueOp(
       opUuid: const Uuid().v4(),
       tipo: 'cambiar_estado',
-      payload: {
-        'cliente_id': (c['id'] as int?) ?? 0,
-        'estado': 'activo'
-      },
+      payload: {'cliente_id': id, 'estado': 'activo'},
     );
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
@@ -107,27 +140,38 @@ class _PapeleraScreenState extends State<PapeleraScreen> {
       icono: Icons.autorenew,
     );
     if (ok != true || !mounted) return;
-    await LocalDb.instance.queueOp(
-      opUuid: const Uuid().v4(),
-      tipo: 'cambiar_estado',
-      payload: {
-        'cliente_id': (c['id'] as int?) ?? 0,
-        'estado': 'activo'
-      },
-    );
-    if (!mounted) return;
+    // Lote 1 Argón: ANTES se encolaba cambiar_estado y después se
+    // abría el pago; al cancelar, el cliente quedaba activo sin pago
+    // (y el siguiente _cargar lo seguía mostrando en la papelera,
+    // invitando a un segundo cambiar_estado duplicado). Ahora el pago
+    // va primero y sin payload NO se encola nada.
     final payload =
         await pagoDialogo(context, {...c, 'estado': 'activo'});
     if (payload == null || !mounted) {
       _cargar();
-      SyncEngine.instance.push();
       return;
     }
-    await LocalDb.instance.queueOp(
-      opUuid: const Uuid().v4(),
-      tipo: 'pago_mensual',
-      payload: payload,
-    );
+    // Revalidar tras el diálogo (mismo criterio que _recuperar).
+    final id = await _idRecuperable(c);
+    if (id == null || !mounted) return;
+    // Lote 1 Argón: ambas ops en UNA transacción local (queueOp
+    // acepta txn y su actualización optimista corre sobre el mismo
+    // executor): si el proceso muere entre ambas, no queda ninguna.
+    final db = await LocalDb.instance.db;
+    await db.transaction((txn) async {
+      await LocalDb.instance.queueOp(
+        opUuid: const Uuid().v4(),
+        tipo: 'cambiar_estado',
+        payload: {'cliente_id': id, 'estado': 'activo'},
+        txn: txn,
+      );
+      await LocalDb.instance.queueOp(
+        opUuid: const Uuid().v4(),
+        tipo: 'pago_mensual',
+        payload: payload,
+        txn: txn,
+      );
+    });
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('${c['nombre']} renovado')));
@@ -138,6 +182,8 @@ class _PapeleraScreenState extends State<PapeleraScreen> {
   /// Elimina definitivamente los seleccionados (solo dueño, v1.0.7).
   /// Requiere doble confirmación.
   Future<void> _eliminarDefinitivo() async {
+    // Lote 1 Argón: defensa en profundidad (el botón ya es solo-dueño).
+    if (!AuthService().isOwner) return;
     if (_seleccionados.isEmpty) return;
     final nombres = _res
         .where((c) => _seleccionados.contains((c['id'] as int?) ?? 0))
@@ -402,7 +448,12 @@ class _PapeleraScreenState extends State<PapeleraScreen> {
                                           FichaScreen(clienteId: id)));
                             }
                           },
-                          onLongPress: () {
+                          // Lote 1 Argón: la selección múltiple es
+                          // solo-dueño (el entrenador no tiene acciones
+                          // en lote y el toque simple dejaba de abrir
+                          // la ficha con algo seleccionado).
+                          onLongPress: esDueno
+                              ? () {
                             // Mantener presionado inicia la selección múltiple
                             setState(() {
                               if (seleccionado) {
@@ -411,8 +462,10 @@ class _PapeleraScreenState extends State<PapeleraScreen> {
                                 _seleccionados.add(id);
                               }
                             });
-                          },
-                          leading: Checkbox(
+                          }
+                              : null,
+                          leading: esDueno
+                              ? Checkbox(
                             value: seleccionado,
                             onChanged: (v) {
                               setState(() {
@@ -423,7 +476,7 @@ class _PapeleraScreenState extends State<PapeleraScreen> {
                                 }
                               });
                             },
-                          ),
+                          ) : null,
                           trailing: Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
