@@ -40,7 +40,7 @@ class LocalDb {
   /// v1.4.0 (Argón): versión actual del esquema local. Los tests de
   /// migración comparan contra esta constante en vez de un número
   /// fijo, para no caer en cascada de fallos con cada migración.
-  static const int versionActual = 47;
+  static const int versionActual = 48;
 
   /// v37: marcas de información pública pendiente de republicar,
   /// UNA FILA POR CLAVE (compartido entre onCreate y la migración
@@ -1182,6 +1182,19 @@ class LocalDb {
           await db.rawInsert(
               "INSERT OR IGNORE INTO meta (k, v) VALUES ('wm_guia_borrados', '0')");
         }
+        if (oldV < 48) {
+          // 1.15 (pomos): espejo de pomos (principal del dueño + uno
+          // por entrenador). Nace vacío; el pull lo puebla desde 0
+          // (getWatermarkTabla: servicio_* no hereda el global).
+          // Si el SQL de Supabase aún no corrió, el pull marca la
+          // tabla ausente y no bloquea el «completo».
+          await db.execute(
+              'CREATE TABLE IF NOT EXISTS servicio_pomos (id INTEGER PRIMARY KEY, data TEXT NOT NULL, sync_seq INTEGER NOT NULL)');
+          await db.execute(
+              'CREATE INDEX IF NOT EXISTS idx_servicio_pomos_seq ON servicio_pomos(sync_seq)');
+          await db.rawInsert(
+              "INSERT OR IGNORE INTO meta (k, v) VALUES ('wm_servicio_pomos', '0')");
+        }
       },
     );
     // v1.2.5+28: repara el índice FTS si la migración lo omitió y el
@@ -1965,6 +1978,7 @@ class LocalDb {
       'servicio_salidas',
       'servicio_agua_movimientos',
       'servicio_compras',
+      'servicio_pomos', // 1.15 (v48): pomos (principal + entrenadores)
     ]) {
       await db.execute(
           'CREATE TABLE IF NOT EXISTS $t (id INTEGER PRIMARY KEY, data TEXT NOT NULL, sync_seq INTEGER NOT NULL)');
@@ -2374,6 +2388,7 @@ class LocalDb {
       'servicio_salidas',
       'servicio_agua_movimientos',
       'servicio_compras',
+      'servicio_pomos', // 1.15 (v48)
       'turnos_apertura',
       'adelantos',
       'nomina_liquidada',
@@ -5766,6 +5781,9 @@ class LocalDb {
     'servicio_salidas',
     'servicio_agua_movimientos',
     'servicio_compras',
+    // 1.15 (v48): pomos. Tabla ausente en Supabase (antes del SQL)
+    // = marcada ausente, no bloquea el «completo».
+    'servicio_pomos',
     // v1.12.0 (G2): GymPedia, reservas y los dos espejos nuevos del
     // Bloque 3. Sin ellos, getWatermarkMinimo no evaluaba si su
     // descarga estaba completa.
@@ -6021,6 +6039,18 @@ class LocalDb {
         where: 'entrenador_telegram_id = ?',
         whereArgs: [telegramId],
         orderBy: 'creada_ts DESC');
+  }
+
+  /// Panel delta Luna ALTO: borra la fila local de una liquidación
+  /// RECHAZADA por el servidor. La fila NO es optimista de espejo
+  /// (tiene id real y columna op_uuid propia): limpiarOptimista
+  /// no la toca, y sin esto la fila seguía descontando el
+  /// pendiente para siempre. Solo se llama en el camino de
+  /// rechazo; la fila aplicada se conserva (es el libro local).
+  Future<void> eliminarEntregaEfectivoPorOp(String opUuid) async {
+    final d = await db;
+    await d.delete('entregas_efectivo',
+        where: 'op_uuid=?', whereArgs: [opUuid]);
   }
 
   // -- cola de operaciones ---------------------------------------------

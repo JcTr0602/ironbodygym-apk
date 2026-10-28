@@ -1152,53 +1152,14 @@ Future<double> pendienteEntregaUsd(int? telegramId) async {
 /// Con `excluirTelegramId` se omiten los cobros hechos por esa persona
 /// (el dueño no tiene nada que recogerse a sí mismo).
 Future<double> pendienteRecoger({int? excluirTelegramId}) async {
+  // 1.15 (H4): el total ES la suma del detalle por entrenador. Antes
+  // sumaba los ítems brutos sin restar libro C1, liquidaciones
+  // parciales ni arrastre, y quedaba inflado tras una parcial. Así
+  // el total y el detalle nunca divergen (misma fuente: el espejo).
   double total = 0;
-  // v1.3.4 (B2): filtro metodo='efectivo' por columna indexada (v26).
-  for (final p in await LocalDb.instance.pagosPorFiltro(metodo: 'efectivo')) {
-    if (esPendiente(p['entregado'])) {
-      final tid = LocalDb.normalizarTelegramId(p['telegram_user_id']);
-      if (excluirTelegramId != null && tid == excluirTelegramId) continue;
-      total += (p['monto'] as num?)?.toDouble() ?? 0;
-    }
-  }
-  for (final d in await LocalDb.instance.allMirror('pagos_diarios')) {
-    if (esPendiente(d['entregado']) && esPagoDiarioEfectivo(d)) {
-      final tid = LocalDb.normalizarTelegramId(d['registrado_por']);
-      if (excluirTelegramId != null && tid == excluirTelegramId) continue;
-      total += (d['total'] as num?)?.toDouble() ?? 0;
-    }
-  }
-  for (final v in await ventasSuplementosCup()) {
-    if (esPendiente(v['entregado'])) {
-      final tid = LocalDb.normalizarTelegramId(v['registrado_por']);
-      if (excluirTelegramId != null && tid == excluirTelegramId) continue;
-      total += totalVentaCup(v);
-    }
-  }
-  // 1.15-turnos (#6): los servicios en efectivo también se recogen,
-  // y los adelantos vivos ya salieron de la gaveta (restan).
-  for (final v in await LocalDb.instance.allMirror('servicio_ventas')) {
-    final resp =
-        LocalDb.normalizarTelegramId(v['responsable_efectivo_id']) ??
-            LocalDb.normalizarTelegramId(v['registrado_por']);
-    if (excluirTelegramId != null && resp == excluirTelegramId) {
-      continue;
-    }
-    if ((v['metodo'] as String?) == 'efectivo' &&
-        (v['casa'] as num?)?.toInt() != 1 &&
-        esPendiente(v['entregado'])) {
-      total += ((v['precio_unitario'] as num?)?.toDouble() ?? 0) *
-          ((v['cantidad'] as num?)?.toDouble() ?? 0);
-    }
-  }
-  for (final a in await LocalDb.instance.allMirror('adelantos')) {
-    final tid = LocalDb.normalizarTelegramId(a['descuenta_a']);
-    if (excluirTelegramId != null && tid == excluirTelegramId) {
-      continue;
-    }
-    if ((a['en_pendiente'] as num?)?.toInt() == 1) {
-      total -= (a['monto'] as num?)?.toDouble() ?? 0;
-    }
+  for (final e in await pendientePorEntrenador(
+      excluirTid: excluirTelegramId)) {
+    total += (e['total'] as num?)?.toDouble() ?? 0;
   }
   return total;
 }
@@ -1207,13 +1168,12 @@ Future<double> pendienteRecoger({int? excluirTelegramId}) async {
 /// Suma las ventas de suplementos en USD que los entrenadores
 /// tienen pendiente de entregar.
 Future<double> pendienteRecogerUsd({int? excluirTelegramId}) async {
+  // 1.15 (H4, misma regla que el total CUP): suma del detalle por
+  // entrenador, para incluir el arrastre USD de parciales.
   double total = 0;
-  for (final v in await ventasSuplementosUsd()) {
-    if (esPendiente(v['entregado'])) {
-      final tid = LocalDb.normalizarTelegramId(v['registrado_por']);
-      if (excluirTelegramId != null && tid == excluirTelegramId) continue;
-      total += totalVentaUsd(v);
-    }
+  for (final e in await pendientePorEntrenador(
+      excluirTid: excluirTelegramId)) {
+    total += (e['total_usd'] as num?)?.toDouble() ?? 0;
   }
   return total;
 }
@@ -1645,8 +1605,41 @@ Future<List<Map<String, dynamic>>> entrenadoresConPendiente() async {
     if (tid != null) tids.add(tid);
   }
   for (final v in await LocalDb.instance.allMirror('servicio_ventas')) {
-    final tid = LocalDb.normalizarTelegramId(v['registrado_por']);
+    // 1.15 (Panel A1): el responsable del efectivo, no quien registró.
+    final tid =
+        LocalDb.normalizarTelegramId(v['responsable_efectivo_id']) ??
+            LocalDb.normalizarTelegramId(v['registrado_por']);
     if (tid != null) tids.add(tid);
+  }
+  for (final l in await LocalDb.instance.allMirror('liquidaciones_caja')) {
+    final tid = LocalDb.normalizarTelegramId(l['entrenador_telegram_id']);
+    if (tid != null) tids.add(tid);
+  }
+  // 1.15 (Panel A1): nombres también desde diarios, suplementos y
+  // servicios (un entrenador sin pagos no salía con nombre).
+  final nombresDiarios = <int, String>{};
+  for (final d in await LocalDb.instance.allMirror('pagos_diarios')) {
+    final tid = LocalDb.normalizarTelegramId(d['registrado_por']);
+    final n = d['registrado_por_nombre'] as String?;
+    if (tid != null && n != null && n.isNotEmpty) {
+      nombresDiarios.putIfAbsent(tid, () => n);
+    }
+  }
+  final nombresSupl = <int, String>{};
+  for (final v in await LocalDb.instance.allMirror('ventas_suplementos')) {
+    final tid = LocalDb.normalizarTelegramId(v['registrado_por']);
+    final n = v['registrado_por_nombre'] as String?;
+    if (tid != null && n != null && n.isNotEmpty) {
+      nombresSupl.putIfAbsent(tid, () => n);
+    }
+  }
+  final nombresServ = <int, String>{};
+  for (final v in await LocalDb.instance.allMirror('servicio_ventas')) {
+    final tid = LocalDb.normalizarTelegramId(v['registrado_por']);
+    final n = v['registrado_por_nombre'] as String?;
+    if (tid != null && n != null && n.isNotEmpty) {
+      nombresServ.putIfAbsent(tid, () => n);
+    }
   }
   // Nombre de cada entrenador (del primer pago/venta que aparezca).
   for (final tid in tids) {
@@ -1656,6 +1649,8 @@ Future<List<Map<String, dynamic>>> entrenadoresConPendiente() async {
       nombre = p['registrado_por'] as String?;
       if (nombre != null && nombre.isNotEmpty) break;
     }
+    nombre ??=
+        nombresDiarios[tid] ?? nombresSupl[tid] ?? nombresServ[tid];
     final pend = await pendienteArqueo(tid);
     await acumular(tid, nombre, pend.cup, pend.usd);
   }
@@ -1876,6 +1871,11 @@ Future<List<Map<String, dynamic>>> avisosWhatsappHoy() async {
   // > Recibos > Cumpleaños).
   final idsVencidos = <int>{};
   for (final c in await atrasados(masDe30: false)) {
+    // 1.15 (H5): el filtro de protegido vive en la función, no solo
+    // en la pantalla: un no-dueño nunca ve avisos de protegidos,
+    // llame quien llame (hoy la bandeja y el contador son del dueño,
+    // pero la función no debe fiarse de eso).
+    if (esVistaProtegida(c, esDueno: esDueno)) continue;
     final cid = (c['id'] as num?)?.toInt() ?? 0;
     idsVencidos.add(cid);
     final ph = '${c['pagado_hasta'] ?? ''}';
@@ -1899,6 +1899,7 @@ Future<List<Map<String, dynamic>>> avisosWhatsappHoy() async {
 
   // 1) Cumpleaños hoy.
   for (final c in await cumpleanosProximos(dias: 0)) {
+    if (esVistaProtegida(c, esDueno: esDueno)) continue;
     if ((c['_dias_para'] as int?) != 0) continue;
     avisos.add({
       'tipo': 'cumple',
@@ -1915,6 +1916,7 @@ Future<List<Map<String, dynamic>>> avisosWhatsappHoy() async {
   // 2) Vencen hoy.
   final idsVenceHoy = <int>{};
   for (final c in await vencenHoy()) {
+    if (esVistaProtegida(c, esDueno: esDueno)) continue;
     final cid = (c['id'] as num?)?.toInt() ?? 0;
     idsVenceHoy.add(cid);
     avisos.add({
@@ -1931,6 +1933,7 @@ Future<List<Map<String, dynamic>>> avisosWhatsappHoy() async {
 
   // 3) Por vencer (próximos 3 días, sin los que vencen hoy).
   for (final c in await porVencer(dias: 3)) {
+    if (esVistaProtegida(c, esDueno: esDueno)) continue;
     final cid = (c['id'] as num?)?.toInt() ?? 0;
     if (idsVenceHoy.contains(cid)) continue;
     final ph = '${c['pagado_hasta'] ?? ''}';
@@ -1960,6 +1963,13 @@ Future<List<Map<String, dynamic>>> avisosWhatsappHoy() async {
   for (final p in pagosHoy) {
     final cid = (p['cliente_id'] as num?)?.toInt() ?? 0;
     final c = clientes[cid];
+    // 1.15 (H5): recibo de un protegido tampoco sale para no-dueño.
+    // Panel delta Luna ALTO: sin cliente en el espejo no se puede
+    // saber si es protegido: para no-dueño el recibo se omite
+    // (fail-closed; antes salía «Cliente $cid» + monto + cobrador).
+    // El dueño lo sigue viendo como «Cliente $cid».
+    if (!esDueno && c == null) continue;
+    if (c != null && esVistaProtegida(c, esDueno: esDueno)) continue;
     final nombre = c != null ? nombreDe(c) : 'Cliente $cid';
     final monto = (p['monto'] as num?)?.toDouble() ?? 0;
     if (monto <= 0) continue;
@@ -2679,7 +2689,8 @@ Future<
   }
   for (final d in await LocalDb.instance.allMirror('pagos_diarios')) {
     if (LocalDb.normalizarTelegramId(d['registrado_por']) == telegramId &&
-        esPendiente(d['entregado'])) {
+        esPendiente(d['entregado']) &&
+        esPagoDiarioEfectivo(d)) {
       diarios.add(d);
     }
   }
@@ -3269,6 +3280,7 @@ Future<List<Map<String, dynamic>>> detallePendienteEntrenador(
   }
   for (final d in await LocalDb.instance.allMirror('pagos_diarios')) {
     if (!esPendiente(d['entregado'])) continue;
+    if (!esPagoDiarioEfectivo(d)) continue;
     if (LocalDb.normalizarTelegramId(d['registrado_por']) != tid) continue;
     items.add({
       'tipo': 'diario',
@@ -3352,6 +3364,7 @@ Future<List<Map<String, dynamic>>> pagosPendientesDetalle(
   }
   for (final d in await LocalDb.instance.allMirror('pagos_diarios')) {
     if (!esPendiente(d['entregado'])) continue;
+    if (!esPagoDiarioEfectivo(d)) continue;
     final tid = LocalDb.normalizarTelegramId(d['registrado_por']);
     if (tid == null) continue;
     if (excluirTid != null && tid == excluirTid) continue;
@@ -3433,6 +3446,7 @@ Future<void> confirmarEntregaPorIds({
   List<int> servicioIds = const [],
   required String entrenadorNombre,
   int? trainerTelegramId,
+  String? nota,
 }) async {
   final db = LocalDb.instance;
   final d = await db.db;
@@ -3476,6 +3490,7 @@ Future<void> confirmarEntregaPorIds({
         // Argón B3: incluir trainer_telegram_id.
         if (trainerTelegramId != null)
           'trainer_telegram_id': trainerTelegramId,
+        if (nota != null && nota.isNotEmpty) 'nota': nota,
         'pago_ids': mensualIds,
         'pago_diario_ids': diarioIds,
         'suplemento_ids': suplementoIds,
@@ -3529,20 +3544,40 @@ Future<List<Map<String, dynamic>>> pendientePorEntrenador(
     e['n'] = (e['n'] as int) + 1;
   }
 
+  // 1.15 (Panel A1): excluir lo ya liquidado (misma regla que
+  // pendienteArqueo): un ítem en otra liquidación no vuelve a contar.
+  // Caché por entrenador para no repetir la consulta por ítem.
+  final cubiertosPorTid = <int, Set<String>>{};
+  Future<Set<String>> cubiertosDe(int tid) async {
+    var s = cubiertosPorTid[tid];
+    if (s == null) {
+      s = await idsLiquidados(tid);
+      cubiertosPorTid[tid] = s;
+    }
+    return s;
+  }
+
   for (final p
       in await LocalDb.instance.pagosEfectivoPorEntrenador(null)) {
     if (!esPendiente(p['entregado'])) continue;
     final tid = LocalDb.normalizarTelegramId(p['telegram_user_id']);
     if (tid == null) continue;
     if (excluirTid != null && tid == excluirTid) continue;
+    if ((await cubiertosDe(tid)).contains('pagos:${p['id']}')) continue;
     suma(tid, '${p['registrado_por'] ?? 'Entrenador $tid'}',
         (p['monto'] as num?)?.toDouble() ?? 0);
   }
   for (final d in await LocalDb.instance.allMirror('pagos_diarios')) {
     if (!esPendiente(d['entregado'])) continue;
+    // Solo efectivo (sin método = efectivo legacy); una transferencia
+    // no entra al pendiente de entrega.
+    if (!esPagoDiarioEfectivo(d)) continue;
     final tid = LocalDb.normalizarTelegramId(d['registrado_por']);
     if (tid == null) continue;
     if (excluirTid != null && tid == excluirTid) continue;
+    if ((await cubiertosDe(tid)).contains('pagos_diarios:${d['id']}')) {
+      continue;
+    }
     suma(tid, '${d['registrado_por_nombre'] ?? 'Entrenador $tid'}',
         (d['total'] as num?)?.toDouble() ?? 0);
   }
@@ -3552,6 +3587,10 @@ Future<List<Map<String, dynamic>>> pendientePorEntrenador(
     final tid = LocalDb.normalizarTelegramId(v['registrado_por']);
     if (tid == null) continue;
     if (excluirTid != null && tid == excluirTid) continue;
+    if ((await cubiertosDe(tid))
+        .contains('ventas_suplementos:${v['id']}')) {
+      continue;
+    }
     suma(tid, '${v['registrado_por_nombre'] ?? 'Entrenador $tid'}',
         totalVentaCup(v));
   }
@@ -3563,6 +3602,10 @@ Future<List<Map<String, dynamic>>> pendientePorEntrenador(
     final tid = LocalDb.normalizarTelegramId(v['registrado_por']);
     if (tid == null) continue;
     if (excluirTid != null && tid == excluirTid) continue;
+    if ((await cubiertosDe(tid))
+        .contains('ventas_suplementos:${v['id']}')) {
+      continue;
+    }
     sumaUsd(tid, '${v['registrado_por_nombre'] ?? 'Entrenador $tid'}',
         totalVentaUsd(v));
   }
@@ -3577,10 +3620,50 @@ Future<List<Map<String, dynamic>>> pendientePorEntrenador(
             LocalDb.normalizarTelegramId(v['registrado_por']);
     if (tid == null) continue;
     if (excluirTid != null && tid == excluirTid) continue;
+    if ((await cubiertosDe(tid)).contains('servicio_ventas:${v['id']}')) {
+      continue;
+    }
     suma(tid, '${v['registrado_por_nombre'] ?? 'Entrenador $tid'}',
         ((v['precio_unitario'] as num?)?.toDouble() ?? 0) *
             ((v['cantidad'] as num?)?.toDouble() ?? 0));
   }
+  // 1.15 (Panel A1): descuentos y arrastre (misma regla que
+  // pendienteArqueo): adelantos en pendiente y libro C1 restan; el
+  // saldo de arrastre de liquidaciones parciales suma. Sin nada
+  // pendiente, la entrada desaparece (igual que en Arqueo).
+  final arrastrePorTid = <int, ({double cup, double usd})>{};
+  for (final l in await LocalDb.instance.allMirror('liquidaciones_caja')) {
+    final tid = LocalDb.normalizarTelegramId(l['entrenador_telegram_id']);
+    if (tid == null || (l['estado'] as String?) != 'parcial') continue;
+    final a = (l['saldo_arrastre'] as num?)?.toDouble() ?? 0;
+    final cur = arrastrePorTid.putIfAbsent(tid, () => (cup: 0.0, usd: 0.0));
+    if ((l['moneda'] as String?) == 'USD') {
+      arrastrePorTid[tid] = (cup: cur.cup, usd: cur.usd + a);
+    } else {
+      arrastrePorTid[tid] = (cup: cur.cup + a, usd: cur.usd);
+    }
+  }
+  // Panel Terra #3: el arrastre solo también crea entrada. Sin
+  // esto, un entrenador con todos sus ítems cubiertos por una
+  // liquidación parcial y solo arrastre desaparecía del panel.
+  for (final entry in arrastrePorTid.entries) {
+    if (entry.value.cup == 0 && entry.value.usd == 0) continue;
+    entrada(entry.key, 'Entrenador ${entry.key}');
+  }
+  for (final e in mapa.values) {
+    final tid = e['id'] as int;
+    e['total'] = (e['total'] as double) -
+        await adelantosEnPendiente(tid) -
+        await contribucionLibroC1(tid) +
+        (arrastrePorTid[tid]?.cup ?? 0);
+    e['total_usd'] =
+        (e['total_usd'] as double) + (arrastrePorTid[tid]?.usd ?? 0);
+  }
+  // Panel Terra #4: solo ceros EXACTOS se eliminan. Con <= 0, un
+  // saldo negativo (adelanto mayor que cobros) quedaba oculto y es
+  // información financiera que el dueño debe ver.
+  mapa.removeWhere((_, e) =>
+      (e['total'] as double) == 0 && (e['total_usd'] as double) == 0);
   final l = mapa.values.toList()
     ..sort((a, b) {
       final c = (b['total'] as double).compareTo(a['total'] as double);
@@ -3589,6 +3672,81 @@ Future<List<Map<String, dynamic>>> pendientePorEntrenador(
           .compareTo(a['total_usd'] as double);
     });
   return l;
+}
+
+/// Ids pendientes de entrega por categoría (extraído de
+/// _confirmarEntrega para poder testearlo, panel Terra #5).
+/// Misma regla que pendientePorEntrenador: efectivo + pendiente +
+/// Casa fuera + responsable del efectivo, MENOS lo ya cubierto por
+/// una liquidación parcial (idsLiquidados por categoría).
+Future<({List<int> pagos, List<int> diarios, List<int> suplementos,
+    List<int> servicios})>
+    idsPendientesEntrega({int? trainerId}) async {
+  final pagoIds = <int>[];
+  final diarioIds = <int>[];
+  final suplementoIds = <int>[];
+  final servicioIds = <int>[];
+  bool mismo(int? tid) => trainerId == null || tid == trainerId;
+  final liqPorTid = <int, Set<String>>{};
+  Future<Set<String>> liq(int tid) async {
+    var s = liqPorTid[tid];
+    if (s == null) {
+      s = await idsLiquidados(tid);
+      liqPorTid[tid] = s;
+    }
+    return s;
+  }
+
+  for (final p in await LocalDb.instance.pagosEfectivoPorEntrenador(null)) {
+    if (!esPendiente(p['entregado'])) continue;
+    final tid = LocalDb.normalizarTelegramId(p['telegram_user_id']);
+    if (tid == null || !mismo(tid)) continue;
+    final id = (p['id'] as num?)?.toInt();
+    if (id != null && !(await liq(tid)).contains('pagos:$id')) {
+      pagoIds.add(id);
+    }
+  }
+  for (final d in await LocalDb.instance.allMirror('pagos_diarios')) {
+    if (!esPendiente(d['entregado']) || !esPagoDiarioEfectivo(d)) {
+      continue;
+    }
+    final tid = LocalDb.normalizarTelegramId(d['registrado_por']);
+    if (tid == null || !mismo(tid)) continue;
+    final id = (d['id'] as num?)?.toInt();
+    if (id != null && !(await liq(tid)).contains('pagos_diarios:$id')) {
+      diarioIds.add(id);
+    }
+  }
+  for (final v in await LocalDb.instance.allMirror('ventas_suplementos')) {
+    if (!esPendiente(v['entregado'])) continue;
+    final tid = LocalDb.normalizarTelegramId(v['registrado_por']);
+    if (tid == null || !mismo(tid)) continue;
+    final id = (v['id'] as num?)?.toInt();
+    if (id != null &&
+        !(await liq(tid)).contains('ventas_suplementos:$id')) {
+      suplementoIds.add(id);
+    }
+  }
+  for (final v in await LocalDb.instance.allMirror('servicio_ventas')) {
+    if (!esPendiente(v['entregado'])) continue;
+    if ('${v['metodo']}' != 'efectivo') continue;
+    if (((v['casa'] as num?)?.toInt() ?? 0) == 1) continue;
+    final tid =
+        LocalDb.normalizarTelegramId(v['responsable_efectivo_id']) ??
+            LocalDb.normalizarTelegramId(v['registrado_por']);
+    if (tid == null || !mismo(tid)) continue;
+    final id = (v['id'] as num?)?.toInt();
+    if (id != null &&
+        !(await liq(tid)).contains('servicio_ventas:$id')) {
+      servicioIds.add(id);
+    }
+  }
+  return (
+    pagos: pagoIds,
+    diarios: diarioIds,
+    suplementos: suplementoIds,
+    servicios: servicioIds,
+  );
 }
 
 /// Ingresos del mes calendario actual (espejo `pagos` + diarios).
@@ -4145,8 +4303,34 @@ Future<int> morosos() async {
 }
 
 /// Gastos del espejo, ordenados por fecha descendente.
+/// Ops 'gasto' pendientes de sync (1.15, Panel A6): se ven en la
+/// lista y en el total del día sin esperar al pull; al llegar el
+/// espejo, la op ya no está pendiente y no hay duplicado. El id es
+/// negativo temporal (rowid de la cola) para no chocar con ids del
+/// espejo.
+Future<List<Map<String, dynamic>>> _gastosPendientes() async {
+  final out = <Map<String, dynamic>>[];
+  final db = await LocalDb.instance.db;
+  final rows = await db.rawQuery(
+      "SELECT rowid, payload FROM ops_queue WHERE tipo = 'gasto' AND estado = 'pendiente'");
+  for (final r in rows) {
+    try {
+      final p = jsonDecode(r['payload'] as String) as Map<String, dynamic>;
+      out.add({
+        'id': -((r['rowid'] as num?)?.toInt() ?? 0),
+        'fecha': '${p['fecha'] ?? ''}',
+        'concepto': '${p['concepto'] ?? ''}',
+        'monto': (p['monto'] as num?)?.toDouble() ?? 0,
+        'pendiente_sync': 1,
+      });
+    } catch (_) {}
+  }
+  return out;
+}
+
 Future<List<Map<String, dynamic>>> gastosTodos() async {
   final rows = await LocalDb.instance.allMirror('gastos');
+  rows.addAll(await _gastosPendientes());
   rows.sort((a, b) => '${b['fecha']}'.compareTo('${a['fecha']}'));
   return rows;
 }
@@ -4155,6 +4339,12 @@ Future<List<Map<String, dynamic>>> gastosTodos() async {
 Future<double> gastosDe(String fechaIso) async {
   double t = 0;
   for (final g in await LocalDb.instance.allMirror('gastos')) {
+    if ('${g['fecha'] ?? ''}'.length >= 10 &&
+        '${g['fecha']}'.substring(0, 10) == fechaIso) {
+      t += (g['monto'] as num?)?.toDouble() ?? 0;
+    }
+  }
+  for (final g in await _gastosPendientes()) {
     if ('${g['fecha'] ?? ''}'.length >= 10 &&
         '${g['fecha']}'.substring(0, 10) == fechaIso) {
       t += (g['monto'] as num?)?.toDouble() ?? 0;

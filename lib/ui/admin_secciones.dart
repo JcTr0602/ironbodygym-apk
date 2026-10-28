@@ -135,6 +135,11 @@ class SeccionCobrosScreen extends StatefulWidget {
   final List<Map<String, dynamic>> Function() getPend;
   final Future<void> Function({int? trainerId, required String nombre})
       onConfirmarEntrega;
+  // 1.15 (H4): registrar una recogida (total o parcial) desde el
+  // pendiente, sin pasar por Arqueo.
+  final Future<void> Function(
+      {int? trainerId, required String nombre, required double pendiente})
+      onRegistrarRecogida;
   final Future<void> Function(Widget) onIr;
 
   const SeccionCobrosScreen({
@@ -143,6 +148,7 @@ class SeccionCobrosScreen extends StatefulWidget {
     required this.getGastosHoy,
     required this.getPend,
     required this.onConfirmarEntrega,
+    required this.onRegistrarRecogida,
     required this.onIr,
   });
 
@@ -155,6 +161,15 @@ class _SeccionCobrosScreenState extends State<SeccionCobrosScreen> {
       {int? trainerId, required String nombre}) async {
     await widget.onConfirmarEntrega(
         trainerId: trainerId, nombre: nombre);
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _registrarYActualizar(
+      {int? trainerId,
+      required String nombre,
+      required double pendiente}) async {
+    await widget.onRegistrarRecogida(
+        trainerId: trainerId, nombre: nombre, pendiente: pendiente);
     if (mounted) setState(() {});
   }
 
@@ -208,11 +223,24 @@ class _SeccionCobrosScreenState extends State<SeccionCobrosScreen> {
                     onTap: () => _irYActualizar(DetallePendienteScreen(
                         trainerId: t['id'] as int,
                         nombre: '${t['nombre']}')),
-                    trailing: TextButton(
-                      child: const Text('Confirmar'),
-                      onPressed: () => _confirmarYActualizar(
-                          trainerId: t['id'] as int?,
-                          nombre: '${t['nombre']}'),
+                    trailing: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        TextButton(
+                          child: const Text('Recogida'),
+                          onPressed: () => _registrarYActualizar(
+                              trainerId: t['id'] as int?,
+                              nombre: '${t['nombre']}',
+                              pendiente:
+                                  (t['total'] as num?)?.toDouble() ?? 0),
+                        ),
+                        TextButton(
+                          child: const Text('Confirmar'),
+                          onPressed: () => _confirmarYActualizar(
+                              trainerId: t['id'] as int?,
+                              nombre: '${t['nombre']}'),
+                        ),
+                      ],
                     ),
                   ),
                 if (pend.isNotEmpty)

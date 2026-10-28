@@ -100,8 +100,8 @@ void main() {
         isTrue);
   });
 
-  test('la versión actual del esquema es 47 (pin movido: v47 Biblioteca)',
+  test('la versión actual del esquema es 48 (pin movido: v48 Pomos)',
       () async {
-    expect(LocalDb.versionActual, 47);
+    expect(LocalDb.versionActual, 48);
   });
 }

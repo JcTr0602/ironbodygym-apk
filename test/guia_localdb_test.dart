@@ -107,12 +107,12 @@ void main() {
     expect(filaSinActivo['activo'], 1);
   });
 
-  test('paridad v47: onCreate y onUpgrade crean el mismo esquema '
-      'Guía', () async {
-    // 1) Instalación limpia (onCreate v47).
+  test('paridad Guía: onCreate y onUpgrade crean el mismo esquema',
+      () async {
+    // 1) Instalación limpia (onCreate actual).
     final dbPath = await _dbPathNuevo();
     final dbLimpia = await LocalDb.instance.db;
-    expect(await dbLimpia.getVersion(), 47);
+    expect(await dbLimpia.getVersion(), LocalDb.versionActual);
     final esquemaLimpia = await _esquemaGuia(dbLimpia);
     final metasLimpias = {
       for (final k in ['wm_guia_fichas', 'wm_guia_equipos', 'wm_guia_borrados'])
@@ -123,14 +123,14 @@ void main() {
       await File(dbPath).delete();
     } catch (_) {}
 
-    // 2) BD v46 mínima (solo meta) → onUpgrade 46→47 real.
+    // 2) BD v46 mínima (solo meta) → onUpgrade real hasta la actual.
     final v46 = await databaseFactoryFfi.openDatabase(dbPath,
         options: OpenDatabaseOptions(version: 46));
     await v46.execute(
         'CREATE TABLE meta (k TEXT PRIMARY KEY, v TEXT NOT NULL)');
     await v46.close();
     final dbMigrada = await LocalDb.instance.db;
-    expect(await dbMigrada.getVersion(), 47);
+    expect(await dbMigrada.getVersion(), LocalDb.versionActual);
     final esquemaMigrada = await _esquemaGuia(dbMigrada);
     expect(esquemaMigrada, esquemaLimpia,
         reason: 'onCreate y onUpgrade deben crear idénticas tablas Guía');

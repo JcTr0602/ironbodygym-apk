@@ -18,10 +18,10 @@ import 'servicios_estadisticas.dart';
 
 /// v1.8.0: Servicios por dosis — pantalla de venta y cuadre.
 ///
-/// El entrenador vende desde SU lote activo; el dueño además
-/// gestiona botes/lotes/agua/precios (Administración) y ve las
-/// estadísticas. La lógica vive en lib/servicios.dart; aquí solo
-/// se presenta y se captura la intención.
+/// El entrenador vende desde SU pomo; el dueño además gestiona
+/// pomos/agua/precios (Administración) y ve las estadísticas. La
+/// lógica vive en lib/servicios.dart; aquí solo se presenta y se
+/// captura la intención.
 class ServiciosScreen extends StatefulWidget {
   /// Ítem 5 (post-1.8.0): el speed dial de Home abre la pantalla ya
   /// posicionada en un tipo de venta ('dosis_sin_agua' |
@@ -43,8 +43,8 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
   Map<String, dynamic> _ajustes = const {};
   bool _dialogoInicialAbierto = false;
   ({int saldo, double cpp}) _agua = (saldo: 0, cpp: 0);
-  List<Map<String, dynamic>> _misLotes = [];
-  int? _loteSel;
+  List<Map<String, dynamic>> _misPomos = [];
+  int? _pomoSel;
   Map<String, dynamic> _cuadre = const {};
   List<Map<String, dynamic>> _ventasHoy = [];
   List<Map<String, dynamic>> _ventasTodas = [];
@@ -66,7 +66,7 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
     final precios = await preciosServicios();
     final ajustes = await LocalDb.instance.getAjustes();
     final agua = await stockAguaLocal();
-    // Personas conocidas (para nombrar al dueño de cada lote):
+    // Personas conocidas (para nombrar al titular de cada pomo):
     // quien haya registrado pagos o ventas de suplementos.
     final personas = <int, String>{};
     if (tid != null) {
@@ -84,11 +84,11 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
       final ptid = LocalDb.normalizarTelegramId(v['registrado_por']);
       if (ptid != null) personas.putIfAbsent(ptid, () => 'Entrenador');
     }
-    // Ítem 8: el dueño ve TODOS los lotes activos (vende de
-    // cualquiera); el entrenador solo los suyos.
-    final lotes = await lotesActivosLocal(
-        responsableId: auth.isOwner ? null : tid);
-    // Nombre del producto en cada lote: lote → bote → suplemento.
+    // Ítem 8: el dueño ve TODOS los pomos activos (vende del
+    // principal; puede elegir otro); el entrenador solo el suyo.
+    final pomos = await pomosActivosLocal(
+        titularId: auth.isOwner ? null : tid);
+    // Nombre del producto en cada pomo: pomo → suplemento directo.
     // Ítem 13: etiqueta compuesta «Nombre · Categoría».
     final cats = mapaCategoriasSuplemento(
         await LocalDb.instance.allMirror('categorias_suplemento'));
@@ -97,19 +97,14 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
         if ((s['id'] as num?) != null)
           (s['id'] as num).toInt(): etiquetaDeSuplemento(s, cats),
     };
-    final boteSup = <int, int>{
-      for (final b in await LocalDb.instance.allMirror('servicio_botes'))
-        if ((b['id'] as num?) != null && (b['suplemento_id'] as num?) != null)
-          (b['id'] as num).toInt(): (b['suplemento_id'] as num).toInt(),
-    };
-    for (final l in lotes) {
-      final supId = boteSup[(l['bote_id'] as num?)?.toInt()];
-      l['producto_nombre'] = nombreSup[supId] ?? 'Servicio';
+    for (final l in pomos) {
+      l['producto_nombre'] =
+          nombreSup[(l['suplemento_id'] as num?)?.toInt()] ?? 'Servicio';
       final respTid =
-          LocalDb.normalizarTelegramId(l['responsable_id']);
-      l['responsable_nombre'] =
+          LocalDb.normalizarTelegramId(l['titular_telegram_id']);
+      l['titular_nombre'] =
           respTid == null ? '—' : (personas[respTid] ?? 'Entrenador');
-      l['responsable_tid'] = respTid;
+      l['titular_tid'] = respTid;
     }
     final ventas = await LocalDb.instance.allMirror('servicio_ventas');
     final salidas =
@@ -119,8 +114,8 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
         if ((v['reverso_de'] as num?) != null)
           (v['reverso_de'] as num).toInt(),
     };
-    final misLotesIds = <int>{
-      for (final l in lotes)
+    final misPomosIds = <int>{
+      for (final l in pomos)
         if ((l['id'] as num?) != null) (l['id'] as num).toInt(),
     };
     final deHoy = ventas.where((v) {
@@ -130,11 +125,13 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
       }
       if (auth.isOwner) return true;
       // Ítem 8 (trazabilidad): el entrenador ve las ventas donde es
-      // el VENDEDOR y las hechas de SU lote (p. ej. por el dueño).
+      // el VENDEDOR y las hechas de SU pomo (p. ej. por el dueño).
+      // Las ventas viejas de la época de lotes (pomo_id NULL) solo
+      // le llegan por la vía del vendedor.
       final vend = LocalDb.normalizarTelegramId(v['vendedor_id']) ??
           LocalDb.normalizarTelegramId(v['registrado_por']);
       return vend == tid ||
-          misLotesIds.contains((v['lote_id'] as num?)?.toInt());
+          misPomosIds.contains((v['pomo_id'] as num?)?.toInt());
     }).toList()
       ..sort((a, b) =>
           ((b['id'] as num?)?.toInt() ?? 0)
@@ -150,9 +147,16 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
       _personas = personas;
       _miTid = tid;
       _agua = agua;
-      _misLotes = lotes;
-      if (_loteSel == null && lotes.isNotEmpty) {
-        _loteSel = (lotes.first['id'] as num?)?.toInt();
+      _misPomos = pomos;
+      if (_pomoSel == null && pomos.isNotEmpty) {
+        // El dueño vende del principal por defecto; el entrenador
+        // solo tiene su pomo.
+        final principal = pomos.where(
+            (l) => (l['es_principal'] as num?)?.toInt() == 1).toList();
+        _pomoSel = ((auth.isOwner && principal.isNotEmpty
+                    ? principal.first
+                    : pomos.first)['id'] as num?)
+                ?.toInt();
       }
       _cuadre = cuadre;
       _ventasHoy = deHoy;
@@ -203,11 +207,11 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
     );
   }
 
-  Map<String, dynamic>? get _loteActual {
-    for (final l in _misLotes) {
-      if ((l['id'] as num?)?.toInt() == _loteSel) return l;
+  Map<String, dynamic>? get _pomoActual {
+    for (final l in _misPomos) {
+      if ((l['id'] as num?)?.toInt() == _pomoSel) return l;
     }
-    return _misLotes.isEmpty ? null : _misLotes.first;
+    return _misPomos.isEmpty ? null : _misPomos.first;
   }
 
   void _aviso(String msg, {bool error = false}) {
@@ -237,11 +241,11 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
   }
 
   Future<void> _vender(String tipo) async {
-    if (tipo != 'agua_suelta' && _loteActual == null) {
+    if (tipo != 'agua_suelta' && _pomoActual == null) {
       _aviso(
           _esDueno
-              ? 'Primero crea un lote para ti en Administración'
-              : 'No tienes un lote activo: pide uno al dueño',
+              ? 'Primero abre un bote en Administración para tener principal'
+              : 'No tienes un pomo activo: pide uno al dueño',
           error: true);
       return;
     }
@@ -253,14 +257,14 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
         primerMetodoServicioActivo(_ajustes, tipo) ?? 'efectivo';
     var cantidad = 1;
     // Ítem 8 (solo el dueño los usa): roles de la venta. Precarga de
-    // Argón: la venta nace «a nombre de» el dueño del lote (para el
+    // Argón: la venta nace «a nombre de» el titular del pomo (para el
     // entrenador y para el agua, de sí mismo) y el responsable del
     // efectivo sigue al vendedor.
-    final loteRespTid = tipo == 'agua_suelta'
+    final pomoTitularTid = tipo == 'agua_suelta'
         ? _miTid
-        : ((_loteActual!['responsable_tid'] as int?) ?? _miTid);
-    var vendedorSel = loteRespTid;
-    var responsableSel = loteRespTid;
+        : ((_pomoActual!['titular_tid'] as int?) ?? _miTid);
+    var vendedorSel = pomoTitularTid;
+    var responsableSel = pomoTitularTid;
     final comisionCtrl = TextEditingController(
         text: (_precios?.comision ?? 0).toStringAsFixed(0));
     final ok = await showDialog<bool>(
@@ -418,11 +422,11 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                         DropdownButton<int>(
                           value: vendedorSel,
                           items: [
-                            if (loteRespTid != null &&
-                                loteRespTid != _miTid)
+                            if (pomoTitularTid != null &&
+                                pomoTitularTid != _miTid)
                               DropdownMenuItem(
-                                  value: loteRespTid,
-                                  child: Text(_personas[loteRespTid] ??
+                                  value: pomoTitularTid,
+                                  child: Text(_personas[pomoTitularTid] ??
                                       'Entrenador')),
                             if (_miTid != null)
                               DropdownMenuItem(
@@ -431,7 +435,7 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                             if (tipo == 'agua_suelta')
                               for (final e in _personas.entries)
                                 if (e.key != _miTid &&
-                                    e.key != loteRespTid)
+                                    e.key != pomoTitularTid)
                                   DropdownMenuItem(
                                       value: e.key,
                                       child: Text(e.value)),
@@ -525,9 +529,9 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
     try {
       final opUuid = await registrarVentaServicio(
         tipo: tipo,
-        loteId: tipo == 'agua_suelta'
+        pomoId: tipo == 'agua_suelta'
             ? null
-            : (_loteActual!['id'] as num).toInt(),
+            : (_pomoActual!['id'] as num).toInt(),
         cantidad: cantidad,
         clienteId: (cliente?['id'] as num?)?.toInt(),
         metodo: metodo,
@@ -594,18 +598,18 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
 
   /// v1.13.0 (Bloque 4, B2 + D1): venta múltiple con contadores N/M.
   /// N dosis (2 ≤ N ≤ tope) y M pomos (0 ≤ M ≤ N, topado a pomos).
-  /// El dueño tiene tope local (saldo del lote); el entrenador es
-  /// ciego al lote y no tiene tope local (el servidor aplica).
+  /// El dueño tiene tope local (saldo del pomo); el entrenador es
+  /// ciego al pomo y no tiene tope local (el servidor aplica).
   Future<void> _ventaMultiple() async {
-    final lote = _loteActual;
-    if (lote == null) {
-      _aviso('No tienes un lote activo', error: true);
+    final pomo = _pomoActual;
+    if (pomo == null) {
+      _aviso('No tienes un pomo activo', error: true);
       return;
     }
     final topeDosis =
-        _esDueno ? ((lote['saldo_local'] as num?)?.toInt() ?? 0) : 999999;
+        _esDueno ? ((pomo['saldo_local'] as num?)?.toInt() ?? 0) : 999999;
     if (_esDueno && topeDosis < 2) {
-      _aviso('No quedan dosis suficientes en el lote', error: true);
+      _aviso('No quedan dosis suficientes en el pomo', error: true);
       return;
     }
     final topePomos = _agua.saldo;
@@ -658,12 +662,12 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
               children: [
                 if (!_esDueno)
                   const Text(
-                    'Tu lote es ciego: sin tope local de dosis. '
+                    'Tu pomo es ciego: sin tope local de dosis. '
                     'El servidor aplica la venta.',
                     style: AppTexto.secundario,
                   ),
                 if (_esDueno)
-                  Text('Dosis en el lote: $topeDosis',
+                  Text('Dosis en el pomo: $topeDosis',
                       style: AppTexto.secundario),
                 Text('Pomos en stock: $topePomos',
                     style: AppTexto.secundario),
@@ -809,7 +813,7 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
     final esCasa = esCasaCliente || paraDuenoCasa;
     try {
       final opUuids = await registrarVentaMultipleServicio(
-        loteId: (lote['id'] as num).toInt(),
+        pomoId: (pomo['id'] as num).toInt(),
         dosisN: n,
         pomosM: m,
         clienteId: (cliente?['id'] as num?)?.toInt(),
@@ -832,9 +836,9 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
   }
 
   Future<void> _salida() async {
-    final lote = _loteActual;
-    if (lote == null) {
-      _aviso('No tienes un lote activo', error: true);
+    final pomo = _pomoActual;
+    if (pomo == null) {
+      _aviso('No tienes un pomo activo', error: true);
       return;
     }
     var motivo = 'merma';
@@ -899,7 +903,7 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
     if (ok != true) return;
     try {
       await registrarSalidaServicio(
-        loteId: (lote['id'] as num).toInt(),
+        pomoId: (pomo['id'] as num).toInt(),
         dosis: int.tryParse(dosisCtrl.text.trim()) ?? 0,
         motivo: motivo,
         nota: notaCtrl.text.trim().isEmpty
@@ -914,23 +918,37 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
   }
 
   /// v1.13.0 (Bloque 4, D3 + Híbrido A 1.9.0): Reversión con motivo
-  /// OBLIGATORIO + «polvo perdido» + guardarraíl de lote cerrado.
-  /// Deshacer E3 (15 s + synced==0) es otro camino: este diálogo es
-  /// solo para cuando ya no cabe Deshacer.
+  /// OBLIGATORIO + «polvo perdido» + guardarraíl de pomo
+  /// desactivado. Deshacer E3 (15 s + synced==0) es otro camino:
+  /// este diálogo es solo para cuando ya no cabe Deshacer.
   Future<void> _revertir(Map<String, dynamic> v) async {
-    final loteId = (v['lote_id'] as num?)?.toInt();
-    // Guardarraíl: si el lote ya fue cerrado por el dueño, la
+    final pomoId = (v['pomo_id'] as num?)?.toInt();
+    // Guardarraíl: si el pomo ya fue desactivado por el dueño, la
     // reversión está BLOQUEADA con motivo visible (la dosis no
-    // puede volver a un lote cerrado).
-    if (loteId != null) {
-      final lotes = await LocalDb.instance.allMirror('servicio_lotes');
-      final lote = lotes.where(
-          (l) => (l['id'] as num?)?.toInt() == loteId).toList();
-      if (lote.isNotEmpty &&
-          '${lote.first['estado'] ?? ''}' != 'activo') {
-        _aviso('El lote de esta venta ya fue cerrado por el dueño',
+    // puede volver a un pomo desactivado). Ventas viejas de la
+    // época de lotes (pomo_id NULL) conservan su guardarraíl viejo.
+    if (pomoId != null) {
+      final pomos = await LocalDb.instance.allMirror('servicio_pomos');
+      final pomo = pomos.where(
+          (l) => (l['id'] as num?)?.toInt() == pomoId).toList();
+      if (pomo.isNotEmpty &&
+          (pomo.first['activo'] as num?)?.toInt() != 1) {
+        _aviso('El pomo de esta venta ya fue desactivado por el dueño',
             error: true);
         return;
+      }
+    } else {
+      final loteId = (v['lote_id'] as num?)?.toInt();
+      if (loteId != null) {
+        final lotes = await LocalDb.instance.allMirror('servicio_lotes');
+        final lote = lotes.where(
+            (l) => (l['id'] as num?)?.toInt() == loteId).toList();
+        if (lote.isNotEmpty &&
+            '${lote.first['estado'] ?? ''}' != 'activo') {
+          _aviso('El lote de esta venta ya fue cerrado por el dueño',
+              error: true);
+          return;
+        }
       }
     }
     final motivoCtrl = TextEditingController();
@@ -954,7 +972,7 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
               Text(
                   'Se registrará un reverso auditable de esta venta '
                   '(${fmtMonto(((v['precio_unitario'] as num?)?.toDouble() ?? 0) * ((v['cantidad'] as num?)?.toDouble() ?? 0))} CUP). '
-                  'La dosis vuelve al lote, el pomo al agua común'
+                  'La dosis vuelve al pomo, el pomo al agua común'
                   '${com > 0 ? ' y se restan los ${fmtMonto(com)} CUP de comisión' : ''}.'),
               const SizedBox(height: 12),
               TextField(
@@ -966,8 +984,10 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
               // (patrón AuthService().isOwner vía _esDueno). La
               // regla del servidor no cambia: sin salida por merma
               // autorizada, la dosis no vuelve al saldo con una
-              // reversión ordinaria.
-              if (mostrarCheckboxPolvoPerdido(_esDueno))
+              // reversión ordinaria. Ventas viejas sin pomo no lo
+              // ofrecen: su merma no se puede atribuir a un pomo.
+              if (mostrarCheckboxPolvoPerdido(_esDueno) &&
+                  (v['pomo_id'] as num?) != null)
                 CheckboxListTile(
                   value: polvoPerdido,
                   contentPadding: EdgeInsets.zero,
@@ -1005,7 +1025,7 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
         ventaId: (v['id'] as num).toInt(),
         motivo: motivo,
         polvoPerdido: polvoPerdido,
-        loteId: loteId,
+        pomoId: pomoId,
         cantidad: (v['cantidad'] as num?)?.toInt(),
       );
       _aviso('Reverso registrado');
@@ -1045,7 +1065,7 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
               child: ListView(
                 padding: const EdgeInsets.all(AppEspacio.lg),
                 children: [
-                  _tarjetaLote(),
+                  _tarjetaPomo(),
                   const SizedBox(height: AppEspacio.md),
                   _botonesVenta(),
                   const SizedBox(height: AppEspacio.md),
@@ -1119,8 +1139,8 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
     );
   }
 
-  Widget _tarjetaLote() {
-    final lote = _loteActual;
+  Widget _tarjetaPomo() {
+    final pomo = _pomoActual;
     return Tarjeta(
       padding: const EdgeInsets.all(AppEspacio.md),
       child: Column(
@@ -1132,13 +1152,13 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
               const SizedBox(width: AppEspacio.sm),
               Expanded(
                 child: Text(
-                  lote == null
-                      ? 'Sin lote activo'
-                      : (!_esDueno ||
-                              lote['responsable_tid'] == _miTid
-                          ? 'Mi lote · ${lote['producto_nombre'] ?? 'Servicio'}'
-                          : 'Lote de ${lote['responsable_nombre']} · '
-                              '${lote['producto_nombre'] ?? 'Servicio'}'),
+                  pomo == null
+                      ? 'Sin pomo activo'
+                      : (!_esDueno || pomo['titular_tid'] == _miTid
+                          ? 'Mi pomo · ${pomo['producto_nombre'] ?? 'Servicio'}'
+                          : (pomo['es_principal'] as num?)?.toInt() == 1
+                              ? 'Pomo principal · ${pomo['producto_nombre'] ?? 'Servicio'}'
+                              : 'Pomo de ${pomo['titular_nombre']} · ${pomo['producto_nombre'] ?? 'Servicio'}'),
                   style: AppTexto.titulo.copyWith(fontSize: 16),
                   // 1.14 (D16): una línea con puntos suspensivos. Sin
                   // esto, con varios lotes el desplegable (hijo sin
@@ -1148,82 +1168,84 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
-              if (_misLotes.length > 1)
+              if (_misPomos.length > 1)
                 Flexible(
                   child: DropdownButton<int>(
-                    value: _loteSel,
+                    value: _pomoSel,
                     items: [
-                      for (final l in _misLotes)
+                      for (final l in _misPomos)
                         DropdownMenuItem(
                           value: (l['id'] as num).toInt(),
-                          // Ítem 6 (lote ciego): el entrenador NO ve
-                          // saldos; el dueño ve producto, dueño y saldo.
+                          // Ítem 6 (pomo ciego): el entrenador NO ve
+                          // saldos; el dueño ve producto, titular y saldo.
                           child: Text(
                             _esDueno
-                                ? '${l['producto_nombre'] ?? 'Lote'} · '
-                                    '${l['responsable_nombre']} '
+                                ? '${l['producto_nombre'] ?? 'Pomo'} · '
+                                    '${(l['es_principal'] as num?)?.toInt() == 1 ? 'Principal' : l['titular_nombre']} '
                                     '(${l['saldo_local']})'
-                                : '${l['producto_nombre'] ?? 'Lote'}',
+                                : '${l['producto_nombre'] ?? 'Pomo'}',
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                           ),
                         ),
                     ],
-                    onChanged: (v) => setState(() => _loteSel = v),
+                    onChanged: (v) => setState(() => _pomoSel = v),
                   ),
                 ),
             ],
           ),
           const SizedBox(height: 8),
           Text(
-            lote == null
+            pomo == null
                 ? (_esDueno
-                    ? 'Crea un lote en Administración para empezar a vender.'
-                    : 'Pide al dueño que te reparta un lote.')
+                    ? 'Abre un bote en Administración para tener principal.'
+                    : 'Pide al dueño que te rellene un pomo.')
                 : _esDueno
-                    ? 'Saldo: ${lote['saldo_local']} dosis · '
+                    ? 'Saldo: ${pomo['saldo_local']} dosis · '
                         'Agua común: ${_agua.saldo} pomos'
                     // Ítem 6: al entrenador solo el agua común
-                    // (el saldo de su lote es ciego para él).
+                    // (el saldo de su pomo es ciego para él).
                     : 'Agua común: ${_agua.saldo} pomos',
             style: AppTexto.cuerpo,
           ),
-          // v1.13.0 (Bloque 4): desglose del lote para el dueño
-          // (iniciales + reposiciones − ventas − salidas, espejo).
-          if (lote != null && _esDueno)
+          // v1.13.0 (Bloque 4): desglose del pomo para el dueño
+          // (asignadas − repartidas − ventas − salidas, espejo).
+          if (pomo != null && _esDueno)
             Builder(builder: (ctx) {
-              final lid = (lote['id'] as num?)?.toInt();
-              final d = desgloseLote(
-                lote: lote,
+              final pid = (pomo['id'] as num?)?.toInt();
+              final d = desglosePomo(
+                pomo: pomo,
                 ventasEspejo: _ventasTodas
-                    .where((v) => (v['lote_id'] as num?)?.toInt() == lid)
+                    .where((v) => (v['pomo_id'] as num?)?.toInt() == pid)
                     .toList(),
                 salidasEspejo: _salidas
-                    .where((s) => (s['lote_id'] as num?)?.toInt() == lid)
+                    .where((s) => (s['pomo_id'] as num?)?.toInt() == pid)
                     .toList(),
               );
               return Padding(
                 padding: const EdgeInsets.only(top: 4),
                 child: Text(
-                  'Historial del lote: ${d.iniciales} iniciales + '
-                  '${d.repuestas} repuestas − ${d.ventas} vendidas − '
+                  'Historial del pomo: ${d.asignadas} asignadas − '
+                  '${d.repartidas} repartidas − ${d.ventas} vendidas − '
                   '${d.salidas} salidas = ${d.saldo} dosis',
                   style: AppTexto.secundario,
                 ),
               );
             }),
-          // v1.12.0 (C6): aviso de lote por agotarse (< 5, umbral
+          // v1.12.0 (C6): aviso de pomo por agotarse (< 5, umbral
           // fijo de Jc). NO revela el saldo exacto al entrenador
-          // (lote ciego, ítem 6): solo que quedan pocas dosis.
+          // (pomo ciego, ítem 6): solo que quedan pocas dosis.
           // NUNCA bloquea la venta, solo advierte.
-          if (lote != null &&
+          if (pomo != null &&
               avisoLotePorAgotarse(
-                  (lote['saldo_local'] as num?)?.toInt() ?? 999))
+                  (pomo['saldo_local'] as num?)?.toInt() ?? 999))
             Padding(
               padding: const EdgeInsets.only(top: 4),
               child: Text(
-                '⚠ Te quedan pocas dosis en este lote (menos de 5): '
-                'avisa al dueño para que te reponga.',
+                _esDueno
+                    ? '⚠ Quedan pocas dosis en este pomo (menos de 5).'
+                    : '⚠ Te quedan pocas dosis en este pomo (menos de 5): '
+                        'avisa al dueño para que te rellene.',
                 style: AppTexto.cuerpo.copyWith(
                     color: AppColores.alertaOscuro,
                     fontWeight: FontWeight.w600),
@@ -1232,7 +1254,7 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
           // 1.15 (decisión Jc 2026-10-26): salida sin venta SOLO
           // dueño, sin importar el motivo. El servidor rechaza
           // además (OPS_SOLO_ADMIN + _require_owner).
-          if (lote != null && _esDueno)
+          if (pomo != null && _esDueno)
             Align(
               alignment: Alignment.centerRight,
               child: TextButton.icon(
@@ -1257,12 +1279,12 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
       // v1.13.0 (Bloque 4, Argón ajuste 1): bloqueo SEPARADO
       // dosis vs pomos (nunca un interruptor único) + motivo
       // visible bajo el botón apagado. El entrenador sigue ciego
-      // al saldo del lote (ítem 6 de la 1.9.0): solo se le bloquea
-      // por falta de lote o de pomos (el agua común sí la ve).
+      // al saldo del pomo (ítem 6 de la 1.9.0): solo se le bloquea
+      // por falta de pomo o de pomos (el agua común sí la ve).
       final est = estadoBotonVentaServicio(
         tipo: tipo,
-        tieneLote: _loteActual != null,
-        dosisRestantes: (_loteActual?['saldo_local'] as num?)?.toInt() ?? 0,
+        tienePomo: _pomoActual != null,
+        dosisRestantes: (_pomoActual?['saldo_local'] as num?)?.toInt() ?? 0,
         pomos: _agua.saldo,
         esDueno: _esDueno,
         precio: precio,
@@ -1329,7 +1351,7 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
         // selector; la múltiple es una entrada aparte.
         const SizedBox(height: AppEspacio.sm),
         OutlinedButton.icon(
-          onPressed: _loteActual == null ? null : _ventaMultiple,
+          onPressed: _pomoActual == null ? null : _ventaMultiple,
           icon: const Icon(Icons.library_add, size: 20),
           label: const Text('Venta múltiple (varias dosis a la vez)'),
         ),
@@ -1368,75 +1390,9 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                   color: AppColores.exito,
                   fontWeight: FontWeight.w600),
             ),
-          // v1.13.0 (Bloque 4): el dueño cierra el lote desde aquí
-          // (mismo patrón que ServiciosAdminScreen._cerrarLote:
-          // conteo físico; la diferencia queda registrada y lo que
-          // sobre vuelve a «sin repartir» del bote).
-          if (_esDueno && _loteActual != null)
-            Align(
-              alignment: Alignment.centerRight,
-              child: TextButton.icon(
-                onPressed: () => _cerrarLote(_loteActual!),
-                icon: const Icon(Icons.lock, size: 18),
-                label: const Text('Cerrar lote'),
-              ),
-            ),
         ],
       ),
     );
-  }
-
-  Future<void> _cerrarLote(Map<String, dynamic> lote) async {
-    final conteoCtrl = TextEditingController(
-        text: '${lote['saldo_local'] ?? 0}');
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => DialogoApp(
-        titulo: 'Cerrar lote',
-        iconoTitulo: Icons.lock,
-        contenido: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Saldo según el sistema: ${lote['saldo_local']} dosis. '
-              'Cuenta el polvo físico y escribe lo que hay de verdad: '
-              'la diferencia queda registrada y lo que sobre vuelve '
-              'a «sin repartir» del bote.',
-              style: AppTexto.cuerpo,
-            ),
-            TextField(
-              controller: conteoCtrl,
-              keyboardType: TextInputType.number,
-              autofocus: true,
-              decoration: const InputDecoration(
-                  labelText: 'Conteo físico (dosis que quedan)'),
-            ),
-          ],
-        ),
-        acciones: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancelar'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Cerrar lote'),
-          ),
-        ],
-      ),
-    );
-    if (ok != true) return;
-    try {
-      await cerrarLoteServicio(
-        loteId: (lote['id'] as num).toInt(),
-        conteoFisico: int.tryParse(conteoCtrl.text.trim()) ?? -1,
-      );
-      _aviso('Cierre registrado (se sincronizará)');
-      await _cargar();
-    } catch (e) {
-      _aviso(_limpio(e), error: true);
-    }
   }
 
   Widget _filaVenta(Map<String, dynamic> v) {
@@ -1457,11 +1413,11 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
     // su insignia; si el dueño la registró a MI nombre, también.
     final vendTid = LocalDb.normalizarTelegramId(v['vendedor_id']);
     final regTid = LocalDb.normalizarTelegramId(v['registrado_por']);
-    final loteEsMio = _misLotes
-        .any((l) => (l['id'] as num?)?.toInt() == (v['lote_id'] as num?)?.toInt());
+    final pomoEsMio = _misPomos.any((l) =>
+        (l['id'] as num?)?.toInt() == (v['pomo_id'] as num?)?.toInt());
     String? insignia;
     if (!_esDueno && !esReverso && !esCasa && vendTid != null) {
-      if (loteEsMio && vendTid != _miTid) {
+      if (pomoEsMio && vendTid != _miTid) {
         final respTid = LocalDb.normalizarTelegramId(
             v['responsable_efectivo_id']);
         insignia = 'Vendida por el dueño de tu pomo · '

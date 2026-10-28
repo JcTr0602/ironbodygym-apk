@@ -54,7 +54,7 @@ Future<void> _venta({
   bool casa = true,
 }) =>
     registrarVentaMultipleServicio(
-      loteId: 999,
+      pomoId: 999,
       dosisN: 2,
       pomosM: 0,
       clienteId: clienteId,
@@ -104,12 +104,12 @@ void main() {
       await _bdVacia();
       final db = await LocalDb.instance.db;
       await _cliente(db, id: 21, cuentaCasa: 1);
-      // Pasa el guard y cae en el lote (inexistente): el error de
+      // Pasa el guard y cae en el pomo (inexistente): el error de
       // lote prueba que el guard no lo rechazó.
       await expectLater(
         _venta(clienteId: 21, vendedorEsDueno: true),
         throwsA(isA<Exception>().having((e) => e.toString(), 'mensaje',
-            contains('El lote no está activo'))),
+            contains('El pomo no está activo'))),
       );
       await db.close();
     });
@@ -121,7 +121,7 @@ void main() {
       await expectLater(
         _venta(beneficiario: 'dueno', vendedorEsDueno: true),
         throwsA(isA<Exception>().having((e) => e.toString(), 'mensaje',
-            contains('El lote no está activo'))),
+            contains('El pomo no está activo'))),
       );
       await db.close();
     });

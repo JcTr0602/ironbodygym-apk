@@ -32,6 +32,23 @@ import 'tiempo.dart';
 ///   dosis nace retenida 15 s por retenerHastaIso, como el cobro del
 ///   Bloque 1); si no, solo cabe Reversión (D3, motivo obligatorio).
 ///
+/// 1.15 (pomos, rediseño Argón 🟢 con ajustes): el modelo de LOTES
+/// queda como historia (las estadísticas por lote_id se conservan).
+/// El stock vivo son POMOS: uno PRINCIPAL del dueño (ya abierto,
+/// se alimenta al abrir cada bote) + uno por entrenador. Rellenar =
+/// mover dosis del principal al pomo del entrenador (op
+/// `reponer_pomo`, solo dueño, atómica en el servidor). El saldo de
+/// un pomo SIEMPRE se deriva (asignadas − repartidas − ventas −
+/// salidas + rellenos pendientes), NUNCA se escribe la fila espejo
+/// en local: el optimista de un relleno pendiente vive SOLO en la
+/// derivación desde ops_queue (si el servidor lo rechaza, la
+/// derivación deja de contarlo sin tocar el espejo). Los
+/// entrenadores NO ven su saldo (ciego, como el lote ciego 1.9.0):
+/// solo «Agua común: X pomos» + aviso «menos de 5» que nunca
+/// bloquea; el dueño ve todos los saldos exactos.
+/// Las ventas viejas con lote_id y pomo_id NULL NO restan de ningún
+/// pomo (el servidor tampoco las resta: su saldo ya quedó migrado).
+///
 /// Reglas de la casa aplicadas aquí (el servidor las re-impone):
 /// - En el teléfono se bloquea vender si el saldo local es 0
 ///   (del lote o del agua); el servidor NUNCA rechaza una venta ya
@@ -221,6 +238,89 @@ int saldoLoteDesde({
   return saldo;
 }
 
+/// 1.15 (pomos): saldo derivado de un pomo — espejo + ops
+/// pendientes cuyo op_uuid aún no aparece en el espejo. PURO.
+/// Base: asignadas − repartidas (el principal reparte; el pomo del
+/// entrenador nace con repartidas 0). Las ventas/salidas del espejo
+/// filtran por pomo_id (las viejas con pomo_id NULL no restan: su
+/// saldo ya quedó migrado). El relleno pendiente se deriva: al
+/// principal le resta, al destino le suma; si el servidor lo
+/// rechaza, la op desaparece de pendientes y la derivación deja de
+/// contarla SIN tocar la fila espejo (ajuste Argón MEDIO).
+int saldoPomoDesde({
+  required Map<String, dynamic> pomo,
+  required List<Map<String, dynamic>> ventasEspejo,
+  required List<Map<String, dynamic>> salidasEspejo,
+  required List<Map<String, dynamic>> opsPendientes,
+}) {
+  var saldo = (pomo['dosis_asignadas'] as num?)?.toInt() ?? 0;
+  saldo -= (pomo['dosis_repartidas'] as num?)?.toInt() ?? 0;
+  final pomoId = (pomo['id'] as num?)?.toInt();
+  // A diferencia de saldoLoteDesde (que recibe listas ya filtradas),
+  // aquí el filtro vive DENTRO: una lista sin filtrar jamás debe
+  // drenar el pomo. Las ventas viejas con pomo_id NULL y las de
+  // otro pomo quedan fuera por construcción.
+  final ventas = ventasEspejo
+      .where((v) => (v['pomo_id'] as num?)?.toInt() == pomoId)
+      .toList();
+  final salidas = salidasEspejo
+      .where((v) => (v['pomo_id'] as num?)?.toInt() == pomoId)
+      .toList();
+  final uuidsEspejo = <String>{
+    for (final v in ventas) '${v['op_uuid'] ?? ''}',
+    for (final s in salidas) '${s['op_uuid'] ?? ''}',
+  };
+  for (final v in ventas) {
+    saldo -= (v['cantidad'] as num?)?.toInt() ?? 0;
+  }
+  for (final s in salidas) {
+    saldo -= (s['dosis'] as num?)?.toInt() ?? 0;
+  }
+  final esPrincipal = (pomo['es_principal'] as num?)?.toInt() == 1;
+  final ventaPorId = <int, Map<String, dynamic>>{
+    for (final v in ventas)
+      if ((v['id'] as num?) != null) (v['id'] as num).toInt(): v,
+  };
+  for (final op in opsPendientes) {
+    final uuid = '${op['op_uuid'] ?? ''}';
+    if (uuidsEspejo.contains(uuid)) continue;
+    final p = _payloadDeOp(op);
+    switch ('${op['tipo']}') {
+      case 'venta_servicio':
+        if ((p['pomo_id'] as num?)?.toInt() == pomoId) {
+          saldo -= (p['cantidad'] as num?)?.toInt() ?? 1;
+        }
+      case 'salida_servicio':
+        if ((p['pomo_id'] as num?)?.toInt() == pomoId) {
+          saldo -= (p['dosis'] as num?)?.toInt() ?? 0;
+        }
+      case 'revertir_venta_servicio':
+        final orig = ventaPorId[(p['venta_id'] as num?)?.toInt()];
+        if (orig != null &&
+            (orig['pomo_id'] as num?)?.toInt() == pomoId) {
+          saldo += (orig['cantidad'] as num?)?.toInt() ?? 0;
+        }
+      case 'reponer_pomo':
+        final dosis = (p['dosis'] as num?)?.toInt() ?? 0;
+        // Solo el principal DEL MISMO producto: sin este chequeo,
+        // un relleno pendiente de otro producto drenaba este
+        // principal en local (el servidor deriva por destino y no
+        // tiene el problema, pero el pre-chequeo local sí).
+        // Delta Luna: el id del payload DEBE ser no nulo; null ==
+        // null es true en Dart y restaría sin producto.
+        final supOp = (p['suplemento_id'] as num?)?.toInt();
+        if (esPrincipal &&
+            supOp != null &&
+            supOp == (pomo['suplemento_id'] as num?)?.toInt()) {
+          saldo -= dosis;
+        } else if ((p['pomo_destino_id'] as num?)?.toInt() == pomoId) {
+          saldo += dosis;
+        }
+    }
+  }
+  return saldo;
+}
+
 /// v1.8.1 (idea de Jc 2026-10-23): acumulado de servicios de UN
 /// cliente para su ficha — detectar frecuentes («este cliente ha
 /// comprado 15 raciones de pre-entreno») y hacerles ofertas o
@@ -317,17 +417,17 @@ int saldoLoteDesde({
 /// dosis vs pomos — nunca un interruptor único. PURO.
 ///
 /// - Dosis sin agua: se apaga solo si el DUEÑO ve saldo 0 («No
-///   quedan dosis en el lote activo»). Al entrenador ciego NUNCA se
-///   le bloquea por saldo del lote (regla lote ciego 1.9.0 ítem 6:
-///   el servidor nunca rechaza por stock teórico); su botón solo se
-///   apaga sin lote o sin precio.
+///   quedan dosis en tu pomo»). Al entrenador ciego NUNCA se le
+///   bloquea por saldo del pomo (regla pomo ciego, antes lote ciego
+///   1.9.0 ítem 6: el servidor nunca rechaza por stock teórico);
+///   su botón solo se apaga sin pomo o sin precio.
 /// - Dosis con agua: igual que sin agua, y además se apaga sin pomos
 ///   («Sin pomos de agua en stock») para todos.
 /// - Agua suelta: solo depende de los pomos (para todos).
 /// Sin precio fijado, cualquier botón se apaga («Precio sin fijar»).
 ({bool habilitado, String? motivo}) estadoBotonVentaServicio({
   required String tipo,
-  required bool tieneLote,
+  required bool tienePomo,
   required int dosisRestantes,
   required int pomos,
   required bool esDueno,
@@ -342,13 +442,13 @@ int saldoLoteDesde({
     }
     return (habilitado: true, motivo: null);
   }
-  if (!tieneLote) {
-    return (habilitado: false, motivo: 'Sin lote activo');
+  if (!tienePomo) {
+    return (habilitado: false, motivo: 'Sin pomo activo');
   }
   if (esDueno && dosisRestantes <= 0) {
     return (
       habilitado: false,
-      motivo: 'No quedan dosis en el lote activo',
+      motivo: 'No quedan dosis en tu pomo',
     );
   }
   if (tipo == 'dosis_con_agua' && pomos <= 0) {
@@ -385,6 +485,39 @@ int saldoLoteDesde({
   );
 }
 
+/// 1.15 (pomos): desglose del saldo de un pomo para la tarjeta del
+/// dueño (asignadas − repartidas − ventas − salidas). PURO: filtra
+/// por pomo_id dentro (las viejas con NULL no cuentan).
+({int asignadas, int repartidas, int ventas, int salidas, int saldo})
+    desglosePomo({
+  required Map<String, dynamic> pomo,
+  required List<Map<String, dynamic>> ventasEspejo,
+  required List<Map<String, dynamic>> salidasEspejo,
+}) {
+  // Filtro interno por pomo_id (igual que saldoPomoDesde): las
+  // ventas viejas con pomo_id NULL no cuentan en ningún pomo.
+  final pomoId = (pomo['id'] as num?)?.toInt();
+  var ventas = 0;
+  for (final v in ventasEspejo) {
+    if ((v['pomo_id'] as num?)?.toInt() != pomoId) continue;
+    ventas += (v['cantidad'] as num?)?.toInt() ?? 0;
+  }
+  var salidas = 0;
+  for (final s in salidasEspejo) {
+    if ((s['pomo_id'] as num?)?.toInt() != pomoId) continue;
+    salidas += (s['dosis'] as num?)?.toInt() ?? 0;
+  }
+  final asignadas = (pomo['dosis_asignadas'] as num?)?.toInt() ?? 0;
+  final repartidas = (pomo['dosis_repartidas'] as num?)?.toInt() ?? 0;
+  return (
+    asignadas: asignadas,
+    repartidas: repartidas,
+    ventas: ventas,
+    salidas: salidas,
+    saldo: asignadas - repartidas - ventas - salidas,
+  );
+}
+
 /// v1.13.0 (E3): ¿sigue abierta la ventana de Deshacer? 15 segundos
 /// exactos desde el cobro. PURO. La segunda condición (op aún
 /// 'pendiente', synced == 0) la verifica [deshacerVentaServicio]
@@ -406,6 +539,7 @@ Future<List<Map<String, dynamic>>> _opsServicioPendientes() async {
     'revertir_venta_servicio',
     'reponer_agua',
     'crear_lote_servicio',
+    'reponer_pomo', // 1.15 (pomos)
     'abrir_bote_servicio',
     'cerrar_lote_servicio',
     'cerrar_bote_servicio',
@@ -464,6 +598,58 @@ Future<List<Map<String, dynamic>>> lotesActivosLocal(
           ventas.where((v) => (v['lote_id'] as num?)?.toInt() == id).toList(),
       salidasEspejo: salidas
           .where((s) => (s['lote_id'] as num?)?.toInt() == id)
+          .toList(),
+      opsPendientes: ops,
+    );
+    out.add({...l, 'saldo_local': saldo});
+  }
+  return out;
+}
+
+/// Saldo local de un pomo (espejo + pendientes).
+Future<int> saldoPomoLocal(int pomoId) async {
+  final pomos = await LocalDb.instance.allMirror('servicio_pomos');
+  final pomo = pomos.where((l) => (l['id'] as num?)?.toInt() == pomoId);
+  if (pomo.isEmpty) return 0;
+  final ventas = (await LocalDb.instance.allMirror('servicio_ventas'))
+      .where((v) => (v['pomo_id'] as num?)?.toInt() == pomoId)
+      .toList();
+  final salidas = (await LocalDb.instance.allMirror('servicio_salidas'))
+      .where((s) => (s['pomo_id'] as num?)?.toInt() == pomoId)
+      .toList();
+  return saldoPomoDesde(
+    pomo: pomo.first,
+    ventasEspejo: ventas,
+    salidasEspejo: salidas,
+    opsPendientes: await _opsServicioPendientes(),
+  );
+}
+
+/// Pomos activos con su saldo local, del titular indicado
+/// (o todos si [titularId] es null). El principal viaja con
+/// es_principal = 1; los de entrenador, con su titular_telegram_id.
+Future<List<Map<String, dynamic>>> pomosActivosLocal(
+    {int? titularId}) async {
+  final pomos = await LocalDb.instance.allMirror('servicio_pomos');
+  final ventas = await LocalDb.instance.allMirror('servicio_ventas');
+  final salidas = await LocalDb.instance.allMirror('servicio_salidas');
+  final ops = await _opsServicioPendientes();
+  final out = <Map<String, dynamic>>[];
+  for (final l in pomos) {
+    if ((l['activo'] as num?)?.toInt() != 1) continue;
+    if (titularId != null &&
+        LocalDb.normalizarTelegramId(l['titular_telegram_id']) !=
+            titularId) {
+      continue;
+    }
+    final id = (l['id'] as num?)?.toInt();
+    if (id == null) continue;
+    final saldo = saldoPomoDesde(
+      pomo: l,
+      ventasEspejo:
+          ventas.where((v) => (v['pomo_id'] as num?)?.toInt() == id).toList(),
+      salidasEspejo: salidas
+          .where((s) => (s['pomo_id'] as num?)?.toInt() == id)
           .toList(),
       opsPendientes: ops,
     );
@@ -713,7 +899,7 @@ int? _edadCliente(Map<String, dynamic> cliente) {
 Future<({Map<String, dynamic> payload, String? retener})>
     _payloadVentaServicio({
   required String tipo, // dosis_sin_agua | dosis_con_agua | agua_suelta
-  int? loteId,
+  int? pomoId,
   int cantidad = 1,
   int? clienteId,
   String? metodo, // 'efectivo' | 'transferencia' (no Casa)
@@ -775,22 +961,22 @@ Future<({Map<String, dynamic> payload, String? retener})>
       throw Exception('Elige el método de cobro');
     }
   }
-  // Lote y saldo local (bloqueo en el teléfono si el saldo es 0).
+  // Pomo y saldo local (bloqueo en el teléfono si el saldo es 0).
   if (tipo != 'agua_suelta') {
-    if (loteId == null) throw Exception('Falta el lote de venta');
-    final lotes = await db.allMirror('servicio_lotes');
-    final lote =
-        lotes.where((l) => (l['id'] as num?)?.toInt() == loteId).toList();
-    if (lote.isEmpty || '${lote.first['estado']}' != 'activo') {
-      throw Exception('El lote no está activo');
+    if (pomoId == null) throw Exception('Falta el pomo de venta');
+    final pomos = await db.allMirror('servicio_pomos');
+    final pomo =
+        pomos.where((l) => (l['id'] as num?)?.toInt() == pomoId).toList();
+    if (pomo.isEmpty || (pomo.first['activo'] as num?)?.toInt() != 1) {
+      throw Exception('El pomo no está activo');
     }
-    final saldo = await saldoLoteLocal(loteId);
-    // Ítem 6 (lote ciego): el bloqueo por saldo local solo aplica
+    final saldo = await saldoPomoLocal(pomoId);
+    // Ítem 6 (pomo ciego): el bloqueo por saldo local solo aplica
     // cuando vende el DUEÑO (él sí conoce la cantidad de su pomo).
     // Al entrenador no se le bloquea ni se le revela el saldo: el
     // servidor nunca rechaza la venta por stock teórico (A3).
     if (saldo <= 0 && vendedorEsDueno) {
-      throw Exception('El lote no tiene dosis disponibles');
+      throw Exception('El pomo no tiene dosis disponibles');
     }
   }
   // Agua común: se bloquea la variante si no hay pomos.
@@ -837,7 +1023,7 @@ Future<({Map<String, dynamic> payload, String? retener})>
       '${ahora.hour.toString().padLeft(2, '0')}:${ahora.minute.toString().padLeft(2, '0')}';
   return (
     payload: {
-      if (tipo != 'agua_suelta') 'lote_id': loteId,
+      if (tipo != 'agua_suelta') 'pomo_id': pomoId,
       'tipo': tipo,
       'cantidad': cantidad,
       if (clienteId != null) 'cliente_id': clienteId,
@@ -860,7 +1046,7 @@ Future<({Map<String, dynamic> payload, String? retener})>
 /// toma normal. Devuelve el op_uuid de la op encolada.
 Future<String> registrarVentaServicio({
   required String tipo,
-  int? loteId,
+  int? pomoId,
   int cantidad = 1,
   int? clienteId,
   String? metodo,
@@ -874,7 +1060,7 @@ Future<String> registrarVentaServicio({
 }) async {
   final calc = await _payloadVentaServicio(
     tipo: tipo,
-    loteId: loteId,
+    pomoId: pomoId,
     cantidad: cantidad,
     clienteId: clienteId,
     metodo: metodo,
@@ -904,7 +1090,7 @@ Future<String> registrarVentaServicio({
 /// (N−M)). Deshacer E3 borra el grupo completo. Devuelve los
 /// op_uuids del grupo.
 Future<List<String>> registrarVentaMultipleServicio({
-  required int loteId,
+  required int pomoId,
   required int dosisN,
   required int pomosM,
   int? clienteId,
@@ -922,7 +1108,7 @@ Future<List<String>> registrarVentaMultipleServicio({
     throw Exception('La venta múltiple es de 2 dosis en adelante');
   }
   if (dosisN > topeDosis) {
-    throw Exception('Solo quedan $topeDosis dosis en el lote');
+    throw Exception('Solo quedan $topeDosis dosis en el pomo');
   }
   if (pomosM < 0 || pomosM > dosisN) {
     throw Exception('Los pomos van de 0 a $dosisN');
@@ -942,7 +1128,7 @@ Future<List<String>> registrarVentaMultipleServicio({
       String tipo, int cant) {
     return _payloadVentaServicio(
       tipo: tipo,
-      loteId: loteId,
+      pomoId: pomoId,
       cantidad: cant,
       clienteId: clienteId,
       metodo: metodo,
@@ -985,17 +1171,17 @@ Future<List<String>> registrarVentaMultipleServicio({
   return uuids;
 }
 
-/// Salida sin venta contra un lote. Cortesía y consumo de staff los
+/// Salida sin venta contra un pomo. Cortesía y consumo de staff los
 /// impone el servidor como solo-dueño; la UI también los gatea.
 Future<String> registrarSalidaServicio({
-  required int loteId,
+  required int pomoId,
   required int dosis,
   required String motivo, // merma | cortesia | consumo_staff | ajuste
   String? nota,
 }) async {
   if (dosis < 1) throw Exception('La salida debe ser de al menos 1 dosis');
   return _encolar('salida_servicio', {
-    'lote_id': loteId,
+    'pomo_id': pomoId,
     'dosis': dosis,
     'motivo': motivo,
     if (nota != null && nota.isNotEmpty) 'nota': nota,
@@ -1030,7 +1216,7 @@ Future<String> registrarSalidaAguaServicio({
 /// en el payload (el servidor lo guarda con el reverso). El servidor
 /// debe: descontar caja, restar la comisión (50 × cantidad), devolver
 /// la dosis al lote activo y el pomo al agua común, y BLOQUEAR el
-/// reverso si el lote ya fue cerrado por el dueño (la UI también lo
+/// reverso si el pomo ya fue desactivado por el dueño (la UI también lo
 /// bloquea con el motivo visible). Si [polvoPerdido] es true, la
 /// dosis no volvió físicamente: tras el reverso se encola una salida
 /// no vendida (merma) por la misma cantidad, así el lote queda neto
@@ -1039,9 +1225,9 @@ Future<List<String>> revertirVentaServicio({
   required int ventaId,
   required String motivo,
   bool polvoPerdido = false,
-  // Solo para polvoPerdido: lote y cantidad de la venta original
+  // Solo para polvoPerdido: pomo y cantidad de la venta original
   // (la UI los tiene de la fila del espejo).
-  int? loteId,
+  int? pomoId,
   int? cantidad,
 }) async {
   if (motivo.trim().isEmpty) {
@@ -1052,9 +1238,9 @@ Future<List<String>> revertirVentaServicio({
   // la validación de lote/cantidad venía después: si faltaban,
   // la excepción dejaba el reverso encolado sin su merma.
   if (polvoPerdido &&
-      (loteId == null || cantidad == null || cantidad < 1)) {
+      (pomoId == null || cantidad == null || cantidad < 1)) {
     throw Exception(
-        'Para registrar la pérdida hace falta el lote y la cantidad');
+        'Para registrar la pérdida hace falta el pomo y la cantidad');
   }
   final uuids = <String>[
     await _encolar('revertir_venta_servicio', {
@@ -1065,7 +1251,7 @@ Future<List<String>> revertirVentaServicio({
   ];
   if (polvoPerdido) {
     uuids.add(await _encolar('salida_servicio', {
-      'lote_id': loteId,
+      'pomo_id': pomoId,
       'dosis': cantidad,
       'motivo': 'merma',
       'nota': 'Pérdida física tras reversión de venta #$ventaId',
@@ -1125,6 +1311,54 @@ Future<String> reponerLoteServicio({
   });
   unawaited(SyncEngine.instance.push().then((_) {}, onError: (_) {}));
   return opUuid;
+}
+
+/// 1.15 (pomos): rellenar el pomo de un entrenador SOLO el dueño.
+/// Op `reponer_pomo` (CHECK 87): el servidor mueve N dosis del
+/// principal al destino en una transacción y rechaza si el
+/// principal no alcanza. SIN reflejo optimista en el espejo: el
+/// saldo local deriva el relleno pendiente desde ops_queue
+/// (saldoPomoDesde), así un rechazo no deja espejo que revertir.
+/// La pre-comprobación local replica el rechazo del servidor para
+/// avisar al dueño antes de encolar (mismo mensaje exacto).
+Future<String> reponerPomoServicio({
+  required int pomoDestinoId,
+  required int dosis,
+}) async {
+  if (dosis < 1) throw Exception('El relleno debe ser de al menos 1 dosis');
+  final db = LocalDb.instance;
+  final pomos = await db.allMirror('servicio_pomos');
+  final destino = pomos
+      .where((l) => (l['id'] as num?)?.toInt() == pomoDestinoId)
+      .toList();
+  if (destino.isEmpty || (destino.first['activo'] as num?)?.toInt() != 1) {
+    throw Exception('El pomo destino no está activo');
+  }
+  if ((destino.first['es_principal'] as num?)?.toInt() == 1) {
+    throw Exception('No se rellena el propio principal');
+  }
+  final suplementoId = (destino.first['suplemento_id'] as num?)?.toInt();
+  final principal = pomos
+      .where((l) =>
+          (l['es_principal'] as num?)?.toInt() == 1 &&
+          (l['suplemento_id'] as num?)?.toInt() == suplementoId)
+      .toList();
+  if (principal.isEmpty) {
+    throw Exception('No hay pomo principal para este producto');
+  }
+  final saldoPrincipal =
+      await saldoPomoLocal((principal.first['id'] as num).toInt());
+  if (dosis > saldoPrincipal) {
+    throw Exception('El principal solo tiene $saldoPrincipal dosis');
+  }
+  return _encolar('reponer_pomo', {
+    'pomo_destino_id': pomoDestinoId,
+    'dosis': dosis,
+    // Panel Luna: sin el producto, un relleno pendiente restaba
+    // del principal de CUALQUIER producto al derivar saldos.
+    'suplemento_id': suplementoId,
+    'fecha': hoyHabanaIso(),
+  });
 }
 
 /// Solo dueño: repone el stock común de agua con su costo (CPP).

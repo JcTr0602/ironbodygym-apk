@@ -10,13 +10,13 @@ library;
 import 'dart:async';
 import 'dart:io';
 
-import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:uuid/uuid.dart';
 
 import '../auth.dart';
+import '../bloque2_resto.dart';
 import '../cliente_protegido.dart';
 import '../invitados.dart' as invitados_svc;
 import '../localdb.dart';
@@ -90,6 +90,9 @@ class _AdminScreenState extends State<AdminScreen> {
   // v1.2.4: datos bancarios (strings, no montos)
   final Map<String, TextEditingController> _bancarios = {};
   bool _cargando = true;
+  // Panel delta Luna ALTO: doble toque en «Recogida» abría dos
+  // diálogos y podía registrar la misma recogida dos veces.
+  bool _recogidaEnCurso = false;
   // Salud del sistema
   SyncDetalle _syncDet = const SyncDetalle();
   int _pendientesSubir = 0;
@@ -167,7 +170,7 @@ class _AdminScreenState extends State<AdminScreen> {
     final inscEntrenador = await inscripcionesPorEntrenador();
     final gastos = await gastosTodos();
     final caja = await cobradoHoyPorMetodo();
-    final hoy = DateTime.now();
+    final hoy = ahoraHabana();
     final hoyIso = '${hoy.year.toString().padLeft(4, '0')}-'
         '${hoy.month.toString().padLeft(2, '0')}-'
         '${hoy.day.toString().padLeft(2, '0')}';
@@ -784,32 +787,6 @@ class _AdminScreenState extends State<AdminScreen> {
     }
   }
 
-  /// v1.3.1: marca como entregado en SQLite local (optimismo).
-  /// Filtra en Dart con esPendiente() (seguro sin JSON1 y con NULLs).
-  Future<void> _marcarEntregadoLocal(int? trainerId) async {
-    final d = await LocalDb.instance.db;
-    final ahora = DateTime.now().toIso8601String();
-    await d.transaction((txn) async {
-      for (final tabla in ['pagos', 'pagos_diarios', 'ventas_suplementos']) {
-        final col =
-            tabla == 'pagos' ? 'telegram_user_id' : 'registrado_por';
-        final rows =
-            await txn.query(tabla, columns: ['id', 'data']);
-        for (final r in rows) {
-          final data = Map<String, dynamic>.from(
-              jsonDecode(r['data'] as String) as Map);
-          if (!esPendiente(data['entregado'])) continue;
-          if (tabla == 'pagos' && data['metodo'] != 'efectivo') continue;
-          if (trainerId != null && data[col] != trainerId) continue;
-          data['entregado'] = 1;
-          data['entregado_ts'] = ahora;
-          await txn.update(tabla, {'data': jsonEncode(data)},
-              where: 'id = ?', whereArgs: [r['id']]);
-        }
-      }
-    });
-  }
-
   Future<void> _confirmarEntrega(
       {int? trainerId, required String nombre}) async {
     final notaCtrl = TextEditingController();
@@ -856,21 +833,142 @@ class _AdminScreenState extends State<AdminScreen> {
     final nota = notaCtrl.text.trim();
     notaCtrl.dispose();
     if (ok != true || !mounted) return;
-    // v1.3.1: actualización optimista local (la UI se pone en 0 al instante).
-    await _marcarEntregadoLocal(trainerId);
-    await LocalDb.instance.queueOp(
-      opUuid: const Uuid().v4(),
-      tipo: 'confirmar_entrega',
-      payload: {
-        'trainer_telegram_id': trainerId ?? 'todos',
-        if (nota.isNotEmpty) 'nota': nota,
-      },
+    // 1.15 (Panel A2): confirmar SIEMPRE por listas de ids explícitas
+    // (la pantalla empaqueta lo que muestra, nunca una orden ciega
+    // por entrenador). Las listas las calcula idsPendientesEntrega
+    // (negocio.dart): efectivo + pendiente + Casa fuera +
+    // responsable del efectivo, menos lo ya liquidado parcial.
+    final ids = await idsPendientesEntrega(trainerId: trainerId);
+    final pagoIds = ids.pagos;
+    final diarioIds = ids.diarios;
+    final suplementoIds = ids.suplementos;
+    final servicioIds = ids.servicios;
+    await confirmarEntregaPorIds(
+      mensualIds: pagoIds,
+      diarioIds: diarioIds,
+      suplementoIds: suplementoIds,
+      servicioIds: servicioIds,
+      entrenadorNombre: nombre,
+      trainerTelegramId: trainerId,
+      nota: nota.isNotEmpty ? nota : null,
     );
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Entrega confirmada (se sincronizará)')));
     await _cargar();
     SyncEngine.instance.push();
+  }
+
+  // 1.15 (H4): registrar una recogida (total o parcial) desde el
+  // pendiente a recoger, sin pasar por Arqueo. El monto puede superar
+  // el pendiente visible: en ese caso se guarda como anticipada (el
+  // entrenador aún no sincronizó esos pagos) y el pendiente queda en
+  // negativo hasta que suba sus pagos; al llegar, se descuenta solo
+  // y queda el resto. Si el entrenador no aparece en la lista (nada
+  // sincronizado aún), basta un sync desde su teléfono para que
+  // aparezca.
+  Future<void> _registrarRecogida(
+      {int? trainerId,
+      required String nombre,
+      required double pendiente}) async {
+    // Panel delta Luna ALTO: doble toque en «Recogida» abría dos
+    // diálogos y podía registrar la misma recogida dos veces
+    // (_enSerieLiquidacion serializa pero no deduplica).
+    if (_recogidaEnCurso) return;
+    if (trainerId == null) {
+      // Panel delta Luna MEDIO: el return silencioso no explicaba
+      // por qué no pasa nada.
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('No se pudo registrar: falta el entrenador')));
+      return;
+    }
+    _recogidaEnCurso = true;
+    try {
+      await _registrarRecogidaImpl(
+          trainerId: trainerId, nombre: nombre, pendiente: pendiente);
+    } finally {
+      _recogidaEnCurso = false;
+    }
+  }
+
+  Future<void> _registrarRecogidaImpl(
+      {required int trainerId,
+      required String nombre,
+      required double pendiente}) async {
+    final montoCtrl = TextEditingController(
+        text: pendiente > 0 ? pendiente.toStringAsFixed(0) : '');
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => DialogoApp(
+        titulo: 'Registrar recogida',
+        iconoTitulo: Icons.handshake,
+        contenido: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Entrenador: $nombre', style: AppTexto.cuerpo),
+            Text('Pendiente visible: ${fmtMonto(pendiente)} CUP',
+                style: AppTexto.cuerpo),
+            const SizedBox(height: 12),
+            CampoTexto(
+              controller: montoCtrl,
+              etiqueta: 'Monto recogido (CUP)',
+              teclado:
+                  const TextInputType.numberWithOptions(decimal: true),
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'Si el monto supera el pendiente visible, se guarda '
+              'como recogida anticipada: el pendiente quedará en '
+              'negativo hasta que el entrenador sincronice sus pagos.',
+              style: TextStyle(fontSize: 12),
+            ),
+          ],
+        ),
+        acciones: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancelar')),
+          ElevatedButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColores.naranja,
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(
+                  borderRadius:
+                      BorderRadius.circular(AppRadio.md),
+                ),
+              ),
+              child: const Text('Registrar')),
+        ],
+      ),
+    );
+    final monto =
+        double.tryParse(montoCtrl.text.trim().replaceAll(',', '.'));
+    montoCtrl.dispose();
+    if (ok != true || !mounted) return;
+    if (monto == null || !monto.isFinite || monto <= 0) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Monto inválido')));
+      return;
+    }
+    try {
+      await registrarEntregaEfectivo(
+        entrenadorTelegramId: trainerId,
+        montoEntregado: monto,
+        autorDuenoId: AuthService().telegramId ?? 0,
+        permitirAnticipada: true,
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('No se pudo registrar: $e')));
+      return;
+    }
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Recogida registrada (se sincronizará)')));
+    await _cargar();
   }
 
   // -- gastos ------------------------------------------------------------
@@ -925,7 +1023,7 @@ class _AdminScreenState extends State<AdminScreen> {
           content: Text('Concepto o monto inválidos')));
       return;
     }
-    final hoy = DateTime.now();
+    final hoy = ahoraHabana();
     final fecha = '${hoy.year.toString().padLeft(4, '0')}-'
         '${hoy.month.toString().padLeft(2, '0')}-'
         '${hoy.day.toString().padLeft(2, '0')}';
@@ -993,7 +1091,7 @@ class _AdminScreenState extends State<AdminScreen> {
           ]
       ],
     );
-    final n = DateTime.now();
+    final n = ahoraHabana();
     final pref = '${n.year.toString().padLeft(4, '0')}-'
         '${n.month.toString().padLeft(2, '0')}';
     // v1.3.4 (ítem 2): columna `fecha` indexada en vez de allMirror.
@@ -1905,6 +2003,7 @@ class _AdminScreenState extends State<AdminScreen> {
       getGastosHoy: () => _gastosHoy,
       getPend: () => _pend,
       onConfirmarEntrega: _confirmarEntrega,
+      onRegistrarRecogida: _registrarRecogida,
       onIr: _irYRecargar,
     );
   }

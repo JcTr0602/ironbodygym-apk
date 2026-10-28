@@ -11,9 +11,11 @@ import 'componentes.dart';
 import 'diseno.dart';
 
 /// v1.8.0: Administración de Servicios por dosis (SOLO DUEÑO):
-/// precios y comisión, stock común de agua (CPP), botes y lotes.
-/// Todas las acciones encolan su op; el servidor re-impone los
-/// permisos (estas ops son solo-admin en el candado).
+/// precios y comisión, stock común de agua (CPP), pomos y botes.
+/// 1.15: los LOTES salen de la UI (P4) y «cerrar bote» también
+/// (P3); el stock vivo son los pomos. Todas las acciones encolan
+/// su op; el servidor re-impone los permisos (estas ops son
+/// solo-admin en el candado).
 class ServiciosAdminScreen extends StatefulWidget {
   const ServiciosAdminScreen({super.key});
 
@@ -28,7 +30,7 @@ class _ServiciosAdminScreenState extends State<ServiciosAdminScreen> {
       _precios;
   ({int saldo, double cpp}) _agua = (saldo: 0, cpp: 0);
   List<Map<String, dynamic>> _botes = [];
-  List<Map<String, dynamic>> _lotes = [];
+  List<Map<String, dynamic>> _pomos = [];
   List<Map<String, dynamic>> _suplementos = [];
   Map<int, String> _categorias = {};
   Map<int, String> _personas = {}; // telegram_id → nombre
@@ -63,7 +65,7 @@ class _ServiciosAdminScreenState extends State<ServiciosAdminScreen> {
   }
 
   /// Ítem 13: «Nombre · Categoría» en toda identificación de producto
-  /// de esta pantalla (selector de Abrir bote, botes y lotes).
+  /// de esta pantalla (selector de Abrir bote, pomos y botes).
   String _nombreSup(int? id) {
     for (final s in _suplementos) {
       if ((s['id'] as num?)?.toInt() == id) {
@@ -81,12 +83,14 @@ class _ServiciosAdminScreenState extends State<ServiciosAdminScreen> {
     final ajustes = await LocalDb.instance.getAjustes();
     final agua = await stockAguaLocal();
     final botes = await LocalDb.instance.allMirror('servicio_botes');
-    final lotes = await LocalDb.instance.allMirror('servicio_lotes');
+    // 1.15: pomos activos con su saldo local (el espejo ya trae
+    // asignadas/repartidas; el saldo deriva espejo + pendientes).
+    final pomos = await pomosActivosLocal();
     final suplementos =
         await LocalDb.instance.allMirror('suplementos');
     final categorias =
         await LocalDb.instance.allMirror('categorias_suplemento');
-    // Personas conocidas (para responsables y nombres): el dueño +
+    // Personas conocidas (para titulares y nombres): el dueño +
     // quien haya registrado pagos o ventas de suplementos.
     final personas = <int, String>{};
     final miTid = AuthService().telegramId;
@@ -103,16 +107,12 @@ class _ServiciosAdminScreenState extends State<ServiciosAdminScreen> {
       final tid = LocalDb.normalizarTelegramId(v['registrado_por']);
       if (tid != null) personas.putIfAbsent(tid, () => 'Entrenador');
     }
-    for (final l in lotes) {
-      final saldo = await saldoLoteLocal((l['id'] as num).toInt());
-      l['saldo_local'] = saldo;
-    }
     if (!mounted) return;
     setState(() {
       _precios = precios;
       _agua = agua;
       _botes = botes;
-      _lotes = lotes;
+      _pomos = pomos;
       _suplementos = suplementos;
       _categorias = mapaCategoriasSuplemento(categorias);
       _personas = personas;
@@ -392,7 +392,7 @@ class _ServiciosAdminScreenState extends State<ServiciosAdminScreen> {
   }
 
   // ---------------------------------------------------------------
-  // Botes y lotes
+  // Pomos y botes (1.15)
   // ---------------------------------------------------------------
 
   Future<void> _abrirBote() async {
@@ -463,60 +463,65 @@ class _ServiciosAdminScreenState extends State<ServiciosAdminScreen> {
         dosisRendimiento: int.tryParse(rendCtrl.text.trim()) ?? 0,
         costoBote: (costo != null && costo > 0) ? costo : null,
       );
-      _aviso('Bote abierto (se sincronizará)');
+      _aviso('Bote abierto: sus dosis van al pomo principal '
+          '(se sincronizará)');
       await _cargar();
     } catch (e) {
       _aviso(_limpio(e), error: true);
     }
   }
 
-  Future<void> _crearLote(Map<String, dynamic> bote) async {
-    final boteId = (bote['id'] as num).toInt();
-    final sinRepartir = await sinRepartirLocal(boteId);
-    if (!mounted) return;
-    if (sinRepartir <= 0) {
-      _aviso('Este bote ya está repartido completo', error: true);
+  /// 1.15 (pomos): rellenar el pomo de un entrenador desde el
+  /// principal. Atajos 4/5 (pocas al inicio; 4-5 más cuando baja)
+  /// + cantidad libre. El servidor mueve las dosis en una
+  /// transacción y rechaza si el principal no alcanza.
+  Future<void> _reponerPomo(Map<String, dynamic> pomo) async {
+    final supId = (pomo['suplemento_id'] as num?)?.toInt();
+    final principal = _pomos.where((l) =>
+        (l['es_principal'] as num?)?.toInt() == 1 &&
+        (l['suplemento_id'] as num?)?.toInt() == supId).toList();
+    if (principal.isEmpty) {
+      _aviso('No hay pomo principal para este producto', error: true);
       return;
     }
-    // Argón #9 (MEDIO): _personas solo trae al dueño + quien haya
-    // registrado pagos/ventas; vacío → keys.first reventaba con
-    // «Bad state: No element». No hay espejo de usuarios en la app
-    // del que poblar entrenadores sin historial, así que se avisa.
-    if (_personas.isEmpty) {
-      _aviso('No hay responsables disponibles', error: true);
-      return;
-    }
-    var responsable = _personas.keys.first;
-    final dosisCtrl =
-        TextEditingController(text: '$sinRepartir');
+    final saldoPrincipal = (principal.first['saldo_local'] as num?)?.toInt() ?? 0;
+    final dosisCtrl = TextEditingController();
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setD) => DialogoApp(
-          titulo: 'Crear lote · ${_nombreSup((bote['suplemento_id'] as num?)?.toInt())}',
-          iconoTitulo: Icons.local_drink,
+          titulo: 'Rellenar pomo · ${_nombrePersona((pomo['titular_telegram_id'] as num?)?.toInt())}',
+          iconoTitulo: Icons.add_circle_outline,
           contenido: Column(
             mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text('Sin repartir: $sinRepartir dosis',
-                  style: AppTexto.cuerpo),
-              DropdownButtonFormField<int>(
-                value: responsable,
-                decoration:
-                    const InputDecoration(labelText: 'Responsable'),
-                items: [
-                  for (final e in _personas.entries)
-                    DropdownMenuItem(
-                        value: e.key, child: Text(e.value)),
+              Text(
+                'Principal: $saldoPrincipal dosis · '
+                'Pomo actual: ${pomo['saldo_local'] ?? '—'} dosis. '
+                'Se mueven del principal al pomo.',
+                style: AppTexto.cuerpo,
+              ),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  for (final atajo in const [4, 5])
+                    Padding(
+                      padding: const EdgeInsets.only(right: 8),
+                      child: OutlinedButton(
+                        onPressed: () =>
+                            setD(() => dosisCtrl.text = '$atajo'),
+                        child: Text('$atajo dosis'),
+                      ),
+                    ),
                 ],
-                onChanged: (v) =>
-                    setD(() => responsable = v ?? responsable),
               ),
               TextField(
                 controller: dosisCtrl,
                 keyboardType: TextInputType.number,
-                decoration:
-                    const InputDecoration(labelText: 'Dosis del lote'),
+                autofocus: true,
+                decoration: const InputDecoration(
+                    labelText: 'Dosis a rellenar'),
               ),
             ],
           ),
@@ -527,7 +532,7 @@ class _ServiciosAdminScreenState extends State<ServiciosAdminScreen> {
             ),
             FilledButton(
               onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('Crear lote'),
+              child: const Text('Rellenar'),
             ),
           ],
         ),
@@ -535,155 +540,87 @@ class _ServiciosAdminScreenState extends State<ServiciosAdminScreen> {
     );
     if (ok != true) return;
     try {
-      final miTid = AuthService().telegramId;
-      await crearLoteServicio(
-        boteId: boteId,
+      await reponerPomoServicio(
+        pomoDestinoId: (pomo['id'] as num).toInt(),
         dosis: int.tryParse(dosisCtrl.text.trim()) ?? 0,
-        responsableTipo:
-            responsable == miTid ? 'dueno' : 'entrenador',
-        responsableId: responsable,
       );
-      _aviso('Lote creado (se sincronizará)');
+      _aviso('Pomo rellenado (se sincronizará)');
       await _cargar();
     } catch (e) {
       _aviso(_limpio(e), error: true);
     }
   }
 
-  /// v1.13.0 (Bloque 4, reponer_lote — solo dueño): devuelve dosis
-  /// del «sin repartir» del MISMO bote al lote activo (movimiento
-  /// propio en el historial). El diálogo muestra el sin repartir
-  /// disponible; la función valida dosis ≥ 1, lote activo y tope.
-  Future<void> _reponerLote(Map<String, dynamic> lote) async {
-    final loteId = (lote['id'] as num).toInt();
-    final boteId = (lote['bote_id'] as num?)?.toInt();
-    if (boteId == null) {
-      _aviso('El lote no tiene bote asociado', error: true);
-      return;
-    }
-    final sinRepartir = await sinRepartirLocal(boteId);
-    if (sinRepartir <= 0) {
-      _aviso('No quedan dosis sin repartir en este bote', error: true);
-      return;
-    }
+  /// 1.15 (pomos): salida sin venta contra un pomo (merma,
+  /// cortesía, consumo del staff, ajuste). Solo dueño.
+  Future<void> _salidaPomo(Map<String, dynamic> pomo) async {
+    var motivo = 'merma';
     final dosisCtrl = TextEditingController(text: '1');
+    final notaCtrl = TextEditingController();
     final ok = await showDialog<bool>(
       context: context,
-      builder: (ctx) => DialogoApp(
-        titulo: 'Reponer lote',
-        iconoTitulo: Icons.add_circle_outline,
-        contenido: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Sin repartir del bote: $sinRepartir dosis. '
-              'Se mueven al lote activo y quedan en su historial '
-              'como reposición.',
-              style: AppTexto.cuerpo,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setD) => DialogoApp(
+          titulo: 'Salida sin venta · ${_nombrePersona((pomo['titular_telegram_id'] as num?)?.toInt())}',
+          iconoTitulo: Icons.outbox,
+          contenido: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                'Saldo del pomo: ${pomo['saldo_local'] ?? '—'} dosis.',
+                style: AppTexto.cuerpo,
+              ),
+              DropdownButtonFormField<String>(
+                value: motivo,
+                decoration:
+                    const InputDecoration(labelText: 'Motivo'),
+                items: const [
+                  DropdownMenuItem(
+                      value: 'merma', child: Text('Merma / rotura')),
+                  DropdownMenuItem(
+                      value: 'cortesia', child: Text('Cortesía')),
+                  DropdownMenuItem(
+                      value: 'consumo_staff',
+                      child: Text('Consumo del staff')),
+                  DropdownMenuItem(
+                      value: 'ajuste', child: Text('Ajuste')),
+                ],
+                onChanged: (v) => setD(() => motivo = v ?? 'merma'),
+              ),
+              TextField(
+                controller: dosisCtrl,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(labelText: 'Dosis'),
+              ),
+              TextField(
+                controller: notaCtrl,
+                decoration: const InputDecoration(
+                    labelText: 'Nota (opcional)'),
+              ),
+            ],
+          ),
+          acciones: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancelar'),
             ),
-            TextField(
-              controller: dosisCtrl,
-              keyboardType: TextInputType.number,
-              autofocus: true,
-              decoration: const InputDecoration(
-                  labelText: 'Dosis a reponer'),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Registrar salida'),
             ),
           ],
         ),
-        acciones: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancelar'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Reponer'),
-          ),
-        ],
       ),
     );
     if (ok != true) return;
     try {
-      await reponerLoteServicio(
-        loteId: loteId,
+      await registrarSalidaServicio(
+        pomoId: (pomo['id'] as num).toInt(),
         dosis: int.tryParse(dosisCtrl.text.trim()) ?? 0,
+        motivo: motivo,
+        nota: notaCtrl.text.trim().isEmpty ? null : notaCtrl.text.trim(),
       );
-      _aviso('Lote repuesto (se sincronizará)');
-      await _cargar();
-    } catch (e) {
-      _aviso(_limpio(e), error: true);
-    }
-  }
-
-  Future<void> _cerrarLote(Map<String, dynamic> lote) async {
-    final conteoCtrl = TextEditingController(
-        text: '${lote['saldo_local'] ?? 0}');
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => DialogoApp(
-        titulo: 'Cerrar lote',
-        iconoTitulo: Icons.lock,
-        contenido: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Saldo según el sistema: ${lote['saldo_local']} dosis. '
-              'Cuenta el pomo físico y escribe lo que hay de verdad: '
-              'la diferencia queda registrada y lo que sobre vuelve '
-              'a «sin repartir» del bote.',
-              style: AppTexto.cuerpo,
-            ),
-            TextField(
-              controller: conteoCtrl,
-              keyboardType: TextInputType.number,
-              autofocus: true,
-              decoration: const InputDecoration(
-                  labelText: 'Conteo físico (dosis que quedan)'),
-            ),
-          ],
-        ),
-        acciones: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancelar'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Cerrar lote'),
-          ),
-        ],
-      ),
-    );
-    if (ok != true) return;
-    try {
-      await cerrarLoteServicio(
-        loteId: (lote['id'] as num).toInt(),
-        conteoFisico: int.tryParse(conteoCtrl.text.trim()) ?? -1,
-      );
-      _aviso('Cierre registrado (se sincronizará)');
-      await _cargar();
-    } catch (e) {
-      _aviso(_limpio(e), error: true);
-    }
-  }
-
-  Future<void> _cerrarBote(Map<String, dynamic> bote) async {
-    final ok = await DialogoApp.confirmar(
-      context,
-      titulo: 'Cerrar bote',
-      mensaje:
-          'Se sella el bote y se registra su diferencia de '
-          'rendimiento. Los lotes activos de este bote deben estar '
-          'cerrados.',
-      aceptar: 'Cerrar bote',
-      icono: Icons.lock,
-    );
-    if (ok != true) return;
-    try {
-      await cerrarBoteServicio(boteId: (bote['id'] as num).toInt());
-      _aviso('Cierre de bote registrado (se sincronizará)');
+      _aviso('Salida registrada');
       await _cargar();
     } catch (e) {
       _aviso(_limpio(e), error: true);
@@ -723,9 +660,9 @@ class _ServiciosAdminScreenState extends State<ServiciosAdminScreen> {
                 const SizedBox(height: AppEspacio.md),
                 _seccionAgua(),
                 const SizedBox(height: AppEspacio.md),
-                _seccionBotes(),
+                _seccionPomos(),
                 const SizedBox(height: AppEspacio.md),
-                _seccionLotes(),
+                _seccionBotes(),
               ],
             ),
     );
@@ -887,87 +824,75 @@ class _ServiciosAdminScreenState extends State<ServiciosAdminScreen> {
                   'Estado: ${b['estado']}'
                   '${b['diferencia_rendimiento_bote'] != null ? ' · Diferencia: ${b['diferencia_rendimiento_bote']}' : ''}',
                 ),
-                trailing: '${b['estado']}' == 'abierto'
-                    ? Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          TextButton(
-                            onPressed: () => _crearLote(b),
-                            child: const Text('Crear lote'),
-                          ),
-                          IconButton(
-                            tooltip: 'Cerrar bote',
-                            icon: const Icon(Icons.lock, size: 20),
-                            onPressed: () => _cerrarBote(b),
-                          ),
-                        ],
-                      )
-                    : null,
+                // 1.15 (P3/P4): los botes son historial; sin
+                // «Crear lote» ni «Cerrar bote». El stock vivo está
+                // en la sección Pomos; abrir un bote alimenta al
+                // principal.
+                trailing: null,
               ),
         ],
       ),
     );
   }
 
-  Widget _seccionLotes() {
+  Widget _seccionPomos() {
+    // Principal primero, luego entrenadores por nombre.
+    final pomos = [..._pomos]
+      ..sort((a, b) {
+        final pa = (a['es_principal'] as num?)?.toInt() ?? 0;
+        final pb = (b['es_principal'] as num?)?.toInt() ?? 0;
+        if (pa != pb) return pb.compareTo(pa);
+        return '${_nombrePersona((a['titular_telegram_id'] as num?)?.toInt())}'
+            .compareTo(
+                _nombrePersona((b['titular_telegram_id'] as num?)?.toInt()));
+      });
     return Tarjeta(
       padding: const EdgeInsets.all(AppEspacio.md),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('Lotes',
+          Text('Pomos',
               style: AppTexto.titulo.copyWith(fontSize: 16)),
-          if (_lotes.isEmpty)
-            Text('Sin lotes creados.',
+          if (pomos.isEmpty)
+            Text('Sin pomos todavía: abre un bote para tener principal.',
                 style: AppTexto.cuerpo.copyWith(
                     color: AppColores.textoSecundario(context)))
           else
-            for (final l in _lotes)
+            for (final l in pomos)
               ListTile(
                 contentPadding: EdgeInsets.zero,
                 leading: Icon(
-                  '${l['estado']}' == 'activo'
-                      ? Icons.local_drink
-                      : Icons.lock,
-                  color: '${l['estado']}' == 'activo'
-                      ? AppColores.naranja
-                      : Colors.grey,
+                  (l['es_principal'] as num?)?.toInt() == 1
+                      ? Icons.science
+                      : Icons.local_drink,
+                  color: AppColores.naranja,
                 ),
                 title: Text(
-                    '${_nombreSup(_supDeBote((l['bote_id'] as num?)?.toInt()))} '
-                    '· ${_nombrePersona((l['responsable_id'] as num?)?.toInt())}'),
+                    '${(l['es_principal'] as num?)?.toInt() == 1 ? 'Principal' : _nombrePersona((l['titular_telegram_id'] as num?)?.toInt())} '
+                    '· ${_nombreSup((l['suplemento_id'] as num?)?.toInt())}'),
                 subtitle: Text(
-                  '${l['estado']} · Saldo: ${l['saldo_local'] ?? '—'} '
-                  'de ${l['dosis_iniciales']} dosis'
-                  '${l['conteo_cierre'] != null ? ' · Conteo cierre: ${l['conteo_cierre']}' : ''}',
+                  'Saldo: ${l['saldo_local'] ?? '—'} dosis · '
+                  'Asignadas: ${l['dosis_asignadas'] ?? '—'}'
+                  '${(l['es_principal'] as num?)?.toInt() == 1 ? ' · Repartidas: ${l['dosis_repartidas'] ?? 0}' : ''}',
                 ),
-                trailing: '${l['estado']}' == 'activo'
-                    ? Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          TextButton(
-                            onPressed: () => _reponerLote(l),
-                            child: const Text('Reponer'),
-                          ),
-                          TextButton(
-                            onPressed: () => _cerrarLote(l),
-                            child: const Text('Cerrar'),
-                          ),
-                        ],
-                      )
-                    : null,
+                trailing: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if ((l['es_principal'] as num?)?.toInt() != 1)
+                      TextButton(
+                        onPressed: () => _reponerPomo(l),
+                        child: const Text('Rellenar'),
+                      ),
+                    TextButton(
+                      onPressed: () => _salidaPomo(l),
+                      child: const Text('Salida'),
+                    ),
+                  ],
+                ),
               ),
         ],
       ),
     );
   }
 
-  int? _supDeBote(int? boteId) {
-    for (final b in _botes) {
-      if ((b['id'] as num?)?.toInt() == boteId) {
-        return (b['suplemento_id'] as num?)?.toInt();
-      }
-    }
-    return null;
-  }
 }

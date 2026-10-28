@@ -180,6 +180,7 @@ class SyncScope {
       'servicio_salidas',
       'servicio_agua_movimientos',
       'servicio_compras',
+      'servicio_pomos', // 1.15 (v48)
     ],
     'ventas': ['ventas_suplementos'],
     'incidencias': ['incidencia_eventos'],
@@ -2247,6 +2248,16 @@ class SyncEngine {
       // una venta al fiado o una categoría rechazada quedaba fantasma
       // en el teléfono (el pull nunca trae la fila real).
       await _limpiarOptimistaDeOp(op);
+      if ('${op['tipo']}' == 'liquidar_entrega_efectivo') {
+        // Panel delta Luna ALTO (= kTipoOpLiquidarEntrega en
+        // bloque2_resto.dart:68; literal aquí como el resto de
+        // tipos en este archivo): una liquidación rechazada
+        // dejaba la fila local en entregas_efectivo descontando
+        // el pendiente para siempre — el push traga errores y
+        // la fila no es optimista de espejo. Solo en rechazo:
+        // la fila aplicada se conserva (es el libro local).
+        await _db.eliminarEntregaEfectivoPorOp(uuid);
+      }
       // Cliente protegido (2026-10-26, A4): el pull de fin de
       // ciclo pisa el estado optimista local (p. ej. un pago que
       // la pantalla ya dio por aplicado).
@@ -2764,6 +2775,7 @@ class SyncEngine {
       'servicio_salidas',
       'servicio_agua_movimientos',
       'servicio_compras',
+      'servicio_pomos', // 1.15 (v48)
       // v1.12.0 (Bloque 3, F3/F4): si la tabla sync_* aún no existe
       // en Supabase, el pull la marca ausente y la omite (mismo
       // patrón que los servicios en v1.8.0).
@@ -2830,6 +2842,7 @@ class SyncEngine {
       'servicio_salidas',
       'servicio_agua_movimientos',
       'servicio_compras',
+      'servicio_pomos', // 1.15 (v48): sin filas optimistas (ver arriba)
     };
     try {
       // Programación idempotente por tabla (panel v1.4.4): la
@@ -2963,6 +2976,8 @@ class SyncEngine {
       'servicio_salidas': 'sync_servicio_salidas',
       'servicio_agua_movimientos': 'sync_servicio_agua_movimientos',
       'servicio_compras': 'sync_servicio_compras',
+      // 1.15 (v48): espejo de pomos (SQL pomos PARTE A).
+      'servicio_pomos': 'sync_servicio_pomos',
       // v1.12.0 (Bloque 3, F3/F4): espejos nuevos del puente
       // (contrato servidor 59f2ffd: esquemas PLANOS, sin columna
       // 'data' — ver la rama de select abajo y _prepararFilaMirror).

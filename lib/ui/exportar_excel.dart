@@ -10,6 +10,7 @@ import 'package:share_plus/share_plus.dart';
 import '../auth.dart';
 import '../cliente_protegido.dart';
 import '../localdb.dart';
+import '../tiempo.dart';
 
 String _csv(List<String> cabecera, List<List<String>> filas) {
   String esc(String s) {
@@ -60,7 +61,7 @@ Future<bool> exportarExcel() async {
     );
 
     // --- Pagos del mes: fecha, cliente, monto, método ---
-    final n = DateTime.now();
+    final n = ahoraHabana();
     final pref = '${n.year.toString().padLeft(4, '0')}-'
         '${n.month.toString().padLeft(2, '0')}';
     // v1.3.4 (ítem 2): columna `fecha` indexada en vez de allMirror.

@@ -22,6 +22,7 @@ import 'auth.dart';
 import 'bloque2_resto.dart';
 import 'cliente_protegido.dart';
 import 'localdb.dart';
+import 'negocio.dart';
 import 'tiempo.dart';
 
 /// Un recordatorio vencido hoy, listo para disparar (o ya disparado).
@@ -243,7 +244,16 @@ class RecordatoriosService {
         // Argón #10-2: ni eliminados ni protegidos generan avisos
         // para entrenadores (para el dueño esVistaProtegida es
         // false y los sigue viendo todos).
-        if (c['eliminado'] == true || c['eliminado'] == 1) continue;
+        // Eliminado por cualquiera de las dos señales: el espejo
+        // puede traer 'eliminado' (siembra/tests) o estado
+        // 'eliminado'/distinto de 'activo' (producción). Solo una
+        // de ellas dejaba fuera al cliente 104 del test #10.
+        if (c['eliminado'] == true ||
+            c['eliminado'] == 1 ||
+            esClienteEliminado(c) ||
+            (c['estado'] ?? 'activo') != 'activo') {
+          continue;
+        }
         if (esVistaProtegida(c, esDueno: _soyDueno)) continue;
         final target = 'cliente:$cid';
         bool aplica = false;

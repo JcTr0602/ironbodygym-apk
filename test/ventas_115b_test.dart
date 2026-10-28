@@ -49,6 +49,7 @@ Future<void> _limpiar() async {
     'servicio_ventas',
     'servicio_salidas',
     'servicio_agua_movimientos',
+    'servicio_pomos', // 1.15
     'clientes',
     'ventas_suplementos',
   ]) {
@@ -107,6 +108,15 @@ Future<void> _siembraVentaServicio() async {
     'dosis_iniciales': 40,
     'dosis_repuestas': 0,
     'estado': 'activo',
+  });
+  // 1.15: la venta múltiple ya valida contra el pomo, no el lote.
+  await _espejo('servicio_pomos', 10, {
+    'suplemento_id': 1,
+    'titular_telegram_id': 969869611,
+    'es_principal': 0,
+    'dosis_asignadas': 40,
+    'dosis_repartidas': 0,
+    'activo': 1,
   });
   await _espejo('servicio_agua_movimientos', 1, {
     'tipo': 'entrada',
@@ -406,7 +416,7 @@ void main() {
       await _siembraVentaServicio();
       await _espejo('clientes', 80, {'cuenta_casa': 1});
       final uuids = await registrarVentaMultipleServicio(
-        loteId: 10,
+        pomoId: 10,
         dosisN: 3,
         pomosM: 1,
         clienteId: 80,
@@ -439,7 +449,7 @@ void main() {
       await _limpiar();
       await _siembraVentaServicio();
       await registrarVentaMultipleServicio(
-        loteId: 10,
+        pomoId: 10,
         dosisN: 2,
         pomosM: 0,
         casa: true,
@@ -460,7 +470,7 @@ void main() {
       await _espejo('clientes', 81, {'cuenta_casa': 0});
       await expectLater(
           registrarVentaMultipleServicio(
-            loteId: 10,
+            pomoId: 10,
             dosisN: 2,
             pomosM: 0,
             clienteId: 81,
@@ -476,7 +486,7 @@ void main() {
     test('ventaMultiple_normalConservaMetodoYTotales', () async {
       await _siembraVentaServicio();
       final uuids = await registrarVentaMultipleServicio(
-        loteId: 10,
+        pomoId: 10,
         dosisN: 3,
         pomosM: 1,
         metodo: 'efectivo',

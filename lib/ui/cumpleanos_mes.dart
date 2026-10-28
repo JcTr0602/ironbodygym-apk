@@ -58,7 +58,11 @@ class _CumpleanosMesState
               'clientes')) {
         // Solo activos: no eliminados y no vencidos hace >60 días
         if (c['eliminado'] == true ||
-            c['eliminado'] == 1) continue;
+            c['eliminado'] == 1 ||
+            esClienteEliminado(c) ||
+            (c['estado'] ?? 'activo') != 'activo') {
+          continue;
+        }
         // Argón #10-2: un entrenador no ve clientes protegidos
         // del dueño (nombres, fechas ni teléfonos).
         if (esVistaProtegida(c)) continue;

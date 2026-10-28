@@ -197,7 +197,7 @@ void main() {
     expect(porMetodo.length, 2);
   });
 
-  test('la versión actual del esquema es 47', () async {
-    expect(LocalDb.versionActual, 47);
+  test('la versión actual del esquema es 48', () async {
+    expect(LocalDb.versionActual, 48);
   });
 }

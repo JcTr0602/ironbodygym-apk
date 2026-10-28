@@ -11,7 +11,9 @@ import 'package:crypto/crypto.dart';
 import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:uuid/uuid.dart';
 import 'localdb.dart';
+import 'tiempo.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'auth.dart';
@@ -396,6 +398,18 @@ class PerfilService {
         }
       }
     } catch (_) {}
+    // 1.15 (Panel A4): publicado por el servidor en ajustes (vía
+    // actualizar_config_gym); es el camino que usan los entrenadores
+    // (en su teléfono la tabla local nunca se escribe).
+    try {
+      final aj = await LocalDb.instance.getAjustes();
+      final v = aj['pago_entrenador_por_cliente'];
+      final n = v is num ? v.toInt() : int.tryParse('$v');
+      if (n != null && n > 0) {
+        (await _p).setInt('pago_entrenador', n);
+        return n;
+      }
+    } catch (_) {}
     // 2. Fallback a caché local.
     return (await _p).getInt('pago_entrenador') ?? 150;
   }
@@ -410,6 +424,21 @@ class PerfilService {
       );
     } catch (_) {}
     await (await _p).setInt('pago_entrenador', monto);
+    // 1.15 (Panel A4): que VIAJE al servidor para que los
+    // entrenadores lo reciban por ajustes (antes solo quedaba local
+    // y seguían con 150). El servidor lo acepta en _CONFIG_PRECIOS
+    // y lo publica en sync_estado.ajustes.
+    try {
+      await LocalDb.instance.queueOp(
+        opUuid: const Uuid().v4(),
+        tipo: 'actualizar_config_gym', // == kTipoOpActualizarConfigGym
+        payload: {
+          'config': {'pago_entrenador_por_cliente': '$monto'},
+          'fecha_hora_havana': isoHabana(ahoraHabana()),
+          'autor_dueno_id': AuthService().telegramId,
+        },
+      );
+    } catch (_) {}
   }
 
   /// Avisar cuando una sincronización falla (item 11).

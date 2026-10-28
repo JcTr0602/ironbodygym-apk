@@ -41,12 +41,12 @@ Future<List<String>> _columnas(String tabla) async {
 }
 
 void main() {
-  test('instalación limpia v47: columna metodo + 4 espejos nuevos',
+  test('instalación limpia: columna metodo + 4 espejos nuevos',
       () async {
     await _abrirDbVacia();
     final d = await LocalDb.instance.db;
     expect(await d.getVersion(), LocalDb.versionActual);
-    expect(LocalDb.versionActual, 47);
+    expect(LocalDb.versionActual, 48);
     expect(await _columnas('pagos_diarios'),
         containsAll(['id', 'data', 'sync_seq', 'metodo']));
     final tablas = (await d.rawQuery(

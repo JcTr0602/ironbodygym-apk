@@ -56,6 +56,7 @@ import 'negocio.dart'
         esPagoDiarioEfectivo,
         ventasSuplementosCup,
         totalVentaCup;
+import 'invitados.dart' as invitados_svc;
 import 'sync.dart' show SyncEngine;
 import 'tiempo.dart';
 
@@ -95,6 +96,12 @@ Map<String, dynamic> payloadLiquidarEntrega({
   required int autorDuenoId,
   Map<String, List<int>>? opIds,
   double? restoSinIds,
+  // 1.15 (H4): recogida anticipada: el dueño registra efectivo antes
+  // de que los pagos existan en su teléfono (el entrenador aún no
+  // sincronizó). El servidor solo salta la validación de pendiente
+  // cuando viene esta marca explícita; el resto de validaciones
+  // (monto == marcado + resto, ids válidos) sigue intacto.
+  bool? anticipada,
 }) =>
     {
       'entrenador_id': entrenadorTelegramId,
@@ -106,6 +113,7 @@ Map<String, dynamic> payloadLiquidarEntrega({
       // servidor aplica el legado (libro sin marca).
       if (opIds != null) 'op_ids': opIds,
       if (restoSinIds != null) 'resto_sin_ids': restoSinIds,
+      if (anticipada == true) 'anticipada': true,
     };
 
 /// PURO (testeable sin BD): fusiona el libro local de entregas C1
@@ -226,17 +234,27 @@ Future<String> registrarEntregaEfectivo({
   required int entrenadorTelegramId,
   required double montoEntregado,
   required int autorDuenoId,
+  // 1.15 (H4): recogida anticipada. Si es true y el monto supera el
+  // pendiente visible (el entrenador aún no sincronizó esos pagos),
+  // se registra igual y se marca 'anticipada' en la op: el servidor
+  // salta SOLO la validación de pendiente. Sin esto, el dueño no
+  // podría registrar efectivo que tiene en la mano antes de que los
+  // pagos existan en su teléfono. Con false (defecto), la validación
+  // de siempre: el monto no puede superar el pendiente.
+  bool permitirAnticipada = false,
 }) =>
     _enSerieLiquidacion(() => _registrarEntregaEfectivoImpl(
           entrenadorTelegramId: entrenadorTelegramId,
           montoEntregado: montoEntregado,
           autorDuenoId: autorDuenoId,
+          permitirAnticipada: permitirAnticipada,
         ));
 
 Future<String> _registrarEntregaEfectivoImpl({
   required int entrenadorTelegramId,
   required double montoEntregado,
   required int autorDuenoId,
+  bool permitirAnticipada = false,
 }) async {
   if (!AuthService().isOwner) {
     throw Exception('Solo el dueño puede liquidar entregas de efectivo');
@@ -248,7 +266,11 @@ Future<String> _registrarEntregaEfectivoImpl({
     throw Exception('El monto entregado debe ser positivo');
   }
   final pendiente = await pendienteDeltaC1(entrenadorTelegramId);
-  if (montoEntregado - pendiente > 0.01) {
+  // 1.15 (H4): anticipada solo cuando realmente supera el pendiente
+  // visible; si no, el camino es el de siempre (sin marca).
+  final anticipada =
+      permitirAnticipada && montoEntregado - pendiente > 0.01;
+  if (!anticipada && montoEntregado - pendiente > 0.01) {
     throw Exception(
         'Lo entregado ($montoEntregado) supera el pendiente ($pendiente)');
   }
@@ -383,6 +405,7 @@ Future<String> _registrarEntregaEfectivoImpl({
         autorDuenoId: autorDuenoId,
         opIds: opIds,
         restoSinIds: resto,
+        anticipada: anticipada,
       ),
       txn: txn,
     );
@@ -482,6 +505,9 @@ FilaIngreso? filaIngresoDesdeEspejo(
       // Solo CUP: el USD no entra al reporte en CUP (se muestra aparte
       // en la pantalla si hace falta; el total C5 es en CUP).
       if ((r['moneda'] as String?) == 'USD') return null;
+      // 1.15 (Panel A3): una venta fiada no es ingreso hasta saldarse.
+      if ((r['es_fiado'] as num?)?.toInt() == 1 &&
+          (r['fiado_saldado'] as num?)?.toInt() != 1) return null;
       final monto = (r['total'] as num?)?.toDouble() ??
           ((r['precio'] as num?)?.toDouble() ?? 0) *
               ((r['cantidad'] as num?)?.toDouble() ?? 0);
@@ -543,6 +569,18 @@ Future<void> guardarConfigGym(Map<String, dynamic> cambios) async {
       'autor_dueno_id': AuthService().telegramId,
     },
   );
+  // 1.15 (Panel A4): si cambió el precio Plus, publicar el precio
+  // público (la pantalla C6 no pasa por _guardarMontos, que es la
+  // que hoy dispara el aviso).
+  final plus = cambios['precio_app_plus'];
+  if (plus != null) {
+    final entero = plus is num ? plus.round() : int.tryParse('$plus');
+    if (entero != null) {
+      // ignore: discarded_futures
+      invitados_svc.InvitadosService().guardarInfoPublicaConReintento(
+          'precio_app_plus', '$entero');
+    }
+  }
   // ignore: discarded_futures
   SyncEngine.instance.push().then((_) {}, onError: (_) {});
 }

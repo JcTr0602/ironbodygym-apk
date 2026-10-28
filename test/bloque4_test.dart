@@ -42,6 +42,7 @@ Future<void> _limpiar() async {
     'servicio_ventas',
     'servicio_salidas',
     'servicio_agua_movimientos',
+    'servicio_pomos', // 1.15
     'ultimo_sync',
     'avisos_wa_contactados',
     'cliente_mediciones',
@@ -80,6 +81,15 @@ Future<void> _siembraVenta() async {
     'dosis_repuestas': 0,
     'estado': 'activo',
   });
+  // 1.15: la venta múltiple ya valida contra el pomo, no el lote.
+  await _espejo('servicio_pomos', 10, {
+    'suplemento_id': 1,
+    'titular_telegram_id': 969869611,
+    'es_principal': 0,
+    'dosis_asignadas': 40,
+    'dosis_repartidas': 0,
+    'activo': 1,
+  });
   await _espejo('servicio_agua_movimientos', 1, {
     'tipo': 'entrada',
     'cantidad': 10,
@@ -99,27 +109,27 @@ void main() {
     test('sin dosis y con pomos: 600 y 900 OFF, agua ON', () {
       final s600 = estadoBotonVentaServicio(
           tipo: 'dosis_sin_agua',
-          tieneLote: true,
+          tienePomo: true,
           dosisRestantes: 0,
           pomos: 5,
           esDueno: true,
           precio: 600);
       final s900 = estadoBotonVentaServicio(
           tipo: 'dosis_con_agua',
-          tieneLote: true,
+          tienePomo: true,
           dosisRestantes: 0,
           pomos: 5,
           esDueno: true,
           precio: 900);
       final a300 = estadoBotonVentaServicio(
           tipo: 'agua_suelta',
-          tieneLote: true,
+          tienePomo: true,
           dosisRestantes: 0,
           pomos: 5,
           esDueno: true,
           precio: 300);
       expect(s600.habilitado, isFalse);
-      expect(s600.motivo, 'No quedan dosis en el lote activo');
+      expect(s600.motivo, 'No quedan dosis en tu pomo');
       expect(s900.habilitado, isFalse);
       expect(a300.habilitado, isTrue);
     });
@@ -127,21 +137,21 @@ void main() {
     test('con dosis y sin pomos: 600 ON, 900 y agua OFF', () {
       final s600 = estadoBotonVentaServicio(
           tipo: 'dosis_sin_agua',
-          tieneLote: true,
+          tienePomo: true,
           dosisRestantes: 10,
           pomos: 0,
           esDueno: true,
           precio: 600);
       final s900 = estadoBotonVentaServicio(
           tipo: 'dosis_con_agua',
-          tieneLote: true,
+          tienePomo: true,
           dosisRestantes: 10,
           pomos: 0,
           esDueno: true,
           precio: 900);
       final a300 = estadoBotonVentaServicio(
           tipo: 'agua_suelta',
-          tieneLote: true,
+          tienePomo: true,
           dosisRestantes: 10,
           pomos: 0,
           esDueno: true,
@@ -156,7 +166,7 @@ void main() {
     test('entrenador ciego: sin dosis local NO se le bloquea', () {
       final s600 = estadoBotonVentaServicio(
           tipo: 'dosis_sin_agua',
-          tieneLote: true,
+          tienePomo: true,
           dosisRestantes: 0,
           pomos: 5,
           esDueno: false,
@@ -167,16 +177,16 @@ void main() {
     test('sin lote: dosis OFF; precio sin fijar apaga todo', () {
       final sinLote = estadoBotonVentaServicio(
           tipo: 'dosis_sin_agua',
-          tieneLote: false,
+          tienePomo: false,
           dosisRestantes: 0,
           pomos: 5,
           esDueno: true,
           precio: 600);
       expect(sinLote.habilitado, isFalse);
-      expect(sinLote.motivo, 'Sin lote activo');
+      expect(sinLote.motivo, 'Sin pomo activo');
       final sinPrecio = estadoBotonVentaServicio(
           tipo: 'agua_suelta',
-          tieneLote: true,
+          tienePomo: true,
           dosisRestantes: 5,
           pomos: 5,
           esDueno: true,
@@ -192,7 +202,7 @@ void main() {
       await _siembraVenta();
       await expectLater(
           registrarVentaMultipleServicio(
-              loteId: 10,
+              pomoId: 10,
               dosisN: 1,
               pomosM: 0,
               metodo: 'efectivo',
@@ -202,7 +212,7 @@ void main() {
           throwsException);
       await expectLater(
           registrarVentaMultipleServicio(
-              loteId: 10,
+              pomoId: 10,
               dosisN: 41,
               pomosM: 0,
               metodo: 'efectivo',
@@ -212,7 +222,7 @@ void main() {
           throwsException);
       await expectLater(
           registrarVentaMultipleServicio(
-              loteId: 10,
+              pomoId: 10,
               dosisN: 3,
               pomosM: 4,
               metodo: 'efectivo',
@@ -222,7 +232,7 @@ void main() {
           throwsException);
       await expectLater(
           registrarVentaMultipleServicio(
-              loteId: 10,
+              pomoId: 10,
               dosisN: 3,
               pomosM: 3,
               metodo: 'efectivo',
@@ -237,7 +247,7 @@ void main() {
         () async {
       await _siembraVenta();
       final uuids = await registrarVentaMultipleServicio(
-          loteId: 10,
+          pomoId: 10,
           dosisN: 3,
           pomosM: 2,
           metodo: 'efectivo',
@@ -266,7 +276,7 @@ void main() {
         () async {
       await _siembraVenta();
       final u0 = await registrarVentaMultipleServicio(
-          loteId: 10,
+          pomoId: 10,
           dosisN: 4,
           pomosM: 0,
           metodo: 'efectivo',
@@ -280,7 +290,7 @@ void main() {
       await _limpiar();
       await _siembraVenta();
       final uN = await registrarVentaMultipleServicio(
-          loteId: 10,
+          pomoId: 10,
           dosisN: 2,
           pomosM: 2,
           metodo: 'efectivo',
@@ -295,7 +305,7 @@ void main() {
     test('Deshacer E3 borra el grupo completo', () async {
       await _siembraVenta();
       final uuids = await registrarVentaMultipleServicio(
-          loteId: 10,
+          pomoId: 10,
           dosisN: 3,
           pomosM: 1,
           metodo: 'efectivo',
