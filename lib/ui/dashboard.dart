@@ -376,6 +376,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
                             'Suplementos',
                             _miPorMetodo['suplementos'] ?? 0,
                             _miMes),
+                        // Ronda 3-9 #7: servicios del entrenador.
+                        _filaDesglose(
+                            'Servicios',
+                            _miPorMetodo['servicios'] ?? 0,
+                            _miMes),
                         const Divider(height: 16),
                         _filaDesglose(
                             'Mensualidades',
@@ -390,6 +395,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         _filaDesglose(
                             'Suplementos',
                             _miPorTipo['suplementos'] ?? 0,
+                            _miMes),
+                        // Ronda 3-9 #7: servicios del entrenador.
+                        _filaDesglose(
+                            'Servicios',
+                            _miPorTipo['servicios'] ?? 0,
                             _miMes),
                         if (_miMejorPeor.isNotEmpty) ...[
                           const SizedBox(height: 8),

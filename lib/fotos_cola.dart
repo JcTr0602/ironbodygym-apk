@@ -1361,11 +1361,13 @@ class FotosColaService {
       // Los archivos finales se borran si no están referenciados y tienen +2h.
       // NOTA (desviación deliberada de Argón #8-4): lastModified()
       // es hora local del dispositivo, así que el umbral también
-      // debe ser hora local del dispositivo (DateTime.now()), no
-      // hora Habana: con el dispositivo fuera de Cuba, ahoraHabana
+      // debe ser hora local del dispositivo (ahoraDispositivoParaFs),
+      // no hora Habana: con el dispositivo fuera de Cuba, ahoraHabana
       // desplazaría los umbrales.
-      final umbralTmp = DateTime.now().subtract(const Duration(hours: 24));
-      final umbralFinal = DateTime.now().subtract(const Duration(hours: 2));
+      final umbralTmp =
+          ahoraDispositivoParaFs().subtract(const Duration(hours: 24));
+      final umbralFinal =
+          ahoraDispositivoParaFs().subtract(const Duration(hours: 2));
       await for (final e in fotosDir.list()) {
         if (e is File) {
           try {

@@ -52,6 +52,9 @@ Map<String, dynamic> payloadRenovacionRapida({
   required String nuevoVencimiento,
   required String fecha,
   required bool esDueno,
+  // Ronda 3-9 #3: tipo de precio (p. ej. 'menores') para que el
+  // servidor aplique el precio correcto y el preview lo rotule.
+  String? tipoId,
 }) =>
     {
       'cliente_id': clienteId,
@@ -62,7 +65,30 @@ Map<String, dynamic> payloadRenovacionRapida({
       'monto': mensualidad,
       'pagado_hasta': nuevoVencimiento,
       if (esDueno) 'entregado': 1,
+      if (tipoId != null) 'tipo_id': tipoId,
     };
+
+/// Decisión de visibilidad de foto en ficha (panel Terra, ajuste
+/// foto 2026-10-29). Tabla completa:
+/// - intención 'eliminar' (BD) → no mostrar.
+/// - intención 'poner' o null con consulta OK → mostrar.
+/// - consulta fallida sin tombstone → mostrar (fail-open del caso
+///   real: BD bloqueada sin eliminaciones pendientes).
+/// - consulta fallida con tombstone de sesión → no mostrar (no
+///   resucitar una eliminación pendiente de sincronizar, F2).
+/// La carrera de una eliminación DURANTE la descarga la cubre el
+/// guard _fotoGen en _cargar, no este helper.
+bool mostrarFotoFicha({
+  required String? intencionBd,
+  required bool consultaFallida,
+  required bool eliminadaEnSesion,
+}) {
+  if (intencionBd == 'eliminar') return false;
+  if (intencionBd == null && consultaFallida && eliminadaEnSesion) {
+    return false;
+  }
+  return true;
+}
 
 class FichaScreen extends StatefulWidget {
   final int clienteId;
@@ -159,7 +185,14 @@ class _FichaScreenState extends State<FichaScreen> {
     }
     // Bloque 1: abrir directo en Editar (deslizar en Buscar).
     // Post-frame: _c ya está cargado y la ficha ya se dibujó.
-    if (widget.editarAlAbrir && !_editoAlAbrir && mounted && c != null) {
+    // Ronda 3-9 #1 (CRÍTICO): un protegido nunca abre el editor
+    // (antes el callback post-frame lo abría aunque la ficha
+    // saliera bloqueada, mostrando carnet, teléfono y sexo).
+    if (widget.editarAlAbrir &&
+        !_editoAlAbrir &&
+        mounted &&
+        c != null &&
+        !esVistaProtegida(c)) {
       _editoAlAbrir = true;
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) _editar();
@@ -177,9 +210,35 @@ class _FichaScreenState extends State<FichaScreen> {
       // pendiente manda también al pintar; corrección del
       // panel — una carga NUEVA, no solo una en vuelo, podía
       // resucitar la foto eliminada al reabrir la ficha).
-      final intencion = await LocalDb.instance
-          .ultimaIntencionFoto(widget.clienteId);
-      if (intencion != 'eliminar') {
+      // Fix foto ficha (2026-10-29, ajuste panel Terra): la
+      // pregunta de intención puede fallar si la BD está
+      // bloqueada; sin red de seguridad la foto nunca se cargaba
+      // (las listas no preguntan y sí la muestran). Reintento
+      // acotado ante el bloqueo; si sigue fallando, decide
+      // mostrarFotoFicha: mostrar salvo que en esta sesión se
+      // haya borrado la foto (tombstone), para no resucitar una
+      // eliminación pendiente de sincronizar (F2).
+      String? intencionBd;
+      var consultaFallida = false;
+      for (var intento = 0; intento < 3; intento++) {
+        try {
+          intencionBd = await LocalDb.instance
+              .ultimaIntencionFoto(widget.clienteId);
+          consultaFallida = false;
+          break;
+        } catch (_) {
+          consultaFallida = true;
+          if (intento < 2) {
+            await Future.delayed(const Duration(milliseconds: 200));
+          }
+        }
+      }
+      if (mostrarFotoFicha(
+        intencionBd: intencionBd,
+        consultaFallida: consultaFallida,
+        eliminadaEnSesion:
+            LocalDb.fotoEliminadaEnSesion(widget.clienteId),
+      )) {
         final gen = _fotoGen;
         final foto = await FotoCache.instance
             .obtener(c['foto_storage'] as String?);
@@ -666,7 +725,12 @@ class _FichaScreenState extends State<FichaScreen> {
         break;
       }
     }
-    final telCtrl = TextEditingController(text: telefono);
+    // Ronda 3-9 #4: el campo guarda 8 dígitos (como el resto de
+    // la app) y el '+53 ' va solo como prefijo visual. Antes se
+    // inicializaba con los 10 dígitos wa.me (53…) y el prefijo
+    // '+' duplicaba la idea del código de país.
+    final telCtrl = TextEditingController(
+        text: telefono.length == 10 ? telefono.substring(2) : telefono);
     final mensaje = _mensajeRegalo(
         nombre: nombre, hastaFmt: hastaFmt, anteriorFmt: anteriorFmt);
     if (!mounted) return;
@@ -688,7 +752,7 @@ class _FichaScreenState extends State<FichaScreen> {
                 decoration: const InputDecoration(
                   labelText: 'Teléfono',
                   hintText: 'Ej. 58123456',
-                  prefixText: '+',
+                  prefixText: '+53 ',
                 ),
               ),
             ],
@@ -797,6 +861,9 @@ class _FichaScreenState extends State<FichaScreen> {
   Future<void> _editar() async {
     final c = _c;
     if (c == null) return;
+    // Ronda 3-9 #1 (CRÍTICO, defensa en profundidad): aunque se
+    // invoque directo, un protegido no se edita.
+    if (esVistaProtegida(c)) return;
     final nombre = TextEditingController(text: '${c['nombre'] ?? ''}');
     final telefono =
         TextEditingController(text: '${c['telefono'] ?? ''}');
@@ -1308,6 +1375,10 @@ class _FichaScreenState extends State<FichaScreen> {
       tipo: 'eliminar_foto',
       payload: {'cliente_id': widget.clienteId},
     );
+    // Tombstone de sesión (panel Terra): si la BD se bloquea al
+    // reabrir la ficha, la intención no se puede leer y sin esto
+    // la foto resucitaría.
+    LocalDb.marcarFotoEliminadaSesion(widget.clienteId);
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('Foto eliminada (se sincronizará)')),
@@ -1370,7 +1441,7 @@ class _FichaScreenState extends State<FichaScreen> {
     if (img == null || !mounted) return;
     final dir = await getApplicationDocumentsDirectory();
     final destino = File('${dir.path}/foto_${widget.clienteId}_'
-        '${DateTime.now().millisecondsSinceEpoch}.jpg');
+        '${ahoraHabana().millisecondsSinceEpoch}.jpg');
     await File(img.path).copy(destino.path);
     if (!mounted) return;
     // Editor simple: permite zoom/mover para centrar la cara
@@ -1386,6 +1457,9 @@ class _FichaScreenState extends State<FichaScreen> {
       clienteId: widget.clienteId,
       rutaOriginal: editada.path,
     );
+    // Una foto nueva deja sin efecto el tombstone de una
+    // eliminación anterior en esta sesión.
+    LocalDb.limpiarFotoEliminadaSesion(widget.clienteId);
     if (!mounted) return;
     _fotoGen++;
     setState(() => _foto = editada);
@@ -1408,9 +1482,17 @@ class _FichaScreenState extends State<FichaScreen> {
     // con deshacer 15 s que el cobro normal.
     if (await mostrarBloqueoCasa(context, c)) return;
     if (!mounted) return;
-    final aj = await LocalDb.instance.getAjustes();
+    // Ronda 3-9 #3: la renovación rápida cobra por el mismo motor
+    // de precio que el diálogo (especial > menores > estándar).
+    // Antes leía el ajuste global fijo (2000) e ignoraba la
+    // tarifa especial en efectivo y la de menores (1500).
+    final precio = await precioCobroParaCliente(
+      cliente: c,
+      periodo: 'mensual',
+      metodo: 'efectivo',
+    );
     if (!mounted) return;
-    final mensual = (aj['mensualidad'] as num?)?.toDouble() ?? 2000;
+    final mensual = precio.monto;
     final nuevo =
         previewHastaDias(c['pagado_hasta'] as String?, 30);
     final payload = payloadRenovacionRapida(
@@ -1419,6 +1501,7 @@ class _FichaScreenState extends State<FichaScreen> {
       nuevoVencimiento: nuevo,
       fecha: isoHabana(ahoraHabana()).substring(0, 10), // v1.3.3 (Argón): hora de La Habana
       esDueno: AuthService().isOwner,
+      tipoId: precio.escalon == 'menores' ? 'menores' : null,
     );
     final deshecho = await cobrarConPreviewYRecibo(
       context: context,

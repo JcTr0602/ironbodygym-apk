@@ -15,6 +15,13 @@ class Novedad {
 }
 
 const novedades = [
+  Novedad('1.17.0', [
+    'Seguridad cerrada: en Auditoría, Administración y GymPedia el entrenador ya solo ve y toca lo suyo; los accesos, la cola y la búsqueda ya no dejan ver ni tocar clientes protegidos',
+    'Nómina y pendientes cuadran: las cuentas Casa ya no inflan los ingresos, los servicios ya suman en el día y por entrenador, y el conteo global solo se muestra con permiso',
+    'Accesos por lote con aviso: si seleccionas más de 40 clientes entre varias búsquedas, la app te avisa para que desmarques el excedente en vez de recortarlo en silencio',
+    'Fotos en fichas más firmes: si la base de datos está ocupada al abrir una ficha, la app reintenta antes de decidir, y una foto eliminada ya no vuelve a aparecer',
+    'Renovaciones y ventas con el precio correcto: la renovación cobra según la tarifa real del cliente, y los precios en dólares ya muestran su equivalente en CUP',
+  ]),
   Novedad('1.16.0', [
     'Pantalla principal rediseñada por zonas: acciones rápidas arriba (Cobrar, Pago diario, Inscribir, Dosis) a un toque, los números del mes se tocan para ver el detalle, la bandeja de avisos de WhatsApp del día subió arriba y la tarjeta del turno quedó compacta',
     'Servicios rediseñado: botones grandes para dosis, dosis con agua, agua suelta y venta múltiple; cada pomo con su nombre, su saldo y su historial a la vista, y el cuadre con tu comisión del día',

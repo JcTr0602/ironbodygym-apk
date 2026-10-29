@@ -11,6 +11,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 
 import '../auth.dart';
+import '../cliente_protegido.dart';
 import '../localdb.dart';
 import '../negocio.dart';
 import '../tiempo.dart';
@@ -36,22 +37,24 @@ Map<String, dynamic> payloadDeOp(Map<String, dynamic> op) {
   return {};
 }
 
-/// Actor que la lista ya muestra: el nombre guardado en el payload
-/// (registrado_por/registrado_por_nombre/usuario/username), la firma
-/// numérica cuando coincide con la sesión, u «Otro usuario» cuando la
-/// op trae firma numérica de OTRA sesión (p. ej. quedó en la cola tras
-/// un cambio de usuario en el mismo teléfono). «Este dispositivo»
-/// solo cuando la op no trae actor (nació en este teléfono).
+/// Actor que la lista ya muestra. PRECEDENCIA (Ronda 17 M1-H3):
+/// la firma NUMÉRICA manda sobre el texto: una op con
+/// registrado_por numérico de OTRA sesión es «Otro usuario»
+/// aunque traiga un campo de texto con un nombre. Sin firma
+/// numérica ajena, se muestra el nombre guardado en el payload
+/// (registrado_por/registrado_por_nombre/usuario/username).
+/// «Este dispositivo» solo cuando la op no trae actor (nació
+/// en este teléfono).
 String actorDeOp(Map<String, dynamic> op, {int? miTelegramId}) {
   final p = payloadDeOp(op);
+  final idNum = actorIdNumericoDeOp(op);
+  if (idNum != null && miTelegramId != null && idNum != miTelegramId) {
+    return 'Otro usuario';
+  }
   for (final k
       in ['registrado_por', 'registrado_por_nombre', 'usuario', 'username']) {
     final v = p[k];
     if (v is String && v.isNotEmpty) return v;
-  }
-  final idNum = actorIdNumericoDeOp(op);
-  if (idNum != null && miTelegramId != null && idNum != miTelegramId) {
-    return 'Otro usuario';
   }
   return 'Este dispositivo';
 }
@@ -120,15 +123,18 @@ int? actorIdNumericoDeOp(Map<String, dynamic> op) {
 ///   oculta).
 /// - Sin firma alguna: la op nació sin actor en este teléfono → mía.
 bool esOpMia(Map<String, dynamic> op, {String? miActor, int? miTelegramId}) {
-  final firma = actorFirmaDeOp(op);
-  if (firma != null) {
-    if (miActor == null || miActor.trim().isEmpty) return false;
-    return normalizarActor(firma) == normalizarActor(miActor);
-  }
+  // Ronda 17 M1-H3: la firma numérica manda. Si la op trae
+  // telegram_id, decide él solo: un texto con mi nombre no
+  // convierte en mía una op firmada por otro id.
   final idNum = actorIdNumericoDeOp(op);
   if (idNum != null) {
     if (miTelegramId == null) return false;
     return idNum == miTelegramId;
+  }
+  final firma = actorFirmaDeOp(op);
+  if (firma != null) {
+    if (miActor == null || miActor.trim().isEmpty) return false;
+    return normalizarActor(firma) == normalizarActor(miActor);
   }
   return true;
 }
@@ -224,6 +230,9 @@ class _AuditoriaScreenState extends State<AuditoriaScreen> {
   final Map<int, String> _nombres = {};
   // cliente_id -> foto_path local (caché)
   final Map<int, String?> _fotos = {};
+  // cliente_id de clientes protegidos (Ronda 17 M1-H2): de ellos
+  // no se precarga nombre ni foto y _detalle no muestra datos.
+  final Set<int> _protegidosIds = {};
 
   @override
   void initState() {
@@ -243,26 +252,52 @@ class _AuditoriaScreenState extends State<AuditoriaScreen> {
       _miActor = null;
       _miTelegramId = null;
     }
+    // Ronda 17 M1-H1 (decisión Jc 2026-10-28): un no-dueño solo
+    // ve lo suyo. Fail-closed: sin dueño confirmado, se recorta.
+    var esDueno = false;
+    try {
+      esDueno = AuthService().isOwner;
+    } catch (_) {
+      esDueno = false;
+    }
     final ops = await LocalDb.instance.recentOps(limit: 100);
+    // Recorte en carga para no-dueños: así ni los contadores
+    // (opsHoy, pendientes) cuentan operaciones ajenas.
+    final opsVisibles = esDueno
+        ? ops
+        : ops
+            .where((o) => esOpMia(o,
+                miActor: _miActor, miTelegramId: _miTelegramId))
+            .toList();
     // Precargar nombres y fotos de clientes mencionados
     final clientes = await LocalDb.instance.allMirror('clientes');
     final porId = <int, Map<String, dynamic>>{
       for (final c in clientes) (c['id'] as int): c,
     };
-    for (final op in ops) {
+    _protegidosIds.clear();
+    for (final op in opsVisibles) {
       final p = _payload(op);
       final cid = _clienteId(p, '${op['tipo']}');
-      if (cid != null && !_nombres.containsKey(cid)) {
+      if (cid != null &&
+          !_nombres.containsKey(cid) &&
+          !_protegidosIds.contains(cid)) {
         final c = porId[cid];
         if (c != null) {
-          _nombres[cid] = '${c['nombre'] ?? 'Cliente $cid'}';
-          _fotos[cid] = c['foto_local'] as String?;
+          // Ronda 17 M1-H2: de un protegido no se precarga ni
+          // nombre ni foto (la fila mostraría su avatar).
+          if (esVistaProtegida(c)) {
+            _protegidosIds.add(cid);
+          } else {
+            _nombres[cid] = '${c['nombre'] ?? 'Cliente $cid'}';
+            _fotos[cid] = c['foto_local'] as String?;
+          }
         }
       }
     }
     if (mounted) {
       setState(() {
-        _ops = ops;
+        _ops = opsVisibles;
+        if (!esDueno) _filtro = FiltroAuditoria.soloMias;
         _cargando = false;
       });
     }
@@ -292,6 +327,11 @@ class _AuditoriaScreenState extends State<AuditoriaScreen> {
     final tipo = '${op['tipo']}';
     final p = _payload(op);
     final cid = _clienteId(p, tipo);
+    // Ronda 17 M1-H2: de un cliente protegido no se muestra
+    // ni nombre, ni monto, ni método, ni campos editados.
+    if (cid != null && _protegidosIds.contains(cid)) {
+      return 'Cliente protegido';
+    }
     final nombre = cid != null ? (_nombres[cid] ?? 'Cliente $cid') : null;
 
     switch (tipo) {
@@ -382,6 +422,8 @@ class _AuditoriaScreenState extends State<AuditoriaScreen> {
   @override
   Widget build(BuildContext context) {
     final hoy = hoyHabanaIso();
+    // Ronda 17 M1-H1: un no-dueño solo ve «Solo mías».
+    final esDueno = AuthService().isOwner;
     final opsHoy = _ops.where((o) => _diaOp(o) == hoy).length;
     final pendientes =
         _ops.where((o) => '${o['estado']}' == 'pendiente').length;
@@ -454,21 +496,23 @@ class _AuditoriaScreenState extends State<AuditoriaScreen> {
                 scrollDirection: Axis.horizontal,
                 child: Row(
                   children: [
-                    ChoiceChip(
-                      label: const Text('Otros y alertas'),
-                      selected:
-                          _filtro == FiltroAuditoria.otrosYAlertas,
-                      onSelected: (_) => setState(
-                          () => _filtro = FiltroAuditoria.otrosYAlertas),
-                    ),
-                    const SizedBox(width: 8),
-                    ChoiceChip(
-                      label: const Text('Todo'),
-                      selected: _filtro == FiltroAuditoria.todo,
-                      onSelected: (_) =>
-                          setState(() => _filtro = FiltroAuditoria.todo),
-                    ),
-                    const SizedBox(width: 8),
+                    if (esDueno) ...[
+                      ChoiceChip(
+                        label: const Text('Otros y alertas'),
+                        selected:
+                            _filtro == FiltroAuditoria.otrosYAlertas,
+                        onSelected: (_) => setState(
+                            () => _filtro = FiltroAuditoria.otrosYAlertas),
+                      ),
+                      const SizedBox(width: 8),
+                      ChoiceChip(
+                        label: const Text('Todo'),
+                        selected: _filtro == FiltroAuditoria.todo,
+                        onSelected: (_) =>
+                            setState(() => _filtro = FiltroAuditoria.todo),
+                      ),
+                      const SizedBox(width: 8),
+                    ],
                     ChoiceChip(
                       label: const Text('Solo mías'),
                       selected: _filtro == FiltroAuditoria.soloMias,
@@ -506,10 +550,12 @@ class _AuditoriaScreenState extends State<AuditoriaScreen> {
                                 'No hay operaciones en el registro '
                                     'reciente.',
                             },
-                            textoAccion: _filtro == FiltroAuditoria.todo
-                                ? null
-                                : 'Ver todo',
-                            onAccion: _filtro == FiltroAuditoria.todo
+                            textoAccion:
+                                (_filtro == FiltroAuditoria.todo || !esDueno)
+                                    ? null
+                                    : 'Ver todo',
+                            onAccion: (_filtro == FiltroAuditoria.todo ||
+                                    !esDueno)
                                 ? null
                                 : () => setState(
                                     () => _filtro = FiltroAuditoria.todo),

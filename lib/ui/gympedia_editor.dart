@@ -94,6 +94,8 @@ class _GympediaEditorScreenState extends State<GympediaEditorScreen> {
   }
 
   Future<void> _init() async {
+    // Ronda 17 M3-H1: sin dueño no se inicializa el editor.
+    if (!AuthService().isOwner) return;
     Map<String, dynamic>? fuente = widget.borrador;
     var desdeBorrador = fuente != null;
     if (fuente == null && widget.publicado != null) {
@@ -302,6 +304,8 @@ class _GympediaEditorScreenState extends State<GympediaEditorScreen> {
   }
 
   Future<void> _guardarBorrador() async {
+    // Ronda 17 M3-H1.
+    if (!AuthService().isOwner) return;
     if (_slug.text.trim().isEmpty) {
       final s = _slugDesdeTitulo(_titulo.text);
       if (s.isEmpty) {
@@ -358,6 +362,8 @@ class _GympediaEditorScreenState extends State<GympediaEditorScreen> {
   }
 
   Future<void> _publicar() async {
+    // Ronda 17 M3-H1.
+    if (!AuthService().isOwner) return;
     if (_ocupado) return;
     if (_slug.text.trim().isEmpty) {
       _slug.text = _slugDesdeTitulo(_titulo.text);
@@ -443,6 +449,8 @@ class _GympediaEditorScreenState extends State<GympediaEditorScreen> {
   /// Sube el webp local del borrador al objeto público del bucket.
   /// Devuelve false (con aviso) si la subida no se logró.
   Future<bool> _subirImagen(String slug) async {
+    // Ronda 17 M3-H1: subir al bucket público es solo del dueño.
+    if (!AuthService().isOwner) return false;
     try {
       final bytes = await File(_imagenLocal).readAsBytes();
       final token = AuthService().session?.accessToken ?? '';
@@ -472,6 +480,8 @@ class _GympediaEditorScreenState extends State<GympediaEditorScreen> {
   /// Borra el objeto público de la imagen (mejor esfuerzo): se
   /// llama SOLO al publicar un artículo que quedó sin imagen.
   Future<void> _borrarImagenRemota(String slug) async {
+    // Ronda 17 M3-H1: borrar del bucket público es solo del dueño.
+    if (!AuthService().isOwner) return;
     try {
       final token = AuthService().session?.accessToken ?? '';
       await http
@@ -488,6 +498,8 @@ class _GympediaEditorScreenState extends State<GympediaEditorScreen> {
   }
 
   Future<void> _retirar() async {
+    // Ronda 17 M3-H1.
+    if (!AuthService().isOwner) return;
     final slug = _slug.text.trim();
     if (slug.isEmpty || !_hayPublicado) return;
     final ok = await showDialog<bool>(
@@ -657,6 +669,16 @@ class _GympediaEditorScreenState extends State<GympediaEditorScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // Ronda 17 M3-H1: el editor es solo del dueño (igual que
+    // GympediaScreen): sin gate, un no-dueño podía publicar,
+    // retirar y tocar imágenes del bucket público.
+    if (!AuthService().isOwner) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Artículo GymPedia')),
+        body: const Center(
+            child: Text('Solo el dueño administra la GymPedia.')),
+      );
+    }
     if (!_listo) {
       return Scaffold(
         appBar: AppBar(title: const Text('Artículo GymPedia')),

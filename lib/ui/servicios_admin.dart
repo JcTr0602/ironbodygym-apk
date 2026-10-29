@@ -157,6 +157,9 @@ class _ServiciosAdminScreenState extends State<ServiciosAdminScreen> {
           : 'agua_suelta';
 
   Future<void> _guardarPrecios() async {
+    // Ronda 3-9 #10: la pantalla ya bloquea a no-dueños en build;
+    // esto frena un cambio de sesión a mitad.
+    if (!AuthService().isOwner) return;
     // Ítem 7: se guardan las claves por (producto, método) que hayan
     // cambiado contra lo VIGENTE resuelto, más la comisión.
     final ajustes = await LocalDb.instance.getAjustes();
@@ -253,6 +256,8 @@ class _ServiciosAdminScreenState extends State<ServiciosAdminScreen> {
   // ---------------------------------------------------------------
 
   Future<void> _reponerAgua() async {
+    // Ronda 3-9 #10: solo el dueño (ver _guardarPrecios).
+    if (!AuthService().isOwner) return;
     final cantCtrl = TextEditingController();
     final costoCtrl = TextEditingController();
     final ok = await showDialog<bool>(
@@ -316,6 +321,8 @@ class _ServiciosAdminScreenState extends State<ServiciosAdminScreen> {
   /// dueño la ve; el servidor la exige). Para pomos rotos, regalados
   /// o consumidos sin pasar por una venta.
   Future<void> _salidaAgua() async {
+    // Ronda 3-9 #10: solo el dueño (ver _guardarPrecios).
+    if (!AuthService().isOwner) return;
     var motivo = 'merma';
     final cantCtrl = TextEditingController(text: '1');
     final notaCtrl = TextEditingController();
@@ -396,6 +403,8 @@ class _ServiciosAdminScreenState extends State<ServiciosAdminScreen> {
   // ---------------------------------------------------------------
 
   Future<void> _abrirBote() async {
+    // Ronda 3-9 #10: solo el dueño (ver _guardarPrecios).
+    if (!AuthService().isOwner) return;
     if (_suplementos.isEmpty) {
       _aviso('No hay suplementos en el catálogo', error: true);
       return;
@@ -476,6 +485,8 @@ class _ServiciosAdminScreenState extends State<ServiciosAdminScreen> {
   /// + cantidad libre. El servidor mueve las dosis en una
   /// transacción y rechaza si el principal no alcanza.
   Future<void> _reponerPomo(Map<String, dynamic> pomo) async {
+    // Ronda 3-9 #10: solo el dueño (ver _guardarPrecios).
+    if (!AuthService().isOwner) return;
     final supId = (pomo['suplemento_id'] as num?)?.toInt();
     final principal = _pomos.where((l) =>
         (l['es_principal'] as num?)?.toInt() == 1 &&
@@ -554,6 +565,8 @@ class _ServiciosAdminScreenState extends State<ServiciosAdminScreen> {
   /// 1.15 (pomos): salida sin venta contra un pomo (merma,
   /// cortesía, consumo del staff, ajuste). Solo dueño.
   Future<void> _salidaPomo(Map<String, dynamic> pomo) async {
+    // Ronda 3-9 #10: solo el dueño (ver _guardarPrecios).
+    if (!AuthService().isOwner) return;
     var motivo = 'merma';
     final dosisCtrl = TextEditingController(text: '1');
     final notaCtrl = TextEditingController();

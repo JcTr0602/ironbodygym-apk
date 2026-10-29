@@ -37,6 +37,9 @@ class _GympediaScreenState extends State<GympediaScreen> {
   }
 
   Future<void> _cargar() async {
+    // Ronda 17 M3-H1 (defensa en profundidad): sin dueño no
+    // se cargan publicados ni borradores aunque se invoque directo.
+    if (!AuthService().isOwner) return;
     final pub = await _db.gympediaPublicados();
     final bor = await _db.gympediaBorradores();
     if (!mounted) return;

@@ -103,7 +103,8 @@ void main() {
             miTelegramId: miId), 'Este dispositivo');
         expect(actorDeOp(op(payload: {'registrado_por': miId}),
             miTelegramId: 999), 'Otro usuario');
-        // Con nombre en el payload manda el nombre.
+        // Ronda 17 M1-H3: con firma numérica de OTRA sesión,
+        // manda el id numérico aunque haya un nombre en texto.
         expect(
             actorDeOp(
                 op(payload: {
@@ -111,7 +112,27 @@ void main() {
                   'registrado_por_nombre': 'Duany'
                 }),
                 miTelegramId: 999),
-            'Duany');
+            'Otro usuario');
+      });
+
+      test('Ronda 17 M1-H3: la firma numérica manda sobre el texto',
+          () {
+        const yo = 'Gabriel';
+        const miId = 735772141;
+        const otroId = 999;
+        // Texto con mi nombre pero id de otro: NO es mía.
+        final ajena = op(payload: {
+          'registrado_por': otroId,
+          'registrado_por_nombre': yo,
+        });
+        expect(esOpMia(ajena, miActor: yo, miTelegramId: miId), isFalse);
+        expect(actorDeOp(ajena, miTelegramId: miId), 'Otro usuario');
+        // Id mío aunque el texto diga otro nombre: SÍ es mía.
+        final mia = op(payload: {
+          'registrado_por': miId,
+          'registrado_por_nombre': 'Duany',
+        });
+        expect(esOpMia(mia, miActor: yo, miTelegramId: miId), isTrue);
       });
 
       test('actor == mi actor (aun con formato distinto): es mía', () {

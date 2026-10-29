@@ -31,6 +31,11 @@ class PapeleraScreen extends StatefulWidget {
 class _PapeleraScreenState extends State<PapeleraScreen> {
   List<Map<String, dynamic>> _res = [];
   final Set<int> _seleccionados = {};
+  // Argón menos auditados MEDIO: candados de exclusión. Sin ellos,
+  // un doble toque abría dos flujos solapados y encolaba dos ops
+  // para el mismo cliente.
+  final Set<int> _enCurso = {};
+  bool _eliminando = false;
   StreamSubscription<SyncStatus>? _subSync;
   // v1.3.9 (Argón): búsqueda en tiempo real por nombre, carnet o teléfono.
   final TextEditingController _searchCtrl = TextEditingController();
@@ -68,7 +73,19 @@ class _PapeleraScreenState extends State<PapeleraScreen> {
             !zombies.contains((c['id'] as int?) ?? 0) &&
             !esVistaProtegida(c))
         .toList();
-    if (mounted) setState(() => _res = filtrados);
+    // Argón menos auditados MENOR: si un pull convierte a un
+    // seleccionado en protegido o zombie, su id no debe sobrevivir
+    // en _seleccionados hasta _eliminarDefinitivo.
+    final idsValidos = filtrados
+        .map((c) => (c['id'] as int?) ?? 0)
+        .where((id) => id > 0)
+        .toSet();
+    if (mounted) {
+      setState(() {
+        _res = filtrados;
+        _seleccionados.retainWhere(idsValidos.contains);
+      });
+    }
   }
 
   /// Lote 1 Argón: validación compartida por _recuperar y
@@ -117,16 +134,21 @@ class _PapeleraScreenState extends State<PapeleraScreen> {
     if (ok != true || !mounted) return;
     final id = await _idRecuperable(c);
     if (id == null || !mounted) return;
-    await LocalDb.instance.queueOp(
-      opUuid: const Uuid().v4(),
-      tipo: 'cambiar_estado',
-      payload: {'cliente_id': id, 'estado': 'activo'},
-    );
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('${c['nombre']} recuperado')));
-    _cargar();
-    SyncEngine.instance.push();
+    if (!_enCurso.add(id)) return;
+    try {
+      await LocalDb.instance.queueOp(
+        opUuid: const Uuid().v4(),
+        tipo: 'cambiar_estado',
+        payload: {'cliente_id': id, 'estado': 'activo'},
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('${c['nombre']} recuperado')));
+      _cargar();
+      SyncEngine.instance.push();
+    } finally {
+      _enCurso.remove(id);
+    }
   }
 
   /// Recupera y de una vez registra la renovación (punto 30).
@@ -154,29 +176,34 @@ class _PapeleraScreenState extends State<PapeleraScreen> {
     // Revalidar tras el diálogo (mismo criterio que _recuperar).
     final id = await _idRecuperable(c);
     if (id == null || !mounted) return;
-    // Lote 1 Argón: ambas ops en UNA transacción local (queueOp
-    // acepta txn y su actualización optimista corre sobre el mismo
-    // executor): si el proceso muere entre ambas, no queda ninguna.
-    final db = await LocalDb.instance.db;
-    await db.transaction((txn) async {
-      await LocalDb.instance.queueOp(
-        opUuid: const Uuid().v4(),
-        tipo: 'cambiar_estado',
-        payload: {'cliente_id': id, 'estado': 'activo'},
-        txn: txn,
-      );
-      await LocalDb.instance.queueOp(
-        opUuid: const Uuid().v4(),
-        tipo: 'pago_mensual',
-        payload: payload,
-        txn: txn,
-      );
-    });
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('${c['nombre']} renovado')));
-    _cargar();
-    SyncEngine.instance.push();
+    if (!_enCurso.add(id)) return;
+    try {
+      // Lote 1 Argón: ambas ops en UNA transacción local (queueOp
+      // acepta txn y su actualización optimista corre sobre el mismo
+      // executor): si el proceso muere entre ambas, no queda ninguna.
+      final db = await LocalDb.instance.db;
+      await db.transaction((txn) async {
+        await LocalDb.instance.queueOp(
+          opUuid: const Uuid().v4(),
+          tipo: 'cambiar_estado',
+          payload: {'cliente_id': id, 'estado': 'activo'},
+          txn: txn,
+        );
+        await LocalDb.instance.queueOp(
+          opUuid: const Uuid().v4(),
+          tipo: 'pago_mensual',
+          payload: payload,
+          txn: txn,
+        );
+      });
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('${c['nombre']} renovado')));
+      _cargar();
+      SyncEngine.instance.push();
+    } finally {
+      _enCurso.remove(id);
+    }
   }
 
   /// Elimina definitivamente los seleccionados (solo dueño, v1.0.7).
@@ -184,7 +211,23 @@ class _PapeleraScreenState extends State<PapeleraScreen> {
   Future<void> _eliminarDefinitivo() async {
     // Lote 1 Argón: defensa en profundidad (el botón ya es solo-dueño).
     if (!AuthService().isOwner) return;
+    // Argón menos auditados MENOR: un id nulo llegaba como 0 a
+    // _seleccionados; se depura antes de cualquier uso.
+    _seleccionados.removeWhere((id) => id <= 0);
     if (_seleccionados.isEmpty) return;
+    // Argón menos auditados MEDIO: candado de exclusión. Sin él, un
+    // doble toque abría dos flujos solapados y encolaba dos
+    // eliminar_cliente para los mismos clientes.
+    if (_eliminando) return;
+    _eliminando = true;
+    try {
+      await _eliminarDefinitivoConfirmado();
+    } finally {
+      _eliminando = false;
+    }
+  }
+
+  Future<void> _eliminarDefinitivoConfirmado() async {
     final nombres = _res
         .where((c) => _seleccionados.contains((c['id'] as int?) ?? 0))
         .map((c) => c['nombre'] as String)

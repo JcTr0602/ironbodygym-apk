@@ -1637,6 +1637,9 @@ class LocalDb {
         {'data': jsonEncode(data), ...columnasClientes(data)},
         where: 'id=?',
         whereArgs: [clienteId]);
+    // Ronda 3-9 #6: refrescar el índice de búsqueda offline con el
+    // JSON actual (repara además una fila FTS ausente).
+    await actualizarFtsCliente(clienteId, jsonEncode(data), null);
   }
 
   /// Cliente protegido (2026-10-26): reflejo optimista local del
@@ -1657,6 +1660,8 @@ class LocalDb {
         {'data': jsonEncode(data), ...columnasClientes(data)},
         where: 'id=?',
         whereArgs: [clienteId]);
+    // Ronda 3-9 #6: igual que updateMirrorCuentaCasa.
+    await actualizarFtsCliente(clienteId, jsonEncode(data), null);
   }
 
   /// v1.3.4 (ítem 2): construye el mapa de columnas para el INSERT del
@@ -3708,6 +3713,14 @@ class LocalDb {
     }
     await d.update('clientes', {'data': jsonEncode(data)},
         where: 'id=?', whereArgs: [clienteId]);
+    // Ronda 3-9 #6: el buscador offline (clientes_fts) debe ver el
+    // nombre/teléfono nuevo sin esperar al pull; sin esto, buscar
+    // por el dato recién editado no encontraba al cliente.
+    if (campos.containsKey('nombre') ||
+        campos.containsKey('telefono') ||
+        campos.containsKey('movil')) {
+      await actualizarFtsCliente(clienteId, jsonEncode(data), null);
+    }
   }
 
   /// ¿Hay operaciones sin aplicar para este cliente? (Argón #7B-1:
@@ -4663,7 +4676,7 @@ class LocalDb {
   }) async {
     final d = await db;
     final id =
-        'inc_${DateTime.now().millisecondsSinceEpoch}_${creadaPor.hashCode.abs()}';
+        'inc_${ahoraHabana().millisecondsSinceEpoch}_${creadaPor.hashCode.abs()}';
     await d.insert('incidencias_local', {
       'id': id,
       'tipo': tipo,
@@ -5052,7 +5065,7 @@ class LocalDb {
   }) async {
     final d = await db;
     final id =
-        'aud_${DateTime.now().millisecondsSinceEpoch}_${accion.hashCode.abs()}';
+        'aud_${ahoraHabana().millisecondsSinceEpoch}_${accion.hashCode.abs()}';
     final creadaEn = isoHabana(ahoraHabana()); // v1.3.4 (Argón)
     final prev = await d.rawQuery(
         'SELECT hash_propio FROM auditoria_local ORDER BY creada_en DESC, rowid DESC LIMIT 1');
@@ -6333,6 +6346,20 @@ class LocalDb {
         [userId]);
     return (r.first['c'] as int?) ?? 0;
   }
+
+  /// Tombstones de sesión para fotos eliminadas (panel Terra,
+  /// ajuste foto ficha 2026-10-29): si la BD está bloqueada al
+  /// abrir la ficha, ultimaIntencionFoto falla y no puede saberse
+  /// si hay una eliminación pendiente; el marcador en memoria
+  /// evita resucitarla en esa sesión. Se limpia al poner una foto
+  /// nueva. Residual declarado: se pierde al reiniciar la app.
+  static final _fotosEliminadasSesion = <int>{};
+  static void marcarFotoEliminadaSesion(int clienteId) =>
+      _fotosEliminadasSesion.add(clienteId);
+  static void limpiarFotoEliminadaSesion(int clienteId) =>
+      _fotosEliminadasSesion.remove(clienteId);
+  static bool fotoEliminadaEnSesion(int clienteId) =>
+      _fotosEliminadasSesion.contains(clienteId);
 
   /// Etapa 4 · F2: última intención local sobre la foto de un
   /// cliente, derivada de las colas persistentes: 'eliminar' si

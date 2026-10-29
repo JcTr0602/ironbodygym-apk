@@ -74,6 +74,9 @@ class _GuiaEditorScreenState extends State<GuiaEditorScreen> {
   @override
   void initState() {
     super.initState();
+    // Ronda 17 M3-H1: sin dueño no se inicializa el editor
+    // (antes initState ya disparaba _cargarEquipos y _cargarDoc).
+    if (!AuthService().isOwner) return;
     _cargarEquipos();
     final p = widget.publicado;
     final b = widget.borrador;
@@ -109,6 +112,8 @@ class _GuiaEditorScreenState extends State<GuiaEditorScreen> {
   }
 
   Future<void> _cargarEquipos() async {
+    // Ronda 17 M3-H1 (defensa en profundidad).
+    if (!AuthService().isOwner) return;
     final eq = await _db.guiaEquipos();
     final pub = await _db.guiaPublicadas();
     if (!mounted) return;
@@ -132,6 +137,14 @@ class _GuiaEditorScreenState extends State<GuiaEditorScreen> {
   }
 
   void _cargarDoc(Map<String, dynamic> d) {
+    // Ronda 17 M3-H3: disponer los controladores previos antes
+    // de reemplazar las listas (recarga desde _chequearObsoleto).
+    for (final c in _ejecutar) {
+      c.dispose();
+    }
+    for (final c in _errores) {
+      c.dispose();
+    }
     _titulo.text = '${d['titulo'] ?? ''}';
     if (_slug.text.isEmpty) _slug.text = '${d['id'] ?? ''}';
     _sinonimos = [for (final s in (d['sinonimos'] as List?) ?? []) '$s'];
@@ -254,6 +267,8 @@ class _GuiaEditorScreenState extends State<GuiaEditorScreen> {
   }
 
   Future<void> _guardarBorrador() async {
+    // Ronda 17 M3-H1.
+    if (!AuthService().isOwner) return;
     if (_slug.text.trim().isEmpty) {
       _slug.text = _slugDesdeTitulo(_titulo.text);
     }
@@ -294,6 +309,11 @@ class _GuiaEditorScreenState extends State<GuiaEditorScreen> {
     if (recargar == true && mounted) {
       final doc = await _db.guiaPublicada(_slug.text.trim());
       if (doc != null) {
+        // Ronda 17 M3-H2: la recarga también reemplaza el borrador
+        // PERSISTIDO y borra la imagen local vieja (igual que
+        // GympediaEditorScreen): si no, al salir sin guardar
+        // reaparece el borrador obsoleto.
+        final rutaVieja = _imagenLocal;
         setState(() {
           _cargarDoc(doc);
           _baseRevision = (doc['revision'] as num?)?.toInt() ?? 0;
@@ -303,12 +323,18 @@ class _GuiaEditorScreenState extends State<GuiaEditorScreen> {
           _imagenCambiada = false;
           _imagenLocal = '';
         });
+        await _db.guiaEliminarBorrador(_slug.text.trim());
+        if (rutaVieja.isNotEmpty) {
+          await _db.guiaBorrarImagenLocal(rutaVieja);
+        }
       }
     }
     return false;
   }
 
   Future<void> _publicar() async {
+    // Ronda 17 M3-H1.
+    if (!AuthService().isOwner) return;
     if (_ocupado) return;
     if (_slug.text.trim().isEmpty) {
       _slug.text = _slugDesdeTitulo(_titulo.text);
@@ -477,6 +503,8 @@ class _GuiaEditorScreenState extends State<GuiaEditorScreen> {
   }
 
   Future<bool> _subirImagen(String slug) async {
+    // Ronda 17 M3-H1: subir al bucket público es solo del dueño.
+    if (!AuthService().isOwner) return false;
     try {
       final bytes = await File(_imagenLocal).readAsBytes();
       final token = AuthService().session?.accessToken ?? '';
@@ -504,6 +532,8 @@ class _GuiaEditorScreenState extends State<GuiaEditorScreen> {
   }
 
   Future<void> _borrarImagenRemota(String slug) async {
+    // Ronda 17 M3-H1: borrar del bucket público es solo del dueño.
+    if (!AuthService().isOwner) return;
     try {
       final token = AuthService().session?.accessToken ?? '';
       await http
@@ -568,6 +598,8 @@ class _GuiaEditorScreenState extends State<GuiaEditorScreen> {
   }
 
   Future<void> _retirar() async {
+    // Ronda 17 M3-H1.
+    if (!AuthService().isOwner) return;
     if (!_publicadoExiste || _ocupado) return;
     final confirmar = await showDialog<bool>(
       context: context,
@@ -695,6 +727,9 @@ class _GuiaEditorScreenState extends State<GuiaEditorScreen> {
                           ? null
                           : () {
                               setState(() {
+                                // Ronda 17 M3-H3: liberar el
+                                // controlador antes de quitarlo.
+                                items[i].dispose();
                                 items.removeAt(i);
                                 onCambio(items);
                               });

@@ -11,6 +11,7 @@ import '../nomina_bonos.dart';
 import '../nomina_calc.dart';
 import '../nomina_precalc.dart';
 import '../perfil.dart';
+import '../permisos_entrenador.dart';
 import '../tiempo.dart';
 import 'componentes.dart';
 import 'diseno.dart';
@@ -284,6 +285,10 @@ class _NominaScreenState extends State<NominaScreen> {
       NominaCalc.bonosPara(_bonos, entrenador);
 
   Future<void> _agregarBono() async {
+    // Ronda 17 M4-H1: agregar bonos es solo del dueño
+    // (la UI ya oculta el botón; esto cubre pantalla abierta
+    // con cambio de sesión).
+    if (!AuthService().isOwner) return;
     final texto =
         _bonoMontoCtrl.text.trim().replaceAll(',', '.');
     final monto = double.tryParse(texto) ?? 0;
@@ -319,6 +324,8 @@ class _NominaScreenState extends State<NominaScreen> {
   }
 
   Future<void> _eliminarBono(String id) async {
+    // Ronda 17 M4-H1: eliminar bonos es solo del dueño.
+    if (!AuthService().isOwner) return;
     // Fase A 2026-10-25 (A4): encola la eliminación; la lectura
     // fusionada lo oculta al instante.
     await BonosNominaService.instance.eliminar(id);
@@ -501,6 +508,8 @@ class _NominaScreenState extends State<NominaScreen> {
   }
 
   Future<void> _guardarTarifa() async {
+    // Ronda 17 M4-H1: cambiar la tarifa es solo del dueño.
+    if (!AuthService().isOwner) return;
     final texto = _tarifaCtrl.text.trim().replaceAll(',', '.');
     final tarifa = double.tryParse(texto) ?? 150;
     if (tarifa <= 0) {
@@ -568,14 +577,19 @@ class _NominaScreenState extends State<NominaScreen> {
                         ],
                       ),
                       const SizedBox(height: 8),
-                      Text(
-                        '$_clientesPagados clientes pagados en $_mesEtiqueta '
-                        '× ${fmtMonto(pagoPorCliente)} CUP',
-                        style: AppTexto.cuerpo.copyWith(
-                          color: AppColores.textoSecundario(
-                              context),
+                      // Ronda 17 M4-H1 (decisión Jc 2026-10-28):
+                      // sin can_ver_cifras no se muestra el conteo
+                      // global; el entrenador ve solo su monto base.
+                      if (esDueno ||
+                          PermisosEntrenador().canVerCifras)
+                        Text(
+                          '$_clientesPagados clientes pagados en $_mesEtiqueta '
+                          '× ${fmtMonto(pagoPorCliente)} CUP',
+                          style: AppTexto.cuerpo.copyWith(
+                            color: AppColores.textoSecundario(
+                                context),
+                          ),
                         ),
-                      ),
                       const SizedBox(height: 4),
                       // v1.4.0: sello del pre-cálculo automático.
                       Text(
@@ -1036,6 +1050,8 @@ class _NominaScreenState extends State<NominaScreen> {
 
   Future<void> _dialogoRegistrarAdelanto(
       BuildContext context, String ent) async {
+    // Ronda 17 M4-H1: registrar adelantos es solo del dueño.
+    if (!AuthService().isOwner) return;
     final persona = _personasAdelantos[ent]!;
     final montoCtrl = TextEditingController();
     final notaCtrl = TextEditingController();

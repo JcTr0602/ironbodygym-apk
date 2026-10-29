@@ -727,12 +727,42 @@ ResultadoMedidasInvitado? resultadoMedidasDeOp(dynamic resultadoOp) {
 /// fecha no viene o no es válida.
 String? carnetDesdeFechaNac(String? fechaNac) {
   if (fechaNac == null || fechaNac.length < 10) return null;
-  final f = DateTime.tryParse(fechaNac.substring(0, 10));
+  final entrada = fechaNac.substring(0, 10);
+  final f = DateTime.tryParse(entrada);
   if (f == null) return null;
+  // Ronda 17 M5-H1: DateTime normaliza desbordes (30-feb → 2-mar):
+  // si la fecha reconstruida no es la entrada, la entrada no era real.
+  final reconstruida = '${f.year.toString().padLeft(4, '0')}-'
+      '${f.month.toString().padLeft(2, '0')}-'
+      '${f.day.toString().padLeft(2, '0')}';
+  if (reconstruida != entrada) return null;
   final yy = (f.year % 100).toString().padLeft(2, '0');
   final mm = f.month.toString().padLeft(2, '0');
   final dd = f.day.toString().padLeft(2, '0');
   return '$yy$mm$dd';
+}
+
+/// Valida un carnet de invitado (11 dígitos): formato + que los
+/// primeros 6 (AAMMDD) formen una fecha real (con bisiestos).
+/// Ronda 17 M5-H1. Regla espejo de fechaNacDeCarnet: ancla de
+/// siglo + round-trip anti-desborde con DateTime.
+bool validarCarnetInvitado11(String? carnet) {
+  final d = (carnet ?? '').replaceAll(RegExp(r'[^0-9]'), '');
+  if (!RegExp(r'^\d{11}$').hasMatch(d)) return false;
+  final anio2 = int.tryParse(d.substring(0, 2)) ?? -1;
+  final mes = int.tryParse(d.substring(2, 4)) ?? 0;
+  final dia = int.tryParse(d.substring(4, 6)) ?? 0;
+  if (anio2 < 0 || mes < 1 || mes > 12 || dia < 1 || dia > 31) {
+    return false;
+  }
+  final hoy = ahoraHabana();
+  final anio = anio2 + ((anio2 <= hoy.year % 100) ? 2000 : 1900);
+  try {
+    final f = DateTime(anio, mes, dia);
+    return f.month == mes && f.day == dia;
+  } catch (_) {
+    return false;
+  }
 }
 
 /// Lo que Inscribir necesita para convertir a un invitado: el
@@ -744,6 +774,10 @@ class DatosConversionInvitado {
   final String nombre;
   final String telefono;
   final String? fechaNac;
+  // Ronda 3-9 #9: carnet real del invitado (11 dígitos). Sin él,
+  // reanudar solo llevaba el derivado de fechaNac y se perdía el
+  // carnet cuando fechaNac faltaba o era inválida.
+  final String? carnet;
   final List<MedidaInvitado> medidas;
 
   const DatosConversionInvitado({
@@ -752,6 +786,7 @@ class DatosConversionInvitado {
     required this.nombre,
     required this.telefono,
     this.fechaNac,
+    this.carnet,
     this.medidas = const [],
   });
 
@@ -1389,7 +1424,7 @@ class InvitadosService {
               InvitadoResumen.fromJson(
                   r.map((k, v) => MapEntry('$k', v))),
         ],
-        cachedAt: DateTime.tryParse('${j['cached_at'] ?? ''}'),
+        cachedAt: instanteServidorHabana(j['cached_at']),
       );
     } catch (_) {
       return null;
@@ -1503,6 +1538,7 @@ class InvitadosService {
       nombre: '${pf['nombre'] ?? detalle.nombre}',
       telefono: '${pf['telefono'] ?? detalle.telefono}',
       fechaNac: pf['fecha_nac'] as String? ?? detalle.fechaNac,
+      carnet: detalle.carnet,
       medidas: detalle.mediciones,
     );
     final ahora = isoHabana(ahoraHabana());

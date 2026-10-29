@@ -93,6 +93,10 @@ class _AdminScreenState extends State<AdminScreen> {
   // Panel delta Luna ALTO: doble toque en «Recogida» abría dos
   // diálogos y podía registrar la misma recogida dos veces.
   bool _recogidaEnCurso = false;
+  // Ronda 17 M2-H2: candado contra doble toque en las acciones
+  // que encolan operaciones (un segundo toque generaría una
+  // segunda op con otro UUID: gasto o entrega duplicados).
+  bool _operacionEnCurso = false;
   // Salud del sistema
   SyncDetalle _syncDet = const SyncDetalle();
   int _pendientesSubir = 0;
@@ -163,6 +167,9 @@ class _AdminScreenState extends State<AdminScreen> {
   }
 
   Future<void> _cargar() async {
+    // Ronda 17 M2-H1 (defensa en profundidad): sin dueño no
+    // se cargan los KPIs financieros aunque se invoque directo.
+    if (!AuthService().isOwner) return;
     final ing = await ingresosMes();
     final insc = await inscripcionesMes();
     final mor = await morosos();
@@ -337,7 +344,19 @@ class _AdminScreenState extends State<AdminScreen> {
   }
 
   // -- montos ----------------------------------------------------------
+  // Ronda 17 M2: guarda de dueño + candado anti-doble-toque.
   Future<void> _guardarMontos() async {
+    if (!AuthService().isOwner) return;
+    if (_operacionEnCurso) return;
+    _operacionEnCurso = true;
+    try {
+      await _guardarMontosImpl();
+    } finally {
+      _operacionEnCurso = false;
+    }
+  }
+
+  Future<void> _guardarMontosImpl() async {
     final cambios = <String, double>{};
     for (final (clave, _) in _clavesMonto) {
       final v = double.tryParse(
@@ -400,7 +419,19 @@ class _AdminScreenState extends State<AdminScreen> {
   }
 
   /// v1.2.4: Guardar datos bancarios (strings, no montos).
+  // Ronda 17 M2: guarda de dueño + candado anti-doble-toque.
   Future<void> _guardarBancarios() async {
+    if (!AuthService().isOwner) return;
+    if (_operacionEnCurso) return;
+    _operacionEnCurso = true;
+    try {
+      await _guardarBancariosImpl();
+    } finally {
+      _operacionEnCurso = false;
+    }
+  }
+
+  Future<void> _guardarBancariosImpl() async {
     // v1.2.4 (Hark): valida formato y solo envía lo que cambió.
     final aj = await LocalDb.instance.getAjustes();
     if (!mounted) return;
@@ -492,7 +523,19 @@ class _AdminScreenState extends State<AdminScreen> {
   };
   bool _esTipoFijo(String id) => _tiposFijos.contains(id);
 
+  // Ronda 17 M2: guarda de dueño + candado anti-doble-toque.
   Future<void> _persistirTipos() async {
+    if (!AuthService().isOwner) return;
+    if (_operacionEnCurso) return;
+    _operacionEnCurso = true;
+    try {
+      await _persistirTiposImpl();
+    } finally {
+      _operacionEnCurso = false;
+    }
+  }
+
+  Future<void> _persistirTiposImpl() async {
     await LocalDb.instance.queueOp(
       opUuid: const Uuid().v4(),
       tipo: 'guardar_tipos_pago',
@@ -706,7 +749,21 @@ class _AdminScreenState extends State<AdminScreen> {
         content: Text('Tipo de pago eliminado (se sincronizará)')));
   }
 
+  // Ronda 17 M2: guarda de dueño + candado anti-doble-toque
+  // (mismo patrón que _guardarMontos: diálogo + op con UUID
+  // nuevo; un segundo toque duplicaría la operación).
   Future<void> _guardarTipos() async {
+    if (!AuthService().isOwner) return;
+    if (_operacionEnCurso) return;
+    _operacionEnCurso = true;
+    try {
+      await _guardarTiposImpl();
+    } finally {
+      _operacionEnCurso = false;
+    }
+  }
+
+  Future<void> _guardarTiposImpl() async {
     final mensaje = [
       for (final t in _tipos)
         '• ${t.nombre}: ${fmtMonto(t.monto)} CUP · ${t.dias} días${t.activo ? '' : ' (inactivo)'}',
@@ -739,6 +796,8 @@ class _AdminScreenState extends State<AdminScreen> {
   /// v1.3.1: elegir cuánto se paga por cliente a entrenadores.
   /// Movido desde Ajustes (solo dueño).
   Future<void> _elegirPagoEntrenador() async {
+    // Ronda 17 M2-H1: elegir el pago por cliente es solo del dueño.
+    if (!AuthService().isOwner) return;
     final ctrl = TextEditingController(text: '$_pagoEntrenador');
     final sel = await showDialog<int>(
       context: context,
@@ -787,7 +846,20 @@ class _AdminScreenState extends State<AdminScreen> {
     }
   }
 
+  // Ronda 17 M2: guarda de dueño + candado anti-doble-toque.
   Future<void> _confirmarEntrega(
+      {int? trainerId, required String nombre}) async {
+    if (!AuthService().isOwner) return;
+    if (_operacionEnCurso) return;
+    _operacionEnCurso = true;
+    try {
+      await _confirmarEntregaImpl(trainerId: trainerId, nombre: nombre);
+    } finally {
+      _operacionEnCurso = false;
+    }
+  }
+
+  Future<void> _confirmarEntregaImpl(
       {int? trainerId, required String nombre}) async {
     final notaCtrl = TextEditingController();
     final ok = await showDialog<bool>(
@@ -871,6 +943,9 @@ class _AdminScreenState extends State<AdminScreen> {
       {int? trainerId,
       required String nombre,
       required double pendiente}) async {
+    // Ronda 17 M2-H1: registrar recogidas es solo del dueño
+    // (el candado anti-doble-toque ya existía).
+    if (!AuthService().isOwner) return;
     // Panel delta Luna ALTO: doble toque en «Recogida» abría dos
     // diálogos y podía registrar la misma recogida dos veces
     // (_enSerieLiquidacion serializa pero no deduplica).
@@ -972,7 +1047,19 @@ class _AdminScreenState extends State<AdminScreen> {
   }
 
   // -- gastos ------------------------------------------------------------
+  // Ronda 17 M2: guarda de dueño + candado anti-doble-toque.
   Future<void> _agregarGasto() async {
+    if (!AuthService().isOwner) return;
+    if (_operacionEnCurso) return;
+    _operacionEnCurso = true;
+    try {
+      await _agregarGastoImpl();
+    } finally {
+      _operacionEnCurso = false;
+    }
+  }
+
+  Future<void> _agregarGastoImpl() async {
     final conceptoCtrl = TextEditingController();
     final montoCtrl = TextEditingController();
     final ok = await showDialog<bool>(
@@ -1138,6 +1225,17 @@ class _AdminScreenState extends State<AdminScreen> {
   // igual que antes (Fix 6, vía _ir).
   @override
   Widget build(BuildContext context) {
+    // Ronda 17 M2-H1: el panel es solo del dueño (su propio
+    // subtítulo lo declara: "Panel del dueño · Solo tú ves
+    // esta sección"). Sin gate, abrirlo por ruta exponía
+    // todos los KPIs financieros del mes.
+    if (!AuthService().isOwner) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Administración')),
+        body: const Center(
+            child: Text('Panel del dueño · Solo tú ves esta sección')),
+      );
+    }
     return Scaffold(
       appBar: AppBar(title: const Text('Administración')),
       body: Column(
@@ -2478,6 +2576,9 @@ class _AdminScreenState extends State<AdminScreen> {
           fechaHora: _fechaHora,
           onExportar: _exportar,
           onExportarExcel: () async {
+            // Ronda 17 M2-H1: el botón exportaba el Excel completo
+            // sin pasar por la guarda de _exportar().
+            if (!AuthService().isOwner) return;
             final ok = await exportarExcel();
             if (context.mounted) {
               ScaffoldMessenger.of(context).showSnackBar(SnackBar(

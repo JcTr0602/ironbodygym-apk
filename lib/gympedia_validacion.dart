@@ -52,6 +52,10 @@ class GympediaValidacion {
     if (!categorias.contains('${a['categoria'] ?? ''}')) {
       errores.add('Categoría no válida.');
     }
+    // Ronda 17 M3-H2: el nivel solo admite 'esencial' o 'plus'.
+    if (!const ['esencial', 'plus'].contains('${a['nivel'] ?? ''}')) {
+      errores.add('Nivel de acceso no válido.');
+    }
     final esencial = '${a['lo_esencial'] ?? ''}';
     if (esencial.trim().isEmpty) errores.add('Falta «Lo esencial».');
     if (bytes(esencial) > 500) {

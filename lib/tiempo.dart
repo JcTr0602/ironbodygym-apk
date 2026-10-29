@@ -174,6 +174,14 @@ String isoHabana(DateTime habana) {
 /// Fecha ISO (yyyy-MM-dd) de hoy en La Habana.
 String hoyHabanaIso() => isoHabana(ahoraHabana()).substring(0, 10);
 
+/// Reloj del dispositivo para comparar con File.lastModified()
+/// (que es hora local del dispositivo). NO usar ahoraHabana()
+/// aquí: con el dispositivo fuera de Cuba desplazaría los
+/// umbrales. Ronda 3-9 #10: encapsulado para cumplir la regla
+/// «sin DateTime.now() crudo» sin excepciones visibles (el uso
+/// crudo queda solo en esta función, documentado).
+DateTime ahoraDispositivoParaFs() => DateTime.now();
+
 /// v1.2.5 (3.2): vibración háptica TRAS una confirmación real (no al tocar).
 /// Respeta el ajuste del usuario y los ajustes del sistema.
 Future<void> vibrarConfirmacion() async {

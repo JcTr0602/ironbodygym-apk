@@ -627,8 +627,11 @@ String textoTotalVenta(double total, String moneda, double? tasa) {
     // v1.3.1 (Medio #6): si la tasa es 1.0 o menor es la normalización por
     // defecto (tasa no indicada), no mostrar equivalencia falsa "≈ 1 CUP".
     final mostrarCup = hayTasa && tasa > 1.0;
+    // Ronda 3-9 #7: equivalencia redondeada a decenas como el resto
+    // de la app (precioOficialEn), no truncada a la unidad.
+    final cup = precioOficialEn('CUP', total, tasa);
     return '${total.toStringAsFixed(2)} USD'
-        '${mostrarCup ? ' (≈ ${(total * tasa).toStringAsFixed(0)} CUP)' : ''}';
+        '${mostrarCup && cup != null ? ' (≈ ${cup.toStringAsFixed(0)} CUP)' : ''}';
   }
   return '${total.toStringAsFixed(0)} $moneda'
       '${hayTasa && moneda == 'CUP' ? ' (≈ ${(total / tasa).toStringAsFixed(2)} USD)' : ''}';
@@ -885,6 +888,22 @@ Future<bool> _esCuentaCasaEspejo(dynamic clienteId) async {
   } catch (_) {
     return false;
   }
+}
+
+/// Ronda 3-9 #2 (CRÍTICO): ¿el pago es de una Cuenta a la Casa?
+/// Casa nunca suma en ingresos ni paga comisión, aunque tenga
+/// pagos registrados (p. ej. pagó antes de pasar a Casa). Se
+/// comprueba la marca propia de la fila y el conjunto de
+/// cuentas Casa (una sola lectura por llamada que suma).
+bool _esPagoCasa(Map<String, dynamic> p, Set<int> casas) {
+  if (p['casa'] == 1 || p['casa'] == true) return true;
+  final cid = p['cliente_id'];
+  if (cid is num) return casas.contains(cid.toInt());
+  if (cid is String) {
+    final n = int.tryParse(cid);
+    if (n != null) return casas.contains(n);
+  }
+  return false;
 }
 
 /// v1.3.3: monto en CUP cobrado que representa una op encolada.
@@ -2026,6 +2045,8 @@ Future<int> pagosRealizadosMes() async {
   final pref = '${n.year.toString().padLeft(4, '0')}-'
       '${n.month.toString().padLeft(2, '0')}';
   final ids = <int>{};
+  // Ronda 3-9 #2: Casa nunca cuenta como cliente pagado.
+  final casas = await LocalDb.instance.idsCuentasCasa();
   // v1.3.4 (B2): filtro fecha LIKE 'yyyy-MM%' por columna indexada (v26).
   // El chequeo en Dart se conserva para las filas del fallback con
   // columna fecha NULL.
@@ -2035,7 +2056,7 @@ Future<int> pagosRealizadosMes() async {
       // v1.3.3: los regalos/promos (monto 0) no cuentan como pago cobrado.
       if ((p['monto'] as num? ?? 0) <= 0) continue;
       final cid = p['cliente_id'] as int?;
-      if (cid != null) ids.add(cid);
+      if (cid != null && !_esPagoCasa(p, casas)) ids.add(cid);
     }
   }
   return ids.length;
@@ -2833,8 +2854,12 @@ Future<double> cobradoAyer() async {
   final ayer = _isoDia(
       ahoraHabana().subtract(const Duration(days: 1)));
   double total = 0;
+  // Ronda 3-9 #7: servicios del día. Casa nunca suma (extensión
+  // del #2: misma clase de bug que las 9 funciones ordenadas).
+  final casas = await LocalDb.instance.idsCuentasCasa();
   for (final p in await LocalDb.instance
       .mirrorPorFecha('pagos', 'fecha', ayer, ayer)) {
+    if (_esPagoCasa(p, casas)) continue;
     total += (p['monto'] as num?)?.toDouble() ?? 0;
   }
   for (final d in await LocalDb.instance
@@ -2845,6 +2870,12 @@ Future<double> cobradoAyer() async {
     if ('${v['fecha'] ?? ''}'.length >= 10 &&
         '${v['fecha']}'.substring(0, 10) == ayer) {
       total += totalVentaCup(v);
+    }
+  }
+  for (final v in await _servicioVentasNetas()) {
+    final f = '${v['fecha'] ?? ''}';
+    if (f.length >= 10 && f.substring(0, 10) == ayer) {
+      total += _montoServicioVenta(v);
     }
   }
   return total;
@@ -2957,10 +2988,14 @@ Future<Map<String, dynamic>> resumenSemanal() async {
       hoy.subtract(Duration(days: hoy.weekday - 1));
   final inicio = _isoDia(DateTime(lunes.year, lunes.month, lunes.day));
   double cobrado = 0;
+  // Ronda 3-9 #7: servicios de la semana. Casa nunca suma
+  // (extensión del #2, misma clase de bug).
+  final casas = await LocalDb.instance.idsCuentasCasa();
   // v1.3.4 (B2): filtro fecha >= inicio por columna indexada (v26).
   // El chequeo en Dart se conserva para las filas del fallback con
   // columna fecha NULL.
   for (final p in await LocalDb.instance.pagosPorFiltro(fechaDesde: inicio)) {
+    if (_esPagoCasa(p, casas)) continue;
     final f = '${p['fecha'] ?? ''}';
     if (f.length >= 10 && f.substring(0, 10).compareTo(inicio) >= 0) {
       cobrado += (p['monto'] as num?)?.toDouble() ?? 0;
@@ -2970,6 +3005,12 @@ Future<Map<String, dynamic>> resumenSemanal() async {
     final f = '${d['fecha'] ?? ''}';
     if (f.length >= 10 && f.substring(0, 10).compareTo(inicio) >= 0) {
       cobrado += (d['total'] as num?)?.toDouble() ?? 0;
+    }
+  }
+  for (final v in await _servicioVentasNetas()) {
+    final f = '${v['fecha'] ?? ''}';
+    if (f.length >= 10 && f.substring(0, 10).compareTo(inicio) >= 0) {
+      cobrado += _montoServicioVenta(v);
     }
   }
   var nuevos = 0;
@@ -3040,9 +3081,12 @@ Future<double> cobradoMes(int? telegramId) async {
   final n = ahoraHabana();
   final pref = '${n.year.toString().padLeft(4, '0')}-'
       '${n.month.toString().padLeft(2, '0')}';
+  // Ajuste A1 (Argón delta 3-9): Casa nunca suma, tampoco aquí.
+  final casas = await LocalDb.instance.idsCuentasCasa();
   double t = 0;
   for (final p
       in await LocalDb.instance.pagosMesPorEntrenador(telegramId, pref)) {
+    if (_esPagoCasa(p, casas)) continue;
     t += (p['monto'] as num?)?.toDouble() ?? 0;
   }
   for (final d in await LocalDb.instance.allMirror('pagos_diarios')) {
@@ -3057,6 +3101,16 @@ Future<double> cobradoMes(int? telegramId) async {
       t += totalVentaCup(v);
     }
   }
+  // Ronda 3-9 #7: servicios del mes del entrenador (la gaveta es
+  // del responsable del efectivo, no del autor del registro).
+  for (final v in await _servicioVentasNetas()) {
+    final resp = LocalDb.normalizarTelegramId(v['responsable_efectivo_id']) ??
+        LocalDb.normalizarTelegramId(v['registrado_por']);
+    if (resp != telegramId) continue;
+    if ('${v['fecha'] ?? ''}'.startsWith(pref)) {
+      t += _montoServicioVenta(v);
+    }
+  }
   return t;
 }
 
@@ -3066,9 +3120,12 @@ Future<double> cobradoMes(int? telegramId) async {
 Future<double> ingresosHoyPorEntrenador(int? telegramId) async {
   if (telegramId == null) return 0;
   final hoy = _hoyIso();
+  // Ajuste A1 (Argón delta 3-9): Casa nunca suma, tampoco aquí.
+  final casas = await LocalDb.instance.idsCuentasCasa();
   double t = 0;
   for (final p in await LocalDb.instance
       .pagosPorDiaYEntrenador(hoy, telegramId)) {
+    if (_esPagoCasa(p, casas)) continue;
     t += (p['monto'] as num?)?.toDouble() ?? 0;
   }
   for (final d in await LocalDb.instance.allMirror('pagos_diarios')) {
@@ -3085,6 +3142,16 @@ Future<double> ingresosHoyPorEntrenador(int? telegramId) async {
       t += totalVentaCup(v);
     }
   }
+  // Ronda 3-9 #7: servicios de hoy del entrenador.
+  for (final v in await _servicioVentasNetas()) {
+    final resp = LocalDb.normalizarTelegramId(v['responsable_efectivo_id']) ??
+        LocalDb.normalizarTelegramId(v['registrado_por']);
+    if (resp != telegramId) continue;
+    final f = '${v['fecha'] ?? ''}';
+    if (f.length >= 10 && f.substring(0, 10) == hoy) {
+      t += _montoServicioVenta(v);
+    }
+  }
   return t;
 }
 
@@ -3098,9 +3165,12 @@ Future<double> ingresosSemanaPorEntrenador(int? telegramId) async {
       '${d.day.toString().padLeft(2, '0')}';
   final desdeIso = iso(desde);
   final hoyIso = iso(hoy);
+  // Ajuste A1 (Argón delta 3-9): Casa nunca suma, tampoco aquí.
+  final casas = await LocalDb.instance.idsCuentasCasa();
   double t = 0;
   for (final p in await LocalDb.instance
       .pagosRangoPorEntrenador(telegramId, desdeIso, hoyIso)) {
+    if (_esPagoCasa(p, casas)) continue;
     t += (p['monto'] as num?)?.toDouble() ?? 0;
   }
   for (final d in await LocalDb.instance.allMirror('pagos_diarios')) {
@@ -3123,6 +3193,19 @@ Future<double> ingresosSemanaPorEntrenador(int? telegramId) async {
       }
     }
   }
+  // Ronda 3-9 #7: servicios de la semana del entrenador.
+  for (final v in await _servicioVentasNetas()) {
+    final resp = LocalDb.normalizarTelegramId(v['responsable_efectivo_id']) ??
+        LocalDb.normalizarTelegramId(v['registrado_por']);
+    if (resp != telegramId) continue;
+    final f = '${v['fecha'] ?? ''}';
+    if (f.length >= 10) {
+      final dia = f.substring(0, 10);
+      if (dia.compareTo(desdeIso) >= 0 && dia.compareTo(hoyIso) <= 0) {
+        t += _montoServicioVenta(v);
+      }
+    }
+  }
   return t;
 }
 
@@ -3131,14 +3214,22 @@ Future<double> ingresosSemanaPorEntrenador(int? telegramId) async {
 Future<Map<String, double>> ingresosPorMetodoEntrenador(
     int? telegramId) async {
   if (telegramId == null) {
-    return {'efectivo': 0, 'transferencia': 0, 'suplementos': 0};
+    return {
+      'efectivo': 0,
+      'transferencia': 0,
+      'suplementos': 0,
+      'servicios': 0
+    };
   }
   final n = ahoraHabana();
   final pref = '${n.year.toString().padLeft(4, '0')}-'
       '${n.month.toString().padLeft(2, '0')}';
-  double efectivo = 0, transferencia = 0, suplementos = 0;
+  // Ajuste A1 (Argón delta 3-9): Casa nunca suma, tampoco aquí.
+  final casas = await LocalDb.instance.idsCuentasCasa();
+  double efectivo = 0, transferencia = 0, suplementos = 0, servicios = 0;
   for (final p
       in await LocalDb.instance.pagosMesPorEntrenador(telegramId, pref)) {
+    if (_esPagoCasa(p, casas)) continue;
     final m = (p['monto'] as num?)?.toDouble() ?? 0;
     if ('${p['metodo']}' == 'transferencia') {
       transferencia += m;
@@ -3158,10 +3249,21 @@ Future<Map<String, double>> ingresosPorMetodoEntrenador(
       suplementos += totalVentaCup(v);
     }
   }
+  // Ronda 3-9 #7: servicios del mes del entrenador, en su propio
+  // bucket como en el desglose global.
+  for (final v in await _servicioVentasNetas()) {
+    final resp = LocalDb.normalizarTelegramId(v['responsable_efectivo_id']) ??
+        LocalDb.normalizarTelegramId(v['registrado_por']);
+    if (resp != telegramId) continue;
+    if ('${v['fecha'] ?? ''}'.startsWith(pref)) {
+      servicios += _montoServicioVenta(v);
+    }
+  }
   return {
     'efectivo': efectivo,
     'transferencia': transferencia,
-    'suplementos': suplementos
+    'suplementos': suplementos,
+    'servicios': servicios
   };
 }
 
@@ -3170,14 +3272,17 @@ Future<Map<String, double>> ingresosPorMetodoEntrenador(
 Future<Map<String, double>> ingresosPorTipoEntrenador(
     int? telegramId) async {
   if (telegramId == null) {
-    return {'mensual': 0, 'diario': 0, 'suplementos': 0};
+    return {'mensual': 0, 'diario': 0, 'suplementos': 0, 'servicios': 0};
   }
   final n = ahoraHabana();
   final pref = '${n.year.toString().padLeft(4, '0')}-'
       '${n.month.toString().padLeft(2, '0')}';
-  double mensual = 0, diario = 0, suplementos = 0;
+  // Ajuste A1 (Argón delta 3-9): Casa nunca suma, tampoco aquí.
+  final casas = await LocalDb.instance.idsCuentasCasa();
+  double mensual = 0, diario = 0, suplementos = 0, servicios = 0;
   for (final p
       in await LocalDb.instance.pagosMesPorEntrenador(telegramId, pref)) {
+    if (_esPagoCasa(p, casas)) continue;
     mensual += (p['monto'] as num?)?.toDouble() ?? 0;
   }
   for (final d in await LocalDb.instance.allMirror('pagos_diarios')) {
@@ -3192,7 +3297,22 @@ Future<Map<String, double>> ingresosPorTipoEntrenador(
       suplementos += totalVentaCup(v);
     }
   }
-  return {'mensual': mensual, 'diario': diario, 'suplementos': suplementos};
+  // Ronda 3-9 #7: servicios del mes del entrenador, en su propio
+  // bucket como en el desglose global.
+  for (final v in await _servicioVentasNetas()) {
+    final resp = LocalDb.normalizarTelegramId(v['responsable_efectivo_id']) ??
+        LocalDb.normalizarTelegramId(v['registrado_por']);
+    if (resp != telegramId) continue;
+    if ('${v['fecha'] ?? ''}'.startsWith(pref)) {
+      servicios += _montoServicioVenta(v);
+    }
+  }
+  return {
+    'mensual': mensual,
+    'diario': diario,
+    'suplementos': suplementos,
+    'servicios': servicios
+  };
 }
 
 /// Dashboard por rol (v1.2): mejor y peor día del mes de un entrenador.
@@ -3205,8 +3325,11 @@ Future<Map<String, Map<String, dynamic>>> mejorPeorDiaEntrenador(
   final pref = '${n.year.toString().padLeft(4, '0')}-'
       '${n.month.toString().padLeft(2, '0')}';
   final porDia = <String, double>{};
+  // Ajuste A1 (Argón delta 3-9): Casa nunca suma, tampoco aquí.
+  final casas = await LocalDb.instance.idsCuentasCasa();
   for (final p
       in await LocalDb.instance.pagosMesPorEntrenador(telegramId, pref)) {
+    if (_esPagoCasa(p, casas)) continue;
     final f = '${p['fecha'] ?? ''}';
     if (f.length >= 10) {
       final dia = f.substring(0, 10);
@@ -3229,6 +3352,17 @@ Future<Map<String, Map<String, dynamic>>> mejorPeorDiaEntrenador(
     if (f.startsWith(pref) && f.length >= 10) {
       final dia = f.substring(0, 10);
       porDia[dia] = (porDia[dia] ?? 0) + totalVentaCup(v);
+    }
+  }
+  // Ronda 3-9 #7: servicios del mes del entrenador en mejor/peor día.
+  for (final v in await _servicioVentasNetas()) {
+    final resp = LocalDb.normalizarTelegramId(v['responsable_efectivo_id']) ??
+        LocalDb.normalizarTelegramId(v['registrado_por']);
+    if (resp != telegramId) continue;
+    final f = '${v['fecha'] ?? ''}';
+    if (f.startsWith(pref) && f.length >= 10) {
+      final dia = f.substring(0, 10);
+      porDia[dia] = (porDia[dia] ?? 0) + _montoServicioVenta(v);
     }
   }
   if (porDia.isEmpty) return {};
@@ -3773,7 +3907,10 @@ Future<double> ingresosMesAnterior() async {
   final pref = '${anio.toString().padLeft(4, '0')}-'
       '${mes.toString().padLeft(2, '0')}';
   double t = 0;
+  // Ronda 3-9 #2: Casa nunca suma en ingresos.
+  final casasMesAnt = await LocalDb.instance.idsCuentasCasa();
   for (final p in await LocalDb.instance.pagosDelMes(pref)) {
+    if (_esPagoCasa(p, casasMesAnt)) continue;
     t += (p['monto'] as num?)?.toDouble() ?? 0;
   }
   for (final d in await LocalDb.instance.allMirror('pagos_diarios')) {
@@ -3800,7 +3937,10 @@ Future<Map<String, double>> ingresosPorMetodo() async {
   final pref = '${n.year.toString().padLeft(4, '0')}-'
       '${n.month.toString().padLeft(2, '0')}';
   double efectivo = 0, transferencia = 0, suplementos = 0, servicios = 0;
+  // Ronda 3-9 #2: Casa nunca suma en ingresos.
+  final casas = await LocalDb.instance.idsCuentasCasa();
   for (final p in await LocalDb.instance.pagosDelMes(pref)) {
+    if (_esPagoCasa(p, casas)) continue;
     final m = (p['monto'] as num?)?.toDouble() ?? 0;
     if ('${p['metodo']}' == 'transferencia') {
       transferencia += m;
@@ -3837,7 +3977,10 @@ Future<Map<String, double>> ingresosPorTipo() async {
   final pref = '${n.year.toString().padLeft(4, '0')}-'
       '${n.month.toString().padLeft(2, '0')}';
   double mensual = 0, diario = 0, suplementos = 0, servicios = 0;
+  // Ronda 3-9 #2: Casa nunca suma en ingresos.
+  final casas = await LocalDb.instance.idsCuentasCasa();
   for (final p in await LocalDb.instance.pagosDelMes(pref)) {
+    if (_esPagoCasa(p, casas)) continue;
     mensual += (p['monto'] as num?)?.toDouble() ?? 0;
   }
   for (final d in await LocalDb.instance.allMirror('pagos_diarios')) {
@@ -3879,7 +4022,10 @@ Future<Map<String, Map<String, dynamic>>> mejorPeorDia() async {
   final pref = '${n.year.toString().padLeft(4, '0')}-'
       '${n.month.toString().padLeft(2, '0')}';
   final porDia = <String, double>{};
+  // Ronda 3-9 #2: Casa nunca suma en ingresos.
+  final casas = await LocalDb.instance.idsCuentasCasa();
   for (final p in await LocalDb.instance.pagosDelMes(pref)) {
+    if (_esPagoCasa(p, casas)) continue;
     final f = '${p['fecha'] ?? ''}';
     if (f.length >= 10) {
       final dia = f.substring(0, 10);
@@ -3900,6 +4046,14 @@ Future<Map<String, Map<String, dynamic>>> mejorPeorDia() async {
     if (f.startsWith(pref) && f.length >= 10) {
       final dia = f.substring(0, 10);
       porDia[dia] = (porDia[dia] ?? 0) + totalVentaCup(v);
+    }
+  }
+  // Ronda 3-9 #7: servicios del mes en mejor/peor día.
+  for (final v in await _servicioVentasNetas()) {
+    final f = '${v['fecha'] ?? ''}';
+    if (f.startsWith(pref) && f.length >= 10) {
+      final dia = f.substring(0, 10);
+      porDia[dia] = (porDia[dia] ?? 0) + _montoServicioVenta(v);
     }
   }
   if (porDia.isEmpty) return {};
@@ -3973,7 +4127,10 @@ Future<List<Map<String, dynamic>>> ingresosUltimos30Dias() async {
   final suplementos = await ventasSuplementosCup();
   // Agrupar por día en Dart (datasets ya acotados a 30 días).
   final porDia = <String, double>{};
+  // Ronda 3-9 #7: Casa nunca suma (extensión del #2).
+  final casas = await LocalDb.instance.idsCuentasCasa();
   for (final p in pagos) {
+    if (_esPagoCasa(p, casas)) continue;
     final f = '${p['fecha'] ?? ''}';
     if (f.length >= 10) {
       final dia = f.substring(0, 10);
@@ -3998,6 +4155,16 @@ Future<List<Map<String, dynamic>>> ingresosUltimos30Dias() async {
       }
     }
   }
+  // Ronda 3-9 #7: servicios de los últimos 30 días.
+  for (final v in await _servicioVentasNetas()) {
+    final f = '${v['fecha'] ?? ''}';
+    if (f.length >= 10) {
+      final dia = f.substring(0, 10);
+      if (dia.compareTo(desdeIso) >= 0 && dia.compareTo(hastaIso) <= 0) {
+        porDia[dia] = (porDia[dia] ?? 0) + _montoServicioVenta(v);
+      }
+    }
+  }
   final res = <Map<String, dynamic>>[];
   for (var i = 29; i >= 0; i--) {
     final dia = hoy.subtract(Duration(days: i));
@@ -4018,7 +4185,42 @@ Future<List<Map<String, dynamic>>> rankingEntrenadores() async {
       '${n.month.toString().padLeft(2, '0')}';
   final porEntrenador = <String, double>{};
   final nombres = <String, String>{};
+  // Ronda 3-9 #7: servicios del mes + Casa nunca suma (extensión
+  // del #2, misma clase de bug).
+  final casas = await LocalDb.instance.idsCuentasCasa();
+  // Ajuste A3 (Argón delta 3-9): id -> nombre del entrenador,
+  // para acreditar los servicios al responsable efectivo con la
+  // misma clave (nombre) que el resto de bucles.
+  final porId = <int, String>{};
+  void anotaNombre(dynamic idRaw, dynamic nombreRaw) {
+    final id = LocalDb.normalizarTelegramId(idRaw);
+    if (id != null && nombreRaw is String && nombreRaw.isNotEmpty) {
+      porId.putIfAbsent(id, () => nombreRaw);
+    }
+  }
+
+  // Panel A1-A4 (Terra MEDIO): la fuente canónica es usuarios_apk
+  // (lista de usuarios APK con telegram_id + nombre). Sin ella, un
+  // responsable sin operaciones en el mes quedaba sin nombre y su
+  // servicio se acreditaba al registrador. Se siembra primero para
+  // que tenga precedencia sobre los nombres de las operaciones.
+  try {
+    final rawApk = await LocalDb.instance.getMeta('usuarios_apk');
+    if (rawApk != null && rawApk.isNotEmpty) {
+      for (final u in jsonDecode(rawApk) as List) {
+        final m = Map<String, dynamic>.from(u as Map);
+        final tid = LocalDb.normalizarTelegramId(m['telegram_id']);
+        final nom = '${m['nombre'] ?? m['username'] ?? ''}';
+        if (tid != null && nom.isNotEmpty) porId[tid] = nom;
+      }
+    }
+  } catch (_) {}
+
   for (final p in await LocalDb.instance.pagosDelMes(pref)) {
+    // El nombre no es dinero: se anota antes del filtro Casa para
+    // que un entrenador con solo pagos Casa también resuelva.
+    anotaNombre(p['registrado_por'], p['registrado_por_nombre']);
+    if (_esPagoCasa(p, casas)) continue;
     final ent =
         '${p['registrado_por_nombre'] ?? p['registrado_por'] ?? '?'}';
     porEntrenador[ent] =
@@ -4026,6 +4228,7 @@ Future<List<Map<String, dynamic>>> rankingEntrenadores() async {
   }
   for (final d in await LocalDb.instance.allMirror('pagos_diarios')) {
     if ('${d['fecha'] ?? ''}'.startsWith(pref)) {
+      anotaNombre(d['registrado_por'], d['registrado_por_nombre']);
       final ent =
           '${d['registrado_por_nombre'] ?? d['registrado_por'] ?? '?'}';
       porEntrenador[ent] =
@@ -4034,9 +4237,28 @@ Future<List<Map<String, dynamic>>> rankingEntrenadores() async {
   }
   for (final v in await ventasSuplementosCup()) {
     if ('${v['fecha'] ?? ''}'.startsWith(pref)) {
+      anotaNombre(v['registrado_por'], v['registrado_por_nombre']);
       final ent =
           '${v['registrado_por_nombre'] ?? v['registrado_por'] ?? '?'}';
       porEntrenador[ent] = (porEntrenador[ent] ?? 0) + totalVentaCup(v);
+    }
+  }
+  for (final v in await _servicioVentasNetas()) {
+    if ('${v['fecha'] ?? ''}'.startsWith(pref)) {
+      // Ajuste A3: mismo criterio que las funciones PorEntrenador
+      // (responsable efectivo, no quien registró); la clave sigue
+      // siendo el nombre para no partir el ranking en dos filas.
+      // Panel A1-A4 (Terra MEDIO): si el responsable no resuelve
+      // a nombre por ninguna fuente, la clave es su id estable,
+      // nunca el nombre del registrador.
+      final respId =
+          LocalDb.normalizarTelegramId(v['responsable_efectivo_id']) ??
+              LocalDb.normalizarTelegramId(v['registrado_por']);
+      final ent = respId != null
+          ? (porId[respId] ?? '$respId')
+          : '${v['registrado_por_nombre'] ?? v['registrado_por'] ?? '?'}';
+      porEntrenador[ent] =
+          (porEntrenador[ent] ?? 0) + _montoServicioVenta(v);
     }
   }
   final res = porEntrenador.entries
@@ -4107,8 +4329,11 @@ Future<double> ingresosMes() async {
   final ultimoDia = DateTime(n.year, n.month + 1, 0).day;
   final hasta = '$pref-${ultimoDia.toString().padLeft(2, '0')}';
   double t = 0;
+  // Ronda 3-9 #2: Casa nunca suma en ingresos.
+  final casas = await LocalDb.instance.idsCuentasCasa();
   for (final p in await LocalDb.instance
       .mirrorPorFecha('pagos', 'fecha', desde, hasta)) {
+    if (_esPagoCasa(p, casas)) continue;
     t += (p['monto'] as num?)?.toDouble() ?? 0;
   }
   for (final d in await LocalDb.instance
@@ -4133,11 +4358,14 @@ Future<double> ingresosMes() async {
 /// para que tarjetas, gráficos y desgloses usen los mismos números.
 Future<Map<String, double>> ingresosPorDia() async {
   final porDia = <String, double>{};
+  // Ronda 3-9 #2: Casa nunca suma en ingresos.
+  final casas = await LocalDb.instance.idsCuentasCasa();
   // v1.3.4 (ítem 2): full scan INTENCIONAL — agregación analítica sobre
   // TODOS los pagos sin filtro por fecha/cliente/entrenador/método; el
   // monto vive en el JSON (sin columna indexada) y hay que leer cada
   // fila de todos modos. No migra a SQL indexado.
   for (final p in await LocalDb.instance.allMirror('pagos')) {
+    if (_esPagoCasa(p, casas)) continue;
     final f = '${p['fecha'] ?? ''}';
     if (f.length >= 10) {
       final dia = f.substring(0, 10);
@@ -4174,8 +4402,11 @@ Future<Map<String, double>> ingresosPorDia() async {
 Future<double> ingresosHoy() async {
   final hoy = _hoyIso();
   double t = 0;
+  // Ronda 3-9 #2: Casa nunca suma en ingresos.
+  final casas = await LocalDb.instance.idsCuentasCasa();
   for (final p
       in await LocalDb.instance.mirrorPorFecha('pagos', 'fecha', hoy, hoy)) {
+    if (_esPagoCasa(p, casas)) continue;
     t += (p['monto'] as num?)?.toDouble() ?? 0;
   }
   for (final d in await LocalDb.instance
@@ -4207,8 +4438,11 @@ Future<double> ingresosSemana() async {
   final desdeIso = iso(desde);
   final hoyIso = iso(hoy);
   double t = 0;
+  // Ronda 3-9 #2: Casa nunca suma en ingresos.
+  final casas = await LocalDb.instance.idsCuentasCasa();
   for (final p in await LocalDb.instance
       .mirrorPorFecha('pagos', 'fecha', desdeIso, hoyIso)) {
+    if (_esPagoCasa(p, casas)) continue;
     t += (p['monto'] as num?)?.toDouble() ?? 0;
   }
   for (final d in await LocalDb.instance
@@ -4269,8 +4503,11 @@ Future<List<Map<String, dynamic>>> pagosDelPeriodo(
   // (panel 2026-10-21).
   // v1.3.4 (ítem 2): mirrorPorFecha usa la columna indexada `fecha`
   // para el espejo `pagos` (misma semántica que el filtro en Dart).
+  // Ronda 3-9 #2: Casa nunca suma en ingresos.
+  final casas = await LocalDb.instance.idsCuentasCasa();
   for (final p in await LocalDb.instance
       .mirrorPorFecha('pagos', 'fecha', desdeIso, hastaIso)) {
+    if (_esPagoCasa(p, casas)) continue;
     out.add({
       'monto': (p['monto'] as num?)?.toDouble() ?? 0,
       'metodo': '${p['metodo'] ?? 'efectivo'}',

@@ -14,6 +14,7 @@ import 'package:flutter/material.dart';
 import '../auth.dart';
 import '../localdb.dart';
 import '../negocio.dart';
+import '../tiempo.dart';
 import '../models/pendiente.dart';
 import 'package:flutter/services.dart';
 import '../sync.dart';
@@ -32,6 +33,9 @@ class _PendienteScreenState extends State<PendienteScreen> {
   List<Map<String, dynamic>> _mens = [];
   List<Map<String, dynamic>> _diarios = [];
   List<Map<String, dynamic>> _servicios = [];
+  // Ronda 17 M4-H2: suplementos en efectivo en CUP pendientes
+  // de entrega (la vista del dueño ya los incluía).
+  List<Map<String, dynamic>> _suplementos = [];
   // v1.3.0 (Pendiente v2): agrupado Entrenador > Días.
   List<EntrenadorPendiente> _entrenadores = [];
   List<Map<String, dynamic>> _crudos = [];
@@ -78,6 +82,20 @@ class _PendienteScreenState extends State<PendienteScreen> {
     } else {
       final tid = auth.telegramId;
       final (m, d, s) = await detallePendiente(tid);
+      // Ronda 17 M4-H2: los suplementos en efectivo en CUP
+      // también son pendiente a entregar (misma fuente que
+      // la vista del dueño, filtrada por este entrenador).
+      // Los USD ya van en _totalUsd (pendienteEntregaUsd).
+      final sups = <Map<String, dynamic>>[];
+      if (tid != null) {
+        for (final p in await pagosPendientesDetalle()) {
+          if (p['tipo'] == 'suplemento' &&
+              p['trainer_telegram_id'] == tid &&
+              p['moneda'] == 'CUP') {
+            sups.add(p);
+          }
+        }
+      }
       // Gemini: USD separado del CUP.
       final usd = await pendienteEntregaUsd(tid);
       if (mounted) {
@@ -85,6 +103,7 @@ class _PendienteScreenState extends State<PendienteScreen> {
           _mens = m;
           _diarios = d;
           _servicios = s;
+          _suplementos = sups;
           _totalUsd = usd;
           _cargando = false;
         });
@@ -104,6 +123,10 @@ class _PendienteScreenState extends State<PendienteScreen> {
       t += ((s['precio_unitario'] as num?)?.toDouble() ?? 0) *
           ((s['cantidad'] as num?)?.toDouble() ?? 0);
     }
+    // Ronda 17 M4-H2: suplementos en efectivo en CUP.
+    for (final s in _suplementos) {
+      t += (s['monto'] as num?)?.toDouble() ?? 0;
+    }
     return t;
   }
 
@@ -119,6 +142,9 @@ class _PendienteScreenState extends State<PendienteScreen> {
   /// Optimistic UI: actualiza al instante, persiste en background.
   Future<void> _confirmarPorIds(PendienteDia dia, String nombre,
       String etiqueta, String trainerTelegramId) async {
+    // Ronda 17 M4-H3: confirmar recibidos es solo del dueño
+    // (la vista del entrenador es de lectura).
+    if (!_esDueno) return;
     // Fix #15 (Sol): el día ya viene separado por moneda (ver
     // procesarPendientes), pero mostramos la moneda real por seguridad.
     final moneda = dia.pagos.isEmpty
@@ -350,7 +376,26 @@ class _PendienteScreenState extends State<PendienteScreen> {
                   '${'${s['cliente_nombre'] ?? ''}'.isNotEmpty ? ' · ${s['cliente_nombre']}' : ''}'),
             ),
         ],
-        if (_mens.isEmpty && _diarios.isEmpty && _servicios.isEmpty)
+        // Ronda 17 M4-H2: suplementos en efectivo en CUP.
+        if (_suplementos.isNotEmpty) ...[
+          const Text('Suplementos en efectivo:',
+              style: TextStyle(fontWeight: FontWeight.bold)),
+          const SizedBox(height: 8),
+          for (final s in _suplementos)
+            ListTile(
+              dense: true,
+              leading: const Icon(Icons.shopping_bag_outlined,
+                  color: AppColores.naranja, size: 18),
+              title: Text('${fmtMonto(s['monto'])} CUP'),
+              subtitle: Text(
+                  '${s['descripcion'] ?? 'Venta suplemento'} · '
+                  '${fmtFecha(s['creada_en'] as String?)}'),
+            ),
+        ],
+        if (_mens.isEmpty &&
+            _diarios.isEmpty &&
+            _servicios.isEmpty &&
+            _suplementos.isEmpty)
           const Padding(
             padding: EdgeInsets.only(top: 32),
             child: Text(
@@ -401,7 +446,7 @@ class _PendienteScreenState extends State<PendienteScreen> {
               .expand((d) => d.pagos)
               .toList();
           final pseudo = PendienteDia(
-              fecha: DateTime.now(), pagos: todos);
+              fecha: ahoraHabana(), pagos: todos);
           _confirmarPorIds(
             pseudo,
             _entrenadores[i].nombre,

@@ -328,58 +328,67 @@ class _BandejaWhatsappScreenState extends State<BandejaWhatsappScreen>
 
   /// v1.3.8 (1B): diálogo para agregar el teléfono sin salir de la bandeja.
   Future<void> _agregarTelefono(Map<String, dynamic> a) async {
+    // Ronda 17 M7-H3: agregar teléfonos es solo del dueño.
+    if (!AuthService().isOwner) return;
     final ctrl = TextEditingController();
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Agregar teléfono'),
-        content: TextField(
-          controller: ctrl,
-          keyboardType: TextInputType.phone,
-          maxLength: 8,
-          decoration: const InputDecoration(
-            hintText: 'Ej. 58191577',
-            helperText: '8 dígitos, empieza con 5 o 6',
+    try {
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Agregar teléfono'),
+          content: TextField(
+            controller: ctrl,
+            keyboardType: TextInputType.phone,
+            maxLength: 8,
+            decoration: const InputDecoration(
+              hintText: 'Ej. 58191577',
+              helperText: '8 dígitos, empieza con 5 o 6',
+            ),
           ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancelar'),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Guardar'),
+            ),
+          ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancelar'),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Guardar'),
-          ),
-        ],
-      ),
-    );
-    if (ok != true || !mounted) return;
-    final tel = ctrl.text.trim();
-    if (!validarTelefono(tel)) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-            content: Text('Teléfono inválido: 8 dígitos, empieza con 5 o 6.')));
+      );
+      if (ok != true || !mounted) return;
+      final tel = ctrl.text.trim();
+      if (!validarTelefono(tel)) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+              content:
+                  Text('Teléfono inválido: 8 dígitos, empieza con 5 o 6.')));
+        }
+        return;
       }
-      return;
-    }
-    final cid = (a['cliente_id'] as num?)?.toInt() ?? 0;
-    if (cid <= 0) return;
-    await LocalDb.instance.updateMirrorTelefono(cid, tel);
-    // Encolar la edición para el servidor.
-    await LocalDb.instance.queueOp(
-      opUuid: const Uuid().v4(),
-      tipo: 'editar_cliente',
-      payload: {'cliente_id': cid, 'telefono': tel},
-    );
-    unawaited(SyncEngine.instance.push());
-    if (mounted) {
-      // Actualiza el aviso en memoria para activar el botón wa.me.
-      setState(() {
-        a['telefono'] = tel;
-      });
-      ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Teléfono guardado.')));
+      final cid = (a['cliente_id'] as num?)?.toInt() ?? 0;
+      if (cid <= 0) return;
+      await LocalDb.instance.updateMirrorTelefono(cid, tel);
+      // Encolar la edición para el servidor.
+      await LocalDb.instance.queueOp(
+        opUuid: const Uuid().v4(),
+        tipo: 'editar_cliente',
+        payload: {'cliente_id': cid, 'telefono': tel},
+      );
+      unawaited(SyncEngine.instance.push());
+      if (mounted) {
+        // Actualiza el aviso en memoria para activar el botón wa.me.
+        setState(() {
+          a['telefono'] = tel;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Teléfono guardado.')));
+      }
+    } finally {
+      // Ronda 17 M7-H3: el controlador del diálogo se libera
+      // siempre (antes quedaba vivo en cada apertura).
+      ctrl.dispose();
     }
   }
 

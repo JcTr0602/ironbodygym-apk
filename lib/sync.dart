@@ -1570,7 +1570,7 @@ class SyncEngine {
         totalOps += resPush2.aplicadas;
         uuidsPush.addAll(resPush2.uuids);
       }
-      await _db.setMeta('last_push_ok', DateTime.now().toIso8601String());
+      await _db.setMeta('last_push_ok', isoHabana(ahoraHabana()));
       // v1.3.0: acumulativo (no solo última sincronización).
       final prevSubidos =
           int.tryParse(await _db.getMeta('total_subidos') ?? '0') ?? 0;
@@ -3762,7 +3762,10 @@ class SyncEngine {
       final dateHdr = ultimoDateHdr;
       final horaServidor = dateHdr != null
           ? HttpDate.parse(dateHdr).toIso8601String()
-          : DateTime.now().toUtc().toIso8601String();
+          // Ajuste A2 (Argón delta 3-9): isoHabana lleva el offset
+          // explícito de La Habana; ahoraHabana().toUtc() aplicaba
+          // la zona del teléfono y corría la hora fuera de Cuba.
+          : isoHabana(ahoraHabana());
       for (final tabla in tablas) {
         await _db.setMeta('last_remote_sync_ok_$tabla', horaServidor);
       }

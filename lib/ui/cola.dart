@@ -13,11 +13,14 @@ import '../errores_sync.dart';
 import '../fotos_qos.dart';
 import '../bloque3.dart';
 import '../app_log.dart';
+import '../auth.dart';
+import '../cliente_protegido.dart';
 import '../localdb.dart';
 import '../negocio.dart';
 import '../sync.dart';
 import '../tiempo.dart';
 import '../tipos_operacion.dart';
+import 'auditoria.dart';
 import 'componentes.dart';
 import 'diseno.dart';
 
@@ -56,6 +59,16 @@ Future<List<String>> detallesDeOp(Map<String, dynamic> op) async {
     }
   } catch (_) {}
   if (payload.isEmpty) return detalles;
+
+  // Ronda 17 M6-H1: de un cliente protegido no se muestra
+  // ningún detalle (ni nombre, ni monto, ni método).
+  final cidRaw = payload['cliente_id'];
+  if (cidRaw != null) {
+    try {
+      final c = await clientePorId(int.tryParse('$cidRaw') ?? 0);
+      if (c != null && esVistaProtegida(c)) return ['Cliente protegido'];
+    } catch (_) {}
+  }
 
   // Nombre del cliente si hay cliente_id
   Future<String?> nombreCliente(dynamic id) async {
@@ -220,6 +233,16 @@ class ColaScreen extends StatefulWidget {
 }
 
 class _ColaScreenState extends State<ColaScreen> {
+  // Ronda 17 M6-H1: actor de la sesión para filtrar ops ajenas.
+  String? _miActor;
+  int? _miTelegramId;
+  // Ronda 17 M6-H1: dueño confirmado en la última carga
+  // (fail-closed: falso hasta que _cargar lo confirme).
+  bool _esDueno = false;
+  // Ronda 17 M6-H2: candados anti-doble-toque en reintentos.
+  final Set<String> _opsReintentando = {};
+  final Set<int> _fotosReintentando = {};
+  bool _reintentandoTodasFotos = false;
   List<Map<String, dynamic>> _ops = [];
   // v1.2.5 (D15): ops bloqueadas que necesitan revisión manual.
   List<Map<String, dynamic>> _bloqueadas = [];
@@ -298,6 +321,19 @@ class _ColaScreenState extends State<ColaScreen> {
   }
 
   Future<void> _cargar() async {
+    // Ronda 17 M6-H1: actor de la sesión (fail-closed).
+    try {
+      _miActor = AuthService().displayName;
+      _miTelegramId = AuthService().telegramId;
+    } catch (_) {
+      _miActor = null;
+      _miTelegramId = null;
+    }
+    try {
+      _esDueno = AuthService().isOwner;
+    } catch (_) {
+      _esDueno = false;
+    }
     final ops = await LocalDb.instance.recentOps();
     final bloqueadas = await LocalDb.instance.opsNecesitanRevision();
     final det = await SyncEngine.instance.detalle();
@@ -352,18 +388,66 @@ class _ColaScreenState extends State<ColaScreen> {
       masAntiguaIso =
           await LocalDb.instance.isoOpPendienteMasAntigua();
     } catch (_) {}
+    // Ronda 17 M6-H1: un no-dueño solo ve sus ops (y el banner
+    // cuenta solo lo suyo: exacto si la lista no se truncó en 30).
+    final opsVisibles = _esDueno
+        ? ops
+        : ops
+            .where((o) => esOpMia(o,
+                miActor: _miActor, miTelegramId: _miTelegramId))
+            .toList();
+    final bloqueadasVisibles = _esDueno
+        ? bloqueadas
+        : bloqueadas
+            .where((o) => esOpMia(o,
+                miActor: _miActor, miTelegramId: _miTelegramId))
+            .toList();
+    // Ronda 17 M6-H1 (extensión): las fotos pendientes de un
+    // cliente protegido tampoco se muestran a un no-dueño
+    // (la fila enseña la miniatura). Sin columna de actor en
+    // fotos_cola, entre entrenadores no se pueden separar.
+    var fotosVisibles = fDet;
+    if (!_esDueno) {
+      try {
+        final clientes = await LocalDb.instance.allMirror('clientes');
+        final protegidos = <int>{
+          for (final c in clientes)
+            if (esVistaProtegida(c)) c['id'] as int,
+        };
+        fotosVisibles = fDet.where((f) {
+          final cid = f['cliente_id'];
+          if (cid is int) return !protegidos.contains(cid);
+          final n = int.tryParse('$cid');
+          return n == null || !protegidos.contains(n);
+        }).toList();
+      } catch (_) {}
+    }
+    // Ronda 17 M6-H1+H3: a un no-dueño, el banner cuenta
+    // solo lo suyo (el total de BD es global).
+    var totalPendientesFinal = totalPendientes;
+    var desgloseFinal = desglosePendientes;
+    if (!_esDueno) {
+      final pendientesPropias =
+          opsVisibles.where((o) => o['estado'] == 'pendiente');
+      totalPendientesFinal = pendientesPropias.length;
+      desgloseFinal = <String, int>{};
+      for (final o in pendientesPropias) {
+        final t = '${o['tipo']}';
+        desgloseFinal[t] = (desgloseFinal[t] ?? 0) + 1;
+      }
+    }
     if (mounted) {
       setState(() {
-        _ops = ops;
-        _bloqueadas = bloqueadas;
+        _ops = opsVisibles;
+        _bloqueadas = bloqueadasVisibles;
         _det = det;
         _fotosPendientes = fPend;
         _fotosSubiendo = fSub;
         _fotosError = fErr;
-        _fotosDetalle = fDet;
+        _fotosDetalle = fotosVisibles;
         _retenidas = retenidas;
-        _totalPendientes = totalPendientes;
-        _desglosePendientes = desglosePendientes;
+        _totalPendientes = totalPendientesFinal;
+        _desglosePendientes = desgloseFinal;
         _masAntiguaIso = masAntiguaIso;
       });
     }
@@ -371,6 +455,9 @@ class _ColaScreenState extends State<ColaScreen> {
 
   /// v1.2.9+46: reintenta una foto específica (resetea backoff).
   Future<void> _reintentarFoto(int id) async {
+    // Ronda 17 M6-H2: candado anti-doble-toque.
+    if (_fotosReintentando.contains(id)) return;
+    _fotosReintentando.add(id);
     try {
       final db = await LocalDb.instance.db;
       await db.update(
@@ -401,11 +488,16 @@ class _ColaScreenState extends State<ColaScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(content: Text('No se pudo reintentar: $e')));
       }
+    } finally {
+      _fotosReintentando.remove(id);
     }
   }
 
   /// v1.2.9+46: reintenta todas las fotos pendientes/con error.
   Future<void> _reintentarTodasFotos() async {
+    // Ronda 17 M6-H2: candado anti-doble-toque.
+    if (_reintentandoTodasFotos) return;
+    _reintentandoTodasFotos = true;
     try {
       final db = await LocalDb.instance.db;
       await db.update(
@@ -432,6 +524,8 @@ class _ColaScreenState extends State<ColaScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(content: Text('No se pudo reintentar: $e')));
       }
+    } finally {
+      _reintentandoTodasFotos = false;
     }
   }
 
@@ -596,22 +690,39 @@ class _ColaScreenState extends State<ColaScreen> {
   /// v1.2.5 (D15): reintento manual de una bloqueada. La devuelve a
   /// 'pendiente' (limpia backoff); si vuelve a fallar, se reclasifica.
   Future<void> _reintentarBloqueada(String opUuid) async {
-    await LocalDb.instance
-        .markOp(opUuid, 'pendiente', error: null);
-    // Limpia el backoff y el código para que salga en el próximo ciclo.
-    final d = await LocalDb.instance.db;
-    await d.rawUpdate(
-        'UPDATE ops_queue SET proximo_reintento=NULL, codigo_error=NULL, '
-        'intentos=0 WHERE op_uuid=?',
-        [opUuid]);
-    await _cargar();
-    // v1.3.1 (E6): sincronizar al instante.
-    unawaited(SyncEngine.instance.push());
-    // v1.2.6 (Gemini): confirmación háptica en reintento manual.
-    await vibrarConfirmacion();
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('Reintentando sincronización...')));
+    // Ronda 17 M6-H2: candado anti-doble-toque.
+    if (_opsReintentando.contains(opUuid)) return;
+    _opsReintentando.add(opUuid);
+    try {
+      // UPDATE atómico y acotado: solo se reactiva si sigue en
+      // estado reintentable; si el sync la aplicó mientras tanto,
+      // no se resucita (n == 0).
+      final d = await LocalDb.instance.db;
+      final n = await d.rawUpdate(
+          'UPDATE ops_queue SET estado=?, error=NULL, '
+          'proximo_reintento=NULL, codigo_error=NULL, '
+          'intentos=0 WHERE op_uuid=? AND estado IN '
+          "('error','rechazada','necesita_revision')",
+          ['pendiente', opUuid]);
+      if (n == 0) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+              content: Text('La operación ya cambió de estado')));
+        }
+        await _cargar();
+        return;
+      }
+      await _cargar();
+      // v1.3.1 (E6): sincronizar al instante.
+      unawaited(SyncEngine.instance.push());
+      // v1.2.6 (Gemini): confirmación háptica en reintento manual.
+      await vibrarConfirmacion();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('Reintentando sincronización...')));
+      }
+    } finally {
+      _opsReintentando.remove(opUuid);
     }
   }
 
@@ -804,6 +915,30 @@ class _ColaScreenState extends State<ColaScreen> {
   }
 
   Future<void> _cancelar(String uuid, String tipo) async {
+    // Ronda 17 M6-H1: un no-dueño no cancela ops ajenas.
+    if (!_esDueno) {
+      try {
+        final db = await LocalDb.instance.db;
+        final rows = await db.query('ops_queue',
+            columns: ['payload'],
+            where: 'op_uuid=?', whereArgs: [uuid], limit: 1);
+        if (rows.isNotEmpty) {
+          final op = {'payload': rows.first['payload']};
+          if (!esOpMia(op,
+              miActor: _miActor, miTelegramId: _miTelegramId)) {
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                  content: Text(
+                      'Solo puedes cancelar tus propias operaciones')));
+            }
+            return;
+          }
+        }
+      } catch (_) {}
+    }
+    // Ronda 17 M6-H2: la consulta anterior es un hueco async;
+    // sin mounted, el diálogo usaría un context muerto.
+    if (!mounted) return;
     final ok = await DialogoApp.confirmar(
       context,
       titulo: 'Cancelar operación',
@@ -1144,26 +1279,53 @@ class _ColaScreenState extends State<ColaScreen> {
   /// Muestra el detalle completo de una operación al tocarla.
   Future<void> _reenviar(Map<String, dynamic> op) async {
     final uuid = op['op_uuid'] as String;
-    // v1.3.1 (E6): limpiar campos de error y disparar sync inmediatamente.
-    final db = await LocalDb.instance.db;
-    await db.update(
-      'ops_queue',
-      {
-        'estado': 'pendiente',
-        'error': null,
-        'intentos': 0,
-        'proximo_reintento': null,
-        'codigo_error': null,
-      },
-      where: 'op_uuid=?',
-      whereArgs: [uuid],
-    );
-    unawaited(SyncEngine.instance.push());
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Reenviando operación...')),
+    // Ronda 17 M6-H1: un no-dueño no reenvía ops ajenas.
+    if (!_esDueno &&
+        !esOpMia(op, miActor: _miActor, miTelegramId: _miTelegramId)) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content:
+                Text('Solo puedes reenviar tus propias operaciones')));
+      }
+      return;
+    }
+    // Ronda 17 M6-H2: candado anti-doble-toque.
+    if (_opsReintentando.contains(uuid)) return;
+    _opsReintentando.add(uuid);
+    try {
+      // v1.3.1 (E6): limpiar campos de error y disparar sync inmediatamente.
+      final db = await LocalDb.instance.db;
+      // UPDATE acotado: si la op cambió de estado mientras
+      // tanto (p. ej. la aplicó el sync), no se resucita.
+      final n = await db.update(
+        'ops_queue',
+        {
+          'estado': 'pendiente',
+          'error': null,
+          'intentos': 0,
+          'proximo_reintento': null,
+          'codigo_error': null,
+        },
+        where: "op_uuid=? AND estado IN ('error','rechazada','necesita_revision')",
+        whereArgs: [uuid],
       );
-      _cargar();
+      if (n == 0) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+              content: Text('La operación ya cambió de estado')));
+        }
+        await _cargar();
+        return;
+      }
+      unawaited(SyncEngine.instance.push());
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Reenviando operación...')),
+        );
+        _cargar();
+      }
+    } finally {
+      _opsReintentando.remove(uuid);
     }
   }
 
@@ -1263,21 +1425,26 @@ class _ColaScreenState extends State<ColaScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // v1.3.1 (E2): conteos reales incluyendo bloqueadas y fotos.
-    // _ops tiene limit 30, así que sumar las bloqueadas cargadas por separado.
-    final pendientes =
-        _ops.where((o) => o['estado'] == 'pendiente').length;
-    final conError =
-        _ops.where((o) => o['estado'] == 'error').length;
+    // Ronda 17 M6-H3: el encabezado usa el total de BD
+    // (_totalPendientes), no la lista visible (limit 30), y
+    // totalError se deduplica por op_uuid (una bloqueada
+    // también está en la lista reciente).
+    final uuidsError = <String>{};
+    for (final o in _ops) {
+      final e = '${o['estado']}';
+      if (e == 'error' || e == 'rechazada') {
+        uuidsError.add('${o['op_uuid']}');
+      }
+    }
+    for (final o in _bloqueadas) {
+      uuidsError.add('${o['op_uuid']}');
+    }
+    final totalError = uuidsError.length + _fotosError;
     // v1.2.9+46 (Gemini): 'enviada' = confirmación pendiente (ámbar).
     final enLimbo =
         _ops.where((o) => o['estado'] == 'enviada').length;
-    // v1.3.1 (E2): bloqueadas (necesita_revision/rechazada) van a rojo.
-    final bloqueadas = _bloqueadas.length;
-    final rechazadas =
-        _ops.where((o) => o['estado'] == 'rechazada').length;
-    final totalError = conError + bloqueadas + rechazadas + _fotosError;
-    final totalPendiente = pendientes + _fotosPendientes + _fotosSubiendo;
+    final totalPendiente =
+        _totalPendientes + _fotosPendientes + _fotosSubiendo;
     final errorReciente = _det.error;
     // v1.0.14: tres estados claros en vez de binario ok/error
     // v1.1: icono Material en vez de emoji

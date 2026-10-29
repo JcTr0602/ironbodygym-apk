@@ -162,6 +162,28 @@ void main() {
       expect(carnetDesdeFechaNac('no-es-fecha'), isNull);
     });
 
+    test('Ronda 17 M5-H1: desborde de fecha no se normaliza', () {
+      // 30-feb no existe: antes DateTime lo corría a 2-mar y
+      // el carnet salía 230302; ahora es null.
+      expect(carnetDesdeFechaNac('2023-02-30'), isNull);
+      expect(carnetDesdeFechaNac('2023-02-29'), isNull);
+      expect(carnetDesdeFechaNac('2023-13-01'), isNull);
+      expect(carnetDesdeFechaNac('2024-02-29'), '240229');
+    });
+
+    test('Ronda 17 M5-H1: validarCarnetInvitado11', () {
+      expect(validarCarnetInvitado11('95102012345'), isTrue);
+      expect(validarCarnetInvitado11('00022912345'), isTrue);
+      // Fecha imposible en los primeros 6 (mes 23, 30-feb).
+      expect(validarCarnetInvitado11('12230312345'), isFalse);
+      expect(validarCarnetInvitado11('23023012345'), isFalse);
+      // Formato: no son 11 dígitos.
+      expect(validarCarnetInvitado11('9510201234'), isFalse);
+      expect(validarCarnetInvitado11('951020123456'), isFalse);
+      expect(validarCarnetInvitado11(null), isFalse);
+      expect(validarCarnetInvitado11(''), isFalse);
+    });
+
     test('el carnet sugerido de una fecha real NO dispara el aviso',
         () {
       expect(carnetFechaInvalida(carnetDesdeFechaNac('2012-03-23')),

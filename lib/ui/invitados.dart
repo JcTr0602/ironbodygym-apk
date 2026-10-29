@@ -1538,6 +1538,7 @@ class _InvitadoDetalleScreenState extends State<InvitadoDetalleScreen> {
       nombre: d.nombre,
       telefono: d.telefono,
       fechaNac: d.fechaNac,
+      carnet: d.carnet,
       medidas: d.mediciones,
     );
     await Navigator.of(context).push(MaterialPageRoute(
@@ -1722,6 +1723,17 @@ class _InvitadoDetalleScreenState extends State<InvitadoDetalleScreen> {
             _linea('🎂 Nacimiento', fmtFecha(d.fechaNac)),
           // Carnet (0.9.1): los viejos no lo tienen → «Sin carnet».
           _linea('🪪 Carnet', d.carnet ?? 'Sin carnet'),
+          // Ronda 3-9 #9: aviso si el carnet existe pero no tiene
+          // 11 dígitos o su fecha AAMMDD no es real (no bloquea).
+          if (d.carnet != null && !validarCarnetInvitado11(d.carnet))
+            const Padding(
+              padding: EdgeInsets.only(top: 2),
+              child: Text(
+                '⚠ Carnet inválido: debe tener 11 dígitos y una '
+                'fecha real.',
+                style: AppTexto.secundario,
+              ),
+            ),
           _linea('🗓 Registrado', fechaAbsoluta(d.creadoEn)),
           _linea(
               '⏳ Caduca',
@@ -2522,6 +2534,9 @@ class _InvitadoDetalleScreenState extends State<InvitadoDetalleScreen> {
   /// creación. Si el nombre no coincide con quien reclama, NO se
   /// resetea: se elimina (libera el número) o se inscribe directo.
   Future<void> _ajustarClave() async {
+    // Ronda 3-9 #10: ajustar acceso es de dueño o admin (la UI ya
+    // lo oculta; esto frena un cambio de sesión a mitad).
+    if (!AuthService().isOwner && !AuthService().isAdmin) return;
     final d = _d!;
     final ctrl = TextEditingController();
     var confirmado = false;
@@ -2612,6 +2627,8 @@ class _InvitadoDetalleScreenState extends State<InvitadoDetalleScreen> {
 
   Future<void> _eliminar() async {
     final d = _d!;
+    // Ronda 3-9 #10: eliminar invitado es SOLO del dueño (J1).
+    if (!AuthService().isOwner) return;
     // v1.12.0 (D5): en caché de solo lectura no hay acciones.
     if (_offlineCache) {
       _snack('Sin conexión: el detalle está en solo lectura.');
@@ -2729,6 +2746,9 @@ class _InfoPublicaScreenState extends State<InfoPublicaScreen> {
   }
 
   Future<void> _guardar() async {
+    // Ronda 3-9 #10: la información pública la edita un admin
+    // (la entrada a esta pantalla ya exige isAdmin).
+    if (!AuthService().isAdmin) return;
     final cambios = <String, String>{};
     for (final c in clavesInfoPublica) {
       // v1.6.0: «horario_texto» no sale de un campo editable (ver

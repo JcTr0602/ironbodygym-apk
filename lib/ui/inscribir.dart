@@ -73,7 +73,13 @@ class _InscribirScreenState extends State<InscribirScreen> {
     if (conv != null) {
       _nombre.text = conv.nombre;
       _telefono.text = conv.telefono;
-      final carnet = conv.carnetSugerido;
+      // Ronda 3-9 #9: el carnet real del invitado manda si es
+      // válido; si no, se usa el derivado de su fecha de
+      // nacimiento; sin derivado, queda el real para corregir.
+      final carnet = (conv.carnet != null &&
+              validarCarnetInvitado11(conv.carnet))
+          ? conv.carnet
+          : (conv.carnetSugerido ?? conv.carnet);
       if (carnet != null) _carnet.text = carnet;
     }
     _cargarPrecioMenor();

@@ -13,6 +13,7 @@ library;
 import 'package:flutter/material.dart';
 
 import '../auth.dart';
+import '../cliente_protegido.dart';
 import '../localdb.dart';
 import '../negocio.dart';
 import '../nomina_calc.dart';
@@ -66,8 +67,18 @@ class _PagaronMesScreenState extends State<PagaronMesScreen> {
     final porId = <int, Map<String, dynamic>>{
       for (final c in datos) (c['id'] as num).toInt(): c,
     };
+    // Cliente protegido (H3, mismo criterio que Pagos Realizados):
+    // para un no-dueño la fila se omite entera — la presencia ya
+    // revela que pagó este mes. Sin fila en el espejo no se puede
+    // saber si es protegido y el marcador se conserva. El conteo
+    // visible puede quedar por debajo de la cifra global de Home
+    // en tantos protegidos como haya.
+    final idsVisibles = ids.where((id) {
+      final c = porId[id];
+      return c == null || !esVistaProtegida(c);
+    }).toList();
     final lista = <Map<String, dynamic>>[
-      for (final id in ids)
+      for (final id in idsVisibles)
         if (porId[id] != null)
           {
             'id': id,

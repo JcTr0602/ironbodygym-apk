@@ -53,6 +53,9 @@ Map<String, dynamic> _articuloValido() => {
         {'titulo': 'Estudio B', 'fuente': 'Revista 2021', 'url': 'https://b.org/2'},
       ],
       'sello': 'verde',
+      // Ronda 17 M3-H2: el validador exige nivel 'esencial' o
+      // 'plus' (el editor real siempre lo lleva: _nivel).
+      'nivel': 'esencial',
       'related_ids': ['tecnica-press-banca'],
       'tiene_imagen': false,
       'imagen_cambiada': false,

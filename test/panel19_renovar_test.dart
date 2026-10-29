@@ -34,5 +34,29 @@ void main() {
       );
       expect(p['entregado'], 1);
     });
+
+    test('Ronda 3-9 #3: tipoId menores viaja como tipo_id', () {
+      final p = payloadRenovacionRapida(
+        clienteId: 7,
+        mensualidad: 1500,
+        nuevoVencimiento: '2026-11-24',
+        fecha: '2026-10-25',
+        esDueno: false,
+        tipoId: 'menores',
+      );
+      expect(p['tipo_id'], 'menores');
+      expect(p['monto'], 1500);
+    });
+
+    test('Ronda 3-9 #3: sin tipoId no hay clave tipo_id', () {
+      final p = payloadRenovacionRapida(
+        clienteId: 7,
+        mensualidad: 2000,
+        nuevoVencimiento: '2026-11-24',
+        fecha: '2026-10-25',
+        esDueno: false,
+      );
+      expect(p.containsKey('tipo_id'), isFalse);
+    });
   });
 }

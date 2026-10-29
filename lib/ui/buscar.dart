@@ -115,7 +115,9 @@ class _BuscarScreenState extends State<BuscarScreen> {
         }
       }
       final ref = c['foto_storage'] as String?;
-      if (ref == null || ref.isEmpty) {
+      // Ronda 17 M7-H2: el contador sinfoto tampoco se alimenta
+      // con protegidos (igual que aldia/porvencer/vencidos).
+      if ((ref == null || ref.isEmpty) && !esVistaProtegida(c)) {
         conteos['sinfoto'] = conteos['sinfoto']! + 1;
       }
     }
@@ -166,6 +168,9 @@ class _BuscarScreenState extends State<BuscarScreen> {
     // CON foto pero sin descargar aparecían erróneamente aquí.
     if (_filtro == 'sinfoto') {
       r = r.where((c) {
+        // Ronda 17 M7-H2: el filtro sinfoto tampoco deja
+        // pasar protegidos.
+        if (esVistaProtegida(c)) return false;
         final ref = c['foto_storage'] as String?;
         return ref == null || ref.isEmpty;
       }).toList();
@@ -405,6 +410,13 @@ class _BuscarScreenState extends State<BuscarScreen> {
                                     },
                                   ),
                                 );
+                                // Ronda 17 M7-H1: cliente protegido
+                                // nunca se envuelve en Dismissible:
+                                // el gesto abriría cobro o edición
+                                // saltándose el bloqueo visual.
+                                if (esVistaProtegida(c)) {
+                                  return fila;
+                                }
                                 // Bloque 1: deslizables configurables
                                 // desde Ajustes (lista cerrada). Sin
                                 // acción configurada no hay Dismissible.
@@ -520,6 +532,16 @@ class _BuscarScreenState extends State<BuscarScreen> {
   /// a su pantalla (Editar abre la ficha directo en Editar).
   Future<void> _ejecutarSwipe(
       String accion, Map<String, dynamic> c) async {
+    // Ronda 17 M7-H1 (defensa en profundidad): aunque la fila
+    // protegida ya no lleva Dismissible, el swipe nunca actúa
+    // sobre un cliente protegido.
+    if (esVistaProtegida(c)) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text(mensajeClienteProtegido)));
+      }
+      return;
+    }
     switch (accion) {
       case 'cobrar':
         if (await mostrarBloqueoCasa(context, c)) return;

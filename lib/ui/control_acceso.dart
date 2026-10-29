@@ -764,6 +764,11 @@ class _AccesosClientesTabState extends State<AccesosClientesTab> {
         rpc: 'desbloquear_acceso_cliente',
         mensajeOk: '${a.nombre} desbloqueado.',
         alTerminar: _cargar,
+        // Argón menos auditados MENOR: el candado desbloqueaba sin
+        // confirmación; un toque accidental bastaba.
+        confirmarAntes: true,
+        titulo: 'Desbloquear acceso',
+        texto: '¿Desbloquear el acceso de ${a.nombre}?',
       ),
     );
   }
@@ -801,6 +806,10 @@ class _AccesosClientesTabState extends State<AccesosClientesTab> {
             style: AppTexto.secundario),
       );
     }
+    // Argón menos auditados MEDIO: el tope de 40 es por lote visible.
+    // Antes se contaba _seleccion entera y las selecciones ocultas
+    // tras buscar bloqueaban el tope antes de llegar a 40 visibles.
+    final visiblesIds = lista.map((e) => e.clienteId).toSet();
     return ListView.builder(
       padding: const EdgeInsets.symmetric(horizontal: AppEspacio.lg),
       itemCount: lista.length,
@@ -814,7 +823,7 @@ class _AccesosClientesTabState extends State<AccesosClientesTab> {
               onChanged: (v) {
                 setState(() {
                   if (v == true) {
-                    if (_seleccion.length >= 40) {
+                    if (_seleccion.intersection(visiblesIds).length >= 40) {
                       ScaffoldMessenger.of(context).showSnackBar(
                         const SnackBar(
                           content:
@@ -921,6 +930,25 @@ class _AccesosClientesTabState extends State<AccesosClientesTab> {
         .toSet();
     final ids = _seleccion.intersection(visibles).toList();
     if (ids.isEmpty) return;
+    // Ajuste Argón (menos auditados M1): el tope 40 por vista no
+    // impide acumular más seleccionando con filtros distintos (25
+    // con "A" + 25 con "B"); al limpiar el buscador todos son
+    // visibles y el lote saldría con 50. Avisar y no enviar:
+    // recortar en silencio dejaría clientes creyendo que tienen
+    // acceso.
+    if (ids.length > 40) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Seleccionaste ${ids.length} clientes; el máximo por '
+              'lote es 40. Desmarca el excedente y vuelve a generar.',
+            ),
+          ),
+        );
+      }
+      return;
+    }
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(

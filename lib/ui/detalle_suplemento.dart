@@ -507,8 +507,11 @@ Future<void> compartirSuplemento(BuildContext context,
   // v1.4.6: la etiqueta es la moneda del propio suplemento;
   // el equivalente en CUP solo existe si el precio está en USD.
   final moneda = LocalDb.monedaDe(s);
+  // Argón menos auditados MEDIO: el equivalente CUP debe usar el
+  // mismo redondeo a decenas que la venta (precioOficialEn), o el
+  // catálogo y la caja muestran números distintos.
   final cup = moneda == 'USD' && tasaUsd != null && tasaUsd > 1.0
-      ? ' (≈ ${fmtMonto(precio * tasaUsd)} CUP)'
+      ? ' (≈ ${fmtMonto(precioOficialEn('CUP', precio, tasaUsd)!)} CUP)'
       : '';
   final stock = (s['stock'] as num?)?.toInt() ?? 0;
   final texto = 'Iron Body Gym — Suplementos\n\n'
@@ -596,7 +599,7 @@ class DetalleSuplementoScreen extends StatelessWidget {
     // oficial está en USD (moneda del propio suplemento).
     final monedaSup = LocalDb.monedaDe(suplemento);
     final cup = monedaSup == 'USD' && tasaUsd != null && tasaUsd! > 1.0
-        ? '≈ ${fmtMonto(precio * tasaUsd!)} CUP'
+        ? '≈ ${fmtMonto(precioOficialEn('CUP', precio, tasaUsd)!)} CUP'
         : null;
     // v1.4.3: presentación del envase (la misma que ve el cliente
     // en su catálogo). Parseo tolerante: el espejo puede traer el
@@ -856,11 +859,19 @@ class DetalleSuplementoScreen extends StatelessWidget {
 
 /// Elimina un suplemento (v1.3.1).
 /// Pide confirmación, lo marca como eliminado localmente y encola la op.
+/// Suplementos con borrado en curso (candado de exclusión, Argón
+/// menos auditados MENOR: sin él, un doble toque encolaba dos borrados).
+final _eliminandoSuplementos = <int>{};
+
 Future<void> _eliminarSuplemento(
     BuildContext context, Map<String, dynamic> s) async {
+  // Argón menos auditados MENOR: guarda de dueño en el método (el
+  // botón ya es solo-dueño) + id parseado seguro antes del cast final.
+  if (!AuthService().isOwner) return;
+  final id = (s['id'] as num?)?.toInt();
+  if (id == null) return;
   final db = LocalDb.instance;
   final d = await db.db;
-  final id = s['id'];
 
   // Argón: verificar localmente que no tenga ventas antes de borrar.
   // La tabla local usa JSON (data TEXT), no columnas.
@@ -923,15 +934,21 @@ Future<void> _eliminarSuplemento(
   );
   if (ok != true || !context.mounted) return;
 
-  // Marcar como eliminado localmente y encolar la op en UNA
-  // transacción (panel 9/10 Luna): dos pasos separados dejaban el
-  // borrado sin op si la app se cerraba entre ambos.
-  await db.eliminarSuplementoLocal((id as num).toInt());
-  AppLog.info('suplementos', 'eliminar', d: 'id=$id nombre=$nombre');
+  // Argón menos auditados MENOR: candado de exclusión por suplemento.
+  if (!_eliminandoSuplementos.add(id)) return;
+  try {
+    // Marcar como eliminado localmente y encolar la op en UNA
+    // transacción (panel 9/10 Luna): dos pasos separados dejaban el
+    // borrado sin op si la app se cerraba entre ambos.
+    await db.eliminarSuplementoLocal(id);
+    AppLog.info('suplementos', 'eliminar', d: 'id=$id nombre=$nombre');
 
-  if (!context.mounted) return;
-  ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Suplemento eliminado')));
-  Navigator.of(context).pop();
-  SyncEngine.instance.push();
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Suplemento eliminado')));
+    Navigator.of(context).pop();
+    SyncEngine.instance.push();
+  } finally {
+    _eliminandoSuplementos.remove(id);
+  }
 }

@@ -286,8 +286,15 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
       // B2 (Argón): jamás exportar "$0.00" a clientes.
       // v1.4.6: la moneda es la del propio suplemento (puede
       // ser CUP desde el formulario), no «USD» fijo.
+      // Ronda 3-9 #8: en USD, equivalente CUP redondeado a
+      // decenas (precioOficialEn) cuando hay tasa.
+      final moneda = LocalDb.monedaDe(s);
+      final cup = moneda == 'USD'
+          ? precioOficialEn('CUP', precio, _tasaUsd)
+          : null;
       buf.writeln(precio > 0
-          ? '💰 ${precio.toStringAsFixed(2)} ${LocalDb.monedaDe(s)}'
+          ? '💰 ${precio.toStringAsFixed(2)} $moneda'
+              '${cup != null ? ' (≈ ${cup.toStringAsFixed(0)} CUP)' : ''}'
           : '💰 Consultar precio');
     }
     await Share.share(buf.toString().trimRight());
@@ -552,6 +559,7 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
                 sup: items[i],
                 onVender: () => _irVender(items[i]),
                 onTap: () => _irDetalle(items[i]),
+                tasaUsd: _tasaUsd,
               ),
             ),
           ),
@@ -660,10 +668,19 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: AppTexto.cuerpo),
-            Text('${precio.toStringAsFixed(2)} ${LocalDb.monedaDe(s)}',
-                style: AppTexto.secundario.copyWith(
-                    color: AppColores.naranja,
-                    fontWeight: FontWeight.bold)),
+            // Ronda 3-9 #8: en USD, equivalente CUP redondeado.
+            Builder(builder: (_) {
+              final moneda = LocalDb.monedaDe(s);
+              final cup = moneda == 'USD'
+                  ? precioOficialEn('CUP', precio, _tasaUsd)
+                  : null;
+              return Text(
+                  '${precio.toStringAsFixed(2)} $moneda'
+                  '${cup != null ? ' (≈ ${cup.toStringAsFixed(0)} CUP)' : ''}',
+                  style: AppTexto.secundario.copyWith(
+                      color: AppColores.naranja,
+                      fontWeight: FontWeight.bold));
+            }),
           ],
         ),
       ),
@@ -687,12 +704,15 @@ class _TarjetaSuplemento extends StatelessWidget {
   final Map<String, dynamic> sup;
   final VoidCallback onVender;
   final VoidCallback onTap;
+  // Ronda 3-9 #8: tasa para el equivalente CUP en USD.
+  final double? tasaUsd;
 
   const _TarjetaSuplemento({
     super.key,
     required this.sup,
     required this.onVender,
     required this.onTap,
+    this.tasaUsd,
   });
 
   @override
@@ -761,15 +781,23 @@ class _TarjetaSuplemento extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(height: 4),
-                    Text(
-                      '${precio.toStringAsFixed(2)} '
-                      '${LocalDb.monedaDe(sup)}',
-                      style: const TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 16,
-                        color: AppColores.naranja,
-                      ),
-                    ),
+                    // Ronda 3-9 #8: en USD, equivalente CUP
+                    // redondeado a decenas (precioOficialEn).
+                    Builder(builder: (_) {
+                      final moneda = LocalDb.monedaDe(sup);
+                      final cup = moneda == 'USD'
+                          ? precioOficialEn('CUP', precio, tasaUsd)
+                          : null;
+                      return Text(
+                        '${precio.toStringAsFixed(2)} $moneda'
+                        '${cup != null ? ' (≈ ${cup.toStringAsFixed(0)} CUP)' : ''}',
+                        style: const TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 16,
+                          color: AppColores.naranja,
+                        ),
+                      );
+                    }),
                     if (inactivo)
                       const Text(
                         'Inactivo',
@@ -1170,6 +1198,9 @@ class _EditarSuplementoScreenState
   }
 
   Future<void> _guardar() async {
+    // Ronda 3-9 #10: editar el catálogo es solo del dueño (la UI
+    // ya oculta el botón; esto frena un cambio de sesión a mitad).
+    if (!AuthService().isOwner) return;
     final nombre = _nombre.text.trim();
     final precio = double.tryParse(
         _precio.text.trim().replaceAll(',', '.'));
