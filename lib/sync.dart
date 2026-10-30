@@ -1079,19 +1079,26 @@ class SyncEngine {
       // isoHabana() y la comparación en SQLite es lexicográfica.
       final corte =
           isoHabana(ahoraHabana().subtract(const Duration(minutes: 2)));
+      // Argón P1#3: no reactivar ops de otro usuario en este teléfono
+      // (el conteo anunciado debe coincidir con lo que esta corrida
+      // realmente puede enviar, que ya filtra por usuario).
+      final uidF = _auth.userId;
+      final filtroF =
+          uidF == null ? '' : ' AND (user_id = ? OR user_id IS NULL)';
+      final argsF = <Object?>[corte, if (uidF != null) uidF];
       return await db.transaction((txn) async {
         final filas = await txn.query('ops_queue',
             columns: ['op_uuid'],
             where:
-                "estado = 'enviada' AND (enviada_ts IS NULL OR enviada_ts < ?)",
-            whereArgs: [corte]);
+                "estado = 'enviada' AND (enviada_ts IS NULL OR enviada_ts < ?)$filtroF",
+            whereArgs: argsF);
         if (filas.isEmpty) return 0;
         await txn.update(
           'ops_queue',
           {'estado': 'pendiente', 'error': null},
           where:
-              "estado = 'enviada' AND (enviada_ts IS NULL OR enviada_ts < ?)",
-          whereArgs: [corte],
+              "estado = 'enviada' AND (enviada_ts IS NULL OR enviada_ts < ?)$filtroF",
+          whereArgs: argsF,
         );
         return filas.length;
       });
@@ -1888,12 +1895,18 @@ class SyncEngine {
       // lexicográfica (DateTime.now() crudo fallaba con otra zona horaria).
       final corte =
           isoHabana(ahoraHabana().subtract(const Duration(minutes: 2)));
+      // Argón P1#3: igual que _forzarAtascadas, no reactivar ops de
+      // otro usuario en este teléfono.
+      final uidR = _auth.userId;
+      final filtroR =
+          uidR == null ? '' : ' AND (user_id = ? OR user_id IS NULL)';
+      final argsR = <Object?>[corte, if (uidR != null) uidR];
       await db.update(
         'ops_queue',
         {'estado': 'pendiente', 'error': null},
         // v1.3.1 (E4): comparar contra enviada_ts (NULL = antes de v21).
-        where: "estado = 'enviada' AND (enviada_ts IS NULL OR enviada_ts < ?)",
-        whereArgs: [corte],
+        where: "estado = 'enviada' AND (enviada_ts IS NULL OR enviada_ts < ?)$filtroR",
+        whereArgs: argsR,
       );
     } catch (_) {}
     // v1.0.16: solo subir las ops del usuario actual. Las de otro
@@ -4256,10 +4269,23 @@ class SyncEngine {
   Future<String?> subirFotoSuplemento(String opUuid, Uint8List bytes) async {
     final comprimida = _comprimirFoto(bytes);
     final path = 'suplementos/$opUuid.jpg';
-    final tus = await _subirFotoTus(opUuid, path, comprimida);
-    // v1.2.6: si TUS falla (false) también se intenta el método simple,
-    // no solo cuando TUS no está disponible (null).
-    final ok = tus == true || await _subirFotoSimple(path, comprimida);
+    // Argón P1#2 (auditoría sync 2026-10-29): vía subirFotoCola
+    // (TUS con claves por variante, 403 permanente y pausa QoS por
+    // chunk) en vez del TUS legado sin pausa ni 403 permanente.
+    // Claves con sufijo _supl para no chocar con las de fotos_cola.
+    final res = await subirFotoCola(
+      opUuid: opUuid,
+      tipo: 'supl',
+      objectPath: path,
+      bytes: comprimida,
+      claveTusLoc: 'tus_loc_${opUuid}_supl',
+      claveTusOffset: 'tus_offset_${opUuid}_supl',
+      debePausarPorCobro: () async =>
+          await _db.countPendingOpsNoFoto() > 0,
+    );
+    if (res.estado == EstadoSubida.subida) return path;
+    // Fallback conservado (v1.2.6): si TUS falla, intento simple.
+    final ok = await _subirFotoSimple(path, comprimida);
     return ok ? path : null;
   }
 
@@ -4582,99 +4608,6 @@ class SyncEngine {
     } catch (_) {
       return -2;
     }
-  }
-
-  /// Sube la foto por partes con tus (punto 17): si se corta la conexión,
-  /// continúa donde quedó en vez de empezar de cero.
-  /// Devuelve true si terminó, false si hay que reintentar luego,
-  /// null si tus no está disponible (usar el método simple).
-  Future<bool?> _subirFotoTus(
-      String opUuid, String objectPath, Uint8List bytes) async {
-    final locKey = 'tus_loc_$opUuid';
-    final offKey = 'tus_offset_$opUuid';
-    String? location = await _db.getMeta(locKey);
-    if (location != null && location.isEmpty) location = null;
-    var offset = int.tryParse(await _db.getMeta(offKey) ?? '0') ?? 0;
-
-    if (location == null) {
-      location = await _tusCrear(objectPath, bytes.length);
-      if (location == null) return null;
-      await _db.setMeta(locKey, location);
-      offset = 0;
-    } else {
-      final remoto = await _tusOffset(location);
-      if (remoto == -1) {
-        // expiró en el servidor: crear de nuevo
-        location = await _tusCrear(objectPath, bytes.length);
-        if (location == null) return null;
-        await _db.setMeta(locKey, location);
-        offset = 0;
-      } else if (remoto >= 0) {
-        offset = remoto;
-      }
-      // remoto == -2: no se pudo averiguar; se usa el guardado
-    }
-    if (offset > bytes.length) offset = 0;
-    final url = location;
-
-    // v1.3.2 (Argón): fragmentos de 128KB (antes 32KB) —
-    // menos round-trips; el timeout de 20s por chunk lo protege
-    // en redes lentas.
-    const chunk = 128 * 1024;
-    String? ultimoError;
-    while (offset < bytes.length) {
-      final fin =
-          (offset + chunk < bytes.length) ? offset + chunk : bytes.length;
-      var okChunk = false;
-      for (var intento = 0; intento < 3 && !okChunk; intento++) {
-        // Fix Gemini: delay entre reintentos (caídas de torre en Cuba).
-        if (intento > 0) {
-          await Future.delayed(Duration(milliseconds: 400 * intento));
-        }
-        try {
-          final r = await _patchAuth(
-            Uri.parse(url),
-            headers: {
-              'Tus-Resumable': '1.0.0',
-              'Content-Type': 'application/offset+octet-stream',
-              'Upload-Offset': '$offset',
-            },
-            body: bytes.sublist(offset, fin),
-            // v1.3.2 (Argón): 20s por chunk.
-            timeout: const Duration(seconds: 20),
-          );
-          if (r.statusCode == 204 || r.statusCode == 200) {
-            offset = int.tryParse(r.headers['upload-offset'] ?? '') ?? fin;
-            okChunk = true;
-          } else if (r.statusCode == 404 || r.statusCode == 410) {
-            // la subida murió en el servidor: recrearla luego
-            await _db.setMeta(locKey, '');
-            await _db.setMeta(offKey, '0');
-            return false;
-          } else {
-            // v1.2.6: registrar el código para diagnóstico
-            ultimoError = 'HTTP ${r.statusCode} en fragmento $offset';
-          }
-        } catch (e) {
-          // v1.2.6: no ocultar el error real
-          ultimoError = 'Fragmento $offset: $e';
-          okChunk = false;
-        }
-      }
-      if (!okChunk) {
-        await _db.setMeta(offKey, '$offset');
-        // v1.2.6: guardar el motivo para diagnóstico en Incidencias
-        if (ultimoError != null) {
-          await _db.setMeta('tus_err_$opUuid', ultimoError);
-        }
-        return false; // se retoma donde quedó
-      }
-      await _db.setMeta(offKey, '$offset');
-    }
-    // limpia el estado tus de esta foto
-    await _db.setMeta(locKey, '');
-    await _db.setMeta(offKey, '0');
-    return true;
   }
 
   /// Método simple (un solo PUT): respaldo si tus no está disponible.
@@ -5210,6 +5143,14 @@ class SyncEngine {
         whereArgs: [],
         limit: 5);
     for (final f in pendientes) {
+      // Argón P1#1 (auditoría sync 2026-10-29): las fotos de
+      // incidencias ceden ante ops_queue como el resto de fotos:
+      // si entró un cobro mientras tanto, no se reclama otra foto.
+      if (await _db.countPendingOpsNoFoto() > 0) {
+        AppLog.aviso('sync', 'foto_inc_pausa_qos',
+            d: 'ops pendientes, cediendo red');
+        break;
+      }
       final fid = '${f['id']}';
       // Claim atómico: solo si sigue en pending/retry.
       final reclamadas = await d.update(

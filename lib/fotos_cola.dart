@@ -1230,9 +1230,10 @@ class FotosColaService {
     data['foto_uuid'] = opUuid;
 
     // 1. Guardar en SQLite local.
+    // Argón P2#6: propagar las columnas dedicadas.
     await db.update(
       'clientes',
-      {'data': jsonEncode(data)},
+      {'data': jsonEncode(data), ...LocalDb.columnasClientes(data)},
       where: 'id = ?',
       whereArgs: [clienteId],
     );

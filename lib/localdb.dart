@@ -3525,7 +3525,10 @@ class LocalDb {
     final data =
         jsonDecode(rows.first['data'] as String) as Map<String, dynamic>;
     data['estado'] = estado;
-    await ex.update('clientes', {'data': jsonEncode(data)},
+    // Argón P2#6: propagar las columnas dedicadas para no dejar
+    // cuenta_casa/protegido desfasados respecto al JSON.
+    await ex.update('clientes',
+        {'data': jsonEncode(data), ...columnasClientes(data)},
         where: 'id=?', whereArgs: [clienteId]);
   }
 
@@ -3555,8 +3558,12 @@ class LocalDb {
     final data =
         jsonDecode(rows.first['data'] as String) as Map<String, dynamic>;
     data['telefono'] = telefono;
-    await d.update('clientes', {'data': jsonEncode(data)},
+    final nuevoJson = jsonEncode(data);
+    await d.update('clientes', {'data': nuevoJson},
         where: 'id=?', whereArgs: [clienteId]);
+    // Argón P2#5: refrescar el FTS para que la búsqueda offline por
+    // el teléfono nuevo funcione sin esperar al pull.
+    await actualizarFtsCliente(clienteId, nuevoJson, null);
   }
 
   /// v1.13.0 (Bloque 4, reponer_lote): suma [delta] (negativo para
@@ -3711,7 +3718,9 @@ class LocalDb {
         data[e.key] = e.value;
       }
     }
-    await d.update('clientes', {'data': jsonEncode(data)},
+    // Argón P2#6: propagar las columnas dedicadas.
+    await d.update('clientes',
+        {'data': jsonEncode(data), ...columnasClientes(data)},
         where: 'id=?', whereArgs: [clienteId]);
     // Ronda 3-9 #6: el buscador offline (clientes_fts) debe ver el
     // nombre/teléfono nuevo sin esperar al pull; sin esto, buscar
@@ -3798,7 +3807,9 @@ class LocalDb {
     } else {
       data['tarifa_especial_transferencia'] = tarifa;
     }
-    await d.update('clientes', {'data': jsonEncode(data)},
+    // Argón P2#6: propagar las columnas dedicadas.
+    await d.update('clientes',
+        {'data': jsonEncode(data), ...columnasClientes(data)},
         where: 'id=?', whereArgs: [clienteId]);
   }
 
@@ -3814,7 +3825,9 @@ class LocalDb {
     final data =
         jsonDecode(rows.first['data'] as String) as Map<String, dynamic>;
     data['pagado_hasta'] = pagadoHasta;
-    await d.update('clientes', {'data': jsonEncode(data)},
+    // Argón P2#6: propagar las columnas dedicadas.
+    await d.update('clientes',
+        {'data': jsonEncode(data), ...columnasClientes(data)},
         where: 'id=?', whereArgs: [clienteId]);
   }
 
@@ -5137,6 +5150,21 @@ class LocalDb {
     n += await d.delete('gastos');
     n += await d.delete('auditoria_local');
     n += await d.delete('meta', where: "k = 'usuarios_apk'");
+    // Argón P2#8: al cerrar sesión tampoco pueden quedar las
+    // tablas exclusivas del dueño en un teléfono compartido.
+    for (final t in [
+      'liquidaciones_caja',
+      'incidencias_sync',
+      'nomina_liquidada',
+      'nomina_bonos',
+      'nomina_precalc',
+      'compras',
+    ]) {
+      try {
+        n += await d.delete(t);
+        await d.delete('meta', where: 'k = ?', whereArgs: ['wm_$t']);
+      } catch (_) {}
+    }
     // borradores y plantillas viven en SharedPreferences (perfil.dart);
     // se purgan desde AuthService.signOut.
     return n;
@@ -5690,7 +5718,12 @@ class LocalDb {
           // Formato: "timestamp:owner". Compatibilidad con locks viejos.
           final partes = v.split(':');
           final ts = int.tryParse(partes[0]) ?? 0;
-          if (ahora - ts < timeout) return null; // lock vigente
+          // Argón P2#9: si el reloj retrocedió más que la ventana
+          // del lock (ts en el futuro), el lock también se considera
+          // expirado; si no, un reloj adelantado lo bloquearía horas.
+          if (ahora - ts < timeout && ts - ahora <= timeout) {
+            return null; // lock vigente
+          }
         }
         await txn.insert('meta', {'k': 'sync_lock', 'v': '$ahora:$owner'},
             conflictAlgorithm: ConflictAlgorithm.replace);
@@ -5726,17 +5759,16 @@ class LocalDb {
 
   /// Libera el lock solo si el owner coincide.
   Future<void> liberarSyncLock(String? owner) async {
-    if (owner == null) return;
+    if (owner == null || owner.isEmpty) return;
     try {
       final d = await db;
-      final rows =
-          await d.query('meta', where: 'k = ?', whereArgs: ['sync_lock']);
-      if (rows.isEmpty) return;
-      final v = '${rows.first['v']}';
-      // Solo borra si yo soy el dueño actual.
-      if (v.endsWith(':$owner')) {
-        await d.delete('meta', where: 'k = ?', whereArgs: ['sync_lock']);
-      }
+      // Argón P2#7: borrado atómico en una sola sentencia: la
+      // lectura y el borrado separados permitían que un isolate
+      // borrara el lock recién adquirido por otro. GLOB es exacto
+      // (sin comodines en el owner: solo dígitos y '_').
+      await d.delete('meta',
+          where: 'k = ? AND v GLOB ?',
+          whereArgs: ['sync_lock', '*:$owner']);
     } catch (_) {}
   }
 

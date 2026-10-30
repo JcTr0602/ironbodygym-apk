@@ -9,25 +9,29 @@ import 'package:flutter/services.dart';
 import 'perfil.dart';
 
 /// "hace 5 min", "hace 2 h", "hace 3 d", o "ahora mismo".
+/// Argón P1#4 (auditoría sync 2026-10-29): la diferencia se calcula
+/// contra ahoraHabana() y la fecha se pasa por aHabana() si viene
+/// en UTC, para no correr el "hace X" cuando el reloj o la zona del
+/// teléfono no coinciden con La Habana.
 String hace(DateTime? fecha) {
   if (fecha == null) return 'nunca';
-  final ahora = DateTime.now();
-  final d = ahora.difference(fecha);
-  if (d.isNegative) return 'ahora mismo';
-  if (d.inMinutes < 1) return 'ahora mismo';
+  final ahora = ahoraHabana();
+  final fHab = fecha.isUtc ? aHabana(fecha) : fecha;
+  final d = ahora.difference(fHab);
+  if (d.isNegative || d.inMinutes < 1) return 'ahora mismo';
   if (d.inMinutes < 60) return 'hace ${d.inMinutes} min';
   if (d.inHours < 24) return 'hace ${d.inHours} h';
   if (d.inDays < 7) return 'hace ${d.inDays} d';
-  // Más de una semana: fecha absoluta corta.
-  return '${fecha.day.toString().padLeft(2, '0')}/'
-      '${fecha.month.toString().padLeft(2, '0')}/'
-      '${fecha.year}';
+  return '${fHab.day.toString().padLeft(2, '0')}/'
+      '${fHab.month.toString().padLeft(2, '0')}/'
+      '${fHab.year}';
 }
 
 /// Fecha absoluta completa: "11/10/2026 14:30".
+/// Argón P1#4: aHabana() en vez de toLocal() del dispositivo.
 String fechaAbsoluta(DateTime? fecha) {
   if (fecha == null) return '—';
-  final f = fecha.toLocal();
+  final f = fecha.isUtc ? aHabana(fecha) : fecha;
   return '${f.day.toString().padLeft(2, '0')}/'
       '${f.month.toString().padLeft(2, '0')}/'
       '${f.year} '
