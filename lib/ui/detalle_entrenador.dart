@@ -14,8 +14,10 @@ library;
 
 import 'package:flutter/material.dart';
 
+import '../auth.dart';
 import '../localdb.dart';
 import '../negocio.dart';
+import '../tiempo.dart';
 import 'componentes.dart';
 import 'diseno.dart';
 import 'ficha.dart';
@@ -63,7 +65,7 @@ class _DetalleEntrenadorScreenState extends State<DetalleEntrenadorScreen> {
 
   Future<void> _cargar() async {
     setState(() => _cargando = true);
-    final ahora = DateTime.now();
+    final ahora = ahoraHabana();
 
     // Rango según filtro
     late DateTime inicio;
@@ -235,6 +237,13 @@ class _DetalleEntrenadorScreenState extends State<DetalleEntrenadorScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // P2#9: pantalla de admin sin guarda de dueño.
+    if (!AuthService().isOwner) {
+      return Scaffold(
+          appBar: AppBar(title: Text(widget.nombre)),
+          body: const Center(
+              child: Text('Solo el dueño ve esta pantalla.')));
+    }
     return Scaffold(
       appBar: AppBar(title: Text(widget.nombre)),
       body: Column(

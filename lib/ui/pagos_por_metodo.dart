@@ -2,6 +2,7 @@
 // v1.3.9 Sprint 3 (#6): desglose de pagos por método.
 // SegmentedButton: Hoy | Mes Actual | Mes Anterior
 import 'package:flutter/material.dart';
+import '../auth.dart';
 import '../negocio.dart';
 import '../localdb.dart';
 import '../tiempo.dart';
@@ -65,8 +66,21 @@ class _PagosPorMetodoState
         final desde = iso(primerDiaMesAnterior);
         final hasta = iso(ultimoDiaMesAnterior);
 
+        // Argón P1#8: misma cobertura que pagosDelPeriodo (hoy/mes):
+        // pagos + diarios + suplementos + servicios, con Casa fuera.
+        final casas = await LocalDb.instance.idsCuentasCasa();
+        bool esCasa(Map<String, dynamic> p) {
+          if (p['casa'] == 1 || p['casa'] == true) return true;
+          final cid = p['cliente_id'];
+          final n = cid is num
+              ? cid.toInt()
+              : int.tryParse('$cid');
+          return n != null && casas.contains(n);
+        }
+
         for (final p in await LocalDb.instance
             .mirrorPorFecha('pagos', 'fecha', desde, hasta)) {
+          if (esCasa(p)) continue;
           final monto =
               (p['monto'] as num?)?.toDouble() ?? 0;
           final metodo =
@@ -79,17 +93,51 @@ class _PagosPorMetodoState
             efectivo += monto;
           }
         }
-        // Incluir pagos diarios del mes anterior
+        // Diarios (igual que pagosDelPeriodo: columna `total`).
         for (final d in await LocalDb.instance
-            .allMirror('pagos_diarios')) {
-          final f = '${d['fecha'] ?? ''}';
+            .mirrorPorFecha('pagos_diarios', 'fecha', desde, hasta)) {
+          efectivo += (d['total'] as num?)?.toDouble() ?? 0;
+        }
+        // Suplementos en CUP (efectivo).
+        for (final v in await ventasSuplementosCup()) {
+          final f = '${v['fecha'] ?? ''}';
           if (f.length >= 10) {
             final dia = f.substring(0, 10);
             if (dia.compareTo(desde) >= 0 &&
                 dia.compareTo(hasta) <= 0) {
+              efectivo += totalVentaCup(v);
+            }
+          }
+        }
+        // Servicios netos (sin reversos ni Casa; igual que
+        // _servicioVentasNetas de negocio.dart).
+        final ventasServ =
+            await LocalDb.instance.allMirror('servicio_ventas');
+        final reversadas = <int>{
+          for (final v in ventasServ)
+            if ((v['reverso_de'] as num?) != null)
+              (v['reverso_de'] as num).toInt(),
+        };
+        for (final v in ventasServ) {
+          if ((v['reverso_de'] as num?) != null) continue;
+          final id = (v['id'] as num?)?.toInt();
+          if (id != null && reversadas.contains(id)) continue;
+          if ((v['casa'] as num?)?.toInt() == 1) continue;
+          final f = '${v['fecha'] ?? ''}';
+          if (f.length >= 10) {
+            final dia = f.substring(0, 10);
+            if (dia.compareTo(desde) >= 0 &&
+                dia.compareTo(hasta) <= 0) {
+              // Terra 1.18: separar por método; una dosis o agua
+              // pagada por transferencia no es efectivo.
               final monto =
-                  (d['monto'] as num?)?.toDouble() ?? 0;
-              efectivo += monto; // diarios son efectivo
+                  ((v['precio_unitario'] as num?)?.toDouble() ?? 0) *
+                      ((v['cantidad'] as num?)?.toInt() ?? 0);
+              if ('${v['metodo']}' == 'transferencia') {
+                transferencia += monto;
+              } else {
+                efectivo += monto;
+              }
             }
           }
         }
@@ -134,6 +182,15 @@ class _PagosPorMetodoState
 
   @override
   Widget build(BuildContext context) {
+    // Argón P1#8: pantalla solo dueño.
+    if (!AuthService().isOwner) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Pagos por Método')),
+        body: const Center(
+          child: Text('Solo el dueño puede ver los pagos por método.'),
+        ),
+      );
+    }
     final total =
         _efectivo + _transferencia + _mixto;
 

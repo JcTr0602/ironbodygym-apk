@@ -9,6 +9,7 @@ import '../auth.dart';
 import '../fotos.dart';
 import '../localdb.dart';
 import '../negocio.dart';
+import '../tiempo.dart';
 import '../permisos_entrenador.dart';
 import '../permisos_visibilidad.dart';
 import '../sync.dart';
@@ -111,7 +112,7 @@ class _PagosRealizadosScreenState extends State<PagosRealizadosScreen> {
   }
 
   Future<void> _cargar() async {
-    final n = DateTime.now();
+    final n = ahoraHabana();
     final pref = '${n.year.toString().padLeft(4, '0')}-'
         '${n.month.toString().padLeft(2, '0')}';
 
@@ -190,7 +191,7 @@ class _PagosRealizadosScreenState extends State<PagosRealizadosScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final n = DateTime.now();
+    final n = ahoraHabana();
     const meses = [
       '', 'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio',
       'julio', 'agosto', 'septiembre', 'octubre', 'noviembre',

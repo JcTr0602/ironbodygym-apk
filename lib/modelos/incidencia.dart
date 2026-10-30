@@ -250,7 +250,7 @@ class IncidenciaFoto {
       syncEstado: '${m['sync_estado'] ?? 'pending'}',
       creadoEn: DateTime.tryParse(
               '${m['creado_en']}') ??
-          DateTime.now(),
+          ahoraHabana(),
     );
   }
 
@@ -294,7 +294,7 @@ class IncidenciaComentario {
       creadoPor: '${m['creado_por'] ?? ''}',
       creadoEn: DateTime.tryParse(
               '${m['creado_en']}') ??
-          DateTime.now(),
+          ahoraHabana(),
       syncEstado: '${m['sync_estado'] ?? 'pending'}',
     );
   }
@@ -343,7 +343,7 @@ class IncidenciaHistorial {
       cambiadoPor: '${m['cambiado_por']}',
       cambiadoEn: DateTime.tryParse(
               '${m['cambiado_en']}') ??
-          DateTime.now(),
+          ahoraHabana(),
     );
   }
 }

@@ -54,6 +54,7 @@ import 'negocio.dart'
         idsLiquidados,
         esPendiente,
         esPagoDiarioEfectivo,
+        fechaNacDeCarnet,
         ventasSuplementosCup,
         totalVentaCup;
 import 'invitados.dart' as invitados_svc;
@@ -617,15 +618,17 @@ bool puedeDispararMasivo({
 
 /// Cumpleaños hoy desde carnet de 6 dígitos (AAMMDD → MM-DD) o desde
 /// fecha_nac 'YYYY-MM-DD' si viene. [hoyMmDd] es 'MM-DD'.
+/// Argón P3#10-parte: el carnet de 11 también lleva la fecha en sus
+/// 6 primeros dígitos; fechaNacDeCarnet lo cubre (antes solo se
+/// miraba el carnet cuando tenía exactamente 6).
 bool esCumpleanosHoy(Map<String, dynamic> cliente, String hoyMmDd) {
   final fn = '${cliente['fecha_nac'] ?? ''}';
   if (fn.length >= 10) return fn.substring(5, 10) == hoyMmDd;
-  final carnet = '${cliente['carnet'] ?? ''}';
-  if (carnet.length == 6) {
-    return '${carnet.substring(2, 4)}-${carnet.substring(4, 6)}' ==
-        hoyMmDd;
-  }
-  return false;
+  final nac = fechaNacDeCarnet('${cliente['carnet'] ?? ''}');
+  if (nac == null) return false;
+  final mmDd =
+      '${nac.month.toString().padLeft(2, '0')}-${nac.day.toString().padLeft(2, '0')}';
+  return mmDd == hoyMmDd;
 }
 
 /// ¿Vence dentro de la ventana? [diasAnticipacion] incluye hoy (0).

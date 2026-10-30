@@ -233,6 +233,21 @@ class _VentaSuplementoScreenState
     // las validaciones y el diálogo de confirmación. Activarlo antes dejaba
     // el botón muerto si una validación fallaba.
     if (_guardando) return;
+    // Argón P1#2-parte: pre-chequeo de stock antes de confirmar
+    // (la transacción ya lanza «Stock insuficiente», pero sin esto
+    // el usuario llegaba al final para enterarse).
+    final stockActual =
+        (widget.suplemento['stock'] as num?)?.toInt() ?? 0;
+    if (_cantidad < 1 || _cantidad > stockActual) {
+      await DialogoApp.confirmar(context,
+          titulo: 'Stock insuficiente',
+          mensaje: _cantidad < 1
+              ? 'Indica una cantidad mayor que 0.'
+              : 'Solo quedan $stockActual en stock.',
+          aceptar: 'Entendido',
+          cancelar: '');
+      return;
+    }
     final precio =
         double.tryParse(_precio.text.trim().replaceAll(',', '.'));
     if (precio == null || precio <= 0) {
@@ -585,6 +600,19 @@ class _VentaSuplementoScreenState
   /// Abre la pantalla combinada inscripción + venta con los datos
   /// ya elegidos. Si vuelve con éxito, cierra esta pantalla también.
   Future<void> _irAInscripcionVenta() async {
+    // Argón P1#2-parte: mismo pre-chequeo de stock que _confirmar.
+    final stockActual =
+        (widget.suplemento['stock'] as num?)?.toInt() ?? 0;
+    if (_cantidad < 1 || _cantidad > stockActual) {
+      await DialogoApp.confirmar(context,
+          titulo: 'Stock insuficiente',
+          mensaje: _cantidad < 1
+              ? 'Indica una cantidad mayor que 0.'
+              : 'Solo quedan $stockActual en stock.',
+          aceptar: 'Entendido',
+          cancelar: '');
+      return;
+    }
     final precio =
         double.tryParse(_precio.text.trim().replaceAll(',', '.'));
     if (precio == null || precio <= 0) {
@@ -650,7 +678,7 @@ class _VentaSuplementoScreenState
           cantidad: _cantidad,
           precio: precio,
           moneda: _moneda,
-          usdTasa: _moneda == 'CUP' ? _tasaUsd : null,
+          usdTasa: _tasaUsd,
           precioOficial: oficialConvertido,
           notaPrecio:
               difiere && notaPrecio.isNotEmpty ? notaPrecio : null,
@@ -791,7 +819,14 @@ class _VentaSuplementoScreenState
           const SizedBox(height: AppEspacio.lg),
           BotonPrimario(
             texto: _guardando ? 'Registrando…' : 'Confirmar venta',
-            onPressed: _guardando ? null : _confirmar,
+            // Argón P1#2-parte: deshabilitado sin stock o si la
+            // cantidad supera el stock (el pre-chequeo en _confirmar
+            // cubre el mismo caso si el stock cambia en caliente).
+            onPressed: (_guardando ||
+                    stock < 1 ||
+                    _cantidad > stock)
+                ? null
+                : _confirmar,
           ),
         ],
       ),

@@ -4284,7 +4284,13 @@ class SyncEngine {
           await _db.countPendingOpsNoFoto() > 0,
     );
     if (res.estado == EstadoSubida.subida) return path;
-    // Fallback conservado (v1.2.6): si TUS falla, intento simple.
+    // Argón P1#2 (adaptado, 2026-10-29): el fallback PUT monolítico
+    // solo se permite ante permitirFallback. Ante pausadaPorQos
+    // (entró un cobro, QoS) o permanente (403) NO se dispara PUT:
+    // violaría la pausa y reintentaría un fallo definitivo.
+    // Ante reintentable tampoco: el reintento lo gestiona la cola
+    // (TUS reanuda en el offset guardado), no un PUT monolítico.
+    if (res.estado != EstadoSubida.permitirFallback) return null;
     final ok = await _subirFotoSimple(path, comprimida);
     return ok ? path : null;
   }

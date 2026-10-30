@@ -89,4 +89,87 @@ void main() {
       expect(0 * pagoPorCliente, 0.0);
     });
   });
+
+  group('P2#2 esActividadPropia', () {
+    test('op local en cola es propia aunque no traiga actor', () {
+      expect(
+          esActividadPropia({'_en_cola': true, 'actor': ''}),
+          isTrue);
+    });
+
+    test('actor igual al de la sesión es propio', () {
+      expect(
+          esActividadPropia({'actor': 'Duany'},
+              miActor: 'Duany'),
+          isTrue);
+    });
+
+    test('actor con sufijo (APK) y distinta capitalización es propio',
+        () {
+      expect(
+          esActividadPropia({'actor': 'Duany (APK)'},
+              miActor: 'duany'),
+          isTrue);
+    });
+
+    test('actor distinto no es propio', () {
+      expect(
+          esActividadPropia({'actor': 'Gabriel'},
+              miActor: 'Duany'),
+          isFalse);
+    });
+
+    test('actor vacío en item del servidor no se acredita (fail-closed)',
+        () {
+      expect(
+          esActividadPropia({'actor': ''}, miActor: 'Duany'),
+          isFalse);
+    });
+
+    test('sin actor de sesión, un nombre ajeno no se acredita', () {
+      expect(esActividadPropia({'actor': 'Duany'}), isFalse);
+    });
+  });
+
+  group('1.18 nombreDeDetalleActividad', () {
+    test('extrae el nombre antes del guion largo', () {
+      expect(
+          nombreDeDetalleActividad(
+              'Helen Guevara — 2000 CUP (mensual, vía APK)'),
+          'Helen Guevara');
+    });
+
+    test('acepta tildes y apóstrofe', () {
+      expect(
+          nombreDeDetalleActividad(
+              "José D'Angelo — 1500 CUP (mensual, vía APK)"),
+          "José D'Angelo");
+    });
+
+    test('una sola palabra no es nombre', () {
+      expect(nombreDeDetalleActividad('Duany — apertura turno'),
+          isNull);
+    });
+
+    test('con dígitos no es nombre', () {
+      expect(nombreDeDetalleActividad('Cliente 123 — pago'), isNull);
+    });
+
+    test('sin guion no hay nombre', () {
+      expect(nombreDeDetalleActividad('Pago mensual'), isNull);
+    });
+
+    test('vacío no es nombre', () {
+      expect(nombreDeDetalleActividad(''), isNull);
+    });
+
+    test('extrae nombre en inscripción Cuenta a la Casa y con punto/guion',
+        () {
+      // 5ta pasada (A3).
+      expect(
+          nombreDeDetalleActividad(
+              'Ma. del Carmen Pérez-López — Cuenta a la Casa, sin cobro (vía APK)'),
+          'Ma. del Carmen Pérez-López');
+    });
+  });
 }

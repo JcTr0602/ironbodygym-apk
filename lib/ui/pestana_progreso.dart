@@ -4,6 +4,7 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../auth.dart';
+import '../mediciones_cliente.dart';
 import '../tiempo.dart';
 import '../permisos_entrenador.dart';
 import 'editor_plan_nutricional.dart';
@@ -110,6 +111,36 @@ class _PestanaProgresoState extends State<PestanaProgreso> {
         });
       }
     } catch (e) {
+      // Argón P1#11: sin red, respaldo con el espejo local
+      // (medicionesClienteLocal): el modelo Medicion del RPC se
+      // reconstruye desde las filas planas del espejo
+      // (medidas: peso_kg, grasa_pct, ...; fecha_medicion).
+      final cid = int.tryParse(widget.clienteId);
+      final locales =
+          cid == null ? <Map<String, dynamic>>[] : await medicionesClienteLocal(cid);
+      if (mounted && locales.isNotEmpty) {
+        setState(() {
+          _mediciones = locales.map((r) {
+            final m = (r['medidas'] as Map?) ?? {};
+            return Medicion.fromJson({
+              'id': int.tryParse('${r['medicion_id'] ?? ''}') ?? 0,
+              'cliente_id': widget.clienteId,
+              'peso_kg': m['peso_kg'],
+              'grasa_pct': m['grasa_pct'],
+              'pecho_cm': m['pecho_cm'],
+              'cintura_cm': m['cintura_cm'],
+              'cadera_cm': m['cadera_cm'],
+              'brazo_cm': m['brazo_cm'],
+              'muslo_cm': m['muslo_cm'],
+              'notas': null,
+              'registrado_por': '',
+              'created_at': r['fecha_medicion'],
+            });
+          }).toList();
+          _cargando = false;
+        });
+        return;
+      }
       if (mounted) {
         setState(() {
           _error = '$e';

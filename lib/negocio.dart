@@ -183,12 +183,13 @@ Future<List<Map<String, dynamic>>> buscarClientes(String q) async {
   // Si la query es numérica, buscar por teléfono primero (vía FTS).
   // v1.3 (auditoría Gemini): criterio refinado —
   // - Cadena estrictamente numérica de 4+ dígitos (permite prefijos como "5819")
-  // - O contiene un segmento que empieza con 5 de 4+ dígitos (móviles Cuba)
+  // - O contiene un segmento que empieza con 5 o 6 de 4+ dígitos (móviles Cuba)
   // Evita falsos positivos con "calle 42" pero preserva búsqueda por prefijo.
   final digitos = q.replaceAll(RegExp(r'[^0-9]'), '');
   final esSoloDigitos = RegExp(r'^\d{4,}$').hasMatch(q.trim());
   final tienePrefijoMovil =
-      digitos.startsWith('5') && digitos.length >= 4;
+      (digitos.startsWith('5') || digitos.startsWith('6')) &&
+          digitos.length >= 4;
   if (esSoloDigitos || tienePrefijoMovil) {
     final ids = await db.buscarClientesFtsIds(digitos, porTelefono: true);
     await cargarPorIds(ids);
@@ -657,12 +658,26 @@ double totalVentaCup(Map<String, dynamic> v) {
 }
 
 /// Ventas de suplementos en CUP del espejo local.
+/// Argón P3#2 (parte fiados, REAL): una venta al fiado sin saldar no es
+/// ingreso ni pendiente a entregar hasta saldarse, así que queda fuera
+/// aquí (y, por tanto, en pendienteEntrega/pendienteArqueo, que usan
+/// este helper). Las ventas anuladas NO se filtran: el servidor las
+/// borra con DELETE + tombstone, no quedan filas marcadas en el espejo.
 Future<List<Map<String, dynamic>>> ventasSuplementosCup() async {
   final out = <Map<String, dynamic>>[];
   for (final v in await LocalDb.instance.allMirror('ventas_suplementos')) {
-    if ((v['moneda'] as String?) == 'CUP') out.add(v);
+    if ((v['moneda'] as String?) == 'CUP' && !_esFiadoSinSaldar(v)) {
+      out.add(v);
+    }
   }
   return out;
+}
+
+/// True si la venta es al fiado y aún no está saldada.
+bool _esFiadoSinSaldar(Map<String, dynamic> v) {
+  final esFiado = v['es_fiado'] == 1 || v['es_fiado'] == true;
+  final saldado = v['fiado_saldado'] == 1 || v['fiado_saldado'] == true;
+  return esFiado && !saldado;
 }
 
 /// Monto en USD de una venta de suplemento (0 si es en CUP u otra moneda).
@@ -677,10 +692,13 @@ double totalVentaUsd(Map<String, dynamic> v) {
 }
 
 /// Ventas de suplementos en USD del espejo local.
+/// Igual que en CUP: fuera las ventas al fiado sin saldar (Argón P3#2).
 Future<List<Map<String, dynamic>>> ventasSuplementosUsd() async {
   final out = <Map<String, dynamic>>[];
   for (final v in await LocalDb.instance.allMirror('ventas_suplementos')) {
-    if ((v['moneda'] as String?) == 'USD') out.add(v);
+    if ((v['moneda'] as String?) == 'USD' && !_esFiadoSinSaldar(v)) {
+      out.add(v);
+    }
   }
   return out;
 }
@@ -2628,6 +2646,19 @@ Future<(double, double)> miTurnoHoy(int? telegramId, {String? fecha}) async {
       cobrado += totalVentaCup(v);
     }
   }
+  // Argón P3#2-turno (REAL): las ventas de Servicios del espejo también
+  // son cobrado del día; sin este bucle, al sincronizar el "Cobrado hoy"
+  // perdía las dosis y el agua. _servicioVentasNetas() ya excluye Casa
+  // y reversos; la gaveta es del responsable del efectivo.
+  for (final v in await _servicioVentasNetas()) {
+    final resp = LocalDb.normalizarTelegramId(v['responsable_efectivo_id']) ??
+        LocalDb.normalizarTelegramId(v['registrado_por']);
+    if (resp != telegramId) continue;
+    final f = '${v['fecha'] ?? ''}';
+    if (f.length >= 10 && f.substring(0, 10) == hoy) {
+      cobrado += _montoServicioVenta(v);
+    }
+  }
   // v1.3.1: incluir ops pendientes de hoy en cobrado (offline).
   final pr = await preciosVigentes();
   for (final op in await LocalDb.instance.pendingOps()) {
@@ -2653,6 +2684,11 @@ Future<(double, double)> miTurnoHoy(int? telegramId, {String? fecha}) async {
 /// NOTA: pagos_count y total_cobrado son movimientos del DÍA del
 /// entrenador (lo que devuelve miTurnoHoy), no solo de la franja que
 /// se cierra. Las franjas del gym son informativas; el cuadre es diario.
+/// NOTA (decisión Jc 2026-10-30): los fiados CUENTAN como registros
+/// en pagos_count (la pantalla muestra «Operaciones»), aunque su
+/// dinero no sume en miTurnoHoy hasta saldarse. Contar registros no
+/// es sumar montos, por diseño: un fiado es una operación del día,
+/// no un cobro recibido.
 /// [fecha] opcional (YYYY-MM-DD): si se omite usa hoy. Ver [miTurnoHoy].
 Future<int> conteoPagosDia(int? telegramId, {String? fecha}) async {
   if (telegramId == null) return 0;
@@ -2680,6 +2716,17 @@ Future<int> conteoPagosDia(int? telegramId, {String? fecha}) async {
   for (final v in await LocalDb.instance.allMirror('ventas_suplementos')) {
     if (LocalDb.normalizarTelegramId(v['registrado_por']) == telegramId &&
         (v['fecha'] as String?) == hoy) {
+      n++;
+    }
+  }
+  // Argón P3#2-turno (REAL): las ventas de Servicios del espejo también
+  // cuentan como cobros del día (mismo filtro que en miTurnoHoy).
+  for (final v in await _servicioVentasNetas()) {
+    final resp = LocalDb.normalizarTelegramId(v['responsable_efectivo_id']) ??
+        LocalDb.normalizarTelegramId(v['registrado_por']);
+    if (resp != telegramId) continue;
+    final f = '${v['fecha'] ?? ''}';
+    if (f.length >= 10 && f.substring(0, 10) == hoy) {
       n++;
     }
   }
@@ -2791,6 +2838,18 @@ Future<List<Map<String, dynamic>>> historialTurno(int? telegramId,
     suma(f.substring(0, 10), (d['total'] as num?)?.toDouble() ?? 0,
         'efectivo',
         'Diario ${d['turno'] ?? ''} x${d['cantidad'] ?? '?'}');
+  }
+  // Argón P3#2-turno (REAL): las ventas de Servicios del espejo también
+  // entran al historial, agrupadas por su propio día (no solo hoy).
+  for (final v in await _servicioVentasNetas()) {
+    final resp = LocalDb.normalizarTelegramId(v['responsable_efectivo_id']) ??
+        LocalDb.normalizarTelegramId(v['registrado_por']);
+    if (resp != telegramId) continue;
+    final f = '${v['fecha'] ?? ''}';
+    if (f.length < 10) continue;
+    final metodo = '${v['metodo'] ?? 'efectivo'}';
+    suma(f.substring(0, 10), _montoServicioVenta(v), metodo,
+        'Servicio x${v['cantidad'] ?? '?'} ($metodo)');
   }
   final lista = porDia.values.toList()
     ..sort((a, b) => '${b['fecha']}'.compareTo('${a['fecha']}'));

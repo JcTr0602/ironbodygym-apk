@@ -6,6 +6,7 @@
 library;
 
 import 'package:flutter/material.dart';
+import '../cliente_protegido.dart';
 import '../negocio.dart';
 
 import '../localdb.dart';
@@ -37,7 +38,9 @@ class _CongeladosScreenState extends State<CongeladosScreen> {
     setState(() => _cargando = true);
     final todos = await LocalDb.instance.allMirror('clientes');
     final congelados = todos
-        .where((c) => '${c['estado'] ?? 'activo'}' == 'congelado')
+        .where((c) =>
+            '${c['estado'] ?? 'activo'}' == 'congelado' &&
+            !esVistaProtegida(c))
         .toList();
     congelados.sort(compararPorNombre);
     if (mounted) {

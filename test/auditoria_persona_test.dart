@@ -170,8 +170,8 @@ void main() {
           {'fecha': '2026-10-05', 'total': 600.0, 'registrado_por': 111},
         ],
         ventasSuplementos: [
-          {'fecha': '2026-10-05', 'precio_unitario': 5000.0, 'cantidad': 1, 'registrado_por': 111, 'estado': 'activa'},
-          {'fecha': '2026-10-06', 'precio_unitario': 5000.0, 'cantidad': 1, 'registrado_por': 111, 'estado': 'anulada'},
+          {'fecha': '2026-10-05', 'precio': 5000.0, 'cantidad': 1, 'registrado_por': 111, 'estado': 'activa'},
+          {'fecha': '2026-10-06', 'precio': 5000.0, 'cantidad': 1, 'registrado_por': 111, 'estado': 'anulada'},
         ],
         ventasServicios: [
           {'fecha': '2026-10-05', 'precio_unitario': 600.0, 'cantidad': 2, 'comision_unitaria': 100.0, 'registrado_por': 111, 'casa': 0},

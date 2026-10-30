@@ -218,8 +218,22 @@ String textoResumenSemanal({
   required List<Map<String, dynamic>> salidas,
   required List<Map<String, dynamic>> botes,
   required Map<int, int> boteDeLote,
+  // Argón pasada 3 #3-parte: desde v1.15 las ventas/salidas
+  // llevan pomo_id. Si viene, el bote se resuelve por pomo
+  // primero y solo se cae a lote_id con ventas viejas.
+  // El respaldo costo_dosis_snapshot NO se toca: costo total
+  // y costo Casa ya lo usan y deben seguir igual.
+  Map<int, int>? boteDePomo,
   required List<Map<String, dynamic>> movsAgua,
 }) {
+  int? boteDe(Map<String, dynamic> r) {
+    final pomoId = (r['pomo_id'] as num?)?.toInt();
+    if (pomoId != null) {
+      final porPomo = boteDePomo?[pomoId];
+      if (porPomo != null) return porPomo;
+    }
+    return boteDeLote[(r['lote_id'] as num?)?.toInt()];
+  }
   final costoDosisPorBote = <int, double>{};
   var inversionBotes = 0.0;
   for (final b in botes) {
@@ -270,7 +284,7 @@ String textoResumenSemanal({
         ingAgua += precio * cant;
     }
     if (!esCasa && tipo.startsWith('dosis')) {
-      final boteId = boteDeLote[(v['lote_id'] as num?)?.toInt()];
+      final boteId = boteDe(v);
       // Panel Luna P2a: la Casa ya usaba el snapshot como respaldo;
       // la comercial huérfana (sin bote) quedaba a costo 0. Mismo
       // respaldo aquí: sin bote no hay costo actual que usar.
@@ -301,7 +315,7 @@ String textoResumenSemanal({
   var mermasCosto = 0.0;
   for (final s in salidas) {
     if ('${s['motivo']}' != 'merma') continue;
-    final boteId = boteDeLote[(s['lote_id'] as num?)?.toInt()];
+    final boteId = boteDe(s);
     mermasCosto += ((s['dosis'] as num?)?.toDouble() ?? 0) *
         (costoDosisPorBote[boteId] ?? 0);
   }
@@ -310,7 +324,7 @@ String textoResumenSemanal({
     if ((v['casa'] as num?)?.toInt() != 1) continue;
     final cant = (v['cantidad'] as num?)?.toInt() ?? 0;
     casaN += cant;
-    final boteId = boteDeLote[(v['lote_id'] as num?)?.toInt()];
+    final boteId = boteDe(v);
     final unit = costoDosisPorBote[boteId] ??
         ((v['costo_dosis_snapshot'] as num?)?.toDouble() ?? 0);
     casaCosto += unit * cant +

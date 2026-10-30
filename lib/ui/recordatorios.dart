@@ -139,18 +139,24 @@ class _RecordatoriosScreenState extends State<RecordatoriosScreen> {
                   style: AppTexto.secundario,
                 ),
               const SizedBox(height: 8),
-              Text('Días de anticipación (vencimiento): $dias'),
-              Slider(
-                  value: dias.toDouble(),
-                  min: 0,
-                  max: 14,
-                  divisions: 14,
-                  onChanged: (v) =>
-                      setDialogState(() => dias = v.round())),
-              TextField(
-                  controller: fechaCtrl,
-                  decoration: const InputDecoration(
-                      labelText: 'Fecha fija (personalizado, YYYY-MM-DD)')),
+              // Argón P2#15: el slider de días solo tiene sentido
+              // para vencimiento/cumpleaños; el personalizado usa
+              // fecha fija.
+              if (tipo != 'personalizado') ...[
+                Text('Días de anticipación (vencimiento): $dias'),
+                Slider(
+                    value: dias.toDouble(),
+                    min: 0,
+                    max: 14,
+                    divisions: 14,
+                    onChanged: (v) =>
+                        setDialogState(() => dias = v.round())),
+              ],
+              if (tipo == 'personalizado')
+                TextField(
+                    controller: fechaCtrl,
+                    decoration: const InputDecoration(
+                        labelText: 'Fecha fija (personalizado, YYYY-MM-DD)')),
             ],
           ),
         ),
@@ -168,6 +174,26 @@ class _RecordatoriosScreenState extends State<RecordatoriosScreen> {
     if (ok != true) return;
     final titulo = tituloCtrl.text.trim();
     if (titulo.isEmpty) return;
+    // Argón P2#15: validar la fecha fija antes de crear.
+    if (tipo == 'personalizado') {
+      final fechaTxt = fechaCtrl.text.trim();
+      final partes = fechaTxt.split('-');
+      final parsed = partes.length == 3
+          ? DateTime.tryParse(fechaTxt)
+          : null;
+      final fechaValida = parsed != null &&
+          parsed.year.toString().padLeft(4, '0') == partes[0] &&
+          parsed.month.toString().padLeft(2, '0') == partes[1] &&
+          parsed.day.toString().padLeft(2, '0') == partes[2];
+      if (!fechaValida) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+              content: Text(
+                  'Fecha inválida: usa el formato YYYY-MM-DD.')));
+        }
+        return;
+      }
+    }
     try {
       await RecordatoriosService.instance.crear(
         titulo: titulo,

@@ -10,12 +10,14 @@ library;
 
 import 'package:flutter/material.dart';
 
+import '../cliente_protegido.dart';
 import '../localdb.dart';
 import '../negocio.dart';
 import '../tiempo.dart';
 import 'componentes.dart';
 import 'diseno.dart';
 import 'ficha.dart';
+import 'suplementos.dart';
 
 /// B2: las 14 claves de permiso, explicadas en sencillo.
 const kPermisosExplicados = {
@@ -170,9 +172,19 @@ class _SinFotoPrecioScreenState extends State<SinFotoPrecioScreen> {
   Future<void> _cargar() async {
     final todos = await LocalDb.instance.allMirror('suplementos');
     final mal = todos.where((s) {
-      final foto = '${s['foto_url'] ?? s['foto'] ?? ''}';
-      final precio = (s['precio'] as num?)?.toDouble();
-      return foto.isEmpty || precio == null || precio <= 0;
+      // P2#7: fuera eliminados e inactivos (activo != 1).
+      final eliminado = s['eliminado'];
+      if (eliminado == 1 || eliminado == true) return false;
+      final act = s['activo'];
+      if (act == 0 || act == false) return false;
+      // P2#7: las claves vivas son foto_storage/foto_local y
+      // precio_oficial (foto_url/precio son claves viejas).
+      final fotoLocal = '${s['foto_local'] ?? ''}';
+      final fotoStorage = '${s['foto_storage'] ?? ''}';
+      final precio = (s['precio_oficial'] as num?)?.toDouble();
+      return (fotoLocal.isEmpty && fotoStorage.isEmpty) ||
+          precio == null ||
+          precio <= 0;
     }).toList();
     if (!mounted) return;
     setState(() {
@@ -202,6 +214,14 @@ class _SinFotoPrecioScreenState extends State<SinFotoPrecioScreen> {
                               color: Colors.orange),
                           title: Text('${s['nombre'] ?? 'Producto'}'),
                           subtitle: Text(_motivo(s)),
+                          // P2#7: tocar abre la edición del producto.
+                          onTap: () => Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                  builder: (_) =>
+                                      EditarSuplementoScreen(
+                                          suplemento: s))).then(
+                              (_) => _cargar()),
                         ),
                       ),
                   ],
@@ -210,8 +230,11 @@ class _SinFotoPrecioScreenState extends State<SinFotoPrecioScreen> {
   }
 
   String _motivo(Map<String, dynamic> s) {
-    final foto = '${s['foto_url'] ?? s['foto'] ?? ''}';
-    final precio = (s['precio'] as num?)?.toDouble();
+    final fotoLocal = '${s['foto_local'] ?? ''}';
+    final fotoStorage = '${s['foto_storage'] ?? ''}';
+    final foto =
+        fotoLocal.isNotEmpty ? fotoLocal : fotoStorage;
+    final precio = (s['precio_oficial'] as num?)?.toDouble();
     final motivos = <String>[];
     if (foto.isEmpty) motivos.add('sin foto');
     if (precio == null || precio <= 0) motivos.add('sin precio');
@@ -250,7 +273,10 @@ class _VencimientosProximosScreenState
     final proximos = <Map<String, dynamic>>[];
     for (final c in todos) {
       if (c['cuenta_casa'] == 1 || c['cuenta_casa'] == true) continue;
-      if ((c['estado'] as String?) == 'congelado') continue;
+      // P2#5: solo activos (esto ya excluye congelado, inactivo y
+      // la cáscara 'eliminado'), y nunca protegidos para no-dueño.
+      if ((c['estado'] as String?) != 'activo') continue;
+      if (esVistaProtegida(c)) continue;
       final ph = '${c['pagado_hasta'] ?? ''}';
       if (ph.length < 10) continue;
       final f = ph.substring(0, 10);

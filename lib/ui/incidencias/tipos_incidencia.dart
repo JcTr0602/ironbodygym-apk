@@ -5,6 +5,7 @@ import 'package:uuid/uuid.dart';
 import '../../auth.dart';
 import '../../localdb.dart';
 import '../../modelos/incidencia.dart';
+import '../../tiempo.dart';
 import '../diseno.dart';
 
 /// CRUD de tipos de incidencia (solo dueño).
@@ -49,6 +50,14 @@ class _TiposIncidenciaScreenState
 
   @override
   Widget build(BuildContext context) {
+    // P2#9: CRUD solo dueño sin guarda.
+    if (!AuthService().isOwner) {
+      return Scaffold(
+          appBar: AppBar(
+              title: const Text('Tipos de incidencia')),
+          body: const Center(
+              child: Text('Solo el dueño ve esta pantalla.')));
+    }
     return Scaffold(
       appBar: AppBar(
         title:
@@ -142,6 +151,8 @@ class _TiposIncidenciaScreenState
   /// Ajuste Gemini: corrección de índice + op consolidada.
   Future<void> _reordenar(
       int oldIndex, int newIndex) async {
+    // P2#9: escritura solo-dueño.
+    if (!AuthService().isOwner) return;
     // Corrección obligatoria de Flutter
     if (oldIndex < newIndex) {
       newIndex -= 1;
@@ -182,8 +193,7 @@ class _TiposIncidenciaScreenState
           ],
         }),
         'estado': 'pendiente',
-        'creada_ts':
-            DateTime.now().toIso8601String(),
+        'creada_ts': isoHabana(ahoraHabana()),
         'user_id': AuthService().userId,
         'telegram_id': AuthService().telegramId,
       });
@@ -193,6 +203,8 @@ class _TiposIncidenciaScreenState
 
   Future<void> _cambiarActivo(
       TipoIncidencia t, bool activo) async {
+    // P2#9: escritura solo-dueño.
+    if (!AuthService().isOwner) return;
     // Fix #9 (Sol): mutación + encolado atómicos.
     await LocalDb.instance.mutarYEncolar(
       tabla: 'incidencias_tipos',
@@ -213,6 +225,8 @@ class _TiposIncidenciaScreenState
 
   Future<void> _mostrarDialogo(
       TipoIncidencia? existente) async {
+    // P2#9: escritura solo-dueño.
+    if (!AuthService().isOwner) return;
     final res = await showDialog<
         Map<String, dynamic>>(
       context: context,

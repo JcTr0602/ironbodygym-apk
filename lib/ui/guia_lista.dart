@@ -17,6 +17,7 @@ import '../config.dart';
 import '../guia_validacion.dart';
 import '../localdb.dart';
 import '../sync.dart';
+import '../tiempo.dart';
 import 'diseno.dart';
 import 'guia_editor.dart';
 import 'guia_equipos.dart';
@@ -187,6 +188,13 @@ class _GuiaScreenState extends State<GuiaScreen> {
     final fallos = <String>[];
     try {
       for (final b in List.of(_borradores)) {
+        // Argón P2#13: un borrador obsoleto no se encola ni pierde
+        // su imagen local; queda en fallos para revisarlo.
+        if (_obsoleto(b)) {
+          fallos.add(
+              '${b['slug']}: borrador obsoleto (hay una versión publicada más reciente).');
+          continue;
+        }
         final doc = _docBorrador(b);
         final slug = '${doc['id']}';
         final errores = GuiaValidacion.validar(doc,
@@ -222,7 +230,7 @@ class _GuiaScreenState extends State<GuiaScreen> {
           'base_revision': base + 1,
           'imagen_cambiada': 0,
           'imagen_local': '',
-          'actualizado_ts': DateTime.now().toIso8601String(),
+          'actualizado_ts': isoHabana(ahoraHabana()),
         });
         if (local.isNotEmpty) await _db.guiaBorrarImagenLocal(local);
         if (cambioImagen && !tieneImagen) {

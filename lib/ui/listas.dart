@@ -6,6 +6,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../localdb.dart';
 import '../negocio.dart';
+import '../tiempo.dart';
 import '../sync.dart';
 import '../cliente_protegido.dart';
 import 'buscar.dart';
@@ -192,11 +193,12 @@ class _ListasScreenState extends State<ListasScreen>
     );
   }
 
-  /// v1.2.4 (C7): móvil cubano del cliente (8 dígitos) o null.
+  /// v1.2.4 (C7): móvil cubano del cliente para wa.me (con prefijo
+  /// 53) o null. Argón P3#5: normalizarTelefonoWaMe acepta 5 y 6.
   String? _movilCliente(Map<String, dynamic> c) {
-    var t = '${c['telefono'] ?? ''}'.replaceAll(RegExp(r'\D'), '');
-    if (t.startsWith('53') && t.length > 8) t = t.substring(2);
-    return (t.length == 8 && t.startsWith('5')) ? t : null;
+    final normalizado =
+        normalizarTelefonoWaMe('${c['telefono'] ?? ''}');
+    return normalizado.isEmpty ? null : normalizado;
   }
 
   Future<String?> _elegirAviso(Map<String, dynamic> c) async {
@@ -234,14 +236,14 @@ class _ListasScreenState extends State<ListasScreen>
     final venceTxt = f.isEmpty
         ? 'tu mensualidad está por vencer'
         : (hasta.substring(0, 10).compareTo(
-                    DateTime.now().toIso8601String().substring(0, 10)) <
+                    hoyHabanaIso()) <
                 0
             ? 'tu mensualidad venció el $f'
             : 'tu mensualidad vence el $f');
     final msg = 'Hola $nombre 👋, te recordamos de Iron Body Gym que '
         '$venceTxt. ¡Te esperamos para seguir entrenando! 💪';
     final ok = await launchUrl(
-        Uri.parse('https://wa.me/53$movil?text=${Uri.encodeComponent(msg)}'),
+        Uri.parse('https://wa.me/$movil?text=${Uri.encodeComponent(msg)}'),
         mode: LaunchMode.externalApplication);
     if (!ok && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(

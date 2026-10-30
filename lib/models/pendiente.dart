@@ -49,7 +49,7 @@ class PagoPendiente {
       id: id,
       monto: monto,
       moneda: moneda ?? 'CUP',
-      fecha: fechaParsed.toLocal(),
+      fecha: aHabana(fechaParsed),
       tipo: map['tipo'] as String? ?? 'mensual',
       descripcion: map['descripcion'] as String? ?? '',
       entrenador:

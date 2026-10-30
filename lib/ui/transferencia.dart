@@ -210,7 +210,7 @@ class _TransferenciaScreenState extends State<TransferenciaScreen> {
       if (d.startsWith('53') && d.length > 8) {
         d = d.substring(2);
       }
-      if (d.length == 8 && d.startsWith('5')) {
+      if (d.length == 8 && validarTelefono(d)) {
         ctrl.text = d;
         return;
       }
@@ -230,7 +230,7 @@ class _TransferenciaScreenState extends State<TransferenciaScreen> {
     if (movil.startsWith('53') && movil.length > 8) {
       movil = movil.substring(2);
     }
-    if (movil.length != 8 || !movil.startsWith('5')) {
+    if (!validarTelefono(movil)) {
       ScaffoldMessenger.of(ctx).showSnackBar(const SnackBar(
           content:
               Text('Escribe un móvil cubano válido (8 dígitos)')));

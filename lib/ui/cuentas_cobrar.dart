@@ -6,10 +6,14 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 
+import '../cliente_protegido.dart';
 import '../fotos.dart';
 import '../negocio.dart';
+import '../precio_cobro.dart';
+import '../tiempo.dart';
 import 'componentes.dart';
 import 'diseno.dart';
+import 'ficha.dart';
 import 'widgets.dart';
 
 class CuentasCobrarScreen extends StatefulWidget {
@@ -34,11 +38,14 @@ class _CuentasCobrarScreenState
 
   Future<void> _cargar() async {
     setState(() => _cargando = true);
-    final hoy = DateTime.now();
+    final hoy = ahoraHabana();
     final todos = <Map<String, dynamic>>[
       ...await atrasados(masDe30: false),
       ...await atrasados(masDe30: true),
-    ];
+    ]
+        // P2#5: los protegidos no aparecen para un no-dueño.
+        .where((c) => !esVistaProtegida(c))
+        .toList();
     final res = <Map<String, dynamic>>[];
     double total = 0;
     // v1.3.2 (Argón #16): tarifa vigente una sola vez (fuera del loop).
@@ -56,13 +63,20 @@ class _CuentasCobrarScreenState
           if (dias < 0) dias = 0;
         }
       }
-      // v1.3.2 (Argón #16): el espejo clientes no trae monto_mensualidad;
-      // usar la tarifa vigente (menores si aplica).
-      final monto = esMenor(c['carnet'] as String?)
-          ? pr['menores']!
-          : pr['mensual']!;
+      // P2#5: precioCobroParaCliente respeta tarifas especiales
+      // (el esMenor?menores:mensual viejo las ignoraba). Casa ya
+      // queda fuera en atrasados(); si aun así llegara, su precio
+      // es 0 y no infla el total.
+      final precio = await precioCobroParaCliente(
+        cliente: c,
+        periodo: 'mensual',
+        metodo: 'efectivo',
+        precios: pr,
+      );
+      final monto = precio.monto;
       total += monto;
       res.add({
+        'cliente_id': (c['id'] as num?)?.toInt(),
         'nombre': '${c['nombre'] ?? '—'}',
         'dias': dias,
         'monto': monto,
@@ -167,6 +181,16 @@ class _CuentasCobrarScreenState
                                       color:
                                           AppColores.naranja),
                             ),
+                            // P2#5: tocar abre la ficha (desde donde
+                            // se cobra); antes la fila no tenía onTap.
+                            onTap: () {
+                              final cid = c['cliente_id'] as int?;
+                              if (cid == null || cid == 0) return;
+                              Navigator.of(context).push(
+                                  MaterialPageRoute(
+                                      builder: (_) => FichaScreen(
+                                          clienteId: cid)));
+                            },
                           ),
                         ),
                       ),

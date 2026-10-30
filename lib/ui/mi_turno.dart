@@ -14,6 +14,7 @@ import '../localdb.dart';
 import '../negocio.dart';
 import '../sync.dart';
 import '../tiempo.dart';
+import '../turno_service.dart';
 import 'componentes.dart';
 import 'diseno.dart';
 import 'ficha.dart';
@@ -103,8 +104,8 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
     final ayer = _ayerIso();
     double cobradoAyer = 0;
     double semanaAnt = 0;
-    final hace8 = DateTime.now().subtract(const Duration(days: 8));
-    final hace15 = DateTime.now().subtract(const Duration(days: 15));
+    final hace8 = ahoraHabana().subtract(const Duration(days: 8));
+    final hace15 = ahoraHabana().subtract(const Duration(days: 15));
     final f8 = _iso(hace8);
     final f15 = _iso(hace15);
     for (final h in hist) {
@@ -148,7 +149,7 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
       int? tid) async {
     if (tid == null) return [];
     final hoy = _hoy();
-    final limite = _iso(DateTime.now().add(const Duration(days: 7)));
+    final limite = _iso(ahoraHabana().add(const Duration(days: 7)));
     // Clientes que el entrenador inscribió o a los que cobró
     final mios = <int>{};
     for (final c in await LocalDb.instance.allMirror('clientes')) {
@@ -188,12 +189,12 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
       '${d.day.toString().padLeft(2, '0')}';
 
   String _ayerIso() =>
-      _iso(DateTime.now().subtract(const Duration(days: 1)));
+      _iso(ahoraHabana().subtract(const Duration(days: 1)));
 
   /// Turno actual según la hora (v1.0.16).
   /// v1.1.1: id corto para la clave de cierre (mañana/tarde/noche).
   String _turnoId() {
-    final h = DateTime.now().hour;
+    final h = ahoraHabana().hour;
     if (h >= 5 && h < 12) return 'manana';
     if (h >= 12 && h < 18) return 'tarde';
     return 'noche';
@@ -203,11 +204,21 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
   String _claveCierre() =>
       'cierre_turno_${_hoy()}_${_turnoId()}_${_auth.telegramId}';
 
-  Future<bool> _turnoCerrado() async =>
-      (await LocalDb.instance.getMeta(_claveCierre())) != null;
+  /// Estado de cierre: primero el turno canónico de TurnoService
+  /// (Argón P1#10); la meta legada solo como respaldo cuando nunca
+  /// se abrió un turno por el flujo de Home.
+  Future<bool> _turnoCerrado() async {
+    try {
+      final visible = await TurnoService.instance.turnoVisible();
+      if ('${visible?['estado'] ?? ''}'.startsWith('cerrado')) {
+        return true;
+      }
+    } catch (_) {}
+    return (await LocalDb.instance.getMeta(_claveCierre())) != null;
+  }
 
   String _turnoActual() {
-    final h = DateTime.now().hour;
+    final h = ahoraHabana().hour;
     if (h >= 5 && h < 12) return 'Turno de mañana';
     if (h >= 12 && h < 18) return 'Turno de tarde';
     return 'Turno de noche';
@@ -215,7 +226,7 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
 
   /// Icono según el turno actual.
   IconData _iconoTurno() {
-    final h = DateTime.now().hour;
+    final h = ahoraHabana().hour;
     if (h >= 5 && h < 12) return Icons.wb_sunny_outlined;
     if (h >= 12 && h < 18) return Icons.wb_sunny;
     return Icons.nights_stay_outlined;
@@ -223,7 +234,7 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
 
   /// Total cobrado en los últimos 7 días (incluye hoy).
   double _cobradoSemana() {
-    final hace7 = _iso(DateTime.now().subtract(const Duration(days: 7)));
+    final hace7 = _iso(ahoraHabana().subtract(const Duration(days: 7)));
     double t = 0;
     for (final h in _historial) {
       final f = '${h['fecha'] ?? ''}';
@@ -453,9 +464,38 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
                   );
                   if (confirma != true) return;
                 }
+                // Argón P1#10: delegar en TurnoService cuando hay un
+                // turno abierto: confirmarCierre() ya encola el mismo
+                // registrarCierreTurno (reporte a admin preservado)
+                // y marca el turno cerrado en la tabla `turnos`.
+                // Sin turno abierto no hay nada que delegar: se
+                // conserva el camino legado para no perder el reporte.
+                final turnoAbierto =
+                    await TurnoService.instance.turnoActual();
+                if (turnoAbierto != null) {
+                  final prep =
+                      await TurnoService.instance.prepararCierre();
+                  if (prep['ok'] == true) {
+                    await TurnoService.instance.confirmarCierre(
+                      turnoId: '${prep['turnoId']}',
+                      forzado: pendientes.isNotEmpty ||
+                          bloqueadas.isNotEmpty,
+                    );
+                    await vibrarConfirmacion();
+                    if (ctx.mounted) Navigator.of(ctx).pop();
+                    if (mounted) {
+                      setState(() => _cerrado = true);
+                      ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                              content: Text(
+                                  'Turno cerrado. ¡Buen trabajo!')));
+                    }
+                    return;
+                  }
+                }
                 await LocalDb.instance.setMeta(
                     _claveCierre(),
-                    DateTime.now().toIso8601String());
+                    isoHabana(ahoraHabana()));
                 // v1.2.5-rev5 (Gemini): encolar el cierre para sincronizar.
                 // El admin ve el historial de todos los entrenadores.
                 // v1.2.5-rev6: pagos_count = operaciones de pago reales de
@@ -486,12 +526,7 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
     );
   }
 
-  String _hoy() {
-    final n = DateTime.now();
-    return '${n.year.toString().padLeft(4, '0')}-'
-        '${n.month.toString().padLeft(2, '0')}-'
-        '${n.day.toString().padLeft(2, '0')}';
-  }
+  String _hoy() => hoyHabanaIso();
 
   /// Pendiente agrupado por día (para el detalle).
   /// 1.15-turnos (#9): antes solo sumaba mensuales y diarios; ahora

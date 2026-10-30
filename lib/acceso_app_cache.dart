@@ -1,5 +1,7 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import 'tiempo.dart';
+
 /// v1.3.9 (F1/F2): caché en memoria de los accesos a la App de Clientes.
 /// Se carga una vez por sesión vía el RPC `listar_accesos_clientes`
 /// (solo dueño). Indexado por cliente_id para consulta O(1) desde ficha.dart.
@@ -71,7 +73,9 @@ class AccesoCliente {
   factory AccesoCliente.fromJson(Map<String, dynamic> j) {
     DateTime? parseFecha(dynamic v) {
       if (v == null) return null;
-      return DateTime.tryParse('$v')?.toLocal();
+      // Argón P3#7: hora de La Habana, no la del dispositivo.
+      final parsed = DateTime.tryParse('$v');
+      return parsed == null ? null : aHabana(parsed);
     }
 
     return AccesoCliente(
@@ -92,7 +96,7 @@ class AccesoCliente {
           : (j['bloqueado'] == true &&
               (parseFecha(j['bloqueado_hasta']) == null ||
                   parseFecha(j['bloqueado_hasta'])!
-                      .isAfter(DateTime.now()))),
+                      .isAfter(ahoraHabana()))),
       motivoBloqueo: j['motivo_bloqueo']?.toString(),
       revocado: j['revocado'] == true,
       revocadoEn: parseFecha(j['revocado_en']),

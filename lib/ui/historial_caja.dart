@@ -5,6 +5,7 @@
 library;
 import 'package:flutter/material.dart';
 
+import '../auth.dart';
 import '../localdb.dart';
 import '../negocio.dart';
 import 'componentes.dart';
@@ -172,6 +173,13 @@ class _HistorialCajaScreenState extends State<HistorialCajaScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // P2#9: historial solo admin sin guarda de dueño.
+    if (!AuthService().isOwner) {
+      return Scaffold(
+          appBar: AppBar(title: const Text('Historial de caja')),
+          body: const Center(
+              child: Text('Solo el dueño ve esta pantalla.')));
+    }
     return Scaffold(
       appBar: AppBar(title: const Text('Historial de caja')),
       body: _cargando

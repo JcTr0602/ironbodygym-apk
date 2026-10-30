@@ -249,11 +249,25 @@ DineroAuditado auditarDineroPersona({
   for (final v in ventasSuplementos) {
     if (!_enPeriodo(v, desdeIso, hastaIso)) continue;
     if (!filaEsDePersona(v, persona)) continue;
+    // Argón P3#3: la columna es `precio` (no `precio_unitario`, que
+    // es de servicio_ventas); solo CUP; anuladas fuera por estado
+    // o por las claves anulada/anulado.
     if ('${v['estado'] ?? ''}' == 'anulada') continue;
+    if ((v['anulada'] as num?)?.toInt() == 1 ||
+        (v['anulado'] as num?)?.toInt() == 1 ||
+        v['anulada'] == true ||
+        v['anulado'] == true) {
+      continue;
+    }
+    if ((v['moneda'] as String?) != null &&
+        (v['moneda'] as String?) != 'CUP') {
+      continue;
+    }
     d.ventasSuplementos++;
     d.suplementosTotal +=
-        ((v['precio_unitario'] as num?)?.toDouble() ?? 0) *
-            ((v['cantidad'] as num?)?.toDouble() ?? 0);
+        ((v['total'] as num?)?.toDouble() ??
+                ((v['precio'] as num?)?.toDouble() ?? 0) *
+                    ((v['cantidad'] as num?)?.toDouble() ?? 0));
   }
   for (final v in ventasServicios) {
     if (!_enPeriodo(v, desdeIso, hastaIso)) continue;

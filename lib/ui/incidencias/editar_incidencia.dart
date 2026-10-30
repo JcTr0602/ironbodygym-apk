@@ -1,8 +1,12 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:uuid/uuid.dart';
+import '../../cliente_protegido.dart';
 import '../../localdb.dart';
 import '../../negocio.dart';
 import '../../modelos/incidencia.dart';
+import '../../tiempo.dart';
 import '../diseno.dart';
 import '../../auth.dart';
 
@@ -35,7 +39,55 @@ class _EditarIncidenciaScreenState
   // Formato: 'entrenador:<username>:<Nombre>' | 'cliente:<id>:<Nombre>' | null
   String _tipoResponsable = 'ninguno'; // ninguno | entrenador | cliente
   String? _responsable;
-  String? _entrenadorUsername; // 'duany' | 'gabriel'
+  String? _entrenadorUsername;
+  // P2#17: entrenadores desde usuarios_apk (meta local), no
+  // hardcodeados. Cada entrada: {username, nombre}.
+  List<Map<String, String>> _entrenadores = [];
+
+  String _nombreEntrenador(String? username) {
+    for (final e in _entrenadores) {
+      if (e['username'] == username) return e['nombre'] ?? username ?? '';
+    }
+    if (username == null || username.isEmpty) return '';
+    return '${username[0].toUpperCase()}${username.substring(1)}';
+  }
+
+  Future<void> _cargarEntrenadores() async {
+    final lista = <Map<String, String>>[];
+    try {
+      final raw = await LocalDb.instance.getMeta('usuarios_apk');
+      if (raw != null && raw.isNotEmpty) {
+        for (final u in jsonDecode(raw) as List) {
+          final m = Map<String, dynamic>.from(u as Map);
+          final username = '${m['username'] ?? ''}'.toLowerCase();
+          final nombre =
+              '${m['nombre'] ?? m['username'] ?? ''}'.trim();
+          if (username.isNotEmpty && nombre.isNotEmpty) {
+            lista.add({'username': username, 'nombre': nombre});
+          }
+        }
+      }
+    } catch (_) {}
+    // Respaldo solo si el meta falta: hoy solo existen Duany y
+    // Gabriel en campo; sin meta no se puede inventar la lista.
+    if (lista.isEmpty) {
+      lista.addAll([
+        {'username': 'duany', 'nombre': 'Duany'},
+        {'username': 'gabriel', 'nombre': 'Gabriel'},
+      ]);
+    }
+    if (!mounted) return;
+    setState(() {
+      _entrenadores = lista;
+      // Validar el responsable restaurado contra la lista viva.
+      if (_tipoResponsable == 'entrenador' &&
+          _entrenadorUsername != null &&
+          !lista.any((e) => e['username'] == _entrenadorUsername)) {
+        _entrenadorUsername = lista.first['username'];
+        _actualizarResponsable();
+      }
+    });
+  }
   int? _clienteId;
   String? _clienteNombre;
   final _ctrlBuscarCliente = TextEditingController();
@@ -62,9 +114,9 @@ class _EditarIncidenciaScreenState
     if (partes[0] == 'entrenador') {
       _tipoResponsable = 'entrenador';
       // v1.3.3 (Argón): normalizar y validar; un valor inesperado
-      // crashea el DropdownButtonFormField.
-      final u = partes[1].toLowerCase();
-      _entrenadorUsername = (u == 'duany' || u == 'gabriel') ? u : 'duany';
+      // crashea el DropdownButtonFormField. La validación contra
+      // la lista viva corre en _cargarEntrenadores.
+      _entrenadorUsername = partes[1].toLowerCase();
     } else if (partes[0] == 'cliente') {
       _tipoResponsable = 'cliente';
       _clienteId = int.tryParse(partes[1]);
@@ -79,7 +131,7 @@ class _EditarIncidenciaScreenState
   /// Reconstruye el string compuesto de responsable desde la selección.
   void _actualizarResponsable() {
     if (_tipoResponsable == 'entrenador' && _entrenadorUsername != null) {
-      final nombre = _entrenadorUsername == 'duany' ? 'Duany' : 'Gabriel';
+      final nombre = _nombreEntrenador(_entrenadorUsername);
       _responsable = 'entrenador:$_entrenadorUsername:$nombre';
     } else if (_tipoResponsable == 'cliente' &&
         _clienteId != null &&
@@ -97,7 +149,11 @@ class _EditarIncidenciaScreenState
     }
     // v1.3.3 (Argón): usar buscarClientes de negocio.dart en vez de query
     // directa — la tabla espejo clientes no tiene columna 'nombre'.
-    final rows = (await buscarClientes(q.trim())).take(8).toList();
+    // P2#8-parte: fuera protegidos para un no-dueño.
+    final rows = (await buscarClientes(q.trim()))
+        .where((c) => !esVistaProtegida(c))
+        .take(8)
+        .toList();
     if (mounted) {
       setState(() => _sugerenciasCliente = rows);
     }
@@ -118,6 +174,7 @@ class _EditarIncidenciaScreenState
       _restaurarResponsable(e.asignadoA);
     }
     _cargarTipos();
+    _cargarEntrenadores();
   }
 
   @override
@@ -295,10 +352,14 @@ class _EditarIncidenciaScreenState
               selected: {_tipoResponsable},
               onSelectionChanged: (s) => setState(() {
                 _tipoResponsable = s.first;
-                // v1.3.3 (Argón): al elegir 'entrenador', inicializar con
-                // 'duany' para que Guardar directo no deje null.
-                _entrenadorUsername =
-                    _tipoResponsable == 'entrenador' ? 'duany' : null;
+                // v1.3.3 (Argón): al elegir 'entrenador', inicializar
+                // con el primero de la lista viva para que Guardar
+                // directo no deje null.
+                _entrenadorUsername = _tipoResponsable == 'entrenador'
+                    ? (_entrenadores.isNotEmpty
+                        ? _entrenadores.first['username']
+                        : null)
+                    : null;
                 _clienteId = null;
                 _clienteNombre = null;
                 _ctrlBuscarCliente.clear();
@@ -322,7 +383,7 @@ class _EditarIncidenciaScreenState
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
-                        'Asignado a: ${_entrenadorUsername == 'gabriel' ? 'Gabriel' : 'Duany'} (solo el dueño puede cambiarlo)',
+                        'Asignado a: ${_nombreEntrenador(_entrenadorUsername)} (solo el dueño puede cambiarlo)',
                         style: const TextStyle(fontSize: 13),
                       ),
                     ),
@@ -333,18 +394,21 @@ class _EditarIncidenciaScreenState
             if (_esDueno && _tipoResponsable == 'entrenador') ...[
               const SizedBox(height: 8),
               DropdownButtonFormField<String>(
-                value: _entrenadorUsername,
+                value: _entrenadores.any((e) =>
+                        e['username'] == _entrenadorUsername)
+                    ? _entrenadorUsername
+                    : (_entrenadores.isNotEmpty
+                        ? _entrenadores.first['username']
+                        : null),
                 decoration: const InputDecoration(
                   labelText: 'Entrenador',
                   border: OutlineInputBorder(),
                 ),
-                items: const [
-                  DropdownMenuItem(
-                      value: 'duany',
-                      child: Text('Duany')),
-                  DropdownMenuItem(
-                      value: 'gabriel',
-                      child: Text('Gabriel')),
+                items: [
+                  for (final e in _entrenadores)
+                    DropdownMenuItem(
+                        value: e['username'],
+                        child: Text(e['nombre'] ?? '')),
                 ],
                 onChanged: (v) => setState(() {
                   _entrenadorUsername = v;
@@ -513,8 +577,9 @@ class _EditarIncidenciaScreenState
     setState(() => _guardando = true);
     try {
       final d = await LocalDb.instance.db;
-      final ahora =
-          DateTime.now().toIso8601String();
+      // P2#17: timestamps persistidos en hora Habana, no del
+      // dispositivo (el picker de fecha límite es solo UI y se deja).
+      final ahora = isoHabana(ahoraHabana());
       final id = widget.existente?.id ??
           const Uuid().v4();
       // Fix #10: version base para precondición OCC en el backend.

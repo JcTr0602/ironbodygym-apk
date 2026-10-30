@@ -8,8 +8,11 @@ library;
 
 import 'package:flutter/material.dart';
 
+import '../auth.dart';
+import '../cliente_protegido.dart';
 import '../localdb.dart';
 import '../negocio.dart';
+import '../tiempo.dart';
 import 'componentes.dart';
 import 'diseno.dart';
 import 'widgets.dart';
@@ -45,10 +48,13 @@ class _RiesgoScreenState extends State<RiesgoScreen> {
   /// Inactivos con 3+ pagos cuyo último pago fue hace más de 60 días.
   Future<List<Map<String, dynamic>>> _clientesEnRiesgo() async {
     final clientes = await LocalDb.instance.allMirror('clientes');
-    final hoy = DateTime.now();
+    final hoy = ahoraHabana();
     final res = <Map<String, dynamic>>[];
     for (final c in clientes) {
       if (c['estado'] != 'inactivo') continue;
+      // P2#8-parte: la cabecera dice solo dueño; fuera protegidos
+      // para un no-dueño.
+      if (esVistaProtegida(c)) continue;
       final cid = c['id'] as int?;
       if (cid == null) continue;
       // v1.3.4 (ítem 2): columna `cliente_id` indexada en vez de
@@ -82,6 +88,15 @@ class _RiesgoScreenState extends State<RiesgoScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // P2#8-parte: guarda de dueño en build (la cabecera promete
+    // "solo dueño" pero no había guarda).
+    if (!AuthService().isOwner) {
+      return Scaffold(
+          appBar: AppBar(
+              title: const Text('Clientes en riesgo')),
+          body: const Center(
+              child: Text('Solo el dueño ve esta pantalla.')));
+    }
     return Scaffold(
       appBar: AppBar(
         title: const Text('Clientes en riesgo'),

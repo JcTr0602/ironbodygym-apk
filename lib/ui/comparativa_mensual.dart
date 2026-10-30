@@ -2,6 +2,7 @@
 // v1.3.9 Sprint 3 (#7): comparativa mes actual vs anterior.
 // MTD: compara día 1-N actual vs día 1-N anterior.
 import 'package:flutter/material.dart';
+import '../auth.dart';
 import '../negocio.dart';
 import '../localdb.dart';
 import '../tiempo.dart';
@@ -58,6 +59,8 @@ class _ComparativaMensualState
     double total = 0;
     for (final p in await LocalDb.instance
         .mirrorPorFecha('pagos', 'fecha', desde, hasta)) {
+      // P2#4: las cortesías no son ingreso.
+      if ((p['metodo'] as String?) == 'cortesia') continue;
       total +=
           (p['monto'] as num?)?.toDouble() ?? 0;
     }
@@ -66,12 +69,22 @@ class _ComparativaMensualState
 
   Future<double> _sumarSuplementos(
       String desde, String hasta) async {
+    // P2#4: ventasSuplementosCup() ya filtra CUP; se filtra por
+    // rango en Dart y se usa precio*cant si falta el total. El
+    // filtro de fiados lo añade otro agente en esa función, así
+    // que se usa tal cual (sin duplicarlo aquí). Son métricas
+    // separadas: no se inventa un total general.
     double total = 0;
-    for (final v in await LocalDb.instance
-        .mirrorPorFecha(
-            'ventas_suplementos', 'fecha', desde, hasta)) {
-      total +=
-          (v['total'] as num?)?.toDouble() ?? 0;
+    for (final v in await ventasSuplementosCup()) {
+      final f = '${v['fecha'] ?? ''}';
+      if (f.length < 10) continue;
+      final dia = f.substring(0, 10);
+      if (dia.compareTo(desde) < 0 || dia.compareTo(hasta) > 0) {
+        continue;
+      }
+      total += (v['total'] as num?)?.toDouble() ??
+          ((v['precio'] as num?)?.toDouble() ?? 0) *
+              ((v['cantidad'] as num?)?.toInt() ?? 0);
     }
     return total;
   }
@@ -231,6 +244,14 @@ class _ComparativaMensualState
 
   @override
   Widget build(BuildContext context) {
+    // P2#4: sin guarda de dueño, un entrenador veía cifras de caja.
+    if (!AuthService().isOwner) {
+      return Scaffold(
+          appBar: AppBar(
+              title: const Text('Comparativa Mensual')),
+          body: const Center(
+              child: Text('Solo el dueño ve esta pantalla.')));
+    }
     return Scaffold(
       appBar: AppBar(
         title: const Text('Comparativa Mensual'),

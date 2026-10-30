@@ -6,6 +6,7 @@ import 'package:image_picker/image_picker.dart';
 import '../../auth.dart';
 import '../../fotos.dart';
 import '../../localdb.dart';
+import '../../tiempo.dart';
 import '../../modelos/incidencia.dart';
 import '../diseno.dart';
 import '../ficha.dart';
@@ -429,7 +430,7 @@ class _DetalleIncidenciaScreenState
       final d = await db.db;
       final id = const Uuid().v4();
       final ahora =
-          DateTime.now().toIso8601String();
+          isoHabana(ahoraHabana());
       // v1.3.2 (Argón #8): la incidencia puede venir de otro móvil
       // (solo en mirror); copiarla a local antes del hijo (FK).
       await db.asegurarIncidenciaLocal(_inc!.id);
@@ -531,7 +532,7 @@ class _DetalleIncidenciaScreenState
     if (texto.isEmpty) return;
     final comId = const Uuid().v4();
     final ahora =
-        DateTime.now().toIso8601String();
+        isoHabana(ahoraHabana());
     // v1.3.2 (Argón #8): asegurar la incidencia en local antes del hijo.
     await LocalDb.instance.asegurarIncidenciaLocal(widget.incidenciaId);
     // Fix #9 (Sol): insert + encolado en una transacción.
@@ -565,7 +566,7 @@ class _DetalleIncidenciaScreenState
       String nuevo) async {
     final d = await LocalDb.instance.db;
     final ahora =
-        DateTime.now().toIso8601String();
+        isoHabana(ahoraHabana());
     final anterior = _inc!.estado;
     // v1.3.2 (Argón #8): puede venir de otro móvil (solo mirror).
     await LocalDb.instance.asegurarIncidenciaLocal(_inc!.id);

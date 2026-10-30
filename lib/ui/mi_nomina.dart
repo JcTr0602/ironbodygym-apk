@@ -440,7 +440,10 @@ class _MiNominaScreenState extends State<MiNominaScreen> {
                       Text(
                         '· ${fmtMonto((e['monto'] as num?)?.toDouble() ?? 0)} CUP'
                         ' · mes ${e['mes_nomina'] ?? ''}'
-                        '${e['motivo'] != null && '${e['motivo']}'.isNotEmpty ? ' · ${e['motivo']}' : ''}'
+                        // Argón P3#8-parte-motivo: el servidor mete el
+                        // motivo en la columna `nota`; `motivo` solo
+                        // como respaldo.
+                        '${(e['nota'] ?? e['motivo']) != null && '${e['nota'] ?? e['motivo']}'.isNotEmpty ? ' · ${e['nota'] ?? e['motivo']}' : ''}'
                         '${_origenAdelanto(e)}',
                         style: AppTexto.cuerpo,
                       ),

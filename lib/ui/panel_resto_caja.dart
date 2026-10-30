@@ -12,15 +12,20 @@
 ///   registro nuevo vive en la pantalla de Nómina, no se duplica).
 library;
 
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
 
+import '../adelantos.dart';
 import '../auth.dart';
 import '../bloque2_resto.dart';
+import '../invitados.dart' as invitados_svc;
 import '../localdb.dart';
 import '../negocio.dart';
+import '../nomina_bonos.dart';
 import '../nomina_calc.dart';
+import '../perfil.dart';
 import '../plus_reportes.dart';
 import '../tiempo.dart';
 import 'componentes.dart';
@@ -257,8 +262,11 @@ class _NominaPrecalculadaScreenState extends State<NominaPrecalculadaScreen> {
   String _mes = '';
   String _calculadoEn = '';
   List<Map<String, dynamic>> _porEntrenador = [];
-  double _baseDueno = 0;
-  double _baseEntrenadores = 0;
+  // P2#10: base GLOBAL (no por quién cobró): la misma para cada
+  // entrenador, igual que en la pantalla de Nómina.
+  int _pagaronGlobal = 0;
+  double _tarifa = 0;
+  double _baseGlobal = 0;
 
   @override
   void initState() {
@@ -268,95 +276,128 @@ class _NominaPrecalculadaScreenState extends State<NominaPrecalculadaScreen> {
 
   Future<void> _cargar() async {
     // Lote 3 (BLOQUEANTE): solo el dueño puede abrir esta pantalla.
-    // Sin esta guarda, un entrenador la abría y el cálculo de
-    // "dueño ×300" se hacía contra SU telegram_id (él quedaba ×300
-    // y el dueño real ×150). Con el gate, `yo` es siempre el dueño.
     if (!AuthService().isOwner) return;
     final mes = mesHabanaActual();
     try {
-      final pagos = await LocalDb.instance.pagosDelMes(mes);
-      final porTid = <int, Set<int>>{};
-      final nombres = <int, String>{};
-      for (final p in pagos) {
-        final tid = LocalDb.normalizarTelegramId(p['telegram_user_id']);
-        if (tid == null) continue;
-        (porTid[tid] ??= <int>{}).addAll(
-            NominaCalc.idsDesdePagos([p]));
-        nombres[tid] ??= '${p['registrado_por'] ?? ''}';
-      }
-      final casa = await LocalDb.instance.idsCuentasCasa();
-      // Lote 3 (MENOR): espejo y cola se cargan UNA vez, fuera del
-      // bucle por entrenador (antes allMirror corría en cada vuelta).
-      final espejoAdelantos =
-          await LocalDb.instance.allMirror('adelantos');
-      final opsPendientes = await LocalDb.instance.pendingOps();
-      // UUIDs ya en espejo: una op en cola que ya bajó al espejo no
-      // se suma dos veces.
-      final uuidsEspejo = <String>{
-        for (final a in espejoAdelantos)
-          if (a['op_uuid'] != null) '${a['op_uuid']}',
-      };
-      final filas = <Map<String, dynamic>>[];
-      var baseEnt = 0.0;
-      var baseDue = 0.0;
-      final yo = AuthService().telegramId;
-      for (final tid in porTid.keys) {
-        final ids = Set<int>.from(porTid[tid]!);
-        NominaCalc.excluirCuentasCasa(ids, casa);
-        if (mes == NominaCalc.prefMesActual()) {
-          final fr =
-              await LocalDb.instance.mirrorPorIds('clientes', ids.toList());
-          final hasta = <int, String?>{
-            for (final f in fr)
-              (f['id'] as num).toInt():
-                  fechaCorta10(f['pagado_hasta'] as String?)
-          };
-          NominaCalc.excluirVencidosDentroDelMes(ids, mes, hasta);
-        }
-        // Válido solo porque la pantalla es solo-dueño (gate en
-        // build y en _cargar): `yo` es el telegram_id del dueño, no
-        // del espectador. Con un segundo dueño habría que comparar
-        // contra el id real del negocio, no contra el espectador.
-        final esDueno = yo != null && tid == yo;
-        final base = ids.length * (esDueno ? 300.0 : 150.0);
-        if (esDueno) {
-          baseDue += base;
-        } else {
-          baseEnt += base;
-        }
-        double adelantos = 0;
-        for (final a in espejoAdelantos) {
-          if ('${a['entrenador']}' == '$tid' &&
-              '${a['mes_nomina'] ?? ''}' == mes) {
-            adelantos += (a['monto'] as num?)?.toDouble() ?? 0;
+      // P2#10: base GLOBAL, no agrupada por quién cobró. Es la
+      // misma definición que la pantalla de Nómina: clientes
+      // únicos que pagaron el mes (NominaCalc, ya excluye Casa y
+      // el vencido-dentro-del-mes) × tarifa configurable.
+      final pagaron =
+          await NominaCalc.clientesQuePagaronElMes(mes);
+      final tarifa =
+          (await PerfilService.instance.getPagoEntrenador())
+              .toDouble();
+      final baseGlobal = pagaron * tarifa;
+      final bonos = await BonosNominaService.instance.leerBonos(mes);
+      final ventasServ =
+          await LocalDb.instance.allMirror('servicio_ventas');
+      // Entrenadores desde usuarios_apk (rol != admin); si el meta
+      // falta, respaldo con los cobradores del mes sin el dueño.
+      final personas = <Map<String, dynamic>>[];
+      try {
+        final raw = await LocalDb.instance.getMeta('usuarios_apk');
+        if (raw != null && raw.isNotEmpty) {
+          for (final u in jsonDecode(raw) as List) {
+            final m = Map<String, dynamic>.from(u as Map);
+            if ('${m['rol'] ?? 'entrenador'}' == 'admin') continue;
+            final username = '${m['username'] ?? ''}'.toLowerCase();
+            if (username.isEmpty) continue;
+            personas.add({
+              'username': username,
+              'id': '${m['id'] ?? ''}',
+              'tid': LocalDb.normalizarTelegramId(m['telegram_id']),
+              'nombre': '${m['nombre'] ?? m['username'] ?? ''}',
+            });
           }
         }
-        // Lote 3 (MENOR): registrar_adelanto aún en cola en este
-        // teléfono (mismo criterio que C3: mes de la fecha, sin
-        // duplicar lo que ya bajó al espejo).
-        for (final op in opsPendientes) {
-          if (op['tipo'] != 'registrar_adelanto') continue;
-          final uuid = op['op_uuid'] ?? op['uuid'];
-          if (uuid != null && uuidsEspejo.contains('$uuid')) continue;
-          try {
-            final p = jsonDecode(op['payload'] as String)
-                as Map<String, dynamic>;
-            final fecha = '${p['fecha'] ?? ''}';
-            if ('${p['entrenador']}' == '$tid' &&
-                fecha.length >= 7 &&
-                fecha.substring(0, 7) == mes) {
-              adelantos += (p['monto'] as num?)?.toDouble() ?? 0;
-            }
-          } catch (_) {}
+      } catch (_) {}
+      if (personas.isEmpty) {
+        final yo = AuthService().telegramId;
+        final nombres = <int, String>{};
+        for (final p in await LocalDb.instance.pagosDelMes(mes)) {
+          final tid =
+              LocalDb.normalizarTelegramId(p['telegram_user_id']);
+          if (tid == null || tid == yo) continue;
+          nombres[tid] ??= '${p['registrado_por'] ?? ''}';
         }
+        for (final e in nombres.entries) {
+          personas.add({
+            'username': '',
+            'id': '',
+            'tid': e.key,
+            'nombre': e.value.isEmpty ? 'Entrenador' : e.value,
+          });
+        }
+      }
+      final filas = <Map<String, dynamic>>[];
+      for (final persona in personas) {
+        final username = persona['username'] as String;
+        final tid = persona['tid'] as int?;
+        final id = persona['id'] as String;
+        final bono = username.isEmpty
+            ? NominaCalc.bonoSoloAmbos(bonos)
+            : NominaCalc.bonosPara(bonos, username);
+        final comision = tid == null
+            ? 0.0
+            : NominaCalc.comisionDosisDesdeVentas(
+                    ventasServ, tid, mes)
+                .total;
+        // Libro corrido de adelantos hasta este mes (igual que la
+        // pantalla de Nómina): adelantos del mes y deuda entrante.
+        var adelantosMes = 0.0;
+        var deudaEntrante = 0.0;
+        try {
+          final eventos = await AdelantosService.instance
+              .eventosDe(id, telegramId: tid);
+          var primero = mes;
+          for (final ev in eventos) {
+            final mm = '${ev['mes_nomina'] ?? ''}';
+            if (mm.length == 7 && mm.compareTo(primero) < 0) {
+              primero = mm;
+            }
+          }
+          final brutoPorMes = <String, double>{};
+          var m = primero;
+          while (m.compareTo(mes) <= 0) {
+            brutoPorMes[m] =
+                (await NominaCalc.clientesQuePagaronElMes(m)) *
+                    tarifa;
+            m = mesSiguiente(m);
+          }
+          final libro = libroAdelantos(
+            eventos: eventos,
+            brutoPorMes: brutoPorMes,
+            comisionesPorMes: tid == null
+                ? {mes: comision}
+                : NominaCalc.comisionesPorMesDesdeVentas(
+                    ventasServ, tid, primero, mes),
+            hastaMes: mes,
+          );
+          for (final filaLibro in libro) {
+            if (filaLibro.mes == mes) {
+              adelantosMes = filaLibro.adelantos;
+              deudaEntrante = filaLibro.deudaEntrante;
+            }
+          }
+        } catch (_) {}
+        final neto = NominaCalc.totalVivo(
+          base: baseGlobal,
+          bono: bono,
+          comision: comision,
+          adelantos: adelantosMes,
+          deudaEntrante: deudaEntrante,
+        );
         filas.add({
           'tid': tid,
-          'nombre': nombres[tid] ?? '—',
-          'pagaron': ids.length,
-          'base': base,
-          'adelantos': adelantos,
-          'neto': base - adelantos,
-          'esDueno': esDueno,
+          'nombre': persona['nombre'],
+          'pagaron': pagaron,
+          'base': baseGlobal,
+          'bono': bono,
+          'comision': comision,
+          'adelantos': adelantosMes,
+          'deudaEntrante': deudaEntrante,
+          'neto': neto,
         });
       }
       filas.sort((a, b) =>
@@ -366,8 +407,9 @@ class _NominaPrecalculadaScreenState extends State<NominaPrecalculadaScreen> {
           _mes = mes;
           _calculadoEn = isoHabana(ahoraHabana());
           _porEntrenador = filas;
-          _baseDueno = baseDue;
-          _baseEntrenadores = baseEnt;
+          _pagaronGlobal = pagaron;
+          _tarifa = tarifa;
+          _baseGlobal = baseGlobal;
           _cargando = false;
         });
       }
@@ -407,12 +449,16 @@ class _NominaPrecalculadaScreenState extends State<NominaPrecalculadaScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                          'Base dueño: ${_baseDueno.toStringAsFixed(0)} CUP',
+                          'Base global: $_pagaronGlobal clientes × '
+                          '${_tarifa.toStringAsFixed(0)} CUP = '
+                          '${_baseGlobal.toStringAsFixed(0)} CUP '
+                          'por entrenador',
                           style: AppTexto.cuerpo),
-                      Text(
-                          'Base entrenadores: '
-                          '${_baseEntrenadores.toStringAsFixed(0)} CUP',
-                          style: AppTexto.cuerpo),
+                      const Text(
+                          'La base ya no depende de quién cobró: '
+                          'cada entrenador parte de la misma base '
+                          'global del mes.',
+                          style: AppTexto.secundario),
                     ],
                   ),
                 ),
@@ -421,14 +467,19 @@ class _NominaPrecalculadaScreenState extends State<NominaPrecalculadaScreen> {
                   Tarjeta(
                     child: ListTile(
                       contentPadding: EdgeInsets.zero,
-                      title: Text(
-                          '${f['nombre']}${f['esDueno'] == true ? ' (dueño)' : ''}',
+                      title: Text('${f['nombre']}',
                           style: AppTexto.cuerpo),
                       subtitle: Text(
-                          'Pagaron: ${f['pagaron']} · base: '
+                          'Pagaron (global): ${f['pagaron']} · base: '
                           '${(f['base'] as double).toStringAsFixed(0)} · '
+                          'bono: '
+                          '${(f['bono'] as double).toStringAsFixed(0)} · '
+                          'comisión dosis: '
+                          '${(f['comision'] as double).toStringAsFixed(0)} · '
                           'adelantos: '
                           '${(f['adelantos'] as double).toStringAsFixed(0)} · '
+                          'deuda anterior: '
+                          '${(f['deudaEntrante'] as double).toStringAsFixed(0)} · '
                           'neto: ${(f['neto'] as double).toStringAsFixed(0)} CUP',
                           style: AppTexto.secundario),
                     ),
@@ -813,7 +864,8 @@ class _PreciosMetodoScreenState extends State<PreciosMetodoScreen> {
     final cambios = <String, dynamic>{};
     for (final k in kClavesPreciosC6) {
       final v = double.tryParse(_ctrls[k]!.text.trim());
-      if (v == null || v < 0) {
+      // P2#16: el 0 también se rechaza (antes pasaba con v < 0).
+      if (v == null || v <= 0) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
             content: Text('Precio inválido: ${_kEtiquetasPrecios[k]}')));
         return;
@@ -822,6 +874,16 @@ class _PreciosMetodoScreenState extends State<PreciosMetodoScreen> {
     }
     try {
       await guardarConfigGym(cambios);
+      // P2#16: republicar precio_app_plus a info_publica con
+      // reintento durable, como hace admin (la cotización S2 lee
+      // el precio de ahí, no del ajuste local).
+      final precioPlus = cambios['precio_app_plus'];
+      if (precioPlus != null) {
+        final entero = (precioPlus as num).round();
+        unawaited(invitados_svc.InvitadosService()
+            .guardarInfoPublicaConReintento(
+                'precio_app_plus', '$entero'));
+      }
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
             content: Text(

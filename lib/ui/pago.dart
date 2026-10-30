@@ -13,9 +13,11 @@ import 'package:flutter/services.dart';
 import 'package:uuid/uuid.dart';
 
 import '../auth.dart';
+import '../cliente_protegido.dart';
 import '../localdb.dart';
 import '../negocio.dart';
 import '../sync.dart';
+import '../tiempo.dart';
 import 'buscar.dart';
 import 'componentes.dart';
 import 'dialogo_pago.dart';
@@ -35,6 +37,13 @@ class _Cobro {
   final String? estadoOp;
   final int? pagoId; // pago en el espejo (servidor)
   final int? telegramUserId; // quién lo registró (espejo)
+  final int? clienteId;
+  // Contrato P1#4 con preview_cobro: si la op trae
+  // 'pagado_hasta_anterior', al deshacerla se restaura el espejo
+  // a ese valor. [tienePagadoHastaAnterior] distingue "campo
+  // ausente" (otro agente aún no lo escribe) de "anterior null".
+  final bool tienePagadoHastaAnterior;
+  final String? pagadoHastaAnterior;
 
   const _Cobro({
     required this.nombre,
@@ -45,6 +54,9 @@ class _Cobro {
     this.estadoOp,
     this.pagoId,
     this.telegramUserId,
+    this.clienteId,
+    this.tienePagadoHastaAnterior = false,
+    this.pagadoHastaAnterior,
   });
 
   bool get esLocal => opUuid != null;
@@ -85,50 +97,35 @@ class _PagoScreenState extends State<PagoScreen> {
     _cargarDatos();
   }
 
-  String _hoyStr() {
-    final hoy = DateTime.now();
-    return '${hoy.year}-${hoy.month.toString().padLeft(2, '0')}-'
-        '${hoy.day.toString().padLeft(2, '0')}';
-  }
+  String _hoyStr() => hoyHabanaIso();
 
   /// Cobros del día: espejo + ops locales pago_mensual aún no aplicadas.
   /// Incluye las pendientes aunque no haya internet (caja offline).
   Future<void> _cargarDatos() async {
     final hoyStr = _hoyStr();
     final cobros = <_Cobro>[];
+    // P1#3: el dueño ve todo (soloTelegramId null); el entrenador
+    // solo sus cobros. Los protegidos se omiten para no-dueño.
+    final esDueno = _auth.isOwner;
+    final soloTid = esDueno
+        ? null
+        : LocalDb.normalizarTelegramId(_auth.telegramId);
 
     // 1) Espejo: pagos con fecha de hoy (ya pasaron por el servidor).
     // v1.3.4 (ítem 2): columna `fecha` indexada en vez de allMirror.
-    for (final p in await LocalDb.instance.pagosDelDia(hoyStr)) {
-      final cid = (p['cliente_id'] as int?) ?? 0;
-      String nombre = '¿?';
-      try {
-        final c = await clientePorId(cid);
-        nombre = '${c?['nombre'] ?? '¿?'}';
-      } catch (_) {}
-      DateTime ts;
-      try {
-        ts = DateTime.parse('${p['created_at']}').toLocal();
-      } catch (_) {
-        ts = DateTime.now();
-      }
-      cobros.add(_Cobro(
-        nombre: nombre,
-        monto: (p['monto'] as num?)?.toDouble() ?? 0,
-        metodo: '${p['metodo'] ?? 'efectivo'}',
-        ts: ts,
-        pagoId: p['id'] as int?,
-        telegramUserId: (p['telegram_user_id'] as num?)?.toInt(),
-      ));
-    }
+    final pagosHoy = await LocalDb.instance.pagosDelDia(
+      hoyStr,
+      soloTelegramId: soloTid,
+    );
 
     // 2) Cola local: pago_mensual de hoy en pendiente/error/enviada.
     //    Una op aplicada ya está en el espejo (sin duplicados).
-    final ops = [
+    final opsHoy = <Map<String, dynamic>>[];
+    final opsPayload = <Map<String, dynamic>>[];
+    for (final op in [
       ...await LocalDb.instance.pendingOps(),
       ...await LocalDb.instance.opsByEstado('enviada'),
-    ];
-    for (final op in ops) {
+    ]) {
       if ('${op['tipo']}' != 'pago_mensual') continue;
       Map<String, dynamic> payload;
       try {
@@ -137,18 +134,63 @@ class _PagoScreenState extends State<PagoScreen> {
         continue;
       }
       if (!'${payload['fecha'] ?? ''}'.startsWith(hoyStr)) continue;
-      final cid = (payload['cliente_id'] as num?)?.toInt() ?? 0;
-      String nombre = '¿?';
+      opsHoy.add(op);
+      opsPayload.add(payload);
+    }
+
+    // P1#15: una sola mirrorPorIds para todos los clientes, en vez
+    // de un clientePorId por cobro dentro de los bucles.
+    final ids = <int>{
+      for (final p in pagosHoy)
+        if ((p['cliente_id'] as num?) != null)
+          (p['cliente_id'] as num).toInt(),
+      for (final payload in opsPayload)
+        if ((payload['cliente_id'] as num?) != null)
+          (payload['cliente_id'] as num).toInt(),
+    };
+    final porId = <int, Map<String, dynamic>>{};
+    for (final c in await LocalDb.instance
+        .mirrorPorIds('clientes', ids.toList())) {
+      final id = (c['id'] as num?)?.toInt();
+      if (id != null) porId[id] = c;
+    }
+    bool protegido(int cid) =>
+        !esDueno && porId[cid] != null && esVistaProtegida(porId[cid]!);
+
+    for (final p in pagosHoy) {
+      final cid = (p['cliente_id'] as num?)?.toInt() ?? 0;
+      if (protegido(cid)) continue;
+      final nombre = '${porId[cid]?['nombre'] ?? '¿?'}';
+      DateTime ts;
       try {
-        final c = await clientePorId(cid);
-        nombre = '${c?['nombre'] ?? '¿?'}';
-      } catch (_) {}
+        ts = DateTime.parse('${p['created_at']}').toLocal();
+      } catch (_) {
+        ts = ahoraHabana();
+      }
+      cobros.add(_Cobro(
+        nombre: nombre,
+        monto: (p['monto'] as num?)?.toDouble() ?? 0,
+        metodo: '${p['metodo'] ?? 'efectivo'}',
+        ts: ts,
+        pagoId: p['id'] as int?,
+        telegramUserId: (p['telegram_user_id'] as num?)?.toInt(),
+        clienteId: cid,
+      ));
+    }
+
+    for (var i = 0; i < opsHoy.length; i++) {
+      final op = opsHoy[i];
+      final payload = opsPayload[i];
+      final cid = (payload['cliente_id'] as num?)?.toInt() ?? 0;
+      if (protegido(cid)) continue;
+      final nombre = '${porId[cid]?['nombre'] ?? '¿?'}';
       DateTime ts;
       try {
         ts = DateTime.parse('${op['creada_ts']}').toLocal();
       } catch (_) {
-        ts = DateTime.now();
+        ts = ahoraHabana();
       }
+      final anteriorRaw = payload['pagado_hasta_anterior'];
       cobros.add(_Cobro(
         nombre: nombre,
         monto: (payload['monto'] as num?)?.toDouble() ?? 0,
@@ -156,6 +198,12 @@ class _PagoScreenState extends State<PagoScreen> {
         ts: ts,
         opUuid: '${op['op_uuid']}',
         estadoOp: '${op['estado']}',
+        clienteId: cid,
+        tienePagadoHastaAnterior:
+            payload.containsKey('pagado_hasta_anterior'),
+        pagadoHastaAnterior: anteriorRaw == null
+            ? null
+            : '$anteriorRaw',
       ));
     }
 
@@ -186,6 +234,13 @@ class _PagoScreenState extends State<PagoScreen> {
 
   Future<void> _buscar() async {
     var r = await listaClientes(_q.text);
+    // P1#3: listaClientes('') devuelve todos los activos sin filtro
+    // de protegido; el no-dueño no debe verlos ni siquiera en la
+    // lista (la fuga real con "Solo vencidos": FilaCliente ya
+    // oculta el botón Pagar al protegido).
+    if (!_auth.isOwner) {
+      r = r.where((c) => !esVistaProtegida(c)).toList();
+    }
     // Vencidos primero, luego por vencer.
     r.sort((a, b) {
       final da = _diasRestantes(a);
@@ -208,7 +263,7 @@ class _PagoScreenState extends State<PagoScreen> {
       final ph = '${c['pagado_hasta'] ?? ''}';
       if (ph.length < 10) return 999;
       final v = DateTime.parse(ph.substring(0, 10));
-      final hoy = DateTime.now();
+      final hoy = ahoraHabana();
       final hoyDia = DateTime(hoy.year, hoy.month, hoy.day);
       return v.difference(hoyDia).inDays;
     } catch (_) {
@@ -275,6 +330,23 @@ class _PagoScreenState extends State<PagoScreen> {
 
     if (u.esLocal && u.opUuid != null) {
       if (u.estadoOp == 'pendiente' || u.estadoOp == 'error') {
+        // P1#4 (contrato): si la op trae 'pagado_hasta_anterior',
+        // restaurar el espejo a ese valor al borrarla. Sin ese
+        // campo (otro agente aún no lo escribe en preview_cobro),
+        // no se inventa otro mecanismo: solo se borra la op.
+        if (u.tienePagadoHastaAnterior && u.clienteId != null) {
+          final anterior = u.pagadoHastaAnterior;
+          if (anterior != null && anterior.isNotEmpty) {
+            await LocalDb.instance
+                .updateMirrorPagadoHasta(u.clienteId!, anterior);
+          } else {
+            // Anterior null: updateMirrorPagadoHasta no acepta
+            // null, así que se quita la clave del JSON del espejo
+            // (pagado_hasta no es columna dedicada, solo JSON).
+            await LocalDb.instance.updateMirrorBasico(
+                u.clienteId!, {'pagado_hasta': null});
+          }
+        }
         // Nunca se envió: borrar la op es seguro.
         await LocalDb.instance.deleteOp(u.opUuid!);
         if (!mounted) return;

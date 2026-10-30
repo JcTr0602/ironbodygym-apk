@@ -12,6 +12,7 @@ import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../auth.dart';
+import '../cliente_protegido.dart';
 import '../localdb.dart';
 import '../negocio.dart';
 import '../plantilla_mensaje.dart';
@@ -268,9 +269,15 @@ class _PlantillasScreenState extends State<PlantillasScreen> {
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setS) {
           final q = filtro.text.trim().toLowerCase();
+          // P2#8-parte: el filtro de protegidos va AQUÍ, en el
+          // diálogo de envío, no dentro de buscarClientes (que es
+          // compartida). El diálogo muestra además el teléfono, así
+          // que un protegido no debe llegar a esta lista.
+          final sinProtegidos =
+              todos.where((c) => !esVistaProtegida(c)).toList();
           final visibles = q.isEmpty
-              ? todos
-              : todos
+              ? sinProtegidos
+              : sinProtegidos
                   .where((c) => '${c['nombre'] ?? ''}'
                       .toLowerCase()
                       .contains(q))

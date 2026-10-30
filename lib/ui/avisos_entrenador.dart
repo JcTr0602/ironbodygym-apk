@@ -9,6 +9,7 @@ library;
 
 import 'package:flutter/material.dart';
 
+import '../auth.dart';
 import '../bloque3.dart';
 import 'componentes.dart';
 import 'diseno.dart';
@@ -49,6 +50,11 @@ class _AvisosEntrenadorScreenState
   }
 
   Future<void> _editar([AvisoEntrenador? actual]) async {
+    // P2#9: escritura solo-dueño.
+    if (!AuthService().isOwner) {
+      _snack('Solo el dueño puede crear o editar avisos.');
+      return;
+    }
     final tituloCtrl = TextEditingController(text: actual?.titulo ?? '');
     final mensajeCtrl =
         TextEditingController(text: actual?.mensaje ?? '');
@@ -188,6 +194,11 @@ class _AvisosEntrenadorScreenState
   }
 
   Future<void> _desactivar(AvisoEntrenador a) async {
+    // P2#9: escritura solo-dueño.
+    if (!AuthService().isOwner) {
+      _snack('Solo el dueño puede desactivar avisos.');
+      return;
+    }
     final ok = await DialogoApp.confirmar(
       context,
       titulo: 'Desactivar aviso',
@@ -207,6 +218,15 @@ class _AvisosEntrenadorScreenState
 
   @override
   Widget build(BuildContext context) {
+    // P2#9: pantalla SOLO dueño sin guarda. Los initialDate de
+    // los pickers son solo UI y se dejan como están.
+    if (!AuthService().isOwner) {
+      return Scaffold(
+          appBar: AppBar(
+              title: const Text('Avisos para entrenadores')),
+          body: const Center(
+              child: Text('Solo el dueño ve esta pantalla.')));
+    }
     return Scaffold(
       appBar: AppBar(title: const Text('Avisos para entrenadores')),
       floatingActionButton: FloatingActionButton.extended(

@@ -12,6 +12,7 @@ library;
 
 import 'package:flutter/material.dart';
 
+import '../auth.dart';
 import '../bloque3.dart';
 import '../negocio.dart';
 import 'componentes.dart';
@@ -67,6 +68,12 @@ class _SolicitudesAdelantoScreenState
   /// disponible (una transferencia no sale de la gaveta) y el
   /// destino se fuerza a «Nómina» antes de enviar.
   Future<void> _aprobar(SolicitudAdelanto s) async {
+    // P2#9: aprobar es escritura solo-dueño (defensa además del
+    // botón: la pantalla puede estar abierta con cambio de sesión).
+    if (!AuthService().isOwner) {
+      _snack('Solo el dueño puede aprobar adelantos.');
+      return;
+    }
     var destino = 'nomina';
     var metodo = 'efectivo';
     final ok = await showDialog<bool>(
@@ -184,6 +191,11 @@ class _SolicitudesAdelantoScreenState
   }
 
   Future<void> _rechazar(SolicitudAdelanto s) async {
+    // P2#9: igual que _aprobar.
+    if (!AuthService().isOwner) {
+      _snack('Solo el dueño puede rechazar adelantos.');
+      return;
+    }
     final motivoCtrl = TextEditingController();
     final motivo = await showDialog<String>(
       context: context,
@@ -226,6 +238,14 @@ class _SolicitudesAdelantoScreenState
 
   @override
   Widget build(BuildContext context) {
+    // P2#9: pantalla SOLO dueño sin guarda.
+    if (!AuthService().isOwner) {
+      return Scaffold(
+          appBar: AppBar(
+              title: const Text('Solicitudes de adelanto')),
+          body: const Center(
+              child: Text('Solo el dueño ve esta pantalla.')));
+    }
     return Scaffold(
       appBar: AppBar(title: const Text('Solicitudes de adelanto')),
       body: Column(

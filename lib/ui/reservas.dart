@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:uuid/uuid.dart';
 
 import '../auth.dart';
+import '../cliente_protegido.dart';
 import '../localdb.dart';
 import '../negocio.dart' show fmtMonto;
 import '../permisos_entrenador.dart';
@@ -92,11 +93,26 @@ double _doble(dynamic v) =>
 /// Arma la bandeja desde los espejos: solicitadas en orden de
 /// llegada (FIFO), reservadas por vencimiento más cercano,
 /// historial (terminales) reciente primero, tope 30.
+/// Argón P3#4: si no es dueño, se filtran las reservas de clientes
+/// protegidos (la bandeja no debe revelar ni su existencia).
 BandejaReservas construirBandeja(
   List<Map<String, dynamic>> reservas,
   List<Map<String, dynamic>> clientes,
-  List<Map<String, dynamic>> suplementos,
-) {
+  List<Map<String, dynamic>> suplementos, {
+  bool esDueno = true,
+}) {
+  final clientePorId = {
+    for (final c in clientes) _entero(c['id']): c,
+  };
+  final reservasVisibles = esDueno
+      ? reservas
+      : [
+          for (final r in reservas)
+            if (!esVistaProtegida(
+                clientePorId[_entero(r['cliente_id'])] ?? {},
+                esDueno: esDueno))
+              r,
+        ];
   final nombreCliente = {
     for (final c in clientes) _entero(c['id']): (c['nombre'] ?? '') as String,
   };
@@ -131,7 +147,7 @@ BandejaReservas construirBandeja(
     );
   }
 
-  final todas = [for (final r in reservas) vista(r)];
+  final todas = [for (final r in reservasVisibles) vista(r)];
   final solicitadas = [
     for (final v in todas)
       if (v.estado == 'solicitada') v
@@ -271,7 +287,8 @@ class _ReservasScreenState extends State<ReservasScreen> {
     final ops = await LocalDb.instance.pendingOps();
     if (!mounted) return;
     setState(() {
-      _bandeja = construirBandeja(reservas, clientes, suplementos);
+      _bandeja = construirBandeja(reservas, clientes, suplementos,
+          esDueno: AuthService().isOwner);
       _conOpPendiente = reservasConOpPendiente(ops);
       _cargando = false;
     });

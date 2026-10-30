@@ -72,6 +72,36 @@ class _CentroComprasScreenState extends State<CentroComprasScreen> {
         await LocalDb.instance.allMirror('servicio_lotes');
     final botes =
         await LocalDb.instance.allMirror('servicio_botes');
+    // P2#6: nombre por pomo_id (servicio_pomos), con fallback a
+    // lote_id. El nombre no es un conteo de dosis: no afecta al
+    // pomo ciego.
+    final pomos =
+        await LocalDb.instance.allMirror('servicio_pomos');
+    final supDePomo = <int, int>{
+      for (final p in pomos)
+        if ((p['id'] as num?) != null)
+          (p['id'] as num).toInt():
+              (p['suplemento_id'] as num?)?.toInt() ?? -1,
+    };
+    final casaIds = <int>{
+      for (final c in clientes)
+        if (c['cuenta_casa'] == 1 || c['cuenta_casa'] == true)
+          if ((c['id'] as num?) != null) (c['id'] as num).toInt(),
+    };
+    bool esAnulada(Map<String, dynamic> v) =>
+        (v['anulada'] as num?)?.toInt() == 1 ||
+        v['anulada'] == true ||
+        (v['anulado'] as num?)?.toInt() == 1 ||
+        v['anulado'] == true ||
+        '${v['estado'] ?? ''}' == 'anulada';
+    bool esCasa(Map<String, dynamic> v) {
+      if ((v['casa'] as num?)?.toInt() == 1 || v['casa'] == true) {
+        return true;
+      }
+      final cid = (v['cliente_id'] as num?)?.toInt() ??
+          (v['fiado_cliente_id'] as num?)?.toInt();
+      return cid != null && casaIds.contains(cid);
+    }
     final boteDeLote = <int, int>{
       for (final l in lotes)
         if ((l['id'] as num?) != null)
@@ -98,6 +128,9 @@ class _CentroComprasScreenState extends State<CentroComprasScreen> {
 
     final filas = <Map<String, dynamic>>[];
     for (final v in ventas) {
+      // P2#6: fuera anuladas y Casa (antes se fijaba 'anulada': 0
+      // ignorando el origen y se sumaban).
+      if (esAnulada(v) || esCasa(v)) continue;
       final precio = (v['precio'] as num?)?.toDouble() ?? 0;
       final cant = (v['cantidad'] as num?)?.toInt() ?? 0;
       final total = (v['total'] as num?)?.toDouble() ?? precio * cant;
@@ -126,13 +159,20 @@ class _CentroComprasScreenState extends State<CentroComprasScreen> {
     // ventas reversadas (ver ventasServicioSinReversos). La pista
     // de auditoría completa sigue en ServiciosScreen.
     for (final v in ventasServicioSinReversos(servicios)) {
+      // P2#6: fuera anuladas y Casa, igual que en suplementos.
+      if (esAnulada(v) || esCasa(v)) continue;
       final precio = (v['precio_unitario'] as num?)?.toDouble() ?? 0;
       final cant = (v['cantidad'] as num?)?.toInt() ?? 0;
       final cid = (v['cliente_id'] as num?)?.toInt();
       final subtipo = '${v['tipo'] ?? 'servicio'}';
-      // v1.13.0: nombre del producto visible en la fila de servicio.
+      // P2#6: primero por pomo_id; si no hay pomo, fallback al
+      // camino viejo (venta → lote → bote → suplemento).
+      final supIdPomo =
+          supDePomo[(v['pomo_id'] as num?)?.toInt()];
       final boteId = boteDeLote[(v['lote_id'] as num?)?.toInt()];
-      final supId = boteId == null ? null : supDeBote[boteId];
+      final supId = supIdPomo != null && supIdPomo != -1
+          ? supIdPomo
+          : (boteId == null ? null : supDeBote[boteId]);
       final nombreProd =
           supId == null ? null : nombreSup[supId];
       final concepto = _conceptoServicio(subtipo, cant);
@@ -201,6 +241,13 @@ class _CentroComprasScreenState extends State<CentroComprasScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // P2#6: guarda de dueño en build (antes solo el FAB la tenía).
+    if (!AuthService().isOwner) {
+      return Scaffold(
+          appBar: AppBar(title: const Text('Extracto de compras')),
+          body: const Center(
+              child: Text('Solo el dueño ve esta pantalla.')));
+    }
     return Scaffold(
       // v1.13.0: la vista de ventas se llama Extracto (E4 extendido,
       // no duplicado). El registro manual de compras sigue aquí.

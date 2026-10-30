@@ -5,8 +5,10 @@ library;
 
 import 'package:flutter/material.dart';
 
+import '../auth.dart';
 import '../localdb.dart';
 import '../negocio.dart';
+import '../tiempo.dart';
 import 'componentes.dart';
 import 'detalle_entrenador.dart';
 import 'diseno.dart';
@@ -31,7 +33,7 @@ class _HistorialEntrenadorScreenState
   }
 
   Future<void> _cargar() async {
-    final n = DateTime.now();
+    final n = ahoraHabana();
     final pref = '${n.year.toString().padLeft(4, '0')}-'
         '${n.month.toString().padLeft(2, '0')}';
 
@@ -88,7 +90,16 @@ class _HistorialEntrenadorScreenState
 
   @override
   Widget build(BuildContext context) {
-    final n = DateTime.now();
+    // Argón P1#8: pantalla solo dueño.
+    if (!AuthService().isOwner) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Historial por entrenador')),
+        body: const Center(
+          child: Text('Solo el dueño puede ver el historial por entrenador.'),
+        ),
+      );
+    }
+    final n = ahoraHabana();
     const meses = [
       '', 'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio',
       'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'

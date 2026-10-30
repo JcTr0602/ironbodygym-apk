@@ -78,6 +78,56 @@ class _ServiciosEstadisticasScreenState
         if ((l['id'] as num?) != null)
           (l['id'] as num).toInt(): (l['bote_id'] as num?)?.toInt() ?? -1,
     };
+    // Argón pasada 1 #1: desde v1.15 las ventas/salidas llevan
+    // pomo_id, no lote_id. Pomo -> suplemento (activos para el
+    // saldo + espejo completo para pomos históricos/inactivos);
+    // suplemento -> bote: el abierto, y si hay varios, el más
+    // reciente (id mayor). Sin pomo_id o sin bote resoluble por
+    // pomo, se cae a lote_id (ventas viejas).
+    final pomosEspejo =
+        await LocalDb.instance.allMirror('servicio_pomos');
+    final pomosActivos = await pomosActivosLocal();
+    final suplementoDePomo = <int, int>{
+      for (final p in pomosEspejo)
+        if ((p['id'] as num?) != null &&
+            (p['suplemento_id'] as num?) != null)
+          (p['id'] as num).toInt():
+              (p['suplemento_id'] as num).toInt(),
+    };
+    for (final p in pomosActivos) {
+      final id = (p['id'] as num?)?.toInt();
+      final sup = (p['suplemento_id'] as num?)?.toInt();
+      if (id != null && sup != null) suplementoDePomo[id] = sup;
+    }
+    final botePorSuplemento = <int, int>{};
+    final abiertoPorSuplemento = <int, bool>{};
+    for (final b in botes) {
+      final id = (b['id'] as num?)?.toInt();
+      final sup = (b['suplemento_id'] as num?)?.toInt();
+      if (id == null || sup == null) continue;
+      final abierto = '${b['estado']}' == 'abierto';
+      final actual = botePorSuplemento[sup];
+      if (actual == null ||
+          (abierto && !(abiertoPorSuplemento[sup] ?? false)) ||
+          (abierto == (abiertoPorSuplemento[sup] ?? false) &&
+              id > actual)) {
+        botePorSuplemento[sup] = id;
+        abiertoPorSuplemento[sup] = abierto;
+      }
+    }
+    final boteDePomo = <int, int>{
+      for (final e in suplementoDePomo.entries)
+        if (botePorSuplemento.containsKey(e.value))
+          e.key: botePorSuplemento[e.value]!,
+    };
+    int? boteDe(Map<String, dynamic> r) {
+      final pomoId = (r['pomo_id'] as num?)?.toInt();
+      if (pomoId != null) {
+        final porPomo = boteDePomo[pomoId];
+        if (porPomo != null) return porPomo;
+      }
+      return boteDeLote[(r['lote_id'] as num?)?.toInt()];
+    }
 
     bool enP(Map<String, dynamic> r) => _enPeriodo(r['fecha'] as String?);
     // Argón #9 (ALTO parcial): estadísticas sin reversos ni ventas
@@ -112,7 +162,7 @@ class _ServiciosEstadisticasScreenState
       };
     }
     for (final v in ventasP) {
-      final boteId = boteDeLote[(v['lote_id'] as num?)?.toInt()];
+      final boteId = boteDe(v);
       final fila = porBote[boteId];
       if (fila == null) continue;
       final tipo = '${v['tipo']}';
@@ -129,7 +179,7 @@ class _ServiciosEstadisticasScreenState
       }
     }
     for (final s in salidasP) {
-      final boteId = boteDeLote[(s['lote_id'] as num?)?.toInt()];
+      final boteId = boteDe(s);
       final fila = porBote[boteId];
       if (fila == null) continue;
       final dosis = (s['dosis'] as num?)?.toInt() ?? 0;
@@ -151,6 +201,7 @@ class _ServiciosEstadisticasScreenState
       salidas: salidasP,
       botes: botes,
       boteDeLote: boteDeLote,
+      boteDePomo: boteDePomo,
       movsAgua: movsAgua,
     );
     final ingBote = agg1B.ingBote;
@@ -164,12 +215,11 @@ class _ServiciosEstadisticasScreenState
     final dias = _periodo == 'mes'
         ? ahoraHabana().day
         : diasDesdePrimeraVenta(ventasP, ahoraHabana());
+    // Argón pasada 1 #1: el stock vivo son pomos (v1.15), no
+    // lotes: saldoTotal suma saldo_local de pomosActivosLocal().
     var saldoTotal = 0;
-    for (final l in lotes) {
-      if ('${l['estado']}' == 'activo') {
-        saldoTotal +=
-            await saldoLoteLocal((l['id'] as num).toInt());
-      }
+    for (final p in pomosActivos) {
+      saldoTotal += (p['saldo_local'] as num?)?.toInt() ?? 0;
     }
     final dosisDia = dias > 0 ? nDosis / dias : 0.0;
     final autonomia =

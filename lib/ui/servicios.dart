@@ -852,6 +852,10 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
   }
 
   Future<void> _salida() async {
+    // Argón pasada 1 #7: solo el dueño registra salidas sin venta.
+    // (Sin tope a la venta múltiple: el pomo ciego usa 999999 por
+    // diseño; un tope revelaría el saldo al entrenador.)
+    if (!AuthService().isOwner) return;
     final pomo = _pomoActual;
     if (pomo == null) {
       _aviso('No tienes un pomo activo', error: true);
@@ -1060,43 +1064,12 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Servicios ⚡'),
+        // Rediseño 1.18 (Jc 2026-10-29): arriba queda solo
+        // refrescar. Administración baja a un botón con texto
+        // debajo de MI POMO; Estadísticas y Ranking bajan como
+        // enlaces con texto dentro del Cuadre. Los iconos sin
+        // texto eran poco intuitivos.
         actions: [
-          // Rediseño opción A (Jc 2026-10-28): Administración,
-          // Estadísticas y Ranking suben al AppBar; el cuerpo queda
-          // para Mostrador, Cuadre y Ventas. Ítem 9: ranking — dueño
-          // siempre; entrenador solo con su permiso (fail-closed).
-          if (_esDueno ||
-              PermisosEntrenador().canVerRankingServicios)
-            IconButton(
-              tooltip: 'Ranking de compradores',
-              icon: const Icon(Icons.emoji_events_outlined),
-              onPressed: () => Navigator.push(
-                context,
-                MaterialPageRoute(
-                    builder: (_) => const RankingServiciosScreen()),
-              ),
-            ),
-          if (_esDueno)
-            IconButton(
-              tooltip: 'Estadísticas',
-              icon: const Icon(Icons.bar_chart),
-              onPressed: () => Navigator.push(
-                context,
-                MaterialPageRoute(
-                    builder: (_) =>
-                        const ServiciosEstadisticasScreen()),
-              ).then((_) => _cargar()),
-            ),
-          if (_esDueno)
-            IconButton(
-              tooltip: 'Administración',
-              icon: const Icon(Icons.tune),
-              onPressed: () => Navigator.push(
-                context,
-                MaterialPageRoute(
-                    builder: (_) => const ServiciosAdminScreen()),
-              ).then((_) => _cargar()),
-            ),
           IconButton(
             tooltip: 'Actualizar',
             icon: _actualizando
@@ -1118,6 +1091,24 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                 padding: const EdgeInsets.all(AppEspacio.lg),
                 children: [
                   _tarjetaPomo(),
+                  // Rediseño 1.18 (Jc 2026-10-29): acceso a la
+                  // administración en un toque, con texto, a lo
+                  // ancho debajo de MI POMO. Solo dueño.
+                  if (_esDueno) ...[
+                    const SizedBox(height: AppEspacio.md),
+                    OutlinedButton.icon(
+                      onPressed: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                            builder: (_) =>
+                                const ServiciosAdminScreen()),
+                      ).then((_) => _cargar()),
+                      icon: const Icon(Icons.settings, size: 20),
+                      label: const Text('Administrar',
+                          style: TextStyle(
+                              fontWeight: FontWeight.bold)),
+                    ),
+                  ],
                   const SizedBox(height: AppEspacio.md),
                   _botonesVenta(),
                   const SizedBox(height: AppEspacio.md),
@@ -1212,25 +1203,6 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
     );
   }
 
-  Widget _pildora(String texto, {bool destacado = false}) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(20),
-        color: destacado
-            ? AppColores.naranja.withValues(alpha: 0.15)
-            : AppColores.textoSecundario(context)
-                .withValues(alpha: 0.10),
-      ),
-      child: Text(
-        texto,
-        style: AppTexto.cuerpo.copyWith(
-            fontWeight:
-                destacado ? FontWeight.w600 : FontWeight.w400),
-      ),
-    );
-  }
-
   Widget _tarjetaPomo() {
     final pomo = _pomoActual;
     return Tarjeta(
@@ -1292,7 +1264,7 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                         pomo == null
                             ? 'Sin pomo activo'
                             : '${pomo['producto_nombre'] ?? 'Servicio'}',
-                        style: AppTexto.titulo.copyWith(fontSize: 16),
+                        style: AppTexto.titulo.copyWith(fontSize: 20),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                       ),
@@ -1303,8 +1275,10 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
               ],
             ),
           const SizedBox(height: 8),
-          // Nivel 2 — píldoras. Ítem 6: el saldo del pomo solo lo ve
-          // el dueño; al entrenador solo el agua común (pomo ciego).
+          // Nivel 2 — jerarquía 1.18 (Jc 2026-10-29): el saldo
+          // en número grande, el resto en fila secundaria.
+          // Ítem 6: el saldo del pomo solo lo ve el dueño; al
+          // entrenador solo el agua común (pomo ciego).
           if (pomo == null)
             Text(
               _esDueno
@@ -1312,17 +1286,20 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                   : 'Pide al dueño que te rellene un pomo.',
               style: AppTexto.cuerpo,
             )
-          else
-            Wrap(
-              spacing: AppEspacio.sm,
-              runSpacing: AppEspacio.sm,
+          else if (_esDueno)
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                if (_esDueno)
-                  _pildora('Saldo: ${pomo['saldo_local']} dosis',
-                      destacado: true),
-                _pildora('Agua común: ${_agua.saldo} pomos'),
+                Text('${pomo['saldo_local']} dosis',
+                    style: AppTexto.titulo.copyWith(fontSize: 28)),
+                const SizedBox(height: 4),
+                Text('Agua común: ${_agua.saldo} pomos',
+                    style: AppTexto.secundario),
               ],
-            ),
+            )
+          else
+            Text('Agua común: ${_agua.saldo} pomos',
+                style: AppTexto.secundario),
           // v1.13.0 (Bloque 4): desglose del pomo para el dueño
           // (asignadas − repartidas − ventas − salidas, espejo).
           // Al pie, tras un divisor, como micro-datos.
@@ -1391,7 +1368,8 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
     double precioDe(String tipo) => precioServicioMetodo(_ajustes,
         tipo, primerMetodoServicioActivo(_ajustes, tipo) ?? 'efectivo');
     Widget boton(String tipo, String etiqueta, double precio,
-        IconData icono, Color color, {bool grande = false}) {
+        IconData icono, Color color,
+        {bool grande = false, bool neutro = false}) {
       // v1.13.0 (Bloque 4, Argón ajuste 1): bloqueo SEPARADO
       // dosis vs pomos (nunca un interruptor único) + motivo
       // visible bajo el botón apagado. El entrenador sigue ciego
@@ -1411,12 +1389,26 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
           children: [
             FilledButton.icon(
               style: FilledButton.styleFrom(
-                backgroundColor: color,
-                // Rediseño post-1.15 (Argón, opción A): la fila
-                // principal es más alta (64px) para el pulgar en
-                // el mostrador; la secundaria mantiene su altura.
-                padding: EdgeInsets.symmetric(
-                    vertical: grande ? 20 : 14),
+                // Servicios 1.18 #2: el neutro ya no usa borde
+                // como fondo (parecía deshabilitado); fondo M3
+                // con borde visible. El deshabilitado sigue
+                // gobernado solo por onPressed: null.
+                backgroundColor: neutro
+                    ? Theme.of(context)
+                        .colorScheme
+                        .surfaceContainerHighest
+                    : color,
+                foregroundColor:
+                    neutro ? AppColores.texto(context) : null,
+                side: neutro
+                    ? BorderSide(color: AppColores.borde(context))
+                    : null,
+                // Servicios 1.18 #1: en 360dp los 3 botones de
+                // venta desbordaban; padding horizontal reducido
+                // y densidad compacta.
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 8, vertical: 10),
+                visualDensity: VisualDensity.compact,
               ),
               onPressed:
                   est.habilitado ? () => _vender(tipo) : null,
@@ -1450,11 +1442,11 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
       );
     }
 
-    // Rediseño post-1.15 (Argón, opción A, jerarquía 2 + 2): la
-    // venta del servicio (dosis sola o con agua) ocupa la fila
-    // principal a lo ancho; el agua suelta y la venta múltiple
-    // bajan a una fila secundaria. Precios, estados, motivos y
-    // flujos (_vender, _ventaMultiple) intactos.
+    // Rediseño 1.18 (Jc 2026-10-29): 3 botones iguales en una
+    // fila (Dosis, Dosis + agua, Solo agua) + Venta múltiple a
+    // lo ancho debajo como secundaria. Naranja solo en la
+    // acción principal (Dosis); el resto neutro. Precios,
+    // estados, motivos y flujos (_vender, _ventaMultiple) intactos.
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -1466,38 +1458,32 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                 grande: true),
             const SizedBox(width: AppEspacio.sm),
             boton('dosis_con_agua', 'Dosis + agua',
-                precioDe('dosis_con_agua'), Icons.water_drop, Colors.blue,
-                grande: true),
+                precioDe('dosis_con_agua'), Icons.water_drop,
+                AppColores.borde(context),
+                grande: true, neutro: true),
+            const SizedBox(width: AppEspacio.sm),
+            boton('agua_suelta', 'Solo agua',
+                precioDe('agua_suelta'), Icons.local_drink,
+                AppColores.borde(context),
+                grande: true, neutro: true),
           ],
         ),
         const SizedBox(height: AppEspacio.sm),
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // «Solo agua» (antes «Pomo agua»): mismo precio y
-            // mismo bloqueo; el nombre ya no se confunde con
-            // «Dosis + agua».
-            boton('agua_suelta', 'Solo agua',
-                precioDe('agua_suelta'), Icons.local_drink, Colors.teal),
-            const SizedBox(width: AppEspacio.sm),
-            Expanded(
-              child: OutlinedButton.icon(
-                onPressed:
-                    _pomoActual == null ? null : _ventaMultiple,
-                icon: const Icon(Icons.library_add, size: 20),
-                label: const Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text('Venta múltiple',
-                        style: TextStyle(
-                            fontWeight: FontWeight.bold, fontSize: 13)),
-                    Text('Varias dosis',
-                        style: TextStyle(fontSize: 11)),
-                  ],
-                ),
-              ),
-            ),
-          ],
+        OutlinedButton.icon(
+          style: OutlinedButton.styleFrom(
+            padding: const EdgeInsets.symmetric(vertical: 14),
+          ),
+          onPressed: _pomoActual == null ? null : _ventaMultiple,
+          icon: const Icon(Icons.library_add, size: 20),
+          label: const Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text('Venta múltiple',
+                  style: TextStyle(
+                      fontWeight: FontWeight.bold, fontSize: 13)),
+              Text('Varias dosis', style: TextStyle(fontSize: 11)),
+            ],
+          ),
         ),
       ],
     );
@@ -1548,7 +1534,7 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                     const Text('Efectivo a entregar',
                         style: AppTexto.secundario),
                     Text('${fmtMonto(c['efectivo'])} CUP',
-                        style: AppTexto.titulo.copyWith(fontSize: 16)),
+                        style: AppTexto.titulo.copyWith(fontSize: 22)),
                   ],
                 ),
               ),
@@ -1559,7 +1545,7 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                     const Text('Transferencia',
                         style: AppTexto.secundario),
                     Text('${fmtMonto(c['transferencia'])} CUP',
-                        style: AppTexto.titulo.copyWith(fontSize: 16)),
+                        style: AppTexto.titulo.copyWith(fontSize: 22)),
                   ],
                 ),
               ),
@@ -1571,6 +1557,7 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
               Expanded(
                 child: Column(
                   children: [
+                    Icon(Icons.bolt, size: 20, color: AppColores.textoSecundario(context)),
                     Text('$dosis',
                         style: AppTexto.titulo.copyWith(fontSize: 16)),
                     Text('Dosis hoy',
@@ -1587,6 +1574,7 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
               Expanded(
                 child: Column(
                   children: [
+                    Icon(Icons.local_drink, size: 20, color: AppColores.textoSecundario(context)),
                     Text('${c['agua_suelta']}',
                         style: AppTexto.titulo.copyWith(fontSize: 16)),
                     Text('Pomos sueltos',
@@ -1598,6 +1586,7 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
               Expanded(
                 child: Column(
                   children: [
+                    Icon(Icons.home, size: 20, color: AppColores.textoSecundario(context)),
                     Text('${c['casa']}',
                         style: AppTexto.titulo.copyWith(fontSize: 16)),
                     Text('Cuenta Casa',
@@ -1608,6 +1597,42 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
               ),
             ],
           ),
+          // Rediseño 1.18 (Jc 2026-10-29): Estadísticas y
+          // Ranking bajan del AppBar a enlaces con texto aquí.
+          // Ranking: dueño siempre; entrenador solo con su
+          // permiso (fail-closed, igual que antes).
+          if (_esDueno ||
+              PermisosEntrenador().canVerRankingServicios) ...[
+            const Divider(height: 24),
+            Row(
+              children: [
+                if (_esDueno)
+                  TextButton.icon(
+                    onPressed: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                          builder: (_) =>
+                              const ServiciosEstadisticasScreen()),
+                    ).then((_) => _cargar()),
+                    icon: const Icon(Icons.bar_chart, size: 18),
+                    label: const Text('Estadísticas'),
+                  ),
+                if (_esDueno ||
+                    PermisosEntrenador().canVerRankingServicios)
+                  TextButton.icon(
+                    onPressed: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                          builder: (_) =>
+                              const RankingServiciosScreen()),
+                    ),
+                    icon: const Icon(Icons.emoji_events_outlined,
+                        size: 18),
+                    label: const Text('Ranking'),
+                  ),
+              ],
+            ),
+          ],
         ],
       ),
     );

@@ -15,6 +15,13 @@ class Novedad {
 }
 
 const novedades = [
+  Novedad('1.18.0', [
+    'Servicios rediseñado: botones de venta más claros, MI POMO con el saldo grande para el dueño y pomo ciego para el entrenador, y Administrar, Estadísticas y Ranking reubicados sin tocar los permisos',
+    'Actividad: al abrir un detalle, la app ya resuelve el cliente por el nombre del texto y abre su ficha con su botón de WhatsApp; los nombres con tildes, puntos y guiones ya resuelven bien',
+    'Bot más firme: un cobro ya no se pierde si se pulsa dos veces seguidas, el recordatorio de entregas ya incluye suplementos y servicios, y las lectoras ya no se quedan fuera de los comandos de consulta',
+    'Guía de invitado: cada invitado ya ve solo lo suyo en el mismo teléfono, sin mezclar favoritos, hechos ni rutinas con otro invitado',
+    'Pagos por método: las ventas de servicios pagadas por transferencia ya no se cuentan como efectivo en el mes anterior',
+  ]),
   Novedad('1.17.0', [
     'Seguridad cerrada: en Auditoría, Administración y GymPedia el entrenador ya solo ve y toca lo suyo; los accesos, la cola y la búsqueda ya no dejan ver ni tocar clientes protegidos',
     'Nómina y pendientes cuadran: las cuentas Casa ya no inflan los ingresos, los servicios ya suman en el día y por entrenador, y el conteo global solo se muestra con permiso',

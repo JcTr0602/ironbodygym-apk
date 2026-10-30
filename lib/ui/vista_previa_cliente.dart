@@ -11,6 +11,7 @@ import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../config.dart';
+import 'horario_gym.dart';
 
 /// Resultado del semáforo de membresía (espejo de la lógica de
 /// inicio_screen.dart de la app de Clientes, v0.5.2).
@@ -153,6 +154,9 @@ class _VistaPreviaClienteScreenState
   Map<String, dynamic>? _datos;
   bool _cargando = true;
   String? _error;
+  // Argón P1#13: horario canónico (no texto fijo): se carga junto a
+  // los datos; mientras tanto se muestra el texto anterior.
+  String? _horarioCanonico;
   late final TabController _tabs;
 
   // Colores de la app de clientes.
@@ -178,6 +182,13 @@ class _VistaPreviaClienteScreenState
       _cargando = true;
       _error = null;
     });
+    // Horario canónico en paralelo al RPC (caché local primero).
+    cargarHorarioCanonico().then((dias) {
+      final texto = textoHorarioCanonico(dias);
+      if (texto.isNotEmpty && mounted) {
+        setState(() => _horarioCanonico = texto);
+      }
+    }).catchError((_) {});
     try {
       final res = await Supabase.instance.client
           .rpc('preview_datos_cliente', params: {
@@ -396,9 +407,9 @@ class _VistaPreviaClienteScreenState
             const Text('Gimnasio cerrado por horario',
                 style: TextStyle(color: Colors.white)),
           const SizedBox(height: 4),
-          const Text(
-              'Horario: L–V 6:00–12:00 y 14:00–20:00 · Sáb 7:00–12:00 · Dom cerrado',
-              style: TextStyle(color: Colors.white54, fontSize: 12)),
+          Text(
+              'Horario: ${_horarioCanonico ?? 'L–V 6:00–12:00 y 14:00–20:00 · Sáb 7:00–12:00 · Dom cerrado'}',
+              style: const TextStyle(color: Colors.white54, fontSize: 12)),
         ]),
         // Resumen rápido.
         _tituloSeccion('Resumen rápido'),

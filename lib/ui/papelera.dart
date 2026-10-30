@@ -19,6 +19,7 @@ import 'buscar.dart';
 import 'componentes.dart';
 import 'dialogo_pago.dart';
 import 'diseno.dart';
+import 'preview_cobro.dart';
 import 'ficha.dart';
 import 'widgets.dart';
 
@@ -162,6 +163,11 @@ class _PapeleraScreenState extends State<PapeleraScreen> {
       icono: Icons.autorenew,
     );
     if (ok != true || !mounted) return;
+    // P2#3-parte: Casa nunca paga: bloquear ANTES de pagoDialogo
+    // (pagoDialogo también lo defiende, pero el bloqueo aquí evita
+    // abrir el diálogo a una Casa recuperada).
+    if (await mostrarBloqueoCasa(context, c)) return;
+    if (!mounted) return;
     // Lote 1 Argón: ANTES se encolaba cambiar_estado y después se
     // abría el pago; al cancelar, el cliente quedaba activo sin pago
     // (y el siguiente _cargar lo seguía mostrando en la papelera,
@@ -173,6 +179,23 @@ class _PapeleraScreenState extends State<PapeleraScreen> {
       _cargar();
       return;
     }
+    // P2#3-parte: un cobro del dueño en efectivo ya está entregado
+    // (no suma al pendiente a entregar); el entrenador lo deja en
+    // pendiente como siempre.
+    if (AuthService().isOwner) payload['entregado'] = 1;
+    // DECISIÓN Jc 2026-10-30 (delega «decide lo mejor»): se
+    // queda el DialogoApp.confirmar previo y NO se cablea
+    // cobrarConPreviewYRecibo aquí. El preview es UI y no
+    // puede correr dentro de la transacción única de abajo;
+    // partir el helper obligaría a ordenar la actualización
+    // optimista del espejo dentro/fuera del txn (riesgo de
+    // bloqueo sqflite: nunca leer por LocalDb.instance.db
+    // dentro de un callback transaction) y abriría un
+    // estado nuevo: deshacer el pago tras recuperar
+    // dejaría al cliente activo sin pago. Ganancia
+    // cosmética en un flujo de admin ocasional; la
+    // atomicidad Lote 1 (cambiar_estado + pago_mensual
+    // juntos o ninguno) no se toca.
     // Revalidar tras el diálogo (mismo criterio que _recuperar).
     final id = await _idRecuperable(c);
     if (id == null || !mounted) return;

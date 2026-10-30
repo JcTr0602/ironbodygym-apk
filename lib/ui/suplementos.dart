@@ -1341,15 +1341,16 @@ class _EditarSuplementoScreenState
           throw StateError(
               'No se puede encolar foto: _editando=true pero suplemento no tiene ID válido: ${widget.suplemento}');
         }
-        final nEncoladas = await FotosColaService.instance.encolarFoto(
+        await FotosColaService.instance.encolarFoto(
           opUuid: fotoOpUuid,
           suplementoId: sid,
           rutaOriginal: _fotoNuevaPath!,
         );
-        // v1.2.9+40: diagnóstico visible (temporal).
+        // Foto encolada: aviso limpio al usuario.
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Fotos encoladas: $nEncoladas (sid=$sid)')),
+            const SnackBar(
+                content: Text('Foto guardada. Se subirá al sincronizar.')),
           );
         }
       }

@@ -477,7 +477,10 @@ class _InscribirScreenState extends State<InscribirScreen> {
         'sexo': _sexo,
         'periodo': _periodo,
         'meses': _meses,
-        if (_periodo == 'personalizado') 'dias': dias,
+        // Argón P1#5-parte: `dias` también cuando el periodo es
+        // un tipo personalizado (`tipo:...`), no solo `personalizado`.
+        if (_periodo == 'personalizado' ||
+            _periodo.startsWith('tipo:')) 'dias': dias,
         // v1.3.9: guardar monto también para tipos personalizados
         // (ej. "Oferta 50%") — se usa en el cálculo del pendiente.
         if (_periodo == 'personalizado' ||
@@ -491,6 +494,8 @@ class _InscribirScreenState extends State<InscribirScreen> {
         'metodo_pago': _metodoPago,
         // v1.2.2: guardar si es menor y el precio aplicado (histórico)
         if (_esMenor) 'es_menor': true,
+        // Argón P1#5-parte: tipo mensual de menor.
+        if (_esMenor && _periodo == 'mensual') 'tipo_id': 'menores',
         'precio_aplicado': monto,
         // v1.4.0 Paso 2 (propuesta 11): el puente genera el acceso a
         // la app de clientes tras aplicar la inscripción.

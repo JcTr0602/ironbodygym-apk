@@ -1163,6 +1163,13 @@ class _FichaScreenState extends State<FichaScreen> {
             TextButton(
                 onPressed: () => Navigator.pop(ctx, false),
                 child: const Text('Cancelar')),
+            // Argón P1#16: limpiar la fecha (pagado_hasta a null).
+            TextButton(
+                onPressed: () {
+                  setS(() => pagadoHasta = null);
+                  Navigator.pop(ctx, true);
+                },
+                child: const Text('Limpiar fecha')),
             ElevatedButton(
                 onPressed: () => Navigator.pop(ctx, true),
                 style: ElevatedButton.styleFrom(
@@ -1185,15 +1192,29 @@ class _FichaScreenState extends State<FichaScreen> {
           const SnackBar(content: Text('Sin cambios')));
       return;
     }
+    // Argón P1#16: al limpiar, el null va explícito en el payload
+    // (payloadSensible omite las claves null y el servidor no
+    // distinguiría «limpiar» de «sin cambio»).
+    final payloadOp = phStr == null
+        ? <String, dynamic>{
+            'cliente_id': widget.clienteId,
+            'pagado_hasta': null,
+          }
+        : payloadSensible(
+            clienteId: widget.clienteId, pagadoHasta: phStr);
     await LocalDb.instance.queueOp(
       opUuid: const Uuid().v4(),
       tipo: 'update_cliente_sensible',
-      payload: payloadSensible(
-          clienteId: widget.clienteId, pagadoHasta: phStr),
+      payload: payloadOp,
     );
     if (phStr != null) {
       await LocalDb.instance
           .updateMirrorPagadoHasta(widget.clienteId, phStr);
+    } else {
+      // Argón P1#16: la limpieza también baja al espejo (null, no
+      // quedarse con la fecha vieja hasta el próximo pull).
+      await LocalDb.instance.updateMirrorBasico(
+          widget.clienteId, {'pagado_hasta': null});
     }
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(

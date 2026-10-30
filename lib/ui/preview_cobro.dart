@@ -235,6 +235,28 @@ Future<bool> cobrarConPreviewYRecibo({
   );
   if (confirmado != true || !context.mounted) return false;
 
+  // Argón P1#4 (contrato con PagoScreen._deshacerUltimo): leer el
+  // pagado_hasta anterior del espejo ANTES de encolar, aplicar la
+  // actualización optimista al encolar y guardar el valor anterior
+  // en el payload como 'pagado_hasta_anterior'. Si la confirmación
+  // devuelve 'deshecho', se restaura ese valor anterior.
+  // NO cubre una op rechazada tras la ventana de 15 s.
+  final clienteId = (payload['cliente_id'] as num?)?.toInt();
+  String? pagadoHastaAnterior;
+  if (clienteId != null) {
+    try {
+      final filas = await LocalDb.instance
+          .mirrorPorIds('clientes', [clienteId]);
+      if (filas.isNotEmpty) {
+        final anterior = filas.first['pagado_hasta'] as String?;
+        pagadoHastaAnterior =
+            (anterior == null || anterior.isEmpty) ? null : anterior;
+      }
+    } catch (_) {}
+  }
+  final payloadOp = Map<String, dynamic>.from(payload)
+    ..['pagado_hasta_anterior'] = pagadoHastaAnterior;
+
   // Retención Deshacer: la op nace con 15 s de espera en cola local.
   final opUuid = const Uuid().v4();
   final retenerHasta =
@@ -242,9 +264,16 @@ Future<bool> cobrarConPreviewYRecibo({
   await LocalDb.instance.queueOp(
     opUuid: opUuid,
     tipo: 'pago_mensual',
-    payload: payload,
+    payload: payloadOp,
     retenerHastaIso: retenerHasta,
   );
+  // Actualización optimista del espejo con el nuevo vencimiento.
+  if (clienteId != null && vencRaw.isNotEmpty) {
+    try {
+      await LocalDb.instance.updateMirrorPagadoHasta(
+          clienteId, vencRaw.substring(0, 10));
+    } catch (_) {}
+  }
   if (!context.mounted) return false;
 
   final resultado = await Navigator.of(context).push<String>(
@@ -258,5 +287,17 @@ Future<bool> cobrarConPreviewYRecibo({
       ),
     ),
   );
+  if (resultado == 'deshecho' && clienteId != null) {
+    // Restaurar el valor anterior en el espejo (null = quitarlo).
+    try {
+      if (pagadoHastaAnterior == null) {
+        await LocalDb.instance.updateMirrorBasico(
+            clienteId, {'pagado_hasta': null});
+      } else {
+        await LocalDb.instance.updateMirrorPagadoHasta(
+            clienteId, pagadoHastaAnterior.substring(0, 10));
+      }
+    } catch (_) {}
+  }
   return resultado == 'deshecho';
 }

@@ -391,6 +391,10 @@ class _GuiaEditorScreenState extends State<GuiaEditorScreen> {
         );
         if (marcar == true) {
           setState(() => _esencial = true);
+          // Argón P2#12-parte: la vista previa se construye con `a`
+          // (tomado antes del setState); sin esto mostraba el mapa
+          // viejo sin el chip Esencial (el payload sí salía bien).
+          a['esencial'] = true;
         } else {
           return;
         }
@@ -914,8 +918,10 @@ class _GuiaEditorScreenState extends State<GuiaEditorScreen> {
               Padding(
                 padding: const EdgeInsets.only(bottom: 8),
                 child: Image.network(
+                  // Argón P2#14: revienta la caché tras republicar.
                   '${AppConfig.supabaseUrl}/storage/v1/object/public/'
-                  '${AppConfig.bucketGuia}/${_slug.text.trim()}.webp',
+                  '${AppConfig.bucketGuia}/${_slug.text.trim()}.webp'
+                  '?v=$_imagenRev',
                   height: 160,
                   errorBuilder: (_, __, ___) =>
                       const Text('Sin vista previa de la imagen.'),

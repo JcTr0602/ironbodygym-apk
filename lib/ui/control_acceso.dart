@@ -14,6 +14,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../acceso_app_cache.dart';
 import '../auth.dart';
 import '../localdb.dart';
+import '../tiempo.dart';
 import '../negocio.dart' show tiempoRelativo;
 import 'acciones_acceso.dart';
 import 'campana_wa.dart';
@@ -217,7 +218,7 @@ class _AccesosClientesTabState extends State<AccesosClientesTab> {
   }
 
   List<AccesoCliente> _filtrarAccesos(List<AccesoCliente> todos) {
-    final ahora = DateTime.now();
+    final ahora = ahoraHabana();
     var lista = todos.where((a) {
       if (!_coincideBusqueda(a.nombre, a.telefono)) return false;
       switch (_vista) {
@@ -325,7 +326,7 @@ class _AccesosClientesTabState extends State<AccesosClientesTab> {
 
   Widget _contenido() {
     final todos = AccesoAppCache.instance.todos ?? [];
-    final ahora = DateTime.now();
+    final ahora = ahoraHabana();
     final activos = todos.where((a) => a.estado == 'activo').length;
     final nunca = todos
         .where((a) => a.activo && a.ultimoAccesoEn == null)

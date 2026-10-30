@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 
 import 'dart:io';
 
+import '../cliente_protegido.dart';
 import '../fotos.dart';
 import '../localdb.dart';
 import '../negocio.dart';
@@ -52,7 +53,7 @@ class _MiDiaScreenState extends State<MiDiaScreen> {
   @override
   void initState() {
     super.initState();
-    final n = DateTime.now();
+    final n = ahoraHabana();
     _mesAnio = n.year;
     _mesMes = n.month;
     _cargar();
@@ -107,7 +108,10 @@ class _MiDiaScreenState extends State<MiDiaScreen> {
       g['total'] = (g['total'] as double) + (c['monto'] as double);
       (g['items'] as List<Map<String, dynamic>>).add(c);
     }
-    final porCobrar = await vencenHoy();
+    // P1#3: los protegidos no aparecen en "Por cobrar hoy" para
+    // un no-dueño (esVistaProtegida ya es false para el dueño).
+    final porCobrar =
+        (await vencenHoy()).where((c) => !esVistaProtegida(c)).toList();
     final porMetodo = await cobradoHoyPorMetodo(soloTelegramId: soloTid);
     // v1.3.2: pagos diarios por turno y turnos sin reporte.
     final diariosPorTurno = await resumenDiarioPorTurno(hoy, soloTelegramId: soloTid);
@@ -140,7 +144,7 @@ class _MiDiaScreenState extends State<MiDiaScreen> {
   }
 
   String _hoyCorto() {
-    final n = DateTime.now();
+    final n = ahoraHabana();
     return '${n.year.toString().padLeft(4, '0')}-'
         '${n.month.toString().padLeft(2, '0')}-'
         '${n.day.toString().padLeft(2, '0')}';
@@ -158,7 +162,7 @@ class _MiDiaScreenState extends State<MiDiaScreen> {
         soloTelegramId: soloTid);
     final diasMes = Map<String, double>.from(res['porDia'] as Map? ?? {});
     var totalMes = (res['total'] as num?)?.toDouble() ?? 0;
-    final ahora = DateTime.now();
+    final ahora = ahoraHabana();
     if (_mesAnio == ahora.year && _mesMes == ahora.month) {
       final hoyIso = _hoyCorto();
       final hoy = await diariosDeHoy(soloTelegramId: soloTid);

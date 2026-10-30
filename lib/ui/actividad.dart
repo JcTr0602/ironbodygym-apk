@@ -5,10 +5,13 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../auth.dart';
+import '../cliente_protegido.dart';
 import '../fotos.dart';
 import '../localdb.dart';
 import '../negocio.dart';
+import '../permisos_entrenador.dart';
 import '../tiempo.dart';
+import 'auditoria.dart';
 import 'componentes.dart';
 import 'diseno.dart';
 import 'ficha.dart';
@@ -36,6 +39,64 @@ String sinTildes(String s) {
     buf.write(idx >= 0 ? sin[idx] : c);
   }
   return buf.toString();
+}
+
+/// Terra 1.18: teléfono preferido para WhatsApp. `??` solo cae
+/// cuando movil es null, no cuando es '' o espacios; aquí se elige
+/// el primer valor no vacío (movil, si no telefono). Top-level
+/// para tests, igual que sinTildes.
+String telefonoPreferido(Map<String, dynamic> c) {
+  final movil = '${c['movil'] ?? ''}'.trim();
+  return movil.isNotEmpty ? movil : '${c['telefono'] ?? ''}'.trim();
+}
+
+/// 1.18 (Jc 2026-10-29, fix Actividad B): el nombre del inscrito
+/// desde el texto del detalle del servidor
+/// («Nombre Apellido — 2000 CUP ...»). Top-level para tests.
+/// Null si el primer segmento no parece un nombre (1 palabra,
+/// dígitos, texto genérico). El nombre NO se inventa: es el texto
+/// que el servidor ya escribió en el detalle.
+String? nombreDeDetalleActividad(String det) {
+  // El formato con nombre siempre trae ' — ' (nombre — resto).
+  // Sin ese separador, el detalle no lleva nombre.
+  if (!det.contains(' — ')) return null;
+  final seg = det.split(' — ').first.trim();
+  if (seg.isEmpty || seg.length > 60) return null;
+  if (seg.toLowerCase().startsWith('cliente ')) return null;
+  final partes = seg.split(RegExp(r'\s+'));
+  if (partes.length < 2) return null;
+  if (!RegExp(r"^[A-Za-zÁÉÍÓÚÜÑáéíóúüñ'.\- ]+$").hasMatch(seg)) {
+    return null;
+  }
+  return seg;
+}
+
+/// P2#2 (Argón, 2026-10-29): ¿esta actividad del feed es propia
+/// del entrenador que mira? Mismo criterio que AuditoriaScreen
+/// ([esOpMia]): la firma de texto del actor contra el nombre de
+/// la sesión. Adaptación necesaria porque el feed NO es una op de
+/// la cola: su forma es {actor, cliente_id, ...} sin payload.
+/// - Op local en cola (_en_cola): nació en este teléfono, es propia
+///   (la cola local solo contiene ops de este dispositivo).
+/// - Actor con nombre: se acredita con [esOpMia] sobre una op
+///   sintética con ese nombre como firma.
+/// - Actor vacío en un item del servidor: NO se acredita como
+///   propia (fail-closed). Aquí, a diferencia de la cola, un item
+///   sin firma puede ser de cualquier entrenador, así que el
+///   default «sin firma = mía» de [esOpMia] no aplica.
+/// Top-level para tests.
+bool esActividadPropia(Map<String, dynamic> a,
+    {String? miActor, int? miTelegramId}) {
+  if (a['_en_cola'] == true) return true;
+  final actor = '${a['actor'] ?? ''}'.trim();
+  if (actor.isEmpty) return false;
+  return esOpMia(
+    {
+      'payload': {'registrado_por_nombre': actor},
+    },
+    miActor: miActor,
+    miTelegramId: miTelegramId,
+  );
 }
 
 /// v1.3.7 (Fase 2, D2): calcula (texto, esPositiva) de la comparativa.
@@ -103,6 +164,11 @@ class _ActividadScreenState extends State<ActividadScreen> {
   // Caché: cliente_id -> nombre y foto_storage
   final Map<int, String> _nombres = {};
   final Map<int, String?> _fotos = {};
+  // P2#2 (Argón): ids de clientes protegidos vistos en esta carga
+  // (solo tiene contenido para un no-dueño; para el dueño
+  // esVistaProtegida es false y queda vacío). Se usa en el detalle
+  // para no ofrecer ficha ni recibo de un protegido.
+  final Set<int> _protegidosIds = {};
   // v1.3.5 (Fase 1, C4): teléfonos para el recibo por WhatsApp.
   final Map<int, String> _telefonos = {};
   // v1.3.5 (Fase 1, C4): claves de ops no confirmadas para el indicador
@@ -199,6 +265,78 @@ class _ActividadScreenState extends State<ActividadScreen> {
         }
       } catch (_) {}
     } catch (_) {}
+    // P2#2 (Argón): recorte de visibilidad para no-dueños, ANTES
+    // de resolver nombres. Fail-closed: sin dueño confirmado, se
+    // recorta (igual que AuditoriaScreen). Solo acciones propias.
+    var esDueno = false;
+    String? miActor;
+    int? miTelegramId;
+    try {
+      esDueno = AuthService().isOwner;
+      miActor = AuthService().displayName;
+      miTelegramId = AuthService().telegramId;
+    } catch (_) {
+      esDueno = false;
+      miActor = null;
+      miTelegramId = null;
+    }
+    if (!esDueno) {
+      lista.removeWhere((a) => !esActividadPropia(a,
+          miActor: miActor, miTelegramId: miTelegramId));
+    }
+    // P2#19 (Argón): UNA sola consulta al espejo para todos los
+    // clientes distintos del feed, en vez de un clientePorId
+    // secuencial por cliente.
+    final idsDistintos = <int>{};
+    for (final a in lista) {
+      final id = _clienteIdDe(a);
+      if (id != null) idsDistintos.add(id);
+    }
+    Map<int, Map<String, dynamic>> porId = {};
+    try {
+      final filas = await LocalDb.instance
+          .mirrorPorIds('clientes', idsDistintos.toList());
+      for (final f in filas) {
+        final rid = f['id'];
+        int? ridInt;
+        if (rid is int) {
+          ridInt = rid;
+        } else if (rid is num) {
+          ridInt = rid.toInt();
+        } else if (rid is String) {
+          ridInt = int.tryParse(rid);
+        }
+        if (ridInt != null) porId[ridInt] = f;
+      }
+    } catch (_) {
+      // Espejo no disponible: se sigue con marcadores
+      // 'Cliente $id', sin nombres ni teléfonos reales.
+      porId = {};
+    }
+    // P2#2 (Argón): un protegido nunca entra en la lista de un
+    // no-dueño, ni su nombre ni su foto ni su teléfono se precargan.
+    // Para el dueño esVistaProtegida es false y no se quita nada.
+    _protegidosIds.clear();
+    for (final f in porId.values) {
+      if (esVistaProtegida(f, esDueno: esDueno)) {
+        final rid = f['id'];
+        int? ridInt;
+        if (rid is int) {
+          ridInt = rid;
+        } else if (rid is num) {
+          ridInt = rid.toInt();
+        } else if (rid is String) {
+          ridInt = int.tryParse(rid);
+        }
+        if (ridInt != null) _protegidosIds.add(ridInt);
+      }
+    }
+    if (!esDueno) {
+      lista.removeWhere((a) {
+        final id = _clienteIdDe(a);
+        return id != null && _protegidosIds.contains(id);
+      });
+    }
     // v1.2.1: resolver nombres y fotos de clientes para cada item.
     _nombres.clear();
     _fotos.clear();
@@ -206,11 +344,13 @@ class _ActividadScreenState extends State<ActividadScreen> {
     for (final a in lista) {
       final id = _clienteIdDe(a);
       if (id != null && !_nombres.containsKey(id)) {
-        final c = await clientePorId(id);
+        final c = porId[id];
         if (c != null) {
           _nombres[id] = '${c['nombre'] ?? 'Cliente $id'}';
           _fotos[id] = c['foto_storage'] as String?;
-          final tel = '${c['telefono'] ?? ''}'.trim();
+          // 5ta pasada (A1, mismo arreglo que el camino por
+          // nombre): priorizar movil sobre telefono.
+          final tel = telefonoPreferido(c);
           if (tel.isNotEmpty) _telefonos[id] = tel;
         } else {
           _nombres[id] = 'Cliente $id';
@@ -442,8 +582,11 @@ class _ActividadScreenState extends State<ActividadScreen> {
 
   Future<void> _marcarLeidas() async {
     final p = await SharedPreferences.getInstance();
-    await p.setString('actividad_vista_ts',
-        DateTime.now().toUtc().toIso8601String());
+    // P2#11 (Argón): hora Habana, no UTC crudo. isoHabana lleva el
+    // offset explícito, así que actividadNoLeidas (que parsea y pasa
+    // a UTC) sigue comparando el mismo instante.
+    await p.setString(
+        'actividad_vista_ts', isoHabana(ahoraHabana()));
   }
 
   List<Map<String, dynamic>> get _filtrados {
@@ -463,7 +606,8 @@ class _ActividadScreenState extends State<ActividadScreen> {
       if (_filtroFecha != 'todo') {
         final ts = '${a['ts'] ?? ''}';
         final dia = ts.length >= 10 ? ts.substring(0, 10) : '';
-        final ahora = DateTime.now();
+        // P2#11 (Argón): hoy/ayer/7 días/mes en hora Habana.
+        final ahora = ahoraHabana();
         final hoyStr = _isoDia(ahora);
         final ayerStr =
             _isoDia(ahora.subtract(const Duration(days: 1)));
@@ -539,6 +683,36 @@ class _ActividadScreenState extends State<ActividadScreen> {
     final m = RegExp(r'cliente\s+(\d+)').firstMatch(det);
     if (m != null) return int.tryParse(m.group(1)!);
     return null;
+  }
+
+  /// 1.18 (fix Actividad B): busca el nombre en el espejo local.
+  /// Devuelve la fila solo si resuelve a UN solo cliente; null
+  /// si ninguno o varios (ambiguo: no se puede afirmar quién es).
+  /// Solo se llama desde el detalle (al tocar), nunca al armar
+  /// la lista, para no escanear el espejo por cada fila.
+  Future<Map<String, dynamic>?> _clienteUnicoPorNombre(
+      String nombre) async {
+    // 5ta pasada (A2): plegar tildes en ambos lados: el texto
+    // de actividad es inmutable y la ficha puede haberse
+    // corregido después ("Maria Rodriguez" → "María Rodríguez").
+    final norm = sinTildes(nombre)
+        .toLowerCase()
+        .trim()
+        .replaceAll(RegExp(r'\s+'), ' ');
+    Map<String, dynamic>? unico;
+    var n = 0;
+    for (final c in await LocalDb.instance.allMirror('clientes')) {
+      final nom = sinTildes('${c['nombre'] ?? ''}')
+          .toLowerCase()
+          .trim()
+          .replaceAll(RegExp(r'\s+'), ' ');
+      if (nom.isNotEmpty && nom == norm) {
+        n++;
+        unico = c;
+        if (n > 1) return null;
+      }
+    }
+    return n == 1 ? unico : null;
   }
 
   /// v1.3.3: extrae cliente_id del payload de una op local.
@@ -687,13 +861,63 @@ class _ActividadScreenState extends State<ActividadScreen> {
   /// Aloja el botón "Recibo WhatsApp" (wa.me) y el acceso a la ficha.
   Future<void> _abrirDetalle(Map<String, dynamic> a) async {
     final accion = '${a['accion'] ?? ''}';
-    final cliId = _clienteIdDe(a);
+    var cliId = _clienteIdDe(a);
+    // 1.18 (Jc 2026-10-29, fix Actividad B): sin cliente_id, el
+    // nombre SÍ viaja en el texto del detalle del servidor
+    // («Nombre Apellido — 2000 CUP ...»). Si resuelve a un solo
+    // cliente del espejo, se trata como cliente (título, ficha,
+    // WhatsApp); si no resuelve a uno único, solo el dueño ve el
+    // nombre del texto (resguardo protegido: un nombre ambiguo
+    // nunca se muestra como hecho a un entrenador).
+    String? nombreTexto;
+    if (cliId == null) {
+      nombreTexto = nombreDeDetalleActividad('${a['detalle'] ?? ''}');
+      if (nombreTexto != null) {
+        // Si el espejo falla, el detalle igual abre: sin cliente
+        // resuelto, el dueño ve el nombre del texto y el entrenador
+        // ve el título genérico. Nunca se cae el detalle por esto.
+        try {
+          final unico = await _clienteUnicoPorNombre(nombreTexto);
+          // P2#2 (Argón, compone con el fix 1.18): si el nombre
+          // resuelve a un cliente protegido, un no-dueño NO lo
+          // resuelve: queda sin cliente (título genérico, sin ficha
+          // ni recibo). esVistaProtegida falla cerrado si Auth no
+          // se resuelve, así que el dueño en sesión normal sí pasa.
+          if (unico != null && !esVistaProtegida(unico)) {
+            cliId = (unico['id'] as num).toInt();
+            _nombres[cliId] = '${unico['nombre'] ?? nombreTexto}';
+            // 5ta pasada (A1): el móvil de WhatsApp vive en
+            // movil; telefono guarda carnet o fijo. Priorizar
+            // movil (el resto de la app hace lo mismo).
+            final tel = telefonoPreferido(unico);
+            if (tel.isNotEmpty) _telefonos[cliId] = tel;
+          }
+        } catch (_) {
+          // Espejo no disponible: se sigue sin resolución (el dueño
+          // ve el nombre del texto, el entrenador el título
+          // genérico). Degradación segura, no un fallo del detalle.
+        }
+      }
+    }
     final tieneCliente = cliId != null;
+    // P2#2 (Argón): cliente protegido visto por un no-dueño. El
+    // conjunto solo se llena en _cargar para no-dueños, así que
+    // para el dueño siempre es false aquí.
+    final esProtegido =
+        cliId != null && _protegidosIds.contains(cliId);
     final nombreCli = cliId != null ? _nombres[cliId] : null;
-    final titulo =
-        (nombreCli != null && !nombreCli.startsWith('Cliente '))
-            ? nombreCli
-            : _tituloAccion(accion);
+    final titulo = (nombreCli != null &&
+            !nombreCli.startsWith('Cliente '))
+        ? nombreCli
+        : (cliId == null &&
+                nombreTexto != null &&
+                AuthService().isOwner
+            ? nombreTexto
+            : _tituloAccion(accion));
+    // Entrada resuelta por nombre: la ficha y el recibo re-derivan
+    // el id desde la entrada, así que se les pasa la entrada con
+    // el id ya resuelto.
+    final aRes = cliId != null ? {...a, 'cliente_id': cliId} : a;
     final subtitulo = _subtituloNuevo(a, titulo);
     final pendiente = _pendienteSync(a);
     // Monto para el recibo.
@@ -771,7 +995,9 @@ class _ActividadScreenState extends State<ActividadScreen> {
               const SizedBox(height: 16),
               Row(
                 children: [
-                  if (tieneCliente)
+                  // P2#2 (Argón): de un protegido, un no-dueño no
+                  // recibe ni «Ver ficha» ni «Recibo WhatsApp».
+                  if (tieneCliente && !esProtegido)
                     Expanded(
                       child: OutlinedButton.icon(
                         icon: const Icon(Icons.person_outline,
@@ -779,13 +1005,13 @@ class _ActividadScreenState extends State<ActividadScreen> {
                         label: const Text('Ver ficha'),
                         onPressed: () {
                           Navigator.of(ctx).pop();
-                          _abrirFicha(a);
+                          _abrirFicha(aRes);
                         },
                       ),
                     ),
-                  if (tieneCliente && waNum.isNotEmpty)
+                  if (tieneCliente && !esProtegido && waNum.isNotEmpty)
                     const SizedBox(width: 8),
-                  if (waNum.isNotEmpty)
+                  if (!esProtegido && waNum.isNotEmpty)
                     Expanded(
                       child: ElevatedButton.icon(
                         icon: const Icon(Icons.share, size: 18),
@@ -803,7 +1029,7 @@ class _ActividadScreenState extends State<ActividadScreen> {
                         onPressed: () {
                           Navigator.of(ctx).pop();
                           _compartirRecibo(
-                              a, titulo, montoTxt, waNum);
+                              aRes, titulo, montoTxt, waNum);
                         },
                       ),
                     ),
@@ -820,6 +1046,13 @@ class _ActividadScreenState extends State<ActividadScreen> {
   /// existente del proyecto (normalizarTelefonoWaMe + launchUrl).
   Future<void> _compartirRecibo(Map<String, dynamic> a, String titulo,
       String montoTxt, String waNum) async {
+    // P2#2 (Argón, defensa en profundidad): aunque el botón ya no
+    // se ofrece para un protegido, el recibo tampoco se comparte
+    // si se invocara por otra vía.
+    final idRecibo = _clienteIdDe(a);
+    if (idRecibo != null && _protegidosIds.contains(idRecibo)) {
+      return;
+    }
     final subtitulo = _subtituloNuevo(a, titulo);
     final fechaLarga = _fechaHoraLarga('${a['ts'] ?? ''}');
     final actor = '${a['actor'] ?? ''}'.trim();
@@ -868,6 +1101,17 @@ class _ActividadScreenState extends State<ActividadScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
               content: Text('Cliente no disponible offline')),
+        );
+      }
+      return;
+    }
+    // P2#2 (Argón, defensa en profundidad): un protegido no abre
+    // su ficha para un no-dueño aunque llegara aquí por otra vía.
+    // esVistaProtegida es owner-safe: al dueño no lo bloquea.
+    if (esVistaProtegida(c)) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text(mensajeClienteProtegido)),
         );
       }
       return;
@@ -1134,7 +1378,8 @@ class _ActividadScreenState extends State<ActividadScreen> {
       List<Map<String, dynamic>> items) {
     final grupos = <String, List<Map<String, dynamic>>>{};
     final orden = <String>[];
-    final hoy = DateTime.now();
+    // P2#11 (Argón): «Hoy»/«Ayer» del encabezado en hora Habana.
+    final hoy = ahoraHabana();
     final hoyStr =
         '${hoy.year}-${hoy.month.toString().padLeft(2, '0')}-${hoy.day.toString().padLeft(2, '0')}';
     final ayer = hoy.subtract(const Duration(days: 1));
@@ -1351,17 +1596,20 @@ class _ActividadScreenState extends State<ActividadScreen> {
           Future<void> elegirRangoSheet() async {
             final ini = await showDatePicker(
               context: ctx,
+              // initialDate es solo UI y se deja como está (P2#11).
               initialDate: rIni ?? DateTime.now(),
               firstDate: DateTime(2020),
-              lastDate: DateTime.now(),
+              // P2#11 (Argón): el tope del rango es hoy en Habana.
+              lastDate: ahoraHabana(),
               helpText: 'Fecha inicial',
             );
             if (ini == null || !ctx.mounted) return;
             final fin = await showDatePicker(
               context: ctx,
+              // initialDate es solo UI y se deja como está (P2#11).
               initialDate: rFin ?? DateTime.now(),
               firstDate: ini,
-              lastDate: DateTime.now(),
+              lastDate: ahoraHabana(),
               helpText: 'Fecha final',
             );
             if (fin == null || !ctx.mounted) return;
@@ -1669,7 +1917,9 @@ class _ActividadScreenState extends State<ActividadScreen> {
           // v1.4.1 (Pieza 7, D3): mini gráfico de la serie diaria.
           _tarjetaSerie(),
           // v1.3.3: cinta de resumen financiero (KPI bar) con desglose D1.
-          _kpiBar(filtrados),
+          // P2#2 (Argón): oculta si quien mira no tiene canVerCifras.
+          // Fail-closed: si los permisos no se resuelven, no se muestra.
+          if (_puedeVerCifras()) _kpiBar(filtrados),
           Expanded(
             child: _cargando
                 ? const Center(child: CircularProgressIndicator())
@@ -2091,6 +2341,16 @@ class _ActividadScreenState extends State<ActividadScreen> {
     final previo = _totalEnRango(_items, ant.$1, ant.$2);
     final r = textoComparativa(actualCup, previo, ant.$3);
     return r;
+  }
+
+  /// P2#2 (Argón): ¿puede ver cifras quien mira? El dueño siempre
+  /// (PermisosEntrenador); si la resolución falla, no se muestran.
+  bool _puedeVerCifras() {
+    try {
+      return PermisosEntrenador().canVerCifras;
+    } catch (_) {
+      return false;
+    }
   }
 
   /// v1.3.5 (Fase 1, D1): cinta de resumen con desglose por tipo.

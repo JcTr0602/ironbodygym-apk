@@ -175,6 +175,40 @@ class _VentaSuplementoInscripcionScreenState
       return;
     }
 
+    // Argón P1#2-parte: pre-chequeo de stock antes del diálogo de
+    // confirmación (la transacción ya lo valida, pero tarde).
+    if (widget.cantidad < 1) {
+      await DialogoApp.confirmar(context,
+          titulo: 'Stock insuficiente',
+          mensaje: 'Indica una cantidad mayor que 0.',
+          aceptar: 'Entendido',
+          cancelar: '');
+      return;
+    }
+    {
+      final sidPre =
+          (widget.suplemento['id'] as num?)?.toInt();
+      if (sidPre != null) {
+        final dbPre = await LocalDb.instance.db;
+        final rowsPre = await dbPre.query('suplementos',
+            columns: ['data'], where: 'id = ?', whereArgs: [sidPre]);
+        if (rowsPre.isNotEmpty) {
+          final dataPre = jsonDecode(rowsPre.first['data'] as String)
+              as Map<String, dynamic>;
+          final stockPre = (dataPre['stock'] as num?)?.toInt() ?? 0;
+          if (widget.cantidad > stockPre) {
+            await DialogoApp.confirmar(context,
+                titulo: 'Stock insuficiente',
+                mensaje:
+                    'Solo quedan $stockPre en stock.',
+                aceptar: 'Entendido',
+                cancelar: '');
+            return;
+          }
+        }
+      }
+    }
+
     final totalTxt = textoTotalVenta(_total, widget.moneda, widget.usdTasa);
     final ok = await DialogoApp.confirmar(
       context,
@@ -438,8 +472,18 @@ class _VentaSuplementoInscripcionScreenState
             texto: _guardando
                 ? 'Registrando…'
                 : 'Confirmar inscripción + venta',
-            onPressed:
-                _guardando ? null : _confirmar,
+            // Argón P1#2-parte: deshabilitado sin stock o si la
+            // cantidad supera el stock del snapshot (el pre-chequeo
+            // en _confirmar relee el stock vivo antes de confirmar).
+            onPressed: (_guardando ||
+                    ((widget.suplemento['stock'] as num?)?.toInt() ??
+                            0) <
+                        1 ||
+                    widget.cantidad >
+                        ((widget.suplemento['stock'] as num?)?.toInt() ??
+                            0))
+                ? null
+                : _confirmar,
           ),
         ],
       ),
