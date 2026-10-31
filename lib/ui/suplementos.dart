@@ -45,15 +45,27 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
   List<Map<String, dynamic>> _items = [];
   bool _cargando = true;
   String _busqueda = '';
+  final _busquedaCtrl = TextEditingController();
   bool _promoActiva = true;
   // v1.2.1: categorías
   List<Map<String, dynamic>> _categorias = [];
   int? _filtroCategoria; // null = todas
+  // 14/25: disponibilidad: 'todos' | 'con_stock' | 'bajo' | 'agotado'.
+  String _filtroStock = 'todos';
   // v1.2.1: tasa USD del día + ids de los más vendidos.
   double? _tasaUsd;
   List<int> _topIds = [];
 
+  // SU2 (estéticas 1.19): vista del catálogo (cuadrícula/lista).
+  bool _vistaLista = false;
+
   bool get _esDueno => _auth.isOwner;
+
+  @override
+  void dispose() {
+    _busquedaCtrl.dispose();
+    super.dispose();
+  }
 
   // Reservas v2: solicitudes pendientes de respuesta (contador
   // del acceso a la bandeja).
@@ -137,6 +149,7 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
   List<Map<String, dynamic>> get _topProductos {
     if (_busqueda.isNotEmpty ||
         _filtroCategoria != null ||
+        _filtroStock != 'todos' ||
         _topIds.isEmpty) {
       return [];
     }
@@ -182,6 +195,10 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
               categoriaDeSuplemento(s, cats)))
           .toList();
     }
+    // 14/25: filtro por disponibilidad.
+    if (_filtroStock != 'todos') {
+      res = res.where((s) => coincideFiltroStock(s, _filtroStock)).toList();
+    }
     // v1.2.3: para el dueño, ordenar sin-stock al final
     if (_esDueno) {
       res = [...res]..sort((a, b) {
@@ -222,20 +239,14 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
       MaterialPageRoute(
         builder: (_) => VentaSuplementoScreen(suplemento: s),
       ),
-    ).then((exito) {
+    ).then((_) {
       _cargar();
-      // TODO (Ítem A v1.3.5 / condición C1 — hook recibo WhatsApp, dueño):
-      // VentaSuplementoScreen hoy devuelve `true` al cerrar una venta
-      // exitosa. Cuando devuelva los datos de la venta (cantidad, total
-      // en USD, teléfono del cliente si aplica), ofrecer aquí el recibo
-      // por WhatsApp reutilizando normalizarTelefonoWaMe (negocio.dart)
-      // y el patrón de _mostrarDialogoWhatsApp (ficha.dart: campo de
-      // teléfono editable + wa.me), con moneda explícita "<monto> USD".
-      // NO duplicar la lógica del diálogo: extraer un helper compartido
-      // antes de implementarlo.
-      if (exito == true && _esDueno) {
-        // Punto de enganche del recibo (pendiente de los datos de venta).
-      }
+      // 13/25: el recibo ya NO se engancha aquí. El TODO viejo
+      // (Ítem A v1.3.5) pedía ofrecerlo tras la venta, pero la
+      // pantalla de venta ya muestra el comprobante completo al
+      // registrar (v1.3.7, ahora con vendedor) y el historial
+      // ofrece el recibo de cada venta (con método y vendedor).
+      // Engancharlo aquí duplicaría el ofrecimiento tras cada venta.
     });
   }
 
@@ -367,10 +378,10 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
                 if (mounted) _cargar();
               },
             ),
-          // v1.3.7 (Fase B §6.2): cuentas por cobrar (fiados).
+          // v1.3.7 (Fase B §6.2): fiados por cobrar (fiados).
           IconButton(
             icon: const Icon(Icons.account_balance_wallet_outlined),
-            tooltip: 'Cuentas por cobrar',
+            tooltip: 'Fiados por cobrar',
             onPressed: () => Navigator.push(
               context,
               MaterialPageRoute(
@@ -442,6 +453,7 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
           Padding(
             padding: const EdgeInsets.all(AppEspacio.md),
             child: CampoTexto(
+              controller: _busquedaCtrl,
               hint: 'Buscar suplemento…',
               icono: Icons.search,
               onChanged: (v) =>
@@ -480,6 +492,31 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
                 ],
               ),
             ),
+          // 14/25: filtro por disponibilidad.
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.fromLTRB(
+                AppEspacio.md, 0, AppEspacio.md, 0),
+            child: Row(
+              children: [
+                for (final f in const [
+                  ('todos', 'Todos'),
+                  ('con_stock', 'Con stock'),
+                  ('bajo', 'Stock bajo'),
+                  ('agotado', 'Agotados'),
+                ]) ...[
+                  ChoiceChip(
+                    label: Text(f.$2,
+                        style: const TextStyle(fontSize: 12)),
+                    selected: _filtroStock == f.$1,
+                    onSelected: (_) =>
+                        setState(() => _filtroStock = f.$1),
+                  ),
+                  const SizedBox(width: 8),
+                ],
+              ],
+            ),
+          ),
           Expanded(child: _cuerpo()),
         ],
       ),
@@ -522,18 +559,40 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
   /// elementos del spec sin overflow.
   Widget _cuerpo() {
     if (_cargando) {
-      return const Center(child: CircularProgressIndicator());
+      return const EstadoCargando(texto: 'Cargando suplementos…');
     }
     final items = _filtrados;
     if (items.isEmpty) {
+      // 14/25: con filtros activos, el vacío ofrece limpiarlos
+      // (búsqueda, categoría y stock) en vez del alta.
+      final hayFiltros = _busqueda.isNotEmpty ||
+          _filtroCategoria != null ||
+          _filtroStock != 'todos';
       return EstadoVacio(
         icono: Icons.medication_outlined,
         titulo: 'Sin suplementos',
-        subtitulo: _esDueno
-            ? 'Agrega el primero para empezar el catálogo.'
-            : 'Aún no hay productos en el inventario.',
-        textoAccion: _esDueno ? '+ Crear primer suplemento' : null,
-        onAccion: _esDueno ? () => _irEditar(null) : null,
+        subtitulo: hayFiltros
+            ? 'Ningún producto coincide con esos filtros.'
+            : _esDueno
+                ? 'Agrega el primero para empezar el catálogo.'
+                : 'Aún no hay productos en el inventario.',
+        textoAccion: hayFiltros
+            ? 'Limpiar filtros'
+            : _esDueno
+                ? '+ Crear primer suplemento'
+                : null,
+        onAccion: hayFiltros
+            ? () {
+                _busquedaCtrl.clear();
+                setState(() {
+                  _busqueda = '';
+                  _filtroCategoria = null;
+                  _filtroStock = 'todos';
+                });
+              }
+            : _esDueno
+                ? () => _irEditar(null)
+                : null,
       );
     }
     // v1.2.1: sección destacada con los más vendidos (solo si hay ventas).
@@ -541,27 +600,75 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
     return Column(
       children: [
         if (top.isNotEmpty) _seccionTop(top),
+        // SU2 (estéticas 1.19): interruptor cuadrícula/lista.
+        Padding(
+          padding: const EdgeInsets.fromLTRB(
+              AppEspacio.md, 0, AppEspacio.md, AppEspacio.sm),
+          child: Row(
+            children: [
+              const Spacer(),
+              SegmentedButton<bool>(
+                segments: const [
+                  ButtonSegment(
+                    value: false,
+                    icon: Icon(Icons.grid_view_rounded, size: 18),
+                  ),
+                  ButtonSegment(
+                    value: true,
+                    icon: Icon(Icons.view_list_rounded, size: 18),
+                  ),
+                ],
+                selected: {_vistaLista},
+                onSelectionChanged: (s) =>
+                    setState(() => _vistaLista = s.first),
+                showSelectedIcon: false,
+                style: const ButtonStyle(
+                  visualDensity: VisualDensity.compact,
+                ),
+              ),
+            ],
+          ),
+        ),
         Expanded(
           child: RefreshIndicator(
             onRefresh: _cargar,
-            child: GridView.builder(
-              padding: const EdgeInsets.all(AppEspacio.md),
-              gridDelegate:
-                  const SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: 2,
-                childAspectRatio: 0.60,
-                crossAxisSpacing: 12,
-                mainAxisSpacing: 12,
-              ),
-              itemCount: items.length,
-              itemBuilder: (ctx, i) => _TarjetaSuplemento(
-                key: ValueKey(items[i]['id']),
-                sup: items[i],
-                onVender: () => _irVender(items[i]),
-                onTap: () => _irDetalle(items[i]),
-                tasaUsd: _tasaUsd,
-              ),
-            ),
+            child: _vistaLista
+                ? ListView.builder(
+                    padding: const EdgeInsets.all(AppEspacio.md),
+                    itemCount: items.length,
+                    itemBuilder: (ctx, i) => Padding(
+                      padding:
+                          const EdgeInsets.only(bottom: AppEspacio.sm),
+                      child: _FilaSuplemento(
+                        key: ValueKey(items[i]['id']),
+                        sup: items[i],
+                        onVender: () => _irVender(items[i]),
+                        onTap: () => _irDetalle(items[i]),
+                        tasaUsd: _tasaUsd,
+                      ),
+                    ),
+                  )
+                : GridView.builder(
+                    padding: const EdgeInsets.all(AppEspacio.md),
+                    gridDelegate:
+                        const SliverGridDelegateWithFixedCrossAxisCount(
+                      crossAxisCount: 2,
+                      // SU1: el BotonPrimario (52 px de alto) es
+                      // más alto que el ElevatedButton anterior;
+                      // 0.52 da aire a nombre + precio + botón.
+                      childAspectRatio: 0.52,
+                      crossAxisSpacing: 12,
+                      mainAxisSpacing: 12,
+                    ),
+                    itemCount: items.length,
+                    itemBuilder: (ctx, i) => _TarjetaSuplemento(
+                      key: ValueKey(items[i]['id']),
+                      sup: items[i],
+                      onVender: () => _irVender(items[i]),
+                      onTap: () => _irDetalle(items[i]),
+                      tasaUsd: _tasaUsd,
+                    ),
+                  ),
           ),
         ),
       ],
@@ -698,6 +805,104 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
 /// - Mitad superior: foto AspectRatio(1.1), bordes superiores 12px,
 ///   BoxFit.cover, con triestado de carga (ver _FotoSuplemento).
 /// - Badge de stock flotante (sup. derecha): chip negro + punto semántico.
+/// SU2 (estéticas 1.19): fila compacta de la vista lista —
+/// foto pequeña + nombre + precio + Vender en una fila.
+class _FilaSuplemento extends StatelessWidget {
+  final Map<String, dynamic> sup;
+  final VoidCallback onVender;
+  final VoidCallback onTap;
+  final double? tasaUsd;
+
+  const _FilaSuplemento({
+    super.key,
+    required this.sup,
+    required this.onVender,
+    required this.onTap,
+    this.tasaUsd,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final nombre = '${sup['nombre'] ?? 'Sin nombre'}';
+    final stock = (sup['stock'] as num?)?.toInt() ?? 0;
+    final precio = (sup['precio_oficial'] as num?)?.toDouble() ??
+        (sup['precio'] as num?)?.toDouble() ??
+        0;
+    final act = sup['activo'];
+    final inactivo = act == 0 ||
+        act == false ||
+        sup['eliminado'] == 1 ||
+        sup['eliminado'] == true;
+    final hayStock = stock > 0 && !inactivo;
+    final moneda = LocalDb.monedaDe(sup);
+    final cup = moneda == 'USD'
+        ? precioOficialEn('CUP', precio, tasaUsd)
+        : null;
+    return Opacity(
+      opacity: hayStock ? 1.0 : 0.55,
+      child: Tarjeta(
+        onTap: onTap,
+        padding: const EdgeInsets.symmetric(
+            horizontal: AppEspacio.md, vertical: AppEspacio.sm),
+        child: Row(
+          children: [
+            SizedBox(
+              width: 56,
+              height: 56,
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: _FotoSuplemento(sup: sup),
+              ),
+            ),
+            const SizedBox(width: AppEspacio.md),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    nombre,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w600,
+                      fontSize: 13,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    '${precio.toStringAsFixed(2)} $moneda'
+                    '${cup != null ? ' (≈ ${cup.toStringAsFixed(0)} CUP)' : ''}',
+                    style: const TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 15,
+                      color: AppColores.naranja,
+                    ),
+                  ),
+                  if (!hayStock)
+                    Text(
+                      inactivo ? 'Inactivo' : 'Agotado',
+                      style: const TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        color: AppColores.error,
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            const SizedBox(width: AppEspacio.sm),
+            BotonPrimario(
+              texto: hayStock ? 'Vender' : 'Agotado',
+              onPressed: hayStock ? onVender : null,
+              expandido: false,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 /// - Mitad inferior: nombre (2 líneas), precio oficial grande, botón Vender.
 /// - Elevación 2, borde 1px (white10 oscuro / black12 claro).
 class _TarjetaSuplemento extends StatelessWidget {
@@ -735,36 +940,65 @@ class _TarjetaSuplemento extends StatelessWidget {
     final hayStock = stock > 0 && !inactivo;
     final oscuro = Theme.of(context).brightness == Brightness.dark;
 
-    return Card(
-      elevation: 2,
-      margin: EdgeInsets.zero,
-      clipBehavior: Clip.antiAlias,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
-        side: BorderSide(
-          color: oscuro ? Colors.white10 : Colors.black12,
-          width: 1,
+    return Opacity(
+      // SU3 (estéticas 1.19): sin stock la tarjeta se atenúa para
+      // distinguirse al pasar la vista (antes solo el botón
+      // cambiaba a «Agotado» y la tarjeta se veía igual).
+      opacity: hayStock ? 1.0 : 0.55,
+      child: Card(
+        elevation: 2,
+        margin: EdgeInsets.zero,
+        clipBehavior: Clip.antiAlias,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+          side: BorderSide(
+            color: oscuro ? Colors.white10 : Colors.black12,
+            width: 1,
+          ),
         ),
-      ),
-      child: InkWell(
-        onTap: onTap,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            AspectRatio(
-              aspectRatio: 1.1,
-              child: Stack(
-                fit: StackFit.expand,
-                children: [
-                  _FotoSuplemento(sup: sup),
-                  Positioned(
-                    top: 8,
-                    right: 8,
-                    child: _BadgeStock(stock: stock),
-                  ),
-                ],
+        child: InkWell(
+          onTap: onTap,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              AspectRatio(
+                aspectRatio: 1.1,
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    _FotoSuplemento(sup: sup),
+                    Positioned(
+                      top: 8,
+                      right: 8,
+                      child: _BadgeStock(stock: stock),
+                    ),
+                    // SU3: badge «Agotado» sobre la foto (el
+                    // inactivo ya se marca con su texto abajo).
+                    if (stock <= 0 && !inactivo)
+                      Positioned(
+                        top: 8,
+                        left: 8,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 8, vertical: 3),
+                          decoration: BoxDecoration(
+                            color: AppColores.error,
+                            borderRadius:
+                                BorderRadius.circular(12),
+                          ),
+                          child: const Text(
+                            'Agotado',
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w700,
+                              color: Colors.white,
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
               ),
-            ),
             Expanded(
               child: Padding(
                 padding: const EdgeInsets.all(8),
@@ -842,23 +1076,12 @@ class _TarjetaSuplemento extends StatelessWidget {
                       );
                     }),
                     const Spacer(),
-                    SizedBox(
-                      width: double.infinity,
-                      child: ElevatedButton(
-                        onPressed: hayStock ? onVender : null,
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: AppColores.naranja,
-                          foregroundColor: Colors.white,
-                          disabledBackgroundColor:
-                              oscuro ? Colors.white12 : Colors.black12,
-                          disabledForegroundColor:
-                              oscuro ? Colors.white38 : Colors.black38,
-                          padding: const EdgeInsets.symmetric(vertical: 8),
-                          tapTargetSize:
-                              MaterialTapTargetSize.shrinkWrap,
-                        ),
-                        child: Text(hayStock ? 'Vender' : 'Agotado'),
-                      ),
+                    // SU1 (estéticas 1.19): botón de venta con el
+                    // estilo primario del sistema; en «Agotado»
+                    // queda deshabilitado con su gris del tema.
+                    BotonPrimario(
+                      texto: hayStock ? 'Vender' : 'Agotado',
+                      onPressed: hayStock ? onVender : null,
                     ),
                   ],
                 ),
@@ -866,6 +1089,7 @@ class _TarjetaSuplemento extends StatelessWidget {
             ),
           ],
         ),
+      ),
       ),
     );
   }

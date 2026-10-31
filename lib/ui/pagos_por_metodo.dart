@@ -6,6 +6,35 @@ import '../auth.dart';
 import '../negocio.dart';
 import '../localdb.dart';
 import '../tiempo.dart';
+import 'componentes.dart';
+import 'diseno.dart';
+
+/// Totales USD de suplementos por método en un rango (PURO, sin mezclar
+/// con CUP): solo las ventas de suplementos en USD; transferencia
+/// aparte, el resto a efectivo. Las al fiado sin saldar ya vienen
+/// filtradas por ventasSuplementosUsd. Los pagos, diarios y servicios
+/// son solo CUP, así que no aportan USD.
+({double efectivo, double transferencia}) totalesUsdPorMetodo({
+  required List<Map<String, dynamic>> ventasUsd,
+  required String desde,
+  required String hasta,
+}) {
+  var efectivo = 0.0;
+  var transferencia = 0.0;
+  for (final v in ventasUsd) {
+    final f = '${v['fecha'] ?? ''}';
+    if (f.length < 10) continue;
+    final dia = f.substring(0, 10);
+    if (dia.compareTo(desde) < 0 || dia.compareTo(hasta) > 0) continue;
+    final monto = totalVentaUsd(v);
+    if ('${v['metodo'] ?? ''}'.toLowerCase().contains('transfer')) {
+      transferencia += monto;
+    } else {
+      efectivo += monto;
+    }
+  }
+  return (efectivo: efectivo, transferencia: transferencia);
+}
 
 class PagosPorMetodo extends StatefulWidget {
   const PagosPorMetodo({super.key});
@@ -22,16 +51,13 @@ class _PagosPorMetodoState
   double _efectivo = 0;
   double _transferencia = 0;
   double _mixto = 0;
+  double _efectivoUsd = 0;
+  double _transferenciaUsd = 0;
 
   static const _periodos = [
     'hoy',
     'mes',
     'mes_anterior'
-  ];
-  static const _labels = [
-    'Hoy',
-    'Mes Actual',
-    'Mes Anterior'
   ];
 
   @override
@@ -47,6 +73,8 @@ class _PagosPorMetodoState
       double efectivo = 0;
       double transferencia = 0;
       double mixto = 0;
+      double efectivoUsd = 0;
+      double transferenciaUsd = 0;
 
       if (periodo == 'mes_anterior') {
         // Rango del mes anterior completo
@@ -141,9 +169,36 @@ class _PagosPorMetodoState
             }
           }
         }
+        // USD (2/25): suplementos en USD por método, sin mezclar con CUP.
+        final usdAnt = totalesUsdPorMetodo(
+          ventasUsd: await ventasSuplementosUsd(),
+          desde: desde,
+          hasta: hasta,
+        );
+        efectivoUsd = usdAnt.efectivo;
+        transferenciaUsd = usdAnt.transferencia;
       } else {
         final pagos =
             await pagosDelPeriodo(periodo);
+        // USD (2/25): mismo rango que pagosDelPeriodo (hoy o mes).
+        final hoyUsd = ahoraHabana();
+        String isoUsd(DateTime d) =>
+            '${d.year.toString().padLeft(4, '0')}-'
+            '${d.month.toString().padLeft(2, '0')}-'
+            '${d.day.toString().padLeft(2, '0')}';
+        final desdeUsd = periodo == 'hoy'
+            ? isoUsd(hoyUsd)
+            : isoUsd(DateTime(hoyUsd.year, hoyUsd.month, 1));
+        final hastaUsd = periodo == 'hoy'
+            ? isoUsd(hoyUsd)
+            : isoUsd(DateTime(hoyUsd.year, hoyUsd.month + 1, 0));
+        final usdRango = totalesUsdPorMetodo(
+          ventasUsd: await ventasSuplementosUsd(),
+          desde: desdeUsd,
+          hasta: hastaUsd,
+        );
+        efectivoUsd = usdRango.efectivo;
+        transferenciaUsd = usdRango.transferencia;
         for (final p in pagos) {
           final monto =
               (p['monto'] as num?)?.toDouble() ??
@@ -166,6 +221,8 @@ class _PagosPorMetodoState
           _efectivo = efectivo;
           _transferencia = transferencia;
           _mixto = mixto;
+          _efectivoUsd = efectivoUsd;
+          _transferenciaUsd = transferenciaUsd;
           _cargando = false;
         });
       }
@@ -224,9 +281,7 @@ class _PagosPorMetodoState
           ),
           if (_cargando)
             const Expanded(
-              child: Center(
-                  child:
-                      CircularProgressIndicator()),
+              child: EstadoCargando(texto: 'Cargando desglose…'),
             )
           else
             Expanded(
@@ -238,7 +293,7 @@ class _PagosPorMetodoState
                     'Efectivo',
                     _efectivo,
                     total,
-                    Colors.green,
+                    AppColores.exito,
                     Icons.money,
                   ),
                   const SizedBox(height: 12),
@@ -246,7 +301,7 @@ class _PagosPorMetodoState
                     'Transferencia',
                     _transferencia,
                     total,
-                    Colors.blue,
+                    AppColores.info,
                     Icons.credit_card,
                   ),
                   if (_mixto > 0) ...[
@@ -255,42 +310,90 @@ class _PagosPorMetodoState
                       'Mixto',
                       _mixto,
                       total,
-                      Colors.orange,
+                      AppColores.naranja,
                       Icons.swap_horiz,
                     ),
                   ],
                   const SizedBox(height: 24),
-                  Card(
-                    color: Colors.grey[100],
-                    child: Padding(
-                      padding:
-                          const EdgeInsets.all(16),
+                  // C1 (estéticas 1.19): Tarjeta del sistema en vez
+                  // de Card gris claro (en oscuro quedaba claro) y
+                  // naranja oficial en vez del 0xFFFF6B00 a mano.
+                  Tarjeta(
+                    child: Row(
+                      mainAxisAlignment:
+                          MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Text(
+                          'Total',
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        Text(
+                          '\$${total.toStringAsFixed(0)} CUP',
+                          style: const TextStyle(
+                            fontSize: 20,
+                            fontWeight: FontWeight.w900,
+                            color: AppColores.naranja,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  if (_efectivoUsd + _transferenciaUsd > 0) ...[
+                    const SizedBox(height: 24),
+                    const Text(
+                      'USD (solo suplementos)',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    _buildBarra(
+                      'Efectivo USD',
+                      _efectivoUsd,
+                      _efectivoUsd + _transferenciaUsd,
+                      AppColores.exito,
+                      Icons.money,
+                    ),
+                    if (_transferenciaUsd > 0) ...[
+                      const SizedBox(height: 12),
+                      _buildBarra(
+                        'Transferencia USD',
+                        _transferenciaUsd,
+                        _efectivoUsd + _transferenciaUsd,
+                        AppColores.info,
+                        Icons.credit_card,
+                      ),
+                    ],
+                    const SizedBox(height: 12),
+                    // C1: igual que el total CUP.
+                    Tarjeta(
                       child: Row(
                         mainAxisAlignment:
-                            MainAxisAlignment
-                                .spaceBetween,
+                            MainAxisAlignment.spaceBetween,
                         children: [
                           const Text(
-                            'Total',
+                            'Total USD',
                             style: TextStyle(
                               fontSize: 18,
-                              fontWeight:
-                                  FontWeight.bold,
+                              fontWeight: FontWeight.bold,
                             ),
                           ),
                           Text(
-                            '\$${total.toStringAsFixed(0)} CUP',
+                            '\$${(_efectivoUsd + _transferenciaUsd).toStringAsFixed(2)} USD',
                             style: const TextStyle(
                               fontSize: 20,
-                              fontWeight:
-                                  FontWeight.w900,
-                              color: Color(0xFFFF6B00),
+                              fontWeight: FontWeight.w900,
+                              color: AppColores.naranja,
                             ),
                           ),
                         ],
                       ),
                     ),
-                  ),
+                  ],
                 ],
               ),
             ),
@@ -303,61 +406,55 @@ class _PagosPorMetodoState
       double total, Color color, IconData icono) {
     final pct =
         total > 0 ? (monto / total * 100) : 0.0;
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment:
-              CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Icon(icono,
-                    color: color, size: 20),
-                const SizedBox(width: 8),
-                Text(
-                  titulo,
-                  style: const TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w600,
-                  ),
+    // C1: Tarjeta del sistema (el Card crudo no adaptaba borde
+    // ni sombra) y grises del sistema en la barra y el porcentaje.
+    return Tarjeta(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(icono, color: color, size: 20),
+              const SizedBox(width: 8),
+              Text(
+                titulo,
+                style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
                 ),
-                const Spacer(),
-                Text(
-                  '\$${monto.toStringAsFixed(0)}',
-                  style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                    color: color,
-                  ),
+              ),
+              const Spacer(),
+              Text(
+                '\$${monto.toStringAsFixed(0)}',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: color,
                 ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            ClipRRect(
-              borderRadius:
-                  BorderRadius.circular(8),
-              child: LinearProgressIndicator(
-                value:
-                    total > 0 ? monto / total : 0,
-                minHeight: 12,
-                backgroundColor:
-                    Colors.grey[200],
-                valueColor:
-                    AlwaysStoppedAnimation<Color>(
-                        color),
               ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(8),
+            child: LinearProgressIndicator(
+              value: total > 0 ? monto / total : 0,
+              minHeight: 12,
+              backgroundColor:
+                  AppColores.borde(context).withValues(alpha: 0.3),
+              valueColor:
+                  AlwaysStoppedAnimation<Color>(color),
             ),
-            const SizedBox(height: 4),
-            Text(
-              '${pct.toStringAsFixed(1)}%',
-              style: TextStyle(
-                fontSize: 12,
-                color: Colors.grey[600],
-              ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            '${pct.toStringAsFixed(1)}%',
+            style: TextStyle(
+              fontSize: 12,
+              color: AppColores.textoSecundario(context),
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }

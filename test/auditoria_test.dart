@@ -17,6 +17,22 @@ void main() {
     });
   });
 
+  group('esNombreProtegido (Argón Gmail_1-14 #1)', () {
+    const protegidos = {'melany hernandez', 'juan perez'};
+    test('coincide sin mayúsculas ni espacios extremos', () {
+      expect(esNombreProtegido('  Melany Hernandez ', protegidos),
+          isTrue);
+      expect(esNombreProtegido('melany hernandez', protegidos),
+          isTrue);
+    });
+    test('no protegido, vacío y null no se enmascaran', () {
+      expect(esNombreProtegido('Duany Torres', protegidos), isFalse);
+      expect(esNombreProtegido('   ', protegidos), isFalse);
+      expect(esNombreProtegido(null, protegidos), isFalse);
+      expect(esNombreProtegido('Melany', protegidos), isFalse);
+    });
+  });
+
   group('filtro de auditoría (v1.6.0)', () {
     Map<String, dynamic> op({
       String tipo = 'apertura_turno',

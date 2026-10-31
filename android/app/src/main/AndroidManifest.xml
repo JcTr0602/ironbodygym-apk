@@ -12,6 +12,9 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC"/>
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+    <!-- 23/25: alarmas exactas de recordatorios (si el usuario no
+         la concede en Ajustes, la app usa alarmas inexactas). -->
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM"/>
     <!-- Huella digital: entrada rápida (v1.0.12) -->
     <application
         android:label="Iron Body Gestión"
@@ -39,6 +42,10 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity>
+        <!-- 23/25: receptor de alarmas de recordatorios. -->
+        <receiver
+            android:name=".RecordatorioReceiver"
+            android:exported="false" />
         <!-- v1.2.8 (Paso 5): servicio foreground para fotos.
              Corrección Gemini: exported=false para Android 13+. -->
         <service

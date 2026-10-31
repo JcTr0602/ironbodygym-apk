@@ -16,6 +16,15 @@ import 'localdb.dart';
 import 'adelantos.dart';
 import 'sync.dart';
 import 'tiempo.dart';
+import 'turnos_resolucion.dart';
+
+/// Dashboard 1.19 (Q7 Argón): umbral de stock de pomos de agua
+/// (y de dosis, vía S1) a partir del cual el medidor se pone en
+/// rojo. Argón lo propuso en 10 con fundamento (media caja de
+/// 20–24, ~1 turno de alta demanda); Jc aún no lo confirmó, pero
+/// al vivir en UNA constante se cambia en segundos si dice otro
+/// número. S1 (servicios.dart) ya lo usa en vez de su 10 a mano.
+const int kUmbralStockPomosAgua = 10;
 
 String _norm(String s) {
   var n = s.toLowerCase().trim();
@@ -516,10 +525,29 @@ String tiempoRelativo(String? iso) {
   }
 }
 
+/// Formato de montos en CUP para UI. Los cálculos con división (costo
+/// por dosis, margen medio) producen artefactos binarios como
+/// 3119.9999999999995 o 1133.3333333333335; sin redondeo se imprimían
+/// tal cual en Estadísticas (2026-10-31). Regla: redondeo a centavos
+/// y sin ceros de más (3120, 1133.33, 271.11); los enteros se ven
+/// igual que antes.
 String fmtMonto(dynamic m) {
   if (m == null) return '—';
-  final v = (m as num).toDouble();
-  return v == v.roundToDouble() ? '${v.toInt()}' : '$v';
+  // Mini Terra (MEDIO): aceptar texto numérico en vez de reventar
+  // con TypeError; lo no numérico cae al marcador '—'.
+  final num? entrada =
+      m is num ? m : (m is String ? num.tryParse(m.trim()) : null);
+  if (entrada == null) return '—';
+  final v = entrada.toDouble();
+  if (v.isNaN || v.isInfinite) return '—';
+  final r = (v * 100).round() / 100;
+  if (r == r.roundToDouble()) return '${r.toInt()}';
+  var s = r.toStringAsFixed(2);
+  while (s.endsWith('0')) {
+    s = s.substring(0, s.length - 1);
+  }
+  if (s.endsWith('.')) s = s.substring(0, s.length - 1);
+  return s;
 }
 
 /// v1.4.6: línea «Cobró: …» de los historiales de pago (ficha del
@@ -585,6 +613,11 @@ String textoComprobanteCompra({
   bool conPromo = false,
   String? nuevoVencimientoIso,
   bool esFiado = false,
+  // 13/25: método y vendedor del recibo completo. Opcionales
+  // para no romper a los llamadores viejos: si vienen vacíos,
+  // la línea no sale (jamás se inventa un método ni un vendedor).
+  String? metodo,
+  String? vendedor,
 }) {
   String fechaBonita(String iso) {
     final p = iso.substring(0, 10).split('-');
@@ -601,8 +634,17 @@ String textoComprobanteCompra({
     ..writeln('━━━━━━━━━━━━━━━')
     ..writeln('💰 *TOTAL: ${total.toStringAsFixed(2)} $moneda*')
     ..writeln('━━━━━━━━━━━━━━━')
-    ..writeln('👤 *Comprador:* $nombreComprador')
-    ..writeln('📅 *Fecha:* ${fechaBonita(fechaIso)}');
+    ..writeln('👤 *Comprador:* $nombreComprador');
+  final metodoTxt = (metodo ?? '').trim();
+  if (metodoTxt.isNotEmpty) {
+    buf.writeln('💳 *Método:* ${metodoTxt[0].toUpperCase()}'
+        '${metodoTxt.substring(1)}');
+  }
+  final vendedorTxt = (vendedor ?? '').trim();
+  if (vendedorTxt.isNotEmpty) {
+    buf.writeln('🧑‍🏫 *Vendedor:* $vendedorTxt');
+  }
+  buf.writeln('📅 *Fecha:* ${fechaBonita(fechaIso)}');
   if (esFiado) {
     buf.writeln('📝 *Estado:* Fiado (pendiente de pago)');
   }
@@ -1088,9 +1130,15 @@ Future<double> adelantosEnPendiente(int? telegramId) async {
 Future<double> pendienteEntrega(int? telegramId) async {
   if (telegramId == null) return 0;
   double total = 0;
+  // H2 (Argón caja): excluir lo ya liquidado en los 4 bucles
+  // espejo, igual que hace pendienteArqueo. Sin esto, en la
+  // ventana pre-pull (espejo aún sin marcar) lo liquidado se
+  // contaba dos veces: la entrega decía 1000 y el arqueo 600.
+  final cubiertos = await idsLiquidados(telegramId);
   // v1.3-r3 (Gemini): filtrar por telegram_user_id en SQL primero.
   for (final p in await LocalDb.instance
       .mirrorFiltrado('pagos', {'telegram_user_id': telegramId})) {
+    if (cubiertos.contains('pagos:${p['id']}')) continue;
     if ((p['metodo'] as String?) == 'efectivo' &&
         esPendiente(p['entregado'])) {
       total += (p['monto'] as num?)?.toDouble() ?? 0;
@@ -1098,12 +1146,14 @@ Future<double> pendienteEntrega(int? telegramId) async {
   }
   for (final d in await LocalDb.instance
       .mirrorFiltrado('pagos_diarios', {'registrado_por': telegramId})) {
+    if (cubiertos.contains('pagos_diarios:${d['id']}')) continue;
     if (esPendiente(d['entregado']) && esPagoDiarioEfectivo(d)) {
       total += (d['total'] as num?)?.toDouble() ?? 0;
     }
   }
   // Ventas de suplementos en CUP en efectivo pendientes de entregar.
   for (final v in await ventasSuplementosCup()) {
+    if (cubiertos.contains('ventas_suplementos:${v['id']}')) continue;
     if (LocalDb.normalizarTelegramId(v['registrado_por']) == telegramId &&
         esPendiente(v['entregado'])) {
       total += totalVentaCup(v);
@@ -1117,6 +1167,7 @@ Future<double> pendienteEntrega(int? telegramId) async {
     final resp =
         LocalDb.normalizarTelegramId(v['responsable_efectivo_id']) ??
             LocalDb.normalizarTelegramId(v['registrado_por']);
+    if (cubiertos.contains('servicio_ventas:${v['id']}')) continue;
     if (resp == telegramId &&
         (v['metodo'] as String?) == 'efectivo' &&
         (v['casa'] as num?)?.toInt() != 1 &&
@@ -1159,6 +1210,18 @@ Future<double> pendienteEntrega(int? telegramId) async {
   }
   // v1.8.0: los adelantos de su gaveta ya salieron de su mano.
   total -= await adelantosEnPendiente(telegramId);
+  // H2 (Argón caja): el arrastre de parciales SÍ entra aquí, igual
+  // que en pendienteArqueo y _pendiente_c1_servidor. Sin esto, tras
+  // una parcial el arqueo mostraba 400 y la entrega mostraba 0.
+  for (final l in await LocalDb.instance.allMirror('liquidaciones_caja')) {
+    if (LocalDb.normalizarTelegramId(l['entrenador_telegram_id']) !=
+        telegramId) {
+      continue;
+    }
+    if ((l['estado'] as String?) != 'parcial') continue;
+    if ((l['moneda'] as String?) == 'USD') continue;
+    total += (l['saldo_arrastre'] as num?)?.toDouble() ?? 0;
+  }
   return total;
 }
 
@@ -1170,7 +1233,11 @@ Future<double> pendienteEntrega(int? telegramId) async {
 Future<double> pendienteEntregaUsd(int? telegramId) async {
   if (telegramId == null) return 0;
   double total = 0;
+  // H2 (Argón caja): misma regla que en CUP: excluir lo ya
+  // liquidado y sumar el arrastre de parciales USD.
+  final cubiertos = await idsLiquidados(telegramId);
   for (final v in await ventasSuplementosUsd()) {
+    if (cubiertos.contains('ventas_suplementos:${v['id']}')) continue;
     if (LocalDb.normalizarTelegramId(v['registrado_por']) == telegramId &&
         esPendiente(v['entregado'])) {
       total += totalVentaUsd(v);
@@ -1180,6 +1247,15 @@ Future<double> pendienteEntregaUsd(int? telegramId) async {
     // 1.15-turnos (#7): igual que en CUP, la cola es de su dueño.
     if (op['telegram_id'] != telegramId) continue;
     total += _montoUsdOp(op);
+  }
+  for (final l in await LocalDb.instance.allMirror('liquidaciones_caja')) {
+    if (LocalDb.normalizarTelegramId(l['entrenador_telegram_id']) !=
+        telegramId) {
+      continue;
+    }
+    if ((l['estado'] as String?) != 'parcial') continue;
+    if ((l['moneda'] as String?) != 'USD') continue;
+    total += (l['saldo_arrastre'] as num?)?.toDouble() ?? 0;
   }
   return total;
 }
@@ -1406,6 +1482,11 @@ Future<double> contribucionLibroC1(int? telegramId) async {
       total += monto;
       continue;
     }
+    // H1 (Argón caja, caso explícito): un doc con 4 listas VACÍAS
+    // no es "vacío": su resto_sin_ids SÍ resta (es la entrega
+    // parcial sin ids). Su extinción ya no depende de la marca de
+    // ids sino del consumo en _op_liquidar_caja, que lo pone a 0
+    // al liquidar.
     total += (f['resto_sin_ids'] as num?)?.toDouble() ?? 0;
     for (final e in doc.entries) {
       final tabla = '${e.key}';
@@ -1516,7 +1597,11 @@ Future<({double cup, double usd})> pendienteArqueo(int? telegramId) async {
       cup += arrastre;
     }
   }
-  return (cup: cup, usd: usd);
+  // H3 (Argón caja): suelo 0 en el retorno. Con adelantos que
+  // superan lo cobrado, la resta daba negativo (-200) y el diálogo
+  // de Arqueo mostraba un "pendiente" negativo; el servidor ya
+  // tenía max(0.0, ...) y rechazaba esperado < 0.
+  return (cup: cup < 0 ? 0.0 : cup, usd: usd < 0 ? 0.0 : usd);
 }
 
 /// IDs que componen el pendiente confirmado (para op_ids de la liquidación).
@@ -2177,15 +2262,18 @@ bool esMenor(String? carnet) {
 Future<List<Map<String, dynamic>>> cumpleanosProximos(
     {int dias = 7}) async {
   final hoy = ahoraHabana();
-  final hoyDia = DateTime(hoy.year, hoy.month, hoy.day);
+  // #2 (Argón cumpleaños): días en UTC. Con medianoche local, el
+  // día del cambio de hora (25 h en Cuba el 1-nov) daba
+  // difference() de 23 h → inDays 0 para un salto de 1 día.
+  final hoyDia = DateTime.utc(hoy.year, hoy.month, hoy.day);
   final rows = await _activos();
   final res = <Map<String, dynamic>>[];
   for (final c in rows) {
     final nac = fechaNacDeCarnet('${c['carnet'] ?? ''}');
     if (nac == null) continue;
-    var proximo = DateTime(hoyDia.year, nac.month, nac.day);
+    var proximo = DateTime.utc(hoyDia.year, nac.month, nac.day);
     if (proximo.isBefore(hoyDia)) {
-      proximo = DateTime(hoyDia.year + 1, nac.month, nac.day);
+      proximo = DateTime.utc(hoyDia.year + 1, nac.month, nac.day);
     }
     final falta = proximo.difference(hoyDia).inDays;
     if (falta <= dias) {
@@ -2207,6 +2295,16 @@ Future<List<Map<String, dynamic>>> cumpleanosProximos(
   return res;
 }
 
+/// Mes y día en que se celebra un cumpleaños en [anio].
+/// Regla 29-feb → 1-mar en todos lados: en año no bisiesto el
+/// cumple se celebra el 1 de marzo (no un 29/02 inexistente).
+({int mes, int dia}) mesDiaCumple(int mesNac, int diaNac, int anio) {
+  if (mesNac == 2 && diaNac == 29 && !esAnioBisiesto(anio)) {
+    return (mes: 3, dia: 1);
+  }
+  return (mes: mesNac, dia: diaNac);
+}
+
 /// Clientes que cumplen años en el mes actual.
 /// Cada mapa trae '_dia' (día del mes), '_fecha_cumple' (DD/MM),
 /// '_cumple' (edad que cumple) y '_paso' (true si ya pasó este mes).
@@ -2218,8 +2316,10 @@ Future<List<Map<String, dynamic>>> cumpleanosDelMes() async {
   for (final c in rows) {
     final nac = fechaNacDeCarnet('${c['carnet'] ?? ''}');
     if (nac == null) continue;
-    if (nac.month != hoy.month) continue;
-    final dia = nac.day;
+    final celeb = mesDiaCumple(nac.month, nac.day, hoy.year);
+    final mesCumple = celeb.mes;
+    final dia = celeb.dia;
+    if (mesCumple != hoy.month) continue;
     final etiqueta =
         '${dia.toString().padLeft(2, '0')}/${hoy.month.toString().padLeft(2, '0')}';
     res.add({
@@ -3876,6 +3976,183 @@ Future<List<Map<String, dynamic>>> pendientePorEntrenador(
           .compareTo(a['total_usd'] as double);
     });
   return l;
+}
+
+/// Dashboard 1.19 (veredicto Argón Gmail_2-14, H1–H6 + Q1–Q6).
+/// Agregados del bloque «Hoy hay que…» y del balance: viven en
+/// negocio.dart para que la UI no escanee espejos (H2/Q6).
+///
+/// Corrección a Q6: Argón pedía derivar «vencen hoy» de LA MISMA
+/// llamada `porVencer(dias: 3)`, pero eso es imposible por
+/// contrato: `porVencer` EXCLUYE a los que vencen hoy
+/// (`ph.compareTo(hoy) > 0`, v1.3.7 — tienen su propio segmento
+/// en Listas y en la bandeja de avisos). Cambiarlo rompería esas
+/// dos poblaciones. En vez de una segunda consulta,
+/// `vencimientosResumen` hace UNA sola lectura de activos y
+/// particiona ambos grupos con las mismas reglas.
+
+/// Dashboard 1.19 (H2 Argón), antes `_detalleDia` en la UI: el
+/// detalle de ingresos de un día, con las mismas reglas de neteo
+/// que la UI tenía (reversos de servicio fuera, originales
+/// reversados fuera, Casa fuera). Los diarios y las ventas de
+/// servicio se filtran EN SQL con `mirrorPorFecha` (el espejo de
+/// servicio_ventas tiene índice de expresión sobre fecha, v51);
+/// los pagos usan la columna indexada `fecha` (v1.3.4).
+Future<
+    ({
+      double efectivo,
+      double transferencia,
+      double diario,
+      double suplementos,
+      double servicios,
+      double total,
+      int movimientos,
+    })> resumenIngresosDia(String fechaIso) async {
+  double efectivo = 0, transferencia = 0, diario = 0;
+  double suplementos = 0, servicios = 0;
+  int n = 0;
+  for (final p in await LocalDb.instance.pagosDelDia(fechaIso)) {
+    final m = (p['monto'] as num?)?.toDouble() ?? 0;
+    if ('${p['metodo']}' == 'transferencia') {
+      transferencia += m;
+    } else {
+      efectivo += m;
+    }
+    n++;
+  }
+  for (final d in await LocalDb.instance
+      .mirrorPorFecha('pagos_diarios', 'fecha', fechaIso, fechaIso)) {
+    diario += (d['total'] as num?)?.toDouble() ?? 0;
+    n++;
+  }
+  for (final v in await ventasSuplementosCup()) {
+    final f = '${v['fecha'] ?? ''}';
+    if (f.length >= 10 && f.substring(0, 10) == fechaIso) {
+      suplementos += totalVentaCup(v);
+      n++;
+    }
+  }
+  final ventasServ = await LocalDb.instance
+      .mirrorPorFecha('servicio_ventas', 'fecha', fechaIso, fechaIso);
+  final reversadasServ = <int>{
+    for (final v in ventasServ)
+      if ((v['reverso_de'] as num?) != null)
+        (v['reverso_de'] as num).toInt(),
+  };
+  for (final v in ventasServ) {
+    if ((v['reverso_de'] as num?) != null) continue;
+    final idServ = (v['id'] as num?)?.toInt();
+    if (idServ != null && reversadasServ.contains(idServ)) continue;
+    if ((v['casa'] as num?)?.toInt() == 1) continue;
+    servicios += ((v['precio_unitario'] as num?)?.toDouble() ?? 0) *
+        ((v['cantidad'] as num?)?.toInt() ?? 0);
+    n++;
+  }
+  return (
+    efectivo: efectivo,
+    transferencia: transferencia,
+    diario: diario,
+    suplementos: suplementos,
+    servicios: servicios,
+    total: efectivo + transferencia + diario + suplementos + servicios,
+    movimientos: n,
+  );
+}
+
+/// Dashboard 1.19 (Q6 Argón, corregida — ver nota de la sección):
+/// por vencer (mañana..+`dias`, SIN hoy) y vencen hoy, en UNA sola
+/// lectura de activos y con las mismas reglas de `porVencer` y
+/// `vencenHoy` (Casa fuera de ambos; orden por pagado_hasta).
+Future<
+    ({
+      List<Map<String, dynamic>> porVencer,
+      List<Map<String, dynamic>> vencenHoy,
+    })> vencimientosResumen({int dias = 3}) async {
+  final hoy = _hoyIso();
+  final limite = ahoraHabana().add(Duration(days: dias));
+  final limIso =
+      '${limite.year.toString().padLeft(4, '0')}-${limite.month.toString().padLeft(2, '0')}-${limite.day.toString().padLeft(2, '0')}';
+  return partirVencimientos(
+      filas: await _activos(), hoy: hoy, limIso: limIso);
+}
+
+/// Dashboard 1.19, PURO: la partición de `vencimientosResumen`.
+/// Casa fuera de ambos grupos; sin `pagado_hasta` fuera; hoy
+/// exacto → vencenHoy; (hoy, limIso] → porVencer.
+({
+  List<Map<String, dynamic>> porVencer,
+  List<Map<String, dynamic>> vencenHoy,
+}) partirVencimientos({
+  required List<Map<String, dynamic>> filas,
+  required String hoy,
+  required String limIso,
+}) {
+  final porVencer = <Map<String, dynamic>>[];
+  final vencenHoy = <Map<String, dynamic>>[];
+  for (final c in filas) {
+    if (esCuentaCasa(c)) continue;
+    final ph = c['pagado_hasta'] as String?;
+    if (ph == null) continue;
+    if (ph == hoy) {
+      vencenHoy.add(c);
+    } else if (ph.compareTo(hoy) > 0 && ph.compareTo(limIso) <= 0) {
+      porVencer.add(c);
+    }
+  }
+  porVencer.sort(
+      (a, b) => '${a['pagado_hasta']}'.compareTo('${b['pagado_hasta']}'));
+  vencenHoy.sort(compararPorNombre);
+  return (porVencer: porVencer, vencenHoy: vencenHoy);
+}
+
+/// Dashboard 1.19 (Q6 Argón): cumpleañeros de hoy (conteo; la
+/// lista con nombres la lee la pantalla del entrenador con su
+/// propio filtro de protegidos).
+Future<int> cumpleanosHoyCount() async =>
+    (await cumpleanosProximos(dias: 0))
+        .where((c) => (c['_dias_para'] as int?) == 0)
+        .length;
+
+/// Dashboard 1.19 (Q6 Argón): cuentas Casa entre los activos
+/// (el espejo `clientes` filtrado por estado, no toda la tabla).
+Future<int> cuentasCasaActivasCount() async =>
+    (await _activos()).where(esCuentaCasa).length;
+
+/// Dashboard 1.19 (Q6 Argón), PURO: ¿el suplemento del espejo
+/// cuenta como «stock bajo» para el bloque de urgencias? Misma
+/// regla que el chip de la tarjeta (suplementos.dart): inactivo
+/// fuera; bajo = stock <= umbral_stock (3 por defecto). A
+/// diferencia del chip, el AGOTADO (stock <= 0) también cuenta:
+/// en el bloque de urgencias un agotado es lo más urgente.
+bool esAlertaStockBajo(Map<String, dynamic> s) {
+  final act = s['activo'];
+  final inactivo =
+      act == 0 || act == false || s['eliminado'] == 1 || s['eliminado'] == true;
+  if (inactivo) return false;
+  final stock = (s['stock'] as num?)?.toInt() ?? 0;
+  final umbral = (s['umbral_stock'] as num?)?.toInt() ?? 3;
+  return stock <= umbral;
+}
+
+/// Dashboard 1.19 (Q6 Argón): suplementos con stock bajo o
+/// agotado (sin inactivos). Solo suplementos: el stock de pomos
+/// de servicio ya tiene su medidor en S1 con su propio umbral.
+Future<List<Map<String, dynamic>>> alertasStockBajo() async =>
+    (await LocalDb.instance.allMirror('suplementos'))
+        .where(esAlertaStockBajo)
+        .toList();
+
+/// Dashboard 1.19 (Q1 Argón): turnos de AYER que quedaron
+/// abiertos (apertura sin cierre que le corresponda). Lectura
+/// por fecha en SQL en ambos espejos; el cruce es el puro
+/// `aperturasSinCierre` (misma correspondencia que el hub).
+Future<List<Map<String, dynamic>>> turnosAbiertosAyer() async {
+  final ayer = _hace(1);
+  final aperturas = await LocalDb.instance
+      .mirrorPorFecha('turnos_apertura', 'fecha_turno', ayer, ayer);
+  final cierres = await LocalDb.instance
+      .mirrorPorFecha('turnos_cierre', 'fecha', ayer, ayer);
+  return aperturasSinCierre(aperturas: aperturas, cierres: cierres);
 }
 
 /// Ids pendientes de entrega por categoría (extraído de

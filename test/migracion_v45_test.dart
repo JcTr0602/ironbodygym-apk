@@ -46,7 +46,7 @@ void main() {
     await _abrirDbVacia();
     final d = await LocalDb.instance.db;
     expect(await d.getVersion(), LocalDb.versionActual);
-    expect(LocalDb.versionActual, 48);
+    expect(LocalDb.versionActual, 51);
     expect(await _columnas('pagos_diarios'),
         containsAll(['id', 'data', 'sync_seq', 'metodo']));
     final tablas = (await d.rawQuery(

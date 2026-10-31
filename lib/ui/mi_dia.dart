@@ -316,7 +316,7 @@ class _MiDiaScreenState extends State<MiDiaScreen> {
         ],
       ),
       body: _cargando
-          ? const Center(child: CircularProgressIndicator())
+          ? const EstadoCargando(texto: 'Cargando mi día…')
           : Column(
               children: [
                 // v1.3.3: selector Hoy / Mes.

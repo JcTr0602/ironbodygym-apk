@@ -92,7 +92,7 @@ class _EstadisticasAdopcionScreenState
         ],
       ),
       body: _cargando
-          ? const Center(child: CircularProgressIndicator())
+          ? const EstadoCargando(texto: 'Cargando estadísticas…')
           : _error != null
               ? Center(
                   child: Column(

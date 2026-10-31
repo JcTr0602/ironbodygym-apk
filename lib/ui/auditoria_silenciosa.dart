@@ -237,7 +237,7 @@ class _AuditoriaSilenciosaScreenState
         ],
       ),
       body: _cargando
-          ? const Center(child: CircularProgressIndicator())
+          ? const EstadoCargando(texto: 'Cargando auditoría…')
           : _casos.isEmpty
               ? const EstadoVacio(
                   icono: Icons.verified_outlined,

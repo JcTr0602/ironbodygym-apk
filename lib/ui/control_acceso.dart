@@ -27,6 +27,7 @@ import 'panel_permisos.dart';
 import 'turnos_hub.dart';
 import 'usuarios.dart';
 import 'widgets.dart';
+import 'componentes.dart';
 
 class ControlAccesoScreen extends StatelessWidget {
   const ControlAccesoScreen({super.key});
@@ -302,7 +303,7 @@ class _AccesosClientesTabState extends State<AccesosClientesTab> {
         const SyncBanner(compact: true),
         Expanded(
           child: _cargando
-              ? const Center(child: CircularProgressIndicator())
+              ? const EstadoCargando(texto: 'Cargando control de acceso…')
               : _error != null
                   ? Center(
                       child: Column(
@@ -1178,7 +1179,7 @@ class _AuditoriaAccesosScreenState extends State<AuditoriaAccesosScreen> {
         ],
       ),
       body: _cargando
-          ? const Center(child: CircularProgressIndicator())
+          ? const EstadoCargando(texto: 'Cargando control de acceso…')
           : _items.isEmpty
               ? const Center(
                   child: Text('Sin acciones registradas todavía.',

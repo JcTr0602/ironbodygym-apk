@@ -21,6 +21,7 @@ import '../tiempo.dart';
 import 'diseno.dart';
 import 'guia_editor.dart';
 import 'guia_equipos.dart';
+import 'componentes.dart';
 
 class GuiaScreen extends StatefulWidget {
   const GuiaScreen({super.key});
@@ -164,21 +165,102 @@ class _GuiaScreenState extends State<GuiaScreen> {
 
   Future<void> _publicarLote() async {
     if (_publicandoLote || _borradores.isEmpty) return;
+    // Argón Guía HIGH 2 (1.19), pre-paso: candidatos reales (no
+    // obsoletos + válidos) y regla D7. Sin este pre-paso el lote
+    // encolaba a ciegas: si quedaban 0 esenciales, el servidor
+    // rechazaba las ops y el espejo optimista ya las daba por
+    // publicadas. Sin esenciales tras el lote, se aborta antes
+    // de encolar nada.
+    bool esEsencial(Object? v) => v == true || v == 1;
+    final candidatos = <Map<String, dynamic>>[];
+    final motivos = <String>[];
+    for (final b in _borradores) {
+      if (_obsoleto(b)) {
+        motivos.add(
+            '${b['slug']}: obsoleto (hay una versión publicada más reciente).');
+        continue;
+      }
+      final doc = _docBorrador(b);
+      final errores = GuiaValidacion.validar(doc,
+          equiposVigentes: _equiposVigentes);
+      if (errores.isNotEmpty) {
+        motivos.add('${doc['id']}: ${errores.first}');
+        continue;
+      }
+      candidatos.add(b);
+    }
+    final esencialesPub =
+        _publicadas.where((p) => esEsencial(p['esencial'])).length;
+    final esencialesTras = esencialesPub +
+        candidatos.where((b) => esEsencial(b['esencial'])).length;
+    if (esencialesTras == 0) {
+      if (!mounted) return;
+      await showDialog<void>(
+        context: context,
+        builder: (c) => AlertDialog(
+          title: const Text('Falta una ficha esencial'),
+          content: const Text(
+              'El lote no trae ninguna ficha esencial y aún no hay '
+              'esenciales publicadas. Marca al menos una como esencial '
+              'antes de publicar en lote.'),
+          actions: [
+            FilledButton(
+                onPressed: () => Navigator.pop(c),
+                child: const Text('Entendido')),
+          ],
+        ),
+      );
+      return;
+    }
+    if (candidatos.isEmpty) {
+      if (!mounted) return;
+      await showDialog<void>(
+        context: context,
+        builder: (c) => AlertDialog(
+          title: const Text('Ningún borrador pasa la validación'),
+          content: SingleChildScrollView(
+            child: Text(motivos.map((f) => '• $f').join('\n')),
+          ),
+          actions: [
+            FilledButton(
+                onPressed: () => Navigator.pop(c),
+                child: const Text('Entendido')),
+          ],
+        ),
+      );
+      return;
+    }
+    // Resumen de contenido antes de confirmar (HIGH 2, segunda
+    // mitad): el diálogo anterior solo daba el conteo; ahora el
+    // dueño ve QUÉ va a publicar, con su marca de esencial.
     final confirmar = await showDialog<bool>(
       context: context,
       builder: (c) => AlertDialog(
-        title: const Text('Publicar todos los borradores'),
-        content: Text(
-            'Se publicarán los ${_borradores.length} borradores que pasen '
-            'la validación. Los que fallen se quedan como borradores '
-            'con el motivo del fallo.'),
+        title: Text('Publicar ${candidatos.length} borradores'),
+        content: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              for (final b in candidatos)
+                Text(
+                    '• ${_docBorrador(b)['titulo']} '
+                    '${esEsencial(b['esencial']) ? '(Esencial)' : ''}'),
+              if (motivos.isNotEmpty) ...[
+                const SizedBox(height: 12),
+                Text(
+                    'Se quedan como borradores (${motivos.length}):\n'
+                    '${motivos.map((f) => '• $f').join('\n')}'),
+              ],
+            ],
+          ),
+        ),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(c, false),
               child: const Text('Cancelar')),
           FilledButton(
               onPressed: () => Navigator.pop(c, true),
-              child: const Text('Publicar todos')),
+              child: const Text('Publicar')),
         ],
       ),
     );
@@ -215,15 +297,29 @@ class _GuiaScreenState extends State<GuiaScreen> {
         }
         final base = (b['base_revision'] as num?)?.toInt() ?? 0;
         final payload = Map<String, dynamic>.from(doc)
-          ..['base_revision'] = base;
+          ..['base_revision'] = base
+          // Argón Guía HIGH 1 (1.19): igual que en el editor, sin
+          // esta llave el servidor no subía imagen_rev al
+          // reemplazar una foto existente.
+          ..['imagen_cambiada'] = cambioImagen;
         await _db.queueOp(
           opUuid: const Uuid().v4(),
           tipo: 'guia_upsert_publicado',
           payload: payload,
         );
+        // imagen_rev base: la publicada para este slug (0 si es
+        // nueva). Si la imagen cambió, el servidor la subirá en 1
+        // y el espejo local lo refleja al instante.
+        var revPub = 0;
+        for (final p in _publicadas) {
+          if ('${p['id']}' == slug) {
+            revPub = (p['imagen_rev'] as num?)?.toInt() ?? 0;
+            break;
+          }
+        }
         final optimista = Map<String, dynamic>.from(doc)
-          ..remove('imagen_cambiada')
-          ..['revision'] = base + 1;
+          ..['revision'] = base + 1
+          ..['imagen_rev'] = cambioImagen ? revPub + 1 : revPub;
         await _db.upsertMirrorTexto('guia_fichas', slug, optimista, 0);
         await _db.guiaGuardarBorrador({
           ...b,
@@ -317,7 +413,7 @@ class _GuiaScreenState extends State<GuiaScreen> {
           child: Text('Solo el dueño administra la Biblioteca.'));
     }
     if (_cargando) {
-      return const Center(child: CircularProgressIndicator());
+      return const EstadoCargando(texto: 'Cargando guía…');
     }
     final esenciales = _publicadas.where((p) => p['esencial'] == true).length;
     final publicadasFiltradas = _publicadas.where((p) {

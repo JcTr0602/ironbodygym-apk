@@ -17,6 +17,21 @@ import 'diseno.dart';
 import 'ficha.dart';
 import 'widgets.dart';
 
+/// Buscador de Listas (16/25, PURO): coincide por nombre (sin
+/// mayúsculas) o por dígitos del teléfono.
+bool coincideBusquedaListas(Map<String, dynamic> c, String texto) {
+  final q = texto.trim().toLowerCase();
+  if (q.isEmpty) return true;
+  if ('${c['nombre'] ?? ''}'.toLowerCase().contains(q)) return true;
+  final digQ = q.replaceAll(RegExp(r'[^0-9]'), '');
+  if (digQ.isNotEmpty) {
+    final tel =
+        '${c['telefono'] ?? ''}'.replaceAll(RegExp(r'[^0-9]'), '');
+    if (tel.contains(digQ)) return true;
+  }
+  return false;
+}
+
 class ListasScreen extends StatefulWidget {
   /// Pestaña inicial: 0=Hoy, 1=Por vencer, 2=Atrasados <30d, 3=Atrasados +30d,
   /// 4=Al día (v1.2.1).
@@ -35,6 +50,16 @@ class _ListasScreenState extends State<ListasScreen>
   List<Map<String, dynamic>> _porVencer = [];
   List<Map<String, dynamic>> _alDia = []; // v1.2.1
   String _orden = 'nombre'; // nombre | vencimiento | dias
+  // 16/25: buscador dentro de Listas (nombre o teléfono).
+  String _busqueda = '';
+  final _busquedaCtrl = TextEditingController();
+
+  @override
+  void dispose() {
+    _busquedaCtrl.dispose();
+    _tab.dispose();
+    super.dispose();
+  }
 
   @override
   void initState() {
@@ -99,6 +124,15 @@ class _ListasScreenState extends State<ListasScreen>
     return r;
   }
 
+  /// 16/25: lista ordenada y filtrada por la búsqueda (aplica a
+  /// las 5 pestañas por igual).
+  List<Map<String, dynamic>> _visibles(
+      List<Map<String, dynamic>> rows) {
+    return _ordenar(rows)
+        .where((c) => coincideBusquedaListas(c, _busqueda))
+        .toList();
+  }
+
   Future<void> _pagoRapido(Map<String, dynamic> c) async {
     // Bloque 1 (Argón AMARILLO): Casa no paga mensualidad, y el
     // «cobro en 2 toques» ya no existe: todo cobro pasa por el
@@ -130,11 +164,40 @@ class _ListasScreenState extends State<ListasScreen>
           controller: _tab,
           isScrollable: true,
           tabs: [
-            Tab(text: 'Hoy (${_hoy.length})'),
-            Tab(text: 'Por vencer (${_porVencer.length})'),
-            Tab(text: 'Atrasados -30d (${_menos30.length})'),
-            Tab(text: 'Atrasados +30d (${_mas30.length})'),
-            Tab(text: 'Al día (${_alDia.length})'), // v1.2.1
+            // L1 (estéticas 1.19): cada pestaña lleva su color
+            // semántico — ámbar para Hoy/Por vencer, rojo para
+            // los dos Atrasados, verde para Al día — para ver la
+            // urgencia sin leer el número.
+            Tab(
+              child: Text('Hoy (${_hoy.length})',
+                  style: const TextStyle(
+                      color: AppColores.alerta,
+                      fontWeight: FontWeight.w600)),
+            ),
+            Tab(
+              child: Text('Por vencer (${_porVencer.length})',
+                  style: const TextStyle(
+                      color: AppColores.alerta,
+                      fontWeight: FontWeight.w600)),
+            ),
+            Tab(
+              child: Text('Atrasados -30d (${_menos30.length})',
+                  style: const TextStyle(
+                      color: AppColores.error,
+                      fontWeight: FontWeight.w600)),
+            ),
+            Tab(
+              child: Text('Atrasados +30d (${_mas30.length})',
+                  style: const TextStyle(
+                      color: AppColores.error,
+                      fontWeight: FontWeight.w600)),
+            ),
+            Tab(
+              child: Text('Al día (${_alDia.length})',
+                  style: const TextStyle(
+                      color: AppColores.exito,
+                      fontWeight: FontWeight.w600)),
+            ), // v1.2.1
           ],
         ),
       ),
@@ -167,22 +230,49 @@ class _ListasScreenState extends State<ListasScreen>
               ],
             ),
           ),
+          // 16/25: buscador (nombre o teléfono, en las 5 pestañas).
+          Padding(
+            padding:
+                const EdgeInsets.fromLTRB(16, 8, 16, 0),
+            child: Row(
+              children: [
+                Expanded(
+                  child: CampoTexto(
+                    controller: _busquedaCtrl,
+                    hint: 'Buscar cliente…',
+                    icono: Icons.search,
+                    onChanged: (v) =>
+                        setState(() => _busqueda = v.trim()),
+                  ),
+                ),
+                if (_busqueda.isNotEmpty)
+                  IconButton(
+                    icon: const Icon(Icons.clear),
+                    tooltip: 'Limpiar búsqueda',
+                    onPressed: () {
+                      _busquedaCtrl.clear();
+                      setState(() => _busqueda = '');
+                    },
+                  ),
+              ],
+            ),
+          ),
           Expanded(
             child: TabBarView(
               controller: _tab,
               children: [
-                _lista(_ordenar(_hoy), Icons.celebration,
+                _lista(_visibles(_hoy), Icons.celebration,
                     'Nadie vence hoy', 'Todo al día.'),
-                _lista(_ordenar(_porVencer),
+                _lista(_visibles(_porVencer),
                     Icons.celebration, 'Nadie por vencer',
                     'Nada en los próximos 3 días.'),
-                _lista(_ordenar(_menos30),
+                _lista(_visibles(_menos30),
                     Icons.celebration, 'Sin atrasados',
                     'Nada de menos de un mes.'),
-                _lista(_ordenar(_mas30),
+                _lista(_visibles(_mas30),
                     Icons.celebration, 'Sin atrasados',
                     'Nada de más de un mes.'),
-                _lista(_ordenar(_alDia), // v1.2.1
+                _lista(_visibles(_alDia), // v1.2.1
                     Icons.check_circle, 'Nadie al día',
                     'Todos los activos están vencidos.'),
               ],
@@ -255,6 +345,21 @@ class _ListasScreenState extends State<ListasScreen>
   Widget _lista(List<Map<String, dynamic>> rows, IconData iconoVacio,
       String tituloVacio, String subtituloVacio) {
     if (rows.isEmpty) {
+      // 16/25: con búsqueda activa, el vacío es por la búsqueda
+      // (no porque nadie venza) y ofrece limpiarla.
+      if (_busqueda.isNotEmpty) {
+        return EstadoVacio(
+          icono: Icons.search_off,
+          titulo: 'Sin coincidencias',
+          subtitulo: 'Ningún cliente de esta lista coincide '
+              'con «$_busqueda».',
+          textoAccion: 'Limpiar búsqueda',
+          onAccion: () {
+            _busquedaCtrl.clear();
+            setState(() => _busqueda = '');
+          },
+        );
+      }
       return EstadoVacio(
           icono: iconoVacio,
           titulo: tituloVacio,
@@ -271,7 +376,22 @@ class _ListasScreenState extends State<ListasScreen>
         itemBuilder: (ctx, i) {
           final c = rows[i];
           final id = (c['id'] as int?) ?? 0;
-          return FilaCliente(
+          // L2 (estéticas 1.19): la fila avisada lleva acento
+          // verde en el borde izquierdo.
+          return FutureBuilder<String?>(
+            future: LocalDb.instance.getAvisado(id),
+            builder: (ctx, snap) {
+              final avisado = snap.data != null;
+              return Container(
+                decoration: avisado
+                    ? const BoxDecoration(
+                        border: Border(
+                          left: BorderSide(
+                              color: AppColores.exito, width: 4),
+                        ),
+                      )
+                    : null,
+                child: FilaCliente(
             cliente: c,
             onTap: () => Navigator.of(context)
                 .push(MaterialPageRoute(
@@ -282,11 +402,7 @@ class _ListasScreenState extends State<ListasScreen>
               mainAxisSize: MainAxisSize.min,
               children: [
                 // Botón avisar (toggle)
-                FutureBuilder<String?>(
-                  future: LocalDb.instance.getAvisado(id),
-                  builder: (ctx, snap) {
-                    final avisado = snap.data != null;
-                    return IconButton(
+                    IconButton(
                       icon: Icon(
                           avisado
                               ? Icons.check_circle
@@ -333,9 +449,7 @@ class _ListasScreenState extends State<ListasScreen>
                           }
                         }
                       },
-                    );
-                  },
-                ),
+                    ),
                 // Botón cobro rápido (naranja circular)
                 Container(
                   width: 44,
@@ -358,9 +472,12 @@ class _ListasScreenState extends State<ListasScreen>
                   ),
                 ),
               ],
-            ),
-          );
-        },
+                ),
+              ),
+            );
+          },
+        );
+      },
       ),
     );
   }

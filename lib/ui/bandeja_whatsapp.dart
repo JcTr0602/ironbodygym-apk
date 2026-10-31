@@ -350,9 +350,10 @@ class _BandejaWhatsappScreenState extends State<BandejaWhatsappScreen>
               onPressed: () => Navigator.pop(ctx, false),
               child: const Text('Cancelar'),
             ),
-            ElevatedButton(
+            BotonPrimario(
+              texto: 'Guardar',
               onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('Guardar'),
+              expandido: false,
             ),
           ],
         ),
@@ -487,7 +488,7 @@ class _BandejaWhatsappScreenState extends State<BandejaWhatsappScreen>
             ),
           Expanded(
             child: _cargando
-                ? const Center(child: CircularProgressIndicator())
+                ? const EstadoCargando(texto: 'Cargando bandeja…')
                 : !AuthService().isOwner
                     // v1.3.6 (auditoría Argón, Fix 1a): solo el dueño.
                     ? Center(

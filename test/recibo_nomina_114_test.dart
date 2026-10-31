@@ -37,7 +37,9 @@ void main() {
     expect(r, contains('Adelantos del mes: -3000 CUP'));
     expect(r, contains('Deuda arrastrada: -1000 CUP'));
     expect(r, contains('NETO ESTIMADO: 10000 CUP'));
-    expect(r, contains('Sin bonos (los gestiona el dueño)'));
+    // 1.19 (#1 Argón + decisión Jc): el recibo del entrenador ya
+    // incluye su línea de bonos (0 aquí) en vez de "Sin bonos".
+    expect(r, contains('Bonos: +0 CUP'));
   });
 
   test('neto nunca negativo', () {

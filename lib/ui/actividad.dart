@@ -12,9 +12,12 @@ import '../negocio.dart';
 import '../permisos_entrenador.dart';
 import '../tiempo.dart';
 import 'auditoria.dart';
+import 'arqueo.dart';
 import 'componentes.dart';
 import 'diseno.dart';
 import 'ficha.dart';
+import 'historial_ventas.dart';
+import 'servicios.dart';
 
 /// Feed de actividad reciente (v1.0.15).
 ///
@@ -69,6 +72,118 @@ String? nombreDeDetalleActividad(String det) {
     return null;
   }
   return seg;
+}
+
+/// Categoría de la actividad según la acción (top-level testeable;
+/// [_ActividadScreenState._categoriaDe] delega aquí).
+String categoriaActividad(String accion) {
+  final a = accion.toLowerCase();
+  if (a.contains('inscri')) return 'inscripciones';
+  if (a.contains('pago_diario') || a == 'diario') return 'diarios';
+  if (a.contains('suplemento') || a.contains('categoria')) {
+    return 'suplementos';
+  }
+  if (a.contains('venta_servicio')) return 'servicios';
+  if (a.contains('confirmar_entrega') || a.contains('entrega')) {
+    return 'entregas';
+  }
+  if (a.contains('regalo_cumpleanos') ||
+      a.contains('regalar_mes')) {
+    return 'mensualidades';
+  }
+  if (a.contains('pago') && !a.contains('diario')) {
+    return 'mensualidades';
+  }
+  if (a == 'mensual') return 'mensualidades';
+  return 'otra';
+}
+
+/// ¿La acción del servidor representa un cobro real? (top-level
+/// testeable; [_ActividadScreenState._esCobroServidor] delega aquí).
+/// Solo cobros suman al KPI (no anulaciones, ediciones, gastos,
+/// entregas ni ajustes de precios). Las ventas de servicio SÍ son
+/// cobro; su reverso, no.
+bool esCobroServidor(String accion) {
+  final a = accion.toLowerCase();
+  if (a.contains('anular_')) return false;
+  if (a.contains('editar_')) return false;
+  if (a.contains('revertir')) return false;
+  if (a.contains('gasto')) return false;
+  if (a.contains('entrega')) return false;
+  if (a.contains('ajuste')) return false;
+  if (a.contains('regalo_cumpleanos')) return false;
+  return a.contains('pago') ||
+      a.contains('inscri') ||
+      a.contains('venta_suplemento') ||
+      a.contains('venta_servicio');
+}
+
+/// Línea de detalle legible para la tarjeta y la ficha de actividad.
+///
+/// El servidor YA escribe el detalle ("Ronnie Coleman (RC) x1 — 30 USD
+/// (tasa 1) · stock 19 · Cliente externo (vía APK)"), pero la UI nunca
+/// lo mostraba: solo lo usaba para sacar el monto. Esta función lo
+/// limpia para mostrarlo: quita "(vía APK)", ids internos, montos (que
+/// ya van en el badge) y el nombre del cliente cuando ya es el título,
+/// y traduce los tipos crudos de servicio. Si no queda nada, ''.
+String lineaDetalleActividad(String det, String titulo) {
+  var s = det;
+  // Tipos crudos de servicio → etiquetas de la app.
+  s = s.replaceAll('dosis_sin_agua', 'Dosis sin agua');
+  s = s.replaceAll('dosis_con_agua', 'Dosis + agua');
+  s = s.replaceAll('agua_suelta', 'Agua suelta');
+  // "(vía APK)" puede venir solo o dentro de un paréntesis con más
+  // texto ("(mensual, vía APK)"): quitarlo en ambas formas antes de
+  // limpiar los paréntesis que deja vacíos o a medias.
+  s = s.replaceAll('(vía APK)', '');
+  s = s.replaceAll('vía APK', '');
+  s = s.replaceAll(RegExp(r',\s*\)'), ')');
+  s = s.replaceAll(RegExp(r'\(\s*,'), '(');
+  s = s.replaceAll(RegExp(r'\(venta #\d+\)'), '');
+  s = s.replaceAll('(tasa 1)', '');
+  s = s.replaceAll(RegExp(r'fuera_de_cierre=\S+'), '');
+  // Prefijo "cliente 123 — " o "{título} — "/" {título} ".
+  s = s.replaceAll(RegExp(r'^cliente\s+\d+\s+—\s+'), '');
+  final t = titulo.trim();
+  if (t.isNotEmpty) {
+    if (s.startsWith('$t — ')) s = s.substring(t.length + 3);
+    if (s.startsWith('$t ')) s = s.substring(t.length + 1);
+  }
+  // Montos (ya van en el badge) y "c/u" huérfano.
+  s = s.replaceAll(RegExp(r'\d+(?:\.\d+)?\s*(CUP|USD)'), '');
+  s = s.replaceAll(' c/u', '');
+  s = s.replaceAll(RegExp(r'\(\d+(?:\.\d+)?\)'), '');
+  // Limpieza de puntuación sobrante.
+  s = s.replaceAll(RegExp(r',\s*\)'), ')');
+  s = s.replaceAll(RegExp(r'\(\s*,'), '(');
+  s = s.replaceAll('()', '');
+  s = s.replaceAll(RegExp(r'\s+'), ' ').trim();
+  s = s.replaceAll('— ·', '·').replaceAll('· —', '·');
+  while (s.endsWith('—') || s.endsWith('=') || s.endsWith(',') ||
+      s.endsWith('·')) {
+    s = s.substring(0, s.length - 1).trim();
+  }
+  if (s.startsWith('(') && s.endsWith(')') && !s.contains(') (')) {
+    s = s.substring(1, s.length - 1).trim();
+  }
+  return s;
+}
+
+/// Comprador de una venta de suplemento, sacado del detalle del
+/// servidor ("... · stock 19 · Cliente externo (vía APK)"): el
+/// segmento tras el stock. Null si el detalle no trae comprador
+/// (venta a cliente: el nombre viene por cliente_id).
+String? compradorDetalleActividad(String det) {
+  final partes = det.split(' · ');
+  for (var i = 0; i < partes.length; i++) {
+    if (partes[i].trim().startsWith('stock ') && i + 1 < partes.length) {
+      var seg = partes[i + 1].replaceAll('(vía APK)', '').trim();
+      if (seg.isEmpty) return null;
+      if (seg.startsWith('(promo:')) return null;
+      return seg;
+    }
+  }
+  return null;
 }
 
 /// P2#2 (Argón, 2026-10-29): ¿esta actividad del feed es propia
@@ -136,9 +251,12 @@ bool pasaFiltroMonto(double totalCup, String filtro, double? min,
 class _ActividadScreenState extends State<ActividadScreen> {
   List<Map<String, dynamic>> _items = [];
   bool _cargando = true;
+  // Mejora Actividad 6: true si el feed del servidor llegó al tope.
+  bool _feedRecortado = false;
   // v1.3.3: 6 filtros de categoría (diseño Argón).
   String _filtro =
-      'todo'; // todo | mensualidades | inscripciones | diarios | suplementos | entregas
+      'todo'; // todo | mensualidades | inscripciones | diarios |
+      // suplementos | servicios | entregas
   String _filtroActor = 'todos'; // todos | nombre del actor
   // v1.2.1: mejoras de actividad
   String _filtroFecha = 'todo'; // todo | hoy | ayer | 7dias | mes | rango
@@ -192,6 +310,9 @@ class _ActividadScreenState extends State<ActividadScreen> {
         }
       } catch (_) {}
     }
+    // Mejora Actividad 6: el servidor ya manda hasta 500 (antes 50).
+    // Si vienen 500, el feed puede estar cortado: se avisa en la UI.
+    final nMeta = lista.length;
     // v1.3.3: fusión híbrida — ops locales aún no aplicadas.
     // El servidor NO trae op_uuid; para no duplicar solo se toman las
     // ops en estado pendiente/error/necesita_revision (las 'aplicada'
@@ -386,6 +507,7 @@ class _ActividadScreenState extends State<ActividadScreen> {
       setState(() {
         _items = lista;
         _cargando = false;
+        _feedRecortado = nMeta >= 500;
       });
     }
     // v1.3.7 (Fase 2, B2): tasa del día para el filtro por monto.
@@ -448,7 +570,7 @@ class _ActividadScreenState extends State<ActividadScreen> {
   void _aplicarGuardado(Map<String, dynamic> g) {
     const tipos = {
       'todo', 'mensualidades', 'inscripciones', 'diarios',
-      'suplementos', 'entregas'
+      'suplementos', 'servicios', 'entregas'
     };
     const fechas = {'todo', 'hoy', 'ayer', '7dias', 'mes', 'rango'};
     const montos = {'todo', 'm500', 'm1000', 'm5000', 'rango'};
@@ -776,43 +898,13 @@ class _ActividadScreenState extends State<ActividadScreen> {
   }
 
   /// v1.3.3: categoría de la actividad según la acción
-  /// (diseño Argón, 6 filtros).
-  String _categoriaDe(String accion) {
-    final a = accion.toLowerCase();
-    if (a.contains('inscri')) return 'inscripciones';
-    if (a.contains('pago_diario') || a == 'diario') return 'diarios';
-    if (a.contains('suplemento') || a.contains('categoria')) {
-      return 'suplementos';
-    }
-    if (a.contains('confirmar_entrega') || a.contains('entrega')) {
-      return 'entregas';
-    }
-    if (a.contains('regalo_cumpleanos') ||
-        a.contains('regalar_mes')) {
-      return 'mensualidades';
-    }
-    if (a.contains('pago') && !a.contains('diario')) {
-      return 'mensualidades';
-    }
-    if (a == 'mensual') return 'mensualidades';
-    return 'otra';
-  }
+  /// (diseño Argón, 6 filtros). Delega en [categoriaActividad].
+  String _categoriaDe(String accion) => categoriaActividad(accion);
 
   /// v1.3.3: ¿la acción del servidor representa un cobro real?
   /// Solo cobros suman al KPI (no anulaciones, ediciones, gastos,
-  /// entregas ni ajustes de precios).
-  bool _esCobroServidor(String accion) {
-    final a = accion.toLowerCase();
-    if (a.contains('anular_')) return false;
-    if (a.contains('editar_')) return false;
-    if (a.contains('gasto')) return false;
-    if (a.contains('entrega')) return false;
-    if (a.contains('ajuste')) return false;
-    if (a.contains('regalo_cumpleanos')) return false;
-    return a.contains('pago') ||
-        a.contains('inscri') ||
-        a.contains('venta_suplemento');
-  }
+  /// entregas ni ajustes de precios). Delega en [esCobroServidor].
+  bool _esCobroServidor(String accion) => esCobroServidor(accion);
 
   /// v1.3.7 (Fase 2, B2): monto total del item en CUP (para el filtro
   /// por monto). Convierte USD→CUP con la tasa del día; si no hay tasa,
@@ -855,6 +947,61 @@ class _ActividadScreenState extends State<ActividadScreen> {
       }
     }
     return (cup, usd);
+  }
+
+  /// Mejora Actividad 2: filas estructuradas de una venta de
+  /// suplemento en la ficha: producto, cantidad, comprador, stock
+  /// restante, tasa y promo. Lo que no trae el detalle, no se inventa:
+  /// el comprador es el nombre resuelto, el del texto del servidor o
+  /// "Cliente externo / mostrador".
+  List<Widget> _filasVentaSuplemento(
+      Map<String, dynamic> a, String? nombreCli) {
+    final det = '${a['detalle'] ?? ''}';
+    final filas = <Widget>[];
+    void fila(String etiqueta, String valor) {
+      filas.add(const SizedBox(height: 4));
+      filas.add(Text('$etiqueta: $valor', style: AppTexto.cuerpo));
+    }
+
+    var base = det.replaceAll('Venta anulada: ', '');
+    final mProd = RegExp(r'^(.*?)\s+x\d+').firstMatch(base);
+    if (mProd != null && mProd.group(1)!.trim().isNotEmpty) {
+      fila('Producto', mProd.group(1)!.trim());
+    }
+    final mCant = RegExp(r'x(\d+)').firstMatch(base);
+    if (mCant != null) fila('Cantidad', mCant.group(1)!);
+    final comprador = (nombreCli != null &&
+            !nombreCli.startsWith('Cliente '))
+        ? nombreCli
+        : (compradorDetalleActividad(det) ?? 'Cliente externo / mostrador');
+    fila('Comprador', comprador);
+    final mStock = RegExp(r'stock (\d+)').firstMatch(det);
+    if (mStock != null) fila('Stock restante', mStock.group(1)!);
+    final mTasa = RegExp(r'\(tasa ([^)]+)\)').firstMatch(det);
+    if (mTasa != null && mTasa.group(1)!.trim() != '1') {
+      fila('Tasa USD', mTasa.group(1)!);
+    }
+    if (det.contains('(promo: mes gratis)')) {
+      fila('Promo', 'mes gratis aplicado');
+    }
+    return filas;
+  }
+
+  /// Mejora Actividad 7: destino del salto al registro original
+  /// según el tipo. Null si el tipo no tiene destino (los pagos ya
+  /// tienen "Ver ficha" por cliente).
+  (String, Widget)? _destinoSalto(String accion) {
+    final a = accion.toLowerCase();
+    if (a.contains('venta_suplemento')) {
+      return ('Ver ventas', const HistorialVentasScreen());
+    }
+    if (a.contains('venta_servicio')) {
+      return ('Ver servicios', const ServiciosScreen());
+    }
+    if (a.contains('confirmar_entrega') || a.contains('c1_entrega')) {
+      return ('Ver arqueo', const ArqueoScreen());
+    }
+    return null;
   }
 
   /// v1.3.5 (Fase 1, E1+E2): modal de detalle al tocar la tarjeta.
@@ -980,6 +1127,19 @@ class _ActividadScreenState extends State<ActividadScreen> {
                         color: AppColores.textoSecundario(
                             context))),
               ],
+              // Mejora Actividad 1: el detalle del servidor visible
+              // (producto, período, etc.), no solo monto y fecha.
+              if (lineaDetalleActividad('${a['detalle'] ?? ''}', titulo)
+                  .isNotEmpty) ...[
+                const SizedBox(height: 4),
+                Text(
+                    lineaDetalleActividad(
+                        '${a['detalle'] ?? ''}', titulo),
+                    style: AppTexto.cuerpo),
+              ],
+              // Mejora Actividad 2: filas de la venta de suplemento.
+              if (accion.contains('venta_suplemento'))
+                ..._filasVentaSuplemento(a, nombreCli),
               if (montoTxt.isNotEmpty) ...[
                 const SizedBox(height: 8),
                 Text(montoTxt,
@@ -1035,6 +1195,25 @@ class _ActividadScreenState extends State<ActividadScreen> {
                     ),
                 ],
               ),
+              // Mejora Actividad 7: salto al registro original.
+              if (_destinoSalto(accion) != null) ...[
+                const SizedBox(height: 8),
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    icon: const Icon(Icons.open_in_new, size: 18),
+                    label: Text(_destinoSalto(accion)!.$1),
+                    onPressed: () {
+                      Navigator.of(ctx).pop();
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                            builder: (_) =>
+                                _destinoSalto(accion)!.$2),
+                      );
+                    },
+                  ),
+                ),
+              ],
             ],
           ),
         ),
@@ -1348,6 +1527,8 @@ class _ActividadScreenState extends State<ActividadScreen> {
         return 'Diarios';
       case 'suplementos':
         return 'Suplementos';
+      case 'servicios':
+        return 'Servicios';
       case 'entregas':
         return 'Entregas';
       default:
@@ -1697,6 +1878,9 @@ class _ActividadScreenState extends State<ActividadScreen> {
                     chipSel('Suplementos',
                         fTipo == 'suplementos',
                         () => fTipo = 'suplementos'),
+                    chipSel('Servicios',
+                        fTipo == 'servicios',
+                        () => fTipo = 'servicios'),
                     chipSel('Entregas', fTipo == 'entregas',
                         () => fTipo = 'entregas'),
                   ]),
@@ -1920,9 +2104,21 @@ class _ActividadScreenState extends State<ActividadScreen> {
           // P2#2 (Argón): oculta si quien mira no tiene canVerCifras.
           // Fail-closed: si los permisos no se resuelven, no se muestra.
           if (_puedeVerCifras()) _kpiBar(filtrados),
+          // Mejora Actividad 6: aviso honesto si el feed llegó al
+          // tope del servidor (500) y puede faltar historia.
+          if (_feedRecortado)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 0, 12, 4),
+              child: Text(
+                'Mostrando las últimas 500 acciones.',
+                style: AppTexto.etiqueta.copyWith(
+                    color: AppColores.textoSecundario(context)),
+                textAlign: TextAlign.center,
+              ),
+            ),
           Expanded(
             child: _cargando
-                ? const Center(child: CircularProgressIndicator())
+                ? const EstadoCargando(texto: 'Cargando actividad…')
                 : filtrados.isEmpty
                     // v1.3.5 (Fase 1, F1): distinguir "sin datos" de
                     // "filtros sin resultados".
@@ -2135,6 +2331,22 @@ class _ActividadScreenState extends State<ActividadScreen> {
                         1,
                       ),
                     ],
+                    // Mejora Actividad 1: el detalle del servidor
+                    // (producto, período, etc.) por fin visible.
+                    // En cola, a['detalle'] ya es el detalle local.
+                    if (lineaDetalleActividad(
+                            '${a['detalle'] ?? ''}', titulo)
+                        .isNotEmpty)
+                      _textoResaltado(
+                        lineaDetalleActividad(
+                            '${a['detalle'] ?? ''}', titulo),
+                        AppTexto.etiqueta.copyWith(
+                          color: AppColores
+                              .textoSecundario(
+                                  context),
+                        ),
+                        2,
+                      ),
                   ],
                 ),
               ),
@@ -2300,6 +2512,7 @@ class _ActividadScreenState extends State<ActividadScreen> {
       'mensualidades': 0,
       'diarios': 0,
       'suplementos': 0,
+      'servicios': 0,
     };
     var usd = 0.0;
     for (final a in items) {
@@ -2375,6 +2588,10 @@ class _ActividadScreenState extends State<ActividadScreen> {
     if (porCat['suplementos']! > 0) {
       desglose.add(
           'Suplementos ${fmtMonto(porCat['suplementos']!)}');
+    }
+    if (porCat['servicios']! > 0) {
+      desglose.add(
+          'Servicios ${fmtMonto(porCat['servicios']!)}');
     }
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 0, 12, 4),

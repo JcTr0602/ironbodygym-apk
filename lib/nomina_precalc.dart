@@ -59,19 +59,19 @@ class NominaPrecalc {
     final r = rows.first;
     final pagosParte =
         '${r['c']}|${r['ss']}|${r['sc']}|${r['mi']}|${r['sf']}|${r['cn']}|${r['sn']}';
-    // v4 (1.15, N2+N6): el componente de clientes ahora incluye
-    // cuenta_casa normalizado y el componente de pagos es un hash
-    // canónico de los campos de negocio que usa esPagoMensualidad.
-    // El prefijo nuevo invalida de una vez toda caché v3.
-    return 'v4|$pagosParte|${await _huellaPagosNegocio()}|${await _huellaClientes()}';
+    // v5 (1.19, #4 Argón nómina): la huella de pagos ahora incluye
+    // pagado_hasta: sin él, un cambio de cobertura no invalidaba
+    // la caché y la nómina servía el conteo viejo. El prefijo
+    // nuevo invalida de una vez toda caché v4.
+    return 'v5|$pagosParte|${await _huellaPagosNegocio()}|${await _huellaClientes()}';
   }
 
   /// Componente de huella sobre el espejo `pagos`: hash canónico
   /// determinista por pago (1.15, N6) con los campos de negocio
   /// que usa [NominaCalc.esPagoMensualidad] (cliente, período,
-  /// método, monto, días) además de la fecha. Editar cualquiera
-  /// de ellos invalida la caché; cambiar otros campos (p. ej.
-  /// registrado_por) no la toca.
+  /// método, monto, días, pagado_hasta) además de la fecha. Editar
+  /// cualquiera de ellos invalida la caché; cambiar otros campos
+  /// (p. ej. registrado_por) no la toca.
   Future<String> _huellaPagosNegocio() async {
     final d = await LocalDb.instance.db;
     final rows = await d.query('pagos', columns: ['id', 'data']);
@@ -92,8 +92,13 @@ class NominaPrecalc {
                 : '$monto');
         final dias = NominaCalc.idTolerante(data['dias']);
         final fecha = data['fecha'] == null ? '<null>' : '${data['fecha']}';
+        // #4 (Argón nómina): pagado_hasta entra en la huella (la
+        // regla del mes en curso depende de él).
+        final pagadoHasta = data['pagado_hasta'] == null
+            ? '<null>'
+            : '${data['pagado_hasta']}';
         estado =
-            '$cliente|$periodo|$metodo|$montoStr|${dias ?? '<null>'}|$fecha';
+            '$cliente|$periodo|$metodo|$montoStr|${dias ?? '<null>'}|$fecha|$pagadoHasta';
       } catch (_) {
         estado = '<ilegible>';
       }

@@ -12,6 +12,123 @@ import 'componentes.dart';
 import 'diseno.dart';
 import 'skeleton.dart';
 
+/// Claves de franja derivadas de los cierres (PURO): pares día-entrenador,
+/// claves de cierre y primer turno del día. Lo usa _cobradosPorFranja para
+/// la query indexada y agruparCobradosPorFranja para asignar cada cobro.
+({Set<String> paresDia, Set<String> claves, Map<String, String> primerTurno})
+    clavesDeCierres(List<Map<String, dynamic>> cierres) {
+  final paresDia = <String>{};
+  final claves = <String>{};
+  final primerTurno = <String, String>{};
+  const orden = {'manana': 0, 'tarde': 1, 'noche': 2};
+  for (final c in cierres) {
+    final tid = LocalDb.normalizarTelegramId(c['telegram_id']);
+    if (tid == null) continue;
+    final fecha = '${c['fecha'] ?? ''}';
+    if (fecha.length < 10) continue;
+    final f10 = fecha.substring(0, 10);
+    paresDia.add('$f10|$tid');
+    final turno = '${c['turno'] ?? '—'}';
+    claves.add('$f10|$turno|$tid');
+    final dk = '$f10|$tid';
+    final prev = primerTurno[dk];
+    if (prev == null ||
+        (orden[turno] ?? 99) < (orden[prev] ?? 99)) {
+      primerTurno[dk] = turno;
+    }
+  }
+  return (paresDia: paresDia, claves: claves, primerTurno: primerTurno);
+}
+
+/// Cobrado por (fecha, franja, telegram_id) en CUP y en USD (PURO).
+/// Reglas: solo efectivo (H12: una transferencia no es dinero cobrado
+/// en el turno), sin Casa, y las filas sin hora caen en el primer
+/// cierre del día. El USD viene solo de ventas de suplementos (única
+/// fuente en USD; las al fiado sin saldar ya vienen filtradas por
+/// ventasSuplementosUsd). Los reversos de servicio no inventan
+/// atribución: si el servidor dejó responsable en null (el dueño
+/// revierte una venta entregada), no caen en el cuadre de nadie
+/// (mismo caso -1500 que cuadreServiciosDia).
+({Map<String, double> cup, Map<String, double> usd})
+    agruparCobradosPorFranja({
+  required Set<String> paresDia,
+  required Set<String> claves,
+  required Map<String, String> primerTurno,
+  required List<Map<String, dynamic>> pagos,
+  required List<Map<String, dynamic>> diarios,
+  required List<Map<String, dynamic>> ventasCup,
+  required List<Map<String, dynamic>> ventasUsd,
+  required List<Map<String, dynamic>> ventasServicio,
+}) {
+  final cup = <String, double>{};
+  final usd = <String, double>{};
+  void suma(Map<String, double> destino, String? fecha, String? turnoFila,
+      int? tid, double monto) {
+    if (fecha == null || fecha.length < 10 || tid == null) return;
+    final f10 = fecha.substring(0, 10);
+    final dk = '$f10|$tid';
+    if (!paresDia.contains(dk)) return;
+    var turno = turnoFila;
+    if (turno == null || !claves.contains('$f10|$turno|$tid')) {
+      turno = primerTurno[dk];
+    }
+    if (turno == null) return;
+    final k = '$f10|$turno|$tid';
+    destino[k] = (destino[k] ?? 0) + monto;
+  }
+  for (final p in pagos) {
+    // H12 (Argón caja): el historial de caja es EFECTIVO: una
+    // transferencia no es dinero cobrado en el turno y no entra aquí.
+    if ((p['metodo'] as String?) != 'efectivo') continue;
+    // v1.3.4 (Argón, luz roja condicional): normalizar fecha a 10 chars.
+    // Si el JSON trae hora ('2026-10-16T14:30:00'), la clave 'fecha|tid'
+    // no coincidiría con pares (que usa YYYY-MM-DD) y el pago se perdía.
+    final f = '${p['fecha'] ?? ''}';
+    final fecha10 = f.length >= 10 ? f.substring(0, 10) : f;
+    suma(cup, fecha10, _HistorialCajaScreenState._franjaDe(p),
+        LocalDb.normalizarTelegramId(p['telegram_user_id']),
+        (p['monto'] as num?)?.toDouble() ?? 0);
+  }
+  for (final d in diarios) {
+    // H12 (Argón caja): mismo filtro de efectivo (un diario por
+    // transferencia no es cobro del turno).
+    if (!esPagoDiarioEfectivo(d)) continue;
+    suma(cup, '${d['fecha']}', _HistorialCajaScreenState._franjaDe(d),
+        LocalDb.normalizarTelegramId(d['registrado_por']),
+        (d['total'] as num?)?.toDouble() ?? 0);
+  }
+  for (final v in ventasCup) {
+    // H12 (Argón caja): ventasSuplementosCup NO filtra por
+    // método (trae transferencias): filtrar aquí.
+    if ((v['metodo'] as String?) != 'efectivo') continue;
+    suma(cup, '${v['fecha']}', _HistorialCajaScreenState._franjaDe(v),
+        LocalDb.normalizarTelegramId(v['registrado_por']),
+        totalVentaCup(v));
+  }
+  for (final v in ventasUsd) {
+    // H12 también en USD: solo el efectivo cobrado en el turno.
+    if ((v['metodo'] as String?) != 'efectivo') continue;
+    suma(usd, '${v['fecha']}', _HistorialCajaScreenState._franjaDe(v),
+        LocalDb.normalizarTelegramId(v['registrado_por']),
+        totalVentaUsd(v));
+  }
+  for (final v in ventasServicio) {
+    if ((v['casa'] as num?)?.toInt() == 1) continue;
+    // H12 (Argón caja): mismo filtro de efectivo.
+    if ((v['metodo'] as String?) != 'efectivo') continue;
+    final esReverso = (v['reverso_de'] as num?) != null;
+    final resp =
+        LocalDb.normalizarTelegramId(v['responsable_efectivo_id']) ??
+            (esReverso
+                ? null
+                : LocalDb.normalizarTelegramId(v['registrado_por']));
+    suma(cup, '${v['fecha']}', _HistorialCajaScreenState._franjaDe(v), resp,
+        ((v['precio_unitario'] as num?)?.toDouble() ?? 0) *
+            ((v['cantidad'] as num?)?.toDouble() ?? 0));
+  }
+  return (cup: cup, usd: usd);
+}
+
 class HistorialCajaScreen extends StatefulWidget {
   const HistorialCajaScreen({super.key});
 
@@ -44,7 +161,11 @@ class _HistorialCajaScreenState extends State<HistorialCajaScreen> {
       final tid = _telegramIdDe(c);
       final key =
           '${c['fecha']}|${c['turno'] ?? '—'}|$tid';
-      res.add({...c, 'cobrado': cobrados[key] ?? 0.0});
+      res.add({
+        ...c,
+        'cobrado': cobrados.cup[key] ?? 0.0,
+        'cobrado_usd': cobrados.usd[key] ?? 0.0,
+      });
     }
     if (mounted) {
       setState(() {
@@ -81,82 +202,25 @@ class _HistorialCajaScreenState extends State<HistorialCajaScreen> {
     return 'noche';
   }
 
-  /// Cobrado por (fecha, franja, telegram_id). 1.15-turnos (#10):
-  /// antes solo sumaba pagos + diarios y agrupaba por día (dos
-  /// cierres el mismo día mostraban el mismo total). Ahora suma
-  /// también suplementos CUP y servicios (responsable del
-  /// efectivo, sin Casa), normaliza el telegram_id, y agrupa por
-  /// franja; las filas sin hora caen en el primer cierre del día
-  /// para no perder ni duplicar montos.
-  Future<Map<String, double>> _cobradosPorFranja(
-      List<Map<String, dynamic>> cierres) async {
-    final paresDia = <String>{};
-    final claves = <String>{};
-    final primerTurno = <String, String>{};
-    const orden = {'manana': 0, 'tarde': 1, 'noche': 2};
-    for (final c in cierres) {
-      final tid = _telegramIdDe(c);
-      if (tid == null) continue;
-      final fecha = '${c['fecha'] ?? ''}';
-      if (fecha.length < 10) continue;
-      final f10 = fecha.substring(0, 10);
-      paresDia.add('$f10|$tid');
-      final turno = '${c['turno'] ?? '—'}';
-      claves.add('$f10|$turno|$tid');
-      final dk = '$f10|$tid';
-      final prev = primerTurno[dk];
-      if (prev == null ||
-          (orden[turno] ?? 99) < (orden[prev] ?? 99)) {
-        primerTurno[dk] = turno;
-      }
-    }
-    final res = <String, double>{};
-    void suma(String? fecha, String? turnoFila, int? tid, double monto) {
-      if (fecha == null || fecha.length < 10 || tid == null) return;
-      final f10 = fecha.substring(0, 10);
-      final dk = '$f10|$tid';
-      if (!paresDia.contains(dk)) return;
-      var turno = turnoFila;
-      if (turno == null || !claves.contains('$f10|$turno|$tid')) {
-        turno = primerTurno[dk];
-      }
-      if (turno == null) return;
-      final k = '$f10|$turno|$tid';
-      res[k] = (res[k] ?? 0) + monto;
-    }
-    // v1.3.4 (ítem 2): columnas indexadas (fecha, telegram_user_id)
-    // en vez de allMirror. La pertenencia exacta al par la sigue
-    // aplicando suma() con `paresDia`.
-    for (final p in await LocalDb.instance.pagosPorParesDiaEntrenador(paresDia)) {
-      // v1.3.4 (Argón, luz roja condicional): normalizar fecha a 10 chars.
-      // Si el JSON trae hora ('2026-10-16T14:30:00'), la clave 'fecha|tid'
-      // no coincidiría con pares (que usa YYYY-MM-DD) y el pago se perdía.
-      final f = '${p['fecha'] ?? ''}';
-      final fecha10 = f.length >= 10 ? f.substring(0, 10) : f;
-      suma(fecha10, _franjaDe(p),
-          LocalDb.normalizarTelegramId(p['telegram_user_id']),
-          (p['monto'] as num?)?.toDouble() ?? 0);
-    }
-    for (final d in await LocalDb.instance.allMirror('pagos_diarios')) {
-      suma('${d['fecha']}', _franjaDe(d),
-          LocalDb.normalizarTelegramId(d['registrado_por']),
-          (d['total'] as num?)?.toDouble() ?? 0);
-    }
-    for (final v in await ventasSuplementosCup()) {
-      suma('${v['fecha']}', _franjaDe(v),
-          LocalDb.normalizarTelegramId(v['registrado_por']),
-          totalVentaCup(v));
-    }
-    for (final v in await LocalDb.instance.allMirror('servicio_ventas')) {
-      if ((v['casa'] as num?)?.toInt() == 1) continue;
-      final resp =
-          LocalDb.normalizarTelegramId(v['responsable_efectivo_id']) ??
-              LocalDb.normalizarTelegramId(v['registrado_por']);
-      suma('${v['fecha']}', _franjaDe(v), resp,
-          ((v['precio_unitario'] as num?)?.toDouble() ?? 0) *
-              ((v['cantidad'] as num?)?.toDouble() ?? 0));
-    }
-    return res;
+  /// Cobrado por (fecha, franja, telegram_id) en CUP y USD. 1.15-turnos
+  /// (#10): dos cierres el mismo día ya no comparten total (se agrupa
+  /// por franja). La agregación vive en agruparCobradosPorFranja (PURO,
+  /// testeable); aquí solo se leen los espejos. La query de pagos
+  /// sigue indexada (v1.3.4, ítem 2), no un escaneo completo.
+  Future<({Map<String, double> cup, Map<String, double> usd})>
+      _cobradosPorFranja(List<Map<String, dynamic>> cierres) async {
+    final keys = clavesDeCierres(cierres);
+    return agruparCobradosPorFranja(
+      paresDia: keys.paresDia,
+      claves: keys.claves,
+      primerTurno: keys.primerTurno,
+      pagos: await LocalDb.instance
+          .pagosPorParesDiaEntrenador(keys.paresDia),
+      diarios: await LocalDb.instance.allMirror('pagos_diarios'),
+      ventasCup: await ventasSuplementosCup(),
+      ventasUsd: await ventasSuplementosUsd(),
+      ventasServicio: await LocalDb.instance.allMirror('servicio_ventas'),
+    );
   }
 
   static String _nombreTurno(String? t) => switch (t) {
@@ -237,6 +301,15 @@ class _HistorialCajaScreenState extends State<HistorialCajaScreen> {
                                   fontWeight:
                                       FontWeight.w600),
                             ),
+                            if (((c['cobrado_usd'] as num?)?.toDouble() ??
+                                    0) >
+                                0)
+                              Text(
+                                'Cobrado: ${fmtMonto((c['cobrado_usd'] as num?)?.toDouble() ?? 0)} USD',
+                                style: AppTexto.cuerpo.copyWith(
+                                    fontWeight:
+                                        FontWeight.w600),
+                              ),
                             Text(
                               'Operaciones: ${c['pagos_count'] ?? '—'}',
                               style: AppTexto.secundario,

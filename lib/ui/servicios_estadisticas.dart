@@ -44,6 +44,11 @@ class _ServiciosEstadisticasScreenState
       _indBote = const {};
   String _semanaTexto = '';
   String _semanaRango = '';
+  // 12/25: listas ya cargadas por _cargar, que el simulador
+  // reutiliza sin releer los espejos en cada apertura.
+  List<Map<String, dynamic>> _botes = const [];
+  Map<int, String> _nombreSup = const {};
+  double _costoAgua = 0;
 
   @override
   void initState() {
@@ -302,6 +307,10 @@ class _ServiciosEstadisticasScreenState
         'autonomia_dias': autonomia,
         'saldo_total': saldoTotal,
       };
+      // 12/25: el simulador reutiliza estas listas.
+      _botes = botes;
+      _nombreSup = nombreSup;
+      _costoAgua = ultimaEntradaAguaCosto(movsAgua);
       _cargando = false;
     });
   }
@@ -327,7 +336,7 @@ class _ServiciosEstadisticasScreenState
         ],
       ),
       body: _cargando
-          ? const Center(child: CircularProgressIndicator())
+          ? const EstadoCargando(texto: 'Cargando estadísticas…')
           : ListView(
               padding: const EdgeInsets.all(AppEspacio.lg),
               children: [
@@ -424,27 +433,19 @@ class _ServiciosEstadisticasScreenState
   /// v1.13.0 (B6): hoja calculadora EFÍMERA en memoria (2
   /// deslizadores sobre el costo del bote actual). No escribe BD.
   Future<void> _abrirSimulador() async {
-    final botes = await LocalDb.instance.allMirror('servicio_botes');
-    // Argón stats MENOR: el desplegable mostraba solo 'Bote #id'.
-    final suplementos =
-        await LocalDb.instance.allMirror('suplementos');
-    final nombreSup = <int, String>{
-      for (final s in suplementos)
-        if ((s['id'] as num?) != null)
-          (s['id'] as num).toInt(): '${s['nombre'] ?? ''}',
-    };
-    // Costo del pomo para el margen con agua: última entrada de agua
-    // (por fecha e id, no por orden del espejo: ver
-    // ultimaEntradaAguaCosto).
-    final costoAgua = ultimaEntradaAguaCosto(await LocalDb.instance
-        .allMirror('servicio_agua_movimientos'));
+    // 12/25: reutiliza las listas que _cargar ya trajo (el botón
+    // solo existe tras la carga: el cuerpo muestra spinner antes).
+    // Antes releía botes, suplementos y movimientos de agua en
+    // cada apertura aunque _cargar acabara de traerlos.
+    final botes = _botes;
+    final nombreSup = _nombreSup;
+    final costoAgua = _costoAgua;
     // Argón #9 (MEDIO): los botes abiertos tienen estado 'abierto';
     // 'activo' es el estado de los LOTES. Con 'activo' la lista
     // salía siempre vacía y el simulador era inutilizable.
     final abiertos = botes
         .where((b) => '${b['estado']}' == 'abierto')
         .toList();
-    if (!mounted) return;
     if (abiertos.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
           content: Text('No hay un bote abierto para simular.')));

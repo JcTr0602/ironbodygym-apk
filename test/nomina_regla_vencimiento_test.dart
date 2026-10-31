@@ -155,15 +155,15 @@ void main() {
     await db.close();
   });
 
-  test('precalc v4: cambiar solo pagado_hasta invalida la caché', () async {
+  test('precalc v5: cambiar solo pagado_hasta invalida la caché', () async {
     final db = await _abrirDbVacia();
     final pref = NominaCalc.prefMesActual();
     await _pago(db, id: 1, clienteId: 10, fecha: '$pref-05');
     await _cliente(db, id: 10, pagadoHasta: '${_mesSiguiente(pref)}-05');
     expect(await NominaPrecalc.instance.asegurar(pref), 1);
     final filas = await db.query('nomina_precalc');
-    expect(filas.first['huella'], startsWith('v4|'),
-        reason: 'toda caché nueva nace con la huella v4');
+    expect(filas.first['huella'], startsWith('v5|'),
+        reason: 'toda caché nueva nace con la huella v5');
 
     // Cambia SOLO el vencimiento (entra al mes): sin tocar pagos.
     await db.update(
@@ -181,7 +181,7 @@ void main() {
         whereArgs: [10]);
     final cache = await NominaPrecalc.instance.leer(pref);
     expect(cache!.fresco, isFalse,
-        reason: 'la huella v4 detecta el cambio de pagado_hasta');
+        reason: 'la huella v5 detecta el cambio de pagado_hasta');
     expect(await NominaPrecalc.instance.asegurar(pref), 0);
     await db.close();
   });
@@ -191,7 +191,7 @@ void main() {
   // (fuera+fuera frente a dentro+dentro) daban la misma huella y
   // la caché vieja se servía como fresca. Con el hash canónico
   // las huellas difieren SIEMPRE que difiera algún vencimiento.
-  test('precalc v4: la huella no colisiona con sumas equivalentes',
+  test('precalc v5: la huella no colisiona con sumas equivalentes',
       () async {
     final db = await _abrirDbVacia();
     final pref = NominaCalc.prefMesActual();

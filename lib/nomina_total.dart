@@ -4,7 +4,9 @@ import 'adelantos.dart';
 import 'localdb.dart';
 import 'nomina_bonos.dart';
 import 'nomina_calc.dart';
+import 'nomina_precalc.dart';
 import 'perfil.dart';
+import 'tiempo.dart';
 
 /// Total neto a pagar a los entrenadores (post-1.15, fix principal).
 ///
@@ -67,6 +69,9 @@ Future<List<Map<String, dynamic>>> _usuariosApk() async {
 
 Future<double?> totalNetoNominaMes(String pref) async {
   try {
+    // #6 (Argón nómina): refrescar el pre-cálculo antes de
+    // componer (la pantalla ya lo hacía; el total del home no).
+    await NominaPrecalc.instance.asegurar(pref);
     final tarifa = await PerfilService.instance.getPagoEntrenador();
     final pagaron = await NominaCalc.clientesQuePagaronElMes(pref);
     final base = pagaron * tarifa.toDouble();
@@ -88,12 +93,10 @@ Future<double?> totalNetoNominaMes(String pref) async {
         final r =
             NominaCalc.comisionDosisDesdeVentas(ventasServ, tid, pref);
         if (r.total == 0 && r.dosis == 0) continue;
-        final nombre = nombrePorTid[tid]!.toLowerCase();
-        if (nombre.contains('duany')) {
-          comisionDosis['duany'] = r;
-        } else if (nombre.contains('gabriel')) {
-          comisionDosis['gabriel'] = r;
-        }
+        // #6 (Argón nómina): llave única (antes contains inline
+        // aquí y filtro estricto en el libro).
+        final clave = NominaCalc.claveEntrenador(nombrePorTid[tid]);
+        if (clave != null) comisionDosis[clave] = r;
       }
     } catch (_) {
       // Sin espejo de servicios: comisiones en 0, como la pantalla.
@@ -102,9 +105,13 @@ Future<double?> totalNetoNominaMes(String pref) async {
     // fallo aquí anula el cálculo: sin el libro no se puede
     // descontar y el neto saldría sobreestimado.
     final libroMes = <String, MesLibroAdelantos>{};
+    // #6 (Argón nómina): el conteo por mes se memoriza fuera del
+    // bucle (antes se recalculaba por entrenador: mismo mes, dos
+    // consultas al espejo).
+    final conteoCache = <String, int>{};
     for (final u in usuariosApk) {
-      final username = '${u['username'] ?? ''}'.toLowerCase();
-      if (username != 'duany' && username != 'gabriel') continue;
+      final username = NominaCalc.claveEntrenador('${u['username'] ?? ''}');
+      if (username == null) continue;
       final id = '${u['id'] ?? ''}';
       if (id.isEmpty) continue;
       final telegramId = (u['telegram_id'] as num?)?.toInt() ??
@@ -119,8 +126,9 @@ Future<double?> totalNetoNominaMes(String pref) async {
       final brutoPorMes = <String, double>{};
       var mes = primero;
       while (mes.compareTo(pref) <= 0) {
-        final n = await NominaCalc.clientesQuePagaronElMes(mes);
-        brutoPorMes[mes] = n * tarifa.toDouble();
+        conteoCache[mes] ??=
+            await NominaCalc.clientesQuePagaronElMes(mes);
+        brutoPorMes[mes] = conteoCache[mes]! * tarifa.toDouble();
         mes = mesSiguiente(mes);
       }
       // Fix Argón post-1.15 (MEDIO): el libro arrastra deuda mes
@@ -137,6 +145,11 @@ Future<double?> totalNetoNominaMes(String pref) async {
             ? {pref: comisionDosis[username]?.total ?? 0}
             : NominaCalc.comisionesPorMesDesdeVentas(
                 ventasServ, telegramId, primero, pref),
+        // #2 (Argón nómina): los bonos suman a la capacidad del
+        // mes (sin esto, un adelanto cubierto por un bono dejaba
+        // deuda fantasma).
+        bonosPorMes: await BonosNominaService.instance
+            .bonosPorMes(username, primero, pref),
         hastaMes: pref,
       );
       for (final m in libro) {

@@ -61,7 +61,7 @@ class _PlantillasScreenState extends State<PlantillasScreen> {
             )
           : null,
       body: _cargando
-          ? const Center(child: CircularProgressIndicator())
+          ? const EstadoCargando(texto: 'Cargando plantillas…')
           : _plantillas.isEmpty
               ? const Center(
                   child: Text(

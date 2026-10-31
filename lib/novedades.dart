@@ -15,6 +15,17 @@ class Novedad {
 }
 
 const novedades = [
+  Novedad('1.19.0', [
+    'Pantalla principal por zonas: módulos agrupados (Cobrar y clientes, El gym hoy, Mi trabajo), turno como chip de color y avisos de vencimientos con su urgencia',
+    'Dashboard nuevo: lo urgente del día arriba (pendientes, vencimientos, cumpleaños, stock bajo), balance del mes y ritmo de cierre estimado, todo más rápido',
+    'Hub de turnos: quién trabaja hoy, abrir y cerrar el turno del día y el pendiente de cada entrenador en un solo lugar',
+    'Historial de caja y de ventas con dólares: filtros, buscador y salto del extracto a la venta; el recibo de WhatsApp ya sale completo',
+    'Servicios más firmes: el cuadre ya no carga un reverso al dueño, las ventas de hoy tienen su ficha al tocar, y la carga ya no relee todo el espejo',
+    'Notificaciones del sistema: los recordatorios del día avisan a las 8 de la mañana aunque la app esté cerrada',
+    'Ficha del cliente con su Plus, bonos con respaldo del servidor, y el entrenador ya ve su solicitud de adelanto mientras sube',
+    'Diseño más maduro en toda la app: estados de carga con texto, errores con Reintentar, botones y tarjetas del sistema, y colores coherentes',
+    'Corrección de decimales: los montos ya no salen con colas raras (3119.9999…) en Estadísticas',
+  ]),
   Novedad('1.18.0', [
     'Servicios rediseñado: botones de venta más claros, MI POMO con el saldo grande para el dueño y pomo ciego para el entrenador, y Administrar, Estadísticas y Ranking reubicados sin tocar los permisos',
     'Actividad: al abrir un detalle, la app ya resuelve el cliente por el nombre del texto y abre su ficha con su botón de WhatsApp; los nombres con tildes, puntos y guiones ya resuelven bien',

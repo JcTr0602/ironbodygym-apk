@@ -91,5 +91,24 @@ void main() {
           menor: false, monto: monto);
       expect(r.id, 'semanal');
     });
+
+    test('1.19 Argón A1: menor Casa no salta a la oferta barata', () {
+      final r = tipoInicialPago([menores, ofertaBarata],
+          menor: true, monto: monto, esCasa: true);
+      expect(r.id, 'menores');
+    });
+
+    test('1.19 Argón A1: menor con especial mensual no salta a '
+        'la oferta barata', () {
+      final r = tipoInicialPago([menores, ofertaBarata],
+          menor: true, monto: monto, tieneEspecialMensual: true);
+      expect(r.id, 'menores');
+    });
+
+    test('1.19 Argón A1: menor Casa sin menores cae al primer tipo', () {
+      final r = tipoInicialPago([ofertaBarata, semanal],
+          menor: true, monto: monto, esCasa: true);
+      expect(r.id, 'oferta50');
+    });
   });
 }

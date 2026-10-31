@@ -85,7 +85,7 @@ class _RankingServiciosScreenState extends State<RankingServiciosScreen> {
     return Scaffold(
       appBar: AppBar(title: const Text('Ranking de Servicios')),
       body: _cargando
-          ? const Center(child: CircularProgressIndicator())
+          ? const EstadoCargando(texto: 'Cargando ranking…')
           : Column(
               children: [
                 const SyncBanner(),

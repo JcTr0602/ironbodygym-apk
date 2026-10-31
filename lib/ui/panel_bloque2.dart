@@ -116,7 +116,7 @@ class _CuentasCasaScreenState extends State<CuentasCasaScreen> {
     return Scaffold(
       appBar: AppBar(title: const Text('Cuentas a la Casa')),
       body: _cargando
-          ? const Center(child: CircularProgressIndicator())
+          ? const EstadoCargando(texto: 'Cargando…')
           : _casas.isEmpty
               ? const Center(
                   child: Text('Ninguna cuenta a la Casa.',
@@ -198,7 +198,7 @@ class _SinFotoPrecioScreenState extends State<SinFotoPrecioScreen> {
     return Scaffold(
       appBar: AppBar(title: const Text('Productos sin foto o sin precio')),
       body: _cargando
-          ? const Center(child: CircularProgressIndicator())
+          ? const EstadoCargando(texto: 'Cargando…')
           : _mal.isEmpty
               ? const Center(
                   child: Text(
@@ -303,7 +303,7 @@ class _VencimientosProximosScreenState
     return Scaffold(
       appBar: AppBar(title: const Text('Vencimientos próximos')),
       body: _cargando
-          ? const Center(child: CircularProgressIndicator())
+          ? const EstadoCargando(texto: 'Cargando…')
           : ListView(
               padding: const EdgeInsets.all(16),
               children: [

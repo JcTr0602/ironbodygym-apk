@@ -594,7 +594,11 @@ class _ListaIncidenciasScreenState
       ids: ids,
       nuevoEstado: destino,
       notaResolucion: nota,
-      userId: AuthService().userId ?? 'desconocido',
+      autor: autorIncidenciaActual(
+        displayName: AuthService().displayName,
+        telegramId: AuthService().telegramId,
+      ),
+      userId: AuthService().userId,
       telegramId: AuthService().telegramId,
     );
     // v1.3.2: un solo disparo de sync al terminar el lote.

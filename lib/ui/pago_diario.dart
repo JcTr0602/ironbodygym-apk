@@ -639,7 +639,7 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
     }
 
     return _cargandoReporte
-        ? const Center(child: CircularProgressIndicator())
+        ? const EstadoCargando(texto: 'Cargando pago diario…')
         : ListView(
             padding: const EdgeInsets.all(16),
             children: [

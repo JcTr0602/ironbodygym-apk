@@ -13,6 +13,7 @@ import 'auth.dart';
 import 'config.dart';
 import 'invitados.dart';
 import 'localdb.dart';
+import 'notificaciones_recordatorios.dart';
 import 'sync.dart';
 import 'fotos_foreground.dart';
 import 'theme.dart';
@@ -51,6 +52,10 @@ Future<void> _republicarInfoPublicaPendiente() async {
 Future<void> _trasSyncExitosa() async {
   await _verificarConversionesInvitados();
   await _republicarInfoPublicaPendiente();
+  // 23/25: reprogramar avisos de recordatorios con la lista fresca
+  // (nunca lanza; en el isolate de fondo el canal no existe y se
+  // ignora en silencio).
+  await AvisosRecordatorios.sincronizar();
 }
 
 /// Tarea en segundo plano (punto 21): sube lo pendiente aunque la app
@@ -141,6 +146,9 @@ Future<void> main() async {
   // background, guardada por fecha (meta 'ultima_poda_ops');
   // no bloquea el arranque.
   unawaited(LocalDb.instance.podaOpsDiariaSiToca());
+  // 23/25: programar avisos de recordatorios de hoy (sin sesión
+  // no hace nada; tras cada sync se reprograma con lista fresca).
+  unawaited(AvisosRecordatorios.sincronizar());
   runApp(const IronBodyApp());
 }
 

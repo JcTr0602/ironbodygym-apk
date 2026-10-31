@@ -25,6 +25,7 @@ import 'buscar.dart';
 import 'diseno.dart';
 import 'ficha.dart';
 import 'widgets.dart';
+import 'componentes.dart';
 
 class CumpleanosScreen extends StatefulWidget {
   const CumpleanosScreen({super.key});
@@ -41,6 +42,10 @@ class _CumpleanosScreenState extends State<CumpleanosScreen>
   Set<int> _regaladosAnio = {};
   bool _cargando = true;
   late String _anio;
+  // #4 (Argón cumpleaños): regalos en curso por cliente. Sin esto,
+  // un doble toque abría dos diálogos y confirmar los dos aplicaba
+  // el regalo dos veces (el segundo extendía otros 30 días).
+  final Set<int> _regalando = {};
 
   static const _meses = [
     '',
@@ -191,11 +196,15 @@ class _CumpleanosScreenState extends State<CumpleanosScreen>
   Future<void> _regalarYFelicitar(Map<String, dynamic> c) async {
     final id = (c['id'] as num?)?.toInt() ?? 0;
     if (id <= 0 || !mounted) return;
+    // #4 (Argón cumpleaños): un solo flujo por cliente (el Set
+    // devuelve false si ya está en curso).
+    if (!_regalando.add(id)) return;
     // Misma clase que #10-4: la clave anual del regalo debe usar
     // el año actual, no el de cuando se abrió la pantalla.
     _anio = '${ahoraHabana().year}';
     // Bloqueo anti-duplicado: operación real en BD (Argón).
     if (await _regaloAplicado(id)) {
+      _regalando.remove(id);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
             content: Text('Ya se regaló el mes este año.')));
@@ -220,14 +229,33 @@ class _CumpleanosScreenState extends State<CumpleanosScreen>
             onPressed: () => Navigator.of(ctx).pop(false),
             child: const Text('Cancelar'),
           ),
-          ElevatedButton(
+          BotonPrimario(
+            texto: 'Regalar',
             onPressed: () => Navigator.of(ctx).pop(true),
-            child: const Text('Regalar'),
+            expandido: false,
           ),
         ],
       ),
     );
-    if (confirmar != true || !mounted) return;
+    if (confirmar != true) {
+      _regalando.remove(id);
+      return;
+    }
+    if (!mounted) {
+      _regalando.remove(id);
+      return;
+    }
+    // #4 (Argón cumpleaños): re-chequeo tras confirmar. Otro
+    // diálogo del mismo cliente pudo aplicar mientras este
+    // esperaba: sin esto, el segundo regalo extendía 30 días más.
+    if (await _regaloAplicado(id)) {
+      _regalando.remove(id);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('Ya se regaló el mes este año.')));
+      }
+      return;
+    }
     // a) Espejo local.
     await LocalDb.instance.updateMirrorPagadoHasta(id, nuevoHasta);
     // b) Op al servidor.
@@ -249,9 +277,24 @@ class _CumpleanosScreenState extends State<CumpleanosScreen>
       setState(() => _regaladosAnio.add(id));
     }
     // d) WhatsApp con el mensaje del regalo (formato de FichaScreen).
+    // #1 (Argón cumpleaños + regla de Jc): el regalo YA se aplicó
+    // arriba; sin teléfono NO se devuelve en silencio: se avisa
+    // para felicitar en persona.
     final tel = '${c['telefono'] ?? ''}'.trim();
     final waNum = normalizarTelefonoWaMe(tel);
-    if (waNum.isEmpty || !mounted) return;
+    if (waNum.isEmpty) {
+      _regalando.remove(id);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('Regalo aplicado. Este cliente no tiene '
+                'teléfono: felicítalo en persona.')));
+      }
+      return;
+    }
+    if (!mounted) {
+      _regalando.remove(id);
+      return;
+    }
     final anteriorFmt = (pagadoHastaActual != null &&
             pagadoHastaActual.length >= 10)
         ? _fechaLarga(pagadoHastaActual)
@@ -277,6 +320,7 @@ class _CumpleanosScreenState extends State<CumpleanosScreen>
             content: Text('Regalo aplicado. No se pudo abrir WhatsApp.')));
       }
     }
+    _regalando.remove(id);
   }
 
   /// "2026-12-05" → "5 de diciembre".
@@ -310,9 +354,10 @@ class _CumpleanosScreenState extends State<CumpleanosScreen>
             onPressed: () => Navigator.pop(ctx, false),
             child: const Text('Cancelar'),
           ),
-          ElevatedButton(
+          BotonPrimario(
+            texto: 'Guardar',
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Guardar'),
+            expandido: false,
           ),
         ],
       ),
@@ -370,7 +415,7 @@ class _CumpleanosScreenState extends State<CumpleanosScreen>
           const SyncBanner(),
           Expanded(
             child: _cargando
-                ? const Center(child: CircularProgressIndicator())
+                ? const EstadoCargando(texto: 'Cargando cumpleaños…')
                 : TabBarView(
                     controller: _tabs,
                     children: [
@@ -386,10 +431,13 @@ class _CumpleanosScreenState extends State<CumpleanosScreen>
 
   Widget _lista(List<Map<String, dynamic>> items, String etiqueta) {
     if (items.isEmpty) {
-      return Center(
-          child: Text('Sin cumpleaños en los $etiqueta.\n'
-              'La fecha sale del carnet de identidad.',
-              textAlign: TextAlign.center));
+      return EstadoVacio(
+        icono: Icons.cake_rounded,
+        titulo: 'Sin cumpleaños en los $etiqueta.',
+        subtitulo: 'La fecha sale del carnet de identidad.',
+        textoAccion: 'Actualizar',
+        onAccion: _cargar,
+      );
     }
     // v1.3.8 (2A/2D): el contador refleja las tarjetas visibles.
     final fel = items
@@ -424,9 +472,24 @@ class _CumpleanosScreenState extends State<CumpleanosScreen>
     final tieneTelefono =
         normalizarTelefonoWaMe('${c['telefono'] ?? ''}').isNotEmpty;
     final diasPara = c['_dias_para'] as int?;
+    // CU1 (estéticas 1.19): el cumpleañero de hoy destaca sobre
+    // el resto (misma condición que la etiqueta '¡Hoy!').
+    // Panel Terra B3: antes se comparaba solo el día del mes y
+    // un cumpleaños del 30 de noviembre destacaba el 30 de octubre.
+    final esHoy = diasPara == 0;
     return Opacity(
       opacity: felicitado ? 0.6 : 1.0,
-      child: FilaCliente(
+      child: Container(
+        decoration: esHoy
+            ? BoxDecoration(
+                color: AppColores.alerta.withValues(alpha: 0.12),
+                border: const Border(
+                  left: BorderSide(
+                      color: AppColores.alerta, width: 4),
+                ),
+              )
+            : null,
+        child: FilaCliente(
         cliente: c,
         onTap: () => Navigator.of(context)
             .push(MaterialPageRoute(
@@ -436,8 +499,19 @@ class _CumpleanosScreenState extends State<CumpleanosScreen>
           mainAxisAlignment: MainAxisAlignment.center,
           crossAxisAlignment: CrossAxisAlignment.end,
           children: [
-            Text(_etiqueta(c),
-                style: const TextStyle(fontWeight: FontWeight.bold)),
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (esHoy)
+                  const Icon(Icons.cake_rounded,
+                      size: 16, color: AppColores.alerta),
+                if (esHoy) const SizedBox(width: 4),
+                Text(_etiqueta(c),
+                    style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        color: esHoy ? AppColores.alerta : null)),
+              ],
+            ),
             Text(
                 '${c['_fecha_cumple']} · Cumple ${c['_cumple']}',
                 style: AppTexto.secundario.copyWith(
@@ -483,6 +557,10 @@ class _CumpleanosScreenState extends State<CumpleanosScreen>
                 // v1.7.0 (regla firme de Argón): una Cuenta a la
                 // Casa se celebra pero NO recibe «regalo de mes»:
                 // el botón se omite; Felicitar queda igual.
+                // #1 (Argón cumpleaños + regla de Jc): sin teléfono
+                // el regalo SE APLICA IGUAL y se avisa (antes el
+                // botón mandaba a agregar el teléfono y el regalo
+                // no se aplicaba).
                 if (AuthService().isOwner && !esCuentaCasa(c))
                   IconButton(
                     tooltip: regalado
@@ -494,14 +572,13 @@ class _CumpleanosScreenState extends State<CumpleanosScreen>
                           ? Colors.amber
                           : AppColores.naranja,
                     ),
-                    onPressed: tieneTelefono
-                        ? () => _regalarYFelicitar(c)
-                        : () => _agregarTelefono(c),
+                    onPressed: () => _regalarYFelicitar(c),
                   ),
               ],
             ),
           ],
         ),
+      ),
       ),
     );
   }

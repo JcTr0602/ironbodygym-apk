@@ -4,6 +4,7 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../auth.dart';
+import 'componentes.dart';
 
 class EntrenadorPermiso {
   final String email;
@@ -290,7 +291,7 @@ class _PanelPermisosState extends State<PanelPermisos> {
     }
 
     final contenido = _cargando
-        ? const Center(child: CircularProgressIndicator())
+        ? const EstadoCargando(texto: 'Cargando permisos…')
         : _entrenadores.isEmpty
             ? const Center(
                 child: Text('No hay entrenadores registrados.'))

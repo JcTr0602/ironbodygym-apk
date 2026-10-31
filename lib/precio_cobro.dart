@@ -28,11 +28,13 @@
 ///   NO aplica (el periodo debe coincidir).
 /// - Tipos personalizados (Oferta): el diálogo los resuelve con su
 ///   propio monto y NO pasa por aquí; si un llamador pasa
-///   [montoOferta], ese es el escalón Oferta de la cadena. Fase A
-///   (MIN): el diálogo sí reenvía como [montoOferta] una oferta
-///   mensual vigente (tipo personalizado de 30 días) cuando se
-///   cobra por el camino fijo mensual/menores, para que el menor
-///   no pague más que la oferta.
+///   [montoOferta], ese es el escalón Oferta de la cadena. En
+///   producción ningún llamador pasa [montoOferta] (1.19, Argón):
+///   el MIN vive solo como preselección del diálogo (tipoInicialPago
+///   elige el tipo de 30 días más barato) y la oferta se aplica
+///   eligiendo ese TipoPago, no reenviando el monto. Los caminos
+///   sin diálogo (atrasados, renovación rápida, mensajes) cobran
+///   la tarifa base del menor (1500), no la promoción puntual.
 ///
 /// El monto devuelto es UNITARIO (por periodo); el diálogo multiplica
 /// por meses solo en mensual/menores, como siempre.

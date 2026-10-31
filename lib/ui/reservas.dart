@@ -1,10 +1,12 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:uuid/uuid.dart';
 
 import '../auth.dart';
 import '../cliente_protegido.dart';
+import '../fotos.dart';
 import '../localdb.dart';
 import '../negocio.dart' show fmtMonto;
 import '../permisos_entrenador.dart';
@@ -12,6 +14,7 @@ import '../sync.dart';
 import '../tiempo.dart';
 import 'componentes.dart';
 import 'dialogo_pago.dart' show metodosAceptadosEfectivos;
+import 'diseno.dart';
 
 /// Reservas v2 — bandeja del gimnasio.
 ///
@@ -49,6 +52,12 @@ class ReservaVista {
   final String creadaTs;
   final String? expiraEn;
   final String? notaResolucion;
+  // R3 (estéticas 1.19): fotos para la tarjeta (opcionales; la
+  // tarjeta muestra iniciales/icono cuando no hay).
+  final String? fotoClienteLocal;
+  final String? fotoClienteStorage;
+  final String? fotoSuplementoLocal;
+  final String? fotoSuplementoStorage;
 
   const ReservaVista({
     required this.id,
@@ -65,6 +74,10 @@ class ReservaVista {
     required this.creadaTs,
     required this.expiraEn,
     required this.notaResolucion,
+    this.fotoClienteLocal,
+    this.fotoClienteStorage,
+    this.fotoSuplementoLocal,
+    this.fotoSuplementoStorage,
   });
 
   double get totalFoto => cantidad * precioUnitario;
@@ -122,6 +135,7 @@ BandejaReservas construirBandeja(
   ReservaVista vista(Map<String, dynamic> r) {
     final sid = _entero(r['suplemento_id']);
     final supl = suplPorId[sid];
+    final cli = clientePorId[_entero(r['cliente_id'])];
     return ReservaVista(
       id: _entero(r['id']),
       clienteId: _entero(r['cliente_id']),
@@ -144,6 +158,11 @@ BandejaReservas construirBandeja(
       creadaTs: (r['creada_ts'] ?? '') as String,
       expiraEn: r['expira_en'] as String?,
       notaResolucion: r['nota_resolucion'] as String?,
+      // R3 (estéticas 1.19): fotos para la tarjeta.
+      fotoClienteLocal: cli?['foto_local'] as String?,
+      fotoClienteStorage: cli?['foto_storage'] as String?,
+      fotoSuplementoLocal: supl?['foto_local'] as String?,
+      fotoSuplementoStorage: supl?['foto_storage'] as String?,
     );
   }
 
@@ -235,6 +254,25 @@ String etiquetaEstadoReserva(String estado) {
       return 'Expirada';
     default:
       return estado;
+  }
+}
+
+/// R1 (estéticas 1.19): color semántico del estado de reserva
+/// (puro, sin contexto: el gris fijo vale en ambos modos).
+Color colorEstadoReserva(String estado) {
+  switch (estado) {
+    case 'solicitada':
+      return AppColores.alerta;
+    case 'reservada':
+      return AppColores.info;
+    case 'pagada':
+      return AppColores.exito;
+    case 'rechazada':
+      return AppColores.error;
+    case 'cancelada':
+    case 'expirada':
+    default:
+      return Colors.grey;
   }
 }
 
@@ -576,20 +614,18 @@ class _ReservasScreenState extends State<ReservasScreen> {
         ],
       ),
       body: _cargando
-          ? const Center(child: CircularProgressIndicator())
+          ? const EstadoCargando(texto: 'Cargando reservas…')
           : b == null ||
                   (b.solicitadas.isEmpty &&
                       b.reservadas.isEmpty &&
                       b.historial.isEmpty)
-              ? const Center(
-                  child: Padding(
-                    padding: EdgeInsets.all(24),
-                    child: Text(
-                      'Todavía no hay reservas.\nCuando un cliente '
-                      'reserve un suplemento desde su app, aparece aquí.',
-                      textAlign: TextAlign.center,
-                    ),
-                  ),
+              ? EstadoVacio(
+                  icono: Icons.event_available_rounded,
+                  titulo: 'Todavía no hay reservas.',
+                  subtitulo: 'Cuando un cliente reserve un suplemento '
+                      'desde su app, aparece aquí.',
+                  textoAccion: 'Actualizar',
+                  onAccion: _refrescar,
                 )
               : RefreshIndicator(
                   onRefresh: _refrescar,
@@ -650,6 +686,87 @@ class _ReservasScreenState extends State<ReservasScreen> {
 
 }
 
+/// R3 (estéticas 1.19): miniatura con la misma resolución que
+/// la foto del catálogo (local → caché → descarga si [descargar];
+/// el cliente no descarga, igual que ClienteAvatarThumb). Sin
+/// foto, icono neutro en vez de un hueco vacío.
+class _MiniFotoReserva extends StatefulWidget {
+  final String? fotoLocal;
+  final String? fotoStorage;
+  final bool descargar;
+  const _MiniFotoReserva({
+    required this.fotoLocal,
+    required this.fotoStorage,
+    required this.descargar,
+  });
+
+  @override
+  State<_MiniFotoReserva> createState() => _MiniFotoReservaState();
+}
+
+class _MiniFotoReservaState extends State<_MiniFotoReserva> {
+  late Future<File?> _futura;
+
+  @override
+  void initState() {
+    super.initState();
+    _futura = _resolver();
+  }
+
+  @override
+  void didUpdateWidget(_MiniFotoReserva old) {
+    super.didUpdateWidget(old);
+    if (old.fotoLocal != widget.fotoLocal ||
+        old.fotoStorage != widget.fotoStorage) {
+      _futura = _resolver();
+    }
+  }
+
+  Future<File?> _resolver() async {
+    final local = widget.fotoLocal;
+    if (local != null && local.isNotEmpty && File(local).existsSync()) {
+      return File(local);
+    }
+    final storage = widget.fotoStorage;
+    if (storage == null || storage.isEmpty) return null;
+    final enCache = await FotoCache.instance.enCache(storage);
+    if (enCache != null) return enCache;
+    if (!widget.descargar) return null;
+    return FotoCache.instance.obtener(storage);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<File?>(
+      future: _futura,
+      builder: (ctx, snap) {
+        final f = snap.data;
+        if (f != null) {
+          return Image.file(
+            f,
+            fit: BoxFit.cover,
+            errorBuilder: (_, __, ___) => const _SinFotoReserva(),
+          );
+        }
+        return const _SinFotoReserva();
+      },
+    );
+  }
+}
+
+class _SinFotoReserva extends StatelessWidget {
+  const _SinFotoReserva();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      color: AppColores.borde(context).withValues(alpha: 0.3),
+      child: const Icon(Icons.medication_outlined,
+          color: Colors.grey, size: 20),
+    );
+  }
+}
+
 /// Tarjeta de una reserva. Widget sin estado y sin dependencias
 /// de BD/sync (testeable directo): la pantalla le pasa si está
 /// [bloqueada] (op encolada o encolándose) y los callbacks; con
@@ -678,6 +795,20 @@ class TarjetaReserva extends StatelessWidget {
     final solicitada = r.estado == 'solicitada';
     final reservada = r.estado == 'reservada';
     final ahora = ahoraHabana();
+    final colorEstado = colorEstadoReserva(r.estado);
+    // R3: iniciales del cliente cuando no hay foto.
+    final iniciales = r.clienteNombre.trim().isEmpty
+        ? '?'
+        : r.clienteNombre
+            .trim()
+            .split(RegExp(r'\s+'))
+            .take(2)
+            .map((p) => p[0].toUpperCase())
+            .join();
+    final hayFotoCliente =
+        (r.fotoClienteLocal != null && r.fotoClienteLocal!.isNotEmpty) ||
+            (r.fotoClienteStorage != null &&
+                r.fotoClienteStorage!.isNotEmpty);
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(12),
@@ -686,20 +817,79 @@ class TarjetaReserva extends StatelessWidget {
           children: [
             Row(
               children: [
+                // R3 (estéticas 1.19): foto del cliente (o sus
+                // iniciales) junto al nombre.
+                SizedBox(
+                  width: 36,
+                  height: 36,
+                  child: hayFotoCliente
+                      ? ClipOval(
+                          child: _MiniFotoReserva(
+                            fotoLocal: r.fotoClienteLocal,
+                            fotoStorage: r.fotoClienteStorage,
+                            descargar: false,
+                          ),
+                        )
+                      : CircleAvatar(
+                          backgroundColor: AppColores.naranja
+                              .withValues(alpha: 0.15),
+                          child: Text(iniciales,
+                              style: const TextStyle(
+                                  color: AppColores.naranja,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 13)),
+                        ),
+                ),
+                const SizedBox(width: 8),
                 Expanded(
                   child: Text(r.clienteNombre,
                       style: const TextStyle(
                           fontWeight: FontWeight.bold, fontSize: 15)),
                 ),
+                // R1 (estéticas 1.19): chip con color semántico.
                 Chip(
-                  label: Text(etiquetaEstadoReserva(r.estado)),
+                  label: Text(etiquetaEstadoReserva(r.estado),
+                      style: TextStyle(
+                          color: colorEstado,
+                          fontWeight: FontWeight.w600)),
                   visualDensity: VisualDensity.compact,
+                  backgroundColor:
+                      colorEstado.withValues(alpha: 0.15),
+                  side: BorderSide(
+                      color: colorEstado.withValues(alpha: 0.4)),
                 ),
               ],
             ),
-            Text('${r.cantidad} × ${r.suplementoNombre}'),
-            Text('Total: ${fmtMonto(r.totalFoto)} ${r.moneda} '
-                '(${fmtMonto(r.precioUnitario)} ${r.moneda} c/u al reservar)'),
+            const SizedBox(height: 8),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // R3: miniatura del suplemento reservado.
+                SizedBox(
+                  width: 48,
+                  height: 48,
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(8),
+                    child: _MiniFotoReserva(
+                      fotoLocal: r.fotoSuplementoLocal,
+                      fotoStorage: r.fotoSuplementoStorage,
+                      descargar: true,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('${r.cantidad} × ${r.suplementoNombre}'),
+                      Text('Total: ${fmtMonto(r.totalFoto)} ${r.moneda} '
+                          '(${fmtMonto(r.precioUnitario)} ${r.moneda} c/u al reservar)'),
+                    ],
+                  ),
+                ),
+              ],
+            ),
             if (avisoMonedaReserva(r) != null)
               Text(avisoMonedaReserva(r)!,
                   style: TextStyle(

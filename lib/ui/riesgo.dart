@@ -108,7 +108,7 @@ class _RiesgoScreenState extends State<RiesgoScreen> {
         ],
       ),
       body: _cargando
-          ? const Center(child: CircularProgressIndicator())
+          ? const EstadoCargando(texto: 'Cargando clientes en riesgo…')
           : Column(
               children: [
                 const SyncBanner(),

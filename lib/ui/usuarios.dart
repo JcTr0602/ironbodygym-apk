@@ -467,7 +467,7 @@ Hola $username, estas son tus credenciales para la app del gym:
         label: const Text('Crear'),
       ),
       body: _cargando
-          ? const Center(child: CircularProgressIndicator())
+          ? const EstadoCargando(texto: 'Cargando usuarios…')
           : _usuarios.isEmpty
               ? EstadoVacio(
                   icono: Icons.people_outline,

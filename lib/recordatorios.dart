@@ -258,7 +258,10 @@ class RecordatoriosService {
         final target = 'cliente:$cid';
         bool aplica = false;
         if (tipo == 'cumpleanos') {
-          aplica = esCumpleanosHoy(c, mmDd);
+          // Q1 (Argón cumpleaños): el año decide si un 29-feb
+          // hace match el 01-mar (solo en año no bisiesto).
+          aplica = esCumpleanosHoy(c, mmDd,
+              anioHoy: int.tryParse(hoy.substring(0, 4)));
         } else if (tipo == 'vencimiento') {
           aplica = venceEnVentana(
               c['pagado_hasta'] as String?, hoy, dias);

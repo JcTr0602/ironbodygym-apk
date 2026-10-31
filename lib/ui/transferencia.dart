@@ -13,6 +13,14 @@ import 'componentes.dart';
 import 'diseno.dart';
 import 'widgets.dart';
 
+/// Fecha de un envío para la lista (PURO): '2026-10-30T21:14:00' →
+/// '30/10 21:14'. Si el formato no es ISO, se devuelve tal cual.
+String textoFechaEnvio(String iso) {
+  if (iso.length < 16) return iso;
+  return '${iso.substring(8, 10)}/${iso.substring(5, 7)} '
+      '${iso.substring(11, 16)}';
+}
+
 class TransferenciaScreen extends StatefulWidget {
   const TransferenciaScreen({super.key});
   @override
@@ -31,6 +39,8 @@ class _TransferenciaScreenState extends State<TransferenciaScreen> {
   final _movilBandec = TextEditingController();
   final _movilBpa = TextEditingController();
   final _movilConfirmar = TextEditingController();
+  // 5/25: registro local de envíos (a quién, qué tarjeta, cuándo).
+  List<Map<String, dynamic>> _envios = [];
 
   @override
   void initState() {
@@ -47,6 +57,12 @@ class _TransferenciaScreenState extends State<TransferenciaScreen> {
         });
       }
     });
+    _cargarEnvios();
+  }
+
+  Future<void> _cargarEnvios() async {
+    final envios = await LocalDb.instance.listarEnviosTransferencia();
+    if (mounted) setState(() => _envios = envios);
   }
 
   @override
@@ -92,6 +108,32 @@ class _TransferenciaScreenState extends State<TransferenciaScreen> {
                 const Text(' Telegram: ${AppConfig.telegramContacto}'),
                 // v1.2.4: el número sale del móvil de confirmación (ajustes).
                 if (_movil.isNotEmpty) Text('WhatsApp: $_movil'),
+                const Divider(),
+                const Text('Envíos registrados',
+                    style:
+                        TextStyle(fontWeight: FontWeight.bold)),
+                const Text(
+                  'Se registra cuando se abre SMS o WhatsApp con el '
+                  'mensaje para ese móvil.',
+                  style: AppTexto.secundario,
+                ),
+                const SizedBox(height: 8),
+                if (_envios.isEmpty)
+                  const Text(
+                    'Todavía no se ha enviado ninguna tarjeta desde '
+                    'este teléfono.',
+                    style: AppTexto.secundario,
+                  )
+                else
+                  for (final e in _envios)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 4),
+                      child: Text(
+                        '${e['tarjeta']} → ${e['movil']} · ${e['canal']} '
+                        '· ${textoFechaEnvio('${e['enviada_ts'] ?? ''}')}',
+                        style: AppTexto.cuerpo,
+                      ),
+                    ),
               ],
             ),
           ),
@@ -248,10 +290,21 @@ class _TransferenciaScreenState extends State<TransferenciaScreen> {
             'sms:$movil?body=${Uri.encodeComponent(mensaje)}');
     final ok = await launchUrl(uri,
         mode: LaunchMode.externalApplication);
-    if (!ok && ctx.mounted) {
-      ScaffoldMessenger.of(ctx).showSnackBar(SnackBar(
-          content: Text(
-              'No se pudo abrir ${porWhatsapp ? 'WhatsApp' : 'SMS'}')));
+    if (!ok) {
+      if (ctx.mounted) {
+        ScaffoldMessenger.of(ctx).showSnackBar(SnackBar(
+            content: Text(
+                'No se pudo abrir ${porWhatsapp ? 'WhatsApp' : 'SMS'}')));
+      }
+      return;
     }
+    // 5/25: constancia del envío (tarjeta, móvil, canal, hora). Solo
+    // cuando la app externa abrió: si no abrió, nada se envió.
+    await LocalDb.instance.registrarEnvioTransferencia(
+      tarjeta: etiqueta,
+      movil: movil,
+      canal: porWhatsapp ? 'WhatsApp' : 'SMS',
+    );
+    _cargarEnvios();
   }
 }

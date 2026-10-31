@@ -73,5 +73,35 @@ void main() {
       expect(t, contains('📝 *Estado:* Fiado (pendiente de pago)'));
       expect(t, contains('🔢 *Cantidad:* 2'));
     });
+
+    test('13/25: con método y vendedor salen sus líneas', () {
+      final t = textoComprobanteCompra(
+        nombreProducto: 'Mutant',
+        cantidad: 1,
+        precio: 25,
+        moneda: 'USD',
+        total: 25,
+        nombreComprador: 'Lorena Montes de Oca',
+        fechaIso: '2026-10-23',
+        metodo: 'transferencia',
+        vendedor: 'Duany',
+      );
+      expect(t, contains('💳 *Método:* Transferencia'));
+      expect(t, contains('🧑‍🏫 *Vendedor:* Duany'));
+    });
+
+    test('13/25: sin método ni vendedor no se inventa nada', () {
+      final t = textoComprobanteCompra(
+        nombreProducto: 'Mutant',
+        cantidad: 1,
+        precio: 25,
+        moneda: 'USD',
+        total: 25,
+        nombreComprador: 'Lorena Montes de Oca',
+        fechaIso: '2026-10-23',
+      );
+      expect(t, isNot(contains('Método:')));
+      expect(t, isNot(contains('Vendedor:')));
+    });
   });
 }

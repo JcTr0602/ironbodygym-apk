@@ -443,7 +443,12 @@ Future<Map<String, dynamic>?> pagoDialogo(
     }
     return PeriodoSel(
         periodo: periodo,
-        meses: meses,
+        // 1.19 (Argón A2): meses solo tiene sentido en mensual/
+        // menores. Antes se arrastraba el contador a semanal,
+        // quincenal u oferta (monto de 1 periodo con meses: 2):
+        // el objeto quedaba inconsistente aunque el payload actual
+        // ya filtrara meses a mensual.
+        meses: (id == 'mensual' || id == 'menores') ? meses : 1,
         dias: dias,
         monto: monto,
         tipoId: id == 'personalizado' ? null : id,
@@ -485,9 +490,17 @@ Future<Map<String, dynamic>?> pagoDialogo(
   // la opción mensual más barata (menores u oferta de 30 días).
   // Es solo el valor preseleccionado: el desplegable sigue
   // permitiendo cambiarlo y nada se cobra sin la vista previa.
+  // 1.19 (Argón A1): Casa o especial mensual vigente NO compiten
+  // contra ofertas: la preselección es 'menores' (el motor aplica
+  // Casa 0 o la especial; una oferta preseleccionada la saltaría).
+  // El entrenador sigue pudiendo elegir la oferta a mano.
   if (menor) {
-    tipoSel =
-        tipoInicialPago(tiposDisp, menor: true, monto: montoEtiqueta);
+    tipoSel = tipoInicialPago(tiposDisp,
+        menor: true,
+        monto: montoEtiqueta,
+        esCasa: esCasa,
+        tieneEspecialMensual:
+            especialPara('mensual', metodo) != null);
   }
 
   // 1.15 (m8): el personalizado delega en la función pura

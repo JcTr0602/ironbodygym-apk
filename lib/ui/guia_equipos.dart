@@ -11,6 +11,7 @@ import 'package:uuid/uuid.dart';
 import '../auth.dart';
 import '../guia_validacion.dart';
 import '../localdb.dart';
+import 'componentes.dart';
 
 class GuiaEquiposScreen extends StatefulWidget {
   const GuiaEquiposScreen({super.key});
@@ -281,7 +282,7 @@ class _GuiaEquiposScreenState extends State<GuiaEquiposScreen> {
         label: const Text('Nuevo equipo'),
       ),
       body: _cargando
-          ? const Center(child: CircularProgressIndicator())
+          ? const EstadoCargando(texto: 'Cargando equipos…')
           : ListView(
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 96),
               children: [

@@ -29,6 +29,9 @@ class _DetalleIncidenciaScreenState
     extends State<DetalleIncidenciaScreen> {
   Incidencia? _inc;
   TipoIncidencia? _tipo;
+  // 22/25: creada_por del espejo (nombre real del servidor), solo
+  // para mostrar cuando el autor local no es fiable.
+  String? _creadaPorEspejo;
   List<IncidenciaComentario> _comentarios = [];
   List<IncidenciaFoto> _fotos = [];
   List<IncidenciaHistorial> _historial = [];
@@ -63,6 +66,20 @@ class _DetalleIncidenciaScreenState
     }
     final inc = Incidencia.fromMap(rows.first);
 
+    // 22/25: el espejo trae el nombre real del servidor
+    // (dev["nombre"]); si el autor local no es fiable
+    // ('desconocido' o UUID viejo), el detalle muestra el del
+    // espejo. Solo se consulta cuando hace falta.
+    String? creadaPorEspejo;
+    if (!autorIncidenciaFiable(inc.creadaPor)) {
+      final mr = await d.query('incidencias_mirror',
+          columns: ['creada_por'],
+          where: 'id = ?', whereArgs: [widget.incidenciaId]);
+      if (mr.isNotEmpty) {
+        creadaPorEspejo = mr.first['creada_por'] as String?;
+      }
+    }
+
     // Tipo
     TipoIncidencia? tipo;
     if (inc.tipoId != null) {
@@ -91,6 +108,7 @@ class _DetalleIncidenciaScreenState
       setState(() {
         _inc = inc;
         _tipo = tipo;
+        _creadaPorEspejo = creadaPorEspejo;
         _comentarios = cr
             .map((m) =>
                 IncidenciaComentario.fromMap(m))
@@ -220,6 +238,7 @@ class _DetalleIncidenciaScreenState
               Text(inc.detalle!),
             ],
             const SizedBox(height: 12),
+            _filaInfo('Creada por', _creadaPorMostrada),
             _filaInfo('Estado',
                 inc.estado),
             _filaInfo('Prioridad',
@@ -238,7 +257,9 @@ class _DetalleIncidenciaScreenState
                 '${inc.diasAbierta} días'),
             if (inc.estaResuelta) ...[
               _filaInfo('Resuelta por',
-                  inc.resueltaPor ?? '-'),
+                  inc.resueltaPor == null
+                      ? '-'
+                      : _nombreAutor(inc.resueltaPor)),
               if (inc.notaResolucion !=
                   null)
                 _filaInfo('Nota',
@@ -474,7 +495,7 @@ class _DetalleIncidenciaScreenState
             dense: true,
             title: Text(c.texto),
             subtitle: Text(
-                '${c.creadoPor} · ${_fechaCorta(c.creadoEn)}'),
+                '${_nombreAutor(c.creadoPor)} · ${_fechaCorta(c.creadoEn)}'),
           ),
         Row(
           children: [
@@ -518,7 +539,7 @@ class _DetalleIncidenciaScreenState
             title: Text(
                 '${h.campo}: ${h.valorAnterior ?? '-'} → ${h.valorNuevo ?? '-'}'),
             subtitle: Text(
-                '${h.cambiadoPor} · ${_fechaCorta(h.cambiadoEn)}'),
+                '${_nombreAutor(h.cambiadoPor)} · ${_fechaCorta(h.cambiadoEn)}'),
           ),
       ],
     );
@@ -526,6 +547,33 @@ class _DetalleIncidenciaScreenState
 
   String _fechaCorta(DateTime d) =>
       '${d.day}/${d.month} ${d.hour}:${d.minute.toString().padLeft(2, '0')}';
+
+  /// 22/25: autor a guardar en filas nuevas (nombre de sesión,
+  /// nunca UUID ni 'desconocido').
+  String _autorActual() => autorIncidenciaActual(
+        displayName: AuthService().displayName,
+        telegramId: AuthService().telegramId,
+      );
+
+  /// 22/25: nombre a mostrar para un autor guardado.
+  String _nombreAutor(String? valor) => nombreAutorIncidencia(
+        valor,
+        userIdActual: AuthService().userId,
+        displayNameActual: AuthService().displayName,
+      );
+
+  /// 22/25: autor de la incidencia a mostrar: el local si es
+  /// fiable; si no, el del espejo (nombre real del servidor); si
+  /// tampoco, la etiqueta honesta.
+  String get _creadaPorMostrada {
+    final inc = _inc;
+    if (inc == null) return 'Sin autor registrado';
+    if (autorIncidenciaFiable(inc.creadaPor)) return inc.creadaPor;
+    if (autorIncidenciaFiable(_creadaPorEspejo)) {
+      return _creadaPorEspejo!;
+    }
+    return _nombreAutor(inc.creadaPor);
+  }
 
   Future<void> _enviarComentario() async {
     final texto = _ctrlComentario.text.trim();
@@ -542,7 +590,7 @@ class _DetalleIncidenciaScreenState
         'id': comId,
         'incidencia_id': widget.incidenciaId,
         'texto': texto,
-        'creado_por': AuthService().userId ?? 'desconocido', // TODO: usuario actual
+        'creado_por': _autorActual(),
         'creado_en': ahora,
         'sync_estado': 'pending',
       },
@@ -553,7 +601,7 @@ class _DetalleIncidenciaScreenState
         'id': comId,
         'incidencia_id': widget.incidenciaId,
         'texto': texto,
-        'creado_por': AuthService().userId ?? 'desconocido',
+        'creado_por': _autorActual(),
         'creado_en': ahora,
       },
       esInsert: true,
@@ -591,9 +639,7 @@ class _DetalleIncidenciaScreenState
           {
             'estado': 'resuelta',
             'nota_resolucion': nota,
-            'resuelta_por':
-                AuthService().userId ??
-                    'desconocido',
+            'resuelta_por': _autorActual(),
             'resuelta_en': ahora,
             'actualizado_en': ahora,
             'sync_estado': 'pending',
@@ -627,7 +673,7 @@ class _DetalleIncidenciaScreenState
           'campo': 'estado',
           'valor_anterior': anterior,
           'valor_nuevo': 'resuelta',
-          'cambiado_por': AuthService().userId ?? 'desconocido',
+          'cambiado_por': _autorActual(),
           'cambiado_en': ahora,
         });
 
@@ -640,7 +686,7 @@ class _DetalleIncidenciaScreenState
             'estado_anterior': anterior,
             'estado_nuevo': 'resuelta',
             'nota_resolucion': nota,
-            'resuelta_por': AuthService().userId ?? 'desconocido',
+            'resuelta_por': _autorActual(),
             'resuelta_en': ahora,
             'version': _inc!.version + 1,
           }),
@@ -680,7 +726,7 @@ class _DetalleIncidenciaScreenState
         'campo': 'estado',
         'valor_anterior': anterior,
         'valor_nuevo': nuevo,
-        'cambiado_por': AuthService().userId ?? 'desconocido',
+        'cambiado_por': _autorActual(),
         'cambiado_en': ahora,
       });
 

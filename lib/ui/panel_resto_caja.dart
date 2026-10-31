@@ -60,12 +60,16 @@ class _ArqueoEntregaScreenState extends State<ArqueoEntregaScreen> {
     setState(() => _cargando = true);
     try {
       final lista = await entrenadoresConPendiente();
-      // 1.15-turnos (#2, mecanismo único): e['cup'] ya es
-      // pendienteArqueo, que descuenta el libro C1 con marca; NO
-      // se resta otra vez (antes el arqueo no restaba el libro y
-      // esta resta era necesaria; restarla ahora duplicaría).
+      // H10 (Argón caja): la lista y el diálogo de liquidar usan
+      // LA MISMA función. Antes la lista venía de pendienteArqueo
+      // (e['cup']) y _liquidarAhora validaba con pendienteDeltaC1:
+      // tras una parcial la tarjeta decía 700 y el botón decía
+      // que no había pendiente. entrenadoresConPendiente solo se
+      // conserva para la lista de entrenadores/nombres.
       for (final e in lista) {
-        e['pendiente_c1'] = e['cup'] as double;
+        final tid = e['telegram_id'] as int?;
+        e['pendiente_c1'] =
+            tid != null ? await pendienteDeltaC1(tid) : e['cup'] as double;
       }
       if (mounted) {
         setState(() {
@@ -208,7 +212,7 @@ class _ArqueoEntregaScreenState extends State<ArqueoEntregaScreen> {
     return Scaffold(
       appBar: AppBar(title: const Text('Arqueo de entrega')),
       body: _cargando
-          ? const Center(child: CircularProgressIndicator())
+          ? const EstadoCargando(texto: 'Cargando caja…')
           : ListView(
               padding: const EdgeInsets.all(16),
               children: [
@@ -430,7 +434,7 @@ class _NominaPrecalculadaScreenState extends State<NominaPrecalculadaScreen> {
     return Scaffold(
       appBar: AppBar(title: const Text('Nómina pre-calculada')),
       body: _cargando
-          ? const Center(child: CircularProgressIndicator())
+          ? const EstadoCargando(texto: 'Cargando caja…')
           : ListView(
               padding: const EdgeInsets.all(16),
               children: [
@@ -564,7 +568,7 @@ class _AdelantosListaScreenState extends State<AdelantosListaScreen> {
     return Scaffold(
       appBar: AppBar(title: const Text('Adelantos')),
       body: _cargando
-          ? const Center(child: CircularProgressIndicator())
+          ? const EstadoCargando(texto: 'Cargando caja…')
           : ListView(
               padding: const EdgeInsets.all(16),
               children: [
@@ -732,7 +736,7 @@ class _IngresosPeriodoScreenState extends State<IngresosPeriodoScreen> {
     return Scaffold(
       appBar: AppBar(title: const Text('Ingresos por período')),
       body: _cargando
-          ? const Center(child: CircularProgressIndicator())
+          ? const EstadoCargando(texto: 'Cargando caja…')
           : ListView(
               padding: const EdgeInsets.all(16),
               children: [
@@ -908,7 +912,7 @@ class _PreciosMetodoScreenState extends State<PreciosMetodoScreen> {
     return Scaffold(
       appBar: AppBar(title: const Text('Precios por método')),
       body: _cargando
-          ? const Center(child: CircularProgressIndicator())
+          ? const EstadoCargando(texto: 'Cargando caja…')
           : ListView(
               padding: const EdgeInsets.all(16),
               children: [
@@ -934,9 +938,11 @@ class _PreciosMetodoScreenState extends State<PreciosMetodoScreen> {
                     ),
                   ),
                 const SizedBox(height: 12),
-                ElevatedButton(
-                    onPressed: _guardar,
-                    child: const Text('Guardar y sincronizar')),
+                BotonPrimario(
+                  texto: 'Guardar y sincronizar',
+                  onPressed: _guardar,
+                  expandido: false,
+                ),
               ],
             ),
     );

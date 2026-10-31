@@ -12,12 +12,14 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../auth.dart';
+import '../bloque2_resto.dart';
 import '../localdb.dart';
 import '../negocio.dart';
 import '../tiempo.dart';
 import '../models/pendiente.dart';
 import 'package:flutter/services.dart';
 import '../sync.dart';
+import 'arqueo.dart';
 import 'componentes.dart';
 import 'diseno.dart';
 import 'widgets.dart';
@@ -41,6 +43,11 @@ class _PendienteScreenState extends State<PendienteScreen> {
   List<Map<String, dynamic>> _crudos = [];
   // Gemini: totales USD separados (no mezclar con CUP).
   double _totalUsd = 0;
+  // H11 (Argón caja): total CUP autoritativo (el mismo que usa la
+  // liquidación) y su ajuste neto frente a la suma bruta de la
+  // lista. Null hasta que _cargar lo calcula.
+  double? _totalAutoritativoCup;
+  double? _ajusteNetoCup;
   // v1.3.4 (C2d): detalle de ventas de suplementos indexado por id,
   // para el badge de "precio modificado" en el arqueo de caja.
   Map<int, Map<String, dynamic>> _detalleVentasSup = {};
@@ -64,14 +71,27 @@ class _PendienteScreenState extends State<PendienteScreen> {
       // Gemini: USD separado del CUP.
       final usd = await pendienteRecogerUsd(
           excluirTelegramId: auth.telegramId);
+      // H11 (Argón caja): el total autoritativo del dueño (misma
+      // fuente que la liquidación) y su ajuste neto frente a la
+      // suma bruta de la lista.
+      final autCup =
+          await pendienteRecoger(excluirTelegramId: auth.telegramId);
+      final lista = procesarPendientes(crudos);
+      double brutoCup = 0;
+      for (final e in lista) {
+        brutoCup += e.totalPorMoneda('CUP');
+      }
+      final ajusteCup = brutoCup - autCup;
       // v1.3.4 (C2d): espejo de ventas para el badge de precio modificado.
       final ventasSup =
           await LocalDb.instance.allMirror('ventas_suplementos');
       if (mounted) {
         setState(() {
           _crudos = crudos;
-          _entrenadores = procesarPendientes(crudos);
+          _entrenadores = lista;
           _totalUsd = usd;
+          _totalAutoritativoCup = autCup;
+          _ajusteNetoCup = ajusteCup.abs() > 0.01 ? ajusteCup : 0;
           _detalleVentasSup = {
             for (final v in ventasSup)
               (v['id'] as num).toInt(): v
@@ -98,6 +118,25 @@ class _PendienteScreenState extends State<PendienteScreen> {
       }
       // Gemini: USD separado del CUP.
       final usd = await pendienteEntregaUsd(tid);
+      // H11 (Argón caja): total autoritativo del entrenador (el
+      // mismo que usa su liquidación: pendienteDeltaC1) y ajuste
+      // neto frente a la suma bruta de sus listas.
+      final autCup = tid != null ? await pendienteDeltaC1(tid) : 0.0;
+      double bruto = 0;
+      for (final p in m) {
+        bruto += (p['monto'] as num?)?.toDouble() ?? 0;
+      }
+      for (final dd in d) {
+        bruto += (dd['total'] as num?)?.toDouble() ?? 0;
+      }
+      for (final sv in s) {
+        bruto += ((sv['precio_unitario'] as num?)?.toDouble() ?? 0) *
+            ((sv['cantidad'] as num?)?.toDouble() ?? 0);
+      }
+      for (final sp in sups) {
+        bruto += (sp['monto'] as num?)?.toDouble() ?? 0;
+      }
+      final ajusteCup = bruto - autCup;
       if (mounted) {
         setState(() {
           _mens = m;
@@ -105,6 +144,8 @@ class _PendienteScreenState extends State<PendienteScreen> {
           _servicios = s;
           _suplementos = sups;
           _totalUsd = usd;
+          _totalAutoritativoCup = autCup;
+          _ajusteNetoCup = ajusteCup.abs() > 0.01 ? ajusteCup : 0;
           _cargando = false;
         });
       }
@@ -145,6 +186,31 @@ class _PendienteScreenState extends State<PendienteScreen> {
     // Ronda 17 M4-H3: confirmar recibidos es solo del dueño
     // (la vista del entrenador es de lectura).
     if (!_esDueno) return;
+    // H11 (Argón caja): la confirmación ciega por IDs NO descuenta
+    // adelantos ni restos C1: con adelantos vivos o resto ≠ 0, no
+    // se confirma aquí; se redirige a Arqueo, donde la liquidación
+    // sí los descuenta. Sin esto, confirmar 1000 con 400 de
+    // adelanto dejaba un descuadre de 400.
+    final tidBloqueo = int.tryParse(trainerTelegramId);
+    if (tidBloqueo != null) {
+      final adelantos = await adelantosEnPendiente(tidBloqueo);
+      double restoC1 = 0;
+      for (final e in await historialEntregasC1(tidBloqueo)) {
+        restoC1 += (e['resto_sin_ids'] as num?)?.toDouble() ?? 0;
+      }
+      if (adelantos > 0.01 || restoC1.abs() > 0.01) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+                'Este entrenador tiene adelantos o entregas parciales sin liquidar: liquida desde Arqueo para no dejar descuadres.'),
+          ),
+        );
+        Navigator.push(context,
+            MaterialPageRoute(builder: (_) => const ArqueoScreen()));
+        return;
+      }
+    }
     // Fix #15 (Sol): el día ya viene separado por moneda (ver
     // procesarPendientes), pero mostramos la moneda real por seguridad.
     final moneda = dia.pagos.isEmpty
@@ -172,9 +238,11 @@ class _PendienteScreenState extends State<PendienteScreen> {
           TextButton(
               onPressed: () => Navigator.pop(ctx, false),
               child: const Text('Cancelar')),
-          ElevatedButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('Confirmar')),
+          BotonPrimario(
+            texto: 'Confirmar',
+            onPressed: () => Navigator.pop(ctx, true),
+            expandido: false,
+          ),
         ],
       ),
     );
@@ -250,7 +318,7 @@ class _PendienteScreenState extends State<PendienteScreen> {
           if (!_cargando) _tarjetaTotal(),
           Expanded(
             child: _cargando
-                ? const Center(child: CircularProgressIndicator())
+                ? const EstadoCargando(texto: 'Cargando pendientes…')
                 : RefreshIndicator(
                     onRefresh: _cargar,
                     child: _esDueno
@@ -267,7 +335,11 @@ class _PendienteScreenState extends State<PendienteScreen> {
   /// (antes fondo beige que no combinaba).
   /// Gemini: muestra CUP y USD por separado (no mezclar monedas).
   Widget _tarjetaTotal() {
-    final total = _esDueno ? _totalDueno : _totalEntrenador;
+    // H11 (Argón caja): la tarjeta muestra el valor autoritativo
+    // (el mismo que usa la liquidación), no la suma bruta: con
+    // adelantos o parciales la suma bruta miente (ej. 1000 vs 600).
+    final crudo = _esDueno ? _totalDueno : _totalEntrenador;
+    final total = _totalAutoritativoCup ?? crudo;
     final hayPendiente = total > 0 || _totalUsd > 0;
     final subtitulo = _esDueno
         ? (hayPendiente
@@ -316,6 +388,17 @@ class _PendienteScreenState extends State<PendienteScreen> {
                 style: AppTexto.secundario.copyWith(
                     color:
                         AppColores.textoSecundario(context))),
+            // H11 (Argón caja): desglose solo cuando el autoritativo
+            // difiere del bruto (adelantos, parciales, arrastres).
+            if (_ajusteNetoCup != null && _ajusteNetoCup!.abs() > 0.01)
+              Padding(
+                padding: const EdgeInsets.only(top: AppEspacio.xs),
+                child: Text(
+                    'Ajuste neto ${_ajusteNetoCup! > 0 ? '-' : '+'}${fmtMonto(_ajusteNetoCup!.abs())} CUP por adelantos, entregas parciales o arrastres',
+                    textAlign: TextAlign.center,
+                    style: AppTexto.secundario.copyWith(
+                        color: AppColores.textoSecundario(context))),
+              ),
           ],
         ),
       ),
@@ -323,6 +406,46 @@ class _PendienteScreenState extends State<PendienteScreen> {
   }
 
   /// Vista entrenador: sin cambios (su propio pendiente).
+  /// C2 (estéticas 1.19): fila del desglose — icono tintado,
+  /// concepto + detalle a la izquierda y monto alineado a la
+  /// derecha, como una cuenta (antes ListTile con hueco vacío
+  /// donde iría el icono y montos dentro del título).
+  Widget _filaDesglose({
+    required IconData icono,
+    required Color color,
+    required String titulo,
+    required String subtitulo,
+    required String monto,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          CircleAvatar(
+            radius: 14,
+            backgroundColor: color.withValues(alpha: 0.15),
+            child: Icon(icono, size: 16, color: color),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(titulo, style: AppTexto.cuerpo),
+                Text(subtitulo, style: AppTexto.secundario),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          Text(monto,
+              style: AppTexto.cuerpo
+                  .copyWith(fontWeight: FontWeight.bold)),
+        ],
+      ),
+    );
+  }
+
   Widget _listaEntrenador() {
     return ListView(
       padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -332,13 +455,13 @@ class _PendienteScreenState extends State<PendienteScreen> {
               style: TextStyle(fontWeight: FontWeight.bold)),
           const SizedBox(height: 8),
           for (final p in _mens)
-            ListTile(
-              dense: true,
-              leading: const Text(''),
-              title:
-                  Text('${fmtMonto(p['monto'])} CUP — ${p['metodo']}'),
-              subtitle: Text(
-                  '${fmtFecha(p['fecha'] as String?)} · ${p['meses'] ?? 1} mes(es)'),
+            _filaDesglose(
+              icono: Icons.payments,
+              color: AppColores.exito,
+              titulo: 'Mensualidad — ${p['metodo']}',
+              subtitulo:
+                  '${fmtFecha(p['fecha'] as String?)} · ${p['meses'] ?? 1} mes(es)',
+              monto: '${fmtMonto(p['monto'])} CUP',
             ),
           const SizedBox(height: 12),
         ],
@@ -347,12 +470,13 @@ class _PendienteScreenState extends State<PendienteScreen> {
               style: TextStyle(fontWeight: FontWeight.bold)),
           const SizedBox(height: 8),
           for (final d in _diarios)
-            ListTile(
-              dense: true,
-              leading: const Text(''),
-              title: Text('${fmtMonto(d['total'])} CUP'),
-              subtitle: Text(
-                  '${fmtFecha(d['fecha'] as String?)} · ${d['turno'] ?? ''} x${d['cantidad'] ?? '?'}'),
+            _filaDesglose(
+              icono: Icons.today,
+              color: AppColores.info,
+              titulo: 'Pago diario',
+              subtitulo:
+                  '${fmtFecha(d['fecha'] as String?)} · ${d['turno'] ?? ''} x${d['cantidad'] ?? '?'}',
+              monto: '${fmtMonto(d['total'])} CUP',
             ),
         ],
         if (_servicios.isNotEmpty) ...[
@@ -360,20 +484,18 @@ class _PendienteScreenState extends State<PendienteScreen> {
               style: TextStyle(fontWeight: FontWeight.bold)),
           const SizedBox(height: 8),
           for (final s in _servicios)
-            ListTile(
-              dense: true,
-              leading: const Icon(Icons.bolt,
-                  color: AppColores.naranja, size: 18),
-              title: Text(
-                  '${fmtMonto(((s['precio_unitario'] as num?)?.toDouble() ?? 0) * ((s['cantidad'] as num?)?.toDouble() ?? 0))} CUP — '
-                  '${switch ('${s['tipo']}') {
-                    'dosis_con_agua' => 'Combo',
-                    'agua_suelta' => 'Pomo de agua',
-                    _ => 'Ración',
-                  }}'),
-              subtitle: Text(
-                  '${fmtFecha(s['fecha'] as String?)}'
-                  '${'${s['cliente_nombre'] ?? ''}'.isNotEmpty ? ' · ${s['cliente_nombre']}' : ''}'),
+            _filaDesglose(
+              icono: Icons.bolt,
+              color: AppColores.naranja,
+              titulo: switch ('${s['tipo']}') {
+                'dosis_con_agua' => 'Combo',
+                'agua_suelta' => 'Pomo de agua',
+                _ => 'Ración',
+              },
+              subtitulo: '${fmtFecha(s['fecha'] as String?)}'
+                  '${'${s['cliente_nombre'] ?? ''}'.isNotEmpty ? ' · ${s['cliente_nombre']}' : ''}',
+              monto:
+                  '${fmtMonto(((s['precio_unitario'] as num?)?.toDouble() ?? 0) * ((s['cantidad'] as num?)?.toDouble() ?? 0))} CUP',
             ),
         ],
         // Ronda 17 M4-H2: suplementos en efectivo en CUP.
@@ -382,14 +504,13 @@ class _PendienteScreenState extends State<PendienteScreen> {
               style: TextStyle(fontWeight: FontWeight.bold)),
           const SizedBox(height: 8),
           for (final s in _suplementos)
-            ListTile(
-              dense: true,
-              leading: const Icon(Icons.shopping_bag_outlined,
-                  color: AppColores.naranja, size: 18),
-              title: Text('${fmtMonto(s['monto'])} CUP'),
-              subtitle: Text(
-                  '${s['descripcion'] ?? 'Venta suplemento'} · '
-                  '${fmtFecha(s['creada_en'] as String?)}'),
+            _filaDesglose(
+              icono: Icons.shopping_bag_outlined,
+              color: AppColores.naranja,
+              titulo: 'Suplemento',
+              subtitulo: '${s['descripcion'] ?? 'Venta suplemento'} · '
+                  '${fmtFecha(s['creada_en'] as String?)}',
+              monto: '${fmtMonto(s['monto'])} CUP',
             ),
         ],
         if (_mens.isEmpty &&

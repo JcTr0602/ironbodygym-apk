@@ -4,8 +4,10 @@ library;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import 'diseno.dart';
 import '../localdb.dart';
 import '../sync.dart';
+import '../tiempo.dart';
 
 /// Franja de estado de sincronización (visible en todas las pantallas).
 ///
@@ -64,7 +66,7 @@ class _SyncBannerState extends State<SyncBanner>
 
   String _hace(DateTime? fecha) {
     if (fecha == null) return 'nunca';
-    final d = DateTime.now().difference(fecha);
+    final d = ahoraHabana().difference(fecha);
     if (d.inMinutes < 1) return 'ahora mismo';
     if (d.inMinutes < 60) return 'hace ${d.inMinutes} min';
     if (d.inHours < 24) return 'hace ${d.inHours} h';
@@ -471,13 +473,22 @@ class SyncPill extends StatelessWidget {
           icono = Icons.sync;
           texto = 'Sincronizando';
         } else if (s.pending > 0) {
-          color = const Color(0xFFFBBF24);
+          color = AppColores.alerta;
           icono = Icons.schedule;
           texto = '${s.pending} por subir';
         } else {
-          color = const Color(0xFF22C55E);
+          color = AppColores.exito;
           icono = Icons.check_circle_outline;
-          texto = 'Al día';
+          // A2 (estéticas 1.19): el chip dice también hace cuánto
+          // fue el último sync confirmado («Al día · hace 12 min»);
+          // sin marca previa queda solo «Al día». La cifra se
+          // refresca con cada evento del motor, como el resto del
+          // pill (no hay ticker propio).
+          final ultimo = s.ultimoSincronizado ?? s.lastOk;
+          final haceTxt = ultimo == null ? '' : hace(ultimo);
+          texto = haceTxt.isEmpty || haceTxt == 'nunca'
+              ? 'Al día'
+              : 'Al día · $haceTxt';
         }
         return InkWell(
           borderRadius: BorderRadius.circular(20),

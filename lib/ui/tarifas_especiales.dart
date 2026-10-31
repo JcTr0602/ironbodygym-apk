@@ -65,7 +65,7 @@ class _TarifasScreenState extends State<TarifasScreen> {
     return Scaffold(
       appBar: AppBar(title: const Text('Tarifas')),
       body: _cargando
-          ? const Center(child: CircularProgressIndicator())
+          ? const EstadoCargando(texto: 'Cargando tarifas…')
           : RefreshIndicator(
               onRefresh: _cargar,
               child: ListView(
@@ -327,26 +327,22 @@ Future<void> _formularioTarifa(
                 Text('Cliente: $clienteNombre',
                     style: AppTexto.cuerpo),
               const SizedBox(height: 8),
-              TextField(
+              // N1 (estéticas 1.19): campos del sistema.
+              CampoTexto(
                   controller: nombreCtrl,
-                  decoration: const InputDecoration(
-                      labelText: 'Nombre (ej: Kevin 1000)',
-                      border: OutlineInputBorder())),
+                  etiqueta: 'Nombre (ej: Kevin 1000)'),
               const SizedBox(height: 8),
-              TextField(
+              CampoTexto(
                   controller: efectivoCtrl,
-                  keyboardType: TextInputType.number,
-                  decoration: const InputDecoration(
-                      labelText: 'Monto en efectivo (vacío = sin especial)',
-                      border: OutlineInputBorder())),
+                  teclado: TextInputType.number,
+                  etiqueta:
+                      'Monto en efectivo (vacío = sin especial)'),
               const SizedBox(height: 8),
-              TextField(
+              CampoTexto(
                   controller: transferCtrl,
-                  keyboardType: TextInputType.number,
-                  decoration: const InputDecoration(
-                      labelText:
-                          'Monto por transferencia (vacío = sin especial)',
-                      border: OutlineInputBorder())),
+                  teclado: TextInputType.number,
+                  etiqueta:
+                      'Monto por transferencia (vacío = sin especial)'),
               const SizedBox(height: 8),
               DropdownButtonFormField<String>(
                 value: periodo,
@@ -369,24 +365,18 @@ Future<void> _formularioTarifa(
                 },
               ),
               const SizedBox(height: 8),
-              TextField(
+              CampoTexto(
                   controller: desdeCtrl,
-                  decoration: const InputDecoration(
-                      labelText: 'Vigente desde (AAAA-MM-DD)',
-                      border: OutlineInputBorder())),
+                  etiqueta: 'Vigente desde (AAAA-MM-DD)'),
               const SizedBox(height: 8),
-              TextField(
+              CampoTexto(
                   controller: hastaCtrl,
-                  decoration: const InputDecoration(
-                      labelText: 'Vigente hasta (vacío = sin fin)',
-                      border: OutlineInputBorder())),
+                  etiqueta: 'Vigente hasta (vacío = sin fin)'),
               const SizedBox(height: 8),
-              TextField(
+              CampoTexto(
                   controller: motivoCtrl,
-                  decoration: const InputDecoration(
-                      labelText: 'Motivo (obligatorio, interno: '
-                          'nunca sale en mensajes)',
-                      border: OutlineInputBorder())),
+                  etiqueta: 'Motivo (obligatorio, interno: '
+                      'nunca sale en mensajes)'),
             ],
           ),
         ),

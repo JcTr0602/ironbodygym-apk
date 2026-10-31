@@ -423,16 +423,24 @@ class _GuiaEditorScreenState extends State<GuiaEditorScreen> {
         if (!await _subirImagen(slug)) return;
       }
       final payload = Map<String, dynamic>.from(_fichaActual())
-        ..['base_revision'] = _baseRevision;
+        ..['base_revision'] = _baseRevision
+        // Argón Guía HIGH 1 (1.19): sin esta llave el servidor
+        // leía imagen_cambiada=false y no subía imagen_rev al
+        // reemplazar una foto existente (tiene_imagen true→true).
+        ..['imagen_cambiada'] = _imagenCambiada;
       await _db.queueOp(
         opUuid: const Uuid().v4(),
         tipo: 'guia_upsert_publicado',
         payload: payload,
       );
       final optimista = Map<String, dynamic>.from(_fichaActual())
-        ..remove('imagen_cambiada')
         ..['revision'] = _baseRevision + 1
-        ..['imagen_rev'] = _imagenRev;
+        // Si la imagen cambió, el servidor subirá imagen_rev en 1
+        // (mismo true→true con cambio, o cambio de tiene_imagen):
+        // el espejo local refleja eso al instante en vez de
+        // quedarse con la foto vieja cacheada en ?v=imagen_rev.
+        ..['imagen_rev'] =
+            _imagenCambiada ? _imagenRev + 1 : _imagenRev;
       await _db.upsertMirrorTexto('guia_fichas', slug, optimista, 0);
       final rutaSubida = _imagenLocal;
       _baseRevision = _baseRevision + 1;

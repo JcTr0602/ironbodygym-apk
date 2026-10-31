@@ -178,6 +178,25 @@ String isoHabana(DateTime habana) {
 /// Fecha ISO (yyyy-MM-dd) de hoy en La Habana.
 String hoyHabanaIso() => isoHabana(ahoraHabana()).substring(0, 10);
 
+/// Mes siguiente a [mes] ('YYYY-MM'). ÚNICA definición (antes
+/// vivía en adelantos.dart y se duplicaba inline en
+/// comisionesPorMesDesdeVentas): solo se usan año y mes, así que
+/// la hora local no afecta (el cambio de año en diciembre lo
+/// resuelve DateTime solo). #7 (Argón nómina).
+String mesSiguiente(String mes) {
+  final y = int.parse(mes.substring(0, 4));
+  final m = int.parse(mes.substring(5, 7));
+  final f = DateTime(y, m + 1);
+  return '${f.year.toString().padLeft(4, '0')}-'
+      '${f.month.toString().padLeft(2, '0')}';
+}
+
+/// Año bisiesto gregoriano. Regla de cumpleaños 29-feb → 1-mar:
+/// en año no bisiesto no hay 29 de febrero y el cumple se
+/// celebra el 1 de marzo.
+bool esAnioBisiesto(int anio) =>
+    anio % 4 == 0 && (anio % 100 != 0 || anio % 400 == 0);
+
 /// Reloj del dispositivo para comparar con File.lastModified()
 /// (que es hora local del dispositivo). NO usar ahoraHabana()
 /// aquí: con el dispositivo fuera de Cuba desplazaría los

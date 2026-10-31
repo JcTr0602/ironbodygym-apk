@@ -15,13 +15,16 @@
 library;
 
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:sqflite/sqflite.dart';
 
 import '../auth.dart';
 import '../bloque2_resto.dart';
+import '../config.dart';
 import '../copia_seguridad.dart';
 import '../localdb.dart';
 import '../nomina_calc.dart';
@@ -133,7 +136,7 @@ class _AjustesGymScreenState extends State<AjustesGymScreen> {
     return Scaffold(
       appBar: AppBar(title: const Text('Ajustes del gym')),
       body: _cargando
-          ? const Center(child: CircularProgressIndicator())
+          ? const EstadoCargando(texto: 'Cargando ajustes…')
           : ListView(
               padding: const EdgeInsets.all(16),
               children: [
@@ -183,9 +186,11 @@ class _AjustesGymScreenState extends State<AjustesGymScreen> {
                       helperText: 'Textos base de mensajes del gym'),
                 ),
                 const SizedBox(height: 12),
-                ElevatedButton(
-                    onPressed: _guardar,
-                    child: const Text('Guardar y sincronizar')),
+                BotonPrimario(
+                  texto: 'Guardar y sincronizar',
+                  onPressed: _guardar,
+                  expandido: false,
+                ),
                 const SizedBox(height: 8),
                 const Text(
                   'Los cambios rigen hacia adelante: ningún cobro ya '
@@ -276,7 +281,7 @@ class _RegistroMensualScreenState extends State<RegistroMensualScreen> {
     return Scaffold(
       appBar: AppBar(title: const Text('Registro mensual')),
       body: _cargando
-          ? const Center(child: CircularProgressIndicator())
+          ? const EstadoCargando(texto: 'Cargando ajustes…')
           : ListView(
               padding: const EdgeInsets.all(16),
               children: [
@@ -313,7 +318,8 @@ class _RegistroMensualScreenState extends State<RegistroMensualScreen> {
                     style: AppTexto.secundario,
                   ),
                   const SizedBox(height: 16),
-                  ElevatedButton(
+                  BotonPrimario(
+                    texto: 'Copiar resumen en Markdown',
                     onPressed: () async {
                       await Clipboard.setData(ClipboardData(text: md));
                       if (context.mounted) {
@@ -323,7 +329,7 @@ class _RegistroMensualScreenState extends State<RegistroMensualScreen> {
                                     'Resumen copiado. Pégalo en tu archivo.')));
                       }
                     },
-                    child: const Text('Copiar resumen en Markdown'),
+                    expandido: false,
                   ),
                 ] else
                   const Text('Sin datos.', style: AppTexto.secundario),
@@ -386,6 +392,31 @@ class CopiaSeguridadScreen extends StatefulWidget {
 class _CopiaSeguridadScreenState extends State<CopiaSeguridadScreen> {
   int _pendientes = -1;
   bool _exportando = false;
+  bool _verificando = false;
+
+  /// Módulo 6 (1.19): trazabilidad de copias. Registro local (meta
+  /// `copias_seguridad`, últimas 10): fecha, tamaño, versión,
+  /// alcance y verificación. La copia en sí se comparte fuera; aquí
+  /// queda el registro, no el archivo.
+  List<Map<String, dynamic>> _registro = [];
+
+  /// Copia recién exportada en esta sesión, si sigue en disco:
+  /// es la única verificable (abrirla y contar registros).
+  File? _ultimaCopia;
+  Map<String, int>? _ultimaVerificacion;
+
+  /// Entrada del registro que corresponde a [_ultimaCopia] (panel
+  /// Terra: la verificación marca ESTA entrada, no _registro[0],
+  /// para no atribuirla a otra copia exportada entretanto).
+  Map<String, dynamic>? _entradaVerificando;
+
+  static const _tablasVerificar = [
+    'clientes',
+    'pagos',
+    'pagos_diarios',
+    'ventas_suplementos',
+    'servicio_ventas',
+  ];
 
   @override
   void initState() {
@@ -398,6 +429,42 @@ class _CopiaSeguridadScreenState extends State<CopiaSeguridadScreen> {
       final p = await LocalDb.instance.countPendingOps();
       if (mounted) setState(() => _pendientes = p);
     } catch (_) {}
+    try {
+      final raw = await LocalDb.instance.getMeta('copias_seguridad');
+      if (raw != null && raw.isNotEmpty && mounted) {
+        setState(() {
+          _registro = (jsonDecode(raw) as List)
+              .map((e) => Map<String, dynamic>.from(e as Map))
+              .toList();
+        });
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _guardarRegistro() async {
+    try {
+      await LocalDb.instance
+          .setMeta('copias_seguridad', jsonEncode(_registro));
+    } catch (_) {}
+  }
+
+  String _tamano(int bytes) {
+    if (bytes < 1024) return '$bytes B';
+    if (bytes < 1024 * 1024) {
+      return '${(bytes / 1024).toStringAsFixed(1)} KB';
+    }
+    return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+  }
+
+  bool _esVieja(String? fechaIso) {
+    if (fechaIso == null || fechaIso.length < 10) return true;
+    try {
+      final f = DateTime.parse(fechaIso.substring(0, 10));
+      // Panel Terra (baja): nunca DateTime.now() crudo en lógica.
+      return ahoraHabana().difference(f).inDays > 30;
+    } catch (_) {
+      return true;
+    }
   }
 
   Future<void> _exportar() async {
@@ -405,8 +472,26 @@ class _CopiaSeguridadScreenState extends State<CopiaSeguridadScreen> {
     try {
       // 1.14 (M6.30): la copia en frío vive en exportarCopiaFria.
       final destino = await exportarCopiaFria();
+      final tamano = await destino.length();
       await registrarAccionMantenimiento(
           'f5_exportar_copia', {'pendientes_al_exportar': _pendientes});
+      // Módulo 6 (1.19): registrar la copia para trazabilidad.
+      final entrada = <String, dynamic>{
+        'fecha': isoHabana(ahoraHabana()),
+        'tamano_bytes': tamano,
+        'version': AppConfig.appVersion,
+        'alcance': 'BD sin fotos',
+        'verificada': false,
+      };
+      if (mounted) {
+        setState(() {
+          _registro = [entrada, ..._registro].take(10).toList();
+          _ultimaCopia = destino;
+          _ultimaVerificacion = null;
+          _entradaVerificando = entrada;
+        });
+      }
+      await _guardarRegistro();
       await Share.shareXFiles([XFile(destino.path)],
           text: 'Copia de seguridad Iron Body Gym (solo BD, sin fotos).');
     } catch (e) {
@@ -416,6 +501,68 @@ class _CopiaSeguridadScreenState extends State<CopiaSeguridadScreen> {
       }
     } finally {
       if (mounted) setState(() => _exportando = false);
+    }
+  }
+
+  /// Módulo 6 (1.19): verificar que la copia abre y cuántos
+  /// registros trae en las tablas principales. Solo en sesión: la
+  /// copia compartida fuera ya no está en este teléfono.
+  /// Panel Terra (alta): la copia que se verifica es la RECIÉN
+  /// creada (las 5 tablas existen en el esquema actual), así que
+  /// cualquier tabla que no se pueda contar es FALLO, no «tabla
+  /// ausente»: una verificación con cero tablas contadas nunca se
+  /// marca como verificada.
+  Future<void> _verificar() async {
+    final copia = _ultimaCopia;
+    if (copia == null) return;
+    setState(() => _verificando = true);
+    try {
+      if (!await copia.exists()) {
+        throw StateError('La copia ya no está en este teléfono');
+      }
+      final db = await openDatabase(copia.path, readOnly: true);
+      final conteos = <String, int>{};
+      final fallos = <String>[];
+      try {
+        for (final t in _tablasVerificar) {
+          try {
+            final r = await db.rawQuery(
+                'SELECT COUNT(*) AS n FROM $t');
+            conteos[t] = (r.first['n'] as num?)?.toInt() ?? 0;
+          } catch (_) {
+            fallos.add(t);
+          }
+        }
+      } finally {
+        await db.close();
+      }
+      if (fallos.isNotEmpty) {
+        throw StateError(
+            'No se pudieron contar: ${fallos.join(', ')}');
+      }
+      if (conteos.isEmpty) {
+        throw StateError('La copia no trajo registros contables');
+      }
+      await registrarAccionMantenimiento(
+          'f5_verificar_copia', {'registros': conteos});
+      if (mounted) {
+        setState(() {
+          _ultimaVerificacion = conteos;
+          final entrada = _entradaVerificando;
+          if (entrada != null) {
+            entrada['verificada'] = true;
+            entrada['registros'] = conteos;
+          }
+        });
+      }
+      await _guardarRegistro();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('No se pudo verificar: $e')));
+      }
+    } finally {
+      if (mounted) setState(() => _verificando = false);
     }
   }
 
@@ -455,9 +602,72 @@ class _CopiaSeguridadScreenState extends State<CopiaSeguridadScreen> {
           ),
           const SizedBox(height: 16),
           ElevatedButton(
-            onPressed: _exportando ? null : _exportar,
+            onPressed:
+                (_exportando || _verificando) ? null : _exportar,
             child: Text(_exportando ? 'Exportando…' : 'Exportar copia'),
           ),
+          if (_ultimaCopia != null) ...[
+            const SizedBox(height: 12),
+            ElevatedButton(
+              // Panel Terra (media): exportar y verificar no se
+              // solapan (la verificación no debe marcar otra copia).
+              onPressed:
+                  (_verificando || _exportando) ? null : _verificar,
+              child: Text(_verificando
+                  ? 'Verificando…'
+                  : 'Verificar esta copia (abre y cuenta registros)'),
+            ),
+          ],
+          if (_ultimaVerificacion != null) ...[
+            const SizedBox(height: 12),
+            Tarjeta(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('Copia verificada: abre y trae',
+                      style: AppTexto.subtitulo),
+                  const SizedBox(height: 4),
+                  for (final e in _ultimaVerificacion!.entries)
+                    Text('${e.key}: ${e.value} registros',
+                        style: AppTexto.cuerpo),
+                ],
+              ),
+            ),
+          ],
+          if (_registro.isNotEmpty) ...[
+            const SizedBox(height: 16),
+            const Text('Copias anteriores (registro, no archivo)',
+                style: AppTexto.subtitulo),
+            const SizedBox(height: 8),
+            for (final r in _registro)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Tarjeta(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        '${'${r['fecha'] ?? ''}'.length >= 10 ? '${r['fecha']}'.substring(0, 10) : '${r['fecha'] ?? ''}'} · '
+                        '${_tamano((r['tamano_bytes'] as num?)?.toInt() ?? 0)} · '
+                        '${r['version'] ?? ''}',
+                        style: AppTexto.cuerpo,
+                      ),
+                      Text(
+                        '${r['alcance'] ?? ''}'
+                        '${r['verificada'] == true ? ' · Verificada' : ' · Sin verificar'}'
+                        '${_esVieja('${r['fecha'] ?? ''}') ? ' · Copia vieja (+30 días)' : ''}',
+                        style: AppTexto.secundario,
+                      ),
+                      if (r['registros'] is Map)
+                        Text(
+                          'Registros: ${(r['registros'] as Map).entries.map((e) => '${e.key} ${e.value}').join(' · ')}',
+                          style: AppTexto.secundario,
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+          ],
         ],
       ),
     );

@@ -15,6 +15,8 @@
 /// venta, solo advierte; nada de DateTime.now() crudo en lógica.
 library;
 
+import 'dart:convert';
+
 import 'package:uuid/uuid.dart';
 
 import 'auth.dart';
@@ -247,6 +249,18 @@ String textoBaseNominaExplicada(int clientesPagados, int tarifa) {
 /// (fechas ISO Habana, opcionales). Sin modo = 'una_vez'.
 /// Aviso del dueño tal como baja por el espejo
 /// `avisos_entrenadores` (contrato servidor 59f2ffd).
+/// Entrenadores destino de avisos (siembra canónica; el servidor
+/// valida contra trainers y rechaza cualquier otro id, así que una
+/// constante desactualizada solo falla cerrada, nunca abre la puerta).
+const Map<int, String> kEntrenadoresAviso = {
+  969869611: 'Duany',
+  1403501391: 'Gabriel',
+};
+
+/// Nombre para mostrar un destinatario de aviso (null = todos).
+String nombreDestinoAviso(int? telegramId) =>
+    telegramId == null ? 'Todos' : (kEntrenadoresAviso[telegramId] ?? 'Entrenador');
+
 class AvisoEntrenador {
   final String id;
   final String titulo;
@@ -255,6 +269,9 @@ class AvisoEntrenador {
   final bool activo;
   final String? vigenteDesde; // YYYY-MM-DD
   final String? vigenteHasta; // YYYY-MM-DD
+  /// Destinatario (1.19): null = todos los entrenadores; si trae un
+  /// telegram_id, solo ese entrenador lo ve como PopUp.
+  final int? destinatarioTelegramId;
 
   const AvisoEntrenador({
     required this.id,
@@ -264,11 +281,16 @@ class AvisoEntrenador {
     this.activo = true,
     this.vigenteDesde,
     this.vigenteHasta,
+    this.destinatarioTelegramId,
   });
 
   factory AvisoEntrenador.fromMirror(Map<String, dynamic> m) {
     String? fecha(String? v) =>
         (v != null && v.length >= 10) ? v.substring(0, 10) : null;
+    final destRaw = m['destinatario_telegram_id'];
+    final dest = destRaw is num
+        ? destRaw.toInt()
+        : int.tryParse('$destRaw');
     return AvisoEntrenador(
       id: '${m['id'] ?? ''}',
       titulo: '${m['titulo'] ?? 'Aviso del dueño'}',
@@ -279,6 +301,7 @@ class AvisoEntrenador {
           m['activo'] != false,
       vigenteDesde: fecha((m['vigente_desde'] ?? m['inicia_en']) as String?),
       vigenteHasta: fecha((m['vigente_hasta'] ?? m['termina_en']) as String?),
+      destinatarioTelegramId: dest,
     );
   }
 
@@ -294,6 +317,26 @@ class AvisoEntrenador {
     return true;
   }
 
+  /// ¿Este teléfono debe ver el aviso como PopUp? El dueño los ve
+  /// todos (los gestiona); un entrenador solo ve los de todos y los
+  /// dirigidos a él. Sin este filtro, un aviso para Duany le saldría
+  /// también a Gabriel.
+  bool visiblePara({required bool esDueno, required int? miTelegramId}) {
+    if (esDueno) {
+      return true;
+    }
+    if (destinatarioTelegramId == null) {
+      return true;
+    }
+    // Argón avisos #2: si no sabemos quién es este teléfono, no ve
+    // avisos dirigidos (antes el == null daba false igual, pero
+    // implícito; ahora fail-closed explícito).
+    if (miTelegramId == null) {
+      return false;
+    }
+    return destinatarioTelegramId == miTelegramId;
+  }
+
   /// JSON del espejo local (activo 1/0, como el resto de espejos).
   Map<String, dynamic> toJson() => {
         'id': id,
@@ -303,6 +346,8 @@ class AvisoEntrenador {
         'activo': activo ? 1 : 0,
         if (vigenteDesde != null) 'vigente_desde': vigenteDesde,
         if (vigenteHasta != null) 'vigente_hasta': vigenteHasta,
+        if (destinatarioTelegramId != null)
+          'destinatario_telegram_id': destinatarioTelegramId,
       };
 }
 
@@ -324,6 +369,11 @@ class AvisosEntrenadorService {
       final a = AvisoEntrenador.fromMirror(f);
       if (a.id.isEmpty || vistos.contains(a.id)) continue;
       if (!a.vigente(hoy)) continue;
+      if (!a.visiblePara(
+          esDueno: AuthService().isOwner,
+          miTelegramId: AuthService().telegramId)) {
+        continue;
+      }
       out.add(a);
     }
     return out;
@@ -363,6 +413,8 @@ class AvisosEntrenadorService {
           'vigente_desde': aviso.vigenteDesde,
         if (aviso.vigenteHasta != null)
           'vigente_hasta': aviso.vigenteHasta,
+        if (aviso.destinatarioTelegramId != null)
+          'destinatario_telegram_id': aviso.destinatarioTelegramId,
       },
     );
     // Optimista local: el aviso aparece en Administración sin
@@ -385,8 +437,15 @@ class AvisosEntrenadorService {
   }
 }
 
-extension _CopiaAviso on AvisoEntrenador {
-  AvisoEntrenador copyWith({bool? activo, String? id}) => AvisoEntrenador(
+// Pública (no _CopiaAviso privada): los tests deben poder llamar a
+// copyWith; una extensión privada solo es visible dentro de este archivo.
+extension CopiaAviso on AvisoEntrenador {
+  AvisoEntrenador copyWith(
+          {bool? activo,
+          String? id,
+          int? destinatarioTelegramId,
+          bool limpiarDestinatario = false}) =>
+      AvisoEntrenador(
         id: id ?? this.id,
         titulo: titulo,
         mensaje: mensaje,
@@ -394,6 +453,12 @@ extension _CopiaAviso on AvisoEntrenador {
         activo: activo ?? this.activo,
         vigenteDesde: vigenteDesde,
         vigenteHasta: vigenteHasta,
+        // Argón avisos #4: pasar destinatarioTelegramId: null antes
+        // conservaba el viejo por ??; con limpiarDestinatario se
+        // puede volver a «Todos» de verdad.
+        destinatarioTelegramId: limpiarDestinatario
+            ? null
+            : (destinatarioTelegramId ?? this.destinatarioTelegramId),
       );
 }
 
@@ -494,6 +559,38 @@ class SolicitudAdelanto {
       };
 }
 
+/// PURO (19/25, testeable sin BD): espejo + ops `solicitar_adelanto`
+/// aún en 'pendiente' de este teléfono, como filas con estado
+/// 'por_enviar'. Las ops en otro estado no entran: 'enviada' ya
+/// está en camino (llega con el pull) y los errores se ven en la
+/// Cola de sync. Payload malformado o sin monto/motivo se ignora.
+List<SolicitudAdelanto> solicitudesConPendientes({
+  required List<SolicitudAdelanto> espejo,
+  required List<Map<String, dynamic>> opsPendientes,
+}) {
+  final out = [...espejo];
+  for (final op in opsPendientes) {
+    if (op['tipo'] != kTipoOpSolicitarAdelanto) continue;
+    if (op['estado'] != 'pendiente') continue;
+    try {
+      final p =
+          jsonDecode(op['payload'] as String) as Map<String, dynamic>;
+      final monto = (p['monto'] as num?)?.toDouble();
+      final motivo = '${p['motivo'] ?? ''}'.trim();
+      if (monto == null || monto <= 0 || motivo.isEmpty) continue;
+      out.add(SolicitudAdelanto(
+        id: 'op:${op['op_uuid'] ?? ''}',
+        monto: monto,
+        motivo: motivo,
+        estado: 'por_enviar',
+        creadoEn: '${op['creada_ts'] ?? ''}',
+      ));
+    } catch (_) {}
+  }
+  out.sort((a, b) => (b.creadoEn ?? '').compareTo(a.creadoEn ?? ''));
+  return out;
+}
+
 /// PURO (testeable sin BD): destino efectivo de una solicitud
 /// F3 aprobada (B1, Fase A 2026-10-25). Una transferencia NO
 /// puede salir de la gaveta del entrenador (el pendiente a
@@ -545,14 +642,34 @@ class SolicitudesAdelantoService {
   /// Solicitudes del entrenador actual (pendientes y resueltas).
   /// Sin telegram_id no se puede atribuir ninguna: lista vacía en
   /// vez de mostrar solicitudes ajenas.
+  /// 19/25: fusiona además las ops `solicitar_adelanto` aún en
+  /// estado 'pendiente' de este teléfono (sin fila espejo): el
+  /// entrenador ve su pedido desde que lo toca, no solo cuando
+  /// sube y baja. Una op 'pendiente' nunca tiene fila espejo
+  /// (el servidor aún no la aplicó), así que no duplica.
   Future<List<SolicitudAdelanto>> mias() async {
     final tid = AuthService().telegramId;
     if (tid == null) return [];
     final todas = await _todas();
-    return [
+    final miasEspejo = [
       for (final s in todas)
         if (s.entrenadorTelegramId == tid) s,
     ];
+    List<Map<String, dynamic>> ops = [];
+    try {
+      ops = await LocalDb.instance.pendingOps();
+    } catch (_) {}
+    return solicitudesConPendientes(
+      espejo: miasEspejo,
+      opsPendientes: [
+        // Panel Terra A7: solo ops atribuidas a la sesión actual.
+        // Antes se colaban también las ops sin telegram_id y un
+        // entrenador podía ver como propia una solicitud ajena.
+        for (final op in ops)
+          if (LocalDb.normalizarTelegramId(op['telegram_id']) == tid)
+            op,
+      ],
+    );
   }
 
   /// Todas (dueño, para resolver).

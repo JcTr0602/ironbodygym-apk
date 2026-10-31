@@ -228,7 +228,7 @@ class _IncidenciasSyncScreenState extends State<IncidenciasSyncScreen> {
           ),
           Expanded(
             child: _cargando || _procesando
-                ? const Center(child: CircularProgressIndicator())
+                ? const EstadoCargando(texto: 'Cargando incidencias…')
                 : lista.isEmpty
                     ? Center(
                         child: Padding(

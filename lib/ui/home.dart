@@ -9,6 +9,7 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../auth.dart';
+import '../bandeja.dart';
 import '../bloque3.dart';
 import '../cliente_protegido.dart';
 import '../invitados.dart' as invitados_svc;
@@ -28,6 +29,7 @@ import '../tiempo.dart';
 import 'admin.dart';
 import 'incidencias/lista_incidencias.dart';
 import 'ajustes.dart';
+import 'bandeja.dart';
 import 'actividad.dart';
 import 'ayuda.dart';
 import 'buscar.dart';
@@ -44,6 +46,7 @@ import 'invitados.dart';
 import 'listas.dart';
 import 'mi_dia.dart';
 import 'mi_turno.dart';
+import 'hub_turnos.dart';
 import 'nomina.dart';
 import 'pago.dart';
 import 'pago_diario.dart';
@@ -65,6 +68,20 @@ import '../turno_service.dart';
 /// nuevo). Función pura, testeable.
 String claveDescarteSinReporte(String fechaIso, String turno) =>
     'sin_reporte:$fechaIso:$turno';
+
+/// H2 (estéticas 1.19): urgencia del badge de Vencimientos.
+/// Rojo solo si hay atrasados de más de 30 días; ámbar en el
+/// resto (vencen hoy, por vencer o atrasados leves). Devuelve el
+/// color del badge y la pestaña inicial de ListasScreen con el
+/// desglose (0 Hoy, 2 Atrasados -30d, 3 Atrasados +30d).
+({Color color, int tabInicial}) urgenciaVencimientos({
+  required int atrasLeve,
+  required int atras30,
+}) {
+  if (atras30 > 0) return (color: AppColores.error, tabInicial: 3);
+  if (atrasLeve > 0) return (color: AppColores.alerta, tabInicial: 2);
+  return (color: AppColores.alerta, tabInicial: 0);
+}
 
 /// v1.8.0 (pedido de Jc): señal de «personas esperando» del dueño
 /// en Home — (a) solicitudes de inscripción de invitados
@@ -106,6 +123,9 @@ class _HomeScreenState extends State<HomeScreen>
     with WidgetsBindingObserver {
   int _vencen = 0;
   int _atras = 0;
+  // H2 (estéticas 1.19): atrasados de más de 30 días, separados
+  // del total para el color del badge de Vencimientos.
+  int _atras30 = 0;
   double _pendiente = 0; // v1.3.3: pendiente a entregar (entrenador)
   int _pagaronMes = 0; // v1.4.0: clientes únicos que pagaron el mes
   int _tarifaMes = 150; // v1.4.0: tarifa por cliente (base del entrenador)
@@ -119,6 +139,10 @@ class _HomeScreenState extends State<HomeScreen>
   int _incidenciasAbiertas = 0; // v1.3.3: chip de incidencias
   int _avisosPendientes = 0; // v1.3.6 (Argón, diseño): contador del botón
   // de WhatsApp (solo dueño).
+  // v1.19 (bandeja): visible si el dueño o con permiso otorgado;
+  // el badge cuenta las solicitudes pendientes del espejo.
+  bool _bandejaVisible = false;
+  int _bandejaPendientes = 0;
   // v1.8.0: señal de atención del dueño (solicitudes de invitados
   // + reportes Plus). Solo dueño; la rellena el segundo pase de
   // _cargar (_cargarAtencionDueno). Sin conexión queda en 0 = sin
@@ -621,6 +645,7 @@ class _HomeScreenState extends State<HomeScreen>
         setState(() {
           _vencen = v.length;
           _atras = a.length + a30.length;
+          _atras30 = a30.length;
           _pendiente = p;
           _porRecoger = porRecoger;
           _noLeidas = noLeidas;
@@ -659,6 +684,9 @@ class _HomeScreenState extends State<HomeScreen>
       // v1.8.0: señal de atención del dueño en segundo pase (las
       // RPC no bloquean el pintado local; ver _cargarAtencionDueno).
       if (_auth.isOwner) unawaited(_cargarAtencionDueno());
+      // v1.19 (bandeja): visibilidad y badge en segundo pase (la
+      // lectura del espejo no bloquea el pintado del home).
+      unawaited(_cargarBandeja());
     } catch (e) {
       // Fix #29 (Sol): NO actualizar _lastFetch si falló.
       // M4 (Argón): loguear y retornar en vez de rethrow.
@@ -669,6 +697,32 @@ class _HomeScreenState extends State<HomeScreen>
     }
     // Fix #29: solo marcar caché si llegamos aquí (éxito).
     _lastFetch = DateTime.now();
+  }
+
+  /// v1.19 (bandeja): segundo pase de _cargar. Visible para el
+  /// dueño siempre y para el entrenador con permiso otorgado; el
+  /// badge cuenta las solicitudes pendientes del espejo local.
+  /// Fail-silent: sin espejo (v2.2 sin ejecutar) la tarjeta no se
+  /// muestra y Home sigue offline-first.
+  Future<void> _cargarBandeja() async {
+    try {
+      final visible = await tieneAccesoBandeja();
+      var pendientes = 0;
+      if (visible) {
+        final todas = await solicitudesBandeja();
+        pendientes =
+            solicitudesPorEstado(todas, kBandejaPendiente).length;
+      }
+      if (!mounted) return;
+      setState(() {
+        _bandejaVisible = visible;
+        _bandejaPendientes = pendientes;
+      });
+    } catch (_) {
+      // Panel Terra (media): un fallo de lectura NO pone el badge
+      // en 0 (eso ocultaría pendientes reales). Se conserva el
+      // valor anterior y el próximo _cargar reintenta.
+    }
   }
 
   /// v1.8.0: segundo pase de _cargar (SOLO dueño): trae los conteos
@@ -710,9 +764,11 @@ class _HomeScreenState extends State<HomeScreen>
           TextButton(
               onPressed: () => Navigator.pop(ctx, false),
               child: const Text('Cancelar')),
-          ElevatedButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('Salir')),
+          BotonPrimario(
+            texto: 'Salir',
+            onPressed: () => Navigator.pop(ctx, true),
+            expandido: false,
+          ),
         ],
       ),
     );
@@ -1081,7 +1137,7 @@ class _HomeScreenState extends State<HomeScreen>
               IconButton(
                 tooltip: 'Ayuda',
                 color: Colors.white70,
-                icon: const Icon(Icons.help_outline),
+                icon: const Icon(Icons.help_outline_rounded),
                 onPressed: () =>
                     _ir(const AyudaScreen()),
               ),
@@ -1092,10 +1148,10 @@ class _HomeScreenState extends State<HomeScreen>
                       'Tema: claro / oscuro / sistema',
                   color: Colors.white70,
                   icon: Icon(mode == ThemeMode.dark
-                      ? Icons.light_mode
+                      ? Icons.light_mode_rounded
                       : mode == ThemeMode.light
-                          ? Icons.dark_mode
-                          : Icons.brightness_auto),
+                          ? Icons.dark_mode_rounded
+                          : Icons.brightness_auto_rounded),
                   onPressed: () =>
                       ThemeController.ciclo(),
                 ),
@@ -1106,11 +1162,18 @@ class _HomeScreenState extends State<HomeScreen>
           Row(
             children: [
               Expanded(
-                child: Text(
-                    '${_fechaHoy()} · Turno ${turnoActual().toLowerCase()}',
-                    style: AppTexto.secundario.copyWith(
-                        color: Colors.white60,
-                        fontSize: 12)),
+                child: Row(
+                  children: [
+                    Flexible(
+                      child: Text(_fechaHoy(),
+                          style: AppTexto.secundario.copyWith(
+                              color: Colors.white60, fontSize: 12),
+                          overflow: TextOverflow.ellipsis),
+                    ),
+                    const SizedBox(width: 8),
+                    _chipTurno(),
+                  ],
+                ),
               ),
               SyncPill(
                   onTap: () =>
@@ -1151,7 +1214,7 @@ class _HomeScreenState extends State<HomeScreen>
         IconButton(
           tooltip: 'Sincronización',
           color: Colors.white70,
-          icon: const Icon(Icons.sync),
+          icon: const Icon(Icons.sync_rounded),
           onPressed: () => _ir(const ColaScreen()),
         ),
         if (_pendientesSync > 0)
@@ -1182,7 +1245,7 @@ class _HomeScreenState extends State<HomeScreen>
         IconButton(
           tooltip: 'Actividad',
           color: Colors.white70,
-          icon: const Icon(Icons.notifications_outlined),
+          icon: const Icon(Icons.notifications_rounded),
           onPressed: () => _ir(const ActividadScreen()),
         ),
         if (_noLeidas > 0)
@@ -1331,6 +1394,17 @@ class _HomeScreenState extends State<HomeScreen>
             // Solo se pinta si los hay (el método ya devuelve
             // shrink cuando está vacío).
             _turnosPendientesCard(),
+            // 24/25: hub operativo del día (quién está de turno,
+            // abrir/cerrar, pendiente a entregar).
+            const SizedBox(height: AppEspacio.sm),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                icon: const Icon(Icons.schedule_rounded, size: 18),
+                label: const Text('Turnos de hoy'),
+                onPressed: () => _ir(const HubTurnosScreen()),
+              ),
+            ),
           ],
         ),
       );
@@ -1393,6 +1467,19 @@ class _HomeScreenState extends State<HomeScreen>
                       fmtMonto(_pagoEntrenadoresNeto),
                       AppColores.exito,
                       () => _ir(const NominaScreen()))),
+            ],
+          ),
+          // 24/25: hub operativo del día (quién está de turno y
+          // pendiente a entregar por entrenador).
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton.icon(
+                  icon: const Icon(Icons.schedule_rounded, size: 18),
+                  label: const Text('Turnos de hoy'),
+                  onPressed: () => _ir(const HubTurnosScreen()),
+                ),
+              ),
             ],
           ),
           // v1.3.6 (ítem 4): el banner se puede descartar (X).
@@ -1737,9 +1824,11 @@ class _HomeScreenState extends State<HomeScreen>
                 TextButton(
                     onPressed: () => Navigator.pop(ctx, 2),
                     child: const Text('Cancelar')),
-                ElevatedButton(
-                    onPressed: () => Navigator.pop(ctx, 1),
-                    child: const Text('Cerrar de todos modos')),
+                BotonPrimario(
+                  texto: 'Cerrar de todos modos',
+                  onPressed: () => Navigator.pop(ctx, 1),
+                  expandido: false,
+                ),
               ],
             ),
           );
@@ -1894,41 +1983,75 @@ class _HomeScreenState extends State<HomeScreen>
 
   /// v1.3.3: grid de módulos (2 columnas). Día del gym para ambos
   /// roles; Administración solo admin, Mi turno solo entrenador.
+  /// H1 (estéticas 1.19): módulos agrupados con encabezado pequeño
+  /// en vez de una lista plana. Cada grupo es su propio grid de
+  /// 2 columnas; un grupo sin hijos no se pinta.
   Widget _gridModulos() {
-    return GridView.count(
-      crossAxisCount: 2,
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
-      mainAxisSpacing: AppEspacio.sm,
-      crossAxisSpacing: AppEspacio.sm,
-      childAspectRatio: 2.4,
+    Widget grupo(String titulo, List<Widget> hijos) {
+      if (hijos.isEmpty) return const SizedBox.shrink();
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(titulo,
+              style: AppTexto.secundario.copyWith(
+                  fontWeight: FontWeight.w700, fontSize: 13)),
+          const SizedBox(height: AppEspacio.sm),
+          GridView.count(
+            crossAxisCount: 2,
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            mainAxisSpacing: AppEspacio.sm,
+            crossAxisSpacing: AppEspacio.sm,
+            childAspectRatio: 2.4,
+            children: hijos,
+          ),
+          const SizedBox(height: AppEspacio.md),
+        ],
+      );
+    }
+
+    // H2: el badge de Vencimientos ya no es siempre rojo: color
+    // según urgencia y el toque cae en la pestaña del desglose.
+    final urgVenc = urgenciaVencimientos(
+        atrasLeve: _atras - _atras30, atras30: _atras30);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _modulo(Icons.insights_rounded, 'Día del gym',
-            () => _ir(const MiDiaScreen())),
-        _modulo(Icons.inventory_2_rounded, 'Suplementos',
-            () => _ir(const SuplementosScreen())),
-        _modulo(Icons.event_busy_rounded, 'Vencimientos',
-            () => _ir(const ListasScreen()),
-            badge: _vencen + _atras),
-        _modulo(Icons.report_rounded,
-            'Incidencias',
-            () =>
-                _ir(const ListaIncidenciasScreen()),
-            badge: _incidenciasAbiertas),
-        _modulo(Icons.dashboard_rounded, 'Dashboard',
-            () => _ir(const DashboardScreen())),
-        if (_auth.isAdmin)
-          _modulo(Icons.admin_panel_settings_rounded,
-              'Administración',
-              () => _ir(const AdminScreen()),
-              // v1.8.0: personas esperando (solo dueño; el conteo
-              // solo se carga para el dueño, para el resto queda 0
-              // y el distintivo no se pinta). El toque ya lleva al
-              // Panel, donde se atienden.
-              badge: _atencion.total)
-        else
-          _modulo(Icons.badge_rounded, 'Mi turno',
-              () => _ir(const MiTurnoScreen())),
+        grupo('Cobrar y clientes', [
+          _modulo(Icons.insights_rounded, 'Día del gym',
+              () => _ir(const MiDiaScreen())),
+          _modulo(Icons.inventory_2_rounded, 'Suplementos',
+              () => _ir(const SuplementosScreen())),
+        ]),
+        grupo('El gym hoy', [
+          _modulo(Icons.event_busy_rounded, 'Vencimientos',
+              () => _ir(ListasScreen(inicial: urgVenc.tabInicial)),
+              badge: _vencen + _atras,
+              badgeColor: urgVenc.color),
+          _modulo(Icons.report_rounded, 'Incidencias',
+              () => _ir(const ListaIncidenciasScreen()),
+              badge: _incidenciasAbiertas),
+          _modulo(Icons.dashboard_rounded, 'Dashboard',
+              () => _ir(const DashboardScreen())),
+        ]),
+        grupo('Mi trabajo', [
+          if (_bandejaVisible)
+            _modulo(Icons.mail_rounded, 'Bandeja',
+                () => _ir(const BandejaScreen()),
+                badge: _bandejaPendientes),
+          if (_auth.isAdmin)
+            _modulo(Icons.admin_panel_settings_rounded,
+                'Administración',
+                () => _ir(const AdminScreen()),
+                // v1.8.0: personas esperando (solo dueño; el conteo
+                // solo se carga para el dueño, para el resto queda 0
+                // y el distintivo no se pinta). El toque ya lleva al
+                // Panel, donde se atienden.
+                badge: _atencion.total)
+          else
+            _modulo(Icons.badge_rounded, 'Mi turno',
+                () => _ir(const MiTurnoScreen())),
+        ]),
       ],
     );
   }
@@ -2009,10 +2132,12 @@ class _HomeScreenState extends State<HomeScreen>
   /// Módulo del grid (badge squircle + etiqueta). v1.3.6 (Argón, diseño):
   /// iconos _rounded dentro del badge tinted naranja.
   /// Módulo del grid. v1.8.0: [badge] opcional — conteo en una
-  /// píldora roja a la derecha (mismo lenguaje visual que el
+  /// píldora a la derecha (mismo lenguaje visual que el
   /// contador de la campana); con 0 no se pinta nada.
+  /// H2 (estéticas 1.19): [badgeColor] tiñe la píldora según
+  /// urgencia (por defecto rojo, como antes).
   Widget _modulo(IconData icono, String texto, VoidCallback onTap,
-      {int badge = 0}) {
+      {int badge = 0, Color? badgeColor}) {
     return Tarjeta(
       onTap: onTap,
       padding: const EdgeInsets.symmetric(
@@ -2034,7 +2159,7 @@ class _HomeScreenState extends State<HomeScreen>
               padding: const EdgeInsets.symmetric(
                   horizontal: 8, vertical: 2),
               decoration: BoxDecoration(
-                color: AppColores.error,
+                color: badgeColor ?? AppColores.error,
                 borderRadius: BorderRadius.circular(10),
               ),
               child: Text(badge > 99 ? '99+' : '$badge',
@@ -2046,6 +2171,31 @@ class _HomeScreenState extends State<HomeScreen>
           ],
         ],
       ),
+    );
+  }
+
+  /// H3 (estéticas 1.19): el turno como chip de color en la
+  /// cabecera, en vez de texto gris. Mañana naranja, tarde azul,
+  /// noche ámbar (mismo turnoActual() de siempre, 5-12 / 12-18 /
+  /// resto).
+  Widget _chipTurno() {
+    final t = turnoActual();
+    final color = t == 'Mañana'
+        ? AppColores.naranja
+        : t == 'Tarde'
+            ? AppColores.info
+            : AppColores.alerta;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+      decoration: BoxDecoration(
+        color: color,
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Text('Turno ${t.toLowerCase()}',
+          style: const TextStyle(
+              color: Colors.white,
+              fontSize: 11,
+              fontWeight: FontWeight.bold)),
     );
   }
 

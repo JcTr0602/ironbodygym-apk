@@ -15,6 +15,7 @@ import '../permisos_entrenador.dart';
 import '../tiempo.dart';
 import 'componentes.dart';
 import 'diseno.dart';
+import 'mi_nomina.dart';
 
 /// v1.3.7 (Fase A, 6.1): pre-cálculo de nómina mensual.
 /// v1.3.9 Sprint 3 (#8): + bono manual editable por el dueño.
@@ -169,12 +170,9 @@ class _NominaScreenState extends State<NominaScreen> {
           final r = NominaCalc.comisionDosisDesdeVentas(
               ventasServ, tid, pref);
           if (r.total == 0 && r.dosis == 0) continue;
-          final nombre = nombrePorTid[tid]!.toLowerCase();
-          if (nombre.contains('duany')) {
-            comisionDosis['duany'] = r;
-          } else if (nombre.contains('gabriel')) {
-            comisionDosis['gabriel'] = r;
-          }
+          // #6 (Argón nómina): llave única (igual que el libro).
+          final clave = NominaCalc.claveEntrenador(nombrePorTid[tid]);
+          if (clave != null) comisionDosis[clave] = r;
           if (tid == miTid) comisionDosis['mi'] = r;
         }
       } catch (_) {
@@ -197,8 +195,11 @@ class _NominaScreenState extends State<NominaScreen> {
         if (raw != null && raw.isNotEmpty) {
           for (final u in jsonDecode(raw) as List) {
             final m = Map<String, dynamic>.from(u as Map);
-            final username = '${m['username'] ?? ''}'.toLowerCase();
-            if (username == 'duany' || username == 'gabriel') {
+            // #6 (Argón nómina): llave única (antes filtro
+            // estricto aquí y contains en comisiones).
+            final username =
+                NominaCalc.claveEntrenador('${m['username'] ?? ''}');
+            if (username != null) {
               personasAdelantos[username] = (
                 id: '${m['id'] ?? ''}',
                 telegramId: (m['telegram_id'] as num?)?.toInt() ??
@@ -212,6 +213,9 @@ class _NominaScreenState extends State<NominaScreen> {
       final libroMes = <String, MesLibroAdelantos>{};
       final eventosPorEnt = <String, List<Map<String, dynamic>>>{};
       final liquidadas = <String, bool>{};
+      // #6 (Argón nómina): conteo por mes memorizado (antes se
+      // recalculaba por entrenador).
+      final conteoCache = <String, int>{};
       for (final e in personasAdelantos.entries) {
         if (e.value.id.isEmpty) continue;
         final eventos = await AdelantosService.instance
@@ -227,8 +231,9 @@ class _NominaScreenState extends State<NominaScreen> {
         final brutoPorMes = <String, double>{};
         var mes = primero;
         while (mes.compareTo(pref) <= 0) {
-          final n = await NominaCalc.clientesQuePagaronElMes(mes);
-          brutoPorMes[mes] = n * tarifa.toDouble();
+          conteoCache[mes] ??=
+              await NominaCalc.clientesQuePagaronElMes(mes);
+          brutoPorMes[mes] = conteoCache[mes]! * tarifa.toDouble();
           mes = mesSiguiente(mes);
         }
         final libro = libroAdelantos(
@@ -238,6 +243,10 @@ class _NominaScreenState extends State<NominaScreen> {
               ? {pref: comisionDosis[e.key]?.total ?? 0}
               : NominaCalc.comisionesPorMesDesdeVentas(
                   ventasServ, e.value.telegramId!, primero, pref),
+          // #2 (Argón nómina): los bonos suman a la capacidad
+          // del mes.
+          bonosPorMes: await BonosNominaService.instance
+              .bonosPorMes(e.key, primero, pref),
           hastaMes: pref,
         );
         for (final m in libro) {
@@ -246,7 +255,7 @@ class _NominaScreenState extends State<NominaScreen> {
         liquidadas[e.key] = await AdelantosService.instance
             .nominaLiquidada(pref, e.value.id);
       }
-      if (!mounted) return;
+      // #7 (Argón nómina): el doble chequeo era redundante.
       if (!mounted) return;
       setState(() {
         _comisionDosis = comisionDosis;
@@ -551,7 +560,7 @@ class _NominaScreenState extends State<NominaScreen> {
         ],
       ),
       body: _cargando
-          ? const Center(child: CircularProgressIndicator())
+          ? const EstadoCargando(texto: 'Cargando nómina…')
           : ListView(
               padding: const EdgeInsets.all(16),
               children: [
@@ -697,45 +706,35 @@ class _NominaScreenState extends State<NominaScreen> {
                         Row(
                           children: [
                             Expanded(
-                              child: TextField(
+                              // N1 (estéticas 1.19): campo del
+                              // sistema; el 'CUP' va en el hint
+                              // (CampoTexto no tiene afijos).
+                              child: CampoTexto(
                                 controller:
                                     _bonoMontoCtrl,
-                                keyboardType:
-                                    const TextInputType
-                                        .numberWithOptions(
-                                            decimal: true,
-                                            signed: true),
-                                decoration:
-                                    const InputDecoration(
-                                  hintText: 'Ej: 2000 o -500',
-                                  border:
-                                      OutlineInputBorder(),
-                                  prefixText: '\$ ',
-                                  suffixText: 'CUP',
-                                ),
+                                teclado: const TextInputType
+                                    .numberWithOptions(
+                                        decimal: true,
+                                        signed: true),
+                                hint: 'Monto en CUP '
+                                    '(Ej: 2000 o -500)',
+                                icono: Icons.payments,
                               ),
                             ),
                           ],
                         ),
                         const SizedBox(height: 8),
-                        TextField(
+                        CampoTexto(
                           controller: _bonoNotaCtrl,
-                          decoration: const InputDecoration(
-                            hintText:
-                                'Nota: por qué se otorga...',
-                            border: OutlineInputBorder(),
-                          ),
-                          maxLines: 2,
+                          hint: 'Nota: por qué se otorga...',
+                          icono: Icons.note,
+                          maxLineas: 2,
                         ),
                         const SizedBox(height: 8),
-                        SizedBox(
-                          width: double.infinity,
-                          child: ElevatedButton.icon(
-                            onPressed: _agregarBono,
-                            icon: const Icon(Icons.add),
-                            label:
-                                const Text('Agregar bono'),
-                          ),
+                        BotonPrimario(
+                          texto: 'Agregar bono',
+                          icono: Icons.add,
+                          onPressed: _agregarBono,
                         ),
                       ],
                     ),
@@ -764,25 +763,21 @@ class _NominaScreenState extends State<NominaScreen> {
                             ),
                             SizedBox(
                               width: 100,
-                              child: TextField(
+                              // N1 (estéticas 1.19): campo del
+                              // sistema (la etiqueta vive en el
+                              // texto de la fila).
+                              child: CampoTexto(
                                 controller:
                                     _tarifaCtrl,
-                                keyboardType:
+                                teclado:
                                     TextInputType.number,
-                                decoration:
-                                    const InputDecoration(
-                                  border:
-                                      OutlineInputBorder(),
-                                  suffixText: 'CUP',
-                                ),
                               ),
                             ),
                             const SizedBox(width: 8),
-                            ElevatedButton(
-                              onPressed:
-                                  _guardarTarifa,
-                              child:
-                                  const Text('Guardar'),
+                            BotonPrimario(
+                              texto: 'Guardar',
+                              onPressed: _guardarTarifa,
+                              expandido: false,
                             ),
                           ],
                         ),
@@ -906,11 +901,25 @@ class _NominaScreenState extends State<NominaScreen> {
                     ),
                   );
                   if (ok != true) return;
+                  // #3 (Argón nómina): foto de tarifa y neto al
+                  // liquidar (misma fórmula de la fila).
+                  final libroLiq = _libroMes[ent];
+                  final netoLiq = NominaCalc.totalVivo(
+                    base: _clientesPagados * _tarifa,
+                    bono: ent == 'mi'
+                        ? _bonoSoloAmbos()
+                        : _bonoPara(ent),
+                    comision: _comisionDosis[ent]?.total ?? 0,
+                    adelantos: libroLiq?.adelantos ?? 0,
+                    deudaEntrante: libroLiq?.deudaEntrante ?? 0,
+                  );
                   await AdelantosService.instance.liquidarNomina(
                     mes: pref,
                     entrenadorId: persona.id,
                     entrenadorNombre: persona.nombre,
                     entrenadorTelegramId: persona.telegramId,
+                    tarifaPorCliente: _tarifa,
+                    neto: netoLiq,
                   );
                   if (mounted) {
                     ScaffoldMessenger.of(context).showSnackBar(
@@ -1194,7 +1203,14 @@ class _NominaScreenState extends State<NominaScreen> {
         ),
       ),
     );
-    if (guardado != true) return;
+    // #7 (Argón nómina): al cancelar también se liberan los
+    // controladores del diálogo (antes solo se liberaban al
+    // guardar).
+    if (guardado != true) {
+      montoCtrl.dispose();
+      notaCtrl.dispose();
+      return;
+    }
     final monto = int.tryParse(montoCtrl.text.trim()) ?? 0;
     final gavetaPersona = _personasAdelantos[gaveta];
     await AdelantosService.instance.registrar(
@@ -1228,11 +1244,13 @@ class TarjetaNominaEntrenador extends StatelessWidget {
       padding: const EdgeInsets.all(16),
       child: InkWell(
         onTap: () {
+          // #1 (Argón nómina + decisión Jc): la tarjeta del
+          // entrenador abre SU resumen (MiNominaScreen, con sus
+          // bonos), no la pantalla del dueño.
           Navigator.push(
             context,
             MaterialPageRoute(
-                builder: (_) =>
-                    const NominaScreen()),
+                builder: (_) => const MiNominaScreen()),
           );
         },
         child: Row(

@@ -2250,7 +2250,7 @@ class _DetalleSyncScreenState extends State<DetalleSyncScreen> {
             Text(esSubidos ? 'Detalle de subidos' : 'Detalle de bajados'),
       ),
       body: _cargando
-          ? const Center(child: CircularProgressIndicator())
+          ? const EstadoCargando(texto: 'Cargando cola de sync…')
           : esSubidos
               ? _buildSubidos()
               : _buildBajados(),

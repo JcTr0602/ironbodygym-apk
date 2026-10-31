@@ -22,6 +22,7 @@ import '../gympedia_validacion.dart';
 import '../localdb.dart';
 import '../tiempo.dart';
 import 'diseno.dart';
+import 'componentes.dart';
 
 class _RefEdit {
   final titulo = TextEditingController();
@@ -47,11 +48,18 @@ class GympediaEditorScreen extends StatefulWidget {
   final Map<String, dynamic>? borrador;
   final Set<String> slugsPublicados;
 
+  /// Solicitud de la bandeja que esta publicación cierra (1.19).
+  /// El servidor la marca publicada DESPUÉS de persistir el
+  /// artículo; ante conflicto la op se completa con aviso y el
+  /// artículo NO se revierte.
+  final String? solicitudId;
+
   const GympediaEditorScreen({
     super.key,
     this.publicado,
     this.borrador,
     required this.slugsPublicados,
+    this.solicitudId,
   });
 
   @override
@@ -411,6 +419,11 @@ class _GympediaEditorScreenState extends State<GympediaEditorScreen> {
       // reintentar tras recargar.
       final payload = Map<String, dynamic>.from(a)
         ..['base_revision'] = _baseRevision;
+      // Bandeja (1.19): cerrar la solicitud al publicar.
+      final sid = widget.solicitudId;
+      if (sid != null && sid.isNotEmpty) {
+        payload['solicitud_id'] = sid;
+      }
       await _db.queueOp(
         opUuid: const Uuid().v4(),
         tipo: 'gympedia_upsert_publicado',
@@ -682,7 +695,7 @@ class _GympediaEditorScreenState extends State<GympediaEditorScreen> {
     if (!_listo) {
       return Scaffold(
         appBar: AppBar(title: const Text('Artículo GymPedia')),
-        body: const Center(child: CircularProgressIndicator()),
+        body: const EstadoCargando(texto: 'Cargando editor…'),
       );
     }
     final candidatosRel = widget.slugsPublicados

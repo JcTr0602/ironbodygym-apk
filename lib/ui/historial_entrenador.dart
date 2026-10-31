@@ -119,7 +119,7 @@ class _HistorialEntrenadorScreenState
           ),
           Expanded(
             child: _cargando
-                ? const Center(child: CircularProgressIndicator())
+                ? const EstadoCargando(texto: 'Cargando historial…')
                 : _datos.isEmpty
                     ? const Center(
                         child: Text('Sin actividad este mes'))

@@ -95,6 +95,16 @@ class AppColores {
     begin: Alignment.topCenter,
     end: Alignment.bottomCenter,
   );
+
+  /// Azul agua (botón Solo agua, 1.19): se lee al instante como agua.
+  static const azulAgua = Color(0xFF1E88E5);
+
+  /// Degradado dosis + agua (1.19): naranja a azul, mezcla de ambos.
+  static const gradienteDosisAgua = LinearGradient(
+    colors: [naranja, azulAgua],
+    begin: Alignment.centerLeft,
+    end: Alignment.centerRight,
+  );
 }
 
 /// Tipografía del sistema.

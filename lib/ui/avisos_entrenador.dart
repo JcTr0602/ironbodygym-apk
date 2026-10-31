@@ -61,6 +61,14 @@ class _AvisosEntrenadorScreenState
     var modo = actual?.modo ?? 'una_vez';
     var desde = actual?.vigenteDesde;
     var hasta = actual?.vigenteHasta;
+    // 1.19: destinatario del aviso (null = todos los entrenadores).
+    // Argón avisos Q5: si el destinatario guardado ya no está en
+    // kEntrenadoresAviso, el Dropdown reventaría con AssertionError
+    // (ningún item con ese valor); se cae a «Todos» en ese caso.
+    var destinatario = kEntrenadoresAviso.containsKey(
+            actual?.destinatarioTelegramId)
+        ? actual?.destinatarioTelegramId
+        : null;
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => StatefulBuilder(
@@ -87,6 +95,26 @@ class _AvisosEntrenadorScreenState
                   ),
                   maxLines: 4,
                   maxLength: 500,
+                ),
+                const SizedBox(height: AppEspacio.md),
+                DropdownButtonFormField<int?>(
+                  initialValue: destinatario,
+                  decoration: const InputDecoration(
+                    labelText: 'Para',
+                    border: OutlineInputBorder(),
+                  ),
+                  items: [
+                    const DropdownMenuItem<int?>(
+                      value: null,
+                      child: Text('Todos los entrenadores'),
+                    ),
+                    for (final e in kEntrenadoresAviso.entries)
+                      DropdownMenuItem<int?>(
+                        value: e.key,
+                        child: Text('Solo ${e.value}'),
+                      ),
+                  ],
+                  onChanged: (v) => setS(() => destinatario = v),
                 ),
                 const SizedBox(height: AppEspacio.md),
                 RadioListTile<String>(
@@ -185,6 +213,7 @@ class _AvisosEntrenadorScreenState
         activo: true,
         vigenteDesde: desde,
         vigenteHasta: hasta,
+        destinatarioTelegramId: destinatario,
       ));
       _snack('Aviso guardado.');
       await _cargar();
@@ -312,7 +341,8 @@ class _AvisosEntrenadorScreenState
                   Text(
                     'Modo: ${a.modo == 'una_vez' ? 'una vez' : 'descartable'}'
                     '${a.vigenteDesde != null ? ' · desde ${a.vigenteDesde}' : ''}'
-                    '${a.vigenteHasta != null ? ' · hasta ${a.vigenteHasta}' : ''}',
+                    '${a.vigenteHasta != null ? ' · hasta ${a.vigenteHasta}' : ''}'
+                    ' · Para: ${nombreDestinoAviso(a.destinatarioTelegramId)}',
                     style: AppTexto.secundario,
                   ),
                   const SizedBox(height: AppEspacio.sm),

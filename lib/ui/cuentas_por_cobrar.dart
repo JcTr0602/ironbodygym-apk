@@ -1,4 +1,4 @@
-/// Cuentas por cobrar — fiados de suplementos pendientes (v1.3.7, Fase B §6.2).
+/// Fiados por cobrar — fiados de suplementos pendientes (v1.3.7, Fase B §6.2).
 ///
 /// Lista las ventas con `es_fiado=1` del espejo, con total por cobrar.
 /// Al cobrar un fiado se encola la op `saldar_fiado_suplemento` (el
@@ -265,7 +265,7 @@ class _CuentasPorCobrarScreenState
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Cuentas por cobrar')),
+      appBar: AppBar(title: const Text('Fiados por cobrar')),
       body: Column(
         children: [
           const SyncBanner(compact: true),
@@ -307,7 +307,7 @@ class _CuentasPorCobrarScreenState
 
   Widget _cuerpo() {
     if (_cargando) {
-      return const Center(child: CircularProgressIndicator());
+      return const EstadoCargando(texto: 'Cargando fiados por cobrar…');
     }
     if (_fiados.isEmpty) {
       return const Center(

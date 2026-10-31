@@ -42,6 +42,8 @@ class _BuscarScreenState extends State<BuscarScreen> {
   DateTime? _ultimoPull;
   String _swipeDer = 'cobrar';
   String _swipeIzq = 'ninguna';
+  // B1 (estéticas 1.19): aviso único del gesto deslizar.
+  bool _mostrarAvisoSwipe = false;
   final _scroll = ScrollController();
 
   @override
@@ -66,6 +68,17 @@ class _BuscarScreenState extends State<BuscarScreen> {
       _swipeIzq = cerrada.contains(izq) ? izq : 'ninguna';
       _ultimoPull = ts == null ? null : DateTime.tryParse(ts);
     });
+    // B1 (estéticas 1.19): aviso único la primera vez que hay
+    // deslizables configurados. Se marca visto al mostrarse, así
+    // no vuelve aunque no lo cierre.
+    final visto = await LocalDb.instance.getMeta('aviso_swipe_visto');
+    if (!mounted) return;
+    if ((visto ?? '').isEmpty &&
+        (_swipeDer != 'ninguna' || _swipeIzq != 'ninguna')) {
+      await LocalDb.instance.setMeta('aviso_swipe_visto', '1');
+      if (!mounted) return;
+      setState(() => _mostrarAvisoSwipe = true);
+    }
   }
 
   int _gen = 0;
@@ -365,7 +378,41 @@ class _BuscarScreenState extends State<BuscarScreen> {
                         ? 'Prueba con otro nombre, carnet o teléfono'
                         : null,
                   )
-                : Row(
+                : Column(
+                    children: [
+                      // B1 (estéticas 1.19): aviso único del gesto.
+                      if (_mostrarAvisoSwipe)
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(
+                              12, 0, 12, 4),
+                          child: Tarjeta(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 12, vertical: 8),
+                            child: Row(
+                              children: [
+                                const Icon(Icons.swipe_rounded,
+                                    size: 18,
+                                    color: AppColores.info),
+                                const SizedBox(width: 8),
+                                const Expanded(
+                                  child: Text(
+                                    'Desliza una fila → cobrar, '
+                                    'vender o editar',
+                                    style: TextStyle(fontSize: 13),
+                                  ),
+                                ),
+                                InkWell(
+                                  onTap: () => setState(() =>
+                                      _mostrarAvisoSwipe = false),
+                                  child: const Icon(Icons.close,
+                                      size: 18),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      Expanded(
+                        child: Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Expanded(
@@ -462,10 +509,13 @@ class _BuscarScreenState extends State<BuscarScreen> {
                       ),
                     ],
                   ),
+              ),
+            ],
           ),
-        ],
-      ),
-    );
+        ),
+      ],
+    ),
+  );
   }
 
   /// Bloque 1: texto de frescura de la lista.

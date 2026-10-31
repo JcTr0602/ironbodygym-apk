@@ -257,6 +257,58 @@ class SyncDetalle {
 /// respondía al instante con éxito falso).
 enum SyncMotivoNoCorrio { enCurso, sinSesion }
 
+/// 21/25: resultado de una bajada completa (primitiva segura).
+/// [bajados] = filas aplicadas por el pull. [pendientesAntes] =
+/// ops en cola ANTES de bajar (nunca se tocan). [tablasPendientes]
+/// = espejos cuya bandera de re-descarga SOBREVIVIÓ al pull: su
+/// purga quedó omitida (cola no vacía, error de tabla o pull
+/// caído) y el próximo ciclo la reintenta sola, sin tocar nada.
+/// Vacía = bajada completa de verdad.
+class BajadaCompletaResultado {
+  final int bajados;
+  final int pendientesAntes;
+  final bool corrio;
+  final List<String> tablasPendientes;
+
+  const BajadaCompletaResultado({
+    required this.bajados,
+    required this.pendientesAntes,
+    required this.corrio,
+    required this.tablasPendientes,
+  });
+
+  /// ¿La limpieza de filas viejas quedó diferida? Solo con cola
+  /// no vacía al bajar: el pull trajo lo nuevo, pero la purga
+  /// (guardas H-03) no borró lo que ya no está en el servidor.
+  bool get purgaDiferida => pendientesAntes > 0;
+}
+
+/// PURO (21/25, testeable sin motor): líneas de resultado de una
+/// bajada completa, en lenguaje llano y sin prometer de más.
+List<String> resumenBajadaCompleta(BajadaCompletaResultado r) {
+  final out = <String>[];
+  if (!r.corrio) {
+    out.add('Ya había un ciclo en curso: la bajada completa quedó '
+        'marcada y se hará en el próximo ciclo completo.');
+    return out;
+  }
+  out.add('Bajada completa: ${r.bajados} fila(s) nueva(s) bajada(s).');
+  if (r.purgaDiferida) {
+    out.add('La limpieza de filas viejas quedó para el próximo ciclo: '
+        'había ${r.pendientesAntes} operación(es) sin subir y la '
+        'purga solo corre con la cola limpia. Nada se borró.');
+  }
+  if (r.tablasPendientes.isNotEmpty) {
+    out.add('${r.tablasPendientes.length} tabla(s) reintentarán solas '
+        'en el próximo ciclo: ${r.tablasPendientes.join(', ')}.');
+  }
+  if (!r.purgaDiferida && r.tablasPendientes.isEmpty) {
+    out.add('Espejos reconstruidos por completo. Tus operaciones '
+        'pendientes y tus datos locales no se tocaron.');
+  }
+  return out;
+}
+
 /// v1.8.0 (Frente 5): resultado REAL de una corrida del motor
 /// ([SyncEngine.run], [SyncEngine.push], [SyncEngine.pull]).
 /// subidos/bajados son los de ESTA corrida (confirmados por el
@@ -868,11 +920,13 @@ class SyncEngine {
   }
 
   Future<http.Response> _getAuth(Uri url,
-          {Duration timeout = const Duration(seconds: 30)}) =>
+          {Duration timeout = const Duration(seconds: 30),
+          Map<String, String>? headers}) =>
       _reqAuth((t) => _httpClient.get(url, headers: {
             'apikey': AppConfig.anonKey,
             'Authorization': 'Bearer $t',
             'Accept-Encoding': 'gzip',
+            ...?headers,
           }).timeout(timeout));
 
   Future<http.Response> _postAuth(Uri url,
@@ -1655,6 +1709,44 @@ class SyncEngine {
       porSubir: conteo.porSubir,
       conError: conteo.conError,
       deOtroUsuario: conteo.deOtroUsuario,
+    );
+  }
+
+  /// 21/25: PRIMITIVA SEGURA de bajada completa. Reconstruye los
+  /// espejos desde cero SIN borrar nada antes y SIN tocar la cola:
+  /// 1. Marca `forzar_redescarga_<tabla>` en TODOS los espejos
+  ///    (la lista canónica `tablasEspejo`, no una copia a mano).
+  /// 2. Corre el pull completo: cada tabla se re-descarga desde
+  ///    0 y se aplica por upsert. Si el pull cae a mitad, los
+  ///    datos viejos quedan intactos (nunca se borra primero) y
+  ///    las banderas sobreviven para el próximo ciclo.
+  /// 3. La purga de filas que ya no están en el servidor solo
+  ///    corre con las guardas H-03 (pasada completa + cola limpia
+  ///    + serverSeq estable): con ops pendientes, el pull trae lo
+  ///    nuevo pero NO purga, y el resultado lo dice.
+  /// NO toca ops_queue (ni las sube ni las borra), fotos_cola,
+  /// borradores de GymPedia, envios_transferencia ni prefs: solo
+  /// metas de re-descarga y espejos. Si el pull lanza, la
+  /// excepción se propaga y las banderas quedan para reintentar.
+  Future<BajadaCompletaResultado> bajadaCompleta() async {
+    final pendientesAntes = await _db.countPendingOps();
+    for (final t in tablasEspejo) {
+      await _db.setMeta('forzar_redescarga_$t', '1');
+    }
+    final res = await pull();
+    // Misma vista que el bucle de descarga: solo cuentan las
+    // banderas con valor no vacío (metasConPrefijo filtra '').
+    final conBandera =
+        await _db.metasConPrefijo('forzar_redescarga_');
+    final restantes = [
+      for (final t in tablasEspejo)
+        if (conBandera.contains('forzar_redescarga_$t')) t,
+    ];
+    return BajadaCompletaResultado(
+      bajados: res.bajados,
+      pendientesAntes: pendientesAntes,
+      corrio: res.corrio,
+      tablasPendientes: restantes,
     );
   }
 
@@ -2536,7 +2628,18 @@ class SyncEngine {
     // entera en 'data' (jsonb de sync_gympedia, como suplementos).
     // Biblioteca / Guía (v47): guia_fichas tiene la misma forma
     // (id TEXT = slug, documento en `data`).
-    if (tabla == 'gympedia_articulos' || tabla == 'guia_fichas') {
+    // Bandeja (1.19, v49): gympedia_solicitudes (id uuid → TEXT)
+    // y espejo_gympedia_borradores (id TEXT = slug) tienen la
+    // misma forma id + data.
+    if (tabla == 'gympedia_articulos' ||
+        tabla == 'guia_fichas' ||
+        tabla == 'gympedia_solicitudes' ||
+        tabla == 'espejo_gympedia_borradores' ||
+        // H-05 (1.19): mediciones del cliente. El espejo es jsonb
+        // (data lleva la fila entera, como los servicios); sin esta
+        // rama, la tabla caía al genérico de id entero y toda fila
+        // se descartaba (id TEXT → 0 → null).
+        tabla == 'cliente_mediciones') {
       final id = '${m['id'] ?? ''}';
       if (id.isEmpty) return null;
       final rawData = m['data'];
@@ -2577,6 +2680,19 @@ class SyncEngine {
       data['equipoId'] = id;
       return {'id': id, 'dataJson': jsonEncode(data), 'esTexto': true};
     }
+    // Bandeja (1.19, v49): espejo plano sin columna 'data'.
+    // La PK local es el telegram_id como TEXT; el JSON local se
+    // arma con las columnas exactas del espejo.
+    if (tabla == 'permisos_bandeja') {
+      final id = '${m['telegram_id'] ?? ''}';
+      if (id.isEmpty) return null;
+      final data = <String, dynamic>{
+        'id': id,
+        'telegram_id': m['telegram_id'],
+        'otorgado_en': m['otorgado_en'],
+      };
+      return {'id': id, 'dataJson': jsonEncode(data), 'esTexto': true};
+    }
     // v1.12.0 (Bloque 3, F3/F4): espejos planos con id TEXT (UUID).
     // Contrato servidor 59f2ffd: sin columna 'data'; el JSON local
     // se arma con las columnas exactas del espejo.
@@ -2607,6 +2723,9 @@ class SyncEngine {
           'activo': m['activo'],
           'vigente_desde': m['vigente_desde'],
           'vigente_hasta': m['vigente_hasta'],
+          // 1.19: destinatario del aviso (null = todos). Sin esta
+          // llave, el filtro del PopUp no distingue a quién va.
+          'destinatario_telegram_id': m['destinatario_telegram_id'],
           'creado_por': m['creado_por'],
           'creada_ts': m['creada_ts'],
           'actualizada_ts': m['actualizada_ts'],
@@ -2651,6 +2770,10 @@ class SyncEngine {
           'autor_dueno_id': m['autor_dueno_id'],
           'movimiento': m['movimiento'],
           'creada_ts': m['creada_ts'],
+          // H-06 (1.19): sin estas dos llaves, el conversor las
+          // tiraba aunque el select las trajera.
+          'op_ids_json': m['op_ids_json'],
+          'resto_sin_ids': m['resto_sin_ids'],
         });
       } else {
         data.addAll({
@@ -2686,6 +2809,10 @@ class SyncEngine {
           'monto': m['monto'],
           'nota': m['nota'],
           'creado_en': m['creado_en'],
+          // H-06 (1.19): el select ya pedía eliminada, pero el
+          // conversor no la pasaba: un bono borrado en el servidor
+          // seguía vivo en la app.
+          'eliminada': m['eliminada'],
         };
       }
       final uuid = '${data['bono_uuid'] ?? m['id'] ?? ''}';
@@ -2737,6 +2864,45 @@ class SyncEngine {
   ///   arrancar el pull), la bandera sobrevive para el próximo
   ///   ciclo; consumirla perdería la reparación pendiente.
   /// - Si la purga corrió, solo se consume cuando validó.
+  /// H-03 (1.19): decisión de purga por reconciliación, extraída a
+  /// función pura para poder probarla sin un motor de sync. Una
+  /// purga solo borra filas locales cuando se cumplen TODAS:
+  /// 1. viable: sin ops pendientes y serverSeq confirmado (el
+  ///    chequeo de sync_estado no falló y ss2 == serverSeq; un null
+  ///    en cualquiera invalida).
+  /// 2. pasadaCompleta: el bucle terminó en página vacía (la tabla
+  ///    se recorrió entera desde el cursor 0).
+  /// 3. Conteo coherente: si PostgREST confirmó el total, el total
+  ///    debe ser exactamente lo visto; si no, la pasada está
+  ///    incompleta y no se purga.
+  /// 4. Conjunto fiable: se vio al menos un id, o no hay nada local
+  ///    que borrar, o el conteo confirmó que la tabla está vacía
+  ///    en el servidor. El vacío SIN confirmación ya no basta en
+  ///    ninguna tabla (antes bastaba en las no troncales).
+  /// 5. Anti-wipe: con 5+ filas locales y menos de la mitad vista,
+  ///    solo se purga si el conteo confirma que lo visto es todo.
+  ///    En el peor caso se retrasa la purga un ciclo, nunca se
+  ///    borra a ciegas.
+  static bool purgaPermitida({
+    required bool viable,
+    required bool pasadaCompleta,
+    required int idsVistos,
+    required int filasLocales,
+    required bool conteoConfirmado,
+    required int? totalServidor,
+  }) {
+    if (!viable || !pasadaCompleta) return false;
+    if (conteoConfirmado && totalServidor != idsVistos) return false;
+    final conjuntoFiable = idsVistos > 0 ||
+        filasLocales == 0 ||
+        (conteoConfirmado && totalServidor == 0);
+    if (!conjuntoFiable) return false;
+    if (filasLocales >= 5 && idsVistos * 2 < filasLocales) {
+      if (!(conteoConfirmado && totalServidor == idsVistos)) return false;
+    }
+    return true;
+  }
+
   static bool banderaRedescargaSeConsume({
     required bool esPurgable,
     required bool fueReseteada,
@@ -2760,49 +2926,63 @@ class SyncEngine {
   // topase por debajo, la app ya perdería filas hoy.
   static const int kPisoPagina = 100;
 
+  /// 21/25: lista canónica de espejos que baja el pull. Única
+  /// fuente de verdad: la usa `_download` por defecto y la
+  /// primitiva `bajadaCompleta` para marcar la re-descarga de
+  /// TODAS (nunca una lista duplicada a mano, que se desfasaría).
+  static const List<String> tablasEspejo = [
+    'clientes',
+    'pagos',
+    'pagos_diarios',
+    'gastos',
+    'categorias_suplemento', // v1.2.1 (orden topológico, Argón paso 2)
+    'suplementos',
+    'ventas_suplementos',
+    'turnos_cierre', // v1.2.5-rev5
+    'turnos_apertura', // v1.8.0 (v39): espejo para la Auditoría
+    'adelantos', // v1.8.0 (v40)
+    'nomina_liquidada', // v1.8.0 (v40)
+    'liquidaciones_caja', // v1.3.6 (v28, ítem 1B)
+    'incidencias_sync', // v1.3.6 (v28, ítem 1C)
+    'gympedia_articulos', // v1.4.4 (v33)
+    'guia_fichas', // Biblioteca / Guía (v47)
+    'guia_equipos', // Biblioteca / Guía (v47)
+    'reservas', // Reservas v2 (v34)
+    // v1.8.0 (v38): servicios por dosis.
+    'servicio_botes',
+    'servicio_lotes',
+    'servicio_ventas',
+    'servicio_salidas',
+    'servicio_agua_movimientos',
+    'servicio_compras',
+    'servicio_pomos', // 1.15 (v48)
+    // v1.12.0 (Bloque 3, F3/F4): si la tabla sync_* aún no existe
+    // en Supabase, el pull la marca ausente y la omite (mismo
+    // patrón que los servicios en v1.8.0).
+    'solicitudes_adelanto',
+    'avisos_entrenadores',
+    // Fase A 2026-10-25 (A4 + pulls 1.10/1.11): mismo patrón de
+    // tabla ausente (el puente ya publica las tres de Fase A;
+    // sync_nomina_bonos la publica cuando el servidor la tenga).
+    'nomina_bonos',
+    'espejo_tarifas_especiales',
+    'espejo_entregas_efectivo',
+    'espejo_recordatorio_config',
+    // H-05 (1.19): mediciones (espejo jsonb del puente, 1.15
+    // M5b-02). El espejo local existe desde v42 y el wm está
+    // sembrado en 0: sin entrar en todasTablas, jamás bajaba.
+    'cliente_mediciones',
+    // Bandeja GymPedia (1.19, v49): mismo patrón de tabla
+    // ausente (el puente las publica cuando el SQL v2.2 corra).
+    'gympedia_solicitudes',
+    'permisos_bandeja',
+    'espejo_gympedia_borradores',
+  ];
+
   Future<({int aplicadas, Map<String, int> porTabla})> _download(
       {bool silencioso = false, List<String>? tablasFiltro}) async {
     // v1.2.8 (Paso 1): si se pasa tablasFiltro (scope), solo esas tablas.
-    final todasTablas = [
-      'clientes',
-      'pagos',
-      'pagos_diarios',
-      'gastos',
-      'categorias_suplemento', // v1.2.1 (orden topológico, Argón paso 2)
-      'suplementos',
-      'ventas_suplementos',
-      'turnos_cierre', // v1.2.5-rev5
-      'turnos_apertura', // v1.8.0 (v39): espejo para la Auditoría
-      'adelantos', // v1.8.0 (v40)
-      'nomina_liquidada', // v1.8.0 (v40)
-      'liquidaciones_caja', // v1.3.6 (v28, ítem 1B)
-      'incidencias_sync', // v1.3.6 (v28, ítem 1C)
-      'gympedia_articulos', // v1.4.4 (v33)
-      'guia_fichas', // Biblioteca / Guía (v47)
-      'guia_equipos', // Biblioteca / Guía (v47)
-      'reservas', // Reservas v2 (v34)
-      // v1.8.0 (v38): servicios por dosis.
-      'servicio_botes',
-      'servicio_lotes',
-      'servicio_ventas',
-      'servicio_salidas',
-      'servicio_agua_movimientos',
-      'servicio_compras',
-      'servicio_pomos', // 1.15 (v48)
-      // v1.12.0 (Bloque 3, F3/F4): si la tabla sync_* aún no existe
-      // en Supabase, el pull la marca ausente y la omite (mismo
-      // patrón que los servicios en v1.8.0).
-      'solicitudes_adelanto',
-      'avisos_entrenadores',
-      // Fase A 2026-10-25 (A4 + pulls 1.10/1.11): mismo patrón de
-      // tabla ausente (el puente ya publica las tres de Fase A;
-      // sync_nomina_bonos la publica cuando el servidor la tenga).
-      'nomina_bonos',
-      'espejo_tarifas_especiales',
-      'espejo_entregas_efectivo',
-      'espejo_recordatorio_config',
-    ];
-    final tablas = tablasFiltro ?? todasTablas;
+    final tablas = tablasFiltro ?? tablasEspejo;
     // v1.2.5 (D19): si el manifiesto marcó algún ámbito divergente,
     // re-descarga completa desde cero en este ciclo.
     // v1.2.5-rev5 (Gemini): reseteo GRANULAR por tabla, no nuclear global.
@@ -2834,6 +3014,20 @@ class SyncEngine {
     // Disparo único al actualizar: la primera descarga de la
     // versión programa la purga de todas las tablas purgables;
     // los reseteos por manifiesto la repiten a futuro.
+    // H-02 (1.19): espejos con secuencia PROPIA de Postgres (los 3
+    // de bandeja, triggers v2.2): su sync_seq NO es el serverSeq
+    // global, así que su watermark NUNCA salta a serverSeq (el salto
+    // dejaría todas sus filas futuras por debajo del marcador y
+    // jamás se descargarían). Su wm avanza solo por página (al
+    // máximo seq de la tabla). Tampoco entran en tablasConWatermark
+    // de LocalDb: un mínimo global no puede compararse con
+    // secuencias por tabla (mismo motivo por el que 'borrados' se
+    // excluye del cartel de novedades).
+    const tablasSecuenciaPropia = {
+      'gympedia_solicitudes',
+      'permisos_bandeja',
+      'espejo_gympedia_borradores',
+    };
     const tablasPurgables = {
       'clientes',
       'pagos',
@@ -2856,6 +3050,21 @@ class SyncEngine {
       'servicio_agua_movimientos',
       'servicio_compras',
       'servicio_pomos', // 1.15 (v48): sin filas optimistas (ver arriba)
+      // Bandeja (1.19, v49): la app nunca inserta filas optimistas
+      // en estos espejos (las solicitudes, permisos y borradores
+      // viajan por ops hasta que el servidor los confirma), así
+      // que purgar ausentes es seguro. permisos_bandeja ADEMÁS
+      // necesita la purga: una revocación borra la fila del
+      // espejo y solo la purga la hace llegar al teléfono.
+      'gympedia_solicitudes',
+      'permisos_bandeja',
+      'espejo_gympedia_borradores',
+      // H-05 (1.19): mediciones. La purga solo borra filas con
+      // sync_seq > 0 (purgarMirrorAusentes), así que las filas
+      // optimistas locales nunca se tocan. OJO: NO va en
+      // tablasSecuenciaPropia: su sync_seq es el global, no una
+      // secuencia por tabla como los 3 espejos de bandeja.
+      'cliente_mediciones',
     };
     try {
       // Programación idempotente por tabla (panel v1.4.4): la
@@ -2975,6 +3184,11 @@ class SyncEngine {
       'incidencias_sync': 'sync_incidencias_sync',
       // v1.4.4 (v33): espejo de artículos GymPedia.
       'gympedia_articulos': 'sync_gympedia',
+      // Bandeja GymPedia (1.19, v49): espejos que publica el puente
+      // (si la oleada SQL no está, se omiten como ausentes).
+      'gympedia_solicitudes': 'sync_gympedia_solicitudes',
+      'permisos_bandeja': 'sync_permisos_bandeja',
+      'espejo_gympedia_borradores': 'sync_gympedia_borradores',
       // Biblioteca / Guía (v47): espejos que publica el puente
       // (si la oleada SQL no está, se omiten como ausentes).
       'guia_fichas': 'sync_guia_ejercicios',
@@ -3004,6 +3218,9 @@ class SyncEngine {
       // ya ocupan el nombre corto.
       'nomina_bonos': 'sync_nomina_bonos',
       'espejo_tarifas_especiales': 'sync_tarifas_especiales',
+      // H-05 (1.19): el puente publica este espejo (verificado en
+      // sync_bridge.py: el genérico lo incluye y el espejo es jsonb).
+      'cliente_mediciones': 'sync_cliente_mediciones',
       'espejo_entregas_efectivo': 'sync_entregas_efectivo',
       'espejo_recordatorio_config': 'sync_recordatorio_config',
     };
@@ -3036,9 +3253,23 @@ class SyncEngine {
       // serverSeq al cierre (ambos asumirían una pasada completa
       // y saltarían las filas pendientes).
       var tablaConSinVerificar = false;
+      // H-03 (1.19): invariantes de purga. pasadaCompleta solo es
+      // true si el bucle terminó con una página vacía (prueba de
+      // que recorrió la tabla entera); totalServidor es el conteo
+      // exacto de PostgREST (Content-Range) de la PRIMERA página
+      // (en páginas siguientes el filtro cambia y el conteo ya no
+      // es el total de la tabla).
+      var pasadaCompleta = false;
+      var conteoConfirmado = false;
+      int? totalServidor;
+      var esPrimeraPagina = true;
       // v1.4.4: ids vistos en la pasada completa (purga).
       final recolectarPurga = tablasPurga.contains(tabla);
       final idsPurga = <Object>{};
+      // Panel Terra #4: fallidas DE ESTA TABLA (no el contador
+      // global del pull: una fila mala en otra tabla no debe
+      // bloquear la purga de esta).
+      var fallidasTabla = 0;
       try {
         while (true) {
           // gastos y turnos_cierre tienen esquema plano en Supabase
@@ -3067,6 +3298,7 @@ class SyncEngine {
                   'destino_resolucion,sync_seq',
             'avisos_entrenadores' =>
               'id,titulo,mensaje,modo,activo,vigente_desde,vigente_hasta,'
+                  'destinatario_telegram_id,'
                   'creado_por,creada_ts,actualizada_ts,sync_seq',
             // Fase A 2026-10-25 (A4 + pulls 1.10/1.11): columnas
             // exactas del puente (publicar_tarifas_especiales,
@@ -3083,12 +3315,20 @@ class SyncEngine {
             'espejo_entregas_efectivo' =>
               'op_uuid,entrenador_telegram_id,monto_entregado,'
                   'fecha_habana,autor_dueno_id,movimiento,creada_ts,'
+                  // H-06 (1.19): el puente ya publica estas dos
+                  // columnas; sin pedirlas, la fusión del resto en
+                  // la app no sabía qué entregas ya estaban contadas.
+                  'op_ids_json,resto_sin_ids,'
                   'sync_seq',
             'espejo_recordatorio_config' =>
               'id,titulo,tipo,alcance,target_key,dias_anticipacion,'
                   'fecha_fija,activa,creado_por,'
                   'disparado_en_fecha_habana,creada_ts,actualizada_ts,'
                   'sync_seq',
+            // Bandeja (1.19, v49): permisos_bandeja es plano SIN
+            // columna 'data' y con telegram_id como PK (el default
+            // 'id,data,sync_seq' daba 400 y la tabla jamás bajaba).
+            'permisos_bandeja' => 'telegram_id,otorgado_en,sync_seq',
             _ => 'id,data,sync_seq',
           };
           // v1.2.9+47 (AppLog): medir latencia del lote.
@@ -3098,10 +3338,15 @@ class SyncEngine {
           final t0 = DateTime.now();
           http.Response? rTmp;
           try {
-            rTmp = await _getAuth(Uri.parse(
-                '$_base/rest/v1/$supTabla?select=$select'
-                '&sync_seq=gt.$pageWm&order=sync_seq.asc'
-                '&limit=${escalera.limite}'));
+            rTmp = await _getAuth(
+                Uri.parse(
+                    '$_base/rest/v1/$supTabla?select=$select'
+                    '&sync_seq=gt.$pageWm&order=sync_seq.asc'
+                    '&limit=${escalera.limite}'),
+                // H-03: solo las tablas que purgan piden el conteo
+                // exacto (cuesta un COUNT(*) por página en el
+                // servidor; el resto no lo necesita).
+                headers: recolectarPurga ? {'Prefer': 'count=exact'} : null);
           } catch (_) {
             // Timeout/socket: escalera a 100 y mismo error por tabla.
             escalera.fallo();
@@ -3171,6 +3416,25 @@ class SyncEngine {
                 'bajada $tabla: HTTP ${r.statusCode}');
           }
           final rows = jsonDecode(r.body) as List;
+          // H-03: conteo exacto de la primera página. PostgREST con
+          // Prefer: count=exact devuelve Content-Range "a-b/total"
+          // (o "*/total"). Solo la primera página vale: su filtro
+          // es sync_seq > 0 en tablas que purgan (cursor reseteado),
+          // o sea, toda la tabla.
+          if (esPrimeraPagina) {
+            esPrimeraPagina = false;
+            final rango = r.headers['content-range'];
+            if (rango != null) {
+              final partes = rango.split('/');
+              if (partes.length == 2) {
+                final total = int.tryParse(partes[1]);
+                if (total != null) {
+                  totalServidor = total;
+                  conteoConfirmado = true;
+                }
+              }
+            }
+          }
           // Argón (sync adaptativa, paso 2a): guardar la fecha del
           // servidor de esta página para el cierre del pull.
           final dateHdrPagina = r.headers['date'];
@@ -3184,7 +3448,12 @@ class SyncEngine {
           // v1.2.9+47 (AppLog): lote OK.
           AppLog.info('sync', 'pull_lote_ok',
               d: '$tabla filas=${rows.length}');
-          if (rows.isEmpty) break;
+          if (rows.isEmpty) {
+            // H-03: página vacía = la tabla se recorrió entera.
+            // Es la única salida que acredita una pasada completa.
+            pasadaCompleta = true;
+            break;
+          }
           // v1.2.7 (Paso 1 Gemini): commit atómico por página.
           // Se preparan las filas primero (sin escribir), luego en una sola
           // transacción se hace batch insert + actualización del watermark.
@@ -3210,12 +3479,18 @@ class SyncEngine {
             var seqEnCurso = 0;
             try {
               final m = Map<String, dynamic>.from(row as Map);
-              if (recolectarPurga && m['id'] != null) {
-                idsPurga.add(m['id'] as Object);
-              }
               final seq = (m['sync_seq'] as int?) ?? 0;
               seqEnCurso = seq;
               final prep = _prepararFilaMirror(tabla, m);
+              // H-01 (1.19): la llave de purga sale del conversor,
+              // no de la columna cruda: en permisos_bandeja la PK
+              // es telegram_id, en guia_equipos equipo_id, en
+              // entregas op_uuid y en bonos bono_uuid. Con m['id']
+              // crudo el conjunto quedaba vacío y la purga borraba
+              // el 100% de la tabla local recién descargada.
+              if (recolectarPurga && prep != null) {
+                idsPurga.add(prep['id'] as Object);
+              }
               if (prep != null) {
                 prepsPagina.add({
                   'id': prep['id'],
@@ -3224,12 +3499,23 @@ class SyncEngine {
                   'esTexto': prep['esTexto'],
                 });
               } else {
-                sinCambios++;
-                if (seq > paginaMax) paginaMax = seq;
-                if (seq > tablaMax) tablaMax = seq;
+                // Panel Terra #4: una fila que no se pudo preparar
+                // NO es "sin cambios": su contraparte local no está
+                // en idsPurga y la purga la borraría. Se cuenta como
+                // fallida y se topa el marcador (igual que en el
+                // catch): el watermark no la salta y la purga de
+                // esta tabla queda bloqueada en el cierre.
+                fallidas++;
+                fallidasTabla++;
+                final minActual = minSinVerificar;
+                if (seqEnCurso > 0 &&
+                    (minActual == null || seqEnCurso < minActual)) {
+                  minSinVerificar = seqEnCurso;
+                }
               }
             } catch (_) {
               fallidas++;
+              fallidasTabla++;
               // S3: la fila que falló en la 1ª pasada también
               // topa el marcador (si otra posterior avanzara,
               // la saltaría para siempre).
@@ -3385,8 +3671,20 @@ class SyncEngine {
           // resuelve, las páginas posteriores a la fila esperan
           // (el pull vuelve, la app funciona, y los fallos
           // pasajeros se recuperan en el ciclo siguiente).
-          if (paginaMax <= pageWm) break;
-          if (rows.length < kPisoPagina) break;
+          if (paginaMax <= pageWm) {
+            // Panel Terra #8: página que no avanzó el cursor =
+            // pasada estancada. Se aborta la tabla sin purgar
+            // (pasadaCompleta queda false) y se registra.
+            AppLog.info('sync', 'pull_estancado',
+                d: '$tabla pageWm=$pageWm paginaMax=$paginaMax');
+            break;
+          }
+          // H-03: en tablas que purgan NO se corta por página corta:
+          // una página corta no prueba el final (el servidor podría
+          // haber topado en silencio). Se sigue hasta la página
+          // vacía, que es la prueba real. En el resto de tablas se
+          // mantiene el corte actual (una petición menos por tabla).
+          if (rows.length < kPisoPagina && !recolectarPurga) break;
           pageWm = paginaMax;
         }
       } catch (e) {
@@ -3463,7 +3761,12 @@ class SyncEngine {
                 final ss2 = rows2.isNotEmpty
                     ? rows2.first['server_seq'] as int?
                     : null;
-                if (ss2 != serverSeq) viable = false;
+                // H-03: ss2 null invalida explícitamente. serverSeq
+                // ya viene garantizado no null por el bloque exterior
+                // (la purga solo se intenta si hay serverSeq).
+                if (ss2 == null || ss2 != serverSeq) {
+                  viable = false;
+                }
               } else {
                 viable = false;
               }
@@ -3472,11 +3775,20 @@ class SyncEngine {
             }
           }
           final filasLocales = await _db.contar(tabla);
-          const troncales = {'clientes', 'pagos', 'suplementos'};
-          final conjuntoFiable = idsPurga.isNotEmpty ||
-              filasLocales == 0 ||
-              !troncales.contains(tabla);
-          purgaValidada = viable && conjuntoFiable;
+          // Panel Terra #4: si alguna fila de esta tabla no se
+          // pudo preparar, su contraparte local no está en
+          // idsPurga: la pasada no es viable para purga. Solo se
+          // bloquea la purga de esta tabla y este ciclo; el resto
+          // del pull (watermark topado, datos aplicados) sigue.
+          if (fallidasTabla > 0) viable = false;
+          purgaValidada = purgaPermitida(
+            viable: viable,
+            pasadaCompleta: pasadaCompleta,
+            idsVistos: idsPurga.length,
+            filasLocales: filasLocales,
+            conteoConfirmado: conteoConfirmado,
+            totalServidor: totalServidor,
+          );
           if (purgaValidada) {
             final borradas =
                 await _db.purgarMirrorAusentes(tabla, idsPurga);
@@ -3487,8 +3799,9 @@ class SyncEngine {
             await _db.setMeta('purga_v144_$tabla', '');
           } else {
             AppLog.aviso('sync', 'purga_omitida',
-                d: '$tabla viable=$viable fiable=$conjuntoFiable '
-                    'locales=$filasLocales');
+                d: '$tabla viable=$viable completa=$pasadaCompleta '
+                    'conteo=$conteoConfirmado/$totalServidor '
+                    'vistos=${idsPurga.length} locales=$filasLocales');
           }
         }
         // 1.14 (Fix 3): la bandera solo se consume si la purga
@@ -3524,11 +3837,17 @@ class SyncEngine {
                   d: '$tabla cursor=0 servidor=0 filas=0');
             }
           }
-          if (forzar) {
+          if (forzar && !tablasSecuenciaPropia.contains(tabla)) {
             await _db.setWatermarkTabla(tabla, serverSeq);
             // v1.2.9+47 (AppLog): watermark persistido.
             AppLog.info('sync', 'pull_wm_guardado',
                 d: '$tabla $wmActual->$serverSeq');
+          } else if (tablasSecuenciaPropia.contains(tabla)) {
+            // H-02: sin salto. El wm de estas tablas avanza solo
+            // por página (al máximo seq propio de la tabla); saltar
+            // a serverSeq las congelaría para siempre.
+            AppLog.info('sync', 'pull_wm_sin_salto',
+                d: '$tabla secuencia propia, wm queda $wmActual');
           }
         }
       }

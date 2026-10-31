@@ -20,8 +20,11 @@ import '../bloque3.dart';
 import '../cliente_protegido.dart';
 import '../localdb.dart';
 import '../negocio.dart';
+import '../nomina_bonos.dart';
 import '../nomina_calc.dart';
+import '../nomina_precalc.dart';
 import '../perfil.dart';
+import '../permisos_entrenador.dart';
 import '../tiempo.dart';
 import 'componentes.dart';
 import 'diseno.dart';
@@ -41,6 +44,9 @@ class _MiNominaScreenState extends State<MiNominaScreen> {
   int _tarifa = 150;
   int _dosis = 0;
   double _comision = 0;
+  // #1 (Argón nómina + decisión Jc): el entrenador SÍ ve sus
+  // bonos en su resumen (antes el recibo decía "Sin bonos").
+  double _bonosMes = 0;
   MesLibroAdelantos? _libro;
   List<Map<String, dynamic>> _eventos = [];
   List<SolicitudAdelanto> _solicitudes = [];
@@ -78,9 +84,41 @@ class _MiNominaScreenState extends State<MiNominaScreen> {
     return '';
   }
 
+  /// Username del entrenador actual (meta usuarios_apk por
+  /// telegram_id), o '' si no se resuelve. Es la llave de bonos.
+  Future<String> _miUsername() async {
+    final tid = AuthService().telegramId;
+    if (tid == null) return '';
+    try {
+      final raw = await LocalDb.instance.getMeta('usuarios_apk');
+      if (raw != null && raw.isNotEmpty) {
+        for (final u in jsonDecode(raw) as List) {
+          final m = Map<String, dynamic>.from(u as Map);
+          if (LocalDb.normalizarTelegramId(m['telegram_id']) == tid) {
+            return '${m['username'] ?? ''}';
+          }
+        }
+      }
+    } catch (_) {}
+    return '';
+  }
+
+  /// Bonos por mes del entrenador actual (llave única), o mapa
+  /// vacío si no se resuelve su identidad (sin identidad no se
+  /// puede atribuir bono: no se inventa).
+  Future<Map<String, double>> _bonosPorMes(
+      String desde, String hasta) async {
+    final clave = NominaCalc.claveEntrenador(await _miUsername());
+    if (clave == null) return const {};
+    return BonosNominaService.instance.bonosPorMes(clave, desde, hasta);
+  }
+
   Future<void> _cargar() async {
     setState(() => _cargando = true);
     final pref = NominaCalc.prefMesActual();
+    // #6 (Argón nómina): refrescar el pre-cálculo antes de
+    // componer (igual que la pantalla del dueño).
+    await NominaPrecalc.instance.asegurar(pref);
     final tid = AuthService().telegramId;
     final clientesPagados = await NominaCalc.clientesQuePagaronElMes(pref);
     final tarifa = await PerfilService.instance.getPagoEntrenador();
@@ -136,6 +174,9 @@ class _MiNominaScreenState extends State<MiNominaScreen> {
             ? {pref: comision}
             : NominaCalc.comisionesPorMesDesdeVentas(
                 ventasServicio, tid, primero, pref),
+        // #2 (Argón nómina): los bonos suman a la capacidad del
+        // mes (misma regla que la pantalla del dueño).
+        bonosPorMes: await _bonosPorMes(primero, pref),
         hastaMes: pref,
       );
       for (final m in libros) {
@@ -188,6 +229,7 @@ class _MiNominaScreenState extends State<MiNominaScreen> {
       _tarifa = tarifa;
       _dosis = dosis;
       _comision = comision;
+      _bonosMes = libro?.bonos ?? 0;
       _libro = libro;
       _eventos = eventos;
       _solicitudes = solicitudes;
@@ -204,9 +246,16 @@ class _MiNominaScreenState extends State<MiNominaScreen> {
   double get _adelantosMes => _libro?.adelantos ?? 0;
   double get _deudaEntrante => _libro?.deudaEntrante ?? 0;
   double get _neto {
-    final n = _base + _comision - _adelantosMes - _deudaEntrante;
+    final n =
+        _base + _comision + _bonosMes - _adelantosMes - _deudaEntrante;
     return n < 0 ? 0 : n;
   }
+
+  /// #1 (Argón nómina): misma regla que NominaScreen (decisión Jc
+  /// 2026-10-28) — sin can_ver_cifras no se muestra el conteo
+  /// global; el entrenador ve solo su monto base.
+  bool get _puedeVerConteo =>
+      AuthService().isOwner || PermisosEntrenador().canVerCifras;
 
   String get _recibo => textoReciboNomina(
         pref: _pref,
@@ -214,8 +263,10 @@ class _MiNominaScreenState extends State<MiNominaScreen> {
         tarifa: _tarifa,
         dosis: _dosis,
         comision: _comision,
+        bonos: _bonosMes,
         adelantosMes: _adelantosMes,
         deudaEntrante: _deudaEntrante,
+        mostrarConteo: _puedeVerConteo,
         sello: kSelloVistaPreviaNomina,
         syncTexto: _syncTexto,
       );
@@ -298,7 +349,8 @@ class _MiNominaScreenState extends State<MiNominaScreen> {
           .pedir(monto: monto.toDouble(), motivo: motivoTexto);
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('Solicitud enviada. El dueño la decidirá.')));
+          content: Text(
+              'Solicitud guardada: sube al sincronizar y el dueño la decidirá.')));
       await _cargar();
     } catch (e) {
       if (!mounted) return;
@@ -387,8 +439,13 @@ class _MiNominaScreenState extends State<MiNominaScreen> {
                       style: AppTexto.subtitulo),
                   const SizedBox(height: AppEspacio.sm),
                   Text(
-                    textoBaseNominaExplicada(
-                        _clientesPagados, _tarifa),
+                    // #1 (Argón nómina): sin permiso de cifras, el
+                    // conteo global no se muestra (solo el monto
+                    // base propio).
+                    _puedeVerConteo
+                        ? textoBaseNominaExplicada(
+                            _clientesPagados, _tarifa)
+                        : 'Tu base este mes: ${fmtMonto(_base)} CUP.',
                     style: AppTexto.cuerpo,
                   ),
                 ],
@@ -406,6 +463,7 @@ class _MiNominaScreenState extends State<MiNominaScreen> {
                   _linea('Base', fmtMonto(_base)),
                   _linea('Comisión dosis',
                       '$_dosis dosis · ${fmtMonto(_comision)}'),
+                  _linea('Bonos', '+${fmtMonto(_bonosMes)}'),
                   _linea(
                       'Adelantos del mes', '-${fmtMonto(_adelantosMes)}'),
                   _linea(
@@ -413,6 +471,49 @@ class _MiNominaScreenState extends State<MiNominaScreen> {
                   const Divider(),
                   _linea('NETO ESTIMADO', fmtMonto(_neto),
                       negrita: true),
+                  const SizedBox(height: AppEspacio.sm),
+                  // N2 (estéticas 1.19): el neto como barra
+                  // apilada — verde lo que cobra, rojo claro lo
+                  // descontado (adelantos + deuda). Sin base, la
+                  // barra queda gris y el texto lo dice.
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(999),
+                    child: Stack(
+                      children: [
+                        Container(
+                          height: 10,
+                          color: (_base + _comision + _bonosMes) <= 0
+                              ? AppColores.borde(context)
+                                  .withValues(alpha: 0.3)
+                              : AppColores.error
+                                  .withValues(alpha: 0.3),
+                        ),
+                        FractionallySizedBox(
+                          widthFactor:
+                              (_base + _comision + _bonosMes) > 0
+                                  ? (_neto /
+                                          (_base +
+                                              _comision +
+                                              _bonosMes))
+                                      .clamp(0.0, 1.0)
+                                  : 0.0,
+                          child: Container(
+                            height: 10,
+                            color: AppColores.exito,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    (_base + _comision + _bonosMes) <= 0
+                        ? 'Sin base este mes'
+                        : (_adelantosMes + _deudaEntrante) > 0
+                            ? 'De ${fmtMonto(_base + _comision + _bonosMes)} brutos, descuentan ${fmtMonto(_adelantosMes + _deudaEntrante)}'
+                            : 'Sin descuentos este mes',
+                    style: AppTexto.secundario,
+                  ),
                   const SizedBox(height: AppEspacio.sm),
                   const Text(
                     'El neto nunca baja de 0: si los adelantos '
@@ -448,6 +549,23 @@ class _MiNominaScreenState extends State<MiNominaScreen> {
                         style: AppTexto.cuerpo,
                       ),
                   const SizedBox(height: AppEspacio.sm),
+                  // 19/25: pedidos aún sin subir (op en cola): el
+                  // entrenador los ve desde que los toca, no solo
+                  // cuando bajan del servidor.
+                  if (_solicitudes
+                      .where((s) => s.estado == 'por_enviar')
+                      .isNotEmpty) ...[
+                    const Text('Por enviar (aún no sube al servidor)',
+                        style: AppTexto.secundario),
+                    for (final s in _solicitudes.where(
+                        (s) => s.estado == 'por_enviar'))
+                      Text(
+                        '· ${fmtMonto(s.monto)} CUP · ${s.motivo}'
+                        '${s.creadoEn != null && s.creadoEn!.length >= 10 ? ' · ${s.creadoEn!.substring(0, 10)}' : ''}',
+                        style: AppTexto.cuerpo,
+                      ),
+                    const SizedBox(height: AppEspacio.sm),
+                  ],
                   const Text('Solicitudes pendientes (no descuentan)',
                       style: AppTexto.secundario),
                   if (_solicitudes
@@ -465,12 +583,14 @@ class _MiNominaScreenState extends State<MiNominaScreen> {
                   // v1.12.0 (F3 destino): solicitudes resueltas con
                   // su destino, cuando el dato llega del espejo.
                   if (_solicitudes
-                      .where((s) => !s.pendiente)
+                      .where((s) =>
+                          !s.pendiente && s.estado != 'por_enviar')
                       .isNotEmpty) ...[
                     const SizedBox(height: AppEspacio.sm),
                     const Text('Solicitudes resueltas',
                         style: AppTexto.secundario),
-                    for (final s in _solicitudes.where((s) => !s.pendiente))
+                    for (final s in _solicitudes.where((s) =>
+                        !s.pendiente && s.estado != 'por_enviar'))
                       Text(
                         '· ${fmtMonto(s.monto)} CUP · ${s.estado}'
                         '${s.destinoEtiqueta != null ? ' · destino: ${s.destinoEtiqueta}' : ''}'
@@ -634,25 +754,33 @@ String textoReciboNomina({
   required int tarifa,
   required int dosis,
   required double comision,
+  double bonos = 0,
   required double adelantosMes,
   required double deudaEntrante,
+  bool mostrarConteo = true,
   required String sello,
   required String syncTexto,
 }) {
   final base = clientesPagados * tarifa.toDouble();
-  var neto = base + comision - adelantosMes - deudaEntrante;
+  var neto = base + comision + bonos - adelantosMes - deudaEntrante;
   if (neto < 0) neto = 0;
   final b = StringBuffer();
   b.writeln(sello);
   b.writeln(syncTexto);
   b.writeln('Mes: $pref');
-  b.writeln(
-      'Base: $clientesPagados clientes × $tarifa = ${fmtMonto(base)} CUP');
+  // #1 (Argón nómina): sin permiso de cifras, la base va sin el
+  // conteo global.
+  if (mostrarConteo) {
+    b.writeln(
+        'Base: $clientesPagados clientes × $tarifa = ${fmtMonto(base)} CUP');
+  } else {
+    b.writeln('Base: ${fmtMonto(base)} CUP');
+  }
   b.writeln('Comisión dosis: $dosis dosis = ${fmtMonto(comision)} CUP');
+  b.writeln('Bonos: +${fmtMonto(bonos)} CUP');
   b.writeln('Adelantos del mes: -${fmtMonto(adelantosMes)} CUP');
   b.writeln('Deuda arrastrada: -${fmtMonto(deudaEntrante)} CUP');
   b.writeln('NETO ESTIMADO: ${fmtMonto(neto)} CUP');
-  b.writeln(
-      'Sin bonos (los gestiona el dueño). El pago se hace el último día del mes.');
+  b.writeln('El pago se hace el último día del mes.');
   return b.toString();
 }

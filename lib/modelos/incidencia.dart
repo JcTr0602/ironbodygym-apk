@@ -347,3 +347,63 @@ class IncidenciaHistorial {
     );
   }
 }
+
+/// 22/25, PURO: autor a GUARDAR en una fila nueva de incidencia.
+/// Antes se guardaba `userId ?? 'desconocido'`: un UUID ilegible
+/// o el literal 'desconocido' sin sesión. Ahora: el nombre de la
+/// sesión (Duany/Gabriel/Jc) si existe; si no, el telegram_id; si
+/// tampoco hay identidad, cadena vacía (la vista muestra 'Sin
+/// autor registrado', nunca un nombre inventado). El servidor, por
+/// su lado, ya estampa `dev["nombre"]` en sus filas: el nombre
+/// local y el del servidor coinciden en el caso normal.
+String autorIncidenciaActual({
+  String? displayName,
+  int? telegramId,
+}) {
+  final n = (displayName ?? '').trim();
+  if (n.isNotEmpty) return n;
+  if (telegramId != null) return '$telegramId';
+  return '';
+}
+
+/// 22/25, PURO: ¿un valor guardado como autor es un nombre
+/// fiable? No lo son: vacío, 'desconocido' (filas viejas sin
+/// sesión) ni un UUID de Supabase (filas viejas con userId).
+bool autorIncidenciaFiable(String? valor) {
+  if (valor == null) return false;
+  final v = valor.trim();
+  if (v.isEmpty || v == 'desconocido') return false;
+  if (_reUuid.hasMatch(v)) return false;
+  return true;
+}
+
+final _reUuid = RegExp(
+    r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-'
+    r'[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$');
+
+/// 22/25, PURO: nombre a MOSTRAR para un autor guardado.
+/// - '' o 'desconocido' → 'Sin autor registrado' (honesto: la
+///   fila vieja no registró quién; no se inventa un nombre).
+/// - El UUID del usuario actual → su nombre de sesión (cubre las
+///   filas viejas propias, que guardaban el UUID).
+/// - Cualquier otro valor fiable se muestra tal cual (nombres
+///   nuevos). Un UUID ajeno no se puede mapear sin tabla de
+///   usuarios: se etiqueta 'Sin autor registrado' (la fila no
+///   guardó un nombre recuperable, no se inventa uno).
+String nombreAutorIncidencia(
+  String? valor, {
+  String? userIdActual,
+  String? displayNameActual,
+}) {
+  final v = (valor ?? '').trim();
+  if (!autorIncidenciaFiable(v)) {
+    if (v.isNotEmpty &&
+        userIdActual != null &&
+        v == userIdActual &&
+        (displayNameActual ?? '').trim().isNotEmpty) {
+      return displayNameActual!.trim();
+    }
+    return 'Sin autor registrado';
+  }
+  return v;
+}

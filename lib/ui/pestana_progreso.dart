@@ -9,6 +9,7 @@ import '../tiempo.dart';
 import '../permisos_entrenador.dart';
 import 'editor_plan_nutricional.dart';
 import 'grafico_peso.dart';
+import 'componentes.dart';
 
 class Medicion {
   final int id;
@@ -177,7 +178,7 @@ class _PestanaProgresoState extends State<PestanaProgreso> {
     }
 
     if (_cargando) {
-      return const Center(child: CircularProgressIndicator());
+      return const EstadoCargando(texto: 'Cargando progreso…');
     }
 
     if (_error != null) {
@@ -187,9 +188,10 @@ class _PestanaProgresoState extends State<PestanaProgreso> {
           children: [
             Text('Error: $_error'),
             const SizedBox(height: 16),
-            ElevatedButton(
+            BotonPrimario(
+              texto: 'Reintentar',
               onPressed: _cargar,
-              child: const Text('Reintentar'),
+              expandido: false,
             ),
           ],
         ),
@@ -481,9 +483,10 @@ class _PestanaProgresoState extends State<PestanaProgreso> {
             onPressed: () => Navigator.pop(ctx, false),
             child: const Text('CANCELAR'),
           ),
-          ElevatedButton(
+          BotonPrimario(
+            texto: 'GUARDAR',
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('GUARDAR'),
+            expandido: false,
           ),
         ],
       ),

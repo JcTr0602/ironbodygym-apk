@@ -24,6 +24,7 @@ import '../localdb.dart';
 import '../negocio.dart';
 import '../tiempo.dart';
 import 'diseno.dart';
+import 'componentes.dart';
 
 class CampanaWaScreen extends StatefulWidget {
   const CampanaWaScreen({super.key});
@@ -584,7 +585,7 @@ class _CampanaWaScreenState extends State<CampanaWaScreen> {
     return Scaffold(
       appBar: AppBar(title: const Text('Campaña WhatsApp')),
       body: _cargando
-          ? const Center(child: CircularProgressIndicator())
+          ? const EstadoCargando(texto: 'Cargando campaña…')
           : switch (_fase) {
               'run' => _vistaRun(),
               'fin' => _vistaFin(),
@@ -736,7 +737,7 @@ class _CampanaWaScreenState extends State<CampanaWaScreen> {
           .addPostFrameCallback((_) {
         if (mounted) setState(() => _fase = 'fin');
       });
-      return const Center(child: CircularProgressIndicator());
+      return const EstadoCargando(texto: 'Cargando campaña…');
     }
     final abierto = actual['estado'] == 'abierto';
     return ListView(

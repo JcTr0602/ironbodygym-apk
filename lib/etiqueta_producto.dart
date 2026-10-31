@@ -52,3 +52,22 @@ bool coincideBusquedaProducto(
   if (q.isEmpty) return true;
   return etiquetaProducto(nombre, categoria).toLowerCase().contains(q);
 }
+
+/// Filtro de disponibilidad del catálogo (14/25, PURO):
+/// 'todos' | 'con_stock' | 'bajo' | 'agotado'. «Bajo» usa la
+/// misma regla que el chip de la tarjeta: 0 < stock <= umbral
+/// (umbral_stock del producto, 3 por defecto).
+bool coincideFiltroStock(Map<String, dynamic> s, String filtro) {
+  final stock = (s['stock'] as num?)?.toInt() ?? 0;
+  switch (filtro) {
+    case 'con_stock':
+      return stock > 0;
+    case 'bajo':
+      final umbral = (s['umbral_stock'] as num?)?.toInt() ?? 3;
+      return stock > 0 && stock <= umbral;
+    case 'agotado':
+      return stock <= 0;
+    default:
+      return true;
+  }
+}

@@ -29,6 +29,28 @@ class CalendarioTurnosScreen extends StatefulWidget {
       _CalendarioTurnosScreenState();
 }
 
+/// T2 (estéticas 1.19): color estable por entrenador para los
+/// chips del calendario — mismo nombre, mismo color todo el mes.
+/// Los dos entrenadores del gym tienen color fijo y distinto; el
+/// resto cae por hash del nombre.
+Color colorChipEntrenador(String? nombre) {
+  final n = (nombre ?? '').trim().toLowerCase();
+  if (n.isEmpty) return Colors.grey;
+  if (n.contains('duany')) return AppColores.naranja;
+  if (n.contains('gabriel')) return AppColores.info;
+  const paleta = [
+    AppColores.exito,
+    AppColores.alerta,
+    AppColores.info,
+    AppColores.naranja,
+  ];
+  var h = 0;
+  for (final u in n.runes) {
+    h = (h * 31 + u) % 1000003;
+  }
+  return paleta[h % paleta.length];
+}
+
 class _CalendarioTurnosScreenState extends State<CalendarioTurnosScreen> {
   static const _diasCortos = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'];
   static const _meses = [
@@ -295,7 +317,7 @@ class _CalendarioTurnosScreenState extends State<CalendarioTurnosScreen> {
         ],
       ),
       body: _cargando
-          ? const Center(child: CircularProgressIndicator())
+          ? const EstadoCargando(texto: 'Cargando calendario…')
           : ListView(
               padding: const EdgeInsets.all(AppEspacio.md),
               children: [
@@ -353,6 +375,47 @@ class _CalendarioTurnosScreenState extends State<CalendarioTurnosScreen> {
     );
   }
 
+  /// T2 (estéticas 1.19): chip de franja — el color identifica al
+  /// entrenador de un vistazo en todo el mes.
+  Widget _chipTurno(String letra, String? nombre) {
+    if (nombre == null) {
+      return Row(
+        children: [
+          Text('$letra ',
+              style: const TextStyle(
+                  fontSize: 10, fontWeight: FontWeight.w700)),
+          const Text('—', style: TextStyle(fontSize: 10)),
+        ],
+      );
+    }
+    final color = colorChipEntrenador(nombre);
+    return Row(
+      children: [
+        Text('$letra ',
+            style: const TextStyle(
+                fontSize: 10, fontWeight: FontWeight.w700)),
+        Expanded(
+          child: Container(
+            padding:
+                const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.15),
+              borderRadius: BorderRadius.circular(999),
+            ),
+            child: Text(
+              nombre.split(' ').first,
+              style: TextStyle(
+                  fontSize: 10,
+                  fontWeight: FontWeight.w700,
+                  color: color),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
   Widget _celda(
       BuildContext context, int dia, int diasEnMes, DateTime hoy) {
     if (dia < 1 || dia > diasEnMes) return const SizedBox(height: 64);
@@ -378,8 +441,6 @@ class _CalendarioTurnosScreenState extends State<CalendarioTurnosScreen> {
             franja: 'tarde',
             patron: _patron,
             excepciones: _excepciones);
-    String corto(String? n) =>
-        n == null ? '—' : n.split(' ').first;
     return Padding(
       padding: const EdgeInsets.all(2),
       child: Material(
@@ -432,13 +493,9 @@ class _CalendarioTurnosScreenState extends State<CalendarioTurnosScreen> {
                     const Text('Cerrado',
                         style: TextStyle(fontSize: 10))
                   else ...[
-                    Text('M ${corto(manana)}',
-                        style: const TextStyle(fontSize: 10),
-                        overflow: TextOverflow.ellipsis),
-                    if (fecha.weekday != 6)
-                      Text('T ${corto(tarde)}',
-                          style: const TextStyle(fontSize: 10),
-                          overflow: TextOverflow.ellipsis),
+                    _chipTurno('M', manana),
+                    const SizedBox(height: 2),
+                    if (fecha.weekday != 6) _chipTurno('T', tarde),
                   ],
                 ],
               ),

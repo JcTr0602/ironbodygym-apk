@@ -6,11 +6,28 @@
 import 'package:flutter/material.dart';
 
 import '../auth.dart';
+import '../config.dart';
 import '../gympedia_validacion.dart';
 import '../localdb.dart';
 import '../sync.dart';
+import 'componentes.dart';
 import 'diseno.dart';
 import 'gympedia_editor.dart';
+
+/// GY3 (estéticas 1.19): texto del sello de respaldo de un
+/// artículo GymPedia (puro; mismo vocabulario que el editor).
+String textoSelloGympedia(String sello) {
+  switch (sello) {
+    case 'verde':
+      return 'Respaldo sólido';
+    case 'amarillo':
+      return 'Con matices';
+    case 'gris':
+      return 'Sin respaldo';
+    default:
+      return sello;
+  }
+}
 
 class GympediaScreen extends StatefulWidget {
   /// Si es true, se muestra sin Scaffold/AppBar (pestaña dentro de
@@ -29,6 +46,28 @@ class _GympediaScreenState extends State<GympediaScreen> {
   List<Map<String, dynamic>> _borradores = [];
   bool _cargando = true;
   bool _sincronizando = false;
+  // 20/25: buscador (título, slug o categoría).
+  String _busqueda = '';
+  final _busquedaCtrl = TextEditingController();
+
+  @override
+  void dispose() {
+    _busquedaCtrl.dispose();
+    super.dispose();
+  }
+
+  /// Listas filtradas por la búsqueda (vacía = todo).
+  List<Map<String, dynamic>> get _publicadosVisibles => _publicados
+      .where((p) => GympediaValidacion.coincideBusqueda(p, _busqueda))
+      .toList();
+  List<Map<String, dynamic>> get _borradoresVisibles => _borradores
+      .where((b) => GympediaValidacion.coincideBusqueda(b, _busqueda))
+      .toList();
+
+  void _limpiarBusqueda() {
+    _busquedaCtrl.clear();
+    setState(() => _busqueda = '');
+  }
 
   @override
   void initState() {
@@ -91,15 +130,45 @@ class _GympediaScreenState extends State<GympediaScreen> {
     await _cargar();
   }
 
-  Color _colorSello(String sello) {
+  Color _colorSello(BuildContext context, String sello) {
     switch (sello) {
       case 'verde':
-        return Colors.green;
+        return AppColores.exito;
       case 'amarillo':
-        return Colors.amber.shade700;
+        return AppColores.alerta;
       default:
-        return Colors.grey;
+        return AppColores.textoSecundario(context);
     }
+  }
+
+  /// GY3 (estéticas 1.19): el sello con texto — mismo vocabulario
+  /// que el editor («Respaldo sólido / Con matices / Sin respaldo»).
+  String _textoSello(String sello) => textoSelloGympedia(sello);
+
+  /// GY1 (estéticas 1.19): miniatura del artículo — misma URL
+  /// pública que la vista previa del editor; si no hay imagen o
+  /// falla, cae al punto del sello.
+  Widget _miniaturaArticulo(Map<String, dynamic> p) {
+    final tieneImagen =
+        p['tiene_imagen'] == true || p['tiene_imagen'] == 1;
+    final sello = _colorSello(context, '${p['sello']}');
+    if (!tieneImagen) {
+      return Icon(Icons.circle, size: 14, color: sello);
+    }
+    final slug = '${p['slug'] ?? p['id'] ?? ''}';
+    final rev = (p['imagen_rev'] as num?)?.toInt() ?? 0;
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(8),
+      child: Image.network(
+        '${AppConfig.supabaseUrl}/storage/v1/object/public/'
+        '${AppConfig.bucketGympedia}/$slug.webp?v=$rev',
+        width: 48,
+        height: 48,
+        fit: BoxFit.cover,
+        errorBuilder: (_, __, ___) =>
+            Icon(Icons.circle, size: 14, color: sello),
+      ),
+    );
   }
 
   @override
@@ -140,10 +209,31 @@ class _GympediaScreenState extends State<GympediaScreen> {
   /// Cuerpo de la lista (compartido entre la pantalla propia y la
   /// pestaña embebida en Biblioteca).
   Widget _cuerpo() {
-    if (_cargando) return const Center(child: CircularProgressIndicator());
+    if (_cargando) return const EstadoCargando(texto: 'Cargando biblioteca…');
     return ListView(
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 96),
               children: [
+        // 20/25: buscador (título, slug o categoría).
+        Row(
+          children: [
+            Expanded(
+              child: CampoTexto(
+                controller: _busquedaCtrl,
+                hint: 'Buscar artículo…',
+                icono: Icons.search,
+                onChanged: (v) =>
+                    setState(() => _busqueda = v.trim()),
+              ),
+            ),
+            if (_busqueda.isNotEmpty)
+              IconButton(
+                icon: const Icon(Icons.clear),
+                tooltip: 'Limpiar búsqueda',
+                onPressed: _limpiarBusqueda,
+              ),
+          ],
+        ),
+        const SizedBox(height: 12),
         if (widget.embebida) ...[
           Row(
             children: [
@@ -167,15 +257,15 @@ class _GympediaScreenState extends State<GympediaScreen> {
           const SizedBox(height: 12),
         ],
 
-                if (_borradores.isNotEmpty) ...[
+                if (_borradoresVisibles.isNotEmpty) ...[
                   Text('Borradores', style: AppTexto.subtitulo),
                   const SizedBox(height: 4),
-                  const Text(
+                  Text(
                     'Solo viven en este teléfono hasta que los publiques.',
-                    style: const TextStyle(fontSize: 12, color: Colors.grey),
+                    style: AppTexto.secundario.copyWith(fontSize: 12),
                   ),
                   const SizedBox(height: 8),
-                  for (final b in _borradores)
+                  for (final b in _borradoresVisibles)
                     Card(
                       child: ListTile(
                         leading: const Icon(Icons.edit_note,
@@ -192,7 +282,7 @@ class _GympediaScreenState extends State<GympediaScreen> {
                                 message:
                                     'El artículo publicado cambió desde que abriste este borrador',
                                 child: Icon(Icons.warning_amber,
-                                    color: Colors.red),
+                                    color: AppColores.error),
                               )
                             : const Chip(
                                 label: Text('Borrador',
@@ -204,21 +294,31 @@ class _GympediaScreenState extends State<GympediaScreen> {
                     ),
                   const SizedBox(height: 16),
                 ],
-                Text('Publicados (${_publicados.length})',
+                Text('Publicados (${_publicadosVisibles.length})',
                     style: AppTexto.subtitulo),
                 const SizedBox(height: 8),
-                if (_publicados.isEmpty)
-                  const Padding(
-                    padding: EdgeInsets.symmetric(vertical: 24),
-                    child: Text(
-                      'Aún no bajó ningún artículo. Toca el botón de '
-                      'actualizar con conexión y espera a que el espejo '
-                      'se llene.',
-                      style: TextStyle(color: Colors.grey),
+                if (_publicadosVisibles.isEmpty)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 24),
+                    child: EstadoVacio(
+                      icono: Icons.menu_book_rounded,
+                      titulo: _busqueda.isNotEmpty
+                          ? 'Ningún artículo coincide con «$_busqueda».'
+                          : 'Aún no bajó ningún artículo.',
+                      subtitulo: _busqueda.isEmpty
+                          ? 'Toca el botón de actualizar con conexión '
+                              'y espera a que el espejo se llene.'
+                          : null,
+                      textoAccion: _busqueda.isNotEmpty
+                          ? 'Limpiar búsqueda'
+                          : 'Actualizar',
+                      onAccion: _busqueda.isNotEmpty
+                          ? _limpiarBusqueda
+                          : _sincronizar,
                     ),
                   ),
                 for (final cat in GympediaValidacion.categorias)
-                  if (_publicados.any((p) => '${p['categoria']}' == cat)) ...[
+                  if (_publicadosVisibles.any((p) => '${p['categoria']}' == cat)) ...[
                     Padding(
                       padding: const EdgeInsets.only(top: 10, bottom: 4),
                       child: Text(
@@ -228,18 +328,30 @@ class _GympediaScreenState extends State<GympediaScreen> {
                             color: AppColores.naranja),
                       ),
                     ),
-                    for (final p in _publicados.where(
+                    for (final p in _publicadosVisibles.where(
                         (p) => '${p['categoria']}' == cat))
                       Card(
                         child: ListTile(
-                          leading: Icon(Icons.circle,
-                              size: 14, color: _colorSello('${p['sello']}')),
+                          leading: _miniaturaArticulo(p),
                           title: Text('${p['titulo']}',
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis),
-                          subtitle: Text(
-                              'Rev. ${(p['revision'] as num?)?.toInt() ?? 1}'
-                              '${(p['tiene_imagen'] == true || p['tiene_imagen'] == 1) ? ' · con imagen' : ''}'),
+                          subtitle: Column(
+                            crossAxisAlignment:
+                                CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                  'Rev. ${(p['revision'] as num?)?.toInt() ?? 1}'
+                                  '${(p['tiene_imagen'] == true || p['tiene_imagen'] == 1) ? ' · con imagen' : ''}'),
+                              // GY3: el sello con su texto.
+                              Text(_textoSello('${p['sello']}'),
+                                  style: TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w600,
+                                      color: _colorSello(
+                                          context, '${p['sello']}'))),
+                            ],
+                          ),
                           trailing: const Icon(Icons.chevron_right),
                           onTap: () => _abrirEditor(publicado: p),
                         ),
@@ -249,7 +361,7 @@ class _GympediaScreenState extends State<GympediaScreen> {
                 const Text(
                   'Los artículos se leen sin conexión en la app de '
                   'clientes. Publicar y retirar se aplica al sincronizar.',
-                  style: TextStyle(fontSize: 12, color: Colors.grey),
+                  style: AppTexto.secundario,
                 ),
               ],
             );

@@ -10,17 +10,20 @@
 /// y esta lista la refleja tal cual.
 library;
 
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 
 import '../auth.dart';
 import '../cliente_protegido.dart';
+import '../fotos.dart';
 import '../localdb.dart';
 import '../negocio.dart';
 import '../nomina_calc.dart';
 import '../sync.dart';
 import 'componentes.dart';
+import 'diseno.dart';
 import 'ficha.dart';
-import 'pagos_realizados.dart' show ClienteAvatarThumb;
 import 'widgets.dart';
 
 class PagaronMesScreen extends StatefulWidget {
@@ -40,8 +43,7 @@ class _PagaronMesScreenState extends State<PagaronMesScreen> {
     _cargar();
   }
 
-  /// Mismo patrón que PagosRealizadosScreen: el ⟳ sincroniza el
-  /// alcance de pagos y luego relee la lista local.
+  /// El ⟳ sincroniza el alcance de pagos y luego relee la lista local.
   Future<void> _actualizar() async {
     try {
       await SyncEngine.instance.sincronizarScope('pagos');
@@ -138,7 +140,7 @@ class _PagaronMesScreenState extends State<PagaronMesScreen> {
           const SyncBanner(alcance: 'pagos'),
           Expanded(
             child: _cargando
-                ? const Center(child: CircularProgressIndicator())
+                ? const EstadoCargando(texto: 'Cargando pagos del mes…')
                 : _filas.isEmpty
                     ? const EstadoVacio(
                         icono: Icons.payments,
@@ -189,5 +191,62 @@ class _PagaronMesScreenState extends State<PagaronMesScreen> {
         ],
       ),
     );
+  }
+}
+
+/// Avatar con miniatura de foto (15/25: mudado desde la pantalla
+/// eliminada PagosRealizadosScreen, su único uso que quedaba).
+/// v1.2.8 (Paso 4/E2): StatefulWidget dedicado en vez de
+/// FutureBuilder directo en el itemBuilder (evita recrear futures
+/// en cada scroll).
+class ClienteAvatarThumb extends StatefulWidget {
+  final String? fotoStorage;
+  final String? fotoLocal;
+  const ClienteAvatarThumb({super.key, this.fotoStorage, this.fotoLocal});
+
+  @override
+  State<ClienteAvatarThumb> createState() => _ClienteAvatarThumbState();
+}
+
+class _ClienteAvatarThumbState extends State<ClienteAvatarThumb> {
+  File? _archivo;
+
+  @override
+  void initState() {
+    super.initState();
+    _cargar();
+  }
+
+  @override
+  void didUpdateWidget(ClienteAvatarThumb old) {
+    super.didUpdateWidget(old);
+    if (old.fotoStorage != widget.fotoStorage ||
+        old.fotoLocal != widget.fotoLocal) {
+      // Corrección Gemini ronda 2: resetear antes de cargar para no
+      // mostrar la foto del cliente anterior durante el I/O.
+      setState(() => _archivo = null);
+      _cargar();
+    }
+  }
+
+  Future<void> _cargar() async {
+    File? f;
+    if (widget.fotoLocal != null && widget.fotoLocal!.isNotEmpty) {
+      final lf = File(widget.fotoLocal!);
+      if (await lf.exists()) f = lf;
+    }
+    f ??= await FotoCache.instance.enCache(widget.fotoStorage);
+    if (mounted) setState(() => _archivo = f);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_archivo != null) {
+      return CircleAvatar(
+        backgroundImage: FileImage(_archivo!),
+        backgroundColor: Colors.transparent,
+      );
+    }
+    return const Icon(Icons.verified, color: AppColores.exito);
   }
 }

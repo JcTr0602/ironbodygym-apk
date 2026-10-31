@@ -621,14 +621,29 @@ bool puedeDispararMasivo({
 /// Argón P3#10-parte: el carnet de 11 también lleva la fecha en sus
 /// 6 primeros dígitos; fechaNacDeCarnet lo cubre (antes solo se
 /// miraba el carnet cuando tenía exactamente 6).
-bool esCumpleanosHoy(Map<String, dynamic> cliente, String hoyMmDd) {
+/// Regla 29-feb → 1-mar (Q1 Argón cumpleaños): un nacido el 29 de
+/// febrero cumple el 1 de marzo en año NO bisiesto. Sin [anioHoy]
+/// se aplica la regla (mejor celebrar que olvidar); con año
+/// bisiesto, el 1 de marzo NO hace match (el cumple fue el 29).
+bool esCumpleanosHoy(Map<String, dynamic> cliente, String hoyMmDd,
+    {int? anioHoy}) {
+  String? mmDd;
   final fn = '${cliente['fecha_nac'] ?? ''}';
-  if (fn.length >= 10) return fn.substring(5, 10) == hoyMmDd;
-  final nac = fechaNacDeCarnet('${cliente['carnet'] ?? ''}');
-  if (nac == null) return false;
-  final mmDd =
-      '${nac.month.toString().padLeft(2, '0')}-${nac.day.toString().padLeft(2, '0')}';
-  return mmDd == hoyMmDd;
+  if (fn.length >= 10) {
+    mmDd = fn.substring(5, 10);
+  } else {
+    final nac = fechaNacDeCarnet('${cliente['carnet'] ?? ''}');
+    if (nac == null) return false;
+    mmDd =
+        '${nac.month.toString().padLeft(2, '0')}-${nac.day.toString().padLeft(2, '0')}';
+  }
+  if (mmDd == hoyMmDd) return true;
+  if (mmDd == '02-29' &&
+      hoyMmDd == '03-01' &&
+      (anioHoy == null || !esAnioBisiesto(anioHoy))) {
+    return true;
+  }
+  return false;
 }
 
 /// ¿Vence dentro de la ventana? [diasAnticipacion] incluye hoy (0).

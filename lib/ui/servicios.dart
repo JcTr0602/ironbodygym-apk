@@ -1,10 +1,13 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 
 import '../auth.dart';
 import '../bloque3.dart';
 import '../etiqueta_producto.dart';
 import '../localdb.dart';
-import '../negocio.dart' show edadDeCarnet, fmtMonto;
+import '../negocio.dart'
+    show edadDeCarnet, fmtMonto, kUmbralStockPomosAgua;
 import '../permisos_entrenador.dart';
 import '../servicios.dart';
 import '../sync.dart';
@@ -47,12 +50,16 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
   List<Map<String, dynamic>> _misPomos = [];
   int? _pomoSel;
   Map<String, dynamic> _cuadre = const {};
+  // 9/25: cuadre del gym (solo dueño) + vista seleccionada.
+  Map<String, dynamic> _cuadreGym = const {};
+  var _vistaCuadre = 'mia';
   List<Map<String, dynamic>> _ventasHoy = [];
-  List<Map<String, dynamic>> _ventasTodas = [];
-  List<Map<String, dynamic>> _ventasHistorial = [];
-  List<Map<String, dynamic>> _salidas = [];
-  List<Map<String, dynamic>> _salidasHistorial = [];
   Set<int> _reversadas = {};
+  // 10/25: desglose del pomo seleccionado (dueño), traído por pomo
+  // en vez del espejo completo.
+  List<Map<String, dynamic>> _desgloseVentas = [];
+  List<Map<String, dynamic>> _desgloseSalidas = [];
+  int? _desglosePomoId;
   Map<int, String> _personas = {};
   int? _miTid;
 
@@ -69,24 +76,28 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
     final precios = await preciosServicios();
     final ajustes = await LocalDb.instance.getAjustes();
     final agua = await stockAguaLocal();
-    // Personas conocidas (para nombrar al titular de cada pomo):
-    // quien haya registrado pagos o ventas de suplementos.
+    // 10/25 (rendimiento): el directorio de entrenadores ya NO se
+    // arma escaneando `pagos` y `ventas_suplementos` completos.
+    // Fuente principal: la meta usuarios_apk (la lista mantenida
+    // de usuarios de la app). Los titulares de pomo que no estén
+    // en la meta se resuelven abajo con una consulta indexada.
     final personas = <int, String>{};
     if (tid != null) {
       personas[tid] = auth.isOwner ? 'Yo (dueño)' : 'Yo';
     }
-    for (final p in await LocalDb.instance.allMirror('pagos')) {
-      final ptid = LocalDb.normalizarTelegramId(p['telegram_user_id']);
-      final nombre = '${p['registrado_por'] ?? ''}';
-      if (ptid != null && nombre.isNotEmpty) {
-        personas.putIfAbsent(ptid, () => nombre);
+    try {
+      final rawApk = await LocalDb.instance.getMeta('usuarios_apk');
+      if (rawApk != null && rawApk.isNotEmpty) {
+        for (final u in jsonDecode(rawApk) as List) {
+          final m = Map<String, dynamic>.from(u as Map);
+          final utid = LocalDb.normalizarTelegramId(m['telegram_id']);
+          final nombre = '${m['nombre'] ?? ''}'.trim();
+          if (utid != null && nombre.isNotEmpty) {
+            personas.putIfAbsent(utid, () => nombre);
+          }
+        }
       }
-    }
-    for (final v
-        in await LocalDb.instance.allMirror('ventas_suplementos')) {
-      final ptid = LocalDb.normalizarTelegramId(v['registrado_por']);
-      if (ptid != null) personas.putIfAbsent(ptid, () => 'Entrenador');
-    }
+    } catch (_) {}
     // Ítem 8: el dueño ve TODOS los pomos activos (vende del
     // principal; puede elegir otro); el entrenador solo el suyo.
     final pomos = await pomosActivosLocal(
@@ -95,11 +106,30 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
     // Ítem 13: etiqueta compuesta «Nombre · Categoría».
     final cats = mapaCategoriasSuplemento(
         await LocalDb.instance.allMirror('categorias_suplemento'));
+    // 10/25: solo los suplementos de los pomos visibles, por PK,
+    // en vez del catálogo completo.
+    final supIds = <int>{
+      for (final l in pomos)
+        if ((l['suplemento_id'] as num?) != null)
+          (l['suplemento_id'] as num).toInt(),
+    };
     final nombreSup = <int, String>{
-      for (final s in await LocalDb.instance.allMirror('suplementos'))
+      for (final s in await LocalDb.instance
+          .mirrorPorIds('suplementos', supIds.toList()))
         if ((s['id'] as num?) != null)
           (s['id'] as num).toInt(): etiquetaDeSuplemento(s, cats),
     };
+    // 10/25: titulares sin nombre en la meta → consulta indexada
+    // por telegram_id (sin escanear `pagos`).
+    final titularesSinNombre = <int>{};
+    for (final l in pomos) {
+      final rt = LocalDb.normalizarTelegramId(l['titular_telegram_id']);
+      if (rt != null && !personas.containsKey(rt)) {
+        titularesSinNombre.add(rt);
+      }
+    }
+    personas.addAll(await LocalDb.instance
+        .nombresPorTelegramIds(titularesSinNombre));
     for (final l in pomos) {
       l['producto_nombre'] =
           nombreSup[(l['suplemento_id'] as num?)?.toInt()] ?? 'Servicio';
@@ -109,18 +139,15 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
           respTid == null ? '—' : (personas[respTid] ?? 'Entrenador');
       l['titular_tid'] = respTid;
     }
-    final ventas = await LocalDb.instance.allMirror('servicio_ventas');
-    final salidas =
-        await LocalDb.instance.allMirror('servicio_salidas');
-    final reversadas = <int>{
-      for (final v in ventas)
-        if ((v['reverso_de'] as num?) != null)
-          (v['reverso_de'] as num).toInt(),
-    };
     final misPomosIds = <int>{
       for (final l in pomos)
         if ((l['id'] as num?) != null) (l['id'] as num).toInt(),
     };
+    // 10/25: la pantalla principal ya NO trae el espejo completo
+    // de ventas ni el de salidas. Solo las ventas de hoy (vía
+    // mirrorPorFecha + índice); el historial completo lo carga la
+    // propia pantalla de Historial al abrirse, y el desglose del
+    // pomo se trae por pomo al seleccionarlo.
     // Historial (pedido Jc 2026-10-28): el mismo predicado de rol
     // que «Ventas de hoy», sin el filtro de fecha. Las salidas sin
     // venta solo las registra el dueño, así que al entrenador no
@@ -137,22 +164,27 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
           misPomosIds.contains((v['pomo_id'] as num?)?.toInt());
     }
 
-    final deHoy = ventas.where((v) {
-      if ('${v['fecha'] ?? ''}'.length < 10 ||
-          '${v['fecha']}'.substring(0, 10) != hoy) {
-        return false;
-      }
-      return visibleParaMi(v);
-    }).toList()
+    final ventasHoyEspejo = await LocalDb.instance
+        .mirrorPorFecha('servicio_ventas', 'fecha', hoy, hoy);
+    // Reversos de hoy: bastan para marcar «Reversada» en las filas
+    // de hoy (un reverso siempre lleva la fecha del día en que se
+    // revierte, nunca anterior a su venta).
+    final reversadas = <int>{
+      for (final v in ventasHoyEspejo)
+        if ((v['reverso_de'] as num?) != null)
+          (v['reverso_de'] as num).toInt(),
+    };
+    final deHoy = ventasHoyEspejo.where(visibleParaMi).toList()
       ..sort((a, b) =>
           ((b['id'] as num?)?.toInt() ?? 0)
               .compareTo((a['id'] as num?)?.toInt() ?? 0));
-    final historial = ventas.where(visibleParaMi).toList();
-    final salidasHistorial =
-        auth.isOwner ? salidas : <Map<String, dynamic>>[];
     final cuadre = tid == null
         ? const <String, dynamic>{}
         : await cuadreServiciosDia(tid, hoy);
+    // 9/25: el dueño ve también el cuadre del gym entero.
+    final cuadreGym = auth.isOwner
+        ? await cuadreServiciosDiaGym(hoy)
+        : const <String, dynamic>{};
     if (!mounted) return;
     setState(() {
       _esDueno = auth.isOwner;
@@ -173,14 +205,13 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                 ?.toInt();
       }
       _cuadre = cuadre;
+      _cuadreGym = cuadreGym;
       _ventasHoy = deHoy;
-      _ventasTodas = ventas;
-      _ventasHistorial = historial;
-      _salidas = salidas;
-      _salidasHistorial = salidasHistorial;
       _reversadas = reversadas;
       _cargando = false;
     });
+    // 10/25: desglose del pomo seleccionado (dueño) tras la carga.
+    _cargarDesglose();
     // Ítem 5: llegada desde el speed dial de Home → el formulario de
     // ese tipo se abre solo, una vez, con lotes y precios ya cargados.
     if (widget.tipoInicial != null && !_dialogoInicialAbierto) {
@@ -189,6 +220,24 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
         if (mounted) _vender(widget.tipoInicial!);
       });
     }
+  }
+
+  /// 10/25: desglose del pomo seleccionado para el dueño, traído
+  /// por pomo (mirrorPorCampo) en vez del espejo completo. Solo
+  /// el dueño ve el desglose; el entrenador no lo necesita.
+  Future<void> _cargarDesglose() async {
+    final pid = _pomoSel;
+    if (!_esDueno || pid == null) return;
+    final ventas = await LocalDb.instance
+        .mirrorPorCampo('servicio_ventas', 'pomo_id', pid);
+    final salidas = await LocalDb.instance
+        .mirrorPorCampo('servicio_salidas', 'pomo_id', pid);
+    if (!mounted || _pomoSel != pid) return;
+    setState(() {
+      _desgloseVentas = ventas;
+      _desgloseSalidas = salidas;
+      _desglosePomoId = pid;
+    });
   }
 
   /// Actualizar de la sección: baja SOLO las tablas de Servicios
@@ -612,6 +661,44 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
     );
   }
 
+  /// S1 (estéticas 1.19): medidor fino con el número exacto. La
+  /// barra es solo un vistazo (llena a partir de 20); el número
+  /// manda. Rojo cuando está bajo: pomos ≤ 10 (umbral con
+  /// fundamento de Argón, Q7 del dashboard) y dosis del pomo ≤ 5.
+  Widget _medidor(String etiqueta, int valor, int umbralBajo) {
+    final frac = (valor / 20).clamp(0.0, 1.0);
+    final color = valor <= umbralBajo
+        ? AppColores.error
+        : valor <= umbralBajo * 2
+            ? AppColores.alerta
+            : AppColores.exito;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text(etiqueta, style: AppTexto.secundario),
+            Text('$valor',
+                style: AppTexto.cuerpo.copyWith(
+                    fontWeight: FontWeight.bold, color: color)),
+          ],
+        ),
+        const SizedBox(height: 2),
+        ClipRRect(
+          borderRadius: BorderRadius.circular(999),
+          child: LinearProgressIndicator(
+            value: frac,
+            minHeight: 6,
+            backgroundColor:
+                AppColores.borde(context).withValues(alpha: 0.3),
+            valueColor: AlwaysStoppedAnimation<Color>(color),
+          ),
+        ),
+      ],
+    );
+  }
+
   /// v1.13.0 (Bloque 4, B2 + D1): venta múltiple con contadores N/M.
   /// N dosis (2 ≤ N ≤ tope) y M pomos (0 ≤ M ≤ N, topado a pomos).
   /// El dueño tiene tope local (saldo del pomo); el entrenador es
@@ -682,11 +769,12 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                     'El servidor aplica la venta.',
                     style: AppTexto.secundario,
                   ),
-                if (_esDueno)
-                  Text('Dosis en el pomo: $topeDosis',
-                      style: AppTexto.secundario),
-                Text('Pomos en stock: $topePomos',
-                    style: AppTexto.secundario),
+                if (_esDueno) ...[
+                  _medidor('Dosis en el pomo', topeDosis, 5),
+                  const SizedBox(height: 8),
+                ],
+                _medidor('Pomos en stock', topePomos,
+                    kUmbralStockPomosAgua),
                 const SizedBox(height: 12),
                 InkWell(
                   onTap: () async {
@@ -1084,7 +1172,7 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
         ],
       ),
       body: _cargando
-          ? const Center(child: CircularProgressIndicator())
+          ? const EstadoCargando(texto: 'Cargando servicios…')
           : RefreshIndicator(
               onRefresh: _actualizar,
               child: ListView(
@@ -1130,10 +1218,13 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                           context,
                           MaterialPageRoute(
                             builder: (_) => ServiciosHistorialScreen(
-                              ventas: _ventasHistorial,
-                              salidas: _salidasHistorial,
-                              reversadas: _reversadas,
                               esDueno: _esDueno,
+                              miTid: _miTid,
+                              misPomosIds: {
+                                for (final l in _misPomos)
+                                  if ((l['id'] as num?) != null)
+                                    (l['id'] as num).toInt(),
+                              },
                               personas: _personas,
                             ),
                           ),
@@ -1151,20 +1242,11 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                           color: AppColores.textoSecundario(context)
                               .withValues(alpha: 0.08),
                         ),
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(
-                              Icons.receipt_long,
-                              color: AppColores.textoSecundario(context)
-                                  .withValues(alpha: 0.5),
-                            ),
-                            const SizedBox(height: AppEspacio.sm),
-                            Text('Sin ventas registradas hoy.',
-                                style: AppTexto.cuerpo.copyWith(
-                                    color: AppColores.textoSecundario(
-                                        context))),
-                          ],
+                        child: const EstadoVacio(
+                          icono: Icons.receipt_long_rounded,
+                          titulo: 'Sin ventas registradas hoy.',
+                          subtitulo:
+                              'Las ventas de hoy aparecen aquí.',
                         ),
                       ),
                     )
@@ -1245,7 +1327,12 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                       ),
                     ),
                 ],
-                onChanged: (v) => setState(() => _pomoSel = v),
+                // 10/25: al cambiar de pomo, el desglose se trae
+                // de nuevo para ese pomo.
+                onChanged: (v) {
+                  setState(() => _pomoSel = v);
+                  _cargarDesglose();
+                },
               ),
             )
           else
@@ -1306,14 +1393,17 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
           if (pomo != null && _esDueno)
             Builder(builder: (ctx) {
               final pid = (pomo['id'] as num?)?.toInt();
+              // 10/25: solo se muestra si el desglose cargado
+              // corresponde al pomo seleccionado (si cambió hace
+              // un instante y la carga va en camino, no se pinta
+              // un desglose viejo de otro pomo).
+              if (_desglosePomoId != pid) {
+                return const SizedBox.shrink();
+              }
               final d = desglosePomo(
                 pomo: pomo,
-                ventasEspejo: _ventasTodas
-                    .where((v) => (v['pomo_id'] as num?)?.toInt() == pid)
-                    .toList(),
-                salidasEspejo: _salidas
-                    .where((s) => (s['pomo_id'] as num?)?.toInt() == pid)
-                    .toList(),
+                ventasEspejo: _desgloseVentas,
+                salidasEspejo: _desgloseSalidas,
               );
               return Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -1369,7 +1459,7 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
         tipo, primerMetodoServicioActivo(_ajustes, tipo) ?? 'efectivo');
     Widget boton(String tipo, String etiqueta, double precio,
         IconData icono, Color color,
-        {bool grande = false, bool neutro = false}) {
+        {bool grande = false, bool neutro = false, Gradient? degradado}) {
       // v1.13.0 (Bloque 4, Argón ajuste 1): bloqueo SEPARADO
       // dosis vs pomos (nunca un interruptor único) + motivo
       // visible bajo el botón apagado. El entrenador sigue ciego
@@ -1383,21 +1473,24 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
         esDueno: _esDueno,
         precio: precio,
       );
-      return Expanded(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            FilledButton.icon(
+      // 1.19: con degradado, el fondo es el degradado (el color
+      // se ignora) y el deshabilitado también queda transparente
+      // para no taparlo con el velo gris por defecto.
+      final accion = FilledButton.icon(
               style: FilledButton.styleFrom(
                 // Servicios 1.18 #2: el neutro ya no usa borde
                 // como fondo (parecía deshabilitado); fondo M3
                 // con borde visible. El deshabilitado sigue
                 // gobernado solo por onPressed: null.
-                backgroundColor: neutro
-                    ? Theme.of(context)
-                        .colorScheme
-                        .surfaceContainerHighest
-                    : color,
+                backgroundColor: degradado != null
+                    ? Colors.transparent
+                    : neutro
+                        ? Theme.of(context)
+                            .colorScheme
+                            .surfaceContainerHighest
+                        : color,
+                disabledBackgroundColor:
+                    degradado != null ? Colors.transparent : null,
                 foregroundColor:
                     neutro ? AppColores.texto(context) : null,
                 side: neutro
@@ -1427,7 +1520,21 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                   ),
                 ],
               ),
-            ),
+            );
+      return Expanded(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (degradado != null)
+              ClipRRect(
+                borderRadius: BorderRadius.circular(30),
+                child: Container(
+                  decoration: BoxDecoration(gradient: degradado),
+                  child: accion,
+                ),
+              )
+            else
+              accion,
             if (!est.habilitado && est.motivo != null)
               Padding(
                 padding: const EdgeInsets.only(top: 4),
@@ -1444,9 +1551,11 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
 
     // Rediseño 1.18 (Jc 2026-10-29): 3 botones iguales en una
     // fila (Dosis, Dosis + agua, Solo agua) + Venta múltiple a
-    // lo ancho debajo como secundaria. Naranja solo en la
-    // acción principal (Dosis); el resto neutro. Precios,
-    // estados, motivos y flujos (_vender, _ventaMultiple) intactos.
+    // lo ancho debajo como secundaria. Precios, estados, motivos
+    // y flujos (_vender, _ventaMultiple) intactos.
+    // 1.19 (Jc 2026-10-30): Dosis sigue naranja; Solo agua azul
+    // (se lee al instante como agua); Dosis + agua degradado
+    // naranja-azul, mezcla de ambos.
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -1459,13 +1568,13 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
             const SizedBox(width: AppEspacio.sm),
             boton('dosis_con_agua', 'Dosis + agua',
                 precioDe('dosis_con_agua'), Icons.water_drop,
-                AppColores.borde(context),
-                grande: true, neutro: true),
+                AppColores.naranja,
+                grande: true, degradado: AppColores.gradienteDosisAgua),
             const SizedBox(width: AppEspacio.sm),
             boton('agua_suelta', 'Solo agua',
                 precioDe('agua_suelta'), Icons.local_drink,
-                AppColores.borde(context),
-                grande: true, neutro: true),
+                AppColores.azulAgua,
+                grande: true),
           ],
         ),
         const SizedBox(height: AppEspacio.sm),
@@ -1490,12 +1599,14 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
   }
 
   Widget _tarjetaCuadre() {
-    final c = _cuadre;
+    // 9/25: el dueño alterna entre su cuadre personal y el del gym.
+    final esGym = _vistaCuadre == 'gym' && _cuadreGym.isNotEmpty;
+    final c = esGym ? _cuadreGym : _cuadre;
     if (c.isEmpty) return const SizedBox.shrink();
     final dosis = ((c['dosis_sin_agua'] as int?) ?? 0) +
         ((c['dosis_con_agua'] as int?) ?? 0);
     final comision = (c['comision'] as double?) ?? 0;
-    return Tarjeta(
+    final tarjeta = Tarjeta(
       padding: const EdgeInsets.all(AppEspacio.md),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1516,7 +1627,9 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                         AppColores.exito.withValues(alpha: 0.15),
                   ),
                   child: Text(
-                    'Tu comisión: ${fmtMonto(comision)} CUP',
+                    esGym
+                        ? 'Comisiones: ${fmtMonto(comision)} CUP'
+                        : 'Tu comisión: ${fmtMonto(comision)} CUP',
                     style: AppTexto.cuerpo.copyWith(
                         color: AppColores.exito,
                         fontWeight: FontWeight.w600),
@@ -1531,7 +1644,7 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text('Efectivo a entregar',
+                    Text(esGym ? 'Efectivo' : 'Efectivo a entregar',
                         style: AppTexto.secundario),
                     Text('${fmtMonto(c['efectivo'])} CUP',
                         style: AppTexto.titulo.copyWith(fontSize: 22)),
@@ -1636,6 +1749,23 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
         ],
       ),
     );
+    if (!_esDueno) return tarjeta;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SegmentedButton<String>(
+          segments: const [
+            ButtonSegment(value: 'mia', label: Text('Mía')),
+            ButtonSegment(value: 'gym', label: Text('Gym')),
+          ],
+          selected: {_vistaCuadre},
+          onSelectionChanged: (s) =>
+              setState(() => _vistaCuadre = s.first),
+        ),
+        const SizedBox(height: 8),
+        tarjeta,
+      ],
+    );
   }
 
   Widget _filaVenta(Map<String, dynamic> v) {
@@ -1673,6 +1803,7 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
     return Card(
       margin: const EdgeInsets.only(bottom: 8),
       child: ListTile(
+        onTap: () => _detalleVenta(v),
         leading: Icon(
           esReverso
               ? Icons.undo
@@ -1707,6 +1838,121 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
               ),
           ],
         ),
+      ),
+    );
+  }
+
+  /// 10/25: la venta original de un reverso, por PK.
+  Future<Map<String, dynamic>?> _ventaOriginal(
+      Map<String, dynamic> v) async {
+    final origId = (v['reverso_de'] as num?)?.toInt();
+    if (origId == null) return null;
+    final filas =
+        await LocalDb.instance.mirrorPorIds('servicio_ventas', [origId]);
+    return filas.isEmpty ? null : filas.first;
+  }
+
+  /// Ficha de la venta (8/25): hora, pomo, motivo y venta original
+  /// si es reverso. Solo lectura, salvo Revertir (misma condición
+  /// que el botón de la fila).
+  Future<void> _detalleVenta(Map<String, dynamic> v) async {
+    final esReverso = (v['reverso_de'] as num?) != null;
+    final yaReversada =
+        _reversadas.contains((v['id'] as num?)?.toInt());
+    final esCasa = (v['casa'] as num?)?.toInt() == 1;
+    final precio =
+        (v['precio_unitario'] as num?)?.toDouble() ?? 0;
+    final cant = (v['cantidad'] as num?)?.toInt() ?? 0;
+    final monto = precio * cant;
+    final tipoTxt = switch ('${v['tipo']}') {
+      'dosis_sin_agua' => 'Dosis sin agua',
+      'dosis_con_agua' => 'Dosis con agua',
+      'agua_suelta' => 'Agua suelta',
+      _ => '${v['tipo']}',
+    };
+    final com = (v['comision_monto'] as num?)?.toDouble() ??
+        ((v['comision_unitaria'] as num?)?.toDouble() ?? 0) * cant;
+    // 10/25: la venta original se trae por PK, sin el espejo.
+    final original = await _ventaOriginal(v);
+    final fecha = '${v['fecha'] ?? ''}';
+    final fecha10 = fecha.length >= 10 ? fecha.substring(0, 10) : fecha;
+    final motivo = '${v['motivo'] ?? ''}'.trim();
+    if (!mounted) return;
+
+    Widget fila(String e, String valor) => Padding(
+          padding: const EdgeInsets.only(bottom: 4),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              SizedBox(
+                  width: 92,
+                  child: Text(e, style: AppTexto.secundario)),
+              Expanded(child: Text(valor, style: AppTexto.cuerpo)),
+            ],
+          ),
+        );
+
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => DialogoApp(
+        titulo: esReverso ? 'Reverso · $tipoTxt' : tipoTxt,
+        iconoTitulo: esReverso ? Icons.undo : Icons.bolt,
+        contenido: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              fila('Cliente',
+                  '${v['cliente_nombre'] ?? 'Sin identificar'}'),
+              fila('Fecha', fecha10.isEmpty ? '—' : fecha10),
+              fila('Hora', horaVentaServicio(v)),
+              fila('Pomo', nombrePomoVenta(v, _misPomos)),
+              fila('Cantidad', '$cant'),
+              fila('Precio', '${fmtMonto(precio)} CUP'),
+              fila('Total', '${fmtMonto(monto)} CUP'),
+              fila('Método', '${v['metodo'] ?? '—'}'),
+              fila('Registrado por',
+                  '${v['registrado_por_nombre'] ?? '—'}'),
+              if (esCasa) fila('Cuenta', 'Casa'),
+              if (com > 0)
+                fila('Comisión', '${fmtMonto(com)} CUP'),
+              if (motivo.isNotEmpty) fila('Motivo', motivo),
+              if (original != null) ...[
+                const SizedBox(height: AppEspacio.md),
+                const EncabezadoSeccion(titulo: 'Venta original'),
+                fila('Tipo', switch ('${original['tipo']}') {
+                  'dosis_sin_agua' => 'Dosis sin agua',
+                  'dosis_con_agua' => 'Dosis con agua',
+                  'agua_suelta' => 'Agua suelta',
+                  _ => '${original['tipo']}',
+                }),
+                fila('Cliente',
+                    '${original['cliente_nombre'] ?? 'Sin identificar'}'),
+                fila('Monto',
+                    '${fmtMonto(((original['precio_unitario'] as num?)?.toDouble() ?? 0) * ((original['cantidad'] as num?)?.toDouble() ?? 0))} CUP'),
+                fila('Fecha', (() {
+                  final f = '${original['fecha'] ?? ''}';
+                  return f.length >= 10 ? f.substring(0, 10) : f;
+                })()),
+              ],
+            ],
+          ),
+        ),
+        acciones: [
+          if (!esReverso && !yaReversada)
+            TextButton(
+              onPressed: () async {
+                Navigator.pop(ctx);
+                await _revertir(v);
+              },
+              child: const Text('Revertir',
+                  style: TextStyle(color: Colors.red)),
+            ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cerrar'),
+          ),
+        ],
       ),
     );
   }

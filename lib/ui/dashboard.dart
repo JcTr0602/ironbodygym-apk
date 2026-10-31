@@ -7,15 +7,19 @@ library;
 import 'package:flutter/material.dart';
 
 import '../negocio.dart';
-import '../localdb.dart';
 import '../auth.dart';
+import '../cliente_protegido.dart';
+import '../invitados.dart';
+import '../nomina_total.dart';
 import '../permisos_entrenador.dart';
 import '../permisos_visibilidad.dart';
 import '../tiempo.dart';
 import 'diseno.dart';
 import 'componentes.dart';
 import 'buscar.dart';
+import 'cumpleanos.dart';
 import 'listas.dart';
+import 'suplementos.dart';
 import 'widgets.dart';
 import 'detalle_pendiente.dart';
 
@@ -47,6 +51,18 @@ class _DashboardScreenState extends State<DashboardScreen> {
   List<Map<String, dynamic>> _ultimos7 = [];
   List<Map<String, dynamic>> _ultimos30 = [];
   String _periodoGrafico = '7'; // 7 | 30
+  // Dashboard 1.19 (H1/Q6 Argón): urgencias del bloque superior,
+  // balance y fila Plus/Casa. _nominaProy queda en null hasta que
+  // el cálculo devuelve un número (nunca se muestra un neto
+  // inventado); _plusVigentes null = sin dato (sin red o más
+  // invitados que el tope de la página), la fila lo omite.
+  int _vencenHoy = 0;
+  int _cumpleHoy = 0;
+  double? _nominaProy;
+  int _casaActivas = 0;
+  List<Map<String, dynamic>> _stockBajo = [];
+  List<Map<String, dynamic>> _turnosOlvidados = [];
+  int? _plusVigentes;
 
   // Vista por rol (v1.2): el entrenador ve solo sus propios números.
   final _auth = AuthService();
@@ -60,6 +76,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
   Map<String, double> _miPorMetodo = {};
   Map<String, double> _miPorTipo = {};
   Map<String, Map<String, dynamic>> _miMejorPeor = {};
+  // Dashboard 1.19 (H5 Argón): «Hoy en sala» del entrenador
+  // (nombres ya filtrados por protegidos). _salaCargada evita
+  // mostrar el bloque vacío antes de la primera carga.
+  List<String> _cumpleHoyNombres = [];
+  List<String> _vencenHoyNombres = [];
+  bool _salaCargada = false;
 
   static const naranja = AppColores.naranja;
 
@@ -83,49 +105,101 @@ class _DashboardScreenState extends State<DashboardScreen> {
         await _cargarEntrenador(v);
         return;
       }
-      final hoy = await ingresosHoy();
-      final semana = await ingresosSemana();
-      final mes = await ingresosMes();
-      final mesAnt = await ingresosMesAnterior();
-      final proy = await proyeccionMes();
-      final porMet = await ingresosPorMetodo();
-      final porTip = await ingresosPorTipo();
-      final mp = await mejorPeorDia();
-      final activos = await activosCount();
-      final mor = await morosos();
-      // Misma población que la pestaña «Por vencer» de Listas
-      // (porVencer con 3 días, solo activos): conteo y lista
-      // coinciden por construcción. (El conteo se llama
-      // conteoPorVencer para no sombrear la función homónima;
-      // ronda 2, Luna.)
-      final conteoPorVencer = (await porVencer(dias: 3)).length;
-      final gastos = await gastosDelMes(hoyHabanaIso().substring(0, 7));
-      final nuevos = await nuevosEsteMes();
-      final rank = await rankingEntrenadores();
-      final inact = await inactivosCount();
-      final pend = await pendientePorEntrenador();
-      final ult7 = await ingresosUltimos7Dias();
-      final ult30 = await ingresosUltimos30Dias();
+      final mesIso = hoyHabanaIso().substring(0, 7);
+      // H2 (Argón): las 17 lecturas en serie pasan a 3 esperas
+      // lanzadas a la vez (ingresos / clientes / novedades del
+      // dashboard); dentro de cada grupo las lecturas corren en
+      // paralelo. NO se añaden consultas nuevas en serie.
+      final fIngresos = Future.wait([
+        ingresosHoy(),
+        ingresosSemana(),
+        ingresosMes(),
+        ingresosMesAnterior(),
+        proyeccionMes(),
+        ingresosPorMetodo(),
+        ingresosPorTipo(),
+        mejorPeorDia(),
+        ingresosUltimos7Dias(),
+        ingresosUltimos30Dias(),
+      ]);
+      final fClientes = Future.wait([
+        activosCount(),
+        morosos(),
+        // Una sola lectura particionada (ver nota en negocio.dart):
+        // por vencer (sin hoy) + vencen hoy, sin 2ª consulta.
+        vencimientosResumen(dias: 3),
+        gastosDelMes(mesIso),
+        nuevosEsteMes(),
+        rankingEntrenadores(),
+        inactivosCount(),
+        pendientePorEntrenador(),
+      ]);
+      final fNovedades = Future.wait([
+        // Un fallo del pre-cálculo de nómina no puede tumbar todo
+        // el panel: degrada a null y se conserva el valor anterior.
+        totalNetoNominaMes(mesIso).catchError((_) => null),
+        cumpleanosHoyCount(),
+        cuentasCasaActivasCount(),
+        alertasStockBajo(),
+        turnosAbiertosAyer(),
+        InvitadosService().contarPlusVigentes(),
+      ]);
+      // Panel Terra B2: cada grupo se espera por separado. Un fallo
+      // en un grupo ya no tumba los otros dos: el grupo que falló
+      // conserva los valores anteriores y los demás se aplican.
+      List<dynamic>? ing;
+      List<dynamic>? cli;
+      List<dynamic>? nov;
+      try {
+        ing = await fIngresos;
+      } catch (_) {}
+      try {
+        cli = await fClientes;
+      } catch (_) {}
+      try {
+        nov = await fNovedades;
+      } catch (_) {}
       if (mounted && v == _versionCarga) {
         setState(() {
-          _hoy = hoy;
-          _semana = semana;
-          _mes = mes;
-          _mesAnterior = mesAnt;
-          _proyeccion = proy;
-          _porMetodo = porMet;
-          _porTipo = porTip;
-          _mejorPeor = mp;
-          _activos = activos;
-          _morosos = mor;
-          _porVencer = conteoPorVencer;
-          _gastosMes = gastos;
-          _nuevos = nuevos;
-          _ranking = rank;
-          _inactivos = inact;
-          _pend = pend;
-          _ultimos7 = ult7;
-          _ultimos30 = ult30;
+          if (ing != null) {
+            _hoy = ing[0] as double;
+            _semana = ing[1] as double;
+            _mes = ing[2] as double;
+            _mesAnterior = ing[3] as double;
+            _proyeccion = ing[4] as double;
+            _porMetodo = ing[5] as Map<String, double>;
+            _porTipo = ing[6] as Map<String, double>;
+            _mejorPeor = ing[7] as Map<String, Map<String, dynamic>>;
+            _ultimos7 = ing[8] as List<Map<String, dynamic>>;
+            _ultimos30 = ing[9] as List<Map<String, dynamic>>;
+          }
+          if (cli != null) {
+            final venc = cli[2]
+                as ({
+                  List<Map<String, dynamic>> porVencer,
+                  List<Map<String, dynamic>> vencenHoy,
+                });
+            _activos = cli[0] as int;
+            _morosos = cli[1] as int;
+            // H3: la estadística sigue siendo el total 3d (sin hoy);
+            // el subtítulo «N hoy» sale del mismo resumen.
+            _porVencer = venc.porVencer.length;
+            _vencenHoy = venc.vencenHoy.length;
+            _gastosMes = cli[3] as double;
+            _nuevos = cli[4] as int;
+            _ranking = cli[5] as List<Map<String, dynamic>>;
+            _inactivos = cli[6] as int;
+            _pend = cli[7] as List<Map<String, dynamic>>;
+          }
+          if (nov != null) {
+            final nomina = nov[0] as double?;
+            if (nomina != null) _nominaProy = nomina;
+            _cumpleHoy = nov[1] as int;
+            _casaActivas = nov[2] as int;
+            _stockBajo = nov[3] as List<Map<String, dynamic>>;
+            _turnosOlvidados = nov[4] as List<Map<String, dynamic>>;
+            _plusVigentes = nov[5] as int?;
+          }
           _cargando = false;
         });
       }
@@ -150,6 +224,26 @@ class _DashboardScreenState extends State<DashboardScreen> {
       final porMet = await ingresosPorMetodoEntrenador(tid);
       final porTip = await ingresosPorTipoEntrenador(tid);
       final mp = await mejorPeorDiaEntrenador(tid);
+      // H5 (Argón): «Hoy en sala» sin montos. Los nombres ya
+      // vienen filtrados: un cliente protegido NO se le muestra
+      // al entrenador (misma regla que la bandeja de avisos).
+      final sala = await Future.wait([
+        cumpleanosProximos(dias: 0),
+        vencenHoy(),
+      ]);
+      final nombresCump = <String>[];
+      for (final c in sala[0]) {
+        if ((c['_dias_para'] as int?) != 0) continue;
+        if (esVistaProtegida(c, esDueno: false)) continue;
+        final n = '${c['nombre'] ?? ''}'.trim();
+        if (n.isNotEmpty) nombresCump.add(n);
+      }
+      final nombresVencen = <String>[];
+      for (final c in sala[1]) {
+        if (esVistaProtegida(c, esDueno: false)) continue;
+        final n = '${c['nombre'] ?? ''}'.trim();
+        if (n.isNotEmpty) nombresVencen.add(n);
+      }
       if (mounted && v == _versionCarga) {
         setState(() {
           _miHoy = hoy;
@@ -160,6 +254,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
           _miPorMetodo = porMet;
           _miPorTipo = porTip;
           _miMejorPeor = mp;
+          _cumpleHoyNombres = nombresCump;
+          _vencenHoyNombres = nombresVencen;
+          _salaCargada = true;
           _cargando = false;
         });
       }
@@ -286,6 +383,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
           children: [
             const SyncBanner(),
             const SizedBox(height: 8),
+            // H5 (Argón): «Hoy en sala» va POR ENCIMA del candado
+            // de cifras: no son cifras, y hoy el return temprano
+            // lo ocultaba todo.
+            if (_salaCargada) ...[
+              const EncabezadoSeccion(titulo: 'Hoy en sala'),
+              const SizedBox(height: 8),
+              _bloqueHoyEnSala(),
+              const SizedBox(height: 8),
+            ],
             Tarjeta(
               child: Text(
                 PermisosEntrenador().cargado
@@ -315,7 +421,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         ],
       ),
       body: _cargando
-          ? const Center(child: CircularProgressIndicator())
+          ? const EstadoCargando(texto: 'Cargando panel…')
           : RefreshIndicator(
               onRefresh: _cargar,
               child: ListView(
@@ -323,6 +429,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 children: [
                   const SyncBanner(),
                   const SizedBox(height: 8),
+                  // H5 (Argón): «Hoy en sala» también abre la vista
+                  // sin candado, antes de las cifras.
+                  if (_salaCargada) ...[
+                    const EncabezadoSeccion(titulo: 'Hoy en sala'),
+                    const SizedBox(height: 8),
+                    _bloqueHoyEnSala(),
+                    const SizedBox(height: 16),
+                  ],
                   const EncabezadoSeccion(titulo: 'Mis cobros'),
                   const SizedBox(height: 8),
                   Row(
@@ -341,6 +455,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       titulo: 'Mi pendiente a entregar'),
                   const SizedBox(height: 8),
                   Tarjeta(
+                    // Q4 (Argón): el pendiente propio abre su
+                    // desglose. (El onTap de las 3 tarjetas
+                    // superiores es explícitamente no-P0: no va.)
+                    onTap: _auth.telegramId == null
+                        ? null
+                        : () => _ir(DetallePendienteScreen(
+                            trainerId: _auth.telegramId!,
+                            nombre: _auth.displayName)),
                     child: Column(
                       children: [
                         _filaMonto('CUP', _miPendCup, 'CUP'),
@@ -558,6 +680,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
   /// así cada bloque suma exactamente la tarjeta «Este mes».
   /// Antes el denominador era ef+tr y los suplementos no tenían
   /// fila: las filas no sumaban el mes y los % salían inflados.
+  /// Dashboard 1.19 (Q2 Argón): el bloque es «Balance y desglose
+  /// del mes»: Bloque A (método/tipo, lo de antes) + Bloque B
+  /// (balance: brutos / gastos / nómina proyectada / utilidad
+  /// neta real). El título de sección vive en el build
+  /// (EncabezadoSeccion, H6); aquí ya no se repite.
   Widget _desgloses() {
     final ef = _porMetodo['efectivo'] ?? 0;
     final tr = _porMetodo['transferencia'] ?? 0;
@@ -572,10 +699,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
       child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text('Desglose del mes',
-                style:
-                    TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 8),
             _filaDesglose('Efectivo', ef, total),
             _filaDesglose('Transferencia', tr, total),
             _filaDesglose('Suplementos', supM, total),
@@ -585,33 +708,40 @@ class _DashboardScreenState extends State<DashboardScreen> {
             _filaDesglose('Pago diario', dia, total),
             _filaDesglose('Suplementos', supT, total),
             _filaDesglose('Servicios', servT, total),
-            if (_proyeccion > 0) ...[
-              const Divider(height: 16),
-              Row(
-                mainAxisAlignment:
-                    MainAxisAlignment.spaceBetween,
-                children: [
-                  const Text('Proyección cierre',
-                      style: TextStyle(fontSize: 13)),
-                  Text('${fmtMonto(_proyeccion.round())} CUP',
-                      style: const TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.bold,
-                          color: naranja)),
-                ],
+            // Bloque B: balance (H1 Argón). Los gastos ya no son
+            // una cifra que solo aparece sola: van dentro de la
+            // terna junto a brutos, nómina y utilidad.
+            const Divider(height: 16),
+            const Text('Balance',
+                style:
+                    TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 4),
+            _filaDetalle('Ingresos brutos', _mes),
+            _filaDetalle('Gastos', _gastosMes),
+            if (_nominaProy != null) ...[
+              _filaDetalle('Nómina proyectada', _nominaProy!),
+              Text(
+                'Proyección, no cierre: se descuenta al cerrar el mes.',
+                style: TextStyle(
+                    fontSize: 12,
+                    color: AppColores.textoSecundario(context)),
               ),
             ],
-            // Neto del mes (panel 2026-10-21): ingresos − gastos,
-            // todo en CUP (la tabla gastos no maneja otra moneda).
-            if (_gastosMes > 0) ...[
+            _filaDetalle('Utilidad neta real', _mes - _gastosMes,
+                negrita: true),
+            // Q3 (Argón): la proyección es «Ritmo de cierre
+            // estimado» y NO se muestra los días 1–2 del mes: con
+            // 1 día de ingreso, actual/1*díasMes proyecta 30× el
+            // primer día y es puro ruido.
+            if (_proyeccion > 0 && ahoraHabana().day >= 3) ...[
               const Divider(height: 16),
               Row(
                 mainAxisAlignment:
                     MainAxisAlignment.spaceBetween,
                 children: [
-                  const Text('Neto del mes (ingresos − gastos)',
+                  const Text('Ritmo de cierre estimado',
                       style: TextStyle(fontSize: 13)),
-                  Text('${fmtMonto(_mes - _gastosMes)} CUP',
+                  Text('${fmtMonto(_proyeccion.round())} CUP',
                       style: const TextStyle(
                           fontSize: 13,
                           fontWeight: FontWeight.bold,
@@ -657,14 +787,18 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   /// v1.0.15: gráfico de días (7 o 30 según selector).
+  /// D1 (estéticas 1.19): etiquetas legibles (11 px), día de hoy
+  /// destacado en verde y mejor día en ámbar. Sin esto el monto
+  /// iba en 8 px y el día en 7 px y no se leía ningún número.
   Widget _graficoDias() {
     final datos = _periodoGrafico == '30' ? _ultimos30 : _ultimos7;
     if (datos.isEmpty) return const SizedBox.shrink();
     final maxMonto = datos
         .map((e) => (e['monto'] as num).toDouble())
         .reduce((a, b) => a > b ? a : b);
+    final hoyIso = hoyHabanaIso();
     return Container(
-      height: 140,
+      height: 150,
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: AppColores.superficie(context),
@@ -692,6 +826,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     ? fecha.substring(8, 10)
                     : '')
                 : d['dia'] as String;
+            final esHoy = fecha == hoyIso;
+            final esMejor = maxMonto > 0 && monto == maxMonto;
+            final colorBarra = esHoy
+                ? AppColores.exito
+                : esMejor
+                    ? AppColores.alerta
+                    : AppColores.naranja;
             return GestureDetector(
               // v1.0.15: tocar barra muestra el detalle
               onTap: monto > 0
@@ -708,14 +849,18 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         monto > 0
                             ? monto.toStringAsFixed(0)
                             : '',
-                        style: const TextStyle(fontSize: 8),
+                        style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: (esHoy || esMejor)
+                                ? FontWeight.w700
+                                : null),
                       ),
                     const SizedBox(height: 2),
                     Container(
                       width: es30 ? 12 : 28,
                       height: altura,
                       decoration: BoxDecoration(
-                        color: AppColores.naranja,
+                        color: colorBarra,
                         borderRadius: BorderRadius.circular(4),
                       ),
                     ),
@@ -723,7 +868,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     Text(
                       etiqueta,
                       style: TextStyle(
-                          fontSize: es30 ? 7 : 10),
+                          fontSize: 11,
+                          fontWeight:
+                              esHoy ? FontWeight.w700 : null),
                     ),
                   ],
                 ),
@@ -741,62 +888,16 @@ class _DashboardScreenState extends State<DashboardScreen> {
   /// de las propias filas de la hoja (el monto de la barra puede
   /// estar viejo si hubo un sync entre la carga y el toque).
   Future<void> _detalleDia(String fechaIso) async {
-    double efectivo = 0,
-        transferencia = 0,
-        diario = 0,
-        suplementos = 0,
-        servicios = 0;
-    int n = 0;
-    // v1.3.4 (ítem 2): columna `fecha` indexada en vez de allMirror.
-    for (final p in await LocalDb.instance.pagosDelDia(fechaIso)) {
-      final m = (p['monto'] as num?)?.toDouble() ?? 0;
-      if ('${p['metodo']}' == 'transferencia') {
-        transferencia += m;
-      } else {
-        efectivo += m;
-      }
-      n++;
-    }
-    for (final d in await LocalDb.instance.allMirror('pagos_diarios')) {
-      final f = '${d['fecha'] ?? ''}';
-      if (f.length >= 10 && f.substring(0, 10) == fechaIso) {
-        diario += (d['total'] as num?)?.toDouble() ?? 0;
-        n++;
-      }
-    }
-    // v1.3.2 (Argón #5): suplementos en CUP.
-    for (final v in await ventasSuplementosCup()) {
-      final f = '${v['fecha'] ?? ''}';
-      if (f.length >= 10 && f.substring(0, 10) == fechaIso) {
-        suplementos += totalVentaCup(v);
-        n++;
-      }
-    }
-    // Argón stats MEDIO (dashboard): Servicios del día, con la misma
-    // regla de neteo que ventasServicioSinReversos: fuera reversos y
-    // originales reversados (si no, un día con venta + reverso
-    // quedaría sobreestimado).
-    final ventasServ =
-        await LocalDb.instance.allMirror('servicio_ventas');
-    final reversadasServ = <int>{
-      for (final v in ventasServ)
-        if ((v['reverso_de'] as num?) != null)
-          (v['reverso_de'] as num).toInt(),
-    };
-    for (final v in ventasServ) {
-      final f = '${v['fecha'] ?? ''}';
-      if (f.length < 10 || f.substring(0, 10) != fechaIso) continue;
-      if ((v['reverso_de'] as num?) != null) continue;
-      final idServ = (v['id'] as num?)?.toInt();
-      if (idServ != null && reversadasServ.contains(idServ)) continue;
-      if ((v['casa'] as num?)?.toInt() == 1) continue;
-      servicios +=
-          ((v['precio_unitario'] as num?)?.toDouble() ?? 0) *
-              ((v['cantidad'] as num?)?.toInt() ?? 0);
-      n++;
-    }
-    final total =
-        efectivo + transferencia + diario + suplementos + servicios;
+    // H2 (Argón): el cálculo vive en negocio.dart
+    // (`resumenIngresosDia`); la UI solo muestra el resultado.
+    final r = await resumenIngresosDia(fechaIso);
+    final efectivo = r.efectivo;
+    final transferencia = r.transferencia;
+    final diario = r.diario;
+    final suplementos = r.suplementos;
+    final servicios = r.servicios;
+    final n = r.movimientos;
+    final total = r.total;
     if (!mounted) return;
     showModalBottomSheet(
       context: context,
@@ -831,8 +932,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   /// Tarjeta de estadística de clientes tocable (v1.0.11).
-  Widget _statCliente(
-      String valor, String etiqueta, Color? color, VoidCallback onTap) {
+  Widget _statCliente(String valor, String etiqueta, Color? color,
+      VoidCallback onTap,
+      {String? subtitulo}) {
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(12),
@@ -850,8 +952,182 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 style: TextStyle(
                     fontSize: 12,
                     color: AppColores.textoSecundario(context))),
+            // H3 (Argón): el subtítulo «N hoy» bajo «por vencer».
+            if (subtitulo != null)
+              Text(subtitulo,
+                  style: TextStyle(
+                      fontSize: 11,
+                      color: AppColores.textoSecundario(context))),
           ],
         ),
+      ),
+    );
+  }
+
+  /// Dashboard 1.19 (H1 Argón): una fila de urgencia del bloque
+  /// «Hoy hay que…»: icono tintado + texto + detalle opcional +
+  /// chevron solo si hay destino.
+  Widget _filaUrgencia({
+    required IconData icono,
+    required Color color,
+    required String texto,
+    String? detalle,
+    VoidCallback? onTap,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(12),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 6),
+        child: Row(
+          children: [
+            CircleAvatar(
+              radius: 16,
+              backgroundColor: color.withValues(alpha: 0.15),
+              child: Icon(icono, size: 18, color: color),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(texto,
+                      style: const TextStyle(
+                          fontSize: 14, fontWeight: FontWeight.bold)),
+                  if (detalle != null)
+                    Text(detalle,
+                        style: TextStyle(
+                            fontSize: 12,
+                            color:
+                                AppColores.textoSecundario(context))),
+                ],
+              ),
+            ),
+            if (onTap != null)
+              Icon(Icons.chevron_right,
+                  size: 20,
+                  color: AppColores.textoSecundario(context)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Dashboard 1.19 (H1 + Q1 Argón): bloque «Hoy hay que…» del
+  /// dueño. El pendiente a entregar va con su multimoneda CUP+USD
+  /// y abre DetallePendienteScreen (NO Arqueo genérico); vencen
+  /// hoy y cumpleaños hoy abren sus pantallas; el stock bajo, el
+  /// catálogo. Los turnos de ayer sin cerrar son chips sin
+  /// destino (ninguna pantalla muestra el ayer). Si no hay nada,
+  /// la fila honesta «Nada urgente hoy».
+  Widget _bloqueHoyHayQue() {
+    final filas = <Widget>[];
+    for (final t in _pend) {
+      final cup = (t['total'] as double?) ?? 0;
+      final usd = (t['total_usd'] as double?) ?? 0;
+      final n = (t['n'] as int?) ?? 0;
+      var det = '$n movimientos sin entregar · ${fmtMonto(cup)} CUP';
+      if (usd > 0) det += ' · ${fmtMonto(usd)} USD';
+      filas.add(_filaUrgencia(
+        icono: Icons.schedule,
+        color: AppColores.naranja,
+        texto: 'Pendiente: ${t['nombre']}',
+        detalle: det,
+        onTap: () => _ir(DetallePendienteScreen(
+            trainerId: t['id'] as int, nombre: '${t['nombre']}')),
+      ));
+    }
+    if (_vencenHoy > 0) {
+      filas.add(_filaUrgencia(
+        icono: Icons.event_busy,
+        color: AppColores.alerta,
+        texto: 'Vencen hoy: $_vencenHoy',
+        onTap: () => _ir(const ListasScreen(inicial: 0)),
+      ));
+    }
+    if (_cumpleHoy > 0) {
+      filas.add(_filaUrgencia(
+        icono: Icons.cake,
+        color: AppColores.exito,
+        texto: 'Cumpleaños hoy: $_cumpleHoy',
+        onTap: () => _ir(const CumpleanosScreen()),
+      ));
+    }
+    if (_stockBajo.isNotEmpty) {
+      filas.add(_filaUrgencia(
+        icono: Icons.inventory_2,
+        color: AppColores.error,
+        texto: 'Stock bajo: ${_stockBajo.length}',
+        onTap: () => _ir(const SuplementosScreen()),
+      ));
+    }
+    if (filas.isEmpty && _turnosOlvidados.isEmpty) {
+      return Tarjeta(
+        child: Text('Nada urgente hoy.',
+            style: TextStyle(
+                color: AppColores.textoSecundario(context))),
+      );
+    }
+    return Tarjeta(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          for (var i = 0; i < filas.length; i++) ...[
+            if (i > 0) const Divider(height: 12),
+            filas[i],
+          ],
+          if (_turnosOlvidados.isNotEmpty) ...[
+            if (filas.isNotEmpty) const Divider(height: 12),
+            Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              children: [
+                for (final a in _turnosOlvidados)
+                  Chip(
+                    label: Text(
+                      'Ayer sin cerrar: '
+                      '${(('${a['entrenador_nombre'] ?? ''}').trim().isEmpty ? 'Sin nombre' : a['entrenador_nombre'])} '
+                      '(${a['turno'] ?? ''})',
+                      style: const TextStyle(fontSize: 12),
+                    ),
+                  ),
+              ],
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  /// Dashboard 1.19 (H5 Argón): «Hoy en sala» del entrenador:
+  /// cumpleaños hoy + vencen hoy, SIN montos. Los nombres ya
+  /// vienen filtrados por protegidos en `_cargarEntrenador`.
+  /// Se muestran 3 nombres como mucho y el resto como «y N más».
+  Widget _bloqueHoyEnSala() {
+    String nombres(List<String> l) {
+      if (l.isEmpty) return 'Nadie';
+      if (l.length <= 3) return l.join(' · ');
+      return '${l.take(3).join(' · ')} y ${l.length - 3} más';
+    }
+
+    return Tarjeta(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _filaUrgencia(
+            icono: Icons.cake,
+            color: AppColores.exito,
+            texto: 'Cumpleaños hoy',
+            detalle: nombres(_cumpleHoyNombres),
+          ),
+          const Divider(height: 12),
+          _filaUrgencia(
+            icono: Icons.event_busy,
+            color: AppColores.alerta,
+            texto: 'Vencen hoy',
+            detalle: nombres(_vencenHoyNombres),
+          ),
+        ],
       ),
     );
   }
@@ -874,7 +1150,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         ],
       ),
       body: _cargando
-          ? const Center(child: CircularProgressIndicator())
+          ? const EstadoCargando(texto: 'Cargando panel…')
           : RefreshIndicator(
               onRefresh: _cargar,
               child: ListView(
@@ -882,9 +1158,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 children: [
                   const SyncBanner(),
                   const SizedBox(height: 8),
-                  const Text('Ingresos',
-                      style: TextStyle(
-                          fontSize: 16, fontWeight: FontWeight.bold)),
+                  // H1 (Argón): el bloque de urgencias abre el panel.
+                  const EncabezadoSeccion(titulo: 'Hoy hay que…'),
+                  const SizedBox(height: 8),
+                  _bloqueHoyHayQue(),
+                  const SizedBox(height: 16),
+                  const EncabezadoSeccion(titulo: 'Ingresos'),
                   const SizedBox(height: 8),
                   Row(
                     children: [
@@ -903,18 +1182,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     const SizedBox(height: 8),
                     _comparativaMes(),
                   ],
-                  // v1.0.15: desgloses
-                  const SizedBox(height: 8),
-                  _desgloses(),
-                  const SizedBox(height: 16),
                   // Gráfico con selector de período (v1.0.15: 7 o 30 días)
                   Row(
                     children: [
-                      const Text('Ingresos por día',
-                          style: TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.bold)),
-                      const Spacer(),
+                      const Expanded(
+                          child: EncabezadoSeccion(
+                              titulo: 'Ingresos por día')),
                       SegmentedButton<String>(
                         segments: const [
                           ButtonSegment(
@@ -934,9 +1207,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   const SizedBox(height: 8),
                   _graficoDias(),
                   const SizedBox(height: 16),
-                  const Text('Clientes',
-                      style: TextStyle(
-                          fontSize: 16, fontWeight: FontWeight.bold)),
+                  const EncabezadoSeccion(titulo: 'Clientes'),
                   const SizedBox(height: 8),
                   Tarjeta(
                       child: Column(
@@ -957,7 +1228,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                   'por vencer',
                                   AppColores.naranja,
                                   () => _ir(const ListasScreen(
-                                      inicial: 1))),
+                                      inicial: 1)),
+                                  // H3: total 3d con subtítulo «N hoy».
+                                  subtitulo: '$_vencenHoy hoy'),
                               _statCliente(
                                   '$_morosos',
                                   'vencidos',
@@ -1026,113 +1299,43 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       ),
                   ),
                   const SizedBox(height: 16),
-                  // v1.0.15: ranking de entrenadores
-                  if (_ranking.length > 1) ...[
-                    const Text('Ranking del mes',
-                        style: TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold)),
-                    const SizedBox(height: 8),
+                  // Q2 (Argón): balance y desglose unificados.
+                  const EncabezadoSeccion(
+                      titulo: 'Balance y desglose del mes'),
+                  const SizedBox(height: 8),
+                  _desgloses(),
+                  const SizedBox(height: 16),
+                  // Fila Plus/Casa (propuesta punto 9, solo conteos).
+                  // Sin Plus (sin red o sobre el tope) solo Casa.
+                  if (_casaActivas > 0 || _plusVigentes != null) ...[
                     Tarjeta(
-                      padding: const EdgeInsets.all(12),
-                      child: Column(
-                          children: _ranking.asMap().entries.map((e) {
-                            final i = e.key;
-                            final r = e.value;
-                            return ListTile(
-                              dense: true,
-                              leading: i < 3
-                                  ? Icon(Icons.emoji_events,
-                                      color: [
-                                        const Color(0xFFFFD700),
-                                        const Color(0xFFC0C0C0),
-                                        const Color(0xFFCD7F32)
-                                      ][i],
-                                      size: 22)
-                                  : Text('${i + 1}°',
-                                      style: const TextStyle(
-                                          fontSize: 18)),
-                              title: Text('${r['nombre']}'),
-                              trailing: Text(
-                                '${fmtMonto(r['total'])} CUP',
-                                style: const TextStyle(
-                                    fontWeight: FontWeight.bold,
-                                    color: naranja),
-                              ),
-                            );
-                          }).toList(),
-                        ),
+                      child: Text(
+                        [
+                          if (_plusVigentes != null)
+                            'Plus vigentes: $_plusVigentes',
+                          if (_casaActivas > 0)
+                            'Cuentas Casa: $_casaActivas',
+                        ].join(' · '),
+                        style: const TextStyle(fontSize: 13),
+                      ),
                     ),
                     const SizedBox(height: 16),
                   ],
-                  Row(
-                    children: [
-                      const Icon(Icons.schedule,
-                          color: AppColores.naranja, size: 20),
-                      const SizedBox(width: 8),
-                      const Text('Pendiente por entrenador',
-                          style: TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.bold)),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  if (_pend.isEmpty)
+                  // Q3 (Argón): el ranking degrada a UNA fila
+                  // compacta al final, sin trofeos.
+                  if (_ranking.length > 1) ...[
+                    const EncabezadoSeccion(
+                        titulo: 'Ranking del mes'),
+                    const SizedBox(height: 8),
                     Tarjeta(
+                      padding: const EdgeInsets.all(12),
                       child: Text(
-                        'Nada pendiente de entregar.',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                            color: AppColores.textoSecundario(
-                                context)),
+                        'Mes: ${_ranking.take(2).toList().asMap().entries.map((e) => '${e.key + 1}° ${e.value['nombre']} (${fmtMonto(e.value['total'])} CUP)').join(' · ')}',
+                        style: const TextStyle(fontSize: 13),
                       ),
-                    )
-                  else
-                    for (final t in _pend)
-                      Tarjeta(
-                        padding: EdgeInsets.zero,
-                        // C (panel 2026-10-21): la fila abre el
-                        // detalle de pendientes de ese entrenador
-                        // (pantalla existente DetallePendiente).
-                        onTap: () => _ir(DetallePendienteScreen(
-                            trainerId: t['id'] as int,
-                            nombre: '${t['nombre']}')),
-                        child: ListTile(
-                          leading: const CircleAvatar(
-                            backgroundColor: AppColores.naranja,
-                            child: Icon(Icons.schedule,
-                                color: Colors.white, size: 20),
-                          ),
-                          title: Text('${t['nombre']}'),
-                          subtitle: Text(
-                              '${t['n']} movimientos sin entregar'),
-                          trailing: Column(
-                            mainAxisAlignment:
-                                MainAxisAlignment.center,
-                            crossAxisAlignment:
-                                CrossAxisAlignment.end,
-                            children: [
-                              if ((t['total'] as double) > 0)
-                                Text(
-                                  '${fmtMonto(t['total'])} CUP',
-                                  style: const TextStyle(
-                                      fontWeight: FontWeight.bold,
-                                      color: naranja,
-                                      fontSize: 15),
-                                ),
-                              if (((t['total_usd'] as double?) ?? 0) >
-                                  0)
-                                Text(
-                                  '${fmtMonto(t['total_usd'])} USD',
-                                  style: const TextStyle(
-                                      fontWeight: FontWeight.bold,
-                                      color: naranja,
-                                      fontSize: 13),
-                                ),
-                            ],
-                          ),
-                        ),
-                      ),
+                    ),
+                    const SizedBox(height: 16),
+                  ],
                 ],
               ),
             ),

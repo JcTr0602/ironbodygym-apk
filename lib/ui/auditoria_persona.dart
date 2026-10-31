@@ -242,7 +242,7 @@ class _AuditoriaPersonaScreenState extends State<AuditoriaPersonaScreen> {
         ],
       ),
       body: _cargando
-          ? const Center(child: CircularProgressIndicator())
+          ? const EstadoCargando(texto: 'Cargando auditoría…')
           : _persona == null
               ? const Center(
                   child: Padding(

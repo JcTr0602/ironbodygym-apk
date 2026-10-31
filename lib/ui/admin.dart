@@ -15,6 +15,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:uuid/uuid.dart';
 
+import '../app_log.dart';
 import '../auth.dart';
 import '../bloque2_resto.dart';
 import '../cliente_protegido.dart';
@@ -31,13 +32,13 @@ import 'componentes.dart';
 import 'diseno.dart';
 import 'buscar.dart';
 import 'admin_secciones.dart';
+import 'cola.dart';
 import 'arqueo.dart';
 import 'guia.dart';
 import 'auditoria.dart';
 import 'auditoria_silenciosa.dart';
 import 'nomina.dart';
 import 'horario_gym.dart';
-import 'cumpleanos_mes.dart';
 import 'riesgo.dart';
 import 'papelera.dart';
 import 'congelados.dart';
@@ -51,6 +52,7 @@ import 'historial_caja.dart';
 import 'invitados.dart';
 import 'solicitudes_adelanto.dart';
 import 'avisos_entrenador.dart';
+import 'bandeja.dart';
 import 'exportar_excel.dart';
 import 'incidencias_sync.dart';
 import 'pago.dart';
@@ -824,12 +826,14 @@ class _AdminScreenState extends State<AdminScreen> {
           TextButton(
               onPressed: () => Navigator.pop(ctx),
               child: const Text('Cancelar')),
-          ElevatedButton(
-              onPressed: () {
+          BotonPrimario(
+            texto: 'Guardar',
+            onPressed: () {
                 final v = int.tryParse(ctrl.text);
                 Navigator.pop(ctx, v != null && v > 0 ? v : null);
               },
-              child: const Text('Guardar')),
+            expandido: false,
+          ),
         ],
       ),
     );
@@ -1243,7 +1247,7 @@ class _AdminScreenState extends State<AdminScreen> {
           const SyncBanner(),
           Expanded(
             child: _cargando
-                ? const Center(child: CircularProgressIndicator())
+                ? const EstadoCargando(texto: 'Cargando administración…')
                 : RefreshIndicator(
                     onRefresh: _cargar,
                     child: ListView(
@@ -1913,7 +1917,7 @@ class _AdminScreenState extends State<AdminScreen> {
         child: Row(
           children: [
             const Icon(Icons.home_rounded,
-                size: 16, color: Color(0xFFB8860B)),
+                size: 16, color: AppColores.alerta),
             const SizedBox(width: 6),
             Text(
               _cuentasCasa == 1
@@ -1922,11 +1926,11 @@ class _AdminScreenState extends State<AdminScreen> {
               style: const TextStyle(
                   fontSize: 12.5,
                   fontWeight: FontWeight.w600,
-                  color: Color(0xFFB8860B)),
+                  color: AppColores.alerta),
             ),
             const SizedBox(width: 4),
             const Icon(Icons.chevron_right_rounded,
-                size: 16, color: Color(0xFFB8860B)),
+                size: 16, color: AppColores.alerta),
           ],
         ),
       ),
@@ -2267,16 +2271,13 @@ class _AdminScreenState extends State<AdminScreen> {
         'Vencidos + próximos 7 días, con acción',
         () => _ir(const VencimientosProximosScreen()),
       ),
-      _tarjetaFlujo(
-        Icons.cake_rounded,
-        'Cumpleaños',
-        'Próximos 30 días',
-        () => _ir(const CumpleanosMes()),
-      ),
+      // #3 (Argón cumpleaños): una sola pantalla. La vieja
+      // CumpleanosMes (sin filtro Casa, sin regalo ni Felicitado)
+      // se eliminó: CumpleanosScreen ya cubre próximos y mes.
       _tarjetaFlujo(
         Icons.cake,
-        'Cumpleaños del mes',
-        'Regalo en un toque desde la ficha',
+        'Cumpleaños',
+        'Próximos días, mes y regalo en un toque',
         () => _ir(const CumpleanosScreen()),
       ),
       _subModulo('INVITADOS'),
@@ -2412,6 +2413,12 @@ class _AdminScreenState extends State<AdminScreen> {
         'GymPedia y Guía para la app de clientes',
         () => _ir(const BibliotecaScreen()),
       ),
+      _tarjetaFlujo(
+        Icons.mail_rounded,
+        'Bandeja GymPedia',
+        'Solicitudes de artículos, borradores y permisos',
+        () => _ir(const BandejaScreen()),
+      ),
     ];
   }
 
@@ -2478,17 +2485,6 @@ class _AdminScreenState extends State<AdminScreen> {
   List<Widget> _tarjetasModuloControl() {
     return [
       _subModulo('CONTROL'),
-      // Estado y último error: las tarjetas compactas de siempre.
-      _tarjetaCompacta(
-        _pendientesSubir > 0
-            ? Icons.sync_problem_rounded
-            : Icons.check_circle_outline_rounded,
-        'Estado de sync',
-        _pendientesSubir > 0
-            ? '$_pendientesSubir por subir'
-            : 'Todo sincronizado',
-        _pendientesSubir > 0 ? AppColores.alerta : AppColores.exito,
-      ),
       if (_syncDet.error != null && _syncDet.error!.isNotEmpty)
         _tarjetaCompacta(
           Icons.error_outline_rounded,
@@ -2497,30 +2493,41 @@ class _AdminScreenState extends State<AdminScreen> {
           errorSyncLegible(_syncDet.error!),
           AppColores.error,
         ),
-      _tarjetaFlujo(
-        Icons.bar_chart_rounded,
-        'Estadísticas del mes',
-        '${fmtMonto(_ingresos)} CUP · $_inscMes insc.',
-        () => _ir(SeccionResumenScreen(
-          ingresos: _ingresos,
-          inscMes: _inscMes,
-          morosos: _morosos,
-          inscPorEntrenador: _inscPorEntrenador,
-        )),
-      ),
+      // Módulo 6 (estado único): Diagnóstico absorbe la vista por
+      // teléfono de EstadoSyncScreen (F4); una sola entrada.
       _tarjetaFlujo(
         Icons.sync_rounded,
-        'Sincronización',
+        'Estado de sync',
         _pendientesSubir > 0
             ? '$_pendientesSubir ops por subir'
             : 'Sincronizado',
         () => _ir(const SeccionDiagnosticoScreen()),
       ),
+      // Módulo 6 (pendientes + reintento): la pantalla ya existía
+      // (detalle por operación, reintento uno/a uno y por lote,
+      // bloqueadas, fotos) pero solo se abría desde Home; ahora
+      // también desde el módulo, con filtro de ops ajenas.
       _tarjetaFlujo(
-        Icons.sync,
-        'Estado de sync',
-        'Contadores y fechas, no contenidos',
-        () => _ir(const EstadoSyncScreen()),
+        Icons.queue_rounded,
+        'Cola de sincronización',
+        'Detalle por operación y reintentos',
+        () => _ir(const ColaScreen()),
+      ),
+      // Módulo 6 (historial de sync): últimos eventos del módulo
+      // 'sync' de la bitácora, sin exportar archivo.
+      _tarjetaFlujo(
+        Icons.timeline_rounded,
+        'Historial de sync',
+        'Subidas, bajadas, purgas y fallos recientes',
+        () => _ir(const HistorialSyncScreen()),
+      ),
+      // Módulo 6 (1.19): conteos local antes/después de un ciclo
+      // forzado, con su alcance declarado (cantidad, no contenido).
+      _tarjetaFlujo(
+        Icons.verified_rounded,
+        'Verificación del espejo',
+        'Conteos por tabla, con alcance declarado',
+        () => _ir(const VerificacionEspejoScreen()),
       ),
       _tarjetaFlujo(
         Icons.warning_amber_rounded,
@@ -2566,29 +2573,60 @@ class _AdminScreenState extends State<AdminScreen> {
         'Exportar solo, copia en frío sin fotos',
         () => _ir(const CopiaSeguridadScreen()),
       ),
+      // Módulo 6 (rediseño): exportar directo, sin la pantalla
+      // intermedia SeccionSistemaScreen (que repetía Salud,
+      // Auditoría y Exportar). La bitácora sale de Ajustes y
+      // queda aquí, donde se necesita cuando algo falla.
       _tarjetaFlujo(
         Icons.file_download_rounded,
-        'Exportar',
-        'CSV y Excel de clientes y pagos',
-        () => _ir(SeccionSistemaScreen(
-          syncDet: _syncDet,
-          pendientesSubir: _pendientesSubir,
-          fechaHora: _fechaHora,
-          onExportar: _exportar,
-          onExportarExcel: () async {
-            // Ronda 17 M2-H1: el botón exportaba el Excel completo
-            // sin pasar por la guarda de _exportar().
-            if (!AuthService().isOwner) return;
-            final ok = await exportarExcel();
-            if (context.mounted) {
-              ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                  content: Text(ok
-                      ? 'Archivos listos para compartir'
-                      : 'No se pudo generar el archivo')));
+        'Exportar CSV',
+        'Clientes y pagos del mes',
+        () => _exportar(),
+      ),
+      _tarjetaFlujo(
+        Icons.table_chart_rounded,
+        'Exportar Excel',
+        'Clientes y pagos',
+        () async {
+          // Ronda 17 M2-H1: el botón exportaba el Excel completo
+          // sin pasar por la guarda de _exportar().
+          if (!AuthService().isOwner) return;
+          final ok = await exportarExcel();
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                content: Text(ok
+                    ? 'Archivos listos para compartir'
+                    : 'No se pudo generar el archivo')));
+          }
+        },
+      ),
+      _tarjetaFlujo(
+        Icons.bug_report_rounded,
+        'Bitácora',
+        'Exportar el registro para diagnóstico',
+        () async {
+          if (!AuthService().isOwner) return;
+          try {
+            final path = await AppLog.exportar();
+            await Share.shareXFiles([XFile(path)],
+                text: 'Bitácora Iron Body Gym');
+          } catch (_) {
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                  content:
+                      Text('No se pudo exportar la bitácora')));
             }
-          },
-          onIr: _irYRecargar,
-        )),
+          }
+        },
+      ),
+      // Módulo 6 (1.19, AL FINAL por orden Terra): bajada completa
+      // segura (21/25): re-descarga sin borrar pendientes ni
+      // datos locales; la pantalla prepara subir + copia primero.
+      _tarjetaFlujo(
+        Icons.download_for_offline_rounded,
+        'Bajada completa',
+        'Re-descarga segura de todos los espejos',
+        () => _ir(const BajadaCompletaScreen()),
       ),
     ];
   }

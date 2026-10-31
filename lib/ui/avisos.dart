@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import '../localdb.dart';
 import 'diseno.dart';
 import 'widgets.dart';
+import 'componentes.dart';
 
 class AvisosScreen extends StatefulWidget {
   const AvisosScreen({super.key});
@@ -49,7 +50,7 @@ class _AvisosScreenState extends State<AvisosScreen> {
     return Scaffold(
       appBar: AppBar(title: const Text('Mis avisos')),
       body: _cargando
-          ? const Center(child: CircularProgressIndicator())
+          ? const EstadoCargando(texto: 'Cargando avisos…')
           : Column(
               children: [
                 const SyncBanner(),

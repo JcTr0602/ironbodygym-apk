@@ -27,9 +27,7 @@ import '../bloque2_resto.dart';
 import '../errores_sync.dart';
 import '../localdb.dart';
 import '../sync.dart';
-import '../tiempo.dart';
 import '../tipos_operacion.dart';
-import '../ultimo_sync.dart';
 import 'auditoria.dart';
 import 'auditoria_persona.dart';
 import 'componentes.dart';
@@ -179,7 +177,7 @@ class _ErroresSyncPanelScreenState extends State<ErroresSyncPanelScreen> {
     return Scaffold(
       appBar: AppBar(title: const Text('Errores de sync (F3)')),
       body: _cargando
-          ? const Center(child: CircularProgressIndicator())
+          ? const EstadoCargando(texto: 'Cargando sistema…')
           : ListView(
               padding: const EdgeInsets.all(16),
               children: [
@@ -263,132 +261,6 @@ class _ErroresSyncPanelScreenState extends State<ErroresSyncPanelScreen> {
 // ---------------------------------------------------------------------------
 // F4
 // ---------------------------------------------------------------------------
-
-class EstadoSyncScreen extends StatefulWidget {
-  const EstadoSyncScreen({super.key});
-  @override
-  State<EstadoSyncScreen> createState() => _EstadoSyncScreenState();
-}
-
-class _EstadoSyncScreenState extends State<EstadoSyncScreen> {
-  bool _cargando = true;
-  int _pendientes = 0;
-  String? _ultimoPull;
-  String? _ultimoPush;
-  List<Map<String, dynamic>> _ultimoSync = [];
-
-  @override
-  void initState() {
-    super.initState();
-    _cargar();
-  }
-
-  Future<void> _cargar() async {
-    try {
-      final p = await LocalDb.instance.countPendingOps();
-      final pull = await LocalDb.instance.getMeta('ultimo_pull_ts');
-      final push = await LocalDb.instance.getMeta('ultimo_push_ts');
-      // v1.13.0 (F4): filas reales del espejo sync_ultimo_sync
-      // (solo lectura; el puente es el único escritor).
-      final filas = await ultimoSyncPorTelefono();
-      if (mounted) {
-        setState(() {
-          _pendientes = p;
-          _ultimoPull = pull;
-          _ultimoPush = push;
-          _ultimoSync = filas;
-          _cargando = false;
-        });
-      }
-    } catch (_) {
-      if (mounted) setState(() => _cargando = false);
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    if (!AuthService().isOwner) return _soloDueno('Estado de sync (F4)');
-    return Scaffold(
-      appBar: AppBar(title: const Text('Estado de sync (F4)')),
-      body: _cargando
-          ? const Center(child: CircularProgressIndicator())
-          : ListView(
-              padding: const EdgeInsets.all(16),
-              children: [
-                const Text(
-                  'Contadores y fechas, nunca contenidos de ops. Sin '
-                  'acciones destructivas.',
-                  style: AppTexto.secundario,
-                ),
-                const SizedBox(height: 12),
-                Tarjeta(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text('Ops pendientes de subir: $_pendientes',
-                          style: AppTexto.cuerpo),
-                      Text('Último pull: ${_ultimoPull ?? 'nunca'}',
-                          style: AppTexto.cuerpo),
-                      Text('Último push: ${_ultimoPush ?? 'nunca'}',
-                          style: AppTexto.cuerpo),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 12),
-                // v1.13.0 (F4, CONTRATO_F4_20261024): teléfonos con
-                // sync vieja desde el espejo real sync_ultimo_sync
-                // (una fila por usuario, solo ops APLICADAS). La
-                // nota de la 1.11.0 («el servidor aún no lo
-                // provee») SE QUITA: el dato ya es real.
-                // Corrección panel 1.13: un usuario conocido sin
-                // fila (nunca sincronizó) también aparece, como
-                // «Sin registro de sync».
-                Tarjeta(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text('Teléfonos con sync vieja',
-                          style: AppTexto.cuerpo),
-                      const SizedBox(height: 4),
-                      const Text(
-                        'Espejo sync_ultimo_sync: última sync '
-                        'efectiva por usuario (solo cuentan las '
-                        'operaciones aplicadas).',
-                        style: AppTexto.secundario,
-                      ),
-                      const SizedBox(height: 8),
-                      if (_ultimoSync.isEmpty)
-                        const Text(
-                          'Sin registro de sync todavía: ningún '
-                          'usuario sincronizó con éxito aún.',
-                          style: AppTexto.secundario,
-                        )
-                      else
-                        ..._ultimoSync.map((f) => Padding(
-                              padding:
-                                  const EdgeInsets.only(bottom: 6),
-                              child: Row(
-                                children: [
-                                  Expanded(
-                                    child: Text('${f['nombre']}',
-                                        style: AppTexto.cuerpo),
-                                  ),
-                                  Text(
-                                    etiquetaUltimoSync(
-                                        f, ahoraHabana()),
-                                    style: AppTexto.secundario,
-                                  ),
-                                ],
-                              ),
-                            )),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-    );
-  }
-}
 
 // ---------------------------------------------------------------------------
 // F5

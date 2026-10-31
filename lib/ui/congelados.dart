@@ -56,7 +56,7 @@ class _CongeladosScreenState extends State<CongeladosScreen> {
     return Scaffold(
       appBar: AppBar(title: const Text('Congelados')),
       body: _cargando
-          ? const Center(child: CircularProgressIndicator())
+          ? const EstadoCargando(texto: 'Cargando congelados…')
           : Column(
               children: [
                 const SyncBanner(),

@@ -622,8 +622,10 @@ class _EditarIncidenciaScreenState
             widget.existente?.estado ??
                 'pendiente',
         'creada_por': widget.existente?.creadaPor ??
-            AuthService().userId ??
-            'desconocido',
+            autorIncidenciaActual(
+              displayName: AuthService().displayName,
+              telegramId: AuthService().telegramId,
+            ),
         'creada_en': widget
                 .existente?.creadaEn
                 ?.toIso8601String() ??

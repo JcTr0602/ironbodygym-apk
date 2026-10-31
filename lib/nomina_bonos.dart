@@ -49,6 +49,7 @@ import 'dart:convert';
 import 'package:uuid/uuid.dart';
 
 import 'localdb.dart';
+import 'nomina_calc.dart';
 import 'tiempo.dart';
 
 /// Tipos de op nuevos de A4 (van al CHECK de sync_ops ANTES de
@@ -83,7 +84,9 @@ List<Map<String, dynamic>> fusionarBonosNomina({
       'bono_uuid': uuid,
       'mes': '${e['mes'] ?? ''}',
       'entrenador': '${e['entrenador'] ?? 'ambos'}',
-      'monto': (e['monto'] as num?)?.toDouble() ?? 0,
+      // #5 (Argón nómina): monto tolerante — un monto String
+      // ('500') valía 0 con el parseo directo.
+      'monto': NominaCalc.montoTolerante(e['monto']) ?? 0,
       'nota': '${e['nota'] ?? ''}',
       'creado_en': '${e['creado_en'] ?? ''}',
     };
@@ -110,7 +113,8 @@ List<Map<String, dynamic>> fusionarBonosNomina({
         'bono_uuid': uuid,
         'mes': '${p['mes'] ?? ''}',
         'entrenador': '${p['entrenador'] ?? 'ambos'}',
-        'monto': (p['monto'] as num?)?.toDouble() ?? 0,
+        // #5 (Argón nómina): monto tolerante (igual que arriba).
+        'monto': NominaCalc.montoTolerante(p['monto']) ?? 0,
         'nota': '${p['nota'] ?? ''}',
         'creado_en': '${p['creado_en'] ?? ''}',
       };
@@ -129,6 +133,36 @@ class BonosNominaService {
   BonosNominaService._();
   static final BonosNominaService instance = BonosNominaService._();
   final LocalDb _db = LocalDb.instance;
+
+  /// Bonos por mes para [entrenador] ('duany'/'gabriel'; 'ambos'
+  /// cuenta para los dos), desde [desde] hasta [hasta] inclusive.
+  /// #2 (Argón nómina): el libro de adelantos suma estos bonos a
+  /// la capacidad de cada mes. Una sola lectura del espejo + ops
+  /// para todo el rango (no una por mes).
+  Future<Map<String, double>> bonosPorMes(
+      String entrenador, String desde, String hasta) async {
+    final out = <String, double>{};
+    List<Map<String, dynamic>> todas = const [];
+    try {
+      todas = await _db.allMirror('nomina_bonos');
+    } catch (_) {}
+    final ops = await _db.pendingOps();
+    final fusion =
+        fusionarBonosNomina(espejo: todas, opsPendientes: ops);
+    for (final b in fusion) {
+      final mes = '${b['mes'] ?? ''}';
+      if (mes.length != 7 ||
+          mes.compareTo(desde) < 0 ||
+          mes.compareTo(hasta) > 0) {
+        continue;
+      }
+      final para = '${b['entrenador'] ?? 'ambos'}';
+      if (para != 'ambos' && para != entrenador) continue;
+      out[mes] =
+          (out[mes] ?? 0) + (NominaCalc.montoTolerante(b['monto']) ?? 0);
+    }
+    return out;
+  }
 
   /// Bonos del mes [mes] ('YYYY-MM'): espejo + ops pendientes
   /// de este teléfono, fusionados. Si el espejo aún no existe
@@ -209,7 +243,9 @@ class BonosNominaService {
           columns: ['v'], where: 'k = ?', whereArgs: [sello]);
       if (ya.isNotEmpty && '${ya.first['v']}' == '1') return;
       for (final b in bonosViejos) {
-        final monto = (b['monto'] as num?)?.toDouble() ?? 0;
+        // #5 (Argón nómina): monto tolerante (un String valía 0 y
+        // el bono se descartaba como "sin monto").
+        final monto = NominaCalc.montoTolerante(b['monto']) ?? 0;
         if (monto == 0) continue;
         await _db.queueOp(
           opUuid: const Uuid().v4(),

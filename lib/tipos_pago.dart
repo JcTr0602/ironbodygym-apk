@@ -53,6 +53,12 @@ class TipoPago {
 /// - Menor: la opción mensual de 30 días más barata entre 'menores'
 ///   y las ofertas de 30 días, comparando con [monto] (en el diálogo
 ///   es el precio de etiqueta, que ya incluye la especial vigente).
+///   Excepción 1.19 (Argón A1): si el menor es Casa o tiene
+///   especial mensual vigente ([esCasa]/[tieneEspecialMensual]),
+///   NO se compara contra ofertas: la preselección es 'menores'.
+///   El motor aplica Casa (0) o la especial, y una oferta
+///   preseleccionada la saltaría en la práctica. El entrenador
+///   sigue pudiendo elegir la oferta a mano en el desplegable.
 ///   Solo se comparan tipos de 30 días: una oferta semanal o de otro
 ///   período no es comparable con una mensualidad. En empate gana
 ///   'menores' sin importar el orden de la lista (1.15 M1d-01: el
@@ -67,12 +73,19 @@ TipoPago tipoInicialPago(
   List<TipoPago> tiposDisp, {
   required bool menor,
   required double Function(TipoPago tipo) monto,
+  bool esCasa = false,
+  bool tieneEspecialMensual = false,
 }) {
   if (tiposDisp.isEmpty) {
     throw ArgumentError('tipoInicialPago: lista de tipos vacía');
   }
   if (!menor) {
     return tiposDisp.firstWhere((t) => t.id == 'mensual',
+        orElse: () => tiposDisp.first);
+  }
+  // 1.19 (Argón A1): Casa y especial mensual no compiten con ofertas.
+  if (esCasa || tieneEspecialMensual) {
+    return tiposDisp.firstWhere((t) => t.id == 'menores',
         orElse: () => tiposDisp.first);
   }
   final candidatos =

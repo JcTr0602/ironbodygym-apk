@@ -665,7 +665,7 @@ class _ServiciosAdminScreenState extends State<ServiciosAdminScreen> {
         ],
       ),
       body: _cargando
-          ? const Center(child: CircularProgressIndicator())
+          ? const EstadoCargando(texto: 'Cargando servicios…')
           : ListView(
               padding: const EdgeInsets.all(AppEspacio.lg),
               children: [

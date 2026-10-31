@@ -223,6 +223,61 @@ List<Map<String, dynamic>> entradasHistorialServicios({
   return entradas;
 }
 
+/// Buscador del historial de servicios (11/25, PURO): el texto
+/// coincide con el cliente, el vendedor, el tipo (en palabras:
+/// ración/combo/agua, y también el código crudo: dosis/agua) o,
+/// en salidas, el motivo. Sin mayúsculas.
+bool coincideBusquedaHistorialServicio(
+    Map<String, dynamic> e, String texto, String nombreVendedor) {
+  final q = texto.trim().toLowerCase();
+  if (q.isEmpty) return true;
+  final tipoTxt = switch ('${e['tipo']}') {
+    'dosis_sin_agua' => 'ración',
+    'dosis_con_agua' => 'combo',
+    'agua_suelta' => 'agua suelta',
+    _ => '${e['tipo']}',
+  };
+  final campos = e['kind'] == 'venta'
+      ? [
+          '${e['cliente']}',
+          nombreVendedor,
+          tipoTxt,
+          '${e['tipo']}',
+          '${e['registradoPor']}',
+        ]
+      : ['${e['motivo']}', tipoTxt, '${e['tipo']}'];
+  return campos.join(' ').toLowerCase().contains(q);
+}
+
+/// Hora de una venta de servicio para su ficha (PURO): la columna
+/// `hora` si viene; si no, la hora dentro de `fecha` (filas viejas
+/// con fecha ISO completa); si no hay ninguna, '—'.
+String horaVentaServicio(Map<String, dynamic> v) {
+  final h = '${v['hora'] ?? ''}'.trim();
+  if (h.isNotEmpty) return h.length >= 5 ? h.substring(0, 5) : h;
+  final f = '${v['fecha'] ?? ''}';
+  if (f.length > 11) return f.substring(11, 16);
+  return '—';
+}
+
+/// Nombre del pomo de una venta para su ficha (PURO): la etiqueta
+/// «Nombre · Categoría» si el pomo está en [pomos] (pomos activos
+/// con producto_nombre ya resuelto); sin pomo → época de lotes;
+/// pomo no resuelto → 'Pomo #id'.
+String nombrePomoVenta(
+    Map<String, dynamic> v, List<Map<String, dynamic>> pomos) {
+  final pomoId = (v['pomo_id'] as num?)?.toInt();
+  if (pomoId == null) return 'Época de lotes (sin pomo)';
+  for (final p in pomos) {
+    if ((p['id'] as num?)?.toInt() == pomoId) {
+      return '${p['producto_nombre'] ?? 'Pomo $pomoId'}';
+    }
+  }
+  return 'Pomo $pomoId';
+}
+
+/// Venta original de un reverso (PURO): la fila de [todas] con
+/// id == reverso_de, o null si no es reverso o no está.
 /// Primer método habilitado del producto (efectivo antes que
 /// transferencia) o null si ambos están deshabilitados. Lo usan el
 /// formulario de venta y el speed dial (ítems 5 y 7). PURO.
@@ -759,7 +814,32 @@ Future<List<Map<String, dynamic>>> historialServiciosCliente(
 /// día desde el espejo + sus ops de venta aún pendientes (las ops en
 /// cola son del usuario del dispositivo por definición).
 Future<Map<String, dynamic>> cuadreServiciosDia(
-    int telegramId, String fechaIso) async {
+        int telegramId, String fechaIso) =>
+    _cuadreServiciosDia(
+      fechaIso,
+      cuenta: (tid) => tid == telegramId,
+      cuentaEfectivo: (tid) => tid == telegramId,
+    );
+
+/// Cuadre del gym (9/25): mismos totales sin filtrar por persona.
+/// Ventas, comisiones y Casa cuentan para el gym sea quien sea el
+/// rol (incluido null en reversos viejos). El efectivo solo cuenta
+/// responsables NO null: el servidor deja responsable en null a
+/// propósito cuando el dueño revierte una venta entregada porque
+/// ese reverso NO mueve efectivo (el dinero ya se entregó);
+/// contarlo en el gym pintaría un -1500 fantasma el día del reverso.
+Future<Map<String, dynamic>> cuadreServiciosDiaGym(String fechaIso) =>
+    _cuadreServiciosDia(
+      fechaIso,
+      cuenta: (_) => true,
+      cuentaEfectivo: (tid) => tid != null,
+    );
+
+Future<Map<String, dynamic>> _cuadreServiciosDia(
+  String fechaIso, {
+  required bool Function(int?) cuenta,
+  required bool Function(int?) cuentaEfectivo,
+}) async {
   var dosisSin = 0, dosisCon = 0, aguas = 0, casaN = 0;
   var efectivo = 0.0, transferencia = 0.0, comision = 0.0;
   // Ítem 8: el cuadre se reparte por ROLES — las ventas cuentan al
@@ -778,10 +858,10 @@ Future<Map<String, dynamic>> cuadreServiciosDia(
       int? responsable,
       int? comisionero) {
     if (esCasa) {
-      if (vendedor == telegramId) casaN += cant;
+      if (cuenta(vendedor)) casaN += cant;
       return;
     }
-    if (vendedor == telegramId) {
+    if (cuenta(vendedor)) {
       switch (tipo) {
         case 'dosis_sin_agua':
           dosisSin += cant;
@@ -794,20 +874,40 @@ Future<Map<String, dynamic>> cuadreServiciosDia(
         transferencia += precio * cant;
       }
     }
-    if (metodo != 'transferencia' && responsable == telegramId) {
+    if (metodo != 'transferencia' && cuentaEfectivo(responsable)) {
       efectivo += precio * cant;
     }
-    if (comisionero == telegramId) {
+    if (cuenta(comisionero)) {
       comision += montoCom ?? com * cant;
     }
   }
 
+  // 10/25 (rendimiento): solo las ventas del día, vía
+  // mirrorPorFecha + el índice idx_servicio_ventas_fecha, en vez
+  // de decodificar el espejo completo en Dart. La deduplicación
+  // de ops pendientes sigue siendo exacta: una op con fecha del
+  // día solo puede tener su fila espejo en el día, y una op sin
+  // fecha que ya se espejó otro día no está en el conjunto del
+  // día ni como espejo (no se cuenta dos veces).
   final uuidsEspejo = <String>{};
-  for (final v in await LocalDb.instance.allMirror('servicio_ventas')) {
+  for (final v in await LocalDb.instance
+      .mirrorPorFecha('servicio_ventas', 'fecha', fechaIso, fechaIso)) {
     uuidsEspejo.add('${v['op_uuid'] ?? ''}');
     if ('${v['fecha'] ?? ''}'.length >= 10 &&
         '${v['fecha']}'.substring(0, 10) == fechaIso) {
       final reg = LocalDb.normalizarTelegramId(v['registrado_por']);
+      // Reverso (2026-10-30, caso -1500): el servidor fija los roles
+      // del reverso a propósito (copia del original o null deliberado:
+      // el dueño que revierte una venta entregada deja responsable en
+      // null porque el pendiente del entrenador no se toca). Jamás
+      // inventar atribución con registrado_por: el fallback caía el
+      // -1500 en el dueño. El fallback solo queda para filas viejas
+      // sin columnas de roles (previas al ítem 8).
+      final esReverso = (v['reverso_de'] as num?) != null;
+      int? rol(Object? valor) {
+        final id = LocalDb.normalizarTelegramId(valor);
+        return id ?? (esReverso ? null : reg);
+      }
       sumar(
         '${v['tipo']}',
         (v['cantidad'] as num?)?.toInt() ?? 0,
@@ -816,11 +916,9 @@ Future<Map<String, dynamic>> cuadreServiciosDia(
         (v['comision_monto'] as num?)?.toDouble(),
         v['metodo'] as String?,
         (v['casa'] as num?)?.toInt() == 1,
-        LocalDb.normalizarTelegramId(v['vendedor_id']) ?? reg,
-        LocalDb.normalizarTelegramId(v['responsable_efectivo_id']) ??
-            reg,
-        LocalDb.normalizarTelegramId(v['comision_entrenador_id']) ??
-            reg,
+        rol(v['vendedor_id']),
+        rol(v['responsable_efectivo_id']),
+        rol(v['comision_entrenador_id']),
       );
     }
   }

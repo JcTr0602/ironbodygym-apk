@@ -17,6 +17,7 @@ import '../negocio.dart';
 import '../tiempo.dart';
 import 'auditoria_persona.dart';
 import 'diseno.dart';
+import 'ficha.dart';
 import 'componentes.dart';
 import 'widgets.dart';
 
@@ -191,6 +192,17 @@ bool esOpAlerta(Map<String, dynamic> op) {
 /// Visibilidad de una op según el filtro elegido y el actor de la
 /// sesión ([miActor]: AuthService.displayName; [miTelegramId]:
 /// AuthService.telegramId). Función pura.
+/// ¿El nombre de un payload pertenece a un cliente protegido?
+/// (Top-level, testeable.) Los nombres se normalizan a minúsculas
+/// sin espacios extremos; la comparación es exacta tras normalizar.
+/// Un nombre compartido por un protegido y un no protegido se
+/// enmascara en ambos: ante la duda, la privacidad manda.
+bool esNombreProtegido(String? nombre, Set<String> protegidos) {
+  if (nombre == null) return false;
+  final n = nombre.trim().toLowerCase();
+  return n.isNotEmpty && protegidos.contains(n);
+}
+
 bool opVisibleEnAuditoria(Map<String, dynamic> op, FiltroAuditoria filtro,
     {String? miActor, int? miTelegramId}) {
   switch (filtro) {
@@ -216,6 +228,12 @@ class _AuditoriaScreenState extends State<AuditoriaScreen> {
   bool _cargando = true;
   // v1.6.0 (Jc): la vista inicial es «Otros y alertas».
   FiltroAuditoria _filtro = FiltroAuditoria.otrosYAlertas;
+
+  /// Módulo 6 (1.19): filtros rápidos — solo hoy y por entrenador
+  /// (el dueño elige el actor; sin elegir, todos). Se combinan con
+  /// [_filtro]: primero el filtro de actor base, luego estos.
+  bool _soloHoy = false;
+  String? _actorFiltro;
   // Nombre con el que la sesión de ESTE teléfono firma sus ops
   // (AuthService.displayName): contra él se clasifica cada op como
   // «mía» o «de otro» (la cola local solo trae ops de este
@@ -233,6 +251,10 @@ class _AuditoriaScreenState extends State<AuditoriaScreen> {
   // cliente_id de clientes protegidos (Ronda 17 M1-H2): de ellos
   // no se precarga nombre ni foto y _detalle no muestra datos.
   final Set<int> _protegidosIds = {};
+  // Nombres normalizados (minúsculas) de clientes protegidos del
+  // espejo: para ops cuyo payload NO trae cliente_id (inscribir),
+  // donde la máscara por id no puede cubrir (Argón Gmail_1-14 #1).
+  final Set<String> _protegidosNombres = {};
 
   @override
   void initState() {
@@ -275,6 +297,16 @@ class _AuditoriaScreenState extends State<AuditoriaScreen> {
       for (final c in clientes) (c['id'] as int): c,
     };
     _protegidosIds.clear();
+    _protegidosNombres.clear();
+    // Argón Gmail_1-14 #1: el set de nombres protegidos se arma
+    // de TODO el espejo, no solo de las ops visibles: una
+    // inscripción no trae cliente_id y solo el nombre la delata.
+    for (final c in clientes) {
+      if (esVistaProtegida(c)) {
+        final n = '${c['nombre'] ?? ''}'.trim().toLowerCase();
+        if (n.isNotEmpty) _protegidosNombres.add(n);
+      }
+    }
     for (final op in opsVisibles) {
       final p = _payload(op);
       final cid = _clienteId(p, '${op['tipo']}');
@@ -361,7 +393,15 @@ class _AuditoriaScreenState extends State<AuditoriaScreen> {
             : 'Pago de $etiqueta: ${monto ?? '?'} CUP ($metodo)';
       case 'inscribir':
         final n = '${p['nombre'] ?? nombre ?? ''}'.trim();
-        return n.isNotEmpty ? 'Se inscribió a $n' : 'Nueva inscripción';
+        if (n.isEmpty) return 'Nueva inscripción';
+        // Argón Gmail_1-14 #1: el payload de inscribir NO trae
+        // cliente_id, así que la máscara por id de arriba no lo
+        // cubre y el nombre real se filtraba en la lista y en el
+        // diálogo. Se compara contra los nombres protegidos.
+        if (esNombreProtegido(n, _protegidosNombres)) {
+          return 'Cliente protegido';
+        }
+        return 'Se inscribió a $n';
       case 'regalar_mes_cumpleanos':
         return nombre != null
             ? 'Se le regaló el mes a $nombre (cumpleaños)'
@@ -435,6 +475,8 @@ class _AuditoriaScreenState extends State<AuditoriaScreen> {
     final visibles = _ops
         .where((o) => opVisibleEnAuditoria(o, _filtro,
             miActor: _miActor, miTelegramId: _miTelegramId))
+        .where((o) => !_soloHoy || _diaOp(o) == hoy)
+        .where((o) => _actorFiltro == null || _usuario(o) == _actorFiltro)
         .toList();
 
     // Agrupar por día manteniendo el orden (ya viene DESC).
@@ -523,9 +565,109 @@ class _AuditoriaScreenState extends State<AuditoriaScreen> {
                 ),
               ),
             ),
+          // Módulo 6 (1.19): filtros rápidos — hoy y por entrenador.
+          // Se combinan con el filtro de actor de arriba.
+          if (!_cargando && _ops.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Row(
+                  children: [
+                    ChoiceChip(
+                      label: const Text('Hoy'),
+                      selected: _soloHoy,
+                      onSelected: (_) =>
+                          setState(() => _soloHoy = !_soloHoy),
+                    ),
+                    if (esDueno) ...[
+                      const SizedBox(width: 8),
+                      Builder(
+                        builder: (chipCtx) => ChoiceChip(
+                          label: Text(_actorFiltro ?? 'Por entrenador'),
+                          selected: _actorFiltro != null,
+                          onSelected: (_) async {
+                            final actores = <String>{};
+                            for (final o in _ops) {
+                              final a = _usuario(o);
+                              if (a.isNotEmpty) actores.add(a);
+                            }
+                            // Argón Gmail_1-14 #5: el menú se ancla
+                            // al chip (RenderBox), no a una
+                            // coordenada fija que se desfasa si la
+                            // barra superior crece.
+                            var position =
+                                const RelativeRect.fromLTRB(
+                                    12, 200, 100, 100);
+                            final boton = chipCtx.findRenderObject()
+                                as RenderBox?;
+                            final overlay = Overlay.of(chipCtx)
+                                .context
+                                .findRenderObject() as RenderBox?;
+                            if (boton != null && overlay != null) {
+                              position = RelativeRect.fromRect(
+                                Rect.fromPoints(
+                                  boton.localToGlobal(Offset.zero,
+                                      ancestor: overlay),
+                                  boton.localToGlobal(
+                                      boton.size.bottomRight(
+                                          Offset.zero),
+                                      ancestor: overlay),
+                                ),
+                                Offset.zero & overlay.size,
+                              );
+                            }
+                            final elegido =
+                                await showMenu<String>(
+                              context: context,
+                              position: position,
+                              items: [
+                                const PopupMenuItem(
+                                    value: '',
+                                    child: Text('Todos')),
+                                for (final a in actores.toList()..sort())
+                                  PopupMenuItem(
+                                      value: a, child: Text(a)),
+                              ],
+                            );
+                            // null = menú cerrado sin elegir: no se
+                            // toca el filtro. '' = «Todos» (quitarlo).
+                            if (elegido != null) {
+                              setState(() {
+                                _actorFiltro =
+                                    elegido.isEmpty ? null : elegido;
+                                // Argón Gmail_1-14 #3: «Solo mías»
+                                // + otro entrenador = lista vacía
+                                // sin explicación. Al elegir a otro
+                                // actor, el filtro base pasa a todo.
+                                if (elegido.isNotEmpty &&
+                                    _filtro ==
+                                        FiltroAuditoria.soloMias &&
+                                    elegido != _miActor) {
+                                  _filtro = FiltroAuditoria.todo;
+                                }
+                              });
+                            }
+                          },
+                        ),
+                      ),
+                      if (_actorFiltro != null) ...[
+                        const SizedBox(width: 4),
+                        IconButton(
+                          icon: const Icon(Icons.clear, size: 18),
+                          tooltip: 'Quitar filtro',
+                          onPressed: () =>
+                              setState(() => _actorFiltro = null),
+                        ),
+                      ],
+                    ],
+                  ],
+                ),
+              ),
+            ),
           Expanded(
             child: _cargando
-                ? const Center(child: CircularProgressIndicator())
+                ? const EstadoCargando(texto: 'Cargando auditoría…')
                 : _ops.isEmpty
                     ? EstadoVacio(
                         icono: Icons.fact_check,
@@ -649,7 +791,54 @@ class _AuditoriaScreenState extends State<AuditoriaScreen> {
               ),
             ],
           ),
+          // Módulo 6 (1.19): salto al registro. Con cliente
+          // identificado (y no protegido) abre su ficha; si no,
+          // muestra el detalle completo de la operación.
+          onTap: () => _abrirOp(ctx, op, cid),
         ),
+      ),
+    );
+  }
+
+  void _abrirOp(BuildContext ctx, Map<String, dynamic> op, int? cid) {
+    if (cid != null && !_protegidosIds.contains(cid)) {
+      Navigator.of(ctx).push(
+        MaterialPageRoute(builder: (_) => FichaScreen(clienteId: cid)),
+      );
+      return;
+    }
+    final tipo = '${op['tipo']}';
+    showDialog<void>(
+      context: ctx,
+      builder: (c) => AlertDialog(
+        title: Text(_descripcionOp(tipo)),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Actor: ${_usuario(op)}'),
+              Text('Fecha: ${fechaCorta(op['creada_ts'], 16)}'
+                  .replaceAll('T', ' ')),
+              Text('Estado: ${_etiquetaEstado('${op['estado']}')}'),
+              if (_detalle(op).isNotEmpty) ...[
+                const SizedBox(height: 8),
+                Text(_detalle(op)),
+              ],
+              if (cid != null) ...[
+                const SizedBox(height: 8),
+                const Text('Cliente protegido: su ficha no se abre '
+                    'desde aquí.'),
+              ],
+            ],
+          ),
+        ),
+        actions: [
+          FilledButton(
+            onPressed: () => Navigator.pop(c),
+            child: const Text('Cerrar'),
+          ),
+        ],
       ),
     );
   }

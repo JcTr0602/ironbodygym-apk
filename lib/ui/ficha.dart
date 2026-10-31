@@ -17,6 +17,7 @@ import 'package:uuid/uuid.dart';
 
 import '../auth.dart';
 import '../permisos_entrenador.dart';
+import '../plus_residual.dart';
 import '../precio_cobro.dart';
 import '../tarifa_especial.dart';
 import '../tiempo.dart';
@@ -108,6 +109,9 @@ class _FichaScreenState extends State<FichaScreen> {
   // ALGÚN registro en tarifa_especial (para el fallback legacy).
   Map<String, dynamic>? _especialActiva;
   bool _tieneRegistroTarifa = false;
+  // 17/25 (1.19): Plus residual del convertido (solo dueño).
+  // null = sin lectura (sin red, sin RPC, o no dueño): sin fila.
+  ({bool activo, String? hasta})? _plusResidual;
   List<Map<String, dynamic>> _pagos = [];
   List<Map<String, dynamic>> _suplementos = [];
   // v1.2.5 (#10): incidencias relacionadas con el cliente.
@@ -157,6 +161,20 @@ class _FichaScreenState extends State<FichaScreen> {
       tieneRegistro =
           await tieneAlgunRegistroTarifa(widget.clienteId);
     } catch (_) {}
+    // 17/25 (1.19): Plus residual (solo dueño, best-effort como
+    // la tarifa especial: sin red o sin la RPC ejecutada, la
+    // ficha abre igual sin la fila; la RPC ya devuelve
+    // {activo:false} a quien no sea dueño).
+    ({bool activo, String? hasta})? plusResidual;
+    if (AuthService().isOwner) {
+      try {
+        final res = await Supabase.instance.client.rpc(
+          'cliente_plus_residual_staff',
+          params: {'p_cliente_id': widget.clienteId},
+        );
+        plusResidual = plusResidualDe(res);
+      } catch (_) {}
+    }
     // v1.2.5 (#10): incidencias relacionadas (respeta visibilidad).
     final incidencias = await LocalDb.instance.incidenciasRelacionadas(
         'cliente', widget.clienteId,
@@ -181,6 +199,7 @@ class _FichaScreenState extends State<FichaScreen> {
         _accesoSinConexion = accesoSinConexion;
         _especialActiva = especialActiva;
         _tieneRegistroTarifa = tieneRegistro;
+        _plusResidual = plusResidual;
       });
     }
     // Bloque 1: abrir directo en Editar (deslizar en Buscar).
@@ -545,6 +564,15 @@ class _FichaScreenState extends State<FichaScreen> {
     _cargar();
   }
 
+  /// 17/25 (1.19): texto de la fila «Plus» de Membresía.
+  /// Null = no mostrar la fila.
+  String? _textoPlus() {
+    final p = _plusResidual;
+    if (p == null) return null;
+    return textoPlusResidual(
+        activo: p.activo, hasta: p.hasta, hoyIso: hoyHabanaIso());
+  }
+
   /// v1.10.0 (Bloque 2, D6): texto de la fila «Tarifa especial» de
   /// Membresía. Null = no mostrar la fila.
   String? _textoTarifaEspecial(Map<String, dynamic> c) {
@@ -643,9 +671,10 @@ class _FichaScreenState extends State<FichaScreen> {
             onPressed: () => Navigator.of(ctx).pop(false),
             child: const Text('Cancelar'),
           ),
-          ElevatedButton(
+          BotonPrimario(
+            texto: 'Regalar',
             onPressed: () => Navigator.of(ctx).pop(true),
-            child: const Text('Regalar'),
+            expandido: false,
           ),
         ],
       ),
@@ -769,7 +798,8 @@ class _FichaScreenState extends State<FichaScreen> {
             },
             child: const Text('Copiar mensaje'),
           ),
-          ElevatedButton(
+          BotonPrimario(
+            texto: 'Abrir WhatsApp',
             onPressed: () async {
               final tel = _normalizarTelefono(telCtrl.text);
               if (tel.isEmpty) {
@@ -802,7 +832,7 @@ class _FichaScreenState extends State<FichaScreen> {
               await launchUrl(url, mode: LaunchMode.externalApplication);
               if (ctx.mounted) Navigator.of(ctx).pop();
             },
-            child: const Text('Abrir WhatsApp'),
+            expandido: false,
           ),
         ],
       ),
@@ -1870,7 +1900,7 @@ class _FichaScreenState extends State<FichaScreen> {
     // Bloque 1: marco de la foto en color de estado (3 dp): verde al día,
     // ámbar por vencer, rojo vencido, dorado Cuenta a la Casa.
     final colorMarco = esCasa
-        ? const Color(0xFFB8860B)
+        ? AppColores.alerta
         : dias < 0
             ? AppColores.error
             : dias <= 7
@@ -2079,24 +2109,24 @@ class _FichaScreenState extends State<FichaScreen> {
                           padding: const EdgeInsets.symmetric(
                               horizontal: 12, vertical: 5),
                           decoration: BoxDecoration(
-                            color: const Color(0xFFFFF3CD),
+                            color: AppColores.alerta.withValues(alpha: 0.15),
                             borderRadius:
                                 BorderRadius.circular(999),
                             border: Border.all(
-                                color: const Color(0xFFB8860B)),
+                                color: AppColores.alerta),
                           ),
                           child: const Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
                               Icon(Icons.home_rounded,
                                   size: 15,
-                                  color: Color(0xFFB8860B)),
+                                  color: AppColores.alerta),
                               SizedBox(width: 6),
                               Text('Cuenta a la Casa',
                                   style: TextStyle(
                                       fontSize: 12.5,
                                       fontWeight: FontWeight.w700,
-                                      color: Color(0xFF7A5A00))),
+                                      color: AppColores.alerta)),
                             ],
                           ),
                         ),
@@ -2238,7 +2268,7 @@ class _FichaScreenState extends State<FichaScreen> {
                                             .copyWith(
                                                 fontWeight:
                                                     FontWeight.w600,
-                                                color: Colors.green),
+                                                color: AppColores.exito),
                                         textAlign:
                                             TextAlign.right,
                                       ),
@@ -2352,6 +2382,11 @@ class _FichaScreenState extends State<FichaScreen> {
                                   Icons.local_offer,
                                   'Tarifa especial',
                                   _textoTarifaEspecial(c)!),
+                            // 17/25: Plus residual del convertido
+                            // (solo dueño; sin Plus no hay fila).
+                            if (_textoPlus() != null)
+                              _filaInfo(
+                                  Icons.star, 'Plus', _textoPlus()!),
                             _filaInfo(
                                 Icons.date_range,
                                 'Inscripción',
@@ -2494,7 +2529,7 @@ class _FichaScreenState extends State<FichaScreen> {
                                 contentPadding: EdgeInsets.zero,
                                 leading: const Icon(
                                     Icons.home_rounded,
-                                    color: Color(0xFFB8860B),
+                                    color: AppColores.alerta,
                                     size: 20),
                                 title: Text(
                                     esCasa
@@ -2872,9 +2907,9 @@ class _FichaScreenState extends State<FichaScreen> {
               Expanded(
                 child: OutlinedButton.icon(
                   icon: const Icon(Icons.block,
-                      size: 18, color: Colors.red),
+                      size: 18, color: AppColores.error),
                   label: const Text('Revocar',
-                      style: TextStyle(color: Colors.red)),
+                      style: TextStyle(color: AppColores.error)),
                   onPressed: () =>
                       _confirmarRevocar(acceso),
                 ),
@@ -2965,7 +3000,7 @@ class _FichaScreenState extends State<FichaScreen> {
               child: const Text('Cancelar')),
           FilledButton(
               style: FilledButton.styleFrom(
-                  backgroundColor: Colors.red),
+                  backgroundColor: AppColores.error),
               onPressed: () => Navigator.of(ctx).pop(true),
               child: const Text('Revocar')),
         ],
@@ -3056,9 +3091,14 @@ class _FichaScreenState extends State<FichaScreen> {
             : metodo == 'transferencia'
                 ? Icons.smartphone
                 : Icons.payments,
-        'color': metodo == 'transferencia'
-            ? AppColores.info
-            : AppColores.exito,
+        // F2 (estéticas 1.19): el color distingue el tipo de un
+        // vistazo — cobro en verde, transferencia en azul, regalo
+        // en ámbar (antes el regalo iba también en verde).
+        'color': metodo == 'cortesia'
+            ? AppColores.alerta
+            : metodo == 'transferencia'
+                ? AppColores.info
+                : AppColores.exito,
         'pago': p,
       });
     }
@@ -3096,7 +3136,10 @@ class _FichaScreenState extends State<FichaScreen> {
         'icono': (s['reverso_de'] as num?) != null
             ? Icons.undo
             : Icons.bolt,
-        'color': AppColores.naranja,
+        // F2: la anulación (reverso) va en rojo, no en naranja.
+        'color': (s['reverso_de'] as num?) != null
+            ? AppColores.error
+            : AppColores.naranja,
       });
     }
     DateTime? fechaDe(Map<String, dynamic> e) {
@@ -3168,15 +3211,24 @@ class _FichaScreenState extends State<FichaScreen> {
             }),
           const SizedBox(height: AppEspacio.sm),
           if (visibles.isEmpty)
-            Text('Sin movimientos en este filtro',
-                style: TextStyle(
-                    color: AppColores.textoSecundario(context))),
+            const EstadoVacio(
+              icono: Icons.history_rounded,
+              titulo: 'Sin movimientos en este filtro',
+              subtitulo: 'Prueba con otro filtro.',
+            ),
           for (final e in visibles)
             ListTile(
               dense: true,
               contentPadding: EdgeInsets.zero,
-              leading: Icon(e['icono'] as IconData,
-                  size: 20, color: e['color'] as Color),
+              // F2 (estéticas 1.19): icono en círculo tintado
+              // según el tipo, en vez de icono suelto sin fondo.
+              leading: CircleAvatar(
+                radius: 16,
+                backgroundColor:
+                    (e['color'] as Color).withValues(alpha: 0.15),
+                child: Icon(e['icono'] as IconData,
+                    size: 18, color: e['color'] as Color),
+              ),
               title: Text('${e['titulo']}', style: AppTexto.cuerpo),
               subtitle: Text('${e['subtitulo']}',
                   style: AppTexto.secundario),

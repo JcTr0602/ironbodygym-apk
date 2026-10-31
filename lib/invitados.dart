@@ -1329,6 +1329,23 @@ class InvitadosService {
   Future<List<InvitadoResumen>> solicitudesPendientes() =>
       listar(filtro: 'solicitudes');
 
+  /// Dashboard 1.19 (Q6 Argón): cuántos invitados tienen Plus
+  /// vigente. El Plus NO vive en ningún espejo local (solo en la
+  /// RPC `invitados_listar`), así que el conteo es best-effort
+  /// contra el servidor: una página de 500. Si la página viene
+  /// llena (hay más invitados que el tope) o la RPC falla, devuelve
+  /// null y la UI omite el dato en vez de mostrar un conteo falso.
+  /// Sin sesión no toca la red.
+  Future<int?> contarPlusVigentes() async {
+    try {
+      final lista = await listar(filtro: 'todos', limite: 500);
+      if (lista.length >= 500) return null;
+      return lista.where((i) => i.plusActivo).length;
+    } catch (_) {
+      return null;
+    }
+  }
+
   /// Conteos de cabecera (RPC `invitados_resumen`). Devuelve null
   /// si la RPC aún no existe (oleada SQL sin aplicar): la cabecera
   /// simplemente no se pinta, sin romper la bandeja.

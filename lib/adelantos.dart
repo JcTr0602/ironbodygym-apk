@@ -20,6 +20,10 @@ class MesLibroAdelantos {
   final String mes; // 'YYYY-MM'
   final double bruto;
   final double comisiones;
+  final double bonos; // #2 (Argón nómina): bonos del mes, parte
+  // de la capacidad: un adelanto cubierto por un bono NO genera
+  // deuda saliente (antes el libro no los veía y la deuda era
+  // fantasma).
   final double adelantos; // suma con signo del mes (por mes_nomina)
   final double deudaEntrante;
   final List<Map<String, dynamic>> items;
@@ -27,28 +31,20 @@ class MesLibroAdelantos {
     required this.mes,
     required this.bruto,
     required this.comisiones,
+    this.bonos = 0,
     required this.adelantos,
     required this.deudaEntrante,
     required this.items,
   });
 
-  /// Lo devengado del mes (bruto + comisiones + bonos si la UI
-  /// los suma aparte; aquí solo bruto y comisiones del libro).
-  double get devengado => bruto + comisiones;
+  /// Lo devengado del mes (bruto + comisiones + bonos).
+  double get devengado => bruto + comisiones + bonos;
 
   /// Neto a pagar: devengado − adelantos − deuda entrante.
   /// Negativo = queda deuda (se paga 0).
   double get neto => devengado - adelantos - deudaEntrante;
   double get aPagar => neto > 0 ? neto : 0;
   double get deudaSaliente => neto < 0 ? -neto : 0;
-}
-
-String mesSiguiente(String mes) {
-  final y = int.parse(mes.substring(0, 4));
-  final m = int.parse(mes.substring(5, 7));
-  final f = DateTime(y, m + 1);
-  return '${f.year.toString().padLeft(4, '0')}-'
-      '${f.month.toString().padLeft(2, '0')}';
 }
 
 /// Libro corrido: un MesLibro por mes desde el primer mes con
@@ -61,6 +57,7 @@ List<MesLibroAdelantos> libroAdelantos({
   required List<Map<String, dynamic>> eventos,
   required Map<String, double> brutoPorMes,
   required Map<String, double> comisionesPorMes,
+  Map<String, double> bonosPorMes = const {},
   required String hastaMes,
 }) {
   final porMes = <String, List<Map<String, dynamic>>>{};
@@ -73,6 +70,7 @@ List<MesLibroAdelantos> libroAdelantos({
     ...porMes.keys,
     ...brutoPorMes.keys,
     ...comisionesPorMes.keys,
+    ...bonosPorMes.keys,
     hastaMes,
   }.where((m) => m.compareTo(hastaMes) <= 0).toList()
     ..sort();
@@ -86,15 +84,18 @@ List<MesLibroAdelantos> libroAdelantos({
         0, (s, e) => s + ((e['monto'] as num?)?.toDouble() ?? 0));
     final bruto = brutoPorMes[mes] ?? 0;
     final comisiones = comisionesPorMes[mes] ?? 0;
+    final bonos = bonosPorMes[mes] ?? 0;
     if (items.isNotEmpty ||
         bruto != 0 ||
         comisiones != 0 ||
+        bonos != 0 ||
         deuda != 0 ||
         mes == hastaMes) {
       final libro = MesLibroAdelantos(
         mes: mes,
         bruto: bruto,
         comisiones: comisiones,
+        bonos: bonos,
         adelantos: adelantos,
         deudaEntrante: deuda,
         items: items,
@@ -340,6 +341,10 @@ class AdelantosService {
     required String entrenadorId,
     required String entrenadorNombre,
     int? entrenadorTelegramId,
+    // #3 (Argón nómina): foto de tarifa y neto al liquidar, para
+    // que la historia no cambie si la tarifa cambia después.
+    double? tarifaPorCliente,
+    double? neto,
   }) =>
       _queueYEmpujar('liquidar_nomina', {
         'mes': mes,
@@ -351,6 +356,9 @@ class AdelantosService {
         // conoce el telegram_id).
         if (entrenadorTelegramId != null)
           'entrenador_telegram_id': entrenadorTelegramId,
+        if (tarifaPorCliente != null)
+          'tarifa_por_cliente': tarifaPorCliente,
+        if (neto != null) 'neto': neto,
       });
 
   /// El mes en curso ('YYYY-MM') en hora de La Habana.

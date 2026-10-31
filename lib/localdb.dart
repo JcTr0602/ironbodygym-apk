@@ -40,7 +40,7 @@ class LocalDb {
   /// v1.4.0 (Argón): versión actual del esquema local. Los tests de
   /// migración comparan contra esta constante en vez de un número
   /// fijo, para no caer en cascada de fallos con cada migración.
-  static const int versionActual = 48;
+  static const int versionActual = 51;
 
   /// v37: marcas de información pública pendiente de republicar,
   /// UNA FILA POR CLAVE (compartido entre onCreate y la migración
@@ -1195,6 +1195,26 @@ class LocalDb {
           await db.rawInsert(
               "INSERT OR IGNORE INTO meta (k, v) VALUES ('wm_servicio_pomos', '0')");
         }
+        if (oldV < 49) {
+          // Bandeja GymPedia (1.19): MISMO método que onCreate
+          // (paridad garantizada, no SQL copiado).
+          await _crearTablasBandeja(db);
+        }
+        if (oldV < 50) {
+          // Registro de envíos de transferencia (1.19): MISMO método
+          // que onCreate (paridad garantizada, no SQL copiado).
+          await _crearTablaEnviosTransferencia(db);
+        }
+        if (oldV < 51) {
+          // 10/25 (rendimiento Servicios): índice de fecha en
+          // servicio_ventas (misma expresión que onCreate).
+          try {
+            await db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_servicio_ventas_fecha ON servicio_ventas(substr(json_extract(data, '\$.fecha'), 1, 10))");
+          } catch (_) {
+            // JSON1 ausente o tabla aún no creada: no aborta el upgrade.
+          }
+        }
       },
     );
     // v1.2.5+28: repara el índice FTS si la migración lo omitió y el
@@ -2060,6 +2080,17 @@ class LocalDb {
     } catch (_) {
       // JSON1 puede faltar en algunos teléfonos.
     }
+    // 10/25 (rendimiento Servicios): índice de expresión sobre la
+    // fecha de servicio_ventas, con LA MISMA expresión que usa
+    // mirrorPorFecha() para que SQLite lo aproveche en vez de
+    // escanear el espejo. También en onUpgrade (oldV < 51).
+    try {
+      await db.execute(
+          "CREATE INDEX IF NOT EXISTS idx_servicio_ventas_fecha ON servicio_ventas(substr(json_extract(data, '\$.fecha'), 1, 10))");
+    } catch (_) {
+      // JSON1 puede faltar en algunos teléfonos, o la tabla aún
+      // no existe en instalaciones muy viejas.
+    }
     // v1.2.5-rev6: la tabla ANTES que su índice. En rev5 el índice
     // idx_ops_estado se creaba primero y la instalación limpia fallaba
     // con "no such table: ops_queue". También se incluyen aquí las
@@ -2145,6 +2176,13 @@ class LocalDb {
         // método en onCreate y en onUpgrade (ver _crearTablasFaseA).
         // Aquí (tras `meta`) porque siembra cursores propios.
         await _crearTablasFaseA(db);
+        // Bandeja GymPedia (1.19, v49). MISMO método en onCreate y
+        // en onUpgrade (ver _crearTablasBandeja).
+        await _crearTablasBandeja(db);
+        // Registro de envíos de transferencia (1.19, v50). MISMO
+        // método en onCreate y en onUpgrade (ver
+        // _crearTablaEnviosTransferencia).
+        await _crearTablaEnviosTransferencia(db);
         // v1.2.4: incidencias (diseño ChatGPT: bidireccional, offline-first).
         // incidencias_local: creadas en este dispositivo, pendientes de subir.
         // incidencias_mirror: copia de la tabla central de Supabase.
@@ -2500,6 +2538,99 @@ class LocalDb {
       await db.rawInsert(
           "INSERT OR IGNORE INTO meta (k, v) VALUES ('wm_$t', '0')");
     }
+  }
+
+  /// Bandeja GymPedia (1.19, v49): espejos que publica el puente.
+  /// MISMO método en onCreate y en onUpgrade (paridad garantizada).
+  /// - gympedia_solicitudes: espejo sync_gympedia_solicitudes
+  ///   (id uuid → TEXT, documento en `data`).
+  /// - permisos_bandeja: espejo sync_permisos_bandeja (plano, sin
+  ///   columna `data`: el JSON local se arma con telegram_id +
+  ///   otorgado_en; la PK local es el telegram_id como TEXT).
+  /// - espejo_gympedia_borradores: espejo sync_gympedia_borradores
+  ///   (id TEXT = slug, documento en `data`). Lleva el prefijo
+  ///   espejo_ porque la tabla de trabajo local
+  ///   gympedia_borradores (borradores solo del teléfono, por slug
+  ///   y con columnas propias) ya ocupa el nombre corto — mismo
+  ///   patrón que espejo_tarifas_especiales.
+  /// Los 3 nacen vacíos con cursor propio en 0; si la oleada SQL
+  /// aún no corrió, el pull marca la tabla ausente y no bloquea
+  /// el «completo». La purga (tablasPurgables en sync.dart) es
+  /// segura: la app nunca inserta filas optimistas en estos
+  /// espejos, y permisos la NECESITA para que una revocación
+  /// (fila borrada del espejo) llegue al teléfono.
+  static Future<void> _crearTablasBandeja(Database db) async {
+    for (final t in [
+      'gympedia_solicitudes',
+      'permisos_bandeja',
+      'espejo_gympedia_borradores',
+    ]) {
+      await db.execute('CREATE TABLE IF NOT EXISTS $t (id TEXT PRIMARY KEY, '
+          'data TEXT NOT NULL, sync_seq INTEGER NOT NULL)');
+      await db.execute(
+          'CREATE INDEX IF NOT EXISTS idx_${t}_seq ON $t(sync_seq)');
+      await db.rawInsert(
+          "INSERT OR IGNORE INTO meta (k, v) VALUES ('wm_$t', '0')");
+    }
+  }
+
+  /// Registro de envíos de datos de transferencia (1.19, v50).
+  /// LOCAL, no sincroniza: el envío sale de este teléfono y la
+  /// constancia vive aquí. Se guarda la etiqueta de la tarjeta (NO
+  /// el número), el móvil destino, el canal y la hora Habana.
+  static Future<void> _crearTablaEnviosTransferencia(
+      Database db) async {
+    await db.execute('CREATE TABLE IF NOT EXISTS envios_transferencia ('
+        'id INTEGER PRIMARY KEY AUTOINCREMENT, '
+        'tarjeta TEXT NOT NULL, '
+        'movil TEXT NOT NULL, '
+        'canal TEXT NOT NULL, '
+        'enviada_ts TEXT NOT NULL)');
+    await db.execute('CREATE INDEX IF NOT EXISTS '
+        'idx_envios_transferencia_ts ON envios_transferencia(enviada_ts DESC)');
+  }
+
+  /// Registra un envío de datos de transferencia (5/25). La poda
+  /// conserva los 100 más recientes para que el registro no crezca
+  /// sin límite.
+  Future<void> registrarEnvioTransferencia({
+    required String tarjeta,
+    required String movil,
+    required String canal,
+  }) async {
+    // Panel Terra A5/A6 (borde fail-closed): la tarjeta es una
+    // ETIQUETA (Bandec/BPA), nunca el número; el móvil se guarda
+    // siempre en 8 dígitos limpios (regla del proyecto).
+    final digitosTarjeta = tarjeta.replaceAll(RegExp(r'\D'), '');
+    if (digitosTarjeta.length >= 8) {
+      throw ArgumentError('La tarjeta debe ser una etiqueta, no el número');
+    }
+    var movilLimpio = movil.replaceAll(RegExp(r'\D'), '');
+    if (movilLimpio.startsWith('53') && movilLimpio.length > 8) {
+      movilLimpio = movilLimpio.substring(2);
+    }
+    if (!RegExp(r'^\d{8}$').hasMatch(movilLimpio)) {
+      throw ArgumentError('Móvil inválido');
+    }
+    final d = await db;
+    await d.insert('envios_transferencia', {
+      'tarjeta': tarjeta,
+      'movil': movilLimpio,
+      'canal': canal,
+      'enviada_ts': isoHabana(ahoraHabana()),
+    });
+    await d.execute('DELETE FROM envios_transferencia WHERE id NOT IN '
+        '(SELECT id FROM envios_transferencia '
+        'ORDER BY enviada_ts DESC, id DESC LIMIT 100)');
+  }
+
+  /// Últimos envíos de datos de transferencia, del más reciente al
+  /// más viejo (5/25).
+  Future<List<Map<String, dynamic>>> listarEnviosTransferencia(
+      {int limite = 20}) async {
+    final d = await db;
+    return d.query('envios_transferencia',
+        orderBy: 'enviada_ts DESC, id DESC', limit: limite);
   }
 
   /// Siembra inicial D6 (Argón ajuste 3): IDs deterministas, INSERT OR
@@ -4240,6 +4371,49 @@ class LocalDb {
   /// (cierre de turno, entrenador) usando las columnas indexadas
   /// (WHERE fecha IN + telegram_user_id IN) en vez de escanear todo el
   /// espejo. El llamador sigue aplicando la pertenencia exacta al par
+  /// 10/25 (rendimiento Servicios): nombre (registrado_por) por
+  /// telegram_id, vía el índice idx_pagos_telegram, sin escanear
+  /// el espejo `pagos` completo para armar el directorio de
+  /// entrenadores. Fallback en Dart para filas con la columna en
+  /// NULL (escritura vieja), igual que pagosPorDiaYEntrenador.
+  Future<Map<int, String>> nombresPorTelegramIds(
+      Set<int> tids) async {
+    final out = <int, String>{};
+    if (tids.isEmpty) return out;
+    final d = await db;
+    final ph = List.filled(tids.length, '?').join(',');
+    final rows = await d.rawQuery(
+        'SELECT telegram_user_id, data FROM pagos '
+        'WHERE telegram_user_id IN ($ph)',
+        tids.toList());
+    for (final r in rows) {
+      final tid = (r['telegram_user_id'] as num?)?.toInt();
+      if (tid == null || out.containsKey(tid)) continue;
+      try {
+        final m = jsonDecode(r['data'] as String) as Map<String, dynamic>;
+        final nombre = '${m['registrado_por'] ?? ''}'.trim();
+        if (nombre.isNotEmpty) out[tid] = nombre;
+      } catch (_) {}
+    }
+    if (out.length < tids.length) {
+      final nulos = await d.rawQuery(
+          'SELECT data FROM pagos WHERE telegram_user_id IS NULL');
+      for (final r in nulos) {
+        try {
+          final m = jsonDecode(r['data'] as String) as Map<String, dynamic>;
+          final tid = normalizarTelegramId(m['telegram_user_id']);
+          if (tid != null &&
+              tids.contains(tid) &&
+              !out.containsKey(tid)) {
+            final nombre = '${m['registrado_por'] ?? ''}'.trim();
+            if (nombre.isNotEmpty) out[tid] = nombre;
+          }
+        } catch (_) {}
+      }
+    }
+    return out;
+  }
+
   /// ('${fecha10}|$tid') como antes. Fallback en Dart para filas con
   /// alguna columna NULL.
   Future<List<Map<String, dynamic>>> pagosPorParesDiaEntrenador(
@@ -4653,6 +4827,27 @@ class LocalDb {
     }
   }
 
+  /// 10/25 (rendimiento Servicios): filas espejo con un campo JSON
+  /// igual a un valor, filtradas en SQLite sin decodificar en Dart
+  /// las filas que no coinciden. Sin índice de expresión sobre ese
+  /// campo sigue siendo un escaneo en SQLite, pero acotado en Dart:
+  /// sirve para el desglose por pomo (pocas filas por pomo) sin
+  /// traer el espejo completo.
+  Future<List<Map<String, dynamic>>> mirrorPorCampo(
+      String tabla, String campo, Object? valor) async {
+    final d = await db;
+    final rows = await d.rawQuery(
+        "SELECT id, data FROM $tabla WHERE json_extract(data, '\$.$campo') = ?",
+        [valor]);
+    return [
+      for (final r in rows)
+        {
+          ...jsonDecode(r['data'] as String) as Map<String, dynamic>,
+          'id': r['id'],
+        }
+    ];
+  }
+
   // -- incidencias v1.2.4 (diseño ChatGPT) -------------------------------
   // v1.2.5: + visibilidad (compartida|privada)
   static const _incCols = [
@@ -4795,7 +4990,12 @@ class LocalDb {
     required List<String> ids,
     required String nuevoEstado,
     String? notaResolucion,
-    required String userId,
+    // 22/25: autor legible (nombre de sesión), no UUID: se guarda
+    // en resuelta_por/cambiado_por y se muestra tal cual.
+    required String autor,
+    // UUID de Supabase para la fila de ops_queue (atribución de
+    // la op); puede ser null sin sesión.
+    String? userId,
     int? telegramId,
   }) async {
     if (ids.isEmpty) return 0;
@@ -4882,7 +5082,7 @@ class LocalDb {
             'version': version + 1,
             if (nuevoEstado == 'resuelta') ...{
               'nota_resolucion': notaResolucion ?? '',
-              'resuelta_por': userId,
+              'resuelta_por': autor,
               'resuelta_en': ahora,
             },
           },
@@ -4896,7 +5096,7 @@ class LocalDb {
           'campo': 'estado',
           'valor_anterior': anterior,
           'valor_nuevo': nuevoEstado,
-          'cambiado_por': userId,
+          'cambiado_por': autor,
           'cambiado_en': ahora,
         });
 
@@ -4909,7 +5109,7 @@ class LocalDb {
             'estado_nuevo': nuevoEstado,
             if (nuevoEstado == 'resuelta') ...{
               'nota_resolucion': notaResolucion ?? '',
-              'resuelta_por': userId,
+              'resuelta_por': autor,
               'resuelta_en': ahora,
             },
             'version': version + 1,

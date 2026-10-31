@@ -5,6 +5,7 @@
 // - B2: pasaFiltroMonto (atajos y rango personalizado).
 // - D2: textoComparativa (% positivo/negativo, previo 0).
 // - 6.1: nómina N × 150 CUP.
+// - 1.19: telefonoPreferido (movil con espacios cae a telefono).
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ironbody_gym/ui/actividad.dart';
 
@@ -170,6 +171,29 @@ void main() {
           nombreDeDetalleActividad(
               'Ma. del Carmen Pérez-López — Cuenta a la Casa, sin cobro (vía APK)'),
           'Ma. del Carmen Pérez-López');
+    });
+  });
+
+  group('1.19 telefonoPreferido', () {
+    test('movil con solo espacios cae a telefono', () {
+      expect(telefonoPreferido({'movil': ' ', 'telefono': '58123456'}),
+          '58123456');
+    });
+
+    test('movil vacío cae a telefono', () {
+      expect(telefonoPreferido({'movil': '', 'telefono': '58123456'}),
+          '58123456');
+    });
+
+    test('movil presente gana y se recorta', () {
+      expect(
+          telefonoPreferido(
+              {'movil': ' 50998877 ', 'telefono': '58123456'}),
+          '50998877');
+    });
+
+    test('sin movil ni telefono devuelve vacío', () {
+      expect(telefonoPreferido({}), '');
     });
   });
 }

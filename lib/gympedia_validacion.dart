@@ -31,6 +31,23 @@ class GympediaValidacion {
 
   static int bytes(String s) => utf8.encode(s).length;
 
+  /// Buscador de GymPedia (20/25, PURO): coincide por título,
+  /// slug o nombre de categoría, sin mayúsculas.
+  static bool coincideBusqueda(
+      Map<String, dynamic> articulo, String texto) {
+    final q = texto.trim().toLowerCase();
+    if (q.isEmpty) return true;
+    final cat = '${articulo['categoria'] ?? ''}';
+    final nombreCat = (nombreCategoria[cat] ?? '').toLowerCase();
+    return '${articulo['titulo'] ?? ''}'
+            .toLowerCase()
+            .contains(q) ||
+        '${articulo['slug'] ?? articulo['id'] ?? ''}'
+            .toLowerCase()
+            .contains(q) ||
+        nombreCat.contains(q);
+  }
+
   static bool slugValido(String slug) =>
       slug.isNotEmpty && slug.length <= 80 && _reSlug.hasMatch(slug);
 

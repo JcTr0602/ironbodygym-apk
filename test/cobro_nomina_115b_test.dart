@@ -350,7 +350,7 @@ void main() {
       final db = await LocalDb.instance.db;
       await _cliente(db, id: 10, pagadoHasta: '2026-12-15');
       final h1 = await NominaPrecalc.instance.huella();
-      expect(h1, startsWith('v4|'));
+      expect(h1, startsWith('v5|'));
       await db.update('clientes', {
         'data': jsonEncode({
           'id': 10,
@@ -362,7 +362,7 @@ void main() {
       }, where: 'id = ?', whereArgs: [10]);
       final h2 = await NominaPrecalc.instance.huella();
       expect(h2, isNot(equals(h1)),
-          reason: 'cuenta_casa normalizado forma parte de la huella v4');
+          reason: 'cuenta_casa normalizado forma parte de la huella v5');
       // Representaciones equivalentes dan la misma huella.
       await db.update('clientes', {
         'data': jsonEncode({

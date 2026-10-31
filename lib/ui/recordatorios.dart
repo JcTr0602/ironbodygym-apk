@@ -9,10 +9,13 @@
 ///   alcance no le ofrece «todos»); solo el dueño toca los de otros.
 library;
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../auth.dart';
 import '../localdb.dart';
+import '../notificaciones_recordatorios.dart';
 import '../recordatorios.dart';
 import '../tiempo.dart';
 import 'componentes.dart';
@@ -69,6 +72,10 @@ class _RecordatoriosScreenState extends State<RecordatoriosScreen> {
 
   Future<void> _disparar(RecordatorioDebido d) async {
     final ok = await RecordatoriosService.instance.disparar(d);
+    if (ok) {
+      // 23/25: ya se atendió hoy: cancelar su aviso programado.
+      unawaited(AvisosRecordatorios.cancelarAviso(d));
+    }
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
         content: Text(ok
@@ -220,7 +227,7 @@ class _RecordatoriosScreenState extends State<RecordatoriosScreen> {
         child: const Icon(Icons.add),
       ),
       body: _cargando
-          ? const Center(child: CircularProgressIndicator())
+          ? const EstadoCargando(texto: 'Cargando recordatorios…')
           : ListView(
               padding: const EdgeInsets.all(16),
               children: [

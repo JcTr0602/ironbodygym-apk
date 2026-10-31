@@ -191,3 +191,154 @@ String? resolverIdPorNombre(
   ];
   return hallados.length == 1 ? hallados.single : null;
 }
+
+/// 24/25, PURO: ¿un cierre del espejo corresponde a una apertura?
+/// Primero por turno_id (exacto, cuando ambos lo traen); si no,
+/// por fecha + franja + entrenador (telegram_id si ambos lo
+/// traen; si no, nombre normalizado).
+bool cierreCorrespondeApertura(
+    Map<String, dynamic> cierre, Map<String, dynamic> apertura) {
+  final tidCierre = cierre['turno_id'];
+  final tidApertura = apertura['turno_id'];
+  if (tidCierre is String &&
+      tidCierre.isNotEmpty &&
+      tidApertura is String &&
+      tidApertura.isNotEmpty) {
+    return tidCierre == tidApertura;
+  }
+  if ('${cierre['fecha'] ?? ''}' !=
+      '${apertura['fecha_turno'] ?? ''}') {
+    return false;
+  }
+  final turnoCierre = '${cierre['turno'] ?? ''}'.toLowerCase();
+  final turnoApertura = '${apertura['turno'] ?? ''}'.toLowerCase();
+  if (turnoCierre.isEmpty ||
+      turnoApertura.isEmpty ||
+      turnoCierre != turnoApertura) {
+    return false;
+  }
+  final tgCierre = cierre['telegram_id'];
+  final tgApertura = apertura['telegram_id'];
+  if (tgCierre is num && tgApertura is num) {
+    return tgCierre.toInt() == tgApertura.toInt();
+  }
+  final nomCierre =
+      '${cierre['entrenador_nombre'] ?? cierre['cerrado_por'] ?? ''}';
+  final nomApertura = '${apertura['entrenador_nombre'] ?? ''}';
+  if (nomCierre.trim().isEmpty || nomApertura.trim().isEmpty) {
+    return false;
+  }
+  return normalizarNombreTurno(nomCierre) ==
+      normalizarNombreTurno(nomApertura);
+}
+
+/// 24/25, PURO: aperturas del espejo de un día con `viva`
+/// resuelta contra los cierres del espejo. Una apertura está
+/// viva si ningún cierre le corresponde. Las filas sin
+/// hora_apertura válida se ignoran (no se puede ubicarlas en
+/// la ventana de su franja).
+List<AperturaTurno> aperturasHoyConViva({
+  required List<Map<String, dynamic>> aperturas,
+  required List<Map<String, dynamic>> cierres,
+  required String fechaIso,
+}) {
+  final out = <AperturaTurno>[];
+  for (final a in aperturas) {
+    if ('${a['fecha_turno'] ?? ''}' != fechaIso) continue;
+    final nombre = '${a['entrenador_nombre'] ?? ''}'.trim();
+    if (nombre.isEmpty) continue;
+    final en = DateTime.tryParse('${a['hora_apertura'] ?? ''}');
+    if (en == null) continue;
+    final viva = !cierres.any((c) => cierreCorrespondeApertura(c, a));
+    out.add((nombre: nombre, aperturaEn: en, viva: viva));
+  }
+  return out;
+}
+
+/// 24/25, PURO: estado de una franja para el hub.
+/// - 'abierto': hay una apertura viva en la ventana.
+/// - 'cerrado': no hay viva pero sí un cierre de la franja hoy.
+/// - 'sin_abrir': ni viva ni cierre.
+String estadoFranjaHub({
+  required bool hayVivaEnVentana,
+  required bool hayCierreFranja,
+}) {
+  if (hayVivaEnVentana) return 'abierto';
+  if (hayCierreFranja) return 'cerrado';
+  return 'sin_abrir';
+}
+
+/// Dashboard 1.19 (Q1 Argón), PURO: aperturas de un día SIN cierre
+/// que les corresponda (turnos abiertos olvidados). A diferencia de
+/// `aperturasHoyConViva` no exige `hora_apertura` válida: un turno
+/// olvidado de ayer sigue siendo olvidado aunque su fila no traiga
+/// hora ubicable en ventana. Devuelve las filas tal cual, en el
+/// orden del espejo, para que la UI pinte nombre + franja.
+List<Map<String, dynamic>> aperturasSinCierre({
+  required List<Map<String, dynamic>> aperturas,
+  required List<Map<String, dynamic>> cierres,
+}) {
+  final out = <Map<String, dynamic>>[];
+  for (final a in aperturas) {
+    if (cierres.any((c) => cierreCorrespondeApertura(c, a))) continue;
+    out.add(a);
+  }
+  return out;
+}
+
+/// 24/25, PURO: ¿hay un cierre del espejo para (fecha, franja)?
+/// El turno del cierre se compara por token ('ma'/'tarde'), como
+/// hace la auditoría por persona.
+bool hayCierreFranja(
+    List<Map<String, dynamic>> cierres, String fechaIso, String franja) {
+  final token = franja == 'manana' ? 'ma' : 'tarde';
+  return cierres.any((c) =>
+      '${c['fecha'] ?? ''}' == fechaIso &&
+      '${c['turno'] ?? ''}'.toLowerCase().contains(token));
+}
+
+/// 24/25, PURO: estado completo de una franja para el hub: quién
+/// estaba programado, quién se muestra (con cobertura si una
+/// apertura ajena viva lo desplaza) y en qué estado está. La
+/// ventana (con colchón de 45 min) vive aquí, no en la pantalla,
+/// para no divergir de `mostradoEn`.
+({String? programado, String? mostrado, bool cubriendo, String estado})
+    estadoFranjaCompleto({
+  required DateTime fecha,
+  required String franja,
+  required Map<int, Map<String, String?>> patron,
+  required Map<String, Map<String, String?>> excepciones,
+  required List<AperturaTurno> aperturas,
+  required List<Map<String, dynamic>> cierres,
+}) {
+  final fechaIso = isoFechaTurno(fecha);
+  final m = mostradoEn(
+      fecha: fecha,
+      franja: franja,
+      patron: patron,
+      excepciones: excepciones,
+      aperturas: aperturas);
+  final v = ventanaFranja(fecha, franja);
+  var hayViva = false;
+  if (v != null) {
+    final dia = DateTime(fecha.year, fecha.month, fecha.day);
+    final desde = dia.add(Duration(minutes: v.inicio - 45));
+    final hasta = dia.add(Duration(minutes: v.fin));
+    hayViva = aperturas.any((a) =>
+        a.viva &&
+        !a.aperturaEn.isBefore(desde) &&
+        a.aperturaEn.isBefore(hasta));
+  }
+  return (
+    programado: programadoEn(
+        fecha: fecha,
+        franja: franja,
+        patron: patron,
+        excepciones: excepciones),
+    mostrado: m.nombre,
+    cubriendo: m.cubriendo,
+    estado: estadoFranjaHub(
+        hayVivaEnVentana: hayViva,
+        hayCierreFranja: hayCierreFranja(cierres, fechaIso, franja)),
+  );
+}

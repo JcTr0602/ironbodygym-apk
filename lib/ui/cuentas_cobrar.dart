@@ -1,4 +1,4 @@
-/// 💸 Cuentas por cobrar: clientes vencidos ordenados por monto
+/// 💸 Vencidos por cobrar: clientes vencidos ordenados por monto
 /// adeudado (mayor primero). El dinero dormido, visible.
 library;
 
@@ -102,7 +102,7 @@ class _CuentasCobrarScreenState
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Cuentas por cobrar'),
+        title: const Text('Vencidos por cobrar'),
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh),
@@ -111,7 +111,7 @@ class _CuentasCobrarScreenState
         ],
       ),
       body: _cargando
-          ? const Center(child: CircularProgressIndicator())
+          ? const EstadoCargando(texto: 'Cargando cuentas por cobrar…')
           : RefreshIndicator(
               onRefresh: _cargar,
               child: ListView(
@@ -148,7 +148,7 @@ class _CuentasCobrarScreenState
                   if (_cuentas.isEmpty)
                     const EstadoVacio(
                       icono: Icons.check_circle,
-                      titulo: 'Sin cuentas por cobrar',
+                      titulo: 'Sin vencidos por cobrar',
                       subtitulo:
                           'Todos los clientes activos están al día.',
                     )

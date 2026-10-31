@@ -545,6 +545,20 @@ class AppLog {
   }
 
   /// Exporta en Markdown con resumen (Gemini #6).
+  /// Módulo 6: últimos eventos persistidos, para el diagnóstico
+  /// de datos visibles (sin exportar archivo). Vacía el buffer
+  /// antes, igual que exportar(). Con [modulo], solo ese módulo
+  /// (p. ej. 'sync' para el historial de sync).
+  static Future<List<Map<String, dynamic>>> eventosRecientes(
+      {int limite = 50, String? modulo}) async {
+    await _flush();
+    final db = await LocalDb.instance.db;
+    return db.query('app_log',
+        where: modulo == null ? null : 'modulo = ?',
+        whereArgs: modulo == null ? null : [modulo],
+        orderBy: 'id DESC', limit: limite);
+  }
+
   static Future<String> exportar() async {
     await _flush(); // vaciar buffer antes
     final db = await LocalDb.instance.db;

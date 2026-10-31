@@ -263,7 +263,7 @@ class _ReportesPlusScreenState extends State<ReportesPlusScreen> {
 
   Widget _cuerpo() {
     if (_cargando) {
-      return const Center(child: CircularProgressIndicator());
+      return const EstadoCargando(texto: 'Cargando reportes…');
     }
     if (_error != null) {
       return Center(

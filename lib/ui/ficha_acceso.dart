@@ -14,6 +14,7 @@ import 'acciones_acceso.dart';
 import 'diseno.dart';
 import 'ficha.dart';
 import 'foto_personal_ficha.dart';
+import 'componentes.dart';
 
 class FichaAccesoScreen extends StatefulWidget {
   final int clienteId;
@@ -102,7 +103,7 @@ class _FichaAccesoScreenState extends State<FichaAccesoScreen> {
         ],
       ),
       body: _cargando
-          ? const Center(child: CircularProgressIndicator())
+          ? const EstadoCargando(texto: 'Cargando acceso…')
           : _acceso == null
               ? const Center(child: Text('No se pudo cargar la ficha.'))
               : ListView(

@@ -22,6 +22,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../localdb.dart';
 import '../negocio.dart';
+import '../auth.dart';
 import '../permisos.dart';
 import '../tiempo.dart';
 import '../cliente_protegido.dart';
@@ -458,6 +459,12 @@ class _VentaSuplementoScreenState
       conPromo: conPromo,
       nuevoVencimientoIso: nuevoVencimiento,
       esFiado: _esFiado && _tipoComprador == 'cliente',
+      // 13/25: el vendedor es quien vende (la venta de
+      // suplementos no lleva método en la app: se registra sin
+      // método y lo pone el servidor al sincronizar, así que el
+      // comprobante en pantalla no inventa ninguno; el método sí
+      // sale en el recibo del historial, que lee la fila espejo).
+      vendedor: AuthService().displayName,
     );
     return (texto: texto, waNum: waNum);
   }
@@ -521,9 +528,10 @@ class _VentaSuplementoScreenState
             onPressed: () => Navigator.pop(ctx, false),
             child: const Text('Cancelar'),
           ),
-          ElevatedButton(
+          BotonPrimario(
+            texto: 'Confirmar venta',
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Confirmar venta'),
+            expandido: false,
           ),
         ],
       ),

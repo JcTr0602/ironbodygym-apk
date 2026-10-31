@@ -39,6 +39,28 @@ import '../sync.dart';
 import '../tiempo.dart';
 import 'componentes.dart';
 import 'diseno.dart';
+import 'historial_ventas.dart';
+import 'servicios_historial.dart';
+
+/// Destino de «Ir a la venta» desde el Extracto (PURO): la venta del
+/// turno se abre en su pantalla (suplementos → Historial de ventas,
+/// servicios → Historial de servicios) con su id para resaltarla.
+/// Las compras manuales no tienen pantalla de venta: null.
+({String pantalla, int id})? destinoVentaExtracto(
+    Map<String, dynamic> f) {
+  final detalle = f['detalle'];
+  if (detalle is! Map<String, dynamic>) return null;
+  final id = (detalle['id'] as num?)?.toInt();
+  if (id == null) return null;
+  switch (f['origen']) {
+    case 'suplemento':
+      return (pantalla: 'historial_ventas', id: id);
+    case 'servicio':
+      return (pantalla: 'historial_servicios', id: id);
+    default:
+      return null;
+  }
+}
 
 class CentroComprasScreen extends StatefulWidget {
   const CentroComprasScreen({super.key});
@@ -263,7 +285,7 @@ class _CentroComprasScreenState extends State<CentroComprasScreen> {
             )
           : null,
       body: _cargando
-          ? const Center(child: CircularProgressIndicator())
+          ? const EstadoCargando(texto: 'Cargando compras…')
           : RefreshIndicator(
               onRefresh: _cargar,
               child: Column(
@@ -376,9 +398,10 @@ class _CentroComprasScreenState extends State<CentroComprasScreen> {
               const Padding(
                 padding: EdgeInsets.only(top: 8),
                 child: Text(
-                  'Las ventas del turno se corrigen desde su pantalla '
-                  '(Ventas / Servicios), no desde aquí, para no '
-                  'duplicar los flujos de reverso.',
+                  'Las ventas del turno se corrigen desde su pantalla, '
+                  'no desde aquí, para no duplicar los flujos de '
+                  'reverso. Toca «Ir a la venta» para abrirla en su '
+                  'pantalla.',
                   style: AppTexto.secundario,
                 ),
               ),
@@ -394,10 +417,53 @@ class _CentroComprasScreenState extends State<CentroComprasScreen> {
                 },
                 child: const Text('Anular con motivo',
                     style: TextStyle(color: Colors.red))),
+          if (!esManual)
+            TextButton(
+                onPressed: () async {
+                  Navigator.pop(ctx);
+                  await _irAVenta(f);
+                },
+                child: const Text('Ir a la venta')),
           TextButton(
               onPressed: () => Navigator.pop(ctx),
               child: const Text('Cerrar')),
         ],
+      ),
+    );
+  }
+
+  /// Abre la venta del Extracto en su pantalla, resaltada (4/25).
+  /// Servicios: la pantalla carga sus propios datos (10/25); el
+  /// Extracto es solo dueño, así que no se filtra por rol.
+  Future<void> _irAVenta(Map<String, dynamic> f) async {
+    final destino = destinoVentaExtracto(f);
+    if (destino == null || !mounted) return;
+    if (destino.pantalla == 'historial_ventas') {
+      await Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => HistorialVentasScreen(resaltarId: destino.id),
+        ),
+      );
+      return;
+    }
+    final personas = <int, String>{};
+    for (final p in await LocalDb.instance.allMirror('pagos')) {
+      final ptid = LocalDb.normalizarTelegramId(p['telegram_user_id']);
+      final nombre = '${p['registrado_por'] ?? ''}';
+      if (ptid != null && nombre.isNotEmpty) {
+        personas.putIfAbsent(ptid, () => nombre);
+      }
+    }
+    if (!mounted) return;
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ServiciosHistorialScreen(
+          esDueno: true,
+          personas: personas,
+          resaltarId: destino.id,
+        ),
       ),
     );
   }

@@ -80,7 +80,7 @@ class _ArqueoScreenState extends State<ArqueoScreen> {
             child: RefreshIndicator(
               onRefresh: _cargar,
               child: _cargando
-                  ? const Center(child: CircularProgressIndicator())
+                  ? const EstadoCargando(texto: 'Cargando arqueo…')
                   : _entrenadores.isEmpty
                       ? ListView(
                           children: [
@@ -271,14 +271,36 @@ class _DetalleArqueoScreenState extends State<_DetalleArqueoScreen> {
             const SizedBox(height: 8),
             Text('Esperado: ${fmtMonto(esperado)} $_moneda'),
             Text('Entregado: ${fmtMonto(entregado)} $_moneda'),
-            if (parcial) ...[
-              const SizedBox(height: 8),
-              Text(
-                'Parcial: quedan ${fmtMonto(esperado - entregado)} '
-                '$_moneda como saldo de arrastre.',
-                style: const TextStyle(fontWeight: FontWeight.w600),
+            // C3 (estéticas 1.19): comparación visual en vez de
+            // dos textos planos — barra de cuánto se entregó y
+            // diferencia destacada (verde si cuadra, rojo si
+            // falta; lo parcial queda como arrastre).
+            const SizedBox(height: 12),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(999),
+              child: LinearProgressIndicator(
+                value: esperado > 0
+                    ? (entregado / esperado).clamp(0.0, 1.0)
+                    : 0,
+                minHeight: 8,
+                backgroundColor:
+                    AppColores.borde(context).withValues(alpha: 0.3),
+                valueColor: AlwaysStoppedAnimation<Color>(
+                    parcial ? AppColores.alerta : AppColores.exito),
               ),
-            ],
+            ),
+            const SizedBox(height: 8),
+            Text(
+              parcial
+                  ? 'Faltan ${fmtMonto(esperado - entregado)} '
+                      '$_moneda · quedan como saldo de arrastre.'
+                  : 'Cuadra exacto.',
+              style: TextStyle(
+                  fontWeight: FontWeight.w600,
+                  color: parcial
+                      ? AppColores.error
+                      : AppColores.exito),
+            ),
             const SizedBox(height: 8),
             Text('$totalIds operación(es) incluida(s).',
                 style: TextStyle(
@@ -345,7 +367,7 @@ class _DetalleArqueoScreenState extends State<_DetalleArqueoScreen> {
           const SyncBanner(),
           Expanded(
             child: _cargando
-                ? const Center(child: CircularProgressIndicator())
+                ? const EstadoCargando(texto: 'Cargando arqueo…')
                 : ListView(
                     padding: const EdgeInsets.all(16),
                     children: [

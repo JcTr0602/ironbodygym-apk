@@ -18,6 +18,7 @@ import 'package:uuid/uuid.dart';
 
 import '../auth.dart';
 import '../localdb.dart';
+import 'componentes.dart';
 
 class HorarioTurnosScreen extends StatefulWidget {
   const HorarioTurnosScreen({super.key});
@@ -189,7 +190,7 @@ class _HorarioTurnosScreenState extends State<HorarioTurnosScreen> {
         ],
       ),
       body: _cargando
-          ? const Center(child: CircularProgressIndicator())
+          ? const EstadoCargando(texto: 'Cargando horario…')
           : ListView(
               padding: const EdgeInsets.all(16),
               children: [

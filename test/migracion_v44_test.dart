@@ -77,6 +77,6 @@ void main() {
 
   test('versión actual de la BD es 48', () async {
     await _abrirDbVacia();
-    expect(LocalDb.versionActual, 48);
+    expect(LocalDb.versionActual, 51);
   });
 }

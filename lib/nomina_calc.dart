@@ -6,7 +6,9 @@ import 'tiempo.dart';
 ///
 /// Regla de negocio (Jc): la base es el número de clientes ÚNICOS que
 /// pagaron en el mes (calendario Habana). Cada entrenador cobra
-/// base × tarifa + bonos aplicables. La tarifa la define Jc
+/// base × tarifa + bonos aplicables + comisión por dosis, menos
+/// adelantos del mes y deuda arrastrada, con suelo 0
+/// ([totalVivo]). La tarifa la define Jc
 /// (PerfilService.getPagoEntrenador; 150 CUP por defecto).
 ///
 /// Fase A 2026-10-25 (A3, regla cerrada por Jc): SOLO las
@@ -25,7 +27,27 @@ import 'tiempo.dart';
 /// anterior, así que los meses cerrados conservan la regla histórica
 /// (panel de revisión 2026-10-21). La excepción se aplica DESPUÉS
 /// del filtro de tipo: nunca se usa como filtro de tipo.
+///
+/// 1.19 (#2, #6 Argón nómina): el libro de adelantos suma los bonos
+/// a la capacidad de cada mes (sin esto, un adelanto cubierto por
+/// un bono generaba deuda fantasma); la llave de entrenador es
+/// ÚNICA ([claveEntrenador]) en libro, comisiones y bonos, para
+/// que ningún entrenador quede medio dentro y medio fuera.
 class NominaCalc {
+  /// Llave canónica de entrenador ('duany'/'gabriel') desde un
+  /// nombre o username, o null si no es un entrenador conocido.
+  /// #6 (Argón nómina): antes el libro filtraba username estricto
+  /// y las comisiones se cubeteaban por nombre (contains): un
+  /// username con apellido quedaba fuera del libro pero dentro de
+  /// las comisiones. Una sola regla (contains, minúsculas) en los
+  /// dos lados.
+  static String? claveEntrenador(String? nombre) {
+    final n = (nombre ?? '').toLowerCase();
+    if (n.contains('duany')) return 'duany';
+    if (n.contains('gabriel')) return 'gabriel';
+    return null;
+  }
+
   /// Prefijo del mes Habana en curso: 'YYYY-MM'.
   static String prefMesActual() => hoyHabanaIso().substring(0, 7);
 
@@ -430,11 +452,7 @@ class NominaCalc {
     var mes = primero;
     while (mes.compareTo(hastaMes) <= 0) {
       out[mes] = comisionDosisDesdeVentas(ventas, telegramId, mes).total;
-      final y = int.parse(mes.substring(0, 4));
-      final m = int.parse(mes.substring(5, 7));
-      final f = DateTime(y, m + 1);
-      mes = '${f.year.toString().padLeft(4, '0')}-'
-          '${f.month.toString().padLeft(2, '0')}';
+      mes = mesSiguiente(mes);
     }
     return out;
   }
