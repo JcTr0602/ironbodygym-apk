@@ -2680,7 +2680,13 @@ class SyncEngine {
         // (data lleva la fila entera, como los servicios); sin esta
         // rama, la tabla caía al genérico de id entero y toda fila
         // se descartaba (id TEXT → 0 → null).
-        tabla == 'cliente_mediciones') {
+        // 1.20 (F5/T22/T5): misma forma (id TEXT + data jsonb);
+        // sin esta rama les pasaba lo mismo (auditoría 1.21, A-01).
+        tabla == 'cliente_mediciones' ||
+        tabla == 'suplemento_ajustes' ||
+        tabla == 'nomina_liquidada_snapshot' ||
+        tabla == 'nomina_confirmaciones' ||
+        tabla == 'diferencias_caja') {
       final id = '${m['id'] ?? ''}';
       if (id.isEmpty) return null;
       final rawData = m['data'];
@@ -3018,6 +3024,18 @@ class SyncEngine {
     'gympedia_solicitudes',
     'permisos_bandeja',
     'espejo_gympedia_borradores',
+    // 1.20 (F5/T22/T5): ajustes de stock, foto de liquidación y
+    // confirmaciones de nómina, expedientes de diferencia de
+    // caja. Estaban en supTablas y con el wm sembrado en 0 pero
+    // FALTABAN en esta lista: el pull nunca las pedía y las
+    // tres funciones quedaban inertes (auditoría 1.21, A-01;
+    // mismo olvido que H-05 con cliente_mediciones). El test
+    // espejos_paridad_test vigila que mapa y lista no vuelvan
+    // a divergir.
+    'suplemento_ajustes',
+    'nomina_liquidada_snapshot',
+    'nomina_confirmaciones',
+    'diferencias_caja',
   ];
 
   Future<({int aplicadas, Map<String, int> porTabla})> _download(

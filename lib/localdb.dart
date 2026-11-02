@@ -6215,6 +6215,16 @@ class LocalDb {
     'espejo_tarifas_especiales',
     'espejo_entregas_efectivo',
     'espejo_recordatorio_config',
+    // 1.20 (F5/T22/T5): ajustes de stock, foto de liquidación y
+    // confirmaciones de nómina, expedientes de diferencia de
+    // caja. Usan la secuencia global del servidor (las publica
+    // el puente desde gym.db), así que entran en el mínimo como
+    // las demás. Faltaban (auditoría 1.21, A-01): su descarga
+    // ni siquiera se evaluaba.
+    'suplemento_ajustes',
+    'nomina_liquidada_snapshot',
+    'nomina_confirmaciones',
+    'diferencias_caja',
   ];
 
   Future<int> getWatermarkTabla(String tabla) async {

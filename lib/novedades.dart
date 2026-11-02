@@ -16,6 +16,9 @@ class Novedad {
 }
 
 const novedades = [
+  Novedad('1.20.1', [
+    'Corrección importante: la foto de la liquidación de nómina, los expedientes de diferencia de caja y los movimientos de stock ya bajan a la app (en la 1.20.0 se quedaban en el servidor)',
+  ]),
   Novedad('1.20.0', [
     'Diseño renovado en toda la app: textos más claros, iconos uniformes, avisos con color según su importancia y montos que se animan al cambiar',
     'Suplementos rediseñados: tarjeta con foto y estado de stock, venta rápida de 1 unidad y ajuste de stock con motivo (merma, regalo, error de conteo...)',
