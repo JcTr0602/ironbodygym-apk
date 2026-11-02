@@ -127,6 +127,12 @@ class _FichaScreenState extends State<FichaScreen> {
   /// no cambió: eliminar o reemplazar la foto lo incrementa y una
   /// descarga vieja ya no puede resucitar la foto anterior.
   int _fotoGen = 0;
+
+  /// Generación de carga de la ficha: cada _cargar la
+  /// incrementa y el enriquecimiento de red solo aplica su
+  /// resultado si su generación sigue siendo la vigente (una
+  /// respuesta tardía no pisa una recarga más nueva).
+  int _cargaGen = 0;
   bool _verificando = false;
   // v1.3.3 (Argón spec 2): regalo de cumpleaños del año en curso, si ya
   // se otorgó. Candado anual + botón "Reenviar WhatsApp".
@@ -158,6 +164,7 @@ class _FichaScreenState extends State<FichaScreen> {
   }
 
   Future<void> _cargar() async {
+    final gen = ++_cargaGen;
     final c = await clientePorId(widget.clienteId);
     final pagos = await pagosDe(widget.clienteId);
     final suplementos = await _suplementosDe(widget.clienteId);
@@ -174,20 +181,14 @@ class _FichaScreenState extends State<FichaScreen> {
       tieneRegistro =
           await tieneAlgunRegistroTarifa(widget.clienteId);
     } catch (_) {}
-    // 17/25 (1.19): Plus residual (solo dueño, best-effort como
-    // la tarifa especial: sin red o sin la RPC ejecutada, la
-    // ficha abre igual sin la fila; la RPC ya devuelve
-    // {activo:false} a quien no sea dueño).
-    ({bool activo, String? hasta})? plusResidual;
-    if (AuthService().isOwner) {
-      try {
-        final res = await Supabase.instance.client.rpc(
-          'cliente_plus_residual_staff',
-          params: {'p_cliente_id': widget.clienteId},
-        );
-        plusResidual = plusResidualDe(res);
-      } catch (_) {}
-    }
+    // 17/25 (1.19): el Plus residual se consulta en
+    // _enriquecerDesdeServidor, DESPUÉS de pintar. Antes vivía
+    // aquí como un await más de la cadena y, sin conexión, la
+    // RPC (sin timeout) no devolvía nunca: la ficha se quedaba
+    // en el spinner para siempre aunque el cliente estuviera
+    // en la BD local (reporte de campo de Jc, 2026-11-02:
+    // «error gravísimo»). La ficha es offline-first: pinta con
+    // el espejo local y la red solo enriquece.
     // v1.2.5 (#10): incidencias relacionadas (respeta visibilidad).
     final incidencias = await LocalDb.instance.incidenciasRelacionadas(
         'cliente', widget.clienteId,
@@ -200,12 +201,9 @@ class _FichaScreenState extends State<FichaScreen> {
       fiadoPend = await LocalDb.instance
           .fiadoPendienteDeCliente(widget.clienteId);
     } catch (_) {}
-    // v1.3.9 (F1): cargar caché de accesos (solo dueño, tolerante a offline).
-    bool accesoSinConexion = false;
-    if (AuthService().isOwner && !AccesoAppCache.instance.cargado) {
-      final ok = await AccesoAppCache.instance.cargar();
-      if (!ok) accesoSinConexion = true;
-    }
+    // v1.3.9 (F1): el caché de accesos también se carga en
+    // _enriquecerDesdeServidor (era el segundo await de red
+    // sin timeout antes de pintar; misma causa del cuelgue).
     if (mounted) {
       setState(() {
         _c = c;
@@ -216,10 +214,8 @@ class _FichaScreenState extends State<FichaScreen> {
         _foto = null;
         _regaloAnio = regaloAnio;
         _fiadoPendiente = fiadoPend;
-        _accesoSinConexion = accesoSinConexion;
         _especialActiva = especialActiva;
         _tieneRegistroTarifa = tieneRegistro;
-        _plusResidual = plusResidual;
         // D-13: con _pagos/_suplementos/_serviciosHist ya
         // asignados, se precalculan entradas y resumen.
         _entradasCache = _construirEntradas();
@@ -244,6 +240,9 @@ class _FichaScreenState extends State<FichaScreen> {
         );
       });
     }
+    // La ficha YA pintó con datos locales: la red enriquece
+    // en segundo plano (Plus residual y caché de accesos).
+    _enriquecerDesdeServidor(gen);
     // Bloque 1: abrir directo en Editar (deslizar en Buscar).
     // Post-frame: _c ya está cargado y la ficha ya se dibujó.
     // Ronda 3-9 #1 (CRÍTICO): un protegido nunca abre el editor
@@ -312,6 +311,45 @@ class _FichaScreenState extends State<FichaScreen> {
     }
   }
 
+  /// Enriquecimiento de red de la ficha, SIEMPRE en segundo
+  /// plano y con timeout: la ficha ya pintó con el espejo
+  /// local (offline-first) y esto solo completa dos datos que
+  /// viven en el servidor — el Plus residual (17/25) y el
+  /// caché de accesos de la app de Clientes (F1). Antes ambos
+  /// se esperaban con await dentro de _cargar, antes de
+  /// pintar, y sin conexión la espera no terminaba nunca
+  /// (spinner eterno con el cliente en la BD local; reporte
+  /// de Jc 2026-11-02). [gen] es la generación de _cargar que
+  /// lo disparó: si ya hubo otra recarga, el resultado se
+  /// descarta.
+  Future<void> _enriquecerDesdeServidor(int gen) async {
+    if (!AuthService().isOwner) return;
+    // Plus residual (solo dueño; la RPC devuelve
+    // {activo:false} a quien no lo sea, pero ni se llama).
+    try {
+      final res = await Supabase.instance.client
+          .rpc(
+            'cliente_plus_residual_staff',
+            params: {'p_cliente_id': widget.clienteId},
+          )
+          .timeout(const Duration(seconds: 8));
+      if (mounted && gen == _cargaGen) {
+        setState(() => _plusResidual = plusResidualDe(res));
+      }
+    } catch (_) {
+      // Sin red o sin la RPC: la ficha sigue sin la fila,
+      // como siempre se diseñó (best-effort).
+    }
+    // Caché de accesos (solo si aún no cargó en la sesión;
+    // cargar() ya trae su propio timeout).
+    if (!AccesoAppCache.instance.cargado) {
+      final ok = await AccesoAppCache.instance.cargar();
+      if (mounted && gen == _cargaGen && !ok) {
+        setState(() => _accesoSinConexion = true);
+      }
+    }
+  }
+
   /// Regalo de cumpleaños del año en curso (Argón spec 2): candado anual.
   /// Retorna {'anterior': ..., 'nuevo': ...} o null si no se ha regalado.
   /// Fuentes: 1) meta local (inmediata, offline); 2) espejo de pagos con
@@ -370,8 +408,11 @@ class _FichaScreenState extends State<FichaScreen> {
       final messenger = ScaffoldMessenger.of(context);
       final antes = _c;
       // Llamada RPC puntual (no dispara el pipeline de sync).
+      // Con timeout: sin red, «Verificando…» no puede girar
+      // para siempre (misma familia que el cuelgue de _cargar).
       final res = await Supabase.instance.client
-          .rpc('obtener_estado_cliente', params: {'p_id': widget.clienteId});
+          .rpc('obtener_estado_cliente', params: {'p_id': widget.clienteId})
+          .timeout(const Duration(seconds: 12));
       var omitidoPorPendientes = false;
       if (res != null) {
         // Actualizar solo este cliente en el mirror local.

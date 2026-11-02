@@ -142,8 +142,14 @@ class AccesoAppCache {
     if (_cargando) return false;
     _cargando = true;
     try {
+      // Timeout propio (10 s): sin conexión, una RPC sin
+      // timeout puede no devolver nunca, y hay llamadores que
+      // la esperan para pintar (la ficha lo hacía y se quedaba
+      // en el spinner; reporte de Jc 2026-11-02). Al vencer,
+      // TimeoutException cae en el catch y devuelve false.
       final res = await Supabase.instance.client
-          .rpc('listar_accesos_clientes');
+          .rpc('listar_accesos_clientes')
+          .timeout(const Duration(seconds: 10));
       final lista = (res as List)
           .map((e) => AccesoCliente.fromJson(
               Map<String, dynamic>.from(e as Map)))
