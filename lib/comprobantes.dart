@@ -21,6 +21,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_image_compress/flutter_image_compress.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:sqflite/sqflite.dart';
+import 'package:uuid/uuid.dart';
 
 import 'app_log.dart';
 import 'localdb.dart';
@@ -50,6 +51,26 @@ class ComprobantesService {
     final base = baseDir ?? await getApplicationDocumentsDirectory();
     final dir = Directory('${base.path}/comprobantes');
     if (!await dir.exists()) await dir.create(recursive: true);
+
+    // Caza Fotos L3-MEDIA (Argón): re-encolar el MISMO uuid (la
+    // fila se reemplaza por conflictAlgorithm.replace) dejaba el
+    // archivo de la extensión anterior huérfano en disco y las
+    // claves TUS apuntando a la subida vieja (la reanudación
+    // chocaba con 409). Se borran ambos archivos posibles y las
+    // claves TUS antes de escribir el nuevo.
+    final dbPrevia = await LocalDb.instance.db;
+    for (final extPrevia in const ['webp', 'jpg']) {
+      try {
+        final viejo = File('${dir.path}/$comprobanteUuid.$extPrevia');
+        if (await viejo.exists()) await viejo.delete();
+      } catch (_) {}
+    }
+    for (final clave in [
+      'tus_loc_${comprobanteUuid}_comp',
+      'tus_offset_${comprobanteUuid}_comp',
+    ]) {
+      await dbPrevia.delete('meta', where: 'k = ?', whereArgs: [clave]);
+    }
 
     var ext = 'webp';
     final destino = File('${dir.path}/$comprobanteUuid.webp');
@@ -131,6 +152,17 @@ class ComprobantesService {
       where: 'comprobante_uuid = ?',
       whereArgs: [comprobanteUuid],
     );
+    // Caza Fotos L3-ALTA (Argón): las claves TUS de reanudación
+    // también se borran. Sin esto, un descarte a mitad de subida
+    // dejaba tus_loc_/tus_offset_ huérfanas en meta para siempre,
+    // y un re-encolado posterior con el mismo uuid reanudaba la
+    // subida descartada.
+    for (final clave in [
+      'tus_loc_${comprobanteUuid}_comp',
+      'tus_offset_${comprobanteUuid}_comp',
+    ]) {
+      await db.delete('meta', where: 'k = ?', whereArgs: [clave]);
+    }
   }
 
   /// Fila local de un comprobante (o null si este teléfono no
@@ -211,6 +243,33 @@ class ComprobantesService {
         whereArgs: [f['comprobante_uuid']],
       );
     }
+    // Caza Fotos L1-MEDIA (Argón): barrido de archivos huérfanos
+    // del directorio (descartes a mitad de escritura, cambios de
+    // extensión viejos): un archivo que ninguna fila referencia y
+    // lleva más de 2 h en disco se borra. Las filas en 'error' NO
+    // se podan aquí: son visibles y reactivables a propósito
+    // (A-03); su archivo sigue referenciado y no se toca.
+    try {
+      final base = await getApplicationDocumentsDirectory();
+      final dir = Directory('${base.path}/comprobantes');
+      if (await dir.exists()) {
+        final todas = await db.query('comprobantes_pago',
+            columns: ['ruta_local']);
+        final referenciadas =
+            todas.map((r) => r['ruta_local'] as String?).toSet();
+        final umbral =
+            ahoraDispositivoParaFs().subtract(const Duration(hours: 2));
+        await for (final e in dir.list()) {
+          if (e is File && !referenciadas.contains(e.path)) {
+            try {
+              if ((await e.lastModified()).isBefore(umbral)) {
+                await e.delete();
+              }
+            } catch (_) {}
+          }
+        }
+      }
+    } catch (_) {}
     return viejos.length;
   }
 
@@ -222,9 +281,40 @@ class ComprobantesService {
     if (_procesando) return 0;
     _procesando = true;
     var subidos = 0;
+    // Caza Fotos L4-CRÍTICA (Argón): el booleano en RAM solo
+    // protege DENTRO de un isolate, pero procesar() corre en tres
+    // sitios (la pantalla de la Cola, el motor de sync y el
+    // Foreground Service): dos isolates subían las mismas filas en
+    // paralelo, con PATCH TUS sobre el mismo offset → 409, offset
+    // corrupto y los 10 intentos quemados hasta 'error'. Lease en
+    // meta como el de fotos_cola ('comprobantes_worker_lease'),
+    // reclamado atómicamente y liberado solo por su dueño.
+    final db = await LocalDb.instance.db;
+    final workerId = const Uuid().v4();
+    var leaseValor =
+        '$workerId|${isoHabana(ahoraHabana().add(const Duration(minutes: 10)))}';
     try {
+      await db.rawInsert(
+          "INSERT OR IGNORE INTO meta (k, v) VALUES "
+          "('comprobantes_worker_lease', '')");
+      final reclamado = await db.rawUpdate(
+        "UPDATE meta SET v = ? WHERE k = 'comprobantes_worker_lease' "
+        "AND (v = '' OR v NOT LIKE '%|%' OR "
+        "COALESCE(CAST(strftime('%s', substr(v, instr(v, '|') + 1)) "
+        'AS INTEGER), 0) < ?)',
+        // El epoch va como ENTERO, nunca como texto: SQLite
+        // compara INTEGER < TEXT siempre verdadero (orden por
+        // tipo) y el reclamo pasaría con cualquier lease ajeno
+        // vigente. (Mismo defecto corregido en el lease de
+        // fotos_cola, donde vivía desde SA-04.)
+        [leaseValor, DateTime.now().millisecondsSinceEpoch ~/ 1000],
+      );
+      if (reclamado != 1) {
+        AppLog.aviso('comprobantes', 'worker_activo',
+            d: 'otro proceso tiene el lease; ciclo omitido');
+        return 0;
+      }
       await purgarSubidosViejos();
-      final db = await LocalDb.instance.db;
       final filas = await db.query(
         'comprobantes_pago',
         where: "estado = 'pendiente'",
@@ -232,6 +322,28 @@ class ComprobantesService {
         limit: 10,
       );
       for (final f in filas) {
+        // Refrescar el lease en cada iteración (una subida larga
+        // no debe dejarlo caducar a mitad del ciclo).
+        final leaseNuevo =
+            '$workerId|${isoHabana(ahoraHabana().add(const Duration(minutes: 10)))}';
+        final refrescado = await db.rawUpdate(
+          "UPDATE meta SET v = ? WHERE k = 'comprobantes_worker_lease' "
+          'AND v = ?',
+          [leaseNuevo, leaseValor],
+        );
+        if (refrescado != 1) break;
+        leaseValor = leaseNuevo;
+        // Caza Fotos L3-ALTA: si la fila se descartó (Deshacer)
+        // después de leído el lote, no se sube: el objeto quedaba
+        // en el bucket pese al cobro deshecho.
+        final vigente = await db.query(
+          'comprobantes_pago',
+          columns: ['comprobante_uuid'],
+          where: 'comprobante_uuid = ?',
+          whereArgs: [f['comprobante_uuid']],
+          limit: 1,
+        );
+        if (vigente.isEmpty) continue;
         final uuid = f['comprobante_uuid'] as String;
         final ruta = f['ruta_local'] as String?;
         final storagePath = f['storage_path'] as String?;
@@ -293,6 +405,15 @@ class ComprobantesService {
         }
       }
     } finally {
+      // Liberar el lease solo si sigue siendo nuestro (si otro
+      // worker ya tomó el relevo, su valor no se toca).
+      try {
+        await db.rawUpdate(
+          "UPDATE meta SET v = '' WHERE k = 'comprobantes_worker_lease' "
+          'AND v = ?',
+          [leaseValor],
+        );
+      } catch (_) {}
       _procesando = false;
     }
     return subidos;

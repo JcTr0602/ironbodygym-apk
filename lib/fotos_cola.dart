@@ -31,6 +31,31 @@ import 'sync.dart' show SyncEngine, EstadoSubida;
 /// a medio escribir.
 Future<Map<String, String>> _generarVariantes(
     String rutaOriginal, String base) async {
+  // Caza Fotos L1 (Argón): si la compresión lanza a mitad, las
+  // variantes ya renombradas y los .tmp de esta base quedan
+  // huérfanos en disco (ninguna fila los referencia y el barrido
+  // por antigüedad tarda días). El catch los borra TODOS antes de
+  // relanzar; el llamador cae entonces a su fallback limpio.
+  try {
+    return await _generarVariantesInterno(rutaOriginal, base);
+  } catch (_) {
+    for (final sufijo in const [
+      '-thumb.webp', '-thumb.webp.tmp',
+      '-display.webp', '-display.webp.tmp',
+      '-original.webp', '-original.webp.tmp',
+      '-original.jpg', '-original.jpg.tmp',
+    ]) {
+      try {
+        final f = File('$base$sufijo');
+        if (await f.exists()) await f.delete();
+      } catch (_) {}
+    }
+    rethrow;
+  }
+}
+
+Future<Map<String, String>> _generarVariantesInterno(
+    String rutaOriginal, String base) async {
   final variantes = <String, String>{};
 
   // Thumb
@@ -183,7 +208,70 @@ class FotosColaService {
     var n = 0;
     // v1.2.9+40 (Gemini): transacción para atomicidad (todo o nada),
     // manteniendo trazabilidad de cada rowId.
+    // Caza Fotos L1-ALTA: el op_uuid de la foto vigente según el
+    // espejo (se persiste al encolar, ver más abajo). Cubre el
+    // hueco del cliente creado offline: sus filas viejas pueden
+    // llevar cliente_id NULL en la cola y el pareo por entidad no
+    // las alcanza, pero su op_uuid sí consta en el espejo.
+    String? opUuidAnterior;
+    if (clienteId != null || suplementoId != null) {
+      try {
+        final tabla = clienteId != null ? 'clientes' : 'suplementos';
+        final idEntidad = clienteId ?? suplementoId;
+        final rows = await db.query(
+          tabla,
+          columns: ['data'],
+          where: 'id = ?',
+          whereArgs: [idEntidad],
+          limit: 1,
+        );
+        if (rows.isNotEmpty) {
+          final raw = rows.first['data'];
+          final data = Map<String, dynamic>.from(
+              raw is String ? jsonDecode(raw) : raw as Map);
+          opUuidAnterior = data['foto_uuid'] as String?;
+        }
+      } catch (_) {}
+    }
     await db.transaction((txn) async {
+      // Caza Fotos L1-ALTA (Argón): una foto NUEVA invalida las
+      // variantes 'pendiente' de fotos anteriores del mismo
+      // cliente/suplemento. Sin esto, cambiar la foto 3 veces deja
+      // las versiones viejas subiendo megabytes obsoletos y
+      // ocupando disco hasta completar y cumplir 7 días más. Solo
+      // 'pendiente': una fila 'subiendo' es de un worker activo y
+      // su vinculación queda neutralizada por la guarda de
+      // precedencia de _vincularEnTransaccion. Se borran también
+      // sus archivos y sus claves TUS de reanudación.
+      if (clienteId != null || suplementoId != null) {
+        final viejas = await txn.query(
+          'fotos_cola',
+          columns: ['id', 'op_uuid', 'tipo', 'ruta_local'],
+          where: "estado = 'pendiente' AND op_uuid != ? AND "
+              '((cliente_id IS ? AND suplemento_id IS ?) '
+              'OR op_uuid = ?)',
+          whereArgs: [opUuid, clienteId, suplementoId, opUuidAnterior ?? ''],
+        );
+        for (final v in viejas) {
+          try {
+            final f = File(v['ruta_local'] as String);
+            if (await f.exists()) await f.delete();
+          } catch (_) {}
+          for (final clave in [
+            'tus_loc_${v['op_uuid']}_${v['tipo']}',
+            'tus_offset_${v['op_uuid']}_${v['tipo']}',
+          ]) {
+            await txn.delete('meta', where: 'k = ?', whereArgs: [clave]);
+          }
+          await txn.delete('fotos_cola',
+              where: 'id = ?', whereArgs: [v['id']]);
+        }
+        if (viejas.isNotEmpty) {
+          AppLog.info('fotos', 'pendientes_invalidadas',
+              d: 'n=${viejas.length} por foto nueva de '
+                  '${clienteId != null ? 'cliente $clienteId' : 'suplemento $suplementoId'}');
+        }
+      }
       for (final entry in variantes.entries) {
         int? tamano;
         try {
@@ -334,7 +422,11 @@ class FotosColaService {
       // nunca; con 0 el lease se trata como vencido y se reclama.
       "(v = '' OR v NOT LIKE '%|%' OR "
       "COALESCE(CAST(strftime('%s', substr(v, instr(v, '|') + 1)) AS INTEGER), 0) < ?)",
-      [leaseValor, '${DateTime.now().millisecondsSinceEpoch ~/ 1000}'],
+      // Caza Fotos (hallazgo del test de lease de comprobantes):
+      // el epoch va como ENTERO. Como texto, SQLite lo compara
+      // por TIPO (INTEGER < TEXT siempre verdadero) y el reclamo
+      // pasaba aunque otro worker tuviera un lease vigente.
+      [leaseValor, DateTime.now().millisecondsSinceEpoch ~/ 1000],
     );
     if (leaseReclamado != 1) {
       AppLog.aviso('fotos', 'worker_activo',
@@ -344,6 +436,25 @@ class FotosColaService {
     // v1.13.0 (G5): barrido de huérfanas viejas (filas en 'error'
     // por problemas del op padre, escritas por el código anterior).
     await _descartarHuerfanasViejas(db);
+
+    // Caza Fotos L1-MEDIA (Argón): limpiarHuerfanos solo se
+    // invocaba a mano desde Ajustes; en el ciclo normal nadie lo
+    // llamaba y la carpeta /fotos crecía sin fin (filas
+    // completadas/error viejas y archivos sin fila). Se corre de
+    // forma oportunista, como máximo 1 vez cada 24 h (marca en
+    // meta), dentro del lease: un solo worker barre.
+    try {
+      final ultima =
+          await LocalDb.instance.getMeta('fotos_ultima_limpieza');
+      final ultimaVez = ultima == null ? null : DateTime.tryParse(ultima);
+      if (ultimaVez == null ||
+          ahoraHabana().difference(ultimaVez) >
+              const Duration(hours: 24)) {
+        await limpiarHuerfanos();
+        await LocalDb.instance
+            .setMeta('fotos_ultima_limpieza', isoHabana(ahoraHabana()));
+      }
+    } catch (_) {}
 
     var redVerificada = false;
     try {
@@ -434,8 +545,10 @@ class FotosColaService {
       // v1.3.4 (Argón): hora Habana, estándar obligatorio.
       // SA-04: el corte de proximo_intento_en se compara por
       // epoch (instante), no como texto ISO (ver lease arriba).
-      final ahoraIso =
-          '${DateTime.now().millisecondsSinceEpoch ~/ 1000}';
+      // Caza Fotos: el epoch va como ENTERO (como texto, SQLite
+      // compara por tipo y el corte <= pasaba SIEMPRE: el backoff
+      // de proximo_intento_en no se respetaba en la selección).
+      final ahoraIso = DateTime.now().millisecondsSinceEpoch ~/ 1000;
       final fotos = await db.query(
         'fotos_cola',
         where: "estado = 'pendiente' AND intentos < 5 "
@@ -884,6 +997,15 @@ class FotosColaService {
 
     // Corrección Gemini #5: renovar lease durante la subida, con
     // cancel() garantizado en finally.
+    // Caza Fotos L4 (Argón): el temporizador también refresca el
+    // lease GLOBAL en meta — el bucle de procesarCola lo renueva
+    // entre fotos, pero DENTRO de una sola subida larga (>10 min
+    // en red lenta) no corre, y otro isolate podía robar el lease
+    // y subir en paralelo. Y perder el lease de la fila ahora SÍ
+    // aborta: la bandera entra en debePausarPorCobro y la subida
+    // se pausa en el próximo chunk en vez de competir con el
+    // nuevo dueño (antes solo se anotaba en el registro).
+    var leasePerdido = false;
     Timer? renovadorLease;
     try {
       renovadorLease = Timer.periodic(const Duration(seconds: 30), (_) async {
@@ -898,8 +1020,23 @@ class FotosColaService {
         );
         if (afectadas == 0) {
           // Otro worker tomó la fila o fue invalidada: abortar.
+          leasePerdido = true;
           debugPrint('[Fotos] Lease perdido para foto $id, abortando.');
+          return;
         }
+        // Refresco del lease global si sigue siendo de este
+        // worker (el dueño se identifica por el prefijo antes
+        // del '|', comparado sin LIKE para no heredar comodines).
+        try {
+          await db.rawUpdate(
+            "UPDATE meta SET v = ? WHERE k = 'fotos_worker_lease' "
+            "AND substr(v, 1, instr(v, '|') - 1) = ?",
+            [
+              '$workerId|${isoHabana(ahoraHabana().add(const Duration(minutes: 10)))}',
+              workerId,
+            ],
+          );
+        } catch (_) {}
       });
 
       final ruta = f['ruta_local'] as String;
@@ -944,6 +1081,7 @@ class FotosColaService {
         // Argón (sync adaptativa, paso 3): antes de cada chunk,
         // si entró trabajo transaccional, pausar (el cobro manda).
         debePausarPorCobro: () async =>
+            leasePerdido ||
             await LocalDb.instance.countPendingOpsNoFoto() > 0,
       );
       final finChunk = ahoraHabana();
@@ -1173,6 +1311,30 @@ class FotosColaService {
       return;
     }
 
+    // Caza Fotos L2-ALTA (Argón): precedencia contra la COLA, no
+    // solo contra el espejo. Las guardas de _vincularFotoCliente y
+    // del suplemento miran el foto_uuid del espejo, pero un pull
+    // puede haberlo dejado en null o en el valor viejo (la
+    // vinculación de la foto nueva aún no se aplicó en el
+    // servidor) y entonces la foto VIEJA se vincula después y pisa
+    // a la nueva en el espejo y aguas arriba. Si en la cola existe
+    // una fila de OTRA foto (otro op_uuid) con id mayor para la
+    // misma entidad y no está en 'error' terminal, esta foto ya
+    // fue superada: se completa sin vincular. Las variantes de la
+    // MISMA foto comparten op_uuid y quedan excluidas.
+    final masNueva = Sqflite.firstIntValue(await txn.rawQuery(
+          "SELECT COUNT(*) FROM fotos_cola WHERE id > ? "
+          "AND op_uuid != ? AND estado != 'error' "
+          'AND (cliente_id = ? OR suplemento_id = ?)',
+          [fotoId, opUuid, clienteId ?? -1, suplementoId ?? -1],
+        )) ??
+        0;
+    if (masNueva > 0) {
+      debugPrint('[Fotos] Foto $fotoId superada por una más nueva '
+          'en la cola; no se vincula.');
+      return;
+    }
+
     // v1.2.9+43 (Gemini R2): UUID v5 determinista, compatible con RFC 4122.
     // Si PostgreSQL tiene la columna como tipo uuid nativo, un string
     // arbitrario fallaría. UUID v5 es determinista y válido.
@@ -1304,8 +1466,8 @@ class FotosColaService {
     final db = await LocalDb.instance.db;
     // v1.3.4 (Argón): hora Habana, estándar obligatorio.
     // SA-04: comparación por epoch (ver procesarCola).
-    final ahoraIso =
-        '${DateTime.now().millisecondsSinceEpoch ~/ 1000}';
+    // Caza Fotos: epoch ENTERO (ver la selección en procesarCola).
+    final ahoraIso = DateTime.now().millisecondsSinceEpoch ~/ 1000;
     final r = await db.rawQuery(
         "SELECT COUNT(*) as n FROM fotos_cola WHERE estado = 'pendiente' "
         "AND intentos < 5 "
@@ -1333,7 +1495,8 @@ class FotosColaService {
       ahora: ahora,
     );
     // SA-04: comparación por epoch (ver procesarCola).
-    final ahoraIso = '${ahora.millisecondsSinceEpoch ~/ 1000}';
+    // Caza Fotos: epoch ENTERO (ver la selección en procesarCola).
+    final ahoraIso = ahora.millisecondsSinceEpoch ~/ 1000;
     final r = await db.rawQuery(
         "SELECT COUNT(*) as n FROM fotos_cola WHERE estado = 'pendiente' "
         "AND intentos < 5 "

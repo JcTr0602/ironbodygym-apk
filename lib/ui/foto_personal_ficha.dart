@@ -44,6 +44,23 @@ class _SeccionFotoPersonalState extends State<SeccionFotoPersonal> {
     _consultar();
   }
 
+  // Caza Fotos L5-MEDIA (Argón): sin didUpdateWidget, si el padre
+  // reutiliza este hueco para OTRO cliente, la sección seguía
+  // mostrando la foto personal del anterior. Al cambiar el
+  // clienteId se resetea el estado y se consulta de nuevo.
+  @override
+  void didUpdateWidget(SeccionFotoPersonal oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.clienteId != widget.clienteId) {
+      _estado = _EstadoFoto.cargando;
+      _path = null;
+      _archivo = null;
+      _actualizadaEn = null;
+      _retirando = false;
+      _consultar();
+    }
+  }
+
   Future<void> _consultar() async {
     try {
       final res = await Supabase.instance.client.rpc(

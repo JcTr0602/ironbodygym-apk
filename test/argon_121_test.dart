@@ -83,7 +83,11 @@ void main() {
       },
     }, 4);
 
-    final (mens, diarios, servicios) = await detallePendiente(_tid);
+    // Caza Dinero #12: detallePendiente devuelve también los
+    // suplementos (4ª lista); este test no siembra ninguno.
+    final (mens, diarios, servicios, suplementos) =
+        await detallePendiente(_tid);
+    expect(suplementos, isEmpty);
     expect(mens.map((e) => e['id']), [10],
         reason: 'el pago 11 ya liquidado no debe listarse');
     expect(diarios, isEmpty);

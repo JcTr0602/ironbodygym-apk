@@ -13,10 +13,11 @@ void main() {
       expect(s.badge, 'Pendiente');
     });
 
-    test('fecha no parseable → VENCE: texto, badge Activo', () {
+    test('fecha no parseable → Pendiente (caza Clientes #11: una '
+        'fecha ilegible NO es un Activo confirmado)', () {
       final s = semaforoVistaPrevia('pronto', '2026-10-21');
       expect(s.titulo, 'VENCE: pronto');
-      expect(s.badge, 'Activo');
+      expect(s.badge, 'Pendiente');
     });
 
     test('vencida hace 3 días (contra fecha del servidor)', () {
