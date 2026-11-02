@@ -33,7 +33,7 @@ Future<Database> _abrirDbVacia() async {
   databaseFactory = databaseFactoryFfi;
   SharedPreferences.setMockInitialValues({});
   final dir = await getDatabasesPath();
-  final dbPath = p.join(dir, 'ironbody.db');
+  final dbPath = p.join(dir, 'test_migracion_v37_test.db');
   try {
     await File(dbPath).delete();
   } catch (_) {}
@@ -57,6 +57,8 @@ Future<void> _volverAV36(Database db, String? metaVieja) async {
 }
 
 void main() {
+  // P1: BD propia de este archivo (modo paralelo).
+  LocalDb.nombreArchivoDbForzado = 'test_migracion_v37_test.db';
   TestWidgetsFlutterBinding.ensureInitialized();
 
   test('limpia: la tabla info_publica_pendiente nace con su '

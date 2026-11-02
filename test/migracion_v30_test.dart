@@ -24,7 +24,7 @@ Future<Database> _abrirDbVacia() async {
   databaseFactory = databaseFactoryFfi;
   SharedPreferences.setMockInitialValues({});
   final dir = await getDatabasesPath();
-  final dbPath = p.join(dir, 'ironbody.db');
+  final dbPath = p.join(dir, 'test_migracion_v30_test.db');
   try {
     await File(dbPath).delete();
   } catch (_) {}
@@ -59,6 +59,8 @@ Future<Map<String, Map<String, dynamic>>> _infoFotosCola(
 }
 
 void main() {
+  // P1: BD propia de este archivo (modo paralelo).
+  LocalDb.nombreArchivoDbForzado = 'test_migracion_v30_test.db';
   TestWidgetsFlutterBinding.ensureInitialized();
 
   test('upgrade 29→30: forzar_qos aparece y las filas se conservan',

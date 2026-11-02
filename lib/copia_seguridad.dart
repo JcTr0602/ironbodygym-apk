@@ -8,7 +8,6 @@ library;
 import 'dart:io';
 
 import 'package:path/path.dart' as p;
-import 'package:sqflite/sqflite.dart';
 
 import 'localdb.dart';
 
@@ -33,8 +32,10 @@ Future<File> exportarCopiaFria() async {
     if (e is StateError) rethrow;
     throw StateError('No se pudo volcar el WAL ($e); reintenta');
   }
-  final dir = await getDatabasesPath();
-  final origen = File(p.join(dir, 'ironbody.db'));
+  // La ruta sale de LocalDb.dbPath() (única fuente): antes se
+  // reconstruía a mano como getDatabasesPath() + 'ironbody.db',
+  // lo que en los tests paralelos (P1) apuntaba a otro archivo.
+  final origen = File(await LocalDb.instance.dbPath());
   final tmp = await Directory.systemTemp.createTemp('ironbody_backup');
   final destino = File(p.join(tmp.path, 'ironbody_backup.db'));
   await origen.copy(destino.path);

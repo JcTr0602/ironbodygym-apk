@@ -37,7 +37,7 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 Future<String> _rutaDb() async {
   final dir = await getDatabasesPath();
-  return p.join(dir, 'ironbody.db');
+  return p.join(dir, 'test_info_publica_carrera_test.db');
 }
 
 Future<Database> _abrirDbVacia() async {
@@ -96,6 +96,8 @@ class _RedControlable {
 }
 
 void main() {
+  // P1: BD propia de este archivo (modo paralelo).
+  LocalDb.nombreArchivoDbForzado = 'test_info_publica_carrera_test.db';
   TestWidgetsFlutterBinding.ensureInitialized();
 
   group('serialización (cadena del servicio)', () {

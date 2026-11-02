@@ -18,7 +18,7 @@ Future<String> _ruta() async {
   databaseFactory = databaseFactoryFfi;
   SharedPreferences.setMockInitialValues({});
   final dir = await getDatabasesPath();
-  return p.join(dir, 'ironbody.db');
+  return p.join(dir, 'test_migracion_v52_test.db');
 }
 
 Future<List<String>> _columnas() async {
@@ -28,6 +28,8 @@ Future<List<String>> _columnas() async {
 }
 
 void main() {
+  // P1: BD propia de este archivo (modo paralelo).
+  LocalDb.nombreArchivoDbForzado = 'test_migracion_v52_test.db';
   test('instalación limpia: recordatorio_config trae frecuencia',
       () async {
     final dbPath = await _ruta();

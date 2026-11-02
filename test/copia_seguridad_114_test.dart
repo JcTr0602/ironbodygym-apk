@@ -17,7 +17,7 @@ Future<void> _abrirDbVacia() async {
   databaseFactory = databaseFactoryFfi;
   SharedPreferences.setMockInitialValues({});
   final dir = await getDatabasesPath();
-  final dbPath = p.join(dir, 'ironbody.db');
+  final dbPath = p.join(dir, 'test_copia_seguridad_114_test.db');
   try {
     await File(dbPath).delete();
   } catch (_) {}
@@ -26,6 +26,8 @@ Future<void> _abrirDbVacia() async {
 }
 
 void main() {
+  // P1: BD propia de este archivo (modo paralelo).
+  LocalDb.nombreArchivoDbForzado = 'test_copia_seguridad_114_test.db';
   test('la copia trae lo último escrito y solo la BD', () async {
     await _abrirDbVacia();
     final db = await LocalDb.instance.db;
@@ -73,7 +75,7 @@ void main() {
       'actualizada_ts': '2026-10-26T08:00:00',
     });
     final dir = await getDatabasesPath();
-    final dbPath = p.join(dir, 'ironbody.db');
+    final dbPath = p.join(dir, 'test_copia_seguridad_114_test.db');
     // Segunda conexión con una lectura abierta: el checkpoint
     // TRUNCATE no puede completarse y la exportación debe fallar
     // en vez de compartir una copia sin los últimos commits.

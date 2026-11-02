@@ -57,6 +57,8 @@ Future<void> _crearEsquemaV7(Database db) async {
 }
 
 void main() {
+  // P1: BD propia de este archivo (modo paralelo).
+  LocalDb.nombreArchivoDbForzado = 'test_migracion_test.db';
   TestWidgetsFlutterBinding.ensureInitialized();
 
   test('migración 7→15 sin tablas de incidencias (caso Jc)', () async {
@@ -65,7 +67,7 @@ void main() {
     SharedPreferences.setMockInitialValues({});
 
     final dir = await getDatabasesPath();
-    final dbPath = p.join(dir, 'ironbody.db');
+    final dbPath = p.join(dir, 'test_migracion_test.db');
     try {
       await File(dbPath).delete();
     } catch (_) {}
@@ -118,7 +120,7 @@ void main() {
     SharedPreferences.setMockInitialValues({});
 
     final dir = await getDatabasesPath();
-    final dbPath = p.join(dir, 'ironbody.db');
+    final dbPath = p.join(dir, 'test_migracion_test.db');
     try {
       await File(dbPath).delete();
     } catch (_) {}
@@ -168,7 +170,7 @@ void main() {
     SharedPreferences.setMockInitialValues({});
 
     final dir = await getDatabasesPath();
-    final dbPath = p.join(dir, 'ironbody.db');
+    final dbPath = p.join(dir, 'test_migracion_test.db');
     try {
       await File(dbPath).delete();
     } catch (_) {}
@@ -219,7 +221,7 @@ void main() {
     SharedPreferences.setMockInitialValues({});
 
     final dir = await getDatabasesPath();
-    final dbPath = p.join(dir, 'ironbody.db');
+    final dbPath = p.join(dir, 'test_migracion_test.db');
     try {
       await File(dbPath).delete();
     } catch (_) {}
@@ -255,7 +257,7 @@ void main() {
     SharedPreferences.setMockInitialValues({});
 
     final dir = await getDatabasesPath();
-    final dbPath = p.join(dir, 'ironbody.db');
+    final dbPath = p.join(dir, 'test_migracion_test.db');
     try {
       await File(dbPath).delete();
     } catch (_) {}

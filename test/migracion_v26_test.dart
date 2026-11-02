@@ -108,7 +108,7 @@ Future<String> _dbPathNuevo() async {
   databaseFactory = databaseFactoryFfi;
   SharedPreferences.setMockInitialValues({});
   final dir = await getDatabasesPath();
-  final dbPath = p.join(dir, 'ironbody.db');
+  final dbPath = p.join(dir, 'test_migracion_v26_test.db');
   try {
     await File(dbPath).delete();
   } catch (_) {}
@@ -130,6 +130,8 @@ Future<Set<String>> _indices(Database db, String tabla) async {
 }
 
 void main() {
+  // P1: BD propia de este archivo (modo paralelo).
+  LocalDb.nombreArchivoDbForzado = 'test_migracion_v26_test.db';
   TestWidgetsFlutterBinding.ensureInitialized();
 
   test('migración 24→26: columnas, índices, backfill y resultado_servidor',

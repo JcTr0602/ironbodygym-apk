@@ -25,7 +25,7 @@ Future<Database> _abrirDbVacia() async {
   databaseFactory = databaseFactoryFfi;
   SharedPreferences.setMockInitialValues({});
   final dir = await getDatabasesPath();
-  final dbPath = p.join(dir, 'ironbody.db');
+  final dbPath = p.join(dir, 'test_migracion_v32_test.db');
   try {
     await File(dbPath).delete();
   } catch (_) {}
@@ -41,6 +41,8 @@ Future<bool> _existeTabla(Database db, String nombre) async {
 }
 
 void main() {
+  // P1: BD propia de este archivo (modo paralelo).
+  LocalDb.nombreArchivoDbForzado = 'test_migracion_v32_test.db';
   test('limpia: fotos_pendientes no se crea', () async {
     final db = await _abrirDbVacia();
     expect(await _existeTabla(db, 'fotos_pendientes'), isFalse);

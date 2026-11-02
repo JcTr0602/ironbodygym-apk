@@ -148,14 +148,63 @@ class LocalDb {
     } catch (_) {}
   }
 
+  /// P1 productividad (selección 1.22 de Jc): nombre del archivo
+  /// de BD. En producción es siempre 'ironbody.db'. Con la
+  /// variable de entorno IRONBODY_TEST_DB=1 (que solo pone el
+  /// corredor de tests paralelo), cada proceso de test usa su
+  /// propio archivo ironbody_<pid>.db: `flutter test` corre cada
+  /// archivo en su propio proceso, y compartir un único
+  /// ironbody.db era lo que obligaba a --concurrency=1 (los
+  /// setUp se borraban la BD entre sí). Sin la variable, el
+  /// comportamiento es idéntico al de siempre.
+  /// Solo para tests: nombre de archivo EXPLÍCITO que manda
+  /// sobre el automático. Lo usan los tests que construyen su
+  /// propia BD (migraciones, copias, carreras entre conexiones)
+  /// y necesitan que LocalDb abra exactamente ese archivo; cada
+  /// uno fuerza un nombre único de su archivo de test para no
+  /// chocar con otros procesos en modo paralelo.
+  @visibleForTesting
+  static String? nombreArchivoDbForzado;
+
+  static String get _nombreArchivoDb =>
+      nombreArchivoDbForzado ??
+      (Platform.environment['IRONBODY_TEST_DB'] == '1'
+          ? 'ironbody_$pid.db'
+          : 'ironbody.db');
+
   /// Solo para tests: reinicia el estado cacheado para poder reabrir
   /// la BD y re-ejecutar la reparación FTS en el mismo proceso.
   @visibleForTesting
-  static Future<void> resetParaTest() async {
+  static Future<void> resetParaTest({bool borrarArchivo = true}) async {
     await instance._db?.close();
     instance._db = null;
     _ftsOk = null;
     _ftsReparado = false;
+    // P1 (modo paralelo, IRONBODY_TEST_DB=1): «reset» = BD
+    // limpia, como cuando cada _preparar borraba a mano la ruta
+    // compartida (en paralelo esa ruta ya no es la suya y el
+    // borrado manual no les limpia nada). Se borra el archivo
+    // PROPIO del proceso (el nombre por pid). Con nombre
+    // FORZADO no se borra: esos tests (migraciones, copias)
+    // construyen su BD con otra conexión y gestionan su archivo
+    // a mano; borrar aquí les destruiría la BD recién construida
+    // antes de que LocalDb la abra. Quien necesite «cerrar y
+    // reabrir» con los datos vivos (p. ej. avisos_wa_114) pasa
+    // borrarArchivo: false. Fuera del modo paralelo no se borra
+    // nunca: el comportamiento histórico queda intacto.
+    if (borrarArchivo &&
+        nombreArchivoDbForzado == null &&
+        Platform.environment['IRONBODY_TEST_DB'] == '1') {
+      try {
+        final dir = await getDatabasesPath();
+        final ruta = p.join(dir, _nombreArchivoDb);
+        for (final sufijo in ['', '-wal', '-shm']) {
+          try {
+            await File('$ruta$sufijo').delete();
+          } catch (_) {}
+        }
+      } catch (_) {}
+    }
   }
 
   /// Solo para tests: si es true, [_reconstruirFts] lanza una excepción
@@ -286,7 +335,7 @@ class LocalDb {
     if (d != null) return d;
     final dir = await getDatabasesPath();
     _db = await openDatabase(
-      p.join(dir, 'ironbody.db'),
+      p.join(dir, _nombreArchivoDb),
       version: versionActual,
       // v1.3-r4 (Gemini): WAL mode para que lectores (UI) y escritores
       // (Workmanager en otro isolate) no se bloqueen mutuamente.
@@ -7814,6 +7863,6 @@ class LocalDb {
   /// Ruta del archivo de la base de datos (para exportar/importar).
   Future<String> dbPath() async {
     final dir = await getDatabasesPath();
-    return p.join(dir, 'ironbody.db');
+    return p.join(dir, _nombreArchivoDb);
   }
 }

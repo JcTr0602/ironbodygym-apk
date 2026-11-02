@@ -26,6 +26,8 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'helpers/esquema.dart';
 
 void main() {
+  // P1: BD propia de este archivo (modo paralelo).
+  LocalDb.nombreArchivoDbForzado = 'test_paridad_esquema_test.db';
   TestWidgetsFlutterBinding.ensureInitialized();
 
   test('paridad onCreate(v26) vs onUpgrade(24→26)', () async {
@@ -34,7 +36,7 @@ void main() {
     SharedPreferences.setMockInitialValues({});
 
     final dir = await getDatabasesPath();
-    final dbPath = p.join(dir, 'ironbody.db');
+    final dbPath = p.join(dir, 'test_paridad_esquema_test.db');
     try {
       await File(dbPath).delete();
     } catch (_) {}

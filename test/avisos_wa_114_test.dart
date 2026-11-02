@@ -17,7 +17,7 @@ Future<void> _abrirDbVacia() async {
   databaseFactory = databaseFactoryFfi;
   SharedPreferences.setMockInitialValues({});
   final dir = await getDatabasesPath();
-  final dbPath = p.join(dir, 'ironbody.db');
+  final dbPath = p.join(dir, 'test_avisos_wa_114_test.db');
   try {
     await File(dbPath).delete();
   } catch (_) {}
@@ -26,6 +26,8 @@ Future<void> _abrirDbVacia() async {
 }
 
 void main() {
+  // P1: BD propia de este archivo (modo paralelo).
+  LocalDb.nombreArchivoDbForzado = 'test_avisos_wa_114_test.db';
   test('marcar y leer por día', () async {
     await _abrirDbVacia();
     final db = LocalDb.instance;
@@ -62,7 +64,9 @@ void main() {
     await _abrirDbVacia();
     final db = LocalDb.instance;
     await db.marcarAvisoWaContactado(34, 'vencimiento', '2026-10-26');
-    await LocalDb.resetParaTest();
+    // Este test SÍ quiere que los datos sobrevivan al reset
+    // (simula el reinicio de la app): sin borrado de archivo.
+    await LocalDb.resetParaTest(borrarArchivo: false);
     final hoy = await LocalDb.instance.avisosWaContactados('2026-10-26');
     expect(hoy, contains('vencimiento_34'));
   });

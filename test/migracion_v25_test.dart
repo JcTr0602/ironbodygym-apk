@@ -50,6 +50,8 @@ Future<void> _crearTurnosV24(Database db) async {
 }
 
 void main() {
+  // P1: BD propia de este archivo (modo paralelo).
+  LocalDb.nombreArchivoDbForzado = 'test_migracion_v25_test.db';
   TestWidgetsFlutterBinding.ensureInitialized();
 
   test('migración 24→25: con_incidencias se convierte en flag', () async {
@@ -58,7 +60,7 @@ void main() {
     SharedPreferences.setMockInitialValues({});
 
     final dir = await getDatabasesPath();
-    final dbPath = p.join(dir, 'ironbody.db');
+    final dbPath = p.join(dir, 'test_migracion_v25_test.db');
     try {
       await File(dbPath).delete();
     } catch (_) {}
@@ -114,7 +116,7 @@ void main() {
     SharedPreferences.setMockInitialValues({});
 
     final dir = await getDatabasesPath();
-    final dbPath = p.join(dir, 'ironbody.db');
+    final dbPath = p.join(dir, 'test_migracion_v25_test.db');
     try {
       await File(dbPath).delete();
     } catch (_) {}
