@@ -2787,6 +2787,7 @@ class LocalDb {
           vigenteDesde,
           null,
           'pactada',
+          // nosemgrep: ironbody-telegram-id-dueno-hardcodeado — semilla de la tarifa especial de Yennifer: otorgado_por es el dueño, es un DATO de la semilla, no lógica.
           735772141,
           '[]',
           ts,
@@ -2808,6 +2809,7 @@ class LocalDb {
           vigenteDesde,
           null,
           'pactada',
+          // nosemgrep: ironbody-telegram-id-dueno-hardcodeado — semilla de la tarifa especial de Kevin: otorgado_por es el dueño, es un DATO de la semilla, no lógica.
           735772141,
           '[]',
           ts,
