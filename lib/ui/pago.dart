@@ -6,6 +6,7 @@
 /// el cobro se hace en 2 toques vía el diálogo unificado de pago.
 library;
 
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -92,9 +93,22 @@ class _PagoScreenState extends State<PagoScreen> {
 
   final _auth = AuthService();
 
+  // Argón 1.21 AR-03: mismo patrón que BuscarScreen (D-09):
+  // debounce de 200 ms al teclear y contador de generación
+  // para descartar resultados obsoletos que lleguen tarde.
+  int _gen = 0;
+  Timer? _debounceBusqueda;
+
+  void _buscarConDebounce() {
+    _debounceBusqueda?.cancel();
+    _debounceBusqueda =
+        Timer(const Duration(milliseconds: 200), _buscar);
+  }
+
   @override
   void dispose() {
     // Pasada 2 de Argón (1.20): _q no se liberaba nunca.
+    _debounceBusqueda?.cancel();
     _q.dispose();
     super.dispose();
   }
@@ -272,7 +286,10 @@ class _PagoScreenState extends State<PagoScreen> {
   }
 
   Future<void> _buscar() async {
+    // Argón 1.21 AR-03: descartar resultados obsoletos.
+    final gen = ++_gen;
     var r = await listaClientes(_q.text);
+    if (gen != _gen) return;
     // P1#3: listaClientes('') devuelve todos los activos sin filtro
     // de protegido; el no-dueño no debe verlos ni siquiera en la
     // lista (la fuga real con "Solo vencidos": FilaCliente ya
@@ -580,7 +597,7 @@ class _PagoScreenState extends State<PagoScreen> {
                     controller: _q,
                     hint: 'Nombre, carnet o teléfono',
                     icono: Icons.search_rounded,
-                    onChanged: (_) => _buscar(),
+                    onChanged: (_) => _buscarConDebounce(),
                   ),
                 ),
                 const SizedBox(width: 8),

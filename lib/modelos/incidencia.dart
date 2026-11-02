@@ -132,7 +132,12 @@ class Incidencia {
       tipoId: m['tipo_id'] as String?,
       descripcion: '${m['descripcion'] ?? ''}',
       detalle: m['detalle'] as String?,
-      estado: '${m['estado'] ?? 'pendiente'}',
+      // Argón 1.21 (pregunta 6): red de seguridad — un
+      // 'en_revision' del servidor se lee como 'en_proceso'
+      // (la UI solo conoce 4 estados con transiciones).
+      estado: m['estado'] == 'en_revision'
+          ? 'en_proceso'
+          : '${m['estado'] ?? 'pendiente'}',
       asignadoA: m['asignado_a'] as String?,
       prioridad: '${m['prioridad'] ?? 'media'}',
       fechaLimite: _dt(m['fecha_limite']),

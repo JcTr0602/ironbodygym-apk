@@ -62,14 +62,30 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
     final ult = await ultimaEntregaConfirmada(tid);
     final mes = await cobradoMes(tid);
     final (pm, pd, ps) = await detallePendiente(tid);
+    // Argón 1.21 AR-01: lo ya absorbido por una liquidación de
+    // caja tampoco cuenta en los bucles locales de esta pantalla
+    // (suplementos y la cola), igual que en detallePendiente.
+    final cubiertos =
+        tid == null ? <String>{} : await idsLiquidados(tid);
+    // Argón 1.21 AR-C03: op_uuid ya presentes en el espejo; la
+    // cola local no debe re-sumar lo que el pull ya bajó
+    // (ventana push→pull, mismo cruce que B-03 en negocio).
+    final uuidsEspejo = <String>{
+      for (final f in [...pm, ...pd, ...ps])
+        if (f['op_uuid'] != null) '${f['op_uuid']}',
+    };
     // 1.15-turnos (#9): el detalle por día cubre también servicios,
     // suplementos, adelantos y la cola local (misma cobertura que
     // pendienteEntrega, salvo el USD que va en su propia línea).
     final sup = <Map<String, dynamic>>[];
     for (final v in await ventasSuplementosCup()) {
+      if (cubiertos.contains('ventas_suplementos:${v['id']}')) {
+        continue;
+      }
       if (LocalDb.normalizarTelegramId(v['registrado_por']) == tid &&
           esPendiente(v['entregado'])) {
         sup.add(v);
+        if (v['op_uuid'] != null) uuidsEspejo.add('${v['op_uuid']}');
       }
     }
     final adel = <Map<String, dynamic>>[];
@@ -82,10 +98,25 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
     final opsDia = <(String, double)>[];
     final pr = await preciosVigentes();
     for (final op in await LocalDb.instance.pendingOps()) {
-      if (op['telegram_id'] != tid) continue;
+      // Argón 1.21 AR-C03: si la op ya bajó al espejo, la
+      // cuentan las listas de espejo; re-sumarla aquí duplicaba
+      // el desglose por día frente al total superior.
+      if (uuidsEspejo.contains('${op['op_uuid']}')) continue;
       try {
         final payload =
             jsonDecode(op['payload'] as String) as Map<String, dynamic>;
+        // Argón 1.21 AR-C03: en venta_servicio el beneficiario
+        // es el responsable del efectivo del payload, no
+        // necesariamente el autor de la op (misma regla que
+        // pendienteEntrega en negocio.dart).
+        if ('${op['tipo']}' == 'venta_servicio') {
+          final resp = LocalDb.normalizarTelegramId(
+                  payload['responsable_efectivo_id']) ??
+              LocalDb.normalizarTelegramId(op['telegram_id']);
+          if (resp != tid) continue;
+        } else if (op['telegram_id'] != tid) {
+          continue;
+        }
         final fecha =
             (payload['fecha'] as String?)?.substring(0, 10) ?? '';
         opsDia.add((fecha, montoEfectivoOp(op, pr)));

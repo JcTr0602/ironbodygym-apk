@@ -2427,7 +2427,26 @@ String textoEstadoCuenta({
   } else if (hasta == null || hasta.isEmpty) {
     b.writeln('Sin pagos registrados todavía.');
   } else {
-    final dias = diasRestantes(hasta);
+    // 1.21 (hallazgo de la suite): los días se calculan contra
+    // hoyIso — la fecha del propio texto — y no contra el reloj:
+    // diasRestantes() usa el hoy real, y el estado de cuenta
+    // podía encabezar una fecha y contar los días de otra.
+    // Misma aritmética de fechas puras (UTC sin horas) que
+    // diasRestantes.
+    int? dias;
+    if (hasta.length >= 10 && hoyIso.length >= 10) {
+      try {
+        final hp =
+            hoyIso.substring(0, 10).split('-').map(int.parse).toList();
+        final pp =
+            hasta.substring(0, 10).split('-').map(int.parse).toList();
+        dias = DateTime.utc(pp[0], pp[1], pp[2])
+            .difference(DateTime.utc(hp[0], hp[1], hp[2]))
+            .inDays;
+      } catch (_) {
+        dias = null;
+      }
+    }
     if (dias == null) {
       b.writeln('Activo hasta el ${fmtFecha(hasta)}.');
     } else if (dias > 1) {
@@ -3410,15 +3429,23 @@ Future<
   final diarios = <Map<String, dynamic>>[];
   final servicios = <Map<String, dynamic>>[];
   if (telegramId == null) return (mens, diarios, servicios);
+  // Argón 1.21 AR-01: excluir lo ya absorbido por una
+  // liquidación de caja, igual que pendienteEntrega y
+  // pendienteArqueo. Sin este cruce, en la ventana entre
+  // tablas del pull el desglose de Mi Turno listaba cobros
+  // ya liquidados que el total superior ya descontaba.
+  final cubiertos = await idsLiquidados(telegramId);
   // v1.3.4 (B2): filtro por columnas indexadas (v26);
   // 'entregado' no tiene columna y sigue filtrándose en Dart.
   for (final p in await LocalDb.instance
       .pagosPorFiltro(telegramId: telegramId, metodo: 'efectivo')) {
+    if (cubiertos.contains('pagos:${p['id']}')) continue;
     if (esPendiente(p['entregado'])) {
       mens.add(p);
     }
   }
   for (final d in await LocalDb.instance.allMirror('pagos_diarios')) {
+    if (cubiertos.contains('pagos_diarios:${d['id']}')) continue;
     if (LocalDb.normalizarTelegramId(d['registrado_por']) == telegramId &&
         esPendiente(d['entregado']) &&
         esPagoDiarioEfectivo(d)) {
@@ -3429,6 +3456,7 @@ Future<
     final resp =
         LocalDb.normalizarTelegramId(v['responsable_efectivo_id']) ??
             LocalDb.normalizarTelegramId(v['registrado_por']);
+    if (cubiertos.contains('servicio_ventas:${v['id']}')) continue;
     if (resp == telegramId &&
         (v['metodo'] as String?) == 'efectivo' &&
         (v['casa'] as num?)?.toInt() != 1 &&

@@ -1423,7 +1423,13 @@ class SyncEngine {
           await _pullIncidencias();
           await _pullIncidenciasComentarios();
           await _pullIncidenciasFotos();
-          await _pullIncidenciasHistorial();
+          // Argón 1.21 (pregunta 1): NO se llama a
+          // _pullIncidenciasHistorial(): la tabla
+          // sync_incidencias_historial no existe en Supabase y
+          // cada ciclo quemaba un GET condenado a 404. La UI
+          // sigue mostrando el historial LOCAL
+          // (incidencias_historial); el puente conserva
+          // incidencia_eventos en gym.db como bitácora.
         }
         // Tablas normales vía _download.
         final tablasNormales =
@@ -1850,7 +1856,8 @@ class SyncEngine {
         // Argón A2: pull de tablas hijas de incidencias.
         await _pullIncidenciasComentarios();
         await _pullIncidenciasFotos();
-        await _pullIncidenciasHistorial();
+        // Argón 1.21 (pregunta 1): sin _pullIncidenciasHistorial
+        // (tabla inexistente en Supabase, 404 perpetuo).
         await _db.setMeta('last_pull_incidencias_ok',
             isoHabana(ahoraHabana()));
       } catch (e) {
@@ -5079,6 +5086,24 @@ class SyncEngine {
               Map<String, dynamic>.from(row as Map);
           final seq =
               (m['sync_seq'] as num?)?.toInt() ?? 0;
+          // Argón 1.21 AR-C01 (defensa en profundidad, mismo
+          // criterio que _pullIncidenciasComentarios v1.3.1
+          // Alto #3): si la RLS de sync_incidencias dejara pasar
+          // una privada a un no-admin, jamás se materializa en
+          // local ni en mirror; el watermark avanza como con una
+          // fila aplicada (no es un conflicto).
+          if (m['visibilidad'] == 'privada' && !_auth.isAdmin) {
+            if (!huboConflicto && seq > maxSeq) maxSeq = seq;
+            continue;
+          }
+          // Argón 1.21 (pregunta 6): el servidor acepta
+          // 'en_revision' por retrocompatibilidad, pero la UI
+          // trabaja con 4 estados; se normaliza al bajar para
+          // que la incidencia no quede atrapada en un estado
+          // sin transiciones en la app.
+          if (m['estado'] == 'en_revision') {
+            m['estado'] = 'en_proceso';
+          }
           final local = await txn.query(
               'incidencias_local',
               where: 'id = ?',

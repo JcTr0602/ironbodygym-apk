@@ -5441,16 +5441,70 @@ class LocalDb {
   Future<int> purgarDatosSensibles() async {
     final d = await db;
     var n = 0;
+    // Argón 1.21 AR-C04: recoger ANTES de borrar las filas los
+    // ids de las incidencias privadas y las rutas de sus fotos:
+    // los archivos físicos en disco y las ops encoladas que las
+    // referencian también son datos sensibles y sobrevivían a
+    // la purga (la fila se iba, la foto y la op se quedaban).
+    final idsPrivadas = <String>{};
+    try {
+      for (final t in ['incidencias_local', 'incidencias_mirror']) {
+        final filas = await d.query(t,
+            columns: ['id'], where: "visibilidad='privada'");
+        for (final f in filas) {
+          final id = '${f['id']}';
+          if (id.isNotEmpty && id != 'null') idsPrivadas.add(id);
+        }
+      }
+    } catch (_) {}
+    if (idsPrivadas.isNotEmpty) {
+      final marcas =
+          List.filled(idsPrivadas.length, '?').join(',');
+      final argsIds = idsPrivadas.toList();
+      try {
+        final fotos = await d.query('incidencias_fotos',
+            columns: ['local_path'],
+            where: 'incidencia_id IN ($marcas)',
+            whereArgs: argsIds);
+        for (final f in fotos) {
+          final ruta = (f['local_path'] as String?) ?? '';
+          if (ruta.isEmpty) continue;
+          try {
+            await File(ruta).delete();
+          } catch (_) {}
+        }
+      } catch (_) {}
+      try {
+        await d.delete('incidencias_fotos',
+            where: 'incidencia_id IN ($marcas)', whereArgs: argsIds);
+        await d.delete('incidencias_comentarios',
+            where: 'incidencia_id IN ($marcas)', whereArgs: argsIds);
+      } catch (_) {}
+    }
     n += await d.delete('incidencias_mirror',
         where: "visibilidad='privada'");
     n += await d.delete('incidencias_local',
         where: "visibilidad='privada'");
     n += await d.delete('incidencia_eventos_mirror',
         where: 'incidencia_id NOT IN (SELECT id FROM incidencias_mirror)');
-    // v1.2.5-rev5 (Gemini): las ops 'incidencia' privadas encoladas también
-    // contienen el texto sensible en el payload. Se eliminan junto al resto.
+    // v1.2.5-rev5 (Gemini): las ops de incidencias privadas
+    // encoladas también contienen el texto sensible en el
+    // payload. Se eliminan junto al resto.
+    // Argón 1.21 AR-C04: el tipo 'incidencia' ya no se encola;
+    // los tipos vivos son crear/editar (su payload lleva la
+    // visibilidad) y cambiar_estado/agregar_comentario/
+    // registrar_foto (referencian la incidencia por id).
     n += await d.delete('ops_queue',
-        where: "tipo='incidencia' AND json_extract(payload,'\$.visibilidad')='privada'");
+        where:
+            "tipo IN ('crear_incidencia','editar_incidencia') AND json_extract(payload,'\$.visibilidad')='privada'");
+    if (idsPrivadas.isNotEmpty) {
+      final marcas =
+          List.filled(idsPrivadas.length, '?').join(',');
+      n += await d.delete('ops_queue',
+          where:
+              "tipo IN ('cambiar_estado_incidencia','agregar_comentario_incidencia','registrar_foto_incidencia') AND (json_extract(payload,'\$.id') IN ($marcas) OR json_extract(payload,'\$.incidencia_id') IN ($marcas))",
+          whereArgs: [...idsPrivadas, ...idsPrivadas]);
+    }
     // v1.3.2 (Argón #19): al cerrar sesión, limpiar también gastos,
     // auditoría local y la caché de usuarios APK (un entrenador no debe
     // ver datos del dueño tras el cambio de sesión).
