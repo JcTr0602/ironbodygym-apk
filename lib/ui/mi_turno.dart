@@ -153,7 +153,7 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
     // Clientes que el entrenador inscribió o a los que cobró
     final mios = <int>{};
     for (final c in await LocalDb.instance.allMirror('clientes')) {
-      if ((c['registrado_por'] as int?) == tid) {
+      if (LocalDb.normalizarTelegramId(c['registrado_por']) == tid) {
         final id = (c['id'] as num?)?.toInt();
         if (id != null) mios.add(id);
       }
@@ -174,7 +174,7 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
       out.add({
         'id': id,
         'nombre': '${c['nombre'] ?? 'Cliente $id'}',
-        'pagado_hasta': ph.substring(0, 10),
+        'pagado_hasta': ph.length >= 10 ? ph.substring(0, 10) : ph,
         'vencido': ph.compareTo(hoy) < 0,
       });
     }

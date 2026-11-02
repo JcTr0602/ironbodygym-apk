@@ -5355,55 +5355,6 @@ class LocalDb {
     );
   }
 
-  Future<int> maxIncidenciaSyncSeq() async {
-    final d = await db;
-    final r = await d
-        .rawQuery('SELECT MAX(sync_seq) m FROM incidencias_mirror');
-    return (r.first['m'] as int?) ?? 0;
-  }
-
-  // -- eventos autoritativos de incidencias v1.2.5 ----------------------
-  // Los escribe SOLO el puente (derivados de la mutación aceptada).
-  // La APK los descarga al espejo; los eventos locales pendientes se
-  // muestran como "por confirmar" hasta que llega el autoritativo.
-
-  Future<void> upsertEventoMirror(Map<String, dynamic> ev) async {
-    final d = await db;
-    await d.insert(
-      'incidencia_eventos_mirror',
-      {
-        'id': ev['id'],
-        'incidencia_id': ev['incidencia_id'],
-        'actor_id': ev['actor_id'],
-        'actor_nombre': ev['actor_nombre'],
-        'accion': ev['accion'],
-        'valor_anterior': ev['valor_anterior'],
-        'valor_nuevo': ev['valor_nuevo'],
-        'nota': ev['nota'],
-        'creada_en': ev['creada_en'],
-        'sync_seq': (ev['sync_seq'] as int?) ?? 0,
-      },
-      conflictAlgorithm: ConflictAlgorithm.replace,
-    );
-  }
-
-  Future<List<Map<String, dynamic>>> eventosMirror(String incidenciaId,
-      {int limit = 100}) async {
-    final d = await db;
-    return d.query('incidencia_eventos_mirror',
-        where: 'incidencia_id=?',
-        whereArgs: [incidenciaId],
-        orderBy: 'sync_seq ASC',
-        limit: limit);
-  }
-
-  Future<int> maxEventoSyncSeq() async {
-    final d = await db;
-    final r = await d.rawQuery(
-        'SELECT MAX(sync_seq) m FROM incidencia_eventos_mirror');
-    return (r.first['m'] as int?) ?? 0;
-  }
-
   // -- auditoría local v1.2.5 ------------------------------------------
   // Append-only con hash encadenado: "evidencia de manipulación", no
   // prueba inviolable. El registro autoritativo lo genera el puente al
@@ -5869,8 +5820,16 @@ class LocalDb {
       int telegramId, String fechaActual, String turnoActual) async {
     final d = await db;
     final rows = await d.query('turnos',
-        where: 'telegram_id=? AND estado IN (?,?)',
-        whereArgs: [telegramId, 'abierto_local', 'abierto_sincronizado'],
+        where: 'telegram_id=? AND estado IN (?,?,?)',
+        whereArgs: [
+          telegramId,
+          'abierto_local',
+          'abierto_sincronizado',
+          // AA3 F-T1: un turno marcado no_cerrado al abrir el siguiente
+          // también está sin resolver: si no entra aquí, ni el barrido
+          // automático ni la sección del Home lo alcanzan jamás.
+          'no_cerrado'
+        ],
         orderBy: 'fecha_turno DESC');
     final ordenActual = _ordenTurno(turnoActual);
     return rows.where((t) {

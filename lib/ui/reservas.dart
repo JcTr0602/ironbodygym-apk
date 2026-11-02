@@ -127,7 +127,7 @@ BandejaReservas construirBandeja(
               r,
         ];
   final nombreCliente = {
-    for (final c in clientes) _entero(c['id']): (c['nombre'] ?? '') as String,
+    for (final c in clientes) _entero(c['id']): '${c['nombre'] ?? ''}',
   };
   final suplPorId = {
     for (final s in suplementos) _entero(s['id']): s,
@@ -143,7 +143,7 @@ BandejaReservas construirBandeja(
           nombreCliente[_entero(r['cliente_id'])] ?? 'Cliente #${r['cliente_id']}',
       suplementoId: sid,
       suplementoNombre:
-          (supl?['nombre'] as String?) ?? 'Suplemento #$sid',
+          supl?['nombre']?.toString() ?? 'Suplemento #$sid',
       cantidad: _entero(r['cantidad']),
       precioUnitario: _doble(r['precio_unitario']),
       // v1.4.6: moneda snapshot que trae la propia reserva.
@@ -154,15 +154,15 @@ BandejaReservas construirBandeja(
           supl == null ? LocalDb.monedaDe(r) : LocalDb.monedaDe(supl),
       precioVigente:
           supl == null ? null : _doble(supl['precio_oficial']),
-      estado: (r['estado'] ?? '') as String,
-      creadaTs: (r['creada_ts'] ?? '') as String,
-      expiraEn: r['expira_en'] as String?,
-      notaResolucion: r['nota_resolucion'] as String?,
+      estado: '${r['estado'] ?? ''}',
+      creadaTs: '${r['creada_ts'] ?? ''}',
+      expiraEn: r['expira_en']?.toString(),
+      notaResolucion: r['nota_resolucion']?.toString(),
       // R3 (estéticas 1.19): fotos para la tarjeta.
-      fotoClienteLocal: cli?['foto_local'] as String?,
-      fotoClienteStorage: cli?['foto_storage'] as String?,
-      fotoSuplementoLocal: supl?['foto_local'] as String?,
-      fotoSuplementoStorage: supl?['foto_storage'] as String?,
+      fotoClienteLocal: cli?['foto_local']?.toString(),
+      fotoClienteStorage: cli?['foto_storage']?.toString(),
+      fotoSuplementoLocal: supl?['foto_local']?.toString(),
+      fotoSuplementoStorage: supl?['foto_storage']?.toString(),
     );
   }
 

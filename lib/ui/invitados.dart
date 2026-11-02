@@ -1500,6 +1500,14 @@ class _InvitadoDetalleScreenState extends State<InvitadoDetalleScreen> {
       _snack('Sin conexión: el detalle está en solo lectura.');
       return;
     }
+    // AA3 F-I1: la RPC no rechaza al invitado caducado (calcula el
+    // flag pero no lo usa como guarda); la vía prevista es extenderle
+    // la vida primero. Corte local con mensaje claro.
+    if (d.caducado) {
+      _snack(
+          'Este invitado está caducado: extiende su vida antes de convertirlo.');
+      return;
+    }
     setState(() => _actuando = true);
     try {
       final datos = await _svc.prepararConversion(d);

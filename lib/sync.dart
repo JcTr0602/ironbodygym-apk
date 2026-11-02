@@ -1422,6 +1422,7 @@ class SyncEngine {
           await _pullTiposIncidencia();
           await _pullIncidencias();
           await _pullIncidenciasComentarios();
+          await _pullIncidenciasFotos();
           await _pullIncidenciasHistorial();
         }
         // Tablas normales vía _download.
@@ -1848,6 +1849,7 @@ class SyncEngine {
         await _pullIncidencias();
         // Argón A2: pull de tablas hijas de incidencias.
         await _pullIncidenciasComentarios();
+        await _pullIncidenciasFotos();
         await _pullIncidenciasHistorial();
         await _db.setMeta('last_pull_incidencias_ok',
             isoHabana(ahoraHabana()));
@@ -4377,108 +4379,6 @@ class SyncEngine {
     }
   }
 
-  /// v1.2.4: reporta una incidencia (offline-first).
-  /// 1) Guarda local. 2) Encola op 'incidencia' para el servidor.
-  /// Retorna el id local (UUID).
-  /// v1.2.5: visibilidad ('compartida' por defecto; 'privada' solo admin —
-  /// la UI no ofrece la opción a entrenadores y el puente la valida).
-  Future<String> reportarIncidencia({
-    required String tipo,
-    required String descripcion,
-    String? entidad,
-    int? entidadId,
-    Map<String, dynamic>? detalle,
-    String visibilidad = 'compartida',
-  }) async {
-    const tipos = {'stock', 'rechazo', 'sync', 'foto'};
-    if (!tipos.contains(tipo)) throw ArgumentError('tipo inválido');
-    if (descripcion.trim().isEmpty) throw ArgumentError('descripción vacía');
-    if (visibilidad != 'compartida' && visibilidad != 'privada') {
-      throw ArgumentError('visibilidad inválida');
-    }
-    // Defensa en profundidad: solo admin puede crear privadas.
-    if (visibilidad == 'privada' && !_auth.isAdmin) {
-      throw StateError('solo el dueño puede crear incidencias privadas');
-    }
-    final u = _auth.username;
-    final creadaPor = u.isNotEmpty ? u : (_auth.userId ?? 'desconocido');
-    // v1.3.1 (Alto #4): generar el opUuid ANTES y guardarlo en la fila local
-    // para el marcado selectivo de synced.
-    final opUuid = const Uuid().v4();
-    final id = await _db.crearIncidenciaLocal(
-      tipo: tipo,
-      descripcion: descripcion.trim(),
-      creadaPor: creadaPor,
-      entidad: entidad,
-      entidadId: entidadId,
-      detalle: detalle,
-      visibilidad: visibilidad,
-      opUuid: opUuid,
-    );
-    await _db.queueOp(
-      opUuid: opUuid,
-      tipo: 'incidencia',
-      payload: {
-        'id': id,
-        'tipo': tipo,
-        'descripcion': descripcion.trim(),
-        'entidad': entidad,
-        'entidad_id': entidadId,
-        'detalle': detalle,
-        'visibilidad': visibilidad,
-      },
-    );
-    return id;
-  }
-
-  /// v1.2.4: solicita cambio de estado de una incidencia.
-  /// Encola op 'incidencia_estado'; el servidor valida transición,
-  /// permisos y concurrencia. Actualización optimista del mirror local.
-  /// v1.2.5 (4.2 adelantado): enforcement en dominio, no solo UI.
-  /// Resolver o reabrir exige admin; el servidor revalida al sincronizar.
-  Future<void> cambiarEstadoIncidencia({
-    required String id,
-    required String nuevoEstado,
-    String? notaResolucion,
-  }) async {
-    final mirror = await _db.incidenciasMirror();
-    final actual = mirror.where((m) => m['id'] == id).toList();
-    if (actual.isEmpty) throw ArgumentError('incidencia no encontrada');
-    final row = actual.first;
-    final estadoActual = '${row['estado']}';
-    final esResolucion = nuevoEstado == 'resuelta';
-    final esReapertura =
-        estadoActual == 'resuelta' && nuevoEstado != 'resuelta';
-    if ((esResolucion || esReapertura) && !_auth.isAdmin) {
-      throw StateError(
-          'solo el dueño puede ${esResolucion ? 'resolver' : 'reabrir'}');
-    }
-    // v1.3.1 (Alto #4): generar opUuid antes para actualizar la fila local.
-    final opUuid = const Uuid().v4();
-    await _db.queueOp(
-      opUuid: opUuid,
-      tipo: 'incidencia_estado',
-      payload: {
-        'id': id,
-        'estado': nuevoEstado,
-        'nota_resolucion': notaResolucion,
-        'version': row['version'],
-      },
-    );
-    // v1.3.1 (Alto #4): si la incidencia existe en local, actualizar su
-    // op_uuid al nuevo (el viejo ya no está en ops_queue). Si no se hace,
-    // marcarTiposComentariosSincronizados la marcaría como synced
-    // inmediatamente aunque esta operación siga pendiente.
-    await _db.actualizarOpUuidIncidencia(id, opUuid);
-    // Optimista: refleja el cambio en el mirror; el próximo pull lo
-    // confirma o lo corrige según lo que aplique el servidor.
-    await _db.upsertIncidenciaMirror({
-      ...row,
-      'estado': nuevoEstado,
-      'nota_resolucion': notaResolucion ?? row['nota_resolucion'],
-    });
-  }
-
   /// v1.3.3: encola la apertura de turno para sincronizar.
   /// El turno_id (UUID estable generado al abrir) vincula apertura y
   /// cierre aunque lleguen al servidor fuera de orden. Idempotente en
@@ -5079,7 +4979,7 @@ class SyncEngine {
             'icono': m['icono'],
             'color': m['color'],
             'activo':
-                (m['activo'] == true) ? 1 : 0,
+                (m['activo'] == true || m['activo'] == 1) ? 1 : 0,
             'orden':
                 (m['orden'] as num?)?.toInt() ??
                     0,
@@ -5103,7 +5003,7 @@ class SyncEngine {
               'icono': m['icono'],
               'color': m['color'],
               'activo':
-                  (m['activo'] == true) ? 1 : 0,
+                  (m['activo'] == true || m['activo'] == 1) ? 1 : 0,
               'orden': (m['orden'] as num?)
                       ?.toInt() ??
                   0,
@@ -5121,7 +5021,7 @@ class SyncEngine {
               'icono': m['icono'],
               'color': m['color'],
               'activo':
-                  (m['activo'] == true) ? 1 : 0,
+                  (m['activo'] == true || m['activo'] == 1) ? 1 : 0,
               'orden': (m['orden'] as num?)
                       ?.toInt() ??
                   0,
@@ -5210,9 +5110,15 @@ class SyncEngine {
                   'incidencias_mirror',
                   {
                     'id': m['id'],
+                    'tipo': m['tipo'] ?? 'sync',
+                    'entidad': m['entidad'],
+                    'entidad_id':
+                        (m['entidad_id'] as num?)?.toInt(),
+                    'visibilidad':
+                        m['visibilidad'] ?? 'compartida',
                     'tipo_id': m['tipo_id'],
                     'descripcion': m['descripcion'],
-                    'detalle': m['detalle'],
+                    'detalle': _detalleIncidenciaTexto(m['detalle']),
                     'estado':
                         m['estado'] ?? 'pendiente',
                     'asignado_a': m['asignado_a'],
@@ -5237,10 +5143,15 @@ class SyncEngine {
                       ConflictAlgorithm.replace);
               await txn.update(
                   'incidencias_local', {
+                'entidad': m['entidad'],
+                'entidad_id':
+                    (m['entidad_id'] as num?)?.toInt(),
+                'visibilidad':
+                    m['visibilidad'] ?? 'compartida',
                 'tipo_id': m['tipo_id'],
                 'descripcion':
                     m['descripcion'],
-                'detalle': m['detalle'],
+                'detalle': _detalleIncidenciaTexto(m['detalle']),
                 'estado':
                     m['estado'] ?? 'pendiente',
                 'asignado_a': m['asignado_a'],
@@ -5265,10 +5176,15 @@ class SyncEngine {
               final vals = {
                 'id': m['id'],
                 'tipo': m['tipo'] ?? 'sync',
+                'entidad': m['entidad'],
+                'entidad_id':
+                    (m['entidad_id'] as num?)?.toInt(),
+                'visibilidad':
+                    m['visibilidad'] ?? 'compartida',
                 'tipo_id': m['tipo_id'],
                 'descripcion':
                     m['descripcion'],
-                'detalle': m['detalle'],
+                'detalle': _detalleIncidenciaTexto(m['detalle']),
                 'estado':
                     m['estado'] ?? 'pendiente',
                 'asignado_a': m['asignado_a'],
@@ -5415,6 +5331,90 @@ class SyncEngine {
       // v1.3.1 (Argón pull r2): guardar error por tabla para el diagnóstico.
       final errTxt = '$e';
       await _db.setMeta('wm_err_incidencias_comentarios',
+          errTxt.length > 200 ? errTxt.substring(0, 200) : errTxt);
+      rethrow;
+    }
+  }
+
+  /// AA3 H2: el detalle baja como jsonb (Map si es objeto, String si
+  /// es texto); la columna local es TEXT: el objeto se guarda como su
+  /// JSON y el texto tal cual.
+  String? _detalleIncidenciaTexto(dynamic v) {
+    if (v == null) return null;
+    if (v is String) return v;
+    if (v is Map || v is List) return jsonEncode(v);
+    return v.toString();
+  }
+
+  /// AA3 H7: descarga las fotos de incidencias. El puente las publica
+  /// (sync_incidencias_fotos) y la pantalla de detalle ya sabe
+  /// mostrarlas vía FotoCache desde storage_path, pero ningún pull las
+  /// bajaba: una foto solo se veía en el teléfono que la tomó.
+  /// Mismo patrón que comentarios: padre ausente = incidencia no
+  /// visible en este teléfono (no-dueño descarta y avanza; dueño
+  /// retiene el cursor para no perderla).
+  Future<void> _pullIncidenciasFotos() async {
+    final wm =
+        await _db.getWatermarkTabla('incidencias_fotos');
+    try {
+      final r = await _getAuth(Uri.parse(
+          '$_base/rest/v1/sync_incidencias_fotos?sync_seq=gt.$wm'
+          '&order=sync_seq&limit=100'));
+      if (r.statusCode == 404) return; // tabla no desplegada
+      if (r.statusCode != 200) {
+        throw Exception(
+            'pull_inc_fotos HTTP ${r.statusCode}');
+      }
+      final rows = jsonDecode(r.body) as List;
+      if (rows.isEmpty) return;
+      final d = await _db.db;
+      await d.transaction((txn) async {
+        var maxSeq = wm;
+        var huboHuerfano = false;
+        for (final row in rows) {
+          final m =
+              Map<String, dynamic>.from(row as Map);
+          final seq =
+              (m['sync_seq'] as num?)?.toInt() ?? 0;
+          final padre = await txn.query('incidencias_local',
+              columns: ['id'],
+              where: 'id = ?',
+              whereArgs: [m['incidencia_id']],
+              limit: 1);
+          if (padre.isEmpty) {
+            if (!_auth.isAdmin) {
+              if (seq > maxSeq) maxSeq = seq;
+              continue;
+            }
+            huboHuerfano = true;
+            continue;
+          }
+          if (!huboHuerfano && seq > maxSeq) maxSeq = seq;
+          await txn.insert(
+            'incidencias_fotos',
+            {
+              'id': m['id'],
+              'incidencia_id': m['incidencia_id'],
+              'local_path': '',
+              'storage_path': m['storage_path'],
+              'tipo': m['tipo'] ?? 'evidencia',
+              'sync_estado': 'synced',
+              'creado_en': m['creado_en'] ??
+                  m['creada_en'] ??
+                  '',
+            },
+            conflictAlgorithm: ConflictAlgorithm.ignore,
+          );
+        }
+        await _db.setWatermarkTabla(
+            'incidencias_fotos', maxSeq,
+            executor: txn);
+      });
+      await _db.setMeta('wm_err_incidencias_fotos', '');
+    } catch (e) {
+      AppLog.error('sync', 'pull_inc_fotos_fallo', d: '$e');
+      final errTxt = '$e';
+      await _db.setMeta('wm_err_incidencias_fotos',
           errTxt.length > 200 ? errTxt.substring(0, 200) : errTxt);
       rethrow;
     }

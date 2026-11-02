@@ -2808,9 +2808,12 @@ Future<List<Map<String, dynamic>>> cumpleanosProximos(
         // v1.4.6: la tarjeta de cumpleaños (cumpleanos.dart) lee '_dia' y
         // '_fecha_cumple' en AMBAS pestañas; sin estas claves la de
         // «Próximos 7 días» mostraba «Día 0» y «null · Cumple …».
-        '_dia': nac.day,
+        // AA3 F-C1: día y fecha de la CELEBRACIÓN (proximo), no del
+        // nacimiento: un 29-feb celebra el 1-mar en año no bisiesto y
+        // la tarjeta debe decir «Día 1 · 01/03», no «Día 29 · 29/02».
+        '_dia': proximo.day,
         '_fecha_cumple':
-            '${nac.day.toString().padLeft(2, '0')}/${nac.month.toString().padLeft(2, '0')}',
+            '${proximo.day.toString().padLeft(2, '0')}/${proximo.month.toString().padLeft(2, '0')}',
       });
     }
   }

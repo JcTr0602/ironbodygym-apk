@@ -188,10 +188,16 @@ class Incidencia {
   }
 
   // v1.3.4: hora de La Habana, no la del dispositivo.
-  bool get vencida =>
-      fechaLimite != null &&
-      ahoraHabana().isAfter(fechaLimite!) &&
-      estado != 'resuelta';
+  // AA3 H14: la fecha límite es el ÚLTIMO día válido (la UI la pinta
+  // como «Límite: d/m/aaaa»): solo vence cuando ese día ya terminó,
+  // no a las 00:00 del propio día.
+  bool get vencida {
+    final f = fechaLimite;
+    if (f == null || estado == 'resuelta') return false;
+    final hoy = ahoraHabana();
+    return DateTime(hoy.year, hoy.month, hoy.day)
+        .isAfter(DateTime(f.year, f.month, f.day));
+  }
 
   bool get estaResuelta => estado == 'resuelta';
 
