@@ -280,5 +280,24 @@ void main() {
       );
       expect(r.saldo, 7);
     });
+    test('FIN-14: el reverso pendiente devuelve el pomo de agua', () {
+      final r = aguaDesde(
+        movimientosEspejo: [
+          {'id': 1, 'op_uuid': 'e1', 'tipo': 'entrada', 'cantidad': 10, 'costo_unitario': 100.0},
+          {'id': 2, 'op_uuid': 'v1', 'tipo': 'salida_venta', 'cantidad': -2, 'costo_unitario': 100.0},
+        ],
+        ventasEspejo: [
+          {'id': 55, 'tipo': 'dosis_con_agua', 'cantidad': 2},
+          {'id': 56, 'tipo': 'dosis_sin_agua', 'cantidad': 3},
+        ],
+        opsPendientes: [
+          _op('revertir_venta_servicio', {'venta_id': 55}, 'r55'),
+          // Un reverso de dosis SIN agua no toca el stock común.
+          _op('revertir_venta_servicio', {'venta_id': 56}, 'r56'),
+        ],
+      );
+      // 10 - 2 (venta) + 2 (reverso con agua) = 10.
+      expect(r.saldo, 10);
+    });
   });
 }

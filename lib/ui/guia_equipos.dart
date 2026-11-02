@@ -12,6 +12,7 @@ import '../auth.dart';
 import '../guia_validacion.dart';
 import '../localdb.dart';
 import 'componentes.dart';
+import 'diseno.dart';
 
 class GuiaEquiposScreen extends StatefulWidget {
   const GuiaEquiposScreen({super.key});
@@ -51,11 +52,13 @@ class _GuiaEquiposScreenState extends State<GuiaEquiposScreen> {
 
   void _aviso(String m) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text(m)));
+    mostrarSnack(context, m);
   }
 
-  Future<void> _aplicarEquipo(Map<String, dynamic> e) async {
+  /// Guarda un equipo (op + espejo local) SIN recargar: el
+  /// llamador decide cuándo recargar (Argón Guía BAJA: mover
+  /// disparaba dos _cargar(), uno por equipo tocado).
+  Future<void> _guardarEquipo(Map<String, dynamic> e) async {
     await _db.queueOp(
       opUuid: const Uuid().v4(),
       tipo: 'guia_equipo_upsert',
@@ -67,6 +70,10 @@ class _GuiaEquiposScreenState extends State<GuiaEquiposScreen> {
       },
     );
     await _db.guiaGuardarEquipo(e);
+  }
+
+  Future<void> _aplicarEquipo(Map<String, dynamic> e) async {
+    await _guardarEquipo(e);
     await _cargar();
   }
 
@@ -111,6 +118,11 @@ class _GuiaEquiposScreenState extends State<GuiaEquiposScreen> {
       ),
     );
     if (ok != true || !mounted) return;
+    final errorNombre = GuiaValidacion.errorNombreEquipo(nombre.text);
+    if (errorNombre != null) {
+      _aviso(errorNombre);
+      return;
+    }
     final slug = _slugDesdeNombre(nombre.text);
     if (!GuiaValidacion.slugValido(slug)) {
       _aviso('Nombre no válido para un equipo.');
@@ -155,10 +167,10 @@ class _GuiaEquiposScreenState extends State<GuiaEquiposScreen> {
               ),
             ),
             const SizedBox(height: 8),
-            const Text(
+            Text(
               'Renombrar NO republica las fichas: solo cambia el '
               'nombre que se muestra.',
-              style: TextStyle(fontSize: 12, color: Colors.grey),
+              style: AppTexto.metadato.copyWith(color: Colors.grey),
             ),
           ],
         ),
@@ -172,7 +184,12 @@ class _GuiaEquiposScreenState extends State<GuiaEquiposScreen> {
         ],
       ),
     );
-    if (ok != true || nombre.text.trim().isEmpty || !mounted) return;
+    if (ok != true || !mounted) return;
+    final errorNombre = GuiaValidacion.errorNombreEquipo(nombre.text);
+    if (errorNombre != null) {
+      _aviso(errorNombre);
+      return;
+    }
     setState(() => _ocupado = true);
     try {
       await _aplicarEquipo({...e, 'equipoNombre': nombre.text.trim()});
@@ -187,14 +204,26 @@ class _GuiaEquiposScreenState extends State<GuiaEquiposScreen> {
     if (j < 0 || j >= _equipos.length || _ocupado) return;
     setState(() => _ocupado = true);
     try {
-      final a = Map<String, dynamic>.from(_equipos[i]);
-      final b = Map<String, dynamic>.from(_equipos[j]);
-      final ordenA = (a['orden'] as num?)?.toInt() ?? 0;
-      final ordenB = (b['orden'] as num?)?.toInt() ?? 0;
-      a['orden'] = ordenB;
-      b['orden'] = ordenA;
-      await _aplicarEquipo(a);
-      await _aplicarEquipo(b);
+      // Argón Guía BAJA: el intercambio de valores dependía
+      // de que los dos `orden` fueran distintos (con órdenes
+      // repetidos de datos viejos, mover no hacía nada). Se
+      // reordena la lista visual y se reasigna la secuencia
+      // completa 1..n, guardando solo los que cambian, con
+      // UNA sola recarga al final.
+      final reordenados = [
+        for (final e in _equipos) Map<String, dynamic>.from(e),
+      ];
+      final movido = reordenados.removeAt(i);
+      reordenados.insert(j, movido);
+      for (var k = 0; k < reordenados.length; k++) {
+        final e = reordenados[k];
+        final nuevo = k + 1;
+        if (((e['orden'] as num?)?.toInt() ?? 0) != nuevo) {
+          e['orden'] = nuevo;
+          await _guardarEquipo(e);
+        }
+      }
+      await _cargar();
     } finally {
       if (mounted) setState(() => _ocupado = false);
     }
@@ -278,7 +307,7 @@ class _GuiaEquiposScreenState extends State<GuiaEquiposScreen> {
       appBar: AppBar(title: const Text('Equipamiento')),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: _ocupado ? null : _crear,
-        icon: const Icon(Icons.add),
+        icon: const Icon(Icons.add_rounded),
         label: const Text('Nuevo equipo'),
       ),
       body: _cargando
@@ -286,11 +315,11 @@ class _GuiaEquiposScreenState extends State<GuiaEquiposScreen> {
           : ListView(
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 96),
               children: [
-                const Text(
+                Text(
                   'Orden canónico: así se agrupan las fichas en la '
                   'lista. Los equipos nuevos van al final. No hay '
                   'borrado físico: desactivar es reversible.',
-                  style: TextStyle(fontSize: 12, color: Colors.grey),
+                  style: AppTexto.metadato.copyWith(color: Colors.grey),
                 ),
                 const SizedBox(height: 12),
                 if (_equipos.isEmpty)
@@ -321,7 +350,7 @@ class _GuiaEquiposScreenState extends State<GuiaEquiposScreen> {
                             onPressed: _ocupado || i == 0
                                 ? null
                                 : () => _mover(i, -1),
-                            icon: const Icon(Icons.arrow_upward),
+                            icon: const Icon(Icons.arrow_upward_rounded),
                           ),
                           IconButton(
                             tooltip: 'Bajar',
@@ -329,7 +358,7 @@ class _GuiaEquiposScreenState extends State<GuiaEquiposScreen> {
                                 _ocupado || i == _equipos.length - 1
                                     ? null
                                     : () => _mover(i, 1),
-                            icon: const Icon(Icons.arrow_downward),
+                            icon: const Icon(Icons.arrow_downward_rounded),
                           ),
                           PopupMenuButton<String>(
                             onSelected: (v) {

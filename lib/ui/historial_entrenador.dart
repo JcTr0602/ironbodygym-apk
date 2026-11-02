@@ -10,6 +10,7 @@ import '../localdb.dart';
 import '../negocio.dart';
 import '../tiempo.dart';
 import 'componentes.dart';
+import 'comparativa_entrenadores.dart';
 import 'detalle_entrenador.dart';
 import 'diseno.dart';
 import 'widgets.dart';
@@ -105,7 +106,23 @@ class _HistorialEntrenadorScreenState
       'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'
     ];
     return Scaffold(
-      appBar: AppBar(title: const Text('Historial por entrenador')),
+      appBar: AppBar(
+        title: const Text('Historial por entrenador'),
+        actions: [
+          // F7 (1.20): comparativa lado a lado del mes.
+          IconButton(
+            tooltip: 'Comparativa del mes',
+            icon: const Icon(Icons.compare_arrows_rounded),
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) =>
+                    const ComparativaEntrenadoresScreen(),
+              ),
+            ),
+          ),
+        ],
+      ),
       body: Column(
         children: [
           const SyncBanner(),
@@ -113,8 +130,7 @@ class _HistorialEntrenadorScreenState
             padding: const EdgeInsets.all(12),
             child: Text(
               'Resumen de ${meses[n.month]} ${n.year}',
-              style: const TextStyle(
-                  fontSize: 16, fontWeight: FontWeight.bold),
+              style: AppTexto.titulo,
             ),
           ),
           Expanded(
@@ -150,9 +166,7 @@ class _HistorialEntrenadorScreenState
                                   children: [
                                     Text(
                                       '${d['nombre']}',
-                                      style: const TextStyle(
-                                          fontSize: 16,
-                                          fontWeight: FontWeight.bold),
+                                      style: AppTexto.titulo,
                                     ),
                                     const SizedBox(height: 8),
                                     Row(
@@ -178,15 +192,11 @@ class _HistorialEntrenadorScreenState
                                                             context))),
                                         Text(
                                           '${(d['pendiente'] as double).toStringAsFixed(0)} CUP',
-                                          style: TextStyle(
-                                              fontSize: 12,
-                                              fontWeight:
-                                                  FontWeight.bold,
-                                              color: (d['pendiente']
+                                          style: AppTexto.metadato.copyWith(color: (d['pendiente']
                                                           as double) >
                                                       0
                                                   ? AppColores.error
-                                                  : AppColores.exito),
+                                                  : AppColores.exito, fontWeight: FontWeight.bold),
                                         ),
                                       ],
                                     ),
@@ -212,8 +222,7 @@ class _HistorialEntrenadorScreenState
                 color:
                     AppColores.textoSecundario(context))),
         Text(valor,
-            style: const TextStyle(
-                fontSize: 14, fontWeight: FontWeight.bold)),
+            style: AppTexto.cuerpo.copyWith(fontWeight: FontWeight.bold)),
       ],
     );
   }

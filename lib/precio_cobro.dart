@@ -4,7 +4,7 @@
 /// REGLA: D1–D3/D5 son insumos de ESTA función, nunca if/else sueltos
 /// en la pantalla de Cobro. La pantalla de Cobro (diálogo de pago)
 /// llama a [calcularPrecioCobro] (pura, testeable) con los datos ya
-/// cargados, o a [precioCobroParaCliente] (carga especial + legacy +
+/// cargados, o a [precioCobroParaCliente] (carga la especial +
 /// precios y luego llama a la pura).
 ///
 /// Precedencia cerrada (ajuste 2 + respuesta 1 de Argón):
@@ -63,10 +63,16 @@ class PrecioCobro {
 /// de fechas que el escalón 2 de [calcularPrecioCobro]: sin fecha
 /// de inicio, vigente; sin fecha de fin, sin vencimiento.
 bool _especialVigente(Map<String, dynamic> especial, String hoy) {
-  final desde = '${especial['vigente_desde'] ?? ''}';
+  // Comparación solo por día (FIN-11 de Argón, 1.20).
+  String dia(Object? v) {
+    final s = '${v ?? ''}';
+    return s.length > 10 ? s.substring(0, 10) : s;
+  }
+
+  final desde = dia(especial['vigente_desde']);
   if (desde.isNotEmpty && hoy.compareTo(desde) < 0) return false;
-  final hasta = especial['vigente_hasta'] as String?;
-  if (hasta != null && hasta.isNotEmpty && hoy.compareTo(hasta) > 0) {
+  final hasta = dia(especial['vigente_hasta']);
+  if (hasta.isNotEmpty && hoy.compareTo(hasta) > 0) {
     return false;
   }
   return true;
@@ -99,8 +105,18 @@ PrecioCobro calcularPrecioCobro({
 
   // 2. Especial: exige periodo + método + fechas, todo a la vez.
   if (especial != null && '${especial['periodo'] ?? ''}' == periodo) {
-    final desde = '${especial['vigente_desde'] ?? ''}';
-    final hasta = especial['vigente_hasta'] as String?;
+    // FIN-11 de Argón (1.20): las fechas se comparan solo por
+    // día (10 chars), igual que estadoRevisionTarifa; si un
+    // valor trajera hora ISO, la comparación lexicográfica
+    // completa marcaría vencida el mismo día del vencimiento.
+    final desdeCrudo = '${especial['vigente_desde'] ?? ''}';
+    final desde = desdeCrudo.length > 10
+        ? desdeCrudo.substring(0, 10)
+        : desdeCrudo;
+    final hastaCruda = especial['vigente_hasta'] as String?;
+    final hasta = (hastaCruda != null && hastaCruda.length > 10)
+        ? hastaCruda.substring(0, 10)
+        : hastaCruda;
     if (desde.isNotEmpty && hoyHabana.compareTo(desde) < 0) {
       return _siguienteEscalon(
           precios: precios,
@@ -185,12 +201,13 @@ PrecioCobro _siguienteEscalon({
 
 /// Carga todo lo que necesita la pura y la llama.
 ///
-/// [cliente] es la fila del espejo (map con cuenta_casa, carnet,
-/// tarifa_especial_transferencia legacy...).
-/// - Si el cliente tiene CUALQUIER registro en tarifa_especial, la
-///   columna legacy se ignora para siempre (ajuste 3).
-/// - Si NO tiene ninguno y trae legacy por transferencia, la legacy
-///   actúa como especial sintética mensual solo para transferencia.
+/// [cliente] es la fila del espejo (map con cuenta_casa, carnet...).
+/// Q2 (Argón precios, 1.20): la columna legacy
+/// tarifa_especial_transferencia YA NO se lee aquí — migró a
+/// filas seed_legacy_<id> de tarifa_especial (siembra del
+/// servidor + siembra local sembrarTarifasLegacy), así que la
+/// especial de un cliente legacy llega por tarifaActivaPara
+/// como cualquier otra.
 Future<PrecioCobro> precioCobroParaCliente({
   required Map<String, dynamic> cliente,
   required String periodo,
@@ -208,22 +225,6 @@ Future<PrecioCobro> precioCobroParaCliente({
   Map<String, dynamic>? especial;
   if (clienteId > 0) {
     especial = await tarifaActivaPara(clienteId, periodo);
-    if (especial == null &&
-        !(await tieneAlgunRegistroTarifa(clienteId)) &&
-        metodo == 'transferencia' &&
-        periodo == 'mensual') {
-      final legacy =
-          (cliente['tarifa_especial_transferencia'] as num?)?.toDouble();
-      if (legacy != null) {
-        especial = {
-          'periodo': 'mensual',
-          'monto_transferencia': legacy,
-          'monto_efectivo': null,
-          'vigente_desde': null,
-          'vigente_hasta': null,
-        };
-      }
-    }
   }
   return calcularPrecioCobro(
     periodo: periodo,

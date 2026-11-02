@@ -164,14 +164,14 @@ class _TransferenciaScreenState extends State<TransferenciaScreen> {
                               fontWeight: FontWeight.bold)),
                       const SizedBox(height: 2),
                       Text(valor,
-                          style: const TextStyle(
-                              fontSize: 18,
-                              fontFamily: 'monospace')),
+                          style: AppTexto.titulo.copyWith(
+                              fontFamily: 'monospace',
+                              fontWeight: FontWeight.normal)),
                     ],
                   ),
                 ),
                 IconButton(
-                  icon: const Icon(Icons.copy),
+                  icon: const Icon(Icons.copy_rounded),
                   tooltip: 'Copiar',
                   onPressed: () =>
                       copiar(context, valor.replaceAll(' ', '')),
@@ -180,9 +180,7 @@ class _TransferenciaScreenState extends State<TransferenciaScreen> {
             ),
             const Divider(height: 20),
             Text('Enviar a un cliente:',
-                style: TextStyle(
-                    fontSize: 13,
-                    color: AppColores.textoSecundario(context))),
+                style: AppTexto.secundario.copyWith(color: AppColores.textoSecundario(context))),
             const SizedBox(height: 8),
             Row(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -191,12 +189,12 @@ class _TransferenciaScreenState extends State<TransferenciaScreen> {
                   child: CampoTexto(
                     controller: movilCtrl,
                     hint: 'Móvil del cliente',
-                    icono: Icons.phone,
+                    icono: Icons.phone_rounded,
                     teclado: TextInputType.phone,
                   ),
                 ),
                 IconButton(
-                  icon: const Icon(Icons.contacts),
+                  icon: const Icon(Icons.contacts_rounded),
                   tooltip: 'Elegir de contactos',
                   onPressed: () =>
                       _elegirContacto(context, movilCtrl),
@@ -209,7 +207,7 @@ class _TransferenciaScreenState extends State<TransferenciaScreen> {
                 Expanded(
                   child: BotonSecundario(
                     texto: 'SMS',
-                    icono: Icons.sms,
+                    icono: Icons.sms_rounded,
                     onPressed: () => _enviar(
                         context, etiqueta, valor,
                         movilCtrl.text, porWhatsapp: false),
@@ -219,7 +217,7 @@ class _TransferenciaScreenState extends State<TransferenciaScreen> {
                 Expanded(
                   child: BotonSecundario(
                     texto: 'WhatsApp',
-                    icono: Icons.chat,
+                    icono: Icons.chat_rounded,
                     onPressed: () => _enviar(
                         context, etiqueta, valor,
                         movilCtrl.text, porWhatsapp: true),
@@ -239,9 +237,7 @@ class _TransferenciaScreenState extends State<TransferenciaScreen> {
     if (!await FlutterContacts.requestPermission(
         readonly: true)) {
       if (ctx.mounted) {
-        ScaffoldMessenger.of(ctx).showSnackBar(const SnackBar(
-            content: Text(
-                'Sin permiso de contactos no se puede elegir')));
+        mostrarSnack(ctx, 'Sin permiso de contactos no se puede elegir', significado: SignificadoChip.alerta);
       }
       return;
     }
@@ -258,9 +254,7 @@ class _TransferenciaScreenState extends State<TransferenciaScreen> {
       }
     }
     if (ctx.mounted) {
-      ScaffoldMessenger.of(ctx).showSnackBar(SnackBar(
-          content: Text(
-              'El contacto "${contacto.displayName}" no tiene un móvil cubano válido')));
+      mostrarSnack(ctx, 'El contacto "${contacto.displayName}" no tiene un móvil cubano válido', significado: SignificadoChip.alerta);
     }
   }
 
@@ -273,9 +267,7 @@ class _TransferenciaScreenState extends State<TransferenciaScreen> {
       movil = movil.substring(2);
     }
     if (!validarTelefono(movil)) {
-      ScaffoldMessenger.of(ctx).showSnackBar(const SnackBar(
-          content:
-              Text('Escribe un móvil cubano válido (8 dígitos)')));
+      mostrarSnack(ctx, 'Escribe un móvil cubano válido (8 dígitos)', significado: SignificadoChip.alerta);
       return;
     }
     final mensaje = 'Iron Body Gym: paga tu mensualidad '
@@ -292,9 +284,7 @@ class _TransferenciaScreenState extends State<TransferenciaScreen> {
         mode: LaunchMode.externalApplication);
     if (!ok) {
       if (ctx.mounted) {
-        ScaffoldMessenger.of(ctx).showSnackBar(SnackBar(
-            content: Text(
-                'No se pudo abrir ${porWhatsapp ? 'WhatsApp' : 'SMS'}')));
+        mostrarSnack(ctx, 'No se pudo abrir ${porWhatsapp ? 'WhatsApp' : 'SMS'}', significado: SignificadoChip.error);
       }
       return;
     }

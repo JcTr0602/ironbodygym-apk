@@ -213,7 +213,7 @@ class _VentaSuplementoInscripcionScreenState
     final ok = await DialogoApp.confirmar(
       context,
       titulo: 'Confirmar inscripción + venta',
-      icono: Icons.person_add,
+      icono: Icons.person_add_rounded,
       mensaje: 'Cliente: $nombre\n'
           'Método: ${_metodo == 'efectivo' ? 'Efectivo' : 'Transferencia'}\n'
           'Venta: ${widget.suplemento['nombre']} x${widget.cantidad}'
@@ -281,8 +281,7 @@ class _VentaSuplementoInscripcionScreenState
         });
       } catch (e) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text('No se registró: $e')));
+          mostrarSnack(context, 'No se registró: $e', significado: SignificadoChip.error);
         }
         return;
       }
@@ -310,25 +309,46 @@ class _VentaSuplementoInscripcionScreenState
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar:
-          AppBar(title: const Text('Inscripción + venta')),
+      appBar: AppBar(
+          title: const Text('Nuevo cliente y venta de suplemento')),
       body: ListView(
         padding: const EdgeInsets.all(AppEspacio.lg),
         children: [
           const SyncBanner(compact: true),
+          const SizedBox(height: AppEspacio.md),
+          // Rediseño 1.20 (§D, solo presentación): la banda
+          // del producto va PRIMERA — qué se vende y por
+          // cuánto se ve mientras se rellena el formulario.
+          const EncabezadoSeccion(
+              titulo: 'Venta del suplemento'),
+          Tarjeta(
+            child: Column(
+              crossAxisAlignment:
+                  CrossAxisAlignment.start,
+              children: [
+                Text('${widget.suplemento['nombre']}',
+                    style: AppTexto.subtitulo),
+                const SizedBox(height: 4),
+                Text(
+                  _lineaVenta(),
+                  style: AppTexto.cuerpo,
+                ),
+              ],
+            ),
+          ),
           const SizedBox(height: AppEspacio.md),
           const EncabezadoSeccion(
               titulo: 'Datos del cliente'),
           CampoTexto(
             controller: _nombre,
             etiqueta: 'Nombre completo *',
-            icono: Icons.person_outline,
+            icono: Icons.person_outline_rounded,
           ),
           const SizedBox(height: AppEspacio.sm),
           CampoTexto(
             controller: _telefono,
             etiqueta: 'Teléfono (opcional)',
-            icono: Icons.phone_outlined,
+            icono: Icons.phone_rounded,
             teclado: TextInputType.phone,
           ),
           const SizedBox(height: AppEspacio.sm),
@@ -367,7 +387,7 @@ class _VentaSuplementoInscripcionScreenState
           CampoTexto(
             controller: _carnet,
             etiqueta: 'Carnet (6 dígitos, opcional)',
-            icono: Icons.badge_outlined,
+            icono: Icons.badge_rounded,
             teclado: TextInputType.number,
             onChanged: (_) => setState(() {}),
           ),
@@ -407,8 +427,8 @@ class _VentaSuplementoInscripcionScreenState
           Tarjeta(
             child: Row(
               children: [
-                const Icon(Icons.payments_outlined,
-                    color: AppColores.naranja),
+                Icon(Icons.payments_rounded,
+                    color: AppColores.textoSecundario(context)),
                 const SizedBox(width: AppEspacio.sm),
                 Expanded(
                   child: Text(
@@ -416,24 +436,6 @@ class _VentaSuplementoInscripcionScreenState
                     '${_metodo == 'efectivo' ? 'en efectivo' : 'por transferencia'} al inscribir.',
                     style: AppTexto.cuerpo,
                   ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: AppEspacio.md),
-          const EncabezadoSeccion(
-              titulo: 'Venta del suplemento'),
-          Tarjeta(
-            child: Column(
-              crossAxisAlignment:
-                  CrossAxisAlignment.start,
-              children: [
-                Text('${widget.suplemento['nombre']}',
-                    style: AppTexto.subtitulo),
-                const SizedBox(height: 4),
-                Text(
-                  _lineaVenta(),
-                  style: AppTexto.cuerpo,
                 ),
               ],
             ),
@@ -452,10 +454,10 @@ class _VentaSuplementoInscripcionScreenState
                     color: AppColores.naranja
                         .withValues(alpha: 0.4)),
               ),
-              child: const Row(
+              child: Row(
                 children: [
-                  Icon(Icons.card_giftcard,
-                      color: AppColores.naranja),
+                  Icon(Icons.card_giftcard_rounded,
+                      color: AppColores.textoSecundario(context)),
                   SizedBox(width: AppEspacio.sm),
                   Expanded(
                     child: Text(

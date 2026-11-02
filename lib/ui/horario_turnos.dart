@@ -19,6 +19,7 @@ import 'package:uuid/uuid.dart';
 import '../auth.dart';
 import '../localdb.dart';
 import 'componentes.dart';
+import 'diseno.dart';
 
 class HorarioTurnosScreen extends StatefulWidget {
   const HorarioTurnosScreen({super.key});
@@ -145,15 +146,12 @@ class _HorarioTurnosScreenState extends State<HorarioTurnosScreen> {
       aj['horario_turnos'] = mapa;
       await LocalDb.instance.setAjustes(aj);
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-            content:
-                Text('Horario de turnos guardado (se sincronizará)')));
+        mostrarSnack(context, 'Horario de turnos guardado (se sincronizará)', significado: SignificadoChip.exito);
         Navigator.of(context).pop();
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('Error: $e')));
+        mostrarSnack(context, 'Error: $e', significado: SignificadoChip.error);
       }
     } finally {
       if (mounted) setState(() => _guardando = false);
@@ -194,17 +192,17 @@ class _HorarioTurnosScreenState extends State<HorarioTurnosScreen> {
           : ListView(
               padding: const EdgeInsets.all(16),
               children: [
-                const Text(
+                Text(
                   'Quién cubre cada turno según el plan semanal. La app '
                   'de clientes lo muestra solo cuando no hay un turno '
                   'abierto en vivo a esa hora; la apertura real manda.',
-                  style: TextStyle(fontSize: 13, color: Colors.grey),
+                  style: AppTexto.secundario.copyWith(color: Colors.grey),
                 ),
                 const SizedBox(height: 12),
                 for (var d = 1; d <= 6; d++) _tarjetaDia(d),
                 const Card(
                   child: ListTile(
-                    leading: Icon(Icons.block, color: Colors.red),
+                    leading: Icon(Icons.block_rounded, color: Colors.red),
                     title: Text('Domingo'),
                     subtitle: Text('Cerrado — sin turnos'),
                   ),
@@ -224,16 +222,15 @@ class _HorarioTurnosScreenState extends State<HorarioTurnosScreen> {
           children: [
             Text(
               _nombres[dia],
-              style: const TextStyle(
-                  fontSize: 16, fontWeight: FontWeight.bold),
+              style: AppTexto.titulo,
             ),
             const Divider(),
             _selectorFranja(dia, 'manana', 'Mañana'),
             if (dia == 6)
-              const Padding(
+              Padding(
                 padding: EdgeInsets.only(top: 8),
                 child: Text('Sin franja de tarde los sábados',
-                    style: TextStyle(fontSize: 12, color: Colors.grey)),
+                    style: AppTexto.metadato.copyWith(color: Colors.grey)),
               )
             else
               _selectorFranja(dia, 'tarde', 'Tarde'),
@@ -250,7 +247,7 @@ class _HorarioTurnosScreenState extends State<HorarioTurnosScreen> {
         SizedBox(
           width: 64,
           child: Text(etiqueta,
-              style: const TextStyle(fontSize: 13, color: Colors.grey)),
+              style: AppTexto.secundario.copyWith(color: Colors.grey)),
         ),
         Expanded(
           child: DropdownButton<String?>(

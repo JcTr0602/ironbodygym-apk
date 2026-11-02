@@ -17,8 +17,12 @@
 //   la confirmación avisa que se le asignará 1 mes de mensualidad.
 library;
 
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
+
+import '../fotos.dart';
 
 import '../localdb.dart';
 import '../negocio.dart';
@@ -27,6 +31,7 @@ import '../permisos.dart';
 import '../tiempo.dart';
 import '../cliente_protegido.dart';
 import 'componentes.dart';
+import 'aviso_duplicado.dart';
 import 'diseno.dart';
 import 'venta_suplemento_inscripcion.dart';
 import 'widgets.dart';
@@ -361,6 +366,23 @@ class _VentaSuplementoScreenState
       return;
     }
 
+    // T16 (1.20): aviso si ya hay una venta igual en la cola
+    // (la vista previa ya evitó el caso de 2026-10-23; esto
+    // cubre el doble toque y el reintento con mala conexión).
+    final centavosUnit = (precio * 100).round();
+    final sigueVenta = await confirmarSiPareceDuplicado(
+      context,
+      tipo: 'venta_suplemento',
+      coincide: (p) =>
+          (p['suplemento_id'] as num?)?.toInt() == sid &&
+          (p['cantidad'] as num?)?.toInt() == _cantidad &&
+          (p['precio_venta_centavos'] as num?)?.toInt() ==
+              centavosUnit,
+      descripcion: 'una venta de '
+          '${widget.suplemento['nombre']} x$_cantidad',
+    );
+    if (!sigueVenta) return;
+
     // v1.3.1 (Argón regresión 1): activar _guardando solo aquí, después de
     // validaciones y confirmación. El finally lo restaura siempre.
     setState(() => _guardando = true);
@@ -494,14 +516,15 @@ class _VentaSuplementoScreenState
       context: context,
       builder: (ctx) => DialogoApp(
         titulo: 'Confirma la venta',
-        iconoTitulo: Icons.point_of_sale,
+        iconoTitulo: Icons.point_of_sale_rounded,
         contenido: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
+            Text(
               'Revisa el comprobante tal y como lo recibirá el cliente:',
-              style: TextStyle(fontWeight: FontWeight.w600),
+              style: AppTexto.cuerpo
+                  .copyWith(fontWeight: FontWeight.w600),
             ),
             const SizedBox(height: 8),
             Container(
@@ -514,11 +537,12 @@ class _VentaSuplementoScreenState
               child: Text(c.texto.replaceAll('*', '')),
             ),
             if (difiere) ...[
-              const SizedBox(height: 10),
+              const SizedBox(height: 12),
               Text(
                 '⚠️ Precio distinto al oficial '
                 '(${oficialRef.toStringAsFixed(2)} $_moneda).',
-                style: const TextStyle(color: Colors.red),
+                style: AppTexto.cuerpo
+                    .copyWith(color: AppColores.error),
               ),
             ],
           ],
@@ -561,7 +585,7 @@ class _VentaSuplementoScreenState
       context: context,
       builder: (ctx) => DialogoApp(
         titulo: 'Venta registrada',
-        iconoTitulo: Icons.receipt_long,
+        iconoTitulo: Icons.receipt_long_rounded,
         contenido: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -572,7 +596,7 @@ class _VentaSuplementoScreenState
               SizedBox(
                 width: double.infinity,
                 child: ElevatedButton.icon(
-                  icon: const Icon(Icons.send),
+                  icon: const Icon(Icons.send_rounded),
                   label: const Text('Enviar por WhatsApp'),
                   onPressed: () async {
                     final url = Uri.parse(
@@ -582,11 +606,7 @@ class _VentaSuplementoScreenState
                           mode: LaunchMode.externalApplication);
                     } catch (_) {
                       if (ctx.mounted) {
-                        ScaffoldMessenger.of(ctx).showSnackBar(
-                          const SnackBar(
-                              content:
-                                  Text('No se pudo abrir WhatsApp')),
-                        );
+                        mostrarSnack(ctx, 'No se pudo abrir WhatsApp', significado: SignificadoChip.error);
                       }
                     }
                   },
@@ -710,8 +730,7 @@ class _VentaSuplementoScreenState
           Tarjeta(
             child: Row(
               children: [
-                const Icon(Icons.medication,
-                    color: AppColores.naranja, size: 32),
+                _miniFotoVenta(),
                 const SizedBox(width: AppEspacio.md),
                 Expanded(
                   child: Column(
@@ -731,10 +750,9 @@ class _VentaSuplementoScreenState
             ),
           ),
           const SizedBox(height: AppEspacio.md),
-          const EncabezadoSeccion(titulo: 'Cantidad'),
+          const EncabezadoSeccion(titulo: 'Cantidad y cobro'),
           _stepperCantidad(stock),
           const SizedBox(height: AppEspacio.sm),
-          const EncabezadoSeccion(titulo: 'Precio de venta'),
           // v1.3.4 (B3-Invariante): referencia fija del oficial, siempre
           // visible. El campo propone el oficial; jamás ultimo_precio.
           Padding(
@@ -766,12 +784,11 @@ class _VentaSuplementoScreenState
                   ? 'Motivo (opcional para el dueño)'
                   : 'Motivo (obligatorio, mín. 5 caracteres)',
               hint: 'Ej: Autorizado por Jc por compra de 2 botes',
-              icono: Icons.edit_note,
+              icono: Icons.edit_note_rounded,
               onChanged: (_) => setState(() {}),
             ),
           ],
           const SizedBox(height: AppEspacio.sm),
-          const EncabezadoSeccion(titulo: 'Moneda'),
           _chipsMoneda(),
           // v1.3.4 (pedido Jc 2026-10-16): en USD no se muestra el
           // equivalente en CUP ni el campo de tasa — solo tienen sentido
@@ -785,19 +802,24 @@ class _VentaSuplementoScreenState
                   decimal: true),
               onChanged: (_) => setState(() {}),
             ),
-            if (_tasaUsd != null && _tasaUsd! > 0)
-              Padding(
-                padding: const EdgeInsets.only(
-                    top: AppEspacio.sm),
-                child: Text(
-                  'Total: ${textoTotalVenta(_total, _moneda, _tasaUsd)}',
-                  style: AppTexto.cuerpo,
-                ),
-              ),
           ],
           const SizedBox(height: AppEspacio.sm),
           const EncabezadoSeccion(titulo: 'Comprador'),
           _selectorComprador(),
+          const SizedBox(height: AppEspacio.xs),
+          Row(
+            children: [
+              Icon(Icons.person_rounded,
+                  size: 18,
+                  color: AppColores.textoSecundario(context)),
+              const SizedBox(width: AppEspacio.xs),
+              Expanded(
+                child: Text(_resumenComprador,
+                    style: AppTexto.secundario
+                        .copyWith(fontWeight: FontWeight.w600)),
+              ),
+            ],
+          ),
           // v1.3.7 (Fase B §6.2): fiado solo con cliente del gym.
           // 1.15 V1: y solo en CUP (en USD el switch ni se muestra
           // y _cambiarMoneda ya apagó el fiado al pasar a USD).
@@ -815,6 +837,25 @@ class _VentaSuplementoScreenState
               onChanged: (v) =>
                   setState(() => _esFiado = v),
             ),
+            if (_esFiado)
+              Padding(
+                padding:
+                    const EdgeInsets.only(top: AppEspacio.xs),
+                child: Row(
+                  children: [
+                    const Icon(Icons.warning_amber_rounded,
+                        size: 16, color: AppColores.alerta),
+                    const SizedBox(width: AppEspacio.xs),
+                    Expanded(
+                      child: Text(
+                          'Quedará registrada como deuda del cliente',
+                          style: AppTexto.secundario.copyWith(
+                              color: AppColores.alerta,
+                              fontWeight: FontWeight.w600)),
+                    ),
+                  ],
+                ),
+              ),
           ],
           // v1.2.1: nota opcional de la venta.
           const SizedBox(height: AppEspacio.sm),
@@ -822,21 +863,120 @@ class _VentaSuplementoScreenState
           CampoTexto(
             controller: _nota,
             hint: 'Ej: apartado…',
-            icono: Icons.sticky_note_2_outlined,
+            icono: Icons.sticky_note_2_rounded,
           ),
-          const SizedBox(height: AppEspacio.lg),
-          BotonPrimario(
-            texto: _guardando ? 'Registrando…' : 'Confirmar venta',
-            // Argón P1#2-parte: deshabilitado sin stock o si la
-            // cantidad supera el stock (el pre-chequeo en _confirmar
-            // cubre el mismo caso si el stock cambia en caliente).
-            onPressed: (_guardando ||
-                    stock < 1 ||
-                    _cantidad > stock)
-                ? null
-                : _confirmar,
-          ),
+          const SizedBox(height: AppEspacio.sm),
         ],
+      ),
+      // Rediseño 1.20: barra fija con el TOTAL siempre visible
+      // (en cualquier moneda; antes solo salía en CUP) y la
+      // confirmación con las mismas condiciones de habilitado.
+      bottomNavigationBar: SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(AppEspacio.lg,
+              AppEspacio.sm, AppEspacio.lg, AppEspacio.md),
+          child: Row(
+            children: [
+              Expanded(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Total',
+                        style: AppTexto.minuscula.copyWith(
+                            color: AppColores.textoSecundario(
+                                context))),
+                    Text(
+                      textoTotalVenta(_total, _moneda,
+                          _moneda == 'CUP' ? _tasaUsd : null),
+                      style: AppTexto.subtitulo.copyWith(
+                        fontWeight: FontWeight.bold,
+                        fontFeatures: const [
+                          FontFeature.tabularFigures()
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: AppEspacio.md),
+              BotonPrimario(
+                texto:
+                    _guardando ? 'Registrando…' : 'Confirmar venta',
+                expandido: false,
+                // Argón P1#2-parte: deshabilitado sin stock o si
+                // la cantidad supera el stock (el pre-chequeo en
+                // _confirmar cubre el mismo caso si el stock
+                // cambia en caliente).
+                onPressed: (_guardando ||
+                        stock < 1 ||
+                        _cantidad > stock)
+                    ? null
+                    : _confirmar,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// Rediseño 1.20: resumen visible del comprador elegido
+  /// («Comprador: María Pérez» / «Externo — Carlos» /
+  /// «Cliente externo»), para no venderle a la persona
+  /// equivocada por no revisar el selector.
+  String get _resumenComprador {
+    switch (_tipoComprador) {
+      case 'cliente':
+        return _clienteId == null
+            ? 'Comprador: sin seleccionar'
+            : 'Comprador: $_clienteNombre';
+      case 'externo_nombre':
+        final n = _compradorNombre.text.trim();
+        return n.isEmpty
+            ? 'Comprador: externo (sin nombre aún)'
+            : 'Comprador: Externo — $n';
+      case 'inscribir_nuevo':
+        return 'Comprador: se inscribe como cliente nuevo';
+      default:
+        return 'Comprador: Cliente externo';
+    }
+  }
+
+  /// Rediseño 1.20: miniatura del producto en la cabecera —
+  /// mismo triestado que la lista (local → caché →
+  /// placeholder), a 56 px.
+  Widget _miniFotoVenta() {
+    final sup = widget.suplemento;
+    final fotoLocal = sup['foto_local'] as String?;
+    final fotoStorage = sup['foto_storage'] as String?;
+    Widget placeholder() => Container(
+          width: 56,
+          height: 56,
+          color: AppColores.fondo(context),
+          child: Icon(Icons.medication_rounded,
+              color: AppColores.textoSecundario(context)),
+        );
+    return SizedBox(
+      width: 56,
+      height: 56,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(AppRadio.sm),
+        child: (fotoLocal != null &&
+                fotoLocal.isNotEmpty &&
+                File(fotoLocal).existsSync())
+            ? Image.file(File(fotoLocal),
+                fit: BoxFit.cover,
+                errorBuilder: (_, __, ___) => placeholder())
+            : FutureBuilder(
+                future: FotoCache.instance.obtener(fotoStorage),
+                builder: (ctx, snap) {
+                  final f = snap.data;
+                  if (f == null) return placeholder();
+                  return Image.file(f, fit: BoxFit.cover);
+                },
+              ),
       ),
     );
   }
@@ -845,22 +985,32 @@ class _VentaSuplementoScreenState
     return Tarjeta(
       padding: const EdgeInsets.symmetric(
           horizontal: AppEspacio.md, vertical: AppEspacio.sm),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
+      child: Column(
         children: [
-          IconButton(
-            icon: const Icon(Icons.remove_circle_outline),
-            onPressed: _cantidad > 1
-                ? () => setState(() => _cantidad--)
-                : null,
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              IconButton(
+                icon:
+                    const Icon(Icons.remove_circle_outline_rounded),
+                onPressed: _cantidad > 1
+                    ? () => setState(() => _cantidad--)
+                    : null,
+              ),
+              Text('$_cantidad',
+                  style: AppTexto.displayPequeno),
+              IconButton(
+                icon: const Icon(Icons.add_circle_outline_rounded),
+                onPressed: _cantidad < stock
+                    ? () => setState(() => _cantidad++)
+                    : null,
+              ),
+            ],
           ),
-          Text('$_cantidad',
-              style: AppTexto.displayPequeno),
-          IconButton(
-            icon: const Icon(Icons.add_circle_outline),
-            onPressed: _cantidad < stock
-                ? () => setState(() => _cantidad++)
-                : null,
+          Text(
+            'Quedan ${stock - _cantidad} unidades tras esta venta',
+            style: AppTexto.minuscula.copyWith(
+                color: AppColores.textoSecundario(context)),
           ),
         ],
       ),
@@ -882,7 +1032,7 @@ class _VentaSuplementoScreenState
         ),
         child: Row(
           children: [
-            const Icon(Icons.warning_amber,
+            const Icon(Icons.warning_amber_rounded,
                 color: AppColores.alerta),
             const SizedBox(width: AppEspacio.sm),
             Expanded(
@@ -948,8 +1098,8 @@ class _VentaSuplementoScreenState
             ),
             secondary: _clienteId == null
                 ? IconButton(
-                    icon: const Icon(Icons.person_search,
-                        color: AppColores.naranja),
+                    icon: Icon(Icons.person_search_rounded,
+                        color: AppColores.textoSecundario(context)),
                     onPressed: _elegirCliente,
                     tooltip: 'Seleccionar cliente',
                   )
@@ -971,7 +1121,8 @@ class _VentaSuplementoScreenState
               child: CampoTexto(
                 controller: _compradorNombre,
                 hint: 'Nombre del comprador',
-                icono: Icons.person_outline,
+                icono: Icons.person_outline_rounded,
+                onChanged: (_) => setState(() {}),
               ),
             ),
           const RadioListTile<String>(
@@ -983,7 +1134,7 @@ class _VentaSuplementoScreenState
                 'Venta rápida sin identificar',
                 style: AppTexto.secundario),
           ),
-          const RadioListTile<String>(
+          RadioListTile<String>(
             value: 'inscribir_nuevo',
             activeColor: AppColores.naranja,
             title: Text('Inscribir como cliente nuevo',
@@ -991,8 +1142,8 @@ class _VentaSuplementoScreenState
             subtitle: Text(
                 'Inscribe al comprador y registra la venta en una sola operación',
                 style: AppTexto.secundario),
-            secondary: Icon(Icons.person_add,
-                color: AppColores.naranja),
+            secondary: Icon(Icons.person_add_rounded,
+                color: AppColores.textoSecundario(context)),
           ),
         ],
       ),
@@ -1030,7 +1181,7 @@ class _DialogoBuscarClienteState extends State<_DialogoBuscarCliente> {
           }).toList();
     return DialogoApp(
       titulo: 'Cliente del gym',
-      iconoTitulo: Icons.person_search,
+      iconoTitulo: Icons.person_search_rounded,
       contenido: SizedBox(
         width: double.maxFinite,
         height: 380,
@@ -1041,7 +1192,7 @@ class _DialogoBuscarClienteState extends State<_DialogoBuscarCliente> {
               autofocus: true,
               decoration: const InputDecoration(
                 hintText: 'Buscar por nombre…',
-                prefixIcon: Icon(Icons.search),
+                prefixIcon: Icon(Icons.search_rounded),
                 border: OutlineInputBorder(),
                 contentPadding:
                     EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -1065,15 +1216,12 @@ class _DialogoBuscarClienteState extends State<_DialogoBuscarCliente> {
                         return ListTile(
                           title: Text('${c['nombre'] ?? ''}'),
                           trailing: esVistaProtegida(c)
-                              ? const Icon(Icons.lock,
+                              ? const Icon(Icons.lock_rounded,
                                   color: AppColores.naranja)
                               : null,
                           onTap: () {
                             if (esVistaProtegida(c)) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(
-                                      content: Text(
-                                          mensajeClienteProtegido)));
+                              mostrarSnack(context, mensajeClienteProtegido, significado: SignificadoChip.alerta);
                               return;
                             }
                             Navigator.pop(context, c);

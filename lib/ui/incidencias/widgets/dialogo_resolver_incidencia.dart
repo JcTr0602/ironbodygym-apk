@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import '../../diseno.dart';
 import '../../../modelos/incidencia.dart';
 
 /// Diálogo de resolución: nota obligatoria + foto condicional.
@@ -77,7 +78,7 @@ class _DialogoResolverState
                 ElevatedButton.icon(
                   onPressed: _tomarFoto,
                   icon: const Icon(
-                      Icons.camera_alt,
+                      Icons.camera_alt_rounded,
                       size: 18),
                   label: Text(_fotoPath ==
                           null
@@ -90,20 +91,18 @@ class _DialogoResolverState
                         EdgeInsets.only(
                             left: 8),
                     child: Icon(
-                        Icons.check_circle,
+                        Icons.check_circle_rounded,
                         color: Colors.green),
                   ),
               ],
             ),
             if (_fotoObligatoria)
-              const Padding(
+              Padding(
                 padding:
                     EdgeInsets.only(top: 4),
                 child: Text(
                   'Foto obligatoria para este tipo',
-                  style: TextStyle(
-                      fontSize: 12,
-                      color: Colors.orange),
+                  style: AppTexto.metadato.copyWith(color: Colors.orange),
                 ),
               ),
           ],

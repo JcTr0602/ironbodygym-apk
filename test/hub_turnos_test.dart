@@ -110,6 +110,7 @@ void main() {
       aperturas: [
         (
           nombre: 'Gabriel',
+          cubreA: null,
           aperturaEn: DateTime(2026, 10, 30, 9, 0),
           viva: true,
         ),

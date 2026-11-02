@@ -170,14 +170,13 @@ class _CumpleanosScreenState extends State<CumpleanosScreen>
     final waNum = normalizarTelefonoWaMe(tel);
     if (waNum.isEmpty) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-            content: Text('Este cliente no tiene teléfono registrado.')));
+        mostrarSnack(context, 'Este cliente no tiene teléfono registrado.', significado: SignificadoChip.alerta);
       }
       return;
     }
     final mensaje = '¡Feliz cumpleaños, $nombre! 🎂\n'
         'De parte de todo el equipo de Iron Body Gym, '
-        'que tengas un día excelente 💪';
+        'que tengas un día excelente 💪$lineaMensajeAutomatico';
     final url = Uri.parse(
         'https://wa.me/$waNum?text=${Uri.encodeComponent(mensaje)}');
     try {
@@ -185,8 +184,7 @@ class _CumpleanosScreenState extends State<CumpleanosScreen>
       await _setFelicitado(id, true);
     } catch (_) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-            content: Text('No se pudo abrir WhatsApp.')));
+        mostrarSnack(context, 'No se pudo abrir WhatsApp.', significado: SignificadoChip.error);
       }
     }
   }
@@ -194,20 +192,30 @@ class _CumpleanosScreenState extends State<CumpleanosScreen>
   /// 2C: regalar mes + felicitar. Aplica el regalo (verificando en BD
   /// que no se haya aplicado ya) y abre wa.me con la nueva fecha.
   Future<void> _regalarYFelicitar(Map<String, dynamic> c) async {
-    final id = (c['id'] as num?)?.toInt() ?? 0;
-    if (id <= 0 || !mounted) return;
+    final idPre = (c['id'] as num?)?.toInt() ?? 0;
+    if (idPre <= 0 || !mounted) return;
+    // Pasada 2 de Argón (1.20): el candado se libera en finally;
+    // antes había 6 removes manuales y una excepción intermedia
+    // dejaba el cliente bloqueado hasta cerrar la pantalla.
+    if (!_regalando.add(idPre)) return;
+    try {
+      await _regalarYFelicitarFlujo(c, idPre);
+    } finally {
+      _regalando.remove(idPre);
+    }
+  }
+
+  Future<void> _regalarYFelicitarFlujo(
+      Map<String, dynamic> c, int id) async {
     // #4 (Argón cumpleaños): un solo flujo por cliente (el Set
     // devuelve false si ya está en curso).
-    if (!_regalando.add(id)) return;
     // Misma clase que #10-4: la clave anual del regalo debe usar
     // el año actual, no el de cuando se abrió la pantalla.
     _anio = '${ahoraHabana().year}';
     // Bloqueo anti-duplicado: operación real en BD (Argón).
     if (await _regaloAplicado(id)) {
-      _regalando.remove(id);
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-            content: Text('Ya se regaló el mes este año.')));
+        mostrarSnack(context, 'Ya se regaló el mes este año.', significado: SignificadoChip.alerta);
       }
       return;
     }
@@ -238,21 +246,17 @@ class _CumpleanosScreenState extends State<CumpleanosScreen>
       ),
     );
     if (confirmar != true) {
-      _regalando.remove(id);
       return;
     }
     if (!mounted) {
-      _regalando.remove(id);
       return;
     }
     // #4 (Argón cumpleaños): re-chequeo tras confirmar. Otro
     // diálogo del mismo cliente pudo aplicar mientras este
     // esperaba: sin esto, el segundo regalo extendía 30 días más.
     if (await _regaloAplicado(id)) {
-      _regalando.remove(id);
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-            content: Text('Ya se regaló el mes este año.')));
+        mostrarSnack(context, 'Ya se regaló el mes este año.', significado: SignificadoChip.alerta);
       }
       return;
     }
@@ -283,16 +287,13 @@ class _CumpleanosScreenState extends State<CumpleanosScreen>
     final tel = '${c['telefono'] ?? ''}'.trim();
     final waNum = normalizarTelefonoWaMe(tel);
     if (waNum.isEmpty) {
-      _regalando.remove(id);
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-            content: Text('Regalo aplicado. Este cliente no tiene '
-                'teléfono: felicítalo en persona.')));
+        mostrarSnack(context, 'Regalo aplicado. Este cliente no tiene '
+                'teléfono: felicítalo en persona.', significado: SignificadoChip.exito);
       }
       return;
     }
     if (!mounted) {
-      _regalando.remove(id);
       return;
     }
     final anteriorFmt = (pagadoHastaActual != null &&
@@ -309,6 +310,7 @@ class _CumpleanosScreenState extends State<CumpleanosScreen>
       buf.writeln('✅ Válida hasta el: *${_fechaLarga(nuevoHasta)}*');
     }
     buf.writeln('¡A seguir dándole duro! — Iron Body Gym 💪🔥');
+    buf.write(lineaMensajeAutomatico);
     final url = Uri.parse(
         'https://wa.me/$waNum?text=${Uri.encodeComponent(buf.toString().trim())}');
     try {
@@ -316,11 +318,9 @@ class _CumpleanosScreenState extends State<CumpleanosScreen>
       await _setFelicitado(id, true);
     } catch (_) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-            content: Text('Regalo aplicado. No se pudo abrir WhatsApp.')));
+        mostrarSnack(context, 'Regalo aplicado. No se pudo abrir WhatsApp.', significado: SignificadoChip.exito);
       }
     }
-    _regalando.remove(id);
   }
 
   /// "2026-12-05" → "5 de diciembre".
@@ -362,13 +362,14 @@ class _CumpleanosScreenState extends State<CumpleanosScreen>
         ],
       ),
     );
-    if (ok != true || !mounted) return;
+    // Pasada 2 de Argón (1.20): el controlador del diálogo se
+    // libera al cerrar (antes quedaba fugado en cada apertura).
     final tel = ctrl.text.trim();
+    ctrl.dispose();
+    if (ok != true || !mounted) return;
     if (!validarTelefono(tel)) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-            content:
-                Text('Teléfono inválido: 8 dígitos, empieza con 5 o 6.')));
+        mostrarSnack(context, 'Teléfono inválido: 8 dígitos, empieza con 5 o 6.', significado: SignificadoChip.alerta);
       }
       return;
     }
@@ -383,8 +384,7 @@ class _CumpleanosScreenState extends State<CumpleanosScreen>
     unawaited(SyncEngine.instance.push());
     if (mounted) {
       setState(() => c['telefono'] = tel);
-      ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Teléfono guardado.')));
+      mostrarSnack(context, 'Teléfono guardado.', significado: SignificadoChip.exito);
     }
   }
 
@@ -507,7 +507,7 @@ class _CumpleanosScreenState extends State<CumpleanosScreen>
                       size: 16, color: AppColores.alerta),
                 if (esHoy) const SizedBox(width: 4),
                 Text(_etiqueta(c),
-                    style: TextStyle(
+                    style: AppTexto.etiqueta.copyWith(
                         fontWeight: FontWeight.bold,
                         color: esHoy ? AppColores.alerta : null)),
               ],
@@ -518,8 +518,8 @@ class _CumpleanosScreenState extends State<CumpleanosScreen>
                     color: AppColores.textoSecundario(context))),
             if (diasPara != null && diasPara > 0)
               Text('en $diasPara día${diasPara == 1 ? '' : 's'}',
-                  style: const TextStyle(
-                      fontSize: 11, color: Colors.green)),
+                  style: AppTexto.minuscula
+                      .copyWith(color: AppColores.exito)),
             const SizedBox(height: 4),
             Row(
               mainAxisSize: MainAxisSize.min,
@@ -529,14 +529,14 @@ class _CumpleanosScreenState extends State<CumpleanosScreen>
                   borderRadius: BorderRadius.circular(16),
                   onTap: () => _setFelicitado(id, !felicitado),
                   child: Padding(
-                    padding: const EdgeInsets.all(6),
+                    padding: const EdgeInsets.all(8),
                     child: Icon(
                       felicitado
-                          ? Icons.check_circle
-                          : Icons.radio_button_unchecked,
+                          ? Icons.check_circle_rounded
+                          : Icons.radio_button_unchecked_rounded,
                       size: 20,
                       color: felicitado
-                          ? Colors.green
+                          ? AppColores.exito
                           : AppColores.textoSecundario(context),
                     ),
                   ),
@@ -544,7 +544,7 @@ class _CumpleanosScreenState extends State<CumpleanosScreen>
                 // Botón Felicitar (wa.me).
                 IconButton(
                   tooltip: 'Felicitar por WhatsApp',
-                  icon: Icon(Icons.chat,
+                  icon: Icon(Icons.chat_rounded,
                       color: tieneTelefono
                           ? const Color(0xFF25D366)
                           : AppColores.textoSecundario(context)
@@ -567,7 +567,7 @@ class _CumpleanosScreenState extends State<CumpleanosScreen>
                         ? 'Mes ya regalado este año'
                         : 'Regalar mes + felicitar',
                     icon: Icon(
-                      regalado ? Icons.card_giftcard : Icons.redeem,
+                      regalado ? Icons.card_giftcard_rounded : Icons.redeem_rounded,
                       color: regalado
                           ? Colors.amber
                           : AppColores.naranja,

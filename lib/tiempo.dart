@@ -69,12 +69,18 @@ DateTime? parseFecha(String? iso) {
 /// el build offline): se calcula por fecha.
 Duration offsetHabana(DateTime utc) {
   bool enHorario(DateTime u, int year) {
-    // Segundo domingo de marzo, 06:00 UTC (= 01:00 EST).
+    // Segundo domingo de marzo, 05:00 UTC (= 00:00 EST, que
+    // salta a 01:00 CDT). H-10 (1.20): la regla anterior usaba
+    // las 06:00 UTC (patrón de EEUU) y la app marcaba 1 h menos
+    // que La Habana real durante esa hora; verificado contra
+    // tzdata de America/Havana (lo que usa el servidor). Si
+    // Cuba cambia su regla DST, esta función hay que revisarla
+    // contra tzdata de nuevo.
     var d = DateTime.utc(year, 3, 8);
     while (d.weekday != DateTime.sunday) {
       d = d.add(const Duration(days: 1));
     }
-    final inicio = DateTime.utc(year, 3, d.day, 6);
+    final inicio = DateTime.utc(year, 3, d.day, 5);
     // Primer domingo de noviembre, 05:00 UTC (= 01:00 EDT).
     var e = DateTime.utc(year, 11, 1);
     while (e.weekday != DateTime.sunday) {

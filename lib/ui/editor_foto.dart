@@ -272,7 +272,7 @@ class _EditorFotoDialogState extends State<EditorFotoDialog> {
       canPop: !_guardando,
       child: DialogoApp(
       titulo: 'Ajusta la foto',
-      iconoTitulo: Icons.crop,
+      iconoTitulo: Icons.crop_rounded,
       contenido: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -352,7 +352,7 @@ class _EditorFotoDialogState extends State<EditorFotoDialog> {
       ),
       acciones: [
         TextButton.icon(
-          icon: const Icon(Icons.refresh),
+          icon: const Icon(Icons.refresh_rounded),
           label: const Text('Restablecer'),
           onPressed: (_guardando || _preparacionFallo || _preparando)
               ? null

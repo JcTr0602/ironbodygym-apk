@@ -72,8 +72,7 @@ class _GuiaScreenState extends State<GuiaScreen> {
     await _cargar();
     if (!mounted) return;
     setState(() => _sincronizando = false);
-    ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Guía actualizada')));
+    mostrarSnack(context, 'Guía actualizada', significado: SignificadoChip.exito);
   }
 
   Map<String, dynamic>? _publicadaDe(String slug) {
@@ -446,7 +445,7 @@ class _GuiaScreenState extends State<GuiaScreen> {
             Expanded(
               child: FilledButton.icon(
                 onPressed: _sincronizando ? null : _sincronizar,
-                icon: const Icon(Icons.sync),
+                icon: const Icon(Icons.sync_rounded),
                 label: const Text('Actualizar'),
               ),
             ),
@@ -454,7 +453,7 @@ class _GuiaScreenState extends State<GuiaScreen> {
             Expanded(
               child: OutlinedButton.icon(
                 onPressed: () => _abrirEditor(),
-                icon: const Icon(Icons.add),
+                icon: const Icon(Icons.add_rounded),
                 label: const Text('Nueva ficha'),
               ),
             ),
@@ -469,7 +468,7 @@ class _GuiaScreenState extends State<GuiaScreen> {
                     .push(MaterialPageRoute(
                         builder: (_) => const GuiaEquiposScreen()))
                     .then((_) => _cargar()),
-                icon: const Icon(Icons.fitness_center),
+                icon: const Icon(Icons.fitness_center_rounded),
                 label: const Text('Equipamiento'),
               ),
             ),
@@ -478,7 +477,7 @@ class _GuiaScreenState extends State<GuiaScreen> {
               child: OutlinedButton.icon(
                 onPressed:
                     _publicandoLote || _borradores.isEmpty ? null : _publicarLote,
-                icon: const Icon(Icons.publish),
+                icon: const Icon(Icons.publish_rounded),
                 label: Text(_publicandoLote
                     ? 'Publicando…'
                     : 'Publicar borradores (${_borradores.length})'),
@@ -490,7 +489,7 @@ class _GuiaScreenState extends State<GuiaScreen> {
         TextField(
           decoration: const InputDecoration(
             labelText: 'Buscar (título, equipo, músculo, sinónimo)',
-            prefixIcon: Icon(Icons.search),
+            prefixIcon: Icon(Icons.search_rounded),
             border: OutlineInputBorder(),
           ),
           onChanged: (v) => setState(() => _busqueda = v),
@@ -506,7 +505,7 @@ class _GuiaScreenState extends State<GuiaScreen> {
             const SizedBox(width: 8),
             Text(
               '$esenciales esenciales (recomendado 4–7)',
-              style: const TextStyle(fontSize: 12, color: Colors.grey),
+              style: AppTexto.metadato.copyWith(color: Colors.grey),
             ),
           ],
         ),
@@ -514,16 +513,16 @@ class _GuiaScreenState extends State<GuiaScreen> {
         if (borradoresFiltrados.isNotEmpty) ...[
           const Text('Borradores', style: AppTexto.subtitulo),
           const SizedBox(height: 4),
-          const Text(
+          Text(
             'Solo viven en este teléfono hasta que los publiques.',
-            style: TextStyle(fontSize: 12, color: Colors.grey),
+            style: AppTexto.metadato.copyWith(color: Colors.grey),
           ),
           const SizedBox(height: 8),
           for (final b in borradoresFiltrados)
             Card(
               child: ListTile(
-                leading: const Icon(Icons.edit_note,
-                    color: AppColores.naranja),
+                leading: Icon(Icons.edit_note_rounded,
+                    color: AppColores.textoSecundario(context)),
                 title: Text(
                     '${_docBorrador(b)['titulo']}'.isEmpty
                         ? '(sin título)'
@@ -537,12 +536,12 @@ class _GuiaScreenState extends State<GuiaScreen> {
                     ? const Tooltip(
                         message:
                             'La ficha publicada cambió desde que abriste este borrador',
-                        child: Icon(Icons.warning_amber,
+                        child: Icon(Icons.warning_amber_rounded,
                             color: Colors.red),
                       )
                     : const Chip(
                         label: Text('Borrador',
-                            style: TextStyle(fontSize: 11)),
+                            style: AppTexto.metadato),
                         visualDensity: VisualDensity.compact,
                       ),
                 onTap: () => _abrirEditor(borrador: b),
@@ -564,7 +563,7 @@ class _GuiaScreenState extends State<GuiaScreen> {
         for (final g in grupos)
           if ((porGrupo[g] ?? []).isNotEmpty) ...[
             Padding(
-              padding: const EdgeInsets.only(top: 10, bottom: 4),
+              padding: const EdgeInsets.only(top: 12, bottom: 4),
               child: Text(
                 g == 'Otros' ? 'Otros' : _nombreEquipo(g),
                 style: const TextStyle(
@@ -575,7 +574,7 @@ class _GuiaScreenState extends State<GuiaScreen> {
             for (final p in porGrupo[g]!)
               Card(
                 child: ListTile(
-                  leading: Icon(Icons.circle,
+                  leading: Icon(Icons.circle_rounded,
                       size: 14,
                       color: p['esencial'] == true
                           ? AppColores.naranja
@@ -590,10 +589,10 @@ class _GuiaScreenState extends State<GuiaScreen> {
                   trailing: p['esencial'] == true
                       ? const Chip(
                           label: Text('Esencial',
-                              style: TextStyle(fontSize: 11)),
+                              style: AppTexto.metadato),
                           visualDensity: VisualDensity.compact,
                         )
-                      : const Icon(Icons.chevron_right),
+                      : const Icon(Icons.chevron_right_rounded),
                   onTap: () => _abrirEditor(publicado: p),
                 ),
               ),
@@ -601,9 +600,9 @@ class _GuiaScreenState extends State<GuiaScreen> {
         const SizedBox(height: 16),
         const Text('Actividad reciente', style: AppTexto.subtitulo),
         const SizedBox(height: 4),
-        const Text(
+        Text(
           'Ops aplicadas de este teléfono (GymPedia y Guía).',
-          style: TextStyle(fontSize: 12, color: Colors.grey),
+          style: AppTexto.metadato.copyWith(color: Colors.grey),
         ),
         const SizedBox(height: 8),
         if (_actividad.isEmpty)
@@ -612,16 +611,16 @@ class _GuiaScreenState extends State<GuiaScreen> {
         for (final a in _actividad)
           ListTile(
             dense: true,
-            leading: const Icon(Icons.history, size: 18),
+            leading: const Icon(Icons.history_rounded, size: 18),
             title: Text(_tituloActividad(a),
                 maxLines: 1, overflow: TextOverflow.ellipsis),
             subtitle: Text('${a['tipo']} · ${_fechaCorta('${a['creada_ts']}')}'),
           ),
         const SizedBox(height: 12),
-        const Text(
+        Text(
           'Las fichas se leen sin conexión en la app de clientes. '
           'Publicar y retirar se aplica al sincronizar.',
-          style: TextStyle(fontSize: 12, color: Colors.grey),
+          style: AppTexto.metadato.copyWith(color: Colors.grey),
         ),
       ],
     );

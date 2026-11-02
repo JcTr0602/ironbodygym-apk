@@ -105,25 +105,25 @@ class AuditoriaPanelScreen extends StatelessWidget {
           Tarjeta(
             child: ListTile(
               contentPadding: EdgeInsets.zero,
-              leading: const Icon(Icons.history, color: AppColores.naranja),
+              leading: Icon(Icons.history_rounded, color: AppColores.textoSecundario(context)),
               title: const Text('Auditoría general',
                   style: AppTexto.cuerpo),
               subtitle: const Text('Ops, filtros y alertas',
                   style: AppTexto.secundario),
-              trailing: const Icon(Icons.chevron_right, size: 18),
+              trailing: const Icon(Icons.chevron_right_rounded, size: 18),
               onTap: () => ir(const AuditoriaScreen()),
             ),
           ),
           Tarjeta(
             child: ListTile(
               contentPadding: EdgeInsets.zero,
-              leading: const Icon(Icons.person_search,
-                  color: AppColores.naranja),
+              leading: Icon(Icons.person_search_rounded,
+                  color: AppColores.textoSecundario(context)),
               title: const Text('Auditoría por persona',
                   style: AppTexto.cuerpo),
               subtitle: const Text('Día, semana, mes o rango',
                   style: AppTexto.secundario),
-              trailing: const Icon(Icons.chevron_right, size: 18),
+              trailing: const Icon(Icons.chevron_right_rounded, size: 18),
               onTap: () => ir(const AuditoriaPersonaScreen()),
             ),
           ),
@@ -198,7 +198,7 @@ class _ErroresSyncPanelScreenState extends State<ErroresSyncPanelScreen> {
                     Tarjeta(
                       child: ListTile(
                         contentPadding: EdgeInsets.zero,
-                        leading: const Icon(Icons.sync_problem,
+                        leading: const Icon(Icons.sync_problem_rounded,
                             color: AppColores.error),
                         title: Text(describirTipoOp('${op['tipo']}'),
                             style: AppTexto.cuerpo),
@@ -221,7 +221,7 @@ class _ErroresSyncPanelScreenState extends State<ErroresSyncPanelScreen> {
                     Tarjeta(
                       child: ListTile(
                         contentPadding: EdgeInsets.zero,
-                        leading: const Icon(Icons.broken_image,
+                        leading: const Icon(Icons.broken_image_rounded,
                             color: AppColores.alerta),
                         title: const Text(
                             'Foto huérfana de op rechazada',
@@ -317,7 +317,7 @@ class _MantenimientoScreenState extends State<MantenimientoScreen> {
       return _soloDueno('Mantenimiento (F5)');
     }
     void irSnack(String m) =>
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(m)));
+        mostrarSnack(context, m, significado: SignificadoChip.exito);
     return Scaffold(
       appBar: AppBar(title: const Text('Mantenimiento (F5)')),
       body: ListView(
@@ -331,16 +331,67 @@ class _MantenimientoScreenState extends State<MantenimientoScreen> {
             style: AppTexto.secundario,
           ),
           const SizedBox(height: 12),
-          Text('Ops pendientes de subir: ${_pendientes < 0 ? '—' : _pendientes}',
-              style: AppTexto.cuerpo),
-          Text('Tamaño de la BD local: $_tamanoTexto',
-              style: AppTexto.cuerpo),
+          Tarjeta(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment:
+                            CrossAxisAlignment.start,
+                        children: [
+                          Text('Ops pendientes de subir',
+                              style: AppTexto.secundario),
+                          Text(
+                            _pendientes < 0 ? '—' : '$_pendientes',
+                            style: AppTexto.metrica.copyWith(
+                                fontFeatures: const [
+                                  FontFeature.tabularFigures()
+                                ]),
+                          ),
+                        ],
+                      ),
+                    ),
+                    ChipEstado.semantico(
+                      texto: _pendientes < 0
+                          ? 'Sin datos'
+                          : _pendientes == 0
+                              ? 'Al día'
+                              : 'Pendientes',
+                      significado: _pendientes < 0
+                          ? SignificadoChip.neutral
+                          : _pendientes == 0
+                              ? SignificadoChip.exito
+                              : SignificadoChip.alerta,
+                    ),
+                  ],
+                ),
+                const Divider(),
+                Row(
+                  mainAxisAlignment:
+                      MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text('Tamaño de la BD local',
+                        style: AppTexto.secundario),
+                    Text(_tamanoTexto,
+                        style: AppTexto.cuerpo.copyWith(
+                            fontWeight: FontWeight.w600,
+                            fontFeatures: const [
+                              FontFeature.tabularFigures()
+                            ])),
+                  ],
+                ),
+              ],
+            ),
+          ),
           const SizedBox(height: 12),
           Tarjeta(
             child: ListTile(
               contentPadding: EdgeInsets.zero,
               leading:
-                  const Icon(Icons.sync, color: AppColores.naranja),
+                  Icon(Icons.sync_rounded, color: AppColores.textoSecundario(context)),
               title: const Text('Reintentar cola de sync',
                   style: AppTexto.cuerpo),
               trailing: TextButton(
@@ -365,8 +416,8 @@ class _MantenimientoScreenState extends State<MantenimientoScreen> {
               children: [
                 ListTile(
                   contentPadding: EdgeInsets.zero,
-                  leading: const Icon(Icons.download,
-                      color: AppColores.naranja),
+                  leading: Icon(Icons.download_rounded,
+                      color: AppColores.textoSecundario(context)),
                   title: const Text('Re-descargar tabla espejo',
                       style: AppTexto.cuerpo),
                   subtitle: Text(
@@ -412,7 +463,7 @@ class _MantenimientoScreenState extends State<MantenimientoScreen> {
           Tarjeta(
             child: ListTile(
               contentPadding: EdgeInsets.zero,
-              leading: const Icon(Icons.broken_image,
+              leading: const Icon(Icons.broken_image_rounded,
                   color: AppColores.naranja),
               title: const Text('Descartar fotos huérfanas',
                   style: AppTexto.cuerpo),
@@ -433,7 +484,7 @@ class _MantenimientoScreenState extends State<MantenimientoScreen> {
             child: ListTile(
               contentPadding: EdgeInsets.zero,
               leading:
-                  const Icon(Icons.storage, color: AppColores.naranja),
+                  Icon(Icons.storage_rounded, color: AppColores.textoSecundario(context)),
               title: const Text('Ver tamaño de la BD local',
                   style: AppTexto.cuerpo),
               subtitle: Text(_tamanoTexto, style: AppTexto.secundario),

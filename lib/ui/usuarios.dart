@@ -107,8 +107,7 @@ class _UsuariosScreenState extends State<UsuariosScreen> {
     // nada se encola ni se dialoga.
     if (!puedeEjecutarAccionesUsuarios(AuthService().isOwner)) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('Solo el dueño puede gestionar usuarios.')));
+      mostrarSnack(context, 'Solo el dueño puede gestionar usuarios.', significado: SignificadoChip.alerta);
       return;
     }
     if (accion == 'eliminar') {
@@ -119,7 +118,7 @@ class _UsuariosScreenState extends State<UsuariosScreen> {
             '¿Eliminar a "$username"? Perderá acceso inmediatamente.',
         aceptar: 'Eliminar',
         peligro: true,
-        icono: Icons.delete_outline,
+        icono: Icons.delete_outline_rounded,
       );
       if (ok != true || !mounted) return;
     }
@@ -130,7 +129,7 @@ class _UsuariosScreenState extends State<UsuariosScreen> {
         context: context,
         builder: (ctx) => DialogoApp(
           titulo: 'Nueva contraseña para $username',
-          iconoTitulo: Icons.key,
+          iconoTitulo: Icons.key_rounded,
           contenido: CampoTexto(
             controller: ctrl,
             etiqueta: 'Contraseña (mín. 6)',
@@ -157,8 +156,7 @@ class _UsuariosScreenState extends State<UsuariosScreen> {
       if (ok != true || !mounted) return;
       password = ctrl.text.trim();
       if (password.length < 6) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-            content: Text('Contraseña muy corta (mín. 6 caracteres)')));
+        mostrarSnack(context, 'Contraseña muy corta (mín. 6 caracteres)', significado: SignificadoChip.alerta);
         return;
       }
     }
@@ -174,9 +172,7 @@ class _UsuariosScreenState extends State<UsuariosScreen> {
       payload: payload,
     );
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('"$titulo" encolado para $username')),
-    );
+    mostrarSnack(context, '"$titulo" encolado para $username', significado: SignificadoChip.exito);
     // v1.0.14: ofrecer compartir credenciales tras crear/resetear
     if ((accion == 'crear' || accion == 'reset_pass') &&
         password != null) {
@@ -200,7 +196,7 @@ Hola $username, estas son tus credenciales para la app del gym:
       context: context,
       builder: (ctx) => DialogoApp(
         titulo: 'Compartir credenciales',
-        iconoTitulo: Icons.share,
+        iconoTitulo: Icons.share_rounded,
         contenido: SingleChildScrollView(child: Text(texto)),
         acciones: [
           TextButton(
@@ -208,7 +204,7 @@ Hola $username, estas son tus credenciales para la app del gym:
             child: const Text('Cerrar'),
           ),
           ElevatedButton.icon(
-            icon: const Icon(Icons.copy),
+            icon: const Icon(Icons.copy_rounded),
             label: const Text('Copiar'),
             style: ElevatedButton.styleFrom(
               backgroundColor: AppColores.naranja,
@@ -220,10 +216,7 @@ Hola $username, estas son tus credenciales para la app del gym:
             onPressed: () {
               Clipboard.setData(ClipboardData(text: texto));
               Navigator.pop(ctx);
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                    content: Text('Copiado, pégalo en WhatsApp')),
-              );
+              mostrarSnack(context, 'Copiado, pégalo en WhatsApp');
             },
           ),
         ],
@@ -239,7 +232,7 @@ Hola $username, estas son tus credenciales para la app del gym:
       context: context,
       builder: (ctx) => DialogoApp(
         titulo: 'Accesos de $username',
-        iconoTitulo: Icons.history,
+        iconoTitulo: Icons.history_rounded,
         contenido: SizedBox(
           width: double.maxFinite,
           child: accesos.isEmpty
@@ -252,11 +245,11 @@ Hola $username, estas son tus credenciales para la app del gym:
                       const Divider(height: 1),
                   itemBuilder: (_, i) => ListTile(
                     dense: true,
-                    leading: const Icon(Icons.login, size: 18),
+                    leading: const Icon(Icons.login_rounded, size: 18),
                     title: Text(tiempoRelativo(accesos[i]),
-                        style: const TextStyle(fontSize: 14)),
+                        style: AppTexto.cuerpo),
                     subtitle: Text(fmtFecha(accesos[i]),
-                        style: const TextStyle(fontSize: 12)),
+                        style: AppTexto.metadato),
                   ),
                 ),
         ),
@@ -316,8 +309,7 @@ Hola $username, estas son tus credenciales para la app del gym:
     // 1.15 P2: guard de acción.
     if (!puedeEjecutarAccionesUsuarios(AuthService().isOwner)) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('Solo el dueño puede gestionar usuarios.')));
+      mostrarSnack(context, 'Solo el dueño puede gestionar usuarios.', significado: SignificadoChip.alerta);
       return;
     }
     final picker = ImagePicker();
@@ -337,16 +329,11 @@ Hola $username, estas son tus credenciales para la app del gym:
             username: username, bytes: bytes),
       );
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-            content: Text('Foto encolada (se sincronizará)')),
-      );
+      mostrarSnack(context, 'Foto encolada (se sincronizará)', significado: SignificadoChip.exito);
       SyncEngine.instance.push();
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('No se pudo encolar la foto: $e')),
-      );
+      mostrarSnack(context, 'No se pudo encolar la foto: $e', significado: SignificadoChip.error);
     }
   }
 
@@ -356,8 +343,7 @@ Hola $username, estas son tus credenciales para la app del gym:
     // 1.15 P2: guard de acción.
     if (!puedeEjecutarAccionesUsuarios(AuthService().isOwner)) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('Solo el dueño puede gestionar usuarios.')));
+      mostrarSnack(context, 'Solo el dueño puede gestionar usuarios.', significado: SignificadoChip.alerta);
       return;
     }
     final nuevoRol =
@@ -368,7 +354,7 @@ Hola $username, estas son tus credenciales para la app del gym:
       mensaje: '"$username" pasará de "$rolActual" a "$nuevoRol".\n\n'
           '${nuevoRol == 'admin' ? 'Tendrá acceso a Administración, finanzas y auditoría.' : 'Solo verá las funciones de entrenador.'}',
       aceptar: 'Cambiar a $nuevoRol',
-      icono: Icons.manage_accounts,
+      icono: Icons.manage_accounts_rounded,
     );
     if (ok == true && mounted) {
       await _accion(username, 'cambiar_rol', 'Cambiar rol', rol: nuevoRol);
@@ -380,8 +366,7 @@ Hola $username, estas son tus credenciales para la app del gym:
     // 1.15 P2: guard de acción.
     if (!puedeEjecutarAccionesUsuarios(AuthService().isOwner)) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('Solo el dueño puede gestionar usuarios.')));
+      mostrarSnack(context, 'Solo el dueño puede gestionar usuarios.', significado: SignificadoChip.alerta);
       return;
     }
     final nombreCtrl = TextEditingController();
@@ -390,7 +375,7 @@ Hola $username, estas son tus credenciales para la app del gym:
       context: context,
       builder: (ctx) => DialogoApp(
         titulo: 'Crear usuario APK',
-        iconoTitulo: Icons.person_add,
+        iconoTitulo: Icons.person_add_rounded,
         contenido: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -431,8 +416,7 @@ Hola $username, estas son tus credenciales para la app del gym:
     // 1.14 (M6.9): la regla vive en validarNuevoUsuarioApk.
     final error = validarNuevoUsuarioApk(nombre, pass);
     if (error != null) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text(error)));
+      mostrarSnack(context, error, significado: SignificadoChip.error);
       return;
     }
     await LocalDb.instance.queueOp(
@@ -441,8 +425,7 @@ Hola $username, estas son tus credenciales para la app del gym:
       payload: {'accion': 'crear', 'username': nombre, 'password': pass},
     );
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Usuario encolado (se sincronizará)')));
+    mostrarSnack(context, 'Usuario encolado (se sincronizará)', significado: SignificadoChip.exito);
     SyncEngine.instance.push();
     _compartirCredenciales(nombre, pass);
     _cargar();
@@ -455,7 +438,7 @@ Hola $username, estas son tus credenciales para la app del gym:
         title: const Text('Usuarios APK'),
         actions: [
           IconButton(
-            icon: const Icon(Icons.refresh),
+            icon: const Icon(Icons.refresh_rounded),
             tooltip: 'Actualizar',
             onPressed: _cargar,
           ),
@@ -463,14 +446,14 @@ Hola $username, estas son tus credenciales para la app del gym:
       ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: _crear,
-        icon: const Icon(Icons.person_add),
+        icon: const Icon(Icons.person_add_rounded),
         label: const Text('Crear'),
       ),
       body: _cargando
           ? const EstadoCargando(texto: 'Cargando usuarios…')
           : _usuarios.isEmpty
               ? EstadoVacio(
-                  icono: Icons.people_outline,
+                  icono: Icons.people_outline_rounded,
                   titulo: 'Sin datos',
                   subtitulo: 'Sincroniza para ver la lista.',
                   textoAccion: 'Actualizar',
@@ -506,19 +489,19 @@ Hola $username, estas son tus credenciales para la app del gym:
                             if (esDueno)
                               const Chip(
                                 label: Text('Dueño',
-                                    style: TextStyle(fontSize: 10)),
+                                    style: AppTexto.minuscula),
                                 visualDensity: VisualDensity.compact,
                               )
                             else if (esAdmin)
                               const Chip(
                                 label: Text('Admin',
-                                    style: TextStyle(fontSize: 10)),
+                                    style: AppTexto.minuscula),
                                 visualDensity: VisualDensity.compact,
                               ),
                             if (bloqueado && !esDueno)
                               const Chip(
                                 label: Text('Bloqueado',
-                                    style: TextStyle(fontSize: 10)),
+                                    style: AppTexto.minuscula),
                                 visualDensity: VisualDensity.compact,
                               ),
                           ],
@@ -528,23 +511,19 @@ Hola $username, estas son tus credenciales para la app del gym:
                           children: [
                             Text(
                               'Último acceso: $ultimoRel',
-                              style: const TextStyle(fontSize: 12),
+                              style: AppTexto.metadato,
                             ),
                             if (dispositivo.isNotEmpty)
                               Text(
                                 dispositivo,
-                                style: TextStyle(
-                                    fontSize: 12,
-                                    color: AppColores.textoSecundario(
+                                style: AppTexto.metadato.copyWith(color: AppColores.textoSecundario(
                                         context)),
                               ),
                             // v1.3.3: versión de la app del usuario.
                             if (appVersion.isNotEmpty)
                               Text(
                                 'App: v$appVersion',
-                                style: TextStyle(
-                                    fontSize: 12,
-                                    color: AppColores.textoSecundario(
+                                style: AppTexto.metadato.copyWith(color: AppColores.textoSecundario(
                                         context)),
                               ),
                           ],

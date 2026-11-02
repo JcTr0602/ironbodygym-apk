@@ -56,7 +56,7 @@ class _PlantillasScreenState extends State<PlantillasScreen> {
                 await _editarPlantilla(context, null);
                 _cargar();
               },
-              icon: const Icon(Icons.add),
+              icon: const Icon(Icons.add_rounded),
               label: const Text('Nueva plantilla'),
             )
           : null,
@@ -83,8 +83,8 @@ class _PlantillasScreenState extends State<PlantillasScreen> {
                       for (final p in _plantillas)
                         Card(
                           child: ListTile(
-                            leading: const Icon(Icons.message,
-                                color: AppColores.naranja),
+                            leading: Icon(Icons.message_rounded,
+                                color: AppColores.textoSecundario(context)),
                             title: Text('${p['nombre']}'),
                             subtitle: Text('${p['cuerpo']}',
                                 maxLines: 2,
@@ -130,7 +130,7 @@ class _PlantillasScreenState extends State<PlantillasScreen> {
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setS) => DialogoApp(
           titulo: p == null ? 'Nueva plantilla' : 'Editar plantilla',
-          iconoTitulo: Icons.message,
+          iconoTitulo: Icons.message_rounded,
           contenido: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -179,8 +179,7 @@ class _PlantillasScreenState extends State<PlantillasScreen> {
     if (ok != true || !context.mounted) return;
     if (nombreCtrl.text.trim().isEmpty ||
         cuerpoCtrl.text.trim().isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('Nombre y texto son obligatorios.')));
+      mostrarSnack(context, 'Nombre y texto son obligatorios.', significado: SignificadoChip.alerta);
       return;
     }
     if (p == null) {
@@ -208,7 +207,7 @@ class _PlantillasScreenState extends State<PlantillasScreen> {
       context: context,
       builder: (ctx) => DialogoApp(
         titulo: 'Vista previa: ${p['nombre']}',
-        iconoTitulo: Icons.preview,
+        iconoTitulo: Icons.preview_rounded,
         contenido: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -284,7 +283,7 @@ class _PlantillasScreenState extends State<PlantillasScreen> {
                   .toList();
           return DialogoApp(
             titulo: 'Elegir cliente',
-            iconoTitulo: Icons.person,
+            iconoTitulo: Icons.person_rounded,
             contenido: SizedBox(
               width: double.maxFinite,
               height: 380,
@@ -350,7 +349,7 @@ class _PlantillasScreenState extends State<PlantillasScreen> {
       context: context,
       builder: (ctx) => DialogoApp(
         titulo: 'Enviar a ${cliente['nombre']}',
-        iconoTitulo: Icons.send,
+        iconoTitulo: Icons.send_rounded,
         contenido: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -377,8 +376,7 @@ class _PlantillasScreenState extends State<PlantillasScreen> {
     if (enviar != true || !mounted) return;
     final tel = normalizarTelefonoWaMe('${cliente['telefono'] ?? ''}');
     if (tel.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('El cliente no tiene un teléfono válido.')));
+      mostrarSnack(context, 'El cliente no tiene un teléfono válido.', significado: SignificadoChip.alerta);
       return;
     }
     final url = Uri.parse(
@@ -387,8 +385,7 @@ class _PlantillasScreenState extends State<PlantillasScreen> {
       await launchUrl(url, mode: LaunchMode.externalApplication);
     } catch (_) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('No se pudo abrir WhatsApp.')));
+      mostrarSnack(context, 'No se pudo abrir WhatsApp.', significado: SignificadoChip.error);
     }
   }
 }

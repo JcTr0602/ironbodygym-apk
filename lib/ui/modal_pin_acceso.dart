@@ -10,6 +10,7 @@ import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import 'diseno.dart';
+import 'componentes.dart';
 
 /// Sanitiza el teléfono para wa.me (regla de Argón):
 /// - Limpia no-numéricos.
@@ -41,11 +42,8 @@ void mostrarModalPin(
           const SizedBox(height: AppEspacio.sm),
           Center(
             child: Text(pin,
-                style: const TextStyle(
-                    fontSize: 36,
-                    fontWeight: FontWeight.bold,
-                    letterSpacing: 8,
-                    color: AppColores.naranja)),
+                style: AppTexto.display.copyWith(
+                    letterSpacing: 8, color: AppColores.naranja)),
           ),
           const SizedBox(height: AppEspacio.sm),
           const Text(
@@ -56,26 +54,21 @@ void mostrarModalPin(
       ),
       actions: [
         TextButton.icon(
-          icon: const Icon(Icons.copy, size: 18),
+          icon: const Icon(Icons.copy_rounded, size: 18),
           label: const Text('Copiar PIN'),
           onPressed: () {
             Clipboard.setData(ClipboardData(text: pin));
-            ScaffoldMessenger.of(ctx).showSnackBar(
-                const SnackBar(
-                    content: Text('PIN copiado')));
+            mostrarSnack(ctx, 'PIN copiado');
           },
         ),
         // Botón WhatsApp siempre visible (Argón): si el teléfono es
         // inválido, muestra alerta en vez de ocultar el botón.
         TextButton.icon(
-          icon: const Icon(Icons.chat, size: 18),
+          icon: const Icon(Icons.chat_rounded, size: 18),
           label: const Text('WhatsApp'),
           onPressed: () {
             if (telWa == null) {
-              ScaffoldMessenger.of(ctx).showSnackBar(
-                  SnackBar(
-                      content: Text(
-                          'Teléfono inválido para WhatsApp ("$telefono"). Usa Copiar PIN.')));
+              mostrarSnack(ctx, 'Teléfono inválido para WhatsApp ("$telefono"). Usa Copiar PIN.', significado: SignificadoChip.alerta);
               return;
             }
             final mensaje =

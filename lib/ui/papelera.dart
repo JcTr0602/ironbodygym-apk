@@ -98,25 +98,20 @@ class _PapeleraScreenState extends State<PapeleraScreen> {
     final id = (c['id'] as num?)?.toInt();
     if (id == null || id <= 0) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-            content: Text(
-                'No se pudo recuperar: cliente sin identificador válido.')));
+        mostrarSnack(context, 'No se pudo recuperar: cliente sin identificador válido.', significado: SignificadoChip.error);
       }
       return null;
     }
     if (esVistaProtegida(c)) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text(mensajeClienteProtegido)));
+        mostrarSnack(context, mensajeClienteProtegido, significado: SignificadoChip.alerta);
       }
       return null;
     }
     final zombies = await LocalDb.instance.clientesConBorradoEnVuelo();
     if (zombies.contains(id)) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-            content: Text(
-                'Este cliente tiene un borrado en curso; no se puede recuperar ahora.')));
+        mostrarSnack(context, 'Este cliente tiene un borrado en curso; no se puede recuperar ahora.', significado: SignificadoChip.alerta);
       }
       return null;
     }
@@ -130,7 +125,7 @@ class _PapeleraScreenState extends State<PapeleraScreen> {
       mensaje:
           '¿Reactivar a ${c['nombre']}? Volverá a aparecer en las listas.',
       aceptar: 'Recuperar',
-      icono: Icons.restore_from_trash,
+      icono: Icons.restore_from_trash_rounded,
     );
     if (ok != true || !mounted) return;
     final id = await _idRecuperable(c);
@@ -143,8 +138,7 @@ class _PapeleraScreenState extends State<PapeleraScreen> {
         payload: {'cliente_id': id, 'estado': 'activo'},
       );
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('${c['nombre']} recuperado')));
+      mostrarSnack(context, '${c['nombre']} recuperado', significado: SignificadoChip.exito);
       _cargar();
       SyncEngine.instance.push();
     } finally {
@@ -160,7 +154,7 @@ class _PapeleraScreenState extends State<PapeleraScreen> {
       mensaje:
           '¿Reactivar a ${c['nombre']} y registrar su pago ahora?',
       aceptar: 'Continuar',
-      icono: Icons.autorenew,
+      icono: Icons.autorenew_rounded,
     );
     if (ok != true || !mounted) return;
     // P2#3-parte: Casa nunca paga: bloquear ANTES de pagoDialogo
@@ -220,8 +214,7 @@ class _PapeleraScreenState extends State<PapeleraScreen> {
         );
       });
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('${c['nombre']} renovado')));
+      mostrarSnack(context, '${c['nombre']} renovado', significado: SignificadoChip.exito);
       _cargar();
       SyncEngine.instance.push();
     } finally {
@@ -266,7 +259,7 @@ class _PapeleraScreenState extends State<PapeleraScreen> {
       mensaje: '¿Borrar PARA SIEMPRE a $nombres$mas?\n\n'
           'Esta acción no se puede deshacer. Solo el dueño puede hacerlo.',
       aceptar: 'Eliminar para siempre',
-      icono: Icons.delete_forever,
+      icono: Icons.delete_forever_rounded,
       peligro: true,
     );
     if (ok != true || !mounted) return;
@@ -277,7 +270,7 @@ class _PapeleraScreenState extends State<PapeleraScreen> {
       mensaje:
           'Última oportunidad. Los datos se borrarán permanentemente.',
       aceptar: 'Sí, eliminar',
-      icono: Icons.warning,
+      icono: Icons.warning_rounded,
       peligro: true,
     );
     if (ok2 != true || !mounted) return;
@@ -344,11 +337,10 @@ class _PapeleraScreenState extends State<PapeleraScreen> {
       }
     });
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(modo == 'conservar'
+    mostrarSnack(context, modo == 'conservar'
             ? '${_seleccionados.length} eliminados conservando '
                 'estadísticas'
-            : '${_seleccionados.length} eliminados definitivamente')));
+            : '${_seleccionados.length} eliminados definitivamente', significado: SignificadoChip.exito);
     setState(() => _seleccionados.clear());
     _cargar();
     SyncEngine.instance.push();
@@ -428,11 +420,11 @@ class _PapeleraScreenState extends State<PapeleraScreen> {
               onChanged: (val) => setState(() => _filtro = val),
               decoration: InputDecoration(
                 hintText: 'Buscar por nombre, carnet o teléfono...',
-                prefixIcon: const Icon(Icons.search),
+                prefixIcon: const Icon(Icons.search_rounded),
                 suffixIcon: _filtro.isNotEmpty
                     ? IconButton(
                         tooltip: 'Limpiar búsqueda',
-                        icon: const Icon(Icons.clear),
+                        icon: const Icon(Icons.clear_rounded),
                         onPressed: () {
                           _searchCtrl.clear();
                           setState(() => _filtro = '');
@@ -462,7 +454,7 @@ class _PapeleraScreenState extends State<PapeleraScreen> {
                   const Spacer(),
                   if (esDueno)
                     ElevatedButton.icon(
-                      icon: const Icon(Icons.delete_forever,
+                      icon: const Icon(Icons.delete_forever_rounded,
                           size: 18),
                       label: const Text('Eliminar'),
                       style: ElevatedButton.styleFrom(
@@ -477,12 +469,12 @@ class _PapeleraScreenState extends State<PapeleraScreen> {
           Expanded(
             child: _res.isEmpty
                 ? const EstadoVacio(
-                    icono: Icons.delete_outline,
+                    icono: Icons.delete_outline_rounded,
                     titulo: 'Papelera vacía',
                   )
                 : listaFiltrada.isEmpty
                     ? EstadoVacio(
-                        icono: Icons.search_off,
+                        icono: Icons.search_off_rounded,
                         titulo:
                             'No se encontraron clientes inactivos para «$_filtro».',
                       )
@@ -548,7 +540,7 @@ class _PapeleraScreenState extends State<PapeleraScreen> {
                             children: [
                               TextButton(
                                 child: const Icon(
-                                    Icons.restore_from_trash),
+                                    Icons.restore_from_trash_rounded),
                                 onPressed: () =>
                                     _recuperar(c),
                               ),

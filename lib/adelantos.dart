@@ -186,8 +186,17 @@ class AdelantosService {
   /// este segundo criterio no aparecían en su libro de nómina.
   Future<List<Map<String, dynamic>>> eventosDe(String entrenadorId,
       {int? telegramId}) async {
+    final espejoCompleto = await _db.allMirror('adelantos');
+    // FIN-09 de Argón (1.20): uuids ya espejados, para no
+    // duplicar el provisional si el pull bajó el adelanto y la
+    // op aún figura en pendingOps (ventana push→pull). Es el
+    // mismo cruce que ya hacía sumaAdelantosPendientes.
+    final uuidsEspejo = <String>{
+      for (final a in espejoCompleto)
+        if (a['op_uuid'] != null) '${a['op_uuid']}',
+    };
     final filas = [
-      for (final a in await _db.allMirror('adelantos'))
+      for (final a in espejoCompleto)
         if ('${a['entrenador']}' == entrenadorId ||
             (telegramId != null &&
                 LocalDb.normalizarTelegramId(
@@ -204,7 +213,8 @@ class AdelantosService {
           final id = (p['adelanto_id'] as num?)?.toInt();
           if (id != null) anulacionesPendientes.add(id);
         } else if (op['tipo'] == 'registrar_adelanto' &&
-            '${p['entrenador']}' == entrenadorId) {
+            '${p['entrenador']}' == entrenadorId &&
+            !uuidsEspejo.contains('${op['op_uuid']}')) {
           filas.add({
             'id': null,
             'entrenador': entrenadorId,
@@ -251,6 +261,17 @@ class AdelantosService {
     }
     for (final op in await _db.pendingOps()) {
       if (op['tipo'] != 'liquidar_nomina') continue;
+      try {
+        final p = jsonDecode(op['payload'] as String)
+            as Map<String, dynamic>;
+        if (coincide(p)) return true;
+      } catch (_) {}
+    }
+    // T22 (1.20): también cuentan las ops ya APLICADAS (el
+    // servidor aceptó la liquidación pero el espejo aún no
+    // bajó: en esa ventana el botón «Marcar como pagada»
+    // reaparecía). opsDeTipo trae pendiente/enviada/aplicada.
+    for (final op in await _db.opsDeTipo('liquidar_nomina')) {
       try {
         final p = jsonDecode(op['payload'] as String)
             as Map<String, dynamic>;
@@ -318,7 +339,7 @@ class AdelantosService {
     if (ent == null || mes == null) {
       for (final a in await _db.allMirror('adelantos')) {
         if ((a['id'] as num?)?.toInt() == adelantoId) {
-          ent ??= '${a['entrenador'] ?? ''}';
+          ent ??= '${a['entrenador'] ?? a['entrenador_telegram_id'] ?? ''}';
           final m = '${a['mes_nomina'] ?? ''}';
           if (mes == null && m.length == 7) mes = m;
           break;
@@ -336,6 +357,45 @@ class AdelantosService {
     return _queueYEmpujar('anular_adelanto', {'adelanto_id': adelantoId});
   }
 
+  /// W3 (1.20): corrige el origen de un adelanto (solo dueño
+  /// en el servidor). Misma guarda previa que [anular]: si el
+  /// mes de nómina ya está liquidado, se rechaza antes de
+  /// encolar. [descuentaA] solo aplica al pasar a caja_turno;
+  /// si es null, el servidor usa al entrenador del adelanto.
+  /// Sin edición optimista del espejo: el cambio se ve al
+  /// sincronizar, igual que la anulación.
+  Future<void> corregirOrigen(int adelantoId,
+      {required String nuevoOrigen,
+      int? descuentaA,
+      String? entrenadorId,
+      String? mesNomina}) async {
+    var ent = entrenadorId;
+    var mes = mesNomina;
+    if (ent == null || mes == null) {
+      for (final a in await _db.allMirror('adelantos')) {
+        if ((a['id'] as num?)?.toInt() == adelantoId) {
+          ent ??= '${a['entrenador'] ?? a['entrenador_telegram_id'] ?? ''}';
+          final m = '${a['mes_nomina'] ?? ''}';
+          if (mes == null && m.length == 7) mes = m;
+          break;
+        }
+      }
+    }
+    if (ent != null &&
+        ent.isNotEmpty &&
+        mes != null &&
+        await nominaLiquidada(mes, ent)) {
+      throw StateError(
+          'La nómina de $mes ya está liquidada: no se puede '
+          'corregir el origen de este adelanto.');
+    }
+    return _queueYEmpujar('corregir_origen_adelanto', {
+      'adelanto_id': adelantoId,
+      'nuevo_origen': nuevoOrigen,
+      if (descuentaA != null) 'descuenta_a': descuentaA,
+    });
+  }
+
   Future<void> liquidarNomina({
     required String mes,
     required String entrenadorId,
@@ -345,6 +405,13 @@ class AdelantosService {
     // que la historia no cambie si la tarifa cambia después.
     double? tarifaPorCliente,
     double? neto,
+    // T22 (1.20): desglose completo de la foto (lo que el
+    // entrenador verá al confirmar su recepción).
+    double? base,
+    double? bonos,
+    double? comisiones,
+    double? adelantos,
+    double? deudaEntrante,
   }) =>
       _queueYEmpujar('liquidar_nomina', {
         'mes': mes,
@@ -359,6 +426,76 @@ class AdelantosService {
         if (tarifaPorCliente != null)
           'tarifa_por_cliente': tarifaPorCliente,
         if (neto != null) 'neto': neto,
+        if (base != null) 'base': base,
+        if (bonos != null) 'bonos': bonos,
+        if (comisiones != null) 'comisiones': comisiones,
+        if (adelantos != null) 'adelantos': adelantos,
+        if (deudaEntrante != null) 'deuda_entrante': deudaEntrante,
+      });
+
+  /// T22 (1.20): coincidencia de una fila de nómina (espejo u
+  /// op) con un entrenador, por id APK o por telegram_id.
+  bool _coincideEntrenador(Map<String, dynamic> fila, String mes,
+      String entrenadorId, int? telegramId) {
+    if ('${fila['mes']}' != mes) return false;
+    if ('${fila['entrenador']}' == entrenadorId) return true;
+    final tid = LocalDb.normalizarTelegramId(
+        fila['entrenador_telegram_id']);
+    return telegramId != null && tid == telegramId;
+  }
+
+  /// T22 (1.20): la foto de liquidación de un mes (espejo
+  /// nomina_liquidada_snapshot), o null si aún no bajó.
+  Future<Map<String, dynamic>?> snapshotNomina(String mes,
+      {required String entrenadorId, int? telegramId}) async {
+    for (final s
+        in await _db.allMirror('nomina_liquidada_snapshot')) {
+      if (_coincideEntrenador(s, mes, entrenadorId, telegramId)) {
+        return s;
+      }
+    }
+    return null;
+  }
+
+  /// T22 (1.20): la confirmación de recepción de un mes: la
+  /// fila del espejo, o una marca local si la op ya salió de
+  /// este teléfono (pendiente/enviada/aplicada) y el espejo
+  /// aún no bajó. Null si no hay confirmación.
+  Future<Map<String, dynamic>?> confirmacionNomina(String mes,
+      {required String entrenadorId, int? telegramId}) async {
+    for (final c in await _db.allMirror('nomina_confirmaciones')) {
+      if (_coincideEntrenador(c, mes, entrenadorId, telegramId)) {
+        return c;
+      }
+    }
+    for (final op
+        in await _db.opsDeTipo('nomina_confirmar_recepcion')) {
+      try {
+        final p = jsonDecode(op['payload'] as String)
+            as Map<String, dynamic>;
+        if (_coincideEntrenador(p, mes, entrenadorId, telegramId)) {
+          return {'mes': mes, 'local': true};
+        }
+      } catch (_) {}
+    }
+    return null;
+  }
+
+  /// T22 (1.20): el entrenador confirma que recibió su
+  /// nómina del mes (el servidor exige que sea él mismo y
+  /// que el mes esté liquidado).
+  Future<void> confirmarRecepcionNomina({
+    required String mes,
+    required String entrenadorId,
+    required String entrenadorNombre,
+    int? entrenadorTelegramId,
+  }) =>
+      _queueYEmpujar('nomina_confirmar_recepcion', {
+        'mes': mes,
+        'entrenador': entrenadorId,
+        'entrenador_nombre': entrenadorNombre,
+        if (entrenadorTelegramId != null)
+          'entrenador_telegram_id': entrenadorTelegramId,
       });
 
   /// El mes en curso ('YYYY-MM') en hora de La Habana.

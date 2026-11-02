@@ -47,6 +47,7 @@ import 'listas.dart';
 import 'mi_dia.dart';
 import 'mi_turno.dart';
 import 'hub_turnos.dart';
+import 'turno_abrir.dart';
 import 'nomina.dart';
 import 'pago.dart';
 import 'pago_diario.dart';
@@ -931,11 +932,10 @@ class _HomeScreenState extends State<HomeScreen>
                   child: _gridMas(),
                 ),
                 const SizedBox(height: AppEspacio.lg),
-                const Center(
+                Center(
                   child: Text('© Creado por JcTr0602',
-                      style: TextStyle(
+                      style: AppTexto.minuscula.copyWith(
                           color: Colors.grey,
-                          fontSize: 12,
                           fontWeight: FontWeight.bold)),
                 ),
                 // v1.3.6: aire inferior para que el FAB de acciones rápidas
@@ -984,7 +984,7 @@ class _HomeScreenState extends State<HomeScreen>
           onTap: () => _ir(const ColaScreen()),
           child: Row(
             children: [
-              const Icon(Icons.sync_problem,
+              const Icon(Icons.sync_problem_rounded,
                   color: AppColores.error),
               const SizedBox(width: AppEspacio.sm),
               const Expanded(
@@ -994,7 +994,7 @@ class _HomeScreenState extends State<HomeScreen>
                 ),
               ),
               IconButton(
-                icon: const Icon(Icons.close, size: 18),
+                icon: const Icon(Icons.close_rounded, size: 18),
                 onPressed: () =>
                     setState(() => _falloSync = null),
               ),
@@ -1012,7 +1012,7 @@ class _HomeScreenState extends State<HomeScreen>
           onTap: () => _ir(const ColaScreen()),
           child: Row(
             children: [
-              const Icon(Icons.warning_amber,
+              const Icon(Icons.warning_amber_rounded,
                   color: AppColores.alerta),
               const SizedBox(width: AppEspacio.sm),
               Expanded(
@@ -1055,7 +1055,7 @@ class _HomeScreenState extends State<HomeScreen>
                   child: FittedBox(
                     fit: BoxFit.scaleDown,
                     child: Text(texto,
-                        style: const TextStyle(fontSize: 11)),
+                        style: AppTexto.etiqueta),
                   ),
                 ),
               ],
@@ -1100,13 +1100,13 @@ class _HomeScreenState extends State<HomeScreen>
             children: [
               // Avatar tocable -> Ajustes
               InkWell(
-                borderRadius: BorderRadius.circular(20),
+                borderRadius: BorderRadius.circular(999),
                 onTap: () => _ir(const AjustesScreen()),
                 child: Tooltip(
                   message: 'Ajustes',
                   child: ClipRRect(
                     borderRadius:
-                        BorderRadius.circular(20),
+                        BorderRadius.circular(999),
                     child: Image.asset('assets/logo.jpg',
                         height: 40,
                         width: 40,
@@ -1121,7 +1121,7 @@ class _HomeScreenState extends State<HomeScreen>
                       CrossAxisAlignment.start,
                   children: [
                     Text('${saludoHora()}, $nombre',
-                        style: AppTexto.titulo.copyWith(
+                        style: AppTexto.tituloPagina.copyWith(
                             color: Colors.white),
                         overflow:
                             TextOverflow.ellipsis),
@@ -1166,8 +1166,7 @@ class _HomeScreenState extends State<HomeScreen>
                   children: [
                     Flexible(
                       child: Text(_fechaHoy(),
-                          style: AppTexto.secundario.copyWith(
-                              color: Colors.white60, fontSize: 12),
+                          style: AppTexto.metadato.copyWith(color: Colors.white60),
                           overflow: TextOverflow.ellipsis),
                     ),
                     const SizedBox(width: 8),
@@ -1192,16 +1191,15 @@ class _HomeScreenState extends State<HomeScreen>
           horizontal: 8, vertical: 2),
       decoration: BoxDecoration(
         color: AppColores.naranja.withValues(alpha: 0.2),
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: BorderRadius.circular(12),
         border: Border.all(
             color:
                 AppColores.naranja.withValues(alpha: 0.5)),
       ),
       child: Text(
         _rolSimple(),
-        style: const TextStyle(
+        style: AppTexto.etiqueta.copyWith(
             color: AppColores.naranja,
-            fontSize: 11,
             fontWeight: FontWeight.bold),
       ),
     );
@@ -1222,15 +1220,15 @@ class _HomeScreenState extends State<HomeScreen>
             right: 8,
             top: 8,
             child: Container(
-              padding: const EdgeInsets.all(4),
+              padding: const EdgeInsets.all(3),
               decoration: const BoxDecoration(
                 color: AppColores.alerta,
                 shape: BoxShape.circle,
               ),
               child: Text(
                 '${_pendientesSync > 9 ? '9+' : _pendientesSync}',
-                style: const TextStyle(
-                    color: Colors.white, fontSize: 9),
+                style: AppTexto.minuscula.copyWith(
+                    color: Colors.white, fontWeight: FontWeight.bold),
               ),
             ),
           ),
@@ -1253,15 +1251,15 @@ class _HomeScreenState extends State<HomeScreen>
             right: 8,
             top: 8,
             child: Container(
-              padding: const EdgeInsets.all(4),
+              padding: const EdgeInsets.all(3),
               decoration: const BoxDecoration(
                 color: AppColores.error,
                 shape: BoxShape.circle,
               ),
               child: Text(
                 '${_noLeidas > 9 ? '9+' : _noLeidas}',
-                style: const TextStyle(
-                    color: Colors.white, fontSize: 9),
+                style: AppTexto.minuscula.copyWith(
+                    color: Colors.white, fontWeight: FontWeight.bold),
               ),
             ),
           ),
@@ -1305,16 +1303,16 @@ class _HomeScreenState extends State<HomeScreen>
                     borderRadius:
                         BorderRadius.circular(AppRadio.md),
                     onTap: () => _ir(const MiTurnoScreen()),
-                    child: const Row(
+                    child: Row(
                       children: [
-                        Icon(Icons.schedule,
+                        Icon(Icons.schedule_rounded,
                             size: 18,
-                            color: AppColores.naranja),
-                        SizedBox(width: 6),
+                            color: AppColores.textoSecundario(context)),
+                        SizedBox(width: 8),
                         Text('Mi Turno Hoy',
                             style: AppTexto.subtitulo),
                         SizedBox(width: 4),
-                        Icon(Icons.chevron_right,
+                        Icon(Icons.chevron_right_rounded,
                             color: Colors.grey, size: 18),
                       ],
                     ),
@@ -1413,12 +1411,12 @@ class _HomeScreenState extends State<HomeScreen>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Row(
+          Row(
             children: [
-              Icon(Icons.insights,
+              Icon(Icons.insights_rounded,
                   size: 18,
-                  color: AppColores.naranja),
-              SizedBox(width: 6),
+                  color: AppColores.textoSecundario(context)),
+              SizedBox(width: 8),
               Text('Estadísticas Rápidas',
                   style: AppTexto.subtitulo),
             ],
@@ -1508,7 +1506,7 @@ class _HomeScreenState extends State<HomeScreen>
                 child: Row(
                   children: [
                     const Icon(
-                        Icons.warning_amber,
+                        Icons.warning_amber_rounded,
                         size: 16,
                         color:
                             AppColores.alertaOscuro),
@@ -1548,7 +1546,7 @@ class _HomeScreenState extends State<HomeScreen>
                       },
                       child: const Padding(
                         padding: EdgeInsets.all(4),
-                        child: Icon(Icons.close,
+                        child: Icon(Icons.close_rounded,
                             size: 16,
                             color: AppColores.alertaOscuro),
                       ),
@@ -1602,17 +1600,14 @@ class _HomeScreenState extends State<HomeScreen>
 
   Widget _chipTurnoTexto(String texto, Color color) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
         color: color.withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(20),
         border: Border.all(color: color.withValues(alpha: 0.4)),
       ),
       child: Text(texto,
-          style: TextStyle(
-              color: color,
-              fontSize: 12,
-              fontWeight: FontWeight.w600)),
+          style: AppTexto.etiqueta.copyWith(color: color)),
     );
   }
 
@@ -1626,7 +1621,7 @@ class _HomeScreenState extends State<HomeScreen>
     final procesando = _procesandoTurno;
     if (t == null) {
       return ElevatedButton.icon(
-        icon: const Icon(Icons.play_arrow, size: 18),
+        icon: const Icon(Icons.play_arrow_rounded, size: 18),
         label: Text(procesando ? 'Abriendo…' : 'Abrir turno'),
         style: ElevatedButton.styleFrom(
           backgroundColor: AppColores.exito,
@@ -1639,7 +1634,7 @@ class _HomeScreenState extends State<HomeScreen>
       case 'abierto_local':
       case 'abierto_sincronizado':
         return OutlinedButton.icon(
-          icon: const Icon(Icons.lock_open, size: 18),
+          icon: const Icon(Icons.lock_open_rounded, size: 18),
           label: Text(procesando ? 'Procesando…' : 'Cerrar turno'),
           onPressed: procesando ? null : _cierreRapido,
         );
@@ -1667,11 +1662,12 @@ class _HomeScreenState extends State<HomeScreen>
         children: [
           Row(
             children: [
-              Icon(Icons.warning_amber,
+              Icon(Icons.warning_amber_rounded,
                   size: 18, color: AppColores.alerta),
               const SizedBox(width: 8),
               Text('${pend.length} turno(s) sin cerrar',
-                  style: const TextStyle(fontWeight: FontWeight.w700)),
+                  style: AppTexto.secundario
+                      .copyWith(fontWeight: FontWeight.w700)),
             ],
           ),
           const SizedBox(height: 8),
@@ -1681,12 +1677,12 @@ class _HomeScreenState extends State<HomeScreen>
               child: Text(
                   '• ${t['fecha_turno']} · ${_nombreTurno('${t['turno']}')} '
                   '· abierto ${horaCorta('${t['hora_apertura']}')}',
-                  style: const TextStyle(fontSize: 13)),
+                  style: AppTexto.secundario),
             ),
           const SizedBox(height: 4),
           const Text(
             'Se marcarán como "no cerrado" al abrir el turno actual.',
-            style: TextStyle(fontSize: 12),
+            style: AppTexto.metadato,
           ),
         ],
       ),
@@ -1711,7 +1707,14 @@ class _HomeScreenState extends State<HomeScreen>
     if (_procesandoTurno) return;
     setState(() => _procesandoTurno = true);
     try {
-      await TurnoService.instance.abrirTurno();
+      // F9: al abrir se puede marcar a quién se cubre.
+      final abiertoOk = await abrirTurnoConSuplente(context);
+      if (!abiertoOk) {
+        if (mounted) {
+          setState(() => _procesandoTurno = false);
+        }
+        return;
+      }
       if (mounted) {
         setState(() {
           _procesandoTurno = false;
@@ -1721,8 +1724,7 @@ class _HomeScreenState extends State<HomeScreen>
     } catch (e) {
       if (mounted) {
         setState(() => _procesandoTurno = false);
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text('No se pudo abrir el turno: $e')));
+        mostrarSnack(context, 'No se pudo abrir el turno: $e', significado: SignificadoChip.error);
       }
     }
   }
@@ -1772,8 +1774,7 @@ class _HomeScreenState extends State<HomeScreen>
         if (!mounted) return;
 
         if (prep['ok'] != true) {
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-              content: Text('No hay turno abierto.')));
+          mostrarSnack(context, 'No hay turno abierto.', significado: SignificadoChip.alerta);
           return;
         }
 
@@ -1813,7 +1814,7 @@ class _HomeScreenState extends State<HomeScreen>
                     'Cerrar de todos modos registra el cierre con '
                     'incidencias; no significa que los pagos estén '
                     'confirmados.',
-                    style: TextStyle(fontSize: 12),
+                    style: AppTexto.metadato,
                   ),
                 ],
               ),
@@ -1846,21 +1847,19 @@ class _HomeScreenState extends State<HomeScreen>
         if (!mounted) return;
         final estado = '${res['estado'] ?? ''}';
         final conInc = res['tiene_incidencias'] == 1;
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text(estado == 'cerrado_sincronizado'
+        mostrarSnack(context, estado == 'cerrado_sincronizado'
                 ? (conInc
                     ? 'Turno cerrado ✓ con incidencias ⚠️'
                     : 'Turno cerrado ✓')
                 : 'Turno cerrado ⏳ (pendiente de sincronizar)'
-                    '${conInc ? ' con incidencias ⚠️' : ''}')));
+                    '${conInc ? ' con incidencias ⚠️' : ''}', significado: SignificadoChip.exito);
         await _cargar(forceRefresh: true);
         return; // fin del flujo
       }
     } catch (e) {
       cerrarDialogoSync();
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text('Error al cerrar el turno: $e')));
+        mostrarSnack(context, 'Error al cerrar el turno: $e', significado: SignificadoChip.error);
       }
     } finally {
       cerrarDialogoSync();
@@ -1925,22 +1924,22 @@ class _HomeScreenState extends State<HomeScreen>
   Widget _tiraAlertas() {
     final filas = <({IconData icono, String texto, int conteo, Color color, VoidCallback ir})>[];
     if (_vencen > 0) {
-      filas.add((icono: Icons.event_available,
+      filas.add((icono: Icons.event_available_rounded,
           texto: 'Vencen hoy', conteo: _vencen, color: AppColores.error,
           ir: () => _ir(const ListasScreen(inicial: 0))));
     }
     if (_atras > 0) {
-      filas.add((icono: Icons.schedule,
+      filas.add((icono: Icons.schedule_rounded,
           texto: 'Atrasados', conteo: _atras, color: AppColores.alerta,
           ir: () => _ir(const ListasScreen(inicial: 2))));
     }
     if (_cumpleHoy > 0) {
-      filas.add((icono: Icons.cake,
+      filas.add((icono: Icons.cake_rounded,
           texto: 'Cumpleaños', conteo: _cumpleHoy, color: AppColores.info,
           ir: () => _ir(const CumpleanosScreen())));
     }
     if (_incidenciasAbiertas > 0) {
-      filas.add((icono: Icons.report_problem_outlined,
+      filas.add((icono: Icons.report_problem_rounded,
           texto: 'Incidencias', conteo: _incidenciasAbiertas,
           color: AppColores.alertaOscuro,
           ir: () => _ir(const ListaIncidenciasScreen())));
@@ -1961,16 +1960,16 @@ class _HomeScreenState extends State<HomeScreen>
                 onTap: f.ir,
                 child: Padding(
                   padding:
-                      const EdgeInsets.symmetric(vertical: 6),
+                      const EdgeInsets.symmetric(vertical: 8),
                   child: Row(
                     children: [
                       Icon(f.icono, size: 20, color: f.color),
-                      const SizedBox(width: 10),
+                      const SizedBox(width: 8),
                       Expanded(
                         child: Text(f.texto, style: AppTexto.cuerpo),
                       ),
                       Text('${f.conteo}',
-                          style: AppTexto.titulo.copyWith(fontSize: 20)),
+                          style: AppTexto.tituloPagina),
                     ],
                   ),
                 ),
@@ -1994,7 +1993,7 @@ class _HomeScreenState extends State<HomeScreen>
         children: [
           Text(titulo,
               style: AppTexto.secundario.copyWith(
-                  fontWeight: FontWeight.w700, fontSize: 13)),
+                  fontWeight: FontWeight.w700)),
           const SizedBox(height: AppEspacio.sm),
           GridView.count(
             crossAxisCount: 2,
@@ -2076,7 +2075,7 @@ class _HomeScreenState extends State<HomeScreen>
           ),
           Icon(Icons.chevron_right_rounded,
               size: 20,
-              color: AppColores.naranja.withValues(alpha: 0.5)),
+              color: AppColores.textoSecundario(context)),
         ],
       ),
     );
@@ -2110,20 +2109,19 @@ class _HomeScreenState extends State<HomeScreen>
               padding: const EdgeInsets.symmetric(
                   horizontal: 8, vertical: 2),
               decoration: BoxDecoration(
-                color: const Color(0xFF22C55E).withValues(alpha: 0.15),
-                borderRadius: BorderRadius.circular(10),
+                color: AppColores.exito.withValues(alpha: 0.15),
+                borderRadius: BorderRadius.circular(12),
               ),
               child: Text('$pendientes',
-                  style: const TextStyle(
-                      color: Color(0xFF16A34A),
-                      fontWeight: FontWeight.w700,
-                      fontSize: 12)),
+                  style: AppTexto.etiqueta.copyWith(
+                      color: AppColores.exitoOscuro,
+                      fontWeight: FontWeight.w700)),
             ),
             const SizedBox(width: 4),
           ],
           Icon(Icons.chevron_right_rounded,
               size: 20,
-              color: AppColores.naranja.withValues(alpha: 0.5)),
+              color: AppColores.textoSecundario(context)),
         ],
       ),
     );
@@ -2160,12 +2158,11 @@ class _HomeScreenState extends State<HomeScreen>
                   horizontal: 8, vertical: 2),
               decoration: BoxDecoration(
                 color: badgeColor ?? AppColores.error,
-                borderRadius: BorderRadius.circular(10),
+                borderRadius: BorderRadius.circular(12),
               ),
               child: Text(badge > 99 ? '99+' : '$badge',
-                  style: const TextStyle(
+                  style: AppTexto.etiqueta.copyWith(
                       color: Colors.white,
-                      fontSize: 11,
                       fontWeight: FontWeight.bold)),
             ),
           ],
@@ -2189,12 +2186,11 @@ class _HomeScreenState extends State<HomeScreen>
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
       decoration: BoxDecoration(
         color: color,
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: BorderRadius.circular(12),
       ),
       child: Text('Turno ${t.toLowerCase()}',
-          style: const TextStyle(
+          style: AppTexto.etiqueta.copyWith(
               color: Colors.white,
-              fontSize: 11,
               fontWeight: FontWeight.bold)),
     );
   }
@@ -2255,7 +2251,7 @@ class _HomeScreenState extends State<HomeScreen>
                   iconoClaro: color,
                   tamanoIcono: 20)
               : IconoModuloBadge.naranja(icono, tamanoIcono: 20),
-          const SizedBox(height: 6),
+          const SizedBox(height: 8),
           Text(texto,
               style: AppTexto.minuscula.copyWith(
                   color: esAlerta
@@ -2522,9 +2518,9 @@ class _FabAccionesRapidasState extends State<_FabAccionesRapidas>
                 color: AppColores.naranja.withValues(alpha: 0.15),
               ),
               child: Icon(icono,
-                  color: AppColores.naranja, size: 17),
+                  color: AppColores.textoSecundario(context), size: 17),
             ),
-            const SizedBox(width: 6),
+            const SizedBox(width: 8),
             // FittedBox en vez de ellipsis para que "Pago diario" no se
             // trunque en móviles estrechos o con texto ampliado.
             Flexible(
@@ -2532,9 +2528,8 @@ class _FabAccionesRapidasState extends State<_FabAccionesRapidas>
                 fit: BoxFit.scaleDown,
                 alignment: Alignment.centerLeft,
                 child: Text(texto,
-                    style: TextStyle(
+                    style: AppTexto.secundario.copyWith(
                         color: AppColores.naranja,
-                        fontSize: 13,
                         fontWeight: FontWeight.w600)),
               ),
             ),

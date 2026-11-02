@@ -58,6 +58,13 @@ class _MiNominaScreenState extends State<MiNominaScreen> {
   double? _horasSinSubir;
   String _syncTexto = '';
   bool _pidiendo = false;
+  // T22 (1.20): liquidaciones mías pendientes de confirmar
+  // (cada una: mes + foto con desglose si ya bajó) y la
+  // última confirmación hecha, para el acuse visible.
+  String _miId = '';
+  List<Map<String, dynamic>> _porConfirmar = [];
+  Map<String, dynamic>? _ultimaConfirmada;
+  bool _confirmando = false;
 
   @override
   void initState() {
@@ -222,8 +229,50 @@ class _MiNominaScreenState extends State<MiNominaScreen> {
       horasSinSubir = horasSinSubirDesde(iso, ahoraHabana());
     } catch (_) {}
     final syncTexto = await textoUltimaSyncNomina();
+    // T22 (1.20): mis liquidaciones y su acuse. Una
+    // liquidación es mía si su telegram_id es el mío o su
+    // entrenador es mi id/usuario APK.
+    var porConfirmar = <Map<String, dynamic>>[];
+    Map<String, dynamic>? ultimaConfirmada;
+    try {
+      final miUser = await _miUsername();
+      final svc = AdelantosService.instance;
+      final liquidadas =
+          await LocalDb.instance.allMirror('nomina_liquidada');
+      final mias = liquidadas
+          .where((l) =>
+              (tid != null &&
+                  LocalDb.normalizarTelegramId(
+                          l['entrenador_telegram_id']) ==
+                      tid) ||
+              (miId.isNotEmpty && '${l['entrenador']}' == miId) ||
+              (miUser.isNotEmpty &&
+                  '${l['entrenador']}' == miUser))
+          .toList()
+        ..sort((a, b) => '${b['mes']}'.compareTo('${a['mes']}'));
+      for (final l in mias) {
+        final mesL = '${l['mes']}';
+        if (mesL.length != 7) continue;
+        final conf = await svc.confirmacionNomina(mesL,
+            entrenadorId: miId, telegramId: tid);
+        if (conf == null) {
+          final snap = await svc.snapshotNomina(mesL,
+              entrenadorId: miId, telegramId: tid);
+          porConfirmar.add({'mes': mesL, 'snapshot': snap});
+        } else if (ultimaConfirmada == null &&
+            conf['confirmada_en'] != null) {
+          ultimaConfirmada = {
+            'mes': mesL,
+            'confirmada_en': conf['confirmada_en'],
+          };
+        }
+      }
+    } catch (_) {}
     if (!mounted) return;
     setState(() {
+      _miId = miId;
+      _porConfirmar = porConfirmar;
+      _ultimaConfirmada = ultimaConfirmada;
       _pref = pref;
       _clientesPagados = clientesPagados;
       _tarifa = tarifa;
@@ -274,8 +323,7 @@ class _MiNominaScreenState extends State<MiNominaScreen> {
   Future<void> _copiarRecibo() async {
     await Clipboard.setData(ClipboardData(text: _recibo));
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Recibo copiado al portapapeles.')));
+    mostrarSnack(context, 'Recibo copiado al portapapeles.');
   }
 
   Future<void> _pedirAdelanto() async {
@@ -338,9 +386,7 @@ class _MiNominaScreenState extends State<MiNominaScreen> {
     // de negocio: un adelanto real no llega ahí).
     final monto = int.tryParse(montoTexto);
     if (monto == null || monto <= 0 || monto > 100000) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text(
-              'Escribe un monto entero mayor que 0 (máx. 100000).')));
+      mostrarSnack(context, 'Escribe un monto entero mayor que 0 (máx. 100000).', significado: SignificadoChip.alerta);
       return;
     }
     setState(() => _pidiendo = true);
@@ -348,17 +394,138 @@ class _MiNominaScreenState extends State<MiNominaScreen> {
       await SolicitudesAdelantoService.instance
           .pedir(monto: monto.toDouble(), motivo: motivoTexto);
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text(
-              'Solicitud guardada: sube al sincronizar y el dueño la decidirá.')));
+      mostrarSnack(context, 'Solicitud guardada: sube al sincronizar y el dueño la decidirá.', significado: SignificadoChip.exito);
       await _cargar();
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('No se pudo enviar: $e')));
+      mostrarSnack(context, 'No se pudo enviar: $e', significado: SignificadoChip.error);
     } finally {
       if (mounted) setState(() => _pidiendo = false);
     }
+  }
+
+  static const _meses = [
+    'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio',
+    'julio', 'agosto', 'septiembre', 'octubre', 'noviembre',
+    'diciembre',
+  ];
+
+  /// '2026-10' → 'octubre de 2026' (si no parsea, tal cual).
+  String _etiquetaMes(String mes) {
+    final m = int.tryParse(mes.length >= 7 ? mes.substring(5, 7) : '');
+    if (m == null || m < 1 || m > 12) return mes;
+    return '${_meses[m - 1]} de ${mes.substring(0, 4)}';
+  }
+
+  /// T22 (1.20): confirmar que recibí la nómina de un mes.
+  Future<void> _confirmarRecepcion(Map<String, dynamic> item) async {
+    if (_confirmando) return;
+    final mes = '${item['mes']}';
+    final ok = await DialogoApp.confirmar(
+      context,
+      titulo: '¿Recibiste tu nómina?',
+      mensaje: 'Confirmas que recibiste tu nómina de '
+          '${_etiquetaMes(mes)}. El dueño verá tu confirmación '
+          'con la fecha y la hora.',
+      aceptar: 'Sí, la recibí',
+    );
+    if (ok != true || !mounted) return;
+    setState(() => _confirmando = true);
+    try {
+      await AdelantosService.instance.confirmarRecepcionNomina(
+        mes: mes,
+        entrenadorId: _miId,
+        entrenadorNombre: AuthService().displayName,
+        entrenadorTelegramId: AuthService().telegramId,
+      );
+      if (!mounted) return;
+      mostrarSnack(context, 'Recepción confirmada. ¡Gracias!',
+          significado: SignificadoChip.exito);
+      await _cargar();
+    } catch (e) {
+      if (!mounted) return;
+      mostrarSnack(context, 'No se pudo confirmar: $e',
+          significado: SignificadoChip.error);
+    } finally {
+      if (mounted) setState(() => _confirmando = false);
+    }
+  }
+
+  /// T22 (1.20): tarjeta de una liquidación pendiente de mi
+  /// acuse, con el desglose de la foto (si ya bajó).
+  Widget _tarjetaPorConfirmar(Map<String, dynamic> item) {
+    final mes = '${item['mes']}';
+    final snap = item['snapshot'] as Map<String, dynamic>?;
+    double? v(String k) => (snap?[k] as num?)?.toDouble();
+    final neto = v('neto');
+    final base = v('base');
+    final bonos = v('bonos');
+    final comisiones = v('comisiones');
+    final adelantos = v('adelantos');
+    final deuda = v('deuda_entrante');
+    return Padding(
+      padding: const EdgeInsets.only(top: AppEspacio.md),
+      child: Tarjeta(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.fact_check_rounded,
+                    color: AppColores.naranja, size: 20),
+                const SizedBox(width: AppEspacio.sm),
+                Expanded(
+                  child: Text(
+                      'Nómina de ${_etiquetaMes(mes)} liquidada',
+                      style: AppTexto.subtitulo),
+                ),
+              ],
+            ),
+            const SizedBox(height: AppEspacio.sm),
+            if (snap == null)
+              const Text(
+                  'El dueño marcó tu nómina de este mes como '
+                  'pagada. El detalle aún no llega a tu '
+                  'teléfono; puedes confirmar igualmente.',
+                  style: AppTexto.cuerpo)
+            else ...[
+              if (base != null)
+                Text('Base: ${fmtMonto(base)} CUP',
+                    style: AppTexto.cuerpo),
+              if (bonos != null && bonos > 0)
+                Text('Bonos: ${fmtMonto(bonos)} CUP',
+                    style: AppTexto.cuerpo),
+              if (comisiones != null && comisiones > 0)
+                Text('Comisión por dosis: '
+                    '${fmtMonto(comisiones)} CUP',
+                    style: AppTexto.cuerpo),
+              if (adelantos != null && adelantos > 0)
+                Text('Adelantos: −${fmtMonto(adelantos)} CUP',
+                    style: AppTexto.cuerpo),
+              if (deuda != null && deuda > 0)
+                Text('Deuda del mes anterior: '
+                    '−${fmtMonto(deuda)} CUP',
+                    style: AppTexto.cuerpo),
+              if (neto != null)
+                Padding(
+                  padding:
+                      const EdgeInsets.only(top: AppEspacio.xs),
+                  child: Text('Neto recibido: '
+                      '${fmtMonto(neto)} CUP',
+                      style: AppTexto.subtitulo),
+                ),
+            ],
+            const SizedBox(height: AppEspacio.md),
+            BotonPrimario(
+              texto: 'Confirmar que la recibí',
+              icono: Icons.check_rounded,
+              cargando: _confirmando,
+              onPressed: () => _confirmarRecepcion(item),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   @override
@@ -411,6 +578,21 @@ class _MiNominaScreenState extends State<MiNominaScreen> {
                 ],
               ),
             ),
+            // T22 (1.20): liquidaciones por confirmar y el
+            // acuse de la última confirmada.
+            for (final item in _porConfirmar)
+              _tarjetaPorConfirmar(item),
+            if (_porConfirmar.isEmpty && _ultimaConfirmada != null)
+              Padding(
+                padding: const EdgeInsets.only(top: AppEspacio.md),
+                child: Text(
+                  '✓ Confirmaste tu nómina de '
+                  '${_etiquetaMes('${_ultimaConfirmada!['mes']}')} '
+                  'el ${fmtFecha('${_ultimaConfirmada!['confirmada_en']}'.substring(0, 10))}.',
+                  style: AppTexto.cuerpo
+                      .copyWith(color: AppColores.exito),
+                ),
+              ),
             // E3: aviso de horas sin subir (no bloquea nada).
             if (_horasSinSubir != null &&
                 _horasSinSubir! >= kHorasAvisoSinSubir)

@@ -64,7 +64,7 @@ void main() {
     testWidgets('sin foto muestra check naranja (fallback)',
         (tester) async {
       await pumpDialog(tester);
-      expect(find.byIcon(Icons.check), findsOneWidget);
+      expect(find.byIcon(Icons.check_rounded), findsOneWidget);
     });
 
     // Nota: el errorBuilder con foto corrupta no se prueba aquí porque

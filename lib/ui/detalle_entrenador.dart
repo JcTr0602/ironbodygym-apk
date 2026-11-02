@@ -299,7 +299,7 @@ class _DetalleEntrenadorScreenState extends State<DetalleEntrenadorScreen> {
                         ),
                         const SizedBox(height: 12),
                         // Estado de entrega (idea 3)
-                        _seccion(Icons.outbox, 'Estado de entrega', [
+                        _seccion(Icons.outbox_rounded, 'Estado de entrega', [
                           Text(
                               'Entregado: ${fmtMonto(_entregado)} CUP',
                               style: const TextStyle(
@@ -312,7 +312,7 @@ class _DetalleEntrenadorScreenState extends State<DetalleEntrenadorScreen> {
                                   color: AppColores.alerta,
                                   fontWeight:
                                       FontWeight.w500)),
-                          const SizedBox(height: 6),
+                          const SizedBox(height: 8),
                           if (_total > 0)
                             ClipRRect(
                               borderRadius:
@@ -332,7 +332,7 @@ class _DetalleEntrenadorScreenState extends State<DetalleEntrenadorScreen> {
                             ),
                         ]),
                         // Comparativa (idea 5)
-                        _seccion(Icons.bar_chart, 'Comparativa', [
+                        _seccion(Icons.bar_chart_rounded, 'Comparativa', [
                           _filaComparativa(
                               'Vs ${_nombreAnterior()}',
                               _totalAnterior,
@@ -341,10 +341,8 @@ class _DetalleEntrenadorScreenState extends State<DetalleEntrenadorScreen> {
                           if (_otros.isEmpty)
                             Text(
                                 'Sin otros entrenadores con cobros en el período.',
-                                style: TextStyle(
-                                    color: AppColores
-                                        .textoSecundario(context),
-                                    fontSize: 13)),
+                                style: AppTexto.secundario.copyWith(color: AppColores
+                                        .textoSecundario(context))),
                           for (final o in _otros.take(3))
                             Padding(
                               padding: const EdgeInsets.only(
@@ -354,21 +352,17 @@ class _DetalleEntrenadorScreenState extends State<DetalleEntrenadorScreen> {
                                   Expanded(
                                       child: Text(
                                           '${o['nombre']}',
-                                          style: const TextStyle(
-                                              fontSize: 13))),
+                                          style: AppTexto.secundario)),
                                   Text(
                                       '${fmtMonto((o['total'] as num).toDouble())} CUP',
-                                      style: const TextStyle(
-                                          fontSize: 13,
-                                          fontWeight:
-                                              FontWeight.w500)),
+                                      style: AppTexto.secundario.copyWith(fontWeight: FontWeight.w500)),
                                 ],
                               ),
                             ),
                         ]),
                         // Actividad por día (ideas 6 y 7)
                         if (_diasActivos.isNotEmpty)
-                          _seccion(Icons.calendar_today, 'Actividad por día', [
+                          _seccion(Icons.calendar_today_rounded, 'Actividad por día', [
                             for (final d in _diasActivos)
                               Padding(
                                 padding:
@@ -383,11 +377,7 @@ class _DetalleEntrenadorScreenState extends State<DetalleEntrenadorScreen> {
                                             d['fecha']),
                                         overflow: TextOverflow
                                             .ellipsis,
-                                        style: const TextStyle(
-                                            fontSize: 12,
-                                            fontWeight:
-                                                FontWeight
-                                                    .w500),
+                                        style: AppTexto.metadato,
                                       ),
                                     ),
                                     Expanded(
@@ -415,8 +405,7 @@ class _DetalleEntrenadorScreenState extends State<DetalleEntrenadorScreen> {
                                             TextAlign.right,
                                         overflow: TextOverflow
                                             .ellipsis,
-                                        style: const TextStyle(
-                                            fontSize: 12),
+                                        style: AppTexto.metadato,
                                       ),
                                     ),
                                   ],
@@ -424,15 +413,13 @@ class _DetalleEntrenadorScreenState extends State<DetalleEntrenadorScreen> {
                               ),
                           ]),
                         // Cobros del período (idea 1)
-                        _seccion(Icons.receipt_long, 'Cobros (${_cobros.length})',
+                        _seccion(Icons.receipt_long_rounded, 'Cobros (${_cobros.length})',
                             [
                               if (_cobros.isEmpty)
                                 Text(
                                     'Sin cobros en el período.',
-                                    style: TextStyle(
-                                        color: AppColores
-                                            .textoSecundario(context),
-                                        fontSize: 13)),
+                                    style: AppTexto.secundario.copyWith(color: AppColores
+                                            .textoSecundario(context))),
                               for (final c
                                   in _cobros.take(50))
                                 ListTile(
@@ -441,19 +428,13 @@ class _DetalleEntrenadorScreenState extends State<DetalleEntrenadorScreen> {
                                       EdgeInsets.zero,
                                   title: Text(
                                       '${c['cliente_nombre']}',
-                                      style: const TextStyle(
-                                          fontSize: 14)),
+                                      style: AppTexto.cuerpo),
                                   subtitle: Text(
                                       '${_etiquetaPeriodo(c)} · ${fmtFecha(c['fecha'])}',
-                                      style: const TextStyle(
-                                          fontSize: 12)),
+                                      style: AppTexto.metadato),
                                   trailing: Text(
                                       '${fmtMonto((c['monto'] as num).toDouble())} CUP',
-                                      style: const TextStyle(
-                                          fontWeight:
-                                              FontWeight
-                                                  .bold,
-                                          fontSize: 13)),
+                                      style: AppTexto.secundario),
                                   onTap: () {
                                     final cid = c[
                                             'cliente_id']
@@ -474,21 +455,17 @@ class _DetalleEntrenadorScreenState extends State<DetalleEntrenadorScreen> {
                               if (_cobros.length > 50)
                                 Text(
                                     '…y ${_cobros.length - 50} más',
-                                    style: TextStyle(
-                                        color: AppColores
-                                            .textoSecundario(context),
-                                        fontSize: 12)),
+                                    style: AppTexto.metadato.copyWith(color: AppColores
+                                            .textoSecundario(context))),
                             ]),
                         // Inscripciones (idea 4)
-                        _seccion(Icons.person_add, 'Inscripciones (${_inscripciones.length})',
+                        _seccion(Icons.person_add_rounded, 'Inscripciones (${_inscripciones.length})',
                             [
                               if (_inscripciones.isEmpty)
                                 Text(
                                     'Sin inscripciones en el período.',
-                                    style: TextStyle(
-                                        color: AppColores
-                                            .textoSecundario(context),
-                                        fontSize: 13)),
+                                    style: AppTexto.secundario.copyWith(color: AppColores
+                                            .textoSecundario(context))),
                               for (final ins
                                   in _inscripciones)
                                 ListTile(
@@ -497,15 +474,13 @@ class _DetalleEntrenadorScreenState extends State<DetalleEntrenadorScreen> {
                                       EdgeInsets.zero,
                                   title: Text(
                                       '${ins['nombre']}',
-                                      style: const TextStyle(
-                                          fontSize: 14)),
+                                      style: AppTexto.cuerpo),
                                   subtitle: Text(
                                       fmtFecha(
                                           ins['fecha']),
-                                      style: const TextStyle(
-                                          fontSize: 12)),
+                                      style: AppTexto.metadato),
                                   trailing: Icon(
-                                      Icons.chevron_right,
+                                      Icons.chevron_right_rounded,
                                       size: 18,
                                       color: AppColores
                                           .textoSecundario(context)),
@@ -547,8 +522,8 @@ class _DetalleEntrenadorScreenState extends State<DetalleEntrenadorScreen> {
             Row(
               children: [
                 Icon(icono,
-                    size: 18, color: AppColores.naranja),
-                const SizedBox(width: 6),
+                    size: 18, color: AppColores.textoSecundario(context)),
+                const SizedBox(width: 8),
                 Text(titulo, style: AppTexto.subtitulo),
               ],
             ),
@@ -572,9 +547,7 @@ class _DetalleEntrenadorScreenState extends State<DetalleEntrenadorScreen> {
                   color: AppColores.textoSecundario(context))),
           const SizedBox(height: 4),
           Text(valor,
-              style: const TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold)),
+              style: AppTexto.titulo),
           Text(subtitulo,
               style: AppTexto.minuscula.copyWith(
                   color: AppColores.textoSecundario(context))),
@@ -592,21 +565,16 @@ class _DetalleEntrenadorScreenState extends State<DetalleEntrenadorScreen> {
       children: [
         Expanded(
             child: Text(etiqueta,
-                style: const TextStyle(fontSize: 13))),
+                style: AppTexto.secundario)),
         Text(
           '${sube ? '↑' : '↓'} ${pct.abs().toStringAsFixed(0)}%',
-          style: TextStyle(
-              fontSize: 14,
-              fontWeight: FontWeight.bold,
-              color: sube
+          style: AppTexto.cuerpo.copyWith(color: sube
                   ? AppColores.exito
-                  : AppColores.error),
+                  : AppColores.error, fontWeight: FontWeight.bold),
         ),
         const SizedBox(width: 8),
         Text('${fmtMonto(anterior)} → ${fmtMonto(actual)}',
-            style: TextStyle(
-                fontSize: 12,
-                color: AppColores.textoSecundario(context))),
+            style: AppTexto.metadato.copyWith(color: AppColores.textoSecundario(context))),
       ],
     );
   }

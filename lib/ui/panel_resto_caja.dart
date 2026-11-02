@@ -105,8 +105,7 @@ class _ArqueoEntregaScreenState extends State<ArqueoEntregaScreen> {
     var pendiente = await pendienteDeltaC1(tid);
     if (pendiente <= 0) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Ya no hay pendiente que liquidar')));
+        mostrarSnack(context, 'Ya no hay pendiente que liquidar', significado: SignificadoChip.alerta);
       }
       return;
     }
@@ -118,7 +117,7 @@ class _ArqueoEntregaScreenState extends State<ArqueoEntregaScreen> {
         context: context,
         builder: (ctx) => DialogoApp(
           titulo: 'Liquidar entrega',
-          iconoTitulo: Icons.handshake,
+          iconoTitulo: Icons.handshake_rounded,
           contenido: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -161,17 +160,15 @@ class _ArqueoEntregaScreenState extends State<ArqueoEntregaScreen> {
       if ((nuevo - pendiente).abs() > 0.01) {
         pendiente = nuevo;
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-              content: Text('El pendiente cambió a '
-                  '${nuevo.toStringAsFixed(0)} CUP. Confirma de nuevo.')));
+          mostrarSnack(context, 'El pendiente cambió a '
+                  '${nuevo.toStringAsFixed(0)} CUP. Confirma de nuevo.', significado: SignificadoChip.alerta);
         }
         montoCtrl.text = nuevo.toStringAsFixed(0);
         continue;
       }
       if (monto <= 0 || monto - pendiente > 0.01) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-              content: Text('Monto inválido o mayor que el pendiente')));
+          mostrarSnack(context, 'Monto inválido o mayor que el pendiente', significado: SignificadoChip.alerta);
         }
         continue;
       }
@@ -183,14 +180,12 @@ class _ArqueoEntregaScreenState extends State<ArqueoEntregaScreen> {
         );
         confirmado = true;
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('Entrega registrada')));
+          mostrarSnack(context, 'Entrega registrada', significado: SignificadoChip.exito);
         }
         await _cargar();
       } catch (err) {
         if (mounted) {
-          ScaffoldMessenger.of(context)
-              .showSnackBar(SnackBar(content: Text('$err')));
+          mostrarSnack(context, '$err', significado: SignificadoChip.error);
         }
         montoCtrl.dispose();
         return;
@@ -376,6 +371,12 @@ class _NominaPrecalculadaScreenState extends State<NominaPrecalculadaScreen> {
                 ? {mes: comision}
                 : NominaCalc.comisionesPorMesDesdeVentas(
                     ventasServ, tid, primero, mes),
+            // Pasada 2 de Argón (1.20): faltaba — sin los bonos
+            // en la capacidad del mes, el precálculo mostraba
+            // una deuda entrante que la pantalla de Nómina no
+            // muestra (los bonos cubren el exceso de adelantos).
+            bonosPorMes: await BonosNominaService.instance
+                .bonosPorMes(username, primero, mes),
             hastaMes: mes,
           );
           for (final filaLibro in libro) {
@@ -516,6 +517,9 @@ class _AdelantosListaScreenState extends State<AdelantosListaScreen> {
   }
 
   Future<void> _cargar() async {
+    // Pasada 2 de Argón (1.20): la lista completa de adelantos
+    // es solo del dueño (C1/C2/C6 ya guardaban; C3 no).
+    if (!AuthService().isOwner) return;
     try {
       final filas = <Map<String, dynamic>>[];
       for (final a in await LocalDb.instance.allMirror('adelantos')) {
@@ -555,6 +559,12 @@ class _AdelantosListaScreenState extends State<AdelantosListaScreen> {
 
   @override
   Widget build(BuildContext context) {
+    if (!AuthService().isOwner) {
+      return Scaffold(
+          appBar: AppBar(title: const Text('Adelantos')),
+          body: const Center(
+              child: Text('Solo el dueño ve esta pantalla.')));
+    }
     final meses = <String>{'todos'};
     for (final f in _filas) {
       meses.add('${f['mes_nomina'] ?? ''}');
@@ -675,6 +685,9 @@ class _IngresosPeriodoScreenState extends State<IngresosPeriodoScreen> {
   }
 
   Future<void> _cargar() async {
+    // Pasada 2 de Argón (1.20): los ingresos del gym son solo
+    // del dueño (C5 no guardaba; C1/C2/C6 sí).
+    if (!AuthService().isOwner) return;
     setState(() => _cargando = true);
     try {
       final filas = <FilaIngreso>[];
@@ -732,6 +745,12 @@ class _IngresosPeriodoScreenState extends State<IngresosPeriodoScreen> {
 
   @override
   Widget build(BuildContext context) {
+    if (!AuthService().isOwner) {
+      return Scaffold(
+          appBar: AppBar(title: const Text('Ingresos por período')),
+          body: const Center(
+              child: Text('Solo el dueño ve esta pantalla.')));
+    }
     final r = _resumen;
     return Scaffold(
       appBar: AppBar(title: const Text('Ingresos por período')),
@@ -837,6 +856,7 @@ const _kEtiquetasPrecios = {
 
 class _PreciosMetodoScreenState extends State<PreciosMetodoScreen> {
   bool _cargando = true;
+  bool _guardando = false;
   final _ctrls = <String, TextEditingController>{};
 
   @override
@@ -858,6 +878,9 @@ class _PreciosMetodoScreenState extends State<PreciosMetodoScreen> {
   Future<void> _cargar() async {
     final aj = await LocalDb.instance.getAjustes();
     for (final k in kClavesPreciosC6) {
+      // Pasada 2 de Argón (1.20): liberar el controlador
+      // anterior si _cargar corre más de una vez.
+      _ctrls[k]?.dispose();
       _ctrls[k] = TextEditingController(
           text: '${(aj[k] as num?)?.toDouble() ?? 0}');
     }
@@ -865,13 +888,24 @@ class _PreciosMetodoScreenState extends State<PreciosMetodoScreen> {
   }
 
   Future<void> _guardar() async {
+    // Pasada 2 de Argón (1.20): candado anti-doble-toque (dos
+    // toques encolaban dos configuraciones y dos RPC).
+    if (_guardando) return;
+    setState(() => _guardando = true);
+    try {
+      await _guardarPrecios();
+    } finally {
+      if (mounted) setState(() => _guardando = false);
+    }
+  }
+
+  Future<void> _guardarPrecios() async {
     final cambios = <String, dynamic>{};
     for (final k in kClavesPreciosC6) {
       final v = double.tryParse(_ctrls[k]!.text.trim());
       // P2#16: el 0 también se rechaza (antes pasaba con v < 0).
       if (v == null || v <= 0) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text('Precio inválido: ${_kEtiquetasPrecios[k]}')));
+        mostrarSnack(context, 'Precio inválido: ${_kEtiquetasPrecios[k]}', significado: SignificadoChip.alerta);
         return;
       }
       cambios[k] = v;
@@ -889,14 +923,11 @@ class _PreciosMetodoScreenState extends State<PreciosMetodoScreen> {
                 'precio_app_plus', '$entero'));
       }
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-            content: Text(
-                'Precios guardados y sincronizados a los entrenadores')));
+        mostrarSnack(context, 'Precios guardados y sincronizados a los entrenadores', significado: SignificadoChip.exito);
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('$e')));
+        mostrarSnack(context, '$e', significado: SignificadoChip.error);
       }
     }
   }
@@ -940,7 +971,8 @@ class _PreciosMetodoScreenState extends State<PreciosMetodoScreen> {
                 const SizedBox(height: 12),
                 BotonPrimario(
                   texto: 'Guardar y sincronizar',
-                  onPressed: _guardar,
+                  onPressed: _guardando ? null : _guardar,
+                  cargando: _guardando,
                   expandido: false,
                 ),
               ],

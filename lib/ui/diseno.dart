@@ -36,6 +36,18 @@ class AppColores {
   static const info = Color(0xFF3B82F6);
   static const infoOscuro = Color(0xFF1D4ED8);
 
+  // --- Gradientes del banner de sync ---
+  // Cola 1.20: los hex sueltos de widgets.dart pasan a ser
+  // tokens con nombre, con los VALORES EXACTOS de siempre
+  // (sin cambio visual). Los pares que ya coincidían con un
+  // semántico (verde = exito/exitoOscuro, ámbar oscuro =
+  // alertaOscuro) usan el semántico directamente.
+  static const bannerGrisA = Color(0xFF9CA3AF);
+  static const bannerGrisB = Color(0xFF6B7280);
+  static const bannerAlertaA = Color(0xFFFBBF24);
+  static const bannerInfoA = Color(0xFF60A5FA);
+  static const bannerInfoB = Color(0xFF2563EB);
+
   // --- Superficies modo claro ---
   static const fondoClaro = Color(0xFFF5F5F5);
   static const superficieClaro = Colors.white;
@@ -52,11 +64,13 @@ class AppColores {
   static const textoOscuro = Color(0xFFF5F5F5);
   static const textoSecundarioOscuro = Color(0xFFB0B0B0);
 
-  /// Color de superficie según el brillo actual.
+  /// Color de superficie según el tema actual.
+  ///
+  /// Delega en `colorScheme.surface` (Argón 1.20): en modo normal vale
+  /// lo mismo que antes, y en alto contraste respeta el blanco/negro
+  /// puro del tema en vez de quedarse en el gris del modo oscuro.
   static Color superficie(BuildContext context) =>
-      Theme.of(context).brightness == Brightness.dark
-          ? superficieOscuro
-          : superficieClaro;
+      Theme.of(context).colorScheme.surface;
 
   /// Color de fondo según el brillo actual.
   static Color fondo(BuildContext context) =>
@@ -64,11 +78,13 @@ class AppColores {
           ? fondoOscuro
           : fondoClaro;
 
-  /// Color de borde sutil según el brillo actual.
+  /// Color de borde según el tema actual.
+  ///
+  /// Delega en `colorScheme.outline` (fijado en [AppTema] al mismo
+  /// valor que antes en modo normal, y a negro/blanco puro en alto
+  /// contraste). Igual que [superficie], no ignora el alto contraste.
   static Color borde(BuildContext context) =>
-      Theme.of(context).brightness == Brightness.dark
-          ? bordeOscuro
-          : bordeClaro;
+      Theme.of(context).colorScheme.outline;
 
   /// Color de texto principal según el brillo actual.
   static Color texto(BuildContext context) =>
@@ -105,9 +121,104 @@ class AppColores {
     begin: Alignment.centerLeft,
     end: Alignment.centerRight,
   );
+
+  // --- P0 (1.20, paquete de diseño Argón) ---
+  // Superficies con jerarquía: elevada flota sobre la tarjeta, hundida
+  // se hunde hacia el fondo. Valores por modo + helpers por brillo.
+  static const superficieElevadaClaro = Colors.white;
+  static const superficieHundidaClaro = Color(0xFFF0F0F0);
+  static const superficieElevadaOscuro = Color(0xFF2A2A2A);
+  static const superficieHundidaOscuro = Color(0xFF121212);
+
+  /// Detecta el tema de alto contraste (Argón 1.20): [AppTema] fija
+  /// `outline` a negro/blanco puro solo en alto contraste, así que el
+  /// borde del tema lo delata en ambos brillos.
+  static bool _altoContraste(BuildContext context) {
+    final esquema = Theme.of(context).colorScheme;
+    return Theme.of(context).brightness == Brightness.dark
+        ? esquema.outline == Colors.white
+        : esquema.outline == Colors.black;
+  }
+
+  /// Superficie elevada según el brillo actual (plana en alto contraste).
+  static Color superficieElevada(BuildContext context) {
+    if (_altoContraste(context)) {
+      return Theme.of(context).colorScheme.surface;
+    }
+    return Theme.of(context).brightness == Brightness.dark
+        ? superficieElevadaOscuro
+        : superficieElevadaClaro;
+  }
+
+  /// Superficie hundida según el brillo actual (plana en alto contraste).
+  static Color superficieHundida(BuildContext context) {
+    if (_altoContraste(context)) {
+      return Theme.of(context).colorScheme.surface;
+    }
+    return Theme.of(context).brightness == Brightness.dark
+        ? superficieHundidaOscuro
+        : superficieHundidaClaro;
+  }
+
+  /// Borde todavía más sutil que [bordeClaro]/[bordeOscuro].
+  static const bordeSutilClaro = Color(0xFFEDEDED);
+  static const bordeSutilOscuro = Color(0xFF2E2E2E);
+
+  /// Borde sutil según el brillo actual (puro en alto contraste).
+  static Color bordeSutil(BuildContext context) {
+    if (_altoContraste(context)) {
+      return Theme.of(context).colorScheme.outline;
+    }
+    return Theme.of(context).brightness == Brightness.dark
+        ? bordeSutilOscuro
+        : bordeSutilClaro;
+  }
+
+  /// Naranja para texto (Argón 1.20, corrección matemática):
+  /// #B45309 pasa AA sobre blanco (5.18:1) Y sobre grises claros
+  /// (#F0F0F0: 4.64:1), donde el #C25E00 original se quedaba corto
+  /// (4.01:1). Vale también como fondo de badge con texto blanco.
+  static const naranjaTexto = Color(0xFFB45309);
+
+  /// Naranja para texto en modo oscuro (el claro se apaga sobre negro).
+  static const naranjaTextoOscuro = Color(0xFFFB923C);
+
+  /// Naranja para texto según el brillo actual.
+  static Color textoNaranja(BuildContext context) =>
+      Theme.of(context).brightness == Brightness.dark
+          ? naranjaTextoOscuro
+          : naranjaTexto;
+
+  /// Contenido (texto/icono) sobre fondo naranja.
+  static const sobreNaranja = Colors.white;
+
+  /// Superficie y borde tintados de alerta (avisos, no errores).
+  static const alertaSuperficieClaro = Color(0xFFFEF3C7);
+  static const alertaBordeClaro = Color(0xFFFDE68A);
+  static const alertaSuperficieOscuro = Color(0xFF3D2A00);
+  static const alertaBordeOscuro = Color(0xFF92600A);
+
+  /// Superficie de alerta según el brillo actual.
+  static Color alertaSuperficie(BuildContext context) =>
+      Theme.of(context).brightness == Brightness.dark
+          ? alertaSuperficieOscuro
+          : alertaSuperficieClaro;
+
+  /// Borde de alerta según el brillo actual.
+  static Color alertaBorde(BuildContext context) =>
+      Theme.of(context).brightness == Brightness.dark
+          ? alertaBordeOscuro
+          : alertaBordeClaro;
 }
 
-/// Tipografía del sistema.
+/// Tipografía del sistema (V1 1.20, escala contractual).
+///
+/// Roles y tamaños, sin excepciones en pantallas nuevas:
+/// display 32 · metrica 22 · tituloPagina 20 · titulo 18 ·
+/// subtitulo 15 · cuerpo 14 · secundario 13 · etiqueta 12 ·
+/// metadato 12 · minuscula/microtexto 11.
+/// Regla: ningún texto operativo importante por debajo de 12 px;
+/// 11 px solo para microtexto no operativo.
 class AppTexto {
   AppTexto._();
 
@@ -116,42 +227,70 @@ class AppTexto {
     fontSize: 32,
     fontWeight: FontWeight.bold,
     letterSpacing: -0.5,
+    height: 1.1,
   );
 
   static const displayPequeno = TextStyle(
     fontSize: 24,
     fontWeight: FontWeight.bold,
     letterSpacing: -0.25,
+    height: 1.15,
+  );
+
+  /// Título de página (P0 1.20).
+  static const tituloPagina = TextStyle(
+    fontSize: 20,
+    fontWeight: FontWeight.bold,
+    height: 1.25,
+  );
+
+  /// Métrica destacada (P0 1.20): cifra única protagonista.
+  static const metrica = TextStyle(
+    fontSize: 22,
+    fontWeight: FontWeight.bold,
+    letterSpacing: -0.25,
+    height: 1.2,
   );
 
   /// Títulos de sección.
   static const titulo = TextStyle(
     fontSize: 18,
     fontWeight: FontWeight.bold,
+    height: 1.25,
   );
 
   static const subtitulo = TextStyle(
     fontSize: 15,
     fontWeight: FontWeight.w600,
+    height: 1.3,
   );
 
   /// Cuerpo normal.
-  static const cuerpo = TextStyle(fontSize: 14);
+  static const cuerpo = TextStyle(fontSize: 14, height: 1.5);
 
   /// Texto secundario / hints.
-  static const secundario = TextStyle(fontSize: 13);
+  static const secundario = TextStyle(fontSize: 13, height: 1.4);
 
   /// Etiquetas pequeñas (badges, captions).
   static const etiqueta = TextStyle(
     fontSize: 12,
     fontWeight: FontWeight.w600,
     letterSpacing: 0.3,
+    height: 1.2,
   );
 
-  static const minuscula = TextStyle(fontSize: 11);
+  /// Metadato: fecha, autor, detalle secundario en filas (12, regular).
+  static const metadato = TextStyle(fontSize: 12, height: 1.4);
+
+  static const minuscula = TextStyle(fontSize: 11, height: 1.4);
 }
 
-/// Espaciado consistente.
+/// Espaciado consistente (V2 1.20, retícula 4/8 pt).
+///
+/// Todos los valores son múltiplos de 4; los escalones habituales
+/// son 8/12/16/24/32. Márgenes laterales, separación entre
+/// secciones, altura de filas y aire interno de tarjetas usan
+/// solo estos escalones.
 class AppEspacio {
   AppEspacio._();
 
@@ -250,7 +389,10 @@ class AppTema {
         onPrimary: Colors.white,
         surface: superficie,
         error: AppColores.error,
-      ),
+        // Borde del tema (Argón 1.20): igual que antes en modo normal,
+        // negro/blanco puro en alto contraste, para que
+        // AppColores.borde(context) lo respete.
+      ).copyWith(outline: borde),
       scaffoldBackgroundColor:
           oscuro ? AppColores.fondoOscuro : AppColores.fondoClaro,
       appBarTheme: AppBarTheme(
@@ -383,11 +525,15 @@ class AppTema {
       textTheme: const TextTheme(
         displayLarge: AppTexto.display,
         displayMedium: AppTexto.displayPequeno,
+        displaySmall: AppTexto.metrica,
+        headlineMedium: AppTexto.tituloPagina,
         titleLarge: AppTexto.titulo,
         titleMedium: AppTexto.subtitulo,
         bodyLarge: AppTexto.cuerpo,
         bodyMedium: AppTexto.secundario,
+        bodySmall: AppTexto.metadato,
         labelLarge: AppTexto.etiqueta,
+        labelSmall: AppTexto.minuscula,
       ).apply(bodyColor: texto, displayColor: texto),
     );
   }

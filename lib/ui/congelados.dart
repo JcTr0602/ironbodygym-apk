@@ -63,7 +63,7 @@ class _CongeladosScreenState extends State<CongeladosScreen> {
                 Expanded(
                   child: _clientes.isEmpty
                       ? const EstadoVacio(
-                          icono: Icons.ac_unit,
+                          icono: Icons.ac_unit_rounded,
                           titulo:
                               'No hay clientes congelados',
                           subtitulo:
@@ -94,7 +94,7 @@ class _CongeladosScreenState extends State<CongeladosScreen> {
                                               .withValues(
                                                   alpha: 0.15),
                                       child: const Icon(
-                                        Icons.ac_unit,
+                                        Icons.ac_unit_rounded,
                                         color: AppColores.info,
                                       ),
                                     ),
@@ -113,7 +113,7 @@ class _CongeladosScreenState extends State<CongeladosScreen> {
                                     ),
                                     trailing: TextButton.icon(
                                       icon: const Icon(
-                                          Icons.play_arrow,
+                                          Icons.play_arrow_rounded,
                                           size: 18),
                                       label: const Text(
                                           'Descongelar'),
@@ -148,7 +148,7 @@ class _CongeladosScreenState extends State<CongeladosScreen> {
       mensaje: '¿Descongelar a $nombre?\n\n'
           'Volverá a aparecer en las listas normales.',
       aceptar: 'Descongelar',
-      icono: Icons.play_arrow,
+      icono: Icons.play_arrow_rounded,
     );
     if (ok != true || !mounted) return;
     await LocalDb.instance.queueOp(
@@ -162,9 +162,7 @@ class _CongeladosScreenState extends State<CongeladosScreen> {
     // Actualización optimista del espejo local
     await LocalDb.instance.updateMirrorEstado(id, 'activo');
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('$nombre descongelado')),
-      );
+      mostrarSnack(context, '$nombre descongelado', significado: SignificadoChip.exito);
       _cargar();
     }
   }

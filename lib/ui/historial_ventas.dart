@@ -7,6 +7,7 @@
 library;
 
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -129,6 +130,10 @@ class _HistorialVentasScreenState
     extends State<HistorialVentasScreen> {
   List<Map<String, dynamic>> _ventas = [];
   Map<int, Map<String, dynamic>> _productos = {};
+  // Rediseño 1.20 (D5): ventas con la anulación aún en cola
+  // (la fila sigue en el espejo hasta que el servidor aplica
+  // el DELETE); se deriva de ops_queue, sin flags nuevos.
+  Set<int> _anuladasPendientes = {};
   // Cliente protegido (2026-10-26, A5): mapa para resolver el
   // candado del comprador en cada fila (el espejo ya lo trae).
   Map<int, Map<String, dynamic>> _clientes = {};
@@ -136,6 +141,13 @@ class _HistorialVentasScreenState
   // Resaltado (4/25): id + llave por fila para desplazar a la venta.
   int? _resaltado;
   final _llaves = <int, GlobalKey>{};
+  // FIN-18 de Argón (1.20): ListView.builder no construye las
+  // filas fuera de pantalla; para saltar a una venta lejana se
+  // usa el controller con una posición estimada y luego el
+  // ensureVisible fino. _posResaltado = índice en la lista de
+  // ítems (con encabezados de día) registrado al construir.
+  final _scrollCtrl = ScrollController();
+  int _posResaltado = -1;
   // Filtros (3/25): texto, producto, moneda y rango de fechas.
   final _textoCtrl = TextEditingController();
   String _texto = '';
@@ -147,6 +159,7 @@ class _HistorialVentasScreenState
   @override
   void dispose() {
     _textoCtrl.dispose();
+    _scrollCtrl.dispose();
     super.dispose();
   }
 
@@ -217,10 +230,28 @@ class _HistorialVentasScreenState
     }
     ventas.sort((a, b) =>
         '${b['fecha'] ?? ''}'.compareTo('${a['fecha'] ?? ''}'));
+    final dbH = await LocalDb.instance.db;
+    final opsAnul = await dbH.rawQuery(
+        "SELECT payload FROM ops_queue "
+        "WHERE tipo = 'anular_venta_suplemento' "
+        "AND estado NOT IN ('aplicada', 'rechazada')");
+    final anuladas = <int>{};
+    for (final r in opsAnul) {
+      try {
+        final p =
+            jsonDecode('${r['payload']}') as Map<String, dynamic>;
+        final vid = (p['venta_id'] as num?)?.toInt();
+        if (vid != null) anuladas.add(vid);
+      } catch (_) {
+        // Payload ilegible: no marca nada (la op seguirá su
+        // curso en el sync; la marca es solo visual).
+      }
+    }
     if (!mounted) return;
     setState(() {
       _ventas = ventas;
       _productos = mapa;
+      _anuladasPendientes = anuladas;
       _clientes = mapaClientes;
       _cargando = false;
     });
@@ -232,11 +263,25 @@ class _HistorialVentasScreenState
 
   /// Desplaza a la venta resaltada y la tiñe (4/25). Si no está en la
   /// lista (p. ej. otro entrenador con soloMias), no hace nada.
-  void _irAResaltado() {
+  /// FIN-18 de Argón (1.20): si la fila aún no está construida
+  /// (ListView.builder perezoso), salta a su posición estimada
+  /// y reintenta el ajuste fino en el siguiente frame.
+  void _irAResaltado([int intentos = 0]) {
     final id = widget.resaltarId;
     if (id == null || !mounted) return;
     final ctx = _llaves[id]?.currentContext;
-    if (ctx == null) return;
+    if (ctx == null) {
+      if (intentos < 3 &&
+          _posResaltado >= 0 &&
+          _scrollCtrl.hasClients) {
+        final destino = _posResaltado * 116.0;
+        final maximo = _scrollCtrl.position.maxScrollExtent;
+        _scrollCtrl.jumpTo(destino > maximo ? maximo : destino);
+        WidgetsBinding.instance.addPostFrameCallback(
+            (_) => _irAResaltado(intentos + 1));
+      }
+      return;
+    }
     setState(() => _resaltado = id);
     Scrollable.ensureVisible(ctx,
         duration: const Duration(milliseconds: 400), alignment: 0.5);
@@ -246,7 +291,7 @@ class _HistorialVentasScreenState
     final ok = await DialogoApp.confirmar(
       context,
       titulo: 'Anular venta',
-      icono: Icons.undo,
+      icono: Icons.undo_rounded,
       peligro: true,
       mensaje: 'Se anulará esta venta y se restaurará el stock. '
           '¿Continuar?',
@@ -260,8 +305,7 @@ class _HistorialVentasScreenState
     );
     unawaited(SyncEngine.instance.push());
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('Venta anulada (se sincronizará)')));
+      mostrarSnack(context, 'Venta anulada (se sincronizará)', significado: SignificadoChip.exito);
       _cargar();
     }
   }
@@ -324,7 +368,7 @@ class _HistorialVentasScreenState
     }
     if (_ventas.isEmpty) {
       return const EstadoVacio(
-        icono: Icons.receipt_long_outlined,
+        icono: Icons.receipt_long_rounded,
         titulo: 'Sin ventas registradas',
         subtitulo:
             'Las ventas de suplementos aparecerán aquí.',
@@ -333,19 +377,49 @@ class _HistorialVentasScreenState
     final filtradas = _ventasFiltradas;
     if (filtradas.isEmpty) {
       return EstadoVacio(
-        icono: Icons.search_off_outlined,
+        icono: Icons.search_off_rounded,
         titulo: 'Sin ventas con esos filtros',
         subtitulo: 'Prueba con otro texto, producto o fecha.',
         textoAccion: _hayFiltros ? 'Limpiar filtros' : null,
         onAccion: _hayFiltros ? _limpiarFiltros : null,
       );
     }
+    // V23: la lista se agrupa por día con encabezados claros;
+    // cada tarjeta ya lee en tres niveles (producto → total →
+    // fecha · vendedor → comprador).
+    final items = <Object>[];
+    String? diaActual;
+    _posResaltado = -1;
+    for (final v in filtradas) {
+      final f = '${v['fecha'] ?? ''}';
+      final dia = f.length >= 10 ? f.substring(0, 10) : f;
+      if (dia != diaActual) {
+        diaActual = dia;
+        items.add(dia);
+      }
+      if ((v['id'] as num?)?.toInt() == widget.resaltarId) {
+        _posResaltado = items.length;
+      }
+      items.add(v);
+    }
     return RefreshIndicator(
       onRefresh: _cargar,
       child: ListView.builder(
+        controller: _scrollCtrl,
         padding: const EdgeInsets.all(AppEspacio.md),
-        itemCount: filtradas.length,
-        itemBuilder: (ctx, i) => _fila(filtradas[i]),
+        itemCount: items.length,
+        itemBuilder: (ctx, i) {
+          final it = items[i];
+          if (it is String) {
+            return Padding(
+              padding: EdgeInsets.only(
+                  top: i == 0 ? 0 : AppEspacio.sm,
+                  bottom: AppEspacio.sm),
+              child: Text(fmtFecha(it), style: AppTexto.subtitulo),
+            );
+          }
+          return _fila(it as Map<String, dynamic>);
+        },
       ),
     );
   }
@@ -366,11 +440,11 @@ class _HistorialVentasScreenState
             controller: _textoCtrl,
             onChanged: (v) => setState(() => _texto = v),
             decoration: InputDecoration(
-              prefixIcon: const Icon(Icons.search),
+              prefixIcon: const Icon(Icons.search_rounded),
               hintText: 'Buscar producto, cliente o vendedor…',
               suffixIcon: _texto.isNotEmpty
                   ? IconButton(
-                      icon: const Icon(Icons.clear),
+                      icon: const Icon(Icons.clear_rounded),
                       onPressed: () {
                         _textoCtrl.clear();
                         setState(() => _texto = '');
@@ -428,7 +502,7 @@ class _HistorialVentasScreenState
             children: [
               Expanded(
                 child: OutlinedButton.icon(
-                  icon: const Icon(Icons.calendar_today, size: 16),
+                  icon: const Icon(Icons.calendar_today_rounded, size: 16),
                   label: Text(_desde == null
                       ? 'Desde…'
                       : 'Desde $_desde'),
@@ -438,7 +512,7 @@ class _HistorialVentasScreenState
               const SizedBox(width: AppEspacio.sm),
               Expanded(
                 child: OutlinedButton.icon(
-                  icon: const Icon(Icons.calendar_today, size: 16),
+                  icon: const Icon(Icons.calendar_today_rounded, size: 16),
                   label: Text(
                       _hasta == null ? 'Hasta…' : 'Hasta $_hasta'),
                   onPressed: () => _elegirFecha(esDesde: false),
@@ -548,16 +622,23 @@ class _HistorialVentasScreenState
                   const ChipEstado(
                       texto: 'Inscripción + venta',
                       color: AppColores.naranja,
-                      icono: Icons.person_add),
+                      icono: Icons.person_add_rounded),
                 if (difiere && !ventaProtegida)
                   const ChipEstado(
                       texto: 'Precio diferente',
                       color: AppColores.alerta,
-                      icono: Icons.warning_amber),
-                // v1.2.1: anular es acción del dueño.
-                if (AuthService().isOwner)
+                      icono: Icons.warning_amber_rounded),
+                if ((v['es_fiado'] == 1 || v['es_fiado'] == true) &&
+                    !ventaProtegida)
+                  const ChipEstado.semantico(
+                      texto: 'Fiado',
+                      significado: SignificadoChip.alerta),
+                // v1.2.1: anular es acción del dueño. Con la
+                // anulación ya en cola el botón sobra.
+                if (AuthService().isOwner &&
+                    !_anuladasPendientes.contains(idVenta))
                   IconButton(
-                    icon: const Icon(Icons.undo,
+                    icon: const Icon(Icons.undo_rounded,
                         color: AppColores.error, size: 20),
                     tooltip: 'Anular venta',
                     onPressed: () => _anular(v),
@@ -567,13 +648,19 @@ class _HistorialVentasScreenState
                 // oculta a propósito).
                 if (AuthService().isOwner && !ventaProtegida)
                   IconButton(
-                    icon: const Icon(Icons.receipt_long,
-                        color: AppColores.naranja, size: 20),
+                    icon: Icon(Icons.receipt_long_rounded,
+                        color: AppColores.textoSecundario(context), size: 20),
                     tooltip: 'Recibo por WhatsApp',
                     onPressed: () => _recibo(v),
                   ),
               ],
             ),
+            if (_anuladasPendientes.contains(idVenta)) ...[
+              const SizedBox(height: 4),
+              const ChipEstado.semantico(
+                  texto: 'Anulada · pendiente de sincronizar',
+                  significado: SignificadoChip.error),
+            ],
             const SizedBox(height: 4),
             // Cliente protegido (2026-10-26, Protegido 2 residual
             // #9): la tarjeta no muestra fecha ni total de la venta
@@ -581,15 +668,17 @@ class _HistorialVentasScreenState
             if (!ventaProtegida)
               Text(
                 lineaTotal,
-                style: AppTexto.cuerpo,
+                style: AppTexto.cuerpo
+                    .copyWith(fontWeight: FontWeight.w600),
               ),
             if (nota.isNotEmpty && !ventaProtegida)
               Padding(
                 padding: const EdgeInsets.only(top: 2),
                 child: Row(
                   children: [
-                    const Icon(Icons.sticky_note_2_outlined,
-                        size: 13, color: Colors.grey),
+                    Icon(Icons.sticky_note_2_rounded,
+                        size: 13,
+                        color: AppColores.textoSecundario(context)),
                     const SizedBox(width: 4),
                     Expanded(
                       child: Text(
@@ -614,7 +703,7 @@ class _HistorialVentasScreenState
                   ),
                 ),
                 if (ventaProtegida)
-                  const Icon(Icons.lock,
+                  const Icon(Icons.lock_rounded,
                       size: 16, color: AppColores.naranja),
               ],
             ),
@@ -666,7 +755,7 @@ class _HistorialVentasScreenState
       context: context,
       builder: (ctx) => DialogoApp(
         titulo: 'Recibo por WhatsApp',
-        iconoTitulo: Icons.receipt_long,
+        iconoTitulo: Icons.receipt_long_rounded,
         contenido: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -692,16 +781,13 @@ class _HistorialVentasScreenState
             child: const Text('Cerrar'),
           ),
           ElevatedButton.icon(
-            icon: const Icon(Icons.send),
+            icon: const Icon(Icons.send_rounded),
             label: const Text('Enviar por WhatsApp'),
             onPressed: () async {
               final num =
                   normalizarTelefonoWaMe(telCtrl.text.trim());
               if (num.isEmpty) {
-                ScaffoldMessenger.of(ctx).showSnackBar(
-                  const SnackBar(
-                      content: Text('Escribe un móvil válido')),
-                );
+                mostrarSnack(ctx, 'Escribe un móvil válido', significado: SignificadoChip.alerta);
                 return;
               }
               final url = Uri.parse(
@@ -711,10 +797,7 @@ class _HistorialVentasScreenState
                     mode: LaunchMode.externalApplication);
               } catch (_) {
                 if (ctx.mounted) {
-                  ScaffoldMessenger.of(ctx).showSnackBar(
-                    const SnackBar(
-                        content: Text('No se pudo abrir WhatsApp')),
-                  );
+                  mostrarSnack(ctx, 'No se pudo abrir WhatsApp', significado: SignificadoChip.error);
                 }
               }
             },
@@ -722,6 +805,9 @@ class _HistorialVentasScreenState
         ],
       ),
     );
+    // FIN-16/18 de Argón (1.20): el controlador del teléfono se
+    // libera al cerrar el diálogo.
+    telCtrl.dispose();
   }
 
   /// Detalle expandido de una venta con inscripción: dos bloques,
@@ -772,7 +858,7 @@ class _HistorialVentasScreenState
       context: context,
       builder: (ctx) => DialogoApp(
         titulo: 'Inscripción + venta',
-        iconoTitulo: Icons.person_add,
+        iconoTitulo: Icons.person_add_rounded,
         contenido: SingleChildScrollView(
           child: Column(
             crossAxisAlignment:
@@ -789,7 +875,7 @@ class _HistorialVentasScreenState
               if (cliente != null && esVistaProtegida(cliente))
                 const Row(
                   children: [
-                    Icon(Icons.lock,
+                    Icon(Icons.lock_rounded,
                         size: 16, color: AppColores.naranja),
                     SizedBox(width: 4),
                     Expanded(

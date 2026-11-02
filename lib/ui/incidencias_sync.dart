@@ -86,11 +86,7 @@ class _IncidenciasSyncScreenState extends State<IncidenciasSyncScreen> {
     try {
       await aprobarIncidenciaSync('${inc['id']}');
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-              content: Text(
-                  'Aprobación enviada. Se aplicará al sincronizar.')),
-        );
+        mostrarSnack(context, 'Aprobación enviada. Se aplicará al sincronizar.', significado: SignificadoChip.exito);
         await _cargar();
       }
     } catch (e) {
@@ -142,9 +138,7 @@ class _IncidenciasSyncScreenState extends State<IncidenciasSyncScreen> {
               ? null
               : notaCtrl.text.trim());
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Incidencia descartada.')),
-        );
+        mostrarSnack(context, 'Incidencia descartada.', significado: SignificadoChip.exito);
         await _cargar();
       }
     } catch (e) {
@@ -156,8 +150,7 @@ class _IncidenciasSyncScreenState extends State<IncidenciasSyncScreen> {
 
   void _aviso(String msg) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text(msg)));
+    mostrarSnack(context, msg);
   }
 
   /// Resumen legible del payload para la tarjeta.
@@ -201,7 +194,7 @@ class _IncidenciasSyncScreenState extends State<IncidenciasSyncScreen> {
         actions: [
           IconButton(
             tooltip: 'Sincronizar',
-            icon: const Icon(Icons.sync),
+            icon: const Icon(Icons.sync_rounded),
             onPressed: _sincronizar,
           ),
         ],
@@ -238,8 +231,8 @@ class _IncidenciasSyncScreenState extends State<IncidenciasSyncScreen> {
                             children: [
                               Icon(
                                   _verResueltas
-                                      ? Icons.history
-                                      : Icons.check_circle_outline,
+                                      ? Icons.history_rounded
+                                      : Icons.check_circle_outline_rounded,
                                   size: 56,
                                   color: Colors.green),
                               const SizedBox(height: 12),
@@ -280,7 +273,7 @@ class _IncidenciasSyncScreenState extends State<IncidenciasSyncScreen> {
           children: [
             Row(
               children: [
-                const Icon(Icons.sync_problem,
+                const Icon(Icons.sync_problem_rounded,
                     color: AppColores.alerta, size: 22),
                 const SizedBox(width: 8),
                 Expanded(
@@ -296,35 +289,28 @@ class _IncidenciasSyncScreenState extends State<IncidenciasSyncScreen> {
                               ? Colors.green
                               : AppColores.textoSecundario(context))
                           .withValues(alpha: 0.15),
-                      borderRadius: BorderRadius.circular(10),
+                      borderRadius: BorderRadius.circular(12),
                     ),
                     child: Text('${inc['estado']}',
-                        style: const TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w600)),
+                        style: AppTexto.metadato.copyWith(fontWeight: FontWeight.w600)),
                   ),
               ],
             ),
-            const SizedBox(height: 6),
+            const SizedBox(height: 8),
             if ((inc['error'] as String?)?.isNotEmpty == true)
               Text('Motivo: ${errorSyncLegible('${inc['error']}')}',
-                  style: const TextStyle(fontSize: 13)),
+                  style: AppTexto.secundario),
             if (resumen.isNotEmpty)
               Padding(
                 padding: const EdgeInsets.only(top: 4),
                 child: Text(resumen,
-                    style: TextStyle(
-                        fontSize: 12,
-                        color:
-                            AppColores.textoSecundario(context))),
+                    style: AppTexto.metadato.copyWith(color: AppColores.textoSecundario(context))),
               ),
             Padding(
               padding: const EdgeInsets.only(top: 4),
               child: Text(
                 '${inc['dispositivo'] ?? '—'} · ${inc['creada_en'] ?? ''}',
-                style: TextStyle(
-                    fontSize: 12,
-                    color: AppColores.textoSecundario(context)),
+                style: AppTexto.metadato.copyWith(color: AppColores.textoSecundario(context)),
               ),
             ),
             if (pendiente) ...[
@@ -333,13 +319,13 @@ class _IncidenciasSyncScreenState extends State<IncidenciasSyncScreen> {
                 mainAxisAlignment: MainAxisAlignment.end,
                 children: [
                   TextButton.icon(
-                    icon: const Icon(Icons.close, size: 18),
+                    icon: const Icon(Icons.close_rounded, size: 18),
                     label: const Text('Descartar'),
                     onPressed: () => _descartar(inc),
                   ),
                   const SizedBox(width: 8),
                   FilledButton.icon(
-                    icon: const Icon(Icons.check, size: 18),
+                    icon: const Icon(Icons.check_rounded, size: 18),
                     label: const Text('Aprobar'),
                     onPressed: () => _aprobar(inc),
                   ),
@@ -352,10 +338,7 @@ class _IncidenciasSyncScreenState extends State<IncidenciasSyncScreen> {
                   child: Text(
                     'Resuelta por ${inc['resuelta_por']} · '
                     '${inc['resuelta_en'] ?? ''}',
-                    style: TextStyle(
-                        fontSize: 12,
-                        color:
-                            AppColores.textoSecundario(context)),
+                    style: AppTexto.metadato.copyWith(color: AppColores.textoSecundario(context)),
                   ),
                 ),
             ],

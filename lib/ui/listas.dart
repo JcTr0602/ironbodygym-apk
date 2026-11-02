@@ -148,8 +148,7 @@ class _ListasScreenState extends State<ListasScreen>
     );
     if (!mounted) return;
     if (deshecho) {
-      ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Cobro deshecho')));
+      mostrarSnack(context, 'Cobro deshecho', significado: SignificadoChip.exito);
     }
     _cargar();
     SyncEngine.instance.push();
@@ -210,7 +209,7 @@ class _ListasScreenState extends State<ListasScreen>
             child: Row(
               children: [
                 const Text('Ordenar: ',
-                    style: TextStyle(fontSize: 13)),
+                    style: AppTexto.secundario),
                 DropdownButton<String>(
                   value: _orden,
                   items: const [
@@ -240,14 +239,14 @@ class _ListasScreenState extends State<ListasScreen>
                   child: CampoTexto(
                     controller: _busquedaCtrl,
                     hint: 'Buscar cliente…',
-                    icono: Icons.search,
+                    icono: Icons.search_rounded,
                     onChanged: (v) =>
                         setState(() => _busqueda = v.trim()),
                   ),
                 ),
                 if (_busqueda.isNotEmpty)
                   IconButton(
-                    icon: const Icon(Icons.clear),
+                    icon: const Icon(Icons.clear_rounded),
                     tooltip: 'Limpiar búsqueda',
                     onPressed: () {
                       _busquedaCtrl.clear();
@@ -261,19 +260,19 @@ class _ListasScreenState extends State<ListasScreen>
             child: TabBarView(
               controller: _tab,
               children: [
-                _lista(_visibles(_hoy), Icons.celebration,
+                _lista(_visibles(_hoy), Icons.celebration_rounded,
                     'Nadie vence hoy', 'Todo al día.'),
                 _lista(_visibles(_porVencer),
-                    Icons.celebration, 'Nadie por vencer',
+                    Icons.celebration_rounded, 'Nadie por vencer',
                     'Nada en los próximos 3 días.'),
                 _lista(_visibles(_menos30),
-                    Icons.celebration, 'Sin atrasados',
+                    Icons.celebration_rounded, 'Sin atrasados',
                     'Nada de menos de un mes.'),
                 _lista(_visibles(_mas30),
-                    Icons.celebration, 'Sin atrasados',
+                    Icons.celebration_rounded, 'Sin atrasados',
                     'Nada de más de un mes.'),
                 _lista(_visibles(_alDia), // v1.2.1
-                    Icons.check_circle, 'Nadie al día',
+                    Icons.check_circle_rounded, 'Nadie al día',
                     'Todos los activos están vencidos.'),
               ],
             ),
@@ -301,13 +300,13 @@ class _ListasScreenState extends State<ListasScreen>
           mainAxisSize: MainAxisSize.min,
           children: [
             ListTile(
-              leading: const Icon(Icons.chat, color: AppColores.exito),
+              leading: const Icon(Icons.chat_rounded, color: AppColores.exito),
               title: const Text('Avisar por WhatsApp'),
               subtitle: const Text('Abre WhatsApp con el mensaje escrito'),
               onTap: () => Navigator.pop(ctx, 'whatsapp'),
             ),
             ListTile(
-              leading: const Icon(Icons.check_circle_outline),
+              leading: const Icon(Icons.check_circle_outline_rounded),
               title: const Text('Solo marcar como avisado'),
               onTap: () => Navigator.pop(ctx, 'marcar'),
             ),
@@ -330,16 +329,71 @@ class _ListasScreenState extends State<ListasScreen>
                 0
             ? 'tu mensualidad venció el $f'
             : 'tu mensualidad vence el $f');
+    // FIN-27 de Argón (1.20): este recordatorio lo compone la
+    // app, así que cierra con la línea automática aprobada
+    // (respuestas al 58191577), como los de la bandeja.
     final msg = 'Hola $nombre 👋, te recordamos de Iron Body Gym que '
-        '$venceTxt. ¡Te esperamos para seguir entrenando! 💪';
+        '$venceTxt. ¡Te esperamos para seguir entrenando! 💪'
+        ' $lineaMensajeAutomatico';
     final ok = await launchUrl(
         Uri.parse('https://wa.me/$movil?text=${Uri.encodeComponent(msg)}'),
         mode: LaunchMode.externalApplication);
     if (!ok && mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('No se pudo abrir WhatsApp')));
+      mostrarSnack(context, 'No se pudo abrir WhatsApp', significado: SignificadoChip.error);
     }
     return ok;
+  }
+
+  /// F10 (1.20): avisar a un cliente de la lista y, si
+  /// quedan más sin avisar DESPUÉS de él, ofrecer en el
+  /// propio aviso el paso directo al siguiente (sin volver
+  /// a buscarlo en la lista). La cadena sigue mientras el
+  /// usuario la acepte; solo aplica al aviso por WhatsApp.
+  Future<void> _avisarEnCadena(
+      List<Map<String, dynamic>> rows, int idx) async {
+    final c = rows[idx];
+    final id = (c['id'] as num?)?.toInt() ?? 0;
+    // v1.2.4 (C7): avisar por WhatsApp con el mensaje ya
+    // escrito si tiene teléfono.
+    final via = await _elegirAviso(c);
+    if (via == null || !mounted) return;
+    if (via == 'whatsapp') {
+      final ok = await _abrirWhatsapp(c);
+      if (!ok) return;
+    }
+    await LocalDb.instance.marcarAvisado(id);
+    if (!mounted) return;
+    Map<String, dynamic>? siguiente;
+    var idxSiguiente = -1;
+    if (via == 'whatsapp') {
+      for (var j = idx + 1; j < rows.length; j++) {
+        final oid = (rows[j]['id'] as num?)?.toInt();
+        if (oid == null || oid == id) continue;
+        if (await LocalDb.instance.getAvisado(oid) == null) {
+          siguiente = rows[j];
+          idxSiguiente = j;
+          break;
+        }
+      }
+    }
+    if (!mounted) return;
+    final sig = siguiente;
+    if (sig != null) {
+      final nombreSig =
+          '${sig['nombre'] ?? ''}'.split(' ').first;
+      mostrarSnack(
+        context,
+        '${c['nombre']} marcado como avisado',
+        significado: SignificadoChip.exito,
+        accion: 'Siguiente: $nombreSig',
+        alAccion: () => _avisarEnCadena(rows, idxSiguiente),
+      );
+    } else {
+      mostrarSnack(
+          context, '${c['nombre']} marcado como avisado',
+          significado: SignificadoChip.exito);
+    }
+    setState(() {});
   }
 
   Widget _lista(List<Map<String, dynamic>> rows, IconData iconoVacio,
@@ -349,7 +403,7 @@ class _ListasScreenState extends State<ListasScreen>
       // (no porque nadie venza) y ofrece limpiarla.
       if (_busqueda.isNotEmpty) {
         return EstadoVacio(
-          icono: Icons.search_off,
+          icono: Icons.search_off_rounded,
           titulo: 'Sin coincidencias',
           subtitulo: 'Ningún cliente de esta lista coincide '
               'con «$_busqueda».',
@@ -405,12 +459,13 @@ class _ListasScreenState extends State<ListasScreen>
                     IconButton(
                       icon: Icon(
                           avisado
-                              ? Icons.check_circle
+                              ? Icons.check_circle_rounded
                               : Icons
                                   .notifications_outlined,
                           color: avisado
                               ? AppColores.exito
-                              : Colors.grey),
+                              : AppColores.textoSecundario(
+                                  context)),
                       tooltip: avisado
                           ? 'Avisado (toca para quitar)'
                           : 'Marcar como avisado',
@@ -419,34 +474,11 @@ class _ListasScreenState extends State<ListasScreen>
                           await LocalDb.instance
                               .desmarcarAvisado(id);
                           if (mounted) {
-                            ScaffoldMessenger.of(context)
-                                .showSnackBar(
-                              SnackBar(
-                                  content: Text(
-                                      'Marca de avisado quitada para ${c['nombre']}')),
-                            );
+                            mostrarSnack(context, 'Marca de avisado quitada para ${c['nombre']}', significado: SignificadoChip.exito);
                             setState(() {});
                           }
                         } else {
-                          // v1.2.4 (C7): avisar por WhatsApp con el
-                          // mensaje ya escrito si tiene teléfono.
-                          final via = await _elegirAviso(c);
-                          if (via == null) return;
-                          if (via == 'whatsapp') {
-                            final ok = await _abrirWhatsapp(c);
-                            if (!ok) return;
-                          }
-                          await LocalDb.instance
-                              .marcarAvisado(id);
-                          if (mounted) {
-                            ScaffoldMessenger.of(context)
-                                .showSnackBar(
-                              SnackBar(
-                                  content: Text(
-                                      '${c['nombre']} marcado como avisado')),
-                            );
-                            setState(() {});
-                          }
+                          await _avisarEnCadena(rows, i);
                         }
                       },
                     ),
@@ -466,7 +498,7 @@ class _ListasScreenState extends State<ListasScreen>
                         const CircleBorder(),
                     onTap: () => _pagoRapido(c),
                     child: const Icon(
-                        Icons.payments,
+                        Icons.payments_rounded,
                         color: Colors.white,
                         size: 22),
                   ),

@@ -280,7 +280,7 @@ class _CentroComprasScreenState extends State<CentroComprasScreen> {
                 await _registrarManual(context);
                 _cargar();
               },
-              icon: const Icon(Icons.add),
+              icon: const Icon(Icons.add_rounded),
               label: const Text('Registrar compra'),
             )
           : null,
@@ -358,8 +358,8 @@ class _CentroComprasScreenState extends State<CentroComprasScreen> {
       child: ListTile(
         leading: Icon(
             f['tipo'] == 'servicio'
-                ? Icons.fitness_center
-                : Icons.shopping_bag,
+                ? Icons.fitness_center_rounded
+                : Icons.shopping_bag_rounded,
             color: anulada ? Colors.grey : AppColores.naranja),
         title: Text(
             '${f['concepto']}'
@@ -384,7 +384,7 @@ class _CentroComprasScreenState extends State<CentroComprasScreen> {
       context: context,
       builder: (ctx) => DialogoApp(
         titulo: '${f['concepto']}',
-        iconoTitulo: Icons.receipt_long,
+        iconoTitulo: Icons.receipt_long_rounded,
         contenido: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -474,7 +474,7 @@ class _CentroComprasScreenState extends State<CentroComprasScreen> {
       context: context,
       builder: (ctx) => DialogoApp(
         titulo: 'Anular compra',
-        iconoTitulo: Icons.cancel,
+        iconoTitulo: Icons.cancel_rounded,
         contenido: TextField(
             controller: motivoCtrl,
             decoration: const InputDecoration(
@@ -509,8 +509,7 @@ class _CentroComprasScreenState extends State<CentroComprasScreen> {
       );
     });
     if (!mounted) return;
-    ScaffoldMessenger.of(context)
-        .showSnackBar(const SnackBar(content: Text('Compra anulada')));
+    mostrarSnack(context, 'Compra anulada', significado: SignificadoChip.exito);
     // Argón #9 (BAJO): sin push, la op quedaba estancada hasta que
     // otra pantalla disparara un push.
     unawaited(SyncEngine.instance.push());
@@ -527,7 +526,7 @@ class _CentroComprasScreenState extends State<CentroComprasScreen> {
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setS) => DialogoApp(
           titulo: 'Registrar compra manual',
-          iconoTitulo: Icons.receipt_long,
+          iconoTitulo: Icons.receipt_long_rounded,
           contenido: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -609,8 +608,7 @@ class _CentroComprasScreenState extends State<CentroComprasScreen> {
     }
     if (error != null) {
       if (!context.mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text(error)));
+      mostrarSnack(context, error, significado: SignificadoChip.error);
       return;
     }
     final id = const Uuid().v4();
@@ -646,8 +644,7 @@ class _CentroComprasScreenState extends State<CentroComprasScreen> {
       );
     });
     if (!context.mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Compra registrada')));
+    mostrarSnack(context, 'Compra registrada', significado: SignificadoChip.exito);
     // Argón #9 (BAJO): sin push, la op quedaba estancada hasta que
     // otra pantalla disparara un push.
     unawaited(SyncEngine.instance.push());
@@ -670,7 +667,7 @@ class _CentroComprasScreenState extends State<CentroComprasScreen> {
                   .toList();
           return DialogoApp(
             titulo: 'Elegir cliente',
-            iconoTitulo: Icons.person,
+            iconoTitulo: Icons.person_rounded,
             contenido: SizedBox(
               width: double.maxFinite,
               height: 380,

@@ -57,8 +57,7 @@ class _SolicitudesAdelantoScreenState
 
   void _snack(String texto) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text(texto)));
+    mostrarSnack(context, texto);
   }
 
   /// Diálogo de aprobación con el selector de destino OBLIGATORIO
@@ -373,8 +372,7 @@ class _SolicitudesAdelantoScreenState
           'rechazado' => 'Rechazada',
           _ => 'Pendiente',
         },
-        style: TextStyle(
-            fontSize: 11, fontWeight: FontWeight.w600, color: color),
+        style: AppTexto.minuscula.copyWith(color: color, fontWeight: FontWeight.w600),
       ),
     );
   }

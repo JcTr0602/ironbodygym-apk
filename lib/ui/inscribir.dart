@@ -52,9 +52,13 @@ class _InscribirScreenState extends State<InscribirScreen> {
   String _metodoPago = 'efectivo';
   File? _foto;
   bool _guardando = false;
+  // Pasada 2 de Argón (1.20): si la pantalla se cierra sin
+  // completar la inscripción, la foto tomada queda huérfana.
+  bool _inscripcionCompletada = false;
   bool _esMenor = false;
   // v1.5.0 (Bloque G): aviso de fecha de carnet imposible (no bloquea).
   bool _carnetFechaInvalida = false;
+  bool _carnetPareceTelefono = false;
   // v1.4.0 Paso 2 (propuesta 11): crear acceso a la app de clientes al
   // inscribir. El servidor lo genera tras sincronizar y el PIN le llega
   // a Jc por Telegram (el cliente aún no existe en la nube al guardar).
@@ -68,6 +72,10 @@ class _InscribirScreenState extends State<InscribirScreen> {
   void initState() {
     super.initState();
     _carnet.addListener(_actualizarEsMenor);
+    // Q5 (cola 1.20): el aviso «parece teléfono» depende de
+    // AMBOS campos: también se recalcula al teclear el
+    // teléfono.
+    _telefono.addListener(_actualizarEsMenor);
     // v1.5.0 (Bloque G): pre-llenado de la conversión de invitado.
     final conv = widget.conversion;
     if (conv != null) {
@@ -111,11 +119,15 @@ class _InscribirScreenState extends State<InscribirScreen> {
   void _actualizarEsMenor() {
     final esMenorVal = esMenor(_carnet.text.trim());
     final fechaInvalida = carnetFechaInvalida(_carnet.text);
+    final pareceTel = carnetPareceTelefono(_carnet.text,
+        telefono: _telefono.text);
     if (esMenorVal != _esMenor ||
-        fechaInvalida != _carnetFechaInvalida) {
+        fechaInvalida != _carnetFechaInvalida ||
+        pareceTel != _carnetPareceTelefono) {
       setState(() {
         _esMenor = esMenorVal;
         _carnetFechaInvalida = fechaInvalida;
+        _carnetPareceTelefono = pareceTel;
       });
     }
   }
@@ -123,11 +135,21 @@ class _InscribirScreenState extends State<InscribirScreen> {
   @override
   void dispose() {
     _carnet.removeListener(_actualizarEsMenor);
+    _telefono.removeListener(_actualizarEsMenor);
     _nombre.dispose();
     _telefono.dispose();
     _carnet.dispose();
     _dias.dispose();
     _monto.dispose();
+    // Pasada 2 de Argón (1.20): foto tomada y nunca entregada
+    // (se canceló el diálogo o se salió con Atrás) → borrar el
+    // archivo. Si la inscripción se completó, la cola de fotos
+    // ya copió sus variantes y el original tampoco se usa.
+    final foto = _foto;
+    if (foto != null && !_inscripcionCompletada) {
+      // Borrado en segundo plano: dispose no puede esperar.
+      foto.delete().catchError((_) => foto);
+    }
     super.dispose();
   }
 
@@ -262,15 +284,12 @@ class _InscribirScreenState extends State<InscribirScreen> {
   Future<void> _guardarAhora() async {
     final nombre = _nombre.text.trim();
     if (nombre.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Escribe el nombre')));
+      mostrarSnack(context, 'Escribe el nombre', significado: SignificadoChip.alerta);
       return;
     }
     final tel = _telefono.text.trim();
     if (tel.isNotEmpty && !validarTelefono(tel)) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text(
-              'Teléfono inválido: 8 dígitos empezando con 5 o 6')));
+      mostrarSnack(context, 'Teléfono inválido: 8 dígitos empezando con 5 o 6', significado: SignificadoChip.alerta);
       return;
     }
     // Argón lote 4 MEDIO: con 'crear acceso' activo, el subtítulo
@@ -278,16 +297,13 @@ class _InscribirScreenState extends State<InscribirScreen> {
     // telefono null y el servidor fallaba en silencio al crear la
     // cuenta. Se exige aquí, antes de cualquier await.
     if (_crearAccesoApp && !validarTelefono(tel)) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text(
-              'Para crear el acceso de la app escribe un teléfono '
-              'válido de 8 dígitos.')));
+      mostrarSnack(context, 'Para crear el acceso de la app escribe un teléfono '
+              'válido de 8 dígitos.', significado: SignificadoChip.alerta);
       return;
     }
     final carnet = _carnet.text.trim();
     if (carnet.isNotEmpty && !validarCarnet(carnet)) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('Carnet inválido: 6 a 11 dígitos')));
+      mostrarSnack(context, 'Carnet inválido: 6 a 11 dígitos', significado: SignificadoChip.alerta);
       return;
     }
     // Argón lote 4 MEDIO: la fecha inválida solo avisaba en la UI y
@@ -316,8 +332,7 @@ class _InscribirScreenState extends State<InscribirScreen> {
     if (!_cuentaCasa &&
         _periodo == 'personalizado' &&
         (_diasPeriodo() <= 0 || _montoPeriodo(precios0) <= 0)) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('Indica días y monto válidos')));
+      mostrarSnack(context, 'Indica días y monto válidos', significado: SignificadoChip.alerta);
       return;
     }
 
@@ -337,7 +352,7 @@ class _InscribirScreenState extends State<InscribirScreen> {
         context: context,
         builder: (ctx) => DialogoApp(
           titulo: 'Carnet duplicado',
-          iconoTitulo: Icons.badge,
+          iconoTitulo: Icons.badge_rounded,
           contenido: Text(
               'El carnet $carnet ya pertenece a "${dueno['nombre']}".\n'
               'Cada carnet corresponde a un solo cliente: no se puede '
@@ -360,7 +375,7 @@ class _InscribirScreenState extends State<InscribirScreen> {
         context: context,
         builder: (ctx) => DialogoApp(
           titulo: 'Posible duplicado',
-          iconoTitulo: Icons.person_search,
+          iconoTitulo: Icons.person_search_rounded,
           contenido: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -435,15 +450,13 @@ class _InscribirScreenState extends State<InscribirScreen> {
           );
         }
         if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-            content:
-                Text('Cuenta a la Casa guardada (se sincronizará)')));
+        _inscripcionCompletada = true;
+        mostrarSnack(context, 'Cuenta a la Casa guardada (se sincronizará)', significado: SignificadoChip.exito);
         Navigator.of(context).pop();
         SyncEngine.instance.push();
       } catch (e) {
         if (!mounted) return;
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('Error: $e')));
+        mostrarSnack(context, 'Error: $e', significado: SignificadoChip.error);
       } finally {
         if (mounted) setState(() => _guardando = false);
       }
@@ -545,14 +558,13 @@ class _InscribirScreenState extends State<InscribirScreen> {
         );
       }
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Guardado (se sincronizará)')));
+      _inscripcionCompletada = true;
+      mostrarSnack(context, 'Guardado (se sincronizará)', significado: SignificadoChip.exito);
       Navigator.of(context).pop();
       SyncEngine.instance.push();
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('Error: $e')));
+      mostrarSnack(context, 'Error: $e', significado: SignificadoChip.error);
     } finally {
       if (mounted) setState(() => _guardando = false);
     }
@@ -614,11 +626,10 @@ class _InscribirScreenState extends State<InscribirScreen> {
                     crossAxisAlignment:
                         CrossAxisAlignment.start,
                     children: [
-                      const Row(
+                      Row(
                         children: [
-                          Icon(Icons.person,
-                              color:
-                                  AppColores.naranja),
+                          Icon(Icons.person_rounded,
+                              color: AppColores.textoSecundario(context)),
                           SizedBox(
                               width: AppEspacio.sm),
                           Text('Información personal',
@@ -643,7 +654,7 @@ class _InscribirScreenState extends State<InscribirScreen> {
                               label:
                                   const Text('Masculino'),
                               avatar: const Icon(
-                                  Icons.male,
+                                  Icons.male_rounded,
                                   size: 18),
                               selected: _sexo == 'M',
                               onSelected: (_) =>
@@ -655,7 +666,7 @@ class _InscribirScreenState extends State<InscribirScreen> {
                               label:
                                   const Text('Femenino'),
                               avatar: const Icon(
-                                  Icons.female,
+                                  Icons.female_rounded,
                                   size: 18),
                               selected: _sexo == 'F',
                               onSelected: (_) =>
@@ -669,7 +680,7 @@ class _InscribirScreenState extends State<InscribirScreen> {
                           controller: _telefono,
                           etiqueta:
                               'Teléfono (8 dígitos)',
-                          icono: Icons.phone,
+                          icono: Icons.phone_rounded,
                           teclado:
                               TextInputType.phone),
                       const SizedBox(
@@ -678,13 +689,17 @@ class _InscribirScreenState extends State<InscribirScreen> {
                           controller: _carnet,
                           etiqueta:
                               'Carnet (6–11 dígitos)',
-                          icono: Icons.badge,
+                          icono: Icons.badge_rounded,
                           teclado:
                               TextInputType.number),
                       // v1.5.0 (Bloque G): aviso de fecha
                       // imposible; NO bloquea el guardado.
                       if (_carnetFechaInvalida)
                         const AvisoFechaCarnet(),
+                      // Q5 (cola 1.20): aviso de carnet que
+                      // parece teléfono; tampoco bloquea.
+                      if (_carnetPareceTelefono)
+                        const AvisoCarnetTelefono(),
                     ],
                   ),
                 ),
@@ -698,12 +713,11 @@ class _InscribirScreenState extends State<InscribirScreen> {
                     crossAxisAlignment:
                         CrossAxisAlignment.start,
                     children: [
-                      const Row(
+                      Row(
                         children: [
                           Icon(
-                              Icons.card_membership,
-                              color:
-                                  AppColores.naranja),
+                              Icons.card_membership_rounded,
+                              color: AppColores.textoSecundario(context)),
                           SizedBox(
                               width: AppEspacio.sm),
                           Text('Membresía',
@@ -817,16 +831,22 @@ class _InscribirScreenState extends State<InscribirScreen> {
                                     _meses = 1;
                                     final id = v
                                         .substring(5);
-                                    _tipoCustomSel =
-                                        _tiposCustom
-                                            .firstWhere(
-                                      (t) =>
-                                          t.id ==
-                                          id,
-                                      orElse: () =>
-                                          _tiposCustom
-                                              .first,
-                                    );
+                                    // Pasada 2 de Argón (#4.2,
+                                    // 1.20): búsqueda sin
+                                    // firstWhere/orElse-first —
+                                    // si la lista se recargó
+                                    // vacía entre el build y el
+                                    // toque, .first lanzaba
+                                    // StateError. Sin hallazgo,
+                                    // la selección queda null.
+                                    _tipoCustomSel = null;
+                                    for (final t
+                                        in _tiposCustom) {
+                                      if (t.id == id) {
+                                        _tipoCustomSel = t;
+                                        break;
+                                      }
+                                    }
                                   } else {
                                     _periodo =
                                         'mensual';
@@ -890,14 +910,14 @@ class _InscribirScreenState extends State<InscribirScreen> {
                         children: [
                           ChoiceChip(
                               label: const Text('Efectivo'),
-                              avatar: const Icon(Icons.payments, size: 18),
+                              avatar: const Icon(Icons.payments_rounded, size: 18),
                               selected: _metodoPago == 'efectivo',
                               onSelected: (_) => setState(
                                   () => _metodoPago = 'efectivo')),
                           const SizedBox(width: 8),
                           ChoiceChip(
                               label: const Text('Transfer.'),
-                              avatar: const Icon(Icons.smartphone, size: 18),
+                              avatar: const Icon(Icons.smartphone_rounded, size: 18),
                               selected: _metodoPago == 'transferencia',
                               onSelected: (_) => setState(
                                   () => _metodoPago = 'transferencia')),
@@ -938,11 +958,10 @@ class _InscribirScreenState extends State<InscribirScreen> {
                     crossAxisAlignment:
                         CrossAxisAlignment.start,
                     children: [
-                      const Row(
+                      Row(
                         children: [
-                          Icon(Icons.camera_alt,
-                              color:
-                                  AppColores.naranja),
+                          Icon(Icons.camera_alt_rounded,
+                              color: AppColores.textoSecundario(context)),
                           SizedBox(
                               width: AppEspacio.sm),
                           Text('Fotografía',
@@ -969,7 +988,7 @@ class _InscribirScreenState extends State<InscribirScreen> {
                           Expanded(
                             child: OutlinedButton.icon(
                               icon: const Icon(
-                                  Icons.photo_camera),
+                                  Icons.photo_camera_rounded),
                               label: const Text(
                                   'Cámara'),
                               onPressed: () =>
@@ -983,7 +1002,7 @@ class _InscribirScreenState extends State<InscribirScreen> {
                           Expanded(
                             child: OutlinedButton.icon(
                               icon: const Icon(
-                                  Icons.photo_library),
+                                  Icons.photo_library_rounded),
                               label: const Text(
                                   'Galería'),
                               onPressed: () =>
@@ -1035,22 +1054,30 @@ class _InscribirScreenState extends State<InscribirScreen> {
                   ),
                   const SizedBox(height: AppEspacio.md),
                 ],
-                const SizedBox(
-                    height: AppEspacio.xl),
-                _guardando
-                    ? const Center(
-                        child:
-                            CircularProgressIndicator(
-                                color: AppColores
-                                    .naranja))
-                    : BotonPrimario(
-                        texto: 'Guardar inscripción',
-                        icono: Icons.check,
-                        onPressed: _guardar,
-                      ),
-                const SizedBox(
-                    height: AppEspacio.lg),
+                const SizedBox(height: AppEspacio.lg),
               ],
+            ),
+          ),
+          // V33: la acción de guardar vive en una barra fija
+          // inferior, separada del contenido — siempre visible
+          // sin bajar al final del formulario. Con el teclado
+          // abierto la barra sube con él y el formulario sigue
+          // desplazable en su Expanded (ningún campo queda
+          // atrapado debajo).
+          SafeArea(
+            top: false,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(AppEspacio.lg,
+                  AppEspacio.sm, AppEspacio.lg, AppEspacio.sm),
+              child: _guardando
+                  ? const Center(
+                      child: CircularProgressIndicator(
+                          color: AppColores.naranja))
+                  : BotonPrimario(
+                      texto: 'Guardar inscripción',
+                      icono: Icons.check_rounded,
+                      onPressed: _guardar,
+                    ),
             ),
           ),
         ],

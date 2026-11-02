@@ -23,6 +23,7 @@ import '../localdb.dart';
 import '../negocio.dart';
 import '../permisos.dart';
 import '../sync.dart';
+import 'aviso_duplicado.dart';
 import 'componentes.dart';
 import 'diseno.dart';
 import 'suplementos.dart';
@@ -47,8 +48,7 @@ Future<bool> ventaRapidaSuplemento(
     [double? tasaUsd]) async {
   final stock = (s['stock'] as num?)?.toInt() ?? 0;
   if (stock <= 0) {
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text('Sin stock disponible para venta rápida')));
+    mostrarSnack(context, 'Sin stock disponible para venta rápida', significado: SignificadoChip.alerta);
     return false;
   }
   if (!context.mounted) return false;
@@ -195,6 +195,25 @@ class _DialogoVentaRapidaState extends State<_DialogoVentaRapida> {
       }
       if (ok != true || !mounted) return;
     }
+    // T16 (1.20, FIN-16 de Argón): la venta rápida también pasa
+    // por el detector de duplicados, con la misma huella que la
+    // venta completa (suplemento + cantidad + precio unitario).
+    final sidPre = (widget.sup['id'] as num?)?.toInt();
+    if (sidPre != null) {
+      final centavosUnit = (_precioVenta! * 100).round();
+      final sigue = await confirmarSiPareceDuplicado(
+        context,
+        tipo: 'venta_suplemento',
+        coincide: (p) =>
+            (p['suplemento_id'] as num?)?.toInt() == sidPre &&
+            (p['cantidad'] as num?)?.toInt() == _cantidad &&
+            (p['precio_venta_centavos'] as num?)?.toInt() ==
+                centavosUnit,
+        descripcion:
+            'una venta de ${widget.sup['nombre']} x$_cantidad',
+      );
+      if (!sigue || !mounted) return;
+    }
     setState(() => _guardando = true);
     try {
       final sid = (widget.sup['id'] as num?)?.toInt();
@@ -217,8 +236,7 @@ class _DialogoVentaRapidaState extends State<_DialogoVentaRapida> {
       if (mounted) Navigator.pop(context, true);
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('No se registró la venta: $e')));
+        mostrarSnack(context, 'No se registró la venta: $e', significado: SignificadoChip.error);
       }
     } finally {
       if (mounted) setState(() => _guardando = false);
@@ -229,7 +247,7 @@ class _DialogoVentaRapidaState extends State<_DialogoVentaRapida> {
   Widget build(BuildContext context) {
     return DialogoApp(
       titulo: 'Vender ${widget.sup['nombre'] ?? 'suplemento'}',
-      iconoTitulo: Icons.flash_on,
+      iconoTitulo: Icons.flash_on_rounded,
       contenido: SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -258,7 +276,7 @@ class _DialogoVentaRapidaState extends State<_DialogoVentaRapida> {
                     ? 'Motivo del precio (opcional para el dueño)'
                     : 'Motivo del precio (obligatorio, mín. 5 caracteres)',
                 hint: 'Ej: Autorizado por Jc',
-                icono: Icons.edit_note,
+                icono: Icons.edit_note_rounded,
                 onChanged: (_) => setState(() {}),
               ),
             ],
@@ -269,7 +287,7 @@ class _DialogoVentaRapidaState extends State<_DialogoVentaRapida> {
               CampoTexto(
                 controller: _busqueda,
                 hint: 'Buscar cliente por nombre…',
-                icono: Icons.person_search,
+                icono: Icons.person_search_rounded,
                 onChanged: (_) => setState(() {}),
               ),
               ..._coincidencias.map((c) {
@@ -286,15 +304,12 @@ class _DialogoVentaRapidaState extends State<_DialogoVentaRapida> {
                       title: Text('${c['nombre'] ?? ''}'),
                       trailing: Icon(
                           protegido
-                              ? Icons.lock_outline
-                              : Icons.add_circle_outline,
+                              ? Icons.lock_outline_rounded
+                              : Icons.add_circle_outline_rounded,
                           color: AppColores.naranja),
                       onTap: () {
                         if (protegido) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                  content:
-                                      Text(mensajeClienteProtegido)));
+                          mostrarSnack(context, mensajeClienteProtegido, significado: SignificadoChip.alerta);
                           return;
                         }
                         setState(() {
@@ -342,14 +357,14 @@ class _DialogoVentaRapidaState extends State<_DialogoVentaRapida> {
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
           IconButton(
-            icon: const Icon(Icons.remove_circle_outline),
+            icon: const Icon(Icons.remove_circle_outline_rounded),
             onPressed: _cantidad > 1 && !_guardando
                 ? () => setState(() => _cantidad--)
                 : null,
           ),
           Text('$_cantidad', style: AppTexto.displayPequeno),
           IconButton(
-            icon: const Icon(Icons.add_circle_outline),
+            icon: const Icon(Icons.add_circle_outline_rounded),
             onPressed: _cantidad < widget.stock && !_guardando
                 ? () => setState(() => _cantidad++)
                 : null,
@@ -374,7 +389,7 @@ class _DialogoVentaRapidaState extends State<_DialogoVentaRapida> {
         ),
         child: Row(
           children: [
-            const Icon(Icons.warning_amber,
+            const Icon(Icons.warning_amber_rounded,
                 color: AppColores.alerta),
             const SizedBox(width: AppEspacio.sm),
             Expanded(
@@ -403,13 +418,13 @@ class _DialogoVentaRapidaState extends State<_DialogoVentaRapida> {
       ),
       child: Row(
         children: [
-          const Icon(Icons.person, color: AppColores.exito),
+          const Icon(Icons.person_rounded, color: AppColores.exito),
           const SizedBox(width: AppEspacio.sm),
           Expanded(
             child: Text(_clienteNombre, style: AppTexto.cuerpo),
           ),
           IconButton(
-            icon: const Icon(Icons.clear),
+            icon: const Icon(Icons.clear_rounded),
             tooltip: 'Quitar cliente',
             onPressed: _guardando
                 ? null
@@ -435,7 +450,7 @@ class _DialogoVentaRapidaState extends State<_DialogoVentaRapida> {
       ),
       child: const Row(
         children: [
-          Icon(Icons.card_giftcard, color: AppColores.exito),
+          Icon(Icons.card_giftcard_rounded, color: AppColores.exito),
           SizedBox(width: AppEspacio.sm),
           Expanded(
             child: Text(
@@ -464,7 +479,7 @@ class _DialogoVentaRapidaState extends State<_DialogoVentaRapida> {
         children: [
           Row(
             children: [
-              const Icon(Icons.warning_amber,
+              const Icon(Icons.warning_amber_rounded,
                   color: AppColores.alerta),
               const SizedBox(width: AppEspacio.sm),
               Expanded(
@@ -536,9 +551,7 @@ Future<void> compartirSuplemento(BuildContext context,
     }
   } catch (_) {
     if (context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-              content: Text('No se pudo compartir')));
+      mostrarSnack(context, 'No se pudo compartir', significado: SignificadoChip.error);
     }
   }
 }
@@ -574,10 +587,7 @@ class DetalleSuplementoScreen extends StatelessWidget {
         await ventaRapidaSuplemento(context, suplemento, tasaUsd);
     if (!context.mounted) return;
     if (ok) {
-      ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-              content:
-                  Text('Venta registrada (se sincronizará)')));
+      mostrarSnack(context, 'Venta registrada (se sincronizará)', significado: SignificadoChip.exito);
       Navigator.pop(context, true);
     }
   }
@@ -601,30 +611,11 @@ class DetalleSuplementoScreen extends StatelessWidget {
     final cup = monedaSup == 'USD' && tasaUsd != null && tasaUsd! > 1.0
         ? '≈ ${fmtMonto(precioOficialEn('CUP', precio, tasaUsd)!)} CUP'
         : null;
-    // v1.4.3: presentación del envase (la misma que ve el cliente
-    // en su catálogo). Parseo tolerante: el espejo puede traer el
-    // número como num o como texto.
-    final pesoV = suplemento['peso_valor'] is num
-        ? (suplemento['peso_valor'] as num).toDouble()
-        : double.tryParse('${suplemento['peso_valor'] ?? ''}');
-    final pesoU = '${suplemento['peso_unidad'] ?? ''}'.trim();
-    final servD = suplemento['servicios_estandar'] is num
-        ? (suplemento['servicios_estandar'] as num).toDouble()
-        : double.tryParse('${suplemento['servicios_estandar'] ?? ''}');
-    // Solo se muestra si es un entero positivo: redondear un
-    // dato fraccionario legado (1.5 → «2 servicios») fabricaría
-    // un dato que no existe (panel 2026-10-21).
-    final serv = (servD != null &&
-            servD > 0 &&
-            servD == servD.roundToDouble())
-        ? servD.toInt()
-        : null;
-    final presentacion = [
-      if (pesoV != null && pesoV > 0 && pesoU.isNotEmpty)
-        '${pesoV == pesoV.roundToDouble() ? pesoV.toInt() : pesoV} $pesoU',
-      if (serv != null && serv > 0)
-        '$serv servicio${serv == 1 ? '' : 's'}',
-    ].join(' · ');
+    // v1.4.3: presentación del envase (la misma que ve el
+    // cliente en su catálogo). Rediseño 1.20: el cálculo vive
+    // en textoPresentacion (negocio.dart), compartido con las
+    // tarjetas de la lista.
+    final presentacion = textoPresentacion(suplemento);
 
     return Scaffold(
       appBar: AppBar(
@@ -632,34 +623,97 @@ class DetalleSuplementoScreen extends StatelessWidget {
             overflow: TextOverflow.ellipsis),
         actions: [
           IconButton(
-            icon: const Icon(Icons.share_outlined),
+            icon: const Icon(Icons.share_rounded),
             tooltip: 'Compartir por WhatsApp',
             onPressed: () =>
                 compartirSuplemento(context, suplemento, tasaUsd),
           ),
+          // Rediseño 1.20: Editar y Eliminar viven en el
+          // menú ⋮ (solo dueño); Compartir queda visible.
           if (AuthService().isOwner)
-            IconButton(
-              icon: const Icon(Icons.edit_outlined),
-              tooltip: 'Editar suplemento',
-              onPressed: () async {
-                final editado = await Navigator.push<bool>(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) =>
-                        EditarSuplementoScreen(suplemento: suplemento),
-                  ),
-                );
-                if (editado == true && context.mounted) {
-                  Navigator.pop(context, true);
+            PopupMenuButton<String>(
+              icon: const Icon(Icons.more_vert_rounded),
+              tooltip: 'Más opciones',
+              onSelected: (v) async {
+                if (v == 'duplicar') {
+                  // F12: crear desde plantilla (sin id ni foto).
+                  final creado = await Navigator.push<bool>(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => EditarSuplementoScreen(
+                          plantilla: suplemento),
+                    ),
+                  );
+                  if (creado == true && context.mounted) {
+                    Navigator.pop(context, true);
+                  }
+                } else if (v == 'editar') {
+                  final editado = await Navigator.push<bool>(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => EditarSuplementoScreen(
+                          suplemento: suplemento),
+                    ),
+                  );
+                  if (editado == true && context.mounted) {
+                    Navigator.pop(context, true);
+                  }
+                } else if (v == 'ajustar') {
+                  // F5: ajuste de stock con motivo.
+                  final ajustado = await _ajustarStock(
+                      context, suplemento);
+                  if (ajustado == true && context.mounted) {
+                    Navigator.pop(context, true);
+                  }
+                } else if (v == 'eliminar') {
+                  _eliminarSuplemento(context, suplemento);
                 }
               },
-            ),
-          if (AuthService().isOwner)
-            IconButton(
-              icon: const Icon(Icons.delete_outline),
-              tooltip: 'Eliminar suplemento',
-              onPressed: () =>
-                  _eliminarSuplemento(context, suplemento),
+              itemBuilder: (_) => [
+                const PopupMenuItem(
+                  value: 'duplicar',
+                  child: Row(
+                    children: [
+                      Icon(Icons.copy_rounded, size: 20),
+                      SizedBox(width: 12),
+                      Text('Duplicar suplemento'),
+                    ],
+                  ),
+                ),
+                const PopupMenuItem(
+                  value: 'ajustar',
+                  child: Row(
+                    children: [
+                      Icon(Icons.inventory_2_rounded, size: 20),
+                      SizedBox(width: 12),
+                      Text('Ajustar stock'),
+                    ],
+                  ),
+                ),
+                const PopupMenuItem(
+                  value: 'editar',
+                  child: Row(
+                    children: [
+                      Icon(Icons.edit_rounded, size: 20),
+                      SizedBox(width: 12),
+                      Text('Editar suplemento'),
+                    ],
+                  ),
+                ),
+                PopupMenuItem(
+                  value: 'eliminar',
+                  child: Row(
+                    children: [
+                      const Icon(Icons.delete_outline_rounded,
+                          size: 20, color: AppColores.error),
+                      const SizedBox(width: 12),
+                      Text('Eliminar suplemento',
+                          style: AppTexto.cuerpo
+                              .copyWith(color: AppColores.error)),
+                    ],
+                  ),
+                ),
+              ],
             ),
         ],
       ),
@@ -686,10 +740,10 @@ class DetalleSuplementoScreen extends StatelessWidget {
                       borderRadius:
                           BorderRadius.circular(AppRadio.lg),
                     ),
-                    child: const Icon(
-                        Icons.medication_outlined,
+                    child: Icon(
+                        Icons.medication_rounded,
                         size: 72,
-                        color: AppColores.naranja),
+                        color: AppColores.textoSecundario(context)),
                   )),
             )
           else
@@ -705,22 +759,31 @@ class DetalleSuplementoScreen extends StatelessWidget {
                       borderRadius:
                           BorderRadius.circular(AppRadio.lg),
                     ),
-                    child: const Icon(
-                        Icons.medication_outlined,
+                    child: Icon(
+                        Icons.medication_rounded,
                         size: 72,
-                        color: AppColores.naranja),
+                        color: AppColores.textoSecundario(context)),
                   );
                 }
                 return ClipRRect(
                   borderRadius:
                       BorderRadius.circular(AppRadio.lg),
                 child: Image.file(f,
-                    height: 220,
+                    height: 200,
                     width: double.infinity,
                     fit: BoxFit.cover),
               );
             },
           ),
+          // Rediseño 1.20: foto_local presente = foto nueva
+          // aún no confirmada por el servidor (el pull la
+          // limpia); se avisa sin bloquear nada.
+          if (fotoLocal != null && fotoLocal.isNotEmpty) ...[
+            const SizedBox(height: AppEspacio.sm),
+            const ChipEstado.semantico(
+                texto: 'Foto pendiente de sincronizar',
+                significado: SignificadoChip.alerta),
+          ],
           const SizedBox(height: AppEspacio.md),
           Row(
             children: [
@@ -729,9 +792,9 @@ class DetalleSuplementoScreen extends StatelessWidget {
                     style: AppTexto.titulo),
               ),
               if (inactivo)
-                const ChipEstado(
+                const ChipEstado.semantico(
                     texto: 'Inactivo',
-                    color: Colors.grey),
+                    significado: SignificadoChip.neutral),
             ],
           ),
           const SizedBox(height: AppEspacio.xs),
@@ -752,8 +815,8 @@ class DetalleSuplementoScreen extends StatelessWidget {
           Tarjeta(
             child: Row(
               children: [
-                const Icon(Icons.payments_outlined,
-                    color: AppColores.naranja, size: 32),
+                Icon(Icons.payments_rounded,
+                    color: AppColores.textoSecundario(context), size: 32),
                 const SizedBox(width: AppEspacio.md),
                 Expanded(
                   child: Column(
@@ -769,8 +832,20 @@ class DetalleSuplementoScreen extends StatelessWidget {
                                 color: AppColores.naranja,
                                 fontWeight:
                                     FontWeight.bold)),
-                      Text('$stock disponibles',
-                          style: AppTexto.secundario),
+                      ChipEstado.semantico(
+                        texto: textoEstadoStock(suplemento),
+                        significado:
+                            switch (estadoStockSuplemento(suplemento)) {
+                          EstadoStockSuplemento.agotado =>
+                            SignificadoChip.error,
+                          EstadoStockSuplemento.bajo =>
+                            SignificadoChip.alerta,
+                          EstadoStockSuplemento.disponible =>
+                            SignificadoChip.exito,
+                          EstadoStockSuplemento.inactivo =>
+                            SignificadoChip.neutral,
+                        },
+                      ),
                     ],
                   ),
                 ),
@@ -807,7 +882,7 @@ class DetalleSuplementoScreen extends StatelessWidget {
                   Tarjeta(
                     child: Row(
                       children: [
-                        const Icon(Icons.trending_up_outlined,
+                        const Icon(Icons.trending_up_rounded,
                             color: AppColores.exito, size: 32),
                         const SizedBox(width: AppEspacio.md),
                         Expanded(
@@ -833,26 +908,234 @@ class DetalleSuplementoScreen extends StatelessWidget {
                 ],
               );
             }),
+          // F5 (1.20): historial de ajustes de stock.
           const SizedBox(height: AppEspacio.lg),
-          BotonPrimario(
-            texto: 'Vender',
-            onPressed:
-                stock > 0 ? () => _vender(context) : null,
-          ),
-          const SizedBox(height: AppEspacio.sm),
-          SizedBox(
-            width: double.infinity,
-            child: OutlinedButton.icon(
-              icon: const Icon(Icons.flash_on,
-                  color: AppColores.naranja),
-              label: const Text('Venta rápida (1 unidad)'),
-              onPressed: stock > 0
-                  ? () => _ventaRapida(context)
-                  : null,
-            ),
-          ),
+          const EncabezadoSeccion(titulo: 'Movimientos de stock'),
+          _MovimientosStock(
+              suplementoId:
+                  (suplemento['id'] as num?)?.toInt() ?? 0),
         ],
       ),
+      // Rediseño 1.20: barra de venta FIJA — la acción
+      // dominante es la venta rápida de 1 unidad (la misma
+      // del botón de la tarjeta); la completa queda como
+      // secundaria visible.
+      bottomNavigationBar: SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(AppEspacio.lg,
+              AppEspacio.sm, AppEspacio.lg, AppEspacio.md),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              BotonPrimario(
+                texto: stock > 0 ? 'Vender 1 unidad' : 'Sin stock',
+                icono: Icons.flash_on_rounded,
+                onPressed:
+                    stock > 0 ? () => _ventaRapida(context) : null,
+              ),
+              const SizedBox(height: AppEspacio.sm),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  icon: Icon(Icons.receipt_long_rounded,
+                      color: AppColores.textoSecundario(context)),
+                  label: const Text('Registrar venta completa'),
+                  onPressed:
+                      stock > 0 ? () => _vender(context) : null,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// F5 (1.20): diálogo de ajuste de stock con motivo.
+/// Devuelve true si se ajustó.
+Future<bool> _ajustarStock(BuildContext context,
+    Map<String, dynamic> suplemento) async {
+  final stockActual =
+      (suplemento['stock'] as num?)?.toInt() ?? 0;
+  final ctrl =
+      TextEditingController(text: '$stockActual');
+  final notaCtrl = TextEditingController();
+  var motivo = 'merma';
+  final ok = await showDialog<bool>(
+    context: context,
+    builder: (ctx) => StatefulBuilder(
+      builder: (ctx, setD) => DialogoApp(
+        titulo: 'Ajustar stock',
+        iconoTitulo: Icons.inventory_2_rounded,
+        contenido: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Stock actual: $stockActual',
+                style: AppTexto.cuerpo),
+            const SizedBox(height: AppEspacio.md),
+            CampoTexto(
+              controller: ctrl,
+              etiqueta: 'Nuevo stock',
+              teclado: TextInputType.number,
+            ),
+            const SizedBox(height: AppEspacio.md),
+            DropdownButton<String>(
+              value: motivo,
+              isExpanded: true,
+              items: [
+                for (final m in kMotivosAjusteStock)
+                  DropdownMenuItem(
+                      value: m,
+                      child: Text(etiquetaMotivoAjuste(m))),
+              ],
+              onChanged: (v) =>
+                  setD(() => motivo = v ?? 'merma'),
+            ),
+            const SizedBox(height: AppEspacio.md),
+            CampoTexto(
+              controller: notaCtrl,
+              etiqueta: 'Nota (opcional)',
+            ),
+          ],
+        ),
+        acciones: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancelar')),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Ajustar')),
+        ],
+      ),
+    ),
+  );
+  if (ok != true) {
+    ctrl.dispose();
+    notaCtrl.dispose();
+    return false;
+  }
+  final nuevo = int.tryParse(ctrl.text.trim());
+  final notaTexto = notaCtrl.text;
+  // FIN-16 de Argón (1.20): controladores liberados tras leer
+  // sus valores (antes quedaban sin dispose).
+  ctrl.dispose();
+  notaCtrl.dispose();
+  if (nuevo == null || nuevo < 0) {
+    if (context.mounted) {
+      mostrarSnack(context, 'Escribe un stock válido (0 o más).',
+          significado: SignificadoChip.alerta);
+    }
+    return false;
+  }
+  if (nuevo == stockActual) {
+    if (context.mounted) {
+      mostrarSnack(context, 'El stock no cambió.');
+    }
+    return false;
+  }
+  try {
+    await ajustarStockSuplemento(
+      suplementoId: (suplemento['id'] as num?)!.toInt(),
+      nuevoStock: nuevo,
+      motivo: motivo,
+      nota: notaTexto,
+    );
+    if (context.mounted) {
+      mostrarSnack(
+          context, 'Stock ajustado: $stockActual → $nuevo',
+          significado: SignificadoChip.exito);
+    }
+    return true;
+  } catch (e) {
+    if (context.mounted) {
+      mostrarSnack(context, 'No se pudo ajustar: $e',
+          significado: SignificadoChip.error);
+    }
+    return false;
+  }
+}
+
+/// F5 (1.20): movimientos de stock del suplemento desde el
+/// espejo de ajustes (antes → después, motivo y autor).
+class _MovimientosStock extends StatefulWidget {
+  final int suplementoId;
+  const _MovimientosStock({required this.suplementoId});
+
+  @override
+  State<_MovimientosStock> createState() =>
+      _MovimientosStockState();
+}
+
+class _MovimientosStockState extends State<_MovimientosStock> {
+  List<Map<String, dynamic>> _movs = [];
+  bool _listo = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _cargar();
+  }
+
+  Future<void> _cargar() async {
+    List<Map<String, dynamic>> filas = const [];
+    try {
+      filas = (await LocalDb.instance
+              .allMirror('suplemento_ajustes'))
+          .where((a) =>
+              (a['suplemento_id'] as num?)?.toInt() ==
+              widget.suplementoId)
+          .toList()
+        ..sort((a, b) =>
+            '${b['fecha'] ?? ''}'.compareTo('${a['fecha'] ?? ''}'));
+    } catch (_) {}
+    if (!mounted) return;
+    setState(() {
+      _movs = filas;
+      _listo = true;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!_listo) return const SizedBox.shrink();
+    if (_movs.isEmpty) {
+      return const Text('Sin movimientos registrados.',
+          style: AppTexto.secundario);
+    }
+    return Column(
+      children: [
+        for (final a in _movs)
+          Padding(
+            padding:
+                const EdgeInsets.symmetric(vertical: AppEspacio.xs),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment:
+                        CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        '${a['stock_antes']} → ${a['stock_despues']} · '
+                        '${etiquetaMotivoAjuste('${a['motivo'] ?? 'otro'}')}',
+                        style: AppTexto.cuerpo,
+                      ),
+                      Text(
+                        '${fmtFecha(a['fecha'] as String?)} · '
+                        '${a['registrado_por_nombre'] ?? ''}'
+                        '${(a['nota'] as String?)?.isNotEmpty == true ? ' · ${a['nota']}' : ''}',
+                        style: AppTexto.secundario,
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+      ],
     );
   }
 }
@@ -882,12 +1165,7 @@ Future<void> _eliminarSuplemento(
   final nVentas = (ventas.first['n'] as int?) ?? 0;
   if (nVentas > 0) {
     if (!context.mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-            'No se puede eliminar: tiene $nVentas venta(s) registrada(s).'),
-      ),
-    );
+    mostrarSnack(context, 'No se puede eliminar: tiene $nVentas venta(s) registrada(s).', significado: SignificadoChip.alerta);
     return;
   }
 
@@ -915,12 +1193,7 @@ Future<void> _eliminarSuplemento(
   final nBotes = (botesAbiertos.first['n'] as int?) ?? 0;
   if (nPendientes > 0 || nBotes > 0) {
     if (!context.mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text(
-            'No se puede eliminar: tiene ventas pendientes o botes abiertos.'),
-      ),
-    );
+    mostrarSnack(context, 'No se puede eliminar: tiene ventas pendientes o botes abiertos.', significado: SignificadoChip.alerta);
     return;
   }
 
@@ -944,8 +1217,7 @@ Future<void> _eliminarSuplemento(
     AppLog.info('suplementos', 'eliminar', d: 'id=$id nombre=$nombre');
 
     if (!context.mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Suplemento eliminado')));
+    mostrarSnack(context, 'Suplemento eliminado', significado: SignificadoChip.exito);
     Navigator.of(context).pop();
     SyncEngine.instance.push();
   } finally {

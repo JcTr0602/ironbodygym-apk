@@ -45,8 +45,7 @@ class _AvisosEntrenadorScreenState
 
   void _snack(String texto) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text(texto)));
+    mostrarSnack(context, texto);
   }
 
   Future<void> _editar([AvisoEntrenador? actual]) async {
@@ -324,13 +323,9 @@ class _AvisosEntrenadorScreenState
                         ),
                         child: Text(
                           a.activo ? 'Activo' : 'Inactivo',
-                          style: TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w600,
-                            color: a.activo
+                          style: AppTexto.minuscula.copyWith(color: a.activo
                                 ? AppColores.exitoOscuro
-                                : AppColores.error,
-                          ),
+                                : AppColores.error, fontWeight: FontWeight.w600),
                         ),
                       ),
                     ],

@@ -5,6 +5,8 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'diseno.dart';
+import 'componentes.dart';
 import '../auth.dart';
 import '../permisos_entrenador.dart';
 
@@ -86,9 +88,7 @@ class _EditorPlanNutricionalState
     } catch (e) {
       if (mounted) {
         setState(() => _cargando = false);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e')),
-        );
+        mostrarSnack(context, 'Error: $e', significado: SignificadoChip.error);
       }
     }
   }
@@ -96,11 +96,7 @@ class _EditorPlanNutricionalState
   Future<void> _guardar() async {
     final texto = _ctrl.text.trim();
     if (texto.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-            content:
-                Text('El plan no puede estar vacío')),
-      );
+      mostrarSnack(context, 'El plan no puede estar vacío', significado: SignificadoChip.alerta);
       return;
     }
     setState(() => _guardando = true);
@@ -111,18 +107,13 @@ class _EditorPlanNutricionalState
         'p_contenido': texto,
       });
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-              content: Text('Plan guardado')),
-        );
+        mostrarSnack(context, 'Plan guardado', significado: SignificadoChip.exito);
         Navigator.pop(context, true);
       }
     } catch (e) {
       if (mounted) {
         setState(() => _guardando = false);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e')),
-        );
+        mostrarSnack(context, 'Error: $e', significado: SignificadoChip.error);
       }
     }
   }
@@ -133,11 +124,7 @@ class _EditorPlanNutricionalState
         prefs.getString('plantilla_nutricional_personal');
     if (plantilla == null || plantilla.isEmpty) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-              content: Text(
-                  'No tienes plantilla guardada. Escribe un plan y usa "Guardar como plantilla".')),
-        );
+        mostrarSnack(context, 'No tienes plantilla guardada. Escribe un plan y usa "Guardar como plantilla".', significado: SignificadoChip.alerta);
       }
       return;
     }
@@ -168,22 +155,14 @@ class _EditorPlanNutricionalState
   Future<void> _guardarComoPlantilla() async {
     final texto = _ctrl.text.trim();
     if (texto.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-            content: Text(
-                'Escribe un plan primero')),
-      );
+      mostrarSnack(context, 'Escribe un plan primero', significado: SignificadoChip.alerta);
       return;
     }
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(
         'plantilla_nutricional_personal', texto);
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-            content:
-                Text('Plantilla personal guardada')),
-      );
+      mostrarSnack(context, 'Plantilla personal guardada', significado: SignificadoChip.exito);
     }
   }
 
@@ -198,7 +177,7 @@ class _EditorPlanNutricionalState
         actions: [
           if (puedeEditar && !_cargando)
             IconButton(
-              icon: const Icon(Icons.save),
+              icon: const Icon(Icons.save_rounded),
               onPressed:
                   _guardando ? null : _guardar,
               tooltip: 'Guardar',
@@ -216,9 +195,7 @@ class _EditorPlanNutricionalState
                     child: Text(
                       'Última actualización: ${_actualizadoPor ?? ''}'
                       '${_actualizadoEn != null ? ' • ${_actualizadoEn!.day}/${_actualizadoEn!.month}/${_actualizadoEn!.year}' : ''}',
-                      style: TextStyle(
-                          color: Colors.grey[600],
-                          fontSize: 12),
+                      style: AppTexto.metadato.copyWith(color: Colors.grey[600]),
                     ),
                   ),
                 if (puedeEditar)
@@ -230,12 +207,11 @@ class _EditorPlanNutricionalState
                         Expanded(
                           child: OutlinedButton.icon(
                             icon: const Icon(
-                                Icons.auto_awesome,
+                                Icons.auto_awesome_rounded,
                                 size: 16),
                             label: const Text(
                                 'Usar mi plantilla',
-                                style: TextStyle(
-                                    fontSize: 12)),
+                                style: AppTexto.metadato),
                             onPressed:
                                 _usarPlantillaPersonal,
                           ),
@@ -244,12 +220,11 @@ class _EditorPlanNutricionalState
                         Expanded(
                           child: OutlinedButton.icon(
                             icon: const Icon(
-                                Icons.bookmark_add,
+                                Icons.bookmark_add_rounded,
                                 size: 16),
                             label: const Text(
                                 'Guardar como plantilla',
-                                style: TextStyle(
-                                    fontSize: 12)),
+                                style: AppTexto.metadato),
                             onPressed:
                                 _guardarComoPlantilla,
                           ),

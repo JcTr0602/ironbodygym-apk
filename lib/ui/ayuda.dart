@@ -40,7 +40,7 @@ class AyudaScreen extends StatelessWidget {
                   '4. Si ya existe alguien parecido, la app te avisa '
                   'antes de duplicarlo.\n\n'
                   'Todo se guarda en el teléfono aunque no haya internet.',
-                  icono: Icons.edit_note,
+                  icono: Icons.edit_note_rounded,
                   color: AppColores.info,
                 ),
                 const _Seccion(
@@ -55,7 +55,7 @@ class AyudaScreen extends StatelessWidget {
                   '4. Confirma el resumen.\n\n'
                   'Si está vencido, en su ficha verás "Renovación rápida" '
                   'para cobrarle 1 mes con un toque.',
-                  icono: Icons.payments,
+                  icono: Icons.payments_rounded,
                   color: AppColores.exito,
                 ),
                 const _Seccion(
@@ -64,7 +64,7 @@ class AyudaScreen extends StatelessWidget {
                   'En el inicio, toca el botón del rayo y elige '
                   '"Pago diario". Queda registrado en tu turno y en tu '
                   'pendiente si es en efectivo.',
-                  icono: Icons.receipt_long,
+                  icono: Icons.receipt_long_rounded,
                   color: AppColores.infoOscuro,
                 ),
                 const _Seccion(
@@ -77,14 +77,14 @@ class AyudaScreen extends StatelessWidget {
                   '• Al día: clientes activos con su pago corriente.\n\n'
                   'Toca Pagar en cualquier fila para cobrar sin entrar '
                   'a la ficha.',
-                  icono: Icons.list_alt,
+                  icono: Icons.list_alt_rounded,
                   color: AppColores.alerta,
                 ),
                 const _Seccion(
                   'Mi turno',
                   'Tus cobros de hoy, tu cierre de turno y tu pendiente '
                   'a entregar. Con tu usuario solo ves tus números.',
-                  icono: Icons.person,
+                  icono: Icons.person_rounded,
                   color: AppColores.infoOscuro,
                 ),
                 const _Seccion(
@@ -95,7 +95,7 @@ class AyudaScreen extends StatelessWidget {
                   'Al tocar un aviso se abre TU WhatsApp con el mensaje '
                   'ya escrito; tú decides si lo envías. La app no '
                   'envía nada sola.',
-                  icono: Icons.chat,
+                  icono: Icons.chat_rounded,
                   color: AppColores.exito,
                 ),
                 const _Seccion(
@@ -106,7 +106,7 @@ class AyudaScreen extends StatelessWidget {
                   'Para quitarla, en la ficha toca "Eliminar foto" '
                   '(funciona aunque la foto nunca se haya descargado '
                   'en este teléfono).',
-                  icono: Icons.photo_camera,
+                  icono: Icons.photo_camera_rounded,
                   color: AppColores.info,
                 ),
                 const _Tema('Dinero'),
@@ -118,7 +118,7 @@ class AyudaScreen extends StatelessWidget {
                   'entrega; no es un error.\n\n'
                   'Las transferencias no entran aquí: van directo a '
                   'la cuenta del dueño.',
-                  icono: Icons.handshake,
+                  icono: Icons.handshake_rounded,
                   color: AppColores.exito,
                 ),
                 const _Seccion(
@@ -126,7 +126,7 @@ class AyudaScreen extends StatelessWidget {
                   'Muestra los datos de las tarjetas para que el cliente '
                   'transfiera y confirme por WhatsApp al móvil de '
                   'confirmación que aparece en esa pantalla.',
-                  icono: Icons.smartphone,
+                  icono: Icons.smartphone_rounded,
                   color: AppColores.infoOscuro,
                 ),
                 const _Seccion(
@@ -138,7 +138,7 @@ class AyudaScreen extends StatelessWidget {
                   'Si un producto se vende a crédito queda como fiado '
                   'hasta que se salde. El dueño controla el stock, '
                   'los márgenes y los fiados desde Administración.',
-                  icono: Icons.medication,
+                  icono: Icons.medication_rounded,
                   color: AppColores.info,
                 ),
                 const _Seccion(
@@ -150,7 +150,7 @@ class AyudaScreen extends StatelessWidget {
                   'Ojo: quien paga este mes pero su cobertura vence '
                   'dentro del propio mes (por ejemplo un semanal) no '
                   'entra en la base de este mes.',
-                  icono: Icons.calculate,
+                  icono: Icons.calculate_rounded,
                   color: AppColores.alerta,
                 ),
                 const _Tema('Gestión'),
@@ -168,7 +168,7 @@ class AyudaScreen extends StatelessWidget {
                   'el dueño puede marcar el turno a mano. El horario '
                   'semanal de turnos lo define el dueño en '
                   'Administración → Horario.',
-                  icono: Icons.badge,
+                  icono: Icons.badge_rounded,
                   color: AppColores.info,
                 ),
                 const _Seccion(
@@ -181,7 +181,7 @@ class AyudaScreen extends StatelessWidget {
                   '(máximo 40 por tanda). La app prepara cada mensaje '
                   'y recuerda por dónde quedaste; el envío siempre '
                   'lo haces tú desde tu WhatsApp.',
-                  icono: Icons.campaign,
+                  icono: Icons.campaign_rounded,
                   color: AppColores.naranja,
                 ),
                 const _Seccion(
@@ -191,7 +191,7 @@ class AyudaScreen extends StatelessWidget {
                   'incidencia con su descripción. El dueño las sigue '
                   'y las marca resueltas; tú ves el estado de las '
                   'tuyas.',
-                  icono: Icons.report_problem,
+                  icono: Icons.report_problem_rounded,
                   color: AppColores.alerta,
                 ),
                 const _Seccion(
@@ -200,7 +200,7 @@ class AyudaScreen extends StatelessWidget {
                   'ahí puedes recuperarlos sin inscribirlos de nuevo. '
                   'Eliminarlos definitivamente solo puede hacerlo '
                   'el dueño.',
-                  icono: Icons.delete_outline,
+                  icono: Icons.delete_outline_rounded,
                 ),
                 const _Tema('La app'),
                 const _Seccion(
@@ -208,7 +208,7 @@ class AyudaScreen extends StatelessWidget {
                   'No para trabajar. Inscribes y cobras con normalidad '
                   'en el gym; cuando tengas conexión, los datos se '
                   'envían solos.',
-                  icono: Icons.signal_cellular_alt,
+                  icono: Icons.signal_cellular_alt_rounded,
                   color: AppColores.naranja,
                 ),
                 const _Seccion(
@@ -223,7 +223,7 @@ class AyudaScreen extends StatelessWidget {
                   'conexión; no se pierden.\n'
                   '• Las fotos suben después de los datos, para que '
                   'un cobro nunca espere por una foto.',
-                  icono: Icons.sync,
+                  icono: Icons.sync_rounded,
                   color: AppColores.info,
                 ),
                 const _Tema('Si algo falla'),
@@ -239,7 +239,7 @@ class AyudaScreen extends StatelessWidget {
                   'nuevo.\n'
                   '• "Un cliente no aparece": sincroniza manualmente '
                   'desde el inicio.',
-                  icono: Icons.warning,
+                  icono: Icons.warning_rounded,
                   color: AppColores.error,
                 ),
                 const _Seccion(
@@ -247,14 +247,14 @@ class AyudaScreen extends StatelessWidget {
                   'Con tu usuario ves tus cobros, tu turno y tu '
                   'pendiente. El dueño ve los totales de todo el gym '
                   'para llevar el control.',
-                  icono: Icons.lock,
+                  icono: Icons.lock_rounded,
                   color: AppColores.error,
                 ),
                 const _Seccion(
                   'Contacto',
                   '¿Dudas con la app? Escríbele al dueño por '
                   'Telegram: ${AppConfig.telegramContacto}.',
-                  icono: Icons.phone,
+                  icono: Icons.phone_rounded,
                   color: AppColores.exito,
                 ),
                 Padding(
@@ -284,7 +284,7 @@ class AyudaScreen extends StatelessWidget {
     final actual = novedades.first;
     final anteriores = novedades.skip(1).toList();
     return Padding(
-      padding: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.only(bottom: 12),
       child: Tarjeta(
         padding: EdgeInsets.zero,
         child: Column(
@@ -292,7 +292,7 @@ class AyudaScreen extends StatelessWidget {
           children: [
             // Cabecera con gradiente naranja
             Container(
-              padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
               decoration: const BoxDecoration(
                 gradient: AppColores.gradienteNaranja,
                 borderRadius: BorderRadius.vertical(
@@ -307,16 +307,13 @@ class AyudaScreen extends StatelessWidget {
                       color: Colors.white.withValues(alpha: 0.22),
                       shape: BoxShape.circle,
                     ),
-                    child: const Icon(Icons.new_releases,
+                    child: const Icon(Icons.new_releases_rounded,
                         color: Colors.white, size: 24),
                   ),
                   const SizedBox(width: 12),
-                  const Expanded(
+                  Expanded(
                     child: Text('Lo Nuevo',
-                        style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 17,
-                            color: Colors.white)),
+                        style: AppTexto.titulo.copyWith(color: Colors.white)),
                   ),
                   Container(
                     padding: const EdgeInsets.symmetric(
@@ -326,17 +323,14 @@ class AyudaScreen extends StatelessWidget {
                       borderRadius: BorderRadius.circular(20),
                     ),
                     child: Text('v${actual.version}',
-                        style: const TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 13)),
+                        style: AppTexto.secundario.copyWith(color: Colors.white, fontWeight: FontWeight.bold)),
                   ),
                 ],
               ),
             ),
             // Cambios de la versión actual, con iconos
             Padding(
-              padding: const EdgeInsets.fromLTRB(8, 10, 8, 4),
+              padding: const EdgeInsets.fromLTRB(8, 12, 8, 4),
               child: Column(
                 children: [
                   for (final c in actual.cambios)
@@ -347,17 +341,16 @@ class AyudaScreen extends StatelessWidget {
                         crossAxisAlignment:
                             CrossAxisAlignment.start,
                         children: [
-                          const Padding(
-                            padding: EdgeInsets.only(top: 2),
-                            child: Icon(Icons.check_circle,
+                          Padding(
+                            padding: const EdgeInsets.only(top: 2),
+                            child: Icon(Icons.check_circle_rounded,
                                 size: 18,
-                                color: AppColores.naranja),
+                                color: AppColores.textoSecundario(context)),
                           ),
-                          const SizedBox(width: 10),
+                          const SizedBox(width: 8),
                           Expanded(
                             child: Text(c,
-                                style: const TextStyle(
-                                    fontSize: 14,
+                                style: AppTexto.cuerpo.copyWith(
                                     height: 1.35)),
                           ),
                         ],
@@ -374,9 +367,7 @@ class AyudaScreen extends StatelessWidget {
                   tilePadding: const EdgeInsets.symmetric(
                       horizontal: 16),
                   title: Text('Versiones anteriores',
-                      style: TextStyle(
-                          fontSize: 13,
-                          color: AppColores.textoSecundario(
+                      style: AppTexto.secundario.copyWith(color: AppColores.textoSecundario(
                               context))),
                   children: [
                     for (final n in anteriores) ...[
@@ -397,12 +388,7 @@ class AyudaScreen extends StatelessWidget {
                                   BorderRadius.circular(12),
                             ),
                             child: Text('v${n.version}',
-                                style: const TextStyle(
-                                    fontWeight:
-                                        FontWeight.bold,
-                                    fontSize: 12,
-                                    color:
-                                        AppColores.naranja)),
+                                style: AppTexto.metadato.copyWith(color: AppColores.naranja, fontWeight: FontWeight.bold)),
                           ),
                         ),
                       ),
@@ -417,9 +403,9 @@ class AyudaScreen extends StatelessWidget {
                             children: [
                               Padding(
                                 padding:
-                                    const EdgeInsets.only(top: 5),
+                                    const EdgeInsets.only(top: 4),
                                 child: Icon(
-                                    Icons.fiber_manual_record,
+                                    Icons.fiber_manual_record_rounded,
                                     size: 8,
                                     color: AppColores
                                         .textoSecundario(
@@ -428,9 +414,7 @@ class AyudaScreen extends StatelessWidget {
                               const SizedBox(width: 8),
                               Expanded(
                                 child: Text(c,
-                                    style: TextStyle(
-                                        fontSize: 13,
-                                        color: AppColores
+                                    style: AppTexto.secundario.copyWith(color: AppColores
                                             .texto(context))),
                               ),
                             ],

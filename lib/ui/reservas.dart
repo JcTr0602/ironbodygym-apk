@@ -276,6 +276,33 @@ Color colorEstadoReserva(String estado) {
   }
 }
 
+/// V27: significado del sistema de chips para el estado de
+/// reserva — el mismo reparto de color que [colorEstadoReserva]
+/// (solicitada ámbar, reservada azul, pagada verde, rechazada
+/// roja, resto neutro), en el vocabulario V6.
+SignificadoChip significadoEstadoReserva(String estado) {
+  switch (estado) {
+    case 'solicitada':
+      return SignificadoChip.alerta;
+    case 'reservada':
+      return SignificadoChip.info;
+    case 'pagada':
+      return SignificadoChip.exito;
+    case 'rechazada':
+      return SignificadoChip.error;
+    default:
+      return SignificadoChip.neutral;
+  }
+}
+
+/// V27: ¿el vencimiento de la reserva es urgente? (vence en 24 h
+/// o ya pasó). Sin fecha parseable, no es urgente.
+bool venceProntoReserva(ReservaVista r, DateTime ahora) {
+  final f = r.expiraEn == null ? null : DateTime.tryParse(r.expiraEn!);
+  if (f == null) return false;
+  return !f.isAfter(ahora.add(const Duration(hours: 24)));
+}
+
 // ------------------------------------------------------------------
 // Pantalla
 // ------------------------------------------------------------------
@@ -371,9 +398,8 @@ class _ReservasScreenState extends State<ReservasScreen> {
           !requeridos.contains(estadoActual) ||
           conOp) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-              content: Text('La reserva cambió mientras confirmabas. '
-                  'Se actualizó la bandeja; revisa su estado actual.')));
+          mostrarSnack(context, 'La reserva cambió mientras confirmabas. '
+                  'Se actualizó la bandeja; revisa su estado actual.', significado: SignificadoChip.alerta);
           await _cargar();
         }
         return;
@@ -395,9 +421,8 @@ class _ReservasScreenState extends State<ReservasScreen> {
     } catch (_) {
       if (mounted) {
         setState(() => _enCurso.remove(rid));
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-            content: Text('No se pudo guardar la acción. '
-                'Inténtalo de nuevo.')));
+        mostrarSnack(context, 'No se pudo guardar la acción. '
+                'Inténtalo de nuevo.', significado: SignificadoChip.error);
       }
       return;
     }
@@ -408,8 +433,7 @@ class _ReservasScreenState extends State<ReservasScreen> {
       _enCurso.remove(rid);
       _conOpPendiente = {..._conOpPendiente, rid};
     });
-    ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text(mensajeOk)));
+    mostrarSnack(context, mensajeOk, significado: SignificadoChip.exito);
     await _refrescar();
   }
 
@@ -424,7 +448,7 @@ class _ReservasScreenState extends State<ReservasScreen> {
           'El apartado dura 72 horas: ese stock no se puede vender '
           'a nadie más hasta que pague o venza.',
       aceptar: 'Confirmar',
-      icono: Icons.bookmark_added,
+      icono: Icons.bookmark_added_rounded,
     );
     if (ok && mounted) {
       await _encolar('confirmar_reserva', {'reserva_id': r.id},
@@ -439,7 +463,7 @@ class _ReservasScreenState extends State<ReservasScreen> {
       context: context,
       builder: (ctx) => DialogoApp(
         titulo: 'Rechazar reserva',
-        iconoTitulo: Icons.bookmark_remove,
+        iconoTitulo: Icons.bookmark_remove_rounded,
         contenido: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -488,7 +512,7 @@ class _ReservasScreenState extends State<ReservasScreen> {
           '(${r.cantidad} × ${r.suplementoNombre})'
           '${r.estado == 'reservada' ? ' y el apartado se libera' : ''}.',
       aceptar: 'Cancelar reserva',
-      icono: Icons.bookmark_remove,
+      icono: Icons.bookmark_remove_rounded,
       peligro: true,
     );
     if (ok && mounted) {
@@ -513,7 +537,7 @@ class _ReservasScreenState extends State<ReservasScreen> {
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setStateDlg) => DialogoApp(
           titulo: 'Cobrar reserva',
-          iconoTitulo: Icons.payments,
+          iconoTitulo: Icons.payments_rounded,
           contenido: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -522,8 +546,7 @@ class _ReservasScreenState extends State<ReservasScreen> {
                   '${r.suplementoNombre}'),
               const SizedBox(height: 8),
               Text('Total a cobrar: ${fmtMonto(r.totalFoto)} ${r.moneda}',
-                  style: const TextStyle(
-                      fontWeight: FontWeight.bold, fontSize: 16)),
+                  style: AppTexto.titulo),
               Text('Precio al reservar: '
                   '${fmtMonto(r.precioUnitario)} ${r.moneda}'),
               if (avisoMoneda != null)
@@ -547,12 +570,12 @@ class _ReservasScreenState extends State<ReservasScreen> {
                     const ButtonSegment(
                         value: 'efectivo',
                         label: Text('Efectivo'),
-                        icon: Icon(Icons.money)),
+                        icon: Icon(Icons.money_rounded)),
                   if (metodos.transferencia)
                     const ButtonSegment(
                         value: 'transferencia',
                         label: Text('Transferencia'),
-                        icon: Icon(Icons.account_balance)),
+                        icon: Icon(Icons.account_balance_rounded)),
                 ],
                 selected: {metodo},
                 onSelectionChanged: (s) =>
@@ -607,7 +630,7 @@ class _ReservasScreenState extends State<ReservasScreen> {
         title: const Text('Reservas'),
         actions: [
           IconButton(
-            icon: const Icon(Icons.refresh),
+            icon: const Icon(Icons.refresh_rounded),
             tooltip: 'Sincronizar',
             onPressed: _refrescar,
           ),
@@ -677,10 +700,9 @@ class _ReservasScreenState extends State<ReservasScreen> {
 
   Widget _tituloSeccion(String titulo, int n) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(4, 14, 4, 6),
+      padding: const EdgeInsets.fromLTRB(4, 16, 4, 8),
       child: Text('$titulo ($n)',
-          style: const TextStyle(
-              fontSize: 16, fontWeight: FontWeight.bold)),
+          style: AppTexto.titulo),
     );
   }
 
@@ -761,8 +783,68 @@ class _SinFotoReserva extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       color: AppColores.borde(context).withValues(alpha: 0.3),
-      child: const Icon(Icons.medication_outlined,
-          color: Colors.grey, size: 20),
+      child: Icon(Icons.medication_rounded,
+          color: AppColores.textoSecundario(context), size: 20),
+    );
+  }
+}
+
+/// V27/V19: avatar del cliente de la tarjeta con el componente
+/// común. Resuelve la foto como _MiniFotoReserva (local → caché,
+/// SIN descargar: el cliente no descarga) y, sin foto, muestra
+/// las iniciales del sistema.
+class _AvatarReservaCliente extends StatefulWidget {
+  final String nombre;
+  final String? fotoLocal;
+  final String? fotoStorage;
+  const _AvatarReservaCliente({
+    required this.nombre,
+    required this.fotoLocal,
+    required this.fotoStorage,
+  });
+
+  @override
+  State<_AvatarReservaCliente> createState() =>
+      _AvatarReservaClienteState();
+}
+
+class _AvatarReservaClienteState extends State<_AvatarReservaCliente> {
+  late Future<File?> _futura;
+
+  @override
+  void initState() {
+    super.initState();
+    _futura = _resolver();
+  }
+
+  @override
+  void didUpdateWidget(_AvatarReservaCliente old) {
+    super.didUpdateWidget(old);
+    if (old.fotoLocal != widget.fotoLocal ||
+        old.fotoStorage != widget.fotoStorage) {
+      _futura = _resolver();
+    }
+  }
+
+  Future<File?> _resolver() async {
+    final local = widget.fotoLocal;
+    if (local != null && local.isNotEmpty && File(local).existsSync()) {
+      return File(local);
+    }
+    final storage = widget.fotoStorage;
+    if (storage == null || storage.isEmpty) return null;
+    return FotoCache.instance.enCache(storage);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<File?>(
+      future: _futura,
+      builder: (ctx, snap) => AvatarCliente(
+        nombre: widget.nombre,
+        foto: snap.data,
+        tamano: TamanoAvatar.s,
+      ),
     );
   }
 }
@@ -795,81 +877,49 @@ class TarjetaReserva extends StatelessWidget {
     final solicitada = r.estado == 'solicitada';
     final reservada = r.estado == 'reservada';
     final ahora = ahoraHabana();
-    final colorEstado = colorEstadoReserva(r.estado);
-    // R3: iniciales del cliente cuando no hay foto.
-    final iniciales = r.clienteNombre.trim().isEmpty
-        ? '?'
-        : r.clienteNombre
-            .trim()
-            .split(RegExp(r'\s+'))
-            .take(2)
-            .map((p) => p[0].toUpperCase())
-            .join();
-    final hayFotoCliente =
-        (r.fotoClienteLocal != null && r.fotoClienteLocal!.isNotEmpty) ||
-            (r.fotoClienteStorage != null &&
-                r.fotoClienteStorage!.isNotEmpty);
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                // R3 (estéticas 1.19): foto del cliente (o sus
-                // iniciales) junto al nombre.
-                SizedBox(
-                  width: 36,
-                  height: 36,
-                  child: hayFotoCliente
-                      ? ClipOval(
-                          child: _MiniFotoReserva(
-                            fotoLocal: r.fotoClienteLocal,
-                            fotoStorage: r.fotoClienteStorage,
-                            descargar: false,
-                          ),
-                        )
-                      : CircleAvatar(
-                          backgroundColor: AppColores.naranja
-                              .withValues(alpha: 0.15),
-                          child: Text(iniciales,
-                              style: const TextStyle(
-                                  color: AppColores.naranja,
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 13)),
-                        ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(r.clienteNombre,
-                      style: const TextStyle(
-                          fontWeight: FontWeight.bold, fontSize: 15)),
-                ),
-                // R1 (estéticas 1.19): chip con color semántico.
-                Chip(
-                  label: Text(etiquetaEstadoReserva(r.estado),
-                      style: TextStyle(
-                          color: colorEstado,
-                          fontWeight: FontWeight.w600)),
-                  visualDensity: VisualDensity.compact,
-                  backgroundColor:
-                      colorEstado.withValues(alpha: 0.15),
-                  side: BorderSide(
-                      color: colorEstado.withValues(alpha: 0.4)),
-                ),
-              ],
-            ),
+    return Tarjeta(
+      padding: const EdgeInsets.all(12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              // V27/V19: avatar del cliente con el componente
+              // común (foto resuelta sin descargar, o iniciales).
+              _AvatarReservaCliente(
+                nombre: r.clienteNombre,
+                fotoLocal: r.fotoClienteLocal,
+                fotoStorage: r.fotoClienteStorage,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(r.clienteNombre,
+                    style: AppTexto.subtitulo
+                        .copyWith(fontWeight: FontWeight.bold)),
+              ),
+              // V27: chip de estado del sistema V6 (el significado
+              // conserva el reparto de colorEstadoReserva).
+              ChipEstado.semantico(
+                texto: etiquetaEstadoReserva(r.estado),
+                significado: significadoEstadoReserva(r.estado),
+              ),
+            ],
+          ),
             const SizedBox(height: 8),
             Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 // R3: miniatura del suplemento reservado.
-                SizedBox(
+                Container(
                   width: 48,
                   height: 48,
-                  child: ClipRRect(
+                  decoration: BoxDecoration(
                     borderRadius: BorderRadius.circular(8),
+                    border:
+                        Border.all(color: AppColores.borde(context)),
+                  ),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(7),
                     child: _MiniFotoReserva(
                       fotoLocal: r.fotoSuplementoLocal,
                       fotoStorage: r.fotoSuplementoStorage,
@@ -882,9 +932,12 @@ class TarjetaReserva extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text('${r.cantidad} × ${r.suplementoNombre}'),
-                      Text('Total: ${fmtMonto(r.totalFoto)} ${r.moneda} '
-                          '(${fmtMonto(r.precioUnitario)} ${r.moneda} c/u al reservar)'),
+                      Text('${r.cantidad} × ${r.suplementoNombre}',
+                          style: AppTexto.cuerpo),
+                      Text(
+                          'Total: ${fmtMonto(r.totalFoto)} ${r.moneda} '
+                          '(${fmtMonto(r.precioUnitario)} ${r.moneda} c/u al reservar)',
+                          style: AppTexto.secundario),
                     ],
                   ),
                 ),
@@ -892,21 +945,41 @@ class TarjetaReserva extends StatelessWidget {
             ),
             if (avisoMonedaReserva(r) != null)
               Text(avisoMonedaReserva(r)!,
-                  style: TextStyle(
-                      color: Theme.of(context).colorScheme.error)),
+                  style: AppTexto.secundario
+                      .copyWith(color: AppColores.error)),
+            // V27: el vencimiento va siempre en el mismo sitio
+            // (línea con reloj bajo el total): en alerta si vence
+            // en 24 h o ya venció; si no, en secundario.
             if (solicitada || reservada)
-              Text(textoVenceEn(r.expiraEn, ahora),
-                  style: const TextStyle(color: Colors.orange)),
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Row(
+                  children: [
+                    Icon(Icons.schedule_rounded,
+                        size: 14,
+                        color: venceProntoReserva(r, ahora)
+                            ? AppColores.alerta
+                            : AppColores.textoSecundario(context)),
+                    const SizedBox(width: 4),
+                    Text(textoVenceEn(r.expiraEn, ahora),
+                        style: AppTexto.secundario.copyWith(
+                            color: venceProntoReserva(r, ahora)
+                                ? AppColores.alerta
+                                : null)),
+                  ],
+                ),
+              ),
             if (r.notaResolucion != null &&
                 r.notaResolucion!.isNotEmpty)
-              Text('Nota: ${r.notaResolucion}'),
+              Text('Nota: ${r.notaResolucion}',
+                  style: AppTexto.secundario),
             if (bloqueada)
               const Padding(
-                padding: EdgeInsets.only(top: 6),
-                child: Chip(
-                  avatar: Icon(Icons.hourglass_top, size: 16),
-                  label: Text('Acción encolada — sincronizando'),
-                  visualDensity: VisualDensity.compact,
+                padding: EdgeInsets.only(top: 8),
+                child: ChipEstado.semantico(
+                  texto: 'Acción encolada — sincronizando',
+                  significado: SignificadoChip.info,
+                  icono: Icons.hourglass_top_rounded,
                 ),
               ),
             if (solicitada && !bloqueada)
@@ -940,7 +1013,6 @@ class TarjetaReserva extends StatelessWidget {
                 ],
               ),
           ],
-        ),
       ),
     );
   }

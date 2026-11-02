@@ -64,9 +64,7 @@ class _FichaAccesoScreenState extends State<FichaAccesoScreen> {
     } catch (e) {
       if (mounted) {
         setState(() => _cargando = false);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error al cargar la ficha: $e')),
-        );
+        mostrarSnack(context, 'Error al cargar la ficha: $e', significado: SignificadoChip.error);
       }
     }
   }
@@ -97,7 +95,7 @@ class _FichaAccesoScreenState extends State<FichaAccesoScreen> {
         title: Text(nombre, overflow: TextOverflow.ellipsis),
         actions: [
           IconButton(
-            icon: const Icon(Icons.refresh),
+            icon: const Icon(Icons.refresh_rounded),
             onPressed: _cargando ? null : _cargar,
           ),
         ],
@@ -168,8 +166,7 @@ class _FichaAccesoScreenState extends State<FichaAccesoScreen> {
                 const Spacer(),
                 Chip(
                   label: Text(estado,
-                      style: const TextStyle(
-                          color: Colors.white, fontSize: 12)),
+                      style: AppTexto.metadato.copyWith(color: Colors.white)),
                   backgroundColor: colorEstado,
                 ),
               ],
@@ -201,7 +198,7 @@ class _FichaAccesoScreenState extends State<FichaAccesoScreen> {
             _dato('Versión de sesión', '${a['token_version'] ?? 1}'),
             const SizedBox(height: AppEspacio.sm),
             OutlinedButton.icon(
-              icon: const Icon(Icons.person, size: 18),
+              icon: const Icon(Icons.person_rounded, size: 18),
               label: const Text('Abrir ficha del cliente'),
               onPressed: () async {
                 await Navigator.of(context).push(
@@ -236,7 +233,7 @@ class _FichaAccesoScreenState extends State<FichaAccesoScreen> {
               runSpacing: 8,
               children: [
                 FilledButton.icon(
-                  icon: const Icon(Icons.pin, size: 18),
+                  icon: const Icon(Icons.pin_rounded, size: 18),
                   label: const Text('Resetear PIN'),
                   onPressed: _ocupado || revocado
                       ? null
@@ -248,7 +245,7 @@ class _FichaAccesoScreenState extends State<FichaAccesoScreen> {
                             alTerminar: _refrescarTodo)),
                 ),
                 OutlinedButton.icon(
-                  icon: const Icon(Icons.chat, size: 18),
+                  icon: const Icon(Icons.chat_rounded, size: 18),
                   label: const Text('Reenviar credenciales'),
                   onPressed: _ocupado || revocado
                       ? null
@@ -261,7 +258,7 @@ class _FichaAccesoScreenState extends State<FichaAccesoScreen> {
                 ),
                 if (!revocado && !bloqueado)
                   OutlinedButton.icon(
-                    icon: const Icon(Icons.lock, size: 18),
+                    icon: const Icon(Icons.lock_rounded, size: 18),
                     label: const Text('Bloquear'),
                     onPressed: _ocupado
                         ? null
@@ -271,7 +268,7 @@ class _FichaAccesoScreenState extends State<FichaAccesoScreen> {
                   ),
                 if (!revocado && bloqueado)
                   FilledButton.icon(
-                    icon: const Icon(Icons.lock_open, size: 18),
+                    icon: const Icon(Icons.lock_open_rounded, size: 18),
                     label: const Text('Desbloquear'),
                     onPressed: _ocupado
                         ? null
@@ -285,7 +282,7 @@ class _FichaAccesoScreenState extends State<FichaAccesoScreen> {
                   ),
                 if (!revocado)
                   OutlinedButton.icon(
-                    icon: const Icon(Icons.key, size: 18),
+                    icon: const Icon(Icons.key_rounded, size: 18),
                     label: const Text('Forzar cambio de PIN'),
                     onPressed: _ocupado
                         ? null
@@ -304,7 +301,7 @@ class _FichaAccesoScreenState extends State<FichaAccesoScreen> {
                   ),
                 if (!revocado)
                   OutlinedButton.icon(
-                    icon: const Icon(Icons.logout, size: 18),
+                    icon: const Icon(Icons.logout_rounded, size: 18),
                     label: const Text('Cerrar sesión remota'),
                     onPressed: _ocupado
                         ? null
@@ -322,7 +319,7 @@ class _FichaAccesoScreenState extends State<FichaAccesoScreen> {
                             )),
                   ),
                 OutlinedButton.icon(
-                  icon: const Icon(Icons.phone, size: 18),
+                  icon: const Icon(Icons.phone_rounded, size: 18),
                   label: const Text('Cambiar teléfono'),
                   onPressed: _ocupado || revocado
                         ? null
@@ -334,7 +331,7 @@ class _FichaAccesoScreenState extends State<FichaAccesoScreen> {
                 ),
                 if (!revocado)
                   OutlinedButton.icon(
-                    icon: const Icon(Icons.block, size: 18),
+                    icon: const Icon(Icons.block_rounded, size: 18),
                     label: const Text('Revocar acceso'),
                     style: OutlinedButton.styleFrom(
                         foregroundColor: AppColores.error),
@@ -354,7 +351,7 @@ class _FichaAccesoScreenState extends State<FichaAccesoScreen> {
                   ),
                 if (revocado)
                   FilledButton.icon(
-                    icon: const Icon(Icons.restore, size: 18),
+                    icon: const Icon(Icons.restore_rounded, size: 18),
                     label: const Text('Reactivar acceso'),
                     onPressed: _ocupado
                         ? null
@@ -396,7 +393,7 @@ class _FichaAccesoScreenState extends State<FichaAccesoScreen> {
               ListTile(
                 dense: true,
                 contentPadding: EdgeInsets.zero,
-                leading: const Icon(Icons.login, size: 18),
+                leading: const Icon(Icons.login_rounded, size: 18),
                 title: Text(_fmtFecha((h as Map)['ingresado_en'])),
                 subtitle: Text(
                   [
@@ -441,7 +438,7 @@ class _FichaAccesoScreenState extends State<FichaAccesoScreen> {
               ListTile(
                 dense: true,
                 contentPadding: EdgeInsets.zero,
-                leading: const Icon(Icons.history, size: 18),
+                leading: const Icon(Icons.history_rounded, size: 18),
                 title: Text(nombres['${(u as Map)['accion']}'] ??
                     '${u['accion']}'),
                 subtitle: Text(

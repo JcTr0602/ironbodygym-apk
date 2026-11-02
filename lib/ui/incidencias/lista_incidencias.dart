@@ -5,6 +5,7 @@ import '../../localdb.dart';
 import '../../modelos/incidencia.dart';
 import '../../sync.dart';
 import '../diseno.dart';
+import '../componentes.dart';
 import 'widgets/tarjeta_incidencia.dart';
 import 'detalle_incidencia.dart';
 import 'tipos_incidencia.dart';
@@ -200,7 +201,7 @@ class _ListaIncidenciasScreenState
           if (AuthService().isOwner)
             IconButton(
               icon: const Icon(
-                  Icons.category_outlined),
+                  Icons.category_rounded),
               tooltip: 'Tipos',
               onPressed: () async {
                 await Navigator.push(
@@ -214,7 +215,7 @@ class _ListaIncidenciasScreenState
               },
             ),
           IconButton(
-            icon: const Icon(Icons.filter_list),
+            icon: const Icon(Icons.filter_list_rounded),
             tooltip: 'Filtros',
             onPressed: _mostrarFiltros,
           ),
@@ -229,7 +230,7 @@ class _ListaIncidenciasScreenState
               decoration: InputDecoration(
                 hintText: 'Buscar incidencia...',
                 prefixIcon:
-                    const Icon(Icons.search),
+                    const Icon(Icons.search_rounded),
                 border: OutlineInputBorder(
                   borderRadius:
                       BorderRadius.circular(12),
@@ -326,7 +327,7 @@ class _ListaIncidenciasScreenState
                 child: Row(
                   children: [
                     IconButton(
-                      icon: const Icon(Icons.close),
+                      icon: const Icon(Icons.close_rounded),
                       tooltip: 'Limpiar selección',
                       onPressed: () => setState(
                           () => _seleccionadas.clear()),
@@ -360,7 +361,7 @@ class _ListaIncidenciasScreenState
           ? null
           : FloatingActionButton.extended(
         onPressed: _crearNueva,
-        icon: const Icon(Icons.add),
+        icon: const Icon(Icons.add_rounded),
         label: const Text('Nueva'),
       ),
       ),
@@ -396,10 +397,7 @@ class _ListaIncidenciasScreenState
                 CrossAxisAlignment.start,
             children: [
               const Text('Filtros',
-                  style: TextStyle(
-                      fontSize: 18,
-                      fontWeight:
-                          FontWeight.bold)),
+                  style: AppTexto.titulo),
               const SizedBox(height: 12),
               const Text('Tipo:'),
               DropdownButton<String?>(
@@ -606,10 +604,6 @@ class _ListaIncidenciasScreenState
     if (!mounted) return;
     setState(() => _seleccionadas.clear());
     _cargar();
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-          content: Text(
-              '$cambiadas de ${ids.length} pasaron a "$destino"')),
-    );
+    mostrarSnack(context, '$cambiadas de ${ids.length} pasaron a "$destino"', significado: SignificadoChip.exito);
   }
 }

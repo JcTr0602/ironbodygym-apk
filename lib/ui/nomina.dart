@@ -30,6 +30,9 @@ class NominaScreen extends StatefulWidget {
 
 class _NominaScreenState extends State<NominaScreen> {
   bool _cargando = true;
+  // Pasada 2 de Argón (1.20): candado de las acciones de
+  // dinero de esta pantalla (bono, tarifa) contra doble toque.
+  bool _operando = false;
   int _clientesPagados = 0;
   // v1.4.0: sello del pre-cálculo ("Actualizado: ...").
   String _actualizadoEtiqueta = '';
@@ -53,6 +56,9 @@ class _NominaScreenState extends State<NominaScreen> {
   Map<String, MesLibroAdelantos> _libroMes = {};
   Map<String, List<Map<String, dynamic>>> _eventosAdelantos = {};
   Map<String, bool> _nominaLiquidadaMes = {};
+  // T22 (1.20): confirmación de recepción por entrenador
+  // (espejo u op local), para mostrar el acuse al dueño.
+  Map<String, Map<String, dynamic>?> _confirmacionMes = {};
 
   String _bonosKey(DateTime d) =>
       'nomina_bonos_${d.year}_${d.month}';
@@ -213,6 +219,7 @@ class _NominaScreenState extends State<NominaScreen> {
       final libroMes = <String, MesLibroAdelantos>{};
       final eventosPorEnt = <String, List<Map<String, dynamic>>>{};
       final liquidadas = <String, bool>{};
+      final confirmaciones = <String, Map<String, dynamic>?>{};
       // #6 (Argón nómina): conteo por mes memorizado (antes se
       // recalculaba por entrenador).
       final conteoCache = <String, int>{};
@@ -254,6 +261,11 @@ class _NominaScreenState extends State<NominaScreen> {
         }
         liquidadas[e.key] = await AdelantosService.instance
             .nominaLiquidada(pref, e.value.id);
+        confirmaciones[e.key] =
+            await AdelantosService.instance.confirmacionNomina(
+                pref,
+                entrenadorId: e.value.id,
+                telegramId: e.value.telegramId);
       }
       // #7 (Argón nómina): el doble chequeo era redundante.
       if (!mounted) return;
@@ -263,6 +275,7 @@ class _NominaScreenState extends State<NominaScreen> {
         _libroMes = libroMes;
         _eventosAdelantos = eventosPorEnt;
         _nominaLiquidadaMes = liquidadas;
+        _confirmacionMes = confirmaciones;
         _clientesPagados = clientesPagados;
         _bonos = bonos;
         _tarifa = tarifa.toDouble();
@@ -298,16 +311,22 @@ class _NominaScreenState extends State<NominaScreen> {
     // (la UI ya oculta el botón; esto cubre pantalla abierta
     // con cambio de sesión).
     if (!AuthService().isOwner) return;
+    if (_operando) return;
     final texto =
         _bonoMontoCtrl.text.trim().replaceAll(',', '.');
     final monto = double.tryParse(texto) ?? 0;
     if (monto == 0) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-            content: Text('Ingresa un monto válido')),
-      );
+      mostrarSnack(context, 'Ingresa un monto válido', significado: SignificadoChip.alerta);
       return;
     }
+    // Pasada 2 de Argón (1.20): capturar la nota y LIMPIAR los
+    // controladores sincrónicamente, antes del primer await;
+    // con la limpieza tras el await, un doble toque insertaba
+    // el bono dos veces.
+    final notaBono = _bonoNotaCtrl.text.trim();
+    _bonoMontoCtrl.clear();
+    _bonoNotaCtrl.clear();
+    _operando = true;
     // Fase A 2026-10-25 (A4): el bono se guarda sincronizado
     // (espejo + op), no en SharedPreferences.
     final pref = hoyHabanaIso().substring(0, 7);
@@ -315,8 +334,9 @@ class _NominaScreenState extends State<NominaScreen> {
       mes: pref,
       entrenador: _bonoEntrenador,
       monto: monto,
-      nota: _bonoNotaCtrl.text.trim(),
+      nota: notaBono,
     );
+    _operando = false;
     final actualizados =
         await BonosNominaService.instance.leerBonos(pref);
     if (!mounted) return;
@@ -326,9 +346,7 @@ class _NominaScreenState extends State<NominaScreen> {
       _bonoNotaCtrl.clear();
     });
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Bono agregado')),
-      );
+      mostrarSnack(context, 'Bono agregado', significado: SignificadoChip.exito);
     }
   }
 
@@ -344,9 +362,7 @@ class _NominaScreenState extends State<NominaScreen> {
     if (!mounted) return;
     setState(() => _bonos = actualizados);
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Bono eliminado')),
-      );
+      mostrarSnack(context, 'Bono eliminado', significado: SignificadoChip.exito);
     }
   }
 
@@ -428,51 +444,38 @@ class _NominaScreenState extends State<NominaScreen> {
               children: [
                 Text(
                   '${fmtMonto(total)} CUP',
-                  style: const TextStyle(
-                    color: AppColores.exito,
-                    fontSize: 20,
-                    fontWeight: FontWeight.bold,
-                  ),
+                  style: AppTexto.tituloPagina.copyWith(color: AppColores.exito),
                 ),
                 if (bono != 0)
                   Text(
                     '${bono > 0 ? '+' : ''}${fmtMonto(bono)} bono',
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: bono > 0
+                    style: AppTexto.metadato.copyWith(color: bono > 0
                           ? AppColores.exito
-                          : Colors.red,
-                    ),
+                          : Colors.red),
                   ),
                 if (comision.total != 0)
                   Text(
                     '${comision.total > 0 ? '+' : ''}'
                     '${fmtMonto(comision.total)} comisión dosis '
                     '(${comision.dosis})',
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: comision.total > 0
+                    style: AppTexto.metadato.copyWith(color: comision.total > 0
                           ? AppColores.exito
-                          : Colors.red,
-                    ),
+                          : Colors.red),
                   ),
                 if (adelantosMes != 0)
                   Text(
                     '−${fmtMonto(adelantosMes)} adelantos',
-                    style: const TextStyle(
-                        fontSize: 12, color: Colors.red),
+                    style: AppTexto.metadato.copyWith(color: Colors.red),
                   ),
                 if (deudaEntrante > 0)
                   Text(
                     '−${fmtMonto(deudaEntrante)} deuda anterior',
-                    style: const TextStyle(
-                        fontSize: 12, color: Colors.red),
+                    style: AppTexto.metadato.copyWith(color: Colors.red),
                   ),
                 if (liquidada)
-                  const Text(
+                  Text(
                     '✓ nómina pagada',
-                    style: TextStyle(
-                        fontSize: 12, color: AppColores.exito),
+                    style: AppTexto.metadato.copyWith(color: AppColores.exito),
                   ),
               ],
             ),
@@ -499,7 +502,7 @@ class _NominaScreenState extends State<NominaScreen> {
       margin: const EdgeInsets.only(bottom: 8),
       child: ListTile(
         leading: Icon(
-          monto >= 0 ? Icons.add_circle : Icons.remove_circle,
+          monto >= 0 ? Icons.add_circle_rounded : Icons.remove_circle_rounded,
           color: monto >= 0 ? AppColores.exito : Colors.red,
         ),
         title: Text(
@@ -508,7 +511,7 @@ class _NominaScreenState extends State<NominaScreen> {
         ),
         subtitle: nota.isNotEmpty ? Text(nota) : null,
         trailing: IconButton(
-          icon: const Icon(Icons.delete, color: Colors.red),
+          icon: const Icon(Icons.delete_rounded, color: Colors.red),
           tooltip: 'Eliminar bono',
           onPressed: () => _eliminarBono('${b['id']}'),
         ),
@@ -519,21 +522,20 @@ class _NominaScreenState extends State<NominaScreen> {
   Future<void> _guardarTarifa() async {
     // Ronda 17 M4-H1: cambiar la tarifa es solo del dueño.
     if (!AuthService().isOwner) return;
+    if (_operando) return;
+    _operando = true;
     final texto = _tarifaCtrl.text.trim().replaceAll(',', '.');
     final tarifa = double.tryParse(texto) ?? 150;
     if (tarifa <= 0) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-            content: Text('Ingresa una tarifa válida')),
-      );
+      _operando = false;
+      mostrarSnack(context, 'Ingresa una tarifa válida', significado: SignificadoChip.alerta);
       return;
     }
     await PerfilService.instance.setPagoEntrenador(tarifa.toInt());
+    _operando = false;
     setState(() => _tarifa = tarifa);
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Tarifa actualizada')),
-      );
+      mostrarSnack(context, 'Tarifa actualizada', significado: SignificadoChip.exito);
     }
   }
 
@@ -553,7 +555,7 @@ class _NominaScreenState extends State<NominaScreen> {
         title: const Text('Nómina del mes'),
         actions: [
           IconButton(
-            icon: const Icon(Icons.refresh),
+            icon: const Icon(Icons.refresh_rounded),
             tooltip: 'Actualizar',
             onPressed: _cargar,
           ),
@@ -579,8 +581,7 @@ class _NominaScreenState extends State<NominaScreen> {
                               esDueno
                                   ? 'Nómina por entrenador'
                                   : 'Mi nómina',
-                              style: AppTexto.titulo
-                                  .copyWith(fontSize: 18),
+                              style: AppTexto.titulo,
                             ),
                           ),
                         ],
@@ -628,9 +629,9 @@ class _NominaScreenState extends State<NominaScreen> {
                           mainAxisSize: MainAxisSize.min,
                           children: [
                             const Icon(
-                                Icons.info_outline,
+                                Icons.info_outline_rounded,
                                 size: 16,
-                                color: AppColores.naranja),
+                                color: AppColores.info),
                             const SizedBox(width: 8),
                             Flexible(
                               child: Text(
@@ -659,8 +660,7 @@ class _NominaScreenState extends State<NominaScreen> {
                       children: [
                         Text(
                           'Bonos del mes',
-                          style: AppTexto.titulo
-                              .copyWith(fontSize: 16),
+                          style: AppTexto.titulo,
                         ),
                         const SizedBox(height: 8),
                         if (_bonos.isEmpty)
@@ -676,8 +676,8 @@ class _NominaScreenState extends State<NominaScreen> {
                         const Divider(height: 24),
                         Text(
                           'Agregar bono',
-                          style: AppTexto.titulo
-                              .copyWith(fontSize: 14),
+                          style: AppTexto.cuerpo
+                              .copyWith(fontWeight: FontWeight.bold),
                         ),
                         const SizedBox(height: 8),
                         // Selector de entrenador
@@ -718,7 +718,7 @@ class _NominaScreenState extends State<NominaScreen> {
                                         signed: true),
                                 hint: 'Monto en CUP '
                                     '(Ej: 2000 o -500)',
-                                icono: Icons.payments,
+                                icono: Icons.payments_rounded,
                               ),
                             ),
                           ],
@@ -727,13 +727,13 @@ class _NominaScreenState extends State<NominaScreen> {
                         CampoTexto(
                           controller: _bonoNotaCtrl,
                           hint: 'Nota: por qué se otorga...',
-                          icono: Icons.note,
+                          icono: Icons.note_rounded,
                           maxLineas: 2,
                         ),
                         const SizedBox(height: 8),
                         BotonPrimario(
                           texto: 'Agregar bono',
-                          icono: Icons.add,
+                          icono: Icons.add_rounded,
                           onPressed: _agregarBono,
                         ),
                       ],
@@ -749,8 +749,8 @@ class _NominaScreenState extends State<NominaScreen> {
                       children: [
                         Text(
                           'Tarifa por cliente',
-                          style: AppTexto.titulo
-                              .copyWith(fontSize: 14),
+                          style: AppTexto.cuerpo
+                              .copyWith(fontWeight: FontWeight.bold),
                         ),
                         const SizedBox(height: 8),
                         Row(
@@ -810,6 +810,34 @@ class _NominaScreenState extends State<NominaScreen> {
     ];
   }
 
+  /// T22 (1.20): línea de acuse de la nómina liquidada: si
+  /// el entrenador ya confirmó (espejo), su fecha; si no,
+  /// que sigue pendiente de su confirmación.
+  Widget _lineaAcuseNomina(
+      BuildContext context, String ent, String nombre) {
+    final conf = _confirmacionMes[ent];
+    final fechaConf = '${conf?['confirmada_en'] ?? ''}';
+    if (conf != null && fechaConf.length >= 10) {
+      return Padding(
+        padding: const EdgeInsets.only(top: 4),
+        child: Text(
+          '✓ $nombre confirmó que recibió su nómina el '
+          '${fmtFecha(fechaConf.substring(0, 10))}.',
+          style:
+              AppTexto.cuerpo.copyWith(color: AppColores.exito),
+        ),
+      );
+    }
+    return Padding(
+      padding: const EdgeInsets.only(top: 4),
+      child: Text(
+        'Nómina liquidada · $nombre aún no confirma la '
+        'recepción.',
+        style: AppTexto.secundario,
+      ),
+    );
+  }
+
   Widget _seccionAdelantos(BuildContext context, String ent) {
     final persona = _personasAdelantos[ent]!;
     final libro = _libroMes[ent];
@@ -826,15 +854,15 @@ class _NominaScreenState extends State<NominaScreen> {
     final esDueno = AuthService().isOwner;
     final liquidada = _nominaLiquidadaMes[ent] ?? false;
     return Padding(
-      padding: const EdgeInsets.only(top: 14),
+      padding: const EdgeInsets.only(top: 16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Divider(),
           Row(
             children: [
-              const Icon(Icons.payments_rounded,
-                  size: 18, color: AppColores.naranja),
+              Icon(Icons.payments_rounded,
+                  size: 18, color: AppColores.textoSecundario(context)),
               const SizedBox(width: 8),
               Expanded(
                 child: Text('Adelantos de ${persona.nombre}',
@@ -842,7 +870,7 @@ class _NominaScreenState extends State<NominaScreen> {
               ),
               if (esDueno)
                 TextButton.icon(
-                  icon: const Icon(Icons.add, size: 17),
+                  icon: const Icon(Icons.add_rounded, size: 18),
                   label: const Text('Registrar'),
                   onPressed: () =>
                       _dialogoRegistrarAdelanto(context, ent),
@@ -864,28 +892,83 @@ class _NominaScreenState extends State<NominaScreen> {
               child: Text(
                 'Queda una deuda de ${fmtMonto(libro.deudaSaliente)} '
                 'CUP para el mes que viene.',
-                style: const TextStyle(
-                    fontSize: 12, color: Colors.red),
+                style: AppTexto.metadato.copyWith(color: Colors.red),
               ),
             ),
+          // T22 (1.20): acuse del entrenador (solo lectura
+          // para el dueño; el entrenador confirma en su
+          // pantalla «Mi nómina»).
+          if (liquidada) _lineaAcuseNomina(context, ent, persona.nombre),
           if (esDueno && !liquidada)
             Align(
               alignment: Alignment.centerLeft,
               child: TextButton.icon(
-                icon: const Icon(Icons.fact_check_rounded, size: 17),
+                icon: const Icon(Icons.fact_check_rounded, size: 18),
                 label: const Text('Marcar nómina del mes como pagada'),
                 onPressed: () async {
+                  // T22 (1.20): el resumen se calcula ANTES
+                  // del diálogo: lo que el dueño ve al
+                  // confirmar es exactamente la foto que
+                  // viaja con la liquidación.
+                  final libroLiq = _libroMes[ent];
+                  final baseLiq = _clientesPagados * _tarifa;
+                  final bonoLiq = ent == 'mi'
+                      ? _bonoSoloAmbos()
+                      : _bonoPara(ent);
+                  final comisionLiq =
+                      _comisionDosis[ent]?.total ?? 0;
+                  final adelantosLiq = libroLiq?.adelantos ?? 0;
+                  final deudaLiq = libroLiq?.deudaEntrante ?? 0;
+                  final netoLiq = NominaCalc.totalVivo(
+                    base: baseLiq,
+                    bono: bonoLiq,
+                    comision: comisionLiq,
+                    adelantos: adelantosLiq,
+                    deudaEntrante: deudaLiq,
+                  );
+                  if (!context.mounted) return;
                   final ok = await showDialog<bool>(
                     context: context,
                     builder: (ctx) => AlertDialog(
                       title: const Text('¿Nómina pagada?'),
-                      content: Text(
-                          'Se marca la nómina de este mes de '
-                          '${persona.nombre} como PAGADA. Desde ese '
-                          'momento, los adelantos que se registren '
-                          'con fecha de este mes caerán en la '
-                          'nómina del mes siguiente (el mes pagado '
-                          'no se reescribe).'),
+                      content: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('Resumen de ${persona.nombre}:',
+                              style: AppTexto.subtitulo),
+                          const SizedBox(height: AppEspacio.sm),
+                          Text('Clientes que pagaron: '
+                              '$_clientesPagados × '
+                              '${fmtMonto(_tarifa)} CUP'),
+                          Text('Base: ${fmtMonto(baseLiq)} CUP'),
+                          if (bonoLiq > 0)
+                            Text('Bono: ${fmtMonto(bonoLiq)} CUP'),
+                          if (comisionLiq > 0)
+                            Text('Comisión por dosis: '
+                                '${fmtMonto(comisionLiq)} CUP'),
+                          if (adelantosLiq > 0)
+                            Text('Adelantos: '
+                                '−${fmtMonto(adelantosLiq)} CUP'),
+                          if (deudaLiq > 0)
+                            Text('Deuda del mes anterior: '
+                                '−${fmtMonto(deudaLiq)} CUP'),
+                          const Divider(),
+                          Text('Neto a pagar: '
+                              '${fmtMonto(netoLiq)} CUP',
+                              style: AppTexto.subtitulo),
+                          const SizedBox(height: AppEspacio.sm),
+                          const Text(
+                              'Se marca la nómina de este mes '
+                              'como PAGADA. Desde ese momento, '
+                              'los adelantos que se registren '
+                              'con fecha de este mes caerán en '
+                              'la nómina del mes siguiente (el '
+                              'mes pagado no se reescribe). El '
+                              'entrenador verá este resumen y '
+                              'podrá confirmar que la recibió.'),
+                        ],
+                      ),
                       actions: [
                         TextButton(
                           onPressed: () =>
@@ -901,18 +984,6 @@ class _NominaScreenState extends State<NominaScreen> {
                     ),
                   );
                   if (ok != true) return;
-                  // #3 (Argón nómina): foto de tarifa y neto al
-                  // liquidar (misma fórmula de la fila).
-                  final libroLiq = _libroMes[ent];
-                  final netoLiq = NominaCalc.totalVivo(
-                    base: _clientesPagados * _tarifa,
-                    bono: ent == 'mi'
-                        ? _bonoSoloAmbos()
-                        : _bonoPara(ent),
-                    comision: _comisionDosis[ent]?.total ?? 0,
-                    adelantos: libroLiq?.adelantos ?? 0,
-                    deudaEntrante: libroLiq?.deudaEntrante ?? 0,
-                  );
                   await AdelantosService.instance.liquidarNomina(
                     mes: pref,
                     entrenadorId: persona.id,
@@ -920,12 +991,14 @@ class _NominaScreenState extends State<NominaScreen> {
                     entrenadorTelegramId: persona.telegramId,
                     tarifaPorCliente: _tarifa,
                     neto: netoLiq,
+                    base: baseLiq,
+                    bonos: bonoLiq,
+                    comisiones: comisionLiq,
+                    adelantos: adelantosLiq,
+                    deudaEntrante: deudaLiq,
                   );
                   if (mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                            content: Text(
-                                'Nómina marcada como pagada')));
+                    mostrarSnack(context, 'Nómina marcada como pagada', significado: SignificadoChip.exito);
                     _cargar();
                   }
                 },
@@ -953,14 +1026,14 @@ class _NominaScreenState extends State<NominaScreen> {
     final metodo = '${e['metodo'] ?? 'efectivo'}';
     final nota = '${e['nota'] ?? ''}';
     return Padding(
-      padding: const EdgeInsets.only(bottom: 6),
+      padding: const EdgeInsets.only(bottom: 8),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           SizedBox(
             width: 86,
             child: Text('${e['fecha'] ?? ''}',
-                style: const TextStyle(fontSize: 12)),
+                style: AppTexto.metadato),
           ),
           Expanded(
             child: Column(
@@ -970,8 +1043,7 @@ class _NominaScreenState extends State<NominaScreen> {
                   esReverso
                       ? 'Anulación de adelanto'
                       : 'Adelanto ($metodo, $origen)',
-                  style: TextStyle(
-                    fontSize: 13,
+                  style: AppTexto.secundario.copyWith(
                     decoration: estaAnulado
                         ? TextDecoration.lineThrough
                         : null,
@@ -979,27 +1051,22 @@ class _NominaScreenState extends State<NominaScreen> {
                 ),
                 if (nota.isNotEmpty)
                   Text(nota,
-                      style: const TextStyle(fontSize: 12)),
+                      style: AppTexto.metadato),
                 if (estaAnulado)
-                  const Text('anulado',
-                      style: TextStyle(
-                          fontSize: 11, color: Colors.red)),
+                  Text('anulado',
+                      style: AppTexto.metadato.copyWith(color: Colors.red)),
                 if (anulacionPendiente)
                   const Text('anulación en curso…',
-                      style: TextStyle(fontSize: 11)),
+                      style: AppTexto.metadato),
                 if (pendiente)
                   const Text('pendiente de sincronizar',
-                      style: TextStyle(fontSize: 11)),
+                      style: AppTexto.metadato),
               ],
             ),
           ),
           Text(
             '${monto >= 0 ? '' : '+'}${fmtMonto(monto.abs())} CUP',
-            style: TextStyle(
-              fontSize: 13,
-              fontWeight: FontWeight.w700,
-              color: esReverso ? AppColores.exito : Colors.red,
-            ),
+            style: AppTexto.secundario.copyWith(color: esReverso ? AppColores.exito : Colors.red, fontWeight: FontWeight.w700),
           ),
           if (esDueno &&
               !liquidada &&
@@ -1044,17 +1111,171 @@ class _NominaScreenState extends State<NominaScreen> {
                   // M1: mes liquidado (u otro rechazo): se avisa
                   // y no se recarga como si hubiera funcionado.
                   if (mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(content: Text('$err')));
+                    mostrarSnack(context, '$err', significado: SignificadoChip.error);
                   }
                   return;
                 }
                 if (mounted) _cargar();
               },
             ),
+          // W3 (1.20): corregir el origen (solo dueño, mes sin
+          // liquidar; mismas guardas que anular). Sin sentido
+          // si ya es fondo_dueno por transferencia: no hay a
+          // dónde moverlo.
+          if (esDueno &&
+              !liquidada &&
+              !esReverso &&
+              !estaAnulado &&
+              !anulacionPendiente &&
+              id != null &&
+              ('${e['origen'] ?? 'caja_turno'}' == 'caja_turno' ||
+                  metodo == 'efectivo'))
+            IconButton(
+              icon: const Icon(Icons.swap_horiz_rounded, size: 18),
+              tooltip: 'Corregir origen',
+              onPressed: () => _dialogoCorregirOrigen(context, e,
+                  entrenadorId: entrenadorId, mesNomina: mesNomina),
+            ),
         ],
       ),
     );
+  }
+
+  /// W3 (1.20): diálogo de corrección de origen de un adelanto.
+  /// Explica el efecto en simple por dirección; la op la
+  /// valida el servidor (guarda de mes liquidado incluida).
+  Future<void> _dialogoCorregirOrigen(
+      BuildContext context, Map<String, dynamic> e,
+      {String? entrenadorId, String? mesNomina}) async {
+    final id = (e['id'] as num?)?.toInt();
+    if (id == null) return;
+    final origenActual = '${e['origen'] ?? 'caja_turno'}';
+    final metodo = '${e['metodo'] ?? 'efectivo'}';
+    var destino =
+        origenActual == 'caja_turno' ? 'fondo_dueno' : 'caja_turno';
+    // Gaveta inicial: la actual si se reconoce; si no, la del
+    // propio adelanto.
+    final gavetaActual = LocalDb.normalizarTelegramId(e['descuenta_a']);
+    var gaveta = entrenadorId ?? 'duany';
+    for (final entry in _personasAdelantos.entries) {
+      if (entry.value.telegramId != null &&
+          entry.value.telegramId == gavetaActual) {
+        gaveta = entry.key;
+        break;
+      }
+    }
+    final nombreEntrenador =
+        _personasAdelantos[entrenadorId]?.nombre ?? 'el entrenador';
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setLocal) => AlertDialog(
+          title: const Text('Corregir origen del adelanto'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                origenActual == 'caja_turno'
+                    ? 'Hoy este adelanto cuenta como que salió de '
+                        'la caja del turno (está en el «pendiente '
+                        'a entregar» de un entrenador).'
+                    : 'Hoy este adelanto cuenta como que salió de '
+                        'tu bolsillo (no está en el «pendiente a '
+                        'entregar» de nadie).',
+                style: AppTexto.secundario,
+              ),
+              const SizedBox(height: 12),
+              Text('¿De dónde salió en realidad?',
+                  style: AppTexto.metadato.copyWith(fontWeight: FontWeight.w700)),
+              Wrap(
+                spacing: 8,
+                children: [
+                  ChoiceChip(
+                    label: const Text('Mi bolsillo'),
+                    selected: destino == 'fondo_dueno',
+                    onSelected: (_) =>
+                        setLocal(() => destino = 'fondo_dueno'),
+                  ),
+                  if (metodo == 'efectivo')
+                    ChoiceChip(
+                      label: const Text('Caja del turno'),
+                      selected: destino == 'caja_turno',
+                      onSelected: (_) =>
+                          setLocal(() => destino = 'caja_turno'),
+                    ),
+                ],
+              ),
+              if (destino == 'caja_turno') ...[
+                const SizedBox(height: 8),
+                const Text('Sale de la gaveta de:',
+                    style: AppTexto.metadato),
+                DropdownButton<String>(
+                  value: _personasAdelantos.containsKey(gaveta)
+                      ? gaveta
+                      : (_personasAdelantos.keys.isNotEmpty
+                          ? _personasAdelantos.keys.first
+                          : gaveta),
+                  isExpanded: true,
+                  items: [
+                    for (final entry in _personasAdelantos.entries)
+                      DropdownMenuItem(
+                          value: entry.key,
+                          child: Text(entry.value.nombre)),
+                  ],
+                  onChanged: (v) =>
+                      setLocal(() => gaveta = v ?? gaveta),
+                ),
+                Text(
+                  'Pasará a contar en el «pendiente a entregar» '
+                  'de ese entrenador y seguirá descontando de la '
+                  'nómina de $nombreEntrenador.',
+                  style: AppTexto.metadato,
+                ),
+              ] else
+                Text(
+                  'Dejará de contar como pendiente a entregar de '
+                  'cualquier entrenador. Seguirá descontando de '
+                  'la nómina de $nombreEntrenador.',
+                  style: AppTexto.metadato,
+                ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: const Text('Cancelar'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(ctx).pop(true),
+              child: const Text('Corregir'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (ok != true) return;
+    try {
+      await AdelantosService.instance.corregirOrigen(id,
+          nuevoOrigen: destino,
+          descuentaA: destino == 'caja_turno'
+              ? _personasAdelantos[gaveta]?.telegramId
+              : null,
+          entrenadorId: entrenadorId,
+          mesNomina: mesNomina);
+    } catch (err) {
+      if (mounted) {
+        mostrarSnack(context, '$err',
+            significado: SignificadoChip.error);
+      }
+      return;
+    }
+    if (mounted) {
+      mostrarSnack(context,
+          'Origen corregido (se sincronizará)',
+          significado: SignificadoChip.exito);
+      _cargar();
+    }
   }
 
   Future<void> _dialogoRegistrarAdelanto(
@@ -1084,7 +1305,7 @@ class _NominaScreenState extends State<NominaScreen> {
                   decoration: const InputDecoration(
                       labelText: 'Monto (CUP entero)'),
                 ),
-                const SizedBox(height: 10),
+                const SizedBox(height: 12),
                 Row(
                   children: [
                     const Text('Fecha: '),
@@ -1105,9 +1326,8 @@ class _NominaScreenState extends State<NominaScreen> {
                     ),
                   ],
                 ),
-                const Text('Método',
-                    style: TextStyle(
-                        fontSize: 12, fontWeight: FontWeight.w700)),
+                Text('Método',
+                    style: AppTexto.metadato.copyWith(fontWeight: FontWeight.w700)),
                 Wrap(
                   spacing: 8,
                   children: [
@@ -1126,9 +1346,8 @@ class _NominaScreenState extends State<NominaScreen> {
                   ],
                 ),
                 const SizedBox(height: 8),
-                const Text('¿De dónde sale?',
-                    style: TextStyle(
-                        fontSize: 12, fontWeight: FontWeight.w700)),
+                Text('¿De dónde sale?',
+                    style: AppTexto.metadato.copyWith(fontWeight: FontWeight.w700)),
                 Wrap(
                   spacing: 8,
                   children: [
@@ -1150,7 +1369,7 @@ class _NominaScreenState extends State<NominaScreen> {
                     metodo == 'efectivo') ...[
                   const SizedBox(height: 8),
                   const Text('Sale de la gaveta de:',
-                      style: TextStyle(fontSize: 12)),
+                      style: AppTexto.metadato),
                   DropdownButton<String>(
                     value: gaveta,
                     isExpanded: true,
@@ -1167,10 +1386,10 @@ class _NominaScreenState extends State<NominaScreen> {
                   const Text(
                     'Ese dinero ya no estará en su «pendiente a '
                     'entregar»: cuadra con su arqueo.',
-                    style: TextStyle(fontSize: 11),
+                    style: AppTexto.metadato,
                   ),
                 ],
-                const SizedBox(height: 10),
+                const SizedBox(height: 12),
                 TextField(
                   controller: notaCtrl,
                   maxLength: 80,
@@ -1189,10 +1408,7 @@ class _NominaScreenState extends State<NominaScreen> {
               onPressed: () {
                 final monto = int.tryParse(montoCtrl.text.trim());
                 if (monto == null || monto <= 0) {
-                  ScaffoldMessenger.of(ctx).showSnackBar(
-                      const SnackBar(
-                          content: Text(
-                              'Monto inválido: entero mayor que 0')));
+                  mostrarSnack(ctx, 'Monto inválido: entero mayor que 0', significado: SignificadoChip.alerta);
                   return;
                 }
                 Navigator.of(ctx).pop(true);
@@ -1227,8 +1443,7 @@ class _NominaScreenState extends State<NominaScreen> {
     montoCtrl.dispose();
     notaCtrl.dispose();
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('Adelanto registrado (se sincronizará)')));
+      mostrarSnack(context, 'Adelanto registrado (se sincronizará)', significado: SignificadoChip.exito);
       _cargar();
     }
   }
@@ -1261,10 +1476,10 @@ class TarjetaNominaEntrenador extends StatelessWidget {
             const Expanded(
               child: Text(
                 'Mi nómina (estimado)',
-                style: TextStyle(fontSize: 14),
+                style: AppTexto.cuerpo,
               ),
             ),
-            const Icon(Icons.chevron_right),
+            const Icon(Icons.chevron_right_rounded),
           ],
         ),
       ),

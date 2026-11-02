@@ -367,8 +367,9 @@ void main() {
       await revocarTarifaEspecial(id: id, motivo: 'ya no aplica');
       expect(await tarifaActivaPara(900003, 'mensual'), isNull);
       expect(await tieneAlgunRegistroTarifa(900003), isTrue);
-      // precioCobroParaCliente: con registro (aunque inactivo) y
-      // legacy, la legacy se ignora → estándar.
+      // precioCobroParaCliente: sin especial activa rige el
+      // estándar (la legacy ya no se lee desde Q2, y la fila
+      // revocada impide que la siembra la resucite).
       final r = await precioCobroParaCliente(
           cliente: {
             'id': 900003,
@@ -381,9 +382,45 @@ void main() {
       expect(r.escalon, 'estandar');
     });
 
-    test('legacy solo actúa sin ningún registro (transferencia mensual)',
+    test('Q2: la legacy ya no se lee; rige la fila seed_legacy sembrada',
         () async {
-      await _abrirDbVacia();
+      final db = await _abrirDbVacia();
+      // Sin sembrar: la columna legacy sola ya no produce
+      // especial (la lectura se retiró en la 1.20).
+      final r0 = await precioCobroParaCliente(
+          cliente: {
+            'id': 900004,
+            'tarifa_especial_transferencia': 2000,
+          },
+          periodo: 'mensual',
+          metodo: 'transferencia',
+          precios: _precios);
+      expect(r0.monto, 2500);
+      expect(r0.escalon, 'estandar');
+
+      // Con el cliente en el espejo, la siembra crea la fila
+      // y el cobro la aplica como cualquier especial.
+      await LocalDb.instance.upsertMirror(
+          'clientes',
+          900004,
+          {
+            'id': 900004,
+            'nombre': 'Cliente Legacy',
+            'tarifa_especial_transferencia': 2000,
+          },
+          1);
+      // (El conteo global no se fija: el espejo compartido de
+      // la suite puede traer otros clientes legacy de tests
+      // vecinos; lo que importa es ESTE cliente y la
+      // idempotencia de la segunda pasada.)
+      await sembrarTarifasLegacy();
+      final fila = await db.query('tarifa_especial',
+          where: 'id=?', whereArgs: ['seed_legacy_900004']);
+      expect(fila, hasLength(1));
+      expect(fila.first['activa'], 1);
+      // Idempotente: la segunda pasada no siembra nada.
+      expect(await sembrarTarifasLegacy(), 0);
+
       final r = await precioCobroParaCliente(
           cliente: {
             'id': 900004,
@@ -394,7 +431,7 @@ void main() {
           precios: _precios);
       expect(r.monto, 2000);
       expect(r.escalon, 'especial');
-      // En efectivo la legacy NO aplica.
+      // En efectivo la seed no aplica (monto_efectivo null).
       final r2 = await precioCobroParaCliente(
           cliente: {
             'id': 900004,
@@ -405,6 +442,34 @@ void main() {
           precios: _precios);
       expect(r2.monto, 2000);
       expect(r2.escalon, 'estandar');
+    });
+
+    test('Q2: con cualquier registro previo no se siembra la legacy',
+        () async {
+      await _abrirDbVacia();
+      await otorgarTarifaEspecial(
+          clienteId: 900005,
+          nombre: 'Con registro',
+          montoEfectivo: 1000,
+          motivo: 'prueba');
+      await LocalDb.instance.upsertMirror(
+          'clientes',
+          900005,
+          {
+            'id': 900005,
+            'nombre': 'Con Registro',
+            'tarifa_especial_transferencia': 2000,
+          },
+          1);
+      await sembrarTarifasLegacy();
+      final fila = await LocalDb.instance.db.then((db) => db.query(
+          'tarifa_especial',
+          where: 'id=?',
+          whereArgs: ['seed_legacy_900005']));
+      expect(fila, isEmpty);
+      final activa = await tarifaActivaPara(900005, 'mensual');
+      expect(activa?['monto_efectivo'], 1000);
+      expect(activa?['monto_transferencia'], isNull);
     });
 
     test('INSERT OR IGNORE con id semilla no duplica ni cambia el monto',

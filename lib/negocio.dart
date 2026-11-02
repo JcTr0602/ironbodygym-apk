@@ -492,7 +492,10 @@ bool esVersionMayor(String remota, String actual) {
 String tiempoRelativo(String? iso) {
   if (iso == null || iso.isEmpty) return 'Sin accesos registrados';
   try {
-    final dt = DateTime.parse(iso).toLocal();
+    // FIN-15 de Argón (1.20): pared Habana, no la zona del
+    // teléfono (mismo blindaje que hace() en tiempo.dart).
+    final parseado = DateTime.parse(iso);
+    final dt = parseado.isUtc ? aHabana(parseado) : parseado;
     final ahora = ahoraHabana();
     final diff = ahora.difference(dt);
     if (diff.isNegative) return 'ahora mismo';
@@ -1810,6 +1813,8 @@ Future<String> crearLiquidacion({
   required Map<String, List<int>> opIds,
   String moneda = 'CUP',
   String? nota,
+  bool abrirExpediente = false,
+  String? explicacionExpediente,
 }) async {
   if (!AuthService().isOwner) {
     throw Exception('Solo el dueño puede liquidar caja');
@@ -1834,6 +1839,14 @@ Future<String> crearLiquidacion({
       'moneda': moneda,
       'op_ids': opIds,
       if (nota != null && nota.isNotEmpty) 'nota': nota,
+      // T5 (1.20): marca del dueño para abrir el expediente
+      // de diferencia EN la misma op (el servidor lo crea
+      // en su transacción, solo si hay diferencia real).
+      if (abrirExpediente) 'abrir_expediente': true,
+      if (abrirExpediente &&
+          explicacionExpediente != null &&
+          explicacionExpediente.trim().isNotEmpty)
+        'explicacion': explicacionExpediente.trim(),
       'creada_en': isoHabana(ahoraHabana()),
     },
   );
@@ -1971,6 +1984,20 @@ Future<List<Map<String, dynamic>>> porVencer({int dias = 3}) async {
 // v1.3.6 (ítem 1A): bandeja "Avisos WhatsApp de Hoy".
 // =====================================================================
 
+/// Línea de cierre de los mensajes que la app compone para
+/// WhatsApp (decisión de Jc, 2026-11-01): aclara que los envía el
+/// sistema de gestión automático, no una persona. No dice «no
+/// respondas»: en los avisos de vencimiento el cliente responde
+/// para pedir los datos de transferencia y eso sí lo atiende
+/// una persona. Ampliación del mismo día (Jc): si el cliente va
+/// a responder de alguna forma, debe hacerlo al 58191577, que es
+/// el número de Jc (los avisos pueden salir desde el teléfono de
+/// un entrenador, pero la respuesta la atiende él).
+const String lineaMensajeAutomatico =
+    '\n\n🤖 _Mensaje automático de nuestro sistema de gestión; '
+    'no lo envía una persona. Si vas a responder, escríbenos '
+    'al 58191577._';
+
 /// Arma la bandeja de avisos de WhatsApp del día: cumpleañeros, vencen hoy,
 /// por vencer (3 días) y recibos de pagos de hoy. Cada mapa trae:
 /// tipo, cliente_id, nombre, telefono, detalle y mensaje (texto pre-rellenado
@@ -2013,9 +2040,10 @@ Future<List<Map<String, dynamic>>> avisosWhatsappHoy() async {
       'detalle': dias > 0
           ? 'Vencido hace $dias día${dias == 1 ? '' : 's'}'
           : 'Mensualidad vencida',
-      'mensaje': 'Hola ${nombreDe(c)}, te escribe Iron Body Gym.\n'
-          'Tu mensualidad está vencida. Pásate por el gym para renovar. '
-          '¡Te esperamos! 💪',
+      'mensaje': 'Hola ${nombreDe(c)} 👋, te escribe Iron Body Gym 🏋️.\n'
+          '⏰ Tu mensualidad está vencida. Puedes renovarla pasando por '
+          'el gym 🏋️ o por transferencia 💸 (respóndenos y te pasamos '
+          'los datos). ¡Te esperamos para seguir entrenando! 💪$lineaMensajeAutomatico',
     });
   }
 
@@ -2031,7 +2059,7 @@ Future<List<Map<String, dynamic>>> avisosWhatsappHoy() async {
       'detalle': 'Cumple ${c['_cumple']} años',
       'mensaje': '¡Feliz cumpleaños, ${nombreDe(c)}! 🎂\n'
           'De parte de todo el equipo de Iron Body Gym, '
-          'que tengas un día excelente 💪',
+          'que tengas un día excelente 💪$lineaMensajeAutomatico',
     });
   }
 
@@ -2047,9 +2075,10 @@ Future<List<Map<String, dynamic>>> avisosWhatsappHoy() async {
       'nombre': nombreDe(c),
       'telefono': telDe(c),
       'detalle': 'Su mensualidad vence hoy',
-      'mensaje': 'Hola ${nombreDe(c)}, te escribe Iron Body Gym.\n'
-          'Tu mensualidad vence hoy. Puedes renovarla pasando por el gym. '
-          '¡Te esperamos! 💪',
+      'mensaje': 'Hola ${nombreDe(c)} 👋, te escribe Iron Body Gym 🏋️.\n'
+          '📅 Tu mensualidad vence hoy. Puedes renovarla pasando por '
+          'el gym 🏋️ o por transferencia 💸 (respóndenos y te pasamos '
+          'los datos). ¡Te esperamos! 💪$lineaMensajeAutomatico',
     });
   }
 
@@ -2067,8 +2096,10 @@ Future<List<Map<String, dynamic>>> avisosWhatsappHoy() async {
       'nombre': nombreDe(c),
       'telefono': telDe(c),
       'detalle': 'Vence el $fechaCorta',
-      'mensaje': 'Hola ${nombreDe(c)}, te escribe Iron Body Gym.\n'
-          'Tu mensualidad vence el $fechaCorta. ¡No olvides renovar a tiempo! 💪',
+      'mensaje': 'Hola ${nombreDe(c)} 👋, te escribe Iron Body Gym 🏋️.\n'
+          '📅 Tu mensualidad vence el $fechaCorta. ¡No olvides renovar '
+          'a tiempo! Puedes hacerlo pasando por el gym 🏋️ o por '
+          'transferencia 💸 (respóndenos y te pasamos los datos). 💪$lineaMensajeAutomatico',
     });
   }
 
@@ -2105,11 +2136,434 @@ Future<List<Map<String, dynamic>>> avisosWhatsappHoy() async {
           'Cliente: $nombre\n'
           'Monto: ${fmtMonto(monto)} CUP\n'
           'Fecha: $hoy\n'
-          'Cobrado por: ${p['registrado_por'] ?? ''}'.trim(),
+          'Cobrado por: ${p['registrado_por'] ?? ''}$lineaMensajeAutomatico'.trim(),
     });
   }
 
   return avisos;
+}
+
+/// W8 (1.20): texto del recibo de UN pago — el mismo
+/// formato del recibo de la bandeja, pero para cualquier
+/// fecha (no solo hoy). Lo usa la ficha para reenviar el
+/// recibo de un pago del historial.
+String textoReciboPago({
+  required String nombre,
+  required num monto,
+  required String metodo,
+  required String fechaIso,
+  required String cobradoPor,
+}) {
+  final metodoTxt = metodo == 'transferencia'
+      ? 'Transferencia'
+      : metodo == 'cortesia'
+          ? 'Cortesía (regalo)'
+          : 'Efectivo';
+  return ('*Iron Body Gym* — Recibo\n'
+          'Cliente: $nombre\n'
+          'Monto: ${fmtMonto(monto)} CUP\n'
+          'Método: $metodoTxt\n'
+          'Fecha: ${fmtFecha(fechaIso)}\n'
+          'Cobrado por: $cobradoPor'
+          '$lineaMensajeAutomatico')
+      .trim();
+}
+
+/// T16 (1.20): busca en la cola una op CASI idéntica
+/// creada hace pocos minutos (doble toque, reintento con
+/// mala conexión, entrar «solo a ver» y registrar de
+/// nuevo). [coincide] recibe el payload DECODIFICADO de
+/// cada op reciente del mismo tipo y decide si es «la
+/// misma» operación. Devuelve la op o null. Solo mira
+/// pendientes/enviadas de los últimos [minutos]: es la
+/// señal fiable sin conexión (el espejo puede ir detrás).
+Future<Map<String, dynamic>?> opRecienteParecida({
+  required String tipo,
+  required bool Function(Map<String, dynamic> payload) coincide,
+  int minutos = 10,
+}) async {
+  final List<Map<String, dynamic>> ops;
+  try {
+    final d = await LocalDb.instance.db;
+    ops = await d.query('ops_queue',
+        where: "tipo = ? AND estado IN ('pendiente', 'enviada')",
+        whereArgs: [tipo],
+        orderBy: 'creada_ts DESC',
+        limit: 50);
+  } catch (_) {
+    return null;
+  }
+  final ahora = ahoraHabana();
+  for (final op in ops) {
+    final creada = DateTime.tryParse('${op['creada_ts'] ?? ''}');
+    if (creada == null) continue;
+    // FIN-08/FIN-13 de Argón (1.20, CRÍTICO): creada_ts lleva
+    // offset (isoHabana) y tryParse la devuelve en UTC, mientras
+    // ahoraHabana() es reloj de pared naive. Compararlas
+    // directo solo acierta si la zona del teléfono es Habana;
+    // con cualquier otra zona (o en tests), la ventana se
+    // desplazaba horas y el detector nunca disparaba. Se
+    // normaliza a pared Habana, como hace() en tiempo.dart.
+    final fHab = creada.isUtc ? aHabana(creada) : creada;
+    if (ahora.difference(fHab).inMinutes.abs() > minutos) {
+      continue;
+    }
+    try {
+      final crudo = op['payload'];
+      final payload = crudo is String
+          ? Map<String, dynamic>.from(jsonDecode(crudo) as Map)
+          : Map<String, dynamic>.from(crudo as Map);
+      if (coincide(payload)) return op;
+    } catch (_) {
+      continue;
+    }
+  }
+  return null;
+}
+
+/// F7 (1.20): foto del mes por entrenador para la
+/// comparativa lado a lado — cobros, ventas de
+/// suplementos, dosis/servicios e inscripciones de cada
+/// vendedor en el mes [prefijo] ('YYYY-MM'). Atribución
+/// por nombre (registrado_por_nombre), salvo los servicios,
+/// que van al responsable efectivo (venta «a nombre de»),
+/// como en rankingEntrenadores. Las ventas anuladas y los
+/// fiados sin saldar no cuentan; los reversos de servicios
+/// restan; la Casa cuenta como actividad de dosis pero no
+/// como dinero. Devuelve una
+/// fila por entrenador con actividad, ordenada por total
+/// movido en CUP (cobros + ventas CUP + dosis).
+Future<List<Map<String, dynamic>>> comparativaEntrenadores(
+    String prefijo) async {
+  final porNombre = <String, Map<String, dynamic>>{};
+  Map<String, dynamic> fila(String nombre) =>
+      porNombre.putIfAbsent(
+          nombre,
+          () => {
+                'nombre': nombre,
+                'cobros_n': 0,
+                'cobros_monto': 0.0,
+                'ventas_n': 0,
+                'ventas_cup': 0.0,
+                'ventas_usd': 0.0,
+                'dosis_n': 0,
+                'dosis_monto': 0.0,
+                'inscripciones': 0,
+              });
+  String nombreDe(Map<String, dynamic> r) {
+    final n = '${r['registrado_por_nombre'] ?? ''}'.trim();
+    if (n.isNotEmpty) return n;
+    final alt = '${r['registrado_por'] ?? ''}'.trim();
+    return alt.isEmpty ? 'Desconocido' : alt;
+  }
+
+  for (final p in await LocalDb.instance.pagosDelMes(prefijo)) {
+    final f = fila(nombreDe(p));
+    f['cobros_n'] = (f['cobros_n'] as int) + 1;
+    f['cobros_monto'] = (f['cobros_monto'] as double) +
+        ((p['monto'] as num?)?.toDouble() ?? 0);
+  }
+  for (final v
+      in await LocalDb.instance.allMirror('ventas_suplementos')) {
+    if (!'${v['fecha'] ?? ''}'.startsWith(prefijo)) continue;
+    if (v['anulada'] == 1 || v['anulada'] == true) continue;
+    // FIN-13 de Argón (1.20): un fiado sin saldar no es dinero
+    // cobrado — el resto de negocio.dart lo excluye de los
+    // totales (ventasSuplementosCup/Usd); la comparativa igual.
+    if (_esFiadoSinSaldar(v)) continue;
+    final f = fila(nombreDe(v));
+    f['ventas_n'] = (f['ventas_n'] as int) + 1;
+    final monto = (v['total'] as num?)?.toDouble() ??
+        ((v['precio'] as num?)?.toDouble() ?? 0) *
+            ((v['cantidad'] as num?)?.toDouble() ?? 0);
+    if ('${v['moneda'] ?? 'CUP'}' == 'USD') {
+      f['ventas_usd'] = (f['ventas_usd'] as double) + monto;
+    } else {
+      f['ventas_cup'] = (f['ventas_cup'] as double) + monto;
+    }
+  }
+  // FIN-13 de Argón (1.20): los servicios se atribuyen al
+  // RESPONSABLE efectivo (venta «a nombre de»), no a quien la
+  // tecleó — mismo criterio A3 de rankingEntrenadores: mapa
+  // id->nombre sembrado desde usuarios_apk y los nombres
+  // vistos en las propias filas; si el responsable no resuelve
+  // a nombre, la clave es su id, nunca el registrador.
+  final porIdServ = <int, String>{};
+  try {
+    final rawApk = await LocalDb.instance.getMeta('usuarios_apk');
+    if (rawApk != null && rawApk.isNotEmpty) {
+      for (final u in jsonDecode(rawApk) as List) {
+        final m = Map<String, dynamic>.from(u as Map);
+        final tid = LocalDb.normalizarTelegramId(m['telegram_id']);
+        final nom = '${m['nombre'] ?? m['username'] ?? ''}';
+        if (tid != null && nom.isNotEmpty) porIdServ[tid] = nom;
+      }
+    }
+  } catch (_) {}
+  final serviciosMes = <Map<String, dynamic>>[];
+  for (final s
+      in await LocalDb.instance.allMirror('servicio_ventas')) {
+    if (!'${s['fecha'] ?? ''}'.startsWith(prefijo)) continue;
+    serviciosMes.add(s);
+    final rid = LocalDb.normalizarTelegramId(s['registrado_por']);
+    final rnom = '${s['registrado_por_nombre'] ?? ''}'.trim();
+    if (rid != null && rnom.isNotEmpty) {
+      porIdServ.putIfAbsent(rid, () => rnom);
+    }
+  }
+  for (final s in serviciosMes) {
+    final respId =
+        LocalDb.normalizarTelegramId(s['responsable_efectivo_id']) ??
+            LocalDb.normalizarTelegramId(s['registrado_por']);
+    final f = fila(respId != null
+        ? (porIdServ[respId] ?? '$respId')
+        : nombreDe(s));
+    final cant = (s['cantidad'] as num?)?.toInt() ?? 0;
+    final monto =
+        ((s['precio_unitario'] as num?)?.toDouble() ?? 0) *
+            ((s['cantidad'] as num?)?.toDouble() ?? 0);
+    final signo = s['reverso_de'] != null ? -1 : 1;
+    f['dosis_n'] = (f['dosis_n'] as int) + signo * cant;
+    if ((s['casa'] as num?)?.toInt() != 1) {
+      f['dosis_monto'] =
+          (f['dosis_monto'] as double) + signo * monto;
+    }
+  }
+  for (final cl in await LocalDb.instance.allMirror('clientes')) {
+    if (esClienteEliminado(cl)) continue;
+    if ('${cl['fecha_inscripcion'] ?? ''}'.startsWith(prefijo)) {
+      final f = fila(nombreDe(cl));
+      f['inscripciones'] = (f['inscripciones'] as int) + 1;
+    }
+  }
+  final lista = porNombre.values.toList();
+  for (final f in lista) {
+    f['total_cup'] = (f['cobros_monto'] as double) +
+        (f['ventas_cup'] as double) +
+        (f['dosis_monto'] as double);
+  }
+  lista.sort((a, b) =>
+      (b['total_cup'] as double).compareTo(a['total_cup'] as double));
+  return lista;
+}
+
+/// T24 (1.20): estado de cuenta del cliente en texto
+/// plano — vigencia, últimos pagos, compras y deuda —
+/// SIN notas internas ni datos de gestión. Es el texto
+/// que la pantalla de estado de cuenta muestra, copia o
+/// envía por WhatsApp. Las listas llegan sin ordenar; el
+/// texto muestra las 10 más recientes de cada bloque.
+String textoEstadoCuenta({
+  required Map<String, dynamic> cliente,
+  required List<Map<String, dynamic>> pagos,
+  required List<Map<String, dynamic>> ventas,
+  required List<Map<String, dynamic>> servicios,
+  required Map<String, double> fiadoPendiente,
+  String? plusResidualTexto,
+  required String hoyIso,
+}) {
+  final b = StringBuffer()
+    ..writeln('*Iron Body Gym* — Estado de cuenta')
+    ..writeln('Cliente: ${cliente['nombre'] ?? ''}')
+    ..writeln('Fecha: ${fmtFecha(hoyIso)}')
+    ..writeln()
+    ..writeln('*Vigencia*');
+  final casa =
+      (cliente['cuenta_casa'] as num?)?.toInt() == 1;
+  final hasta = cliente['pagado_hasta'] as String?;
+  if (casa) {
+    b.writeln('Cuenta a la Casa: sin vencimiento.');
+  } else if (hasta == null || hasta.isEmpty) {
+    b.writeln('Sin pagos registrados todavía.');
+  } else {
+    final dias = diasRestantes(hasta);
+    if (dias == null) {
+      b.writeln('Activo hasta el ${fmtFecha(hasta)}.');
+    } else if (dias > 1) {
+      b.writeln(
+          'Activo hasta el ${fmtFecha(hasta)} (quedan $dias días).');
+    } else if (dias == 1) {
+      b.writeln(
+          'Activo hasta el ${fmtFecha(hasta)} (queda 1 día).');
+    } else if (dias == 0) {
+      b.writeln('Vence hoy, ${fmtFecha(hasta)}.');
+    } else if (dias == -1) {
+      b.writeln('Venció ayer, ${fmtFecha(hasta)}.');
+    } else {
+      b.writeln(
+          'Venció el ${fmtFecha(hasta)} (hace ${-dias} días).');
+    }
+  }
+  if (plusResidualTexto != null && plusResidualTexto.isNotEmpty) {
+    b.writeln('Plus: $plusResidualTexto');
+  }
+
+  List<Map<String, dynamic>> recientes(
+      List<Map<String, dynamic>> l) {
+    final copia = [...l]..sort((a, b) =>
+        '${b['fecha'] ?? ''}'.compareTo('${a['fecha'] ?? ''}'));
+    return copia;
+  }
+
+  final pagosOrd = recientes(pagos)
+      .where((p) => '${p['metodo'] ?? ''}' != 'cortesia')
+      .toList();
+  b
+    ..writeln()
+    ..writeln('*Pagos* (${pagosOrd.length})');
+  if (pagosOrd.isEmpty) {
+    b.writeln('Sin pagos registrados.');
+  } else {
+    var totalPagos = 0.0;
+    for (final p in pagosOrd) {
+      totalPagos += (p['monto'] as num?)?.toDouble() ?? 0;
+    }
+    for (final p in pagosOrd.take(10)) {
+      final metodo = '${p['metodo'] ?? ''}' == 'transferencia'
+          ? 'Transferencia'
+          : 'Efectivo';
+      b.writeln('• ${fmtFecha(p['fecha'] as String?)} · '
+          '$metodo · ${fmtMonto(p['monto'])} CUP');
+    }
+    if (pagosOrd.length > 10) {
+      b.writeln('… y ${pagosOrd.length - 10} pagos más.');
+    }
+    b.writeln('Total pagado: ${fmtMonto(totalPagos)} CUP');
+  }
+
+  final ventasOrd = recientes(ventas)
+      .where((v) => v['anulada'] != 1 && v['anulada'] != true)
+      .toList();
+  b
+    ..writeln()
+    ..writeln('*Compras de suplementos* (${ventasOrd.length})');
+  if (ventasOrd.isEmpty) {
+    b.writeln('Sin compras registradas.');
+  } else {
+    for (final v in ventasOrd.take(10)) {
+      final nombre =
+          '${v['suplemento_nombre'] ?? v['nombre'] ?? 'Suplemento'}';
+      final monto = (v['total'] as num?)?.toDouble() ??
+          ((v['precio'] as num?)?.toDouble() ?? 0) *
+              ((v['cantidad'] as num?)?.toDouble() ?? 0);
+      b.writeln('• ${fmtFecha(v['fecha'] as String?)} · '
+          '$nombre x${v['cantidad'] ?? 1} · '
+          '${fmtMonto(monto)} ${v['moneda'] ?? 'CUP'}');
+    }
+    if (ventasOrd.length > 10) {
+      b.writeln('… y ${ventasOrd.length - 10} compras más.');
+    }
+  }
+
+  final servOrd = recientes(servicios);
+  var dosis = 0;
+  var importeServ = 0.0;
+  for (final s in servOrd) {
+    // FIN-13 de Argón (1.20): los reversos NO se saltan — su
+    // cantidad viene negativa del servidor y netea la venta
+    // original (antes, una dosis revertida se seguía cobrando
+    // en el estado de cuenta).
+    if ('${s['tipo']}' != 'agua_suelta') {
+      dosis += (s['cantidad'] as num?)?.toInt() ?? 0;
+    }
+    if ((s['casa'] as num?)?.toInt() != 1) {
+      importeServ +=
+          ((s['precio_unitario'] as num?)?.toDouble() ?? 0) *
+              ((s['cantidad'] as num?)?.toDouble() ?? 0);
+    }
+  }
+  b
+    ..writeln()
+    ..writeln('*Servicios*');
+  if (servOrd.isEmpty) {
+    b.writeln('Sin servicios registrados.');
+  } else {
+    b.writeln('$dosis dosis en total · '
+        '${fmtMonto(importeServ)} CUP en servicios.');
+  }
+
+  final debeCup = fiadoPendiente['CUP'] ?? 0;
+  final debeUsd = fiadoPendiente['USD'] ?? 0;
+  if (debeCup > 0 || debeUsd > 0) {
+    b
+      ..writeln()
+      ..writeln('*Deuda pendiente (fiado)*');
+    if (debeCup > 0) b.writeln('${fmtMonto(debeCup)} CUP');
+    if (debeUsd > 0) b.writeln('${fmtMonto(debeUsd)} USD');
+  }
+  b.write(lineaMensajeAutomatico);
+  return b.toString().trim();
+}
+
+/// F5 (1.20): motivos válidos de un ajuste de stock de
+/// suplemento (lista cerrada, la misma del servidor).
+const kMotivosAjusteStock = [
+  'merma',
+  'regalo',
+  'error_conteo',
+  'roto',
+  'vencido',
+  'otro',
+];
+
+/// Etiqueta visible de un motivo de ajuste de stock.
+String etiquetaMotivoAjuste(String motivo) {
+  switch (motivo) {
+    case 'merma':
+      return 'Merma';
+    case 'regalo':
+      return 'Regalo';
+    case 'error_conteo':
+      return 'Error de conteo';
+    case 'roto':
+      return 'Roto / dañado';
+    case 'vencido':
+      return 'Vencido';
+    default:
+      return 'Otro';
+  }
+}
+
+/// F5 (1.20): ajusta el stock de un suplemento a
+/// [nuevoStock] dejando el motivo registrado. Optimista:
+/// el espejo se actualiza en la misma transacción que
+/// encola la op; el servidor guarda el movimiento
+/// (antes/después/motivo/autor) y lo publica al espejo de
+/// ajustes. Solo dueño (el servidor también lo exige).
+Future<void> ajustarStockSuplemento({
+  required int suplementoId,
+  required int nuevoStock,
+  required String motivo,
+  String? nota,
+}) async {
+  if (nuevoStock < 0) throw Exception('Stock inválido');
+  if (!kMotivosAjusteStock.contains(motivo)) {
+    throw Exception('Motivo de ajuste inválido');
+  }
+  final db = LocalDb.instance;
+  final ajusteId = const Uuid().v4();
+  final d = await db.db;
+  await d.transaction((txn) async {
+    await db.actualizarSuplemento(
+        suplementoId, {'stock': nuevoStock}, txn);
+    await db.queueOp(
+      opUuid: const Uuid().v4(),
+      tipo: 'ajustar_stock_suplemento',
+      payload: {
+        'id': ajusteId,
+        'suplemento_id': suplementoId,
+        'nuevo_stock': nuevoStock,
+        'motivo': motivo,
+        if (nota != null && nota.trim().isNotEmpty)
+          'nota': nota.trim(),
+      },
+      txn: txn,
+    );
+  });
+  // FIN-13 de Argón (1.20): faltaba el disparo de subida (las
+  // demás acciones lo hacen); el ajuste quedaba en cola hasta
+  // que otra acción sincronizara.
+  unawaited(SyncEngine.instance.push().then((_) {}, onError: (_) {}));
 }
 
 /// Clientes inactivos (papelera de reciclaje).
@@ -2244,17 +2698,32 @@ bool carnetFechaInvalida(String? carnet) {
   return fechaNacDeCarnet(carnet) == null;
 }
 
+/// Q5 (cola 1.20): ¿el carnet parece un teléfono pegado por
+/// error en el campo equivocado? Dos señales: coincide con el
+/// teléfono del formulario, o tiene exactamente 8 dígitos y
+/// empieza en 5 (todo móvil cubano). La UI avisa SIN bloquear
+/// (puede ser un carnet real de 11 con esos dígitos dentro:
+/// por eso solo se juzga la igualdad y el patrón exacto de
+/// 8 dígitos, no subcadenas).
+bool carnetPareceTelefono(String? carnet, {String? telefono}) {
+  final d = (carnet ?? '').replaceAll(RegExp(r'[^0-9]'), '');
+  if (d.isEmpty) return false;
+  final t = (telefono ?? '').replaceAll(RegExp(r'[^0-9]'), '');
+  if (t.isNotEmpty && d == t) return true;
+  // FIN-29 de Argón (1.20): los móviles cubanos válidos
+  // empiezan en 5 o en 6 (validarTelefono acepta ambos).
+  return d.length == 8 &&
+      (d.startsWith('5') || d.startsWith('6'));
+}
+
 /// True si el carnet indica menos de 18 años (precio reducido).
+/// B1 (cola 1.20): delega en [edadDeCarnet] (única fuente de la
+/// edad; antes duplicaba el cálculo y un nacimiento futuro
+/// daba «menor» con edad negativa: ahora edad inválida = no
+/// menor, como cualquier carnet sin fecha válida).
 bool esMenor(String? carnet) {
-  final nac = fechaNacDeCarnet(carnet);
-  if (nac == null) return false;
-  final hoy = ahoraHabana();
-  var edad = hoy.year - nac.year;
-  if (hoy.month < nac.month ||
-      (hoy.month == nac.month && hoy.day < nac.day)) {
-    edad--;
-  }
-  return edad < 18;
+  final edad = edadDeCarnet(carnet);
+  return edad != null && edad < 18;
 }
 
 /// Clientes que cumplen años en los próximos [dias] (incluye hoy).
@@ -3133,7 +3602,10 @@ String _diaEntrega(Map<String, dynamic> p) {
   final ts = '${p['entregado_ts'] ?? ''}';
   if (ts.isEmpty) return '';
   try {
-    return _isoDia(DateTime.parse(ts).toLocal());
+    // FIN-15 de Argón (1.20): el día de la entrega es el de
+    // La Habana, no el de la zona del teléfono.
+    final parseado = DateTime.parse(ts);
+    return _isoDia(parseado.isUtc ? aHabana(parseado) : parseado);
   } catch (_) {
     return '';
   }
@@ -4132,6 +4604,71 @@ bool esAlertaStockBajo(Map<String, dynamic> s) {
   final stock = (s['stock'] as num?)?.toInt() ?? 0;
   final umbral = (s['umbral_stock'] as num?)?.toInt() ?? 3;
   return stock <= umbral;
+}
+
+/// Rediseño 1.20 (PURO): estado de stock de un suplemento del
+/// espejo — UNA sola regla para la lista y el detalle (antes el
+/// badge de la foto usaba un umbral fijo de 5 y el chip de la
+/// tarjeta el `umbral_stock` del producto). `activo`/`eliminado`
+/// tolerantes al espejo (bool/int/ausentes), misma lectura que
+/// esAlertaStockBajo.
+enum EstadoStockSuplemento { inactivo, agotado, bajo, disponible }
+
+EstadoStockSuplemento estadoStockSuplemento(
+    Map<String, dynamic> s) {
+  final act = s['activo'];
+  final inactivo = act == 0 ||
+      act == false ||
+      s['eliminado'] == 1 ||
+      s['eliminado'] == true;
+  if (inactivo) return EstadoStockSuplemento.inactivo;
+  final stock = (s['stock'] as num?)?.toInt() ?? 0;
+  if (stock <= 0) return EstadoStockSuplemento.agotado;
+  final umbral = (s['umbral_stock'] as num?)?.toInt() ?? 3;
+  if (stock <= umbral) return EstadoStockSuplemento.bajo;
+  return EstadoStockSuplemento.disponible;
+}
+
+/// Texto del estado de stock (SIEMPRE con texto, no solo
+/// color): «Inactivo» / «Sin stock» / «Stock bajo · N» /
+/// «N disponibles».
+String textoEstadoStock(Map<String, dynamic> s) {
+  final stock = (s['stock'] as num?)?.toInt() ?? 0;
+  return switch (estadoStockSuplemento(s)) {
+    EstadoStockSuplemento.inactivo => 'Inactivo',
+    EstadoStockSuplemento.agotado => 'Sin stock',
+    EstadoStockSuplemento.bajo => 'Stock bajo · $stock',
+    EstadoStockSuplemento.disponible => '$stock disponibles',
+  };
+}
+
+/// Rediseño 1.20 (PURO): texto de presentación del envase de
+/// un suplemento del espejo: «300 g · 60 servicios». Parseo
+/// tolerante (el espejo puede traer el número como num o como
+/// texto). Los servicios SOLO se muestran si son un entero
+/// positivo: redondear un fraccionario legado (1.5 → «2
+/// servicios») fabricaría un dato que no existe (panel
+/// 2026-10-21). '' si no hay nada que mostrar. Extraído del
+/// detalle (v1.4.3) para compartirlo con las tarjetas.
+String textoPresentacion(Map<String, dynamic> suplemento) {
+  final pesoV = suplemento['peso_valor'] is num
+      ? (suplemento['peso_valor'] as num).toDouble()
+      : double.tryParse('${suplemento['peso_valor'] ?? ''}');
+  final pesoU = '${suplemento['peso_unidad'] ?? ''}'.trim();
+  final servD = suplemento['servicios_estandar'] is num
+      ? (suplemento['servicios_estandar'] as num).toDouble()
+      : double.tryParse('${suplemento['servicios_estandar'] ?? ''}');
+  final serv = (servD != null &&
+          servD > 0 &&
+          servD == servD.roundToDouble())
+      ? servD.toInt()
+      : null;
+  return [
+    if (pesoV != null && pesoV > 0 && pesoU.isNotEmpty)
+      '${pesoV == pesoV.roundToDouble() ? pesoV.toInt() : pesoV} $pesoU',
+    if (serv != null && serv > 0)
+      '$serv servicio${serv == 1 ? '' : 's'}',
+  ].join(' · ');
 }
 
 /// Dashboard 1.19 (Q6 Argón): suplementos con stock bajo o

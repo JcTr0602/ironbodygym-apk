@@ -10,6 +10,7 @@ import '../permisos_entrenador.dart';
 import 'editor_plan_nutricional.dart';
 import 'grafico_peso.dart';
 import 'componentes.dart';
+import 'diseno.dart';
 
 class Medicion {
   final int id;
@@ -206,12 +207,12 @@ class _PestanaProgresoState extends State<PestanaProgreso> {
           // Botón de plan nutricional
           Card(
             child: ListTile(
-              leading: const Icon(Icons.restaurant_menu,
+              leading: const Icon(Icons.restaurant_menu_rounded,
                   color: Colors.green),
               title: const Text('Plan Nutricional'),
               subtitle: const Text(
                   'Ver o editar el plan del cliente'),
-              trailing: const Icon(Icons.chevron_right),
+              trailing: const Icon(Icons.chevron_right_rounded),
               onTap: () {
                 Navigator.push(
                   context,
@@ -239,18 +240,15 @@ class _PestanaProgresoState extends State<PestanaProgreso> {
                   crossAxisAlignment:
                       CrossAxisAlignment.start,
                   children: [
-                    const Text(
+                    Text(
                       'Evolución de peso',
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 16,
-                      ),
+                      style: AppTexto.titulo,
                     ),
                     const SizedBox(height: 8),
                     Text(
                       'Último: ${_mediciones.first.pesoKg.toStringAsFixed(1)} kg',
                       style:
-                          const TextStyle(fontSize: 24),
+                          AppTexto.displayPequeno,
                     ),
                   ],
                 ),
@@ -266,7 +264,7 @@ class _PestanaProgresoState extends State<PestanaProgreso> {
             SizedBox(
               width: double.infinity,
               child: ElevatedButton.icon(
-                icon: const Icon(Icons.add),
+                icon: const Icon(Icons.add_rounded),
                 label: const Text('Registrar medición'),
                 onPressed: () =>
                     _mostrarFormulario(context, null),
@@ -307,15 +305,14 @@ class _PestanaProgresoState extends State<PestanaProgreso> {
       child: ListTile(
         title: Text(
           '${m.pesoKg.toStringAsFixed(1)} kg',
-          style: const TextStyle(
-              fontWeight: FontWeight.bold, fontSize: 18),
+          style: AppTexto.titulo,
         ),
         subtitle: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
               '${fmtFechaHabana(m.createdAt)} • Por: ${m.registradoPor}',
-              style: const TextStyle(fontSize: 12),
+              style: AppTexto.metadato,
             ),
             // v1.4.0: solo medidas visibles (sin % grasa/pecho/cadera).
             if (m.cinturaCm != null || m.brazoCm != null || m.musloCm != null)
@@ -328,7 +325,7 @@ class _PestanaProgresoState extends State<PestanaProgreso> {
                   if (m.musloCm != null)
                     'Pierna ${m.musloCm!.toStringAsFixed(1)}',
                 ].join(' · '),
-                style: const TextStyle(fontSize: 12),
+                style: AppTexto.metadato,
               ),
           ],
         ),
@@ -510,10 +507,7 @@ class _PestanaProgresoState extends State<PestanaProgreso> {
     final peso = _parseNum(pesoStr);
     if (peso == null || peso <= 0) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-              content: Text('El peso es requerido')),
-        );
+        mostrarSnack(context, 'El peso es requerido', significado: SignificadoChip.alerta);
       }
       return;
     }
@@ -535,17 +529,12 @@ class _PestanaProgresoState extends State<PestanaProgreso> {
         'p_medicion_id': existente?.id,
       });
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-              content: Text('Medición guardada')),
-        );
+        mostrarSnack(context, 'Medición guardada', significado: SignificadoChip.exito);
         _cargar();
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e')),
-        );
+        mostrarSnack(context, 'Error: $e', significado: SignificadoChip.error);
       }
     }
   }
@@ -578,17 +567,12 @@ class _PestanaProgresoState extends State<PestanaProgreso> {
         'p_medicion_id': m.id,
       });
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-              content: Text('Medición eliminada')),
-        );
+        mostrarSnack(context, 'Medición eliminada', significado: SignificadoChip.exito);
         _cargar();
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e')),
-        );
+        mostrarSnack(context, 'Error: $e', significado: SignificadoChip.error);
       }
     }
   }

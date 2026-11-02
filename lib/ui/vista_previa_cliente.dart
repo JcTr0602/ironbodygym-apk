@@ -11,6 +11,7 @@ import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../config.dart';
+import 'diseno.dart';
 import 'horario_gym.dart';
 
 /// Resultado del semáforo de membresía (espejo de la lógica de
@@ -257,13 +258,10 @@ class _VistaPreviaClienteScreenState
             width: double.infinity,
             color: _naranja,
             padding:
-                const EdgeInsets.symmetric(vertical: 6, horizontal: 16),
-            child: const Text(
+                const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+            child: Text(
               'VISTA PREVIA — lo que ve el cliente en su app',
-              style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600),
+              style: AppTexto.metadato.copyWith(color: Colors.white, fontWeight: FontWeight.w600),
               textAlign: TextAlign.center,
             ),
           ),
@@ -331,18 +329,14 @@ class _VistaPreviaClienteScreenState
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(nombre,
-                        style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold)),
+                        style: AppTexto.titulo.copyWith(color: Colors.white)),
                     if (plan.isNotEmpty) ...[
                       const SizedBox(height: 4),
                       _chip('Plan: $plan', _naranja),
                     ],
                     const SizedBox(height: 4),
                     Text('Estado: ${c['estado'] ?? '—'}',
-                        style: const TextStyle(
-                            color: Colors.white70, fontSize: 13)),
+                        style: AppTexto.secundario.copyWith(color: Colors.white70)),
                   ],
                 ),
               ),
@@ -366,14 +360,10 @@ class _VistaPreviaClienteScreenState
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(semaforo.titulo,
-                        style: TextStyle(
-                            color: semaforo.color,
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold)),
+                        style: AppTexto.titulo.copyWith(color: semaforo.color)),
                     const SizedBox(height: 2),
                     Text(semaforo.subtitulo,
-                        style: const TextStyle(
-                            color: Colors.white70, fontSize: 13)),
+                        style: AppTexto.secundario.copyWith(color: Colors.white70)),
                   ],
                 ),
               ),
@@ -383,23 +373,16 @@ class _VistaPreviaClienteScreenState
         ),
         // Entrenador de turno: abierto por horario ≠ entrenador asignado.
         _tarjeta([
-          const Text('ENTRENADOR DE TURNO HOY',
-              style: TextStyle(
-                  color: _naranja,
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600)),
-          const SizedBox(height: 6),
+          Text('ENTRENADOR DE TURNO HOY',
+              style: AppTexto.metadato.copyWith(color: _naranja, fontWeight: FontWeight.w600)),
+          const SizedBox(height: 8),
           if (turno.isNotEmpty) ...[
             Text('${turno['entrenador_nombre'] ?? '—'}',
-                style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 16,
-                    fontWeight: FontWeight.w600)),
+                style: AppTexto.titulo.copyWith(color: Colors.white, fontWeight: FontWeight.w600)),
             Text(
                 'Turno: ${_turnoLegible(turno['turno'])}'
                 '${(turno['hora_apertura'] ?? '').toString().isNotEmpty ? ' · desde ${turno['hora_apertura']}' : ''}',
-                style: const TextStyle(
-                    color: Colors.white70, fontSize: 13)),
+                style: AppTexto.secundario.copyWith(color: Colors.white70)),
           ] else if (abierto)
             const Text('Sin entrenador asignado',
                 style: TextStyle(color: Colors.white))
@@ -409,7 +392,7 @@ class _VistaPreviaClienteScreenState
           const SizedBox(height: 4),
           Text(
               'Horario: ${_horarioCanonico ?? 'L–V 6:00–12:00 y 14:00–20:00 · Sáb 7:00–12:00 · Dom cerrado'}',
-              style: const TextStyle(color: Colors.white54, fontSize: 12)),
+              style: AppTexto.metadato.copyWith(color: Colors.white54)),
         ]),
         // Resumen rápido.
         _tituloSeccion('Resumen rápido'),
@@ -460,8 +443,7 @@ class _VistaPreviaClienteScreenState
                   [p['periodo'], p['metodo']]
                       .where((x) => '${x ?? ''}'.isNotEmpty)
                       .join(' · '),
-                  style: const TextStyle(
-                      color: Colors.white70, fontSize: 13)),
+                  style: AppTexto.secundario.copyWith(color: Colors.white70)),
             ]),
       ],
     );
@@ -481,10 +463,10 @@ class _VistaPreviaClienteScreenState
       padding: const EdgeInsets.all(16),
       children: [
         _tituloSeccion('Catálogo (${catalogo.length})'),
-        const Padding(
+        Padding(
           padding: EdgeInsets.only(bottom: 8),
           child: Text('Vista previa: las acciones están deshabilitadas',
-              style: TextStyle(color: Colors.white54, fontSize: 12)),
+              style: AppTexto.metadato.copyWith(color: Colors.white54)),
         ),
         for (final s in catalogo)
           _tarjeta([
@@ -512,12 +494,10 @@ class _VistaPreviaClienteScreenState
                       ),
                       if ('${s['descripcion'] ?? ''}'.isNotEmpty)
                         Text('${s['descripcion']}',
-                            style: const TextStyle(
-                                color: Colors.white70, fontSize: 13)),
+                            style: AppTexto.secundario.copyWith(color: Colors.white70)),
                       if (_presentacion(s) != null)
                         Text(_presentacion(s)!,
-                            style: const TextStyle(
-                                color: Colors.white70, fontSize: 13)),
+                            style: AppTexto.secundario.copyWith(color: Colors.white70)),
                       Text(
                           'Precio oficial: \$${formatoMonto(s['precio_oficial'])}',
                           style: const TextStyle(
@@ -529,12 +509,16 @@ class _VistaPreviaClienteScreenState
               ],
             ),
             const SizedBox(height: 8),
-            // Condición 5: visible por fidelidad, deshabilitado.
+            // Condición 5: visible por fidelidad. F15 (1.20):
+            // ya no es un botón MUERTO — al tocarlo explica
+            // qué hace en la app del cliente; la vista previa
+            // no envía WhatsApp reales desde el teléfono del
+            // dueño.
             SizedBox(
               width: double.infinity,
               child: OutlinedButton.icon(
-                onPressed: null,
-                icon: const Icon(Icons.chat_bubble_outline, size: 16),
+                onPressed: () => _explicarCompraWhatsApp(s),
+                icon: const Icon(Icons.chat_bubble_outline_rounded, size: 16),
                 label: const Text('Comprar por WhatsApp'),
               ),
             ),
@@ -554,10 +538,33 @@ class _VistaPreviaClienteScreenState
                   style: const TextStyle(color: Colors.white)),
               if (nombresPorId[vc['suplemento_id']] != null)
                 Text(nombresPorId[vc['suplemento_id']]!,
-                    style: const TextStyle(
-                        color: Colors.white70, fontSize: 13)),
+                    style: AppTexto.secundario.copyWith(color: Colors.white70)),
             ]),
       ],
+    );
+  }
+
+  /// F15: qué hace «Comprar por WhatsApp» en la app del
+  /// cliente (en esta vista previa no se envía nada).
+  void _explicarCompraWhatsApp(Map<dynamic, dynamic> s) {
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Vista previa'),
+        content: Text(
+            'En la app del cliente, este botón abre su WhatsApp '
+            'con el pedido ya escrito al número del gym '
+            '(58191577):\n\n'
+            '«Hola, quiero comprar: ${s['nombre'] ?? 'este producto'} '
+            '(\$${formatoMonto(s['precio_oficial'])})»\n\n'
+            'Aquí es solo una muestra: no se envía ningún mensaje.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Entendido'),
+          ),
+        ],
+      ),
     );
   }
 
@@ -593,28 +600,18 @@ class _VistaPreviaClienteScreenState
               style: const TextStyle(
                   color: Colors.white, fontWeight: FontWeight.w600)),
           Text('Actualizado: ${plan['actualizado_en'] ?? '—'}',
-              style: const TextStyle(
-                  color: Colors.white70, fontSize: 13)),
+              style: AppTexto.secundario.copyWith(color: Colors.white70)),
         ]),
         if (detalle.isNotEmpty)
           _tarjeta([
             MarkdownBody(
               data: detalle,
               styleSheet: MarkdownStyleSheet(
-                p: const TextStyle(
-                    color: Colors.white70, fontSize: 14, height: 1.4),
-                h1: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 20,
-                    fontWeight: FontWeight.bold),
-                h2: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold),
-                h3: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 16,
-                    fontWeight: FontWeight.bold),
+                p: AppTexto.cuerpo.copyWith(
+                    color: Colors.white70, height: 1.4),
+                h1: AppTexto.tituloPagina.copyWith(color: Colors.white),
+                h2: AppTexto.titulo.copyWith(color: Colors.white),
+                h3: AppTexto.titulo.copyWith(color: Colors.white),
                 strong: const TextStyle(
                     color: Colors.white, fontWeight: FontWeight.bold),
                 listBullet: const TextStyle(color: Colors.white70),
@@ -666,8 +663,8 @@ class _VistaPreviaClienteScreenState
             _tarjeta([
               Row(
                 children: [
-                  const Icon(Icons.emoji_events,
-                      color: _naranja, size: 18),
+                  Icon(Icons.emoji_events_rounded,
+                      color: AppColores.textoSecundario(context), size: 18),
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
@@ -682,8 +679,7 @@ class _VistaPreviaClienteScreenState
                 ],
               ),
               Text(fechaHumana(r['fecha']),
-                  style: const TextStyle(
-                      color: Colors.white70, fontSize: 13)),
+                  style: AppTexto.secundario.copyWith(color: Colors.white70)),
             ]),
         if (registros.isNotEmpty) ...[
           const SizedBox(height: 8),
@@ -696,8 +692,7 @@ class _VistaPreviaClienteScreenState
                   '${r['ejercicio_nombre'] ?? 'Ejercicio #${r['ejercicio_id'] ?? '—'}'} · ${formatoMonto(r['peso'])} kg',
                   style: const TextStyle(color: Colors.white)),
               Text(fechaHumana(r['fecha']),
-                  style: const TextStyle(
-                      color: Colors.white70, fontSize: 13)),
+                  style: AppTexto.secundario.copyWith(color: Colors.white70)),
             ]),
         ],
       ],
@@ -732,11 +727,11 @@ class _VistaPreviaClienteScreenState
       if (medidas.isNotEmpty)
         Text(medidas.join(' · '),
             style:
-                const TextStyle(color: Colors.white70, fontSize: 13)),
+                AppTexto.secundario.copyWith(color: Colors.white70)),
       if ('${m['notas'] ?? ''}'.isNotEmpty)
         Text('${m['notas']}',
             style:
-                const TextStyle(color: Colors.white54, fontSize: 13)),
+                AppTexto.secundario.copyWith(color: Colors.white54)),
     ]);
   }
 
@@ -746,7 +741,7 @@ class _VistaPreviaClienteScreenState
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
       child: Text('Mostrando últimos $mostrados de $total',
-          style: const TextStyle(color: Colors.white54, fontSize: 12)),
+          style: AppTexto.metadato.copyWith(color: Colors.white54)),
     );
   }
 
@@ -801,10 +796,7 @@ class _VistaPreviaClienteScreenState
     return Padding(
       padding: const EdgeInsets.only(top: 4, bottom: 8),
       child: Text(t,
-          style: const TextStyle(
-              color: _naranja,
-              fontSize: 16,
-              fontWeight: FontWeight.bold)),
+          style: AppTexto.titulo.copyWith(color: _naranja)),
     );
   }
 
@@ -832,15 +824,10 @@ class _VistaPreviaClienteScreenState
         children: [
           Text('$etiqueta: ',
               style:
-                  const TextStyle(color: Colors.white70, fontSize: 14)),
+                  AppTexto.cuerpo.copyWith(color: Colors.white70)),
           Expanded(
             child: Text(valor,
-                style: TextStyle(
-                    color: destacado ? _naranja : Colors.white,
-                    fontSize: 14,
-                    fontWeight: destacado
-                        ? FontWeight.bold
-                        : FontWeight.normal)),
+                style: AppTexto.cuerpo.copyWith(color: destacado ? _naranja : Colors.white, fontWeight: FontWeight.bold)),
           ),
         ],
       ),
@@ -855,7 +842,7 @@ class _VistaPreviaClienteScreenState
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: color.withValues(alpha: 0.5)),
       ),
-      child: Text(texto, style: TextStyle(color: color, fontSize: 11)),
+      child: Text(texto, style: AppTexto.metadato.copyWith(color: color)),
     );
   }
 

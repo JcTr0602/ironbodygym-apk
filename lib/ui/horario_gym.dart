@@ -6,6 +6,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'dart:convert';
 import '../auth.dart';
+import 'diseno.dart';
+import 'componentes.dart';
 
 class DiaHorario {
   final int diaSemana; // 1=Lun ... 7=Dom
@@ -225,9 +227,7 @@ class _HorarioGymState extends State<HorarioGym> {
     } catch (e) {
       if (mounted && _dias.isEmpty) {
         setState(() => _cargando = false);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e')),
-        );
+        mostrarSnack(context, 'Error: $e', significado: SignificadoChip.error);
       }
     }
   }
@@ -248,17 +248,11 @@ class _HorarioGymState extends State<HorarioGym> {
       await prefs.setString(
           _kCacheKey, jsonEncode(payload));
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-              content:
-                  Text('Horario guardado')),
-        );
+        mostrarSnack(context, 'Horario guardado', significado: SignificadoChip.exito);
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e')),
-        );
+        mostrarSnack(context, 'Error: $e', significado: SignificadoChip.error);
       }
     } finally {
       if (mounted) {
@@ -386,10 +380,7 @@ class _HorarioGymState extends State<HorarioGym> {
                 Expanded(
                   child: Text(
                     dia.nombre,
-                    style: const TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                    ),
+                    style: AppTexto.titulo,
                   ),
                 ),
                 Switch(
@@ -403,22 +394,16 @@ class _HorarioGymState extends State<HorarioGym> {
                   dia.abierto
                       ? 'Abierto'
                       : 'Cerrado',
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: dia.abierto
+                  style: AppTexto.metadato.copyWith(color: dia.abierto
                         ? Colors.green[700]
-                        : Colors.red[700],
-                    fontWeight: FontWeight.w600,
-                  ),
+                        : Colors.red[700], fontWeight: FontWeight.w600),
                 ),
               ],
             ),
             if (dia.abierto) ...[
               const Divider(),
-              const Text('Turno 1',
-                  style: TextStyle(
-                      fontSize: 12,
-                      color: Colors.grey)),
+              Text('Turno 1',
+                  style: AppTexto.metadato.copyWith(color: Colors.grey)),
               Row(
                 children: [
                   Expanded(
@@ -444,10 +429,8 @@ class _HorarioGymState extends State<HorarioGym> {
                 ],
               ),
               const SizedBox(height: 8),
-              const Text('Turno 2 (opcional)',
-                  style: TextStyle(
-                      fontSize: 12,
-                      color: Colors.grey)),
+              Text('Turno 2 (opcional)',
+                  style: AppTexto.metadato.copyWith(color: Colors.grey)),
               Row(
                 children: [
                   Expanded(
@@ -521,15 +504,10 @@ class _HorarioGymState extends State<HorarioGym> {
         child: Column(
           children: [
             Text(label,
-                style: const TextStyle(
-                    fontSize: 10,
-                    color: Colors.grey)),
+                style: AppTexto.minuscula.copyWith(color: Colors.grey)),
             Text(
               valor ?? '--:--',
-              style: const TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.w600,
-              ),
+              style: AppTexto.titulo.copyWith(fontWeight: FontWeight.w600),
             ),
           ],
         ),

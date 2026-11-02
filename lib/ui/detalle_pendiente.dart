@@ -154,9 +154,7 @@ class _DetallePendienteScreenState extends State<DetallePendienteScreen> {
                   const Spacer(),
                   Text(
                       '${fmtMonto(total)} CUP${totalUsd > 0 ? ' + ${fmtMonto(totalUsd)} USD' : ''}',
-                      style: const TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold)),
+                      style: AppTexto.titulo),
                 ],
               ),
             ),
@@ -184,9 +182,9 @@ class _DetallePendienteScreenState extends State<DetallePendienteScreen> {
                               child: Tarjeta(
                                 padding: EdgeInsets.zero,
                                 child: ListTile(
-                                  leading: const Icon(
-                                      Icons.shopping_bag,
-                                      color: AppColores.naranja,
+                                  leading: Icon(
+                                      Icons.shopping_bag_rounded,
+                                      color: AppColores.textoSecundario(context),
                                       size: 24),
                                   title: Text(
                                       '${it['suplemento_nombre']} x${it['cantidad']}'),
@@ -209,9 +207,9 @@ class _DetallePendienteScreenState extends State<DetallePendienteScreen> {
                               child: Tarjeta(
                                 padding: EdgeInsets.zero,
                                 child: ListTile(
-                                  leading: const Icon(
-                                      Icons.bolt,
-                                      color: AppColores.naranja,
+                                  leading: Icon(
+                                      Icons.bolt_rounded,
+                                      color: AppColores.textoSecundario(context),
                                       size: 24),
                                   title: Text(switch (
                                       '${it['servicio_tipo']}') {
@@ -264,9 +262,9 @@ class _DetallePendienteScreenState extends State<DetallePendienteScreen> {
                               child: ListTile(
                                 leading: Icon(
                                     esInsc
-                                        ? Icons.person_add
-                                        : Icons.payments,
-                                    color: AppColores.naranja,
+                                        ? Icons.person_add_rounded
+                                        : Icons.payments_rounded,
+                                    color: AppColores.textoSecundario(context),
                                     size: 24),
                                 title: Text(
                                     '${it['cliente_nombre']}',

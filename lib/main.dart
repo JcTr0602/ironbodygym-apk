@@ -15,6 +15,7 @@ import 'invitados.dart';
 import 'localdb.dart';
 import 'notificaciones_recordatorios.dart';
 import 'sync.dart';
+import 'tarifa_especial.dart';
 import 'fotos_foreground.dart';
 import 'theme.dart';
 import 'ui/diseno.dart';
@@ -52,6 +53,10 @@ Future<void> _republicarInfoPublicaPendiente() async {
 Future<void> _trasSyncExitosa() async {
   await _verificarConversionesInvitados();
   await _republicarInfoPublicaPendiente();
+  // Q2 (1.20): siembra local de tarifas legacy con el espejo
+  // fresco (nunca lanza; la canónica nace en el servidor y
+  // baja por el espejo, esto cubre el hueco entre tanto).
+  await sembrarTarifasLegacy();
   // 23/25: reprogramar avisos de recordatorios con la lista fresca
   // (nunca lanza; en el isolate de fondo el canal no existe y se
   // ignora en silencio).
@@ -146,6 +151,11 @@ Future<void> main() async {
   // background, guardada por fecha (meta 'ultima_poda_ops');
   // no bloquea el arranque.
   unawaited(LocalDb.instance.podaOpsDiariaSiToca());
+  // Q2 (1.20): siembra local de tarifas legacy desde el espejo
+  // ya guardado, para que un cobro offline justo tras
+  // actualizar la app ya vea las filas seed_legacy_<id>
+  // (nunca lanza; también corre tras cada sync exitosa).
+  unawaited(sembrarTarifasLegacy());
   // 23/25: programar avisos de recordatorios de hoy (sin sesión
   // no hace nada; tras cada sync se reprograma con lista fresca).
   unawaited(AvisosRecordatorios.sincronizar());

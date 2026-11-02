@@ -34,6 +34,7 @@ import 'package:uuid/uuid.dart';
 
 import 'app_log.dart';
 import 'auth.dart';
+import 'comprobantes.dart';
 import 'config.dart';
 import 'errores_sync.dart';
 import 'fotos.dart';
@@ -1614,6 +1615,18 @@ class SyncEngine {
         debugPrint('ERROR procesarCola falló: $e');
         AppLog.error('sync', 'cola_fotos_fallo', d: '$e');
       }
+      // F1 (1.20): comprobantes de pagos por transferencia
+      // pendientes de subida (servicio propio, tras las fotos).
+      try {
+        final compSubidos =
+            await ComprobantesService.instance.procesar();
+        if (compSubidos > 0) {
+          AppLog.info('sync', 'comprobantes',
+              d: 'subidos=$compSubidos');
+        }
+      } catch (e) {
+        AppLog.error('sync', 'comprobantes_fallo', d: '$e');
+      }
       // Si se subieron fotos y se generaron ops de vinculación,
       // vaciar ops_queue hacia Supabase de inmediato.
       // Argón (sync adaptativa, paso 3): también si quedó
@@ -1954,6 +1967,32 @@ class SyncEngine {
   }
 
   // -- subida ----------------------------------------------------------
+
+  String? _deviceTagCache;
+
+  /// H-09 (1.20): etiqueta de ESTA instalación para la auditoría
+  /// de sync_ops. Antes era la constante 'apk-android' en los dos
+  /// caminos de subida: dos aparatos con la misma cuenta eran
+  /// indistinguibles en el servidor. Ahora es `apk-<uuid>` con un
+  /// UUID v4 generado UNA vez y persistido en la meta local
+  /// `device_tag_id` (única fuente: los dos caminos llaman aquí).
+  ///
+  /// Es un identificador DECLARATIVO de auditoría: no autoriza
+  /// nada ni decide atribución (la autoría sigue siendo la
+  /// persona, por su cuenta). Limitación conocida: una copia o
+  /// restauración de los datos de la app conserva el mismo id, y
+  /// dos instalaciones clonadas compartirían etiqueta.
+  Future<String> deviceTag() async {
+    final cache = _deviceTagCache;
+    if (cache != null) return cache;
+    var id = await _db.getMeta('device_tag_id');
+    if (id == null || id.isEmpty) {
+      id = const Uuid().v4();
+      await _db.setMeta('device_tag_id', id);
+    }
+    return _deviceTagCache = 'apk-$id';
+  }
+
   /// Devuelve la cantidad de ops que quedaron aplicadas.
   ///
   /// Envío en lote (punto 19): varias ops por petición PostgREST
@@ -2048,6 +2087,7 @@ class SyncEngine {
     // 3 lotes OK. Commit local de avance entre lote y lote (markOp /
     // bumpOp por lote, no todo al final).
     // NOTA: gzip en subida DESCARTADO (Supabase devuelve HTTP 400).
+    final tagLote = await deviceTag();
     var i = 0;
     while (i < porEnviar.length) {
       final tam = _loteAdaptativo.tam;
@@ -2061,7 +2101,7 @@ class SyncEngine {
         for (final op in lote)
           {
             'op_uuid': op['op_uuid'],
-            'device_tag': 'apk-android',
+            'device_tag': tagLote,
             'tipo': op['tipo'],
             'payload': jsonDecode(op['payload'] as String),
           }
@@ -2154,11 +2194,12 @@ class SyncEngine {
   /// 'rechazada' (definitiva y visible en la cola) y NO bloquea a las
   /// demás. Los fallos de red siguen siendo transitorios (reintento).
   Future<void> _uploadUnaPorUna(List<Map<String, dynamic>> lote) async {
+    final tag = await deviceTag();
     for (final op in lote) {
       final uuid = op['op_uuid'] as String;
       final body = jsonEncode({
         'op_uuid': uuid,
-        'device_tag': 'apk-android',
+        'device_tag': tag,
         'tipo': op['tipo'],
         'payload': jsonDecode(op['payload'] as String),
       });
@@ -3176,9 +3217,16 @@ class SyncEngine {
       // v1.8.0 (v39): aperturas sincronizadas (Auditoría por
       // persona; la tabla existe en Supabase desde v1.3.3).
       'turnos_apertura': 'sync_turnos_apertura',
+      'suplemento_ajustes': 'sync_suplemento_ajustes',
       // v1.8.0 (v40): adelantos (si la oleada SQL no está, se omite).
       'adelantos': 'sync_adelantos',
       'nomina_liquidada': 'sync_nomina_liquidada',
+      // T22 (1.20, v56): foto de liquidación con desglose y
+      // confirmaciones de recepción (si el SQL T22 no está,
+      // se omiten como ausentes).
+      'nomina_liquidada_snapshot': 'sync_nomina_liquidada_snapshot',
+      'nomina_confirmaciones': 'sync_nomina_confirmaciones',
+      'diferencias_caja': 'sync_diferencias_caja',
       // v1.3.6 (v28): arqueo de caja e incidencias de sync.
       'liquidaciones_caja': 'sync_liquidaciones_caja',
       'incidencias_sync': 'sync_incidencias_sync',
@@ -4433,6 +4481,7 @@ class SyncEngine {
     required String fechaTurno,
     required String turno,
     required String horaApertura,
+    String? cubreA,
   }) async {
     final id = const Uuid().v4();
     await _db.queueOp(
@@ -4444,6 +4493,7 @@ class SyncEngine {
         'fecha_turno': fechaTurno,
         'turno': turno,
         'hora_apertura': horaApertura,
+        if (cubreA != null) 'cubre_a': cubreA,
         'telegram_id': _auth.telegramId,
       },
     );
@@ -5450,6 +5500,12 @@ class SyncEngine {
   /// siguiente, igual que antes. Las fotos_cola (TUS) no se
   /// tocan: ya ceden por QoS.
   bool _fotosIncidenciasEnCurso = false;
+
+  /// H-12 (1.20): disparo público del worker de fotos de
+  /// incidencias para la pantalla de la Cola (reintento manual
+  /// tras reactivar las filas en 'error'). Mismo guard
+  /// anti-paralelo que el disparo interno.
+  void reintentarFotosIncidencias() => _lanzarFotosIncidencias();
 
   void _lanzarFotosIncidencias() {
     if (_fotosIncidenciasEnCurso) return;

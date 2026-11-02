@@ -138,8 +138,7 @@ class _BandejaScreenState extends State<BandejaScreen>
 
   void _snack(String texto) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text(texto)));
+    mostrarSnack(context, texto);
   }
 
   String _nombreCliente(dynamic clienteId) {
@@ -439,25 +438,21 @@ class _BandejaScreenState extends State<BandejaScreen>
           Text(
             '${_nombreCliente(s['cliente_id'])} · '
             '${_fecha('${s['creada_en'] ?? ''}')}',
-            style: TextStyle(
-                fontSize: 12,
-                color: AppColores.textoSecundario(context)),
+            style: AppTexto.metadato.copyWith(color: AppColores.textoSecundario(context)),
           ),
           if (detalle.isNotEmpty) ...[
-            const SizedBox(height: 6),
+            const SizedBox(height: 8),
             Text(detalle),
           ],
           if (pendiente && tituloBorrador != null) ...[
-            const SizedBox(height: 6),
+            const SizedBox(height: 8),
             Text(
               'Con borrador: «$tituloBorrador»',
-              style: TextStyle(
-                  fontSize: 12,
-                  color: AppColores.textoSecundario(context)),
+              style: AppTexto.metadato.copyWith(color: AppColores.textoSecundario(context)),
             ),
           ],
           if (!pendiente) ...[
-            const SizedBox(height: 6),
+            const SizedBox(height: 8),
             Text(
               publicacionEnCola
                   ? 'Publicación en cola · Por subir'
@@ -465,9 +460,7 @@ class _BandejaScreenState extends State<BandejaScreen>
                       ? 'Publicada como «${s['articulo_id'] ?? ''}»'
                           ' · ${_fecha('${s['cerrada_en'] ?? ''}')}'
                       : 'Descartada · ${_fecha('${s['cerrada_en'] ?? ''}')}',
-              style: TextStyle(
-                  fontSize: 12,
-                  color: AppColores.textoSecundario(context)),
+              style: AppTexto.metadato.copyWith(color: AppColores.textoSecundario(context)),
             ),
           ],
           if (pendiente) ...[
@@ -543,12 +536,10 @@ class _BandejaScreenState extends State<BandejaScreen>
                   '${_nombreAutor(b['autor_telegram_id'])} · '
                   '${_fecha('${b['actualizado_en'] ?? ''}')}'
                   '${'${b['solicitud_id'] ?? ''}'.isNotEmpty ? ' · De una solicitud' : ''}',
-                  style: TextStyle(
-                      fontSize: 12,
-                      color: AppColores.textoSecundario(context)),
+                  style: AppTexto.metadato.copyWith(color: AppColores.textoSecundario(context)),
                 ),
                 if ('${b['texto'] ?? ''}'.isNotEmpty) ...[
-                  const SizedBox(height: 6),
+                  const SizedBox(height: 8),
                   Text('${b['texto']}',
                       maxLines: 3, overflow: TextOverflow.ellipsis),
                 ],

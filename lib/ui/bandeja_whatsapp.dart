@@ -84,6 +84,10 @@ class _BandejaWhatsappScreenState extends State<BandejaWhatsappScreen>
     if (a == null || !mounted) return;
     _confirmarAlVolver = null;
     final enLote = _confirmarEnLote;
+    // Pasada 2 de Argón (1.20): si el SnackBar de confirmación
+    // de un aviso anterior seguía en pantalla, su botón podía
+    // marcar ese aviso viejo (o disparar el lote) a destiempo.
+    ScaffoldMessenger.of(context).hideCurrentSnackBar();
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(
@@ -262,9 +266,8 @@ class _BandejaWhatsappScreenState extends State<BandejaWhatsappScreen>
     final siguiente = _siguienteLote();
     if (siguiente == null) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-            content: Text('Lote completo: no quedan avisos '
-                'pendientes con teléfono.')));
+        mostrarSnack(context, 'Lote completo: no quedan avisos '
+                'pendientes con teléfono.');
       }
       return;
     }
@@ -276,13 +279,24 @@ class _BandejaWhatsappScreenState extends State<BandejaWhatsappScreen>
     final waNum = normalizarTelefonoWaMe('${a['telefono'] ?? ''}');
     if (waNum.isEmpty) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-            content: Text('Este cliente no tiene teléfono registrado.')));
+        mostrarSnack(context, 'Este cliente no tiene teléfono registrado.', significado: SignificadoChip.alerta);
       }
       return;
     }
+    // W9 (1.20): vista previa editable — el mensaje se
+    // puede ajustar para ESTE envío antes de abrir WhatsApp
+    // (no cambia la plantilla ni el aviso guardado). Un
+    // texto vaciado vuelve al mensaje original.
+    final editado = await _editarAntesDeEnviar(a);
+    if (editado == null || !mounted) return;
+    // Pasada 2 de Argón (1.20): al abrir otro aviso, cualquier
+    // SnackBar de confirmación anterior muere (su acción ya no
+    // corresponde a este contexto).
+    ScaffoldMessenger.of(context).hideCurrentSnackBar();
+    final texto =
+        editado.trim().isEmpty ? '${a['mensaje']}' : editado;
     final url = Uri.parse(
-        'https://wa.me/$waNum?text=${Uri.encodeComponent('${a['mensaje']}')}');
+        'https://wa.me/$waNum?text=${Uri.encodeComponent(texto)}');
     try {
       await launchUrl(url, mode: LaunchMode.externalApplication);
       // Corrección panel 1.13: NO marcar aquí. launchUrl resuelve
@@ -296,10 +310,21 @@ class _BandejaWhatsappScreenState extends State<BandejaWhatsappScreen>
       _confirmarEnLote = enLote;
     } catch (_) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-            content: Text('No se pudo abrir WhatsApp.')));
+        mostrarSnack(context, 'No se pudo abrir WhatsApp.', significado: SignificadoChip.error);
       }
     }
+  }
+
+  /// W9: muestra el editor del mensaje y devuelve el texto
+  /// a enviar (null si se cancela).
+  Future<String?> _editarAntesDeEnviar(Map<String, dynamic> a) {
+    return showDialog<String>(
+      context: context,
+      builder: (_) => _DialogoEditarMensaje(
+        nombre: '${a['nombre'] ?? 'el cliente'}',
+        mensaje: '${a['mensaje']}',
+      ),
+    );
   }
 
   /// v1.3.8 (1A): marca/desmarca "Atendido" manualmente (SQLite, al
@@ -362,9 +387,7 @@ class _BandejaWhatsappScreenState extends State<BandejaWhatsappScreen>
       final tel = ctrl.text.trim();
       if (!validarTelefono(tel)) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-              content:
-                  Text('Teléfono inválido: 8 dígitos, empieza con 5 o 6.')));
+          mostrarSnack(context, 'Teléfono inválido: 8 dígitos, empieza con 5 o 6.', significado: SignificadoChip.alerta);
         }
         return;
       }
@@ -383,8 +406,7 @@ class _BandejaWhatsappScreenState extends State<BandejaWhatsappScreen>
         setState(() {
           a['telefono'] = tel;
         });
-        ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Teléfono guardado.')));
+        mostrarSnack(context, 'Teléfono guardado.', significado: SignificadoChip.exito);
       }
     } finally {
       // Ronda 17 M7-H3: el controlador del diálogo se libera
@@ -411,7 +433,7 @@ class _BandejaWhatsappScreenState extends State<BandejaWhatsappScreen>
         actions: [
           IconButton(
             tooltip: 'Actualizar',
-            icon: const Icon(Icons.refresh),
+            icon: const Icon(Icons.refresh_rounded),
             onPressed: _cargar,
           ),
         ],
@@ -455,7 +477,7 @@ class _BandejaWhatsappScreenState extends State<BandejaWhatsappScreen>
                           controller: _busquedaCtrl,
                           decoration: const InputDecoration(
                             hintText: 'Buscar por nombre',
-                            prefixIcon: Icon(Icons.search, size: 20),
+                            prefixIcon: Icon(Icons.search_rounded, size: 20),
                             isDense: true,
                           ),
                           onChanged: (v) =>
@@ -477,7 +499,7 @@ class _BandejaWhatsappScreenState extends State<BandejaWhatsappScreen>
                     child: OutlinedButton.icon(
                       onPressed:
                           _pendientesLote() > 0 ? _enviarLote : null,
-                      icon: const Icon(Icons.send, size: 18),
+                      icon: const Icon(Icons.send_rounded, size: 18),
                       label: Text(_pendientesLote() > 0
                           ? 'Enviar en lote (${_pendientesLote()} pendientes)'
                           : 'Lote completo'),
@@ -508,7 +530,7 @@ class _BandejaWhatsappScreenState extends State<BandejaWhatsappScreen>
                           child: Column(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              const Icon(Icons.mark_chat_read_outlined,
+                              const Icon(Icons.mark_chat_read_rounded,
                                   size: 56, color: Colors.green),
                               const SizedBox(height: 12),
                               const Text('Sin avisos por hoy.',
@@ -561,24 +583,24 @@ class _BandejaWhatsappScreenState extends State<BandejaWhatsappScreen>
       (
         tipo: 'vencido',
         titulo: '🔴 Vencidos',
-        icono: Icons.error_outline
+        icono: Icons.error_outline_rounded
       ),
       (
         tipo: 'vence_hoy',
         titulo: '⏰ Vencen hoy',
-        icono: Icons.warning_amber_outlined
+        icono: Icons.warning_amber_rounded
       ),
       (
         tipo: 'por_vencer',
         titulo: '📩 Por vencer',
-        icono: Icons.schedule_outlined
+        icono: Icons.schedule_rounded
       ),
       (
         tipo: 'recibo',
         titulo: '🧾 Recibos de hoy',
-        icono: Icons.receipt_long_outlined
+        icono: Icons.receipt_long_rounded
       ),
-      (tipo: 'cumple', titulo: '🎂 Cumpleaños hoy', icono: Icons.cake),
+      (tipo: 'cumple', titulo: '🎂 Cumpleaños hoy', icono: Icons.cake_rounded),
     ];
     return [
       for (final o in orden)
@@ -606,7 +628,7 @@ class _BandejaWhatsappScreenState extends State<BandejaWhatsappScreen>
           child: Row(
             children: [
               Icon(seccion.icono,
-                  color: AppColores.naranja, size: 20),
+                  color: AppColores.textoSecundario(context), size: 20),
               const SizedBox(width: 8),
               Text('${seccion.titulo} (${items.length})',
                   style: AppTexto.subtitulo),
@@ -639,7 +661,7 @@ class _BandejaWhatsappScreenState extends State<BandejaWhatsappScreen>
         child: Row(
           children: [
             Icon(seccion.icono,
-                color: AppColores.naranja, size: 20),
+                color: AppColores.textoSecundario(context), size: 20),
             const SizedBox(width: 8),
             Text('${seccion.titulo} (${items.length})',
                 style: AppTexto.subtitulo),
@@ -672,8 +694,8 @@ class _BandejaWhatsappScreenState extends State<BandejaWhatsappScreen>
                   padding: const EdgeInsets.all(8),
                   child: Icon(
                     atendido
-                        ? Icons.check_circle
-                        : Icons.radio_button_unchecked,
+                        ? Icons.check_circle_rounded
+                        : Icons.radio_button_unchecked_rounded,
                     size: 22,
                     color: atendido
                         ? Colors.green
@@ -699,31 +721,25 @@ class _BandejaWhatsappScreenState extends State<BandejaWhatsappScreen>
                                       fontWeight: FontWeight.w600)),
                             ),
                             if (atendido) ...[
-                              const SizedBox(width: 6),
-                              const Icon(Icons.check_circle,
+                              const SizedBox(width: 8),
+                              const Icon(Icons.check_circle_rounded,
                                   size: 16, color: Colors.green),
                             ],
                           ],
                         ),
                         const SizedBox(height: 2),
                         Text('${a['detalle']}',
-                            style: TextStyle(
-                                fontSize: 12,
-                                color: AppColores.textoSecundario(context))),
+                            style: AppTexto.metadato.copyWith(color: AppColores.textoSecundario(context))),
                         if (atendido)
-                          const Text('✓ Atendido',
-                              style: TextStyle(
-                                  fontSize: 11,
-                                  color: Colors.green,
-                                  fontWeight: FontWeight.w600)),
+                          Text('✓ Atendido',
+                              style: AppTexto.minuscula.copyWith(color: Colors.green, fontWeight: FontWeight.w600)),
                         if (!tieneTelefono)
                           InkWell(
                             onTap: () => _agregarTelefono(a),
-                            child: const Padding(
-                              padding: EdgeInsets.only(top: 2),
+                            child: Padding(
+                              padding: const EdgeInsets.only(top: 2),
                               child: Text('Sin teléfono registrado · toca para agregar',
-                                  style: TextStyle(
-                                      fontSize: 11,
+                                  style: AppTexto.minuscula.copyWith(
                                       color: AppColores.alerta,
                                       decoration: TextDecoration.underline)),
                             ),
@@ -748,7 +764,7 @@ class _BandejaWhatsappScreenState extends State<BandejaWhatsappScreen>
                         : AppColores.textoSecundario(context)
                             .withValues(alpha: 0.3),
                   ),
-                  child: const Icon(Icons.chat,
+                  child: const Icon(Icons.chat_rounded,
                       color: Colors.white, size: 24),
                 ),
               ),
@@ -758,5 +774,55 @@ class _BandejaWhatsappScreenState extends State<BandejaWhatsappScreen>
       ),
     );
     return contenido;
+  }
+}
+
+/// W9 (1.20): editor del mensaje antes de enviar. Es dueño
+/// de su controlador (se descarta con el diálogo) y devuelve
+/// el texto al cerrar con «Abrir WhatsApp».
+class _DialogoEditarMensaje extends StatefulWidget {
+  final String nombre;
+  final String mensaje;
+  const _DialogoEditarMensaje(
+      {required this.nombre, required this.mensaje});
+
+  @override
+  State<_DialogoEditarMensaje> createState() =>
+      _DialogoEditarMensajeState();
+}
+
+class _DialogoEditarMensajeState
+    extends State<_DialogoEditarMensaje> {
+  late final _ctrl = TextEditingController(text: widget.mensaje);
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text('Mensaje para ${widget.nombre}'),
+      content: TextField(
+        controller: _ctrl,
+        maxLines: 8,
+        minLines: 3,
+        autofocus: true,
+        decoration:
+            const InputDecoration(border: OutlineInputBorder()),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancelar'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.pop(context, _ctrl.text),
+          child: const Text('Abrir WhatsApp'),
+        ),
+      ],
+    );
   }
 }

@@ -227,9 +227,9 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
   /// Icono según el turno actual.
   IconData _iconoTurno() {
     final h = ahoraHabana().hour;
-    if (h >= 5 && h < 12) return Icons.wb_sunny_outlined;
-    if (h >= 12 && h < 18) return Icons.wb_sunny;
-    return Icons.nights_stay_outlined;
+    if (h >= 5 && h < 12) return Icons.wb_sunny_rounded;
+    if (h >= 12 && h < 18) return Icons.wb_sunny_rounded;
+    return Icons.nights_stay_rounded;
   }
 
   /// Total cobrado en los últimos 7 días (incluye hoy).
@@ -275,12 +275,9 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
       children: [
         Expanded(
             child: Text(etiqueta,
-                style: const TextStyle(fontSize: 14))),
+                style: AppTexto.cuerpo)),
         Text('$flecha ${fmtMonto(ahora)} CUP$pct',
-            style: TextStyle(
-                fontSize: 14,
-                fontWeight: FontWeight.bold,
-                color: color)),
+            style: AppTexto.cuerpo.copyWith(color: color, fontWeight: FontWeight.bold)),
       ],
     );
   }
@@ -324,17 +321,14 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
             const Divider(),
             Text(
               'Total a entregar a Jc: ${fmtMonto(_pendiente)} CUP',
-              style: const TextStyle(
-                  fontWeight: FontWeight.bold, fontSize: 16),
+              style: AppTexto.titulo,
             ),
             const SizedBox(height: 8),
             Text(
               'Revisa que todo esté bien antes de irte. '
               'El pendiente solo se reinicia cuando Jc confirme '
               'que recibió el dinero.',
-              style: TextStyle(
-                  fontSize: 12,
-                  color: AppColores.textoSecundario(ctx)),
+              style: AppTexto.metadato.copyWith(color: AppColores.textoSecundario(ctx)),
             ),
             // v1.2.5 (2.4): aviso si hay ops sin sincronizar.
             if (!_cerrado &&
@@ -358,7 +352,7 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
                         const Icon(Icons.warning_amber_rounded,
                             color: AppColores.alerta,
                             size: 18),
-                        const SizedBox(width: 6),
+                        const SizedBox(width: 8),
                         Expanded(
                           child: Text(
                             '${pendientes.length + bloqueadas.length} '
@@ -366,27 +360,22 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
                             'sin sincronizar'
                             // v1.2.6 (Gemini): desglose en efectivo.
                             '${montoPendiente > 0 ? ' por un total de ${fmtMonto(montoPendiente)} CUP' : ''}',
-                            style: const TextStyle(
-                                fontWeight: FontWeight.bold,
-                                fontSize: 13),
+                            style: AppTexto.secundario.copyWith(fontWeight: FontWeight.bold),
                           ),
                         ),
                       ],
                     ),
-                    const SizedBox(height: 6),
+                    const SizedBox(height: 8),
                     const Text(
                       'Se guardaron en este teléfono. Si cierras ahora, '
                       'se enviarán cuando haya conexión.',
-                      style: TextStyle(fontSize: 12),
+                      style: AppTexto.metadato,
                     ),
                     if (bloqueadas.isNotEmpty) ...[
                       const SizedBox(height: 4),
                       Text(
                         '${bloqueadas.length} necesitan revisión manual.',
-                        style: const TextStyle(
-                            fontSize: 12,
-                            color: AppColores.error,
-                            fontWeight: FontWeight.w600),
+                        style: AppTexto.metadato.copyWith(color: AppColores.error, fontWeight: FontWeight.w600),
                       ),
                     ],
                   ],
@@ -397,9 +386,9 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
               const SizedBox(height: 8),
               const Row(
                 children: [
-                  Icon(Icons.check_circle,
+                  Icon(Icons.check_circle_rounded,
                       color: AppColores.exito, size: 16),
-                  SizedBox(width: 6),
+                  SizedBox(width: 8),
                   Text('Este turno ya está cerrado',
                       style: TextStyle(
                           color: AppColores.exito,
@@ -419,7 +408,7 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
           if (!_cerrado &&
               (pendientes.isNotEmpty || bloqueadas.isNotEmpty))
             TextButton.icon(
-              icon: const Icon(Icons.sync, size: 18),
+              icon: const Icon(Icons.sync_rounded, size: 18),
               label: const Text('Sincronizar ahora'),
               onPressed: () async {
                 Navigator.of(ctx).pop();
@@ -429,7 +418,7 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
             ),
           if (!_cerrado)
             ElevatedButton.icon(
-              icon: const Icon(Icons.done_all, size: 18),
+              icon: const Icon(Icons.done_all_rounded, size: 18),
               label: Text(pendientes.isNotEmpty || bloqueadas.isNotEmpty
                   ? 'Cerrar de todos modos'
                   : 'Confirmar cierre'),
@@ -485,10 +474,7 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
                     if (ctx.mounted) Navigator.of(ctx).pop();
                     if (mounted) {
                       setState(() => _cerrado = true);
-                      ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                              content: Text(
-                                  'Turno cerrado. ¡Buen trabajo!')));
+                      mostrarSnack(context, 'Turno cerrado. ¡Buen trabajo!', significado: SignificadoChip.exito);
                     }
                     return;
                   }
@@ -514,10 +500,7 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
                 if (ctx.mounted) Navigator.of(ctx).pop();
                 if (mounted) {
                   setState(() => _cerrado = true);
-                  ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                          content: Text(
-                              'Turno cerrado. ¡Buen trabajo!')));
+                  mostrarSnack(context, 'Turno cerrado. ¡Buen trabajo!', significado: SignificadoChip.exito);
                 }
               },
             ),
@@ -621,7 +604,7 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
                           mainAxisAlignment:
                               MainAxisAlignment.center,
                           children: [
-                            Icon(Icons.payments,
+                            Icon(Icons.payments_rounded,
                                 color: AppColores.exito,
                                 size: 28),
                             SizedBox(
@@ -633,8 +616,7 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
                         const SizedBox(
                             height: AppEspacio.sm),
                         Text('${fmtMonto(_cobrado)} CUP',
-                            style: AppTexto.titulo.copyWith(
-                                fontSize: 26,
+                            style: AppTexto.displayPequeno.copyWith(
                                 color:
                                     AppColores.naranja)),
                         const SizedBox(height: 4),
@@ -653,10 +635,9 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
                         avatar: Icon(
                             _iconoTurno(),
                             size: 18,
-                            color: AppColores.naranja),
+                            color: AppColores.textoSecundario(context)),
                         label: Text(_turnoActual(),
-                            style: const TextStyle(
-                                fontSize: 13)),
+                            style: AppTexto.secundario),
                       ),
                     ),
                     const SizedBox(height: 8),
@@ -668,7 +649,7 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
                         children: [
                           const Row(
                             children: [
-                              Icon(Icons.outbox,
+                              Icon(Icons.outbox_rounded,
                                   color: AppColores.info,
                                   size: 20),
                               SizedBox(
@@ -707,8 +688,8 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
                       child: ListTile(
                         leading: Icon(
                             _pendiente > 0
-                                ? Icons.payments
-                                : Icons.check_circle,
+                                ? Icons.payments_rounded
+                                : Icons.check_circle_rounded,
                             color: _pendiente > 0
                                 ? AppColores.naranja
                                 : AppColores.exito,
@@ -717,11 +698,9 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
                             const Text('Pendiente a entregar'),
                         subtitle: Text(
                             '${fmtMonto(_pendiente)} CUP',
-                            style: const TextStyle(
-                                fontSize: 22,
-                                fontWeight: FontWeight.bold)),
+                            style: AppTexto.metrica),
                         trailing:
-                            const Icon(Icons.chevron_right),
+                            const Icon(Icons.chevron_right_rounded),
                         onTap: () => Navigator.of(context)
                             .push(MaterialPageRoute(
                                 builder: (_) =>
@@ -735,7 +714,7 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
                           .withValues(alpha: 0.08),
                       child: const Row(
                         children: [
-                          Icon(Icons.info_outline,
+                          Icon(Icons.info_outline_rounded,
                               color: AppColores.info),
                           SizedBox(
                               width: AppEspacio.sm),
@@ -757,7 +736,7 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
                       for (final e in _pendPorDia.entries)
                         ListTile(
                           dense: true,
-                          leading: const Icon(Icons.calendar_today, size: 20, color: AppColores.naranja),
+                          leading: Icon(Icons.calendar_today_rounded, size: 20, color: AppColores.textoSecundario(context)),
                           title: Text(fmtFecha(e.key)),
                           trailing: Text(
                               '${fmtMonto(e.value)} CUP',
@@ -770,7 +749,7 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
                     Tarjeta(
                       padding: EdgeInsets.zero,
                       child: ListTile(
-                        leading: const Icon(Icons.inventory_2,
+                        leading: const Icon(Icons.inventory_2_rounded,
                             size: 28, color: AppColores.info),
                         title: const Text(
                             'Última entrega confirmada'),
@@ -788,11 +767,10 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
                           crossAxisAlignment:
                               CrossAxisAlignment.start,
                           children: [
-                            const Row(
+                            Row(
                               children: [
-                                Icon(Icons.trending_up,
-                                    color:
-                                        AppColores.naranja,
+                                Icon(Icons.trending_up_rounded,
+                                    color: AppColores.textoSecundario(context),
                                     size: 20),
                                 SizedBox(
                                     width: AppEspacio.sm),
@@ -822,7 +800,7 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
                           children: [
                             Row(
                               children: [
-                                const Icon(Icons.alarm,
+                                const Icon(Icons.alarm_rounded,
                                     color:
                                         AppColores.alerta,
                                     size: 20),
@@ -839,32 +817,28 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
                             if (_vencimientos.isEmpty)
                               Text(
                                   'Nada por vencer en 7 días.',
-                                  style: TextStyle(
-                                      color: AppColores
-                                          .textoSecundario(context),
-                                      fontSize: 13)),
+                                  style: AppTexto.secundario.copyWith(color: AppColores
+                                          .textoSecundario(context))),
                             for (final v in _vencimientos
                                 .take(10))
                               ListTile(
                                 dense: true,
                                 contentPadding:
                                     EdgeInsets.zero,
-                                leading: Icon(Icons.circle,
+                                leading: Icon(Icons.circle_rounded,
                                     size: 12,
                                     color: (v['vencido'] == true)
                                         ? AppColores.error
                                         : AppColores.alerta),
                                 title: Text(
                                     '${v['nombre']}',
-                                    style: const TextStyle(
-                                        fontSize: 14)),
+                                    style: AppTexto.cuerpo),
                                 subtitle: Text(
                                     (v['vencido'] == true)
                                         ? 'Venció: ${fmtFecha(v['pagado_hasta'])}'
                                         : 'Vence: ${fmtFecha(v['pagado_hasta'])}',
                                     style:
-                                        const TextStyle(
-                                            fontSize: 12)),
+                                        AppTexto.metadato),
                                 onTap: () {
                                   final cid =
                                       v['id'] as int?;
@@ -890,7 +864,7 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
                       child: _cerrado
                           ? OutlinedButton.icon(
                               icon: const Icon(
-                                  Icons.check_circle,
+                                  Icons.check_circle_rounded,
                                   color: AppColores.exito),
                               label: Text(
                                   'Turno cerrado (${_turnoActual().toLowerCase()})'),
@@ -900,7 +874,7 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
                             )
                           : ElevatedButton.icon(
                               icon:
-                                  const Icon(Icons.done_all),
+                                  const Icon(Icons.done_all_rounded),
                               label: const Text(
                                   'Cerrar mi turno'),
                               onPressed: _cierreTurno,
@@ -911,13 +885,11 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
                   Tarjeta(
                     padding: EdgeInsets.zero,
                     child: ListTile(
-                      leading: const Icon(Icons.calendar_month,
-                          size: 28, color: AppColores.naranja),
+                      leading: Icon(Icons.calendar_month_rounded,
+                          size: 28, color: AppColores.textoSecundario(context)),
                       title: const Text('Cobrado este mes'),
                       trailing: Text('${fmtMonto(_cobradoMes)} CUP',
-                          style: const TextStyle(
-                              fontSize: 18,
-                              fontWeight: FontWeight.bold)),
+                          style: AppTexto.titulo),
                     ),
                   ),
                   const SizedBox(height: 4),
@@ -938,8 +910,8 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
                       child: Tarjeta(
                         padding: EdgeInsets.zero,
                         child: ExpansionTile(
-                        leading: const Icon(Icons.calendar_month,
-                            size: 22, color: AppColores.naranja),
+                        leading: Icon(Icons.calendar_month_rounded,
+                            size: 22, color: AppColores.textoSecundario(context)),
                         title: Text(sem['titulo'] as String,
                             style: const TextStyle(
                                 fontWeight: FontWeight.bold)),
@@ -949,32 +921,25 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
                                 fontWeight: FontWeight.bold)),
                         subtitle: Text(
                             '${(sem['dias'] as List).length} días con cobros',
-                            style: const TextStyle(fontSize: 12)),
+                            style: AppTexto.metadato),
                         children: [
                           for (final h in sem['dias']
                               as List<Map<String, dynamic>>)
                             ExpansionTile(
                               dense: true,
-                              leading: const Icon(Icons.calendar_today,
-                                  size: 18, color: AppColores.naranja),
+                              leading: Icon(Icons.calendar_today_rounded,
+                                  size: 18, color: AppColores.textoSecundario(context)),
                               title: Text(
                                   fmtFecha(
                                       h['fecha'] as String?),
-                                  style: const TextStyle(
-                                      fontWeight:
-                                          FontWeight.bold,
-                                      fontSize: 14)),
+                                  style: AppTexto.cuerpo.copyWith(fontWeight: FontWeight.bold)),
                               trailing: Text(
                                   '${fmtMonto(h['cobrado'])} CUP',
-                                  style: const TextStyle(
-                                      fontWeight:
-                                          FontWeight.bold,
-                                      fontSize: 14)),
+                                  style: AppTexto.cuerpo.copyWith(fontWeight: FontWeight.bold)),
                               subtitle: Text(
                                   'Efectivo: ${fmtMonto(h['efectivo'])} · '
                                   'Transf.: ${fmtMonto(h['transferencia'])}',
-                                  style: const TextStyle(
-                                      fontSize: 12)),
+                                  style: AppTexto.metadato),
                               children: [
                                 for (final op in (h['ops']
                                         as List<
@@ -985,15 +950,11 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
                                     title: Text(
                                         op['etiqueta'] ?? '',
                                         style:
-                                            const TextStyle(
-                                                fontSize:
-                                                    13)),
+                                            AppTexto.secundario),
                                     trailing: Text(
                                         '${op['monto']} CUP',
                                         style:
-                                            const TextStyle(
-                                                fontSize:
-                                                    13)),
+                                            AppTexto.secundario),
                                   ),
                               ],
                             ),

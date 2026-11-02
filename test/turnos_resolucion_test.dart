@@ -76,6 +76,7 @@ void main() {
   group('mostrado: el plan manda (T1/T2)', () {
     AperturaTurno ap(String n, int h, int m, {bool viva = true}) => (
           nombre: n,
+          cubreA: null,
           aperturaEn: DateTime(2026, 10, 26, h, m),
           viva: viva
         );

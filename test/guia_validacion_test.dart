@@ -147,4 +147,23 @@ void main() {
     final a = fichaBase()..['campo_futuro'] = 'x' * 20000;
     expect(validar(a), isNotEmpty);
   });
+
+  group('errorNombreEquipo (espejo del servidor, 50 bytes)', () {
+    test('válido, vacío y límite exacto en ASCII', () {
+      expect(GuiaValidacion.errorNombreEquipo('Prensa de pecho'),
+          isNull);
+      expect(GuiaValidacion.errorNombreEquipo('   '), isNotNull);
+      expect(GuiaValidacion.errorNombreEquipo('x' * 50), isNull);
+      expect(GuiaValidacion.errorNombreEquipo('x' * 51), isNotNull);
+    });
+
+    test('los acentos cuentan como 2 bytes (UTF-8)', () {
+      // 49 ASCII + 'á' (2 bytes) = 51 bytes: el servidor lo
+      // rechazaría aunque tenga 50 caracteres.
+      expect(GuiaValidacion.errorNombreEquipo('${'x' * 49}á'),
+          isNotNull);
+      expect(GuiaValidacion.errorNombreEquipo('${'x' * 48}á'),
+          isNull);
+    });
+  });
 }

@@ -40,7 +40,7 @@ class LocalDb {
   /// v1.4.0 (Argón): versión actual del esquema local. Los tests de
   /// migración comparan contra esta constante en vez de un número
   /// fijo, para no caer en cascada de fallos con cada migración.
-  static const int versionActual = 51;
+  static const int versionActual = 57;
 
   /// v37: marcas de información pública pendiente de republicar,
   /// UNA FILA POR CLAVE (compartido entre onCreate y la migración
@@ -1205,6 +1205,48 @@ class LocalDb {
           // que onCreate (paridad garantizada, no SQL copiado).
           await _crearTablaEnviosTransferencia(db);
         }
+        if (oldV < 54) {
+          // F5 (1.20): espejo de ajustes de stock (mismo
+          // método que onCreate).
+          await _crearTablaSuplementoAjustes(db);
+        }
+        if (oldV < 55) {
+          // F1 (1.20): comprobantes de pago (mismo método
+          // que onCreate).
+          await _crearTablaComprobantes(db);
+        }
+        if (oldV < 56) {
+          // T22 (1.20): espejos de foto de liquidación y
+          // confirmaciones de nómina (mismo método que
+          // onCreate).
+          await _crearTablasNominaT22(db);
+        }
+        if (oldV < 57) {
+          // T5 (1.20): espejo de expedientes de diferencia
+          // de caja (mismo método que onCreate).
+          await _crearTablaDiferenciasCaja(db);
+        }
+        if (oldV < 53) {
+          // F9 (1.20): suplente de turno en la tabla local.
+          try {
+            await db.execute(
+                'ALTER TABLE turnos ADD COLUMN cubre_a TEXT');
+          } catch (_) {
+            // La tabla se crea con la columna cuando toque.
+          }
+        }
+        if (oldV < 52) {
+          // F4 (1.20): frecuencia de los recordatorios
+          // personalizados (ninguna|semanal|mensual).
+          try {
+            await db.execute(
+                "ALTER TABLE recordatorio_config ADD COLUMN frecuencia TEXT NOT NULL DEFAULT 'ninguna'");
+          } catch (_) {
+            // Tabla aún no creada en esta ruta de upgrade:
+            // _crearTablasBloque2Resto la crea ya con la
+            // columna cuando toque.
+          }
+        }
         if (oldV < 51) {
           // 10/25 (rendimiento Servicios): índice de fecha en
           // servicio_ventas (misma expresión que onCreate).
@@ -2015,6 +2057,19 @@ class LocalDb {
     // el teléfono y la auditoría de turnos era imposible.
     await db.execute(
         'CREATE TABLE IF NOT EXISTS turnos_apertura (id TEXT PRIMARY KEY, data TEXT NOT NULL, sync_seq INTEGER NOT NULL)');
+    // F5 (1.20, v54): espejo del historial de ajustes de
+    // stock de suplementos (id TEXT = uuid del ajuste).
+    await _crearTablaSuplementoAjustes(db);
+    // F1 (1.20, v55): comprobantes de pago por transferencia
+    // (tabla local de control de subida, no espejo).
+    await _crearTablaComprobantes(db);
+    // T22 (1.20, v56): espejos de la foto de liquidación de
+    // nómina (con desglose) y de las confirmaciones de
+    // recepción de los entrenadores.
+    await _crearTablasNominaT22(db);
+    // T5 (1.20, v57): espejo de expedientes de diferencia
+    // de caja (id TEXT = uuid del expediente).
+    await _crearTablaDiferenciasCaja(db);
     // v1.8.0 (v40): espejos de adelantos (id entero de gym.db) y
     // de las marcas de liquidación de nómina (id texto
     // 'YYYY-MM|entrenador'). Cursor propio desde 0.
@@ -2335,6 +2390,7 @@ class LocalDb {
         'target_key TEXT NOT NULL DEFAULT \'todos\', '
         'dias_anticipacion INTEGER NOT NULL DEFAULT 3, '
         'fecha_fija TEXT, '
+        'frecuencia TEXT NOT NULL DEFAULT \'ninguna\', '
         'activa INTEGER NOT NULL DEFAULT 1, '
         'creado_por INTEGER, '
         'disparado_en_fecha_habana TEXT, '
@@ -2690,6 +2746,57 @@ class LocalDb {
         ]);
   }
 
+  /// F5 (1.20): espejo de ajustes de stock (mismo método
+  /// en onCreate y en onUpgrade: paridad de esquema).
+  static Future<void> _crearTablaSuplementoAjustes(
+      DatabaseExecutor db) async {
+    await db.execute(
+        'CREATE TABLE IF NOT EXISTS suplemento_ajustes (id TEXT PRIMARY KEY, data TEXT NOT NULL, sync_seq INTEGER NOT NULL)');
+    await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_suplemento_ajustes_seq ON suplemento_ajustes(sync_seq)');
+  }
+
+  /// F1 (1.20): comprobantes de pago por transferencia.
+  /// Tabla LOCAL (no espejo): el vínculo con el pago viaja en
+  /// `pagos.comprobante_uuid` (servidor → espejo); esta tabla
+  /// solo controla la subida de la foto en ESTE teléfono
+  /// (ruta local, ruta en el bucket y estado).
+  static Future<void> _crearTablaComprobantes(
+      DatabaseExecutor db) async {
+    await db.execute(
+        'CREATE TABLE IF NOT EXISTS comprobantes_pago ('
+        'comprobante_uuid TEXT PRIMARY KEY, '
+        'ruta_local TEXT, '
+        'storage_path TEXT, '
+        "estado TEXT NOT NULL DEFAULT 'pendiente', "
+        'creado_en TEXT NOT NULL)');
+  }
+
+  /// T22 (1.20): espejos de la foto de liquidación de nómina
+  /// (id TEXT = 'YYYY-MM|entrenador') y de las confirmaciones
+  /// de recepción (id TEXT = 'YYYY-MM|telegram_id').
+  static Future<void> _crearTablasNominaT22(
+      DatabaseExecutor db) async {
+    await db.execute(
+        'CREATE TABLE IF NOT EXISTS nomina_liquidada_snapshot (id TEXT PRIMARY KEY, data TEXT NOT NULL, sync_seq INTEGER NOT NULL)');
+    await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_nomina_liq_snapshot_seq ON nomina_liquidada_snapshot(sync_seq)');
+    await db.execute(
+        'CREATE TABLE IF NOT EXISTS nomina_confirmaciones (id TEXT PRIMARY KEY, data TEXT NOT NULL, sync_seq INTEGER NOT NULL)');
+    await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_nomina_confirmaciones_seq ON nomina_confirmaciones(sync_seq)');
+  }
+
+  /// T5 (1.20): espejo de expedientes de diferencia de caja
+  /// (id TEXT = uuid del expediente).
+  static Future<void> _crearTablaDiferenciasCaja(
+      DatabaseExecutor db) async {
+    await db.execute(
+        'CREATE TABLE IF NOT EXISTS diferencias_caja (id TEXT PRIMARY KEY, data TEXT NOT NULL, sync_seq INTEGER NOT NULL)');
+    await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_diferencias_caja_seq ON diferencias_caja(sync_seq)');
+  }
+
   static Future<void> _crearTablaTurnos(Database db) async {
     await db.execute('CREATE TABLE IF NOT EXISTS turnos ('
         'turno_id TEXT PRIMARY KEY, '
@@ -2707,6 +2814,9 @@ class LocalDb {
         // v1.3.3 (Argón P2): incidencias como propiedad de negocio,
         // separada del ciclo local/sincronizado de `estado`.
         'tiene_incidencias INTEGER NOT NULL DEFAULT 0, '
+        // F9 (1.20): a quién cubre el que abre (suplente),
+        // nombre visible; null = turno propio.
+        'cubre_a TEXT, '
         // v1.3.3 (Argón P1): 1 = el turno_id ya se reconcilió contra el
         // turno_id_canonico del servidor (no re-leer el resultado).
         'turno_id_reconciliado INTEGER NOT NULL DEFAULT 0)');
@@ -4938,6 +5048,48 @@ class LocalDb {
         whereArgs: [id]);
   }
 
+  /// H-12 (1.20): fotos de incidencias en estado 'error' (el
+  /// worker agotó sus 5 intentos o el archivo local desapareció).
+  /// Antes quedaban muertas: el worker solo procesa
+  /// 'pending'/'retry' y ninguna pantalla las mostraba. Cada
+  /// fila devuelta lleva `recuperable`: true si el archivo local
+  /// aún existe (un reintento tiene sentido) y false si el
+  /// archivo ya no está en este teléfono (irrecuperable aquí).
+  Future<List<Map<String, dynamic>>> fotosIncidenciasEnError()
+      async {
+    final d = await db;
+    final filas = await d.query('incidencias_fotos',
+        where: "sync_estado = 'error'", orderBy: 'id ASC');
+    return [
+      for (final f in filas)
+        {
+          ...f,
+          'recuperable':
+              File('${f['local_path'] ?? ''}').existsSync(),
+        },
+    ];
+  }
+
+  /// H-12 (1.20): reactiva fotos de incidencias en 'error'
+  /// devolviéndolas a 'retry' con los intentos a cero, SOLO las
+  /// de la lista (la UI pasa las recuperables). Devuelve cuántas
+  /// se reactivaron. Nunca toca filas en otro estado.
+  Future<int> reactivarFotosIncidenciasError(
+      List<String> ids) async {
+    if (ids.isEmpty) return 0;
+    final d = await db;
+    var n = 0;
+    for (final id in ids) {
+      n += await d.update(
+        'incidencias_fotos',
+        {'sync_estado': 'retry', 'intentos': 0},
+        where: "id = ? AND sync_estado = 'error'",
+        whereArgs: [id],
+      );
+    }
+    return n;
+  }
+
   /// v1.3.1 (Alto #4): actualiza el op_uuid de una incidencia local al
   /// encolar una nueva operación sobre ella (ej. cambio de estado).
   /// Sin esto, la fila conserva el UUID viejo (ya aplicado) y el marcado
@@ -5356,6 +5508,9 @@ class LocalDb {
       'liquidaciones_caja',
       'incidencias_sync',
       'nomina_liquidada',
+      'nomina_liquidada_snapshot',
+      'nomina_confirmaciones',
+      'diferencias_caja',
       'nomina_bonos',
       'nomina_precalc',
       'compras',
@@ -5589,6 +5744,7 @@ class LocalDb {
     required String turno,
     required String horaApertura,
     required int telegramId,
+    String? cubreA,
   }) async {
     final d = await db;
     final existente = await d.query('turnos',
@@ -5597,7 +5753,13 @@ class LocalDb {
         whereArgs: [fechaTurno, turno, telegramId],
         limit: 1);
     if (existente.isNotEmpty) {
-      return (existente.first['turno_id'] as String, false);
+      final idExistente = existente.first['turno_id'] as String;
+      // F9: marcar el suplente sobre un turno ya abierto.
+      if (cubreA != null) {
+        await d.update('turnos', {'cubre_a': cubreA},
+            where: 'turno_id=?', whereArgs: [idExistente]);
+      }
+      return (idExistente, false);
     }
     try {
       await d.insert('turnos', {
@@ -5608,6 +5770,7 @@ class LocalDb {
         'hora_cierre': null,
         'telegram_id': telegramId,
         'estado': 'abierto_local',
+        'cubre_a': cubreA,
       });
     } catch (_) {
       // Carrera entre dos llamadas: el índice único ganó la otra.
@@ -6082,6 +6245,17 @@ class LocalDb {
     if (tabla.startsWith('servicio_')) return 0;
     // v1.8.0 (v39): aperturas de turno, mismo motivo.
     if (tabla == 'turnos_apertura') return 0;
+    // F5 (1.20): ajustes de stock, mismo motivo.
+    if (tabla == 'suplemento_ajustes') return 0;
+    // T22 (1.20): foto de liquidación y confirmaciones de
+    // nómina, mismo motivo.
+    if (tabla == 'nomina_liquidada_snapshot' ||
+        tabla == 'nomina_confirmaciones') {
+      return 0;
+    }
+    // T5 (1.20): expedientes de diferencia de caja, mismo
+    // motivo.
+    if (tabla == 'diferencias_caja') return 0;
     // v1.8.0 (v40): adelantos y liquidaciones, mismo motivo.
     if (tabla == 'adelantos' || tabla == 'nomina_liquidada') return 0;
     // v1.12.0 (G2): los espejos nuevos del Bloque 3 nacen con la
@@ -6199,6 +6373,7 @@ class LocalDb {
         'dias_anticipacion':
             (e['dias_anticipacion'] as num?)?.toInt() ?? 3,
         'fecha_fija': e['fecha_fija'],
+        'frecuencia': '${e['frecuencia'] ?? 'ninguna'}',
         'activa': e['activa'] == true || e['activa'] == 1
             ? 1
             : (e['activa'] is num ? (e['activa'] as num).toInt() : 0),
@@ -6555,6 +6730,22 @@ class LocalDb {
         orderBy: 'creada_ts ASC');
   }
 
+  /// Ops de un tipo en estados «vivos o ya aceptadas»:
+  /// pendiente/enviada (aún en este teléfono) y aplicada (el
+  /// servidor ya la aceptó; el espejo puede tardar un ciclo
+  /// en reflejarla). Para lecturas de «esto ya se hizo» que
+  /// no deben reaparecer tras el push (T22: liquidación y
+  /// confirmación de nómina). NO incluye rechazadas ni
+  /// necesita_revision: esas no cuentan como hechas.
+  Future<List<Map<String, dynamic>>> opsDeTipo(String tipo) async {
+    final d = await db;
+    return d.query('ops_queue',
+        where: "tipo = ? AND estado IN ('pendiente', 'enviada', "
+            "'aplicada')",
+        whereArgs: [tipo],
+        orderBy: 'creada_ts ASC');
+  }
+
   /// v1.0.16: ops pendientes del usuario indicado. Las de otro usuario
   /// quedan en espera (no se suben con sesión ajena).
   Future<List<Map<String, dynamic>>> pendingOpsDe(String? userId) async {
@@ -6773,7 +6964,17 @@ class LocalDb {
         proximo = isoHabana(ahoraHabana().add(backoffReintento(intentos))); // v1.3.4 (Argón)
       }
     } else if (ec.tipo == TipoErrorSync.auth) {
-      estado = 'error';
+      // Ajuste 2 de reservas (cola 1.20; conecta con H-14):
+      // el error de auth no tenía salida — quedaba en
+      // 'error' sin backoff ni tope, se reintentaba en cada
+      // sync para siempre y una tarjeta de reserva con esa
+      // op quedaba bloqueada eterna. Con el mismo tope que
+      // el transitorio pasa a revisión: la tarjeta se
+      // libera y la op queda visible en la cola (bloqueadas)
+      // para reintentarla tras recuperar la sesión.
+      estado = intentos >= maxIntentosTransitorio
+          ? 'necesita_revision'
+          : 'error';
     } else {
       estado = 'necesita_revision';
     }
@@ -7007,6 +7208,58 @@ class LocalDb {
     }
   }
 
+  /// Estados terminales de una reserva. CONTRATO de retención
+  /// compartido con el puente (ironbody/reservas.py TERMINALES,
+  /// que poda Supabase con la misma lista): si aparece un estado
+  /// terminal nuevo, se añade EN LOS DOS SITIOS o la retención
+  /// local lo conservará para siempre.
+  static const estadosTerminalesReserva = {
+    'pagada',
+    'rechazada',
+    'cancelada',
+    'expirada',
+  };
+
+  /// H-13 (1.20): retención del espejo LOCAL de reservas, alineada
+  /// con la del puente (90 días). El puente poda las terminales
+  /// viejas en Supabase sin generar tumba, así que el teléfono
+  /// conservaba para siempre las que ya había bajado; la purga por
+  /// reconciliación solo corre con pasada completa. Aquí se borran
+  /// del espejo las terminales cuyo `creada_ts` (prefijo de fecha,
+  /// comparación robusta a formatos) supera los 90 días.
+  ///
+  /// Seguridad: solo filas que vinieron del servidor (sync_seq>0).
+  /// La app NO inserta filas optimistas en este espejo (las
+  /// reservas locales viven en ops_queue hasta confirmarse), así
+  /// que nada pendiente de subir puede borrarse.
+  ///
+  /// Devuelve las filas borradas, o -1 si falló (para que la poda
+  /// diaria NO marque el día y lo reintente mañana). Nunca lanza.
+  Future<int> purgarReservasLocalesViejas() async {
+    final d = await db;
+    try {
+      final corte =
+          ahoraHabana().subtract(const Duration(days: 90));
+      final corteTxt = '${corte.year.toString().padLeft(4, '0')}-'
+          '${corte.month.toString().padLeft(2, '0')}-'
+          '${corte.day.toString().padLeft(2, '0')}';
+      final terminales =
+          estadosTerminalesReserva.map((e) => "'$e'").join(',');
+      final n = await d.rawDelete(
+        'DELETE FROM reservas '
+        'WHERE sync_seq > 0 '
+        "AND json_extract(data, '\$.estado') IN ($terminales) "
+        "AND substr(json_extract(data, '\$.creada_ts'), 1, 10) < ?",
+        [corteTxt],
+      );
+      debugPrint('[poda_reservas] locales borradas=$n corte=$corteTxt');
+      return n;
+    } catch (e) {
+      debugPrint('[poda_reservas] fallo (no fatal): $e');
+      return -1;
+    }
+  }
+
   /// Ejecuta [purgarOpsAplicadas] como maximo 1 vez al dia (v1.3.4,
   /// item 3).
   ///
@@ -7020,8 +7273,19 @@ class LocalDb {
       final ultima = await getMeta('ultima_poda_ops');
       if (ultima == hoy) return; // Ya se podo hoy.
       final borradas = await purgarOpsAplicadas();
+      // H-13 (1.20): la retención local de reservas viaja con la
+      // misma poda diaria. Si falla, el día NO se marca: se
+      // reintenta mañana (ajuste del panel: el fallo no debe
+      // ocultarse un día entero en silencio).
+      final reservasBorradas = await purgarReservasLocalesViejas();
+      if (reservasBorradas < 0) {
+        debugPrint('[poda_ops] diaria: poda de reservas falló; '
+            'el día no se marca y se reintenta mañana');
+        return;
+      }
       await setMeta('ultima_poda_ops', hoy);
-      debugPrint('[poda_ops] diaria ok: borradas=$borradas dia=$hoy');
+      debugPrint('[poda_ops] diaria ok: borradas=$borradas '
+          'reservas=$reservasBorradas dia=$hoy');
     } catch (e) {
       // Defensiva: la poda jamas debe impedir el arranque.
       debugPrint('[poda_ops] diaria fallo (no fatal): $e');

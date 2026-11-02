@@ -152,9 +152,7 @@ class _RankingServiciosScreenState extends State<RankingServiciosScreen> {
                                       Text(detalle.isEmpty ? '—' : detalle),
                                   trailing: Text(
                                       '${fmtMonto(f['monto'] as double)} CUP',
-                                      style: const TextStyle(
-                                          fontWeight: FontWeight.bold,
-                                          fontSize: 15)),
+                                      style: AppTexto.subtitulo.copyWith(fontWeight: FontWeight.bold)),
                                 ),
                               ),
                             );

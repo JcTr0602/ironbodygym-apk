@@ -9,6 +9,8 @@ import 'package:flutter/material.dart';
 import '../negocio.dart';
 import '../auth.dart';
 import '../cliente_protegido.dart';
+import '../conciliacion.dart';
+import '../diferencias_caja.dart';
 import '../invitados.dart';
 import '../nomina_total.dart';
 import '../permisos_entrenador.dart';
@@ -17,7 +19,9 @@ import '../tiempo.dart';
 import 'diseno.dart';
 import 'componentes.dart';
 import 'buscar.dart';
+import 'conciliacion.dart';
 import 'cumpleanos.dart';
+import 'diferencias_caja.dart';
 import 'listas.dart';
 import 'suplementos.dart';
 import 'widgets.dart';
@@ -63,6 +67,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
   List<Map<String, dynamic>> _stockBajo = [];
   List<Map<String, dynamic>> _turnosOlvidados = [];
   int? _plusVigentes;
+  // T4 (1.20): transferencias por transferencia sin comprobar
+  // (pendientes + con problema) para el bloque «Hoy hay que…».
+  int _porComprobar = 0;
+  // T5 (1.20): expedientes de diferencia de caja abiertos del
+  // dueño (FIN-23 de Argón: faltaba su fila en «Hoy hay que…»).
+  int _diferenciasAbiertas = 0;
+  // T5 (1.20): expedientes de diferencia del entrenador
+  // (su vista de transparencia en «Mi dashboard»).
+  List<Map<String, dynamic>> _misDiferencias = [];
 
   // Vista por rol (v1.2): el entrenador ve solo sus propios números.
   final _auth = AuthService();
@@ -143,6 +156,16 @@ class _DashboardScreenState extends State<DashboardScreen> {
         alertasStockBajo(),
         turnosAbiertosAyer(),
         InvitadosService().contarPlusVigentes(),
+        // T4 (1.20): transferencias por comprobar del dueño.
+        // Un fallo degrada a -1 y se conserva el valor anterior.
+        ConciliacionService.instance
+            .conteoPorComprobar()
+            .catchError((_) => -1),
+        // T5 (1.20): diferencias de caja abiertas del dueño
+        // (FIN-23 de Argón). Misma degradación a -1.
+        DiferenciasCajaService.instance
+            .conteoAbiertas()
+            .catchError((_) => -1),
       ]);
       // Panel Terra B2: cada grupo se espera por separado. Un fallo
       // en un grupo ya no tumba los otros dos: el grupo que falló
@@ -199,6 +222,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
             _stockBajo = nov[3] as List<Map<String, dynamic>>;
             _turnosOlvidados = nov[4] as List<Map<String, dynamic>>;
             _plusVigentes = nov[5] as int?;
+            final porComprobarT4 = nov[6] as int?;
+            if (porComprobarT4 != null && porComprobarT4 >= 0) {
+              _porComprobar = porComprobarT4;
+            }
+            final diferenciasT5 = nov[7] as int?;
+            if (diferenciasT5 != null && diferenciasT5 >= 0) {
+              _diferenciasAbiertas = diferenciasT5;
+            }
           }
           _cargando = false;
         });
@@ -214,36 +245,72 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   /// Carga los números propios del entrenador (dashboard por rol, v1.2).
   Future<void> _cargarEntrenador(int v) async {
+    // §14 (1.20): degradación POR MÉTRICA. Antes las nueve
+    // lecturas compartían un solo try: si una fallaba (p. ej.
+    // pendienteEntrega), el panel entero quedaba sin cifras
+    // aunque las demás estuvieran bien. Ahora cada lectura
+    // conserva su valor anterior si falla (mismo patrón que
+    // las diferencias T5 y los índices del panel del dueño).
+    Future<T> seguro<T>(Future<T> lectura, T anterior) async {
+      try {
+        return await lectura;
+      } catch (_) {
+        return anterior;
+      }
+    }
+
     try {
       final tid = _auth.telegramId;
-      final hoy = await ingresosHoyPorEntrenador(tid);
-      final semana = await ingresosSemanaPorEntrenador(tid);
-      final mes = await cobradoMes(tid);
-      final pendCup = await pendienteEntrega(tid);
-      final pendUsd = await pendienteEntregaUsd(tid);
-      final porMet = await ingresosPorMetodoEntrenador(tid);
-      final porTip = await ingresosPorTipoEntrenador(tid);
-      final mp = await mejorPeorDiaEntrenador(tid);
+      final hoy = await seguro(ingresosHoyPorEntrenador(tid), _miHoy);
+      final semana =
+          await seguro(ingresosSemanaPorEntrenador(tid), _miSemana);
+      final mes = await seguro(cobradoMes(tid), _miMes);
+      final pendCup = await seguro(pendienteEntrega(tid), _miPendCup);
+      final pendUsd =
+          await seguro(pendienteEntregaUsd(tid), _miPendUsd);
+      final porMet =
+          await seguro(ingresosPorMetodoEntrenador(tid), _miPorMetodo);
+      final porTip =
+          await seguro(ingresosPorTipoEntrenador(tid), _miPorTipo);
+      final mp =
+          await seguro(mejorPeorDiaEntrenador(tid), _miMejorPeor);
+      // T5 (1.20): sus expedientes de diferencia de caja
+      // (degrada en silencio: un fallo no tumba el panel).
+      var misDif = _misDiferencias;
+      try {
+        if (tid != null) {
+          misDif = await DiferenciasCajaService.instance
+              .deEntrenador(tid);
+        }
+      } catch (_) {}
       // H5 (Argón): «Hoy en sala» sin montos. Los nombres ya
       // vienen filtrados: un cliente protegido NO se le muestra
       // al entrenador (misma regla que la bandeja de avisos).
-      final sala = await Future.wait([
-        cumpleanosProximos(dias: 0),
-        vencenHoy(),
-      ]);
-      final nombresCump = <String>[];
-      for (final c in sala[0]) {
-        if ((c['_dias_para'] as int?) != 0) continue;
-        if (esVistaProtegida(c, esDueno: false)) continue;
-        final n = '${c['nombre'] ?? ''}'.trim();
-        if (n.isNotEmpty) nombresCump.add(n);
-      }
-      final nombresVencen = <String>[];
-      for (final c in sala[1]) {
-        if (esVistaProtegida(c, esDueno: false)) continue;
-        final n = '${c['nombre'] ?? ''}'.trim();
-        if (n.isNotEmpty) nombresVencen.add(n);
-      }
+      // Si la lectura de la sala falla, se conservan los
+      // nombres anteriores en vez de vaciar la sección.
+      var nombresCump = _cumpleHoyNombres;
+      var nombresVencen = _vencenHoyNombres;
+      try {
+        final sala = await Future.wait([
+          cumpleanosProximos(dias: 0),
+          vencenHoy(),
+        ]);
+        final cump = <String>[];
+        for (final c in sala[0]) {
+          if ((c['_dias_para'] as int?) != 0) continue;
+          if (esVistaProtegida(c, esDueno: false)) continue;
+          final n = '${c['nombre'] ?? ''}'.trim();
+          if (n.isNotEmpty) cump.add(n);
+        }
+        nombresCump = cump;
+        final vencen = <String>[];
+        for (final c in sala[1]) {
+          if (esVistaProtegida(c, esDueno: false)) continue;
+          final n = '${c['nombre'] ?? ''}'.trim();
+          if (n.isNotEmpty) vencen.add(n);
+        }
+        nombresVencen = vencen;
+      } catch (_) {}
       if (mounted && v == _versionCarga) {
         setState(() {
           _miHoy = hoy;
@@ -256,6 +323,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           _miMejorPeor = mp;
           _cumpleHoyNombres = nombresCump;
           _vencenHoyNombres = nombresVencen;
+          _misDiferencias = misDif;
           _salaCargada = true;
           _cargando = false;
         });
@@ -310,7 +378,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     showModalBottomSheet(
       context: context,
       shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
       builder: (ctx) => Padding(
         padding: const EdgeInsets.all(20),
@@ -345,13 +413,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(etiqueta, style: const TextStyle(fontSize: 15)),
+          Text(etiqueta, style: AppTexto.subtitulo),
           Text('${fmtMonto(valor)} CUP',
-              style: TextStyle(
-                  fontSize: 15,
-                  fontWeight:
-                      negrita ? FontWeight.bold : FontWeight.normal,
-                  color: negrita ? naranja : null)),
+              style: AppTexto.subtitulo.copyWith(color: negrita ? naranja : null, fontWeight: FontWeight.bold)),
         ],
       ),
     );
@@ -373,7 +437,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           title: const Text('Mi dashboard'),
           actions: [
             IconButton(
-              icon: const Icon(Icons.refresh),
+              icon: const Icon(Icons.refresh_rounded),
               onPressed: _cargar,
             ),
           ],
@@ -403,7 +467,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         'comprueben, este panel muestra tus '
                         'cifras. Si tarda, revisa tu conexión y '
                         'toca el botón de actualizar.',
-                style: const TextStyle(fontSize: 14),
+                style: AppTexto.cuerpo,
               ),
             ),
           ],
@@ -415,7 +479,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         title: const Text('Mi dashboard'),
         actions: [
           IconButton(
-            icon: const Icon(Icons.refresh),
+            icon: const Icon(Icons.refresh_rounded),
             onPressed: _cargar,
           ),
         ],
@@ -441,13 +505,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   const SizedBox(height: 8),
                   Row(
                     children: [
-                      _tarjetaSimple('Hoy', _miHoy, Icons.today),
+                      _tarjetaSimple('Hoy', _miHoy, Icons.today_rounded),
                       const SizedBox(width: 8),
                       _tarjetaSimple(
-                          '7 días', _miSemana, Icons.date_range),
+                          '7 días', _miSemana, Icons.date_range_rounded),
                       const SizedBox(width: 8),
                       _tarjetaSimple('Este mes', _miMes,
-                          Icons.calendar_month),
+                          Icons.calendar_month_rounded),
                     ],
                   ),
                   const SizedBox(height: 16),
@@ -473,10 +537,55 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         ],
                         if (_miPendCup <= 0 && _miPendUsd <= 0)
                           const Text('Nada pendiente. Todo entregado.',
-                              style: TextStyle(fontSize: 13)),
+                              style: AppTexto.secundario),
                       ],
                     ),
                   ),
+                  // T5 (1.20): sus diferencias de caja, si
+                  // tiene: transparencia (el expediente no
+                  // descuenta nada automáticamente).
+                  if (_misDiferencias.isNotEmpty) ...[
+                    const SizedBox(height: 16),
+                    const EncabezadoSeccion(
+                        titulo: 'Mis diferencias de caja'),
+                    const SizedBox(height: 8),
+                    Tarjeta(
+                      child: Column(
+                        crossAxisAlignment:
+                            CrossAxisAlignment.start,
+                        children: [
+                          for (final e in _misDiferencias.take(5))
+                            Padding(
+                              padding: const EdgeInsets.only(
+                                  bottom: AppEspacio.sm),
+                              child: Row(
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                      'Faltan '
+                                      '${fmtMonto(e['monto'])} '
+                                      '${e['moneda'] ?? 'CUP'} · '
+                                      '${fmtFecha('${e['fecha'] ?? ''}')}',
+                                      style: AppTexto.secundario,
+                                    ),
+                                  ),
+                                  chipExpedienteDiferencia(e),
+                                ],
+                              ),
+                            ),
+                          Text(
+                            'El dueño abre un expediente cuando '
+                            'falta dinero en una liquidación y no '
+                            'es el arrastre normal. No se te '
+                            'descuenta nada automáticamente.',
+                            style: AppTexto.metadato.copyWith(
+                                color: AppColores.textoSecundario(
+                                    context)),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
                   const SizedBox(height: 16),
                   const EncabezadoSeccion(
                       titulo: 'Desglose del mes'),
@@ -528,10 +637,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           Text(
                             'Mi mejor día: ${fmtFecha(_miMejorPeor['mejor']!['dia'] as String?)} '
                             '(${fmtMonto(_miMejorPeor['mejor']!['monto'] as double)} CUP)',
-                            style: TextStyle(
-                                fontSize: 12,
-                                color:
-                                    AppColores.textoSecundario(
+                            style: AppTexto.metadato.copyWith(color: AppColores.textoSecundario(
                                         context)),
                           ),
                         ],
@@ -549,25 +655,20 @@ class _DashboardScreenState extends State<DashboardScreen> {
     return Expanded(
       child: Tarjeta(
         padding:
-            const EdgeInsets.symmetric(vertical: 14, horizontal: 8),
+            const EdgeInsets.symmetric(vertical: 16, horizontal: 8),
         child: Column(
           children: [
-            Icon(icono, color: naranja, size: 26),
-            const SizedBox(height: 6),
+            Icon(icono, color: AppColores.textoSecundario(context), size: 24),
+            const SizedBox(height: 8),
             Text(titulo,
-                style: TextStyle(
-                    fontSize: 11,
-                    color: AppColores.textoSecundario(context))),
+                style: AppTexto.metadato.copyWith(color: AppColores.textoSecundario(context))),
             const SizedBox(height: 2),
-            Text(fmtMonto(valor),
-                style: const TextStyle(
-                    fontSize: 17,
-                    fontWeight: FontWeight.bold,
-                    color: naranja)),
+            MontoAnimado(
+                valor: valor,
+                formato: fmtMonto,
+                style: AppTexto.metrica.copyWith(color: naranja)),
             Text('CUP',
-                style: TextStyle(
-                    fontSize: 10,
-                    color: AppColores.textoSecundario(context))),
+                style: AppTexto.minuscula.copyWith(color: AppColores.textoSecundario(context))),
           ],
         ),
       ),
@@ -579,12 +680,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
-        Text(etiqueta, style: const TextStyle(fontSize: 13)),
+        Text(etiqueta, style: AppTexto.secundario),
         Text('${fmtMonto(valor)} $moneda',
-            style: const TextStyle(
-                fontSize: 15,
-                fontWeight: FontWeight.bold,
-                color: naranja)),
+            style: AppTexto.subtitulo.copyWith(color: naranja, fontWeight: FontWeight.bold)),
       ],
     );
   }
@@ -595,27 +693,22 @@ class _DashboardScreenState extends State<DashboardScreen> {
       child: Tarjeta(
         onTap: onTap,
         padding:
-            const EdgeInsets.symmetric(vertical: 14, horizontal: 8),
+            const EdgeInsets.symmetric(vertical: 16, horizontal: 8),
         child: Column(
           children: [
-            Icon(icono, color: naranja, size: 26),
-            const SizedBox(height: 6),
+            Icon(icono, color: AppColores.textoSecundario(context), size: 24),
+            const SizedBox(height: 8),
             Text(titulo,
-                style: TextStyle(
-                    fontSize: 11,
-                    color: AppColores.textoSecundario(context))),
+                style: AppTexto.metadato.copyWith(color: AppColores.textoSecundario(context))),
             const SizedBox(height: 2),
-            Text(fmtMonto(valor),
-                style: const TextStyle(
-                    fontSize: 17,
-                    fontWeight: FontWeight.bold,
-                    color: naranja)),
+            MontoAnimado(
+                valor: valor,
+                formato: fmtMonto,
+                style: AppTexto.metrica.copyWith(color: naranja)),
             Text('CUP',
-                style: TextStyle(
-                    fontSize: 10,
-                    color: AppColores.textoSecundario(context))),
+                style: AppTexto.minuscula.copyWith(color: AppColores.textoSecundario(context))),
             const SizedBox(height: 4),
-            Icon(Icons.touch_app,
+            Icon(Icons.touch_app_rounded,
                 size: 14,
                 color: AppColores.textoSecundario(context)),
           ],
@@ -651,7 +744,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       ),
       child: Row(
         children: [
-          Icon(sube ? Icons.trending_up : Icons.trending_down,
+          Icon(sube ? Icons.trending_up_rounded : Icons.trending_down_rounded,
               size: 20,
               color: sube ? AppColores.exito : AppColores.error),
           const SizedBox(width: 8),
@@ -662,9 +755,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       '(${fmtMonto(_mesAnterior)} CUP)'
                   : 'Baja ${pct.abs().toStringAsFixed(0)}% vs mes anterior '
                       '(${fmtMonto(_mesAnterior)} CUP)',
-              style: TextStyle(
-                  fontSize: 13,
-                  color: sube
+              style: AppTexto.secundario.copyWith(color: sube
                       ? AppColores.exito
                       : AppColores.error),
             ),
@@ -712,9 +803,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
             // una cifra que solo aparece sola: van dentro de la
             // terna junto a brutos, nómina y utilidad.
             const Divider(height: 16),
-            const Text('Balance',
+            Text('Balance',
                 style:
-                    TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
+                    AppTexto.cuerpo.copyWith(fontWeight: FontWeight.bold)),
             const SizedBox(height: 4),
             _filaDetalle('Ingresos brutos', _mes),
             _filaDetalle('Gastos', _gastosMes),
@@ -722,9 +813,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
               _filaDetalle('Nómina proyectada', _nominaProy!),
               Text(
                 'Proyección, no cierre: se descuenta al cerrar el mes.',
-                style: TextStyle(
-                    fontSize: 12,
-                    color: AppColores.textoSecundario(context)),
+                style: AppTexto.metadato.copyWith(color: AppColores.textoSecundario(context)),
               ),
             ],
             _filaDetalle('Utilidad neta real', _mes - _gastosMes,
@@ -740,12 +829,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     MainAxisAlignment.spaceBetween,
                 children: [
                   const Text('Ritmo de cierre estimado',
-                      style: TextStyle(fontSize: 13)),
+                      style: AppTexto.secundario),
                   Text('${fmtMonto(_proyeccion.round())} CUP',
-                      style: const TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.bold,
-                          color: naranja)),
+                      style: AppTexto.secundario.copyWith(color: naranja, fontWeight: FontWeight.bold)),
                 ],
               ),
             ],
@@ -754,9 +840,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
               Text(
                 'Mejor día: ${fmtFecha(_mejorPeor['mejor']!['dia'] as String?)} '
                 '(${fmtMonto(_mejorPeor['mejor']!['monto'] as double)} CUP)',
-                style: TextStyle(
-                    fontSize: 12,
-                    color: AppColores.textoSecundario(context)),
+                style: AppTexto.metadato.copyWith(color: AppColores.textoSecundario(context)),
               ),
             ],
           ],
@@ -772,15 +856,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
         children: [
           Expanded(
               child: Text(etiqueta,
-                  style: const TextStyle(fontSize: 13))),
+                  style: AppTexto.secundario)),
           Text('${fmtMonto(valor)} CUP',
-              style: const TextStyle(
-                  fontSize: 13, fontWeight: FontWeight.bold)),
+              style: AppTexto.secundario.copyWith(fontWeight: FontWeight.bold)),
           const SizedBox(width: 8),
           Text('${pct.toStringAsFixed(0)}%',
-              style: TextStyle(
-                  fontSize: 12,
-                  color: AppColores.textoSecundario(context))),
+              style: AppTexto.metadato.copyWith(color: AppColores.textoSecundario(context))),
         ],
       ),
     );
@@ -797,6 +878,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
         .map((e) => (e['monto'] as num).toDouble())
         .reduce((a, b) => a > b ? a : b);
     final hoyIso = hoyHabanaIso();
+    // V15: promedio diario del período, para la línea discreta
+    // de tendencia sobre las barras.
+    final prom = datos.isEmpty
+        ? 0.0
+        : datos
+                .map((e) => (e['monto'] as num).toDouble())
+                .reduce((a, b) => a + b) /
+            datos.length;
     return Container(
       height: 150,
       padding: const EdgeInsets.all(12),
@@ -807,8 +896,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
       ),
       child: SingleChildScrollView(
         scrollDirection: Axis.horizontal,
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.end,
+        child: Stack(
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.end,
           children: datos.asMap().entries.map((e) {
             final d = e.value;
             final i = e.key;
@@ -840,7 +931,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   : null,
               child: Padding(
                 padding:
-                    EdgeInsets.symmetric(horizontal: es30 ? 3 : 6),
+                    EdgeInsets.symmetric(horizontal: es30 ? 3 : 8),
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.end,
                   children: [
@@ -849,11 +940,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         monto > 0
                             ? monto.toStringAsFixed(0)
                             : '',
-                        style: TextStyle(
-                            fontSize: 11,
-                            fontWeight: (esHoy || esMejor)
-                                ? FontWeight.w700
-                                : null),
+                        style: AppTexto.metadato.copyWith(fontWeight: FontWeight.w700),
                       ),
                     const SizedBox(height: 2),
                     Container(
@@ -867,16 +954,41 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     const SizedBox(height: 4),
                     Text(
                       etiqueta,
-                      style: TextStyle(
-                          fontSize: 11,
-                          fontWeight:
-                              esHoy ? FontWeight.w700 : null),
+                      style: AppTexto.metadato.copyWith(fontWeight: FontWeight.w700),
                     ),
                   ],
                 ),
               ),
             );
-          }).toList(),
+              }).toList(),
+            ),
+            if (prom > 0 && maxMonto > 0)
+              Positioned(
+                left: 0,
+                right: 0,
+                // La base de las barras: etiqueta (≈15) + 4 de aire.
+                bottom: 19 +
+                    (prom / maxMonto * 80).clamp(4.0, 80.0),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Container(
+                          height: 1,
+                          color: AppColores.borde(context)),
+                    ),
+                    Container(
+                      color: AppColores.superficie(context),
+                      padding:
+                          const EdgeInsets.symmetric(horizontal: 4),
+                      child: Text('prom ${fmtMonto(prom)}',
+                          style: AppTexto.minuscula.copyWith(
+                              color: AppColores.textoSecundario(
+                                  context))),
+                    ),
+                  ],
+                ),
+              ),
+          ],
         ),
       ),
     );
@@ -902,7 +1014,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     showModalBottomSheet(
       context: context,
       shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
       builder: (ctx) => Padding(
         padding: const EdgeInsets.all(20),
@@ -943,21 +1055,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
         child: Column(
           children: [
             Text(valor,
-                style: TextStyle(
-                    fontSize: 22,
-                    fontWeight: FontWeight.bold,
-                    color: color)),
+                style: AppTexto.metrica.copyWith(color: color)),
             const SizedBox(height: 2),
             Text(etiqueta,
-                style: TextStyle(
-                    fontSize: 12,
-                    color: AppColores.textoSecundario(context))),
+                style: AppTexto.metadato.copyWith(color: AppColores.textoSecundario(context))),
             // H3 (Argón): el subtítulo «N hoy» bajo «por vencer».
             if (subtitulo != null)
               Text(subtitulo,
-                  style: TextStyle(
-                      fontSize: 11,
-                      color: AppColores.textoSecundario(context))),
+                  style: AppTexto.metadato.copyWith(color: AppColores.textoSecundario(context))),
           ],
         ),
       ),
@@ -978,7 +1083,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       onTap: onTap,
       borderRadius: BorderRadius.circular(12),
       child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 6),
+        padding: const EdgeInsets.symmetric(vertical: 8),
         child: Row(
           children: [
             CircleAvatar(
@@ -986,25 +1091,21 @@ class _DashboardScreenState extends State<DashboardScreen> {
               backgroundColor: color.withValues(alpha: 0.15),
               child: Icon(icono, size: 18, color: color),
             ),
-            const SizedBox(width: 10),
+            const SizedBox(width: 8),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(texto,
-                      style: const TextStyle(
-                          fontSize: 14, fontWeight: FontWeight.bold)),
+                      style: AppTexto.cuerpo.copyWith(fontWeight: FontWeight.bold)),
                   if (detalle != null)
                     Text(detalle,
-                        style: TextStyle(
-                            fontSize: 12,
-                            color:
-                                AppColores.textoSecundario(context))),
+                        style: AppTexto.metadato.copyWith(color: AppColores.textoSecundario(context))),
                 ],
               ),
             ),
             if (onTap != null)
-              Icon(Icons.chevron_right,
+              Icon(Icons.chevron_right_rounded,
                   size: 20,
                   color: AppColores.textoSecundario(context)),
           ],
@@ -1029,7 +1130,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       var det = '$n movimientos sin entregar · ${fmtMonto(cup)} CUP';
       if (usd > 0) det += ' · ${fmtMonto(usd)} USD';
       filas.add(_filaUrgencia(
-        icono: Icons.schedule,
+        icono: Icons.schedule_rounded,
         color: AppColores.naranja,
         texto: 'Pendiente: ${t['nombre']}',
         detalle: det,
@@ -1039,7 +1140,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
     if (_vencenHoy > 0) {
       filas.add(_filaUrgencia(
-        icono: Icons.event_busy,
+        icono: Icons.event_busy_rounded,
         color: AppColores.alerta,
         texto: 'Vencen hoy: $_vencenHoy',
         onTap: () => _ir(const ListasScreen(inicial: 0)),
@@ -1047,15 +1148,35 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
     if (_cumpleHoy > 0) {
       filas.add(_filaUrgencia(
-        icono: Icons.cake,
+        icono: Icons.cake_rounded,
         color: AppColores.exito,
         texto: 'Cumpleaños hoy: $_cumpleHoy',
         onTap: () => _ir(const CumpleanosScreen()),
       ));
     }
+    // T4 (1.20): transferencias cobradas sin comprobar que el
+    // dinero llegó a la cuenta del dueño.
+    if (_porComprobar > 0) {
+      filas.add(_filaUrgencia(
+        icono: Icons.fact_check_rounded,
+        color: AppColores.alerta,
+        texto: 'Transferencias por comprobar: $_porComprobar',
+        onTap: () => _ir(const ConciliacionScreen()),
+      ));
+    }
+    // T5 (1.20): expedientes de diferencia de caja sin resolver
+    // (FIN-23 de Argón).
+    if (_diferenciasAbiertas > 0) {
+      filas.add(_filaUrgencia(
+        icono: Icons.balance_rounded,
+        color: AppColores.alerta,
+        texto: 'Diferencias de caja abiertas: $_diferenciasAbiertas',
+        onTap: () => _ir(const DiferenciasCajaScreen()),
+      ));
+    }
     if (_stockBajo.isNotEmpty) {
       filas.add(_filaUrgencia(
-        icono: Icons.inventory_2,
+        icono: Icons.inventory_2_rounded,
         color: AppColores.error,
         texto: 'Stock bajo: ${_stockBajo.length}',
         onTap: () => _ir(const SuplementosScreen()),
@@ -1088,7 +1209,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       'Ayer sin cerrar: '
                       '${(('${a['entrenador_nombre'] ?? ''}').trim().isEmpty ? 'Sin nombre' : a['entrenador_nombre'])} '
                       '(${a['turno'] ?? ''})',
-                      style: const TextStyle(fontSize: 12),
+                      style: AppTexto.metadato,
                     ),
                   ),
               ],
@@ -1115,14 +1236,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           _filaUrgencia(
-            icono: Icons.cake,
+            icono: Icons.cake_rounded,
             color: AppColores.exito,
             texto: 'Cumpleaños hoy',
             detalle: nombres(_cumpleHoyNombres),
           ),
           const Divider(height: 12),
           _filaUrgencia(
-            icono: Icons.event_busy,
+            icono: Icons.event_busy_rounded,
             color: AppColores.alerta,
             texto: 'Vencen hoy',
             detalle: nombres(_vencenHoyNombres),
@@ -1144,7 +1265,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         title: const Text('Dashboard'),
         actions: [
           IconButton(
-            icon: const Icon(Icons.refresh),
+            icon: const Icon(Icons.refresh_rounded),
             onPressed: _cargar,
           ),
         ],
@@ -1167,14 +1288,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   const SizedBox(height: 8),
                   Row(
                     children: [
-                      _tarjetaIngreso('Hoy', _hoy, Icons.today,
+                      _tarjetaIngreso('Hoy', _hoy, Icons.today_rounded,
                           () => _detalleIngresos('hoy')),
                       const SizedBox(width: 8),
                       _tarjetaIngreso('7 días', _semana,
-                          Icons.date_range, () => _detalleIngresos('semana')),
+                          Icons.date_range_rounded, () => _detalleIngresos('semana')),
                       const SizedBox(width: 8),
                       _tarjetaIngreso('Este mes', _mes,
-                          Icons.calendar_month, () => _detalleIngresos('mes')),
+                          Icons.calendar_month_rounded, () => _detalleIngresos('mes')),
                     ],
                   ),
                   // v1.0.15: comparativa vs mes anterior
@@ -1255,9 +1376,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           const SizedBox(height: 4),
                           Text(
                               '${(pctAlDia * 100).toStringAsFixed(0)}% al día',
-                              style: TextStyle(
-                                  fontSize: 11,
-                                  color: AppColores.textoSecundario(
+                              style: AppTexto.metadato.copyWith(color: AppColores.textoSecundario(
                                       context))),
                           // v1.0.15: nuevos este mes + inactivos
                           if (_nuevos > 0 || _inactivos > 0) ...[
@@ -1279,16 +1398,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                 children: [
                                   if (_nuevos > 0)
                                     Text('$_nuevos nuevos',
-                                        style: const TextStyle(
-                                            fontSize: 13,
-                                            color: AppColores.info,
-                                            fontWeight:
-                                                FontWeight.bold)),
+                                        style: AppTexto.secundario.copyWith(color: AppColores.info, fontWeight: FontWeight.bold)),
                                   if (_inactivos > 0)
                                     Text('$_inactivos inactivos',
-                                        style: TextStyle(
-                                            fontSize: 13,
-                                            color: AppColores
+                                        style: AppTexto.secundario.copyWith(color: AppColores
                                                 .textoSecundario(
                                                     context))),
                                 ],
@@ -1316,7 +1429,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           if (_casaActivas > 0)
                             'Cuentas Casa: $_casaActivas',
                         ].join(' · '),
-                        style: const TextStyle(fontSize: 13),
+                        style: AppTexto.secundario,
                       ),
                     ),
                     const SizedBox(height: 16),
@@ -1331,7 +1444,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       padding: const EdgeInsets.all(12),
                       child: Text(
                         'Mes: ${_ranking.take(2).toList().asMap().entries.map((e) => '${e.key + 1}° ${e.value['nombre']} (${fmtMonto(e.value['total'])} CUP)').join(' · ')}',
-                        style: const TextStyle(fontSize: 13),
+                        style: AppTexto.secundario,
                       ),
                     ),
                     const SizedBox(height: 16),

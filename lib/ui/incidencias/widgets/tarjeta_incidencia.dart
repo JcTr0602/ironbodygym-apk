@@ -137,7 +137,7 @@ class TarjetaIncidencia extends StatelessWidget {
                       ),
                     ),
                   if (tipo != null)
-                    const SizedBox(width: 10),
+                    const SizedBox(width: 8),
                   Expanded(
                     child: Column(
                       crossAxisAlignment:
@@ -149,11 +149,7 @@ class TarjetaIncidencia extends StatelessWidget {
                           maxLines: 2,
                           overflow: TextOverflow
                               .ellipsis,
-                          style: const TextStyle(
-                            fontWeight:
-                                FontWeight.w600,
-                            fontSize: 14,
-                          ),
+                          style: AppTexto.cuerpo.copyWith(fontWeight: FontWeight.w600),
                         ),
                         if (tipo != null ||
                             incidencia
@@ -168,11 +164,7 @@ class TarjetaIncidencia extends StatelessWidget {
                                   null)
                                 '📍 ${incidencia.ubicacion}',
                             ].join(' · '),
-                            style: TextStyle(
-                              fontSize: 12,
-                              color:
-                                  Colors.grey[500],
-                            ),
+                            style: AppTexto.metadato.copyWith(color: Colors.grey[500]),
                           ),
                       ],
                     ),
@@ -192,12 +184,7 @@ class TarjetaIncidencia extends StatelessWidget {
                     ),
                     child: Text(
                       _etiquetaEstado,
-                      style: TextStyle(
-                        fontSize: 11,
-                        fontWeight:
-                            FontWeight.w600,
-                        color: _colorEstado,
-                      ),
+                      style: AppTexto.minuscula.copyWith(color: _colorEstado, fontWeight: FontWeight.w600),
                     ),
                   ),
                 ],
@@ -207,7 +194,7 @@ class TarjetaIncidencia extends StatelessWidget {
                 children: [
                   // SLA
                   Icon(
-                    Icons.schedule,
+                    Icons.schedule_rounded,
                     size: 14,
                     color: incidencia.vencida
                         ? Colors.redAccent
@@ -216,22 +203,18 @@ class TarjetaIncidencia extends StatelessWidget {
                   const SizedBox(width: 4),
                   Text(
                     slaTexto,
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: incidencia.vencida
+                    style: AppTexto.metadato.copyWith(color: incidencia.vencida
                           ? Colors.redAccent
                           : Colors.grey[500],
-                      fontWeight:
-                          incidencia.vencida
-                              ? FontWeight.bold
-                              : null,
-                    ),
+                        fontWeight: incidencia.vencida
+                            ? FontWeight.bold
+                            : null),
                   ),
                   // v1.3.3: responsable
                   if (_nombreResponsable != null) ...[
-                    const SizedBox(width: 10),
+                    const SizedBox(width: 8),
                     Icon(
-                      Icons.person,
+                      Icons.person_rounded,
                       size: 14,
                       color: Colors.grey[500],
                     ),
@@ -242,10 +225,7 @@ class TarjetaIncidencia extends StatelessWidget {
                         maxLines: 1,
                         overflow:
                             TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: Colors.grey[500],
-                        ),
+                        style: AppTexto.metadato.copyWith(color: Colors.grey[500]),
                       ),
                     ),
                   ],
@@ -264,8 +244,7 @@ class TarjetaIncidencia extends StatelessWidget {
                     // Fix #24 (Sol): mapa seguro, sin [0] directo.
                     _etiquetaPrioridad(
                         incidencia.prioridad),
-                    style: const TextStyle(
-                        fontSize: 12),
+                    style: AppTexto.metadato,
                   ),
                 ],
               ),

@@ -9,6 +9,7 @@ import '../../localdb.dart';
 import '../../tiempo.dart';
 import '../../modelos/incidencia.dart';
 import '../diseno.dart';
+import '../componentes.dart';
 import '../ficha.dart';
 import 'widgets/dialogo_resolver_incidencia.dart';
 import 'editar_incidencia.dart';
@@ -134,7 +135,7 @@ class _DetalleIncidenciaScreenState
         actions: [
           if (inc != null)
             IconButton(
-              icon: const Icon(Icons.edit),
+              icon: const Icon(Icons.edit_rounded),
               tooltip: 'Editar',
               onPressed: () async {
                 await Navigator.push(
@@ -152,7 +153,7 @@ class _DetalleIncidenciaScreenState
               (!inc.estaResuelta ||
                   AuthService().isOwner))
             PopupMenuButton<String>(
-              icon: const Icon(Icons.more_vert),
+              icon: const Icon(Icons.more_vert_rounded),
               onSelected: _cambiarEstado,
               itemBuilder: (ctx) {
                 final items = <PopupMenuItem<String>>[];
@@ -229,10 +230,7 @@ class _DetalleIncidenciaScreenState
               ),
             const SizedBox(height: 8),
             Text(inc.descripcion,
-                style: const TextStyle(
-                    fontSize: 18,
-                    fontWeight:
-                        FontWeight.bold)),
+                style: AppTexto.titulo),
             if (inc.detalle != null) ...[
               const SizedBox(height: 8),
               Text(inc.detalle!),
@@ -280,10 +278,7 @@ class _DetalleIncidenciaScreenState
           SizedBox(
             width: 110,
             child: Text(label,
-                style: TextStyle(
-                    color:
-                        Colors.grey[500],
-                    fontSize: 13)),
+                style: AppTexto.secundario.copyWith(color: Colors.grey[500])),
           ),
           Expanded(child: Text(valor)),
         ],
@@ -317,10 +312,7 @@ class _DetalleIncidenciaScreenState
           SizedBox(
             width: 110,
             child: Text('Responsable',
-                style: TextStyle(
-                    color:
-                        Colors.grey[500],
-                    fontSize: 13)),
+                style: AppTexto.secundario.copyWith(color: Colors.grey[500])),
           ),
           Expanded(
             child: esCliente && clienteId != null
@@ -363,7 +355,7 @@ class _DetalleIncidenciaScreenState
             const Spacer(),
             TextButton.icon(
               icon: const Icon(
-                  Icons.add_a_photo,
+                  Icons.add_a_photo_rounded,
                   size: 18),
               label: const Text('Agregar'),
               onPressed: _agregarFoto,
@@ -415,7 +407,7 @@ class _DetalleIncidenciaScreenState
                                       child:
                                           CircularProgressIndicator())
                                   : const Icon(
-                                      Icons.broken_image),
+                                      Icons.broken_image_rounded),
                             );
                           },
                         )
@@ -426,7 +418,7 @@ class _DetalleIncidenciaScreenState
                               .colorScheme
                               .surfaceContainerHighest,
                           child: const Icon(
-                              Icons.broken_image),
+                              Icons.broken_image_rounded),
                         );
               return ClipRRect(
                 borderRadius:
@@ -467,16 +459,11 @@ class _DetalleIncidenciaScreenState
       // tras subir el archivo a Storage (con storage_path).
       await _cargar();
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(const SnackBar(
-                content:
-                    Text('Foto agregada')));
+        mostrarSnack(context, 'Foto agregada', significado: SignificadoChip.exito);
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(
-                content: Text('Error: $e')));
+        mostrarSnack(context, 'Error: $e', significado: SignificadoChip.error);
       }
     }
   }
@@ -512,7 +499,7 @@ class _DetalleIncidenciaScreenState
               ),
             ),
             IconButton(
-              icon: const Icon(Icons.send),
+              icon: const Icon(Icons.send_rounded),
               onPressed: _enviarComentario,
             ),
           ],
@@ -534,7 +521,7 @@ class _DetalleIncidenciaScreenState
           ListTile(
             dense: true,
             leading: const Icon(
-                Icons.history,
+                Icons.history_rounded,
                 size: 18),
             title: Text(
                 '${h.campo}: ${h.valorAnterior ?? '-'} → ${h.valorNuevo ?? '-'}'),

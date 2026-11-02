@@ -137,10 +137,9 @@ class _ServiciosAdminScreenState extends State<ServiciosAdminScreen> {
 
   void _aviso(String msg, {bool error = false}) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text(msg),
-      backgroundColor: error ? AppColores.error : null,
-    ));
+    mostrarSnack(context, msg,
+        significado:
+            error ? SignificadoChip.error : SignificadoChip.neutral);
   }
 
   String _limpio(Object e) =>
@@ -264,7 +263,7 @@ class _ServiciosAdminScreenState extends State<ServiciosAdminScreen> {
       context: context,
       builder: (ctx) => DialogoApp(
         titulo: 'Reponer agua',
-        iconoTitulo: Icons.water_drop,
+        iconoTitulo: Icons.water_drop_rounded,
         contenido: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -283,10 +282,10 @@ class _ServiciosAdminScreenState extends State<ServiciosAdminScreen> {
                   labelText: 'Costo por pomo (CUP)'),
             ),
             const SizedBox(height: 8),
-            const Text(
+            Text(
               'El costo alimenta el costo promedio (CPP) con el que '
               'se valoriza cada venta con agua.',
-              style: TextStyle(fontSize: 12, color: Colors.grey),
+              style: AppTexto.metadato.copyWith(color: Colors.grey),
             ),
           ],
         ),
@@ -331,7 +330,7 @@ class _ServiciosAdminScreenState extends State<ServiciosAdminScreen> {
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setD) => DialogoApp(
           titulo: 'Salida de agua sin venta',
-          iconoTitulo: Icons.water_drop_outlined,
+          iconoTitulo: Icons.water_drop_rounded,
           contenido: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -417,7 +416,7 @@ class _ServiciosAdminScreenState extends State<ServiciosAdminScreen> {
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setD) => DialogoApp(
           titulo: 'Abrir bote de servicio',
-          iconoTitulo: Icons.science,
+          iconoTitulo: Icons.science_rounded,
           contenido: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -502,7 +501,7 @@ class _ServiciosAdminScreenState extends State<ServiciosAdminScreen> {
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setD) => DialogoApp(
           titulo: 'Rellenar pomo · ${_nombrePersona((pomo['titular_telegram_id'] as num?)?.toInt())}',
-          iconoTitulo: Icons.add_circle_outline,
+          iconoTitulo: Icons.add_circle_outline_rounded,
           contenido: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -575,7 +574,7 @@ class _ServiciosAdminScreenState extends State<ServiciosAdminScreen> {
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setD) => DialogoApp(
           titulo: 'Salida sin venta · ${_nombrePersona((pomo['titular_telegram_id'] as num?)?.toInt())}',
-          iconoTitulo: Icons.outbox,
+          iconoTitulo: Icons.outbox_rounded,
           contenido: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -659,7 +658,7 @@ class _ServiciosAdminScreenState extends State<ServiciosAdminScreen> {
         actions: [
           IconButton(
             tooltip: 'Actualizar',
-            icon: const Icon(Icons.refresh),
+            icon: const Icon(Icons.refresh_rounded),
             onPressed: _cargar,
           ),
         ],
@@ -727,7 +726,7 @@ class _ServiciosAdminScreenState extends State<ServiciosAdminScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text('Precios y comisión',
-              style: AppTexto.titulo.copyWith(fontSize: 16)),
+              style: AppTexto.titulo),
           const SizedBox(height: 8),
           // Ítem 7: precio y métodos habilitados POR PRODUCTO.
           bloque('Ración (dosis sin agua)', 'racion'),
@@ -738,12 +737,12 @@ class _ServiciosAdminScreenState extends State<ServiciosAdminScreen> {
             const Expanded(child: SizedBox()),
           ]),
           const SizedBox(height: 4),
-          const Text(
+          Text(
             'Agua en 0 = precio sin fijar (no se puede vender suelta). '
             'Comisión en 0 = sin comisión. La comisión se paga con la '
             'nómina del mes. Apagar ambos métodos de un producto lo '
             'deja invendible (la Cuenta a la Casa no se afecta).',
-            style: TextStyle(fontSize: 12, color: Colors.grey),
+            style: AppTexto.metadato.copyWith(color: Colors.grey),
           ),
           Align(
             alignment: Alignment.centerRight,
@@ -763,7 +762,7 @@ class _ServiciosAdminScreenState extends State<ServiciosAdminScreen> {
       child: Row(
         children: [
           const IconoModuloBadge(
-            icono: Icons.water_drop,
+            icono: Icons.water_drop_rounded,
             tinte: Colors.blue,
             iconoOscuro: Color(0xFF60A5FA),
             iconoClaro: Color(0xFF2563EB),
@@ -774,7 +773,7 @@ class _ServiciosAdminScreenState extends State<ServiciosAdminScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text('Agua común',
-                    style: AppTexto.titulo.copyWith(fontSize: 16)),
+                    style: AppTexto.titulo),
                 Text(
                   'Stock: ${_agua.saldo} pomos · Costo promedio: '
                   '${fmtMonto(_agua.cpp)} CUP/pomo',
@@ -790,7 +789,7 @@ class _ServiciosAdminScreenState extends State<ServiciosAdminScreen> {
                 onPressed: _reponerAgua,
                 child: const Text('Reponer'),
               ),
-              const SizedBox(height: 6),
+              const SizedBox(height: 8),
               OutlinedButton(
                 onPressed: _salidaAgua,
                 child: const Text('Salida sin venta'),
@@ -812,11 +811,11 @@ class _ServiciosAdminScreenState extends State<ServiciosAdminScreen> {
             children: [
               Expanded(
                 child: Text('Botes',
-                    style: AppTexto.titulo.copyWith(fontSize: 16)),
+                    style: AppTexto.titulo),
               ),
               FilledButton.icon(
                 onPressed: _abrirBote,
-                icon: const Icon(Icons.add, size: 18),
+                icon: const Icon(Icons.add_rounded, size: 18),
                 label: const Text('Abrir bote'),
               ),
             ],
@@ -865,7 +864,7 @@ class _ServiciosAdminScreenState extends State<ServiciosAdminScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text('Pomos',
-              style: AppTexto.titulo.copyWith(fontSize: 16)),
+              style: AppTexto.titulo),
           if (pomos.isEmpty)
             Text('Sin pomos todavía: abre un bote para tener principal.',
                 style: AppTexto.cuerpo.copyWith(
@@ -876,9 +875,9 @@ class _ServiciosAdminScreenState extends State<ServiciosAdminScreen> {
                 contentPadding: EdgeInsets.zero,
                 leading: Icon(
                   (l['es_principal'] as num?)?.toInt() == 1
-                      ? Icons.science
-                      : Icons.local_drink,
-                  color: AppColores.naranja,
+                      ? Icons.science_rounded
+                      : Icons.local_drink_rounded,
+                  color: AppColores.textoSecundario(context),
                 ),
                 title: Text(
                     '${(l['es_principal'] as num?)?.toInt() == 1 ? 'Principal' : _nombrePersona((l['titular_telegram_id'] as num?)?.toInt())} '

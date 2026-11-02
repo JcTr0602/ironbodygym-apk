@@ -290,7 +290,7 @@ class _MiDiaScreenState extends State<MiDiaScreen> {
         // v1.3.3: en detalle de día, el back vuelve a la vista de mes.
         leading: _modo == 2
             ? IconButton(
-                icon: const Icon(Icons.arrow_back),
+                icon: const Icon(Icons.arrow_back_rounded),
                 onPressed: () {
                   setState(() => _modo = 1);
                   _cargarMes();
@@ -302,7 +302,7 @@ class _MiDiaScreenState extends State<MiDiaScreen> {
             : 'Día del gym'),
         actions: [
           IconButton(
-            icon: const Icon(Icons.refresh),
+            icon: const Icon(Icons.refresh_rounded),
             onPressed: () {
               if (_modo == 1) {
                 _cargarMes();
@@ -328,11 +328,11 @@ class _MiDiaScreenState extends State<MiDiaScreen> {
                       ButtonSegment(
                           value: 0,
                           label: Text('Hoy'),
-                          icon: Icon(Icons.today, size: 18)),
+                          icon: Icon(Icons.today_rounded, size: 18)),
                       ButtonSegment(
                           value: 1,
                           label: Text('Por mes'),
-                          icon: Icon(Icons.calendar_month,
+                          icon: Icon(Icons.calendar_month_rounded,
                               size: 18)),
                     ],
                     selected: {_modo == 2 ? 1 : _modo},
@@ -405,10 +405,10 @@ class _MiDiaScreenState extends State<MiDiaScreen> {
       ),
       child: Row(
         children: [
-          Icon(Icons.sync, size: 16, color: color),
+          Icon(Icons.sync_rounded, size: 16, color: color),
           const SizedBox(width: 8),
           Expanded(
-              child: Text(texto, style: const TextStyle(fontSize: 13))),
+              child: Text(texto, style: AppTexto.secundario)),
         ],
       ),
     );
@@ -427,7 +427,7 @@ class _MiDiaScreenState extends State<MiDiaScreen> {
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 IconButton(
-                  icon: const Icon(Icons.chevron_left),
+                  icon: const Icon(Icons.chevron_left_rounded),
                   onPressed: () => _cambiarMes(-1),
                 ),
                 Text(
@@ -435,7 +435,7 @@ class _MiDiaScreenState extends State<MiDiaScreen> {
                   style: AppTexto.subtitulo,
                 ),
                 IconButton(
-                  icon: const Icon(Icons.chevron_right),
+                  icon: const Icon(Icons.chevron_right_rounded),
                   onPressed: () => _cambiarMes(1),
                 ),
               ],
@@ -453,10 +453,7 @@ class _MiDiaScreenState extends State<MiDiaScreen> {
                         color: Colors.white
                             .withValues(alpha: 0.85))),
                 Text('${fmtMonto(_totalMes)} CUP',
-                    style: const TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 20)),
+                    style: AppTexto.tituloPagina.copyWith(color: Colors.white)),
               ],
             ),
           ),
@@ -504,7 +501,7 @@ class _MiDiaScreenState extends State<MiDiaScreen> {
                               fontWeight: FontWeight.bold),
                         ),
                         const SizedBox(width: 4),
-                        const Icon(Icons.chevron_right,
+                        const Icon(Icons.chevron_right_rounded,
                             color: Colors.grey),
                       ],
                     ),
@@ -561,11 +558,11 @@ class _MiDiaScreenState extends State<MiDiaScreen> {
                     initiallyExpanded: items.isNotEmpty,
                     leading: Icon(
                       t == 'mañana'
-                          ? Icons.wb_sunny_outlined
+                          ? Icons.wb_sunny_rounded
                           : t == 'tarde'
-                              ? Icons.wb_twilight_outlined
-                              : Icons.nightlight_outlined,
-                      color: AppColores.naranja,
+                              ? Icons.wb_twilight_rounded
+                              : Icons.nightlight_rounded,
+                      color: AppColores.textoSecundario(context),
                     ),
                     title: Row(
                       children: [
@@ -583,12 +580,8 @@ class _MiDiaScreenState extends State<MiDiaScreen> {
                               borderRadius:
                                   BorderRadius.circular(12),
                             ),
-                            child: const Text('Caja cerrada',
-                                style: TextStyle(
-                                    fontSize: 11,
-                                    color: Colors.green,
-                                    fontWeight:
-                                        FontWeight.w600)),
+                            child: Text('Caja cerrada',
+                                style: AppTexto.metadato.copyWith(color: Colors.green, fontWeight: FontWeight.w600)),
                           ),
                       ],
                     ),
@@ -615,15 +608,12 @@ class _MiDiaScreenState extends State<MiDiaScreen> {
                                 top: 8, bottom: 4),
                             child: Row(
                               children: [
-                                const Icon(Icons.person_outline,
+                                const Icon(Icons.person_outline_rounded,
                                     size: 16,
                                     color: Colors.grey),
                                 const SizedBox(width: 4),
                                 Text('Reportó: ${q.key}',
-                                    style: const TextStyle(
-                                        fontWeight:
-                                            FontWeight.w600,
-                                        fontSize: 13)),
+                                    style: AppTexto.secundario.copyWith(fontWeight: FontWeight.w600)),
                               ],
                             ),
                           ),
@@ -668,7 +658,7 @@ class _MiDiaScreenState extends State<MiDiaScreen> {
                   const SizedBox(height: 8),
                   Tarjeta(
                     color: AppColores.naranja,
-                    padding: const EdgeInsets.all(18),
+                    padding: const EdgeInsets.all(16),
                     child: Column(
                       children: [
                         Text('Cobrado hoy',
@@ -699,7 +689,7 @@ class _MiDiaScreenState extends State<MiDiaScreen> {
                         color: AppColores.alerta,
                         child: Row(
                           children: [
-                            const Icon(Icons.warning_amber,
+                            const Icon(Icons.warning_amber_rounded,
                                 color: Colors.white),
                             const SizedBox(width: 8),
                             Expanded(
@@ -741,10 +731,7 @@ class _MiDiaScreenState extends State<MiDiaScreen> {
                                           .secundario),
                                   Text(
                                     '${fmtMonto(_diariosPorTurno[t]?['total'] ?? 0)} CUP',
-                                    style: const TextStyle(
-                                        fontWeight:
-                                            FontWeight.bold,
-                                        fontSize: 18),
+                                    style: AppTexto.titulo,
                                   ),
                                   Text(
                                       '${(_diariosPorTurno[t]?['cantidad'] ?? 0).toInt()} pagos'),
@@ -840,10 +827,10 @@ class _MiDiaScreenState extends State<MiDiaScreen> {
                               fallback: Icon(
                                 (c['metodo'] as String) ==
                                         'transferencia'
-                                    ? Icons.smartphone
-                                    : Icons.payments,
+                                    ? Icons.smartphone_rounded
+                                    : Icons.payments_rounded,
                                 size: 22,
-                                color: AppColores.naranja,
+                                color: AppColores.textoSecundario(context),
                               ),
                             ),
                             title: Text('${c['nombre']}'),
@@ -884,7 +871,7 @@ class _MiDiaScreenState extends State<MiDiaScreen> {
                               fotoStorage:
                                   c['foto_storage'] as String?,
                               fallback: const Icon(
-                                  Icons.warning_amber,
+                                  Icons.warning_amber_rounded,
                                   color: AppColores.alerta),
                             ),
                             title:

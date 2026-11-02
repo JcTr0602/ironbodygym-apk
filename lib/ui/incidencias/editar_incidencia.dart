@@ -324,7 +324,7 @@ class _EditarIncidenciaScreenState
                 hintText:
                     'Ej: Sala de máquinas, pasillo',
                 prefixIcon:
-                    Icon(Icons.place),
+                    Icon(Icons.place_rounded),
                 border: OutlineInputBorder(),
               ),
             ),
@@ -379,12 +379,12 @@ class _EditarIncidenciaScreenState
                 ),
                 child: Row(
                   children: [
-                    const Icon(Icons.person, size: 18),
+                    const Icon(Icons.person_rounded, size: 18),
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
                         'Asignado a: ${_nombreEntrenador(_entrenadorUsername)} (solo el dueño puede cambiarlo)',
-                        style: const TextStyle(fontSize: 13),
+                        style: AppTexto.secundario,
                       ),
                     ),
                   ],
@@ -425,7 +425,7 @@ class _EditarIncidenciaScreenState
                   hintText:
                       'Escribe al menos 2 letras',
                   prefixIcon:
-                      Icon(Icons.person_search),
+                      Icon(Icons.person_search_rounded),
                   border: OutlineInputBorder(),
                 ),
                 onChanged: _buscarClientes,
@@ -451,7 +451,7 @@ class _EditarIncidenciaScreenState
                             '${c['nombre']}'),
                         trailing: sel
                             ? const Icon(
-                                Icons.check,
+                                Icons.check_rounded,
                                 color: Colors.green)
                             : null,
                         onTap: () => setState(() {
@@ -476,7 +476,7 @@ class _EditarIncidenciaScreenState
                           top: 4),
                   child: Chip(
                     avatar: const Icon(
-                        Icons.person,
+                        Icons.person_rounded,
                         size: 16),
                     label: Text(_clienteNombre!),
                     onDeleted: () =>
@@ -517,7 +517,7 @@ class _EditarIncidenciaScreenState
             ListTile(
               contentPadding: EdgeInsets.zero,
               leading: const Icon(
-                  Icons.calendar_today),
+                  Icons.calendar_today_rounded),
               title: Text(_fechaLimite ==
                       null
                   ? 'Sin fecha límite'
@@ -531,7 +531,7 @@ class _EditarIncidenciaScreenState
                           'Elegir'))
                   : IconButton(
                       icon: const Icon(
-                          Icons.clear),
+                          Icons.clear_rounded),
                       onPressed: () =>
                           setState(() =>
                               _fechaLimite =

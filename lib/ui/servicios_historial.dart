@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../localdb.dart';
-import '../negocio.dart' show fmtMonto;
+import '../negocio.dart' show fmtMonto, fmtFecha;
 import '../servicios.dart';
 import 'diseno.dart';
 import 'componentes.dart';
@@ -205,6 +205,23 @@ class _ServiciosHistorialScreenState
         duration: const Duration(milliseconds: 400), alignment: 0.5);
   }
 
+  /// V23: aplana las entradas visibles intercalando el día
+  /// ('aaaa-mm-dd') como encabezado de grupo.
+  List<Object> _itemsPorDia(List<Map<String, dynamic>> visibles) {
+    final items = <Object>[];
+    String? diaActual;
+    for (final e in visibles) {
+      final f = '${e['fecha']}';
+      final dia = f.length >= 10 ? f.substring(0, 10) : f;
+      if (dia != diaActual) {
+        diaActual = dia;
+        items.add(dia);
+      }
+      items.add(e);
+    }
+    return items;
+  }
+
   Widget _filaEntrada(Map<String, dynamic> e) {
     final esVenta = e['kind'] == 'venta';
     final esReverso = e['esReverso'] == true;
@@ -217,12 +234,14 @@ class _ServiciosHistorialScreenState
       return Card(
         margin: const EdgeInsets.only(bottom: 8),
         child: ListTile(
-          leading: const Icon(Icons.outbox, color: Colors.grey),
-          title: const Text('Salida sin venta'),
+          leading: Icon(Icons.outbox_rounded,
+              color: AppColores.textoSecundario(context)),
+          title: const Text('Salida sin venta', style: AppTexto.cuerpo),
           subtitle: Text(
             '${e['tipo'] == 'agua' ? 'Agua' : 'Dosis'} ×${e['cantidad']}'
             ' · ${e['motivo']}'
             ' · $fecha10',
+            style: AppTexto.secundario,
           ),
         ),
       );
@@ -234,9 +253,9 @@ class _ServiciosHistorialScreenState
       _ => '${e['tipo']}',
     };
     final icono = esReverso
-        ? Icons.undo
+        ? Icons.undo_rounded
         : esCasa
-            ? Icons.star
+            ? Icons.star_rounded
             : e['tipo'] == 'dosis_sin_agua'
                 ? Icons.science_rounded
                 : e['tipo'] == 'dosis_con_agua'
@@ -245,7 +264,7 @@ class _ServiciosHistorialScreenState
     final colorIcono = esReverso
         ? AppColores.error
         : esCasa
-            ? Colors.amber
+            ? AppColores.alerta
             : e['tipo'] == 'agua_suelta'
                 ? AppColores.info
                 : AppColores.naranja;
@@ -265,16 +284,23 @@ class _ServiciosHistorialScreenState
       margin: const EdgeInsets.only(bottom: 8),
       child: ListTile(
         leading: Icon(icono, color: colorIcono),
-        title: Text(titulo),
-        subtitle: Text(
-          '${e['cliente']}'
-          ' · $fecha10${hora.isNotEmpty ? ' $hora' : ''}'
-          '$vendedor'
-          '${esCasa ? '' : (e['metodo'] as String).isNotEmpty ? ' · ${e['metodo']}' : ''}',
+        title: Text(titulo, style: AppTexto.cuerpo),
+        subtitle: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('${e['cliente']}', style: AppTexto.secundario),
+            Text(
+              '$fecha10${hora.isNotEmpty ? ' $hora' : ''}'
+              '$vendedor'
+              '${esCasa ? '' : (e['metodo'] as String).isNotEmpty ? ' · ${e['metodo']}' : ''}',
+              style: AppTexto.metadato,
+            ),
+          ],
         ),
         trailing: Text('${fmtMonto((e['monto'] as num).toDouble())} CUP',
             style: TextStyle(
                 fontWeight: FontWeight.bold,
+                fontFeatures: const [FontFeature.tabularFigures()],
                 color: esReverso ? AppColores.error : null)),
       ),
     );
@@ -289,6 +315,7 @@ class _ServiciosHistorialScreenState
       );
     }
     final visibles = _visibles;
+    final itemsHist = _itemsPorDia(visibles);
     final vendedores = _vendedores;
     return Scaffold(
       appBar: AppBar(title: const Text('Historial de Servicios')),
@@ -302,11 +329,11 @@ class _ServiciosHistorialScreenState
               controller: _busquedaCtrl,
               onChanged: (v) => setState(() => _busqueda = v),
               decoration: InputDecoration(
-                prefixIcon: const Icon(Icons.search),
+                prefixIcon: const Icon(Icons.search_rounded),
                 hintText: 'Buscar cliente, vendedor o tipo…',
                 suffixIcon: _busqueda.isNotEmpty
                     ? IconButton(
-                        icon: const Icon(Icons.clear),
+                        icon: const Icon(Icons.clear_rounded),
                         onPressed: () {
                           _busquedaCtrl.clear();
                           setState(() => _busqueda = '');
@@ -382,7 +409,7 @@ class _ServiciosHistorialScreenState
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           Icon(
-                            Icons.history,
+                            Icons.history_rounded,
                             color: AppColores.textoSecundario(context)
                                 .withValues(alpha: 0.5),
                           ),
@@ -410,21 +437,31 @@ class _ServiciosHistorialScreenState
                   )
                 : ListView.builder(
                     padding: const EdgeInsets.all(AppEspacio.lg),
-                    itemCount: visibles.length + 1,
+                    itemCount: itemsHist.length + 1,
                     itemBuilder: (context, index) {
-                      if (index < visibles.length) {
-                        return _filaEntrada(visibles[index]);
+                      if (index == itemsHist.length) {
+                        return Padding(
+                          padding:
+                              const EdgeInsets.only(top: AppEspacio.sm),
+                          child: Text(
+                            'Solo operaciones sincronizadas: una venta '
+                            'offline aparece aquí cuando sincroniza.',
+                            style: AppTexto.minuscula,
+                            textAlign: TextAlign.center,
+                          ),
+                        );
                       }
-                      return Padding(
-                        padding:
-                            const EdgeInsets.only(top: AppEspacio.sm),
-                        child: Text(
-                          'Solo operaciones sincronizadas: una venta '
-                          'offline aparece aquí cuando sincroniza.',
-                          style: AppTexto.secundario.copyWith(fontSize: 11),
-                          textAlign: TextAlign.center,
-                        ),
-                      );
+                      final it = itemsHist[index];
+                      if (it is String) {
+                        return Padding(
+                          padding: EdgeInsets.only(
+                              top: index == 0 ? 0 : AppEspacio.sm,
+                              bottom: AppEspacio.sm),
+                          child: Text(fmtFecha(it),
+                              style: AppTexto.subtitulo),
+                        );
+                      }
+                      return _filaEntrada(it as Map<String, dynamic>);
                     },
                   ),
           ),

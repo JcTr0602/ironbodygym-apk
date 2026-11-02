@@ -65,7 +65,7 @@ Widget seccionAdmin(
 Widget filaAdmin(BuildContext context, IconData? icono, String etiqueta,
     String valor, {bool negrita = false}) {
   return Padding(
-    padding: const EdgeInsets.only(bottom: 6),
+    padding: const EdgeInsets.only(bottom: 8),
     child: Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
@@ -75,7 +75,7 @@ Widget filaAdmin(BuildContext context, IconData? icono, String etiqueta,
               Icon(icono,
                   size: 16,
                   color: AppColores.textoSecundario(context)),
-              const SizedBox(width: 6),
+              const SizedBox(width: 8),
             ],
             Text(etiqueta),
           ],
@@ -111,16 +111,16 @@ class SeccionResumenScreen extends StatelessWidget {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          seccionAdmin(context, Icons.bar_chart, 'Estadísticas del mes', [
-            filaAdmin(context, Icons.payments, 'Ingresos',
+          seccionAdmin(context, Icons.bar_chart_rounded, 'Estadísticas del mes', [
+            filaAdmin(context, Icons.payments_rounded, 'Ingresos',
                 '${fmtMonto(ingresos)} CUP'),
             filaAdmin(
-                context, Icons.person_add, 'Inscripciones', '$inscMes'),
-            filaAdmin(context, Icons.warning, 'Morosos', '$morosos'),
+                context, Icons.person_add_rounded, 'Inscripciones', '$inscMes'),
+            filaAdmin(context, Icons.warning_rounded, 'Morosos', '$morosos'),
           ]),
           if (inscPorEntrenador.isNotEmpty)
             seccionAdmin(
-                context, Icons.group, 'Inscripciones por entrenador', [
+                context, Icons.group_rounded, 'Inscripciones por entrenador', [
               for (final e in inscPorEntrenador)
                 filaAdmin(
                     context, null, '${e['nombre']}', '${e['cantidad']}'),
@@ -196,21 +196,21 @@ class _SeccionCobrosScreenState extends State<SeccionCobrosScreen> {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          seccionAdmin(context, Icons.point_of_sale, 'Cierre de caja (hoy)', [
-            filaAdmin(context, Icons.payments, 'Efectivo',
+          seccionAdmin(context, Icons.point_of_sale_rounded, 'Cierre de caja (hoy)', [
+            filaAdmin(context, Icons.payments_rounded, 'Efectivo',
                 '${fmtMonto(caja['efectivo'])} CUP'),
-            filaAdmin(context, Icons.smartphone, 'Transferencia',
+            filaAdmin(context, Icons.smartphone_rounded, 'Transferencia',
                 '${fmtMonto(caja['transferencia'])} CUP'),
-            filaAdmin(context, Icons.receipt_long, 'Gastos',
+            filaAdmin(context, Icons.receipt_long_rounded, 'Gastos',
                 '${fmtMonto(gastosHoy)} CUP'),
             const Divider(),
-            filaAdmin(context, Icons.inventory_2, 'Neto',
+            filaAdmin(context, Icons.inventory_2_rounded, 'Neto',
                 '${fmtMonto(neto)} CUP',
                 negrita: true),
           ]),
           seccionAdmin(
               context,
-              Icons.outbox,
+              Icons.outbox_rounded,
               'Pendiente a entregar (${fmtMonto(totalPend)} CUP)',
               [
                 if (pend.isEmpty)
@@ -250,7 +250,7 @@ class _SeccionCobrosScreenState extends State<SeccionCobrosScreen> {
                   Align(
                     alignment: Alignment.centerRight,
                     child: TextButton.icon(
-                      icon: const Icon(Icons.done_all),
+                      icon: const Icon(Icons.done_all_rounded),
                       label: const Text('Confirmar todo'),
                       onPressed: () =>
                           _confirmarYActualizar(nombre: 'todos'),
@@ -258,13 +258,11 @@ class _SeccionCobrosScreenState extends State<SeccionCobrosScreen> {
                   ),
               ]),
           // v1.3.6 (ítem 1B): arqueo de caja con liquidaciones.
-          seccionAdmin(context, Icons.point_of_sale, 'Arqueo de caja', [
+          seccionAdmin(context, Icons.point_of_sale_rounded, 'Arqueo de caja', [
             Text(
               'Liquida el pendiente de cada entrenador con monto esperado '
               'vs entregado. Las parciales dejan saldo de arrastre.',
-              style: TextStyle(
-                  color: AppColores.textoSecundario(context),
-                  fontSize: 12),
+              style: AppTexto.metadato.copyWith(color: AppColores.textoSecundario(context)),
             ),
             const SizedBox(height: 8),
             BotonPrimario(
@@ -278,9 +276,7 @@ class _SeccionCobrosScreenState extends State<SeccionCobrosScreen> {
             Text(
               'Proyección del pago por entrenador: clientes pagados '
               '× 150 CUP. Solo lectura.',
-              style: TextStyle(
-                  color: AppColores.textoSecundario(context),
-                  fontSize: 12),
+              style: AppTexto.metadato.copyWith(color: AppColores.textoSecundario(context)),
             ),
             const SizedBox(height: 8),
             BotonPrimario(
@@ -292,30 +288,26 @@ class _SeccionCobrosScreenState extends State<SeccionCobrosScreen> {
           seccionAdmin(
               context, Icons.account_balance_wallet_rounded, 'Vencidos por cobrar', [            Text(
               'Clientes vencidos ordenados por monto adeudado. El dinero dormido, visible.',
-              style: TextStyle(
-                  color: AppColores.textoSecundario(context),
-                  fontSize: 12),
+              style: AppTexto.metadato.copyWith(color: AppColores.textoSecundario(context)),
             ),
             const SizedBox(height: 8),
             BotonPrimario(
               texto: 'Ver vencidos por cobrar',
-              icono: Icons.money_off,
+              icono: Icons.money_off_rounded,
               onPressed: () =>
                   _irYActualizar(const CuentasCobrarScreen()),
             ),
           ]),
           seccionAdmin(
-              context, Icons.history, 'Historial por entrenador', [
+              context, Icons.history_rounded, 'Historial por entrenador', [
             Text(
               'Cobrado, pagos e inscripciones del mes por entrenador.',
-              style: TextStyle(
-                  color: AppColores.textoSecundario(context),
-                  fontSize: 12),
+              style: AppTexto.metadato.copyWith(color: AppColores.textoSecundario(context)),
             ),
             const SizedBox(height: 8),
             BotonPrimario(
               texto: 'Ver historial por entrenador',
-              icono: Icons.person_search,
+              icono: Icons.person_search_rounded,
               onPressed: () =>
                   _irYActualizar(const HistorialEntrenadorScreen()),
             ),
@@ -402,21 +394,19 @@ class _SeccionAjustesScreenState extends State<SeccionAjustesScreen> {
         padding: const EdgeInsets.all(16),
         children: [
           if (widget.seccion == null || widget.seccion == 'tipos')
-            seccionAdmin(context, Icons.payments, 'Tipos de pago', [
+            seccionAdmin(context, Icons.payments_rounded, 'Tipos de pago', [
             for (final t in tipos)
               ListTile(
                 dense: true,
                 contentPadding: EdgeInsets.zero,
                 title: Text(t.nombre,
-                    style: TextStyle(
-                        fontSize: 14,
-                        color: t.activo
+                    style: AppTexto.cuerpo.copyWith(color: t.activo
                             ? null
                             : AppColores.textoSecundario(context))),
                 subtitle: Text(
                     '${fmtMonto(t.monto)} CUP · ${t.dias} días'
                     '${t.soloMenores ? ' · solo menores' : ''}',
-                    style: const TextStyle(fontSize: 12)),
+                    style: AppTexto.metadato),
                 trailing: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
@@ -425,12 +415,12 @@ class _SeccionAjustesScreenState extends State<SeccionAjustesScreen> {
                       onChanged: (v) => _toggleYActualizar(t, v),
                     ),
                     IconButton(
-                      icon: const Icon(Icons.edit, size: 20),
+                      icon: const Icon(Icons.edit_rounded, size: 20),
                       onPressed: () => _editarYActualizar(t),
                     ),
                     if (!widget.esTipoFijo(t.id))
                       IconButton(
-                        icon: const Icon(Icons.delete_outline,
+                        icon: const Icon(Icons.delete_outline_rounded,
                             size: 20, color: AppColores.error),
                         onPressed: () => _eliminarYActualizar(t),
                       ),
@@ -440,18 +430,18 @@ class _SeccionAjustesScreenState extends State<SeccionAjustesScreen> {
             const SizedBox(height: 4),
             BotonSecundario(
               texto: 'Agregar tipo de pago',
-              icono: Icons.add,
+              icono: Icons.add_rounded,
               onPressed: _agregarYActualizar,
             ),
             const SizedBox(height: 8),
             BotonPrimario(
               texto: 'Guardar tipos de pago',
-              icono: Icons.save,
+              icono: Icons.save_rounded,
               onPressed: widget.onGuardarTipos,
             ),
           ]),
           if (widget.seccion == null || widget.seccion == 'precios')
-            seccionAdmin(context, Icons.price_change, 'Otros precios', [
+            seccionAdmin(context, Icons.price_change_rounded, 'Otros precios', [
             for (final (clave, etiqueta) in widget.clavesMonto)
               Padding(
                 padding: const EdgeInsets.only(bottom: 8),
@@ -464,13 +454,13 @@ class _SeccionAjustesScreenState extends State<SeccionAjustesScreen> {
               ),
             BotonPrimario(
               texto: 'Guardar otros precios',
-              icono: Icons.save,
+              icono: Icons.save_rounded,
               onPressed: widget.onGuardarMontos,
             ),
           ]),
           // v1.2.4: datos bancarios para transferencias
           if (widget.seccion == null || widget.seccion == 'bancarios')
-            seccionAdmin(context, Icons.account_balance, 'Datos bancarios', [
+            seccionAdmin(context, Icons.account_balance_rounded, 'Datos bancarios', [
             Padding(
               padding: const EdgeInsets.only(bottom: 8),
               child: CampoTexto(
@@ -502,7 +492,7 @@ class _SeccionAjustesScreenState extends State<SeccionAjustesScreen> {
             ),
             BotonPrimario(
               texto: 'Guardar datos bancarios',
-              icono: Icons.save,
+              icono: Icons.save_rounded,
               onPressed: widget.onGuardarBancarios,
             ),
           ]),
@@ -545,7 +535,7 @@ class _SeccionGastosScreenState extends State<SeccionGastosScreen> {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          seccionAdmin(context, Icons.receipt_long, 'Últimos gastos', [
+          seccionAdmin(context, Icons.receipt_long_rounded, 'Últimos gastos', [
             if (gastos.isEmpty)
               Text('Sin gastos registrados.',
                   style: TextStyle(
@@ -562,7 +552,7 @@ class _SeccionGastosScreenState extends State<SeccionGastosScreen> {
             const SizedBox(height: 8),
             BotonSecundario(
               texto: 'Agregar gasto',
-              icono: Icons.add,
+              icono: Icons.add_rounded,
               onPressed: _agregarYActualizar,
             ),
           ]),
@@ -585,32 +575,30 @@ class SeccionSuplementosScreen extends StatelessWidget {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          seccionAdmin(context, Icons.medication, 'Suplementos', [
+          seccionAdmin(context, Icons.medication_rounded, 'Suplementos', [
             BotonPrimario(
               texto: 'Gestionar catálogo',
-              icono: Icons.inventory_2,
+              icono: Icons.inventory_2_rounded,
               onPressed: () => onIr(const SuplementosScreen()),
             ),
             const SizedBox(height: AppEspacio.sm),
             // v1.2.1: CRUD de categorías.
             BotonSecundario(
               texto: 'Categorías',
-              icono: Icons.category_outlined,
+              icono: Icons.category_rounded,
               onPressed: () =>
                   onIr(const CategoriasSuplementoScreen()),
             ),
             const SizedBox(height: AppEspacio.sm),
             BotonSecundario(
               texto: 'Historial de ventas',
-              icono: Icons.receipt_long,
+              icono: Icons.receipt_long_rounded,
               onPressed: () => onIr(const HistorialVentasScreen()),
             ),
             const SizedBox(height: 4),
             Text(
               'Productos, precios oficiales, stock, promo "mes gratis" y ventas.',
-              style: TextStyle(
-                  fontSize: 12,
-                  color: AppColores.textoSecundario(context)),
+              style: AppTexto.metadato.copyWith(color: AppColores.textoSecundario(context)),
             ),
           ]),
         ],
@@ -814,8 +802,7 @@ class _SeccionDiagnosticoScreenState extends State<SeccionDiagnosticoScreen> {
     if (_ultimoError != null) txt.writeln('Último error: $_ultimoError');
     await Clipboard.setData(ClipboardData(text: txt.toString()));
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text('Informe copiado. Pégalo en Telegram o WhatsApp.')));
+    mostrarSnack(context, 'Informe copiado. Pégalo en Telegram o WhatsApp.');
   }
 
   /// v1.13.0 (G4): «Reparar lista de clientes» — re-descarga
@@ -830,7 +817,7 @@ class _SeccionDiagnosticoScreenState extends State<SeccionDiagnosticoScreen> {
       context: context,
       builder: (ctx) => DialogoApp(
         titulo: 'Reparar lista de clientes',
-        iconoTitulo: Icons.build,
+        iconoTitulo: Icons.build_rounded,
         contenido: const Text(
           'Vuelve a descargar la lista completa de clientes desde '
           'el servidor (para cuando la lista local quedó desfasada '
@@ -885,17 +872,15 @@ class _SeccionDiagnosticoScreenState extends State<SeccionDiagnosticoScreen> {
               '1';
       final colaSucia = await LocalDb.instance.countPendingOps() > 0;
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text(banderaViva || colaSucia
+        mostrarSnack(context, banderaViva || colaSucia
                 ? 'No se completó la purga (la cola no quedó limpia). '
                     'Quedó pendiente y se reintentará sola en la '
                     'próxima sincronización.'
-                : 'Lista de clientes reparada.')));
+                : 'Lista de clientes reparada.');
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text('No se pudo reparar: $e')));
+        mostrarSnack(context, 'No se pudo reparar: $e', significado: SignificadoChip.error);
       }
     }
   }
@@ -908,7 +893,7 @@ class _SeccionDiagnosticoScreenState extends State<SeccionDiagnosticoScreen> {
         actions: [
           IconButton(
             tooltip: 'Copiar informe',
-            icon: const Icon(Icons.copy_all),
+            icon: const Icon(Icons.copy_all_rounded),
             onPressed: _cargando ? null : _copiar,
           ),
         ],
@@ -920,7 +905,7 @@ class _SeccionDiagnosticoScreenState extends State<SeccionDiagnosticoScreen> {
               child: ListView(
                 padding: const EdgeInsets.all(16),
                 children: [
-                  seccionAdmin(context, Icons.monitor_heart, 'Estado', [
+                  seccionAdmin(context, Icons.monitor_heart_rounded, 'Estado', [
                     for (final e in _datos.entries)
                       filaAdmin(context, null, e.key, e.value),
                   ]),
@@ -929,7 +914,7 @@ class _SeccionDiagnosticoScreenState extends State<SeccionDiagnosticoScreen> {
                   // teléfonos; es dato de todos los usuarios.
                   if (AuthService().isOwner)
                     seccionAdmin(
-                        context, Icons.phone_android, 'Teléfonos con sync vieja', [
+                        context, Icons.phone_android_rounded, 'Teléfonos con sync vieja', [
                       const Text(
                         'Espejo sync_ultimo_sync: última sync '
                         'efectiva por usuario (solo cuentan las '
@@ -946,7 +931,7 @@ class _SeccionDiagnosticoScreenState extends State<SeccionDiagnosticoScreen> {
                       else
                         ..._ultimoSync.map((f) => Padding(
                               padding:
-                                  const EdgeInsets.only(bottom: 6),
+                                  const EdgeInsets.only(bottom: 8),
                               child: Row(
                                 children: [
                                   Expanded(
@@ -963,17 +948,16 @@ class _SeccionDiagnosticoScreenState extends State<SeccionDiagnosticoScreen> {
                             )),
                     ]),
                   if (_ultimoError != null)
-                    seccionAdmin(context, Icons.error_outline, 'Último error', [
+                    seccionAdmin(context, Icons.error_outline_rounded, 'Último error', [
                       Text(_ultimoError!,
-                          style: const TextStyle(
-                              color: AppColores.error, fontSize: 13)),
+                          style: AppTexto.secundario.copyWith(color: AppColores.error)),
                     ]),
                   // Módulo 6 (datos visibles): si una pantalla
                   // muestra cero pero los conteos de arriba traen
                   // datos, el problema es de carga, no de sync.
                   // Es dato de este teléfono: sin guarda de dueño.
                   seccionAdmin(
-                      context, Icons.visibility, 'Datos visibles', [
+                      context, Icons.visibility_rounded, 'Datos visibles', [
                     const Text(
                       'Conteos de arriba = datos en la base de este '
                       'teléfono. Si una pantalla muestra cero con '
@@ -990,7 +974,7 @@ class _SeccionDiagnosticoScreenState extends State<SeccionDiagnosticoScreen> {
                     else
                       ..._eventosCarga.map((f) => Padding(
                             padding:
-                                const EdgeInsets.only(bottom: 6),
+                                const EdgeInsets.only(bottom: 8),
                             child: Row(
                               children: [
                                 Expanded(
@@ -1008,18 +992,16 @@ class _SeccionDiagnosticoScreenState extends State<SeccionDiagnosticoScreen> {
                   ]),
                   // v1.13.0 (G4): reparar la lista de clientes.
                   seccionAdmin(
-                      context, Icons.build_circle_outlined, 'Reparar lista', [
+                      context, Icons.build_circle_rounded, 'Reparar lista', [
                     Text(
                       'Si la lista de clientes quedó desfasada, '
                       're-descárgala completa desde el servidor.',
-                      style: TextStyle(
-                          color: AppColores.textoSecundario(context),
-                          fontSize: 12),
+                      style: AppTexto.metadato.copyWith(color: AppColores.textoSecundario(context)),
                     ),
                     const SizedBox(height: 8),
                     BotonPrimario(
                       texto: 'Reparar lista de clientes',
-                      icono: Icons.build,
+                      icono: Icons.build_rounded,
                       onPressed: _repararClientes,
                     ),
                   ]),
@@ -1029,14 +1011,12 @@ class _SeccionDiagnosticoScreenState extends State<SeccionDiagnosticoScreen> {
                     Text(
                       'Operaciones rechazadas por el servidor, con '
                       'Aprobar/Descartar.',
-                      style: TextStyle(
-                          color: AppColores.textoSecundario(context),
-                          fontSize: 12),
+                      style: AppTexto.metadato.copyWith(color: AppColores.textoSecundario(context)),
                     ),
                     const SizedBox(height: 8),
                     BotonPrimario(
                       texto: 'Revisar incidencias de sync',
-                      icono: Icons.sync_problem,
+                      icono: Icons.sync_problem_rounded,
                       onPressed: () => Navigator.of(context).push(
                         MaterialPageRoute(
                             builder: (_) =>
@@ -1096,6 +1076,21 @@ class _HistorialSyncScreenState extends State<HistorialSyncScreen> {
     }
   }
 
+  /// V32: nivel del evento en el vocabulario de chips.
+  SignificadoChip _significadoNivel(String nivel) {
+    final n = nivel.toLowerCase();
+    if (n.contains('error') || n.contains('crit')) {
+      return SignificadoChip.error;
+    }
+    if (n.contains('warn') || n.contains('avis')) {
+      return SignificadoChip.alerta;
+    }
+    if (n.contains('ok') || n.contains('exit')) {
+      return SignificadoChip.exito;
+    }
+    return SignificadoChip.info;
+  }
+
   String _ts(String ts) =>
       ts.length > 16 ? ts.substring(0, 16).replaceFirst('T', ' ') : ts;
 
@@ -1121,34 +1116,92 @@ class _HistorialSyncScreenState extends State<HistorialSyncScreen> {
                   onRefresh: _cargar,
                   child: ListView.builder(
                     padding: const EdgeInsets.all(16),
-                    itemCount: _eventos.length,
+                    itemCount: _eventos.length + 1,
                     itemBuilder: (context, i) {
-                      final f = _eventos[i];
-                      final nivel = '${f['nivel']}';
-                      return Padding(
-                        padding: const EdgeInsets.only(bottom: 12),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(
+                      // V32: resumen semántico arriba; el detalle
+                      // de cada evento va plegado en su tarjeta
+                      // (plegado, nunca eliminado: hace falta
+                      // para soporte).
+                      if (i == 0) {
+                        final errores = _eventos
+                            .where((e) =>
+                                _significadoNivel('${e['nivel']}') ==
+                                SignificadoChip.error)
+                            .length;
+                        return Padding(
+                          padding:
+                              const EdgeInsets.only(bottom: 12),
+                          child: Tarjeta(
+                            child: Row(
                               children: [
                                 Expanded(
-                                  child: Text('${f['evento']}',
+                                  child: Text(
+                                      '${_eventos.length} eventos '
+                                      'recientes',
                                       style: AppTexto.cuerpo),
                                 ),
-                                Text(
-                                  _ts('${f['ts']}'),
-                                  style: AppTexto.secundario,
+                                ChipEstado.semantico(
+                                  texto: errores == 0
+                                      ? 'Sin errores'
+                                      : '$errores con error',
+                                  significado: errores == 0
+                                      ? SignificadoChip.exito
+                                      : SignificadoChip.error,
                                 ),
                               ],
                             ),
-                            Text(nivel, style: AppTexto.secundario),
-                            if (f['detalle'] != null)
-                              Text('${f['detalle']}',
-                                  style: AppTexto.secundario,
-                                  maxLines: 2,
-                                  overflow: TextOverflow.ellipsis),
-                          ],
+                          ),
+                        );
+                      }
+                      final f = _eventos[i - 1];
+                      final nivel = '${f['nivel']}';
+                      final detalle = f['detalle']?.toString();
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: 12),
+                        child: Tarjeta(
+                          child: Column(
+                            crossAxisAlignment:
+                                CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: Text('${f['evento']}',
+                                        style: AppTexto.cuerpo),
+                                  ),
+                                  Text(
+                                    _ts('${f['ts']}'),
+                                    style: AppTexto.secundario,
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 4),
+                              ChipEstado.semantico(
+                                texto: nivel,
+                                significado:
+                                    _significadoNivel(nivel),
+                              ),
+                              if (detalle != null &&
+                                  detalle.isNotEmpty)
+                                ExpansionTile(
+                                  title: const Text('Detalle',
+                                      style: AppTexto.metadato),
+                                  tilePadding: EdgeInsets.zero,
+                                  childrenPadding:
+                                      const EdgeInsets.only(
+                                          bottom: 4),
+                                  children: [
+                                    Align(
+                                      alignment:
+                                          Alignment.centerLeft,
+                                      child: Text(detalle,
+                                          style:
+                                              AppTexto.secundario),
+                                    ),
+                                  ],
+                                ),
+                            ],
+                          ),
                         ),
                       );
                     },
@@ -1323,6 +1376,30 @@ class _VerificacionEspejoScreenState
     return iso.substring(0, 16).replaceFirst('T', ' ');
   }
 
+  /// V32: resumen semántico de la cabecera — el estado de un
+  /// vistazo antes del detalle por tabla.
+  SignificadoChip _significadoResumenEspejo() {
+    if (_errorSync != null && _errorSync!.isNotEmpty) {
+      return SignificadoChip.error;
+    }
+    if (_conteos.values.any((v) => v == null)) {
+      return SignificadoChip.alerta;
+    }
+    if (_pendientes > 0) return SignificadoChip.alerta;
+    return SignificadoChip.exito;
+  }
+
+  String _textoResumenEspejo() {
+    if (_errorSync != null && _errorSync!.isNotEmpty) {
+      return 'Error de sync';
+    }
+    final sinContar =
+        _conteos.values.where((v) => v == null).length;
+    if (sinContar > 0) return '$sinContar sin contar';
+    if (_pendientes > 0) return '$_pendientes por subir';
+    return 'Espejo contado';
+  }
+
   @override
   Widget build(BuildContext context) {
     if (!AuthService().isOwner) {
@@ -1357,6 +1434,11 @@ class _VerificacionEspejoScreenState
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
+                      ChipEstado.semantico(
+                        texto: _textoResumenEspejo(),
+                        significado: _significadoResumenEspejo(),
+                      ),
+                      const SizedBox(height: 8),
                       Text('Última bajada: ${_ts(_ultimaPull)}',
                           style: AppTexto.cuerpo),
                       Text('Ops pendientes de subir: $_pendientes',
@@ -1365,7 +1447,7 @@ class _VerificacionEspejoScreenState
                           _errorSync!.isNotEmpty)
                         Text('Último error: $_errorSync',
                             style: AppTexto.cuerpo),
-                      const SizedBox(height: 6),
+                      const SizedBox(height: 8),
                       const Text(
                         'Alcance: conteos iguales no certifican '
                         'integridad. Esta pantalla detecta desfases '
@@ -1382,8 +1464,17 @@ class _VerificacionEspejoScreenState
                   ),
                   const SizedBox(height: 12),
                 ],
-                for (final t in _tablas)
-                  Padding(
+                ExpansionTile(
+                  title: const Text('Detalle por tabla',
+                      style: AppTexto.subtitulo),
+                  subtitle: Text(
+                      '${_tablas.length} tablas del espejo local',
+                      style: AppTexto.secundario),
+                  tilePadding: EdgeInsets.zero,
+                  childrenPadding: const EdgeInsets.only(top: 4),
+                  children: [
+                    for (final t in _tablas)
+                      Padding(
                     padding: const EdgeInsets.only(bottom: 8),
                     child: Tarjeta(
                       child: Builder(builder: (_) {
@@ -1407,8 +1498,11 @@ class _VerificacionEspejoScreenState
                                 const SizedBox(width: 8),
                                 Text(
                                   delta,
-                                  style: TextStyle(
+                                  style: AppTexto.cuerpo.copyWith(
                                       fontWeight: FontWeight.w700,
+                                      fontFeatures: const [
+                                        FontFeature.tabularFigures()
+                                      ],
                                       color: delta.startsWith('+')
                                           ? AppColores.exito
                                           : AppColores.alerta),
@@ -1418,8 +1512,10 @@ class _VerificacionEspejoScreenState
                           ],
                         );
                       }),
-                    ),
-                  ),
+                        ),
+                      ),
+                  ],
+                ),
                 const SizedBox(height: 12),
                 FilledButton(
                   onPressed: _verificando ? null : _verificar,
@@ -1473,8 +1569,7 @@ class _BajadaCompletaScreenState extends State<BajadaCompletaScreen> {
 
   void _snack(String texto) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text(texto)));
+    mostrarSnack(context, texto);
   }
 
   Future<void> _subir() async {
@@ -1562,7 +1657,7 @@ class _BajadaCompletaScreenState extends State<BajadaCompletaScreen> {
               children: [
                 const Text('Antes de una bajada completa',
                     style: AppTexto.subtitulo),
-                const SizedBox(height: 6),
+                const SizedBox(height: 8),
                 Text(
                   '${sinPendientes ? '✓' : '○'} Sin pendientes de subir '
                   '(${_pendientes < 0 ? '—' : _pendientes})',
@@ -1613,7 +1708,7 @@ class _BajadaCompletaScreenState extends State<BajadaCompletaScreen> {
               children: [
                 Text('Cómo es segura esta bajada',
                     style: AppTexto.subtitulo),
-                SizedBox(height: 6),
+                SizedBox(height: 8),
                 Text(
                   'No borra los espejos antes de bajar: re-descarga '
                   'cada tabla desde 0 y aplica por encima de lo '

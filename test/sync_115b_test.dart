@@ -89,10 +89,14 @@ void main() {
     });
 
     test('test_isoHabana_frontera_marzo_2026', () {
-      // Inicio DST 2026: 8-mar. 00:30 Habana aún es estándar
-      // (-05:00); 03:00 ya es verano (-04:00).
+      // Inicio DST 2026: 8-mar. H-10 (1.20): en Cuba el salto
+      // es a las 00:00 (los relojes pasan a 01:00), así que la
+      // hora de pared 00:30 de ese día no existe y la app la
+      // trata como verano (-04:00), como 03:00. La regla
+      // anterior (patrón EEUU) la daba como estándar (-05:00)
+      // y abría 1 h de desfase contra el servidor (tzdata).
       expect(isoHabana(DateTime.utc(2026, 3, 8, 0, 30)),
-          '2026-03-08T00:30:00-05:00');
+          '2026-03-08T00:30:00-04:00');
       expect(isoHabana(DateTime.utc(2026, 3, 8, 3, 0)),
           '2026-03-08T03:00:00-04:00');
     });

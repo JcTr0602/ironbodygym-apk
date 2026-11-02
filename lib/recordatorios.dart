@@ -16,6 +16,8 @@
 ///   de quien la creó (`creado_por` == mi telegram_id).
 library;
 
+import 'dart:async';
+
 import 'package:uuid/uuid.dart';
 
 import 'auth.dart';
@@ -23,7 +25,17 @@ import 'bloque2_resto.dart';
 import 'cliente_protegido.dart';
 import 'localdb.dart';
 import 'negocio.dart';
+import 'sync.dart';
 import 'tiempo.dart';
+
+/// FIN-25 de Argón (1.20): las ops de recordatorios se encolan
+/// pero nadie disparaba la subida — el cambio (y sobre todo el
+/// «ya disparado hoy» de los masivos) viajaba cuando otra
+/// acción sincronizaba. Empuje inmediato tras cada mutación.
+void _empujarRecordatorios() {
+  unawaited(
+      SyncEngine.instance.push().then((_) {}, onError: (_) {}));
+}
 
 /// Un recordatorio vencido hoy, listo para disparar (o ya disparado).
 class RecordatorioDebido {
@@ -67,6 +79,31 @@ class RecordatorioDebido {
   );
 }
 
+/// F4 (1.20): ¿un recordatorio personalizado toca hoy?
+/// Sin frecuencia (o 'ninguna'): solo su fecha fija. Con
+/// 'semanal': el mismo día de semana de la fecha fija,
+/// desde esa fecha. Con 'mensual': el mismo día del mes,
+/// con tope al último día del mes (un 31 cae al 30 en los
+/// meses de 30, y al 28/29 en febrero). PURO, testeable.
+bool recordatorioPersonalizadoTocaHoy(
+    Map<String, dynamic> cfg, String hoyIso) {
+  final ff = '${cfg['fecha_fija'] ?? ''}';
+  if (ff.length < 10 || hoyIso.length < 10) return false;
+  final fija = ff.substring(0, 10);
+  final frec = '${cfg['frecuencia'] ?? 'ninguna'}';
+  if (frec != 'semanal' && frec != 'mensual') {
+    return fija == hoyIso;
+  }
+  if (hoyIso.compareTo(fija) < 0) return false;
+  final dF = DateTime.tryParse(fija);
+  final dH = DateTime.tryParse(hoyIso);
+  if (dF == null || dH == null) return false;
+  if (frec == 'semanal') return dF.weekday == dH.weekday;
+  final ultimoDia = DateTime(dH.year, dH.month + 1, 0).day;
+  final diaObjetivo = dF.day > ultimoDia ? ultimoDia : dF.day;
+  return dH.day == diaObjetivo;
+}
+
 class RecordatoriosService {
   RecordatoriosService._();
   static final RecordatoriosService instance = RecordatoriosService._();
@@ -83,6 +120,7 @@ class RecordatoriosService {
     String targetKey = 'todos',
     int diasAnticipacion = 3,
     String? fechaFija,
+    String frecuencia = 'ninguna',
   }) async {
     if (!alcancePermitido(alcance, esDueno: _soyDueno)) {
       throw Exception(
@@ -98,6 +136,7 @@ class RecordatoriosService {
       'target_key': targetKey,
       'dias_anticipacion': diasAnticipacion,
       'fecha_fija': fechaFija,
+      'frecuencia': frecuencia,
       'activa': 1,
       'creado_por': _yo,
       'disparado_en_fecha_habana': null,
@@ -117,6 +156,7 @@ class RecordatoriosService {
         txn: txn,
       );
     });
+    _empujarRecordatorios();
     return id;
   }
 
@@ -153,6 +193,7 @@ class RecordatoriosService {
         txn: txn,
       );
     });
+    _empujarRecordatorios();
   }
 
   Future<void> eliminar(String id) async {
@@ -179,6 +220,7 @@ class RecordatoriosService {
       tipo: kTipoOpDeleteRecordatorio,
       payload: {'recordatorio_id': id},
     );
+    _empujarRecordatorios();
   }
 
   /// Recordatorios vencidos hoy (para la pantalla G2).
@@ -212,9 +254,9 @@ class RecordatoriosService {
       final disparadoMasivoHoy =
           cfg['disparado_en_fecha_habana'] == hoy;
       if (tipo == 'personalizado') {
-        final fechaFija = '${cfg['fecha_fija'] ?? ''}';
-        if (fechaFija.length < 10 ||
-            fechaFija.substring(0, 10) != hoy) {
+        // F4: con frecuencia, el recordatorio toca cada
+        // semana o cada mes desde su fecha fija.
+        if (!recordatorioPersonalizadoTocaHoy(cfg, hoy)) {
           continue;
         }
         final ya = disparadoMasivoHoy ||
@@ -347,6 +389,7 @@ class RecordatoriosService {
         }
       }
     });
+    if (nuevo) _empujarRecordatorios();
     return nuevo;
   }
 }

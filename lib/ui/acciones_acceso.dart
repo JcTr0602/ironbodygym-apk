@@ -16,17 +16,19 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../acceso_app_cache.dart';
 import '../tiempo.dart';
+import 'componentes.dart';
 import 'diseno.dart';
 import 'modal_pin_acceso.dart';
 
 void _snack(BuildContext ctx, String mensaje) {
   if (!ctx.mounted) return;
-  ScaffoldMessenger.of(ctx).showSnackBar(
-    SnackBar(content: Text(mensaje)),
-  );
+  mostrarSnack(ctx, mensaje);
 }
 
-void _snackError(BuildContext ctx, Object e) => _snack(ctx, 'Error: $e');
+void _snackError(BuildContext ctx, Object e) {
+  if (!ctx.mounted) return;
+  mostrarSnack(ctx, 'Error: $e', significado: SignificadoChip.error);
+}
 
 /// Confirmación estándar de las acciones de acceso (extraída de la
 /// ficha, que la usaba para todas sus acciones).
@@ -347,7 +349,7 @@ Future<void> mostrarMenuAccionesAcceso(
           ),
           if (!revocado)
             item(
-              Icons.pin,
+              Icons.pin_rounded,
               'Resetear PIN y compartir',
               () => resetearPinAcceso(
                 ctx,
@@ -361,14 +363,14 @@ Future<void> mostrarMenuAccionesAcceso(
             ),
           if (!revocado && !bloqueado)
             item(
-              Icons.lock,
+              Icons.lock_rounded,
               'Bloquear',
               () => bloquearAcceso(ctx,
                   clienteId: a.clienteId, alTerminar: alTerminar),
             ),
           if (!revocado && bloqueado)
             item(
-              Icons.lock_open,
+              Icons.lock_open_rounded,
               'Desbloquear',
               () => accionSimpleAcceso(
                 ctx,
@@ -380,7 +382,7 @@ Future<void> mostrarMenuAccionesAcceso(
             ),
           if (!revocado)
             item(
-              Icons.key,
+              Icons.key_rounded,
               'Forzar cambio de PIN',
               () => accionSimpleAcceso(
                 ctx,
@@ -397,7 +399,7 @@ Future<void> mostrarMenuAccionesAcceso(
             ),
           if (!revocado)
             item(
-              Icons.logout,
+              Icons.logout_rounded,
               'Cerrar sesión remota',
               () => accionSimpleAcceso(
                 ctx,
@@ -413,7 +415,7 @@ Future<void> mostrarMenuAccionesAcceso(
             ),
           if (!revocado)
             item(
-              Icons.phone,
+              Icons.phone_rounded,
               'Cambiar teléfono',
               () => cambiarTelefonoAcceso(
                 ctx,
@@ -424,7 +426,7 @@ Future<void> mostrarMenuAccionesAcceso(
             ),
           if (!revocado)
             item(
-              Icons.block,
+              Icons.block_rounded,
               'Revocar acceso',
               () => accionSimpleAcceso(
                 ctx,
@@ -441,7 +443,7 @@ Future<void> mostrarMenuAccionesAcceso(
             ),
           if (revocado)
             item(
-              Icons.restore,
+              Icons.restore_rounded,
               'Reactivar acceso',
               () => accionSimpleAcceso(
                 ctx,
@@ -452,7 +454,7 @@ Future<void> mostrarMenuAccionesAcceso(
               ),
             ),
             const Divider(),
-            item(Icons.person, 'Abrir ficha', alAbrirFicha),
+            item(Icons.person_rounded, 'Abrir ficha', alAbrirFicha),
           ],
         ),
       );

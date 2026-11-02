@@ -194,33 +194,33 @@ Widget chipEstadoOp(String estado) {
   String texto;
   if (estado == 'aplicada') {
     color = AppColores.exito;
-    icono = Icons.check_circle;
+    icono = Icons.check_circle_rounded;
     texto = 'Confirmada';
   } else if (estado == 'rechazada') {
     color = AppColores.error;
-    icono = Icons.block;
+    icono = Icons.block_rounded;
     texto = 'Rechazada';
   } else if (estado == 'enviada') {
     // v1.2.9+46: ámbar + etiqueta legible.
     color = AppColores.alerta;
-    icono = Icons.sync_problem;
+    icono = Icons.sync_problem_rounded;
     texto = 'Confirmación pendiente';
   } else if (estado == 'pendiente') {
     color = AppColores.naranja;
-    icono = Icons.schedule;
+    icono = Icons.schedule_rounded;
     texto = 'Pendiente';
   } else if (estado == 'error') {
     color = AppColores.error;
-    icono = Icons.warning;
+    icono = Icons.warning_rounded;
     texto = 'Falló';
   } else if (estado == 'necesita_revision') {
     // v1.3.5 (auditoría 2026-10-16): etiqueta legible en vez del código.
     color = AppColores.alerta;
-    icono = Icons.rule;
+    icono = Icons.rule_rounded;
     texto = 'Requiere revisión';
   } else {
     color = AppColores.naranja;
-    icono = Icons.schedule;
+    icono = Icons.schedule_rounded;
     texto = estado;
   }
   return ChipEstado(texto: texto, color: color, icono: icono);
@@ -269,6 +269,10 @@ class _ColaScreenState extends State<ColaScreen> {
   // v1.2.9+46: detalle de fotos pendientes/error para gestión.
   List<Map<String, dynamic>> _fotosDetalle = [];
   bool _fotosExpandido = false;
+  // H-12 (1.20): fotos de incidencias en 'error' (tabla propia),
+  // con su marca de recuperable calculada por LocalDb.
+  List<Map<String, dynamic>> _fotosIncError = [];
+  bool _reintentandoFotosInc = false;
   StreamSubscription<SyncStatus>? _syncSub;
 
   @override
@@ -296,7 +300,7 @@ class _ColaScreenState extends State<ColaScreen> {
       mensaje: '¿Descartar esta foto pendiente? No se subirá al sistema.',
       aceptar: 'Sí, descartar',
       peligro: true,
-      icono: Icons.delete_outline,
+      icono: Icons.delete_outline_rounded,
     );
     if (ok != true) return;
     try {
@@ -309,13 +313,11 @@ class _ColaScreenState extends State<ColaScreen> {
       AppLog.info('fotos', 'descartada_manual', d: 'id=$id');
       await _cargar();
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-            content: Text('Foto descartada')));
+        mostrarSnack(context, 'Foto descartada');
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Error: $e')));
+        mostrarSnack(context, 'Error: $e', significado: SignificadoChip.error);
       }
     }
   }
@@ -340,6 +342,12 @@ class _ColaScreenState extends State<ColaScreen> {
     // v1.2.9+46: contadores y detalle de fotos.
     int fPend = 0, fSub = 0, fErr = 0;
     List<Map<String, dynamic>> fDet = [];
+    // H-12 (1.20): fotos de incidencias en error (otra tabla).
+    var fotosIncError = <Map<String, dynamic>>[];
+    try {
+      fotosIncError =
+          await LocalDb.instance.fotosIncidenciasEnError();
+    } catch (_) {}
     try {
       final db = await LocalDb.instance.db;
       fPend = Sqflite.firstIntValue(await db.rawQuery(
@@ -445,6 +453,7 @@ class _ColaScreenState extends State<ColaScreen> {
         _fotosSubiendo = fSub;
         _fotosError = fErr;
         _fotosDetalle = fotosVisibles;
+        _fotosIncError = fotosIncError;
         _retenidas = retenidas;
         _totalPendientes = totalPendientesFinal;
         _desglosePendientes = desgloseFinal;
@@ -478,15 +487,13 @@ class _ColaScreenState extends State<ColaScreen> {
       AppLog.info('fotos', 'reintento_manual', d: 'id=$id');
       await _cargar();
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-            content: Text('Foto marcada para reintento')));
+        mostrarSnack(context, 'Foto marcada para reintento', significado: SignificadoChip.exito);
       }
       // Disparar sincronización para procesarla de inmediato.
       unawaited(SyncEngine.instance.push());
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('No se pudo reintentar: $e')));
+        mostrarSnack(context, 'No se pudo reintentar: $e', significado: SignificadoChip.error);
       }
     } finally {
       _fotosReintentando.remove(id);
@@ -515,17 +522,51 @@ class _ColaScreenState extends State<ColaScreen> {
       AppLog.info('fotos', 'reintento_manual_todas');
       await _cargar();
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-            content: Text('Todas las fotos marcadas para reintento')));
+        mostrarSnack(context, 'Todas las fotos marcadas para reintento', significado: SignificadoChip.exito);
       }
       unawaited(SyncEngine.instance.push());
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('No se pudo reintentar: $e')));
+        mostrarSnack(context, 'No se pudo reintentar: $e', significado: SignificadoChip.error);
       }
     } finally {
       _reintentandoTodasFotos = false;
+    }
+  }
+
+  /// H-12 (1.20): reintento DELIBERADO de las fotos de
+  /// incidencias en 'error' cuyo archivo local aún existe. Las
+  /// que perdieron el archivo no se reactivan: volverían a
+  /// fallar al instante y el conteo mentiría.
+  Future<void> _reintentarFotosIncidencias() async {
+    if (_reintentandoFotosInc) return;
+    _reintentandoFotosInc = true;
+    try {
+      final ids = [
+        for (final f in _fotosIncError)
+          if (f['recuperable'] == true) '${f['id']}',
+      ];
+      final n = await LocalDb.instance
+          .reactivarFotosIncidenciasError(ids);
+      AppLog.info('fotos', 'reintento_incidencias_manual',
+          d: 'reactivadas=$n');
+      await _cargar();
+      if (mounted) {
+        mostrarSnack(
+            context,
+            n == 1
+                ? 'Foto de incidencia marcada para reintento'
+                : '$n fotos de incidencias marcadas para reintento',
+            significado: SignificadoChip.exito);
+      }
+      SyncEngine.instance.reintentarFotosIncidencias();
+    } catch (e) {
+      if (mounted) {
+        mostrarSnack(context, 'No se pudo reintentar: $e',
+            significado: SignificadoChip.error);
+      }
+    } finally {
+      _reintentandoFotosInc = false;
     }
   }
 
@@ -706,8 +747,7 @@ class _ColaScreenState extends State<ColaScreen> {
           ['pendiente', opUuid]);
       if (n == 0) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-              content: Text('La operación ya cambió de estado')));
+          mostrarSnack(context, 'La operación ya cambió de estado', significado: SignificadoChip.alerta);
         }
         await _cargar();
         return;
@@ -718,8 +758,7 @@ class _ColaScreenState extends State<ColaScreen> {
       // v1.2.6 (Gemini): confirmación háptica en reintento manual.
       await vibrarConfirmacion();
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-            content: Text('Reintentando sincronización...')));
+        mostrarSnack(context, 'Reintentando sincronización...', significado: SignificadoChip.info);
       }
     } finally {
       _opsReintentando.remove(opUuid);
@@ -748,7 +787,7 @@ class _ColaScreenState extends State<ColaScreen> {
         builder: (ctx) => DialogoApp(
           titulo:
               enCurso ? 'Sincronización en curso' : 'No se pudo sincronizar',
-          iconoTitulo: Icons.sync,
+          iconoTitulo: Icons.sync_rounded,
           contenido: Text(
             enCurso
                 ? 'Ya hay una sincronización en curso en este '
@@ -759,7 +798,7 @@ class _ColaScreenState extends State<ColaScreen> {
                         'Inténtalo de nuevo.'
                     : 'No hay una sesión activa para sincronizar. '
                         'Entra de nuevo e inténtalo.',
-            style: const TextStyle(fontSize: 14, height: 1.4),
+            style: AppTexto.cuerpo.copyWith(height: 1.4),
           ),
           acciones: [
             TextButton(
@@ -779,27 +818,27 @@ class _ColaScreenState extends State<ColaScreen> {
       context: context,
       builder: (ctx) => DialogoApp(
         titulo: 'Sincronización completada',
-        iconoTitulo: Icons.sync,
+        iconoTitulo: Icons.sync_rounded,
         contenido: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _resumenFila(context, Icons.upload, 'Subidos', '$subidos'),
+            _resumenFila(context, Icons.upload_rounded, 'Subidos', '$subidos'),
             const SizedBox(height: 8),
-            _resumenFila(context, Icons.download, 'Bajados', '$bajados'),
+            _resumenFila(context, Icons.download_rounded, 'Bajados', '$bajados'),
             if (reactivadas > 0) ...[
               const SizedBox(height: 12),
               Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Icon(Icons.refresh,
+                  const Icon(Icons.refresh_rounded,
                       size: 16, color: AppColores.info),
-                  const SizedBox(width: 6),
+                  const SizedBox(width: 8),
                   Expanded(
                     child: Text(
                       'Se reintentaron $reactivadas operaciones que '
                       'estaban atascadas.',
-                      style: const TextStyle(fontSize: 13),
+                      style: AppTexto.secundario,
                     ),
                   ),
                 ],
@@ -811,16 +850,14 @@ class _ColaScreenState extends State<ColaScreen> {
                 crossAxisAlignment:
                     CrossAxisAlignment.start,
                 children: [
-                  const Icon(Icons.warning,
+                  const Icon(Icons.warning_rounded,
                       size: 16,
                       color: AppColores.error),
-                  const SizedBox(width: 6),
+                  const SizedBox(width: 8),
                   Expanded(
                     child: Text(
                       error,
-                      style: const TextStyle(
-                          color: AppColores.error,
-                          fontSize: 13),
+                      style: AppTexto.secundario.copyWith(color: AppColores.error),
                     ),
                   ),
                 ],
@@ -834,13 +871,13 @@ class _ColaScreenState extends State<ColaScreen> {
               Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Icon(Icons.schedule,
+                  const Icon(Icons.schedule_rounded,
                       size: 16, color: AppColores.alerta),
-                  const SizedBox(width: 6),
+                  const SizedBox(width: 8),
                   Expanded(
                     child: Text(
                       res.textoPendientes,
-                      style: const TextStyle(fontSize: 13),
+                      style: AppTexto.secundario,
                     ),
                   ),
                 ],
@@ -899,16 +936,12 @@ class _ColaScreenState extends State<ColaScreen> {
                     Theme.of(ctx).colorScheme.onSurfaceVariant),
             const SizedBox(width: 8),
             Text(etiqueta,
-                style: const TextStyle(fontSize: 16)),
+                style: AppTexto.titulo),
           ],
         ),
         Text(
           valor,
-          style: const TextStyle(
-            fontSize: 18,
-            fontWeight: FontWeight.bold,
-            color: AppColores.naranja,
-          ),
+          style: AppTexto.titulo.copyWith(color: AppColores.naranja),
         ),
       ],
     );
@@ -927,9 +960,7 @@ class _ColaScreenState extends State<ColaScreen> {
           if (!esOpMia(op,
               miActor: _miActor, miTelegramId: _miTelegramId)) {
             if (mounted) {
-              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                  content: Text(
-                      'Solo puedes cancelar tus propias operaciones')));
+              mostrarSnack(context, 'Solo puedes cancelar tus propias operaciones', significado: SignificadoChip.alerta);
             }
             return;
           }
@@ -946,15 +977,14 @@ class _ColaScreenState extends State<ColaScreen> {
           '¿Cancelar esta operación (${_tipo(tipo)})? No se subirá al sistema.',
       aceptar: 'Sí, cancelar',
       peligro: true,
-      icono: Icons.cancel_outlined,
+      icono: Icons.cancel_rounded,
     );
     if (ok != true) return;
     final borrada = await LocalDb.instance.cancelOp(uuid);
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(borrada
+    mostrarSnack(context, borrada
             ? 'Operación cancelada'
-            : 'Ya no se puede cancelar (fue aplicada)')));
+            : 'Ya no se puede cancelar (fue aplicada)');
     _cargar();
   }
 
@@ -962,16 +992,16 @@ class _ColaScreenState extends State<ColaScreen> {
   IconData _iconoEstado(String estado) {
     switch (estado) {
       case 'aplicada':
-        return Icons.check_circle;
+        return Icons.check_circle_rounded;
       case 'enviada':
         // v1.2.9+46: ámbar = confirmación pendiente.
-        return Icons.sync_problem;
+        return Icons.sync_problem_rounded;
       case 'rechazada':
-        return Icons.block;
+        return Icons.block_rounded;
       case 'error':
-        return Icons.warning;
+        return Icons.warning_rounded;
       default:
-        return Icons.schedule;
+        return Icons.schedule_rounded;
     }
   }
 
@@ -1038,8 +1068,8 @@ class _ColaScreenState extends State<ColaScreen> {
             borderRadius: BorderRadius.circular(8),
             child: Row(
               children: [
-                Icon(Icons.photo_library,
-                    size: 24, color: AppColores.naranja),
+                Icon(Icons.photo_library_rounded,
+                    size: 24, color: AppColores.textoSecundario(context)),
                 const SizedBox(width: 12),
                 const Expanded(
                   child: Text('Fotos', style: AppTexto.subtitulo),
@@ -1056,17 +1086,14 @@ class _ColaScreenState extends State<ColaScreen> {
                         ? 'Al día'
                         : '$_fotosPendientes pendientes · '
                             '$_fotosSubiendo subiendo',
-                    style: TextStyle(
-                        color: color,
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600),
+                    style: AppTexto.metadato.copyWith(color: color, fontWeight: FontWeight.w600),
                   ),
                 ),
                 if (total > 0)
                   Icon(
                     _fotosExpandido
-                        ? Icons.expand_less
-                        : Icons.expand_more,
+                        ? Icons.expand_less_rounded
+                        : Icons.expand_more_rounded,
                     color: AppColores.textoSecundario(context),
                   ),
               ],
@@ -1080,7 +1107,7 @@ class _ColaScreenState extends State<ColaScreen> {
             SizedBox(
               width: double.infinity,
               child: OutlinedButton.icon(
-                icon: const Icon(Icons.refresh, size: 18),
+                icon: const Icon(Icons.refresh_rounded, size: 18),
                 label: const Text('Reintentar todas'),
                 onPressed: _reintentarTodasFotos,
               ),
@@ -1090,8 +1117,68 @@ class _ColaScreenState extends State<ColaScreen> {
             const SizedBox(height: 8),
             Text(
               '$_fotosError ${_fotosError == 1 ? 'foto falló' : 'fotos fallaron'} — toca para ver detalle',
-              style: const TextStyle(
-                  color: AppColores.error, fontSize: 13),
+              style: AppTexto.secundario.copyWith(color: AppColores.error),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  /// H-12 (1.20): tarjeta de fotos de incidencias que agotaron
+  /// sus intentos. Distingue las recuperables (el archivo sigue
+  /// en el teléfono) de las perdidas (sin archivo: ningún
+  /// reintento las puede subir desde aquí).
+  Widget _tarjetaFotosIncidencias(BuildContext context) {
+    final total = _fotosIncError.length;
+    final recuperables =
+        _fotosIncError.where((f) => f['recuperable'] == true).length;
+    final perdidas = total - recuperables;
+    return Tarjeta(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.report_problem_rounded,
+                  size: 24, color: AppColores.error),
+              const SizedBox(width: 12),
+              const Expanded(
+                child: Text('Fotos de incidencias sin subir',
+                    style: AppTexto.subtitulo),
+              ),
+              ContadorBadge(numero: total),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            recuperables > 0
+                ? '$recuperables ${recuperables == 1 ? 'foto agotó' : 'fotos agotaron'} '
+                    'sus intentos de subida y ${recuperables == 1 ? 'puede' : 'pueden'} '
+                    'reintentarse.'
+                : 'Ninguna se puede reintentar desde este teléfono.',
+            style: AppTexto.secundario,
+          ),
+          if (perdidas > 0) ...[
+            const SizedBox(height: 4),
+            Text(
+              '$perdidas ${perdidas == 1 ? 'foto ya no tiene' : 'fotos ya no tienen'} '
+                  'el archivo en este teléfono: no ${perdidas == 1 ? 'es recuperable' : 'son recuperables'}.',
+              style: AppTexto.secundario
+                  .copyWith(color: AppColores.error),
+            ),
+          ],
+          if (recuperables > 0) ...[
+            const SizedBox(height: 8),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                icon: const Icon(Icons.refresh_rounded, size: 18),
+                label: const Text('Reintentar'),
+                onPressed: _reintentandoFotosInc
+                    ? null
+                    : _reintentarFotosIncidencias,
+              ),
             ),
           ],
         ],
@@ -1133,7 +1220,7 @@ class _ColaScreenState extends State<ColaScreen> {
         (f['forzar_qos'] as int? ?? 0) != 1 &&
         (error == null || error.isEmpty);
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 6),
+      padding: const EdgeInsets.symmetric(vertical: 8),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -1150,17 +1237,17 @@ class _ColaScreenState extends State<ColaScreen> {
                       width: 48,
                       height: 48,
                       color: AppColores.fondo(context),
-                      child: const Icon(Icons.broken_image, size: 24),
+                      child: const Icon(Icons.broken_image_rounded, size: 24),
                     ),
                   )
                 : Container(
                     width: 48,
                     height: 48,
                     color: AppColores.fondo(context),
-                    child: const Icon(Icons.image, size: 24),
+                    child: const Icon(Icons.image_rounded, size: 24),
                   ),
           ),
-          const SizedBox(width: 10),
+          const SizedBox(width: 8),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -1170,8 +1257,7 @@ class _ColaScreenState extends State<ColaScreen> {
                     Expanded(
                       child: Text(
                         '$entidad · $tipo',
-                        style: const TextStyle(
-                            fontWeight: FontWeight.w600, fontSize: 13),
+                        style: AppTexto.secundario.copyWith(fontWeight: FontWeight.w600),
                       ),
                     ),
                     Container(
@@ -1179,7 +1265,7 @@ class _ColaScreenState extends State<ColaScreen> {
                           horizontal: 8, vertical: 2),
                       decoration: BoxDecoration(
                         color: colorEstado.withValues(alpha: 0.15),
-                        borderRadius: BorderRadius.circular(10),
+                        borderRadius: BorderRadius.circular(12),
                       ),
                       child: Text(
                         estado == 'error'
@@ -1189,10 +1275,7 @@ class _ColaScreenState extends State<ColaScreen> {
                                 : esperandoConexion
                                     ? 'Esperando buena conexión'
                                     : 'Pendiente',
-                        style: TextStyle(
-                            color: colorEstado,
-                            fontSize: 11,
-                            fontWeight: FontWeight.w600),
+                        style: AppTexto.metadato.copyWith(color: colorEstado, fontWeight: FontWeight.w600),
                       ),
                     ),
                   ],
@@ -1200,16 +1283,13 @@ class _ColaScreenState extends State<ColaScreen> {
                 const SizedBox(height: 2),
                 Text(
                   'Solicitada: ${_hora(creadoEn)} · $intentos ${intentos == 1 ? 'intento' : 'intentos'}',
-                  style: TextStyle(
-                      fontSize: 11,
-                      color: AppColores.textoSecundario(context)),
+                  style: AppTexto.metadato.copyWith(color: AppColores.textoSecundario(context)),
                 ),
                 if (error != null && error.isNotEmpty) ...[
                   const SizedBox(height: 2),
                   Text(
                     'Error: $error',
-                    style: const TextStyle(
-                        fontSize: 11, color: AppColores.error),
+                    style: AppTexto.metadato.copyWith(color: AppColores.error),
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -1218,13 +1298,13 @@ class _ColaScreenState extends State<ColaScreen> {
             ),
           ),
           IconButton(
-            icon: const Icon(Icons.refresh, size: 20),
+            icon: const Icon(Icons.refresh_rounded, size: 20),
             tooltip:
                 esperandoConexion ? 'Subir ahora' : 'Reintentar',
             onPressed: () => _reintentarFoto(id),
           ),
           IconButton(
-            icon: const Icon(Icons.close, size: 20),
+            icon: const Icon(Icons.close_rounded, size: 20),
             tooltip: 'Descartar',
             onPressed: () => _cancelarFoto(id),
           ),
@@ -1251,7 +1331,7 @@ class _ColaScreenState extends State<ColaScreen> {
       context: context,
       builder: (ctx) => DialogoApp(
         titulo: 'Fotos con error',
-        iconoTitulo: Icons.error_outline,
+        iconoTitulo: Icons.error_outline_rounded,
         contenido: fallos.isEmpty
             ? const Text('No hay fotos con error.')
             : Column(
@@ -1260,14 +1340,14 @@ class _ColaScreenState extends State<ColaScreen> {
                   for (final f in fallos)
                     ListTile(
                       dense: true,
-                      leading: const Icon(Icons.photo,
+                      leading: const Icon(Icons.photo_rounded,
                           color: AppColores.error),
                       title: Text(
                           'Foto ${f['id']} (${f['tipo']}) — '
                           '${f['intentos']} intentos'),
                       subtitle: Text(
                         '${f['ultimo_error'] ?? 'sin detalle'}',
-                        style: const TextStyle(fontSize: 12),
+                        style: AppTexto.metadato,
                       ),
                     ),
                 ],
@@ -1283,9 +1363,7 @@ class _ColaScreenState extends State<ColaScreen> {
     if (!_esDueno &&
         !esOpMia(op, miActor: _miActor, miTelegramId: _miTelegramId)) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-            content:
-                Text('Solo puedes reenviar tus propias operaciones')));
+        mostrarSnack(context, 'Solo puedes reenviar tus propias operaciones', significado: SignificadoChip.alerta);
       }
       return;
     }
@@ -1311,17 +1389,14 @@ class _ColaScreenState extends State<ColaScreen> {
       );
       if (n == 0) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-              content: Text('La operación ya cambió de estado')));
+          mostrarSnack(context, 'La operación ya cambió de estado', significado: SignificadoChip.alerta);
         }
         await _cargar();
         return;
       }
       unawaited(SyncEngine.instance.push());
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Reenviando operación...')),
-        );
+        mostrarSnack(context, 'Reenviando operación...', significado: SignificadoChip.info);
         _cargar();
       }
     } finally {
@@ -1360,14 +1435,14 @@ class _ColaScreenState extends State<ColaScreen> {
           children: [
             Row(
               children: [
-                Icon(Icons.calendar_today,
+                Icon(Icons.calendar_today_rounded,
                     size: 14,
                     color:
                         AppColores.textoSecundario(context)),
-                const SizedBox(width: 6),
+                const SizedBox(width: 8),
                 Text(fecha,
                     style:
-                        const TextStyle(fontSize: 13)),
+                        AppTexto.secundario),
               ],
             ),
             const SizedBox(height: 8),
@@ -1382,10 +1457,10 @@ class _ColaScreenState extends State<ColaScreen> {
                 crossAxisAlignment:
                     CrossAxisAlignment.start,
                 children: [
-                  const Icon(Icons.warning,
+                  const Icon(Icons.warning_rounded,
                       size: 16,
                       color: AppColores.error),
-                  const SizedBox(width: 6),
+                  const SizedBox(width: 8),
                   Expanded(
                     child: Text(errorClaro,
                         style: const TextStyle(
@@ -1457,7 +1532,7 @@ class _ColaScreenState extends State<ColaScreen> {
     if (totalError > 0) {
       estadoSync = 'error';
       colores = [AppColores.error, AppColores.errorOscuro];
-      iconoEstado = Icons.warning;
+      iconoEstado = Icons.warning_rounded;
       titulo = 'Atención requerida';
       subtitulo = totalError == 1
           ? '1 elemento falló y necesita tu revisión'
@@ -1465,7 +1540,7 @@ class _ColaScreenState extends State<ColaScreen> {
     } else if (enLimbo > 0) {
       estadoSync = 'limbo';
       colores = [AppColores.alerta, AppColores.alertaOscuro];
-      iconoEstado = Icons.sync_problem;
+      iconoEstado = Icons.sync_problem_rounded;
       titulo = 'Confirmación pendiente';
       subtitulo = enLimbo == 1
           ? '1 operación se envió pero no se confirmó'
@@ -1473,14 +1548,14 @@ class _ColaScreenState extends State<ColaScreen> {
     } else if (errorReciente != null && errorReciente.isNotEmpty) {
       estadoSync = 'error';
       colores = [AppColores.error, AppColores.errorOscuro];
-      iconoEstado = Icons.warning;
+      iconoEstado = Icons.warning_rounded;
       titulo = 'Falló la última sincronización';
       // v1.2.9+46: mensaje en lenguaje natural, no genérico.
       subtitulo = describirError(errorReciente);
     } else if (totalPendiente > 0) {
       estadoSync = 'pendiente';
       colores = [AppColores.alerta, AppColores.alertaOscuro];
-      iconoEstado = Icons.schedule;
+      iconoEstado = Icons.schedule_rounded;
       titulo = 'Pendiente de sincronizar';
       subtitulo = totalPendiente == 1
           ? '1 elemento esperando conexión'
@@ -1488,7 +1563,7 @@ class _ColaScreenState extends State<ColaScreen> {
     } else {
       estadoSync = 'ok';
       colores = [AppColores.exito, AppColores.exitoOscuro];
-      iconoEstado = Icons.check_circle;
+      iconoEstado = Icons.check_circle_rounded;
       titulo = 'Sincronizado';
       subtitulo = 'Todo al día';
     }
@@ -1534,30 +1609,25 @@ class _ColaScreenState extends State<ColaScreen> {
                   const SizedBox(height: 4),
                   Text(
                     subtitulo,
-                    style: const TextStyle(
-                      color: Colors.white70,
-                      fontSize: 14,
-                    ),
+                    style: AppTexto.cuerpo.copyWith(color: Colors.white70),
                     textAlign: TextAlign.center,
                   ),
                   // v1.0.14: guía contextual según el estado
                   if (estadoSync == 'pendiente') ...[
                     const SizedBox(height: 12),
-                    const Text(
+                    Text(
                       'Se subirán automáticamente cuando haya conexión. '
                       'Puedes seguir trabajando sin internet.',
-                      style: TextStyle(
-                          color: Colors.white70, fontSize: 12),
+                      style: AppTexto.metadato.copyWith(color: Colors.white70),
                       textAlign: TextAlign.center,
                     ),
                   ],
                   if (estadoSync == 'error') ...[
                     const SizedBox(height: 12),
-                    const Text(
+                    Text(
                       'Revisa las operaciones marcadas abajo. '
                       'Puedes reintentarlas o cancelarlas.',
-                      style: TextStyle(
-                          color: Colors.white70, fontSize: 12),
+                      style: AppTexto.metadato.copyWith(color: Colors.white70),
                       textAlign: TextAlign.center,
                     ),
                   ],
@@ -1570,7 +1640,7 @@ class _ColaScreenState extends State<ColaScreen> {
               children: [
                 Expanded(
                   child: _tarjetaStat(
-                    Icons.download,
+                    Icons.download_rounded,
                     'Bajados',
                     '${_det.bajados}',
                     // v1.3.1 (E5): acumulado histórico + última sync.
@@ -1582,7 +1652,7 @@ class _ColaScreenState extends State<ColaScreen> {
                 const SizedBox(width: 12),
                 Expanded(
                   child: _tarjetaStat(
-                    Icons.upload,
+                    Icons.upload_rounded,
                     'Subidos',
                     '${_det.subidos}',
                     // v1.3.1 (E5): acumulado histórico + última sync.
@@ -1603,7 +1673,7 @@ class _ColaScreenState extends State<ColaScreen> {
             BotonPrimario(
               texto:
                   _sincronizando ? 'Sincronizando…' : 'Sincronizar ahora',
-              icono: Icons.sync,
+              icono: Icons.sync_rounded,
               onPressed: _sincronizando ? null : _sincronizar,
             ),
             // v1.12.0 (E2): «Subir ahora» libera lo retenido por
@@ -1657,16 +1727,14 @@ class _ColaScreenState extends State<ColaScreen> {
                 ),
                 child: Row(
                   children: [
-                    const Icon(Icons.warning,
+                    const Icon(Icons.warning_rounded,
                         size: 20,
                         color: AppColores.error),
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
                         _det.error!,
-                        style: const TextStyle(
-                            color: AppColores.error,
-                            fontSize: 13),
+                        style: AppTexto.secundario.copyWith(color: AppColores.error),
                       ),
                     ),
                   ],
@@ -1705,14 +1773,14 @@ class _ColaScreenState extends State<ColaScreen> {
                     const Text(
                       'Estas operaciones no se pudieron enviar. '
                       'No se reintentarán solas.',
-                      style: TextStyle(fontSize: 13),
+                      style: AppTexto.secundario,
                     ),
                     const SizedBox(height: 8),
                     for (final b in _bloqueadas)
                       ListTile(
                         dense: true,
                         contentPadding: EdgeInsets.zero,
-                        leading: const Icon(Icons.block, size: 20),
+                        leading: const Icon(Icons.block_rounded, size: 20),
                         title: Text(
                             '${b['tipo'] ?? ''}',
                             style: AppTexto.cuerpo),
@@ -1735,6 +1803,11 @@ class _ColaScreenState extends State<ColaScreen> {
             ],
             // v1.2.9+46 (Gemini): visibilidad de la cola de fotos.
             _tarjetaFotos(context),
+            // H-12 (1.20): fotos de incidencias en error, si hay.
+            if (_fotosIncError.isNotEmpty) ...[
+              const SizedBox(height: 16),
+              _tarjetaFotosIncidencias(context),
+            ],
             const SizedBox(height: 16),
             const Text(
               'Operaciones recientes',
@@ -1743,7 +1816,7 @@ class _ColaScreenState extends State<ColaScreen> {
             const SizedBox(height: 8),
             if (_ops.isEmpty)
               const EstadoVacio(
-                icono: Icons.inbox_outlined,
+                icono: Icons.inbox_rounded,
                 titulo: 'Sin operaciones todavía',
                 subtitulo:
                     'Las operaciones pendientes aparecerán aquí.',
@@ -1797,7 +1870,7 @@ class _ColaScreenState extends State<ColaScreen> {
                                       creada.length > 16 ? 16 : creada.length)
                                   .replaceAll('T', ' ')
                               : hace,
-                          style: const TextStyle(fontSize: 12),
+                          style: AppTexto.metadato,
                         ),
                         if (esError &&
                             op['error'] != null &&
@@ -1814,10 +1887,7 @@ class _ColaScreenState extends State<ColaScreen> {
                                         top: 4),
                                 child: Text(
                                   errTraducido.mensaje,
-                                  style: const TextStyle(
-                                      fontSize: 12,
-                                      color:
-                                          AppColores.error),
+                                  style: AppTexto.metadato.copyWith(color: AppColores.error),
                                 ),
                               );
                             },
@@ -1843,13 +1913,13 @@ class _ColaScreenState extends State<ColaScreen> {
                               if (esError || esBloqueada)
                                 IconButton(
                                   tooltip: 'Reintentar',
-                                  icon: const Icon(Icons.refresh,
+                                  icon: const Icon(Icons.refresh_rounded,
                                       color: AppColores.info),
                                   onPressed: () => _reenviar(op),
                                 ),
                               IconButton(
                                 tooltip: 'Cancelar',
-                                icon: const Icon(Icons.cancel_outlined,
+                                icon: const Icon(Icons.cancel_rounded,
                                     color: AppColores.error),
                                 onPressed: () => _cancelar(
                                     '${op['op_uuid']}',
@@ -1875,8 +1945,7 @@ class _ColaScreenState extends State<ColaScreen> {
         await LocalDb.instance.getMeta('ultimo_push_op_uuids'));
     if (uuids.isEmpty) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('No hay registros en este ciclo')));
+      mostrarSnack(context, 'No hay registros en este ciclo', significado: SignificadoChip.alerta);
       return;
     }
     if (!mounted) return;
@@ -1891,8 +1960,7 @@ class _ColaScreenState extends State<ColaScreen> {
         await LocalDb.instance.getMeta('ultimo_pull_detalle'));
     if (detalle.isEmpty) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('No hay registros en este ciclo')));
+      mostrarSnack(context, 'No hay registros en este ciclo', significado: SignificadoChip.alerta);
       return;
     }
     if (!mounted) return;
@@ -1917,7 +1985,7 @@ class _ColaScreenState extends State<ColaScreen> {
               Icon(icono, size: 24, color: color),
               if (onTap != null) ...[
                 const Spacer(),
-                Icon(Icons.chevron_right,
+                Icon(Icons.chevron_right_rounded,
                     size: 16,
                     color: AppColores.textoSecundario(context)),
               ],
@@ -1968,6 +2036,11 @@ const Map<String, String> kEtiquetasTablaSync = {
   'turnos_cierre': 'Cierres de turno',
   'incidencias': 'Incidencias operativas',
   'liquidaciones_caja': 'Liquidaciones de caja',
+  // 1.20 (FIN-21/22 de Argón): tablas nuevas de la versión.
+  'suplemento_ajustes': 'Ajustes de stock de suplementos',
+  'diferencias_caja': 'Diferencias de caja',
+  'nomina_liquidada_snapshot': 'Fotos de nómina liquidada',
+  'nomina_confirmaciones': 'Confirmaciones de nómina',
 };
 
 /// v1.3.4: detalle ampliable de un ciclo de sincronización.
@@ -2075,7 +2148,7 @@ class _DetalleSyncScreenState extends State<DetalleSyncScreen> {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(Icons.inbox_outlined,
+          Icon(Icons.inbox_rounded,
               size: 48,
               color: AppColores.textoSecundario(context)),
           const SizedBox(height: 12),
@@ -2119,7 +2192,7 @@ class _DetalleSyncScreenState extends State<DetalleSyncScreen> {
             ),
             child: Row(
               children: [
-                const Icon(Icons.info_outline,
+                const Icon(Icons.info_outline_rounded,
                     size: 20, color: AppColores.info),
                 const SizedBox(width: 8),
                 Expanded(
@@ -2206,7 +2279,7 @@ class _DetalleSyncScreenState extends State<DetalleSyncScreen> {
             ),
             child: Row(
               children: [
-                const Icon(Icons.info_outline,
+                const Icon(Icons.info_outline_rounded,
                     size: 20, color: AppColores.info),
                 const SizedBox(width: 8),
                 Expanded(
@@ -2227,7 +2300,7 @@ class _DetalleSyncScreenState extends State<DetalleSyncScreen> {
             margin: const EdgeInsets.only(bottom: 8),
             child: ListTile(
               leading:
-                  const Icon(Icons.download, color: AppColores.info),
+                  const Icon(Icons.download_rounded, color: AppColores.info),
               title: Text(kEtiquetasTablaSync[e.key] ?? e.key),
               trailing: Text(
                 '${e.value}',

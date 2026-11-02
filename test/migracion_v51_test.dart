@@ -30,7 +30,7 @@ void main() {
     await LocalDb.resetParaTest();
     final d = await LocalDb.instance.db;
     expect(await d.getVersion(), LocalDb.versionActual);
-    expect(LocalDb.versionActual, 51);
+    expect(LocalDb.versionActual, 57);
     final indices = (await d.rawQuery(
             "SELECT name, sql FROM sqlite_master WHERE type='index' "
             "AND name='idx_servicio_ventas_fecha'"))

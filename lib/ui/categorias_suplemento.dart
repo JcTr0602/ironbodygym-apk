@@ -26,6 +26,8 @@ class _CategoriasSuplementoScreenState
     extends State<CategoriasSuplementoScreen> {
   final _auth = AuthService();
   List<Map<String, dynamic>> _items = [];
+  // Rediseño 1.20: suplementos por categoría (del espejo).
+  Map<int, int> _conteos = {};
   bool _cargando = true;
 
   bool get _esDueno => _auth.isOwner;
@@ -39,10 +41,18 @@ class _CategoriasSuplementoScreenState
   Future<void> _cargar() async {
     final items =
         await LocalDb.instance.allMirror('categorias_suplemento');
+    final sups =
+        await LocalDb.instance.allMirror('suplementos');
+    final conteos = <int, int>{};
+    for (final s in sups) {
+      final cid = (s['categoria_id'] as num?)?.toInt();
+      if (cid != null) conteos[cid] = (conteos[cid] ?? 0) + 1;
+    }
     if (!mounted) return;
     setState(() {
       _items = items
         ..sort(compararPorNombre);
+      _conteos = conteos;
       _cargando = false;
     });
   }
@@ -106,7 +116,7 @@ class _CategoriasSuplementoScreenState
         titulo: categoria == null
             ? 'Nueva categoría'
             : 'Editar categoría',
-        iconoTitulo: Icons.category_outlined,
+        iconoTitulo: Icons.category_rounded,
         contenido: TextField(
           controller: ctrl,
           autofocus: true,
@@ -139,12 +149,12 @@ class _CategoriasSuplementoScreenState
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Categorías de suplementos'),
+        title: const Text('Categorías'),
       ),
       floatingActionButton: _esDueno
           ? FloatingActionButton.extended(
               onPressed: () => _dialogoNombre(),
-              icon: const Icon(Icons.add),
+              icon: const Icon(Icons.add_rounded),
               label: const Text('Nueva'),
             )
           : null,
@@ -157,7 +167,7 @@ class _CategoriasSuplementoScreenState
                     child: CircularProgressIndicator())
                 : _items.isEmpty
                     ? const EstadoVacio(
-                        icono: Icons.category_outlined,
+                        icono: Icons.category_rounded,
                         titulo: 'Sin categorías',
                         subtitulo:
                             'Crea la primera con el botón Nueva.',
@@ -179,6 +189,10 @@ class _CategoriasSuplementoScreenState
                               padding: const EdgeInsets.only(
                                   bottom: AppEspacio.sm),
                               child: Tarjeta(
+                                onTap: _esDueno
+                                    ? () => _dialogoNombre(
+                                        categoria: c)
+                                    : null,
                                 padding: const EdgeInsets.all(
                                     AppEspacio.md),
                                 child: Row(
@@ -194,11 +208,9 @@ class _CategoriasSuplementoScreenState
                                         shape:
                                             BoxShape.circle,
                                       ),
-                                      child: const Icon(
-                                        Icons
-                                            .category_outlined,
-                                        color:
-                                            AppColores.naranja,
+                                      child: Icon(
+                                        Icons.category_rounded,
+                                        color: AppColores.textoSecundario(context),
                                       ),
                                     ),
                                     const SizedBox(
@@ -213,6 +225,10 @@ class _CategoriasSuplementoScreenState
                                               '${c['nombre'] ?? 'Sin nombre'}',
                                               style: AppTexto
                                                   .subtitulo),
+                                          Text(
+                                              '${_conteos[(c['id'] as num?)?.toInt()] ?? 0} suplemento${(_conteos[(c['id'] as num?)?.toInt()] ?? 0) == 1 ? '' : 's'}',
+                                              style: AppTexto
+                                                  .secundario),
                                           if (!activa)
                                             ChipEstado(
                                                 texto:
@@ -233,8 +249,8 @@ class _CategoriasSuplementoScreenState
                                                 c, v),
                                       ),
                                       IconButton(
-                                        icon: const Icon(Icons
-                                            .edit_outlined),
+                                        icon: const Icon(
+                                            Icons.edit_rounded),
                                         tooltip: 'Editar',
                                         onPressed: () =>
                                             _dialogoNombre(

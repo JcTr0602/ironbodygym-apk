@@ -102,7 +102,7 @@ class _RiesgoScreenState extends State<RiesgoScreen> {
         title: const Text('Clientes en riesgo'),
         actions: [
           IconButton(
-            icon: const Icon(Icons.refresh),
+            icon: const Icon(Icons.refresh_rounded),
             onPressed: _cargar,
           ),
         ],
@@ -115,7 +115,7 @@ class _RiesgoScreenState extends State<RiesgoScreen> {
                 Expanded(
                   child: _riesgo.isEmpty
                       ? const EstadoVacio(
-                          icono: Icons.person_off,
+                          icono: Icons.person_off_rounded,
                           titulo: 'No hay clientes en riesgo',
                           subtitulo: 'Se muestran aquí los inactivos '
                               'con 3+ pagos cuyo último pago fue hace '
@@ -140,7 +140,7 @@ class _RiesgoScreenState extends State<RiesgoScreen> {
                                       backgroundColor:
                                           AppColores.naranja,
                                       child: Icon(
-                                          Icons.warning,
+                                          Icons.warning_rounded,
                                           color: Colors.white,
                                           size: 22),
                                     ),

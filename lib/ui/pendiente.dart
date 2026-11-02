@@ -200,12 +200,7 @@ class _PendienteScreenState extends State<PendienteScreen> {
       }
       if (adelantos > 0.01 || restoC1.abs() > 0.01) {
         if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(
-                'Este entrenador tiene adelantos o entregas parciales sin liquidar: liquida desde Arqueo para no dejar descuadres.'),
-          ),
-        );
+        mostrarSnack(context, 'Este entrenador tiene adelantos o entregas parciales sin liquidar: liquida desde Arqueo para no dejar descuadres.', significado: SignificadoChip.alerta);
         Navigator.push(context,
             MaterialPageRoute(builder: (_) => const ArqueoScreen()));
         return;
@@ -285,10 +280,7 @@ class _PendienteScreenState extends State<PendienteScreen> {
           _totalUsd = _entrenadores.fold(
               0.0, (acc, e) => acc + e.totalPorMoneda('USD'));
         });
-        ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-                content: Text(
-                    'Error al guardar, intenta de nuevo')));
+        mostrarSnack(context, 'Error al guardar, intenta de nuevo', significado: SignificadoChip.error);
       }
       return;
     } finally {
@@ -298,9 +290,8 @@ class _PendienteScreenState extends State<PendienteScreen> {
     // y NO revierte la UI (ya está guardado localmente).
     unawaited(SyncEngine.instance.push());
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text('Recibido de $nombre confirmado '
-            '(se aplicará al sincronizar)')));
+    mostrarSnack(context, 'Recibido de $nombre confirmado '
+            '(se aplicará al sincronizar)', significado: SignificadoChip.exito);
     // Gemini: NO llamar _cargar() aquí — el estado optimista ya está
     // actualizado. Recargar ahora haría reaparecer los pagos porque
     // el mirror aún no se actualizó (el push va en background).
@@ -367,8 +358,8 @@ class _PendienteScreenState extends State<PendienteScreen> {
               children: [
                 Icon(
                   hayPendiente
-                      ? Icons.account_balance_wallet_outlined
-                      : Icons.check_circle_outline,
+                      ? Icons.account_balance_wallet_rounded
+                      : Icons.check_circle_outline_rounded,
                   color: colorAcento,
                   size: 28,
                 ),
@@ -418,7 +409,7 @@ class _PendienteScreenState extends State<PendienteScreen> {
     required String monto,
   }) {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 6),
+      padding: const EdgeInsets.symmetric(vertical: 8),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -427,7 +418,7 @@ class _PendienteScreenState extends State<PendienteScreen> {
             backgroundColor: color.withValues(alpha: 0.15),
             child: Icon(icono, size: 16, color: color),
           ),
-          const SizedBox(width: 10),
+          const SizedBox(width: 8),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -456,7 +447,7 @@ class _PendienteScreenState extends State<PendienteScreen> {
           const SizedBox(height: 8),
           for (final p in _mens)
             _filaDesglose(
-              icono: Icons.payments,
+              icono: Icons.payments_rounded,
               color: AppColores.exito,
               titulo: 'Mensualidad — ${p['metodo']}',
               subtitulo:
@@ -471,7 +462,7 @@ class _PendienteScreenState extends State<PendienteScreen> {
           const SizedBox(height: 8),
           for (final d in _diarios)
             _filaDesglose(
-              icono: Icons.today,
+              icono: Icons.today_rounded,
               color: AppColores.info,
               titulo: 'Pago diario',
               subtitulo:
@@ -485,7 +476,7 @@ class _PendienteScreenState extends State<PendienteScreen> {
           const SizedBox(height: 8),
           for (final s in _servicios)
             _filaDesglose(
-              icono: Icons.bolt,
+              icono: Icons.bolt_rounded,
               color: AppColores.naranja,
               titulo: switch ('${s['tipo']}') {
                 'dosis_con_agua' => 'Combo',
@@ -505,7 +496,7 @@ class _PendienteScreenState extends State<PendienteScreen> {
           const SizedBox(height: 8),
           for (final s in _suplementos)
             _filaDesglose(
-              icono: Icons.shopping_bag_outlined,
+              icono: Icons.shopping_bag_rounded,
               color: AppColores.naranja,
               titulo: 'Suplemento',
               subtitulo: '${s['descripcion'] ?? 'Venta suplemento'} · '
@@ -522,7 +513,7 @@ class _PendienteScreenState extends State<PendienteScreen> {
             child: Text(
                 'Sin pagos pendientes de entrega.',
                 textAlign: TextAlign.center,
-                style: TextStyle(color: Colors.grey)),
+                style: AppTexto.secundario),
           ),
       ],
     );
@@ -539,7 +530,7 @@ class _PendienteScreenState extends State<PendienteScreen> {
             child: Text(
                 'Nada pendiente de recoger.',
                 textAlign: TextAlign.center,
-                style: TextStyle(color: Colors.grey)),
+                style: AppTexto.secundario),
           ),
         ],
       );
@@ -606,10 +597,7 @@ class _PendienteScreenState extends State<PendienteScreen> {
     await Clipboard.setData(
         ClipboardData(text: buf.toString()));
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-            content: Text(
-                'Texto copiado, pégalo en WhatsApp')));
+    mostrarSnack(context, 'Texto copiado, pégalo en WhatsApp');
   }
 }
 
@@ -643,17 +631,18 @@ class _EntrenadorCard extends StatelessWidget {
         : '${fmtMonto(totalCup)} CUP';
     final n = entrenador.totalPagos;
     return Card(
-      margin: const EdgeInsets.only(bottom: 10),
+      margin: const EdgeInsets.only(bottom: 12),
       child: ExpansionTile(
         leading: CircleAvatar(
-          backgroundColor: Colors.orange.shade100,
+          backgroundColor:
+              AppColores.naranja.withValues(alpha: 0.15),
           child: Text(
             nombre.isNotEmpty
                 ? nombre[0].toUpperCase()
                 : '?',
             style: const TextStyle(
                 fontWeight: FontWeight.bold,
-                color: Colors.deepOrange),
+                color: AppColores.naranja),
           ),
         ),
         title: Row(
@@ -664,9 +653,9 @@ class _EntrenadorCard extends StatelessWidget {
                       fontWeight: FontWeight.bold)),
             ),
             if (entrenador.tieneRetraso) ...[
-              const SizedBox(width: 6),
+              const SizedBox(width: 8),
               const Icon(Icons.warning_amber_rounded,
-                  color: Colors.amber, size: 18),
+                  color: AppColores.alerta, size: 18),
             ],
           ],
         ),
@@ -674,10 +663,9 @@ class _EntrenadorCard extends StatelessWidget {
             Text('$n pago${n == 1 ? '' : 's'} sin entregar'),
         trailing: Text(
           totalTxt,
-          style: const TextStyle(
-              fontWeight: FontWeight.bold,
-              color: Colors.deepOrange,
-              fontSize: 15),
+          style: AppTexto.subtitulo.copyWith(
+              color: AppColores.textoNaranja(context),
+              fontWeight: FontWeight.bold),
         ),
         children: [
           Padding(
@@ -697,7 +685,7 @@ class _EntrenadorCard extends StatelessWidget {
                 SizedBox(
                   width: double.infinity,
                   child: ElevatedButton.icon(
-                    icon: const Icon(Icons.check_circle_outline,
+                    icon: const Icon(Icons.check_circle_outline_rounded,
                         size: 18),
                     label: Text(
                         'Cobrar todo ($totalTxt)'),
@@ -705,7 +693,7 @@ class _EntrenadorCard extends StatelessWidget {
                         ? null
                         : onConfirmarTodo,
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.green,
+                      backgroundColor: AppColores.exito,
                       foregroundColor: Colors.white,
                     ),
                   ),
@@ -714,7 +702,7 @@ class _EntrenadorCard extends StatelessWidget {
                 SizedBox(
                   width: double.infinity,
                   child: OutlinedButton.icon(
-                    icon: const Icon(Icons.share, size: 16),
+                    icon: const Icon(Icons.share_rounded, size: 16),
                     label:
                         const Text('Cuadre a WhatsApp'),
                     onPressed: onWhatsApp,
@@ -790,7 +778,7 @@ class _DiaTileState extends State<_DiaTile> {
             horizontal: 8, vertical: 5),
         decoration: BoxDecoration(
           color: Colors.amber.shade100,
-          borderRadius: BorderRadius.circular(6),
+          borderRadius: BorderRadius.circular(8),
           border: Border.all(color: Colors.amber.shade800),
         ),
         child: Column(
@@ -800,21 +788,14 @@ class _DiaTileState extends State<_DiaTile> {
               '⚠️ Precio modificado '
               '(Oficial: ${(oficialCent / 100).toStringAsFixed(2)} $mon → '
               'Cobrado: ${(cobradoCent / 100).toStringAsFixed(2)} $mon)',
-              style: TextStyle(
-                fontSize: 11,
-                fontWeight: FontWeight.w700,
-                color: Colors.amber.shade900,
-              ),
+              style: AppTexto.metadato.copyWith(color: Colors.amber.shade900, fontWeight: FontWeight.w700),
             ),
             if (nota != null && nota.isNotEmpty)
               Padding(
                 padding: const EdgeInsets.only(top: 2),
                 child: Text(
                   '📝 $nota',
-                  style: const TextStyle(
-                    fontSize: 11,
-                    color: Colors.black87,
-                  ),
+                  style: AppTexto.metadato.copyWith(color: Colors.black87),
                 ),
               ),
           ],
@@ -841,11 +822,11 @@ class _DiaTileState extends State<_DiaTile> {
             : '';
 
     return Container(
-      margin: const EdgeInsets.only(bottom: 6),
-      padding: const EdgeInsets.all(10),
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: Colors.grey.shade50,
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: BorderRadius.circular(12),
         border: Border.all(
             color: Colors.grey.shade300),
       ),
@@ -866,31 +847,24 @@ class _DiaTileState extends State<_DiaTile> {
                   color:
                       _badgeBg(dia.nivelAlerta),
                   borderRadius:
-                      BorderRadius.circular(6),
+                      BorderRadius.circular(8),
                 ),
                 child: Text(
                   '$icono${dia.etiquetaFecha}',
-                  style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w700,
-                    color: _badgeFg(
-                        dia.nivelAlerta),
-                  ),
+                  style: AppTexto.metadato.copyWith(color: _badgeFg(
+                        dia.nivelAlerta), fontWeight: FontWeight.w700),
                 ),
               ),
               const Spacer(),
               Text(
                 '${fmtMonto(total)} $monedaDia',
-                style: const TextStyle(
-                    fontWeight: FontWeight.bold,
-                    fontSize: 14,
-                    color: Colors.black87),
+                style: AppTexto.cuerpo.copyWith(color: Colors.black87, fontWeight: FontWeight.bold),
               ),
               IconButton(
                 visualDensity:
                     VisualDensity.compact,
-                icon: const Icon(Icons.done_all,
-                    color: Colors.teal, size: 20),
+                icon: const Icon(Icons.done_all_rounded,
+                    color: AppColores.exito, size: 20),
                 tooltip: 'Cobrar este día',
                 onPressed: widget.onConfirmar,
               ),
@@ -909,31 +883,25 @@ class _DiaTileState extends State<_DiaTile> {
                     children: [
                       Icon(
                         p.tipo == 'mensual'
-                            ? Icons.calendar_month
+                            ? Icons.calendar_month_rounded
                             : p.tipo == 'servicio'
-                                ? Icons.bolt
-                                : Icons.today,
+                                ? Icons.bolt_rounded
+                                : Icons.today_rounded,
                         size: 14,
                         color: Colors.grey.shade600,
                       ),
-                      const SizedBox(width: 6),
+                      const SizedBox(width: 8),
                       Expanded(
                         child: Text(
                           '${p.descripcion} (${p.tipo})',
-                          style: const TextStyle(
-                              fontSize: 12,
-                              color: Colors.black54),
+                          style: AppTexto.metadato.copyWith(color: Colors.black54),
                           overflow:
                               TextOverflow.ellipsis,
                         ),
                       ),
                       Text(
                         '${fmtMonto(p.monto)} ${p.moneda}',
-                        style: const TextStyle(
-                            fontSize: 12,
-                            fontWeight:
-                                FontWeight.w600,
-                            color: Colors.black87),
+                        style: AppTexto.metadato.copyWith(color: Colors.black87, fontWeight: FontWeight.w600),
                       ),
                     ],
                   ),
@@ -954,12 +922,8 @@ class _DiaTileState extends State<_DiaTile> {
                   _mostrarTodos
                       ? 'Ocultar detalles'
                       : 'Ver ${dia.pagos.length - 3} pagos más...',
-                  style: TextStyle(
-                      color: Theme.of(context)
-                          .primaryColor,
-                      fontSize: 12,
-                      fontWeight:
-                          FontWeight.w500),
+                  style: AppTexto.metadato.copyWith(color: Theme.of(context)
+                          .primaryColor, fontWeight: FontWeight.w500),
                 ),
               ),
             ),

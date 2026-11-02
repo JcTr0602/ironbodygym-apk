@@ -52,7 +52,7 @@ class ControlAccesoScreen extends StatelessWidget {
             // plan semanal, los ajustes por fecha y la línea de
             // precedencia). Antes esto abría solo «Turnos manuales».
             IconButton(
-              icon: const Icon(Icons.calendar_month),
+              icon: const Icon(Icons.calendar_month_rounded),
               tooltip: 'Turnos',
               onPressed: () => Navigator.of(context).push(
                 MaterialPageRoute(
@@ -63,8 +63,8 @@ class ControlAccesoScreen extends StatelessWidget {
           ],
           bottom: const TabBar(
             tabs: [
-              Tab(icon: Icon(Icons.sports, size: 18), text: 'Entrenadores'),
-              Tab(icon: Icon(Icons.people, size: 18), text: 'Clientes'),
+              Tab(icon: Icon(Icons.sports_rounded, size: 18), text: 'Entrenadores'),
+              Tab(icon: Icon(Icons.people_rounded, size: 18), text: 'Clientes'),
               Tab(
                   icon: Icon(Icons.person_add_alt_rounded, size: 18),
                   text: 'Invitados'),
@@ -81,12 +81,12 @@ class ControlAccesoScreen extends StatelessWidget {
                       AppEspacio.lg, AppEspacio.md, AppEspacio.lg, 0),
                   child: Card(
                     child: ListTile(
-                      leading: const Icon(Icons.manage_accounts,
-                          color: AppColores.naranja),
+                      leading: Icon(Icons.manage_accounts_rounded,
+                          color: AppColores.textoSecundario(context)),
                       title: const Text('Usuarios APK'),
                       subtitle: const Text(
                           'Cuentas de entrenadores: crear, contraseña, bloquear'),
-                      trailing: const Icon(Icons.chevron_right),
+                      trailing: const Icon(Icons.chevron_right_rounded),
                       onTap: () => Navigator.of(context).push(
                         MaterialPageRoute(
                           builder: (_) => const UsuariosScreen(),
@@ -130,6 +130,12 @@ class AccesosClientesTab extends StatefulWidget {
 
 class _AccesosClientesTabState extends State<AccesosClientesTab> {
   bool _cargando = true;
+
+  @override
+  void dispose() {
+    _busquedaCtrl.dispose();
+    super.dispose();
+  }
   // Auditoría OpenCode 2026-10-20: distinguir "sin clientes
   // pendientes" de "no se pudo consultar" (offline no es éxito).
   bool _sinAccesoFallo = false;
@@ -146,6 +152,9 @@ class _AccesosClientesTabState extends State<AccesosClientesTab> {
   // Filtros (propuestas 12-23)
   String _vista = 'todos'; // todos|activos|nunca|7d|bloqueados|revocados|sinacceso
   String _busqueda = '';
+  // Pasada 2 de Argón (1.20): el buscador necesita controlador
+  // para que «Limpiar» borre también el texto visible.
+  final _busquedaCtrl = TextEditingController();
   String _orden = 'ultimo'; // ultimo|nombre|activacion
   bool _soloPinPendiente = false;
   bool _soloInactivos30 = false;
@@ -279,6 +288,7 @@ class _AccesosClientesTabState extends State<AccesosClientesTab> {
       _soloInactivos30;
 
   void _limpiarFiltros() {
+    _busquedaCtrl.clear();
     setState(() {
       _vista = 'todos';
       _busqueda = '';
@@ -312,7 +322,7 @@ class _AccesosClientesTabState extends State<AccesosClientesTab> {
                           Text(_error!, style: AppTexto.secundario),
                           const SizedBox(height: AppEspacio.md),
                           FilledButton.icon(
-                            icon: const Icon(Icons.refresh, size: 18),
+                            icon: const Icon(Icons.refresh_rounded, size: 18),
                             label: const Text('Reintentar'),
                             onPressed: _cargar,
                           ),
@@ -360,7 +370,7 @@ class _AccesosClientesTabState extends State<AccesosClientesTab> {
             children: [
               Expanded(
                 child: OutlinedButton.icon(
-                  icon: const Icon(Icons.bar_chart, size: 18),
+                  icon: const Icon(Icons.bar_chart_rounded, size: 18),
                   label: const Text('Adopción'),
                   onPressed: () => Navigator.of(context).push(
                     MaterialPageRoute(
@@ -373,7 +383,7 @@ class _AccesosClientesTabState extends State<AccesosClientesTab> {
               const SizedBox(width: 8),
               Expanded(
                 child: OutlinedButton.icon(
-                  icon: const Icon(Icons.campaign_outlined, size: 18),
+                  icon: const Icon(Icons.campaign_rounded, size: 18),
                   label: const Text('Campaña WA'),
                   onPressed: () => Navigator.of(context).push(
                     MaterialPageRoute(
@@ -393,19 +403,19 @@ class _AccesosClientesTabState extends State<AccesosClientesTab> {
           child: Row(
             children: [
               _tarjetaFiltro('todos', 'Todos', '${todos.length}',
-                  Icons.people, Colors.blueGrey),
+                  Icons.people_rounded, Colors.blueGrey),
               _tarjetaFiltro('activos', 'Activos', '$activos',
-                  Icons.check_circle, AppColores.exitoOscuro),
+                  Icons.check_circle_rounded, AppColores.exitoOscuro),
               _tarjetaFiltro('nunca', 'Nunca han entrado', '$nunca',
-                  Icons.login, Colors.grey),
+                  Icons.login_rounded, Colors.grey),
               _tarjetaFiltro('7d', 'Últimos 7 días', '$ult7',
-                  Icons.schedule, AppColores.infoOscuro),
+                  Icons.schedule_rounded, AppColores.infoOscuro),
               _tarjetaFiltro('bloqueados', 'Bloqueados', '$bloqueados',
-                  Icons.lock, AppColores.alertaOscuro),
+                  Icons.lock_rounded, AppColores.alertaOscuro),
               _tarjetaFiltro('revocados', 'Revocados', '$revocados',
-                  Icons.block, Colors.grey.shade700),
+                  Icons.block_rounded, Colors.grey.shade700),
               _tarjetaFiltro('sinacceso', 'Sin acceso',
-                  '${_sinAcceso.length}', Icons.person_add,
+                  '${_sinAcceso.length}', Icons.person_add_rounded,
                   AppColores.naranjaOscuro),
             ],
           ),
@@ -417,10 +427,11 @@ class _AccesosClientesTabState extends State<AccesosClientesTab> {
             children: [
               Expanded(
                 child: TextField(
+                  controller: _busquedaCtrl,
                   onChanged: (v) => setState(() => _busqueda = v.trim()),
                   decoration: InputDecoration(
                     hintText: 'Buscar por nombre o teléfono…',
-                    prefixIcon: const Icon(Icons.search, size: 20),
+                    prefixIcon: const Icon(Icons.search_rounded, size: 20),
                     isDense: true,
                     border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(12),
@@ -429,7 +440,7 @@ class _AccesosClientesTabState extends State<AccesosClientesTab> {
                 ),
               ),
               PopupMenuButton<String>(
-                icon: const Icon(Icons.sort),
+                icon: const Icon(Icons.sort_rounded),
                 tooltip: 'Ordenar',
                 onSelected: (v) => setState(() => _orden = v),
                 itemBuilder: (ctx) => [
@@ -439,7 +450,7 @@ class _AccesosClientesTabState extends State<AccesosClientesTab> {
                 ],
               ),
               IconButton(
-                icon: const Icon(Icons.history),
+                icon: const Icon(Icons.history_rounded),
                 tooltip: 'Auditoría del panel',
                 onPressed: () => Navigator.of(context).push(
                   MaterialPageRoute(
@@ -448,7 +459,7 @@ class _AccesosClientesTabState extends State<AccesosClientesTab> {
                 ),
               ),
               IconButton(
-                icon: const Icon(Icons.refresh),
+                icon: const Icon(Icons.refresh_rounded),
                 tooltip: 'Recargar',
                 onPressed: _cargar,
               ),
@@ -505,11 +516,11 @@ class _AccesosClientesTabState extends State<AccesosClientesTab> {
             padding: const EdgeInsets.fromLTRB(
                 AppEspacio.lg, 0, AppEspacio.lg, AppEspacio.sm),
             child: Card(
-              color: AppColores.alerta.withOpacity(0.12),
+              color: AppColores.alerta.withValues(alpha: 0.12),
               child: ListTile(
-                leading: const Icon(Icons.key, size: 20),
+                leading: const Icon(Icons.key_rounded, size: 20),
                 title: const Text('PINs de la última generación',
-                    style: TextStyle(fontSize: 14)),
+                    style: AppTexto.cuerpo),
                 subtitle: const Text(
                     'Aún no confirmaste la entrega. Si la app se cierra, '
                     'se pierden y habrá que resetearlos.'),
@@ -538,7 +549,7 @@ class _AccesosClientesTabState extends State<AccesosClientesTab> {
               child: SizedBox(
                 width: double.infinity,
                 child: FilledButton.icon(
-                  icon: const Icon(Icons.group_add, size: 18),
+                  icon: const Icon(Icons.group_add_rounded, size: 18),
                   label: Text(
                       'Generar acceso a ${selVisibles.length} seleccionados'),
                   onPressed:
@@ -556,7 +567,7 @@ class _AccesosClientesTabState extends State<AccesosClientesTab> {
       value: valor,
       child: Row(
         children: [
-          Icon(_orden == valor ? Icons.check : null, size: 18),
+          Icon(_orden == valor ? Icons.check_rounded : null, size: 18),
           const SizedBox(width: 8),
           Text(etiqueta),
         ],
@@ -586,8 +597,8 @@ class _AccesosClientesTabState extends State<AccesosClientesTab> {
           padding: const EdgeInsets.all(AppEspacio.md),
           decoration: BoxDecoration(
             color: seleccionada
-                ? color.withOpacity(0.16)
-                : color.withOpacity(0.06),
+                ? color.withValues(alpha: 0.16)
+                : color.withValues(alpha: 0.06),
             border: Border.all(
               color: seleccionada ? color : Colors.transparent,
               width: 1.4,
@@ -599,7 +610,7 @@ class _AccesosClientesTabState extends State<AccesosClientesTab> {
             children: [
               Icon(icono, color: color, size: 20),
               Text(valor,
-                  style: AppTexto.titulo.copyWith(fontSize: 20)),
+                  style: AppTexto.tituloPagina),
               Text(etiqueta,
                   style: AppTexto.minuscula,
                   textAlign: TextAlign.center,
@@ -629,12 +640,9 @@ class _AccesosClientesTabState extends State<AccesosClientesTab> {
   /// v1.7.0: distintivo dorado de Cuenta a la Casa en Control de
   /// Acceso (la Casa pasa siempre; se marca, no se bloquea).
   Widget _chipCasa() {
-    return const Chip(
+    return Chip(
       label: Text('Casa',
-          style: TextStyle(
-              color: Color(0xFF7A5A00),
-              fontSize: 11,
-              fontWeight: FontWeight.w700)),
+          style: AppTexto.minuscula.copyWith(color: Color(0xFF7A5A00), fontWeight: FontWeight.w700)),
       avatar: Icon(Icons.home_rounded,
           size: 14, color: Color(0xFFB8860B)),
       backgroundColor: Color(0xFFFFF3CD),
@@ -661,7 +669,7 @@ class _AccesosClientesTabState extends State<AccesosClientesTab> {
                   overflow: TextOverflow.ellipsis),
             ),
             if (_casaIds.contains(a.clienteId)) ...[
-              const SizedBox(width: 6),
+              const SizedBox(width: 8),
               _chipCasa(),
             ],
           ],
@@ -675,19 +683,19 @@ class _AccesosClientesTabState extends State<AccesosClientesTab> {
           children: [
             if (a.estado == 'bloqueado')
               IconButton(
-                icon: const Icon(Icons.lock_open, size: 20),
+                icon: const Icon(Icons.lock_open_rounded, size: 20),
                 tooltip: 'Desbloquear',
                 onPressed: () => _desbloqueoRapido(a),
               ),
             Chip(
               label: Text(chipTexto,
                   style:
-                      const TextStyle(color: Colors.white, fontSize: 11)),
+                      AppTexto.minuscula.copyWith(color: Colors.white)),
               backgroundColor: chipColor,
               visualDensity: VisualDensity.compact,
             ),
             IconButton(
-              icon: const Icon(Icons.more_vert, size: 20),
+              icon: const Icon(Icons.more_vert_rounded, size: 20),
               tooltip: 'Opciones rápidas',
               onPressed: () => _menuAcciones(a),
             ),
@@ -729,11 +737,7 @@ class _AccesosClientesTabState extends State<AccesosClientesTab> {
   Future<void> _conExclusion(
       AccesoCliente a, Future<void> Function() accion) async {
     if (!_accionesEnCurso.add(a.clienteId)) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-            content:
-                Text('Ya hay una acción en curso para ${a.nombre}.')),
-      );
+      mostrarSnack(context, 'Ya hay una acción en curso para ${a.nombre}.', significado: SignificadoChip.alerta);
       return;
     }
     try {
@@ -784,7 +788,7 @@ class _AccesosClientesTabState extends State<AccesosClientesTab> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const Icon(Icons.cloud_off, color: AppColores.error),
+                const Icon(Icons.cloud_off_rounded, color: AppColores.error),
                 const SizedBox(height: AppEspacio.sm),
                 const Text(
                   'No se pudo cargar la lista de clientes sin acceso. '
@@ -795,7 +799,7 @@ class _AccesosClientesTabState extends State<AccesosClientesTab> {
                 const SizedBox(height: AppEspacio.md),
                 OutlinedButton.icon(
                   onPressed: _cargar,
-                  icon: const Icon(Icons.refresh, size: 18),
+                  icon: const Icon(Icons.refresh_rounded, size: 18),
                   label: const Text('Reintentar'),
                 ),
               ],
@@ -826,12 +830,7 @@ class _AccesosClientesTabState extends State<AccesosClientesTab> {
                 setState(() {
                   if (v == true) {
                     if (_seleccion.intersection(visiblesIds).length >= 40) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content:
-                              Text('Máximo 40 por lote (límite acordado).'),
-                        ),
-                      );
+                      mostrarSnack(context, 'Máximo 40 por lote (límite acordado).', significado: SignificadoChip.alerta);
                       return;
                     }
                     _seleccion.add(c.clienteId);
@@ -850,7 +849,7 @@ class _AccesosClientesTabState extends State<AccesosClientesTab> {
                       overflow: TextOverflow.ellipsis),
                 ),
                 if (_casaIds.contains(c.clienteId)) ...[
-                  const SizedBox(width: 6),
+                  const SizedBox(width: 8),
                   _chipCasa(),
                 ],
               ],
@@ -913,9 +912,7 @@ class _AccesosClientesTabState extends State<AccesosClientesTab> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e')),
-        );
+        mostrarSnack(context, 'Error: $e', significado: SignificadoChip.error);
       }
     } finally {
       if (mounted) setState(() => _generandoAcceso = false);
@@ -940,14 +937,9 @@ class _AccesosClientesTabState extends State<AccesosClientesTab> {
     // acceso.
     if (ids.length > 40) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              'Seleccionaste ${ids.length} clientes; el máximo por '
+        mostrarSnack(context, 'Seleccionaste ${ids.length} clientes; el máximo por '
               'lote es 40. Desmarca el excedente y vuelve a generar.',
-            ),
-          ),
-        );
+            significado: SignificadoChip.alerta);
       }
       return;
     }
@@ -1004,9 +996,7 @@ class _AccesosClientesTabState extends State<AccesosClientesTab> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e')),
-        );
+        mostrarSnack(context, 'Error: $e', significado: SignificadoChip.error);
       }
     } finally {
       if (mounted) setState(() => _generandoAcceso = false);
@@ -1039,7 +1029,7 @@ class _AccesosClientesTabState extends State<AccesosClientesTab> {
                     if (r['ok'] != true) {
                       return ListTile(
                         dense: true,
-                        leading: const Icon(Icons.error,
+                        leading: const Icon(Icons.error_rounded,
                             color: AppColores.error, size: 18),
                         title: Text('Cliente ${r['cliente_id']}'),
                         subtitle: Text('${r['error'] ?? 'Error'}'),
@@ -1053,7 +1043,7 @@ class _AccesosClientesTabState extends State<AccesosClientesTab> {
                       subtitle: Text(
                           'PIN: ${r['pin_temporal']} · ${r['telefono'] ?? ''}'),
                       trailing: IconButton(
-                        icon: const Icon(Icons.chat, size: 20),
+                        icon: const Icon(Icons.chat_rounded, size: 20),
                         tooltip: 'Enviar por WhatsApp',
                         onPressed: telWa == null
                             ? null
@@ -1147,9 +1137,7 @@ class _AuditoriaAccesosScreenState extends State<AuditoriaAccesosScreen> {
     } catch (e) {
       if (mounted) {
         setState(() => _cargando = false);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e')),
-        );
+        mostrarSnack(context, 'Error: $e', significado: SignificadoChip.error);
       }
     }
   }
@@ -1173,7 +1161,7 @@ class _AuditoriaAccesosScreenState extends State<AuditoriaAccesosScreen> {
         title: const Text('Auditoría de accesos'),
         actions: [
           IconButton(
-            icon: const Icon(Icons.refresh),
+            icon: const Icon(Icons.refresh_rounded),
             onPressed: _cargando ? null : _cargar,
           ),
         ],
@@ -1192,7 +1180,7 @@ class _AuditoriaAccesosScreenState extends State<AuditoriaAccesosScreen> {
                     final cuando = tiempoRelativo(
                         m['creado_en']?.toString());
                     return ListTile(
-                      leading: const Icon(Icons.history, size: 20),
+                      leading: const Icon(Icons.history_rounded, size: 20),
                       title: Text(_nombres['${m['accion']}'] ??
                           '${m['accion']}'),
                       subtitle: Text(

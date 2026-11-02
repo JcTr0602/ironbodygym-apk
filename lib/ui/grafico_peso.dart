@@ -3,6 +3,7 @@
 // Usa el modelo Medicion local (pesoKg + createdAt).
 import 'package:flutter/material.dart';
 import '../tiempo.dart';
+import 'diseno.dart';
 import 'pestana_progreso.dart';
 
 /// Naranja Iron Body
@@ -47,13 +48,12 @@ class GraficoPesoEntrenador extends StatelessWidget {
           children: [
             Row(
               children: [
-                const Icon(Icons.show_chart,
-                    color: _naranja, size: 20),
+                Icon(Icons.show_chart_rounded,
+                    color: AppColores.textoSecundario(context), size: 20),
                 const SizedBox(width: 8),
-                const Text(
+                Text(
                   'EVOLUCIÓN DE PESO',
-                  style: TextStyle(
-                    fontSize: 11,
+                  style: AppTexto.minuscula.copyWith(
                     fontWeight: FontWeight.w800,
                     color: Colors.grey,
                     letterSpacing: 1.0,
@@ -62,11 +62,7 @@ class GraficoPesoEntrenador extends StatelessWidget {
                 const Spacer(),
                 Text(
                   '${ordenado.first.pesoKg.toStringAsFixed(1)} → ${ordenado.last.pesoKg.toStringAsFixed(1)} kg',
-                  style: const TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w700,
-                    color: _naranja,
-                  ),
+                  style: AppTexto.secundario.copyWith(color: _naranja, fontWeight: FontWeight.w700),
                 ),
               ],
             ),
@@ -90,15 +86,11 @@ class GraficoPesoEntrenador extends StatelessWidget {
               children: [
                 Text(
                   fmtFecha(ordenado.first.createdAt),
-                  style: const TextStyle(
-                      fontSize: 10,
-                      color: Colors.grey),
+                  style: AppTexto.minuscula.copyWith(color: Colors.grey),
                 ),
                 Text(
                   fmtFecha(ordenado.last.createdAt),
-                  style: const TextStyle(
-                      fontSize: 10,
-                      color: Colors.grey),
+                  style: AppTexto.minuscula.copyWith(color: Colors.grey),
                 ),
               ],
             ),
@@ -246,11 +238,7 @@ class _GraficoPesoPainter extends CustomPainter {
     final tp = TextPainter(
       text: TextSpan(
         text: texto,
-        style: const TextStyle(
-          fontSize: 11,
-          fontWeight: FontWeight.w700,
-          color: _naranja,
-        ),
+        style: AppTexto.metadato.copyWith(color: _naranja, fontWeight: FontWeight.w700),
       ),
       textDirection: TextDirection.ltr,
     )..layout();

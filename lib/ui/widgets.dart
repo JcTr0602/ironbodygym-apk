@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'diseno.dart';
+import 'componentes.dart';
 import '../localdb.dart';
 import '../sync.dart';
 import '../tiempo.dart';
@@ -93,7 +94,7 @@ class _SyncBannerState extends State<SyncBanner>
               Color(0xFFF59E0B),
               Color(0xFFEA580C)
             ];
-            icono = Icons.sync;
+            icono = Icons.sync_rounded;
             titulo = 'Enviando tus cambios';
             subtitulo = s.detalle;
             break;
@@ -102,7 +103,7 @@ class _SyncBannerState extends State<SyncBanner>
               Color(0xFF3B82F6),
               Color(0xFF1D4ED8)
             ];
-            icono = Icons.cloud_download_outlined;
+            icono = Icons.cloud_download_rounded;
             titulo = 'Descargando datos';
             subtitulo = s.detalle;
             break;
@@ -111,7 +112,7 @@ class _SyncBannerState extends State<SyncBanner>
               Color(0xFFA855F7),
               Color(0xFF7C3AED)
             ];
-            icono = Icons.photo_camera_outlined;
+            icono = Icons.photo_camera_rounded;
             titulo = 'Subiendo fotos';
             subtitulo = s.detalle;
             break;
@@ -120,7 +121,7 @@ class _SyncBannerState extends State<SyncBanner>
               Color(0xFFEF4444),
               Color(0xFFB91C1C)
             ];
-            icono = Icons.error_outline;
+            icono = Icons.error_outline_rounded;
             titulo = 'No se pudo sincronizar';
             subtitulo = s.lastError?.mensaje;
             break;
@@ -129,20 +130,20 @@ class _SyncBannerState extends State<SyncBanner>
             titulo = s.frase;
             if (!s.enLinea) {
               gradiente = const [
-                Color(0xFF9CA3AF),
-                Color(0xFF6B7280)
+                AppColores.bannerGrisA,
+                AppColores.bannerGrisB
               ];
-              icono = Icons.cloud_off_outlined;
+              icono = Icons.cloud_off_rounded;
               // v1.2.5 (D12): guardado vs sincronizado, sin tecnicismos.
               subtitulo = s.ultimoGuardado != null
                   ? 'Guardado en este teléfono ${_hace(s.ultimoGuardado)}'
                   : 'Toca para intentar de nuevo';
             } else if (s.pending > 0) {
               gradiente = const [
-                Color(0xFFFBBF24),
-                Color(0xFFD97706)
+                AppColores.bannerAlertaA,
+                AppColores.alertaOscuro
               ];
-              icono = Icons.schedule;
+              icono = Icons.schedule_rounded;
               // v1.2.6 (Gemini): prioriza lo pendiente sobre el último sync.
               final nCambios = '${s.pending} cambio${s.pending == 1 ? '' : 's'}';
               subtitulo = s.ultimoSincronizado != null
@@ -150,27 +151,27 @@ class _SyncBannerState extends State<SyncBanner>
                   : '$nCambios listos para subir';
             } else if (s.hayNovedades) {
               gradiente = const [
-                Color(0xFF60A5FA),
-                Color(0xFF2563EB)
+                AppColores.bannerInfoA,
+                AppColores.bannerInfoB
               ];
-              icono = Icons.cloud_download_outlined;
+              icono = Icons.cloud_download_rounded;
               titulo = 'Hay cambios nuevos';
               subtitulo = 'Toca para descargar';
             } else if (s.lastOk == null) {
               // v1.1.1: nunca se ha sincronizado: no decir "Todo al día"
               gradiente = const [
-                Color(0xFF9CA3AF),
-                Color(0xFF6B7280)
+                AppColores.bannerGrisA,
+                AppColores.bannerGrisB
               ];
-              icono = Icons.cloud_off_outlined;
+              icono = Icons.cloud_off_rounded;
               titulo = 'Sin sincronizar';
               subtitulo = 'Toca para sincronizar';
             } else {
               gradiente = const [
-                Color(0xFF22C55E),
-                Color(0xFF15803D)
+                AppColores.exito,
+                AppColores.exitoOscuro
               ];
-              icono = Icons.check_circle_outline;
+              icono = Icons.check_circle_outline_rounded;
               // v1.0.17: resumen discreto de la última sincronización
               final res = s.ultimoResumen;
               final resHora = s.ultimoResumenHora;
@@ -208,10 +209,10 @@ class _SyncBannerState extends State<SyncBanner>
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
               ),
-              borderRadius: BorderRadius.circular(10),
+              borderRadius: BorderRadius.circular(12),
             ),
             child: InkWell(
-              borderRadius: BorderRadius.circular(10),
+              borderRadius: BorderRadius.circular(12),
               onTap: () {
                 if (enProgreso) return;
                 final alc = widget.alcance;
@@ -223,7 +224,7 @@ class _SyncBannerState extends State<SyncBanner>
               },
               child: Padding(
                 padding: const EdgeInsets.symmetric(
-                    horizontal: 10, vertical: 6),
+                    horizontal: 12, vertical: 8),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
@@ -234,22 +235,16 @@ class _SyncBannerState extends State<SyncBanner>
                       child: Icon(icono,
                           color: Colors.white, size: 16),
                     ),
-                    const SizedBox(width: 6),
+                    const SizedBox(width: 8),
                     Flexible(
                       child: Text(titulo,
-                          style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 12,
-                              fontWeight: FontWeight.w600),
+                          style: AppTexto.metadato.copyWith(color: Colors.white, fontWeight: FontWeight.w600),
                           overflow: TextOverflow.ellipsis),
                     ),
                     if (pct != null) ...[
-                      const SizedBox(width: 6),
+                      const SizedBox(width: 8),
                       Text(pct,
-                          style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 12,
-                              fontWeight: FontWeight.bold)),
+                          style: AppTexto.metadato.copyWith(color: Colors.white, fontWeight: FontWeight.bold)),
                     ],
                   ],
                 ),
@@ -289,7 +284,7 @@ class _SyncBannerState extends State<SyncBanner>
             },
             child: Padding(
               padding: const EdgeInsets.symmetric(
-                  horizontal: 14, vertical: 12),
+                  horizontal: 16, vertical: 12),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
@@ -310,17 +305,11 @@ class _SyncBannerState extends State<SyncBanner>
                           mainAxisSize: MainAxisSize.min,
                           children: [
                             Text(titulo,
-                                style: const TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 14,
-                                    fontWeight:
-                                        FontWeight.bold)),
+                                style: AppTexto.cuerpo.copyWith(color: Colors.white, fontWeight: FontWeight.bold)),
                             if (subtitulo != null &&
                                 subtitulo.isNotEmpty)
                               Text(subtitulo,
-                                  style: const TextStyle(
-                                      color: Colors.white,
-                                      fontSize: 12),
+                                  style: AppTexto.metadato.copyWith(color: Colors.white),
                                   maxLines:
                                       _expandido ? 10 : 1,
                                   overflow:
@@ -330,12 +319,9 @@ class _SyncBannerState extends State<SyncBanner>
                       ),
                       if (pct != null)
                         Text(pct,
-                            style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 16,
-                                fontWeight: FontWeight.bold)),
+                            style: AppTexto.titulo.copyWith(color: Colors.white)),
                       if (!enProgreso)
-                        const Icon(Icons.chevron_right,
+                        const Icon(Icons.chevron_right_rounded,
                             color: Colors.white70,
                             size: 20),
                     ],
@@ -389,9 +375,7 @@ class _SyncBannerState extends State<SyncBanner>
                           padding: const EdgeInsets.only(
                               top: 8),
                           child: Text(det,
-                              style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 12)),
+                              style: AppTexto.metadato.copyWith(color: Colors.white)),
                         );
                       },
                     ),
@@ -435,8 +419,7 @@ class Campo extends StatelessWidget {
 Future<void> copiar(BuildContext context, String texto) async {
   await Clipboard.setData(ClipboardData(text: texto));
   if (context.mounted) {
-    ScaffoldMessenger.of(context)
-        .showSnackBar(const SnackBar(content: Text('Copiado')));
+    mostrarSnack(context, 'Copiado');
   }
 }
 
@@ -466,19 +449,19 @@ class SyncPill extends StatelessWidget {
         final String texto;
         if (s.phase == SyncPhase.error) {
           color = const Color(0xFFEF4444);
-          icono = Icons.error_outline;
+          icono = Icons.error_outline_rounded;
           texto = 'Error';
         } else if (enProgreso) {
           color = const Color(0xFFF59E0B);
-          icono = Icons.sync;
+          icono = Icons.sync_rounded;
           texto = 'Sincronizando';
         } else if (s.pending > 0) {
           color = AppColores.alerta;
-          icono = Icons.schedule;
+          icono = Icons.schedule_rounded;
           texto = '${s.pending} por subir';
         } else {
           color = AppColores.exito;
-          icono = Icons.check_circle_outline;
+          icono = Icons.check_circle_outline_rounded;
           // A2 (estéticas 1.19): el chip dice también hace cuánto
           // fue el último sync confirmado («Al día · hace 12 min»);
           // sin marca previa queda solo «Al día». La cifra se
@@ -495,7 +478,7 @@ class SyncPill extends StatelessWidget {
           onTap: onTap,
           child: Container(
             padding: const EdgeInsets.symmetric(
-                horizontal: 10, vertical: 6),
+                horizontal: 12, vertical: 8),
             decoration: BoxDecoration(
               color: color.withValues(alpha: 0.15),
               borderRadius: BorderRadius.circular(20),
@@ -505,13 +488,10 @@ class SyncPill extends StatelessWidget {
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Icon(icono, size: 14, color: color),
+                Icon(icono, size: 16, color: color),
                 const SizedBox(width: 4),
                 Text(texto,
-                    style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w700,
-                        color: color)),
+                    style: AppTexto.metadato.copyWith(color: color, fontWeight: FontWeight.w700)),
               ],
             ),
           ),

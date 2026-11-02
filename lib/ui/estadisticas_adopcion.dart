@@ -85,7 +85,7 @@ class _EstadisticasAdopcionScreenState
         title: const Text('Adopción de la app'),
         actions: [
           IconButton(
-            icon: const Icon(Icons.refresh),
+            icon: const Icon(Icons.refresh_rounded),
             tooltip: 'Actualizar',
             onPressed: _cargando ? null : _cargar,
           ),
@@ -105,7 +105,7 @@ class _EstadisticasAdopcionScreenState
                             style: AppTexto.secundario),
                       ),
                       FilledButton.icon(
-                        icon: const Icon(Icons.refresh, size: 18),
+                        icon: const Icon(Icons.refresh_rounded, size: 18),
                         label: const Text('Reintentar'),
                         onPressed: _cargar,
                       ),
@@ -201,7 +201,7 @@ class _EstadisticasAdopcionScreenState
               leading: CircleAvatar(
                 radius: 14,
                 child: Text('${i + 1}',
-                    style: const TextStyle(fontSize: 12)),
+                    style: AppTexto.metadato),
               ),
               title: Text((top[i]['nombre'] ?? '').toString()),
               trailing: Text('${top[i]['ingresos'] ?? 0} ingresos',
@@ -220,17 +220,14 @@ class _EstadisticasAdopcionScreenState
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(titulo,
-                  style: const TextStyle(
-                      fontSize: 11, color: Colors.grey)),
+                  style: AppTexto.minuscula.copyWith(color: Colors.grey)),
               const SizedBox(height: 4),
               Text(valor,
-                  style: const TextStyle(
-                      fontSize: 22, fontWeight: FontWeight.bold)),
+                  style: AppTexto.metrica),
               if (pie != null) ...[
                 const SizedBox(height: 2),
                 Text(pie,
-                    style: const TextStyle(
-                        fontSize: 10, color: Colors.grey)),
+                    style: AppTexto.minuscula.copyWith(color: Colors.grey)),
               ],
             ],
           ),

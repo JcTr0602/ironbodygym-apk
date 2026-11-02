@@ -373,9 +373,7 @@ class _CampanaWaScreenState extends State<CampanaWaScreen> {
         item['estado'] = 'pendiente';
         if (mounted) {
           setState(() {});
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-              content: Text(
-                  'No se pudo guardar el avance; no se abrió WhatsApp.')));
+          mostrarSnack(context, 'No se pudo guardar el avance; no se abrió WhatsApp.', significado: SignificadoChip.error);
         }
         return;
       }
@@ -387,8 +385,7 @@ class _CampanaWaScreenState extends State<CampanaWaScreen> {
         await launchUrl(url, mode: LaunchMode.externalApplication);
       } catch (_) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('No se pudo abrir WhatsApp')));
+          mostrarSnack(context, 'No se pudo abrir WhatsApp', significado: SignificadoChip.error);
         }
       }
     } finally {
@@ -408,9 +405,7 @@ class _CampanaWaScreenState extends State<CampanaWaScreen> {
     final ok = await _persistir();
     if (!mounted) return;
     if (!ok) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content:
-              Text('Ojo: no se pudo guardar el avance en el dispositivo.')));
+      mostrarSnack(context, 'Ojo: no se pudo guardar el avance en el dispositivo.', significado: SignificadoChip.error);
     }
     _refrescarPrevia();
     if (_actual == null) {
@@ -443,8 +438,7 @@ class _CampanaWaScreenState extends State<CampanaWaScreen> {
           _plantillaSel = '';
         }
       });
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('Plantillas guardadas (se sincronizarán)')));
+      mostrarSnack(context, 'Plantillas guardadas (se sincronizarán)', significado: SignificadoChip.exito);
     }
   }
 
@@ -500,8 +494,7 @@ class _CampanaWaScreenState extends State<CampanaWaScreen> {
     nomCtrl.dispose();
     txtCtrl.dispose();
     if (nombre.isEmpty || texto.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('La plantilla necesita nombre y texto')));
+      mostrarSnack(context, 'La plantilla necesita nombre y texto', significado: SignificadoChip.alerta);
       return;
     }
     // El servidor también lo rechaza, pero el estado optimista
@@ -510,8 +503,7 @@ class _CampanaWaScreenState extends State<CampanaWaScreen> {
         p['nombre'] != existente?['nombre'] &&
         '${p['nombre']}'.toLowerCase() == nombre.toLowerCase());
     if (duplicada) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('Ya existe una plantilla con ese nombre.')));
+      mostrarSnack(context, 'Ya existe una plantilla con ese nombre.', significado: SignificadoChip.alerta);
       return;
     }
     final nuevas = [
@@ -545,14 +537,14 @@ class _CampanaWaScreenState extends State<CampanaWaScreen> {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     IconButton(
-                      icon: const Icon(Icons.edit_outlined, size: 20),
+                      icon: const Icon(Icons.edit_rounded, size: 20),
                       onPressed: () {
                         Navigator.of(ctx).pop();
                         _editarPlantilla(existente: p);
                       },
                     ),
                     IconButton(
-                      icon: const Icon(Icons.delete_outline, size: 20),
+                      icon: const Icon(Icons.delete_outline_rounded, size: 20),
                       onPressed: () async {
                         Navigator.of(ctx).pop();
                         await _guardarPlantillas([
@@ -565,7 +557,7 @@ class _CampanaWaScreenState extends State<CampanaWaScreen> {
                 ),
               ),
             ListTile(
-              leading: const Icon(Icons.add),
+              leading: const Icon(Icons.add_rounded),
               title: const Text('Nueva plantilla'),
               onTap: () {
                 Navigator.of(ctx).pop();
@@ -603,24 +595,24 @@ class _CampanaWaScreenState extends State<CampanaWaScreen> {
           Card(
             color: AppColores.naranja.withValues(alpha: 0.12),
             child: ListTile(
-              leading: const Icon(Icons.play_circle_outline),
+              leading: const Icon(Icons.play_circle_outline_rounded),
               title: Text(
                   'Reanudar tanda ($_prevResueltos/$_prevTotal)'),
               subtitle: const Text(
                   'Quedó una tanda sin terminar en este teléfono'),
               trailing: IconButton(
-                icon: const Icon(Icons.delete_outline),
+                icon: const Icon(Icons.delete_outline_rounded),
                 tooltip: 'Descartar',
                 onPressed: _descartarTanda,
               ),
               onTap: () => setState(() => _fase = 'run'),
             ),
           ),
-        const Text(
+        Text(
           'Envío asistido, uno a uno, desde tu WhatsApp. La app '
           'prepara el texto y lleva la cuenta; tú tocas enviar en '
           'cada chat. Máximo 40 por tanda.',
-          style: TextStyle(fontSize: 13, color: Colors.grey),
+          style: AppTexto.secundario.copyWith(color: Colors.grey),
         ),
         const SizedBox(height: 16),
         Text('¿A quién?',
@@ -668,7 +660,7 @@ class _CampanaWaScreenState extends State<CampanaWaScreen> {
             ),
             if (esDueno)
               TextButton.icon(
-                icon: const Icon(Icons.edit_note, size: 18),
+                icon: const Icon(Icons.edit_note_rounded, size: 18),
                 label: const Text('Plantillas'),
                 onPressed: _gestionarPlantillas,
               ),
@@ -720,7 +712,7 @@ class _CampanaWaScreenState extends State<CampanaWaScreen> {
         ],
         const SizedBox(height: 20),
         FilledButton.icon(
-          icon: const Icon(Icons.playlist_play),
+          icon: const Icon(Icons.playlist_play_rounded),
           label: const Text('Iniciar tanda'),
           onPressed: _iniciarTanda,
         ),
@@ -750,7 +742,7 @@ class _CampanaWaScreenState extends State<CampanaWaScreen> {
         Text(
           'Resueltos $_resueltos de ${_items.length} · '
           'enviados $_enviados · saltados $_saltados',
-          style: const TextStyle(fontSize: 12, color: Colors.grey),
+          style: AppTexto.metadato.copyWith(color: Colors.grey),
         ),
         const SizedBox(height: 16),
         Card(
@@ -760,8 +752,7 @@ class _CampanaWaScreenState extends State<CampanaWaScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text('${actual['nombre']}',
-                    style: const TextStyle(
-                        fontSize: 18, fontWeight: FontWeight.bold)),
+                    style: AppTexto.titulo),
                 Text('Tel. ${actual['telefono']}',
                     style: const TextStyle(color: Colors.grey)),
                 const Divider(height: 24),
@@ -781,7 +772,7 @@ class _CampanaWaScreenState extends State<CampanaWaScreen> {
             children: [
               Expanded(
                 child: FilledButton.icon(
-                  icon: const Icon(Icons.check, size: 18),
+                  icon: const Icon(Icons.check_rounded, size: 18),
                   label: const Text('Sí, enviado'),
                   onPressed: () => _resolver(actual, 'enviado'),
                 ),
@@ -797,7 +788,7 @@ class _CampanaWaScreenState extends State<CampanaWaScreen> {
           ),
         ] else ...[
           FilledButton.icon(
-            icon: const Icon(Icons.chat, size: 18),
+            icon: const Icon(Icons.chat_rounded, size: 18),
             label: const Text('Abrir WhatsApp'),
             onPressed:
                 _abriendoWa ? null : () => _abrirWhatsApp(actual),
@@ -828,11 +819,11 @@ class _CampanaWaScreenState extends State<CampanaWaScreen> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.check_circle_outline,
+            const Icon(Icons.check_circle_outline_rounded,
                 size: 56, color: AppColores.exito),
             const SizedBox(height: 12),
             Text('Tanda terminada',
-                style: AppTexto.titulo.copyWith(fontSize: 20)),
+                style: AppTexto.tituloPagina),
             const SizedBox(height: 8),
             Text(
               'Enviados: $_enviados · Saltados: $_saltados · '

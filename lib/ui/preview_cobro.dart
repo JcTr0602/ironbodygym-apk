@@ -19,10 +19,12 @@ library;
 import 'package:flutter/material.dart';
 import 'package:uuid/uuid.dart';
 
+import '../comprobantes.dart';
 import '../localdb.dart';
 import '../negocio.dart';
 import '../tiempo.dart';
 import 'componentes.dart';
+import 'aviso_duplicado.dart';
 import 'confirmacion_cobro.dart';
 import 'diseno.dart';
 
@@ -70,9 +72,9 @@ class _PreviewCobroScreenState extends State<PreviewCobroScreen> {
                     children: [
                       _fila(context, 'Cliente', widget.nombreCliente),
                       const Divider(),
-                      _fila(context, 'Monto', widget.montoTexto),
+                      _filaMonto(context),
                       const Divider(),
-                      _fila(context, 'Método', widget.metodoTexto),
+                      _filaMetodo(context),
                       const Divider(),
                       _fila(context, 'Período', widget.periodoTexto),
                       const Divider(),
@@ -91,7 +93,7 @@ class _PreviewCobroScreenState extends State<PreviewCobroScreen> {
                     'Revisa antes de confirmar: al confirmar se guarda '
                     'el cobro en el teléfono.',
                     textAlign: TextAlign.center,
-                    style: TextStyle(fontSize: 12),
+                    style: AppTexto.metadato,
                   ),
                   const SizedBox(height: 12),
                   SizedBox(
@@ -127,18 +129,70 @@ class _PreviewCobroScreenState extends State<PreviewCobroScreen> {
 
   Widget _fila(BuildContext context, String etiqueta, String valor) {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 6),
+      padding: const EdgeInsets.symmetric(vertical: 8),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(etiqueta,
-              style: TextStyle(
-                  color: AppColores.textoSecundario(context))),
+          Text(etiqueta, style: AppTexto.secundario),
           const SizedBox(width: 16),
           Flexible(
             child: Text(valor,
                 textAlign: TextAlign.end,
-                style: const TextStyle(fontWeight: FontWeight.w600)),
+                style: AppTexto.cuerpo
+                    .copyWith(fontWeight: FontWeight.w600)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// V21: el monto es el ancla visual del preview — el ojo debe
+  /// encontrar el dinero antes que cualquier otro dato.
+  Widget _filaMonto(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text('Monto', style: AppTexto.secundario),
+          const SizedBox(width: 16),
+          Flexible(
+            child: Text(widget.montoTexto,
+                textAlign: TextAlign.end,
+                style: AppTexto.metrica.copyWith(
+                    fontFeatures: const [FontFeature.tabularFigures()])),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// V22: el método se reconoce por icono y color semántico,
+  /// igual que en el historial de la ficha (efectivo = pagos en
+  /// verde; transferencia = teléfono en azul).
+  Widget _filaMetodo(BuildContext context) {
+    final esTransf = widget.metodoTexto == 'Transferencia';
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text('Método', style: AppTexto.secundario),
+          const SizedBox(width: 16),
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                  esTransf
+                      ? Icons.smartphone_rounded
+                      : Icons.payments_rounded,
+                  size: 18,
+                  color: esTransf ? AppColores.info : AppColores.exito),
+              const SizedBox(width: 6),
+              Text(widget.metodoTexto,
+                  style: AppTexto.cuerpo
+                      .copyWith(fontWeight: FontWeight.w600)),
+            ],
           ),
         ],
       ),
@@ -235,6 +289,20 @@ Future<bool> cobrarConPreviewYRecibo({
   );
   if (confirmado != true || !context.mounted) return false;
 
+  // T16 (1.20): aviso si ya hay un cobro igual en la cola
+  // (doble toque o reintento con mala conexión).
+  final clienteIdDup = (payload['cliente_id'] as num?)?.toInt();
+  final sigueCobro = await confirmarSiPareceDuplicado(
+    context,
+    tipo: 'pago_mensual',
+    coincide: (p) =>
+        (p['cliente_id'] as num?)?.toInt() == clienteIdDup &&
+        ((p['monto'] as num?) ?? 0) == monto,
+    descripcion:
+        'un cobro de ${fmtMonto(monto)} CUP a $nombreCliente',
+  );
+  if (!sigueCobro || !context.mounted) return false;
+
   // Argón P1#4 (contrato con PagoScreen._deshacerUltimo): leer el
   // pagado_hasta anterior del espejo ANTES de encolar, aplicar la
   // actualización optimista al encolar y guardar el valor anterior
@@ -254,8 +322,19 @@ Future<bool> cobrarConPreviewYRecibo({
       }
     } catch (_) {}
   }
+  // F1 (1.20): la ruta local del comprobante NO viaja en la
+  // op; se genera el uuid que sí viaja ('comprobante_uuid') y
+  // enlaza el pago con su foto en el bucket.
+  final rutaComprobante = payload['_comprobante_ruta'] as String?;
+  String? comprobanteUuid;
   final payloadOp = Map<String, dynamic>.from(payload)
+    ..remove('_comprobante_ruta')
     ..['pagado_hasta_anterior'] = pagadoHastaAnterior;
+  if (rutaComprobante != null &&
+      '${payload['metodo'] ?? ''}' == 'transferencia') {
+    comprobanteUuid = const Uuid().v4();
+    payloadOp['comprobante_uuid'] = comprobanteUuid;
+  }
 
   // Retención Deshacer: la op nace con 15 s de espera en cola local.
   final opUuid = const Uuid().v4();
@@ -274,6 +353,15 @@ Future<bool> cobrarConPreviewYRecibo({
           clienteId, vencRaw.substring(0, 10));
     } catch (_) {}
   }
+  // F1: guardar la foto del comprobante en su cola local. Si
+  // falla, el cobro queda sin comprobante (nunca al revés).
+  if (comprobanteUuid != null) {
+    try {
+      await ComprobantesService.instance.encolar(
+          comprobanteUuid: comprobanteUuid,
+          rutaOrigen: rutaComprobante!);
+    } catch (_) {}
+  }
   if (!context.mounted) return false;
 
   final resultado = await Navigator.of(context).push<String>(
@@ -287,6 +375,12 @@ Future<bool> cobrarConPreviewYRecibo({
       ),
     ),
   );
+  if (resultado == 'deshecho' && comprobanteUuid != null) {
+    // F1: el cobro se deshizo: su comprobante se descarta.
+    try {
+      await ComprobantesService.instance.descartar(comprobanteUuid);
+    } catch (_) {}
+  }
   if (resultado == 'deshecho' && clienteId != null) {
     // Restaurar el valor anterior en el espejo (null = quitarlo).
     try {

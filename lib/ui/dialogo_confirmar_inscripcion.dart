@@ -54,7 +54,7 @@ class DialogoConfirmarInscripcion extends StatelessWidget {
         color: AppColores.naranja,
         shape: BoxShape.circle,
       ),
-      child: const Icon(Icons.check, color: Colors.white, size: 40),
+      child: const Icon(Icons.check_rounded, color: Colors.white, size: 40),
     );
   }
 
@@ -109,10 +109,8 @@ class DialogoConfirmarInscripcion extends StatelessWidget {
             Text(
               montoTxt,
               textAlign: TextAlign.center,
-              style: AppTexto.titulo.copyWith(
+              style: AppTexto.display.copyWith(
                 color: AppColores.naranja,
-                fontSize: 32,
-                fontWeight: FontWeight.bold,
               ),
             ),
             Text(
@@ -122,12 +120,12 @@ class DialogoConfirmarInscripcion extends StatelessWidget {
             const SizedBox(height: AppEspacio.md),
             Divider(color: AppColores.borde(context), height: 1),
             const SizedBox(height: AppEspacio.sm),
-            _filaDato(context, Icons.person, nombre),
-            _filaDato(context, Icons.calendar_month, periodoEtiqueta),
+            _filaDato(context, Icons.person_rounded, nombre),
+            _filaDato(context, Icons.calendar_month_rounded, periodoEtiqueta),
             if (carnet.isNotEmpty)
-              _filaDato(context, Icons.badge, carnet),
+              _filaDato(context, Icons.badge_rounded, carnet),
             if (telefono.isNotEmpty)
-              _filaDato(context, Icons.phone,
+              _filaDato(context, Icons.phone_rounded,
                   formatoTelefonoPresentacion(telefono)),
             // Vigencia como pastilla.
             Padding(
@@ -135,7 +133,7 @@ class DialogoConfirmarInscripcion extends StatelessWidget {
                   const EdgeInsets.symmetric(vertical: AppEspacio.sm),
               child: Row(
                 children: [
-                  Icon(Icons.check_circle,
+                  Icon(Icons.check_circle_rounded,
                       size: 22,
                       color: AppColores.textoSecundario(context)),
                   const SizedBox(width: AppEspacio.md),

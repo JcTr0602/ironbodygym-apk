@@ -77,10 +77,9 @@ class _RecordatoriosScreenState extends State<RecordatoriosScreen> {
       unawaited(AvisosRecordatorios.cancelarAviso(d));
     }
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(ok
+    mostrarSnack(context, ok
             ? 'Recordatorio marcado como disparado hoy'
-            : 'Ya estaba disparado hoy')));
+            : 'Ya estaba disparado hoy');
     await _cargar();
   }
 
@@ -89,6 +88,7 @@ class _RecordatoriosScreenState extends State<RecordatoriosScreen> {
     var tipo = 'vencimiento';
     var alcance = 'solo_mio';
     var dias = 3;
+    var frecuencia = 'ninguna';
     final fechaCtrl =
         TextEditingController(text: hoyHabanaIso());
     final ok = await showDialog<bool>(
@@ -96,7 +96,7 @@ class _RecordatoriosScreenState extends State<RecordatoriosScreen> {
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setDialogState) => DialogoApp(
         titulo: 'Nuevo recordatorio',
-        iconoTitulo: Icons.notifications,
+        iconoTitulo: Icons.notifications_rounded,
         contenido: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -159,11 +159,30 @@ class _RecordatoriosScreenState extends State<RecordatoriosScreen> {
                     onChanged: (v) =>
                         setDialogState(() => dias = v.round())),
               ],
-              if (tipo == 'personalizado')
+              if (tipo == 'personalizado') ...[
                 TextField(
                     controller: fechaCtrl,
                     decoration: const InputDecoration(
-                        labelText: 'Fecha fija (personalizado, YYYY-MM-DD)')),
+                        labelText: 'Fecha (personalizado, YYYY-MM-DD)')),
+                const SizedBox(height: 8),
+                // F4 (1.20): repetición del personalizado.
+                DropdownButton<String>(
+                  value: frecuencia,
+                  isExpanded: true,
+                  items: const [
+                    DropdownMenuItem(
+                        value: 'ninguna', child: Text('Solo esa fecha')),
+                    DropdownMenuItem(
+                        value: 'semanal',
+                        child: Text('Cada semana (ese día)')),
+                    DropdownMenuItem(
+                        value: 'mensual',
+                        child: Text('Cada mes (ese día)')),
+                  ],
+                  onChanged: (v) => setDialogState(
+                      () => frecuencia = v ?? 'ninguna'),
+                ),
+              ],
             ],
           ),
         ),
@@ -194,9 +213,7 @@ class _RecordatoriosScreenState extends State<RecordatoriosScreen> {
           parsed.day.toString().padLeft(2, '0') == partes[2];
       if (!fechaValida) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-              content: Text(
-                  'Fecha inválida: usa el formato YYYY-MM-DD.')));
+          mostrarSnack(context, 'Fecha inválida: usa el formato YYYY-MM-DD.', significado: SignificadoChip.alerta);
         }
         return;
       }
@@ -208,12 +225,12 @@ class _RecordatoriosScreenState extends State<RecordatoriosScreen> {
         alcance: _soyDueno ? alcance : 'solo_mio',
         diasAnticipacion: dias,
         fechaFija: tipo == 'personalizado' ? fechaCtrl.text.trim() : null,
+        frecuencia: tipo == 'personalizado' ? frecuencia : 'ninguna',
       );
       await _cargar();
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('$e')));
+        mostrarSnack(context, '$e', significado: SignificadoChip.error);
       }
     }
   }
@@ -224,7 +241,7 @@ class _RecordatoriosScreenState extends State<RecordatoriosScreen> {
       appBar: AppBar(title: const Text('Recordatorios automáticos (G2)')),
       floatingActionButton: FloatingActionButton(
         onPressed: _crear,
-        child: const Icon(Icons.add),
+        child: const Icon(Icons.add_rounded),
       ),
       body: _cargando
           ? const EstadoCargando(texto: 'Cargando recordatorios…')
@@ -243,8 +260,8 @@ class _RecordatoriosScreenState extends State<RecordatoriosScreen> {
                         contentPadding: EdgeInsets.zero,
                         leading: Icon(
                             d.yaDisparado
-                                ? Icons.check_circle
-                                : Icons.notifications,
+                                ? Icons.check_circle_rounded
+                                : Icons.notifications_rounded,
                             color: d.yaDisparado
                                 ? AppColores.exito
                                 : AppColores.naranja),
@@ -284,7 +301,8 @@ class _RecordatoriosScreenState extends State<RecordatoriosScreen> {
                             style: AppTexto.cuerpo),
                         subtitle: Text(
                             '${c['tipo']} · ${c['alcance']} · '
-                            '${(c['activa'] as num?)?.toInt() == 1 ? 'activo' : 'pausado'}',
+                            '${(c['activa'] as num?)?.toInt() == 1 ? 'activo' : 'pausado'}'
+                            '${'${c['frecuencia'] ?? 'ninguna'}' == 'semanal' ? ' · cada semana' : '${c['frecuencia'] ?? 'ninguna'}' == 'mensual' ? ' · cada mes' : ''}',
                             style: AppTexto.secundario),
                         trailing: Row(
                           mainAxisSize: MainAxisSize.min,
@@ -292,8 +310,8 @@ class _RecordatoriosScreenState extends State<RecordatoriosScreen> {
                             IconButton(
                               icon: Icon(
                                   (c['activa'] as num?)?.toInt() == 1
-                                      ? Icons.pause
-                                      : Icons.play_arrow,
+                                      ? Icons.pause_rounded
+                                      : Icons.play_arrow_rounded,
                                   size: 20),
                               onPressed: () async {
                                 await RecordatoriosService.instance
@@ -303,7 +321,7 @@ class _RecordatoriosScreenState extends State<RecordatoriosScreen> {
                               },
                             ),
                             IconButton(
-                              icon: const Icon(Icons.delete_outline,
+                              icon: const Icon(Icons.delete_outline_rounded,
                                   size: 20),
                               onPressed: () async {
                                 await RecordatoriosService.instance

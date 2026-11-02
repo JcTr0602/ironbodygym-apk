@@ -111,7 +111,12 @@ class TurnoService {
   /// - Al abrir un turno nuevo, los turnos sin resolver anteriores se
   ///   marcan no_cerrado (acción explícita del usuario, no automática).
   /// Retorna el turno_id canónico.
-  Future<String> abrirTurno() async {
+  /// [cubreA] (F9, 1.20): nombre del titular al que el que
+  /// abre está cubriendo hoy (suplente); null = turno propio.
+  /// Si el turno ya existía y llega un [cubreA], se actualiza
+  /// la marca local y se re-encola la apertura para que el
+  /// servidor la actualice también.
+  Future<String> abrirTurno({String? cubreA}) async {
     final tid = _auth.telegramId;
     if (tid == null) throw StateError('sin sesión de entrenador');
     final ahora = ahoraHabana();
@@ -124,9 +129,27 @@ class TurnoService {
       turno: turno,
       horaApertura: isoHabana(ahora),
       telegramId: tid,
+      cubreA: cubreA,
     );
     if (!creado) {
-      // Ya existía (abierto o cerrado): no duplicar ni re-encolar.
+      // Ya existía (abierto o cerrado): no duplicar ni
+      // re-encolar — SALVO que venga una marca de suplente
+      // nueva: la apertura se re-encola con ella y el
+      // servidor actualiza solo ese dato.
+      if (cubreA != null) {
+        try {
+          final fila =
+              await _db.ultimoTurno(fechaTurno, turno, tid);
+          await SyncEngine.instance.registrarAperturaTurno(
+            turnoId: canonico,
+            fechaTurno: fechaTurno,
+            turno: turno,
+            horaApertura:
+                '${fila?['hora_apertura'] ?? isoHabana(ahora)}',
+            cubreA: cubreA,
+          );
+        } catch (_) {}
+      }
       return canonico;
     }
     // Nuevo: marcar anteriores como no_cerrado (el usuario está
@@ -145,6 +168,7 @@ class TurnoService {
         fechaTurno: fechaTurno,
         turno: turno,
         horaApertura: isoHabana(ahora),
+        cubreA: cubreA,
       );
     } catch (_) {}
     return canonico;
@@ -181,6 +205,11 @@ class TurnoService {
               fechaTurno: '${t['fecha_turno']}',
               turno: '${t['turno']}',
               horaApertura: '${t['hora_apertura']}',
+              // F9: la marca de suplente local viaja también
+              // en la reconciliación de huérfanas.
+              cubreA: ('${t['cubre_a'] ?? ''}'.trim().isEmpty)
+                  ? null
+                  : '${t['cubre_a']}'.trim(),
             );
           } catch (_) {}
         }

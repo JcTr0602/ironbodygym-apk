@@ -52,19 +52,19 @@ class TipoIncidencia {
   IconData get iconoData {
     switch (icono) {
       case 'fitness_center':
-        return Icons.fitness_center;
+        return Icons.fitness_center_rounded;
       case 'build':
-        return Icons.build;
+        return Icons.build_rounded;
       case 'cleaning_services':
-        return Icons.cleaning_services;
+        return Icons.cleaning_services_rounded;
       case 'report':
-        return Icons.report;
+        return Icons.report_rounded;
       case 'electrical_services':
-        return Icons.electrical_services;
+        return Icons.electrical_services_rounded;
       case 'water_drop':
-        return Icons.water_drop;
+        return Icons.water_drop_rounded;
       default:
-        return Icons.label;
+        return Icons.label_rounded;
     }
   }
 

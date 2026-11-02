@@ -65,7 +65,7 @@ class _PinLockScreenState extends State<PinLockScreen> {
       mensaje: 'Se cerrará tu sesión en este teléfono. Para volver a entrar '
           'necesitarás tu contraseña de la cuenta. ¿Continuar?',
       aceptar: 'Cerrar sesión',
-      icono: Icons.lock_open_outlined,
+      icono: Icons.lock_open_rounded,
     );
     if (ok != true || !mounted) return;
     // v1.2.5: purga de datos sensibles antes de cerrar sesión.
@@ -93,8 +93,8 @@ class _PinLockScreenState extends State<PinLockScreen> {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              const Icon(Icons.lock_outline,
-                  size: 64, color: AppColores.naranja),
+              Icon(Icons.lock_outline_rounded,
+                  size: 64, color: AppColores.textoSecundario(context)),
               const SizedBox(height: 16),
               const Text('App bloqueada',
                   style: AppTexto.displayPequeno),
@@ -150,9 +150,9 @@ class _PinLockScreenState extends State<PinLockScreen> {
     Widget tecla(String d, {IconData? icono, VoidCallback? fn}) {
       return Expanded(
         child: Padding(
-          padding: const EdgeInsets.all(6),
+          padding: const EdgeInsets.all(8),
           child: InkWell(
-            borderRadius: BorderRadius.circular(48),
+            borderRadius: BorderRadius.circular(999),
             onTap: fn ?? () => _tecla(d),
             child: Container(
               height: 64,
@@ -163,9 +163,10 @@ class _PinLockScreenState extends State<PinLockScreen> {
                     color: AppColores.borde(context)),
               ),
               child: icono != null
-                  ? Icon(icono, size: 26)
+                  ? Icon(icono, size: 24)
                   : Text(d,
-                      style: const TextStyle(fontSize: 26)),
+                      style: AppTexto.displayPequeno.copyWith(
+                          fontWeight: FontWeight.normal)),
             ),
           ),
         ),
@@ -180,7 +181,7 @@ class _PinLockScreenState extends State<PinLockScreen> {
         Row(children: [
           const Expanded(child: SizedBox()),
           tecla('0'),
-          tecla('', icono: Icons.backspace_outlined, fn: _borrar),
+          tecla('', icono: Icons.backspace_rounded, fn: _borrar),
         ]),
       ],
     );

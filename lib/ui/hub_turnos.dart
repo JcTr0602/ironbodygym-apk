@@ -24,6 +24,8 @@ import 'arqueo.dart';
 import 'componentes.dart';
 import 'diseno.dart';
 import 'mi_turno.dart';
+import 'turnos_calendario.dart' show colorChipEntrenador;
+import 'turno_abrir.dart';
 import 'turnos_hub.dart';
 
 class HubTurnosScreen extends StatefulWidget {
@@ -95,6 +97,9 @@ class _HubTurnosScreenState extends State<HubTurnosScreen> {
                 nombre: nombre,
                 aperturaEn: en,
                 viva: true,
+                cubreA: ('${abierto['cubre_a'] ?? ''}'.trim().isEmpty)
+                    ? null
+                    : '${abierto['cubre_a']}'.trim(),
               ),
             ];
           }
@@ -157,14 +162,15 @@ class _HubTurnosScreenState extends State<HubTurnosScreen> {
 
   void _snack(String texto) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text(texto)));
+    mostrarSnack(context, texto);
   }
 
   Future<void> _abrir() async {
     setState(() => _procesando = true);
     try {
-      await TurnoService.instance.abrirTurno();
+      // F9: al abrir se puede marcar a quién se cubre.
+      final abiertoOk = await abrirTurnoConSuplente(context);
+      if (!abiertoOk) return;
       _snack('Turno abierto.');
       await _cargar();
     } catch (e) {
@@ -268,10 +274,28 @@ class _HubTurnosScreenState extends State<HubTurnosScreen> {
             ],
           ),
           const SizedBox(height: 4),
-          Text(
-            'De turno: ${est.mostrado ?? 'Sin asignar'}'
-            '${est.cubriendo ? ' (cubriendo)' : ''}',
-            style: AppTexto.cuerpo,
+          Row(
+            children: [
+              const Text('De turno: ', style: AppTexto.cuerpo),
+              if (est.mostrado != null) ...[
+                Container(
+                  width: 10,
+                  height: 10,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: colorChipEntrenador(est.mostrado),
+                  ),
+                ),
+                const SizedBox(width: 5),
+              ],
+              Flexible(
+                child: Text(
+                  '${est.mostrado ?? 'Sin asignar'}'
+                  '${est.cubriendo ? ' (cubriendo)' : ''}',
+                  style: AppTexto.cuerpo,
+                ),
+              ),
+            ],
           ),
           if (est.programado != null &&
               est.programado != est.mostrado)
@@ -279,6 +303,89 @@ class _HubTurnosScreenState extends State<HubTurnosScreen> {
                 style: AppTexto.secundario),
         ],
       ),
+    );
+  }
+
+  /// M5 (1.20): mini mapa de calor de la semana — cuántas
+  /// franjas de cada día tienen entrenador asignado, resuelto
+  /// con la misma función que usa el hub (patrón + excepciones
+  /// + aperturas/cierres). Domingo cerrado; sábado sin tarde.
+  Widget _semanaCalor() {
+    final lunes = _hoy.subtract(Duration(days: _hoy.weekday - 1));
+    const letras = ['L', 'M', 'X', 'J', 'V', 'S', 'D'];
+    return Tarjeta(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text('Semana', style: AppTexto.subtitulo),
+          const SizedBox(height: 8),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              for (var i = 0; i < 7; i++)
+                _celdaDia(lunes.add(Duration(days: i)), letras[i]),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _celdaDia(DateTime dia, String letra) {
+    final esHoy = dia.year == _hoy.year &&
+        dia.month == _hoy.month &&
+        dia.day == _hoy.day;
+    Widget caja(Widget hijo, {Color? fondo, bool bordeHoy = false}) {
+      return Container(
+        width: 36,
+        height: 36,
+        decoration: BoxDecoration(
+          color: fondo,
+          borderRadius: BorderRadius.circular(AppRadio.sm),
+          border: Border.all(
+              color: bordeHoy
+                  ? AppColores.naranja
+                  : AppColores.borde(context),
+              width: bordeHoy ? 1.5 : 1),
+        ),
+        child: Center(child: hijo),
+      );
+    }
+
+    return Column(
+      children: [
+        Text(letra, style: AppTexto.metadato),
+        const SizedBox(height: 4),
+        if (dia.weekday == 7)
+          caja(const Text('—', style: AppTexto.secundario),
+              bordeHoy: esHoy)
+        else
+          Builder(builder: (_) {
+            final franjas = ['manana', if (dia.weekday != 6) 'tarde'];
+            var asignadas = 0;
+            for (final f in franjas) {
+              final m = estadoFranjaCompleto(
+                fecha: dia,
+                franja: f,
+                patron: _patron,
+                excepciones: _excepciones,
+                aperturas: _aperturas,
+                cierres: _cierres,
+              ).mostrado;
+              if (m != null && m.isNotEmpty) asignadas++;
+            }
+            return caja(
+              Text('$asignadas/${franjas.length}',
+                  style: AppTexto.etiqueta
+                      .copyWith(fontWeight: FontWeight.bold)),
+              fondo: AppColores.naranja
+                  .withValues(alpha: 0.10 + 0.45 * (asignadas / franjas.length)),
+              bordeHoy: esHoy,
+            );
+          }),
+        const SizedBox(height: 4),
+        Text('${dia.day}', style: AppTexto.minuscula),
+      ],
     );
   }
 
@@ -315,18 +422,34 @@ class _HubTurnosScreenState extends State<HubTurnosScreen> {
                   Tarjeta(
                     child: Row(
                       children: [
-                        const Icon(Icons.group_rounded,
-                            color: AppColores.naranja),
+                        Icon(Icons.group_rounded,
+                            color: AppColores.textoSecundario(context)),
                         const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            quienesHoy.isEmpty
-                                ? 'Hoy sin asignar'
-                                : 'Hoy trabajan: '
-                                    '${quienesHoy.join(' · ')}',
-                            style: AppTexto.cuerpo,
-                          ),
-                        ),
+                        const Text('Hoy trabajan:',
+                            style: AppTexto.cuerpo),
+                        const SizedBox(width: 8),
+                        if (quienesHoy.isEmpty)
+                          Text('sin asignar',
+                              style: AppTexto.secundario)
+                        else
+                          for (final n in quienesHoy) ...[
+                            CircleAvatar(
+                              radius: 13,
+                              backgroundColor: colorChipEntrenador(n)
+                                  .withValues(alpha: 0.18),
+                              child: Text(
+                                n.trim().isEmpty
+                                    ? '?'
+                                    : n.trim()[0].toUpperCase(),
+                                style: AppTexto.etiqueta.copyWith(
+                                    color: colorChipEntrenador(n),
+                                    fontWeight: FontWeight.bold),
+                              ),
+                            ),
+                            const SizedBox(width: 4),
+                            Text(n, style: AppTexto.cuerpo),
+                            const SizedBox(width: 10),
+                          ],
                       ],
                     ),
                   ),
@@ -348,6 +471,32 @@ class _HubTurnosScreenState extends State<HubTurnosScreen> {
                     const SizedBox(height: 8),
                   ],
                 ],
+                // F9: suplencias de hoy (quién cubre a quién).
+                Builder(builder: (_) {
+                  final suplen = [
+                    for (final a in _aperturas)
+                      if (a.cubreA != null) a,
+                  ];
+                  if (suplen.isEmpty) return const SizedBox.shrink();
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: Tarjeta(
+                      child: Column(
+                        crossAxisAlignment:
+                            CrossAxisAlignment.start,
+                        children: [
+                          for (final a in suplen)
+                            Text(
+                              '🔁 ${a.nombre} cubre a ${a.cubreA}',
+                              style: AppTexto.cuerpo,
+                            ),
+                        ],
+                      ),
+                    ),
+                  );
+                }),
+                _semanaCalor(),
+                const SizedBox(height: 8),
                 // Mi turno (entrenador).
                 if (!_soyDueno) ...[
                   const SizedBox(height: 8),
@@ -357,7 +506,7 @@ class _HubTurnosScreenState extends State<HubTurnosScreen> {
                       children: [
                         const Text('Mi turno',
                             style: AppTexto.subtitulo),
-                        const SizedBox(height: 6),
+                        const SizedBox(height: 8),
                         Builder(
                           builder: (_) {
                             final v = _miTurnoVisible;
@@ -369,10 +518,32 @@ class _HubTurnosScreenState extends State<HubTurnosScreen> {
                               );
                             }
                             if (estado.startsWith('abierto')) {
-                              return Text(
-                                'Abierto a las ${_hora('${v['hora_apertura']}')} '
-                                '(${v['turno'] ?? ''}).',
-                                style: AppTexto.cuerpo,
+                              final cubre =
+                                  '${v['cubre_a'] ?? ''}'.trim();
+                              return Column(
+                                crossAxisAlignment:
+                                    CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    'Abierto a las ${_hora('${v['hora_apertura']}')} '
+                                    '(${v['turno'] ?? ''}).',
+                                    style: AppTexto.cuerpo,
+                                  ),
+                                  if (cubre.isNotEmpty)
+                                    Text(
+                                      'Cubres a $cubre.',
+                                      style: AppTexto.secundario,
+                                    ),
+                                  TextButton(
+                                    onPressed: () async {
+                                      await marcarCubreA(context);
+                                      await _cargar();
+                                    },
+                                    child: Text(cubre.isEmpty
+                                        ? 'Marcar a quién cubro'
+                                        : 'Cambiar a quién cubro'),
+                                  ),
+                                ],
                               );
                             }
                             if (estado.startsWith('cerrado')) {
@@ -442,7 +613,7 @@ class _HubTurnosScreenState extends State<HubTurnosScreen> {
                                 '${p.usd > 0 ? ' + ${fmtMonto(p.usd)} USD' : ''}',
                                 style: AppTexto.cuerpo,
                               ),
-                              const Icon(Icons.chevron_right,
+                              const Icon(Icons.chevron_right_rounded,
                                   color: Colors.grey, size: 18),
                             ],
                           ),
@@ -466,7 +637,7 @@ class _HubTurnosScreenState extends State<HubTurnosScreen> {
                               style: AppTexto.subtitulo,
                             ),
                           ),
-                          Icon(Icons.chevron_right,
+                          Icon(Icons.chevron_right_rounded,
                               color: Colors.grey, size: 18),
                         ],
                       ),

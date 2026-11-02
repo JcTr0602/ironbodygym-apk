@@ -184,7 +184,7 @@ class _LoginScreenState extends State<LoginScreen>
                         ],
                       ),
                       child: ClipRRect(
-                        borderRadius: BorderRadius.circular(75),
+                        borderRadius: BorderRadius.circular(999),
                         child: Image.asset('assets/logo.jpg',
                             height: 130,
                             width: 130,
@@ -193,9 +193,8 @@ class _LoginScreenState extends State<LoginScreen>
                     ),
                     const SizedBox(height: AppEspacio.lg),
                     RichText(
-                      text: const TextSpan(
-                        style: TextStyle(
-                            fontSize: 30,
+                      text: TextSpan(
+                        style: AppTexto.display.copyWith(
                             fontWeight: FontWeight.w900,
                             letterSpacing: 1),
                         children: [
@@ -211,10 +210,10 @@ class _LoginScreenState extends State<LoginScreen>
                       ),
                     ),
                     const SizedBox(height: AppEspacio.sm),
-                    const Text('G E S T I Ó N',
-                        style: TextStyle(
+                    Text('G E S T I Ó N',
+                        style: AppTexto.etiqueta.copyWith(
                             color: Colors.white60,
-                            fontSize: 12,
+                            fontWeight: FontWeight.normal,
                             letterSpacing: 4)),
                     const SizedBox(height: AppEspacio.xxl),
                     // Campo usuario
@@ -222,7 +221,7 @@ class _LoginScreenState extends State<LoginScreen>
                       controller: _user,
                       focusNode: _userFocus,
                       hint: 'Usuario',
-                      icono: Icons.person,
+                      icono: Icons.person_rounded,
                       textCapitalization: TextCapitalization.words,
                       onSubmitted: (_) => _entrar(),
                     ),
@@ -232,13 +231,13 @@ class _LoginScreenState extends State<LoginScreen>
                       controller: _pass,
                       focusNode: _passFocus,
                       hint: 'Contraseña',
-                      icono: Icons.lock,
+                      icono: Icons.lock_rounded,
                       obscure: !_verPass,
                       suffix: IconButton(
                         icon: Icon(
                             _verPass
-                                ? Icons.visibility_off
-                                : Icons.visibility,
+                                ? Icons.visibility_off_rounded
+                                : Icons.visibility_rounded,
                             color: Colors.white54),
                         onPressed: () => setState(
                             () => _verPass = !_verPass),
@@ -259,16 +258,14 @@ class _LoginScreenState extends State<LoginScreen>
                         ),
                         child: Row(
                           children: [
-                            const Icon(Icons.error_outline,
+                            const Icon(Icons.error_outline_rounded,
                                 color: AppColores.error,
                                 size: 18),
                             const SizedBox(
                                 width: AppEspacio.sm),
                             Expanded(
                               child: Text(_error!,
-                                  style: const TextStyle(
-                                      color: AppColores.error,
-                                      fontSize: 13)),
+                                  style: AppTexto.secundario.copyWith(color: AppColores.error)),
                             ),
                           ],
                         ),
@@ -286,29 +283,26 @@ class _LoginScreenState extends State<LoginScreen>
                           )
                         : BotonPrimario(
                             texto: 'ENTRAR',
-                            icono: Icons.login,
+                            icono: Icons.login_rounded,
                             onPressed: _entrar,
                           ),
                     const SizedBox(height: AppEspacio.lg),
-                    const Text(
+                    Text(
                       'Sin conexión puedes entrar igual si ya lo hiciste antes.\n'
                       'Todo se guarda y sincroniza solo.',
-                      style: TextStyle(
-                          color: Colors.white54, fontSize: 12),
+                      style: AppTexto.metadato.copyWith(color: Colors.white54),
                       textAlign: TextAlign.center,
                     ),
                     const SizedBox(height: AppEspacio.xxl),
-                    const Text(
+                    Text(
                       '© Creado por JcTr0602',
-                      style: TextStyle(
-                          color: Colors.white38, fontSize: 11),
+                      style: AppTexto.metadato.copyWith(color: Colors.white38),
                       textAlign: TextAlign.center,
                     ),
                     const SizedBox(height: 4),
                     Text(
                       'v${AppConfig.appVersion}',
-                      style: const TextStyle(
-                          color: Colors.white24, fontSize: 10),
+                      style: AppTexto.minuscula.copyWith(color: Colors.white24),
                       textAlign: TextAlign.center,
                     ),
                     const SizedBox(height: AppEspacio.lg),
@@ -362,7 +356,7 @@ class _LoginScreenState extends State<LoginScreen>
           hintStyle:
               const TextStyle(color: Colors.white38),
           prefixIcon:
-              Icon(icono, color: AppColores.naranja),
+              Icon(icono, color: AppColores.textoSecundario(context)),
           suffixIcon: suffix,
           filled: true,
           fillColor: const Color(0xFF2A2A2A),

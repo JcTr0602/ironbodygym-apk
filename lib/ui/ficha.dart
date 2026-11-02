@@ -21,6 +21,8 @@ import '../plus_residual.dart';
 import '../precio_cobro.dart';
 import '../tarifa_especial.dart';
 import '../tiempo.dart';
+import '../comprobantes.dart';
+import '../conciliacion.dart';
 import '../fotos.dart';
 import '../fotos_cola.dart';
 import '../localdb.dart';
@@ -30,10 +32,12 @@ import '../sync.dart';
 import '../cliente_protegido.dart';
 import '../acceso_app_cache.dart';
 import 'componentes.dart';
+import 'conciliacion.dart';
 import 'dialogo_pago.dart';
 import 'panel_bloque2.dart';
 import 'preview_cobro.dart';
 import 'tarifas_especiales.dart';
+import 'estado_cuenta.dart';
 import 'diseno.dart';
 import 'editor_foto.dart';
 import 'modal_pin_acceso.dart';
@@ -420,9 +424,7 @@ class _FichaScreenState extends State<FichaScreen> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error al verificar: $e')),
-        );
+        mostrarSnack(context, 'Error al verificar: $e', significado: SignificadoChip.error);
       }
     } finally {
       if (mounted) setState(() => _verificando = false);
@@ -501,10 +503,9 @@ class _FichaScreenState extends State<FichaScreen> {
       por: AuthService().displayName,
     );
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(activar
+    mostrarSnack(context, activar
             ? 'Cuenta a la Casa activada (se sincronizará)'
-            : 'Cuenta a la Casa retirada (se sincronizará)')));
+            : 'Cuenta a la Casa retirada (se sincronizará)', significado: SignificadoChip.exito);
     SyncEngine.instance.push();
     _cargar();
   }
@@ -524,7 +525,7 @@ class _FichaScreenState extends State<FichaScreen> {
         titulo: activar
             ? 'Marcar cliente protegido'
             : 'Quitar protección',
-        iconoTitulo: Icons.lock,
+        iconoTitulo: Icons.lock_rounded,
         contenido: Text(activar
             ? '$nombre solo mostrará foto y nombre a los '
                 'entrenadores, y solo tú podrás modificarlo.'
@@ -556,10 +557,9 @@ class _FichaScreenState extends State<FichaScreen> {
       activar: activar,
     );
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(activar
+    mostrarSnack(context, activar
             ? 'Cliente protegido (se sincronizará)'
-            : 'Protección retirada (se sincronizará)')));
+            : 'Protección retirada (se sincronizará)', significado: SignificadoChip.exito);
     SyncEngine.instance.push();
     _cargar();
   }
@@ -625,8 +625,7 @@ class _FichaScreenState extends State<FichaScreen> {
     );
     if (!mounted) return;
     if (deshecho) {
-      ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Cobro deshecho')));
+      mostrarSnack(context, 'Cobro deshecho', significado: SignificadoChip.exito);
     }
     _cargar();
     SyncEngine.instance.push();
@@ -725,8 +724,7 @@ class _FichaScreenState extends State<FichaScreen> {
     var nuevo = r?['nuevo'] as String?;
     nuevo ??= c['pagado_hasta'] as String?;
     if (nuevo == null || nuevo.length < 10) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('No hay datos del regalo para reenviar')));
+      mostrarSnack(context, 'No hay datos del regalo para reenviar', significado: SignificadoChip.alerta);
       return;
     }
     await _mostrarDialogoWhatsApp(
@@ -792,9 +790,7 @@ class _FichaScreenState extends State<FichaScreen> {
             onPressed: () {
               Clipboard.setData(ClipboardData(text: mensaje));
               Navigator.of(ctx).pop();
-              ScaffoldMessenger.of(outerContext).showSnackBar(
-                const SnackBar(content: Text('Mensaje copiado')),
-              );
+              mostrarSnack(outerContext, 'Mensaje copiado');
             },
             child: const Text('Copiar mensaje'),
           ),
@@ -803,9 +799,7 @@ class _FichaScreenState extends State<FichaScreen> {
             onPressed: () async {
               final tel = _normalizarTelefono(telCtrl.text);
               if (tel.isEmpty) {
-                ScaffoldMessenger.of(ctx).showSnackBar(const SnackBar(
-                    content: Text(
-                        'Teléfono inválido: 8 dígitos empezando con 5 o 6')));
+                mostrarSnack(ctx, 'Teléfono inválido: 8 dígitos empezando con 5 o 6', significado: SignificadoChip.alerta);
                 return;
               }
               // Guardar el teléfono en la ficha si cambió (Argón spec 4).
@@ -858,6 +852,10 @@ class _FichaScreenState extends State<FichaScreen> {
       b.writeln('✅ Válida hasta el: *$hastaFmt*');
       b.writeln('¡Te esperamos para entrenar! — Iron Body Gym 💪🔥');
     }
+    // Jc 2026-11-01: toda notificación automática indica que la
+    // respuesta va a su número (este mensaje no lleva la línea
+    // automática común porque ya abre con el aviso del sistema).
+    b.writeln('📲 _Si vas a responder, escríbenos al 58191577._');
     return b.toString();
   }
 
@@ -911,7 +909,7 @@ class _FichaScreenState extends State<FichaScreen> {
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setS) => DialogoApp(
           titulo: 'Editar cliente',
-          iconoTitulo: Icons.edit,
+          iconoTitulo: Icons.edit_rounded,
           contenido: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -939,8 +937,8 @@ class _FichaScreenState extends State<FichaScreen> {
                     // Elegir de los contactos del teléfono (v1.0.11)
                     IconButton(
                       tooltip: 'Elegir de contactos',
-                      icon: const Icon(Icons.contacts,
-                          color: AppColores.naranja),
+                      icon: Icon(Icons.contacts_rounded,
+                          color: AppColores.textoSecundario(context)),
                       onPressed: () async {
                         final tel =
                             await _elegirDeContactos(ctx);
@@ -1010,18 +1008,15 @@ class _FichaScreenState extends State<FichaScreen> {
     final tel = telefono.text.trim();
     final car = carnet.text.trim();
     if (tel.isNotEmpty && !validarTelefono(tel)) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('Teléfono inválido: 8 dígitos empezando con 5 o 6')));
+      mostrarSnack(context, 'Teléfono inválido: 8 dígitos empezando con 5 o 6', significado: SignificadoChip.alerta);
       return;
     }
     if (car.isNotEmpty && !validarCarnet(car)) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('Carnet inválido: 6 a 11 dígitos')));
+      mostrarSnack(context, 'Carnet inválido: 6 a 11 dígitos', significado: SignificadoChip.alerta);
       return;
     }
     if (nombre.text.trim().isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('El nombre no puede estar vacío')));
+      mostrarSnack(context, 'El nombre no puede estar vacío', significado: SignificadoChip.alerta);
       return;
     }
     // Argón B7: enviar SIEMPRE todos los campos básicos (como v1.2.9)
@@ -1040,8 +1035,7 @@ class _FichaScreenState extends State<FichaScreen> {
         sexo != orig['sexo'];
     if (!huboCambios) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Sin cambios')));
+      mostrarSnack(context, 'Sin cambios');
       return;
     }
     // Argón #7B-3: sin duplicados de carnet ni teléfono de otro
@@ -1072,9 +1066,7 @@ class _FichaScreenState extends State<FichaScreen> {
       if (bloqueos.isNotEmpty && mounted) {
         final c0 = bloqueos.first.key;
         final mot = bloqueos.first.value!;
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text(
-                'El $mot ya pertenece a "${c0['nombre']}"')));
+        mostrarSnack(context, 'El $mot ya pertenece a "${c0['nombre']}"', significado: SignificadoChip.alerta);
         return;
       }
     }
@@ -1100,8 +1092,7 @@ class _FichaScreenState extends State<FichaScreen> {
     });
     // v1.3.1 (Argón regresión 2): sin dispose. Controllers locales de _editar().
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Cambios guardados (se sincronizarán)')));
+    mostrarSnack(context, 'Cambios guardados (se sincronizarán)', significado: SignificadoChip.exito);
     _cargar();
     SyncEngine.instance.push();
   }
@@ -1125,7 +1116,7 @@ class _FichaScreenState extends State<FichaScreen> {
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setS) => DialogoApp(
           titulo: 'Datos sensibles',
-          iconoTitulo: Icons.security,
+          iconoTitulo: Icons.security_rounded,
           contenido: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -1169,7 +1160,7 @@ class _FichaScreenState extends State<FichaScreen> {
                   ),
                   child: Row(
                     children: [
-                      const Icon(Icons.calendar_today, size: 18),
+                      const Icon(Icons.calendar_today_rounded, size: 18),
                       const SizedBox(width: 8),
                       Text(
                         pagadoHasta == null
@@ -1177,10 +1168,10 @@ class _FichaScreenState extends State<FichaScreen> {
                             : 'Pagado hasta: ${pagadoHasta!.day.toString().padLeft(2, '0')}/'
                                 '${pagadoHasta!.month.toString().padLeft(2, '0')}/'
                                 '${pagadoHasta!.year}',
-                        style: const TextStyle(fontSize: 15),
+                        style: AppTexto.subtitulo,
                       ),
                       const Spacer(),
-                      Icon(Icons.edit,
+                      Icon(Icons.edit_rounded,
                           size: 16,
                           color: AppColores.textoSecundario(context)),
                     ],
@@ -1218,8 +1209,7 @@ class _FichaScreenState extends State<FichaScreen> {
             '${pagadoHasta!.month.toString().padLeft(2, '0')}-'
             '${pagadoHasta!.day.toString().padLeft(2, '0')}';
     if (phStr == (c['pagado_hasta'] as String?)) {
-      ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Sin cambios')));
+      mostrarSnack(context, 'Sin cambios');
       return;
     }
     // Argón P1#16: al limpiar, el null va explícito en el payload
@@ -1247,8 +1237,7 @@ class _FichaScreenState extends State<FichaScreen> {
           widget.clienteId, {'pagado_hasta': null});
     }
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Cambios guardados (se sincronizarán)')));
+    mostrarSnack(context, 'Cambios guardados (se sincronizarán)', significado: SignificadoChip.exito);
     _cargar();
     SyncEngine.instance.push();
   }
@@ -1262,7 +1251,7 @@ class _FichaScreenState extends State<FichaScreen> {
       context: context,
       builder: (ctx) => DialogoApp(
         titulo: 'Notas del cliente',
-        iconoTitulo: Icons.note,
+        iconoTitulo: Icons.note_rounded,
         contenido: TextField(
           controller: ctrl,
           maxLines: 4,
@@ -1298,8 +1287,7 @@ class _FichaScreenState extends State<FichaScreen> {
       'notas': ctrl.text.trim().isEmpty ? null : ctrl.text.trim(),
     });
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Nota guardada (se sincronizará)')));
+    mostrarSnack(context, 'Nota guardada (se sincronizará)', significado: SignificadoChip.exito);
     _cargar();
     SyncEngine.instance.push();
   }
@@ -1310,9 +1298,7 @@ class _FichaScreenState extends State<FichaScreen> {
     // Pedir permiso
     if (!await FlutterContacts.requestPermission(readonly: true)) {
       if (ctx.mounted) {
-        ScaffoldMessenger.of(ctx).showSnackBar(const SnackBar(
-            content: Text(
-                'Sin permiso de contactos no se puede elegir')));
+        mostrarSnack(ctx, 'Sin permiso de contactos no se puede elegir', significado: SignificadoChip.alerta);
       }
       return null;
     }
@@ -1331,9 +1317,7 @@ class _FichaScreenState extends State<FichaScreen> {
       }
     }
     if (ctx.mounted) {
-      ScaffoldMessenger.of(ctx).showSnackBar(SnackBar(
-          content: Text(
-              'El contacto "${contacto.displayName}" no tiene un móvil cubano válido')));
+      mostrarSnack(ctx, 'El contacto "${contacto.displayName}" no tiene un móvil cubano válido', significado: SignificadoChip.alerta);
     }
     return null;
   }
@@ -1395,7 +1379,7 @@ class _FichaScreenState extends State<FichaScreen> {
       context: context,
       builder: (ctx) => DialogoApp(
         titulo: 'Eliminar foto',
-        iconoTitulo: Icons.delete,
+        iconoTitulo: Icons.delete_rounded,
         contenido: const Text(
             '¿Eliminar la foto de este cliente? Esta acción se sincronizará.'),
         acciones: [
@@ -1431,9 +1415,7 @@ class _FichaScreenState extends State<FichaScreen> {
     // la foto resucitaría.
     LocalDb.marcarFotoEliminadaSesion(widget.clienteId);
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Foto eliminada (se sincronizará)')),
-    );
+    mostrarSnack(context, 'Foto eliminada (se sincronizará)', significado: SignificadoChip.exito);
     SyncEngine.instance.push();
   }
 
@@ -1445,27 +1427,27 @@ class _FichaScreenState extends State<FichaScreen> {
       context: context,
       builder: (ctx) => DialogoApp(
         titulo: 'Foto del cliente',
-        iconoTitulo: Icons.photo_camera,
+        iconoTitulo: Icons.photo_camera_rounded,
         contenido: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             ListTile(
               leading:
-                  const Icon(Icons.photo_camera, size: 24),
+                  const Icon(Icons.photo_camera_rounded, size: 24),
               title: const Text('Tomar foto'),
               onTap: () =>
                   Navigator.pop(ctx, 'camera'),
             ),
             ListTile(
               leading:
-                  const Icon(Icons.photo_library, size: 24),
+                  const Icon(Icons.photo_library_rounded, size: 24),
               title: const Text('Elegir de la galería'),
               onTap: () =>
                   Navigator.pop(ctx, 'gallery'),
             ),
             if (tieneFoto)
               ListTile(
-                leading: const Icon(Icons.delete,
+                leading: const Icon(Icons.delete_rounded,
                     size: 24, color: AppColores.error),
                 title: const Text('Eliminar foto',
                     style: TextStyle(color: AppColores.error)),
@@ -1514,8 +1496,7 @@ class _FichaScreenState extends State<FichaScreen> {
     if (!mounted) return;
     _fotoGen++;
     setState(() => _foto = editada);
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text('Foto actualizada (se sincronizará)')));
+    mostrarSnack(context, 'Foto actualizada (se sincronizará)', significado: SignificadoChip.exito);
     SyncEngine.instance.push();
   }
 
@@ -1561,8 +1542,7 @@ class _FichaScreenState extends State<FichaScreen> {
     );
     if (!mounted) return;
     if (deshecho) {
-      ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Cobro deshecho')));
+      mostrarSnack(context, 'Cobro deshecho', significado: SignificadoChip.exito);
     }
     _cargar();
     SyncEngine.instance.push();
@@ -1572,7 +1552,7 @@ class _FichaScreenState extends State<FichaScreen> {
       context: context,
       builder: (ctx) => DialogoApp(
         titulo: 'Enviar a papelera',
-        iconoTitulo: Icons.delete,
+        iconoTitulo: Icons.delete_rounded,
         contenido: const Text(
             'El cliente quedará inactivo y no aparecerá en las listas. '
             'Podrás recuperarlo desde la Papelera.'),
@@ -1601,8 +1581,7 @@ class _FichaScreenState extends State<FichaScreen> {
     await LocalDb.instance
         .updateMirrorBasico(widget.clienteId, {'estado': 'inactivo'});
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Enviado a la papelera')));
+    mostrarSnack(context, 'Enviado a la papelera', significado: SignificadoChip.exito);
     Navigator.of(context).pop();
     SyncEngine.instance.push();
   }
@@ -1620,7 +1599,7 @@ class _FichaScreenState extends State<FichaScreen> {
       context: context,
       builder: (ctx) => DialogoApp(
         titulo: esCongelado ? 'Descongelar' : 'Congelar membresía',
-        iconoTitulo: Icons.ac_unit,
+        iconoTitulo: Icons.ac_unit_rounded,
         contenido: Text(esCongelado
             ? '¿Reactivar la membresía de ${_c?['nombre']}? Volverá a contar el vencimiento.'
             : '¿Congelar la membresía de ${_c?['nombre']}? No aparecerá en vencidos mientras esté congelada.'),
@@ -1651,10 +1630,9 @@ class _FichaScreenState extends State<FichaScreen> {
     await LocalDb.instance.updateMirrorBasico(widget.clienteId,
         {'estado': esCongelado ? 'activo' : 'congelado'});
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(esCongelado
+    mostrarSnack(context, esCongelado
             ? 'Membresía descongelada'
-            : 'Membresía congelada')));
+            : 'Membresía congelada', significado: SignificadoChip.exito);
     _cargar();
     SyncEngine.instance.push();
   }
@@ -1672,7 +1650,7 @@ class _FichaScreenState extends State<FichaScreen> {
       context: context,
       builder: (ctx) => DialogoApp(
         titulo: 'Corregir pago',
-        iconoTitulo: Icons.edit,
+        iconoTitulo: Icons.edit_rounded,
         contenido: Text(
             '${fmtMonto(p['monto'])} CUP — ${fmtFecha(p['fecha'] as String?)}'),
         acciones: [
@@ -1697,7 +1675,7 @@ class _FichaScreenState extends State<FichaScreen> {
         context: context,
         builder: (ctx) => DialogoApp(
           titulo: 'Anular pago',
-          iconoTitulo: Icons.cancel,
+          iconoTitulo: Icons.cancel_rounded,
           contenido: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -1728,8 +1706,7 @@ class _FichaScreenState extends State<FichaScreen> {
       if (ok != true || !mounted) return;
       final motivo = motivoCtrl.text.trim();
       if (motivo.isEmpty) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-            content: Text('Falta el motivo de la anulación.')));
+        mostrarSnack(context, 'Falta el motivo de la anulación.', significado: SignificadoChip.alerta);
         return;
       }
       await LocalDb.instance.queueOp(
@@ -1738,8 +1715,7 @@ class _FichaScreenState extends State<FichaScreen> {
         payload: {'pago_id': pagoId, 'motivo': motivo},
       );
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('Pago anulado (se sincronizará)')));
+      mostrarSnack(context, 'Pago anulado (se sincronizará)', significado: SignificadoChip.exito);
       _cargar();
       SyncEngine.instance.push();
       return;
@@ -1757,7 +1733,7 @@ class _FichaScreenState extends State<FichaScreen> {
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setS) => DialogoApp(
           titulo: 'Editar pago',
-          iconoTitulo: Icons.edit,
+          iconoTitulo: Icons.edit_rounded,
         contenido: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -1835,20 +1811,18 @@ class _FichaScreenState extends State<FichaScreen> {
     final motivo = (datos['motivo'] ?? '').trim();
     final fechaOk = RegExp(r'^\d{4}-\d{2}-\d{2}$').hasMatch(fecha);
     if (monto == null || monto <= 0 || !fechaOk) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('Monto o fecha inválidos')));
+      mostrarSnack(context, 'Monto o fecha inválidos', significado: SignificadoChip.alerta);
       return;
     }
     if (motivo.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('Falta el motivo de la corrección.')));
+      mostrarSnack(context, 'Falta el motivo de la corrección.', significado: SignificadoChip.alerta);
       return;
     }
     final confirma = await showDialog<bool>(
       context: context,
       builder: (ctx) => DialogoApp(
         titulo: 'Confirmar corrección',
-        iconoTitulo: Icons.check_circle,
+        iconoTitulo: Icons.check_circle_rounded,
         contenido: Text(
             'De: ${fmtMonto(p['monto'])} CUP — ${fmtFecha(p['fecha'] as String?)} — ${p['metodo'] ?? ''}\n'
             'A: ${fmtMonto(monto)} CUP — $fecha — ${datos['metodo']}\n'
@@ -1880,8 +1854,7 @@ class _FichaScreenState extends State<FichaScreen> {
       },
     );
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text('Corrección guardada (se sincronizará)')));
+    mostrarSnack(context, 'Corrección guardada (se sincronizará)', significado: SignificadoChip.exito);
     _cargar();
     SyncEngine.instance.push();
   }
@@ -1923,7 +1896,7 @@ class _FichaScreenState extends State<FichaScreen> {
               padding: const EdgeInsets.all(AppEspacio.md),
               child: const Row(
                 children: [
-                  Icon(Icons.lock, color: AppColores.naranja),
+                  Icon(Icons.lock_rounded, color: AppColores.naranja),
                   SizedBox(width: AppEspacio.sm),
                   Expanded(
                     child: Text(bannerClienteProtegido,
@@ -1935,19 +1908,13 @@ class _FichaScreenState extends State<FichaScreen> {
             const SizedBox(height: AppEspacio.lg),
             GestureDetector(
               onTap: _foto != null ? _verFotoGrande : null,
-              child: _foto != null
-                  ? ClipRRect(
-                      borderRadius: BorderRadius.circular(80),
-                      child: Image.file(_foto!,
-                          width: 160, height: 160, fit: BoxFit.cover),
-                    )
-                  : CircleAvatar(
-                      radius: 80,
-                      backgroundColor: AppColores.naranja
-                          .withValues(alpha: 0.15),
-                      child: const Icon(Icons.person,
-                          size: 80, color: AppColores.naranja),
-                    ),
+              child: AvatarCliente(
+                nombre: nombre,
+                foto: _foto,
+                tamano: TamanoAvatar.xl,
+                iconoFallback: Icons.person_rounded,
+                heroTag: 'avatar-cliente-${widget.clienteId}',
+              ),
             ),
             const SizedBox(height: AppEspacio.md),
             Text(nombre, style: AppTexto.titulo),
@@ -1969,7 +1936,7 @@ class _FichaScreenState extends State<FichaScreen> {
                         child: CircularProgressIndicator(
                             strokeWidth: 2,
                             color: Colors.white))
-                    : const Icon(Icons.cloud_sync),
+                    : const Icon(Icons.cloud_sync_rounded),
                 onPressed:
                     _verificando ? null : _verificarServidor),
           ],
@@ -1990,7 +1957,7 @@ class _FichaScreenState extends State<FichaScreen> {
                   width: double.infinity,
                   child: BotonPrimario(
                     texto: 'Registrar pago',
-                    icono: Icons.payments,
+                    icono: Icons.payments_rounded,
                     onPressed: _pagar,
                   ),
                 ),
@@ -2031,62 +1998,27 @@ class _FichaScreenState extends State<FichaScreen> {
                         child: Column(
                           children: [
                       Center(
-                        child: _foto != null
-                            ? GestureDetector(
-                                onTap: () =>
-                                    _verFotoGrande(),
-                                child: Container(
-                                  padding:
-                                      const EdgeInsets.all(3),
-                                  decoration: BoxDecoration(
-                                    shape: BoxShape.circle,
-                                    border: Border.all(
-                                        color:
-                                            colorMarco,
-                                        width: 3),
-                                  ),
-                                  child: ClipRRect(
-                                    borderRadius:
-                                        BorderRadius.circular(
-                                            57),
-                                    child: Image.file(_foto!,
-                                        width: 114,
-                                        height: 114,
-                                        fit: BoxFit.cover),
-                                  ),
-                                ),
-                              )
-                            : Container(
-                                padding:
-                                    const EdgeInsets.all(3),
-                                decoration: BoxDecoration(
-                                  shape: BoxShape.circle,
-                                  border: Border.all(
-                                      color: colorMarco,
-                                      width: 3),
-                                ),
-                                child: CircleAvatar(
-                                radius: 57,
-                                backgroundColor: AppColores
-                                    .naranja
-                                    .withValues(alpha: 0.15),
-                                child: Text(
-                                    _iniciales(nombre),
-                                    style: const TextStyle(
-                                        fontSize: 40,
-                                        fontWeight:
-                                            FontWeight.bold,
-                                        color: AppColores
-                                            .naranja)),
-                                ),
-                              ),
+                        child: GestureDetector(
+                          onTap: _foto != null
+                              ? () => _verFotoGrande()
+                              : null,
+                          child: AvatarCliente(
+                            nombre: nombre,
+                            foto: _foto,
+                            tamano: TamanoAvatar.perfil,
+                            colorBorde: colorMarco,
+                            grosorBorde: 3,
+                            heroTag:
+                                'avatar-cliente-${widget.clienteId}',
+                          ),
+                        ),
                       ),
                       const SizedBox(
                           height: AppEspacio.sm),
                       Center(
                         child: TextButton.icon(
                           icon: const Icon(
-                              Icons.camera_alt,
+                              Icons.camera_alt_rounded,
                               size: 18),
                           label:
                               const Text('Cambiar foto'),
@@ -2115,18 +2047,15 @@ class _FichaScreenState extends State<FichaScreen> {
                             border: Border.all(
                                 color: AppColores.alerta),
                           ),
-                          child: const Row(
+                          child: Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
                               Icon(Icons.home_rounded,
                                   size: 15,
                                   color: AppColores.alerta),
-                              SizedBox(width: 6),
+                              SizedBox(width: 8),
                               Text('Cuenta a la Casa',
-                                  style: TextStyle(
-                                      fontSize: 12.5,
-                                      fontWeight: FontWeight.w700,
-                                      color: AppColores.alerta)),
+                                  style: AppTexto.etiqueta.copyWith(color: AppColores.alerta, fontWeight: FontWeight.w700)),
                             ],
                           ),
                         ),
@@ -2157,20 +2086,15 @@ class _FichaScreenState extends State<FichaScreen> {
                                 border: Border.all(
                                     color: AppColores.naranja),
                               ),
-                              child: const Row(
+                              child: Row(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
                                   Text('🎂',
-                                      style: TextStyle(
-                                          fontSize: 14)),
-                                  SizedBox(width: 6),
+                                      style: AppTexto.cuerpo),
+                                  SizedBox(width: 8),
                                   Text('¡Cumpleaños hoy!',
-                                      style: TextStyle(
-                                          fontSize: 12.5,
-                                          fontWeight:
-                                              FontWeight.w700,
-                                          color: AppColores
-                                              .naranja)),
+                                      style: AppTexto.etiqueta.copyWith(color: AppColores
+                                              .naranja, fontWeight: FontWeight.w700)),
                                 ],
                               ),
                             ),
@@ -2183,7 +2107,7 @@ class _FichaScreenState extends State<FichaScreen> {
                         width: double.infinity,
                         child: BotonSecundario(
                           texto: 'Editar',
-                          icono: Icons.edit,
+                          icono: Icons.edit_rounded,
                           onPressed: _editar,
                         ),
                       ),
@@ -2209,11 +2133,10 @@ class _FichaScreenState extends State<FichaScreen> {
                                         BorderRadius.circular(
                                             AppRadio.sm),
                                   ),
-                                  child: const Icon(
-                                      Icons.person_outline,
+                                  child: Icon(
+                                      Icons.person_outline_rounded,
                                       size: 18,
-                                      color:
-                                          AppColores.naranja),
+                                      color: AppColores.textoSecundario(context)),
                                 ),
                                 const SizedBox(
                                     width: AppEspacio.sm),
@@ -2225,18 +2148,18 @@ class _FichaScreenState extends State<FichaScreen> {
                             const SizedBox(
                                 height: AppEspacio.sm),
                             _filaInfo(
-                                Icons.badge,
+                                Icons.badge_rounded,
                                 'Carnet',
                                 '${c['carnet'] ?? '—'}'),
                             if (edadDeCarnet(
                                     '${c['carnet'] ?? ''}') !=
                                 null)
                               _filaInfo(
-                                  Icons.cake,
+                                  Icons.cake_rounded,
                                   'Edad',
                                   '${edadDeCarnet('${c['carnet']}')} años'),
                             _filaInfo(
-                                Icons.person,
+                                Icons.person_rounded,
                                 'Sexo',
                                 '${c['sexo'] ?? '—'}'),
                             // Bloque 1: teléfono tocable para
@@ -2251,8 +2174,8 @@ class _FichaScreenState extends State<FichaScreen> {
                                         vertical: AppEspacio.sm),
                                 child: Row(
                                   children: [
-                                    const Icon(Icons.phone,
-                                        color: AppColores.naranja,
+                                    Icon(Icons.phone_rounded,
+                                        color: AppColores.textoSecundario(context),
                                         size: 20),
                                     const SizedBox(
                                         width: AppEspacio.md),
@@ -2278,7 +2201,7 @@ class _FichaScreenState extends State<FichaScreen> {
                               ),
                             ),
                             _filaInfo(
-                                Icons.person_add,
+                                Icons.person_add_rounded,
                                 'Inscrito por',
                                 _textoInscritoPor(c[
                                         'registrado_por_nombre']
@@ -2295,10 +2218,9 @@ class _FichaScreenState extends State<FichaScreen> {
                                             AppEspacio.sm),
                                 child: Row(
                                   children: [
-                                    const Icon(
-                                        Icons.note,
-                                        color: AppColores
-                                            .naranja,
+                                    Icon(
+                                        Icons.note_rounded,
+                                        color: AppColores.textoSecundario(context),
                                         size: 20),
                                     const SizedBox(
                                         width:
@@ -2346,28 +2268,28 @@ class _FichaScreenState extends State<FichaScreen> {
                             const SizedBox(
                                 height: AppEspacio.sm),
                             _filaInfo(
-                                Icons.calendar_today,
+                                Icons.calendar_today_rounded,
                                 'Pagado hasta',
                                 esCasa
                                     ? 'Sin vencimiento'
                                     : fmtFecha(c['pagado_hasta']
                                         as String?)),
                             _filaInfo(
-                                Icons.event,
+                                Icons.event_rounded,
                                 'Estado',
                                 esCasa
                                     ? 'Cuenta a la Casa'
                                     : textoEstado(c['pagado_hasta']
                                         as String?)),
                             _filaInfo(
-                                Icons.payments_outlined,
+                                Icons.payments_rounded,
                                 'Último pago',
                                 _pagos.isEmpty
                                     ? '—'
                                     : fmtFecha(_pagos.first['fecha']
                                         as String?)),
                             _filaInfo(
-                                Icons.repeat,
+                                Icons.repeat_rounded,
                                 'Tipo',
                                 _pagos.isEmpty
                                     ? '—'
@@ -2379,16 +2301,16 @@ class _FichaScreenState extends State<FichaScreen> {
                             // legacy se ignora para siempre).
                             if (_textoTarifaEspecial(c) != null)
                               _filaInfo(
-                                  Icons.local_offer,
+                                  Icons.local_offer_rounded,
                                   'Tarifa especial',
                                   _textoTarifaEspecial(c)!),
                             // 17/25: Plus residual del convertido
                             // (solo dueño; sin Plus no hay fila).
                             if (_textoPlus() != null)
                               _filaInfo(
-                                  Icons.star, 'Plus', _textoPlus()!),
+                                  Icons.star_rounded, 'Plus', _textoPlus()!),
                             _filaInfo(
-                                Icons.date_range,
+                                Icons.date_range_rounded,
                                 'Inscripción',
                                 fmtFecha(c[
                                         'fecha_inscripcion']
@@ -2437,10 +2359,10 @@ class _FichaScreenState extends State<FichaScreen> {
                                       EdgeInsets.zero,
                                   leading: Icon(
                                     i['visibilidad'] == 'privada'
-                                        ? Icons.lock_outline
-                                        : Icons.report_problem_outlined,
+                                        ? Icons.lock_outline_rounded
+                                        : Icons.report_problem_rounded,
                                     size: 20,
-                                    color: AppColores.naranja,
+                                    color: AppColores.textoSecundario(context),
                                   ),
                                   title: Text(
                                       '${i['descripcion'] ?? ''}',
@@ -2510,9 +2432,9 @@ class _FichaScreenState extends State<FichaScreen> {
                                   contentPadding: EdgeInsets.zero,
                                   leading: Icon(
                                       _regaloAnio != null
-                                          ? Icons.send
-                                          : Icons.card_giftcard,
-                                      color: AppColores.naranja,
+                                          ? Icons.send_rounded
+                                          : Icons.card_giftcard_rounded,
+                                      color: AppColores.textoSecundario(context),
                                       size: 20),
                                   title: Text(
                                       _regaloAnio != null
@@ -2546,9 +2468,9 @@ class _FichaScreenState extends State<FichaScreen> {
                               ListTile(
                                 dense: true,
                                 contentPadding: EdgeInsets.zero,
-                                leading: const Icon(
-                                    Icons.lock,
-                                    color: AppColores.naranja,
+                                leading: Icon(
+                                    Icons.lock_rounded,
+                                    color: AppColores.textoSecundario(context),
                                     size: 20),
                                 title: Text(
                                     protegido
@@ -2564,9 +2486,9 @@ class _FichaScreenState extends State<FichaScreen> {
                               ListTile(
                                 dense: true,
                                 contentPadding: EdgeInsets.zero,
-                                leading: const Icon(
-                                    Icons.local_offer,
-                                    color: AppColores.naranja,
+                                leading: Icon(
+                                    Icons.local_offer_rounded,
+                                    color: AppColores.textoSecundario(context),
                                     size: 20),
                                 title: const Text(
                                     'Tarifa especial',
@@ -2587,9 +2509,9 @@ class _FichaScreenState extends State<FichaScreen> {
                               ListTile(
                                 dense: true,
                                 contentPadding: EdgeInsets.zero,
-                                leading: const Icon(
-                                    Icons.security,
-                                    color: AppColores.naranja,
+                                leading: Icon(
+                                    Icons.security_rounded,
+                                    color: AppColores.textoSecundario(context),
                                     size: 20),
                                 title: const Text(
                                     'Datos sensibles',
@@ -2602,9 +2524,9 @@ class _FichaScreenState extends State<FichaScreen> {
                               ListTile(
                                 dense: true,
                                 contentPadding: EdgeInsets.zero,
-                                leading: const Icon(
-                                    Icons.help_outline,
-                                    color: AppColores.naranja,
+                                leading: Icon(
+                                    Icons.help_outline_rounded,
+                                    color: AppColores.textoSecundario(context),
                                     size: 20),
                                 title: const Text(
                                     'Permisos explicados',
@@ -2654,9 +2576,7 @@ class _FichaScreenState extends State<FichaScreen> {
     final tel = _normalizarTelefono('${_c?['telefono'] ?? ''}');
     if (tel.length < 8) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content:
-              Text('Este cliente no tiene un teléfono válido registrado.')));
+      mostrarSnack(context, 'Este cliente no tiene un teléfono válido registrado.', significado: SignificadoChip.alerta);
       return;
     }
     final url = Uri.parse('https://wa.me/$tel');
@@ -2672,19 +2592,6 @@ class _FichaScreenState extends State<FichaScreen> {
       'resuelta' => 'Resuelta',
       _ => '${estado ?? ''}',
     };
-  }
-
-  String _iniciales(String nombre) {    final partes =
-        nombre.trim().split(RegExp(r'\s+'));
-    var ini = '';
-    if (partes.isNotEmpty && partes[0].isNotEmpty) {
-      ini = partes[0][0].toUpperCase();
-      if (partes.length > 1 &&
-          partes.last.isNotEmpty) {
-        ini += partes.last[0].toUpperCase();
-      }
-    }
-    return ini.isEmpty ? '?' : ini;
   }
 
   /// Bloque 1: barra del mes pagado (del último pago al
@@ -2760,7 +2667,7 @@ class _FichaScreenState extends State<FichaScreen> {
       child: Row(
         children: [
           Icon(icono,
-              color: AppColores.naranja, size: 20),
+              color: AppColores.textoSecundario(context), size: 20),
           const SizedBox(width: AppEspacio.md),
           Expanded(
               child: Text(etiqueta,
@@ -2797,7 +2704,7 @@ class _FichaScreenState extends State<FichaScreen> {
               style: AppTexto.secundario),
           const SizedBox(height: AppEspacio.sm),
           OutlinedButton.icon(
-            icon: const Icon(Icons.refresh, size: 18),
+            icon: const Icon(Icons.refresh_rounded, size: 18),
             label: const Text('Reintentar'),
             onPressed: _reintentarCargaAcceso,
           ),
@@ -2816,7 +2723,7 @@ class _FichaScreenState extends State<FichaScreen> {
               style: AppTexto.secundario),
           const SizedBox(height: AppEspacio.sm),
           FilledButton.icon(
-            icon: const Icon(Icons.key, size: 18),
+            icon: const Icon(Icons.key_rounded, size: 18),
             label: const Text('Generar PIN para App'),
             onPressed: () => _generarPin(esRegeneracion: false),
           ),
@@ -2831,7 +2738,7 @@ class _FichaScreenState extends State<FichaScreen> {
               style: AppTexto.titulo),
           const SizedBox(height: AppEspacio.sm),
           Chip(
-            avatar: const Icon(Icons.block,
+            avatar: const Icon(Icons.block_rounded,
                 size: 16, color: Colors.white),
             label: const Text('Revocado',
                 style: TextStyle(color: Colors.white)),
@@ -2839,7 +2746,7 @@ class _FichaScreenState extends State<FichaScreen> {
           ),
           const SizedBox(height: AppEspacio.sm),
           FilledButton.icon(
-            icon: const Icon(Icons.refresh, size: 18),
+            icon: const Icon(Icons.refresh_rounded, size: 18),
             label: const Text('Reactivar / Generar PIN'),
             onPressed: () => _generarPin(esRegeneracion: true),
           ),
@@ -2854,7 +2761,7 @@ class _FichaScreenState extends State<FichaScreen> {
               style: AppTexto.titulo),
           const SizedBox(height: AppEspacio.sm),
           Chip(
-            avatar: const Icon(Icons.lock,
+            avatar: const Icon(Icons.lock_rounded,
                 size: 16, color: Colors.white),
             label: const Text('Bloqueado',
                 style: TextStyle(color: Colors.white)),
@@ -2866,7 +2773,7 @@ class _FichaScreenState extends State<FichaScreen> {
               style: AppTexto.secundario),
           const SizedBox(height: AppEspacio.sm),
           FilledButton.icon(
-            icon: const Icon(Icons.lock_open, size: 18),
+            icon: const Icon(Icons.lock_open_rounded, size: 18),
             label: const Text('Desbloquear (Nuevo PIN)'),
             onPressed: () => _generarPin(esRegeneracion: true),
           ),
@@ -2884,7 +2791,7 @@ class _FichaScreenState extends State<FichaScreen> {
               style: AppTexto.titulo),
           const SizedBox(height: AppEspacio.sm),
           Chip(
-            avatar: const Icon(Icons.check_circle,
+            avatar: const Icon(Icons.check_circle_rounded,
                 size: 16, color: Colors.white),
             label: const Text('Activo',
                 style: TextStyle(color: Colors.white)),
@@ -2897,7 +2804,7 @@ class _FichaScreenState extends State<FichaScreen> {
             children: [
               Expanded(
                 child: OutlinedButton.icon(
-                  icon: const Icon(Icons.refresh, size: 18),
+                  icon: const Icon(Icons.refresh_rounded, size: 18),
                   label: const Text('Regenerar PIN'),
                   onPressed: () =>
                       _confirmarRegenerar(acceso),
@@ -2906,7 +2813,7 @@ class _FichaScreenState extends State<FichaScreen> {
               const SizedBox(width: AppEspacio.sm),
               Expanded(
                 child: OutlinedButton.icon(
-                  icon: const Icon(Icons.block,
+                  icon: const Icon(Icons.block_rounded,
                       size: 18, color: AppColores.error),
                   label: const Text('Revocar',
                       style: TextStyle(color: AppColores.error)),
@@ -2938,7 +2845,7 @@ class _FichaScreenState extends State<FichaScreen> {
               SizedBox(
                 width: double.infinity,
                 child: OutlinedButton.icon(
-                  icon: const Icon(Icons.preview, size: 18),
+                  icon: const Icon(Icons.preview_rounded, size: 18),
                   label: const Text('Vista previa App'),
                   onPressed: _abrirVistaPrevia,
                 ),
@@ -3017,14 +2924,11 @@ class _FichaScreenState extends State<FichaScreen> {
       await AccesoAppCache.instance.cargar();
       if (mounted) {
         setState(() {});
-        ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-                content: Text('Acceso revocado')));
+        mostrarSnack(context, 'Acceso revocado', significado: SignificadoChip.exito);
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text('Error al revocar: $e')));
+        mostrarSnack(context, 'Error al revocar: $e', significado: SignificadoChip.error);
       }
     }
   }
@@ -3050,8 +2954,7 @@ class _FichaScreenState extends State<FichaScreen> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text('Error al generar PIN: $e')));
+        mostrarSnack(context, 'Error al generar PIN: $e', significado: SignificadoChip.error);
       }
     }
   }
@@ -3082,15 +2985,20 @@ class _FichaScreenState extends State<FichaScreen> {
       entradas.add({
         'tipo': 'pago',
         'fecha': '${p['fecha'] ?? ''}',
-        'titulo': '${fmtMonto(p['monto'])} CUP — $metodo',
+        'titulo': metodo == 'cortesia'
+            ? 'Cortesía (regalo)'
+            : metodo == 'transferencia'
+                ? 'Transferencia'
+                : 'Efectivo',
+        'trailing': '${fmtMonto(p['monto'])} CUP',
         'subtitulo':
             '${fmtFecha(p['fecha'] as String?)} · ${p['periodo'] ?? 'mensual'}\n'
             '${textoCobradoPor(p['registrado_por'])}',
         'icono': metodo == 'cortesia'
-            ? Icons.card_giftcard
+            ? Icons.card_giftcard_rounded
             : metodo == 'transferencia'
-                ? Icons.smartphone
-                : Icons.payments,
+                ? Icons.smartphone_rounded
+                : Icons.payments_rounded,
         // F2 (estéticas 1.19): el color distingue el tipo de un
         // vistazo — cobro en verde, transferencia en azul, regalo
         // en ámbar (antes el regalo iba también en verde).
@@ -3112,7 +3020,7 @@ class _FichaScreenState extends State<FichaScreen> {
             '${fmtFecha(s['fecha'] as String?)} · ${(s['moneda'] ?? 'CUP')}',
         'trailing':
             '${fmtMonto((s['precio'] as num?)?.toDouble() ?? 0)} ${(s['moneda'] ?? 'CUP')}',
-        'icono': Icons.shopping_bag,
+        'icono': Icons.shopping_bag_rounded,
         'color': AppColores.naranja,
       });
     }
@@ -3134,8 +3042,8 @@ class _FichaScreenState extends State<FichaScreen> {
             ? 'Casa'
             : '${fmtMonto(((s['precio_unitario'] as num?)?.toDouble() ?? 0) * ((s['cantidad'] as num?)?.toDouble() ?? 0))} CUP',
         'icono': (s['reverso_de'] as num?) != null
-            ? Icons.undo
-            : Icons.bolt,
+            ? Icons.undo_rounded
+            : Icons.bolt_rounded,
         // F2: la anulación (reverso) va en rojo, no en naranja.
         'color': (s['reverso_de'] as num?) != null
             ? AppColores.error
@@ -3178,7 +3086,27 @@ class _FichaScreenState extends State<FichaScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text('Historial', style: AppTexto.titulo),
+          Row(
+            children: [
+              const Expanded(
+                child:
+                    Text('Historial', style: AppTexto.titulo),
+              ),
+              // T24 (1.20): estado de cuenta del cliente.
+              IconButton(
+                tooltip: 'Estado de cuenta',
+                icon: const Icon(
+                    Icons.receipt_long_rounded, size: 22),
+                onPressed: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => EstadoCuentaScreen(
+                        clienteId: widget.clienteId),
+                  ),
+                ),
+              ),
+            ],
+          ),
           const SizedBox(height: AppEspacio.sm),
           Wrap(
             spacing: 8,
@@ -3216,36 +3144,249 @@ class _FichaScreenState extends State<FichaScreen> {
               titulo: 'Sin movimientos en este filtro',
               subtitulo: 'Prueba con otro filtro.',
             ),
-          for (final e in visibles)
-            ListTile(
-              dense: true,
-              contentPadding: EdgeInsets.zero,
-              // F2 (estéticas 1.19): icono en círculo tintado
-              // según el tipo, en vez de icono suelto sin fondo.
-              leading: CircleAvatar(
+          for (var i = 0; i < visibles.length; i++)
+            _filaTimeline(visibles[i],
+                esUltima: i == visibles.length - 1),
+        ],
+      ),
+    );
+  }
+
+  /// Fila de la línea de tiempo del historial (V18): riel vertical
+  /// que une los eventos, icono semántico en círculo tintado según
+  /// el tipo (F2 de la 1.19), título, detalle con fecha y monto
+  /// alineado a la derecha en todos los tipos; en pagos con permiso
+  /// de administrador, el botón de corregir va junto al monto.
+  Widget _filaTimeline(Map<String, dynamic> e,
+      {required bool esUltima}) {
+    final color = e['color'] as Color;
+    // W8: el recibo se puede reenviar en pagos reales (no
+    // en cortesías ni en pagos en cero).
+    final pagoFila = e['pago'] as Map<String, dynamic>?;
+    final puedeRecibo = e['tipo'] == 'pago' &&
+        pagoFila != null &&
+        '${pagoFila['metodo'] ?? ''}' != 'cortesia' &&
+        ((pagoFila['monto'] as num?) ?? 0) > 0;
+    // F1 (1.20): comprobante adjunto a un pago por
+    // transferencia (el uuid baja con el espejo del pago).
+    final uuidComprobante = (pagoFila != null &&
+            '${pagoFila['metodo'] ?? ''}' == 'transferencia')
+        ? '${pagoFila['comprobante_uuid'] ?? ''}'
+        : '';
+    // T4 (1.20): estado de conciliación del pago (solo
+    // tiene sentido en transferencias; en el resto da
+    // 'no_aplica' y no se muestra nada).
+    final estadoConcil = pagoFila == null
+        ? 'no_aplica'
+        : estadoConciliacion(pagoFila);
+    final notaConcil =
+        '${pagoFila?['conciliacion_nota'] ?? ''}'.trim();
+    return IntrinsicHeight(
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Column(
+            children: [
+              CircleAvatar(
                 radius: 16,
-                backgroundColor:
-                    (e['color'] as Color).withValues(alpha: 0.15),
+                backgroundColor: color.withValues(alpha: 0.15),
                 child: Icon(e['icono'] as IconData,
-                    size: 18, color: e['color'] as Color),
+                    size: 18, color: color),
               ),
-              title: Text('${e['titulo']}', style: AppTexto.cuerpo),
-              subtitle: Text('${e['subtitulo']}',
-                  style: AppTexto.secundario),
-              trailing: e['tipo'] == 'pago'
-                  ? (AuthService().isAdmin
-                      ? IconButton(
-                          tooltip: 'Corregir pago',
-                          icon: const Icon(Icons.tune, size: 20),
+              if (!esUltima)
+                Expanded(
+                  child: Container(
+                      width: 2, color: AppColores.borde(context)),
+                ),
+            ],
+          ),
+          const SizedBox(width: AppEspacio.sm),
+          Expanded(
+            child: Padding(
+              padding:
+                  EdgeInsets.only(bottom: esUltima ? 0 : AppEspacio.sm),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text('${e['titulo']}',
+                            style: AppTexto.cuerpo),
+                      ),
+                      Text('${e['trailing'] ?? ''}',
+                          style: AppTexto.cuerpo.copyWith(
+                              fontWeight: FontWeight.bold,
+                              color: AppColores.naranja)),
+                      if (puedeRecibo)
+                        IconButton(
+                          tooltip: 'Reenviar recibo',
+                          icon: const Icon(
+                              Icons.share_rounded, size: 20),
                           onPressed: () =>
-                              _corregirPago(e['pago'] as Map<String, dynamic>),
-                        )
-                      : null)
-                  : Text('${e['trailing'] ?? ''}',
-                      style: AppTexto.cuerpo.copyWith(
-                          fontWeight: FontWeight.bold,
-                          color: AppColores.naranja)),
+                              _reenviarRecibo(pagoFila),
+                        ),
+                      if (uuidComprobante.isNotEmpty)
+                        IconButton(
+                          tooltip: 'Ver comprobante',
+                          icon: const Icon(
+                              Icons.image_rounded, size: 20),
+                          onPressed: () =>
+                              _verComprobante(uuidComprobante),
+                        ),
+                      if (e['tipo'] == 'pago' &&
+                          AuthService().isAdmin)
+                        IconButton(
+                          tooltip: 'Corregir pago',
+                          icon:
+                              const Icon(Icons.tune_rounded, size: 20),
+                          onPressed: () => _corregirPago(
+                              e['pago'] as Map<String, dynamic>),
+                        ),
+                      // T4 (1.20): conciliar la transferencia
+                      // (solo el dueño; el servidor lo exige).
+                      if (e['tipo'] == 'pago' &&
+                          pagoFila != null &&
+                          '${pagoFila['metodo'] ?? ''}' ==
+                              'transferencia' &&
+                          AuthService().isOwner)
+                        IconButton(
+                          tooltip: 'Conciliar transferencia',
+                          icon: const Icon(
+                              Icons.fact_check_rounded, size: 20),
+                          onPressed: () async {
+                            final okConc =
+                                await mostrarDialogoConciliar(
+                              context,
+                              pago: pagoFila,
+                              nombreCliente:
+                                  '${_c?['nombre'] ?? ''}',
+                            );
+                            if (okConc && mounted) _cargar();
+                          },
+                        ),
+                    ],
+                  ),
+                  Text('${e['subtitulo']}',
+                      style: AppTexto.secundario),
+                  // T4 (1.20): chip de conciliación en pagos
+                  // por transferencia (el histórico también se
+                  // muestra: señala que nunca se comprobó; la
+                  // bandeja del dueño lo excluye).
+                  if (e['tipo'] == 'pago' &&
+                      pagoFila != null &&
+                      '${pagoFila['metodo'] ?? ''}' ==
+                          'transferencia') ...[
+                    const SizedBox(height: AppEspacio.xs),
+                    ChipEstado.semantico(
+                      texto: etiquetaConciliacion(estadoConcil),
+                      significado:
+                          significadoConciliacion(estadoConcil),
+                    ),
+                    if ((estadoConcil == 'problema' ||
+                            estadoConcil == 'rechazada') &&
+                        notaConcil.isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(
+                            top: AppEspacio.xs),
+                        child: Text(
+                          'Nota: $notaConcil',
+                          style: AppTexto.metadato
+                              .copyWith(color: AppColores.error),
+                        ),
+                      ),
+                  ],
+                ],
+              ),
             ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// W8 (1.20): reenviar el recibo de un pago del
+  /// historial por WhatsApp al teléfono del cliente (el
+  /// mismo texto que el recibo de la bandeja, con su línea
+  /// automática).
+  Future<void> _reenviarRecibo(Map<String, dynamic> p) async {
+    final c = _c;
+    if (c == null) return;
+    final texto = textoReciboPago(
+      nombre: '${c['nombre'] ?? ''}',
+      monto: (p['monto'] as num?) ?? 0,
+      metodo: '${p['metodo'] ?? ''}',
+      fechaIso: '${p['fecha'] ?? ''}',
+      cobradoPor: '${p['registrado_por'] ?? ''}',
+    );
+    final wa = normalizarTelefonoWaMe('${c['telefono'] ?? ''}');
+    if (wa.isEmpty) {
+      if (mounted) {
+        mostrarSnack(
+            context, 'Este cliente no tiene teléfono registrado.',
+            significado: SignificadoChip.alerta);
+      }
+      return;
+    }
+    final ok = await launchUrl(
+      Uri.parse(
+          'https://wa.me/$wa?text=${Uri.encodeComponent(texto)}'),
+      mode: LaunchMode.externalApplication,
+    );
+    if (!ok && mounted) {
+      mostrarSnack(context, 'No se pudo abrir WhatsApp',
+          significado: SignificadoChip.error);
+    }
+  }
+
+  /// F1 (1.20): ver la foto del comprobante de un pago por
+  /// transferencia. Orden: archivo local de este teléfono →
+  /// ruta exacta guardada → ruta determinista (.webp y luego
+  /// .jpg) vía FotoCache (bucket de fotos, con la sesión).
+  Future<void> _verComprobante(String uuid) async {
+    File? local;
+    try {
+      final fila = await ComprobantesService.instance.filaDe(uuid);
+      final ruta = fila?['ruta_local'] as String?;
+      if (ruta != null) {
+        final f = File(ruta);
+        if (await f.exists() && await f.length() > 0) local = f;
+      }
+      if (local == null) {
+        final exacta = fila?['storage_path'] as String?;
+        if (exacta != null && exacta.isNotEmpty) {
+          local = await FotoCache.instance.obtener(exacta);
+        }
+      }
+      if (local == null) {
+        for (final ext in ['webp', 'jpg']) {
+          local = await FotoCache.instance
+              .obtener(rutaStorageComprobante(uuid, ext));
+          if (local != null) break;
+        }
+      }
+    } catch (_) {}
+    if (!mounted) return;
+    if (local == null) {
+      mostrarSnack(context,
+          'El comprobante aún no está disponible en este teléfono',
+          significado: SignificadoChip.alerta);
+      return;
+    }
+    final archivo = local;
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => DialogoApp(
+        titulo: 'Comprobante de la transferencia',
+        iconoTitulo: Icons.image_rounded,
+        contenido: Image.file(archivo,
+            errorBuilder: (context, error, stackTrace) => const Text(
+                'No se pudo mostrar la imagen del comprobante.')),
+        acciones: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cerrar'),
+          ),
         ],
       ),
     );
@@ -3310,9 +3451,9 @@ class _FichaScreenState extends State<FichaScreen> {
                 children: [
                   Icon(
                       metodoTop == 'efectivo'
-                          ? Icons.payments
-                          : Icons.smartphone,
-                      color: AppColores.naranja,
+                          ? Icons.payments_rounded
+                          : Icons.smartphone_rounded,
+                      color: AppColores.textoSecundario(context),
                       size: 28),
                   const Text('prefiere',
                       style: AppTexto.secundario),

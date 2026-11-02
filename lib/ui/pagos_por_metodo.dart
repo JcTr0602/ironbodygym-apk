@@ -229,10 +229,7 @@ class _PagosPorMetodoState
     } catch (e) {
       if (mounted) {
         setState(() => _cargando = false);
-        ScaffoldMessenger.of(context)
-            .showSnackBar(
-          SnackBar(content: Text('Error: $e')),
-        );
+        mostrarSnack(context, 'Error: $e', significado: SignificadoChip.error);
       }
     }
   }
@@ -294,7 +291,7 @@ class _PagosPorMetodoState
                     _efectivo,
                     total,
                     AppColores.exito,
-                    Icons.money,
+                    Icons.money_rounded,
                   ),
                   const SizedBox(height: 12),
                   _buildBarra(
@@ -302,7 +299,7 @@ class _PagosPorMetodoState
                     _transferencia,
                     total,
                     AppColores.info,
-                    Icons.credit_card,
+                    Icons.credit_card_rounded,
                   ),
                   if (_mixto > 0) ...[
                     const SizedBox(height: 12),
@@ -311,7 +308,7 @@ class _PagosPorMetodoState
                       _mixto,
                       total,
                       AppColores.naranja,
-                      Icons.swap_horiz,
+                      Icons.swap_horiz_rounded,
                     ),
                   ],
                   const SizedBox(height: 24),
@@ -325,30 +322,20 @@ class _PagosPorMetodoState
                       children: [
                         const Text(
                           'Total',
-                          style: TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold,
-                          ),
+                          style: AppTexto.titulo,
                         ),
                         Text(
                           '\$${total.toStringAsFixed(0)} CUP',
-                          style: const TextStyle(
-                            fontSize: 20,
-                            fontWeight: FontWeight.w900,
-                            color: AppColores.naranja,
-                          ),
+                          style: AppTexto.tituloPagina.copyWith(color: AppColores.naranja, fontWeight: FontWeight.w900),
                         ),
                       ],
                     ),
                   ),
                   if (_efectivoUsd + _transferenciaUsd > 0) ...[
                     const SizedBox(height: 24),
-                    const Text(
+                    Text(
                       'USD (solo suplementos)',
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w600,
-                      ),
+                      style: AppTexto.titulo.copyWith(fontWeight: FontWeight.w600),
                     ),
                     const SizedBox(height: 12),
                     _buildBarra(
@@ -356,7 +343,7 @@ class _PagosPorMetodoState
                       _efectivoUsd,
                       _efectivoUsd + _transferenciaUsd,
                       AppColores.exito,
-                      Icons.money,
+                      Icons.money_rounded,
                     ),
                     if (_transferenciaUsd > 0) ...[
                       const SizedBox(height: 12),
@@ -365,7 +352,7 @@ class _PagosPorMetodoState
                         _transferenciaUsd,
                         _efectivoUsd + _transferenciaUsd,
                         AppColores.info,
-                        Icons.credit_card,
+                        Icons.credit_card_rounded,
                       ),
                     ],
                     const SizedBox(height: 12),
@@ -377,18 +364,11 @@ class _PagosPorMetodoState
                         children: [
                           const Text(
                             'Total USD',
-                            style: TextStyle(
-                              fontSize: 18,
-                              fontWeight: FontWeight.bold,
-                            ),
+                            style: AppTexto.titulo,
                           ),
                           Text(
                             '\$${(_efectivoUsd + _transferenciaUsd).toStringAsFixed(2)} USD',
-                            style: const TextStyle(
-                              fontSize: 20,
-                              fontWeight: FontWeight.w900,
-                              color: AppColores.naranja,
-                            ),
+                            style: AppTexto.tituloPagina.copyWith(color: AppColores.naranja, fontWeight: FontWeight.w900),
                           ),
                         ],
                       ),
@@ -418,19 +398,12 @@ class _PagosPorMetodoState
               const SizedBox(width: 8),
               Text(
                 titulo,
-                style: const TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w600,
-                ),
+                style: AppTexto.titulo.copyWith(fontWeight: FontWeight.w600),
               ),
               const Spacer(),
               Text(
                 '\$${monto.toStringAsFixed(0)}',
-                style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                  color: color,
-                ),
+                style: AppTexto.titulo.copyWith(color: color),
               ),
             ],
           ),
@@ -449,10 +422,7 @@ class _PagosPorMetodoState
           const SizedBox(height: 4),
           Text(
             '${pct.toStringAsFixed(1)}%',
-            style: TextStyle(
-              fontSize: 12,
-              color: AppColores.textoSecundario(context),
-            ),
+            style: AppTexto.metadato.copyWith(color: AppColores.textoSecundario(context)),
           ),
         ],
       ),

@@ -40,7 +40,7 @@ const kSeedTarifaKevin = 'seed_esp_70';
 /// (los ids son UUID salvo las semillas idénticas).
 /// Las filas inactivas del espejo SE conservan (no como en
 /// recordatorios): una tarifa revocada debe seguir contando como
-/// «algún registro» para que el fallback legacy no resucite. El
+/// «algún registro» para que la siembra legacy no resucite. El
 /// historial del espejo llega como lista JSON y se normaliza a
 /// texto JSON, como lo guarda la tabla local.
 List<Map<String, dynamic>> fusionarTarifasEspeciales(
@@ -190,8 +190,9 @@ Future<List<Map<String, dynamic>>> _todasFusionadas() async {
 }
 
 /// Todas las filas de un cliente (activas primero, luego por
-/// actualización descendente). Incluye inactivas: el fallback legacy
-/// se desactiva con CUALQUIER registro, activo o no (ajuste 3).
+/// actualización descendente). Incluye inactivas: CUALQUIER
+/// registro, activo o no, cuenta como «tiene tarifa» (ajuste 3;
+/// la siembra legacy de Q2 usa la misma guarda).
 Future<List<Map<String, dynamic>>> tarifasDeCliente(int clienteId) async {
   final todas = await _todasFusionadas();
   final filas = [
@@ -208,8 +209,9 @@ Future<List<Map<String, dynamic>>> tarifasDeCliente(int clienteId) async {
 }
 
 /// ¿Existe ALGÚN registro (activo o inactivo) para el cliente?
-/// Si es true, la columna legacy tarifa_especial_transferencia se
-/// ignora PARA SIEMPRE (ajuste 3: si no, revocar sería imposible).
+/// Si es true, la siembra legacy (Q2) no crea su fila: cualquier
+/// registro manda sobre la columna vieja (ajuste 3: si no,
+/// revocar sería imposible).
 Future<bool> tieneAlgunRegistroTarifa(int clienteId) async {
   final db = await LocalDb.instance.db;
   final rows = await db.query('tarifa_especial',
@@ -220,13 +222,80 @@ Future<bool> tieneAlgunRegistroTarifa(int clienteId) async {
   if (rows.isNotEmpty) return true;
   // Fase A (D6): el registro puede vivir solo en el espejo (lo
   // otorgaron en otro teléfono y aún no hay fila local).
+  // M1 (cola 1.20): filtro en SQL (mirrorPorCampo) en vez de
+  // decodificar el espejo entero en Dart para un any().
   try {
-    final espejo =
-        await LocalDb.instance.allMirror('espejo_tarifas_especiales');
-    return espejo.any(
-        (e) => (e['cliente_id'] as num?)?.toInt() == clienteId);
+    final espejo = await LocalDb.instance.mirrorPorCampo(
+        'espejo_tarifas_especiales', 'cliente_id', clienteId);
+    return espejo.isNotEmpty;
   } catch (_) {
     return false;
+  }
+}
+
+/// Q2 (Argón precios, 1.20): siembra local de las tarifas
+/// legacy, espejo de la del servidor (sync.py,
+/// _ensure_tarifas_especiales). Cada cliente del espejo con
+/// tarifa_especial_transferencia > 0 y SIN ningún registro
+/// (local, espejo u op pendiente) recibe su fila determinista
+/// seed_legacy_<id>: mensual, solo transferencia, sin fechas.
+/// Sin op de sync: la fila canónica nace en gym.db y baja por
+/// el espejo a todos los teléfonos; esta siembra cubre al
+/// teléfono que actualiza la app y cobra antes del primer
+/// pull que la traiga. Idempotente (INSERT OR IGNORE + la
+/// guarda de «sin ningún registro»): correrla dos veces no
+/// duplica ni resucita una seed revocada. Nunca lanza:
+/// devuelve cuántas filas sembró (0 si algo falla).
+Future<int> sembrarTarifasLegacy() async {
+  try {
+    final clientes = await LocalDb.instance.allMirror('clientes');
+    if (clientes.isEmpty) return 0;
+    final fusionadas = await _todasFusionadas();
+    final conRegistro = <int>{
+      for (final f in fusionadas)
+        if (f['cliente_id'] is num) (f['cliente_id'] as num).toInt(),
+    };
+    final ts = isoHabana(ahoraHabana());
+    var sembradas = 0;
+    final db = await LocalDb.instance.db;
+    await db.transaction((txn) async {
+      for (final c in clientes) {
+        final cid = (c['id'] as num?)?.toInt() ?? 0;
+        final legacy =
+            (c['tarifa_especial_transferencia'] as num?)?.toDouble();
+        if (cid <= 0 || legacy == null || legacy <= 0) continue;
+        if (conRegistro.contains(cid)) continue;
+        sembradas += await txn.rawInsert(
+            'INSERT OR IGNORE INTO tarifa_especial '
+            '(id, cliente_id, nombre, monto_efectivo, '
+            'monto_transferencia, periodo, vigente_desde, '
+            'vigente_hasta, motivo, otorgado_por, activa, '
+            'historial, creada_ts, actualizada_ts) '
+            'VALUES (?, ?, ?, NULL, ?, ?, NULL, NULL, ?, ?, 1, '
+            '?, ?, ?)',
+            [
+              'seed_legacy_$cid',
+              cid,
+              '${c['nombre'] ?? ''}',
+              legacy,
+              'mensual',
+              'legacy',
+              735772141,
+              jsonEncode([
+                {
+                  'evento': 'sembrada_legacy',
+                  'en': ts,
+                  'monto_transferencia': legacy,
+                }
+              ]),
+              ts,
+              ts,
+            ]);
+      }
+    });
+    return sembradas;
+  } catch (_) {
+    return 0;
   }
 }
 
@@ -248,6 +317,46 @@ Future<Map<String, dynamic>?> tarifaActivaPara(
   activas.sort((a, b) => '${b['actualizada_ts']}'
       .compareTo('${a['actualizada_ts']}'));
   return activas.first;
+}
+
+/// T14 (1.20): estado de revisión de una tarifa por su
+/// `vigente_hasta`: 'sin_fecha' | 'vigente' | 'por_vencer'
+/// (7 días o menos) | 'vencida'. La superficie de T14 es el
+/// AVISO para que el dueño la renueve, la revoque o la
+/// cambie; el PRECIO lo manda el motor (precio_cobro.dart):
+/// una tarifa vencida NO aplica y se cobra el siguiente
+/// escalón, con el aviso «Especial vencida · se aplica
+/// tarifa normal» en el propio cobro. (Decisión de Jc
+/// 2026-11-01, opción A, sobre la contradicción que cazó
+/// Argón en FIN-2: vale el motor.)
+String estadoRevisionTarifa(
+    Map<String, dynamic> fila, String hoyIso) {
+  final hasta = fila['vigente_hasta'] as String?;
+  if (hasta == null || hasta.length < 10) return 'sin_fecha';
+  final h = hasta.substring(0, 10);
+  if (h.compareTo(hoyIso) < 0) return 'vencida';
+  DateTime? aUtc(String iso) {
+    try {
+      return DateTime.utc(int.parse(iso.substring(0, 4)),
+          int.parse(iso.substring(5, 7)), int.parse(iso.substring(8, 10)));
+    } catch (_) {
+      return null;
+    }
+  }
+
+  final dH = aUtc(h);
+  final dHoy = aUtc(hoyIso);
+  if (dH != null && dHoy != null && dH.difference(dHoy).inDays <= 7) {
+    return 'por_vencer';
+  }
+  return 'vigente';
+}
+
+/// T14: ¿esta tarifa pide revisión ya (vencida o por
+/// vencer)? Atajo para contadores y avisos.
+bool tarifaPorRevisar(Map<String, dynamic> fila, String hoyIso) {
+  final e = estadoRevisionTarifa(fila, hoyIso);
+  return e == 'vencida' || e == 'por_vencer';
 }
 
 /// Todas las filas activas (para la pantalla D1 y el Panel).
@@ -438,8 +547,8 @@ Future<List<String>> otorgarTarifaEspecialMulti({
 }
 
 /// Revoca una tarifa: activa = 0 + historial, NUNCA DELETE.
-/// Encola revoke_tarifa_especial. La columna legacy NO resucita:
-/// tieneAlgunRegistroTarifa seguirá siendo true para este cliente.
+/// Encola revoke_tarifa_especial. La fila queda como registro:
+/// la siembra legacy no la resucita ni crea otra (Q2).
 Future<void> revocarTarifaEspecial({
   required String id,
   required String motivo,

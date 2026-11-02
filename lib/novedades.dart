@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 
 import 'config.dart';
 import 'perfil.dart';
+import 'ui/diseno.dart';
 
 class Novedad {
   final String version;
@@ -15,6 +16,23 @@ class Novedad {
 }
 
 const novedades = [
+  Novedad('1.20.0', [
+    'Diseño renovado en toda la app: textos más claros, iconos uniformes, avisos con color según su importancia y montos que se animan al cambiar',
+    'Suplementos rediseñados: tarjeta con foto y estado de stock, venta rápida de 1 unidad y ajuste de stock con motivo (merma, regalo, error de conteo...)',
+    'Foto del comprobante: al cobrar por transferencia puedes adjuntar la foto y verla después desde la ficha del cliente',
+    'Conciliación de transferencias (solo dueño): marca cada transferencia como comprobada o con problema, con su nota; el Dashboard avisa cuántas faltan por comprobar',
+    'Diferencias de caja (solo dueño): si una entrega queda por debajo de lo esperado, puedes abrir un expediente y cerrarlo con su explicación',
+    'La nómina liquidada guarda la foto del cálculo (base, bonos, adelantos) y cada entrenador confirma en su pantalla que la recibió',
+    'Corregir el origen de un adelanto: si un adelanto salió de la caja y era de tu bolsillo (o al revés), el dueño puede corregirlo sin anularlo',
+    'Estado de cuenta en la ficha: un resumen listo para enviar al cliente por WhatsApp con su vigencia, pagos y deuda',
+    'Comparativa de entrenadores del mes (solo dueño): cobros, ventas, dosis e inscripciones lado a lado',
+    'Aviso de operaciones parecidas: si cobras o vendes algo casi igual a lo de hace unos minutos, la app pregunta antes de duplicar',
+    'La bandeja de WhatsApp permite editar el mensaje antes de enviarlo, y cualquier recibo de pago se puede reenviar desde la ficha',
+    'Las copias de respaldo ahora se verifican antes de compartirse: verás si la copia es válida o falló',
+    'Recordatorios que se repiten: cada semana o cada mes, además de la fecha única de siempre',
+    'Un entrenador puede cubrir el turno de otro y queda registrado a nombre de quién cubre',
+    'Buscar por número: si escribes el número de un cliente en el buscador, aparece primero aunque no coincida el nombre',
+  ]),
   Novedad('1.19.0', [
     'Pantalla principal por zonas: módulos agrupados (Cobrar y clientes, El gym hoy, Mi trabajo), turno como chip de color y avisos de vencimientos con su urgencia',
     'Dashboard nuevo: lo urgente del día arriba (pendientes, vencimientos, cumpleaños, stock bajo), balance del mes y ritmo de cierre estimado, todo más rápido',
@@ -452,8 +470,7 @@ Future<bool> mostrarNovedadesSiHay(BuildContext context) async {
                 Padding(
                   padding:
                       const EdgeInsets.only(bottom: 4),
-                  child: Text('• $c',
-                      style: const TextStyle(fontSize: 13)),
+                  child: Text('• $c', style: AppTexto.secundario),
                 ),
               const SizedBox(height: 8),
             ],

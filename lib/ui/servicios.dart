@@ -14,6 +14,7 @@ import '../sync.dart';
 import '../tiempo.dart';
 import '../cliente_protegido.dart';
 import 'componentes.dart';
+import 'aviso_duplicado.dart';
 import 'diseno.dart';
 import 'ranking_servicios.dart';
 import 'servicios_admin.dart';
@@ -281,10 +282,9 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
 
   void _aviso(String msg, {bool error = false}) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text(msg),
-      backgroundColor: error ? AppColores.error : null,
-    ));
+    mostrarSnack(context, msg,
+        significado:
+            error ? SignificadoChip.error : SignificadoChip.neutral);
   }
 
   String _limpio(Object e) =>
@@ -357,7 +357,7 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                 : tipo == 'dosis_con_agua'
                     ? 'Dosis con agua'
                     : 'Pomo de agua',
-            iconoTitulo: Icons.bolt,
+            iconoTitulo: Icons.bolt_rounded,
             contenido: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -367,7 +367,7 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                       ? 'Cuenta a la Casa — sin cobro'
                       : '${fmtMonto(precioUnit)} CUP'
                           '${tipo == 'agua_suelta' ? ' por pomo' : ''}',
-                  style: AppTexto.titulo.copyWith(fontSize: 16),
+                  style: AppTexto.titulo,
                 ),
                 // v1.8.1 (pedido de Jc 2026-10-23): el diálogo de agua
                 // muestra cuántos pomos quedan (el tope ya existía en
@@ -402,12 +402,12 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                     padding: const EdgeInsets.symmetric(
                         horizontal: 12, vertical: 6),
                     decoration: BoxDecoration(
-                      border: Border.all(color: Colors.grey.shade400),
+                      border: Border.all(color: AppColores.borde(context)),
                       borderRadius: BorderRadius.circular(12),
                     ),
                     child: Row(
                       children: [
-                        const Icon(Icons.person_search, size: 20),
+                        const Icon(Icons.person_search_rounded, size: 20),
                         const SizedBox(width: 8),
                         Expanded(
                           child: Text(
@@ -421,20 +421,21 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                         if (cliente != null)
                           IconButton(
                             visualDensity: VisualDensity.compact,
-                            icon: const Icon(Icons.close, size: 18),
+                            icon: const Icon(Icons.close_rounded, size: 18),
                             onPressed: () =>
                                 setD(() => cliente = null),
                           )
                         else
-                          const Icon(Icons.chevron_right, size: 20),
+                          const Icon(Icons.chevron_right_rounded, size: 20),
                       ],
                     ),
                   ),
                 ),
                 if (esCasaCliente)
-                  const Chip(
-                    label: Text('⭐ Cuenta a la Casa'),
-                    visualDensity: VisualDensity.compact,
+                  const ChipEstado.semantico(
+                    texto: 'Cuenta a la Casa',
+                    significado: SignificadoChip.alerta,
+                    icono: Icons.star_rounded,
                   ),
                 if (_esDueno && cliente == null)
                   CheckboxListTile(
@@ -556,16 +557,15 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                         onPressed: cantidad > 1
                             ? () => setD(() => cantidad--)
                             : null,
-                        icon: const Icon(Icons.remove_circle_outline),
+                        icon: const Icon(Icons.remove_circle_outline_rounded),
                       ),
                       Text('$cantidad',
-                          style: AppTexto.titulo
-                              .copyWith(fontSize: 16)),
+                          style: AppTexto.titulo),
                       IconButton(
                         onPressed: cantidad < _agua.saldo
                             ? () => setD(() => cantidad++)
                             : null,
-                        icon: const Icon(Icons.add_circle_outline),
+                        icon: const Icon(Icons.add_circle_outline_rounded),
                       ),
                     ],
                   ),
@@ -591,6 +591,23 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
     if (ok != true) return;
     final esCasaCliente = cliente != null &&
         (cliente!['cuenta_casa'] as num?)?.toInt() == 1;
+    // T16 (1.20): aviso si ya hay una venta de servicio
+    // igual en la cola (doble toque o reintento).
+    final cidServ = (cliente?['id'] as num?)?.toInt();
+    final casaServ = esCasaCliente || paraDuenoCasa;
+    final sigueServ = await confirmarSiPareceDuplicado(
+      context,
+      tipo: 'venta_servicio',
+      coincide: (p) =>
+          '${p['tipo']}' == tipo &&
+          (p['cantidad'] as num?)?.toInt() == cantidad &&
+          (p['cliente_id'] as num?)?.toInt() == cidServ &&
+          (p['casa'] == true) == casaServ,
+      descripcion: 'una venta de '
+          '${tipo == 'dosis_sin_agua' ? 'dosis sin agua' : tipo == 'dosis_con_agua' ? 'dosis con agua' : tipo == 'agua_suelta' ? 'pomo de agua' : 'servicio'}'
+          ' x$cantidad',
+    );
+    if (!sigueServ) return;
     try {
       final opUuid = await registrarVentaServicio(
         tipo: tipo,
@@ -758,7 +775,7 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
           final comision = resumen.comision;
           return DialogoApp(
             titulo: 'Venta múltiple',
-            iconoTitulo: Icons.library_add,
+            iconoTitulo: Icons.library_add_rounded,
             contenido: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -791,12 +808,12 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                     padding: const EdgeInsets.symmetric(
                         horizontal: 12, vertical: 10),
                     decoration: BoxDecoration(
-                      border: Border.all(color: Colors.grey.shade400),
+                      border: Border.all(color: AppColores.borde(context)),
                       borderRadius: BorderRadius.circular(12),
                     ),
                     child: Row(
                       children: [
-                        const Icon(Icons.person_search, size: 20),
+                        const Icon(Icons.person_search_rounded, size: 20),
                         const SizedBox(width: 8),
                         Expanded(
                           child: Text(
@@ -814,9 +831,10 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                 // 1.15 V7: consumo Casa del dueño (solo dueño y
                 // sin cliente elegido), igual que la venta simple.
                 if (esCasaCliente)
-                  const Chip(
-                    label: Text('⭐ Cuenta a la Casa'),
-                    visualDensity: VisualDensity.compact,
+                  const ChipEstado.semantico(
+                    texto: 'Cuenta a la Casa',
+                    significado: SignificadoChip.alerta,
+                    icono: Icons.star_rounded,
                   ),
                 if (_esDueno && cliente == null)
                   CheckboxListTile(
@@ -834,31 +852,31 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                     IconButton(
                       onPressed:
                           n > 2 ? () => setD(() => n--) : null,
-                      icon: const Icon(Icons.remove_circle_outline),
+                      icon: const Icon(Icons.remove_circle_outline_rounded),
                     ),
                     Text('$n',
-                        style: AppTexto.titulo.copyWith(fontSize: 16)),
+                        style: AppTexto.titulo),
                     IconButton(
                       onPressed: n < topeDosis
                           ? () => setD(() => n++)
                           : null,
-                      icon: const Icon(Icons.add_circle_outline),
+                      icon: const Icon(Icons.add_circle_outline_rounded),
                     ),
                     const SizedBox(width: 16),
                     const Text('Pomos:'),
                     IconButton(
                       onPressed:
                           m > 0 ? () => setD(() => m--) : null,
-                      icon: const Icon(Icons.remove_circle_outline),
+                      icon: const Icon(Icons.remove_circle_outline_rounded),
                     ),
                     Text('$m',
-                        style: AppTexto.titulo.copyWith(fontSize: 16)),
+                        style: AppTexto.titulo),
                     IconButton(
                       onPressed:
                           m < n && m < topePomos
                               ? () => setD(() => m++)
                               : null,
-                      icon: const Icon(Icons.add_circle_outline),
+                      icon: const Icon(Icons.add_circle_outline_rounded),
                     ),
                   ],
                 ),
@@ -880,14 +898,28 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                   ),
                 ],
                 const SizedBox(height: 12),
-                Text(
-                  esCasa
-                      ? 'Cuenta a la Casa — sin cobro'
-                      : '$n dosis ($m con agua · ${n - m} sin agua)\n'
-                          'Total: ${fmtMonto(total)} CUP · '
+                if (esCasa)
+                  const Text('Cuenta a la Casa — sin cobro',
+                      style: AppTexto.cuerpo)
+                else
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                          '$n dosis ($m con agua · ${n - m} sin agua)',
+                          style: AppTexto.secundario),
+                      const SizedBox(height: 4),
+                      Text('Total: ${fmtMonto(total)} CUP',
+                          style: AppTexto.subtitulo.copyWith(
+                              fontWeight: FontWeight.bold,
+                              fontFeatures: const [
+                                FontFeature.tabularFigures()
+                              ])),
+                      Text(
                           'Comisión: ${fmtMonto(comision)} CUP',
-                  style: AppTexto.cuerpo,
-                ),
+                          style: AppTexto.secundario),
+                    ],
+                  ),
               ],
             ),
             acciones: [
@@ -915,6 +947,20 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
     final esCasaCliente = cliente != null &&
         (cliente!['cuenta_casa'] as num?)?.toInt() == 1;
     final esCasa = esCasaCliente || paraDuenoCasa;
+    // T16 (1.20): aviso si este cliente ya recibió una venta
+    // de dosis hace pocos minutos (posible repetición de la
+    // venta múltiple entera).
+    final cidMult = (cliente?['id'] as num?)?.toInt();
+    final sigueMult = await confirmarSiPareceDuplicado(
+      context,
+      tipo: 'venta_servicio',
+      coincide: (p) =>
+          '${p['tipo']}'.startsWith('dosis') &&
+          (p['cliente_id'] as num?)?.toInt() == cidMult &&
+          (p['casa'] == true) == esCasa,
+      descripcion: 'una venta de dosis a este cliente',
+    );
+    if (!sigueMult) return;
     try {
       final opUuids = await registrarVentaMultipleServicio(
         pomoId: (pomo['id'] as num).toInt(),
@@ -957,7 +1003,7 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setD) => DialogoApp(
           titulo: 'Salida sin venta',
-          iconoTitulo: Icons.outbox,
+          iconoTitulo: Icons.outbox_rounded,
           contenido: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -1072,7 +1118,7 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setD) => DialogoApp(
           titulo: 'Revertir venta',
-          iconoTitulo: Icons.undo,
+          iconoTitulo: Icons.undo_rounded,
           contenido: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -1166,7 +1212,7 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                     height: 20,
                     child: CircularProgressIndicator(strokeWidth: 2),
                   )
-                : const Icon(Icons.refresh),
+                : const Icon(Icons.refresh_rounded),
             onPressed: _actualizando ? null : _actualizar,
           ),
         ],
@@ -1191,7 +1237,7 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                             builder: (_) =>
                                 const ServiciosAdminScreen()),
                       ).then((_) => _cargar()),
-                      icon: const Icon(Icons.settings, size: 20),
+                      icon: const Icon(Icons.settings_rounded, size: 20),
                       label: const Text('Administrar',
                           style: TextStyle(
                               fontWeight: FontWeight.bold)),
@@ -1209,10 +1255,10 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                     children: [
                       Text('Ventas de hoy',
                           style:
-                              AppTexto.titulo.copyWith(fontSize: 16)),
+                              AppTexto.titulo),
                       const Spacer(),
                       TextButton.icon(
-                        icon: const Icon(Icons.history, size: 18),
+                        icon: const Icon(Icons.history_rounded, size: 18),
                         label: const Text('Historial'),
                         onPressed: () => Navigator.push(
                           context,
@@ -1276,11 +1322,11 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
     return TextButton.icon(
       style: TextButton.styleFrom(
         padding: const EdgeInsets.symmetric(horizontal: 8),
-        minimumSize: const Size(0, 32),
+        minimumSize: const Size(0, 40),
         tapTargetSize: MaterialTapTargetSize.shrinkWrap,
       ),
       onPressed: _salida,
-      icon: const Icon(Icons.outbox, size: 18),
+      icon: const Icon(Icons.outbox_rounded, size: 18),
       label: const Text('Salida sin venta'),
     );
   }
@@ -1300,7 +1346,7 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
               children: [
                 Text(_etiquetaPomo(pomo),
                     style:
-                        AppTexto.secundario.copyWith(fontSize: 11)),
+                        AppTexto.metadato),
                 const Spacer(),
                 if (pomo != null && _esDueno) _botonSalidaCompacto(),
               ],
@@ -1338,20 +1384,19 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
           else
             Row(
               children: [
-                IconoModuloBadge.naranja(Icons.local_drink),
+                IconoModuloBadge.naranja(Icons.local_drink_rounded),
                 const SizedBox(width: AppEspacio.sm),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(_etiquetaPomo(pomo),
-                          style: AppTexto.secundario
-                              .copyWith(fontSize: 11)),
+                          style: AppTexto.metadato),
                       Text(
                         pomo == null
                             ? 'Sin pomo activo'
                             : '${pomo['producto_nombre'] ?? 'Servicio'}',
-                        style: AppTexto.titulo.copyWith(fontSize: 20),
+                        style: AppTexto.tituloPagina,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                       ),
@@ -1378,7 +1423,7 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text('${pomo['saldo_local']} dosis',
-                    style: AppTexto.titulo.copyWith(fontSize: 28)),
+                    style: AppTexto.metrica),
                 const SizedBox(height: 4),
                 Text('Agua común: ${_agua.saldo} pomos',
                     style: AppTexto.secundario),
@@ -1414,7 +1459,7 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                     'Repartidas: ${d.repartidas} · '
                     'Vendidas: ${d.ventas} · Salidas: ${d.salidas}',
                     style:
-                        AppTexto.secundario.copyWith(fontSize: 11),
+                        AppTexto.metadato,
                   ),
                 ],
               );
@@ -1510,13 +1555,13 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Text(etiqueta,
-                      style: const TextStyle(
-                          fontWeight: FontWeight.bold, fontSize: 13)),
+                      style: AppTexto.secundario
+                          .copyWith(fontWeight: FontWeight.bold)),
                   Text(
                     precio <= 0 && tipo == 'agua_suelta'
                         ? 'sin precio'
                         : '${fmtMonto(precio)} CUP',
-                    style: const TextStyle(fontSize: 11),
+                    style: AppTexto.metadato,
                   ),
                 ],
               ),
@@ -1563,16 +1608,16 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             boton('dosis_sin_agua', 'Dosis',
-                precioDe('dosis_sin_agua'), Icons.bolt, AppColores.naranja,
+                precioDe('dosis_sin_agua'), Icons.bolt_rounded, AppColores.naranja,
                 grande: true),
             const SizedBox(width: AppEspacio.sm),
             boton('dosis_con_agua', 'Dosis + agua',
-                precioDe('dosis_con_agua'), Icons.water_drop,
+                precioDe('dosis_con_agua'), Icons.water_drop_rounded,
                 AppColores.naranja,
                 grande: true, degradado: AppColores.gradienteDosisAgua),
             const SizedBox(width: AppEspacio.sm),
             boton('agua_suelta', 'Solo agua',
-                precioDe('agua_suelta'), Icons.local_drink,
+                precioDe('agua_suelta'), Icons.local_drink_rounded,
                 AppColores.azulAgua,
                 grande: true),
           ],
@@ -1580,17 +1625,17 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
         const SizedBox(height: AppEspacio.sm),
         OutlinedButton.icon(
           style: OutlinedButton.styleFrom(
-            padding: const EdgeInsets.symmetric(vertical: 14),
+            padding: const EdgeInsets.symmetric(vertical: 16),
           ),
           onPressed: _pomoActual == null ? null : _ventaMultiple,
-          icon: const Icon(Icons.library_add, size: 20),
-          label: const Column(
+          icon: const Icon(Icons.library_add_rounded, size: 20),
+          label: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
               Text('Venta múltiple',
-                  style: TextStyle(
-                      fontWeight: FontWeight.bold, fontSize: 13)),
-              Text('Varias dosis', style: TextStyle(fontSize: 11)),
+                  style: AppTexto.secundario
+                      .copyWith(fontWeight: FontWeight.bold)),
+              Text('Varias dosis', style: AppTexto.metadato),
             ],
           ),
         ),
@@ -1615,7 +1660,7 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
             children: [
               Expanded(
                 child: Text('Cuadre de hoy',
-                    style: AppTexto.titulo.copyWith(fontSize: 16)),
+                    style: AppTexto.titulo),
               ),
               if (comision != 0)
                 Container(
@@ -1647,7 +1692,7 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                     Text(esGym ? 'Efectivo' : 'Efectivo a entregar',
                         style: AppTexto.secundario),
                     Text('${fmtMonto(c['efectivo'])} CUP',
-                        style: AppTexto.titulo.copyWith(fontSize: 22)),
+                        style: AppTexto.metrica),
                   ],
                 ),
               ),
@@ -1658,7 +1703,7 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                     const Text('Transferencia',
                         style: AppTexto.secundario),
                     Text('${fmtMonto(c['transferencia'])} CUP',
-                        style: AppTexto.titulo.copyWith(fontSize: 22)),
+                        style: AppTexto.metrica),
                   ],
                 ),
               ),
@@ -1670,41 +1715,37 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
               Expanded(
                 child: Column(
                   children: [
-                    Icon(Icons.bolt, size: 20, color: AppColores.textoSecundario(context)),
+                    Icon(Icons.bolt_rounded, size: 20, color: AppColores.textoSecundario(context)),
                     Text('$dosis',
-                        style: AppTexto.titulo.copyWith(fontSize: 16)),
+                        style: AppTexto.titulo),
                     Text('Dosis hoy',
-                        style: AppTexto.secundario
-                            .copyWith(fontSize: 11)),
+                        style: AppTexto.metadato),
                     Text(
                         '${c['dosis_sin_agua']} sin agua · '
                         '${c['dosis_con_agua']} con agua',
-                        style: AppTexto.secundario
-                            .copyWith(fontSize: 11)),
+                        style: AppTexto.metadato),
                   ],
                 ),
               ),
               Expanded(
                 child: Column(
                   children: [
-                    Icon(Icons.local_drink, size: 20, color: AppColores.textoSecundario(context)),
+                    Icon(Icons.local_drink_rounded, size: 20, color: AppColores.textoSecundario(context)),
                     Text('${c['agua_suelta']}',
-                        style: AppTexto.titulo.copyWith(fontSize: 16)),
+                        style: AppTexto.titulo),
                     Text('Pomos sueltos',
-                        style: AppTexto.secundario
-                            .copyWith(fontSize: 11)),
+                        style: AppTexto.metadato),
                   ],
                 ),
               ),
               Expanded(
                 child: Column(
                   children: [
-                    Icon(Icons.home, size: 20, color: AppColores.textoSecundario(context)),
+                    Icon(Icons.home_rounded, size: 20, color: AppColores.textoSecundario(context)),
                     Text('${c['casa']}',
-                        style: AppTexto.titulo.copyWith(fontSize: 16)),
+                        style: AppTexto.titulo),
                     Text('Cuenta Casa',
-                        style: AppTexto.secundario
-                            .copyWith(fontSize: 11)),
+                        style: AppTexto.metadato),
                   ],
                 ),
               ),
@@ -1727,7 +1768,7 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                           builder: (_) =>
                               const ServiciosEstadisticasScreen()),
                     ).then((_) => _cargar()),
-                    icon: const Icon(Icons.bar_chart, size: 18),
+                    icon: const Icon(Icons.bar_chart_rounded, size: 18),
                     label: const Text('Estadísticas'),
                   ),
                 if (_esDueno ||
@@ -1739,7 +1780,7 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                           builder: (_) =>
                               const RankingServiciosScreen()),
                     ),
-                    icon: const Icon(Icons.emoji_events_outlined,
+                    icon: const Icon(Icons.emoji_events_rounded,
                         size: 18),
                     label: const Text('Ranking'),
                   ),
@@ -1806,14 +1847,14 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
         onTap: () => _detalleVenta(v),
         leading: Icon(
           esReverso
-              ? Icons.undo
+              ? Icons.undo_rounded
               : esCasa
-                  ? Icons.star
-                  : Icons.bolt,
+                  ? Icons.star_rounded
+                  : Icons.bolt_rounded,
           color: esReverso
               ? AppColores.error
               : esCasa
-                  ? Colors.amber
+                  ? AppColores.alerta
                   : AppColores.naranja,
         ),
         title: Text(esReverso ? 'Reverso · $tipoTxt' : tipoTxt),
@@ -1833,7 +1874,7 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
             if (!esReverso && !yaReversada)
               IconButton(
                 tooltip: 'Revertir',
-                icon: const Icon(Icons.undo, size: 20),
+                icon: const Icon(Icons.undo_rounded, size: 20),
                 onPressed: () => _revertir(v),
               ),
           ],
@@ -1896,7 +1937,7 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
       context: context,
       builder: (ctx) => DialogoApp(
         titulo: esReverso ? 'Reverso · $tipoTxt' : tipoTxt,
-        iconoTitulo: esReverso ? Icons.undo : Icons.bolt,
+        iconoTitulo: esReverso ? Icons.undo_rounded : Icons.bolt_rounded,
         contenido: SingleChildScrollView(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -1946,7 +1987,7 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                 await _revertir(v);
               },
               child: const Text('Revertir',
-                  style: TextStyle(color: Colors.red)),
+                  style: TextStyle(color: AppColores.error)),
             ),
           TextButton(
             onPressed: () => Navigator.pop(ctx),
@@ -2015,7 +2056,7 @@ class _DialogoClienteState extends State<_DialogoCliente> {
           }).toList();
     return DialogoApp(
       titulo: 'Cliente del gym',
-      iconoTitulo: Icons.person_search,
+      iconoTitulo: Icons.person_search_rounded,
       contenido: SizedBox(
         width: double.maxFinite,
         height: 380,
@@ -2026,7 +2067,7 @@ class _DialogoClienteState extends State<_DialogoCliente> {
               autofocus: true,
               decoration: const InputDecoration(
                 hintText: 'Buscar por nombre…',
-                prefixIcon: Icon(Icons.search),
+                prefixIcon: Icon(Icons.search_rounded),
                 border: OutlineInputBorder(),
                 contentPadding:
                     EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -2069,21 +2110,19 @@ class _DialogoClienteState extends State<_DialogoCliente> {
                               ? null
                               : (sub.isEmpty ? null : Text(sub)),
                           trailing: esVistaProtegida(c)
-                              ? const Icon(Icons.lock,
+                              ? const Icon(Icons.lock_rounded,
                                   color: AppColores.naranja)
                               : casa
-                                  ? const Chip(
-                                      label: Text('⭐ Casa'),
-                                      visualDensity:
-                                          VisualDensity.compact,
+                                  ? const ChipEstado.semantico(
+                                      texto: 'Casa',
+                                      significado:
+                                          SignificadoChip.alerta,
+                                      icono: Icons.star_rounded,
                                     )
                                   : null,
                           onTap: () {
                             if (esVistaProtegida(c)) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(
-                                      content: Text(
-                                          mensajeClienteProtegido)));
+                              mostrarSnack(context, mensajeClienteProtegido, significado: SignificadoChip.alerta);
                               return;
                             }
                             Navigator.pop(context, c);

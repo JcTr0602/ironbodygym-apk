@@ -54,7 +54,7 @@ Future<void> mostrarPermisosExplicados(BuildContext context) async {
     context: context,
     builder: (ctx) => DialogoApp(
       titulo: 'Permisos, en sencillo',
-      iconoTitulo: Icons.security,
+      iconoTitulo: Icons.security_rounded,
       contenido: SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -210,7 +210,7 @@ class _SinFotoPrecioScreenState extends State<SinFotoPrecioScreen> {
                     for (final s in _mal)
                       Card(
                         child: ListTile(
-                          leading: const Icon(Icons.warning_amber,
+                          leading: const Icon(Icons.warning_amber_rounded,
                               color: Colors.orange),
                           title: Text('${s['nombre'] ?? 'Producto'}'),
                           subtitle: Text(_motivo(s)),
@@ -328,12 +328,12 @@ class _VencimientosProximosScreenState
   Widget _filaCliente(Map<String, dynamic> c, bool vencido) => Card(
         child: ListTile(
           leading: Icon(
-              vencido ? Icons.warning_amber : Icons.event,
+              vencido ? Icons.warning_amber_rounded : Icons.event_rounded,
               color: vencido ? Colors.red : AppColores.naranja),
           title: Text('${c['nombre'] ?? ''}'),
           subtitle: Text(
               'Vence: ${fmtFecha('${c['pagado_hasta']}'.substring(0, 10))}'),
-          trailing: const Icon(Icons.chevron_right),
+          trailing: const Icon(Icons.chevron_right_rounded),
           onTap: () => Navigator.push(
               context,
               MaterialPageRoute(

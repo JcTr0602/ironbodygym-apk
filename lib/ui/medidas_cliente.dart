@@ -57,7 +57,7 @@ class _TarjetaMedidasState extends State<TarjetaMedidas> {
       context: context,
       builder: (ctx) => DialogoApp(
         titulo: 'Registrar medida',
-        iconoTitulo: Icons.straighten,
+        iconoTitulo: Icons.straighten_rounded,
         contenido: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -106,14 +106,11 @@ class _TarjetaMedidasState extends State<TarjetaMedidas> {
           clienteId: widget.clienteId, medidas: medidas);
       await _cargar();
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Medida registrada.')));
+        mostrarSnack(context, 'Medida registrada.', significado: SignificadoChip.exito);
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text(
-                e.toString().replaceFirst('Exception: ', ''))));
+        mostrarSnack(context, e.toString().replaceFirst('Exception: ', ''), significado: SignificadoChip.error);
       }
     }
   }
@@ -132,7 +129,7 @@ class _TarjetaMedidasState extends State<TarjetaMedidas> {
               if (_puedeRegistrar)
                 TextButton.icon(
                   onPressed: _registrar,
-                  icon: const Icon(Icons.add, size: 18),
+                  icon: const Icon(Icons.add_rounded, size: 18),
                   label: const Text('Registrar medida'),
                 ),
             ],

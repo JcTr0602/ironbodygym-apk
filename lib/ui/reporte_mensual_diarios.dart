@@ -94,7 +94,7 @@ class _ReporteMensualDiariosScreenState
                   children: [
                     IconButton(
                       icon: const Icon(
-                          Icons.chevron_left),
+                          Icons.chevron_left_rounded),
                       onPressed: () => _cambiarMes(-1),
                     ),
                     Text(
@@ -103,7 +103,7 @@ class _ReporteMensualDiariosScreenState
                     ),
                     IconButton(
                       icon: const Icon(
-                          Icons.chevron_right),
+                          Icons.chevron_right_rounded),
                       onPressed: () {
                         final ahora = ahoraHabana();
                         final limite = DateTime(
@@ -120,7 +120,7 @@ class _ReporteMensualDiariosScreenState
                 Tarjeta(
                   color: AppColores.naranja,
                   padding:
-                      const EdgeInsets.all(18),
+                      const EdgeInsets.all(16),
                   child: Column(
                     children: [
                       Text('Total del mes',
@@ -174,11 +174,7 @@ class _ReporteMensualDiariosScreenState
                                         .secundario),
                                 Text(
                                   '${fmtMonto((porTurno[t]?['total'] as num?)?.toDouble() ?? 0)} CUP',
-                                  style: const TextStyle(
-                                      fontWeight:
-                                          FontWeight
-                                              .bold,
-                                      fontSize: 18),
+                                  style: AppTexto.titulo,
                                 ),
                                 Text(
                                     '${((porTurno[t]?['cantidad'] as num?)?.toDouble() ?? 0).toInt()} pagos'),
@@ -204,9 +200,7 @@ class _ReporteMensualDiariosScreenState
                           const Text('Noche', style: AppTexto.secundario),
                           Text(
                             '${fmtMonto((porTurno['noche']?['total'] as num?)?.toDouble() ?? 0)} CUP',
-                            style: const TextStyle(
-                                fontWeight: FontWeight.bold,
-                                fontSize: 18),
+                            style: AppTexto.titulo,
                           ),
                           Text(
                               '${((porTurno['noche']?['cantidad'] as num?)?.toDouble() ?? 0).toInt()} pagos'),

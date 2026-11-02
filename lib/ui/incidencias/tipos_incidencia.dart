@@ -82,7 +82,7 @@ class _TiposIncidenciaScreenState
       floatingActionButton:
           FloatingActionButton.extended(
         onPressed: () => _mostrarDialogo(null),
-        icon: const Icon(Icons.add),
+        icon: const Icon(Icons.add_rounded),
         label: const Text('Nuevo tipo'),
       ),
     );
@@ -115,10 +115,8 @@ class _TiposIncidenciaScreenState
             )),
         subtitle: t.activo
             ? null
-            : const Text('Inactivo',
-                style: TextStyle(
-                    color: Colors.grey,
-                    fontSize: 12)),
+            : Text('Inactivo',
+                style: AppTexto.metadato.copyWith(color: Colors.grey)),
         trailing: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -130,7 +128,7 @@ class _TiposIncidenciaScreenState
             ),
             // Editar
             IconButton(
-              icon: const Icon(Icons.edit,
+              icon: const Icon(Icons.edit_rounded,
                   size: 20),
               onPressed: () =>
                   _mostrarDialogo(t),
@@ -139,7 +137,7 @@ class _TiposIncidenciaScreenState
             ReorderableDragStartListener(
               index: index,
               child: const Icon(
-                  Icons.drag_handle,
+                  Icons.drag_handle_rounded,
                   color: Colors.grey),
             ),
           ],
@@ -345,23 +343,23 @@ class _DialogoTipoState
   IconData _iconoData(String nombre) {
     switch (nombre) {
       case 'fitness_center':
-        return Icons.fitness_center;
+        return Icons.fitness_center_rounded;
       case 'build':
-        return Icons.build;
+        return Icons.build_rounded;
       case 'cleaning_services':
-        return Icons.cleaning_services;
+        return Icons.cleaning_services_rounded;
       case 'report':
-        return Icons.report;
+        return Icons.report_rounded;
       case 'electrical_services':
-        return Icons.electrical_services;
+        return Icons.electrical_services_rounded;
       case 'water_drop':
-        return Icons.water_drop;
+        return Icons.water_drop_rounded;
       case 'warning':
-        return Icons.warning;
+        return Icons.warning_rounded;
       case 'info':
-        return Icons.info;
+        return Icons.info_rounded;
       default:
-        return Icons.label;
+        return Icons.label_rounded;
     }
   }
 
@@ -498,7 +496,7 @@ class _DialogoTipoState
                       ),
                       child: sel
                           ? Icon(
-                              Icons.check,
+                              Icons.check_rounded,
                               // v1.3.2 (Argón #20): check según luminancia
                               // (blanco sobre amarillo es ilegible).
                               color: Color(c).computeLuminance() >

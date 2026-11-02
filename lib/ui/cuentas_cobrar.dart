@@ -105,7 +105,7 @@ class _CuentasCobrarScreenState
         title: const Text('Vencidos por cobrar'),
         actions: [
           IconButton(
-            icon: const Icon(Icons.refresh),
+            icon: const Icon(Icons.refresh_rounded),
             onPressed: _cargar,
           ),
         ],
@@ -147,7 +147,7 @@ class _CuentasCobrarScreenState
                   const SizedBox(height: AppEspacio.md),
                   if (_cuentas.isEmpty)
                     const EstadoVacio(
-                      icono: Icons.check_circle,
+                      icono: Icons.check_circle_rounded,
                       titulo: 'Sin vencidos por cobrar',
                       subtitulo:
                           'Todos los clientes activos están al día.',

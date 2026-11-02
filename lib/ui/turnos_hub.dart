@@ -106,9 +106,7 @@ class TurnosHubScreen extends StatelessWidget {
                   const SizedBox(height: 2),
                   Text(
                     resumen,
-                    style: TextStyle(
-                        fontSize: 12,
-                        color: AppColores.textoSecundario(context)),
+                    style: AppTexto.metadato.copyWith(color: AppColores.textoSecundario(context)),
                   ),
                 ],
               ),

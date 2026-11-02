@@ -87,8 +87,17 @@ class _PagoScreenState extends State<PagoScreen> {
   bool _soloVencidos = false;
   List<_Cobro> _cobros = [];
   bool _cargandoCobros = true;
+  // PagoIds del espejo con anular_pago ya en cola (ver _cargarDatos).
+  Set<int> _anulacionesVivas = {};
 
   final _auth = AuthService();
+
+  @override
+  void dispose() {
+    // Pasada 2 de Argón (1.20): _q no se liberaba nunca.
+    _q.dispose();
+    super.dispose();
+  }
 
   @override
   void initState() {
@@ -136,6 +145,27 @@ class _PagoScreenState extends State<PagoScreen> {
       if (!'${payload['fecha'] ?? ''}'.startsWith(hoyStr)) continue;
       opsHoy.add(op);
       opsPayload.add(payload);
+    }
+
+    // Pasada 2 de Argón (1.20): pagos del espejo con una
+    // anulación ya en cola NO se ofrecen otra vez en «Deshacer
+    // último» (la fila sigue en el espejo hasta que el pull la
+    // retira; sin esto, un segundo toque encolaba otra
+    // anular_pago para el mismo pago). El pago SIGUE contando
+    // en los totales del día hasta que la anulación se aplica:
+    // solo se excluye de _ultimoMio vía este conjunto.
+    _anulacionesVivas = <int>{};
+    for (final op in [
+      ...await LocalDb.instance.pendingOps(),
+      ...await LocalDb.instance.opsByEstado('enviada'),
+    ]) {
+      if ('${op['tipo']}' != 'anular_pago') continue;
+      try {
+        final p = jsonDecode(op['payload'] as String)
+            as Map<String, dynamic>;
+        final pid = (p['pago_id'] as num?)?.toInt();
+        if (pid != null) _anulacionesVivas.add(pid);
+      } catch (_) {}
     }
 
     // P1#15: una sola mirrorPorIds para todos los clientes, en vez
@@ -227,7 +257,12 @@ class _PagoScreenState extends State<PagoScreen> {
   _Cobro? get _ultimoMio {
     final miTid = _auth.telegramId;
     for (final c in _cobros) {
-      if (c.esMio(miTid)) return c;
+      if (!c.esMio(miTid)) continue;
+      // Con anulación ya en cola no se ofrece de nuevo.
+      if (c.pagoId != null && _anulacionesVivas.contains(c.pagoId)) {
+        continue;
+      }
+      return c;
     }
     return null;
   }
@@ -286,10 +321,9 @@ class _PagoScreenState extends State<PagoScreen> {
     // v1.0.15: vibración de confirmación (caja rápida).
     if (!deshecho) HapticFeedback.lightImpact();
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(deshecho
+    mostrarSnack(context, deshecho
             ? 'Cobro deshecho'
-            : 'Pago de ${c['nombre']} guardado')));
+            : 'Pago de ${c['nombre']} guardado', significado: SignificadoChip.exito);
     SyncEngine.instance.push();
     _cargarDatos();
     _buscar();
@@ -309,7 +343,7 @@ class _PagoScreenState extends State<PagoScreen> {
       context: context,
       builder: (ctx) => DialogoApp(
         titulo: 'Deshacer último pago',
-        iconoTitulo: Icons.undo,
+        iconoTitulo: Icons.undo_rounded,
         contenido: Text(
             '¿Anular el cobro de ${u.nombre} por '
             '${fmtMonto(u.monto)} CUP (${u.hora})?'),
@@ -350,14 +384,11 @@ class _PagoScreenState extends State<PagoScreen> {
         // Nunca se envió: borrar la op es seguro.
         await LocalDb.instance.deleteOp(u.opUuid!);
         if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-            content: Text('Pago deshecho (no había sido enviado)')));
+        mostrarSnack(context, 'Pago deshecho (no había sido enviado)', significado: SignificadoChip.exito);
       } else {
         // 'enviada': ya va en camino al servidor, no se puede borrar.
         if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-            content: Text(
-                'Ese pago se está sincronizando, intenta en unos segundos')));
+        mostrarSnack(context, 'Ese pago se está sincronizando, intenta en unos segundos', significado: SignificadoChip.alerta);
         return;
       }
     } else if (u.pagoId != null) {
@@ -368,9 +399,7 @@ class _PagoScreenState extends State<PagoScreen> {
       // Sin ser dueño, avisar y no encolar.
       if (!_auth.isOwner) {
         if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-            content: Text(
-                'Solo el dueño puede anular un pago ya sincronizado')));
+        mostrarSnack(context, 'Solo el dueño puede anular un pago ya sincronizado', significado: SignificadoChip.alerta);
         return;
       }
       await LocalDb.instance.queueOp(
@@ -379,8 +408,7 @@ class _PagoScreenState extends State<PagoScreen> {
         payload: {'pago_id': u.pagoId},
       );
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('Pago anulado (se sincronizará)')));
+      mostrarSnack(context, 'Pago anulado (se sincronizará)', significado: SignificadoChip.exito);
       SyncEngine.instance.push();
     } else {
       return;
@@ -405,9 +433,8 @@ class _PagoScreenState extends State<PagoScreen> {
                   children: [
                     Text(
                       '${fmtMonto(_totalHoy)} CUP',
-                      style: AppTexto.titulo.copyWith(
-                          color: AppColores.naranja,
-                          fontSize: 22),
+                      style: AppTexto.metrica.copyWith(
+                          color: AppColores.naranja),
                     ),
                     Text('Cobrado hoy',
                         style: AppTexto.etiqueta.copyWith(
@@ -418,8 +445,7 @@ class _PagoScreenState extends State<PagoScreen> {
                   children: [
                     Text(
                       '${_cobros.length}',
-                      style: AppTexto.titulo.copyWith(
-                          fontSize: 22),
+                      style: AppTexto.metrica,
                     ),
                     Text('Pagos hoy',
                         style: AppTexto.etiqueta.copyWith(
@@ -431,7 +457,7 @@ class _PagoScreenState extends State<PagoScreen> {
                       CrossAxisAlignment.start,
                   children: [
                     Row(children: [
-                      const Icon(Icons.payments,
+                      const Icon(Icons.payments_rounded,
                           size: 14,
                           color: AppColores.exito),
                       const SizedBox(width: 4),
@@ -440,7 +466,7 @@ class _PagoScreenState extends State<PagoScreen> {
                     ]),
                     const SizedBox(height: 4),
                     Row(children: [
-                      const Icon(Icons.smartphone,
+                      const Icon(Icons.smartphone_rounded,
                           size: 14,
                           color: AppColores.info),
                       const SizedBox(width: 4),
@@ -456,7 +482,7 @@ class _PagoScreenState extends State<PagoScreen> {
               SizedBox(
                 width: double.infinity,
                 child: OutlinedButton.icon(
-                  icon: const Icon(Icons.undo, size: 18),
+                  icon: const Icon(Icons.undo_rounded, size: 18),
                   label: Text(
                       'Deshacer último (${fmtMonto(ultimo.monto)} CUP)'),
                   onPressed: _deshacerUltimo,
@@ -482,11 +508,11 @@ class _PagoScreenState extends State<PagoScreen> {
       child: Tarjeta(
         padding: EdgeInsets.zero,
         child: ExpansionTile(
-          leading: const Icon(Icons.schedule,
-              color: AppColores.naranja),
+          leading: Icon(Icons.schedule_rounded,
+              color: AppColores.textoSecundario(context)),
           title: Text('Últimos cobros (${items.length})',
-              style: AppTexto.subtitulo
-                  .copyWith(fontSize: 14)),
+              style: AppTexto.cuerpo
+                  .copyWith(fontWeight: FontWeight.w600)),
           children: items.isEmpty
               ? const [
                   Padding(
@@ -500,8 +526,8 @@ class _PagoScreenState extends State<PagoScreen> {
                   final mio = c.esMio(_auth.telegramId);
                   final iconoMetodo =
                       c.metodo == 'efectivo'
-                          ? Icons.payments
-                          : Icons.smartphone;
+                          ? Icons.payments_rounded
+                          : Icons.smartphone_rounded;
                   return ListTile(
                     dense: true,
                     leading: Icon(iconoMetodo,
@@ -549,7 +575,7 @@ class _PagoScreenState extends State<PagoScreen> {
                   child: CampoTexto(
                     controller: _q,
                     hint: 'Nombre, carnet o teléfono',
-                    icono: Icons.search,
+                    icono: Icons.search_rounded,
                     onChanged: (_) => _buscar(),
                   ),
                 ),
@@ -580,7 +606,7 @@ class _PagoScreenState extends State<PagoScreen> {
           Expanded(
             child: _res.isEmpty
                 ? EstadoVacio(
-                    icono: Icons.search_off,
+                    icono: Icons.search_off_rounded,
                     titulo: _busco ? 'Sin resultados' : 'Busca un cliente',
                     subtitulo: _busco
                         ? 'Prueba con otro nombre, carnet o teléfono'
@@ -603,7 +629,7 @@ class _PagoScreenState extends State<PagoScreen> {
                           children: [
                             BotonPrimario(
                               texto: 'Pagar',
-                              icono: Icons.payments,
+                              icono: Icons.payments_rounded,
                               onPressed: () => _pagar(c),
                               expandido: false,
                             ),

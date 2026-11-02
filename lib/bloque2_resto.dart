@@ -260,6 +260,16 @@ Future<String> _registrarEntregaEfectivoImpl({
   if (!AuthService().isOwner) {
     throw Exception('Solo el dueño puede liquidar entregas de efectivo');
   }
+  // H8 (Argón caja): el autor debe ser el Telegram ID real
+  // del dueño. Los llamadores pasan `telegramId ?? 0`: con
+  // sesión incompleta, el 0 llegaba al servidor, que lo
+  // rechazaba («no coincide con el dueño») y la op caía en
+  // revisión. Aquí se corta en local, con el motivo claro.
+  if (autorDuenoId <= 0) {
+    throw Exception('No se identificó al dueño en esta sesión '
+        '(falta su Telegram ID). Cierra sesión y vuelve a '
+        'entrar antes de liquidar.');
+  }
   // Panel 1.15 (Luna MEDIO, R3): NaN pasa `<= 0` (false) y
   // `NaN - pendiente > 0.01` (false): sin isFinite, un monto
   // inválido colaba la validación. Se rechaza de entrada.

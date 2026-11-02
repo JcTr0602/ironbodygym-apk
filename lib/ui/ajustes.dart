@@ -112,8 +112,7 @@ class _AjustesScreenState extends State<AjustesScreen> {
 
   void _msg(String t) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text(t)));
+    mostrarSnack(context, t);
   }
 
   // ---------- Perfil ----------
@@ -123,20 +122,20 @@ class _AjustesScreenState extends State<AjustesScreen> {
       context: context,
       builder: (ctx) => DialogoApp(
         titulo: 'Foto de perfil',
-        iconoTitulo: Icons.photo_camera,
+        iconoTitulo: Icons.photo_camera_rounded,
         contenido: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             ListTile(
               leading:
-                  const Icon(Icons.photo_camera, size: 24),
+                  const Icon(Icons.photo_camera_rounded, size: 24),
               title: const Text('Tomar foto'),
               onTap: () =>
                   Navigator.pop(ctx, ImageSource.camera),
             ),
             ListTile(
               leading:
-                  const Icon(Icons.photo_library, size: 24),
+                  const Icon(Icons.photo_library_rounded, size: 24),
               title: const Text('Elegir de la galería'),
               onTap: () =>
                   Navigator.pop(ctx, ImageSource.gallery),
@@ -173,7 +172,7 @@ class _AjustesScreenState extends State<AjustesScreen> {
       context: context,
       builder: (ctx) => DialogoApp(
         titulo: titulo,
-        iconoTitulo: Icons.edit_outlined,
+        iconoTitulo: Icons.edit_rounded,
         contenido: CampoTexto(
           controller: ctrl,
           etiqueta: etiqueta,
@@ -224,7 +223,7 @@ class _AjustesScreenState extends State<AjustesScreen> {
       context: context,
       builder: (ctx) => DialogoApp(
         titulo: titulo,
-        iconoTitulo: Icons.edit_outlined,
+        iconoTitulo: Icons.edit_rounded,
         contenido: TextField(
           controller: ctrl,
           keyboardType: TextInputType.number,
@@ -288,16 +287,16 @@ class _AjustesScreenState extends State<AjustesScreen> {
       context: context,
       builder: (ctx) => DialogoApp(
         titulo: 'Tema',
-        iconoTitulo: Icons.palette_outlined,
+        iconoTitulo: Icons.palette_rounded,
         contenido: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            _opcionTema(ctx, 'sistema', Icons.brightness_auto,
+            _opcionTema(ctx, 'sistema', Icons.brightness_auto_rounded,
                 'Según el sistema'),
             _opcionTema(
-                ctx, 'claro', Icons.light_mode, 'Claro'),
+                ctx, 'claro', Icons.light_mode_rounded, 'Claro'),
             _opcionTema(
-                ctx, 'oscuro', Icons.dark_mode, 'Oscuro'),
+                ctx, 'oscuro', Icons.dark_mode_rounded, 'Oscuro'),
           ],
         ),
       ),
@@ -324,7 +323,7 @@ class _AjustesScreenState extends State<AjustesScreen> {
             width: 44,
             height: 28,
             decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(6),
+              borderRadius: BorderRadius.circular(8),
               color: oscuro
                   ? AppColores.carbonProfundo
                   : AppColores.borde(ctx).withValues(alpha: 0.4),
@@ -344,7 +343,7 @@ class _AjustesScreenState extends State<AjustesScreen> {
           ),
           const SizedBox(width: 8),
           if (activo)
-            const Icon(Icons.check,
+            const Icon(Icons.check_rounded,
                 color: AppColores.naranja),
         ],
       ),
@@ -367,7 +366,7 @@ class _AjustesScreenState extends State<AjustesScreen> {
                       Text('$h horas'),
                       const Spacer(),
                       if (_horasAviso == h)
-                        const Icon(Icons.check,
+                        const Icon(Icons.check_rounded,
                             color: AppColores.naranja),
                     ],
                   ),
@@ -408,7 +407,7 @@ class _AjustesScreenState extends State<AjustesScreen> {
                   Text(_etiquetaSwipe(v)),
                   const Spacer(),
                   if (actual == v)
-                    const Icon(Icons.check,
+                    const Icon(Icons.check_rounded,
                         color: AppColores.naranja),
                 ],
               ),
@@ -438,7 +437,7 @@ class _AjustesScreenState extends State<AjustesScreen> {
       context: context,
       builder: (ctx) => DialogoApp(
         titulo: 'Cambiar contraseña',
-        iconoTitulo: Icons.key_outlined,
+        iconoTitulo: Icons.key_rounded,
         contenido: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -504,7 +503,7 @@ class _AjustesScreenState extends State<AjustesScreen> {
       context: context,
       builder: (ctx) => DialogoApp(
         titulo: _tienePin ? 'Cambiar PIN' : 'Crear PIN rápido',
-        iconoTitulo: Icons.pin_outlined,
+        iconoTitulo: Icons.pin_rounded,
         contenido: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -553,10 +552,7 @@ class _AjustesScreenState extends State<AjustesScreen> {
                 final okPin = await _perfil.verificarPin(c0.text.trim());
                 if (!okPin) {
                   if (ctx.mounted) {
-                    ScaffoldMessenger.of(ctx).showSnackBar(
-                        const SnackBar(
-                            content: Text(
-                                'PIN actual incorrecto')));
+                    mostrarSnack(ctx, 'PIN actual incorrecto', significado: SignificadoChip.alerta);
                   }
                   return;
                 }
@@ -577,10 +573,7 @@ class _AjustesScreenState extends State<AjustesScreen> {
                       await _perfil.verificarPin(c0.text.trim());
                   if (!okPin) {
                     if (ctx.mounted) {
-                      ScaffoldMessenger.of(ctx).showSnackBar(
-                          const SnackBar(
-                              content: Text(
-                                  'PIN actual incorrecto')));
+                      mostrarSnack(ctx, 'PIN actual incorrecto', significado: SignificadoChip.alerta);
                     }
                     return;
                   }
@@ -657,7 +650,7 @@ class _AjustesScreenState extends State<AjustesScreen> {
                       Text(_bloqueoEtiqueta(m)),
                       const Spacer(),
                       if (_bloqueoMinutos == m)
-                        const Icon(Icons.check,
+                        const Icon(Icons.check_rounded,
                             color: AppColores.naranja),
                     ],
                   ),
@@ -774,7 +767,7 @@ class _AjustesScreenState extends State<AjustesScreen> {
           'respaldo elegido. ¿Continuar?',
       aceptar: 'Importar',
       peligro: true,
-      icono: Icons.cloud_download_outlined,
+      icono: Icons.cloud_download_rounded,
     );
     if (ok != true || !mounted) return;
     _msg('Validando respaldo…');
@@ -844,7 +837,7 @@ class _AjustesScreenState extends State<AjustesScreen> {
         barrierDismissible: false,
         builder: (ctx) => DialogoApp(
           titulo: 'Respaldo importado',
-          iconoTitulo: Icons.check_circle,
+          iconoTitulo: Icons.check_circle_rounded,
           contenido: const Text(
               'Reinicia la app para que los datos importados se apliquen.'),
           acciones: [
@@ -898,7 +891,7 @@ class _AjustesScreenState extends State<AjustesScreen> {
         context: context,
         builder: (ctx) => DialogoApp(
           titulo: 'Espacio usado',
-          iconoTitulo: Icons.storage_outlined,
+          iconoTitulo: Icons.storage_rounded,
           contenido: Text(_espacioTexto!),
           acciones: [
             TextButton(
@@ -926,7 +919,7 @@ class _AjustesScreenState extends State<AjustesScreen> {
       mensaje: 'Se borrarán las fotos guardadas en el teléfono. '
           'Se descargarán de nuevo al sincronizar.',
       aceptar: 'Limpiar',
-      icono: Icons.cleaning_services_outlined,
+      icono: Icons.cleaning_services_rounded,
     );
     if (ok != true) return;
     try {
@@ -963,7 +956,7 @@ class _AjustesScreenState extends State<AjustesScreen> {
           '(también las que ya se subieron), reemplazando la copia del '
           'servidor. Úsalo si alguna foto no se ve bien en otros móviles.',
       aceptar: 'Resincronizar',
-      icono: Icons.sync_outlined,
+      icono: Icons.sync_rounded,
     );
     if (ok != true) return;
     try {
@@ -1018,7 +1011,7 @@ class _AjustesScreenState extends State<AjustesScreen> {
         context: context,
         builder: (ctx) => DialogoApp(
           titulo: 'Actualizaciones',
-          iconoTitulo: Icons.system_update,
+          iconoTitulo: Icons.system_update_rounded,
           contenido: Text(hayNueva
               ? 'Hay una nueva versión disponible: $remota\nTu versión: $actual'
               : remota == null
@@ -1042,7 +1035,7 @@ class _AjustesScreenState extends State<AjustesScreen> {
       context: context,
       builder: (ctx) => DialogoApp(
         titulo: 'Lo nuevo',
-        iconoTitulo: Icons.new_releases_outlined,
+        iconoTitulo: Icons.new_releases_rounded,
         contenido: SizedBox(
           width: double.maxFinite,
           child: ListView.builder(
@@ -1057,18 +1050,35 @@ class _AjustesScreenState extends State<AjustesScreen> {
                   crossAxisAlignment:
                       CrossAxisAlignment.start,
                   children: [
-                    Text('v${n.version}',
-                        style: const TextStyle(
-                            fontWeight: FontWeight.bold,
-                            color: AppColores.naranja)),
+                    Row(
+                      children: [
+                        const Icon(Icons.new_releases_rounded,
+                            size: 16, color: AppColores.naranja),
+                        const SizedBox(width: 6),
+                        Text('v${n.version}',
+                            style: AppTexto.subtitulo.copyWith(
+                                color:
+                                    AppColores.textoNaranja(ctx))),
+                      ],
+                    ),
                     const SizedBox(height: 4),
                     for (final c in n.cambios)
                       Padding(
                         padding:
-                            const EdgeInsets.only(bottom: 2),
-                        child: Text('• $c',
-                            style: const TextStyle(
-                                fontSize: 13)),
+                            const EdgeInsets.only(bottom: 3),
+                        child: Row(
+                          crossAxisAlignment:
+                              CrossAxisAlignment.start,
+                          children: [
+                            const Icon(Icons.check_rounded,
+                                size: 14, color: AppColores.exito),
+                            const SizedBox(width: 6),
+                            Expanded(
+                              child: Text(c,
+                                  style: AppTexto.secundario),
+                            ),
+                          ],
+                        ),
                       ),
                   ],
                 ),
@@ -1120,7 +1130,7 @@ class _AjustesScreenState extends State<AjustesScreen> {
       mensaje: 'Se devolverán todos los ajustes a sus valores por defecto. '
           'No se borran tus datos ni tu PIN.',
       aceptar: 'Restablecer',
-      icono: Icons.restart_alt_outlined,
+      icono: Icons.restart_alt_rounded,
     );
     if (ok != true) return;
     await _perfil.resetAjustes();
@@ -1138,10 +1148,7 @@ class _AjustesScreenState extends State<AjustesScreen> {
     return Padding(
       padding: const EdgeInsets.fromLTRB(4, 16, 4, 4),
       child: Text(titulo,
-          style: const TextStyle(
-              fontSize: 13,
-              fontWeight: FontWeight.bold,
-              color: AppColores.naranja)),
+          style: AppTexto.secundario.copyWith(color: AppColores.naranja, fontWeight: FontWeight.bold)),
     );
   }
 
@@ -1163,11 +1170,11 @@ class _AjustesScreenState extends State<AjustesScreen> {
                   : null)),
       subtitle: subtitulo != null
           ? Text(subtitulo,
-              style: const TextStyle(fontSize: 12))
+              style: AppTexto.metadato)
           : null,
       trailing: trailing ??
           (onTap != null
-              ? const Icon(Icons.chevron_right)
+              ? const Icon(Icons.chevron_right_rounded)
               : null),
       onTap: onTap,
     );
@@ -1185,7 +1192,7 @@ class _AjustesScreenState extends State<AjustesScreen> {
       title: Text(titulo),
       subtitle: subtitulo != null
           ? Text(subtitulo,
-              style: const TextStyle(fontSize: 12))
+              style: AppTexto.metadato)
           : null,
       value: valor,
       onChanged: onChanged,
@@ -1217,7 +1224,7 @@ class _AjustesScreenState extends State<AjustesScreen> {
                     child: _avatar != null
                         ? ClipRRect(
                             borderRadius:
-                                BorderRadius.circular(50),
+                                BorderRadius.circular(999),
                             child: Image.file(_avatar!,
                                 width: 100,
                                 height: 100,
@@ -1229,8 +1236,7 @@ class _AjustesScreenState extends State<AjustesScreen> {
                                 AppColores.naranja.withValues(
                                     alpha: 0.2),
                             child: Text(_inicial(),
-                                style: const TextStyle(
-                                    fontSize: 40,
+                                style: AppTexto.display.copyWith(
                                     color:
                                         AppColores.naranja)),
                           ),
@@ -1238,14 +1244,14 @@ class _AjustesScreenState extends State<AjustesScreen> {
                 ),
                 Center(
                   child: TextButton.icon(
-                    icon: const Icon(Icons.photo_camera,
+                    icon: const Icon(Icons.photo_camera_rounded,
                         size: 16),
                     label: const Text('Cambiar foto'),
                     onPressed: _cambiarAvatar,
                   ),
                 ),
                 _opcion(
-                  icono: Icons.badge_outlined,
+                  icono: Icons.badge_rounded,
                   titulo: 'Nombre visible',
                   subtitulo:
                       _nombreVisible ?? 'Igual que la cuenta',
@@ -1257,17 +1263,17 @@ class _AjustesScreenState extends State<AjustesScreen> {
                   ),
                 ),
                 _opcion(
-                  icono: Icons.person_outline,
+                  icono: Icons.person_outline_rounded,
                   titulo: 'Cuenta',
                   subtitulo: _auth.displayName,
                 ),
                 _opcion(
-                  icono: Icons.shield_outlined,
+                  icono: Icons.shield_rounded,
                   titulo: 'Rol',
                   subtitulo: _rolTexto(),
                 ),
                 _opcion(
-                  icono: Icons.phone_outlined,
+                  icono: Icons.phone_rounded,
                   titulo: 'Móvil',
                   subtitulo: _movil ?? 'Sin registrar',
                   onTap: () => _editarCampo(
@@ -1281,7 +1287,7 @@ class _AjustesScreenState extends State<AjustesScreen> {
                   ),
                 ),
                 _opcion(
-                  icono: Icons.credit_card_outlined,
+                  icono: Icons.credit_card_rounded,
                   titulo: 'Carnet',
                   subtitulo: _carnet ?? 'Sin registrar',
                   onTap: () => _editarCampo(
@@ -1298,7 +1304,7 @@ class _AjustesScreenState extends State<AjustesScreen> {
                 // ----- APARIENCIA -----
                 _seccion('Apariencia'),
                 _opcion(
-                  icono: Icons.palette_outlined,
+                  icono: Icons.palette_rounded,
                   titulo: 'Tema',
                   subtitulo: _temaEtiqueta(_tema),
                   onTap: _elegirTema,
@@ -1308,9 +1314,9 @@ class _AjustesScreenState extends State<AjustesScreen> {
                   child: Tarjeta(
                     child: Row(
                       children: [
-                        const Icon(Icons.format_size,
+                        Icon(Icons.format_size_rounded,
                             size: 24,
-                            color: AppColores.naranja),
+                            color: AppColores.textoSecundario(context)),
                         const SizedBox(width: 16),
                         const Expanded(
                             child: Text('Tamaño de letra',
@@ -1338,13 +1344,13 @@ class _AjustesScreenState extends State<AjustesScreen> {
                 // Bloque 1: acciones al deslizar en Buscar.
                 _seccion('Buscar cliente'),
                 _opcion(
-                  icono: Icons.swipe_right,
+                  icono: Icons.swipe_right_rounded,
                   titulo: 'Deslizar a la derecha',
                   subtitulo: _etiquetaSwipe(_swipeDer),
                   onTap: () => _elegirSwipe(true),
                 ),
                 _opcion(
-                  icono: Icons.swipe_left,
+                  icono: Icons.swipe_left_rounded,
                   titulo: 'Deslizar a la izquierda',
                   subtitulo: _etiquetaSwipe(_swipeIzq),
                   onTap: () => _elegirSwipe(false),
@@ -1352,7 +1358,7 @@ class _AjustesScreenState extends State<AjustesScreen> {
                 // ----- NOTIFICACIONES -----
                 _seccion('Notificaciones'),
                 _opcion(
-                  icono: Icons.notifications_outlined,
+                  icono: Icons.notifications_rounded,
                   titulo: 'Mis avisos',
                   subtitulo:
                       'Vencimientos, cumpleaños y sincronización',
@@ -1363,7 +1369,7 @@ class _AjustesScreenState extends State<AjustesScreen> {
                                   const AvisosScreen())),
                 ),
                 _switch(
-                  icono: Icons.sync_outlined,
+                  icono: Icons.sync_rounded,
                   titulo: 'Avisar si llevo sin sincronizar',
                   subtitulo:
                       'Cada $_horasAviso horas sin subir cambios',
@@ -1377,13 +1383,13 @@ class _AjustesScreenState extends State<AjustesScreen> {
                 ),
                 if (_recordatorio)
                   _opcion(
-                    icono: Icons.schedule_outlined,
+                    icono: Icons.schedule_rounded,
                     titulo: 'Cada cuánto avisar',
                     subtitulo: '$_horasAviso horas',
                     onTap: _elegirHoras,
                   ),
                 _switch(
-                  icono: Icons.sync_problem_outlined,
+                  icono: Icons.sync_problem_rounded,
                   titulo: 'Avisar si falla la sincronización',
                   valor: _avisoFalloSync,
                   onChanged: (v) async {
@@ -1394,7 +1400,7 @@ class _AjustesScreenState extends State<AjustesScreen> {
                   },
                 ),
                 _switch(
-                  icono: Icons.cloud_upload_outlined,
+                  icono: Icons.cloud_upload_rounded,
                   titulo: 'Sincronizar al abrir la app',
                   subtitulo:
                       'Sube lo pendiente en segundo plano',
@@ -1408,7 +1414,7 @@ class _AjustesScreenState extends State<AjustesScreen> {
                 ),
                 // v1.2.5 (3.2): vibración háptica tras confirmaciones.
                 _switch(
-                  icono: Icons.vibration_outlined,
+                  icono: Icons.vibration_rounded,
                   titulo: 'Vibración',
                   subtitulo:
                       'Vibra suave al confirmar una acción',
@@ -1422,7 +1428,7 @@ class _AjustesScreenState extends State<AjustesScreen> {
                 ),
                 // v1.2.5 (3.4): alto contraste.
                 _switch(
-                  icono: Icons.contrast_outlined,
+                  icono: Icons.contrast_rounded,
                   titulo: 'Alto contraste',
                   subtitulo:
                       'Texto y bordes más marcados',
@@ -1437,12 +1443,12 @@ class _AjustesScreenState extends State<AjustesScreen> {
                 // ----- SEGURIDAD -----
                 _seccion('Seguridad'),
                 _opcion(
-                  icono: Icons.key_outlined,
+                  icono: Icons.key_rounded,
                   titulo: 'Cambiar contraseña',
                   onTap: _cambiarClave,
                 ),
                 _switch(
-                  icono: Icons.phonelink_lock_outlined,
+                  icono: Icons.phonelink_lock_rounded,
                   titulo: 'Vincular a este dispositivo',
                   subtitulo:
                       'Avisa si entras desde otro teléfono',
@@ -1463,7 +1469,7 @@ class _AjustesScreenState extends State<AjustesScreen> {
                   },
                 ),
                 _opcion(
-                  icono: Icons.pin_outlined,
+                  icono: Icons.pin_rounded,
                   titulo: 'PIN rápido',
                   subtitulo: _tienePin
                       ? 'Configurado (4 dígitos)'
@@ -1471,7 +1477,7 @@ class _AjustesScreenState extends State<AjustesScreen> {
                   onTap: _configurarPin,
                 ),
                 _opcion(
-                  icono: Icons.timer_outlined,
+                  icono: Icons.timer_rounded,
                   titulo: 'Bloqueo automático',
                   subtitulo:
                       '${_bloqueoEtiqueta(_bloqueoMinutos)}${_tienePin ? '' : ' (requiere PIN)'}',
@@ -1482,7 +1488,7 @@ class _AjustesScreenState extends State<AjustesScreen> {
                 _seccion('Datos'),
                 if (_auth.isOwner)
                   _opcion(
-                    icono: Icons.cloud_upload_outlined,
+                    icono: Icons.cloud_upload_rounded,
                     titulo: 'Exportar respaldo',
                     subtitulo:
                         'Guarda la base de datos para compartirla',
@@ -1490,14 +1496,14 @@ class _AjustesScreenState extends State<AjustesScreen> {
                   ),
                 if (_auth.isOwner)
                   _opcion(
-                    icono: Icons.cloud_download_outlined,
+                    icono: Icons.cloud_download_rounded,
                     titulo: 'Importar respaldo',
                     subtitulo:
                         'Restaura los datos desde un archivo',
                     onTap: _importarRespaldo,
                   ),
                 _opcion(
-                  icono: Icons.storage_outlined,
+                  icono: Icons.storage_rounded,
                   titulo: 'Espacio usado',
                   subtitulo: _espacioTexto
                           ?.split('\n')
@@ -1507,7 +1513,7 @@ class _AjustesScreenState extends State<AjustesScreen> {
                 ),
                 if (_auth.isOwner)
                   _opcion(
-                    icono: Icons.cleaning_services_outlined,
+                    icono: Icons.cleaning_services_rounded,
                     titulo: 'Limpiar caché de fotos',
                     subtitulo:
                         'Libera espacio; se descargan al sincronizar',
@@ -1516,7 +1522,7 @@ class _AjustesScreenState extends State<AjustesScreen> {
                 // v1.2.3: resincronizar fotos (solo dueño) - implementado
                 if (AuthService().isOwner)
                   _opcion(
-                    icono: Icons.sync_outlined,
+                    icono: Icons.sync_rounded,
                     titulo: 'Resincronizar fotos de clientes',
                     subtitulo:
                         'Re-sube fotos que no se sincronizaron',
@@ -1524,7 +1530,7 @@ class _AjustesScreenState extends State<AjustesScreen> {
                   ),
                 if (AuthService().isOwner)
                   _opcion(
-                    icono: Icons.sync_outlined,
+                    icono: Icons.sync_rounded,
                     titulo: 'Resincronizar fotos de suplementos',
                     subtitulo:
                         'Re-sube fotos que no se sincronizaron',
@@ -1533,7 +1539,7 @@ class _AjustesScreenState extends State<AjustesScreen> {
                 // v1.2.9+46 (AppLog): exportar bitácora para diagnóstico.
                 if (AuthService().isOwner)
                   _opcion(
-                    icono: Icons.bug_report_outlined,
+                    icono: Icons.bug_report_rounded,
                     titulo: 'Exportar bitácora',
                     subtitulo:
                         'Genera un archivo con el registro de la app',
@@ -1543,7 +1549,7 @@ class _AjustesScreenState extends State<AjustesScreen> {
                 // ----- ACERCA DE -----
                 _seccion('Acerca de'),
                 _opcion(
-                  icono: Icons.info_outline,
+                  icono: Icons.info_outline_rounded,
                   titulo: 'Versión',
                   subtitulo:
                       '${AppConfig.appVersion} · Toca para buscar actualizaciones',
@@ -1555,25 +1561,25 @@ class _AjustesScreenState extends State<AjustesScreen> {
                               CircularProgressIndicator(
                                   strokeWidth: 2),
                         )
-                      : const Icon(Icons.refresh),
+                      : const Icon(Icons.refresh_rounded),
                   onTap: _buscarActualizaciones,
                 ),
                 _opcion(
-                  icono: Icons.new_releases_outlined,
+                  icono: Icons.new_releases_rounded,
                   titulo: 'Lo nuevo',
                   subtitulo:
                       'Cambios de cada versión',
                   onTap: _verNovedades,
                 ),
                 _opcion(
-                  icono: Icons.bug_report_outlined,
+                  icono: Icons.bug_report_rounded,
                   titulo: 'Reportar problema',
                   subtitulo: 'Escríbenos por WhatsApp',
                   onTap: _reportarWhatsApp,
                 ),
                 if (_auth.isOwner)
                   _opcion(
-                    icono: Icons.restart_alt_outlined,
+                    icono: Icons.restart_alt_rounded,
                     titulo: 'Restablecer ajustes',
                     subtitulo:
                         'Volver a los valores por defecto',

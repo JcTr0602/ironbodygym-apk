@@ -182,8 +182,7 @@ class _CuentasPorCobrarScreenState
     // Se valida antes de encolar.
     final ventaId = (v['id'] as num?)?.toInt();
     if (ventaId == null) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('No se puede cobrar: venta sin identificador')));
+      mostrarSnack(context, 'No se puede cobrar: venta sin identificador', significado: SignificadoChip.alerta);
       return;
     }
 
@@ -196,7 +195,7 @@ class _CuentasPorCobrarScreenState
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setD) => DialogoApp(
           titulo: 'Cobrar fiado',
-          iconoTitulo: Icons.payments_outlined,
+          iconoTitulo: Icons.payments_rounded,
           contenido: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -256,8 +255,7 @@ class _CuentasPorCobrarScreenState
       setState(() {
         _fiados.remove(v);
       });
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('Fiado cobrado (se sincronizará)')));
+      mostrarSnack(context, 'Fiado cobrado (se sincronizará)', significado: SignificadoChip.exito);
     }
     unawaited(SyncEngine.instance.push());
   }
@@ -283,7 +281,7 @@ class _CuentasPorCobrarScreenState
         child: Row(
           children: [
             IconoModuloBadge.naranja(
-                Icons.account_balance_wallet_outlined),
+                Icons.account_balance_wallet_rounded),
             const SizedBox(width: AppEspacio.md),
             Expanded(
               child: Column(
@@ -341,7 +339,7 @@ class _CuentasPorCobrarScreenState
           child: ListTile(
             contentPadding: EdgeInsets.zero,
             leading: IconoModuloBadge.naranja(
-                Icons.person_outline),
+                Icons.person_outline_rounded),
             title: Text('$nombreProd × $cant',
                 style: AppTexto.cuerpo
                     .copyWith(fontWeight: FontWeight.w600)),

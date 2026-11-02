@@ -330,7 +330,7 @@ class _ServiciosEstadisticasScreenState
         actions: [
           IconButton(
             tooltip: 'Actualizar',
-            icon: const Icon(Icons.refresh),
+            icon: const Icon(Icons.refresh_rounded),
             onPressed: _cargar,
           ),
         ],
@@ -375,7 +375,7 @@ class _ServiciosEstadisticasScreenState
                           builder: (_) =>
                               const ReporteMargenesScreen()),
                     ),
-                    icon: const Icon(Icons.bar_chart, size: 20),
+                    icon: const Icon(Icons.bar_chart_rounded, size: 20),
                     label: const Text(
                         'Abrir reporte de márgenes de suplementos'),
                   ),
@@ -410,7 +410,7 @@ class _ServiciosEstadisticasScreenState
                       Expanded(
                         child: OutlinedButton.icon(
                           onPressed: _abrirSimulador,
-                          icon: const Icon(Icons.calculate, size: 20),
+                          icon: const Icon(Icons.calculate_rounded, size: 20),
                           label: const Text('Simulador de precios'),
                         ),
                       ),
@@ -418,7 +418,7 @@ class _ServiciosEstadisticasScreenState
                       Expanded(
                         child: OutlinedButton.icon(
                           onPressed: _exportarCsv,
-                          icon: const Icon(Icons.download, size: 20),
+                          icon: const Icon(Icons.download_rounded, size: 20),
                           label: const Text('Exportar CSV'),
                         ),
                       ),
@@ -447,8 +447,7 @@ class _ServiciosEstadisticasScreenState
         .where((b) => '${b['estado']}' == 'abierto')
         .toList();
     if (abiertos.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('No hay un bote abierto para simular.')));
+      mostrarSnack(context, 'No hay un bote abierto para simular.', significado: SignificadoChip.alerta);
       return;
     }
     var bote = abiertos.first;
@@ -570,8 +569,7 @@ class _ServiciosEstadisticasScreenState
           text: 'Estadísticas de Servicios Iron Body Gym');
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('No se pudo exportar: $e')));
+        mostrarSnack(context, 'No se pudo exportar: $e', significado: SignificadoChip.error);
       }
     }
   }
@@ -583,7 +581,7 @@ class _ServiciosEstadisticasScreenState
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text('Por día de semana (Habana)',
-              style: AppTexto.titulo.copyWith(fontSize: 16)),
+              style: AppTexto.titulo),
           const SizedBox(height: 4),
           for (var d = 1; d <= 7; d++)
             _fila(
@@ -593,7 +591,7 @@ class _ServiciosEstadisticasScreenState
             ),
           const Divider(height: 20),
           Text('Por franja horaria (Habana)',
-              style: AppTexto.titulo.copyWith(fontSize: 16)),
+              style: AppTexto.titulo),
           const SizedBox(height: 4),
           for (final e in kNombresFranja.entries)
             _fila(e.value, '${_porFranja[e.key] ?? 0} dosis'),
@@ -616,7 +614,7 @@ class _ServiciosEstadisticasScreenState
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text('Resumen semanal (semana cerrada)',
-              style: AppTexto.titulo.copyWith(fontSize: 16)),
+              style: AppTexto.titulo),
           const SizedBox(height: 4),
           Text(_semanaRango, style: AppTexto.secundario),
           const SizedBox(height: 8),
@@ -627,12 +625,10 @@ class _ServiciosEstadisticasScreenState
               await Clipboard.setData(
                   ClipboardData(text: _semanaTexto));
               if (mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                        content: Text('Resumen copiado')));
+                mostrarSnack(context, 'Resumen copiado');
               }
             },
-            icon: const Icon(Icons.copy, size: 18),
+            icon: const Icon(Icons.copy_rounded, size: 18),
             label: const Text('Copiar resumen'),
           ),
         ],
@@ -669,7 +665,7 @@ class _ServiciosEstadisticasScreenState
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text('1A · Rendimiento (físico)',
-              style: AppTexto.titulo.copyWith(fontSize: 16)),
+              style: AppTexto.titulo),
           if (porBote.isEmpty)
             Text('Sin botes todavía.',
                 style: AppTexto.cuerpo.copyWith(
@@ -734,7 +730,7 @@ class _ServiciosEstadisticasScreenState
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text('1B · Inversión y margen',
-              style: AppTexto.titulo.copyWith(fontSize: 16)),
+              style: AppTexto.titulo),
           const Divider(height: 20),
           _fila('Inversión en botes (acumulada)',
               cup('inversion_botes')),

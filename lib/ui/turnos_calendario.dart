@@ -139,14 +139,11 @@ class _CalendarioTurnosScreenState extends State<CalendarioTurnosScreen> {
       await LocalDb.instance.setAjustes(aj);
       _excepciones = podadas;
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-            content:
-                Text('Excepciones guardadas (se sincronizarán)')));
+        mostrarSnack(context, 'Excepciones guardadas (se sincronizarán)', significado: SignificadoChip.exito);
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('Error: $e')));
+        mostrarSnack(context, 'Error: $e', significado: SignificadoChip.error);
       }
     } finally {
       if (mounted) setState(() => _guardando = false);
@@ -191,7 +188,7 @@ class _CalendarioTurnosScreenState extends State<CalendarioTurnosScreen> {
                   const Padding(
                     padding: EdgeInsets.only(bottom: 12),
                     child: Text('Día pasado: solo lectura.',
-                        style: TextStyle(fontSize: 13)),
+                        style: AppTexto.secundario),
                   ),
                 for (final franja in sel.keys) ...[
                   Text(franja == 'manana' ? 'Mañana' : 'Tarde',
@@ -335,16 +332,13 @@ class _CalendarioTurnosScreenState extends State<CalendarioTurnosScreen> {
                       Expanded(
                         child: Center(
                           child: Text(d,
-                              style: TextStyle(
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w700,
-                                  color: AppColores.textoSecundario(
-                                      context))),
+                              style: AppTexto.metadato.copyWith(color: AppColores.textoSecundario(
+                                      context), fontWeight: FontWeight.w700)),
                         ),
                       ),
                   ],
                 ),
-                const SizedBox(height: 6),
+                const SizedBox(height: 8),
                 for (var fila = 0; fila < filas; fila++)
                   Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -382,9 +376,8 @@ class _CalendarioTurnosScreenState extends State<CalendarioTurnosScreen> {
       return Row(
         children: [
           Text('$letra ',
-              style: const TextStyle(
-                  fontSize: 10, fontWeight: FontWeight.w700)),
-          const Text('—', style: TextStyle(fontSize: 10)),
+              style: AppTexto.minuscula.copyWith(fontWeight: FontWeight.w700)),
+          const Text('—', style: AppTexto.minuscula),
         ],
       );
     }
@@ -392,8 +385,7 @@ class _CalendarioTurnosScreenState extends State<CalendarioTurnosScreen> {
     return Row(
       children: [
         Text('$letra ',
-            style: const TextStyle(
-                fontSize: 10, fontWeight: FontWeight.w700)),
+            style: AppTexto.minuscula.copyWith(fontWeight: FontWeight.w700)),
         Expanded(
           child: Container(
             padding:
@@ -404,10 +396,7 @@ class _CalendarioTurnosScreenState extends State<CalendarioTurnosScreen> {
             ),
             child: Text(
               nombre.split(' ').first,
-              style: TextStyle(
-                  fontSize: 10,
-                  fontWeight: FontWeight.w700,
-                  color: color),
+              style: AppTexto.minuscula.copyWith(color: color, fontWeight: FontWeight.w700),
               overflow: TextOverflow.ellipsis,
             ),
           ),
@@ -447,15 +436,15 @@ class _CalendarioTurnosScreenState extends State<CalendarioTurnosScreen> {
         color: esHoy
             ? AppColores.naranja.withValues(alpha: 0.12)
             : Theme.of(context).cardColor,
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: BorderRadius.circular(12),
         child: InkWell(
-          borderRadius: BorderRadius.circular(10),
+          borderRadius: BorderRadius.circular(12),
           onTap: domingo ? null : () => _editarDia(fecha),
           child: Container(
             height: 64,
-            padding: const EdgeInsets.all(5),
+            padding: const EdgeInsets.all(4),
             decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(10),
+              borderRadius: BorderRadius.circular(12),
               border: Border.all(
                 color: esHoy
                     ? AppColores.naranja
@@ -470,19 +459,16 @@ class _CalendarioTurnosScreenState extends State<CalendarioTurnosScreen> {
                   Row(
                     children: [
                       Text('$dia',
-                          style: TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w800,
-                              color: esHoy
+                          style: AppTexto.metadato.copyWith(color: esHoy
                                   ? AppColores.naranja
-                                  : null)),
+                                  : null, fontWeight: FontWeight.w800)),
                       const Spacer(),
                       if (conExcepcion)
                         Container(
                           width: 7,
                           height: 7,
                           decoration: const BoxDecoration(
-                            color: Colors.orange,
+                            color: AppColores.alerta,
                             shape: BoxShape.circle,
                           ),
                         ),
@@ -491,7 +477,7 @@ class _CalendarioTurnosScreenState extends State<CalendarioTurnosScreen> {
                   const SizedBox(height: 2),
                   if (domingo)
                     const Text('Cerrado',
-                        style: TextStyle(fontSize: 10))
+                        style: AppTexto.minuscula)
                   else ...[
                     _chipTurno('M', manana),
                     const SizedBox(height: 2),

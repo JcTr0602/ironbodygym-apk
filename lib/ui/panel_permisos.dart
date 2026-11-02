@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../auth.dart';
 import 'componentes.dart';
+import 'diseno.dart';
 
 class EntrenadorPermiso {
   final String email;
@@ -124,9 +125,7 @@ class _PanelPermisosState extends State<PanelPermisos> {
     } catch (e) {
       if (mounted) {
         setState(() => _cargando = false);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error al cargar: $e')),
-        );
+        mostrarSnack(context, 'Error al cargar: $e', significado: SignificadoChip.error);
       }
     }
   }
@@ -198,12 +197,8 @@ class _PanelPermisosState extends State<PanelPermisos> {
         // Revertir
         if (mounted) {
           setState(() => ent.permisos[key] = anterior);
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Sin conexión. Cambio revertido.'),
-              backgroundColor: Colors.red,
-            ),
-          );
+          mostrarSnack(context, 'Sin conexión. Cambio revertido.',
+              significado: SignificadoChip.error);
         }
       }
     });
@@ -266,12 +261,8 @@ class _PanelPermisosState extends State<PanelPermisos> {
       } catch (e) {
         if (mounted) {
           setState(() => ent.activo = !nuevo);
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Sin conexión. Cambio revertido.'),
-              backgroundColor: Colors.red,
-            ),
-          );
+          mostrarSnack(context, 'Sin conexión. Cambio revertido.',
+              significado: SignificadoChip.error);
         }
       }
     });
@@ -309,7 +300,7 @@ class _PanelPermisosState extends State<PanelPermisos> {
         title: const Text('Permisos de Entrenadores'),
         actions: [
           IconButton(
-            icon: const Icon(Icons.refresh),
+            icon: const Icon(Icons.refresh_rounded),
             onPressed: _cargar,
           ),
         ],
@@ -345,17 +336,11 @@ class _PanelPermisosState extends State<PanelPermisos> {
                     children: [
                       Text(
                         ent.nombre,
-                        style: const TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                        ),
+                        style: AppTexto.titulo,
                       ),
                       Text(
                         ent.email,
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: Colors.grey[600],
-                        ),
+                        style: AppTexto.metadato.copyWith(color: Colors.grey[600]),
                       ),
                     ],
                   ),
@@ -365,13 +350,9 @@ class _PanelPermisosState extends State<PanelPermisos> {
                   children: [
                     Text(
                       ent.activo ? 'ACTIVO' : 'SUSPENDIDO',
-                      style: TextStyle(
-                        fontSize: 10,
-                        fontWeight: FontWeight.bold,
-                        color: ent.activo
+                      style: AppTexto.minuscula.copyWith(color: ent.activo
                             ? Colors.green
-                            : Colors.red,
-                      ),
+                            : Colors.red, fontWeight: FontWeight.bold),
                     ),
                     Switch(
                       value: ent.activo,
@@ -399,16 +380,13 @@ class _PanelPermisosState extends State<PanelPermisos> {
                       child: Text(
                         'Permisos · $activos de '
                         '${EntrenadorPermiso.permisosDisponibles.length} activos',
-                        style: const TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w600,
-                        ),
+                        style: AppTexto.cuerpo.copyWith(fontWeight: FontWeight.w600),
                       ),
                     ),
                     Icon(
                       expandido
-                          ? Icons.expand_less
-                          : Icons.expand_more,
+                          ? Icons.expand_less_rounded
+                          : Icons.expand_more_rounded,
                     ),
                   ],
                 ),
@@ -418,9 +396,9 @@ class _PanelPermisosState extends State<PanelPermisos> {
               ...EntrenadorPermiso.permisosDisponibles.map(
                 (p) => SwitchListTile(
                   title: Text(p.$2,
-                      style: const TextStyle(fontSize: 14)),
+                      style: AppTexto.cuerpo),
                   subtitle: Text(p.$3,
-                      style: const TextStyle(fontSize: 12)),
+                      style: AppTexto.metadato),
                   value: ent.permisos[p.$1] ?? false,
                   onChanged: ent.activo
                       ? (v) => _togglePermiso(ent, p.$1, v)

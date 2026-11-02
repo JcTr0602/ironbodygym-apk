@@ -5,6 +5,8 @@
 /// sus propios botones/tarjetas/diálogos.
 library;
 
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 
 import 'diseno.dart';
@@ -158,7 +160,7 @@ class TarjetaAccionesCliente extends StatelessWidget {
             : null,
       ),
       trailing: chevron
-          ? const Icon(Icons.chevron_right, size: 20)
+          ? const Icon(Icons.chevron_right_rounded, size: 20)
           : null,
       onTap: onTap,
       ),
@@ -183,8 +185,8 @@ class TarjetaAccionesCliente extends StatelessWidget {
                   borderRadius:
                       BorderRadius.circular(AppRadio.sm),
                 ),
-                child: const Icon(Icons.bolt,
-                    size: 18, color: AppColores.naranja),
+                child: Icon(Icons.bolt_rounded,
+                    size: 18, color: AppColores.textoSecundario(context)),
               ),
               const SizedBox(width: AppEspacio.sm),
               const Text('Acciones', style: AppTexto.titulo),
@@ -192,28 +194,28 @@ class TarjetaAccionesCliente extends StatelessWidget {
           ),
           const SizedBox(height: AppEspacio.sm),
           _fila(
-            icono: Icons.show_chart,
-            color: Colors.blue,
+            icono: Icons.show_chart_rounded,
+            color: AppColores.info,
             texto: 'Progreso y Nutrición',
             onTap: onProgreso,
             chevron: true,
           ),
           if (vencido)
             _fila(
-              icono: Icons.refresh,
+              icono: Icons.refresh_rounded,
               color: AppColores.naranja,
               texto: 'Renovación rápida (1 mes)',
               onTap: onRenovar,
             ),
           _fila(
-            icono: congelado ? Icons.wb_sunny : Icons.ac_unit,
+            icono: congelado ? Icons.wb_sunny_rounded : Icons.ac_unit_rounded,
             color: AppColores.naranja,
             texto: congelado ? 'Descongelar' : 'Congelar',
             onTap: onCongelar,
           ),
           const Divider(height: 1),
           _fila(
-            icono: Icons.delete_outline,
+            icono: Icons.delete_outline_rounded,
             color: AppColores.error,
             texto: 'A papelera',
             onTap: onPapelera,
@@ -268,7 +270,7 @@ class BotonPeligro extends StatelessWidget {
     super.key,
     required this.texto,
     this.onPressed,
-    this.icono = Icons.delete_outline,
+    this.icono = Icons.delete_outline_rounded,
     this.cargando = false,
   });
 
@@ -373,17 +375,17 @@ class BadgeEstado extends StatelessWidget {
       case EstadoMembresia.alDia:
         fondo = AppColores.exito.withValues(alpha: 0.15);
         frente = AppColores.exitoOscuro;
-        icono = Icons.check_circle;
+        icono = Icons.check_circle_rounded;
         break;
       case EstadoMembresia.porVencer:
         fondo = AppColores.alerta.withValues(alpha: 0.15);
         frente = AppColores.alertaOscuro;
-        icono = Icons.schedule;
+        icono = Icons.schedule_rounded;
         break;
       case EstadoMembresia.vencido:
         fondo = AppColores.error.withValues(alpha: 0.15);
         frente = AppColores.errorOscuro;
-        icono = Icons.warning;
+        icono = Icons.warning_rounded;
         break;
     }
     // En modo oscuro aclarar el texto del badge.
@@ -399,7 +401,7 @@ class BadgeEstado extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icono, size: 14, color: oscuro ? _aclarar(frente) : frente),
+          Icon(icono, size: 16, color: oscuro ? _aclarar(frente) : frente),
           const SizedBox(width: 4),
           Text(texto,
               style: AppTexto.etiqueta.copyWith(
@@ -461,7 +463,7 @@ class DialogoApp extends StatelessWidget {
       title: Row(
         children: [
           if (iconoTitulo != null) ...[
-            Icon(iconoTitulo, color: AppColores.naranja),
+            Icon(iconoTitulo, color: AppColores.textoSecundario(context)),
             const SizedBox(width: AppEspacio.sm),
           ],
           Expanded(child: Text(titulo, style: AppTexto.titulo)),
@@ -481,7 +483,7 @@ class DialogoApp extends StatelessWidget {
     required String mensaje,
     String aceptar = 'Aceptar',
     String cancelar = 'Cancelar',
-    IconData icono = Icons.help_outline,
+    IconData icono = Icons.help_outline_rounded,
     bool peligro = false,
   }) async {
     final ok = await showDialog<bool>(
@@ -535,18 +537,18 @@ Future<String?> elegirModoEliminacion(
     return InkWell(
       onTap: () => setState(() => modo = valor),
       child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 6),
+        padding: const EdgeInsets.symmetric(vertical: 8),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Icon(
               sel
-                  ? Icons.radio_button_checked
-                  : Icons.radio_button_unchecked,
+                  ? Icons.radio_button_checked_rounded
+                  : Icons.radio_button_unchecked_rounded,
               color: sel ? AppColores.naranja : null,
               size: 22,
             ),
-            const SizedBox(width: 10),
+            const SizedBox(width: 8),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -555,7 +557,7 @@ Future<String?> elegirModoEliminacion(
                       style: const TextStyle(
                           fontWeight: FontWeight.w600)),
                   Text(descripcion,
-                      style: const TextStyle(fontSize: 13)),
+                      style: AppTexto.secundario),
                 ],
               ),
             ),
@@ -570,7 +572,7 @@ Future<String?> elegirModoEliminacion(
     builder: (ctx) => StatefulBuilder(
       builder: (ctx, setState) => DialogoApp(
         titulo: titulo,
-        iconoTitulo: Icons.warning,
+        iconoTitulo: Icons.warning_rounded,
         contenido: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -592,7 +594,7 @@ Future<String?> elegirModoEliminacion(
                 child: Text(
                   avisoFiado,
                   style: const TextStyle(
-                      color: Colors.red, fontWeight: FontWeight.w600),
+                      color: AppColores.error, fontWeight: FontWeight.w600),
                 ),
               ),
             opcion(
@@ -610,7 +612,7 @@ Future<String?> elegirModoEliminacion(
           ElevatedButton(
               onPressed: () => Navigator.pop(ctx, modo),
               style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.red,
+                backgroundColor: AppColores.error,
                 foregroundColor: Colors.white,
               ),
               child: const Text('Continuar')),
@@ -655,11 +657,12 @@ class EstadoVacio extends StatelessWidget {
               width: 72,
               height: 72,
               decoration: BoxDecoration(
-                color: AppColores.naranja.withValues(alpha: 0.12),
+                color:
+                    AppColores.textoSecundario(context).withValues(alpha: 0.12),
                 shape: BoxShape.circle,
               ),
               child: Icon(icono,
-                  size: 36, color: AppColores.naranja),
+                  size: 36, color: AppColores.textoSecundario(context)),
             ),
             const SizedBox(height: AppEspacio.lg),
             Text(titulo,
@@ -706,7 +709,7 @@ class EstadoError extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.error_outline,
+            const Icon(Icons.error_outline_rounded,
                 size: 48, color: AppColores.error),
             const SizedBox(height: AppEspacio.md),
             Text(titulo,
@@ -722,7 +725,7 @@ class EstadoError extends StatelessWidget {
               const SizedBox(height: AppEspacio.lg),
               BotonSecundario(
                   texto: 'Reintentar',
-                  icono: Icons.refresh,
+                  icono: Icons.refresh_rounded,
                   onPressed: onReintentar),
             ],
           ],
@@ -826,25 +829,56 @@ class CampoTexto extends StatelessWidget {
 /// mes invertidos al teclear). Es SOLO un aviso en el momento: no
 /// bloquea el guardado ni exige longitud alguna. La condición la
 /// decide `carnetFechaInvalida` (negocio.dart), única fuente.
+/// Q5 (cola 1.20): aviso de que el carnet parece un teléfono
+/// (mismo lenguaje visual que [AvisoFechaCarnet]; no bloquea).
+class AvisoCarnetTelefono extends StatelessWidget {
+  const AvisoCarnetTelefono({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 8),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Icon(Icons.warning_amber_rounded,
+              size: 16, color: AppColores.alerta),
+          SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              'Esto parece un número de teléfono, no un '
+              'carnet. Revísalo: del carnet solo hacen falta '
+              'los 6 dígitos de la fecha de nacimiento. '
+              'Puedes guardar igual.',
+              style: AppTexto.metadato
+                  .copyWith(color: AppColores.alertaOscuro),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class AvisoFechaCarnet extends StatelessWidget {
   const AvisoFechaCarnet({super.key});
 
   @override
   Widget build(BuildContext context) {
-    return const Padding(
-      padding: EdgeInsets.only(top: 6),
+    return Padding(
+      padding: const EdgeInsets.only(top: 8),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(Icons.warning_amber_rounded,
+          const Icon(Icons.warning_amber_rounded,
               size: 16, color: AppColores.alerta),
-          SizedBox(width: 6),
+          SizedBox(width: 8),
           Expanded(
             child: Text(
               'Esa fecha no existe, revísala: el día y el mes '
               'pueden estar invertidos. Puedes guardar igual.',
-              style: TextStyle(
-                  fontSize: 12, color: AppColores.alertaOscuro),
+              style: AppTexto.metadato
+                  .copyWith(color: AppColores.alertaOscuro),
             ),
           ),
         ],
@@ -887,9 +921,7 @@ class EncabezadoSeccion extends StatelessWidget {
               style: TextButton.styleFrom(
                 padding: const EdgeInsets.symmetric(
                     horizontal: AppEspacio.sm),
-                minimumSize: Size.zero,
-                tapTargetSize:
-                    MaterialTapTargetSize.shrinkWrap,
+                minimumSize: const Size(48, 44),
               ),
               child: Text(accionTexto!,
                   style: AppTexto.etiqueta.copyWith(
@@ -899,6 +931,9 @@ class EncabezadoSeccion extends StatelessWidget {
             IconButton(
               tooltip: accionTooltip,
               iconSize: 20,
+              padding: const EdgeInsets.all(12),
+              constraints: const BoxConstraints(
+                  minWidth: 44, minHeight: 44),
               color: Colors.grey,
               icon: Icon(accionIcono),
               onPressed: onAccion,
@@ -913,44 +948,302 @@ class EncabezadoSeccion extends StatelessWidget {
 // Chip de estado (reemplaza chips armados a mano con fondos fijos)
 // ---------------------------------------------------------------------------
 
+/// Vocabulario semántico único (V6 1.20): un significado = un color,
+/// en ambos brillos. Los llamadores ya no eligen el color a mano:
+/// usan [ChipEstado.semantico] y el color lo decide el significado.
+/// Regla V6: estado → chip; cantidad → [ContadorBadge], nunca chip.
+enum SignificadoChip { exito, info, alerta, error, neutral, agotado }
+
+/// Color de texto/borde del chip para un significado y un brillo.
+/// En claro se usan las variantes oscuras (legibles sobre fondo
+/// tintado); en oscuro, las variantes claras.
+Color colorSignificadoChip(SignificadoChip s, bool oscuro) {
+  switch (s) {
+    case SignificadoChip.exito:
+      return oscuro ? const Color(0xFF4ADE80) : const Color(0xFF166534);
+    case SignificadoChip.info:
+      return oscuro ? const Color(0xFF60A5FA) : AppColores.infoOscuro;
+    case SignificadoChip.alerta:
+      return oscuro ? const Color(0xFFFBBF24) : const Color(0xFF92400E);
+    case SignificadoChip.error:
+      return oscuro ? const Color(0xFFF87171) : AppColores.errorOscuro;
+    case SignificadoChip.neutral:
+      return oscuro
+          ? AppColores.textoSecundarioOscuro
+          : const Color(0xFF616161);
+    case SignificadoChip.agotado:
+      return oscuro ? const Color(0xFF9CA3AF) : const Color(0xFF4B5563);
+  }
+}
+
+/// Chip de estado (V6, Argón 1.20): acepta color directo o significado.
+/// Como constructor nombrado real (const), devuelve [ChipEstado] de
+/// verdad: se puede tipar `List<ChipEstado>`, usar en `const` y buscar
+/// por key con `tester.widget<ChipEstado>` sin el agujero que dejaba
+/// el método estático con `_ChipSemantico` privado (eliminado).
 class ChipEstado extends StatelessWidget {
   final String texto;
-  final Color color;
+  final Color? color;
+  final SignificadoChip? significado;
   final IconData? icono;
   const ChipEstado(
       {super.key,
       required this.texto,
-      required this.color,
-      this.icono});
+      required Color this.color,
+      this.icono})
+      : significado = null;
+
+  /// Chip por significado: el color lo decide [significado] según el
+  /// brillo al construir. `icono` opcional; si no se pasa, sin icono.
+  const ChipEstado.semantico({
+    super.key,
+    required this.texto,
+    required SignificadoChip this.significado,
+    this.icono,
+  }) : color = null;
 
   @override
   Widget build(BuildContext context) {
+    final oscuro = Theme.of(context).brightness == Brightness.dark;
+    final c = color ?? colorSignificadoChip(significado!, oscuro);
     return Container(
       padding: const EdgeInsets.symmetric(
           horizontal: AppEspacio.sm, vertical: 4),
       decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.14),
+        color: c.withValues(alpha: 0.14),
         borderRadius: BorderRadius.circular(AppRadio.lg),
         border: Border.all(
-            color: color.withValues(alpha: 0.35)),
+            color: c.withValues(alpha: 0.35)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
           if (icono != null) ...[
-            Icon(icono, size: 13, color: color),
+            Icon(icono, size: 16, color: c),
             const SizedBox(width: 4),
           ],
           Flexible(
             child: Text(texto,
                 style: AppTexto.etiqueta
-                    .copyWith(color: color),
+                    .copyWith(color: c),
                 overflow: TextOverflow.ellipsis),
           ),
         ],
       ),
     );
   }
+}
+
+/// Badge numérico discreto (V6): solo para cantidades (contadores),
+/// nunca para estados. Recorta a "99+" por encima de 99.
+///
+/// Fondo [AppColores.naranjaTexto] (Argón 1.20): blanco sobre el
+/// naranja brillante daba 2.59:1 (falla AA); sobre naranjaTexto da
+/// 4.57:1 o más. Geometría 20×20 (múltiplo de 4, retícula V2): con
+/// etiqueta a 12 px el contenido mide 18.4 px y el mínimo 18 lo
+/// dejaba ovalado.
+class ContadorBadge extends StatelessWidget {
+  final int numero;
+  const ContadorBadge({super.key, required this.numero});
+
+  @override
+  Widget build(BuildContext context) {
+    final texto = numero > 99 ? '99+' : '$numero';
+    return Container(
+      constraints: const BoxConstraints(minWidth: 20, minHeight: 20),
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: AppColores.naranjaTexto,
+        borderRadius: BorderRadius.circular(AppRadio.circular),
+      ),
+      child: Center(
+        child: Text(
+          texto,
+          style: AppTexto.etiqueta.copyWith(
+            fontWeight: FontWeight.bold,
+            color: AppColores.sobreNaranja,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Tamaños del avatar de cliente (V19): una sola identidad visual
+/// de la foto en todo el ecosistema (listas, fichas, reservas…).
+/// [perfil] es la foto grande de la cabecera de la ficha (120 con
+/// su marco de estado de 3 px, el que ya usaba la ficha).
+enum TamanoAvatar { s, m, l, xl, perfil }
+
+/// Avatar de cliente consistente (V19): foto circular con borde
+/// sutil, o iniciales sobre naranja suave cuando no hay foto (o el
+/// [iconoFallback] que pida la pantalla). Con [heroTag], la foto
+/// vuela entre la lista y la ficha (V17). La foto llega ya resuelta
+/// por la pantalla (archivo local); este componente no hace E/S.
+/// El borde es fino y neutro por defecto; la ficha pasa su marco
+/// de estado con [colorBorde] y [grosorBorde].
+class AvatarCliente extends StatelessWidget {
+  final String nombre;
+  final File? foto;
+  final TamanoAvatar tamano;
+  final IconData? iconoFallback;
+  final String? heroTag;
+  final Color? colorBorde;
+  final double grosorBorde;
+
+  const AvatarCliente({
+    super.key,
+    required this.nombre,
+    this.foto,
+    this.tamano = TamanoAvatar.m,
+    this.iconoFallback,
+    this.heroTag,
+    this.colorBorde,
+    this.grosorBorde = 1,
+  });
+
+  double get _diametro => switch (tamano) {
+        TamanoAvatar.s => 32,
+        TamanoAvatar.m => 44,
+        TamanoAvatar.l => 56,
+        TamanoAvatar.xl => 160,
+        TamanoAvatar.perfil => 120,
+      };
+
+  String get _iniciales {
+    final partes =
+        nombre.trim().split(RegExp(r'\s+')).where((p) => p.isNotEmpty);
+    if (partes.isEmpty) return '?';
+    var ini = partes.first[0].toUpperCase();
+    if (partes.length > 1) ini += partes.last[0].toUpperCase();
+    return ini;
+  }
+
+  TextStyle get _estiloIniciales => switch (tamano) {
+        TamanoAvatar.s => AppTexto.etiqueta,
+        TamanoAvatar.m => AppTexto.subtitulo,
+        TamanoAvatar.l => AppTexto.tituloPagina,
+        TamanoAvatar.xl => AppTexto.display,
+        TamanoAvatar.perfil => AppTexto.display,
+      };
+
+  @override
+  Widget build(BuildContext context) {
+    final d = _diametro;
+    // El interior respira dentro del borde (como el marco de la
+    // ficha: borde + padding del mismo grosor).
+    final di = d - 2 * grosorBorde;
+    final Widget interior = foto != null
+        ? ClipRRect(
+            borderRadius: BorderRadius.circular(di / 2),
+            child: Image.file(foto!,
+                width: di, height: di, fit: BoxFit.cover),
+          )
+        : CircleAvatar(
+            radius: di / 2,
+            backgroundColor:
+                AppColores.naranja.withValues(alpha: 0.15),
+            child: iconoFallback != null
+                ? Icon(iconoFallback,
+                    size: di / 2, color: AppColores.naranja)
+                : Text(_iniciales,
+                    style: _estiloIniciales.copyWith(
+                        color: AppColores.naranja,
+                        fontWeight: FontWeight.bold)),
+          );
+    final Widget conBorde = Container(
+      width: d,
+      height: d,
+      padding: EdgeInsets.all(grosorBorde),
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        border: Border.all(
+            color: colorBorde ?? AppColores.borde(context),
+            width: grosorBorde),
+      ),
+      child: interior,
+    );
+    return heroTag == null
+        ? conBorde
+        : Hero(tag: heroTag!, child: conBorde);
+  }
+}
+
+/// Monto con animación funcional breve (V14): cuando el valor
+/// cambia con el widget ya montado (una recarga, un pull-to-refresh),
+/// la cifra cuenta hacia el nuevo valor en 300 ms, sin rebotes. En
+/// el primer montaje muestra el valor directamente (sin animación),
+/// así ningún lector de pantalla ni test ve una cifra a medias.
+/// El formato lo decide quien llama ([formato]); las cifras son
+/// tabulares para que el ancho no baile durante la animación (M7).
+class MontoAnimado extends StatelessWidget {
+  final double valor;
+  final String Function(double) formato;
+  final TextStyle? style;
+
+  const MontoAnimado({
+    super.key,
+    required this.valor,
+    required this.formato,
+    this.style,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final base = (style ?? AppTexto.metrica).copyWith(
+      fontFeatures: const [FontFeature.tabularFigures()],
+    );
+    return TweenAnimationBuilder<double>(
+      tween: Tween<double>(end: valor),
+      duration: const Duration(milliseconds: 300),
+      curve: Curves.easeOut,
+      builder: (_, v, __) => Text(formato(v), style: base),
+    );
+  }
+}
+
+/// Aviso breve unificado (V7): SnackBar con icono y color según el
+/// significado (mismo vocabulario que [SignificadoChip], V6). El
+/// fondo, la forma flotante y la acción los da el tema; aquí solo se
+/// fija el significado visual. El error siempre lleva texto (nunca
+/// solo color, V8) y dura más, para que se alcance a leer.
+///
+/// La migración de los SnackBar existentes a este helper va pantalla
+/// a pantalla con los grupos de diseño (V9–V35); el código nuevo usa
+/// siempre este helper.
+void mostrarSnack(
+  BuildContext context,
+  String mensaje, {
+  SignificadoChip significado = SignificadoChip.neutral,
+  String? accion,
+  VoidCallback? alAccion,
+}) {
+  final (icono, color) = switch (significado) {
+    SignificadoChip.exito => (Icons.check_circle_rounded, AppColores.exito),
+    SignificadoChip.info => (Icons.info_rounded, AppColores.info),
+    SignificadoChip.alerta => (Icons.warning_amber_rounded, AppColores.alerta),
+    SignificadoChip.error => (Icons.error_rounded, AppColores.error),
+    SignificadoChip.agotado => (Icons.warning_amber_rounded, AppColores.alerta),
+    SignificadoChip.neutral => (Icons.info_rounded, Colors.white),
+  };
+  final messenger = ScaffoldMessenger.of(context);
+  messenger.hideCurrentSnackBar();
+  messenger.showSnackBar(
+    SnackBar(
+      duration: Duration(
+          seconds: significado == SignificadoChip.error ? 6 : 4),
+      content: Row(
+        children: [
+          Icon(icono, color: color, size: 20),
+          const SizedBox(width: AppEspacio.sm),
+          Expanded(child: Text(mensaje)),
+        ],
+      ),
+      action: (accion != null && alAccion != null)
+          ? SnackBarAction(label: accion, onPressed: alAccion)
+          : null,
+    ),
+  );
 }
 
 /// v1.3.6 (Argón, diseño): badge squircle tinted del sistema de iconos.
@@ -1005,7 +1298,7 @@ class IconoModuloBadge extends StatelessWidget {
       height: 38,
       decoration: BoxDecoration(
         color: tinte.withValues(alpha: oscuro ? 0.14 : 0.12),
-        borderRadius: BorderRadius.circular(11),
+        borderRadius: BorderRadius.circular(12),
         border: oscuro
             ? Border.all(color: tinte.withValues(alpha: 0.22), width: 1)
             : null,
@@ -1055,9 +1348,10 @@ class GraficoBarrasDiarias extends StatelessWidget {
     if (maximo <= 0) {
       return SizedBox(
         height: altura,
-        child: const Center(
+        child: Center(
           child: Text('Sin actividad en el período',
-              style: TextStyle(fontSize: 11, color: Colors.grey)),
+              style: AppTexto.minuscula
+                  .copyWith(color: Colors.grey)),
         ),
       );
     }
@@ -1098,17 +1392,14 @@ class GraficoBarrasDiarias extends StatelessWidget {
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
             Text(etiquetaPrimera ?? _ddmm('${datos.first['fecha'] ?? ''}'),
-                style: const TextStyle(
-                    fontSize: 10, color: Colors.grey)),
+                style: AppTexto.minuscula.copyWith(color: Colors.grey)),
             Flexible(
               child: Text('máx $maximo/día',
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                      fontSize: 10, color: Colors.grey)),
+                  style: AppTexto.minuscula.copyWith(color: Colors.grey)),
             ),
             Text(etiquetaUltima ?? _ddmm('${datos.last['fecha'] ?? ''}'),
-                style: const TextStyle(
-                    fontSize: 10, color: Colors.grey)),
+                style: AppTexto.minuscula.copyWith(color: Colors.grey)),
           ],
         ),
       ],

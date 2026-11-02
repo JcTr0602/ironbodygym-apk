@@ -110,13 +110,11 @@ class _SeccionFotoPersonalState extends State<SeccionFotoPersonal> {
         _path = null;
         _archivo = null;
       });
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('Foto personal retirada')));
+      mostrarSnack(context, 'Foto personal retirada', significado: SignificadoChip.exito);
     } catch (_) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-            content: Text('No se pudo retirar la foto'),
-            backgroundColor: Colors.red));
+        mostrarSnack(context, 'No se pudo retirar la foto',
+            significado: SignificadoChip.error);
       }
     } finally {
       if (mounted) setState(() => _retirando = false);
@@ -134,7 +132,7 @@ class _SeccionFotoPersonalState extends State<SeccionFotoPersonal> {
         return Tarjeta(
           child: Row(
             children: [
-              const Icon(Icons.wifi_off, size: 18),
+              const Icon(Icons.wifi_off_rounded, size: 18),
               const SizedBox(width: AppEspacio.sm),
               Expanded(
                 child: Text(
@@ -153,13 +151,13 @@ class _SeccionFotoPersonalState extends State<SeccionFotoPersonal> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text('Foto personal del cliente',
-                  style: AppTexto.titulo.copyWith(fontSize: 15)),
+                  style: AppTexto.subtitulo.copyWith(fontWeight: FontWeight.bold)),
               Text('La que se puso en su app de cliente.',
                   style: AppTexto.secundario),
               const SizedBox(height: AppEspacio.sm),
               if (_archivo != null)
                 ClipRRect(
-                  borderRadius: BorderRadius.circular(10),
+                  borderRadius: BorderRadius.circular(12),
                   child: Image.file(_archivo!,
                       height: 220,
                       width: double.infinity,
@@ -171,7 +169,7 @@ class _SeccionFotoPersonalState extends State<SeccionFotoPersonal> {
                   width: double.infinity,
                   decoration: BoxDecoration(
                     color: Colors.grey.shade200,
-                    borderRadius: BorderRadius.circular(10),
+                    borderRadius: BorderRadius.circular(12),
                   ),
                   // Argón #8-5: sin botón de reintento, el dueño
                   // tenía que salir y volver a entrar a la ficha.
@@ -198,7 +196,7 @@ class _SeccionFotoPersonalState extends State<SeccionFotoPersonal> {
                 alignment: Alignment.centerRight,
                 child: OutlinedButton.icon(
                   onPressed: _retirando ? null : _retirar,
-                  icon: const Icon(Icons.delete_outline, size: 18),
+                  icon: const Icon(Icons.delete_outline_rounded, size: 18),
                   label: const Text('Retirar foto'),
                   style: OutlinedButton.styleFrom(
                       foregroundColor: Colors.red),

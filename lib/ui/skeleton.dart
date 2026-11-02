@@ -47,7 +47,7 @@ class SkeletonTarjeta extends StatelessWidget {
           SkeletonLinea(ancho: 160, alto: 16),
           SizedBox(height: 8),
           SkeletonLinea(ancho: 240),
-          SizedBox(height: 6),
+          SizedBox(height: 8),
           SkeletonLinea(ancho: 200),
         ],
       ),

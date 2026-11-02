@@ -416,8 +416,7 @@ class _InvitadosScreenState extends State<InvitadosScreen> {
     }
     if (!mounted) return;
     if (error != null || res == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(error ?? 'Sin respuesta.')));
+      mostrarSnack(context, error ?? 'Sin respuesta.', significado: SignificadoChip.error);
       return;
     }
     // v1.12.0 (E4): el resumen se persiste en SQLite ANTES de
@@ -518,10 +517,9 @@ class _InvitadosScreenState extends State<InvitadosScreen> {
       );
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text(e is InvitadoError
+      mostrarSnack(context, e is InvitadoError
               ? e.mensaje
-              : 'No se pudo limpiar los caducados.')));
+              : 'No se pudo limpiar los caducados.', significado: SignificadoChip.error);
       return;
     }
     if (mounted) _cargar();
@@ -828,10 +826,7 @@ class _InvitadosScreenState extends State<InvitadosScreen> {
                 } else if (_seleccion.length < 50) {
                   _seleccion.add(inv.id);
                 } else {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                          content: Text(
-                              'Máximo 50 invitados por lote.')));
+                  mostrarSnack(context, 'Máximo 50 invitados por lote.', significado: SignificadoChip.alerta);
                 }
               });
           return Padding(
@@ -844,11 +839,8 @@ class _InvitadosScreenState extends State<InvitadosScreen> {
                   : null,
               onTap: () async {
                 if (_offline) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                          content: Text(
-                              'Sin conexión: el detalle no está '
-                              'disponible en modo lectura.')));
+                  mostrarSnack(context, 'Sin conexión: el detalle no está '
+                              'disponible en modo lectura.', significado: SignificadoChip.error);
                   return;
                 }
                 if (_modoSeleccion) {
@@ -872,8 +864,8 @@ class _InvitadosScreenState extends State<InvitadosScreen> {
                           onChanged: (_) => alternar(),
                         )
                       else
-                        const Icon(Icons.person_outline_rounded,
-                            color: AppColores.naranja),
+                        Icon(Icons.person_outline_rounded,
+                            color: AppColores.textoSecundario(context)),
                       const SizedBox(width: AppEspacio.sm),
                       Expanded(
                         child: Text(inv.nombre,
@@ -1011,9 +1003,7 @@ class _InvitadosScreenState extends State<InvitadosScreen> {
                                   vertical: 1.5),
                               child: Text(
                                 letra,
-                                style: const TextStyle(
-                                    fontSize: 10,
-                                    color: Colors.grey),
+                                style: AppTexto.minuscula.copyWith(color: Colors.grey),
                               ),
                             ),
                           ),
@@ -1034,7 +1024,7 @@ class _InvitadosScreenState extends State<InvitadosScreen> {
     if (idx == null || !_scroll.hasClients) return;
     final max = _scroll.position.maxScrollExtent;
     _scroll.animateTo(
-      (idx * 170.0).clamp(0.0, max),
+      (idx * 120.0).clamp(0.0, max),
       duration: const Duration(milliseconds: 250),
       curve: Curves.easeOut,
     );
@@ -1049,8 +1039,7 @@ Widget _chip(String texto, Color color) {
       borderRadius: BorderRadius.circular(20),
     ),
     child: Text(texto,
-        style: TextStyle(
-            fontSize: 11, fontWeight: FontWeight.w600, color: color)),
+        style: AppTexto.minuscula.copyWith(color: color, fontWeight: FontWeight.w600)),
   );
 }
 
@@ -1469,8 +1458,7 @@ class _InvitadoDetalleScreenState extends State<InvitadoDetalleScreen> {
 
   void _snack(String texto) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text(texto)));
+    mostrarSnack(context, texto);
   }
 
   Future<void> _whatsapp() async {
@@ -1554,7 +1542,7 @@ class _InvitadoDetalleScreenState extends State<InvitadoDetalleScreen> {
       context: context,
       builder: (ctx) => DialogoApp(
         titulo: 'Cancelar conversión',
-        iconoTitulo: Icons.cancel_outlined,
+        iconoTitulo: Icons.cancel_rounded,
         contenido: const Text(
             'Se cancela la preparación en el servidor y el '
             'invitado vuelve a estar activo normal. Podrás '
@@ -1701,8 +1689,8 @@ class _InvitadoDetalleScreenState extends State<InvitadoDetalleScreen> {
         children: [
           Row(
             children: [
-              const Icon(Icons.person_rounded,
-                  color: AppColores.naranja),
+              Icon(Icons.person_rounded,
+                  color: AppColores.textoSecundario(context)),
               const SizedBox(width: AppEspacio.sm),
               Expanded(
                   child: Text(d.nombre, style: AppTexto.titulo)),
@@ -1858,6 +1846,9 @@ class _InvitadoDetalleScreenState extends State<InvitadoDetalleScreen> {
         ],
       ),
     );
+    // Pasada 2 de Argón (1.20): liberar el controlador del
+    // diálogo al cerrar.
+    motivoCtrl.dispose();
     if (motivo == null || motivo.isEmpty || !mounted) return;
     setState(() => _actuando = true);
     try {
@@ -1881,9 +1872,9 @@ class _InvitadoDetalleScreenState extends State<InvitadoDetalleScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Row(
+          Row(
             children: [
-              Icon(Icons.sync_rounded, color: AppColores.naranja),
+              Icon(Icons.sync_rounded, color: AppColores.textoSecundario(context)),
               SizedBox(width: AppEspacio.sm),
               Text('Datos sincronizados', style: AppTexto.subtitulo),
             ],
@@ -2040,7 +2031,7 @@ class _InvitadoDetalleScreenState extends State<InvitadoDetalleScreen> {
               ),
               const SizedBox(height: AppEspacio.sm),
               OutlinedButton.icon(
-                icon: const Icon(Icons.cancel_outlined),
+                icon: const Icon(Icons.cancel_rounded),
                 label: const Text('Cancelar conversión'),
                 onPressed: _actuando ? null : _cancelarConversion,
               ),
@@ -2129,7 +2120,7 @@ class _InvitadoDetalleScreenState extends State<InvitadoDetalleScreen> {
               ),
               const SizedBox(height: AppEspacio.md),
               OutlinedButton.icon(
-                icon: const Icon(Icons.cancel_outlined),
+                icon: const Icon(Icons.cancel_rounded),
                 label: const Text('Cancelar conversión'),
                 onPressed: _actuando ? null : _cancelarConversion,
               ),
@@ -2142,10 +2133,10 @@ class _InvitadoDetalleScreenState extends State<InvitadoDetalleScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Row(
+              Row(
                 children: [
                   Icon(Icons.swap_horiz_rounded,
-                      color: AppColores.naranja),
+                      color: AppColores.textoSecundario(context)),
                   SizedBox(width: AppEspacio.sm),
                   Text('Convertir en cliente',
                       style: AppTexto.subtitulo),
@@ -2279,12 +2270,12 @@ class _InvitadoDetalleScreenState extends State<InvitadoDetalleScreen> {
             for (final h in p.historial)
               Container(
                 width: double.infinity,
-                margin: const EdgeInsets.only(top: 6),
+                margin: const EdgeInsets.only(top: 8),
                 padding: const EdgeInsets.symmetric(
                     horizontal: 10, vertical: 8),
                 decoration: BoxDecoration(
                   color: Colors.grey.withValues(alpha: 0.10),
-                  borderRadius: BorderRadius.circular(10),
+                  borderRadius: BorderRadius.circular(12),
                 ),
                 child: Text(textoHistorial(h),
                     style: AppTexto.secundario),
@@ -2443,10 +2434,9 @@ class _InvitadoDetalleScreenState extends State<InvitadoDetalleScreen> {
       if (mounted) _cargar();
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text(e is InvitadoError
+      mostrarSnack(context, e is InvitadoError
               ? e.mensaje
-              : 'No se pudo aplicar la acción.')));
+              : 'No se pudo aplicar la acción.', significado: SignificadoChip.error);
     } finally {
       if (mounted) setState(() => _actuando = false);
     }
@@ -2611,10 +2601,14 @@ class _InvitadoDetalleScreenState extends State<InvitadoDetalleScreen> {
         ),
       ),
     );
+    // Pasada 2 de Argón (1.20): la clave se captura y el
+    // controlador del diálogo se libera al cerrar.
+    final claveNueva = ctrl.text.trim();
+    ctrl.dispose();
     if (ok != true || !mounted) return;
     setState(() => _actuando = true);
     try {
-      await _svc.ajustarClave(widget.invitadoId, ctrl.text.trim());
+      await _svc.ajustarClave(widget.invitadoId, claveNueva);
       _snack('Clave ajustada. Las sesiones del invitado se '
           'revocaron: debe entrar con la clave nueva y cambiarla.');
       await _cargar();
@@ -2770,8 +2764,7 @@ class _InfoPublicaScreenState extends State<InfoPublicaScreen> {
       cambios['horario_texto'] = textoHorario;
     }
     if (cambios.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Sin cambios que guardar')));
+      mostrarSnack(context, 'Sin cambios que guardar');
       return;
     }
     // G6: un teléfono que no cumple (8 dígitos) frena TODO el
@@ -2784,8 +2777,7 @@ class _InfoPublicaScreenState extends State<InfoPublicaScreen> {
       final error = validarValorInfoPublica(
           c.clave, _ctrls[c.clave]!.text);
       if (error != null) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('«${c.etiqueta}» $error')));
+        mostrarSnack(context, '«${c.etiqueta}» $error', significado: SignificadoChip.error);
         return;
       }
     }
@@ -2795,15 +2787,12 @@ class _InfoPublicaScreenState extends State<InfoPublicaScreen> {
         await _svc.guardarInfoPublica(e.key, e.value);
       }
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text(
-              'Información pública actualizada: la app de '
-              'clientes la verá en su próxima sincronización')));
+      mostrarSnack(context, 'Información pública actualizada: la app de '
+              'clientes la verá en su próxima sincronización', significado: SignificadoChip.exito);
       await _cargar();
     } on InvitadoError catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text(e.mensaje)));
+      mostrarSnack(context, e.mensaje, significado: SignificadoChip.error);
     } finally {
       if (mounted) setState(() => _guardando = false);
     }
@@ -2895,10 +2884,10 @@ class _InfoPublicaScreenState extends State<InfoPublicaScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Row(
+          Row(
             children: [
               Icon(Icons.schedule_rounded,
-                  size: 18, color: AppColores.naranja),
+                  size: 18, color: AppColores.textoSecundario(context)),
               SizedBox(width: AppEspacio.sm),
               Text('Horario del gym', style: AppTexto.subtitulo),
             ],

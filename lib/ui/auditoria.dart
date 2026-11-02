@@ -502,7 +502,7 @@ class _AuditoriaScreenState extends State<AuditoriaScreen> {
             ),
           ),
           IconButton(
-            icon: const Icon(Icons.refresh),
+            icon: const Icon(Icons.refresh_rounded),
             onPressed: _cargar,
           ),
         ],
@@ -517,7 +517,7 @@ class _AuditoriaScreenState extends State<AuditoriaScreen> {
               child: Tarjeta(
                 child: Row(
                   children: [
-                    IconoModuloBadge.naranja(Icons.fact_check),
+                    IconoModuloBadge.naranja(Icons.fact_check_rounded),
                     const SizedBox(width: 12),
                     Expanded(
                       child: Text(
@@ -654,7 +654,7 @@ class _AuditoriaScreenState extends State<AuditoriaScreen> {
                       if (_actorFiltro != null) ...[
                         const SizedBox(width: 4),
                         IconButton(
-                          icon: const Icon(Icons.clear, size: 18),
+                          icon: const Icon(Icons.clear_rounded, size: 18),
                           tooltip: 'Quitar filtro',
                           onPressed: () =>
                               setState(() => _actorFiltro = null),
@@ -670,7 +670,7 @@ class _AuditoriaScreenState extends State<AuditoriaScreen> {
                 ? const EstadoCargando(texto: 'Cargando auditoría…')
                 : _ops.isEmpty
                     ? EstadoVacio(
-                        icono: Icons.fact_check,
+                        icono: Icons.fact_check_rounded,
                         titulo: 'Sin operaciones registradas',
                         textoAccion: 'Actualizar',
                         onAccion: _cargar,
@@ -751,7 +751,7 @@ class _AuditoriaScreenState extends State<AuditoriaScreen> {
         File(fotoPath).existsSync();
 
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       child: Tarjeta(
         padding: EdgeInsets.zero,
         child: ListTile(

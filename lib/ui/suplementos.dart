@@ -24,13 +24,13 @@ import '../localdb.dart';
 import '../negocio.dart';
 import '../sync.dart';
 import 'componentes.dart';
+import 'categorias_suplemento.dart';
 import 'cuentas_por_cobrar.dart';
 import 'detalle_suplemento.dart';
 import 'diseno.dart';
 import 'historial_ventas.dart';
 import 'reservas.dart';
 import 'servicios.dart';
-import 'venta_suplemento.dart';
 import 'widgets.dart';
 
 class SuplementosScreen extends StatefulWidget {
@@ -103,6 +103,13 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
       // v1.2.2: entrenadores solo ven productos con stock > 0
       _items = items
           .where((s) {
+            // FIN-24 de Argón (1.20): un suplemento ELIMINADO no
+            // se muestra a nadie (antes el dueño lo veía como
+            // «Inactivo», mezclado con los desactivados, sin
+            // forma de reactivarlo desde aquí).
+            if (s['eliminado'] == 1 || s['eliminado'] == true) {
+              return false;
+            }
             if (_esDueno) return true;
             final activo = (s['activo'] as int?) == 1;
             final stock = (s['stock'] as num?)?.toInt() ?? 0;
@@ -233,20 +240,15 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
 
   /// v1.3.4: abre la venta con el flujo unificado (VentaSuplementoScreen +
   /// registrarVentaSuplemento). Esta pantalla NUNCA escribe SQL de venta.
+  /// Rediseño 1.20 (D1): el botón «Vender» de la tarjeta
+  /// abre la VENTA RÁPIDA (diálogo de 1 unidad); la venta
+  /// completa vive en el detalle del producto.
   void _irVender(Map<String, dynamic> s) {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => VentaSuplementoScreen(suplemento: s),
-      ),
-    ).then((_) {
-      _cargar();
-      // 13/25: el recibo ya NO se engancha aquí. El TODO viejo
-      // (Ítem A v1.3.5) pedía ofrecerlo tras la venta, pero la
-      // pantalla de venta ya muestra el comprobante completo al
-      // registrar (v1.3.7, ahora con vendedor) y el historial
-      // ofrece el recibo de cada venta (con método y vendedor).
-      // Engancharlo aquí duplicaría el ofrecimiento tras cada venta.
+    ventaRapidaSuplemento(context, s, _tasaUsd).then((vendido) {
+      // Sin recibo enganchado aquí (13/25): el historial ofrece
+      // el recibo de cada venta; engancharlo duplicaría el
+      // ofrecimiento tras cada venta.
+      if (vendido) _cargar();
     });
   }
 
@@ -274,10 +276,8 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
     });
     if (visibles.isEmpty) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-              content: Text('No hay productos activos con stock')),
-        );
+        mostrarSnack(context, 'No hay productos activos con stock',
+            significado: SignificadoChip.alerta);
       }
       return;
     }
@@ -349,13 +349,13 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
               padding: const EdgeInsets.symmetric(vertical: 8),
               child: FilledButton.tonalIcon(
                 onPressed: () => _irEditar(null),
-                icon: const Icon(Icons.add, size: 18),
+                icon: const Icon(Icons.add_rounded, size: 18),
                 label: const Text('Nuevo'),
               ),
             ),
           // v1.3.4 (B2): compartir el catálogo como texto (WhatsApp).
           IconButton(
-            icon: const Icon(Icons.share_outlined),
+            icon: const Icon(Icons.share_rounded),
             tooltip: 'Compartir catálogo',
             onPressed: _compartirCatalogo,
           ),
@@ -366,7 +366,7 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
               icon: Badge(
                 isLabelVisible: _reservasSolicitadas > 0,
                 label: Text('$_reservasSolicitadas'),
-                child: const Icon(Icons.bookmark_border),
+                child: const Icon(Icons.bookmark_border_rounded),
               ),
               tooltip: 'Reservas',
               onPressed: () async {
@@ -380,7 +380,7 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
             ),
           // v1.3.7 (Fase B §6.2): fiados por cobrar (fiados).
           IconButton(
-            icon: const Icon(Icons.account_balance_wallet_outlined),
+            icon: const Icon(Icons.account_balance_wallet_rounded),
             tooltip: 'Fiados por cobrar',
             onPressed: () => Navigator.push(
               context,
@@ -389,73 +389,91 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
                       const CuentasPorCobrarScreen()),
             ),
           ),
-          if (_esDueno)
-            IconButton(
-              icon: const Icon(Icons.receipt_long),
-              tooltip: 'Historial de ventas',
-              onPressed: () => Navigator.push(
-                context,
-                MaterialPageRoute(
-                    builder: (_) =>
-                        const HistorialVentasScreen()),
+          // Rediseño 1.20: Historial, Categorías y Servicios
+          // se agrupan en el menú ⋮ (antes iconos sueltos y una
+          // tarjeta grande en el cuerpo).
+          PopupMenuButton<String>(
+            icon: const Icon(Icons.more_vert_rounded),
+            tooltip: 'Más opciones',
+            onSelected: (v) async {
+              if (v == 'historial') {
+                await Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                      builder: (_) => HistorialVentasScreen(
+                          soloMias: !_esDueno)),
+                );
+              } else if (v == 'categorias') {
+                await Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                      builder: (_) =>
+                          const CategoriasSuplementoScreen()),
+                );
+                if (mounted) _cargar();
+              } else if (v == 'servicios') {
+                await Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                      builder: (_) => const ServiciosScreen()),
+                );
+              }
+            },
+            itemBuilder: (_) => [
+              PopupMenuItem(
+                value: 'historial',
+                child: Row(
+                  children: [
+                    Icon(
+                        _esDueno
+                            ? Icons.receipt_long_rounded
+                            : Icons.history_rounded,
+                        size: 20),
+                    const SizedBox(width: AppEspacio.sm),
+                    Text(_esDueno
+                        ? 'Historial de ventas'
+                        : 'Mis ventas'),
+                  ],
+                ),
               ),
-            )
-          else
-            // v1.2.1: el entrenador ve su propio historial.
-            IconButton(
-              icon: const Icon(Icons.history),
-              tooltip: 'Mis ventas',
-              onPressed: () => Navigator.push(
-                context,
-                MaterialPageRoute(
-                    builder: (_) =>
-                        const HistorialVentasScreen(
-                            soloMias: true)),
+              if (_esDueno)
+                const PopupMenuItem(
+                  value: 'categorias',
+                  child: Row(
+                    children: [
+                      Icon(Icons.category_rounded, size: 20),
+                      SizedBox(width: AppEspacio.sm),
+                      Text('Categorías'),
+                    ],
+                  ),
+                ),
+              const PopupMenuItem(
+                value: 'servicios',
+                child: Row(
+                  children: [
+                    Icon(Icons.bolt_rounded, size: 20),
+                    SizedBox(width: AppEspacio.sm),
+                    Text('Servicios ⚡ por dosis'),
+                  ],
+                ),
               ),
-            ),
+            ],
+          ),
         ],
       ),
       body: Column(
         children: [
           const SyncBanner(compact: true, alcance: 'suplementos'),
-          // v1.8.0: entrada a Servicios por dosis (venta + gestión).
-          Padding(
-            padding: const EdgeInsets.fromLTRB(
-                AppEspacio.md, AppEspacio.md, AppEspacio.md, 0),
-            child: Tarjeta(
-              onTap: () => Navigator.push(
-                context,
-                MaterialPageRoute(
-                    builder: (_) => const ServiciosScreen()),
-              ),
-              padding: const EdgeInsets.symmetric(
-                  horizontal: AppEspacio.md, vertical: AppEspacio.md),
-              child: Row(
-                children: [
-                  IconoModuloBadge.naranja(Icons.bolt_rounded,
-                      tamanoIcono: 22),
-                  const SizedBox(width: AppEspacio.sm),
-                  Expanded(
-                    child: Text('Servicios ⚡ pre-entreno por dosis',
-                        style: AppTexto.secundario.copyWith(
-                            fontWeight: FontWeight.w600)),
-                  ),
-                  Icon(Icons.chevron_right_rounded,
-                      size: 20,
-                      color: AppColores.naranja
-                          .withValues(alpha: 0.5)),
-                ],
-              ),
-            ),
-          ),
-          // v1.2.1: la promo la ven todos (el interruptor solo el dueño).
+          // v1.2.1: la promo la ven todos (el interruptor solo
+          // el dueño). Rediseño 1.20: banda compacta; Servicios
+          // vive ahora en el menú ⋮ del app bar.
           _tarjetaPromo(),
           Padding(
             padding: const EdgeInsets.all(AppEspacio.md),
             child: CampoTexto(
               controller: _busquedaCtrl,
               hint: 'Buscar suplemento…',
-              icono: Icons.search,
+              icono: Icons.search_rounded,
               onChanged: (v) =>
                   setState(() => _busqueda = v.trim()),
             ),
@@ -470,7 +488,7 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
                 children: [
                   ChoiceChip(
                     label: const Text('Todas',
-                        style: TextStyle(fontSize: 12)),
+                        style: AppTexto.etiqueta),
                     selected: _filtroCategoria == null,
                     onSelected: (_) => setState(
                         () => _filtroCategoria = null),
@@ -479,8 +497,7 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
                   for (final c in _categorias) ...[
                     ChoiceChip(
                       label: Text('${c['nombre']}',
-                          style:
-                              const TextStyle(fontSize: 12)),
+                          style: AppTexto.etiqueta),
                       selected: _filtroCategoria ==
                           (c['id'] as int?),
                       onSelected: (_) => setState(() =>
@@ -507,7 +524,7 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
                 ]) ...[
                   ChoiceChip(
                     label: Text(f.$2,
-                        style: const TextStyle(fontSize: 12)),
+                        style: AppTexto.etiqueta),
                     selected: _filtroStock == f.$1,
                     onSelected: (_) =>
                         setState(() => _filtroStock = f.$1),
@@ -529,15 +546,19 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
           AppEspacio.md, AppEspacio.sm, AppEspacio.md, 0),
       child: Tarjeta(
         padding: const EdgeInsets.symmetric(
-            horizontal: AppEspacio.lg, vertical: AppEspacio.sm),
+            horizontal: AppEspacio.md, vertical: AppEspacio.xs),
         child: Row(
           children: [
-            const Icon(Icons.card_giftcard,
-                color: AppColores.naranja),
+            Icon(Icons.card_giftcard_rounded,
+                size: 20,
+                color: AppColores.textoSecundario(context)),
             const SizedBox(width: AppEspacio.sm),
-            const Expanded(
-              child: Text('Promo: 1 mes gratis por compra',
-                  style: AppTexto.cuerpo),
+            Expanded(
+              child: Text(
+                  _promoActiva
+                      ? 'Promo activa · 1 mes gratis por compra'
+                      : 'Promo inactiva',
+                  style: AppTexto.secundario),
             ),
             Switch(
               value: _promoActiva,
@@ -569,7 +590,7 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
           _filtroCategoria != null ||
           _filtroStock != 'todos';
       return EstadoVacio(
-        icono: Icons.medication_outlined,
+        icono: Icons.medication_rounded,
         titulo: 'Sin suplementos',
         subtitulo: hayFiltros
             ? 'Ningún producto coincide con esos filtros.'
@@ -597,15 +618,26 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
     }
     // v1.2.1: sección destacada con los más vendidos (solo si hay ventas).
     final top = _topProductos;
+    final hayFiltros = _busqueda.isNotEmpty ||
+        _filtroCategoria != null ||
+        _filtroStock != 'todos';
     return Column(
       children: [
         if (top.isNotEmpty) _seccionTop(top),
         // SU2 (estéticas 1.19): interruptor cuadrícula/lista.
+        // Rediseño 1.20: contador de resultados a la izquierda.
         Padding(
           padding: const EdgeInsets.fromLTRB(
               AppEspacio.md, 0, AppEspacio.md, AppEspacio.sm),
           child: Row(
             children: [
+              Text(
+                hayFiltros
+                    ? '${items.length} de ${_items.length} suplementos'
+                    : '${items.length} suplemento'
+                        '${items.length == 1 ? '' : 's'}',
+                style: AppTexto.metadato,
+              ),
               const Spacer(),
               SegmentedButton<bool>(
                 segments: const [
@@ -736,9 +768,8 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
                         borderRadius: BorderRadius.circular(
                             AppRadio.md),
                       ),
-                      child: const Icon(
-                          Icons.medication_outlined,
-                          color: AppColores.naranja),
+                      child: Icon(Icons.medication_rounded,
+                          color: AppColores.textoSecundario(context)),
                     )),
               )
             else
@@ -755,9 +786,9 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
                         borderRadius: BorderRadius.circular(
                             AppRadio.md),
                       ),
-                      child: const Icon(
-                          Icons.medication_outlined,
-                          color: AppColores.naranja),
+                      child: Icon(Icons.medication_rounded,
+                          color:
+                              AppColores.textoSecundario(ctx)),
                     );
                   }
                   return ClipRRect(
@@ -838,6 +869,8 @@ class _FilaSuplemento extends StatelessWidget {
     final cup = moneda == 'USD'
         ? precioOficialEn('CUP', precio, tasaUsd)
         : null;
+    final presentacion = textoPresentacion(sup);
+    final estado = estadoStockSuplemento(sup);
     return Opacity(
       opacity: hayStock ? 1.0 : 0.55,
       child: Tarjeta(
@@ -863,28 +896,42 @@ class _FilaSuplemento extends StatelessWidget {
                     nombre,
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      fontWeight: FontWeight.w600,
-                      fontSize: 13,
-                    ),
+                    style: AppTexto.secundario
+                        .copyWith(fontWeight: FontWeight.w600),
                   ),
                   const SizedBox(height: 2),
                   Text(
                     '${precio.toStringAsFixed(2)} $moneda'
                     '${cup != null ? ' (≈ ${cup.toStringAsFixed(0)} CUP)' : ''}',
-                    style: const TextStyle(
+                    style: AppTexto.subtitulo.copyWith(
                       fontWeight: FontWeight.bold,
-                      fontSize: 15,
                       color: AppColores.naranja,
                     ),
                   ),
-                  if (!hayStock)
+                  if (presentacion.isNotEmpty)
                     Text(
-                      inactivo ? 'Inactivo' : 'Agotado',
-                      style: const TextStyle(
-                        fontSize: 11,
+                      presentacion,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: AppTexto.minuscula.copyWith(
+                        color: AppColores.textoSecundario(context),
+                      ),
+                    ),
+                  if (estado != EstadoStockSuplemento.disponible)
+                    Text(
+                      textoEstadoStock(sup),
+                      style: AppTexto.minuscula.copyWith(
                         fontWeight: FontWeight.w600,
-                        color: AppColores.error,
+                        color: switch (estado) {
+                          EstadoStockSuplemento.inactivo =>
+                            AppColores.textoSecundario(context),
+                          EstadoStockSuplemento.agotado =>
+                            AppColores.error,
+                          EstadoStockSuplemento.bajo =>
+                            AppColores.alerta,
+                          EstadoStockSuplemento.disponible =>
+                            AppColores.exito,
+                        },
                       ),
                     ),
                 ],
@@ -892,7 +939,11 @@ class _FilaSuplemento extends StatelessWidget {
             ),
             const SizedBox(width: AppEspacio.sm),
             BotonPrimario(
-              texto: hayStock ? 'Vender' : 'Agotado',
+              texto: hayStock
+                  ? 'Vender'
+                  : inactivo
+                      ? 'Inactivo'
+                      : 'Sin stock',
               onPressed: hayStock ? onVender : null,
               expandido: false,
             ),
@@ -970,32 +1021,8 @@ class _TarjetaSuplemento extends StatelessWidget {
                     Positioned(
                       top: 8,
                       right: 8,
-                      child: _BadgeStock(stock: stock),
+                      child: _BadgeStock(sup: sup),
                     ),
-                    // SU3: badge «Agotado» sobre la foto (el
-                    // inactivo ya se marca con su texto abajo).
-                    if (stock <= 0 && !inactivo)
-                      Positioned(
-                        top: 8,
-                        left: 8,
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 8, vertical: 3),
-                          decoration: BoxDecoration(
-                            color: AppColores.error,
-                            borderRadius:
-                                BorderRadius.circular(12),
-                          ),
-                          child: const Text(
-                            'Agotado',
-                            style: TextStyle(
-                              fontSize: 11,
-                              fontWeight: FontWeight.w700,
-                              color: Colors.white,
-                            ),
-                          ),
-                        ),
-                      ),
                   ],
                 ),
               ),
@@ -1009,10 +1036,8 @@ class _TarjetaSuplemento extends StatelessWidget {
                       nombre,
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        fontWeight: FontWeight.w600,
-                        fontSize: 13,
-                      ),
+                      style: AppTexto.secundario.copyWith(
+                          fontWeight: FontWeight.w600),
                     ),
                     const SizedBox(height: 4),
                     // Ronda 3-9 #8: en USD, equivalente CUP
@@ -1025,53 +1050,47 @@ class _TarjetaSuplemento extends StatelessWidget {
                       return Text(
                         '${precio.toStringAsFixed(2)} $moneda'
                         '${cup != null ? ' (≈ ${cup.toStringAsFixed(0)} CUP)' : ''}',
-                        style: const TextStyle(
+                        style: AppTexto.subtitulo.copyWith(
                           fontWeight: FontWeight.bold,
-                          fontSize: 16,
                           color: AppColores.naranja,
                         ),
                       );
                     }),
-                    if (inactivo)
-                      const Text(
-                        'Inactivo',
-                        style: TextStyle(
-                          fontSize: 10,
-                          color: Colors.grey,
-                          height: 1.2,
-                        ),
-                      ),
-                    // v1.3.7 (Fase B §6.2): chip de stock bajo.
                     Builder(builder: (ctx) {
-                      final umbral = (sup['umbral_stock'] as num?)
-                              ?.toInt() ??
-                          3;
-                      if (inactivo || stock <= 0 || stock > umbral) {
+                      final pres = textoPresentacion(sup);
+                      if (pres.isEmpty) {
                         return const SizedBox.shrink();
                       }
-                      return Padding(
-                        padding:
-                            const EdgeInsets.only(top: 4),
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 8, vertical: 3),
-                          decoration: BoxDecoration(
-                            color: AppColores.alerta
-                                .withValues(alpha: 0.15),
-                            borderRadius:
-                                BorderRadius.circular(12),
-                            border: Border.all(
-                                color: AppColores.alerta
-                                    .withValues(alpha: 0.4)),
-                          ),
-                          child: Text(
-                            'Stock bajo: $stock',
-                            style: TextStyle(
-                              fontSize: 11,
-                              fontWeight: FontWeight.w600,
-                              color: AppColores.alerta,
-                            ),
-                          ),
+                      return Text(
+                        pres,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: AppTexto.minuscula.copyWith(
+                          color: AppColores.textoSecundario(ctx),
+                        ),
+                      );
+                    }),
+                    Builder(builder: (ctx) {
+                      final estado = estadoStockSuplemento(sup);
+                      if (estado ==
+                          EstadoStockSuplemento.disponible) {
+                        return const SizedBox.shrink();
+                      }
+                      return Text(
+                        textoEstadoStock(sup),
+                        style: AppTexto.minuscula.copyWith(
+                          fontWeight: FontWeight.w600,
+                          height: 1.2,
+                          color: switch (estado) {
+                            EstadoStockSuplemento.inactivo =>
+                              AppColores.textoSecundario(ctx),
+                            EstadoStockSuplemento.agotado =>
+                              AppColores.error,
+                            EstadoStockSuplemento.bajo =>
+                              AppColores.alerta,
+                            EstadoStockSuplemento.disponible =>
+                              AppColores.exito,
+                          },
                         ),
                       );
                     }),
@@ -1080,7 +1099,11 @@ class _TarjetaSuplemento extends StatelessWidget {
                     // estilo primario del sistema; en «Agotado»
                     // queda deshabilitado con su gris del tema.
                     BotonPrimario(
-                      texto: hayStock ? 'Vender' : 'Agotado',
+                      texto: hayStock
+                          ? 'Vender'
+                          : inactivo
+                              ? 'Inactivo'
+                              : 'Sin stock',
                       onPressed: hayStock ? onVender : null,
                     ),
                   ],
@@ -1183,7 +1206,7 @@ class _PlaceholderFoto extends StatelessWidget {
       ),
       child: const Center(
         child: Icon(
-          Icons.fitness_center,
+          Icons.fitness_center_rounded,
           size: 46,
           color: Color(0x40FFFFFF),
         ),
@@ -1231,21 +1254,22 @@ class _ShimmerFotoState extends State<_ShimmerFoto>
 /// Badge de stock flotante: chip negro translúcido + punto semántico
 /// (verde > 5, ámbar 1–5, rojo agotado) + "Stock: X".
 class _BadgeStock extends StatelessWidget {
-  final int stock;
-  const _BadgeStock({required this.stock});
+  final Map<String, dynamic> sup;
+  const _BadgeStock({required this.sup});
 
   @override
   Widget build(BuildContext context) {
-    final Color punto;
-    if (stock <= 0) {
-      punto = AppColores.error;
-    } else if (stock <= 5) {
-      punto = AppColores.alerta;
-    } else {
-      punto = AppColores.exito;
-    }
+    // Rediseño 1.20: el badge consume la regla ÚNICA de stock
+    // (umbral_stock del producto; antes un umbral fijo de 5) y
+    // lleva siempre el texto del estado.
+    final Color punto = switch (estadoStockSuplemento(sup)) {
+      EstadoStockSuplemento.agotado => AppColores.error,
+      EstadoStockSuplemento.bajo => AppColores.alerta,
+      EstadoStockSuplemento.disponible => AppColores.exito,
+      EstadoStockSuplemento.inactivo => Colors.grey,
+    };
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
         color: Colors.black87,
         borderRadius: BorderRadius.circular(20),
@@ -1261,12 +1285,11 @@ class _BadgeStock extends StatelessWidget {
               shape: BoxShape.circle,
             ),
           ),
-          const SizedBox(width: 6),
+          const SizedBox(width: 8),
           Text(
-            'Stock: $stock',
-            style: const TextStyle(
+            textoEstadoStock(sup),
+            style: AppTexto.minuscula.copyWith(
               color: Colors.white,
-              fontSize: 11,
               fontWeight: FontWeight.w600,
             ),
           ),
@@ -1281,7 +1304,14 @@ class _BadgeStock extends StatelessWidget {
 
 class EditarSuplementoScreen extends StatefulWidget {
   final Map<String, dynamic>? suplemento;
-  const EditarSuplementoScreen({super.key, this.suplemento});
+
+  /// F12 (1.20): plantilla para DUPLICAR — el editor abre en
+  /// modo CREAR con los campos llenos desde otro suplemento,
+  /// pero sin su id (el payload es crear_suplemento) y sin
+  /// heredar su foto.
+  final Map<String, dynamic>? plantilla;
+  const EditarSuplementoScreen(
+      {super.key, this.suplemento, this.plantilla});
 
   @override
   State<EditarSuplementoScreen> createState() =>
@@ -1327,6 +1357,8 @@ class _EditarSuplementoScreenState
   int? _categoriaId;
 
   bool get _editando => widget.suplemento != null;
+  bool get _duplicando =>
+      widget.suplemento == null && widget.plantilla != null;
 
   /// Número del espejo sin decimales inútiles (300.0 → «300»).
   static String _fmtNum(dynamic v) {
@@ -1337,7 +1369,11 @@ class _EditarSuplementoScreenState
   @override
   void initState() {
     super.initState();
-    final s = widget.suplemento;
+    // F12: en duplicar, los campos se llenan desde la
+    // plantilla pero el modo sigue siendo CREAR (sin id, sin
+    // foto y sin trackers de "valor inicial": la presentación
+    // viaja siempre al crear).
+    final s = widget.suplemento ?? widget.plantilla;
     if (s != null) {
       _nombre.text = '${s['nombre'] ?? ''}';
       _desc.text = '${s['descripcion'] ?? ''}';
@@ -1351,13 +1387,15 @@ class _EditarSuplementoScreenState
       }
       final unidad = s['peso_unidad']?.toString().trim();
       _pesoUnidad = (unidad != null && unidad.isNotEmpty) ? unidad : null;
-      _presPesoIni = (s['peso_valor'] as num?)?.toDouble();
-      _presUnidadIni = _pesoUnidad;
-      final servIni = (s['servicios_estandar'] as num?)?.toDouble();
-      _presServiciosIni =
-          (servIni != null && servIni == servIni.roundToDouble())
-              ? servIni.toInt()
-              : null;
+      if (widget.suplemento != null) {
+        _presPesoIni = (s['peso_valor'] as num?)?.toDouble();
+        _presUnidadIni = _pesoUnidad;
+        final servIni = (s['servicios_estandar'] as num?)?.toDouble();
+        _presServiciosIni =
+            (servIni != null && servIni == servIni.roundToDouble())
+                ? servIni.toInt()
+                : null;
+      }
       _activo = (s['activo'] as int?) == 1;
       _categoriaId = s['categoria_id'] as int?;
       // v1.4.6: moneda actual del suplemento (fallback 'CUP').
@@ -1572,10 +1610,9 @@ class _EditarSuplementoScreenState
         );
         // Foto encolada: aviso limpio al usuario.
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-                content: Text('Foto guardada. Se subirá al sincronizar.')),
-          );
+          mostrarSnack(
+              context, 'Foto guardada. Se subirá al sincronizar.',
+              significado: SignificadoChip.exito);
         }
       }
       unawaited(SyncEngine.instance.push());
@@ -1584,11 +1621,11 @@ class _EditarSuplementoScreenState
       // afecta a ventas y reservas futuras; lo ya vendido o
       // reservado conserva su moneda snapshot.
       if (mounted && _editando && _moneda != _monedaIni) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-              content: Text('Moneda cambiada a $_moneda: solo '
-                  'afecta a las ventas y reservas futuras.')),
-        );
+        mostrarSnack(
+            context,
+            'Moneda cambiada a $_moneda: solo '
+            'afecta a las ventas y reservas futuras.',
+            significado: SignificadoChip.info);
       }
       if (mounted) Navigator.pop(context, true);
     } finally {
@@ -1598,218 +1635,304 @@ class _EditarSuplementoScreenState
 
   @override
   Widget build(BuildContext context) {
+    // Rediseño 1.20 (paso 4): el formulario se agrupa en
+    // secciones con EncabezadoSeccion; la foto ACTUAL se ve
+    // al abrir en edición; el guardado vive en una barra
+    // inferior fija. Los campos, controladores y el
+    // _guardar completo NO cambian.
+    final fotoLocalActual = _editando
+        ? (widget.suplemento?['foto_local'] as String?)
+        : null;
     return Scaffold(
       appBar: AppBar(
-          title: Text(
-              _editando ? 'Editar suplemento' : 'Nuevo suplemento')),
+          title: Text(_editando
+              ? 'Editar suplemento'
+              : _duplicando
+                  ? 'Duplicar suplemento'
+                  : 'Nuevo suplemento')),
       body: ListView(
-        padding: const EdgeInsets.all(AppEspacio.lg),
+        padding: const EdgeInsets.symmetric(
+            vertical: AppEspacio.lg),
         children: [
-          const SyncBanner(compact: true, alcance: 'suplementos'),
-          const SizedBox(height: AppEspacio.md),
-          Center(
-            child: GestureDetector(
-              // v1.2.1: permitir foto también al crear (antes solo al editar).
-              onTap: _elegirFoto,
-              child: Container(
-                width: 96,
-                height: 96,
-                decoration: BoxDecoration(
-                  color: AppColores.fondo(context),
-                  borderRadius:
-                      BorderRadius.circular(AppRadio.lg),
-                  border: Border.all(
-                      color: AppColores.borde(context)),
+          const Padding(
+            padding: EdgeInsets.symmetric(horizontal: AppEspacio.lg),
+            child: SyncBanner(compact: true, alcance: 'suplementos'),
+          ),
+          const EncabezadoSeccion(titulo: 'Identificación'),
+          Padding(
+            padding: const EdgeInsets.symmetric(
+                horizontal: AppEspacio.lg),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Center(
+                  child: GestureDetector(
+                    // v1.2.1: permitir foto también al crear (antes solo al editar).
+                    onTap: _elegirFoto,
+                    child: Container(
+                      width: 96,
+                      height: 96,
+                      decoration: BoxDecoration(
+                        color: AppColores.fondo(context),
+                        borderRadius:
+                            BorderRadius.circular(AppRadio.lg),
+                        border: Border.all(
+                            color: AppColores.borde(context)),
+                      ),
+                      child: _fotoNueva != null
+                          ? ClipRRect(
+                              borderRadius: BorderRadius.circular(
+                                  AppRadio.lg),
+                              child: Image.memory(_fotoNueva!,
+                                  fit: BoxFit.cover),
+                            )
+                          : (_editando && widget.suplemento != null)
+                              ? ClipRRect(
+                                  borderRadius:
+                                      BorderRadius.circular(
+                                          AppRadio.lg),
+                                  child: _FotoSuplemento(
+                                      sup: widget.suplemento!),
+                                )
+                              : Column(
+                                  mainAxisAlignment:
+                                      MainAxisAlignment.center,
+                                  children: [
+                                    Icon(
+                                        Icons.add_a_photo_rounded,
+                                        color: AppColores
+                                            .textoSecundario(
+                                                context)),
+                                    // v1.2.1: texto genérico (antes "Foto al editar").
+                                    const Text('Agregar foto',
+                                        style:
+                                            AppTexto.minuscula),
+                                  ],
+                                ),
+                    ),
+                  ),
                 ),
-                child: _fotoNueva != null
-                    ? ClipRRect(
-                            borderRadius: BorderRadius.circular(
-                                AppRadio.lg),
-                            child: Image.memory(_fotoNueva!,
-                                fit: BoxFit.cover),
-                          )
-                        : const Column(
-                            mainAxisAlignment:
-                                MainAxisAlignment.center,
-                            children: [
-                              Icon(
-                                  Icons.add_a_photo_outlined,
-                                  color: AppColores.naranja),
-                              // v1.2.1: texto genérico (antes "Foto al editar").
-                              Text('Agregar foto',
-                                  style:
-                                      AppTexto.minuscula),
-                            ],
-                          ),
-              ),
+                if (_editando && widget.suplemento != null) ...[
+                  const SizedBox(height: AppEspacio.sm),
+                  Text(
+                    'Toca la foto para cambiarla',
+                    textAlign: TextAlign.center,
+                    style: AppTexto.minuscula.copyWith(
+                        color:
+                            AppColores.textoSecundario(context)),
+                  ),
+                ],
+                if (fotoLocalActual != null &&
+                    fotoLocalActual.isNotEmpty &&
+                    _fotoNueva == null) ...[
+                  const SizedBox(height: AppEspacio.sm),
+                  const Center(
+                    child: ChipEstado.semantico(
+                        texto: 'Foto pendiente de sincronizar',
+                        significado: SignificadoChip.alerta),
+                  ),
+                ],
+                const SizedBox(height: AppEspacio.md),
+                CampoTexto(
+                    controller: _nombre,
+                    etiqueta: 'Nombre',
+                    hint: 'Ej. Creatina Monohidrato 500g'),
+                const SizedBox(height: AppEspacio.md),
+                CampoTexto(
+                    controller: _desc,
+                    etiqueta: 'Descripción (opcional)',
+                    maxLineas: 2),
+                // v1.2.1: selector de categoría.
+                if (_categorias.isNotEmpty) ...[
+                  const SizedBox(height: AppEspacio.md),
+                  DropdownButtonFormField<int?>(
+                    initialValue: _categoriaId,
+                    decoration: const InputDecoration(
+                      labelText: 'Categoría',
+                      border: OutlineInputBorder(),
+                    ),
+                    items: [
+                      const DropdownMenuItem<int?>(
+                        value: null,
+                        child: Text('Sin categoría'),
+                      ),
+                      for (final c in _categorias)
+                        DropdownMenuItem<int?>(
+                          value: c['id'] as int?,
+                          child: Text(
+                              '${c['nombre']}${(c['activa'] as int?) == 0 ? ' (inactiva)' : ''}'),
+                        ),
+                    ],
+                    onChanged: (v) =>
+                        setState(() => _categoriaId = v),
+                  ),
+                ],
+              ],
             ),
           ),
-          const SizedBox(height: AppEspacio.md),
-          CampoTexto(
-              controller: _nombre,
-              etiqueta: 'Nombre',
-              hint: 'Ej. Creatina Monohidrato 500g'),
-          const SizedBox(height: AppEspacio.md),
-          CampoTexto(
-              controller: _desc,
-              etiqueta: 'Descripción (opcional)',
-              maxLineas: 2),
-          const SizedBox(height: AppEspacio.md),
-          // v1.2.1: selector de categoría.
-          if (_categorias.isNotEmpty)
-            DropdownButtonFormField<int?>(
-              initialValue: _categoriaId,
-              decoration: const InputDecoration(
-                labelText: 'Categoría',
-                border: OutlineInputBorder(),
-              ),
-              items: [
-                const DropdownMenuItem<int?>(
-                  value: null,
-                  child: Text('Sin categoría'),
-                ),
-                for (final c in _categorias)
-                  DropdownMenuItem<int?>(
-                    value: c['id'] as int?,
-                    child: Text(
-                        '${c['nombre']}${(c['activa'] as int?) == 0 ? ' (inactiva)' : ''}'),
-                  ),
-              ],
-              onChanged: (v) =>
-                  setState(() => _categoriaId = v),
-            ),
-          if (_categorias.isNotEmpty)
-            const SizedBox(height: AppEspacio.md),
-          Row(
-            children: [
-              Expanded(
-                flex: 3,
-                child: CampoTexto(
-                    controller: _precio,
-                    etiqueta: 'Precio oficial ($_moneda)',
-                    teclado:
-                        const TextInputType.numberWithOptions(
-                            decimal: true)),
-              ),
-              const SizedBox(width: AppEspacio.md),
-              // v1.4.6: selector de moneda del precio oficial.
-              Expanded(
-                flex: 2,
-                child: DropdownButtonFormField<String>(
-                  initialValue: _moneda,
-                  decoration: const InputDecoration(
-                    labelText: 'Moneda',
-                    border: OutlineInputBorder(),
-                  ),
-                  items: const [
-                    DropdownMenuItem<String>(
-                      value: 'CUP',
-                      child: Text('CUP'),
+          const EncabezadoSeccion(
+              titulo: 'Presentación del envase'),
+          Padding(
+            padding: const EdgeInsets.symmetric(
+                horizontal: AppEspacio.lg),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                // v1.4.3: presentación del envase — el cliente la ve en
+                // su catálogo bajo el nombre del producto.
+                Row(
+                  children: [
+                    Expanded(
+                      child: CampoTexto(
+                          controller: _pesoValor,
+                          etiqueta: 'Contenido del envase',
+                          hint: 'Ej. 300',
+                          teclado:
+                              const TextInputType.numberWithOptions(
+                                  decimal: true)),
                     ),
-                    DropdownMenuItem<String>(
-                      value: 'USD',
-                      child: Text('USD'),
+                    const SizedBox(width: AppEspacio.md),
+                    Expanded(
+                      child: DropdownButtonFormField<String?>(
+                        initialValue: _pesoUnidad,
+                        decoration: const InputDecoration(
+                          labelText: 'Unidad',
+                          border: OutlineInputBorder(),
+                        ),
+                        items: [
+                          const DropdownMenuItem<String?>(
+                            value: null,
+                            child: Text('—'),
+                          ),
+                          for (final u in _unidadesEnvase)
+                            DropdownMenuItem<String?>(
+                              value: u,
+                              child: Text(u),
+                            ),
+                          // Si el dato guardado trae una unidad fuera de
+                          // la lista, se incluye para no romper el
+                          // dropdown (mismo arreglo que en Categoría).
+                          if (_pesoUnidad != null &&
+                              !_unidadesEnvase.contains(_pesoUnidad))
+                            DropdownMenuItem<String?>(
+                              value: _pesoUnidad,
+                              child: Text(_pesoUnidad!),
+                            ),
+                        ],
+                        onChanged: (v) =>
+                            setState(() => _pesoUnidad = v),
+                      ),
                     ),
                   ],
-                  onChanged: (v) =>
-                      setState(() => _moneda = v ?? 'CUP'),
                 ),
-              ),
-              const SizedBox(width: AppEspacio.md),
-              Expanded(
-                flex: 2,
-                child: CampoTexto(
+                const SizedBox(height: AppEspacio.sm),
+                CampoTexto(
+                    controller: _servicios,
+                    etiqueta: 'Servicios por envase (opcional)',
+                    hint: 'Ej. 60',
+                    teclado: TextInputType.number),
+              ],
+            ),
+          ),
+          const EncabezadoSeccion(titulo: 'Precio'),
+          Padding(
+            padding: const EdgeInsets.symmetric(
+                horizontal: AppEspacio.lg),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      flex: 3,
+                      child: CampoTexto(
+                          controller: _precio,
+                          etiqueta: 'Precio oficial ($_moneda)',
+                          teclado:
+                              const TextInputType.numberWithOptions(
+                                  decimal: true)),
+                    ),
+                    const SizedBox(width: AppEspacio.md),
+                    // v1.4.6: selector de moneda del precio oficial.
+                    Expanded(
+                      flex: 2,
+                      child: DropdownButtonFormField<String>(
+                        initialValue: _moneda,
+                        decoration: const InputDecoration(
+                          labelText: 'Moneda',
+                          border: OutlineInputBorder(),
+                        ),
+                        items: const [
+                          DropdownMenuItem<String>(
+                            value: 'CUP',
+                            child: Text('CUP'),
+                          ),
+                          DropdownMenuItem<String>(
+                            value: 'USD',
+                            child: Text('USD'),
+                          ),
+                        ],
+                        onChanged: (v) =>
+                            setState(() => _moneda = v ?? 'CUP'),
+                      ),
+                    ),
+                  ],
+                ),
+                // v1.3.7 (Fase B §6.2): costo (solo dueño, sensible).
+                if (AuthService().isOwner) ...[
+                  const SizedBox(height: AppEspacio.sm),
+                  CampoTexto(
+                      controller: _costo,
+                      etiqueta: 'Costo por unidad (USD)',
+                      teclado:
+                          const TextInputType.numberWithOptions(
+                              decimal: true)),
+                ],
+              ],
+            ),
+          ),
+          const EncabezadoSeccion(titulo: 'Inventario'),
+          Padding(
+            padding: const EdgeInsets.symmetric(
+                horizontal: AppEspacio.lg),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                CampoTexto(
                     controller: _stock,
                     etiqueta: 'Stock',
                     teclado: TextInputType.number),
-              ),
-            ],
-          ),
-          const SizedBox(height: AppEspacio.sm),
-          // v1.3.7 (Fase B §6.2): costo (solo dueño, sensible) y
-          // umbral de stock bajo.
-          if (AuthService().isOwner)
-            CampoTexto(
-                controller: _costo,
-                etiqueta: 'Costo por unidad (USD)',
-                teclado: const TextInputType.numberWithOptions(
-                    decimal: true)),
-          if (AuthService().isOwner)
-            const SizedBox(height: AppEspacio.sm),
-          CampoTexto(
-              controller: _umbral,
-              etiqueta: 'Alerta de stock bajo (unidades)',
-              teclado: TextInputType.number),
-          const SizedBox(height: AppEspacio.sm),
-          // v1.4.3: presentación del envase — el cliente la ve en
-          // su catálogo bajo el nombre del producto.
-          Row(
-            children: [
-              Expanded(
-                child: CampoTexto(
-                    controller: _pesoValor,
-                    etiqueta: 'Contenido del envase',
-                    hint: 'Ej. 300',
-                    teclado:
-                        const TextInputType.numberWithOptions(
-                            decimal: true)),
-              ),
-              const SizedBox(width: AppEspacio.md),
-              Expanded(
-                child: DropdownButtonFormField<String?>(
-                  initialValue: _pesoUnidad,
-                  decoration: const InputDecoration(
-                    labelText: 'Unidad',
-                    border: OutlineInputBorder(),
-                  ),
-                  items: [
-                    const DropdownMenuItem<String?>(
-                      value: null,
-                      child: Text('—'),
-                    ),
-                    for (final u in _unidadesEnvase)
-                      DropdownMenuItem<String?>(
-                        value: u,
-                        child: Text(u),
-                      ),
-                    // Si el dato guardado trae una unidad fuera de
-                    // la lista, se incluye para no romper el
-                    // dropdown (mismo arreglo que en Categoría).
-                    if (_pesoUnidad != null &&
-                        !_unidadesEnvase.contains(_pesoUnidad))
-                      DropdownMenuItem<String?>(
-                        value: _pesoUnidad,
-                        child: Text(_pesoUnidad!),
-                      ),
-                  ],
-                  onChanged: (v) =>
-                      setState(() => _pesoUnidad = v),
+                const SizedBox(height: AppEspacio.sm),
+                CampoTexto(
+                    controller: _umbral,
+                    etiqueta: 'Alerta de stock bajo (unidades)',
+                    teclado: TextInputType.number),
+                const SizedBox(height: AppEspacio.sm),
+                SwitchListTile(
+                  value: _activo,
+                  activeThumbColor: AppColores.naranja,
+                  title: const Text('Activo en catálogo',
+                      style: AppTexto.cuerpo),
+                  onChanged: (v) => setState(() => _activo = v),
                 ),
-              ),
-            ],
-          ),
-          const SizedBox(height: AppEspacio.sm),
-          CampoTexto(
-              controller: _servicios,
-              etiqueta: 'Servicios por envase (opcional)',
-              hint: 'Ej. 60',
-              teclado: TextInputType.number),
-          const SizedBox(height: AppEspacio.sm),
-          SwitchListTile(
-            value: _activo,
-            activeThumbColor: AppColores.naranja,
-            title:
-                const Text('Activo en catálogo', style: AppTexto.cuerpo),
-            onChanged: (v) => setState(() => _activo = v),
-          ),
-          const SizedBox(height: AppEspacio.lg),
-          BotonPrimario(
-            texto: _guardando
-                ? 'Guardando…'
-                : (_editando ? 'Guardar cambios' : 'Crear suplemento'),
-            onPressed: _guardando ? null : _guardar,
+              ],
+            ),
           ),
         ],
+      ),
+      // Guardado en barra inferior fija (rediseño 1.20).
+      bottomNavigationBar: SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(AppEspacio.lg,
+              AppEspacio.sm, AppEspacio.lg, AppEspacio.md),
+          child: BotonPrimario(
+            texto:
+                _editando ? 'Guardar cambios' : 'Crear suplemento',
+            cargando: _guardando,
+            onPressed: _guardando ? null : _guardar,
+          ),
+        ),
       ),
     );
   }

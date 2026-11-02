@@ -254,7 +254,7 @@ class _HistorialCajaScreenState extends State<HistorialCajaScreen> {
             )
           : _cierres.isEmpty
               ? const EstadoVacio(
-                  icono: Icons.history_outlined,
+                  icono: Icons.history_rounded,
                   titulo: 'Sin cierres registrados',
                   subtitulo:
                       'Los cierres de turno aparecerán aquí.',
@@ -285,8 +285,7 @@ class _HistorialCajaScreenState extends State<HistorialCajaScreen> {
                                 Chip(
                                   label: Text(
                                       _nombreTurno(c['turno'] as String?),
-                                      style: const TextStyle(
-                                          fontSize: 11)),
+                                      style: AppTexto.minuscula),
                                 ),
                               ],
                             ),

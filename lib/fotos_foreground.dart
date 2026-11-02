@@ -9,6 +9,7 @@ library;
 import 'package:flutter/widgets.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'comprobantes.dart';
 import 'config.dart';
 import 'fotos_cola.dart';
 
@@ -88,6 +89,10 @@ class _FotosTaskHandler extends TaskHandler {
     _procesando = true;
     try {
       await FotosColaService.instance.procesarCola();
+      // F1 (1.20): comprobantes pendientes, tras las fotos.
+      try {
+        await ComprobantesService.instance.procesar();
+      } catch (_) {}
       // v1.3.4 (veredicto de Argón, Bug A1.4): la decisión de detener
       // usa pendientes RECLAMABLES. Si solo quedan variantes 'original'
       // diferidas por QoS (no reclamables ahora), el servicio se detiene

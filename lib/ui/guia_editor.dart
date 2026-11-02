@@ -22,6 +22,7 @@ import '../config.dart';
 import '../guia_validacion.dart';
 import '../localdb.dart';
 import '../tiempo.dart';
+import 'componentes.dart';
 import 'diseno.dart';
 
 class GuiaEditorScreen extends StatefulWidget {
@@ -262,8 +263,7 @@ class _GuiaEditorScreenState extends State<GuiaEditorScreen> {
 
   void _aviso(String m) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text(m)));
+    mostrarSnack(context, m);
   }
 
   Future<void> _guardarBorrador() async {
@@ -469,6 +469,26 @@ class _GuiaEditorScreenState extends State<GuiaEditorScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        // Argón Guía BAJA: la vista previa no mostraba la
+        // imagen; se añade la miniatura con el mismo criterio
+        // del editor (local si cambió, remota con rev si no).
+        if (_tieneImagen && _imagenLocal.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Image.file(File(_imagenLocal), height: 120),
+          )
+        else if (_tieneImagen && _publicadoExiste)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Image.network(
+              '${AppConfig.supabaseUrl}/storage/v1/object/public/'
+              '${AppConfig.bucketGuia}/${_slug.text.trim()}.webp'
+              '?v=$_imagenRev',
+              height: 120,
+              errorBuilder: (_, __, ___) =>
+                  const Text('Sin vista previa de la imagen.'),
+            ),
+          ),
         Text(
             '${nombreEquipo ?? a['equipoId']} · '
             '${GuiaValidacion.nombreSilueta['${a['siluetaId']}'] ?? a['siluetaId']}',
@@ -504,6 +524,14 @@ class _GuiaEditorScreenState extends State<GuiaEditorScreen> {
             style: TextStyle(fontWeight: FontWeight.bold)),
         Text('Parada: ${seg['senalParada']}'),
         Text('Verificación: ${seg['autoVerificacion']}'),
+        // Argón Guía BAJA: los errores comunes de la ficha
+        // tampoco salían en la vista previa.
+        if ((a['errores'] as List?)?.isNotEmpty ?? false) ...[
+          const SizedBox(height: 8),
+          const Text('Errores comunes',
+              style: TextStyle(fontWeight: FontWeight.bold)),
+          for (final e in (a['errores'] as List)) Text('• $e'),
+        ],
         if ('${a['regresion']}'.isNotEmpty) ...[
           const SizedBox(height: 8),
           const Text('Regresión',
@@ -698,7 +726,7 @@ class _GuiaEditorScreenState extends State<GuiaEditorScreen> {
                         onCambio(items);
                       });
                     },
-              icon: const Icon(Icons.add),
+              icon: const Icon(Icons.add_rounded),
             ),
           ],
         ),
@@ -721,7 +749,7 @@ class _GuiaEditorScreenState extends State<GuiaEditorScreen> {
                 padding: const EdgeInsets.only(bottom: 8),
                 child: Row(
                   children: [
-                    const Icon(Icons.drag_handle, color: Colors.grey),
+                    const Icon(Icons.drag_handle_rounded, color: Colors.grey),
                     const SizedBox(width: 4),
                     Expanded(
                       child: TextField(
@@ -746,7 +774,7 @@ class _GuiaEditorScreenState extends State<GuiaEditorScreen> {
                                 onCambio(items);
                               });
                             },
-                      icon: const Icon(Icons.remove_circle_outline),
+                      icon: const Icon(Icons.remove_circle_outline_rounded),
                     ),
                   ],
                 ),
@@ -826,7 +854,7 @@ class _GuiaEditorScreenState extends State<GuiaEditorScreen> {
                 IconButton(
                   tooltip: 'Añadir sinónimo',
                   onPressed: _agregarSinonimo,
-                  icon: const Icon(Icons.add),
+                  icon: const Icon(Icons.add_rounded),
                 ),
               ],
             ),
@@ -877,7 +905,7 @@ class _GuiaEditorScreenState extends State<GuiaEditorScreen> {
             Text(
               '$_esenciales esenciales publicados '
               '(recomendado 4–7; el aviso no bloquea).',
-              style: const TextStyle(fontSize: 12, color: Colors.grey),
+              style: AppTexto.metadato.copyWith(color: Colors.grey),
             ),
             SwitchListTile(
               title: const Text('Revisado por entrenador'),
@@ -910,10 +938,10 @@ class _GuiaEditorScreenState extends State<GuiaEditorScreen> {
             _campo(_regresion, 'Regresión (si queda vacía, se avisa)',
                 maxLines: 2),
             if (_regresion.text.trim().isEmpty)
-              const Text(
+              Text(
                 'Aviso: sin regresión, la ficha queda incompleta '
                 'para quien no pueda con la versión completa.',
-                style: TextStyle(fontSize: 12, color: Colors.orange),
+                style: AppTexto.metadato.copyWith(color: Colors.orange),
               ),
           ]),
           _seccion('Imagen (1 por ficha)', [
@@ -940,7 +968,7 @@ class _GuiaEditorScreenState extends State<GuiaEditorScreen> {
                 Expanded(
                   child: OutlinedButton.icon(
                     onPressed: _ocupado ? null : _elegirImagen,
-                    icon: const Icon(Icons.image),
+                    icon: const Icon(Icons.image_rounded),
                     label: const Text('Elegir imagen'),
                   ),
                 ),
@@ -949,36 +977,36 @@ class _GuiaEditorScreenState extends State<GuiaEditorScreen> {
                   Expanded(
                     child: OutlinedButton.icon(
                       onPressed: _ocupado ? null : _quitarImagen,
-                      icon: const Icon(Icons.delete_outline),
+                      icon: const Icon(Icons.delete_outline_rounded),
                       label: const Text('Quitar imagen'),
                     ),
                   ),
                 ],
               ],
             ),
-            const Text(
+            Text(
               'La imagen solo se sube al publicar; un borrador '
               'nunca altera la imagen ya publicada.',
-              style: TextStyle(fontSize: 12, color: Colors.grey),
+              style: AppTexto.metadato.copyWith(color: Colors.grey),
             ),
           ]),
           const SizedBox(height: 16),
           FilledButton.icon(
             onPressed: _ocupado ? null : _guardarBorrador,
-            icon: const Icon(Icons.save),
+            icon: const Icon(Icons.save_rounded),
             label: const Text('Guardar borrador'),
           ),
           const SizedBox(height: 8),
           FilledButton.icon(
             onPressed: _ocupado ? null : _publicar,
-            icon: const Icon(Icons.publish),
+            icon: const Icon(Icons.publish_rounded),
             label: const Text('Publicar (con vista previa)'),
           ),
           if (_publicadoExiste) ...[
             const SizedBox(height: 8),
             OutlinedButton.icon(
               onPressed: _ocupado ? null : _retirar,
-              icon: const Icon(Icons.visibility_off),
+              icon: const Icon(Icons.visibility_off_rounded),
               label: const Text('Retirar ficha'),
             ),
           ],

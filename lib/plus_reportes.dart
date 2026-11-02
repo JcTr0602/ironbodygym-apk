@@ -238,6 +238,7 @@ class PlusReportesService {
   /// (la pantalla contaba solo lo recibido).
   Future<List<ReportePlus>> confirmados() async {
     final todos = <ReportePlus>[];
+    final vistos = <String>{};
     var desde = 0;
     while (true) {
       final params = {
@@ -253,7 +254,15 @@ class PlusReportesService {
         res = await _c.rpc(kRpcListarReportesPlus, params: params);
       }
       final pagina = parsearReportesPlus(res);
-      todos.addAll(pagina);
+      // H-04 Plus (Argón, 1.20): la paginación es por OFFSET
+      // sobre una lista viva — si un reporte entra o sale del
+      // estado entre página y página, la ventana se desplaza
+      // y una fila puede venir dos veces (y sumarse dos veces
+      // en el C5). Dedup por id al acumular; el SQL compañero
+      // añade id como desempate del ORDER BY de la RPC.
+      for (final r in pagina) {
+        if (vistos.add(r.id)) todos.add(r);
+      }
       if (pagina.length < kLimiteReportesPlus) break;
       desde += kLimiteReportesPlus;
     }

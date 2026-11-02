@@ -6,6 +6,8 @@ import '../auth.dart';
 import '../negocio.dart';
 import '../localdb.dart';
 import '../tiempo.dart';
+import 'diseno.dart';
+import 'componentes.dart';
 
 class ComparativaMensual extends StatefulWidget {
   const ComparativaMensual({super.key});
@@ -204,28 +206,28 @@ class _ComparativaMensualState
               actual: mensualActual,
               anteriorMTD: mensualAntMTD,
               anteriorTotal: mensualAntTotal,
-              icono: Icons.payments,
+              icono: Icons.payments_rounded,
             ),
             _Metrica(
               titulo: 'Suplementos',
               actual: suplActual,
               anteriorMTD: suplAntMTD,
               anteriorTotal: suplAntTotal,
-              icono: Icons.fitness_center,
+              icono: Icons.fitness_center_rounded,
             ),
             _Metrica(
               titulo: 'Clientes activos',
               actual: cliActual.toDouble(),
               anteriorMTD: cliAntMTD.toDouble(),
               anteriorTotal: cliAntMTD.toDouble(),
-              icono: Icons.people,
+              icono: Icons.people_rounded,
             ),
             _Metrica(
               titulo: 'Nuevos ingresos',
               actual: nuevosActual.toDouble(),
               anteriorMTD: nuevosAntMTD.toDouble(),
               anteriorTotal: nuevosAntTotal.toDouble(),
-              icono: Icons.person_add,
+              icono: Icons.person_add_rounded,
             ),
           ];
           _cargando = false;
@@ -234,10 +236,7 @@ class _ComparativaMensualState
     } catch (e) {
       if (mounted) {
         setState(() => _cargando = false);
-        ScaffoldMessenger.of(context)
-            .showSnackBar(
-          SnackBar(content: Text('Error: $e')),
-        );
+        mostrarSnack(context, 'Error: $e', significado: SignificadoChip.error);
       }
     }
   }
@@ -257,7 +256,7 @@ class _ComparativaMensualState
         title: const Text('Comparativa Mensual'),
         actions: [
           IconButton(
-            icon: const Icon(Icons.refresh),
+            icon: const Icon(Icons.refresh_rounded),
             onPressed: _cargar,
           ),
         ],
@@ -271,10 +270,7 @@ class _ComparativaMensualState
                   padding: const EdgeInsets.all(16),
                   child: Text(
                     '$_mesActual (al día ${ahoraHabana().day}) vs $_mesAnterior',
-                    style: const TextStyle(
-                      fontSize: 14,
-                      color: Colors.grey,
-                    ),
+                    style: AppTexto.cuerpo.copyWith(color: Colors.grey),
                   ),
                 ),
                 Expanded(
@@ -322,15 +318,12 @@ class _ComparativaMensualState
               children: [
                 Icon(m.icono,
                     size: 18,
-                    color: const Color(0xFFFF6B00)),
-                const SizedBox(width: 6),
+                    color: AppColores.textoSecundario(context)),
+                const SizedBox(width: 8),
                 Expanded(
                   child: Text(
                     m.titulo,
-                    style: const TextStyle(
-                      fontSize: 12,
-                      color: Colors.grey,
-                    ),
+                    style: AppTexto.metadato.copyWith(color: Colors.grey),
                     maxLines: 1,
                     overflow:
                         TextOverflow.ellipsis,
@@ -340,10 +333,7 @@ class _ComparativaMensualState
             ),
             Text(
               fmt(m.actual),
-              style: const TextStyle(
-                fontSize: 22,
-                fontWeight: FontWeight.w900,
-              ),
+              style: AppTexto.metrica.copyWith(fontWeight: FontWeight.w900),
             ),
             Row(
               children: [
@@ -361,23 +351,16 @@ class _ComparativaMensualState
                   ),
                   child: Text(
                     '${esPositivo ? '+' : ''}${delta.toStringAsFixed(1)}%',
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.bold,
-                      color: esPositivo
+                    style: AppTexto.metadato.copyWith(color: esPositivo
                           ? Colors.green[700]
-                          : Colors.red[700],
-                    ),
+                          : Colors.red[700], fontWeight: FontWeight.bold),
                   ),
                 ),
               ],
             ),
             Text(
               'Ant: ${fmt(m.anteriorTotal)}',
-              style: const TextStyle(
-                fontSize: 10,
-                color: Colors.grey,
-              ),
+              style: AppTexto.minuscula.copyWith(color: Colors.grey),
             ),
           ],
         ),

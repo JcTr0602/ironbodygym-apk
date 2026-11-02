@@ -307,8 +307,7 @@ class _GympediaEditorScreenState extends State<GympediaEditorScreen> {
 
   void _aviso(String msg) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text(msg)));
+    mostrarSnack(context, msg);
   }
 
   Future<void> _guardarBorrador() async {
@@ -620,7 +619,7 @@ class _GympediaEditorScreenState extends State<GympediaEditorScreen> {
         maxLines: lineas,
         readOnly: soloLectura,
         enabled: !soloLectura,
-        style: mono ? const TextStyle(fontFamily: 'monospace', fontSize: 13) : null,
+        style: mono ? AppTexto.secundario.copyWith(fontFamily: 'monospace') : null,
         decoration: InputDecoration(
           labelText: etiqueta,
           helperText: ayuda,
@@ -640,7 +639,7 @@ class _GympediaEditorScreenState extends State<GympediaEditorScreen> {
           children: [
             Expanded(child: Text(titulo, style: AppTexto.subtitulo)),
             IconButton(
-              icon: const Icon(Icons.add_circle_outline),
+              icon: const Icon(Icons.add_circle_outline_rounded),
               tooltip: 'Añadir $singular',
               onPressed: cs.length >= 10
                   ? null
@@ -665,7 +664,7 @@ class _GympediaEditorScreenState extends State<GympediaEditorScreen> {
                 ),
               ),
               IconButton(
-                icon: const Icon(Icons.remove_circle_outline),
+                icon: const Icon(Icons.remove_circle_outline_rounded),
                 onPressed: cs.length <= 1
                     ? null
                     : () => setState(() {
@@ -709,7 +708,7 @@ class _GympediaEditorScreenState extends State<GympediaEditorScreen> {
             : 'Nuevo artículo'),
         actions: [
           IconButton(
-            icon: Icon(_vistaPrevia ? Icons.edit : Icons.visibility),
+            icon: Icon(_vistaPrevia ? Icons.edit_rounded : Icons.visibility_rounded),
             tooltip: _vistaPrevia ? 'Editar explicación' : 'Vista previa',
             onPressed: () =>
                 setState(() => _vistaPrevia = !_vistaPrevia),
@@ -817,7 +816,7 @@ class _GympediaEditorScreenState extends State<GympediaEditorScreen> {
                 for (var i = 0; i < _refs.length; i++)
                   Card(
                     child: Padding(
-                      padding: const EdgeInsets.all(10),
+                      padding: const EdgeInsets.all(12),
                       child: Column(
                         children: [
                           _campoTexto('Título del estudio/artículo',
@@ -832,7 +831,7 @@ class _GympediaEditorScreenState extends State<GympediaEditorScreen> {
                                       mono: true)),
                               IconButton(
                                 icon:
-                                    const Icon(Icons.remove_circle_outline),
+                                    const Icon(Icons.remove_circle_outline_rounded),
                                 onPressed: _refs.length <= 2
                                     ? null
                                     : () => setState(() {
@@ -852,14 +851,14 @@ class _GympediaEditorScreenState extends State<GympediaEditorScreen> {
                     child: TextButton.icon(
                       onPressed: () =>
                           setState(() => _refs.add(_RefEdit())),
-                      icon: const Icon(Icons.add),
+                      icon: const Icon(Icons.add_rounded),
                       label: const Text('Añadir referencia'),
                     ),
                   ),
                 const SizedBox(height: 8),
                 const Text('Artículos relacionados',
                     style: AppTexto.subtitulo),
-                const SizedBox(height: 6),
+                const SizedBox(height: 8),
                 if (candidatosRel.isEmpty)
                   const Text('Aún no hay otros artículos publicados.',
                       style: TextStyle(color: Colors.grey))
@@ -869,7 +868,7 @@ class _GympediaEditorScreenState extends State<GympediaEditorScreen> {
                     children: [
                       for (final s in candidatosRel)
                         FilterChip(
-                          label: Text(s, style: const TextStyle(fontSize: 12)),
+                          label: Text(s, style: AppTexto.metadato),
                           selected: _relacionados.contains(s),
                           onSelected: (sel) => setState(() {
                             if (sel) {
@@ -886,7 +885,7 @@ class _GympediaEditorScreenState extends State<GympediaEditorScreen> {
                 const SizedBox(height: 16),
                 const Text('Imagen del artículo',
                     style: AppTexto.subtitulo),
-                const SizedBox(height: 6),
+                const SizedBox(height: 8),
                 if (_tieneImagen)
                   ClipRRect(
                     borderRadius: BorderRadius.circular(8),
@@ -920,7 +919,7 @@ class _GympediaEditorScreenState extends State<GympediaEditorScreen> {
                   children: [
                     OutlinedButton.icon(
                       onPressed: _ocupado ? null : _elegirImagen,
-                      icon: const Icon(Icons.image),
+                      icon: const Icon(Icons.image_rounded),
                       label: Text(_tieneImagen
                           ? 'Cambiar imagen'
                           : 'Elegir imagen'),
@@ -929,22 +928,22 @@ class _GympediaEditorScreenState extends State<GympediaEditorScreen> {
                       const SizedBox(width: 8),
                       TextButton.icon(
                         onPressed: _ocupado ? null : _quitarImagen,
-                        icon: const Icon(Icons.link_off),
+                        icon: const Icon(Icons.link_off_rounded),
                         label: const Text('Quitar'),
                       ),
                     ],
                   ],
                 ),
-                const Text(
+                Text(
                   'La imagen se guarda en este teléfono y se sube al '
                   'publicar (ese paso sí necesita conexión).',
-                  style: TextStyle(fontSize: 12, color: Colors.grey),
+                  style: AppTexto.metadato.copyWith(color: Colors.grey),
                 ),
                 if (_hayPublicado) ...[
                   const SizedBox(height: 24),
                   const Divider(),
                   ListTile(
-                    leading: const Icon(Icons.visibility_off,
+                    leading: const Icon(Icons.visibility_off_rounded,
                         color: AppColores.error),
                     title: const Text('Retirar artículo',
                         style: TextStyle(color: AppColores.error)),
@@ -964,7 +963,7 @@ class _GympediaEditorScreenState extends State<GympediaEditorScreen> {
                   Expanded(
                     child: OutlinedButton.icon(
                       onPressed: _ocupado ? null : _guardarBorrador,
-                      icon: const Icon(Icons.save_outlined),
+                      icon: const Icon(Icons.save_rounded),
                       label: const Text('Guardar borrador'),
                     ),
                   ),
@@ -978,7 +977,7 @@ class _GympediaEditorScreenState extends State<GympediaEditorScreen> {
                               height: 16,
                               child:
                                   CircularProgressIndicator(strokeWidth: 2))
-                          : const Icon(Icons.publish),
+                          : const Icon(Icons.publish_rounded),
                       label: const Text('Publicar'),
                     ),
                   ),

@@ -287,8 +287,7 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
     if (!puedeEditarRegistroDiario(
         esDueno: AuthService().isOwner, yo: yo, autor: autor)) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('Solo puedes editar tus propios registros.')));
+      mostrarSnack(context, 'Solo puedes editar tus propios registros.', significado: SignificadoChip.alerta);
       return;
     }
     // v1.3.1: si es optimista (sin id), solo permite eliminar de la cola.
@@ -298,7 +297,7 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
         context: context,
         builder: (ctx) => DialogoApp(
           titulo: '¿Eliminar?',
-          iconoTitulo: Icons.delete,
+          iconoTitulo: Icons.delete_rounded,
           contenido: const Text(
               'Se eliminará este registro pendiente (aún no sincronizado).'),
           acciones: [
@@ -317,10 +316,9 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
         final cancelado = await LocalDb.instance.cancelOp(opUuid);
         _cargarHoy();
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-              content: Text(cancelado
+          mostrarSnack(context, cancelado
                   ? 'Registro eliminado'
-                  : 'Ya se envió al servidor, espera a que sincronice')));
+                  : 'Ya se envió al servidor, espera a que sincronice');
         }
       }
       return;
@@ -335,7 +333,7 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
       context: context,
       builder: (ctx) => DialogoApp(
         titulo: 'Editar pago diario',
-        iconoTitulo: Icons.edit,
+        iconoTitulo: Icons.edit_rounded,
         contenido: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -383,7 +381,7 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
         context: context,
         builder: (ctx) => DialogoApp(
           titulo: '¿Eliminar?',
-          iconoTitulo: Icons.delete,
+          iconoTitulo: Icons.delete_rounded,
           contenido: const Text(
               'Se eliminará este registro de pago diario.'),
           acciones: [
@@ -409,8 +407,7 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
       _cargarHoy();
       SyncEngine.instance.push();
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Registro eliminado')));
+      mostrarSnack(context, 'Registro eliminado', significado: SignificadoChip.exito);
       return;
     }
 
@@ -418,8 +415,7 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
     final cantidad = int.tryParse(cantTexto) ?? 0;
     if (cantidad < 1) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('La cantidad debe ser al menos 1')));
+      mostrarSnack(context, 'La cantidad debe ser al menos 1', significado: SignificadoChip.alerta);
       return;
     }
     // v1.3.1: actualización optimista local.
@@ -451,8 +447,7 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
     _cargarHoy();
     SyncEngine.instance.push();
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Registro actualizado')));
+    mostrarSnack(context, 'Registro actualizado', significado: SignificadoChip.exito);
   }
 
   @override
@@ -469,7 +464,7 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
           if (AuthService().isOwner)
             TextButton.icon(
               icon: Icon(
-                  _modoReporte ? Icons.edit_outlined : Icons.bar_chart),
+                  _modoReporte ? Icons.edit_rounded : Icons.bar_chart_rounded),
               label: Text(_modoReporte ? 'Registrar' : 'Reporte'),
               onPressed: () {
                 setState(() => _modoReporte = !_modoReporte);
@@ -520,7 +515,7 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
                 // Botón rápido + cantidad
                 BotonPrimario(
                   texto: 'Registrar 1',
-                  icono: Icons.flash_on,
+                  icono: Icons.flash_on_rounded,
                   onPressed: _guardando ? null : _rapido,
                 ),
                 const SizedBox(height: 12),
@@ -530,15 +525,16 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
                     const Text('Cantidad: '),
                     IconButton(
                         icon: const Icon(
-                            Icons.remove_circle_outline),
+                            Icons.remove_circle_outline_rounded),
                         onPressed: _cantidad > 1
                             ? () => setState(() => _cantidad--)
                             : null),
                     Text('$_cantidad',
-                        style: const TextStyle(fontSize: 28)),
+                        style: AppTexto.metrica.copyWith(
+                            fontWeight: FontWeight.normal)),
                     IconButton(
                         icon: const Icon(
-                            Icons.add_circle_outline),
+                            Icons.add_circle_outline_rounded),
                         onPressed: () =>
                             setState(() => _cantidad++)),
                   ],
@@ -547,12 +543,11 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
                   controller: _notaCtrl,
                   etiqueta: 'Nota (opcional)',
                   hint: 'Ej: grupo de 3',
-                  icono: Icons.note_outlined,
+                  icono: Icons.note_rounded,
                 ),
                 const SizedBox(height: 8),
                 Text('Total: ${fmtMonto(_precio * _cantidad)} CUP',
-                    style: const TextStyle(
-                        fontSize: 20, fontWeight: FontWeight.bold)),
+                    style: AppTexto.tituloPagina),
                 const SizedBox(height: 12),
                 BotonSecundario(
                   texto: 'Guardar cantidad',
@@ -602,7 +597,7 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
                           '${d['registrado_por_nombre'] ?? ''}',
                         ].join(' · ')),
                         trailing: const Icon(
-                            Icons.edit_outlined,
+                            Icons.edit_rounded,
                             size: 20),
                         onTap: () => _editarRegistro(d),
                       ),
@@ -649,7 +644,7 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
                     const EdgeInsets.only(bottom: 12),
                 child: OutlinedButton.icon(
                   icon: const Icon(
-                      Icons.calendar_month),
+                      Icons.calendar_month_rounded),
                   label: const Text(
                       'Ver resumen mensual'),
                   onPressed: () =>
@@ -666,7 +661,7 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
               Row(
                 children: [
                   IconButton(
-                    icon: const Icon(Icons.chevron_left),
+                    icon: const Icon(Icons.chevron_left_rounded),
                     onPressed: () {
                       setState(() {
                         _fechaReporte = _fechaReporte.subtract(
@@ -690,15 +685,13 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
                         child: Text(
                           fmtFecha(_fechaReporte.toIso8601String().substring(0, 10)),
                           textAlign: TextAlign.center,
-                          style: const TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.bold),
+                          style: AppTexto.titulo,
                         ),
                       ),
                     ),
                   ),
                   IconButton(
-                    icon: const Icon(Icons.chevron_right),
+                    icon: const Icon(Icons.chevron_right_rounded),
                     onPressed: _fechaReporte
                             .toIso8601String()
                             .substring(0, 10) ==
@@ -723,9 +716,7 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
                   children: [
                     Text(
                       '${fmtMonto(total)} CUP',
-                      style: const TextStyle(
-                          fontSize: 28,
-                          fontWeight: FontWeight.bold,
+                      style: AppTexto.metrica.copyWith(
                           color: Colors.white),
                     ),
                     Text(
@@ -822,7 +813,7 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
                             (d['fecha'] as String)
                                 .substring(8, 10),
                             style:
-                                const TextStyle(fontSize: 9),
+                                AppTexto.minuscula,
                           ),
                         ],
                       );
@@ -881,17 +872,12 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
       child: Column(
         children: [
           Text(titulo,
-              style: const TextStyle(fontSize: 14)),
+              style: AppTexto.cuerpo),
           const SizedBox(height: 4),
           Text(fmtMonto(total),
-              style: const TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                  color: AppColores.naranja)),
+              style: AppTexto.titulo.copyWith(color: AppColores.naranja)),
           Text('$cantidad pagos',
-              style: TextStyle(
-                  fontSize: 12,
-                  color: AppColores.textoSecundario(context))),
+              style: AppTexto.metadato.copyWith(color: AppColores.textoSecundario(context))),
         ],
       ),
     );

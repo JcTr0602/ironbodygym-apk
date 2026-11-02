@@ -159,8 +159,7 @@ class _ReporteMargenesScreenState
                     padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
                     child: Text(
                       '${_datos.where((r) => r['sin_tasa'] == true).length} producto(s) en CUP sin tasa USD: fuera del total.',
-                      style: TextStyle(
-                          fontSize: 12, color: Colors.grey[500]),
+                      style: AppTexto.metadato.copyWith(color: Colors.grey[500]),
                     ),
                   ),
                 Expanded(
@@ -199,10 +198,7 @@ class _ReporteMargenesScreenState
                           '${moneda == 'CUP' && precioUsd != null ? ' (≈ \$${precioUsd.toStringAsFixed(2)} USD)' : ''}'
                           '${sinTasa ? ' · sin tasa USD' : ''} '
                           '($stock disp.)',
-                          style: TextStyle(
-                              fontSize: 12,
-                              color:
-                                  Colors.grey[400]),
+                          style: AppTexto.metadato.copyWith(color: Colors.grey[400]),
                         ),
                         trailing: Column(
                           mainAxisAlignment:
@@ -230,8 +226,7 @@ class _ReporteMargenesScreenState
                                 pct == null
                                     ? '—'
                                     : '${pct.toStringAsFixed(1)}%',
-                                style: const TextStyle(
-                                    fontSize: 12)),
+                                style: AppTexto.metadato),
                           ],
                         ),
                       );
@@ -247,14 +242,10 @@ class _ReporteMargenesScreenState
     return Column(
       children: [
         Text(valor,
-            style: const TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.bold)),
+            style: AppTexto.titulo),
         const SizedBox(height: 2),
         Text(label,
-            style: TextStyle(
-                fontSize: 12,
-                color: Colors.grey[500])),
+            style: AppTexto.metadato.copyWith(color: Colors.grey[500])),
       ],
     );
   }

@@ -10,9 +10,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../auth.dart';
+import '../diferencias_caja.dart';
 import '../negocio.dart';
 import '../sync.dart';
 import 'componentes.dart';
+import 'diferencias_caja.dart';
 import 'diseno.dart';
 import 'widgets.dart';
 
@@ -26,6 +28,9 @@ class ArqueoScreen extends StatefulWidget {
 class _ArqueoScreenState extends State<ArqueoScreen> {
   bool _cargando = true;
   List<Map<String, dynamic>> _entrenadores = [];
+  // T5 (1.20): expedientes de diferencia abiertos (badge de
+  // la entrada a la bandeja).
+  int _difAbiertas = 0;
 
   @override
   void initState() {
@@ -37,9 +42,15 @@ class _ArqueoScreenState extends State<ArqueoScreen> {
     setState(() => _cargando = true);
     try {
       final lista = await entrenadoresConPendiente();
+      var difAbiertas = _difAbiertas;
+      try {
+        difAbiertas =
+            await DiferenciasCajaService.instance.conteoAbiertas();
+      } catch (_) {}
       if (mounted) {
         setState(() {
           _entrenadores = lista;
+          _difAbiertas = difAbiertas;
           _cargando = false;
         });
       }
@@ -68,7 +79,7 @@ class _ArqueoScreenState extends State<ArqueoScreen> {
         actions: [
           IconButton(
             tooltip: 'Sincronizar arqueo',
-            icon: const Icon(Icons.sync),
+            icon: const Icon(Icons.sync_rounded),
             onPressed: _sincronizar,
           ),
         ],
@@ -76,6 +87,39 @@ class _ArqueoScreenState extends State<ArqueoScreen> {
       body: Column(
         children: [
           const SyncBanner(),
+          // T5 (1.20): entrada a la bandeja de diferencias
+          // de caja, con el conteo de expedientes abiertos.
+          Padding(
+            padding: const EdgeInsets.fromLTRB(AppEspacio.lg,
+                AppEspacio.sm, AppEspacio.lg, 0),
+            child: Tarjeta(
+              onTap: () async {
+                await Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => const DiferenciasCajaScreen(),
+                  ),
+                );
+                _cargar();
+              },
+              child: Row(
+                children: [
+                  Icon(Icons.folder_open_rounded,
+                      color: AppColores.textoSecundario(context),
+                      size: 28),
+                  const SizedBox(width: AppEspacio.sm),
+                  const Expanded(
+                    child: Text('Diferencias de caja',
+                        style: AppTexto.subtitulo),
+                  ),
+                  if (_difAbiertas > 0) ...[
+                    ContadorBadge(numero: _difAbiertas),
+                    const SizedBox(width: AppEspacio.sm),
+                  ],
+                  const Icon(Icons.chevron_right_rounded),
+                ],
+              ),
+            ),
+          ),
           Expanded(
             child: RefreshIndicator(
               onRefresh: _cargar,
@@ -88,7 +132,7 @@ class _ArqueoScreenState extends State<ArqueoScreen> {
                               padding: const EdgeInsets.all(32),
                               child: Column(
                                 children: [
-                                  const Icon(Icons.check_circle_outline,
+                                  const Icon(Icons.check_circle_outline_rounded,
                                       size: 56, color: Colors.green),
                                   const SizedBox(height: 12),
                                   const Text('Nada pendiente. Todo cuadrado.',
@@ -131,8 +175,8 @@ class _ArqueoScreenState extends State<ArqueoScreen> {
                                 },
                                 child: Row(
                                   children: [
-                                    const Icon(Icons.person,
-                                        color: AppColores.naranja, size: 28),
+                                    Icon(Icons.person_rounded,
+                                        color: AppColores.textoSecundario(context), size: 28),
                                     const SizedBox(width: AppEspacio.sm),
                                     Expanded(
                                       child: Column(
@@ -156,7 +200,7 @@ class _ArqueoScreenState extends State<ArqueoScreen> {
                                         ],
                                       ),
                                     ),
-                                    const Icon(Icons.chevron_right),
+                                    const Icon(Icons.chevron_right_rounded),
                                   ],
                                 ),
                               ),
@@ -191,6 +235,9 @@ class _DetalleArqueoScreenState extends State<_DetalleArqueoScreen> {
   double _usd = 0;
   String _moneda = 'CUP';
   List<Map<String, dynamic>> _historial = [];
+  // T5 (1.20): expedientes por liquidación (chip o botón
+  // «Abrir expediente» en el historial).
+  Map<String, Map<String, dynamic>> _expedientes = {};
   final _entregadoCtrl = TextEditingController();
   final _notaCtrl = TextEditingController();
 
@@ -214,11 +261,17 @@ class _DetalleArqueoScreenState extends State<_DetalleArqueoScreen> {
     try {
       final pend = await pendienteArqueo(widget.telegramId);
       final hist = await liquidacionesDeEntrenador(widget.telegramId);
+      var exps = _expedientes;
+      try {
+        exps = await DiferenciasCajaService.instance
+            .porLiquidacion();
+      } catch (_) {}
       if (mounted) {
         setState(() {
           _cup = pend.cup;
           _usd = pend.usd;
           _historial = hist;
+          _expedientes = exps;
           _cargando = false;
           if (_moneda == 'USD' && _usd <= 0) _moneda = 'CUP';
           _entregadoCtrl.text = _esperado > 0
@@ -259,9 +312,14 @@ class _DetalleArqueoScreenState extends State<_DetalleArqueoScreen> {
     // vacío sin arrastre y con esperado > 0.01).
     final parcial = entregado < esperado - 0.01;
     if (!mounted) return;
+    // T5 (1.20): la marca de expediente solo tiene sentido
+    // con diferencia; el servidor la ignora sin diferencia.
+    var abrirExp = false;
+    final expCtrl = TextEditingController();
     final ok = await showDialog<bool>(
       context: context,
-      builder: (ctx) => AlertDialog(
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setStateDialogo) => AlertDialog(
         title: const Text('Confirmar liquidación'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
@@ -269,8 +327,14 @@ class _DetalleArqueoScreenState extends State<_DetalleArqueoScreen> {
           children: [
             Text('Entrenador: ${widget.nombre}'),
             const SizedBox(height: 8),
-            Text('Esperado: ${fmtMonto(esperado)} $_moneda'),
-            Text('Entregado: ${fmtMonto(entregado)} $_moneda'),
+            Text('Esperado: ${fmtMonto(esperado)} $_moneda',
+                style: AppTexto.secundario),
+            Text('Entregado: ${fmtMonto(entregado)} $_moneda',
+                style: AppTexto.cuerpo.copyWith(
+                    fontWeight: FontWeight.w600,
+                    fontFeatures: const [
+                      FontFeature.tabularFigures()
+                    ])),
             // C3 (estéticas 1.19): comparación visual en vez de
             // dos textos planos — barra de cuánto se entregó y
             // diferencia destacada (verde si cuadra, rojo si
@@ -303,9 +367,36 @@ class _DetalleArqueoScreenState extends State<_DetalleArqueoScreen> {
             ),
             const SizedBox(height: 8),
             Text('$totalIds operación(es) incluida(s).',
-                style: TextStyle(
-                    color: AppColores.textoSecundario(context),
-                    fontSize: 12)),
+                style: AppTexto.metadato.copyWith(color: AppColores.textoSecundario(context))),
+            // T5 (1.20): abrir el expediente AQUÍ, en la
+            // misma op, solo si la diferencia no es el
+            // arrastre normal.
+            if (parcial) ...[
+              const SizedBox(height: AppEspacio.sm),
+              CheckboxListTile(
+                contentPadding: EdgeInsets.zero,
+                controlAffinity: ListTileControlAffinity.leading,
+                value: abrirExp,
+                onChanged: (v) =>
+                    setStateDialogo(() => abrirExp = v ?? false),
+                title: const Text(
+                    'Abrir expediente por esta diferencia',
+                    style: AppTexto.cuerpo),
+                subtitle: const Text(
+                    'Solo si NO es el arrastre normal: queda '
+                    'registrada con causa y resolución.',
+                    style: AppTexto.metadato),
+              ),
+              if (abrirExp)
+                TextField(
+                  controller: expCtrl,
+                  decoration: const InputDecoration(
+                    labelText: 'Explicación (opcional)',
+                    border: OutlineInputBorder(),
+                  ),
+                  maxLines: 2,
+                ),
+            ],
           ],
         ),
         actions: [
@@ -318,8 +409,12 @@ class _DetalleArqueoScreenState extends State<_DetalleArqueoScreen> {
             child: const Text('Liquidar'),
           ),
         ],
+        ),
       ),
     );
+    final quiereExpediente = ok == true && abrirExp;
+    final explicacionExpediente = expCtrl.text;
+    expCtrl.dispose();
     if (ok != true || !mounted) return;
     setState(() => _liquidando = true);
     try {
@@ -333,15 +428,14 @@ class _DetalleArqueoScreenState extends State<_DetalleArqueoScreen> {
         nota: _notaCtrl.text.trim().isEmpty
             ? null
             : _notaCtrl.text.trim(),
+        abrirExpediente: quiereExpediente,
+        explicacionExpediente: explicacionExpediente,
       );
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-              content: Text(parcial
+        mostrarSnack(context, parcial
                   ? 'Liquidación parcial registrada. Arrastre: '
                       '${fmtMonto(esperado - entregado)} $_moneda.'
-                  : 'Liquidación registrada. Se sincronizará en breve.')),
-        );
+                  : 'Liquidación registrada. Se sincronizará en breve.', significado: SignificadoChip.exito);
         _notaCtrl.clear();
         await _cargar();
       }
@@ -354,8 +448,7 @@ class _DetalleArqueoScreenState extends State<_DetalleArqueoScreen> {
 
   void _aviso(String msg) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text(msg)));
+    mostrarSnack(context, msg);
   }
 
   @override
@@ -414,9 +507,7 @@ class _DetalleArqueoScreenState extends State<_DetalleArqueoScreen> {
                             Text(
                               'Calculado solo sobre datos confirmados por '
                               'el servidor (sin operaciones en cola).',
-                              style: TextStyle(
-                                  fontSize: 12,
-                                  color: AppColores.textoSecundario(
+                              style: AppTexto.metadato.copyWith(color: AppColores.textoSecundario(
                                       context)),
                             ),
                           ],
@@ -451,7 +542,7 @@ class _DetalleArqueoScreenState extends State<_DetalleArqueoScreen> {
                       const SizedBox(height: AppEspacio.md),
                       BotonPrimario(
                         texto: 'Liquidar',
-                        icono: Icons.point_of_sale,
+                        icono: Icons.point_of_sale_rounded,
                         cargando: _liquidando,
                         onPressed: _liquidando ? null : _liquidar,
                       ),
@@ -492,15 +583,13 @@ class _DetalleArqueoScreenState extends State<_DetalleArqueoScreen> {
                                                 : Colors.green)
                                             .withValues(alpha: 0.15),
                                         borderRadius:
-                                            BorderRadius.circular(10),
+                                            BorderRadius.circular(12),
                                       ),
                                       child: Text(
                                         h['estado'] == 'parcial'
                                             ? 'Parcial'
                                             : 'Liquidado',
-                                        style: const TextStyle(
-                                            fontSize: 11,
-                                            fontWeight: FontWeight.w600),
+                                        style: AppTexto.metadato.copyWith(fontWeight: FontWeight.w600),
                                       ),
                                     ),
                                   ],
@@ -509,23 +598,55 @@ class _DetalleArqueoScreenState extends State<_DetalleArqueoScreen> {
                                 Text(
                                   'Esperado: ${fmtMonto(h['monto_esperado'])}'
                                   '${(h['saldo_arrastre'] as num? ?? 0) > 0 ? ' · Arrastre: ${fmtMonto(h['saldo_arrastre'])}' : ''}',
-                                  style: TextStyle(
-                                      fontSize: 12,
-                                      color: AppColores.textoSecundario(
+                                  style: AppTexto.metadato.copyWith(color: AppColores.textoSecundario(
                                           context)),
                                 ),
                                 Text(
                                   '${h['creada_en'] ?? ''} · por ${h['creada_por'] ?? ''}',
-                                  style: TextStyle(
-                                      fontSize: 12,
-                                      color: AppColores.textoSecundario(
+                                  style: AppTexto.metadato.copyWith(color: AppColores.textoSecundario(
                                           context)),
                                 ),
                                 if ((h['nota'] as String?)?.isNotEmpty ==
                                     true)
                                   Text('${h['nota']}',
                                       style:
-                                          const TextStyle(fontSize: 12)),
+                                          AppTexto.metadato),
+                                // T5 (1.20): el expediente de
+                                // esta liquidación, o el botón
+                                // para abrirlo si faltó dinero.
+                                if (_expedientes['${h['id']}'] !=
+                                    null) ...[
+                                  const SizedBox(
+                                      height: AppEspacio.sm),
+                                  chipExpedienteDiferencia(
+                                      _expedientes['${h['id']}']!),
+                                ] else if (diferenciaDeLiquidacion(
+                                        h) >
+                                    0.01)
+                                  Align(
+                                    alignment: Alignment.centerRight,
+                                    child: TextButton.icon(
+                                      icon: const Icon(
+                                          Icons.folder_open_rounded,
+                                          size: 18),
+                                      label: const Text(
+                                          'Abrir expediente'),
+                                      onPressed: () async {
+                                        await DiferenciasCajaService
+                                            .instance
+                                            .abrir(
+                                                liquidacionId:
+                                                    '${h['id']}');
+                                        if (!context.mounted) return;
+                                        mostrarSnack(context,
+                                            'Expediente abierto '
+                                            '(se sincronizará)',
+                                            significado:
+                                                SignificadoChip.exito);
+                                        _cargar();
+                                      },
+                                    ),
+                                  ),
                               ],
                             ),
                           ),

@@ -105,9 +105,8 @@ class _ReportesPlusScreenState extends State<ReportesPlusScreen> {
     } catch (_) {
       if (mounted) {
         setState(() => _enCurso.remove(r.id));
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-            content: Text('No se pudo guardar la decisión. '
-                'Inténtalo de nuevo.')));
+        mostrarSnack(context, 'No se pudo guardar la decisión. '
+                'Inténtalo de nuevo.', significado: SignificadoChip.error);
       }
       return;
     }
@@ -116,11 +115,16 @@ class _ReportesPlusScreenState extends State<ReportesPlusScreen> {
       _enCurso.remove(r.id);
       _conOpPendiente = {..._conOpPendiente, r.id};
     });
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(confirmar
+    mostrarSnack(context, confirmar
             ? 'Confirmación encolada: el Plus se activa al sincronizar'
-            : 'Rechazo encolado: se aplica al sincronizar')));
-    unawaited(SyncEngine.instance.push().then((_) {}, onError: (_) {}));
+            : 'Rechazo encolado: se aplica al sincronizar', significado: SignificadoChip.exito);
+    // H-05 Plus (Argón, 1.20): al terminar el push se recarga;
+    // sin esto la tarjeta quedaba congelada en «Decisión
+    // encolada» hasta salir y volver a entrar, aunque la op
+    // ya hubiera salido de la cola.
+    unawaited(SyncEngine.instance.push().then((_) {
+      if (mounted) _cargar();
+    }, onError: (_) {}));
   }
 
   Future<void> _confirmar(ReportePlus r) async {
@@ -272,15 +276,15 @@ class _ReportesPlusScreenState extends State<ReportesPlusScreen> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Icon(Icons.cloud_off_rounded,
-                  size: 40, color: AppColores.naranja),
+              Icon(Icons.cloud_off_rounded,
+                  size: 40, color: AppColores.textoSecundario(context)),
               const SizedBox(height: AppEspacio.md),
               Text(_error!,
                   textAlign: TextAlign.center,
                   style: AppTexto.secundario),
               const SizedBox(height: AppEspacio.md),
               FilledButton.icon(
-                icon: const Icon(Icons.refresh, size: 18),
+                icon: const Icon(Icons.refresh_rounded, size: 18),
                 label: const Text('Reintentar'),
                 onPressed: () {
                   setState(() => _cargando = true);
@@ -369,23 +373,20 @@ class _ReportesPlusScreenState extends State<ReportesPlusScreen> {
             // referencia ya apareció en un reporte rechazado. Se
             // avisa; NO se bloquea la confirmación.
             if (r.alertaReferenciaRechazada)
-              const Padding(
-                padding: EdgeInsets.only(top: 6),
+              Padding(
+                padding: EdgeInsets.only(top: 8),
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Icon(Icons.warning_amber_rounded,
                         size: 16, color: AppColores.alerta),
-                    SizedBox(width: 6),
+                    SizedBox(width: 8),
                     Expanded(
                       child: Text(
                         'Ojo: esta referencia ya apareció en un '
                         'reporte rechazado. Revísala bien antes de '
                         'confirmar.',
-                        style: TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w600,
-                            color: AppColores.alerta),
+                        style: AppTexto.metadato.copyWith(color: AppColores.alerta, fontWeight: FontWeight.w600),
                       ),
                     ),
                   ],
@@ -393,16 +394,13 @@ class _ReportesPlusScreenState extends State<ReportesPlusScreen> {
               ),
             const SizedBox(height: AppEspacio.sm),
             if (bloqueado)
-              const Row(
+              Row(
                 children: [
                   Icon(Icons.sync_rounded,
                       size: 16, color: AppColores.info),
-                  SizedBox(width: 6),
+                  SizedBox(width: 8),
                   Text('Decisión encolada: se aplica al sincronizar',
-                      style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
-                          color: AppColores.info)),
+                      style: AppTexto.metadato.copyWith(color: AppColores.info, fontWeight: FontWeight.w600)),
                 ],
               )
             else if (_puedeDecidir)
@@ -438,7 +436,7 @@ class _ReportesPlusScreenState extends State<ReportesPlusScreen> {
         children: [
           Icon(icono,
               size: 15, color: AppColores.textoSecundario(context)),
-          const SizedBox(width: 6),
+          const SizedBox(width: 8),
           Expanded(
             child: Text(texto, style: AppTexto.secundario),
           ),

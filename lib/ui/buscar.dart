@@ -23,6 +23,17 @@ import 'diseno.dart';
 import 'ficha.dart';
 import 'widgets.dart';
 
+/// FIN-28 de Argón (1.20): ultimo_pull_ts se guarda con
+/// isoHabana() (con offset) y tryParse lo devuelve en UTC;
+/// ahoraHabana() es reloj de pared. Sin normalizar, el cartel
+/// de «lista desactualizada» se desplazaba 4-5 h según la zona
+/// del teléfono. Devuelve el instante en pared Habana.
+DateTime? _pullEnHabana(String ts) {
+  final d = DateTime.tryParse(ts);
+  if (d == null) return null;
+  return d.isUtc ? aHabana(d) : d;
+}
+
 class BuscarScreen extends StatefulWidget {
   const BuscarScreen({super.key});
   @override
@@ -66,7 +77,7 @@ class _BuscarScreenState extends State<BuscarScreen> {
     setState(() {
       _swipeDer = cerrada.contains(der) ? der : 'cobrar';
       _swipeIzq = cerrada.contains(izq) ? izq : 'ninguna';
-      _ultimoPull = ts == null ? null : DateTime.tryParse(ts);
+      _ultimoPull = ts == null ? null : _pullEnHabana(ts);
     });
     // B1 (estéticas 1.19): aviso único la primera vez que hay
     // deslizables configurados. Se marca visto al mostrarse, así
@@ -118,13 +129,21 @@ class _BuscarScreenState extends State<BuscarScreen> {
       // Cliente protegido (2026-10-26, Protegido 2 H2): su estado
       // de pago no alimenta los contadores (revelaría si pagó).
       if (!esVistaProtegida(c)) {
-        final dias = diasRestantes(c['pagado_hasta'] as String?);
-        if (dias != null && dias > 7) {
+        // FIN-28 de Argón (1.20): una Cuenta a la Casa nunca
+        // vence — cuenta como al día (como clientesAlDia()).
+        // Sin continue: el conteo de «sin foto» de abajo también
+        // debe alimentarse de las cuentas Casa.
+        if (esCuentaCasa(c)) {
           conteos['aldia'] = conteos['aldia']! + 1;
-        } else if (dias != null && dias >= 0 && dias <= 7) {
-          conteos['porvencer'] = conteos['porvencer']! + 1;
-        } else if (dias == null || dias < 0) {
-          conteos['vencidos'] = conteos['vencidos']! + 1;
+        } else {
+          final dias = diasRestantes(c['pagado_hasta'] as String?);
+          if (dias != null && dias > 7) {
+            conteos['aldia'] = conteos['aldia']! + 1;
+          } else if (dias != null && dias >= 0 && dias <= 7) {
+            conteos['porvencer'] = conteos['porvencer']! + 1;
+          } else if (dias == null || dias < 0) {
+            conteos['vencidos'] = conteos['vencidos']! + 1;
+          }
         }
       }
       final ref = c['foto_storage'] as String?;
@@ -141,6 +160,9 @@ class _BuscarScreenState extends State<BuscarScreen> {
         // Cliente protegido (2026-10-26, Protegido 2 H2): ningún
         // filtro de estado lo deja pasar (su estado no se revela).
         if (esVistaProtegida(c)) return false;
+        // FIN-28 de Argón (1.20): la Casa pasa el filtro «al
+        // día» y ningún otro de estado.
+        if (esCuentaCasa(c)) return _filtro == 'aldia';
         final dias = diasRestantes(c['pagado_hasta'] as String?);
         switch (_filtro) {
           case 'aldia':
@@ -188,6 +210,30 @@ class _BuscarScreenState extends State<BuscarScreen> {
         return ref == null || ref.isEmpty;
       }).toList();
     }
+    // F11 (1.20): si lo escrito es un número que coincide
+    // EXACTO con el id de un cliente, ese cliente va PRIMERO
+    // (y entra aunque la búsqueda normal o los filtros no lo
+    // trajeran): abrir la ficha desde un id copiado de una
+    // captura, de la nómina o de un error. La ficha aplica la
+    // vista protegida si corresponde, como siempre.
+    if (RegExp(r'^\d+$').hasMatch(q)) {
+      final idBuscado = int.tryParse(q);
+      if (idBuscado != null) {
+        final i = r.indexWhere(
+            (c) => (c['id'] as num?)?.toInt() == idBuscado);
+        if (i > 0) {
+          r.insert(0, r.removeAt(i));
+        } else if (i < 0) {
+          final todos = await listaClientes('');
+          if (gen != _gen) return;
+          final porId = todos
+              .where((c) =>
+                  (c['id'] as num?)?.toInt() == idBuscado)
+              .toList();
+          if (porId.isNotEmpty) r = [...porId, ...r];
+        }
+      }
+    }
     if (mounted && gen == _gen) {
       setState(() {
         _res = r;
@@ -205,17 +251,15 @@ class _BuscarScreenState extends State<BuscarScreen> {
       // Bloque 1: la bajada quedó registrada en ultimo_pull_ts.
       final ts = await LocalDb.instance.getMeta('ultimo_pull_ts');
       if (mounted && ts != null) {
-        setState(() => _ultimoPull = DateTime.tryParse(ts));
+        setState(() => _ultimoPull = _pullEnHabana(ts));
       }
       await _buscar();
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Lista actualizada')));
+      mostrarSnack(context, 'Lista actualizada', significado: SignificadoChip.exito);
     } catch (_) {
       await _buscar();
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('Sin conexión: mostrando datos locales')));
+      mostrarSnack(context, 'Sin conexión: mostrando datos locales', significado: SignificadoChip.alerta);
     }
   }
 
@@ -234,7 +278,7 @@ class _BuscarScreenState extends State<BuscarScreen> {
         actions: [
           IconButton(
             tooltip: 'Actualizar (bajar cambios)',
-            icon: const Icon(Icons.refresh),
+            icon: const Icon(Icons.refresh_rounded),
             onPressed: _actualizar,
           ),
         ],
@@ -247,7 +291,7 @@ class _BuscarScreenState extends State<BuscarScreen> {
             child: CampoTexto(
               controller: _q,
               hint: 'Nombre, carnet o teléfono',
-              icono: Icons.search,
+              icono: Icons.search_rounded,
               onChanged: (_) => _buscar(),
             ),
           ),
@@ -257,14 +301,10 @@ class _BuscarScreenState extends State<BuscarScreen> {
             child: Row(
               children: [
                 Text('${_res.length} cliente(s)',
-                    style: TextStyle(
-                        color: AppColores.textoSecundario(context),
-                        fontSize: 12)),
+                    style: AppTexto.metadato.copyWith(color: AppColores.textoSecundario(context))),
                 const Spacer(),
                 Text(_textoActualizado(),
-                    style: TextStyle(
-                        color: AppColores.textoSecundario(context),
-                        fontSize: 12)),
+                    style: AppTexto.metadato.copyWith(color: AppColores.textoSecundario(context))),
               ],
             ),
           ),
@@ -273,7 +313,7 @@ class _BuscarScreenState extends State<BuscarScreen> {
           if (_ultimoPull != null &&
               ahoraHabana().difference(_ultimoPull!).inHours >= 24)
             Padding(
-              padding: const EdgeInsets.fromLTRB(12, 6, 12, 0),
+              padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
               child: Container(
                 padding: const EdgeInsets.symmetric(
                     horizontal: 12, vertical: 8),
@@ -285,13 +325,13 @@ class _BuscarScreenState extends State<BuscarScreen> {
                 ),
                 child: Row(
                   children: [
-                    const Icon(Icons.warning_amber,
+                    const Icon(Icons.warning_amber_rounded,
                         size: 18, color: AppColores.alerta),
                     const SizedBox(width: 8),
                     const Expanded(
                       child: Text(
                           'Lista desactualizada: hace más de 24 h sin bajar cambios',
-                          style: TextStyle(fontSize: 12.5)),
+                          style: AppTexto.etiqueta),
                     ),
                     TextButton(
                       onPressed: _actualizar,
@@ -310,19 +350,19 @@ class _BuscarScreenState extends State<BuscarScreen> {
               children: [
                 _chipFiltro('todos',
                     'Todos (${_conteos['todos'] ?? 0})'),
-                const SizedBox(width: 6),
+                const SizedBox(width: 8),
                 _chipFiltro('aldia',
                     'Al día (${_conteos['aldia'] ?? 0})',
                     punto: AppColores.exito),
-                const SizedBox(width: 6),
+                const SizedBox(width: 8),
                 _chipFiltro('porvencer',
                     'Por vencer (${_conteos['porvencer'] ?? 0})',
                     punto: AppColores.alerta),
-                const SizedBox(width: 6),
+                const SizedBox(width: 8),
                 _chipFiltro('vencidos',
                     'Vencidos (${_conteos['vencidos'] ?? 0})',
                     punto: AppColores.error),
-                const SizedBox(width: 6),
+                const SizedBox(width: 8),
                 _chipFiltro('sinfoto',
                     'Sin foto (${_conteos['sinfoto'] ?? 0})'),
               ],
@@ -333,13 +373,13 @@ class _BuscarScreenState extends State<BuscarScreen> {
             dense: true,
             visualDensity: VisualDensity.compact,
             title: const Text('Búsqueda avanzada',
-                style: TextStyle(fontSize: 13)),
+                style: AppTexto.secundario),
             children: [
               SwitchListTile(
                 dense: true,
                 visualDensity: VisualDensity.compact,
                 title: const Text('Buscar también en notas',
-                    style: TextStyle(fontSize: 13)),
+                    style: AppTexto.secundario),
                 value: _enNotas,
                 onChanged: (v) {
                   setState(() => _enNotas = v);
@@ -347,12 +387,12 @@ class _BuscarScreenState extends State<BuscarScreen> {
                 },
               ),
               Padding(
-                padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     const Text('Rango de edad',
-                        style: TextStyle(fontSize: 12)),
+                        style: AppTexto.metadato),
                     const SizedBox(height: 4),
                     Wrap(
                       spacing: 6,
@@ -372,7 +412,7 @@ class _BuscarScreenState extends State<BuscarScreen> {
           Expanded(
             child: _res.isEmpty
                 ? EstadoVacio(
-                    icono: Icons.search_off,
+                    icono: Icons.search_off_rounded,
                     titulo: _busco ? 'Sin resultados' : 'Busca un cliente',
                     subtitulo: _busco
                         ? 'Prueba con otro nombre, carnet o teléfono'
@@ -398,13 +438,13 @@ class _BuscarScreenState extends State<BuscarScreen> {
                                   child: Text(
                                     'Desliza una fila → cobrar, '
                                     'vender o editar',
-                                    style: TextStyle(fontSize: 13),
+                                    style: AppTexto.secundario,
                                   ),
                                 ),
                                 InkWell(
                                   onTap: () => setState(() =>
                                       _mostrarAvisoSwipe = false),
-                                  child: const Icon(Icons.close,
+                                  child: const Icon(Icons.close_rounded,
                                       size: 18),
                                 ),
                               ],
@@ -545,19 +585,19 @@ class _BuscarScreenState extends State<BuscarScreen> {
     switch (accion) {
       case 'cobrar':
         color = AppColores.exito;
-        icono = Icons.payments;
+        icono = Icons.payments_rounded;
       case 'diario':
         color = AppColores.info;
-        icono = Icons.today;
+        icono = Icons.today_rounded;
       case 'venta':
         color = AppColores.naranja;
-        icono = Icons.shopping_bag;
+        icono = Icons.shopping_bag_rounded;
       case 'editar':
         color = Colors.grey;
-        icono = Icons.edit;
+        icono = Icons.edit_rounded;
       default:
         color = Colors.grey;
-        icono = Icons.block;
+        icono = Icons.block_rounded;
     }
     return Container(
       color: color,
@@ -567,7 +607,7 @@ class _BuscarScreenState extends State<BuscarScreen> {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icono, color: Colors.white, size: 22),
+          Icon(icono, color: Colors.white, size: 20),
           const SizedBox(width: 8),
           Text(_etiquetaSwipeAccion(accion),
               style: const TextStyle(
@@ -587,8 +627,7 @@ class _BuscarScreenState extends State<BuscarScreen> {
     // sobre un cliente protegido.
     if (esVistaProtegida(c)) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text(mensajeClienteProtegido)));
+        mostrarSnack(context, mensajeClienteProtegido, significado: SignificadoChip.alerta);
       }
       return;
     }
@@ -605,8 +644,7 @@ class _BuscarScreenState extends State<BuscarScreen> {
         );
         if (!mounted) return;
         if (deshecho) {
-          ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('Cobro deshecho')));
+          mostrarSnack(context, 'Cobro deshecho', significado: SignificadoChip.exito);
         }
         await _buscar();
         SyncEngine.instance.push();
@@ -642,10 +680,10 @@ class _BuscarScreenState extends State<BuscarScreen> {
       {Color? punto}) {
     final activo = _filtro == valor;
     return ChoiceChip(
-      label: Text(etiqueta, style: const TextStyle(fontSize: 12)),
+      label: Text(etiqueta, style: AppTexto.metadato),
       avatar: punto == null
           ? null
-          : Icon(Icons.circle, size: 10, color: punto),
+          : Icon(Icons.circle_rounded, size: 10, color: punto),
       selected: activo,
       visualDensity: VisualDensity.compact,
       onSelected: (_) {
@@ -659,7 +697,7 @@ class _BuscarScreenState extends State<BuscarScreen> {
   Widget _chipEdad(String valor, String etiqueta) {
     final activo = _rangoEdad == valor;
     return ChoiceChip(
-      label: Text(etiqueta, style: const TextStyle(fontSize: 12)),
+      label: Text(etiqueta, style: AppTexto.metadato),
       selected: activo,
       visualDensity: VisualDensity.compact,
       onSelected: (_) {
@@ -773,22 +811,12 @@ class _FilaClienteState extends State<_FilaCliente> {
     }
     if (iniciales.isEmpty) iniciales = '?';
     // Foto (mismo widget en la rama normal y en la protegida).
-    final foto = _foto != null
-        ? ClipRRect(
-            borderRadius: BorderRadius.circular(28),
-            child: Image.file(_foto!,
-                width: 56, height: 56, fit: BoxFit.cover),
-          )
-        : CircleAvatar(
-            radius: 28,
-            backgroundColor:
-                AppColores.naranja.withValues(alpha: 0.15),
-            child: Text(iniciales,
-                style: const TextStyle(
-                    color: AppColores.naranja,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 20)),
-          );
+    final foto = AvatarCliente(
+      nombre: nombre,
+      foto: _foto,
+      tamano: TamanoAvatar.l,
+      heroTag: 'avatar-cliente-${c['id']}',
+    );
     // Cliente protegido (2026-10-26, A1 Argón): el entrenador solo
     // ve avatar, nombre y candado. Sin badge, sin días, sin
     // leading (selección de papelera) y sin trailing (acciones
@@ -807,18 +835,46 @@ class _FilaClienteState extends State<_FilaCliente> {
               Expanded(
                 child: Text(nombre,
                     style:
-                        AppTexto.subtitulo.copyWith(fontSize: 16)),
+                        AppTexto.subtitulo),
               ),
-              const Icon(Icons.lock, color: AppColores.naranja),
+              const Icon(Icons.lock_rounded, color: AppColores.naranja),
             ],
           ),
         ),
       );
     }
     // v1.1: badge según días restantes (con icono + texto, nunca solo color)
+    // FIN-28 de Argón (1.20): la Cuenta a la Casa no vence —
+    // distintivo dorado «Casa» (patrón de Control de Acceso) en
+    // vez del badge de días, que la pintaba «Vencido»/«Sin
+    // fecha» por su pagado_hasta nulo o viejo.
+    final esCasa = esCuentaCasa(c);
     final dias = d ?? 999999;
-    final badge = BadgeEstado.desdeDias(dias);
-    final textoDias = d == null
+    final badge = esCasa
+        ? Container(
+            padding: const EdgeInsets.symmetric(
+                horizontal: AppEspacio.sm, vertical: AppEspacio.xs),
+            decoration: BoxDecoration(
+              color: const Color(0xFFFFF3CD),
+              borderRadius:
+                  BorderRadius.circular(AppRadio.circular),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.home_rounded,
+                    size: 16, color: Color(0xFFB8860B)),
+                const SizedBox(width: 4),
+                Text('CASA',
+                    style: AppTexto.etiqueta.copyWith(
+                        color: const Color(0xFF7A5A00))),
+              ],
+            ),
+          )
+        : BadgeEstado.desdeDias(dias);
+    final textoDias = esCasa
+        ? 'Cuenta a la Casa · sin vencimiento'
+        : d == null
         ? 'Sin fecha'
         : dias < 0
             ? 'Vencido hace ${dias.abs()} días'
@@ -849,8 +905,7 @@ class _FilaClienteState extends State<_FilaCliente> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(nombre,
-                      style: AppTexto.subtitulo.copyWith(
-                          fontSize: 16)),
+                      style: AppTexto.subtitulo),
                   const SizedBox(height: 4),
                   badge,
                   const SizedBox(height: 2),
@@ -863,7 +918,7 @@ class _FilaClienteState extends State<_FilaCliente> {
             ),
             // Acción rápida (o chevron por defecto)
             widget.trailing ??
-                Icon(Icons.chevron_right,
+                Icon(Icons.chevron_right_rounded,
                     color: AppColores.textoSecundario(context)),
           ],
         ),

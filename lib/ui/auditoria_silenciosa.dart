@@ -188,13 +188,13 @@ class _AuditoriaSilenciosaScreenState
   IconData _iconoCaso(String tipo) {
     switch (tipo) {
       case 'turno_corto':
-        return Icons.timer_off_outlined;
+        return Icons.timer_off_rounded;
       case 'edicion':
-        return Icons.edit_note_outlined;
+        return Icons.edit_note_rounded;
       case 'sin_sync':
-        return Icons.sync_problem_outlined;
+        return Icons.sync_problem_rounded;
       default:
-        return Icons.flag_outlined;
+        return Icons.flag_rounded;
     }
   }
 
@@ -230,7 +230,7 @@ class _AuditoriaSilenciosaScreenState
         title: const Text('Auditoría silenciosa'),
         actions: [
           IconButton(
-            icon: const Icon(Icons.refresh),
+            icon: const Icon(Icons.refresh_rounded),
             tooltip: 'Actualizar',
             onPressed: _cargar,
           ),
@@ -240,7 +240,7 @@ class _AuditoriaSilenciosaScreenState
           ? const EstadoCargando(texto: 'Cargando auditoría…')
           : _casos.isEmpty
               ? const EstadoVacio(
-                  icono: Icons.verified_outlined,
+                  icono: Icons.verified_rounded,
                   titulo: 'Sin anomalías',
                   subtitulo:
                       'No se detectaron patrones sospechosos.',

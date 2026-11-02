@@ -366,8 +366,7 @@ class _AdminScreenState extends State<AdminScreen> {
       if (v != null && v > 0) cambios[clave] = v;
     }
     if (cambios.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('No hay montos válidos para guardar')));
+      mostrarSnack(context, 'No hay montos válidos para guardar', significado: SignificadoChip.alerta);
       return;
     }
     final mensaje = [
@@ -381,7 +380,7 @@ class _AdminScreenState extends State<AdminScreen> {
       titulo: 'Cambiar precios',
       mensaje: mensaje,
       aceptar: 'Confirmar',
-      icono: Icons.price_change,
+      icono: Icons.price_change_rounded,
     );
     if (ok != true || !mounted) return;
     for (final e in cambios.entries) {
@@ -398,8 +397,7 @@ class _AdminScreenState extends State<AdminScreen> {
     }
     await LocalDb.instance.setAjustes(aj);
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Precios guardados (se sincronizarán)')));
+    mostrarSnack(context, 'Precios guardados (se sincronizarán)', significado: SignificadoChip.exito);
     SyncEngine.instance.push();
     // v1.7.0 (G2 + panel): el precio del App Plus se REPUBLICA a
     // info_publica al guardar (patrón del horario canónico de la
@@ -473,13 +471,11 @@ class _AdminScreenState extends State<AdminScreen> {
       if (normal != '${aj[clave] ?? ''}'.trim()) cambios[clave] = normal;
     }
     if (errores.isNotEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text('Revisa: ${errores.join(' · ')}')));
+      mostrarSnack(context, 'Revisa: ${errores.join(' · ')}', significado: SignificadoChip.alerta);
       return;
     }
     if (cambios.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('No hay cambios en los datos bancarios')));
+      mostrarSnack(context, 'No hay cambios en los datos bancarios');
       return;
     }
     final ok = await DialogoApp.confirmar(
@@ -488,7 +484,7 @@ class _AdminScreenState extends State<AdminScreen> {
       mensaje: 'Se actualizarán los datos de transferencia.\n'
           'Se aplicará en la próxima sincronización.',
       aceptar: 'Confirmar',
-      icono: Icons.account_balance,
+      icono: Icons.account_balance_rounded,
     );
     if (ok != true || !mounted) return;
     for (final e in cambios.entries) {
@@ -504,8 +500,7 @@ class _AdminScreenState extends State<AdminScreen> {
     }
     await LocalDb.instance.setAjustes(aj);
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text('Datos bancarios guardados (se sincronizarán)')));
+    mostrarSnack(context, 'Datos bancarios guardados (se sincronizarán)', significado: SignificadoChip.exito);
     SyncEngine.instance.push();
   }
 
@@ -581,7 +576,7 @@ class _AdminScreenState extends State<AdminScreen> {
       context: context,
       builder: (ctx) => DialogoApp(
         titulo: 'Editar ${t.nombre}',
-        iconoTitulo: Icons.edit,
+        iconoTitulo: Icons.edit_rounded,
         contenido: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -627,8 +622,7 @@ class _AdminScreenState extends State<AdminScreen> {
     // Los controllers locales los recoge el GC (igual que dialogo_pago).
     if (ok != true || !mounted) return;
     if (nombre.isEmpty || monto == null || monto <= 0) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('Nombre y monto válido requeridos')));
+      mostrarSnack(context, 'Nombre y monto válido requeridos', significado: SignificadoChip.alerta);
       return;
     }
     setState(() {
@@ -648,8 +642,7 @@ class _AdminScreenState extends State<AdminScreen> {
     });
     await _persistirTipos();
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text('Tipo de pago actualizado (se sincronizará)')));
+    mostrarSnack(context, 'Tipo de pago actualizado (se sincronizará)', significado: SignificadoChip.exito);
   }
 
   Future<void> _agregarTipo() async {
@@ -660,7 +653,7 @@ class _AdminScreenState extends State<AdminScreen> {
       context: context,
       builder: (ctx) => DialogoApp(
         titulo: 'Nuevo tipo de pago',
-        iconoTitulo: Icons.add,
+        iconoTitulo: Icons.add_rounded,
         contenido: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -705,9 +698,7 @@ class _AdminScreenState extends State<AdminScreen> {
     // v1.3.2 (Argón #11): sin dispose tras showDialog (ver arriba).
     if (ok != true || !mounted) return;
     if (nombre.isEmpty || monto == null || monto <= 0 || dias <= 0) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content:
-              Text('Nombre, monto y días válidos requeridos')));
+      mostrarSnack(context, 'Nombre, monto y días válidos requeridos', significado: SignificadoChip.alerta);
       return;
     }
     final id = nombre
@@ -715,8 +706,7 @@ class _AdminScreenState extends State<AdminScreen> {
         .replaceAll(RegExp(r'[^a-z0-9]+'), '_')
         .replaceAll(RegExp(r'^_+|_+$'), '');
     if (id.isEmpty || _tipos.any((x) => x.id == id)) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('Ya existe un tipo con ese nombre')));
+      mostrarSnack(context, 'Ya existe un tipo con ese nombre', significado: SignificadoChip.alerta);
       return;
     }
     setState(() {
@@ -728,8 +718,7 @@ class _AdminScreenState extends State<AdminScreen> {
     });
     await _persistirTipos();
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text('Tipo de pago agregado (se sincronizará)')));
+    mostrarSnack(context, 'Tipo de pago agregado (se sincronizará)', significado: SignificadoChip.exito);
   }
 
   Future<void> _eliminarTipo(TipoPago t) async {
@@ -739,7 +728,7 @@ class _AdminScreenState extends State<AdminScreen> {
       mensaje: '¿Eliminar "${t.nombre}"? Ya no aparecerá al cobrar.',
       aceptar: 'Eliminar',
       peligro: true,
-      icono: Icons.delete_outline,
+      icono: Icons.delete_outline_rounded,
     );
     if (ok != true || !mounted) return;
     setState(() {
@@ -747,8 +736,7 @@ class _AdminScreenState extends State<AdminScreen> {
     });
     await _persistirTipos();
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text('Tipo de pago eliminado (se sincronizará)')));
+    mostrarSnack(context, 'Tipo de pago eliminado (se sincronizará)', significado: SignificadoChip.exito);
   }
 
   // Ronda 17 M2: guarda de dueño + candado anti-doble-toque
@@ -777,7 +765,7 @@ class _AdminScreenState extends State<AdminScreen> {
       titulo: 'Guardar tipos de pago',
       mensaje: mensaje,
       aceptar: 'Confirmar',
-      icono: Icons.payments,
+      icono: Icons.payments_rounded,
     );
     if (ok != true || !mounted) return;
     await LocalDb.instance.queueOp(
@@ -788,9 +776,7 @@ class _AdminScreenState extends State<AdminScreen> {
       },
     );
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content:
-            Text('Tipos guardados (se sincronizarán)')));
+    mostrarSnack(context, 'Tipos guardados (se sincronizarán)', significado: SignificadoChip.exito);
     SyncEngine.instance.push();
   }
 
@@ -843,9 +829,7 @@ class _AdminScreenState extends State<AdminScreen> {
       await PerfilService.instance.setPagoEntrenador(sel);
       if (mounted) {
         setState(() => _pagoEntrenador = sel);
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content:
-                Text('Pago actualizado: $sel CUP por cliente')));
+        mostrarSnack(context, 'Pago actualizado: $sel CUP por cliente', significado: SignificadoChip.exito);
       }
     }
   }
@@ -870,7 +854,7 @@ class _AdminScreenState extends State<AdminScreen> {
       context: context,
       builder: (ctx) => DialogoApp(
         titulo: 'Confirmar entrega',
-        iconoTitulo: Icons.done_all,
+        iconoTitulo: Icons.done_all_rounded,
         contenido: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -929,8 +913,7 @@ class _AdminScreenState extends State<AdminScreen> {
       nota: nota.isNotEmpty ? nota : null,
     );
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Entrega confirmada (se sincronizará)')));
+    mostrarSnack(context, 'Entrega confirmada (se sincronizará)', significado: SignificadoChip.exito);
     await _cargar();
     SyncEngine.instance.push();
   }
@@ -955,10 +938,7 @@ class _AdminScreenState extends State<AdminScreen> {
     // (_enSerieLiquidacion serializa pero no deduplica).
     if (_recogidaEnCurso) return;
     if (trainerId == null) {
-      // Panel delta Luna MEDIO: el return silencioso no explicaba
-      // por qué no pasa nada.
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('No se pudo registrar: falta el entrenador')));
+      mostrarSnack(context, 'No se pudo registrar: falta el entrenador', significado: SignificadoChip.error);
       return;
     }
     _recogidaEnCurso = true;
@@ -980,7 +960,7 @@ class _AdminScreenState extends State<AdminScreen> {
       context: context,
       builder: (ctx) => DialogoApp(
         titulo: 'Registrar recogida',
-        iconoTitulo: Icons.handshake,
+        iconoTitulo: Icons.handshake_rounded,
         contenido: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -1000,7 +980,7 @@ class _AdminScreenState extends State<AdminScreen> {
               'Si el monto supera el pendiente visible, se guarda '
               'como recogida anticipada: el pendiente quedará en '
               'negativo hasta que el entrenador sincronice sus pagos.',
-              style: TextStyle(fontSize: 12),
+              style: AppTexto.metadato,
             ),
           ],
         ),
@@ -1027,8 +1007,7 @@ class _AdminScreenState extends State<AdminScreen> {
     montoCtrl.dispose();
     if (ok != true || !mounted) return;
     if (monto == null || !monto.isFinite || monto <= 0) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('Monto inválido')));
+      mostrarSnack(context, 'Monto inválido', significado: SignificadoChip.alerta);
       return;
     }
     try {
@@ -1040,13 +1019,11 @@ class _AdminScreenState extends State<AdminScreen> {
       );
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('No se pudo registrar: $e')));
+      mostrarSnack(context, 'No se pudo registrar: $e', significado: SignificadoChip.error);
       return;
     }
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text('Recogida registrada (se sincronizará)')));
+    mostrarSnack(context, 'Recogida registrada (se sincronizará)', significado: SignificadoChip.exito);
     await _cargar();
   }
 
@@ -1070,7 +1047,7 @@ class _AdminScreenState extends State<AdminScreen> {
       context: context,
       builder: (ctx) => DialogoApp(
         titulo: 'Agregar gasto',
-        iconoTitulo: Icons.receipt_long,
+        iconoTitulo: Icons.receipt_long_rounded,
         contenido: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -1110,8 +1087,7 @@ class _AdminScreenState extends State<AdminScreen> {
     if (ok != true || !mounted) return;
     final monto = double.tryParse(montoTexto);
     if (concepto.isEmpty || monto == null || monto <= 0) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('Concepto o monto inválidos')));
+      mostrarSnack(context, 'Concepto o monto inválidos', significado: SignificadoChip.alerta);
       return;
     }
     final hoy = ahoraHabana();
@@ -1128,8 +1104,7 @@ class _AdminScreenState extends State<AdminScreen> {
       },
     );
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Gasto guardado (se sincronizará)')));
+    mostrarSnack(context, 'Gasto guardado (se sincronizará)', significado: SignificadoChip.exito);
     await _cargar();
     SyncEngine.instance.push();
   }
@@ -1151,8 +1126,7 @@ class _AdminScreenState extends State<AdminScreen> {
     // (ni sus pagos) aunque el llamado llegue por otro camino.
     if (!AuthService().isOwner) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-            content: Text('Solo el dueño puede exportar datos')));
+        mostrarSnack(context, 'Solo el dueño puede exportar datos', significado: SignificadoChip.alerta);
       }
       return;
     }
@@ -1270,10 +1244,7 @@ class _AdminScreenState extends State<AdminScreen> {
                             'lo urgente primero. Los entrenadores no ven '
                             'este panel.',
                             textAlign: TextAlign.center,
-                            style: TextStyle(
-                                fontSize: 11,
-                                color:
-                                    AppColores.textoSecundario(context)),
+                            style: AppTexto.metadato.copyWith(color: AppColores.textoSecundario(context)),
                           ),
                         ),
                       ],
@@ -1309,8 +1280,7 @@ class _AdminScreenState extends State<AdminScreen> {
             children: [
               Text.rich(
                 TextSpan(
-                  style: AppTexto.titulo
-                      .copyWith(fontSize: 24, fontWeight: FontWeight.w800),
+                  style: AppTexto.displayPequeno.copyWith(fontWeight: FontWeight.w800),
                   children: const [
                     TextSpan(text: 'Panel '),
                     TextSpan(
@@ -1322,9 +1292,7 @@ class _AdminScreenState extends State<AdminScreen> {
               const SizedBox(height: 3),
               Text(
                 'Iron Body Gym · Solo tú ves esta sección',
-                style: TextStyle(
-                    fontSize: 12,
-                    color: AppColores.textoSecundario(context)),
+                style: AppTexto.metadato.copyWith(color: AppColores.textoSecundario(context)),
               ),
             ],
           ),
@@ -1337,7 +1305,7 @@ class _AdminScreenState extends State<AdminScreen> {
           borderRadius: BorderRadius.circular(999),
           onTap: () => _ir(const SeccionDiagnosticoScreen()),
           child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
             decoration: BoxDecoration(
               color: chipColor.withValues(alpha: 0.14),
               borderRadius: BorderRadius.circular(999),
@@ -1352,12 +1320,9 @@ class _AdminScreenState extends State<AdminScreen> {
                   decoration:
                       BoxDecoration(color: chipColor, shape: BoxShape.circle),
                 ),
-                const SizedBox(width: 6),
+                const SizedBox(width: 8),
                 Text(chipTxt,
-                    style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w700,
-                        color: chipColor)),
+                    style: AppTexto.metadato.copyWith(color: chipColor, fontWeight: FontWeight.w700)),
               ],
             ),
           ),
@@ -1375,13 +1340,12 @@ class _AdminScreenState extends State<AdminScreen> {
           if (naranja) ...[
             const Icon(Icons.warning_amber_rounded,
                 size: 15, color: AppColores.naranja),
-            const SizedBox(width: 6),
+            const SizedBox(width: 8),
           ],
           Expanded(
             child: Text(
               titulo,
-              style: TextStyle(
-                fontSize: 12,
+              style: AppTexto.etiqueta.copyWith(
                 fontWeight: FontWeight.w800,
                 letterSpacing: 1.6,
                 color: naranja
@@ -1392,9 +1356,7 @@ class _AdminScreenState extends State<AdminScreen> {
           ),
           if (derecha != null)
             Text(derecha,
-                style: TextStyle(
-                    fontSize: 11,
-                    color: AppColores.textoSecundario(context))),
+                style: AppTexto.metadato.copyWith(color: AppColores.textoSecundario(context))),
         ],
       ),
     );
@@ -1581,7 +1543,7 @@ class _AdminScreenState extends State<AdminScreen> {
         if (pendientes.isEmpty && !_solicitudesCargando)
           Container(
             padding:
-                const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             decoration: BoxDecoration(
               color: AppColores.superficie(context),
               borderRadius: BorderRadius.circular(AppRadio.lg),
@@ -1591,7 +1553,7 @@ class _AdminScreenState extends State<AdminScreen> {
               children: [
                 Icon(Icons.check_circle_outline_rounded,
                     size: 20, color: AppColores.exito),
-                SizedBox(width: 10),
+                SizedBox(width: 8),
                 Text('Sin pendientes · Todo en orden',
                     style: AppTexto.cuerpo),
               ],
@@ -1624,15 +1586,12 @@ class _AdminScreenState extends State<AdminScreen> {
                     onTap: () => setState(
                         () => _atencionExpandida = !_atencionExpandida),
                     child: Padding(
-                      padding: const EdgeInsets.fromLTRB(14, 0, 14, 10),
+                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
                       child: Text(
                         _atencionExpandida
                             ? 'Ver menos'
                             : '+$ocultos pendiente(s) más',
-                        style: const TextStyle(
-                            fontSize: 11.5,
-                            fontWeight: FontWeight.w700,
-                            color: AppColores.naranja),
+                        style: AppTexto.metadato.copyWith(color: AppColores.naranja, fontWeight: FontWeight.w700),
                       ),
                     ),
                   ),
@@ -1649,7 +1608,7 @@ class _AdminScreenState extends State<AdminScreen> {
   /// los datos locales; esta fila se sustituye al llegar el dato).
   Widget _filaSolicitudesCargando({required bool ultima}) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       decoration: BoxDecoration(
         border: ultima
             ? null
@@ -1672,14 +1631,11 @@ class _AdminScreenState extends State<AdminScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text('Solicitudes de inscripción',
-                    style: AppTexto.cuerpo.copyWith(
-                        fontSize: 13.5, fontWeight: FontWeight.w700)),
+                    style: AppTexto.secundario.copyWith(fontWeight: FontWeight.w700)),
                 const SizedBox(height: 1),
                 Text(
                   'Cargando…',
-                  style: TextStyle(
-                      fontSize: 11.5,
-                      color: AppColores.textoSecundario(context)),
+                  style: AppTexto.metadato.copyWith(color: AppColores.textoSecundario(context)),
                 ),
               ],
             ),
@@ -1700,7 +1656,7 @@ class _AdminScreenState extends State<AdminScreen> {
     return InkWell(
       onTap: p.onTap,
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         decoration: BoxDecoration(
           border: ultima
               ? null
@@ -1723,14 +1679,11 @@ class _AdminScreenState extends State<AdminScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(p.titulo,
-                      style: AppTexto.cuerpo.copyWith(
-                          fontSize: 13.5, fontWeight: FontWeight.w700)),
+                      style: AppTexto.secundario.copyWith(fontWeight: FontWeight.w700)),
                   const SizedBox(height: 1),
                   Text(
                     p.detalle,
-                    style: TextStyle(
-                        fontSize: 11.5,
-                        color: AppColores.textoSecundario(context)),
+                    style: AppTexto.metadato.copyWith(color: AppColores.textoSecundario(context)),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -1743,7 +1696,7 @@ class _AdminScreenState extends State<AdminScreen> {
               onTap: p.onTap,
               child: Container(
                 padding:
-                    const EdgeInsets.symmetric(horizontal: 13, vertical: 7),
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                 decoration: BoxDecoration(
                   color: p.primario
                       ? AppColores.naranja
@@ -1754,12 +1707,9 @@ class _AdminScreenState extends State<AdminScreen> {
                       : Border.all(color: AppColores.borde(context)),
                 ),
                 child: Text(p.boton,
-                    style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w800,
-                        color: p.primario
+                    style: AppTexto.metadato.copyWith(color: p.primario
                             ? const Color(0xFF171106)
-                            : null)),
+                            : null, fontWeight: FontWeight.w800)),
               ),
             ),
           ],
@@ -1790,7 +1740,7 @@ class _AdminScreenState extends State<AdminScreen> {
               child: _accionRapida(Icons.payments_rounded, 'Cobrar',
                   primario: true, onTap: () => _ir(const PagoScreen())),
             ),
-            const SizedBox(width: 10),
+            const SizedBox(width: 8),
             Expanded(
               child: _accionRapida(Icons.today_rounded, 'Mi Día',
                   onTap: () {
@@ -1800,7 +1750,7 @@ class _AdminScreenState extends State<AdminScreen> {
             ),
           ],
         ),
-        const SizedBox(height: 10),
+        const SizedBox(height: 12),
         Row(
           children: [
             Expanded(
@@ -1808,7 +1758,7 @@ class _AdminScreenState extends State<AdminScreen> {
                   Icons.account_balance_wallet_rounded, 'Arqueo rápido',
                   onTap: () => _ir(const ArqueoScreen())),
             ),
-            const SizedBox(width: 10),
+            const SizedBox(width: 8),
             Expanded(
               child: _accionRapida(
                   Icons.point_of_sale_rounded, 'Cierre / caja hoy',
@@ -1840,13 +1790,10 @@ class _AdminScreenState extends State<AdminScreen> {
         child: Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(icono, size: 19, color: fg),
-            const SizedBox(width: 7),
+            Icon(icono, size: 20, color: fg),
+            const SizedBox(width: 8),
             Text(texto,
-                style: TextStyle(
-                    fontSize: 14.5,
-                    fontWeight: FontWeight.w800,
-                    color: fg)),
+                style: AppTexto.cuerpo.copyWith(color: fg, fontWeight: FontWeight.w800)),
           ],
         ),
       ),
@@ -1886,7 +1833,7 @@ class _AdminScreenState extends State<AdminScreen> {
                       morosos: _morosos,
                       inscPorEntrenador: _inscPorEntrenador,
                     )))),
-        const SizedBox(width: 10),
+        const SizedBox(width: 8),
         // v1.6.0 (Jc, añadido 7): «Pagos este mes» abre el LISTADO
         // exacto de los que pagaron el mes (PagaronMesScreen, el
         // conjunto de NominaCalc), no la nómina (misma corrección
@@ -1894,7 +1841,7 @@ class _AdminScreenState extends State<AdminScreen> {
         Expanded(
             child: _kpi('$_pagosMes', 'Pagos este mes',
                 onTap: () => _ir(const PagaronMesScreen()))),
-        const SizedBox(width: 10),
+        const SizedBox(width: 8),
         Expanded(
             child: _kpi('$_clientesActivos', 'Clientes activos',
                 onTap: () => _ir(const BuscarScreen()))),
@@ -1910,7 +1857,7 @@ class _AdminScreenState extends State<AdminScreen> {
     // 1.14 (rediseño): la línea es tocable — abre la pantalla de
     // Cuentas a la Casa, el mismo destino del módulo 2.
     return Padding(
-      padding: const EdgeInsets.only(top: 10),
+      padding: const EdgeInsets.only(top: 12),
       child: InkWell(
         borderRadius: BorderRadius.circular(8),
         onTap: () => _ir(const CuentasCasaScreen()),
@@ -1918,15 +1865,12 @@ class _AdminScreenState extends State<AdminScreen> {
           children: [
             const Icon(Icons.home_rounded,
                 size: 16, color: AppColores.alerta),
-            const SizedBox(width: 6),
+            const SizedBox(width: 8),
             Text(
               _cuentasCasa == 1
                   ? 'Cuentas a la Casa activas: 1'
                   : 'Cuentas a la Casa activas: $_cuentasCasa',
-              style: const TextStyle(
-                  fontSize: 12.5,
-                  fontWeight: FontWeight.w600,
-                  color: AppColores.alerta),
+              style: AppTexto.etiqueta.copyWith(color: AppColores.alerta),
             ),
             const SizedBox(width: 4),
             const Icon(Icons.chevron_right_rounded,
@@ -1946,17 +1890,12 @@ class _AdminScreenState extends State<AdminScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(valor,
-              style: TextStyle(
-                  fontSize: 17,
-                  fontWeight: FontWeight.w800,
-                  color: color),
+              style: AppTexto.titulo.copyWith(color: color, fontWeight: FontWeight.w800),
               maxLines: 1,
               overflow: TextOverflow.ellipsis),
           const SizedBox(height: 2),
           Text(etiqueta,
-              style: TextStyle(
-                  fontSize: 10.5,
-                  color: AppColores.textoSecundario(context))),
+              style: AppTexto.metadato.copyWith(color: AppColores.textoSecundario(context))),
         ],
       ),
     );
@@ -2058,10 +1997,7 @@ class _AdminScreenState extends State<AdminScreen> {
                           const SizedBox(height: 2),
                           Text(
                             modulos[i].resumen,
-                            style: TextStyle(
-                                fontSize: 11.5,
-                                color:
-                                    AppColores.textoSecundario(context)),
+                            style: AppTexto.metadato.copyWith(color: AppColores.textoSecundario(context)),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                           ),
@@ -2077,12 +2013,9 @@ class _AdminScreenState extends State<AdminScreen> {
                           borderRadius: BorderRadius.circular(999),
                         ),
                         child: Text('${modulos[i].badge}',
-                            style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 10.5,
-                                fontWeight: FontWeight.w800)),
+                            style: AppTexto.minuscula.copyWith(color: Colors.white, fontWeight: FontWeight.w800)),
                       ),
-                      const SizedBox(width: 6),
+                      const SizedBox(width: 8),
                     ],
                     Icon(Icons.chevron_right_rounded,
                         color: AppColores.textoSecundario(context)),
@@ -2118,8 +2051,7 @@ class _AdminScreenState extends State<AdminScreen> {
       padding: const EdgeInsets.fromLTRB(4, 16, 4, 8),
       child: Text(
         titulo,
-        style: TextStyle(
-          fontSize: 12,
+        style: AppTexto.etiqueta.copyWith(
           fontWeight: FontWeight.w800,
           letterSpacing: 1.6,
           color: AppColores.textoSecundario(context),
@@ -2151,13 +2083,13 @@ class _AdminScreenState extends State<AdminScreen> {
         () => _ir(_pantallaCierre()),
       ),
       _tarjetaFlujo(
-        Icons.handshake,
+        Icons.handshake_rounded,
         'Arqueo de entrega de efectivo',
         'Liquidar por delta, nunca pendiente = 0',
         () => _ir(const ArqueoEntregaScreen()),
       ),
       _tarjetaFlujo(
-        Icons.receipt_long,
+        Icons.receipt_long_rounded,
         'Centro de Compras y Extracto',
         'Todo | Suplementos | Servicios, con subtotales',
         () => _ir(const CentroComprasScreen()),
@@ -2172,7 +2104,7 @@ class _AdminScreenState extends State<AdminScreen> {
         )),
       ),
       _tarjetaFlujo(
-        Icons.history_outlined,
+        Icons.history_rounded,
         'Historial de caja',
         'Cierres por entrenador y fecha',
         () => _ir(const HistorialCajaScreen()),
@@ -2190,7 +2122,7 @@ class _AdminScreenState extends State<AdminScreen> {
         () => _ir(const ComparativaMensual()),
       ),
       _tarjetaFlujo(
-        Icons.bar_chart,
+        Icons.bar_chart_rounded,
         'Ingresos por período',
         'Plus como línea propia, sin doble conteo',
         () => _ir(const IngresosPeriodoScreen()),
@@ -2204,19 +2136,19 @@ class _AdminScreenState extends State<AdminScreen> {
         () => _ir(const NominaScreen()),
       ),
       _tarjetaFlujo(
-        Icons.fact_check,
+        Icons.fact_check_rounded,
         'Nómina pre-calculada',
         'Solo lectura, vista previa hasta el 31',
         () => _ir(const NominaPrecalculadaScreen()),
       ),
       _tarjetaFlujo(
-        Icons.payments,
+        Icons.payments_rounded,
         'Adelantos',
         'Lista con filtro por mes',
         () => _ir(const AdelantosListaScreen()),
       ),
       _tarjetaFlujo(
-        Icons.request_page,
+        Icons.request_page_rounded,
         'Solicitudes de adelanto',
         'Aprobar (Nómina / Pendiente) o rechazar',
         () => _ir(const SolicitudesAdelantoScreen()),
@@ -2266,7 +2198,7 @@ class _AdminScreenState extends State<AdminScreen> {
         () => _ir(const CuentasCasaScreen()),
       ),
       _tarjetaFlujo(
-        Icons.event,
+        Icons.event_rounded,
         'Vencimientos próximos',
         'Vencidos + próximos 7 días, con acción',
         () => _ir(const VencimientosProximosScreen()),
@@ -2275,33 +2207,33 @@ class _AdminScreenState extends State<AdminScreen> {
       // CumpleanosMes (sin filtro Casa, sin regalo ni Felicitado)
       // se eliminó: CumpleanosScreen ya cubre próximos y mes.
       _tarjetaFlujo(
-        Icons.cake,
+        Icons.cake_rounded,
         'Cumpleaños',
         'Próximos días, mes y regalo en un toque',
         () => _ir(const CumpleanosScreen()),
       ),
       _subModulo('INVITADOS'),
       _tarjetaFlujo(
-        Icons.group,
+        Icons.group_rounded,
         'Solicitudes de invitados',
         'Por atender',
         () => _ir(const InvitadosScreen()),
       ),
       _subModulo('COMUNICACIÓN'),
       _tarjetaFlujo(
-        Icons.message,
+        Icons.message_rounded,
         'Plantillas de mensajes',
         'Solo variables blancas, aviso si la sync es vieja',
         () => _ir(const PlantillasScreen()),
       ),
       _tarjetaFlujo(
-        Icons.campaign,
+        Icons.campaign_rounded,
         'Avisos para entrenadores',
         'PopUp en el Home de cada entrenador',
         () => _ir(const AvisosEntrenadorScreen()),
       ),
       _tarjetaFlujo(
-        Icons.notifications,
+        Icons.notifications_rounded,
         'Recordatorios automáticos',
         'Hoy, con anti-duplicado; masivos solo en tu teléfono',
         () => _ir(const RecordatoriosScreen()),
@@ -2320,7 +2252,7 @@ class _AdminScreenState extends State<AdminScreen> {
     return [
       _subModulo('EQUIPO'),
       _tarjetaFlujo(
-        Icons.manage_accounts,
+        Icons.manage_accounts_rounded,
         'Entrenadores y usuarios APK',
         'Crear entrenador y compartir credenciales',
         () => _ir(const UsuariosScreen()),
@@ -2336,7 +2268,7 @@ class _AdminScreenState extends State<AdminScreen> {
         () => _ir(const TurnosHubScreen()),
       ),
       _tarjetaFlujo(
-        Icons.schedule,
+        Icons.schedule_rounded,
         'Turnos y horarios',
         'Enlaza el editor único de Turnos',
         () => _ir(const TurnosPanelScreen()),
@@ -2349,7 +2281,7 @@ class _AdminScreenState extends State<AdminScreen> {
       ),
       _subModulo('PERMISOS'),
       _tarjetaFlujo(
-        Icons.security,
+        Icons.security_rounded,
         'Permisos explicados',
         'Qué permite cada permiso, en sencillo',
         () => mostrarPermisosExplicados(context),
@@ -2370,20 +2302,20 @@ class _AdminScreenState extends State<AdminScreen> {
         )),
       ),
       _tarjetaFlujo(
-        Icons.fitness_center,
+        Icons.fitness_center_rounded,
         'Catálogo de suplementos',
         'Con foto, precio y margen',
         () => _ir(const SuplementosScreen()),
       ),
       _tarjetaFlujo(
-        Icons.warning_amber,
+        Icons.warning_amber_rounded,
         'Productos sin foto o sin precio',
         'Señalados para completar el catálogo',
         () => _ir(const SinFotoPrecioScreen()),
       ),
       _subModulo('DOSIS'),
       _tarjetaFlujo(
-        Icons.inventory_2,
+        Icons.inventory_2_rounded,
         'Botes y lotes',
         'Desde Administración',
         () => _ir(const ServiciosAdminScreen()),
@@ -2427,7 +2359,7 @@ class _AdminScreenState extends State<AdminScreen> {
     return [
       _subModulo('PRECIOS Y TARIFAS'),
       _tarjetaFlujo(
-        Icons.payments_outlined,
+        Icons.payments_rounded,
         'Tipos de pago',
         '${_tipos.length} tipos configurados',
         () => _ir(_pantallaAjustes(seccion: 'tipos')),
@@ -2439,13 +2371,13 @@ class _AdminScreenState extends State<AdminScreen> {
         () => _ir(_pantallaAjustes(seccion: 'precios')),
       ),
       _tarjetaFlujo(
-        Icons.local_offer,
+        Icons.local_offer_rounded,
         'Tarifas',
         'Estándar y especiales, otorgar y revocar',
         () => _ir(const TarifasScreen()),
       ),
       _tarjetaFlujo(
-        Icons.tune,
+        Icons.tune_rounded,
         'Precios por método',
         'Única fuente de precios',
         () => _ir(const PreciosMetodoScreen()),
@@ -2461,7 +2393,7 @@ class _AdminScreenState extends State<AdminScreen> {
       ),
       _subModulo('CONFIGURACIÓN'),
       _tarjetaFlujo(
-        Icons.settings,
+        Icons.settings_rounded,
         'Ajustes del gym',
         'Precios, tarifas, métodos y textos',
         () => _ir(const AjustesGymScreen()),
@@ -2473,7 +2405,7 @@ class _AdminScreenState extends State<AdminScreen> {
         () => _ir(_pantallaAjustes(seccion: 'bancarios')),
       ),
       _tarjetaFlujo(
-        Icons.book,
+        Icons.book_rounded,
         'Registro mensual',
         'Visor + copiar resumen en Markdown',
         () => _ir(const RegistroMensualScreen()),
@@ -2536,7 +2468,7 @@ class _AdminScreenState extends State<AdminScreen> {
         () => _ir(const ListaIncidenciasScreen()),
       ),
       _tarjetaFlujo(
-        Icons.sync_problem,
+        Icons.sync_problem_rounded,
         'Errores de sync',
         'En sencillo, sin «Descartar» para ops de datos',
         () => _ir(const ErroresSyncPanelScreen()),
@@ -2549,7 +2481,7 @@ class _AdminScreenState extends State<AdminScreen> {
         () => _ir(const AuditoriaScreen()),
       ),
       _tarjetaFlujo(
-        Icons.history,
+        Icons.history_rounded,
         'Auditoría detallada',
         'General y por persona, con filtros',
         () => _ir(const AuditoriaPanelScreen()),
@@ -2562,13 +2494,13 @@ class _AdminScreenState extends State<AdminScreen> {
       ),
       _subModulo('SISTEMA'),
       _tarjetaFlujo(
-        Icons.build,
+        Icons.build_rounded,
         'Mantenimiento',
         'Lista cerrada, con confirmación y auditoría',
         () => _ir(const MantenimientoScreen()),
       ),
       _tarjetaFlujo(
-        Icons.backup,
+        Icons.backup_rounded,
         'Copia de seguridad',
         'Exportar solo, copia en frío sin fotos',
         () => _ir(const CopiaSeguridadScreen()),
@@ -2593,10 +2525,9 @@ class _AdminScreenState extends State<AdminScreen> {
           if (!AuthService().isOwner) return;
           final ok = await exportarExcel();
           if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                content: Text(ok
+            mostrarSnack(context, ok
                     ? 'Archivos listos para compartir'
-                    : 'No se pudo generar el archivo')));
+                    : 'No se pudo generar el archivo');
           }
         },
       ),
@@ -2612,9 +2543,7 @@ class _AdminScreenState extends State<AdminScreen> {
                 text: 'Bitácora Iron Body Gym');
           } catch (_) {
             if (mounted) {
-              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                  content:
-                      Text('No se pudo exportar la bitácora')));
+              mostrarSnack(context, 'No se pudo exportar la bitácora', significado: SignificadoChip.error);
             }
           }
         },
@@ -2669,9 +2598,7 @@ class _AdminScreenState extends State<AdminScreen> {
                   const SizedBox(height: 2),
                   Text(
                     resumen,
-                    style: TextStyle(
-                        fontSize: 12,
-                        color: AppColores.textoSecundario(context)),
+                    style: AppTexto.metadato.copyWith(color: AppColores.textoSecundario(context)),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -2694,7 +2621,7 @@ class _AdminScreenState extends State<AdminScreen> {
       child: Tarjeta(
         child: Row(
           children: [
-            Icon(icono, color: color, size: 22),
+            Icon(icono, color: color, size: 20),
             const SizedBox(width: 12),
             Expanded(
               child: Column(
@@ -2705,9 +2632,7 @@ class _AdminScreenState extends State<AdminScreen> {
                           .copyWith(fontWeight: FontWeight.w600)),
                   Text(
                     detalle,
-                    style: TextStyle(
-                        fontSize: 12,
-                        color: AppColores.textoSecundario(context)),
+                    style: AppTexto.metadato.copyWith(color: AppColores.textoSecundario(context)),
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                   ),

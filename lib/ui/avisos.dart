@@ -65,7 +65,7 @@ class _AvisosScreenState extends State<AvisosScreen> {
                       ),
                       const SizedBox(height: 16),
                       SwitchListTile(
-                        secondary: const Icon(Icons.schedule_outlined),
+                        secondary: const Icon(Icons.schedule_rounded),
                         title: const Text('Vencimientos'),
                         subtitle: const Text(
                             'Avisar cuando haya clientes por vencer o vencidos'),
@@ -77,7 +77,7 @@ class _AvisosScreenState extends State<AvisosScreen> {
                       ),
                       const Divider(),
                       SwitchListTile(
-                        secondary: const Icon(Icons.cake_outlined),
+                        secondary: const Icon(Icons.cake_rounded),
                         title: const Text('Cumpleaños'),
                         subtitle: const Text(
                             'Avisar de los cumpleaños del mes'),
@@ -89,7 +89,7 @@ class _AvisosScreenState extends State<AvisosScreen> {
                       ),
                       const Divider(),
                       SwitchListTile(
-                        secondary: const Icon(Icons.sync_outlined),
+                        secondary: const Icon(Icons.sync_rounded),
                         title: const Text('Sincronización'),
                         subtitle: const Text(
                             'Avisar cuando haya pendientes por sincronizar'),

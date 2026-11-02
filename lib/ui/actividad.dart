@@ -660,8 +660,7 @@ class _ActividadScreenState extends State<ActividadScreen> {
     });
     await _persistirGuardados();
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Filtros «$nombre» guardados')));
+      mostrarSnack(context, 'Filtros «$nombre» guardados', significado: SignificadoChip.exito);
     }
   }
 
@@ -676,25 +675,24 @@ class _ActividadScreenState extends State<ActividadScreen> {
     return Card(
       margin: const EdgeInsets.fromLTRB(12, 8, 12, 0),
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(12, 8, 12, 10),
+        padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
               children: [
-                const Expanded(
+                Expanded(
                   child: Text('Acciones por día · últimos 30 días',
-                      style: TextStyle(
-                          fontSize: 12, fontWeight: FontWeight.w600)),
+                      style: AppTexto.metadato.copyWith(fontWeight: FontWeight.w600)),
                 ),
                 InkWell(
                   onTap: () => setState(() => _verSerie = false),
-                  child: const Icon(Icons.close,
+                  child: const Icon(Icons.close_rounded,
                       size: 16, color: Colors.grey),
                 ),
               ],
             ),
-            const SizedBox(height: 6),
+            const SizedBox(height: 8),
             GraficoBarrasDiarias(datos: _serie, altura: 56),
           ],
         ),
@@ -1114,8 +1112,7 @@ class _ActividadScreenState extends State<ActividadScreen> {
                 children: [
                   Expanded(
                     child: Text(titulo,
-                        style: AppTexto.titulo
-                            .copyWith(fontSize: 18)),
+                        style: AppTexto.titulo),
                   ),
                   _indicadorSync(pendiente),
                 ],
@@ -1143,10 +1140,7 @@ class _ActividadScreenState extends State<ActividadScreen> {
               if (montoTxt.isNotEmpty) ...[
                 const SizedBox(height: 8),
                 Text(montoTxt,
-                    style: const TextStyle(
-                        color: AppColores.exito,
-                        fontSize: 22,
-                        fontWeight: FontWeight.bold)),
+                    style: AppTexto.metrica.copyWith(color: AppColores.exito)),
               ],
               const SizedBox(height: 8),
               if (fechaLarga.isNotEmpty)
@@ -1160,7 +1154,7 @@ class _ActividadScreenState extends State<ActividadScreen> {
                   if (tieneCliente && !esProtegido)
                     Expanded(
                       child: OutlinedButton.icon(
-                        icon: const Icon(Icons.person_outline,
+                        icon: const Icon(Icons.person_outline_rounded,
                             size: 18),
                         label: const Text('Ver ficha'),
                         onPressed: () {
@@ -1174,7 +1168,7 @@ class _ActividadScreenState extends State<ActividadScreen> {
                   if (!esProtegido && waNum.isNotEmpty)
                     Expanded(
                       child: ElevatedButton.icon(
-                        icon: const Icon(Icons.share, size: 18),
+                        icon: const Icon(Icons.share_rounded, size: 18),
                         label: const Text('Recibo WhatsApp'),
                         style: ElevatedButton.styleFrom(
                           backgroundColor:
@@ -1201,7 +1195,7 @@ class _ActividadScreenState extends State<ActividadScreen> {
                 SizedBox(
                   width: double.infinity,
                   child: OutlinedButton.icon(
-                    icon: const Icon(Icons.open_in_new, size: 18),
+                    icon: const Icon(Icons.open_in_new_rounded, size: 18),
                     label: Text(_destinoSalto(accion)!.$1),
                     onPressed: () {
                       Navigator.of(ctx).pop();
@@ -1248,10 +1242,7 @@ class _ActividadScreenState extends State<ActividadScreen> {
       await launchUrl(url, mode: LaunchMode.externalApplication);
     } catch (_) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-              content: Text('No se pudo abrir WhatsApp')),
-        );
+        mostrarSnack(context, 'No se pudo abrir WhatsApp', significado: SignificadoChip.error);
       }
     }
   }
@@ -1277,10 +1268,7 @@ class _ActividadScreenState extends State<ActividadScreen> {
     final c = await clientePorId(id);
     if (c == null) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-              content: Text('Cliente no disponible offline')),
-        );
+        mostrarSnack(context, 'Cliente no disponible offline', significado: SignificadoChip.alerta);
       }
       return;
     }
@@ -1289,9 +1277,7 @@ class _ActividadScreenState extends State<ActividadScreen> {
     // esVistaProtegida es owner-safe: al dueño no lo bloquea.
     if (esVistaProtegida(c)) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text(mensajeClienteProtegido)),
-        );
+        mostrarSnack(context, mensajeClienteProtegido, significado: SignificadoChip.alerta);
       }
       return;
     }
@@ -1304,26 +1290,26 @@ class _ActividadScreenState extends State<ActividadScreen> {
 
   /// Icono Material por tipo de acción (v1.1: sin emojis).
   IconData _iconoAccion(String accion) {
-    if (accion.contains('inscri')) return Icons.person_add;
-    if (accion.contains('pago_diario')) return Icons.receipt_long;
-    if (accion.contains('pago')) return Icons.payments;
+    if (accion.contains('inscri')) return Icons.person_add_rounded;
+    if (accion.contains('pago_diario')) return Icons.receipt_long_rounded;
+    if (accion.contains('pago')) return Icons.payments_rounded;
     // v1.3.3: iconos por categoría (diseño Argón).
     if (accion.contains('regalo_cumpleanos') ||
         accion.contains('regalar_mes')) {
-      return Icons.card_giftcard;
+      return Icons.card_giftcard_rounded;
     }
     if (accion.contains('suplemento') || accion.contains('categoria')) {
-      return Icons.medication;
+      return Icons.medication_rounded;
     }
-    if (accion.contains('entrega')) return Icons.delivery_dining;
-    if (accion.contains('incidencia')) return Icons.report_problem_outlined;
-    if (accion.contains('foto')) return Icons.photo_camera;
-    if (accion.contains('editar')) return Icons.edit;
-    if (accion.contains('eliminar')) return Icons.delete_outline;
-    if (accion.contains('restaur')) return Icons.restore_from_trash;
-    if (accion.contains('congel')) return Icons.ac_unit;
-    if (accion.contains('verific')) return Icons.verified_user;
-    return Icons.assignment;
+    if (accion.contains('entrega')) return Icons.delivery_dining_rounded;
+    if (accion.contains('incidencia')) return Icons.report_problem_rounded;
+    if (accion.contains('foto')) return Icons.photo_camera_rounded;
+    if (accion.contains('editar')) return Icons.edit_rounded;
+    if (accion.contains('eliminar')) return Icons.delete_outline_rounded;
+    if (accion.contains('restaur')) return Icons.restore_from_trash_rounded;
+    if (accion.contains('congel')) return Icons.ac_unit_rounded;
+    if (accion.contains('verific')) return Icons.verified_user_rounded;
+    return Icons.assignment_rounded;
   }
 
   /// Color semántico por tipo de acción.
@@ -1427,14 +1413,14 @@ class _ActividadScreenState extends State<ActividadScreen> {
     IconData icono;
     switch (categoria) {
       case 'mensualidades':
-        icono = Icons.payments;
+        icono = Icons.payments_rounded;
         break;
       case 'diarios':
-        icono = Icons.receipt_long;
+        icono = Icons.receipt_long_rounded;
         break;
       case 'suplementos':
       case 'entregas':
-        icono = Icons.shopping_bag;
+        icono = Icons.shopping_bag_rounded;
         break;
       default:
         icono = _iconoAccion(accion);
@@ -1478,7 +1464,7 @@ class _ActividadScreenState extends State<ActividadScreen> {
   /// v1.3.5 (Fase 1, C4): micro-indicador de sync, 14px.
   Widget _indicadorSync(bool pendiente) {
     return Icon(
-      pendiente ? Icons.schedule_outlined : Icons.check,
+      pendiente ? Icons.schedule_rounded : Icons.check_rounded,
       size: 14,
       color: pendiente
           ? AppColores.alerta
@@ -1631,7 +1617,7 @@ class _ActividadScreenState extends State<ActividadScreen> {
   Widget _chipFechaRapida(String valor, String etiqueta) {
     final activo = _filtroFecha == valor;
     return ChoiceChip(
-      label: Text(etiqueta, style: const TextStyle(fontSize: 12)),
+      label: Text(etiqueta, style: AppTexto.metadato),
       selected: activo,
       onSelected: (_) => setState(
           () => _filtroFecha = activo ? 'todo' : valor),
@@ -1642,9 +1628,9 @@ class _ActividadScreenState extends State<ActividadScreen> {
   Widget _botonFiltros() {
     final n = _filtrosSecundariosActivos;
     return OutlinedButton.icon(
-      icon: const Icon(Icons.filter_list, size: 16),
+      icon: const Icon(Icons.filter_list_rounded, size: 16),
       label: Text(n > 0 ? 'Filtros · $n' : 'Filtros',
-          style: const TextStyle(fontSize: 12)),
+          style: AppTexto.metadato),
       style: OutlinedButton.styleFrom(
         padding:
             const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -1715,8 +1701,8 @@ class _ActividadScreenState extends State<ActividadScreen> {
 
   Widget _chipResumen(String etiqueta, VoidCallback onQuitar) {
     return InputChip(
-      label: Text(etiqueta, style: const TextStyle(fontSize: 12)),
-      deleteIcon: const Icon(Icons.close, size: 16),
+      label: Text(etiqueta, style: AppTexto.metadato),
+      deleteIcon: const Icon(Icons.close_rounded, size: 16),
       onDeleted: onQuitar,
     );
   }
@@ -1765,7 +1751,7 @@ class _ActividadScreenState extends State<ActividadScreen> {
               String etiqueta, bool sel, VoidCallback onTap) {
             return ChoiceChip(
               label: Text(etiqueta,
-                  style: const TextStyle(fontSize: 12)),
+                  style: AppTexto.metadato),
               selected: sel,
               onSelected: (_) {
                 onTap();
@@ -1820,8 +1806,7 @@ class _ActividadScreenState extends State<ActividadScreen> {
                   ),
                   const SizedBox(height: 12),
                   Text('Filtros',
-                      style: AppTexto.titulo
-                          .copyWith(fontSize: 18)),
+                      style: AppTexto.titulo),
                   const SizedBox(height: 12),
                   // v1.4.1 (Pieza 7, B3): filtros guardados de este
                   // dispositivo. Tocar aplica y cierra; la × borra.
@@ -1835,9 +1820,9 @@ class _ActividadScreenState extends State<ActividadScreen> {
                         InputChip(
                           label: Text('${g['nombre'] ?? ''}',
                               style:
-                                  const TextStyle(fontSize: 12)),
+                                  AppTexto.metadato),
                           deleteIcon:
-                              const Icon(Icons.close, size: 16),
+                              const Icon(Icons.close_rounded, size: 16),
                           onPressed: () {
                             _aplicarGuardado(g);
                             Navigator.of(ctx).pop();
@@ -1855,7 +1840,7 @@ class _ActividadScreenState extends State<ActividadScreen> {
                   Align(
                     alignment: Alignment.centerLeft,
                     child: TextButton.icon(
-                      icon: const Icon(Icons.bookmark_add_outlined,
+                      icon: const Icon(Icons.bookmark_add_rounded,
                           size: 18),
                       label: const Text('Guardar filtros actuales'),
                       onPressed: () async {
@@ -2057,7 +2042,7 @@ class _ActividadScreenState extends State<ActividadScreen> {
         title: const Text('Actividad reciente'),
         actions: [
           IconButton(
-            icon: const Icon(Icons.refresh),
+            icon: const Icon(Icons.refresh_rounded),
             tooltip: 'Actualizar',
             onPressed: _cargar,
           ),
@@ -2072,10 +2057,10 @@ class _ActividadScreenState extends State<ActividadScreen> {
               controller: _busquedaCtrl,
               decoration: InputDecoration(
                 hintText: 'Buscar por cliente, suplemento…',
-                prefixIcon: const Icon(Icons.search),
+                prefixIcon: const Icon(Icons.search_rounded),
                 suffixIcon: _busqueda.isNotEmpty
                     ? IconButton(
-                        icon: const Icon(Icons.clear),
+                        icon: const Icon(Icons.clear_rounded),
                         onPressed: () {
                           _busquedaCtrl.clear();
                           setState(() => _busqueda = '');
@@ -2124,13 +2109,13 @@ class _ActividadScreenState extends State<ActividadScreen> {
                     // "filtros sin resultados".
                     ? (_items.isEmpty
                         ? const EstadoVacio(
-                            icono: Icons.history_outlined,
+                            icono: Icons.history_rounded,
                             titulo: 'Sin actividad reciente',
                             subtitulo:
                                 'Sincroniza para actualizar.',
                           )
                         : EstadoVacio(
-                            icono: Icons.search_off_outlined,
+                            icono: Icons.search_off_rounded,
                             titulo:
                                 'Sin resultados con estos filtros',
                             subtitulo:
@@ -2363,14 +2348,8 @@ class _ActividadScreenState extends State<ActividadScreen> {
                   if (tieneMonto)
                     Text(
                       montoTxt,
-                      style: const TextStyle(
-                          color: AppColores
-                              .exito,
-                          fontSize:
-                              14,
-                          fontWeight:
-                              FontWeight
-                                  .bold),
+                      style: AppTexto.cuerpo.copyWith(color: AppColores
+                              .exito),
                     ),
                   const SizedBox(
                       height:
@@ -2600,9 +2579,9 @@ class _ActividadScreenState extends State<ActividadScreen> {
             horizontal: 14, vertical: 10),
         child: Row(
           children: [
-            const Icon(Icons.analytics_outlined,
-                size: 20, color: AppColores.naranja),
-            const SizedBox(width: 10),
+            Icon(Icons.analytics_rounded,
+                size: 20, color: AppColores.textoSecundario(context)),
+            const SizedBox(width: 8),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,

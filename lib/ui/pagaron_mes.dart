@@ -49,13 +49,11 @@ class _PagaronMesScreenState extends State<PagaronMesScreen> {
       await SyncEngine.instance.sincronizarScope('pagos');
       await _cargar();
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Lista actualizada')));
+      mostrarSnack(context, 'Lista actualizada', significado: SignificadoChip.exito);
     } catch (_) {
       await _cargar();
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('Sin conexión: mostrando datos locales')));
+      mostrarSnack(context, 'Sin conexión: mostrando datos locales', significado: SignificadoChip.alerta);
     }
   }
 
@@ -129,7 +127,7 @@ class _PagaronMesScreenState extends State<PagaronMesScreen> {
             : 'Pagaron este mes (${_filas.length})'),
         actions: [
           IconButton(
-            icon: const Icon(Icons.refresh),
+            icon: const Icon(Icons.refresh_rounded),
             tooltip: 'Actualizar (bajar cambios)',
             onPressed: _actualizar,
           ),
@@ -143,7 +141,7 @@ class _PagaronMesScreenState extends State<PagaronMesScreen> {
                 ? const EstadoCargando(texto: 'Cargando pagos del mes…')
                 : _filas.isEmpty
                     ? const EstadoVacio(
-                        icono: Icons.payments,
+                        icono: Icons.payments_rounded,
                         titulo: 'Nadie ha pagado este mes',
                         subtitulo:
                             'Los clientes que paguen aparecerán aquí')
@@ -157,7 +155,7 @@ class _PagaronMesScreenState extends State<PagaronMesScreen> {
                             return ListTile(
                               leading: sinDatos
                                   ? const CircleAvatar(
-                                      child: Icon(Icons.person_outline),
+                                      child: Icon(Icons.person_outline_rounded),
                                     )
                                   : ClienteAvatarThumb(
                                       fotoLocal:
@@ -171,11 +169,11 @@ class _PagaronMesScreenState extends State<PagaronMesScreen> {
                                     ? 'Datos aún sin descargar'
                                     : 'Pagado hasta: '
                                         '${fmtFecha(c['pagado_hasta'] as String?)}',
-                                style: const TextStyle(fontSize: 12),
+                                style: AppTexto.metadato,
                               ),
                               trailing: sinDatos || !esDueno
                                   ? null
-                                  : const Icon(Icons.chevron_right),
+                                  : const Icon(Icons.chevron_right_rounded),
                               onTap: sinDatos || !esDueno
                                   ? null
                                   : () => Navigator.of(context)
@@ -247,6 +245,6 @@ class _ClienteAvatarThumbState extends State<ClienteAvatarThumb> {
         backgroundColor: Colors.transparent,
       );
     }
-    return const Icon(Icons.verified, color: AppColores.exito);
+    return const Icon(Icons.verified_rounded, color: AppColores.exito);
   }
 }

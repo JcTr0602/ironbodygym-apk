@@ -6,8 +6,11 @@
 /// confirmación antes de encolar es PreviewCobroScreen.
 library;
 
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:image_picker/image_picker.dart';
 
 import '../localdb.dart';
 import '../negocio.dart';
@@ -236,8 +239,7 @@ Future<Map<String, dynamic>?> pagoDialogo(
   final tipos = await getTiposPago(paraMenor: menor);
   if (!context.mounted) return null;
   if (tipos.isEmpty) {
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text('No hay tipos de pago configurados')));
+    mostrarSnack(context, 'No hay tipos de pago configurados', significado: SignificadoChip.alerta);
     return null;
   }
 
@@ -257,8 +259,7 @@ Future<Map<String, dynamic>?> pagoDialogo(
   final esCasa = esCuentaCasa(cliente);
   if (esCasa) {
     if (context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('Una Cuenta a la Casa no paga mensualidad.')));
+      mostrarSnack(context, 'Una Cuenta a la Casa no paga mensualidad.', significado: SignificadoChip.alerta);
     }
     return null;
   }
@@ -271,7 +272,6 @@ Future<Map<String, dynamic>?> pagoDialogo(
       filasEspecial = await tarifasDeCliente(clienteId);
     } catch (_) {}
   }
-  final tieneRegistroEsp = filasEspecial.isNotEmpty;
   double montoTipo(String id, double def) {
     for (final t in tipos) {
       if (t.id == id) return t.monto;
@@ -287,28 +287,16 @@ Future<Map<String, dynamic>?> pagoDialogo(
     'quincenal': montoTipo('quincenal', 1200),
   };
 
-  /// Especial aplicable a (periodo motor, método): fila activa de ese
-  /// periodo, o la legacy sintética (solo si NO hay ningún registro
-  /// y es transferencia mensual; ajuste 3).
-  Map<String, dynamic>? especialPara(String periodoMotor, String met) {
+  /// Especial aplicable a un periodo del motor: la fila
+  /// activa de ese periodo. El método NO pre-filtra (M2,
+  /// verificado): solo elige qué monto de la fila aplica,
+  /// dentro del motor. Q2 (1.20): sin fallback legacy — la
+  /// columna migró a filas seed_legacy_<id>, que llegan en
+  /// filasEspecial como cualquier otra tarifa.
+  Map<String, dynamic>? especialPara(String periodoMotor) {
     for (final f in filasEspecial) {
       if (f['activa'] == 1 && '${f['periodo']}' == periodoMotor) {
         return f;
-      }
-    }
-    if (!tieneRegistroEsp &&
-        periodoMotor == 'mensual' &&
-        met == 'transferencia') {
-      final legacy =
-          (cliente['tarifa_especial_transferencia'] as num?)?.toDouble();
-      if (legacy != null) {
-        return {
-          'periodo': 'mensual',
-          'monto_transferencia': legacy,
-          'monto_efectivo': null,
-          'vigente_desde': null,
-          'vigente_hasta': null,
-        };
       }
     }
     return null;
@@ -323,6 +311,12 @@ Future<Map<String, dynamic>?> pagoDialogo(
   // 30 días más barata, cambiable en el desplegable).
   int meses = 1;
   String metodo = aceptaEfectivo ? 'efectivo' : 'transferencia';
+  // F1 (1.20): foto del comprobante (solo transferencia). Es una
+  // ruta LOCAL: viaja en el resultado con clave '_comprobante_ruta'
+  // y la pantalla de confirmación la convierte en
+  // 'comprobante_uuid' + fila en comprobantes_pago; la ruta en sí
+  // NUNCA va en el payload de la op.
+  String? comprobanteRuta;
   final diasCtrl = TextEditingController();
   final montoCtrl = TextEditingController();
   // 1.15 (C1): fecha del pago en hora Habana, no DateTime.now()
@@ -410,7 +404,7 @@ Future<Map<String, dynamic>?> pagoDialogo(
           esCasa: esCasa,
           esMenor: menor,
           precios: preciosMapa,
-          especial: especialPara(id, metodo),
+          especial: especialPara(id),
           hoyHabana: hoyHabanaIso());
       monto = r.monto;
       escalon = r.escalon;
@@ -423,7 +417,7 @@ Future<Map<String, dynamic>?> pagoDialogo(
           esCasa: esCasa,
           esMenor: menor,
           precios: preciosMapa,
-          especial: especialPara('mensual', metodo),
+          especial: especialPara('mensual'),
           hoyHabana: hoyHabanaIso());
       monto = r.monto * meses;
       escalon = r.escalon;
@@ -466,7 +460,7 @@ Future<Map<String, dynamic>?> pagoDialogo(
               esCasa: esCasa,
               esMenor: menor,
               precios: preciosMapa,
-              especial: especialPara('mensual', metodo),
+              especial: especialPara('mensual'),
               hoyHabana: hoyHabanaIso())
           .monto;
     }
@@ -477,7 +471,7 @@ Future<Map<String, dynamic>?> pagoDialogo(
               esCasa: esCasa,
               esMenor: menor,
               precios: preciosMapa,
-              especial: especialPara(t.id, metodo),
+              especial: especialPara(t.id),
               hoyHabana: hoyHabanaIso())
           .monto;
     }
@@ -500,7 +494,7 @@ Future<Map<String, dynamic>?> pagoDialogo(
         monto: montoEtiqueta,
         esCasa: esCasa,
         tieneEspecialMensual:
-            especialPara('mensual', metodo) != null);
+            especialPara('mensual') != null);
   }
 
   // 1.15 (m8): el personalizado delega en la función pura
@@ -526,7 +520,7 @@ Future<Map<String, dynamic>?> pagoDialogo(
             fechaPago: fpIso, base: basePago);
         return DialogoApp(
           titulo: 'Pago — ${cliente['nombre']}',
-          iconoTitulo: Icons.payments,
+          iconoTitulo: Icons.payments_rounded,
           contenido: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -539,7 +533,7 @@ Future<Map<String, dynamic>?> pagoDialogo(
                   Container(
                     margin:
                         const EdgeInsets.only(top: 8, bottom: 4),
-                    padding: const EdgeInsets.all(10),
+                    padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
                       color: AppColores.info
                           .withValues(alpha: 0.08),
@@ -551,7 +545,7 @@ Future<Map<String, dynamic>?> pagoDialogo(
                     ),
                     child: Row(
                       children: [
-                        const Icon(Icons.child_care,
+                        const Icon(Icons.child_care_rounded,
                             color: AppColores.info),
                         const SizedBox(
                             width: AppEspacio.sm),
@@ -559,8 +553,7 @@ Future<Map<String, dynamic>?> pagoDialogo(
                           child: Text(
                             'Menor de 18: precio especial '
                             '${fmtMonto(tipos.firstWhere((t) => t.id == 'menores', orElse: () => tipos.first).monto)} CUP/mes.',
-                            style: const TextStyle(
-                                fontSize: 13),
+                            style: AppTexto.secundario,
                           ),
                         ),
                       ],
@@ -578,7 +571,7 @@ Future<Map<String, dynamic>?> pagoDialogo(
                     return Container(
                       margin: const EdgeInsets.only(
                           top: 8, bottom: 4),
-                      padding: const EdgeInsets.all(10),
+                      padding: const EdgeInsets.all(12),
                       decoration: BoxDecoration(
                         color: AppColores.exito
                             .withValues(alpha: 0.08),
@@ -592,7 +585,7 @@ Future<Map<String, dynamic>?> pagoDialogo(
                       child: Row(
                         children: [
                           const Icon(
-                              Icons.check_circle,
+                              Icons.check_circle_rounded,
                               color:
                                   AppColores.exito),
                           const SizedBox(
@@ -602,8 +595,7 @@ Future<Map<String, dynamic>?> pagoDialogo(
                               'Tiene $diasRest día(s) vigentes. '
                               'No se pierden: el nuevo período '
                               'empieza al vencer.',
-                              style: const TextStyle(
-                                  fontSize: 13),
+                              style: AppTexto.secundario,
                             ),
                           ),
                         ],
@@ -701,16 +693,16 @@ Future<Map<String, dynamic>?> pagoDialogo(
                     ),
                     child: Row(
                       children: [
-                        const Icon(Icons.calendar_today, size: 18),
+                        const Icon(Icons.calendar_today_rounded, size: 18),
                         const SizedBox(width: 8),
                         Text(
                           'Pagado el: ${fechaPago.day.toString().padLeft(2, '0')}/'
                           '${fechaPago.month.toString().padLeft(2, '0')}/'
                           '${fechaPago.year}',
-                          style: const TextStyle(fontSize: 15),
+                          style: AppTexto.subtitulo,
                         ),
                         const Spacer(),
-                        Icon(Icons.edit,
+                        Icon(Icons.edit_rounded,
                             size: 16,
                             color: AppColores.textoSecundario(ctx)),
                       ],
@@ -811,7 +803,7 @@ Future<Map<String, dynamic>?> pagoDialogo(
                     if (aceptaEfectivo)
                       ChoiceChip(
                           label: const Text('Efectivo'),
-                          avatar: const Icon(Icons.payments,
+                          avatar: const Icon(Icons.payments_rounded,
                               size: 18),
                           selected: metodo == 'efectivo',
                           onSelected: (_) =>
@@ -822,13 +814,92 @@ Future<Map<String, dynamic>?> pagoDialogo(
                       ChoiceChip(
                           label: const Text('Transfer.'),
                           avatar: const Icon(
-                              Icons.smartphone,
+                              Icons.smartphone_rounded,
                               size: 18),
                           selected: metodo == 'transferencia',
                           onSelected: (_) => setS(
                               () => metodo = 'transferencia')),
                   ],
                 ),
+                // F1 (1.20): comprobante opcional de la
+                // transferencia (foto de la captura del banco).
+                if (metodo == 'transferencia') ...[
+                  const SizedBox(height: 8),
+                  if (comprobanteRuta == null)
+                    OutlinedButton.icon(
+                      icon: const Icon(Icons.add_a_photo_rounded,
+                          size: 18),
+                      label: const Text(
+                          'Adjuntar foto del comprobante'),
+                      onPressed: () async {
+                        final origen = await showDialog<String>(
+                          context: ctx,
+                          builder: (c2) => SimpleDialog(
+                            title:
+                                const Text('Foto del comprobante'),
+                            children: [
+                              SimpleDialogOption(
+                                onPressed: () =>
+                                    Navigator.pop(c2, 'camera'),
+                                child: const ListTile(
+                                  leading: Icon(
+                                      Icons.photo_camera_rounded),
+                                  title: Text('Tomar foto'),
+                                ),
+                              ),
+                              SimpleDialogOption(
+                                onPressed: () =>
+                                    Navigator.pop(c2, 'gallery'),
+                                child: const ListTile(
+                                  leading: Icon(Icons
+                                      .photo_library_rounded),
+                                  title: Text(
+                                      'Elegir de la galería'),
+                                ),
+                              ),
+                            ],
+                          ),
+                        );
+                        if (origen == null) return;
+                        final img = await ImagePicker().pickImage(
+                          source: origen == 'camera'
+                              ? ImageSource.camera
+                              : ImageSource.gallery,
+                        );
+                        if (img == null) return;
+                        setS(() => comprobanteRuta = img.path);
+                      },
+                    )
+                  else
+                    Row(
+                      children: [
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(6),
+                          child: Image.file(
+                            File(comprobanteRuta!),
+                            width: 40,
+                            height: 40,
+                            fit: BoxFit.cover,
+                            errorBuilder:
+                                (context, error, stackTrace) =>
+                                    const Icon(
+                                        Icons.image_rounded,
+                                        size: 40),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        const Expanded(
+                            child: Text('Comprobante adjunto')),
+                        IconButton(
+                          icon: const Icon(
+                              Icons.delete_outline_rounded),
+                          tooltip: 'Quitar comprobante',
+                          onPressed: () =>
+                              setS(() => comprobanteRuta = null),
+                        ),
+                      ],
+                    ),
+                ],
                 const SizedBox(height: 12),
                 Text('Período: ${_etiquetaPeriodo(s)}'),
                 Text('Monto: ${fmtMonto(s.monto)} CUP',
@@ -848,8 +919,7 @@ Future<Map<String, dynamic>?> pagoDialogo(
                   Padding(
                     padding: const EdgeInsets.only(top: 2),
                     child: Text(a,
-                        style: const TextStyle(
-                            fontSize: 13, color: Colors.orange)),
+                        style: AppTexto.secundario.copyWith(color: Colors.orange)),
                   ),
                 Text('Nuevo vencimiento: ${fmtFecha(nuevo)}',
                     style:
@@ -906,6 +976,10 @@ Future<Map<String, dynamic>?> pagoDialogo(
     'monto': s.monto,
     'pagado_hasta': nuevo,
     'metodo': metodo,
+    // F1 (1.20): ruta LOCAL del comprobante (solo transferencia);
+    // la confirmación la convierte en comprobante_uuid.
+    if (comprobanteRuta != null && metodo == 'transferencia')
+      '_comprobante_ruta': comprobanteRuta,
     // v1.3.2: base explícita si el cliente siguió viniendo vencido.
     // El servidor la respeta en record_payment.
     if (basePago != null) 'base': basePago,

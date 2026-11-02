@@ -98,8 +98,7 @@ class _GympediaScreenState extends State<GympediaScreen> {
     await _cargar();
     if (!mounted) return;
     setState(() => _sincronizando = false);
-    ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('GymPedia actualizada')));
+    mostrarSnack(context, 'GymPedia actualizada', significado: SignificadoChip.exito);
   }
 
   Map<String, dynamic>? _publicadoDe(String slug) {
@@ -153,20 +152,37 @@ class _GympediaScreenState extends State<GympediaScreen> {
         p['tiene_imagen'] == true || p['tiene_imagen'] == 1;
     final sello = _colorSello(context, '${p['sello']}');
     if (!tieneImagen) {
-      return Icon(Icons.circle, size: 14, color: sello);
+      return Icon(Icons.circle_rounded, size: 16, color: sello);
     }
     final slug = '${p['slug'] ?? p['id'] ?? ''}';
     final rev = (p['imagen_rev'] as num?)?.toInt() ?? 0;
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(8),
-      child: Image.network(
-        '${AppConfig.supabaseUrl}/storage/v1/object/public/'
-        '${AppConfig.bucketGympedia}/$slug.webp?v=$rev',
-        width: 48,
-        height: 48,
-        fit: BoxFit.cover,
-        errorBuilder: (_, __, ___) =>
-            Icon(Icons.circle, size: 14, color: sello),
+    return Container(
+      width: 48,
+      height: 48,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: AppColores.borde(context)),
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(7),
+        child: Image.network(
+          '${AppConfig.supabaseUrl}/storage/v1/object/public/'
+          '${AppConfig.bucketGympedia}/$slug.webp?v=$rev',
+          width: 48,
+          height: 48,
+          fit: BoxFit.cover,
+          loadingBuilder: (_, hijo, progreso) => progreso == null
+              ? hijo
+              : Container(
+                  color: AppColores.borde(context)
+                      .withValues(alpha: 0.3),
+                  child: Icon(Icons.menu_book_rounded,
+                      size: 20,
+                      color: AppColores.textoSecundario(context)),
+                ),
+          errorBuilder: (_, __, ___) =>
+              Icon(Icons.circle_rounded, size: 16, color: sello),
+        ),
       ),
     );
   }
@@ -191,7 +207,7 @@ class _GympediaScreenState extends State<GympediaScreen> {
                     width: 20,
                     height: 20,
                     child: CircularProgressIndicator(strokeWidth: 2))
-                : const Icon(Icons.sync),
+                : const Icon(Icons.sync_rounded),
             tooltip: 'Actualizar (bajar cambios)',
             onPressed: _sincronizando ? null : _sincronizar,
           ),
@@ -199,7 +215,7 @@ class _GympediaScreenState extends State<GympediaScreen> {
       ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () => _abrirEditor(),
-        icon: const Icon(Icons.add),
+        icon: const Icon(Icons.add_rounded),
         label: const Text('Nuevo artículo'),
       ),
       body: _cuerpo(),
@@ -220,14 +236,14 @@ class _GympediaScreenState extends State<GympediaScreen> {
               child: CampoTexto(
                 controller: _busquedaCtrl,
                 hint: 'Buscar artículo…',
-                icono: Icons.search,
+                icono: Icons.search_rounded,
                 onChanged: (v) =>
                     setState(() => _busqueda = v.trim()),
               ),
             ),
             if (_busqueda.isNotEmpty)
               IconButton(
-                icon: const Icon(Icons.clear),
+                icon: const Icon(Icons.clear_rounded),
                 tooltip: 'Limpiar búsqueda',
                 onPressed: _limpiarBusqueda,
               ),
@@ -240,7 +256,7 @@ class _GympediaScreenState extends State<GympediaScreen> {
               Expanded(
                 child: FilledButton.icon(
                   onPressed: _sincronizando ? null : _sincronizar,
-                  icon: const Icon(Icons.sync),
+                  icon: const Icon(Icons.sync_rounded),
                   label: const Text('Actualizar'),
                 ),
               ),
@@ -248,7 +264,7 @@ class _GympediaScreenState extends State<GympediaScreen> {
               Expanded(
                 child: OutlinedButton.icon(
                   onPressed: () => _abrirEditor(),
-                  icon: const Icon(Icons.add),
+                  icon: const Icon(Icons.add_rounded),
                   label: const Text('Nuevo artículo'),
                 ),
               ),
@@ -262,14 +278,14 @@ class _GympediaScreenState extends State<GympediaScreen> {
                   const SizedBox(height: 4),
                   Text(
                     'Solo viven en este teléfono hasta que los publiques.',
-                    style: AppTexto.secundario.copyWith(fontSize: 12),
+                    style: AppTexto.metadato,
                   ),
                   const SizedBox(height: 8),
                   for (final b in _borradoresVisibles)
                     Card(
                       child: ListTile(
-                        leading: const Icon(Icons.edit_note,
-                            color: AppColores.naranja),
+                        leading: Icon(Icons.edit_note_rounded,
+                            color: AppColores.textoSecundario(context)),
                         title: Text(
                             '${b['titulo']}'.isEmpty
                                 ? '(sin título)'
@@ -281,12 +297,12 @@ class _GympediaScreenState extends State<GympediaScreen> {
                             ? const Tooltip(
                                 message:
                                     'El artículo publicado cambió desde que abriste este borrador',
-                                child: Icon(Icons.warning_amber,
+                                child: Icon(Icons.warning_amber_rounded,
                                     color: AppColores.error),
                               )
                             : const Chip(
                                 label: Text('Borrador',
-                                    style: TextStyle(fontSize: 11)),
+                                    style: AppTexto.minuscula),
                                 visualDensity: VisualDensity.compact,
                               ),
                         onTap: () => _abrirEditor(borrador: b),
@@ -320,40 +336,57 @@ class _GympediaScreenState extends State<GympediaScreen> {
                 for (final cat in GympediaValidacion.categorias)
                   if (_publicadosVisibles.any((p) => '${p['categoria']}' == cat)) ...[
                     Padding(
-                      padding: const EdgeInsets.only(top: 10, bottom: 4),
+                      padding: const EdgeInsets.only(top: 12, bottom: 4),
                       child: Text(
                         GympediaValidacion.nombreCategoria[cat] ?? cat,
-                        style: const TextStyle(
+                        style: AppTexto.etiqueta.copyWith(
                             fontWeight: FontWeight.bold,
                             color: AppColores.naranja),
                       ),
                     ),
                     for (final p in _publicadosVisibles.where(
                         (p) => '${p['categoria']}' == cat))
-                      Card(
-                        child: ListTile(
-                          leading: _miniaturaArticulo(p),
-                          title: Text('${p['titulo']}',
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis),
-                          subtitle: Column(
+                      Padding(
+                        padding: const EdgeInsets.only(
+                            bottom: AppEspacio.sm),
+                        child: Tarjeta(
+                          padding:
+                              const EdgeInsets.all(AppEspacio.md),
+                          onTap: () => _abrirEditor(publicado: p),
+                          child: Row(
                             crossAxisAlignment:
                                 CrossAxisAlignment.start,
                             children: [
-                              Text(
-                                  'Rev. ${(p['revision'] as num?)?.toInt() ?? 1}'
-                                  '${(p['tiene_imagen'] == true || p['tiene_imagen'] == 1) ? ' · con imagen' : ''}'),
-                              // GY3: el sello con su texto.
-                              Text(_textoSello('${p['sello']}'),
-                                  style: TextStyle(
-                                      fontSize: 12,
-                                      fontWeight: FontWeight.w600,
-                                      color: _colorSello(
-                                          context, '${p['sello']}'))),
+                              _miniaturaArticulo(p),
+                              const SizedBox(width: AppEspacio.sm),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment:
+                                      CrossAxisAlignment.start,
+                                  children: [
+                                    Text('${p['titulo']}',
+                                        style: AppTexto.subtitulo,
+                                        maxLines: 2,
+                                        overflow:
+                                            TextOverflow.ellipsis),
+                                    const SizedBox(height: 2),
+                                    Text(
+                                        'Rev. ${(p['revision'] as num?)?.toInt() ?? 1}'
+                                        '${(p['tiene_imagen'] == true || p['tiene_imagen'] == 1) ? ' · con imagen' : ''}',
+                                        style: AppTexto.secundario),
+                                    // GY3: el sello con su texto.
+                                    Text(_textoSello('${p['sello']}'),
+                                        style: AppTexto.metadato.copyWith(
+                                            color: _colorSello(context,
+                                                '${p['sello']}'),
+                                            fontWeight:
+                                                FontWeight.w600)),
+                                  ],
+                                ),
+                              ),
+                              const Icon(Icons.chevron_right_rounded),
                             ],
                           ),
-                          trailing: const Icon(Icons.chevron_right),
-                          onTap: () => _abrirEditor(publicado: p),
                         ),
                       ),
                   ],

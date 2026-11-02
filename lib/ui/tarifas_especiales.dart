@@ -105,20 +105,54 @@ class _TarifasScreenState extends State<TarifasScreen> {
                             await mostrarModalTarifaEspecial(context);
                             _cargar();
                           },
-                          icon: const Icon(Icons.add, size: 18),
+                          icon: const Icon(Icons.add_rounded, size: 18),
                           label: const Text('Nueva'),
                         ),
                     ],
                   ),
+                  // T14 (1.20): aviso de tarifas por revisar
+                  // (su fecha pasó o está cerca): siguen
+                  // aplicando hasta que el dueño decida.
+                  Builder(builder: (_) {
+                    final hoy = hoyHabanaIso();
+                    final n = _especiales
+                        .where((e) => tarifaPorRevisar(e, hoy))
+                        .length;
+                    if (n == 0) return const SizedBox.shrink();
+                    return Padding(
+                      padding:
+                          const EdgeInsets.only(bottom: AppEspacio.sm),
+                      child: Tarjeta(
+                        child: Row(
+                          children: [
+                            Icon(Icons.warning_amber_rounded,
+                                color: AppColores.alerta),
+                            const SizedBox(width: AppEspacio.sm),
+                            Expanded(
+                              child: Text(
+                                n == 1
+                                    ? '1 tarifa por revisar: su fecha ya pasó o está cerca. Sigue aplicando hasta que decidas renovarla o terminarla.'
+                                    : '$n tarifas por revisar: su fecha ya pasó o está cerca. Siguen aplicando hasta que decidas renovarlas o terminarlas.',
+                                style: AppTexto.cuerpo,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    );
+                  }),
                   const SizedBox(height: 8),
                   if (_especiales.isEmpty)
                     const Text('Ninguna tarifa especial activa.',
                         style: AppTexto.secundario),
                   for (final e in _especiales)
                     Card(
-                      child: ListTile(
-                        leading: const Icon(Icons.local_offer,
-                            color: AppColores.naranja),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                      ListTile(
+                        leading: Icon(Icons.local_offer_rounded,
+                            color: AppColores.textoSecundario(context)),
                         title: Text(_nombres[
                                 (e['cliente_id'] as num?)?.toInt()] ??
                             'Cliente ${e['cliente_id']}'),
@@ -140,6 +174,27 @@ class _TarifasScreenState extends State<TarifasScreen> {
                                 _cargar();
                               }
                             : null,
+                      ),
+                      Builder(builder: (_) {
+                        final est = estadoRevisionTarifa(
+                            e, hoyHabanaIso());
+                        if (est != 'vencida' && est != 'por_vencer') {
+                          return const SizedBox.shrink();
+                        }
+                        return Padding(
+                          padding: const EdgeInsets.fromLTRB(
+                              16, 0, 16, 12),
+                          child: ChipEstado.semantico(
+                            texto: est == 'vencida'
+                                ? 'Vencida — por revisar'
+                                : 'Vence pronto — por revisar',
+                            significado: est == 'vencida'
+                                ? SignificadoChip.error
+                                : SignificadoChip.alerta,
+                          ),
+                        );
+                      }),
+                        ],
                       ),
                     ),
                 ],
@@ -201,7 +256,7 @@ Future<List<int>?> _elegirClientes(BuildContext context) async {
                 .toList();
         return DialogoApp(
           titulo: 'Elegir clientes',
-          iconoTitulo: Icons.group,
+          iconoTitulo: Icons.group_rounded,
           contenido: SizedBox(
             width: double.maxFinite,
             height: 420,
@@ -311,7 +366,7 @@ Future<void> _formularioTarifa(
         titulo: activaPrevia != null
             ? 'Editar tarifa especial'
             : 'Nueva tarifa especial',
-        iconoTitulo: Icons.local_offer,
+        iconoTitulo: Icons.local_offer_rounded,
         contenido: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -398,7 +453,7 @@ Future<void> _formularioTarifa(
                   if (ctx.mounted) Navigator.pop(ctx, false);
                 },
                 child: const Text('Revocar',
-                    style: TextStyle(color: Colors.red))),
+                    style: TextStyle(color: AppColores.error))),
           TextButton(
               onPressed: () => Navigator.pop(ctx, false),
               child: const Text('Cancelar')),
@@ -434,8 +489,7 @@ Future<void> _formularioTarifa(
   }
   if (error != null) {
     if (!context.mounted) return;
-    ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text(error)));
+    mostrarSnack(context, error, significado: SignificadoChip.error);
     return;
   }
 
@@ -489,8 +543,7 @@ Future<void> _formularioTarifa(
   // Como tras revocar: subir en cuanto se guarda.
   SyncEngine.instance.push();
   if (!context.mounted) return;
-  ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Tarifa especial guardada')));
+  mostrarSnack(context, 'Tarifa especial guardada', significado: SignificadoChip.exito);
 }
 
 Future<String?> _pedirMotivo(BuildContext context) async {
@@ -499,7 +552,7 @@ Future<String?> _pedirMotivo(BuildContext context) async {
     context: context,
     builder: (ctx) => DialogoApp(
       titulo: 'Motivo de la revocación',
-      iconoTitulo: Icons.cancel,
+      iconoTitulo: Icons.cancel_rounded,
       contenido: TextField(
           controller: ctrl,
           decoration: const InputDecoration(

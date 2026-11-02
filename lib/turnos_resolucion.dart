@@ -23,6 +23,7 @@ typedef AperturaTurno = ({
   String nombre,
   DateTime aperturaEn, // hora del DISPOSITIVO (timestamp_evento)
   bool viva, // sin cierre registrado
+  String? cubreA, // F9 (1.20): titular cubierto, si lo hay
 });
 
 /// Normaliza un nombre para compararlo (las aperturas guardan a
@@ -250,7 +251,13 @@ List<AperturaTurno> aperturasHoyConViva({
     final en = DateTime.tryParse('${a['hora_apertura'] ?? ''}');
     if (en == null) continue;
     final viva = !cierres.any((c) => cierreCorrespondeApertura(c, a));
-    out.add((nombre: nombre, aperturaEn: en, viva: viva));
+    final cubre = '${a['cubre_a'] ?? ''}'.trim();
+    out.add((
+      nombre: nombre,
+      aperturaEn: en,
+      viva: viva,
+      cubreA: cubre.isEmpty ? null : cubre,
+    ));
   }
   return out;
 }

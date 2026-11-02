@@ -238,7 +238,7 @@ class _AuditoriaPersonaScreenState extends State<AuditoriaPersonaScreen> {
         title: const Text('Auditoría por persona'),
         actions: [
           IconButton(
-              icon: const Icon(Icons.refresh), onPressed: _cargar),
+              icon: const Icon(Icons.refresh_rounded), onPressed: _cargar),
         ],
       ),
       body: _cargando
@@ -259,9 +259,7 @@ class _AuditoriaPersonaScreenState extends State<AuditoriaPersonaScreen> {
                     _selectorPeriodo(),
                     const SizedBox(height: AppEspacio.sm),
                     Text('Período: $_periodoTexto',
-                        style: TextStyle(
-                            fontSize: 12,
-                            color: AppColores.textoSecundario(context))),
+                        style: AppTexto.metadato.copyWith(color: AppColores.textoSecundario(context))),
                     if (_avisoCobertura != null) ...[
                       const SizedBox(height: AppEspacio.sm),
                       Tarjeta(
@@ -349,12 +347,11 @@ class _AuditoriaPersonaScreenState extends State<AuditoriaPersonaScreen> {
           child: Column(
             children: [
               Text(valor,
-                  style: const TextStyle(
-                      fontSize: 16, fontWeight: FontWeight.w800)),
+                  style: AppTexto.titulo.copyWith(fontWeight: FontWeight.w800)),
               const SizedBox(height: 2),
               Text(etiqueta,
                   textAlign: TextAlign.center,
-                  style: const TextStyle(fontSize: 11)),
+                  style: AppTexto.metadato),
             ],
           ),
         );
@@ -410,20 +407,19 @@ class _AuditoriaPersonaScreenState extends State<AuditoriaPersonaScreen> {
       partes.add('arqueo ${fmtMonto(t.diferenciaArqueo!)}');
     }
     return Padding(
-      padding: const EdgeInsets.only(bottom: 6),
+      padding: const EdgeInsets.only(bottom: 8),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           SizedBox(
             width: 108,
             child: Text('$f · $franja',
-                style: const TextStyle(
-                    fontSize: 12, fontWeight: FontWeight.w700)),
+                style: AppTexto.metadato.copyWith(fontWeight: FontWeight.w700)),
           ),
           Expanded(
             child: Text(
                 partes.isEmpty ? 'sin novedad' : partes.join(' · '),
-                style: const TextStyle(fontSize: 12)),
+                style: AppTexto.metadato),
           ),
         ],
       ),
@@ -433,15 +429,14 @@ class _AuditoriaPersonaScreenState extends State<AuditoriaPersonaScreen> {
   Widget _bloqueDinero() {
     final d = _dinero;
     Widget fila(String etiqueta, String valor) => Padding(
-          padding: const EdgeInsets.only(bottom: 5),
+          padding: const EdgeInsets.only(bottom: 4),
           child: Row(
             children: [
               Expanded(
                   child:
                       Text(etiqueta, style: AppTexto.cuerpo)),
               Text(valor,
-                  style: const TextStyle(
-                      fontWeight: FontWeight.w700, fontSize: 13)),
+                  style: AppTexto.secundario.copyWith(fontWeight: FontWeight.w700)),
             ],
           ),
         );
@@ -493,7 +488,7 @@ class _AuditoriaPersonaScreenState extends State<AuditoriaPersonaScreen> {
           else
             for (final op in _sensibles.take(30))
               Padding(
-                padding: const EdgeInsets.only(bottom: 5),
+                padding: const EdgeInsets.only(bottom: 4),
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -503,11 +498,11 @@ class _AuditoriaPersonaScreenState extends State<AuditoriaPersonaScreen> {
                           '${op['creada_ts'] ?? ''}'.length >= 10
                               ? '${op['creada_ts']}'.substring(0, 10)
                               : '',
-                          style: const TextStyle(fontSize: 12)),
+                          style: AppTexto.metadato),
                     ),
                     Expanded(
                       child: Text(descripcionOp('${op['tipo']}'),
-                          style: const TextStyle(fontSize: 12)),
+                          style: AppTexto.metadato),
                     ),
                   ],
                 ),

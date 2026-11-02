@@ -106,9 +106,8 @@ class _ConfirmacionCobroScreenState
         _puedeDeshacer = false;
         _yaSubio = true;
       });
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('El cobro ya subió: la corrección queda solo '
-              'en el panel del dueño.')));
+      mostrarSnack(context, 'El cobro ya subió: la corrección queda solo '
+              'en el panel del dueño.', significado: SignificadoChip.alerta);
       return;
     }
     await LocalDb.instance.deleteOp(uuid);
@@ -131,18 +130,26 @@ class _ConfirmacionCobroScreenState
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            // Check grande animado
-            Container(
-              width: 120,
-              height: 120,
-              decoration: BoxDecoration(
-                color: AppColores.exito.withValues(alpha: 0.12),
-                shape: BoxShape.circle,
-              ),
-              child: const Icon(
-                Icons.check_circle,
-                size: 80,
-                color: AppColores.exito,
+            // Check grande animado (M9): entra escalando en
+            // 350 ms; confirmación visual inmediata del cobro.
+            TweenAnimationBuilder<double>(
+              tween: Tween(begin: 0.5, end: 1.0),
+              duration: const Duration(milliseconds: 350),
+              curve: Curves.easeOutBack,
+              builder: (context, escala, hijo) =>
+                  Transform.scale(scale: escala, child: hijo),
+              child: Container(
+                width: 120,
+                height: 120,
+                decoration: BoxDecoration(
+                  color: AppColores.exito.withValues(alpha: 0.12),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(
+                  Icons.check_circle_rounded,
+                  size: 80,
+                  color: AppColores.exito,
+                ),
               ),
             ),
             const SizedBox(height: 32),
@@ -152,18 +159,48 @@ class _ConfirmacionCobroScreenState
                   color: AppColores.texto(context)),
             ),
             const SizedBox(height: 24),
-            // Datos del cobro
+            // Datos del cobro, como ticket (M3): el importe
+            // arriba y la línea de corte punteada lo separa del
+            // detalle.
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 32),
-              child: Tarjeta(
+              child: Container(
+                decoration: BoxDecoration(
+                  color: AppColores.superficie(context),
+                  borderRadius:
+                      BorderRadius.circular(AppRadio.lg),
+                  border:
+                      Border.all(color: AppColores.borde(context)),
+                ),
                 child: Column(
                   children: [
-                    _fila(context, 'Cliente', widget.nombreCliente),
-                    const Divider(),
-                    _fila(context, 'Monto', widget.monto),
-                    const Divider(),
-                    _fila(context, 'Nuevo vencimiento',
-                        widget.nuevoVencimiento),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(
+                          16, 4, 16, 0),
+                      child: _filaMonto(context),
+                    ),
+                    const SizedBox(height: 4),
+                    SizedBox(
+                      height: 1.2,
+                      width: double.infinity,
+                      child: CustomPaint(
+                        painter: _PunteadaPainter(
+                            AppColores.borde(context)),
+                      ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(
+                          16, 0, 16, 4),
+                      child: Column(
+                        children: [
+                          _fila(context, 'Cliente',
+                              widget.nombreCliente),
+                          const Divider(),
+                          _fila(context, 'Nuevo vencimiento',
+                              widget.nuevoVencimiento),
+                        ],
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -175,7 +212,7 @@ class _ConfirmacionCobroScreenState
                 child: SizedBox(
                   width: double.infinity,
                   child: OutlinedButton.icon(
-                    icon: const Icon(Icons.undo, size: 18),
+                    icon: const Icon(Icons.undo_rounded, size: 18),
                     label: Text('Deshacer ($_segundos s)'),
                     style: OutlinedButton.styleFrom(
                         foregroundColor: AppColores.error),
@@ -190,7 +227,7 @@ class _ConfirmacionCobroScreenState
                   'Si deshaces, el cobro se borra del teléfono '
                   'porque aún no subió.',
                   textAlign: TextAlign.center,
-                  style: TextStyle(fontSize: 12),
+                  style: AppTexto.metadato,
                 ),
               ),
               const SizedBox(height: 16),
@@ -201,7 +238,7 @@ class _ConfirmacionCobroScreenState
                   'El cobro ya subió: cualquier corrección posterior '
                   'es solo del dueño.',
                   textAlign: TextAlign.center,
-                  style: TextStyle(fontSize: 12),
+                  style: AppTexto.metadato,
                 ),
               ),
               const SizedBox(height: 16),
@@ -225,17 +262,12 @@ class _ConfirmacionCobroScreenState
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(etiqueta,
-              style: TextStyle(
-                  color: AppColores.textoSecundario(context))),
+          Text(etiqueta, style: AppTexto.secundario),
           Flexible(
             child: Text(
               valor,
-              style: TextStyle(
-                fontWeight: FontWeight.bold,
-                fontSize: 16,
-                color: AppColores.texto(context),
-              ),
+              style: AppTexto.cuerpo
+                  .copyWith(fontWeight: FontWeight.w600),
               textAlign: TextAlign.right,
             ),
           ),
@@ -243,4 +275,50 @@ class _ConfirmacionCobroScreenState
       ),
     );
   }
+
+  /// V21: el monto del recibo es el ancla visual (metrica).
+  Widget _filaMonto(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text('Monto', style: AppTexto.secundario),
+          Flexible(
+            child: Text(
+              widget.monto,
+              style: AppTexto.metrica.copyWith(
+                  fontFeatures: const [FontFeature.tabularFigures()]),
+              textAlign: TextAlign.right,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// M3: línea punteada de corte del ticket del comprobante.
+class _PunteadaPainter extends CustomPainter {
+  final Color color;
+  const _PunteadaPainter(this.color);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = color
+      ..strokeWidth = 1.2;
+    const dash = 6.0;
+    const gap = 4.0;
+    var x = 0.0;
+    while (x < size.width) {
+      final fin = (x + dash).clamp(0.0, size.width);
+      canvas.drawLine(Offset(x, 0), Offset(fin, 0), paint);
+      x += dash + gap;
+    }
+  }
+
+  @override
+  bool shouldRepaint(_PunteadaPainter oldDelegate) =>
+      oldDelegate.color != color;
 }

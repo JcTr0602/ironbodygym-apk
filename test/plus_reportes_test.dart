@@ -195,6 +195,30 @@ void main() {
     expect(lista.map((r) => r.id).toList(), ['1', '2']);
   });
 
+  test('H-04: confirmados() deduplica filas repetidas entre '
+      'páginas (la ventana OFFSET se desplaza)', () async {
+    Map<String, dynamic> fila(int id) => {
+          'id': id,
+          'invitado_id': 'i$id',
+          'creado_en': '2026-10-23T08:00:00Z',
+        };
+    final svc = PlusReportesService(rpc: (nombre, params) async {
+      final desde = params?['p_desde'] as int? ?? 0;
+      if (desde == 0) {
+        // Página completa: obliga a seguir paginando.
+        return [for (var i = 1; i <= kLimiteReportesPlus; i++) fila(i)];
+      }
+      // La ventana se desplazó: el 100 viene OTRA vez.
+      return [fila(kLimiteReportesPlus), fila(kLimiteReportesPlus + 1)];
+    });
+    final lista = await svc.confirmados();
+    expect(lista.length, kLimiteReportesPlus + 1);
+    expect(lista.map((r) => r.id).toSet().length, lista.length,
+        reason: 'ningún id repetido');
+    expect(lista.where((r) => r.id == '$kLimiteReportesPlus').length,
+        1);
+  });
+
   test('reportesPlusConOpPendiente: ambos tipos de op bloquean',
       () {
     final ops = <Map<String, dynamic>>[

@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:uuid/uuid.dart';
 
+import 'auth.dart';
 import 'localdb.dart';
 import 'negocio.dart' show fechaNacDeCarnet;
 import 'sync.dart';
@@ -476,6 +477,9 @@ int saldoPomoDesde({
 ({int saldo, double cpp}) aguaDesde({
   required List<Map<String, dynamic>> movimientosEspejo,
   required List<Map<String, dynamic>> opsPendientes,
+  // FIN-14 de Argón (1.20): ventas del espejo para resolver
+  // los reversos pendientes (venta_id -> tipo/cantidad).
+  List<Map<String, dynamic>> ventasEspejo = const [],
 }) {
   var saldo = 0;
   var cpp = 0.0;
@@ -527,9 +531,33 @@ int saldoPomoDesde({
         if ('${p['tipo_item'] ?? ''}' == 'agua') {
           salida((p['cantidad'] as num?)?.toInt() ?? 0);
         }
+      case 'revertir_venta_servicio':
+        // FIN-14 de Argón (1.20): el reverso pendiente devuelve
+        // el pomo que la venta original consumió (mismo patrón
+        // que saldoPomoDesde/saldoLoteDesde). Sin esto, el stock
+        // local de agua no se recuperaba hasta el pull.
+        final orig = _ventaPorIdAgua(ventasEspejo,
+            (p['venta_id'] as num?)?.toInt());
+        if (orig != null) {
+          final subtipo = '${orig['tipo'] ?? ''}';
+          if (subtipo == 'dosis_con_agua' ||
+              subtipo == 'agua_suelta') {
+            saldo += (orig['cantidad'] as num?)?.toInt() ?? 0;
+          }
+        }
     }
   }
   return (saldo: saldo, cpp: cpp);
+}
+
+/// Busca una venta de servicio por id en la lista del espejo.
+Map<String, dynamic>? _ventaPorIdAgua(
+    List<Map<String, dynamic>> ventas, int? id) {
+  if (id == null) return null;
+  for (final v in ventas) {
+    if ((v['id'] as num?)?.toInt() == id) return v;
+  }
+  return null;
 }
 
 /// v1.13.0 (Bloque 4, Argón ajuste 1): bloqueo de stock SEPARADO
@@ -690,6 +718,8 @@ Future<({int saldo, double cpp})> stockAguaLocal() async {
   return aguaDesde(
     movimientosEspejo: movs,
     opsPendientes: await _opsServicioPendientes(),
+    ventasEspejo:
+        await LocalDb.instance.allMirror('servicio_ventas'),
   );
 }
 
@@ -890,11 +920,19 @@ Future<Map<String, dynamic>> _cuadreServiciosDia(
   // fecha que ya se espejó otro día no está en el conjunto del
   // día ni como espejo (no se cuenta dos veces).
   final uuidsEspejo = <String>{};
+  // Para el reverso pendiente (más abajo): ventas del día por id
+  // y originales ya neteadas por un reverso ESPEJADO del día.
+  final ventasDiaPorId = <int, Map<String, dynamic>>{};
+  final reversosEspejados = <int>{};
   for (final v in await LocalDb.instance
       .mirrorPorFecha('servicio_ventas', 'fecha', fechaIso, fechaIso)) {
     uuidsEspejo.add('${v['op_uuid'] ?? ''}');
     if ('${v['fecha'] ?? ''}'.length >= 10 &&
         '${v['fecha']}'.substring(0, 10) == fechaIso) {
+      final vid = (v['id'] as num?)?.toInt();
+      if (vid != null) ventasDiaPorId[vid] = v;
+      final revDe = (v['reverso_de'] as num?)?.toInt();
+      if (revDe != null) reversosEspejados.add(revDe);
       final reg = LocalDb.normalizarTelegramId(v['registrado_por']);
       // Reverso (2026-10-30, caso -1500): el servidor fija los roles
       // del reverso a propósito (copia del original o null deliberado:
@@ -922,7 +960,8 @@ Future<Map<String, dynamic>> _cuadreServiciosDia(
       );
     }
   }
-  for (final op in await _opsServicioPendientes()) {
+  final opsPendientes = await _opsServicioPendientes();
+  for (final op in opsPendientes) {
     if ('${op['tipo']}' != 'venta_servicio') continue;
     if (uuidsEspejo.contains('${op['op_uuid'] ?? ''}')) continue;
     final p = _payloadDeOp(op);
@@ -942,6 +981,72 @@ Future<Map<String, dynamic>> _cuadreServiciosDia(
       vend,
       (p['responsable_efectivo_id'] as num?)?.toInt() ?? vend,
       vend,
+    );
+  }
+  // Lag del reverso pendiente (§14, 1.20): un reverso encolado
+  // aún no existe en el espejo y la venta original seguía
+  // contando entera en el cuadre hasta sincronizar. Aquí se
+  // suma la fila sintética EXACTA que el servidor creará al
+  // aplicar la op (cantidad negativa, precio/comisión de la
+  // original, comision_monto negado, roles del reverso según
+  // las reglas del handler: vendedor y comisionero copian a
+  // la original SIN fallback; el responsable sigue la tabla
+  // casa/transferencia→null, entregada→dueño null o el actor,
+  // no entregada→el de la original). La fecha del reverso es
+  // la de su creación (el servidor fecha el reverso el día en
+  // que lo aplica; salvo un cruce de medianoche en cola, es
+  // el día de la op). Al bajar el reverso real al espejo, la
+  // guarda por op_uuid y por venta ya espejada apaga esta vía.
+  for (final op in opsPendientes) {
+    if ('${op['tipo']}' != 'revertir_venta_servicio') continue;
+    if (uuidsEspejo.contains('${op['op_uuid'] ?? ''}')) continue;
+    final creada = '${op['creada_ts'] ?? ''}';
+    if (creada.length < 10 || creada.substring(0, 10) != fechaIso) {
+      continue;
+    }
+    final p = _payloadDeOp(op);
+    final ventaId = (p['venta_id'] as num?)?.toInt();
+    if (ventaId == null || reversosEspejados.contains(ventaId)) {
+      continue;
+    }
+    // Dos reversos pendientes de la misma venta: el servidor
+    // rechaza el segundo; se netea una sola vez.
+    reversosEspejados.add(ventaId);
+    var orig = ventasDiaPorId[ventaId];
+    if (orig == null) {
+      final filas = await LocalDb.instance
+          .mirrorPorIds('servicio_ventas', [ventaId]);
+      if (filas.isNotEmpty) orig = filas.first;
+    }
+    if (orig == null) continue;
+    final oMetodo = orig['metodo'] as String?;
+    final oCasa = (orig['casa'] as num?)?.toInt() == 1;
+    final int? responsable;
+    if (oCasa || oMetodo == 'transferencia') {
+      responsable = null;
+    } else if ((orig['entregado'] as num?)?.toInt() == 1) {
+      // Las ops en cola son del usuario de ESTE dispositivo:
+      // si es el dueño, el reverso no mueve efectivo (null);
+      // si es un entrenador, devuelve de su gaveta (él mismo).
+      responsable = AuthService().isOwner
+          ? null
+          : (op['telegram_id'] as num?)?.toInt();
+    } else {
+      responsable =
+          LocalDb.normalizarTelegramId(orig['responsable_efectivo_id']);
+    }
+    final comMonto = (orig['comision_monto'] as num?)?.toDouble();
+    sumar(
+      '${orig['tipo']}',
+      -((orig['cantidad'] as num?)?.toInt() ?? 0),
+      (orig['precio_unitario'] as num?)?.toDouble() ?? 0,
+      (orig['comision_unitaria'] as num?)?.toDouble() ?? 0,
+      comMonto == null ? null : -comMonto,
+      oMetodo,
+      oCasa,
+      LocalDb.normalizarTelegramId(orig['vendedor_id']),
+      responsable,
+      LocalDb.normalizarTelegramId(orig['comision_entrenador_id']),
     );
   }
   return {

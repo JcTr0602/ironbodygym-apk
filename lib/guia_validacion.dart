@@ -34,6 +34,22 @@ class GuiaValidacion {
   static bool slugValido(String slug) =>
       slug.isNotEmpty && slug.length <= 80 && _reSlug.hasMatch(slug);
 
+  /// Nombre de equipo: espejo de la validación del servidor
+  /// en _op_guia_equipo_upsert (no vacío y ≤ 50 BYTES UTF-8;
+  /// Argón Guía MEDIA: la app no lo validaba y la op nacía
+  /// condenada al rechazo). Null si el nombre es válido.
+  static String? errorNombreEquipo(String nombre) {
+    final limpio = nombre.trim();
+    if (limpio.isEmpty) {
+      return 'El nombre del equipo no puede estar vacío.';
+    }
+    if (bytes(limpio) > 50) {
+      return 'El nombre del equipo supera los 50 bytes '
+          '(las letras con acento y la ñ cuentan doble).';
+    }
+    return null;
+  }
+
   static void _listaTextos(List<String> errores, dynamic lista,
       String campo, int maxb, int minimo, int maximo) {
     if (lista == null) {

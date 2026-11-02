@@ -114,13 +114,11 @@ class _AjustesGymScreenState extends State<AjustesGymScreen> {
         'textos_base': textos ?? {},
       });
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-            content: Text('Ajustes guardados y sincronizados')));
+        mostrarSnack(context, 'Ajustes guardados y sincronizados', significado: SignificadoChip.exito);
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('$e')));
+        mostrarSnack(context, '$e', significado: SignificadoChip.error);
       }
     }
   }
@@ -149,24 +147,24 @@ class _AjustesGymScreenState extends State<AjustesGymScreen> {
                 Tarjeta(
                   child: ListTile(
                     contentPadding: EdgeInsets.zero,
-                    leading: const Icon(Icons.tune,
-                        color: AppColores.naranja),
+                    leading: Icon(Icons.tune_rounded,
+                        color: AppColores.textoSecundario(context)),
                     title: const Text('Precios por método',
                         style: AppTexto.cuerpo),
                     trailing:
-                        const Icon(Icons.chevron_right, size: 18),
+                        const Icon(Icons.chevron_right_rounded, size: 18),
                     onTap: () => _ir(context, const PreciosMetodoScreen()),
                   ),
                 ),
                 Tarjeta(
                   child: ListTile(
                     contentPadding: EdgeInsets.zero,
-                    leading: const Icon(Icons.local_offer,
-                        color: AppColores.naranja),
+                    leading: Icon(Icons.local_offer_rounded,
+                        color: AppColores.textoSecundario(context)),
                     title: const Text('Tarifas especiales',
                         style: AppTexto.cuerpo),
                     trailing:
-                        const Icon(Icons.chevron_right, size: 18),
+                        const Icon(Icons.chevron_right_rounded, size: 18),
                     onTap: () => _ir(context, const TarifasScreen()),
                   ),
                 ),
@@ -323,10 +321,7 @@ class _RegistroMensualScreenState extends State<RegistroMensualScreen> {
                     onPressed: () async {
                       await Clipboard.setData(ClipboardData(text: md));
                       if (context.mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                                content: Text(
-                                    'Resumen copiado. Pégalo en tu archivo.')));
+                        mostrarSnack(context, 'Resumen copiado. Pégalo en tu archivo.');
                       }
                     },
                     expandido: false,
@@ -363,13 +358,13 @@ class TurnosPanelScreen extends StatelessWidget {
           Tarjeta(
             child: ListTile(
               contentPadding: EdgeInsets.zero,
-              leading: const Icon(Icons.schedule,
-                  color: AppColores.naranja),
+              leading: Icon(Icons.schedule_rounded,
+                  color: AppColores.textoSecundario(context)),
               title: const Text('Editor de turnos',
                   style: AppTexto.cuerpo),
               subtitle: const Text('Horarios y excepciones',
                   style: AppTexto.secundario),
-              trailing: const Icon(Icons.chevron_right, size: 18),
+              trailing: const Icon(Icons.chevron_right_rounded, size: 18),
               onTap: () => _ir(context, const HorarioTurnosScreen()),
             ),
           ),
@@ -491,13 +486,46 @@ class _CopiaSeguridadScreenState extends State<CopiaSeguridadScreen> {
           _entradaVerificando = entrada;
         });
       }
+      // W6 (1.20): la copia se VERIFICA al exportarla,
+      // antes de compartirla — abrirla y contar sus tablas.
+      // Si la verificación falla, el dueño decide si la
+      // comparte de todos modos; el fallo queda registrado.
+      var compartir = true;
+      try {
+        final conteos = await _conteosDeCopia(destino);
+        entrada['verificada'] = true;
+        entrada['registros'] = conteos;
+        if (mounted) {
+          setState(() => _ultimaVerificacion = conteos);
+        }
+      } catch (e) {
+        entrada['verificacion_error'] = '$e';
+        if (mounted) {
+          compartir = await DialogoApp.confirmar(
+            context,
+            titulo: 'Copia sin verificar',
+            mensaje: 'La copia se creó, pero no se pudo '
+                'verificar: $e\n\n¿Compartirla de todos modos?',
+            aceptar: 'Compartir igual',
+            cancelar: 'No compartir',
+            icono: Icons.warning_amber_rounded,
+            peligro: true,
+          );
+        }
+      }
       await _guardarRegistro();
-      await Share.shareXFiles([XFile(destino.path)],
-          text: 'Copia de seguridad Iron Body Gym (solo BD, sin fotos).');
+      if (compartir) {
+        await Share.shareXFiles([XFile(destino.path)],
+            text:
+                'Copia de seguridad Iron Body Gym (solo BD, sin fotos).');
+      } else if (mounted) {
+        mostrarSnack(context,
+            'Copia guardada en el teléfono, sin compartir.',
+            significado: SignificadoChip.alerta);
+      }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('No se pudo exportar: $e')));
+        mostrarSnack(context, 'No se pudo exportar: $e', significado: SignificadoChip.error);
       }
     } finally {
       if (mounted) setState(() => _exportando = false);
@@ -512,37 +540,47 @@ class _CopiaSeguridadScreenState extends State<CopiaSeguridadScreen> {
   /// cualquier tabla que no se pueda contar es FALLO, no «tabla
   /// ausente»: una verificación con cero tablas contadas nunca se
   /// marca como verificada.
+  /// W6 (1.20): núcleo de la verificación de una copia —
+  /// la abre en solo lectura y cuenta las tablas
+  /// principales. Devuelve los conteos o lanza StateError
+  /// con el motivo. Lo comparten la verificación manual y
+  /// la automática al exportar.
+  Future<Map<String, int>> _conteosDeCopia(File copia) async {
+    if (!await copia.exists()) {
+      throw StateError('La copia ya no está en este teléfono');
+    }
+    final db = await openDatabase(copia.path, readOnly: true);
+    final conteos = <String, int>{};
+    final fallos = <String>[];
+    try {
+      for (final t in _tablasVerificar) {
+        try {
+          final r =
+              await db.rawQuery('SELECT COUNT(*) AS n FROM $t');
+          conteos[t] = (r.first['n'] as num?)?.toInt() ?? 0;
+        } catch (_) {
+          fallos.add(t);
+        }
+      }
+    } finally {
+      await db.close();
+    }
+    if (fallos.isNotEmpty) {
+      throw StateError(
+          'No se pudieron contar: ${fallos.join(', ')}');
+    }
+    if (conteos.isEmpty) {
+      throw StateError('La copia no trajo registros contables');
+    }
+    return conteos;
+  }
+
   Future<void> _verificar() async {
     final copia = _ultimaCopia;
     if (copia == null) return;
     setState(() => _verificando = true);
     try {
-      if (!await copia.exists()) {
-        throw StateError('La copia ya no está en este teléfono');
-      }
-      final db = await openDatabase(copia.path, readOnly: true);
-      final conteos = <String, int>{};
-      final fallos = <String>[];
-      try {
-        for (final t in _tablasVerificar) {
-          try {
-            final r = await db.rawQuery(
-                'SELECT COUNT(*) AS n FROM $t');
-            conteos[t] = (r.first['n'] as num?)?.toInt() ?? 0;
-          } catch (_) {
-            fallos.add(t);
-          }
-        }
-      } finally {
-        await db.close();
-      }
-      if (fallos.isNotEmpty) {
-        throw StateError(
-            'No se pudieron contar: ${fallos.join(', ')}');
-      }
-      if (conteos.isEmpty) {
-        throw StateError('La copia no trajo registros contables');
-      }
+      final conteos = await _conteosDeCopia(copia);
       await registrarAccionMantenimiento(
           'f5_verificar_copia', {'registros': conteos});
       if (mounted) {
@@ -558,8 +596,7 @@ class _CopiaSeguridadScreenState extends State<CopiaSeguridadScreen> {
       await _guardarRegistro();
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('No se pudo verificar: $e')));
+        mostrarSnack(context, 'No se pudo verificar: $e', significado: SignificadoChip.error);
       }
     } finally {
       if (mounted) setState(() => _verificando = false);
@@ -654,9 +691,24 @@ class _CopiaSeguridadScreenState extends State<CopiaSeguridadScreen> {
                       ),
                       Text(
                         '${r['alcance'] ?? ''}'
-                        '${r['verificada'] == true ? ' · Verificada' : ' · Sin verificar'}'
                         '${_esVieja('${r['fecha'] ?? ''}') ? ' · Copia vieja (+30 días)' : ''}',
                         style: AppTexto.secundario,
+                      ),
+                      const SizedBox(height: AppEspacio.xs),
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: ChipEstado.semantico(
+                          texto: r['verificada'] == true
+                              ? 'Verificada'
+                              : r['verificacion_error'] != null
+                                  ? 'Verificación fallida'
+                                  : 'Sin verificar',
+                          significado: r['verificada'] == true
+                              ? SignificadoChip.exito
+                              : r['verificacion_error'] != null
+                                  ? SignificadoChip.error
+                                  : SignificadoChip.neutral,
+                        ),
                       ),
                       if (r['registros'] is Map)
                         Text(
