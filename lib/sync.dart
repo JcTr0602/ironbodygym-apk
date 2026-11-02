@@ -32,6 +32,7 @@ import 'package:sqflite/sqflite.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:uuid/uuid.dart';
 
+import 'acceso_bloqueo.dart';
 import 'app_log.dart';
 import 'auth.dart';
 import 'comprobantes.dart';
@@ -1270,8 +1271,18 @@ class SyncEngine {
           } catch (_) {}
         }
         // v1.2.4: perfil (móvil/carnet) que no pudo subirse sin conexión.
+        // Argón Acceso #5 (residual): con el candado vigente
+        // para un no-dueño, el perfil TAMPOCO sube (es un canal
+        // de escritura directo a Supabase que no pasa por
+        // ops_queue ni por la puerta ACCESO_PAUSADO del
+        // servidor). Las ops de la cola ya se retienen solas
+        // (+6 h sin quemar intentos) y las fotos quedan FUERA
+        // del candado por decisión S2 del diseño.
         try {
-          await PerfilService.instance.sincronizarSiPendiente();
+          if (AccesoBloqueoService.instance.vigente.value == null ||
+              AuthService().isOwner) {
+            await PerfilService.instance.sincronizarSiPendiente();
+          }
         } catch (_) {}
         // Pull repetido: si llegan cambios durante la descarga, seguir.
         bool completo = false;

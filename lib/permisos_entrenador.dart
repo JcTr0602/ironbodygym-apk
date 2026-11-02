@@ -13,30 +13,109 @@ class PermisosEntrenador {
   static final PermisosEntrenador _instance =
       PermisosEntrenador._internal();
   factory PermisosEntrenador() => _instance;
-  PermisosEntrenador._internal();
 
-  static const _kPrefsPermisos = 'cache_permisos_entrenador_json';
-  static const _kPrefsActivo = 'cache_entrenador_activo';
-  static const _kPrefsHabilitado = 'cache_entrenador_habilitado';
+  // Argón Acceso #1 (CRÍTICO): las claves de caché llevan el
+  // usuario dueño de la foto. Antes eran GLOBALES: el dueño
+  // entraba en el teléfono, su foto (todo en true) quedaba
+  // guardada, y el entrenador que entraba después sin red la
+  // heredaba entera. Ahora cada usuario tiene SU caché y al
+  // cerrar sesión la memoria se limpia (limpiar()).
+  static String get _kPrefsPermisos =>
+      'cache_permisos_entrenador_json@${AuthService().username}';
+  static String get _kPrefsActivo =>
+      'cache_entrenador_activo@${AuthService().username}';
+  static String get _kPrefsHabilitado =>
+      'cache_entrenador_habilitado@${AuthService().username}';
+  // Claves viejas (globales, pre-1.21): solo se usan UNA vez
+  // para migrar la foto al primer usuario que cargue tras la
+  // actualización (en los teléfonos de los entrenadores es su
+  // propia foto; sin migración, un entrenador offline tras
+  // actualizar quedaría bloqueado sin culpa).
+  static const _kGlobalPermisos = 'cache_permisos_entrenador_json';
+  static const _kGlobalActivo = 'cache_entrenador_activo';
+  static const _kGlobalHabilitado = 'cache_entrenador_habilitado';
 
   Map<String, dynamic> _permisos = {};
-  bool _activo = true;
+  // Argón Acceso #2 (CRÍTICO): defaults FAIL-CLOSED. Antes
+  // _activo/_habilitado nacían en true y con la caché vacía o
+  // corrupta un entrenador sin habilitar (o suspendido) cuyo
+  // refresco fallaba entraba a la interfaz principal.
+  bool _activo = false;
   // v1.4.4: ¿existe la fila del entrenador en
   // entrenadores_autorizados? Sin fila NO es un suspendido: es una
   // cuenta aún no habilitada (la RPC vieja devolvía activo=false
   // para ambos casos y la app lo llamaba «suspendido»).
-  bool _habilitado = true;
+  bool _habilitado = false;
   bool _cargado = false;
+  // ¿cargar() ya corrió para el usuario actual? Sin foto tras
+  // intentar cargar, un no-dueño se trata como «sin habilitar»
+  // (fail-closed): su primera carga con red siembra la foto.
+  bool _cargaIntentada = false;
+  String _ultimoUsername = '';
+
+  PermisosEntrenador._internal() {
+    // Al perder la sesión (signOut en cualquier ruta), la
+    // memoria se limpia sola: ninguna foto sobrevive al cambio
+    // de usuario aunque cargar() tarde en correr.
+    try {
+      Supabase.instance.client.auth.onAuthStateChange.listen((d) {
+        if (d.session == null) limpiar();
+      });
+    } catch (_) {
+      // Sin Supabase inicializado (tests): la limpieza por
+      // cambio de usuario en cargar() sigue activa.
+    }
+  }
+
+  /// Limpia la foto en memoria (la caché persistida es por
+  /// usuario y se conserva para SU próximo ingreso offline).
+  void limpiar() {
+    _permisos = {};
+    _activo = false;
+    _habilitado = false;
+    _cargado = false;
+    _cargaIntentada = false;
+    _ultimoUsername = '';
+  }
 
   /// Carga los permisos desde Supabase (llamar en login/sync).
   /// Primero levanta caché local (offline), luego refresca desde Supabase.
   Future<void> cargar() async {
     final prefs = await SharedPreferences.getInstance();
 
+    // Argón Acceso #1: si cambió el usuario desde la última
+    // carga, la foto anterior se descarta ANTES de leer nada.
+    final usuarioActual = AuthService().username;
+    if (usuarioActual != _ultimoUsername) {
+      limpiar();
+      _ultimoUsername = usuarioActual;
+    }
+    _cargaIntentada = true;
+
+    // Migración única de las claves globales a las del usuario
+    // (solo si este usuario aún no tiene foto propia).
+    if (!prefs.containsKey(_kPrefsPermisos) &&
+        prefs.containsKey(_kGlobalPermisos)) {
+      final rawG = prefs.getString(_kGlobalPermisos);
+      if (rawG != null) {
+        await prefs.setString(_kPrefsPermisos, rawG);
+      }
+      final actG = prefs.getBool(_kGlobalActivo);
+      if (actG != null) await prefs.setBool(_kPrefsActivo, actG);
+      final habG = prefs.getBool(_kGlobalHabilitado);
+      if (habG != null) {
+        await prefs.setBool(_kPrefsHabilitado, habG);
+      }
+      await prefs.remove(_kGlobalPermisos);
+      await prefs.remove(_kGlobalActivo);
+      await prefs.remove(_kGlobalHabilitado);
+    }
+
     // 1. Primero levantar caché local por si estamos offline
+    // (SOLO la foto de ESTE usuario; defaults fail-closed).
     if (!_cargado) {
-      _activo = prefs.getBool(_kPrefsActivo) ?? true;
-      _habilitado = prefs.getBool(_kPrefsHabilitado) ?? true;
+      _activo = prefs.getBool(_kPrefsActivo) ?? false;
+      _habilitado = prefs.getBool(_kPrefsHabilitado) ?? false;
       final raw = prefs.getString(_kPrefsPermisos);
       if (raw != null && raw.isNotEmpty) {
         try {
@@ -98,9 +177,15 @@ class PermisosEntrenador {
       !AuthService().isOwner && _cargado && _habilitado && !_activo;
 
   /// Si la cuenta aún NO tiene fila de permisos (no es una
-  /// suspensión: nadie la ha habilitado todavía).
+  /// suspensión: nadie la ha habilitado todavía). Argón Acceso
+  /// #2: también cuenta como «sin habilitar» el no-dueño SIN
+  /// foto tras intentar cargar (caché vacía/corrupta y refresco
+  /// fallido): fail-closed, no entra a la interfaz principal.
   bool get sinHabilitar =>
-      !AuthService().isOwner && _cargado && !_habilitado;
+      !AuthService().isOwner &&
+      _cargaIntentada &&
+      !_habilitado &&
+      (_cargado || _permisos.isEmpty);
 
   /// ¿Ya hay una foto de permisos (de la RPC o de la caché)?
   /// Los candados de visibilidad la exigen para restringir:

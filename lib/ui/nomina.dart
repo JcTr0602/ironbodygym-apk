@@ -12,6 +12,7 @@ import '../nomina_calc.dart';
 import '../nomina_precalc.dart';
 import '../perfil.dart';
 import '../permisos_entrenador.dart';
+import '../sync.dart';
 import '../tiempo.dart';
 import 'componentes.dart';
 import 'diseno.dart';
@@ -532,6 +533,9 @@ class _NominaScreenState extends State<NominaScreen> {
       return;
     }
     await PerfilService.instance.setPagoEntrenador(tarifa.toInt());
+    // Argón Acceso #9: que el cambio viaje ya, no en el próximo
+    // evento de sync.
+    SyncEngine.instance.push();
     _operando = false;
     setState(() => _tarifa = tarifa);
     if (mounted) {

@@ -181,6 +181,20 @@ class AccesoBloqueoService {
       if (server == null || _anclaServer != null) return;
       _anclaServer = server;
       _anclaPared = _parseTs(p);
+      // Argón Acceso #8: arrancar el reloj monotónico AQUÍ con
+      // el desplazamiento ya transcurrido capturado una sola
+      // vez. Antes _reloj quedaba null tras el reinicio y la
+      // hora estimada dependía del reloj de pared (congelada si
+      // este retrocedía) hasta que llegara una fila más nueva.
+      final paredGuardada = _anclaPared;
+      if (paredGuardada != null) {
+        final diff = DateTime.now().difference(paredGuardada);
+        if (!diff.isNegative) {
+          _anclaServer = server.add(diff);
+        }
+        _anclaPared = DateTime.now();
+      }
+      _reloj = Stopwatch()..start();
     } catch (_) {
       // Sin ancla persistida: la primera evaluación la siembra.
     }

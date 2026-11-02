@@ -887,6 +887,18 @@ class _SeccionDiagnosticoScreenState extends State<SeccionDiagnosticoScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // Argón Acceso #3: guarda de dueño como en las pantallas
+    // hermanas (Verificación/Bajada). Hoy solo se entra desde
+    // el panel del dueño, pero el Diagnóstico muestra conteos
+    // CRUDOS de tablas (incluye protegidos) e ids de fotos: si
+    // mañana se enlaza desde otra superficie, la guarda viaja
+    // con la pantalla.
+    if (!AuthService().isOwner) {
+      return Scaffold(
+          appBar: AppBar(title: const Text('Diagnóstico de sync')),
+          body: const Center(
+              child: Text('El diagnóstico es solo el dueño.')));
+    }
     return Scaffold(
       appBar: AppBar(
         title: const Text('Diagnóstico'),
@@ -1096,6 +1108,14 @@ class _HistorialSyncScreenState extends State<HistorialSyncScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // Argón Acceso #3: guarda de dueño (el historial muestra
+    // el detalle crudo de eventos de sync).
+    if (!AuthService().isOwner) {
+      return Scaffold(
+          appBar: AppBar(title: const Text('Historial de sync')),
+          body: const Center(
+              child: Text('El historial es solo el dueño.')));
+    }
     return Scaffold(
       appBar: AppBar(
         title: const Text('Historial de sync'),

@@ -828,6 +828,9 @@ class _AdminScreenState extends State<AdminScreen> {
     // la animación de salida del diálogo (error "used after being disposed").
     if (sel != null) {
       await PerfilService.instance.setPagoEntrenador(sel);
+      // Argón Acceso #9: sin push, el cambio quedaba retenido
+      // en la cola hasta el próximo evento de sync.
+      SyncEngine.instance.push();
       if (mounted) {
         setState(() => _pagoEntrenador = sel);
         mostrarSnack(context, 'Pago actualizado: $sel CUP por cliente', significado: SignificadoChip.exito);

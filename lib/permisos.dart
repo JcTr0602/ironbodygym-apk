@@ -42,7 +42,10 @@ class Permisos {
   bool get verAuditoria => esAdmin;
 
   /// Exportar datos a Excel.
-  bool get exportarDatos => esAdmin;
+  /// Argón Acceso #10: la regla vigente es «exportar la
+  /// BD/respaldo: SOLO el dueño»; esAdmin abría la puerta a
+  /// administradores no-dueños.
+  bool get exportarDatos => esDueno;
 
   /// Ver lista de congelados.
   bool get verCongelados => esAdmin;

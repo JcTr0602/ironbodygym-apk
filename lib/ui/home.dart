@@ -461,7 +461,10 @@ class _HomeScreenState extends State<HomeScreen>
           .difference(
               DateTime.fromMillisecondsSinceEpoch(ultima))
           .inMinutes;
-      if (transcurridos >= minutos && mounted) {
+      // Argón Acceso #7: un transcurrido NEGATIVO significa que
+      // el reloj del teléfono se atrasó tras sellar la actividad:
+      // se bloquea igual (fail-closed), no se regala la sesión.
+      if ((transcurridos < 0 || transcurridos >= minutos) && mounted) {
         await Navigator.of(context).push(
           MaterialPageRoute(
             builder: (_) => const PinLockScreen(),

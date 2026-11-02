@@ -50,6 +50,15 @@ class _FichaAccesoScreenState extends State<FichaAccesoScreen> {
   }
 
   Future<void> _cargar() async {
+    // Argón Acceso #4: la ficha de acceso es SOLO del dueño
+    // (como ControlAcceso y Auditoría, que sí traían la
+    // guarda): sin ella, un no-dueño que llegara a esta ruta
+    // ejecutaba la RPC y veía teléfono, dispositivo e
+    // historial del cliente.
+    if (!AuthService().isOwner) {
+      if (mounted) setState(() => _cargando = false);
+      return;
+    }
     setState(() => _cargando = true);
     try {
       final res = await Supabase.instance.client.rpc(
@@ -93,6 +102,13 @@ class _FichaAccesoScreenState extends State<FichaAccesoScreen> {
 
   @override
   Widget build(BuildContext context) {
+    if (!AuthService().isOwner) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Acceso del cliente')),
+        body: const Center(
+            child: Text('La ficha de acceso es solo el dueño.')),
+      );
+    }
     final nombre = '${_acceso?['nombre'] ?? 'Acceso del cliente'}';
     return Scaffold(
       appBar: AppBar(

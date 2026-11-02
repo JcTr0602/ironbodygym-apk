@@ -279,19 +279,16 @@ class PerfilService {
   Future<bool> verificarPin(String pin) async {
     final p = await _p;
     final ahora = DateTime.now().millisecondsSinceEpoch;
-    final hasta = p.getInt(_key('seg_pin_bloqueado_hasta')) ?? 0;
-    // v1.2.5 (4.1): si el reloj retrocedió (ahora < última vez visto),
-    // mantener el bloqueo por seguridad.
+    var hasta = p.getInt(_key('seg_pin_bloqueado_hasta')) ?? 0;
     final ultimaVez = p.getInt(_key('seg_pin_ultima_vez')) ?? 0;
-    if (ahora < ultimaVez - 60000 && hasta > 0) {
-      // Retroceso >1 min con bloqueo activo: no acortar.
-      return false;
-    }
-    // Auditoría perfil: antes se sobrescribía incondicionalmente y
-    // atrasar el reloj en saltos de <60 s iba erosionando la línea
-    // base sin ser detectado. Solo avanza, nunca retrocede.
-    await p.setInt(
-        _key('seg_pin_ultima_vez'), ahora > ultimaVez ? ahora : ultimaVez);
+    // Argón Acceso #6: PRIMERO se resuelve el bloqueo con el
+    // reloj monotónico (el bloque de abajo): si expiró en tiempo
+    // real, se limpia y `hasta` queda en 0. Antes el chequeo
+    // anti-retroceso corría primero y, con el reloj adelantado
+    // una vez (ultimaVez en el futuro), devolvía false para
+    // siempre sin llegar jamás a la expiración monotónica: el
+    // usuario quedaba bloqueado hasta que el reloj de pared
+    // alcanzara la marca futura (horas).
     if (hasta > 0) {
       // Hay bloqueo activo: decidir con el reloj monotónico.
       final durMs = p.getInt(_key('seg_pin_duracion_ms')) ?? 0;
@@ -319,11 +316,27 @@ class PerfilService {
         if (ahora < hasta) return false;
         await _limpiarBloqueoPin(p);
       }
+      hasta = p.getInt(_key('seg_pin_bloqueado_hasta')) ?? 0;
     }
+    // v1.2.5 (4.1): si el reloj retrocedió (ahora < última vez
+    // visto) y el bloqueo SIGUE activo tras la evaluación
+    // monotónica, mantenerlo por seguridad (no acortar).
+    if (ahora < ultimaVez - 60000 && hasta > 0) {
+      return false;
+    }
+    // Auditoría perfil: antes se sobrescribía incondicionalmente y
+    // atrasar el reloj en saltos de <60 s iba erosionando la línea
+    // base sin ser detectado. Solo avanza, nunca retrocede.
+    await p.setInt(
+        _key('seg_pin_ultima_vez'), ahora > ultimaVez ? ahora : ultimaVez);
     final guardado = await getPinHash();
     if (guardado == null || guardado.isEmpty) return false;
     final ok = _pinCoincide(pin, guardado, await getPinSalt());
     if (ok) {
+      // Argón Acceso #6: acertar demuestra propiedad; la marca
+      // de última vez se re-basa al ahora real para que un
+      // adelanto de reloj pasado no contamine chequeos futuros.
+      await p.setInt(_key('seg_pin_ultima_vez'), ahora);
       await _setPinFallos(0);
       // Auditoría perfil: antes no se limpiaban los ciclos y un
       // entrenador que acertaba seguía acumulando castigos de por
@@ -353,6 +366,11 @@ class PerfilService {
   /// Reinicia los ciclos de bloqueo (al cambiar el PIN o "Olvidé mi PIN").
   Future<void> reiniciarBloqueoPin() async {
     final p = await _p;
+    // Argón Acceso #6: también se re-basa la marca de última
+    // vez (un adelanto de reloj pasado no debe sobrevivir a un
+    // reinicio legítimo del bloqueo).
+    await p.setInt(_key('seg_pin_ultima_vez'),
+        DateTime.now().millisecondsSinceEpoch);
     await p.setInt(_key('seg_pin_fallos'), 0);
     await p.setInt(_key('seg_pin_ciclos_bloqueo'), 0);
     await _limpiarBloqueoPin(p); // v1.2.5-rev6: también el ancla monotónica
@@ -566,10 +584,20 @@ class PerfilService {
 
   /// Bloqueo automático con PIN tras X minutos inactiva (item 14).
   /// 0 = nunca.
-  Future<int> getBloqueoMinutos() async =>
-      (await _p).getInt('bloqueo_minutos') ?? 0;
+  // Argón Acceso #7: la clave pasa a ser por usuario (antes
+  // global: un entrenador cambiaba el bloqueo por inactividad
+  // del dueño en un teléfono compartido). La lectura cae UNA
+  // vez a la clave global vieja para no perder el ajuste ya
+  // configurado tras actualizar.
+  Future<int> getBloqueoMinutos() async {
+    final p = await _p;
+    return p.getInt(_key('bloqueo_minutos')) ??
+        p.getInt('bloqueo_minutos') ??
+        0;
+  }
+
   Future<void> setBloqueoMinutos(int m) async =>
-      (await _p).setInt('bloqueo_minutos', m);
+      (await _p).setInt(_key('bloqueo_minutos'), m);
   Future<int> getUltimaActividad() async =>
       (await _p).getInt(_key('ultima_actividad')) ?? 0;
   Future<void> setUltimaActividad(int ts) async =>

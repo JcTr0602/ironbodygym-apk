@@ -76,7 +76,12 @@ class _PanelCandadoScreenState extends State<PanelCandadoScreen> {
           for (final u in jsonDecode(raw) as List) {
             final m = Map<String, dynamic>.from(u as Map);
             final tid = '${m['telegram_id'] ?? ''}';
-            if (tid.isEmpty || tid == '735772141') continue;
+            // Argón Acceso #11: el dueño se excluye por SU
+            // telegram id de sesión, no por un id escrito a mano.
+            if (tid.isEmpty ||
+                tid == '${AuthService().telegramId}') {
+              continue;
+            }
             final nombre = '${m['nombre'] ?? m['username'] ?? tid}';
             entrenadores.add((tid: tid, nombre: nombre));
             _nombresPersonas[tid] = nombre;
