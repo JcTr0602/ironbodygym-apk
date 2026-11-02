@@ -2538,7 +2538,7 @@ class _AdminScreenState extends State<AdminScreen> {
         () async {
           if (!AuthService().isOwner) return;
           try {
-            final path = await AppLog.exportar();
+            final (path, _) = await AppLog.exportar();
             await Share.shareXFiles([XFile(path)],
                 text: 'Bitácora Iron Body Gym');
           } catch (_) {

@@ -721,11 +721,110 @@ class _AjustesScreenState extends State<AjustesScreen> {
     }
     try {
       _msg('Generando bitácora…');
-      final path = await AppLog.exportar();
+      final (path, _) =
+          await AppLog.exportar(versionApp: AppConfig.appVersion);
       await Share.shareXFiles([XFile(path)],
           text: 'Bitácora Iron Body Gym');
     } catch (e) {
       _msg('No se pudo exportar la bitácora: $e');
+    }
+  }
+
+  /// 1.21 (Argón 121B): exporta solo lo nuevo desde la última
+  /// exportación confirmada. La marca avanza SOLO si el sistema
+  /// confirma que el compartido salió (si Jc cancela el menú de
+  /// compartir, las novedades quedan para el próximo intento).
+  Future<void> _exportarNovedadesBitacora() async {
+    if (!_auth.isOwner) {
+      _msg('Solo el dueño puede exportar la bitácora');
+      return;
+    }
+    try {
+      _msg('Generando novedades…');
+      final (path, maxId) = await AppLog.exportar(
+          soloNovedades: true, versionApp: AppConfig.appVersion);
+      if (maxId == null) {
+        _msg('No hay novedades desde la última exportación');
+        return;
+      }
+      final res = await Share.shareXFiles([XFile(path)],
+          text: 'Bitácora Iron Body Gym (novedades)');
+      if (res.status == ShareResultStatus.success) {
+        await AppLog.confirmarMarcaExportada(maxId);
+      }
+    } catch (e) {
+      _msg('No se pudo exportar la bitácora: $e');
+    }
+  }
+
+  /// 1.21: el flujo de Jc en un toque — exporta la bitácora
+  /// completa, la comparte y la reinicia (la fila semilla guarda
+  /// el resumen de lo borrado).
+  Future<void> _exportarYReiniciarBitacora() async {
+    if (!_auth.isOwner) {
+      _msg('Solo el dueño puede reiniciar la bitácora');
+      return;
+    }
+    final ok = await DialogoApp.confirmar(context,
+        titulo: '¿Exportar y reiniciar la bitácora?',
+        mensaje:
+            'Se genera el archivo completo, se comparte y el '
+            'registro empieza de cero. Lo borrado queda resumido '
+            'en la primera línea de la bitácora nueva.',
+        aceptar: 'Exportar y reiniciar',
+        icono: Icons.restart_alt_rounded);
+    if (!ok || !mounted) return;
+    try {
+      final (path, _) =
+          await AppLog.exportar(versionApp: AppConfig.appVersion);
+      await Share.shareXFiles([XFile(path)],
+          text: 'Bitácora Iron Body Gym');
+      final r = await AppLog.reiniciar();
+      if (mounted) {
+        _msg('Bitácora reiniciada: se borraron '
+            '${r['total']} registros');
+      }
+    } catch (e) {
+      _msg('No se pudo completar: $e');
+    }
+  }
+
+  /// 1.21: reinicio a secas, con DOBLE confirmación (sin el
+  /// archivo, lo borrado no se puede recuperar; el resumen por
+  /// nivel queda en la fila semilla).
+  Future<void> _reiniciarBitacora() async {
+    if (!_auth.isOwner) {
+      _msg('Solo el dueño puede reiniciar la bitácora');
+      return;
+    }
+    final ok1 = await DialogoApp.confirmar(context,
+        titulo: '¿Reiniciar la bitácora sin exportar?',
+        mensaje:
+            'Se borra todo el registro actual y se empieza de '
+            'cero. Sin el archivo exportado no se puede revisar '
+            'después.',
+        aceptar: 'Continuar',
+        peligro: true,
+        icono: Icons.delete_sweep_rounded);
+    if (!ok1 || !mounted) return;
+    final ok2 = await DialogoApp.confirmar(context,
+        titulo: '¿Seguro? Es irreversible',
+        mensaje:
+            'El resumen de lo borrado (cuántos por nivel y de qué '
+            'fechas) quedará en la primera línea de la bitácora '
+            'nueva, pero el detalle se pierde.',
+        aceptar: 'Reiniciar',
+        peligro: true,
+        icono: Icons.warning_amber_rounded);
+    if (!ok2 || !mounted) return;
+    try {
+      final r = await AppLog.reiniciar();
+      if (mounted) {
+        _msg('Bitácora reiniciada: se borraron '
+            '${r['total']} registros');
+      }
+    } catch (e) {
+      _msg('No se pudo reiniciar: $e');
     }
   }
 
@@ -1544,6 +1643,31 @@ class _AjustesScreenState extends State<AjustesScreen> {
                     subtitulo:
                         'Genera un archivo con el registro de la app',
                     onTap: _exportarBitacora,
+                  ),
+                // 1.21 (Argón 121B): delta y reinicio de bitácora.
+                if (AuthService().isOwner)
+                  _opcion(
+                    icono: Icons.mark_email_unread_rounded,
+                    titulo: 'Exportar novedades de la bitácora',
+                    subtitulo:
+                        'Solo lo nuevo desde la última exportación',
+                    onTap: _exportarNovedadesBitacora,
+                  ),
+                if (AuthService().isOwner)
+                  _opcion(
+                    icono: Icons.restart_alt_rounded,
+                    titulo: 'Exportar y reiniciar bitácora',
+                    subtitulo:
+                        'Comparte el archivo completo y empieza de cero',
+                    onTap: _exportarYReiniciarBitacora,
+                  ),
+                if (AuthService().isOwner)
+                  _opcion(
+                    icono: Icons.delete_sweep_rounded,
+                    titulo: 'Reiniciar bitácora',
+                    subtitulo:
+                        'Borra el registro sin exportar (irreversible)',
+                    onTap: _reiniciarBitacora,
                   ),
 
                 // ----- ACERCA DE -----

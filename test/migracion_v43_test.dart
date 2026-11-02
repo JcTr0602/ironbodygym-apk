@@ -198,6 +198,6 @@ void main() {
   });
 
   test('la versión actual del esquema es 48', () async {
-    expect(LocalDb.versionActual, 57);
+    expect(LocalDb.versionActual, 58);
   });
 }

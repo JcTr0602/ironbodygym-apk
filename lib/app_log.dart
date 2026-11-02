@@ -54,16 +54,41 @@ class AppLog {
   static const String _keyDiag = 'applog_diag_hasta';
   static DateTime? _diagHasta;
 
+  /// 1.21 (Argón 121B): corte duro de texto con marca visible.
+  static String _cortar(String s, int max) =>
+      s.length <= max ? s : '${s.substring(0, max)}…(cortado)';
+
   static void _ringAdd(String nivel, String modulo, String mensaje,
       {String? detalle, Map<String, dynamic>? ctxSanitizado}) {
+    // BT-01 (Argón 121B): una tormenta del mismo error no debe
+    // expulsar del ring las migas de UI que la precedieron: si
+    // el último elemento es el mismo módulo+evento+nivel, solo
+    // se cuenta la repetición sobre ese mismo elemento.
+    if (_ring.isNotEmpty) {
+      final ult = _ring.last;
+      if (ult['modulo'] == modulo &&
+          ult['mensaje'] == mensaje &&
+          ult['nivel'] == nivel) {
+        ult['ts'] = DateTime.now().toIso8601String();
+        ult['repetido'] = ((ult['repetido'] as int?) ?? 1) + 1;
+        return;
+      }
+    }
+    // BT-01: las migas viven en RAM y se copian a cada error
+    // alto; detalle y contexto entran ya cortados a 200
+    // caracteres (una miga no necesita más).
+    final ctxCorto = ctxSanitizado == null
+        ? null
+        : ctxSanitizado.map((k, v) =>
+            MapEntry(k, v is String ? _cortar(v, 200) : v));
     _ring.add({
       'ts': DateTime.now().toIso8601String(),
       'nivel': nivel,
       'modulo': modulo,
       'mensaje': _sanitizarTexto(mensaje),
-      if (detalle != null) 'detalle': detalle,
-      if (ctxSanitizado != null && ctxSanitizado.isNotEmpty)
-        'contexto': ctxSanitizado,
+      if (detalle != null) 'detalle': _cortar(detalle, 200),
+      if (ctxCorto != null && ctxCorto.isNotEmpty)
+        'contexto': ctxCorto,
     });
     if (_ring.length > _ringCapacidad) {
       _ring.removeRange(0, _ring.length - _ringCapacidad);
@@ -205,10 +230,15 @@ class AppLog {
       StackTrace? stack,
       String? opId) {
     // 1. Sanitizar UNA sola vez.
-    final detSan =
-        detalle != null ? _sanitizarTexto(detalle) : null;
+    // 1.21 (Argón 121B): topes de peso por fila — detalle a
+    // 2000 caracteres y valores de contexto a 1000; sin ellos,
+    // 5000 filas de tormenta pesaban ~15 MB al exportar.
+    final detSan = detalle != null
+        ? _cortar(_sanitizarTexto(detalle), 2000)
+        : null;
     final ctxLimpio = contexto != null
-        ? Map<String, dynamic>.from(_sanitizar(contexto))
+        ? _sanitizar(contexto).map((k, v) =>
+            MapEntry(k, v is String ? _cortar(v, 1000) : v))
         : <String, dynamic>{};
 
     // 2. Ring Buffer recibe copia limpia (sin breadcrumbs) para no
@@ -225,22 +255,32 @@ class AppLog {
     // 4. Contexto exclusivo para SQLite (sin mutar lo del ring).
     final ctxDb = Map<String, dynamic>.from(ctxLimpio);
     if (_esNivelAlto(nivel)) {
-      ctxDb['breadcrumbs'] =
-          List<Map<String, dynamic>>.from(_ring);
+      // BT-01 (Argón 121B): solo las ÚLTIMAS 10 migas (antes se
+      // copiaba el ring entero de 50 en cada error y la fila se
+      // disparaba a decenas de KB).
+      final skip = _ring.length > 10 ? _ring.length - 10 : 0;
+      ctxDb['breadcrumbs'] = _ring.sublist(skip);
     } else if (nivel == 'aviso' && modulo != 'perf') {
       final skip = _ring.length > 5 ? _ring.length - 5 : 0;
       ctxDb['breadcrumbs'] = _ring.sublist(skip);
     }
 
     // Stack recortado a 15 líneas.
-    final stackRecortado = stack
+    var stackRecortado = stack
         ?.toString()
         .split('\n')
         .take(15)
         .join('\n');
+    // Argón 121B: tope defensivo de 4 KB tras el recorte por
+    // líneas (una línea minificada gigante no debe romper la
+    // cota de peso por fila).
+    if (stackRecortado != null) {
+      stackRecortado = _cortar(stackRecortado, 4096);
+    }
 
+    final ts = DateTime.now().toIso8601String();
     return {
-      'ts': DateTime.now().toIso8601String(),
+      'ts': ts,
       'modulo': modulo,
       'evento': evento,
       'detalle': detSan,
@@ -249,7 +289,35 @@ class AppLog {
           ctxDb.isNotEmpty ? jsonEncode(ctxDb) : null,
       'op_id': opId,
       'stack': stackRecortado,
+      // 1.21 (Argón 121B): agrupación de tormentas — la firma
+      // solo se calcula en niveles altos; repeticiones y
+      // primer_ts alimentan el UPDATE de _flush y la exportación.
+      'firma': _firmaDe(nivel, modulo, evento, detSan),
+      'repeticiones': 1,
+      'primer_ts': ts,
     };
+  }
+
+  /// Firma de tormenta: módulo + evento + detalle normalizado
+  /// (los dígitos son la parte variable típica: errno, ids,
+  /// conteos). Solo niveles altos; el resto no se agrupa.
+  static String? _firmaDe(String nivel, String modulo,
+      String evento, String? detalle) {
+    if (!_esNivelAlto(nivel)) return null;
+    final base =
+        (detalle ?? '').replaceAll(RegExp(r'\d+'), '#');
+    return '$modulo|$evento|'
+        '${base.length <= 120 ? base : base.substring(0, 120)}';
+  }
+
+  /// ¿[tsNuevo] cae dentro de la ventana de tormenta (10 min)
+  /// posterior a [tsFila]?
+  static bool _dentroDeVentana(String tsFila, String tsNuevo) {
+    final a = DateTime.tryParse(tsFila);
+    final b = DateTime.tryParse(tsNuevo);
+    if (a == null || b == null) return false;
+    return !b.isBefore(a) &&
+        b.difference(a) < const Duration(minutes: 10);
   }
 
   /// Sanitiza tokens y passwords (Gemini #8).
@@ -292,6 +360,25 @@ class AppLog {
 
   static void _encolar(Map<String, dynamic> log,
       {bool inmediato = false}) {
+    // BT-02 (Argón 121B) etapa 1 — colapso en RAM: si el buffer
+    // ya trae un evento con la misma firma dentro de la ventana
+    // de tormenta, se suman las repeticiones en ESA fila (su ts
+    // pasa a ser el de la última repetición y primer_ts conserva
+    // el primero) en vez de encolar otra fila idéntica.
+    final firma = log['firma'] as String?;
+    if (firma != null) {
+      for (final item in _buffer) {
+        if (item['firma'] == firma &&
+            _dentroDeVentana('${item['ts']}', '${log['ts']}')) {
+          item['repeticiones'] =
+              ((item['repeticiones'] as int?) ?? 1) +
+                  ((log['repeticiones'] as int?) ?? 1);
+          item['ts'] = log['ts'];
+          if (inmediato) unawaited(_flush());
+          return;
+        }
+      }
+    }
     _buffer.add(log);
     if (inmediato || _buffer.length >= 25) {
       unawaited(_flush());
@@ -323,11 +410,39 @@ class AppLog {
     _buffer.clear();
     try {
       final db = await LocalDb.instance.db;
-      final batch = db.batch();
-      for (final item in lote) {
-        batch.insert('app_log', item);
-      }
-      await batch.commit(noResult: true);
+      // BT-02 (Argón 121B) etapa 2: el batch ciego no podía
+      // decidir INSERT vs UPDATE; ahora una transacción: si ya
+      // hay fila con la misma firma dentro de la ventana, la
+      // tormenta se absorbe como repeticiones (conservando el
+      // detalle y el contexto de la PRIMERA ocurrencia).
+      await db.transaction((txn) async {
+        for (final item in lote) {
+          final firma = item['firma'] as String?;
+          var absorbido = false;
+          if (firma != null) {
+            final prev = await txn.query('app_log',
+                columns: ['id', 'ts'],
+                where: 'firma = ?',
+                whereArgs: [firma],
+                orderBy: 'id DESC',
+                limit: 1);
+            if (prev.isNotEmpty &&
+                _dentroDeVentana(
+                    '${prev.first['ts']}', '${item['ts']}')) {
+              await txn.rawUpdate(
+                  'UPDATE app_log SET repeticiones = '
+                  'repeticiones + ?, ts = ? WHERE id = ?',
+                  [
+                    (item['repeticiones'] as int?) ?? 1,
+                    item['ts'],
+                    prev.first['id'],
+                  ]);
+              absorbido = true;
+            }
+          }
+          if (!absorbido) await txn.insert('app_log', item);
+        }
+      });
       _contador += lote.length;
       _fallosFlush = 0; // éxito: resetear contador
       if (_contador >= 100) {
@@ -417,13 +532,14 @@ class AppLog {
         'ts': DateTime.now().toIso8601String(),
         'tipo': tipo,
         'error': _sanitizarTexto(err),
-        'stack': stack
-            ?.toString()
-            .split('\n')
-            .take(25)
-            .join('\n'),
-        'breadcrumbs':
-            List<Map<String, dynamic>>.from(_ring),
+        'stack': stack == null
+            ? null
+            : _cortar(
+                stack.toString().split('\n').take(25).join('\n'),
+                4096),
+        // 1.21: últimas 10 migas, como en _crear (BT-01).
+        'breadcrumbs': _ring.sublist(
+            _ring.length > 10 ? _ring.length - 10 : 0),
       };
       File('$dir/last_crash.json')
           .writeAsStringSync(jsonEncode(mapa));
@@ -541,7 +657,35 @@ class AppLog {
         'ORDER BY id DESC LIMIT 4000))',
         [corte7],
       );
+      // 1.21 (Argón 121B BT-04): poda por PESO. Las cuotas por
+      // filas no acotan los bytes (5000 filas pesaron ~15 MB).
+      // El peso se mide sumando las longitudes de las columnas
+      // de app_log — nunca el archivo de la BD, que contiene
+      // todas las tablas del gimnasio. Se sacrifican primero
+      // las filas ligeras más viejas (debug/info/aviso).
+      var peso = await _pesoTabla(b);
+      var guard = 0;
+      while (peso > 6 * 1024 * 1024 && guard++ < 20) {
+        final n = await b.delete('app_log',
+            where: 'id IN (SELECT id FROM app_log '
+                "WHERE nivel IN ('debug','info','aviso') "
+                'ORDER BY id ASC LIMIT 500)');
+        if (n == 0) break;
+        peso = await _pesoTabla(b);
+      }
     } catch (_) {}
+  }
+
+  /// Peso estimado en bytes de la tabla app_log (BT-04).
+  /// OJO: el SQL va en comillas dobles de Dart a propósito — con
+  /// comillas simples, el '' de SQL se come como fin de cadena
+  /// y el COALESCE queda roto (bug cazado en test, 1.21).
+  static Future<int> _pesoTabla(Database b) async {
+    final r = await b.rawQuery(
+        "SELECT COALESCE(SUM(LENGTH(COALESCE(detalle,'')) + "
+        "LENGTH(COALESCE(contexto,'')) + "
+        "LENGTH(COALESCE(stack,'')) + 100), 0) AS p FROM app_log");
+    return (r.first['p'] as num?)?.toInt() ?? 0;
   }
 
   /// Exporta en Markdown con resumen (Gemini #6).
@@ -559,16 +703,122 @@ class AppLog {
         orderBy: 'id DESC', limit: limite);
   }
 
-  static Future<String> exportar() async {
+  // === 1.21 (Argón 121B): delta, reinicio y marca ===
+
+  static const String _kMarcaDelta = 'bitacora_ultimo_id_exportado';
+
+  /// Último id de bitácora cuya exportación el usuario confirmó.
+  static Future<int> _marcaDelta() async {
+    final v = await LocalDb.instance.getMeta(_kMarcaDelta);
+    return int.tryParse(v ?? '') ?? 0;
+  }
+
+  /// Avanza la marca del delta hasta [maxId]. La llaman los
+  /// flujos de UI SOLO tras un compartido exitoso (o el botón
+  /// «Exportar y reiniciar», cuya intención ya es explícita):
+  /// exportar() nunca la mueve por su cuenta, porque si el
+  /// usuario cancela al compartir, el delta siguiente saldría
+  /// vacío y perdería esos registros (Argón 121B, pregunta 3).
+  static Future<void> confirmarMarcaExportada(int maxId) async {
+    final actual = await _marcaDelta();
+    if (maxId > actual) {
+      await LocalDb.instance.setMeta(_kMarcaDelta, '$maxId');
+    }
+  }
+
+  /// Reinicia la bitácora (pedido de Jc): la tabla queda vacía
+  /// con una única fila semilla que conserva el resumen de lo
+  /// borrado (conteos por nivel y rango de fechas), como
+  /// trazabilidad forense. Devuelve ese resumen.
+  ///
+  /// BT-03 (Argón 121B): antes de borrar hay que aquietar todo
+  /// lo que pueda volcar logs viejos encima de la tabla recién
+  /// vaciada: se cancela el temporizador, se espera a que un
+  /// flush en curso termine (su lote caerá ANTES del DELETE y
+  /// también se borra) y se vacían buffer, ring y —con el
+  /// buffer— las firmas de tormenta en RAM.
+  static Future<Map<String, dynamic>> reiniciar() async {
+    _flushTimer?.cancel();
+    _flushTimer = null;
+    for (var i = 0; i < 40 && _flushing; i++) {
+      await Future<void>.delayed(
+          const Duration(milliseconds: 50));
+    }
+    _buffer.clear();
+    _ring.clear();
+    final db = await LocalDb.instance.db;
+    final resumen = await db.rawQuery(
+        'SELECT nivel, COUNT(*) AS c, MIN(ts) AS mn, '
+        'MAX(ts) AS mx FROM app_log GROUP BY nivel');
+    var total = 0;
+    final porNivel = <String, dynamic>{};
+    String? desde;
+    String? hasta;
+    for (final r in resumen) {
+      total += (r['c'] as num).toInt();
+      porNivel['${r['nivel']}'] = (r['c'] as num).toInt();
+      final mn = '${r['mn']}';
+      final mx = '${r['mx']}';
+      if (desde == null || mn.compareTo(desde) < 0) desde = mn;
+      if (hasta == null || mx.compareTo(hasta) > 0) hasta = mx;
+    }
+    await db.delete('app_log');
+    final ahora = DateTime.now().toIso8601String();
+    await db.insert('app_log', {
+      'ts': ahora,
+      'modulo': 'app',
+      'evento': 'bitacora.reiniciada',
+      'detalle': 'Bitácora reiniciada manualmente.',
+      'nivel': 'info',
+      'contexto': jsonEncode({
+        'borrados_total': total,
+        'por_nivel': porNivel,
+        'desde': desde,
+        'hasta': hasta,
+      }),
+      'op_id': null,
+      'stack': null,
+      'firma': null,
+      'repeticiones': 1,
+      'primer_ts': ahora,
+    });
+    return {
+      'total': total,
+      'por_nivel': porNivel,
+      'desde': desde,
+      'hasta': hasta,
+    };
+  }
+
+  /// Exporta la bitácora en Markdown y devuelve (ruta, maxId).
+  ///
+  /// Con [soloNovedades], solo las filas posteriores a la marca
+  /// confirmada (ver confirmarMarcaExportada); la marca NO se
+  /// mueve aquí. El encabezado lleva versión de la app, tipo de
+  /// exportación, rango de fechas cubierto y registros por
+  /// nivel: lo que antes había que deducir a mano del archivo.
+  static Future<(String, int?)> exportar(
+      {bool soloNovedades = false, String versionApp = ''}) async {
     await _flush(); // vaciar buffer antes
     final db = await LocalDb.instance.db;
     await podar(db);
-    final filas = (await db.query('app_log',
-            orderBy: 'id DESC', limit: 5000))
-        .reversed
-        .toList();
+    final desdeId = soloNovedades ? await _marcaDelta() : 0;
+    final filas = await db.query('app_log',
+        where: soloNovedades ? 'id > ?' : null,
+        whereArgs: soloNovedades ? [desdeId] : null,
+        orderBy: 'id ASC',
+        limit: 5000);
+    final maxId =
+        filas.isEmpty ? null : (filas.last['id'] as num).toInt();
+    var quedanMas = false;
+    if (filas.length == 5000 && maxId != null) {
+      final extra = await db.rawQuery(
+          'SELECT COUNT(*) AS c FROM app_log WHERE id > ?',
+          [maxId]);
+      quedanMas = ((extra.first['c'] as num?)?.toInt() ?? 0) > 0;
+    }
 
-    // Resumen 24h
+    // Resumen 24h (se mantiene el de siempre).
     final hace24h = DateTime.now()
         .subtract(const Duration(hours: 24))
         .toIso8601String();
@@ -590,13 +840,37 @@ class AppLog {
           break;
       }
     }
+    // Conteos por nivel de TODO lo exportado (encabezado 1.21).
+    final porNivel = <String, int>{};
+    for (final f in filas) {
+      porNivel.update('${f['nivel']}', (v) => v + 1,
+          ifAbsent: () => 1);
+    }
 
     final sb = StringBuffer();
     sb.writeln('# Bitácora IronBody Gym');
     sb.writeln('');
     sb.writeln(
         'Exportado: ${DateTime.now().toIso8601String()}');
+    if (versionApp.isNotEmpty) {
+      sb.writeln('Versión de la app: $versionApp');
+    }
+    sb.writeln(soloNovedades
+        ? 'Tipo: novedades (desde el id $desdeId)'
+        : 'Tipo: completa');
+    if (filas.isNotEmpty) {
+      sb.writeln(
+          'Rango: ${filas.first['ts']} — ${filas.last['ts']}');
+    }
     sb.writeln('Registros: ${filas.length}');
+    if (porNivel.isNotEmpty) {
+      sb.writeln(
+          'Por nivel: ${porNivel.entries.map((e) => '${e.key} ${e.value}').join(' · ')}');
+    }
+    if (quedanMas) {
+      sb.writeln(
+          'OJO: quedan registros sin exportar tras este corte de 5000.');
+    }
     sb.writeln('');
     sb.writeln('## Resumen últimas 24h');
     sb.writeln('');
@@ -616,6 +890,11 @@ class AppLog {
       }
       sb.writeln(
           '- `[${f['ts']}]` **[${f['nivel']}]** `${f['modulo']}.${f['evento']}`');
+      final reps = (f['repeticiones'] as num?)?.toInt() ?? 1;
+      if (reps > 1) {
+        sb.writeln(
+            '  Repetido ×$reps (primero: ${f['primer_ts']}, último: ${f['ts']})');
+      }
       if (f['detalle'] != null) {
         sb.writeln('  ${f['detalle']}');
       }
@@ -634,7 +913,7 @@ class AppLog {
     final path =
         '${dir.path}/bitacora-ironbody-${DateTime.now().millisecondsSinceEpoch}.md';
     await File(path).writeAsString(sb.toString());
-    return path;
+    return (path, maxId);
   }
 }
 

@@ -41,7 +41,7 @@ class LocalDb {
   /// v1.4.0 (Argón): versión actual del esquema local. Los tests de
   /// migración comparan contra esta constante en vez de un número
   /// fijo, para no caer en cascada de fallos con cada migración.
-  static const int versionActual = 57;
+  static const int versionActual = 58;
 
   /// v37: marcas de información pública pendiente de republicar,
   /// UNA FILA POR CLAVE (compartido entre onCreate y la migración
@@ -1222,6 +1222,15 @@ class LocalDb {
           // onCreate).
           await _crearTablasNominaT22(db);
         }
+        if (oldV < 58) {
+          // 1.21 (Argón 121B): la bitácora agrupa tormentas y
+          // exporta por delta: firma del evento normalizado,
+          // contador de repeticiones y primera marca de tiempo.
+          await _addColumnIfMissing(db, 'app_log', 'firma', 'TEXT');
+          await _addColumnIfMissing(
+              db, 'app_log', 'repeticiones', 'INTEGER NOT NULL DEFAULT 1');
+          await _addColumnIfMissing(db, 'app_log', 'primer_ts', 'TEXT');
+        }
         if (oldV < 57) {
           // T5 (1.20): espejo de expedientes de diferencia
           // de caja (mismo método que onCreate).
@@ -2203,7 +2212,11 @@ class LocalDb {
             // onUpgrade añade a app_log nacen ya aquí en limpio.
             'contexto TEXT, '
             'op_id TEXT, '
-            'stack TEXT)');
+            // 1.21 (Argón 121B): paridad con onUpgrade v58.
+            'stack TEXT, '
+            'firma TEXT, '
+            'repeticiones INTEGER NOT NULL DEFAULT 1, '
+            'primer_ts TEXT)');
         await db.execute(
             'CREATE INDEX IF NOT EXISTS idx_app_log_ts ON app_log(ts)');
         // v1.12.0 (G2): índices de app_log con prioridad no anulable
@@ -5588,7 +5601,16 @@ class LocalDb {
         if (!idsLocales.contains(m['id'])) {...m, '_origen': 'central'},
     ];
     // Pendientes primero, luego por fecha desc.
-    const ordenEstado = {'pendiente': 0, 'en_revision': 1, 'resuelta': 2};
+    // Argón 121B (apunte cosmético): 'en_proceso' es el estado
+    // vivo tras Q6; 'en_revision' se conserva por datos viejos y
+    // 'descartada' ordena al final, tras las resueltas.
+    const ordenEstado = {
+      'pendiente': 0,
+      'en_proceso': 1,
+      'en_revision': 1,
+      'resuelta': 2,
+      'descartada': 3
+    };
     items.sort((a, b) {
       final ea = ordenEstado[a['estado']] ?? 9;
       final eb = ordenEstado[b['estado']] ?? 9;
