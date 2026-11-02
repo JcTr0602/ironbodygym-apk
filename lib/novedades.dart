@@ -16,6 +16,13 @@ class Novedad {
 }
 
 const novedades = [
+  Novedad('1.21.0', [
+    'Candado de acceso (solo dueño): pausa el acceso a la app para todos, para un rol o para una persona, con tu mensaje y caducidad; lo que se intente registrar durante la pausa se guarda y sube solo al reactivar',
+    'Cumpleaños: si ya regalaste el mes a un cliente, la felicitación de WhatsApp ahora anuncia el regalo con su nuevo vencimiento (antes salía el saludo sin mencionarlo)',
+    'Sincronización reforzada: auditoría completa de la subida y la bajada (operaciones, fotos y comprobantes) con varias correcciones para que nada se pierda ni se duplique cuando la conexión falla a mitad de camino',
+    'Comprobantes: la foto en espera ya no gasta sus intentos de subida mientras hay cobros pendientes por subir',
+    'Bitácora renovada: el registro interno se agrupa por error repetido, se limpia solo y se exporta por partes para diagnosticar problemas sin archivos enormes',
+  ]),
   Novedad('1.20.1', [
     'Corrección importante: la foto de la liquidación de nómina, los expedientes de diferencia de caja y los movimientos de stock ya bajan a la app (en la 1.20.0 se quedaban en el servidor)',
   ]),
