@@ -90,7 +90,14 @@ class _TarjetaMedidasState extends State<TarjetaMedidas> {
         ],
       ),
     );
-    if (ok != true || !mounted) return;
+    if (ok != true || !mounted) {
+      // Argón Clientes #10: cancelar fugaba TODOS los
+      // controladores (el dispose vivía tras este return).
+      for (final c in ctrls.values) {
+        c.dispose();
+      }
+      return;
+    }
     final medidas = <String, double>{};
     for (final e in ctrls.entries) {
       final txt = e.value.text.trim().replaceAll(',', '.');

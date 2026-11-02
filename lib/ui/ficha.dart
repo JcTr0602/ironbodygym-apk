@@ -131,6 +131,9 @@ class _FichaScreenState extends State<FichaScreen> {
   // v1.3.3 (Argón spec 2): regalo de cumpleaños del año en curso, si ya
   // se otorgó. Candado anual + botón "Reenviar WhatsApp".
   Map<String, dynamic>? _regaloAnio;
+  // Argón Clientes #6: deuda de fiado del cliente (la ficha no
+  // la mostraba en ningún lado; el Estado de cuenta sí).
+  Map<String, double> _fiadoPendiente = const {};
   // v1.3.9 (F1): estado del acceso a la App de Clientes.
   // null = sin acceso o caché no cargado; _accesoSinConexion = true si
   // no se pudo verificar por falta de red.
@@ -191,6 +194,12 @@ class _FichaScreenState extends State<FichaScreen> {
         soloCompartidas: !AuthService().isAdmin);
     // v1.3.3 (Argón spec 2): ¿ya se regaló este año?
     final regaloAnio = await _regaloDelAnio(widget.clienteId);
+    // Argón Clientes #6: deuda de fiado viva (tolerante).
+    var fiadoPend = <String, double>{};
+    try {
+      fiadoPend = await LocalDb.instance
+          .fiadoPendienteDeCliente(widget.clienteId);
+    } catch (_) {}
     // v1.3.9 (F1): cargar caché de accesos (solo dueño, tolerante a offline).
     bool accesoSinConexion = false;
     if (AuthService().isOwner && !AccesoAppCache.instance.cargado) {
@@ -206,6 +215,7 @@ class _FichaScreenState extends State<FichaScreen> {
         _incidencias = incidencias;
         _foto = null;
         _regaloAnio = regaloAnio;
+        _fiadoPendiente = fiadoPend;
         _accesoSinConexion = accesoSinConexion;
         _especialActiva = especialActiva;
         _tieneRegistroTarifa = tieneRegistro;
@@ -307,42 +317,14 @@ class _FichaScreenState extends State<FichaScreen> {
   /// Fuentes: 1) meta local (inmediata, offline); 2) espejo de pagos con
   /// metodo='cortesia' del año actual, hora de La Habana (autoritativo
   /// tras sincronizar).
-  Future<Map<String, dynamic>?> _regaloDelAnio(int clienteId) async {
-    final anio = '${ahoraHabana().year}';
-    try {
-      final meta = await LocalDb.instance
-          .getMeta('regalo_cumple_${clienteId}_$anio');
-      if (meta != null) {
-        final m = jsonDecode(meta) as Map<String, dynamic>;
-        return {'anterior': m['anterior'], 'nuevo': m['nuevo']};
-      }
-    } catch (_) {}
-    try {
-      Map<String, dynamic>? mejor;
-      // v1.3.4 (ítem 2): lectura indexada (cliente_id, fecha) + metodo,
-      // en vez de allMirror('pagos') + filtro en Dart. Incluye fallback
-      // para filas con columnas NULL.
-      for (final p in await LocalDb.instance
-          .pagosCortesiaClienteAnio(clienteId, anio)) {
-        if (mejor == null ||
-            '${p['fecha']}'.compareTo('${mejor['fecha']}') > 0) {
-          mejor = p;
-        }
-      }
-      if (mejor != null) {
-        final nuevo = '${mejor['pagado_hasta'] ?? ''}';
-        String? anterior;
-        try {
-          final d = DateTime.parse(nuevo.substring(0, 10))
-              .subtract(const Duration(days: 30));
-          anterior = '${d.year.toString().padLeft(4, '0')}-'
-              '${d.month.toString().padLeft(2, '0')}-'
-              '${d.day.toString().padLeft(2, '0')}';
-        } catch (_) {}
-        return {'anterior': anterior, 'nuevo': nuevo};
-      }
-    } catch (_) {}
-    return null;
+  Future<Map<String, dynamic>?> _regaloDelAnio(int clienteId) {
+    // Argón Clientes #7: UNA sola fuente (negocio.dart), con
+    // respaldo en el espejo de pagos. La copia local de aquí
+    // reconstruía el «vencía el» restando 30 días fijos al
+    // nuevo vencimiento: falso si el cliente estaba vencido
+    // (el regalo sumó desde hoy) y con desfase de 1 día en
+    // los cambios de horario de verano.
+    return regaloCumpleDelAnio(clienteId);
   }
 
   /// v1.2.2: historial de suplementos comprados por el cliente.
@@ -350,13 +332,17 @@ class _FichaScreenState extends State<FichaScreen> {
   Future<List<Map<String, dynamic>>> _suplementosDe(int clienteId) async {
     try {
       final db = await LocalDb.instance.db;
+      // Argón Clientes #6: también las ventas FIADAS a este
+      // cliente (fiado_cliente_id sin cliente_id): el Estado
+      // de cuenta sí las muestra y la ficha las escondía.
       final rows = await db.rawQuery('''
         SELECT id, data FROM ventas_suplementos
-        WHERE json_extract(data, '\$.cliente_id') = ?
+        WHERE (json_extract(data, '\$.cliente_id') = ?
+          OR json_extract(data, '\$.fiado_cliente_id') = ?)
           AND json_extract(data, '\$.anulado') IS NULL
         ORDER BY json_extract(data, '\$.fecha') DESC
         LIMIT 20
-      ''', [clienteId]);
+      ''', [clienteId, clienteId]);
       return rows.map((r) {
         try {
           final data = jsonDecode(r['data'] as String) as Map<String, dynamic>;
@@ -1892,10 +1878,16 @@ class _FichaScreenState extends State<FichaScreen> {
     final c = _c;
     final dias =
         diasRestantes(c?['pagado_hasta'] as String?) ?? 999999;
-    final vencido = c != null && dias < 0;
     // v1.7.0: Cuenta a la Casa (distintivo dorado; el predicado
     // vive en negocio.dart/LocalDb).
     final esCasa = c != null && esCuentaCasa(c);
+    // Argón Clientes #3: una Cuenta a la Casa NUNCA está
+    // vencida (no vence): sin esta guarda, la ficha pintaba el
+    // badge «VENCIDO» (o uno de miles de días si nunca pagó)
+    // sobre el chip dorado y activaba «Renovar 1 mes», que
+    // rebotaba contra el bloqueo de Casa. Buscar ya lo hacía
+    // bien (badge CASA); la ficha ahora coincide.
+    final vencido = c != null && !esCasa && dias < 0;
     // Cliente protegido (2026-10-26): marca del espejo local.
     final protegido = c != null && clienteEstaProtegido(c);
     // Bloque 1: marco de la foto en color de estado (3 dp): verde al día,
@@ -2059,9 +2051,13 @@ class _FichaScreenState extends State<FichaScreen> {
                       ),
                       const SizedBox(
                           height: AppEspacio.sm),
-                      Center(
-                          child: BadgeEstado.desdeDias(
-                              dias)),
+                      // Argón Clientes #3: con Casa, el badge de
+                      // días no se pinta: manda el chip dorado
+                      // de abajo (como en Buscar).
+                      if (!esCasa)
+                        Center(
+                            child: BadgeEstado.desdeDias(
+                                dias)),
                       // v1.7.0: distintivo DORADO de Cuenta a la Casa.
                       if (esCasa) ...[
                         const SizedBox(height: AppEspacio.sm),
@@ -2595,13 +2591,32 @@ class _FichaScreenState extends State<FichaScreen> {
     final nac = fechaNacDeCarnet('${c?['carnet'] ?? ''}');
     if (nac == null) return false;
     final hoy = ahoraHabana();
-    return nac.month == hoy.month && nac.day == hoy.day;
+    // Argón Clientes #4: con la regla ÚNICA 29-feb → 1-mar
+    // (mesDiaCumple): sin ella, la ficha no mostraba el banner
+    // el 1 de marzo en años no bisiestos mientras la pantalla
+    // de Cumpleaños y la bandeja sí felicitaban.
+    final celeb = mesDiaCumple(nac.month, nac.day, hoy.year);
+    return celeb.mes == hoy.month && celeb.dia == hoy.day;
   }
 
   /// Bloque 1: teléfono tocable para WhatsApp. Solo abre wa.me: NO
   /// guarda nada en el historial (regla «compartir nunca registra»).
   Future<void> _abrirWhatsAppTelefono() async {
-    final tel = _normalizarTelefono('${_c?['telefono'] ?? ''}');
+    // Argón Clientes #5: mismo orden que _mostrarDialogoWhatsApp
+    // (movil primero): en clientes migrados el celular vive en
+    // movil y telefono puede traer el carnet u otro dato, y el
+    // toque directo fallaba aunque el regalo sí abría WhatsApp.
+    var tel = '';
+    for (final raw in [
+      '${_c?['movil'] ?? ''}',
+      '${_c?['telefono'] ?? ''}'
+    ]) {
+      final norm = _normalizarTelefono(raw);
+      if (norm.isNotEmpty) {
+        tel = norm;
+        break;
+      }
+    }
     if (tel.length < 8) {
       if (!mounted) return;
       mostrarSnack(context, 'Este cliente no tiene un teléfono válido registrado.', significado: SignificadoChip.alerta);
@@ -3012,6 +3027,26 @@ class _FichaScreenState extends State<FichaScreen> {
   /// vigente sobre la lista ya ordenada.
   List<Map<String, dynamic>> _construirEntradas() {
     final entradas = <Map<String, dynamic>>[];
+    // Argón Clientes #6: la deuda de fiado se anuncia en la
+    // propia ficha (antes solo salía en el Estado de cuenta).
+    final deudaCup = _fiadoPendiente['CUP'] ?? 0;
+    final deudaUsd = _fiadoPendiente['USD'] ?? 0;
+    if (deudaCup > 0 || deudaUsd > 0) {
+      final partes = [
+        if (deudaCup > 0) '${fmtMonto(deudaCup)} CUP',
+        if (deudaUsd > 0) '${fmtMonto(deudaUsd)} USD',
+      ];
+      entradas.add({
+        'tipo': 'fiado',
+        'fecha': '',
+        'titulo': 'Suplemento fiado por pagar',
+        'subtitulo': 'Deuda pendiente · se salda en el Estado '
+            'de cuenta',
+        'trailing': partes.join(' + '),
+        'icono': Icons.receipt_long_rounded,
+        'color': AppColores.error,
+      });
+    }
     for (final p in _pagos) {
       final metodo = '${p['metodo'] ?? ''}';
       entradas.add({

@@ -308,23 +308,22 @@ class _CumpleanosScreenState extends State<CumpleanosScreen>
     if (!mounted) {
       return;
     }
-    final anteriorFmt = (pagadoHastaActual != null &&
-            pagadoHastaActual.length >= 10)
-        ? _fechaLarga(pagadoHastaActual)
-        : null;
-    final buf = StringBuffer()
-      ..writeln('¡Feliz cumpleaños, *$nombre*! 🎂🎉')
-      ..writeln('Te hemos regalado 1 mensualidad por tu día.');
-    if (anteriorFmt != null) {
-      buf.writeln('📅 Vencía el: *$anteriorFmt*');
-      buf.writeln('✅ Nuevo vencimiento: *${_fechaLarga(nuevoHasta)}*');
-    } else {
-      buf.writeln('✅ Válida hasta el: *${_fechaLarga(nuevoHasta)}*');
-    }
-    buf.writeln('¡A seguir dándole duro! — Iron Body Gym 💪🔥');
-    buf.write(lineaMensajeAutomatico);
+    // Argón Clientes #9: el mensaje sale de la función
+    // CANÓNICA (mensajeCumpleConRegalo, la misma que usa
+    // «Felicitar» cuando el regalo ya existe): esta pantalla
+    // lo armaba a mano y era un tercer formato. (El formato
+    // de la FICHA sí es distinto a propósito: excepción
+    // escrita por Jc el 2026-11-01.)
+    final mensaje = mensajeCumpleConRegalo(
+      nombre: nombre,
+      anteriorIso: (pagadoHastaActual != null &&
+              pagadoHastaActual.length >= 10)
+          ? pagadoHastaActual
+          : null,
+      nuevoIso: nuevoHasta,
+    );
     final url = Uri.parse(
-        'https://wa.me/$waNum?text=${Uri.encodeComponent(buf.toString().trim())}');
+        'https://wa.me/$waNum?text=${Uri.encodeComponent(mensaje.trim())}');
     try {
       await launchUrl(url, mode: LaunchMode.externalApplication);
       await _setFelicitado(id, true);

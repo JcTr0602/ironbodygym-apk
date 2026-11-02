@@ -47,11 +47,14 @@ SemaforoVistaPrevia semaforoVistaPrevia(
   }
   final parsed = DateTime.tryParse(pagadoHasta.trim());
   if (parsed == null) {
+    // Argón Clientes #11: una fecha ILEGIBLE no es «Activo»
+    // (en el resto de la app una fecha no parseable cuenta
+    // como vencido/pendiente). Verde aquí mentía al cliente.
     return SemaforoVistaPrevia(
       titulo: 'VENCE: $pagadoHasta',
       subtitulo: 'Verifica tu fecha de renovación en recepción.',
-      badge: 'Activo',
-      color: verde,
+      badge: 'Pendiente',
+      color: ambar,
     );
   }
   final hoyParsed = DateTime.tryParse(fechaServidor?.trim() ?? '');

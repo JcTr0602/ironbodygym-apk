@@ -507,8 +507,17 @@ class _HomeScreenState extends State<HomeScreen>
         );
       }
       var n = 0;
+      // Argón Clientes #8: las incidencias PRIVADAS del dueño
+      // no cuentan en el badge de un entrenador (su lista las
+      // filtra y salía vacía contra un badge de 2). Misma
+      // regla que incidenciasRelacionadas(soloCompartidas:).
+      final soloCompartidas = !AuthService().isAdmin;
       for (final i in [...localRows, ...mirrorRows]) {
-        if ('${i['estado']}' != 'resuelta') n++;
+        if ('${i['estado']}' == 'resuelta') continue;
+        if (soloCompartidas && '${i['visibilidad']}' == 'privada') {
+          continue;
+        }
+        n++;
       }
       return n;
     } catch (_) {

@@ -149,13 +149,87 @@ class _VentaSuplementoInscripcionScreenState
       return;
     }
     final carnet = _carnet.text.trim();
-    if (carnet.isNotEmpty && !RegExp(r'^\d{6}$').hasMatch(carnet)) {
+    // Argón Clientes #1: el carnet sigue la regla ÚNICA de la
+    // app (validarCarnet: 6 a 11 dígitos), no «exactamente 6»
+    // como decía aquí — la ficha y el alta aceptan hasta 11.
+    if (carnet.isNotEmpty && !validarCarnet(carnet)) {
       await DialogoApp.confirmar(context,
           titulo: 'Revisa el carnet',
-          mensaje: 'El carnet debe tener 6 dígitos (o déjalo vacío).',
+          mensaje: 'El carnet debe tener de 6 a 11 dígitos '
+              '(o déjalo vacío).',
           aceptar: 'Entendido',
           cancelar: '');
       return;
+    }
+    // Argón Clientes #1: teléfono con formato válido (el alta
+    // normal SÍ lo exige) y chequeo de DUPLICADOS antes de
+    // tocar el stock: sin esto, un comprador ya inscrito (o un
+    // teléfono de 7 dígitos) creaba un cliente duplicado o la
+    // op rebotaba en el servidor con el stock ya descontado
+    // en el teléfono.
+    final tel = _telefono.text.trim();
+    if (tel.isNotEmpty && !validarTelefono(tel)) {
+      await DialogoApp.confirmar(context,
+          titulo: 'Revisa el teléfono',
+          mensaje: 'El teléfono debe tener 8 dígitos empezando '
+              'con 5 o 6 (o déjalo vacío).',
+          aceptar: 'Entendido',
+          cancelar: '');
+      return;
+    }
+    final dups = await posiblesDuplicados(
+        nombre: nombre,
+        carnet: carnet.isEmpty ? null : carnet,
+        telefono: tel.isEmpty ? null : tel);
+    if (!mounted) return;
+    final carnetDigitos = carnet.replaceAll(RegExp(r'[^0-9]'), '');
+    final carnetDuplicado = carnetDigitos.length == 11 &&
+        dups.any((d) => d['_motivo'] == 'mismo carnet');
+    if (carnetDuplicado) {
+      final dueno = dups.firstWhere(
+          (d) => d['_motivo'] == 'mismo carnet');
+      await DialogoApp.confirmar(context,
+          titulo: 'Carnet duplicado',
+          mensaje: 'El carnet $carnet ya pertenece a '
+              '"${dueno['nombre']}". Cada carnet corresponde a '
+              'un solo cliente: no se puede inscribir de nuevo.',
+          aceptar: 'Entendido',
+          cancelar: '');
+      return;
+    }
+    if (dups.isNotEmpty) {
+      final seguir = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => DialogoApp(
+          titulo: 'Posible duplicado',
+          iconoTitulo: Icons.person_search_rounded,
+          contenido: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('Ya existe(n) cliente(s) parecido(s):'),
+              const SizedBox(height: 8),
+              for (final d in dups)
+                Text('• ${d['nombre']} (${d['_motivo']})'),
+              const SizedBox(height: 8),
+              const Text('¿Seguro que es un cliente nuevo?'),
+            ],
+          ),
+          acciones: [
+            TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('Revisar')),
+            ElevatedButton(
+                onPressed: () => Navigator.pop(ctx, true),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColores.naranja,
+                  foregroundColor: Colors.white,
+                ),
+                child: const Text('Sí, es nuevo')),
+          ],
+        ),
+      );
+      if (seguir != true) return;
     }
 
     // Lote 3 (BLOQUEANTE, espejo del bloqueo USD de la venta simple):

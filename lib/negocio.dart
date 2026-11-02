@@ -465,13 +465,39 @@ String fechaLargaCorta(String? iso) {
 /// 'nuevo': iso}); null si este año aún no se ha regalado.
 Future<Map<String, dynamic>?> regaloCumpleDelAnio(
     int clienteId) async {
+  final anio = '${ahoraHabana().year}';
   final crudo = await LocalDb.instance
-      .getMeta('regalo_cumple_${clienteId}_${ahoraHabana().year}');
-  if (crudo == null || crudo.isEmpty) return null;
+      .getMeta('regalo_cumple_${clienteId}_$anio');
+  if (crudo != null && crudo.isNotEmpty) {
+    try {
+      final m = jsonDecode(crudo);
+      if (m is Map && m['nuevo'] != null) {
+        return Map<String, dynamic>.from(m);
+      }
+    } catch (_) {}
+  }
+  // Argón Clientes #7: respaldo en el espejo de pagos (la meta
+  // local no existe si el regalo se hizo en OTRO teléfono o
+  // tras reinstalar: sin respaldo, felicitar desde aquí salía
+  // pelado aunque el regalo constaba en los pagos). El
+  // «anterior» NO se reconstruye restando 30 días: si el
+  // cliente estaba vencido, el regalo sumó desde hoy y esa
+  // resta inventa una fecha falsa; sin meta, anterior = null
+  // y el mensaje omite la línea «Vencía el».
   try {
-    final m = jsonDecode(crudo);
-    if (m is Map && m['nuevo'] != null) {
-      return Map<String, dynamic>.from(m);
+    Map<String, dynamic>? mejor;
+    for (final p in await LocalDb.instance
+        .pagosCortesiaClienteAnio(clienteId, anio)) {
+      if (mejor == null ||
+          '${p['fecha']}'.compareTo('${mejor['fecha']}') > 0) {
+        mejor = p;
+      }
+    }
+    if (mejor != null) {
+      final nuevo = '${mejor['pagado_hasta'] ?? ''}';
+      if (nuevo.isNotEmpty) {
+        return {'anterior': null, 'nuevo': nuevo};
+      }
     }
   } catch (_) {}
   return null;

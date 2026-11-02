@@ -109,7 +109,18 @@ class _BuscarScreenState extends State<BuscarScreen> {
     // v1.3.1: descartar resultados obsoletos (race condition).
     final gen = ++_gen;
     final q = _q.text.trim();
-    var r = await listaClientes(q);
+    // Argón Clientes #12: si lo pegado es un TELÉFONO con
+    // formato (+53 5819 1577, 5 819 1577…), la búsqueda va por
+    // sus 8 dígitos limpios (así se guarda en la ficha): con
+    // los espacios y el prefijo no coincidía con nada.
+    var qBusqueda = q;
+    final digitos = q.replaceAll(RegExp(r'[^0-9]'), '');
+    if (digitos.length == 10 && digitos.startsWith('53')) {
+      qBusqueda = digitos.substring(2);
+    } else if (digitos.length == 8 && q != digitos) {
+      qBusqueda = digitos;
+    }
+    var r = await listaClientes(qBusqueda);
     if (gen != _gen) return;
     // D-09 (1.21): la lista completa se carga UNA vez por
     // búsqueda aunque la pidan dos rutas (notas e id exacto).
@@ -228,10 +239,17 @@ class _BuscarScreenState extends State<BuscarScreen> {
     }
     // F11 (1.20): si lo escrito es un número que coincide
     // EXACTO con el id de un cliente, ese cliente va PRIMERO
-    // (y entra aunque la búsqueda normal o los filtros no lo
-    // trajeran): abrir la ficha desde un id copiado de una
-    // captura, de la nómina o de un error. La ficha aplica la
-    // vista protegida si corresponde, como siempre.
+    // (y entra aunque la búsqueda normal no lo trajera):
+    // abrir la ficha desde un id copiado de una captura, de
+    // la nómina o de un error. La ficha aplica la vista
+    // protegida si corresponde, como siempre.
+    // Argón Clientes #2: con un FILTRO activo (estado, edad o
+    // sin foto) el rescate NO inyecta desde fuera: el filtro
+    // es una lente deliberada y colar un «al día» bajo el chip
+    // «Vencidos» (o un protegido que el filtro excluye)
+    // contradice lo que la pantalla está afirmando. Sin
+    // filtros, el rescate sigue como se diseñó.
+    final sinFiltros = _filtro == 'todos' && _rangoEdad == 'todas';
     if (RegExp(r'^\d+$').hasMatch(q)) {
       final idBuscado = int.tryParse(q);
       if (idBuscado != null) {
@@ -239,7 +257,7 @@ class _BuscarScreenState extends State<BuscarScreen> {
             (c) => (c['id'] as num?)?.toInt() == idBuscado);
         if (i > 0) {
           r.insert(0, r.removeAt(i));
-        } else if (i < 0) {
+        } else if (i < 0 && sinFiltros) {
           final todosL2 = await todos();
           if (gen != _gen) return;
           final porId = todosL2
