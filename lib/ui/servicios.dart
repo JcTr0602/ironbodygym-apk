@@ -60,6 +60,7 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
   // en vez del espejo completo.
   List<Map<String, dynamic>> _desgloseVentas = [];
   List<Map<String, dynamic>> _desgloseSalidas = [];
+  List<Map<String, dynamic>> _desgloseOps = [];
   int? _desglosePomoId;
   Map<int, String> _personas = {};
   int? _miTid;
@@ -174,6 +175,10 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
       for (final v in ventasHoyEspejo)
         if ((v['reverso_de'] as num?) != null)
           (v['reverso_de'] as num).toInt(),
+      // Argón Servicios #6: también las reversiones aún en la
+      // cola (sin espejar): el botón de revertir se oculta en
+      // cuanto se encola, no cuando sincroniza.
+      ...await reversosPendientesVentaIds(),
     };
     final deHoy = ventasHoyEspejo.where(visibleParaMi).toList()
       ..sort((a, b) =>
@@ -233,10 +238,14 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
         .mirrorPorCampo('servicio_ventas', 'pomo_id', pid);
     final salidas = await LocalDb.instance
         .mirrorPorCampo('servicio_salidas', 'pomo_id', pid);
+    // Argón Servicios #4: el desglose compone espejo + cola,
+    // igual que el saldo de la cabecera.
+    final ops = await opsPendientesServicios();
     if (!mounted || _pomoSel != pid) return;
     setState(() {
       _desgloseVentas = ventas;
       _desgloseSalidas = salidas;
+      _desgloseOps = ops;
       _desglosePomoId = pid;
     });
   }
@@ -599,8 +608,16 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
       context,
       tipo: 'venta_servicio',
       coincide: (p) =>
-          '${p['tipo']}' == tipo &&
+          // Argón Servicios #8: entre dosis (ración/combo) SÍ
+          // avisa aunque cambie el subtipo; y sin cliente
+          // identificado no avisa (dos personas distintas «Sin
+          // identificar» seguidas son comercio normal, y el
+          // aviso constante entrena a ignorarlo).
+          (tipo.startsWith('dosis')
+              ? '${p['tipo']}'.startsWith('dosis')
+              : '${p['tipo']}' == tipo) &&
           (p['cantidad'] as num?)?.toInt() == cantidad &&
+          cidServ != null &&
           (p['cliente_id'] as num?)?.toInt() == cidServ &&
           (p['casa'] == true) == casaServ,
       descripcion: 'una venta de '
@@ -738,16 +755,47 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
     Map<String, dynamic>? cliente;
     // 1.15 V7: Casa para el dueño (mismo trato que la venta simple).
     var paraDuenoCasa = false;
-    var metodo =
-        primerMetodoServicioActivo(_ajustes, 'dosis_con_agua') ?? 'efectivo';
-    final metodosActivos = <String>[
-      for (final x in const ['efectivo', 'transferencia'])
-        if (metodoServicioActivo(_ajustes, 'dosis_con_agua', x)) x,
-    ];
+    // Argón Servicios #1 (CRÍTICO): la múltiple nace «a nombre
+    // de» el titular del pomo seleccionado, igual que la venta
+    // simple. Antes viajaba siempre como venta del dueño:
+    // vendiendo desde el pomo de un entrenador, la comisión
+    // salía en 0 y el efectivo se le cargaba al dueño, aunque
+    // el stock sí salía del pomo del entrenador.
+    final vendedorSel = (_pomoActual!['titular_tid'] as int?) ?? _miTid;
+    // Argón Servicios #2: los métodos ofrecidos son la
+    // INTERSECCIÓN de los activos de los componentes presentes
+    // (con agua si m > 0, sin agua si m < n), recalculada en
+    // vivo al mover los contadores. Antes solo mandaba
+    // dosis_con_agua: una venta de puras raciones podía quedar
+    // bloqueada sin motivo, y una mixta podía ofrecer una
+    // transferencia que la subventa sin agua rechazaba.
+    List<String> metodosPara(int nn, int mm) => <String>[
+          for (final x in const ['efectivo', 'transferencia'])
+            if ((mm <= 0 ||
+                    metodoServicioActivo(
+                        _ajustes, 'dosis_con_agua', x)) &&
+                (mm >= nn ||
+                    metodoServicioActivo(
+                        _ajustes, 'dosis_sin_agua', x)))
+              x,
+        ];
+    var metodosActivos = metodosPara(n, m);
+    var metodo = metodosActivos.isNotEmpty
+        ? metodosActivos.first
+        : (primerMetodoServicioActivo(_ajustes, 'dosis_sin_agua') ??
+            'efectivo');
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setD) {
+          // Argón Servicios #2: métodos vivos según la mezcla
+          // actual; si el elegido dejó de ser válido, se corrige
+          // al primero disponible.
+          metodosActivos = metodosPara(n, m);
+          if (metodosActivos.isNotEmpty &&
+              !metodosActivos.contains(metodo)) {
+            metodo = metodosActivos.first;
+          }
           // 1.14 (D14): carnet + edad del elegido, para verificar
           // antes de confirmar la venta.
           final subCliente =
@@ -769,7 +817,14 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
             pomosM: m,
             precioSinAgua: precioSin,
             precioConAgua: precioCon,
-            comisionUnitaria: _precios?.comision ?? 50,
+            // Argón Servicios #1: si la venta es del propio
+            // dueño (su pomo), la comisión real es 0 y el
+            // diálogo lo muestra así; desde el pomo de un
+            // entrenador, la comisión estándar es la suya.
+            comisionUnitaria:
+                (vendedorSel == _miTid || esCasa)
+                    ? 0
+                    : (_precios?.comision ?? 50),
           );
           final total = resumen.total;
           final comision = resumen.comision;
@@ -955,6 +1010,10 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
       context,
       tipo: 'venta_servicio',
       coincide: (p) =>
+          // Argón Servicios #8: sin cliente identificado no se
+          // avisa (grupos «Sin identificar» seguidos son
+          // legítimos y el aviso perdería fuerza).
+          cidMult != null &&
           '${p['tipo']}'.startsWith('dosis') &&
           (p['cliente_id'] as num?)?.toInt() == cidMult &&
           (p['casa'] == true) == esCasa,
@@ -970,10 +1029,15 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
         metodo: metodo,
         casa: esCasa,
         beneficiario: paraDuenoCasa ? 'dueno' : null,
-        vendedorEsDueno: _esDueno,
-        vendedorId: null,
+        // Argón Servicios #1: roles como en la venta simple
+        // (vendedor = titular del pomo; el efectivo lo responde
+        // el mismo cuando el dueño cobra en efectivo).
+        vendedorEsDueno: _esDueno && vendedorSel == _miTid,
+        vendedorId: _esDueno ? vendedorSel : null,
         responsableEfectivoId:
-            _esDueno && !esCasa && metodo == 'efectivo' ? _miTid : null,
+            _esDueno && !esCasa && metodo == 'efectivo'
+                ? vendedorSel
+                : null,
         topeDosis: topeDosis,
         topePomos: topePomos,
       );
@@ -1449,6 +1513,7 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                 pomo: pomo,
                 ventasEspejo: _desgloseVentas,
                 salidasEspejo: _desgloseSalidas,
+                opsPendientes: _desgloseOps,
               );
               return Column(
                 crossAxisAlignment: CrossAxisAlignment.start,

@@ -367,40 +367,47 @@ int saldoLoteDesde({
 /// principal le resta, al destino le suma; si el servidor lo
 /// rechaza, la op desaparece de pendientes y la derivación deja de
 /// contarla SIN tocar la fila espejo (ajuste Argón MEDIO).
-int saldoPomoDesde({
+({int asignadas, int repartidas, int ventas, int salidas, int saldo})
+    _componentesPomo({
   required Map<String, dynamic> pomo,
   required List<Map<String, dynamic>> ventasEspejo,
   required List<Map<String, dynamic>> salidasEspejo,
   required List<Map<String, dynamic>> opsPendientes,
 }) {
-  var saldo = (pomo['dosis_asignadas'] as num?)?.toInt() ?? 0;
-  saldo -= (pomo['dosis_repartidas'] as num?)?.toInt() ?? 0;
+  // Paseo ÚNICO del pomo (espejo + ops en cola): el saldo de la
+  // cabecera y el desglose del pie salen de ESTAS mismas cuentas
+  // y no pueden volver a contradecirse (Argón Servicios #4: el
+  // desglose leía solo el espejo y con una venta en cola la
+  // cabecera decía 28 y el pie seguía sumando 30).
   final pomoId = (pomo['id'] as num?)?.toInt();
-  // A diferencia de saldoLoteDesde (que recibe listas ya filtradas),
-  // aquí el filtro vive DENTRO: una lista sin filtrar jamás debe
-  // drenar el pomo. Las ventas viejas con pomo_id NULL y las de
-  // otro pomo quedan fuera por construcción.
-  final ventas = ventasEspejo
+  var asignadas = (pomo['dosis_asignadas'] as num?)?.toInt() ?? 0;
+  var repartidas = (pomo['dosis_repartidas'] as num?)?.toInt() ?? 0;
+  // Filtro DENTRO (igual que siempre): una lista sin filtrar
+  // jamás debe drenar el pomo. Las ventas viejas con pomo_id
+  // NULL y las de otro pomo quedan fuera por construcción.
+  final ventasFiltradas = ventasEspejo
       .where((v) => (v['pomo_id'] as num?)?.toInt() == pomoId)
       .toList();
-  final salidas = salidasEspejo
-      .where((v) => (v['pomo_id'] as num?)?.toInt() == pomoId)
+  final salidasFiltradas = salidasEspejo
+      .where((s) => (s['pomo_id'] as num?)?.toInt() == pomoId)
       .toList();
+  var ventas = 0;
+  for (final v in ventasFiltradas) {
+    ventas += (v['cantidad'] as num?)?.toInt() ?? 0;
+  }
+  var salidas = 0;
+  for (final s in salidasFiltradas) {
+    salidas += (s['dosis'] as num?)?.toInt() ?? 0;
+  }
   final uuidsEspejo = <String>{
-    for (final v in ventas) '${v['op_uuid'] ?? ''}',
-    for (final s in salidas) '${s['op_uuid'] ?? ''}',
+    for (final v in ventasFiltradas) '${v['op_uuid'] ?? ''}',
+    for (final s in salidasFiltradas) '${s['op_uuid'] ?? ''}',
   };
-  for (final v in ventas) {
-    saldo -= (v['cantidad'] as num?)?.toInt() ?? 0;
-  }
-  for (final s in salidas) {
-    saldo -= (s['dosis'] as num?)?.toInt() ?? 0;
-  }
-  final esPrincipal = (pomo['es_principal'] as num?)?.toInt() == 1;
   final ventaPorId = <int, Map<String, dynamic>>{
-    for (final v in ventas)
+    for (final v in ventasFiltradas)
       if ((v['id'] as num?) != null) (v['id'] as num).toInt(): v,
   };
+  final esPrincipal = (pomo['es_principal'] as num?)?.toInt() == 1;
   for (final op in opsPendientes) {
     final uuid = '${op['op_uuid'] ?? ''}';
     if (uuidsEspejo.contains(uuid)) continue;
@@ -408,37 +415,54 @@ int saldoPomoDesde({
     switch ('${op['tipo']}') {
       case 'venta_servicio':
         if ((p['pomo_id'] as num?)?.toInt() == pomoId) {
-          saldo -= (p['cantidad'] as num?)?.toInt() ?? 1;
+          ventas += (p['cantidad'] as num?)?.toInt() ?? 1;
         }
       case 'salida_servicio':
         if ((p['pomo_id'] as num?)?.toInt() == pomoId) {
-          saldo -= (p['dosis'] as num?)?.toInt() ?? 0;
+          salidas += (p['dosis'] as num?)?.toInt() ?? 0;
         }
       case 'revertir_venta_servicio':
         final orig = ventaPorId[(p['venta_id'] as num?)?.toInt()];
-        if (orig != null &&
-            (orig['pomo_id'] as num?)?.toInt() == pomoId) {
-          saldo += (orig['cantidad'] as num?)?.toInt() ?? 0;
+        if (orig != null) {
+          ventas -= (orig['cantidad'] as num?)?.toInt() ?? 0;
         }
       case 'reponer_pomo':
         final dosis = (p['dosis'] as num?)?.toInt() ?? 0;
         // Solo el principal DEL MISMO producto: sin este chequeo,
         // un relleno pendiente de otro producto drenaba este
-        // principal en local (el servidor deriva por destino y no
-        // tiene el problema, pero el pre-chequeo local sí).
-        // Delta Luna: el id del payload DEBE ser no nulo; null ==
-        // null es true en Dart y restaría sin producto.
+        // principal en local. El id del payload DEBE ser no nulo;
+        // null == null es true en Dart y restaría sin producto.
         final supOp = (p['suplemento_id'] as num?)?.toInt();
         if (esPrincipal &&
             supOp != null &&
             supOp == (pomo['suplemento_id'] as num?)?.toInt()) {
-          saldo -= dosis;
+          repartidas += dosis;
         } else if ((p['pomo_destino_id'] as num?)?.toInt() == pomoId) {
-          saldo += dosis;
+          asignadas += dosis;
         }
     }
   }
-  return saldo;
+  return (
+    asignadas: asignadas,
+    repartidas: repartidas,
+    ventas: ventas,
+    salidas: salidas,
+    saldo: asignadas - repartidas - ventas - salidas,
+  );
+}
+
+int saldoPomoDesde({
+  required Map<String, dynamic> pomo,
+  required List<Map<String, dynamic>> ventasEspejo,
+  required List<Map<String, dynamic>> salidasEspejo,
+  required List<Map<String, dynamic>> opsPendientes,
+}) {
+  return _componentesPomo(
+    pomo: pomo,
+    ventasEspejo: ventasEspejo,
+    salidasEspejo: salidasEspejo,
+    opsPendientes: opsPendientes,
+  ).saldo;
 }
 
 /// v1.8.1 (idea de Jc 2026-10-23): acumulado de servicios de UN
@@ -640,28 +664,16 @@ Map<String, dynamic>? _ventaPorIdAgua(
   required Map<String, dynamic> pomo,
   required List<Map<String, dynamic>> ventasEspejo,
   required List<Map<String, dynamic>> salidasEspejo,
+  required List<Map<String, dynamic>> opsPendientes,
 }) {
-  // Filtro interno por pomo_id (igual que saldoPomoDesde): las
-  // ventas viejas con pomo_id NULL no cuentan en ningún pomo.
-  final pomoId = (pomo['id'] as num?)?.toInt();
-  var ventas = 0;
-  for (final v in ventasEspejo) {
-    if ((v['pomo_id'] as num?)?.toInt() != pomoId) continue;
-    ventas += (v['cantidad'] as num?)?.toInt() ?? 0;
-  }
-  var salidas = 0;
-  for (final s in salidasEspejo) {
-    if ((s['pomo_id'] as num?)?.toInt() != pomoId) continue;
-    salidas += (s['dosis'] as num?)?.toInt() ?? 0;
-  }
-  final asignadas = (pomo['dosis_asignadas'] as num?)?.toInt() ?? 0;
-  final repartidas = (pomo['dosis_repartidas'] as num?)?.toInt() ?? 0;
-  return (
-    asignadas: asignadas,
-    repartidas: repartidas,
-    ventas: ventas,
-    salidas: salidas,
-    saldo: asignadas - repartidas - ventas - salidas,
+  // Argón Servicios #4: el desglose sale del MISMO paseo que el
+  // saldo (espejo + cola); antes leía solo el espejo y el pie de
+  // la tarjeta contradecía a la cabecera con ops en cola.
+  return _componentesPomo(
+    pomo: pomo,
+    ventasEspejo: ventasEspejo,
+    salidasEspejo: salidasEspejo,
+    opsPendientes: opsPendientes,
   );
 }
 
@@ -677,6 +689,26 @@ bool puedeDeshacerVenta(DateTime cobradoEn, DateTime ahora) =>
 // ------------------------------------------------------------------
 // Lecturas locales (espejo + pendientes)
 // ------------------------------------------------------------------
+
+/// Argón Servicios #6: ids de ventas con un reverso YA en la
+/// cola (aún no espejado). Las pantallas los suman a las
+/// reversadas del espejo para ocultar el botón de revertir:
+/// sin esto, el botón seguía visible hasta sincronizar y se
+/// podía encolar una segunda reversión (y su segunda merma).
+Future<Set<int>> reversosPendientesVentaIds() async {
+  final ids = <int>{};
+  for (final op in await _opsServicioPendientes()) {
+    if ('${op['tipo']}' != 'revertir_venta_servicio') continue;
+    final vid = (_payloadDeOp(op)['venta_id'] as num?)?.toInt();
+    if (vid != null) ids.add(vid);
+  }
+  return ids;
+}
+
+/// Ops de Servicios en cola (acceso público para las pantallas
+/// que componen vistas con espejo + pendientes).
+Future<List<Map<String, dynamic>>> opsPendientesServicios() =>
+    _opsServicioPendientes();
 
 Future<List<Map<String, dynamic>>> _opsServicioPendientes() async {
   final ops = await LocalDb.instance.pendingOps();
@@ -1485,6 +1517,13 @@ Future<String> registrarSalidaServicio({
   String? nota,
 }) async {
   if (dosis < 1) throw Exception('La salida debe ser de al menos 1 dosis');
+  // Argón Servicios #10: la salida no puede superar el saldo
+  // local del pomo (un dedo de más —22 por 2— dejaba el saldo
+  // en -19 y apagaba los botones de venta del dueño).
+  final saldoPomo = await saldoPomoLocal(pomoId);
+  if (dosis > saldoPomo) {
+    throw Exception('Solo quedan $saldoPomo dosis en el pomo');
+  }
   return _encolar('salida_servicio', {
     'pomo_id': pomoId,
     'dosis': dosis,
@@ -1505,6 +1544,11 @@ Future<String> registrarSalidaAguaServicio({
   String? nota,
 }) async {
   if (cantidad < 1) throw Exception('La salida debe ser de al menos 1 pomo');
+  // Argón Servicios #10: tampoco del agua común.
+  final agua = await stockAguaLocal();
+  if (cantidad > agua.saldo) {
+    throw Exception('Solo quedan ${agua.saldo} pomos de agua');
+  }
   return _encolar('salida_servicio', {
     'tipo_item': 'agua',
     'cantidad': cantidad,
@@ -1547,28 +1591,61 @@ Future<List<String>> revertirVentaServicio({
     throw Exception(
         'Para registrar la pérdida hace falta el pomo y la cantidad');
   }
-  final uuids = <String>[
-    await _encolar('revertir_venta_servicio', {
-      'venta_id': ventaId,
-      'motivo': motivo.trim(),
-      if (polvoPerdido) 'polvo_perdido': true,
-    }),
-  ];
-  if (polvoPerdido) {
-    uuids.add(await _encolar('salida_servicio', {
-      'pomo_id': pomoId,
-      'dosis': cantidad,
-      'motivo': 'merma',
-      'nota': 'Pérdida física tras reversión de venta #$ventaId',
-      'fecha': hoyHabanaIso(),
-      // Corrección panel 1.13: la merma va ligada a su venta.
-      // El servidor la rechaza si el reverso aún no se aplicó
-      // (lote cerrado entre tanto, reverso rechazado): sin este
-      // enlace, la merma podía aplicarse sola, fantasma.
-      'venta_id': ventaId,
-    }));
+  // Argón Servicios #6: guarda anti-doble reversión. Si ya hay
+  // un reverso de ESTA venta en la cola, el segundo se bloquea
+  // aquí (la UI también lo oculta con reversosPendientesVentaIds,
+  // pero la guarda de fondo es esta): el servidor rechaza el
+  // segundo reverso, mas la segunda merma enlazada podría
+  // aplicarse contra el reverso ya aplicado y descontar dos
+  // veces el polvo.
+  final pendientesPrevias = await _opsServicioPendientes();
+  final yaEnCola = pendientesPrevias.any((op) =>
+      '${op['tipo']}' == 'revertir_venta_servicio' &&
+      (_payloadDeOp(op)['venta_id'] as num?)?.toInt() == ventaId);
+  if (yaEnCola) {
+    throw Exception('Esta venta ya tiene una reversión en cola');
   }
-  return uuids;
+  // Argón Servicios #5: reverso y merma se encolan en UNA
+  // transacción con un solo push al final (antes eran dos
+  // _encolar separados, cada uno con su push: si el proceso
+  // moría entre ambos, quedaba el reverso sin su merma y el
+  // polvo volvía al pomo aunque se hubiera perdido).
+  final uuidReverso = const Uuid().v4();
+  final uuidSalida = polvoPerdido ? const Uuid().v4() : null;
+  final conn = await LocalDb.instance.db;
+  await conn.transaction((txn) async {
+    await LocalDb.instance.queueOp(
+      opUuid: uuidReverso,
+      tipo: 'revertir_venta_servicio',
+      payload: {
+        'venta_id': ventaId,
+        'motivo': motivo.trim(),
+        if (polvoPerdido) 'polvo_perdido': true,
+      },
+      txn: txn,
+    );
+    if (polvoPerdido) {
+      await LocalDb.instance.queueOp(
+        opUuid: uuidSalida!,
+        tipo: 'salida_servicio',
+        payload: {
+          'pomo_id': pomoId,
+          'dosis': cantidad,
+          'motivo': 'merma',
+          'nota': 'Pérdida física tras reversión de venta #$ventaId',
+          'fecha': hoyHabanaIso(),
+          // Corrección panel 1.13: la merma va ligada a su venta.
+          // El servidor la rechaza si el reverso aún no se aplicó
+          // (lote cerrado entre tanto, reverso rechazado): sin este
+          // enlace, la merma podía aplicarse sola, fantasma.
+          'venta_id': ventaId,
+        },
+        txn: txn,
+      );
+    }
+  });
+  unawaited(SyncEngine.instance.push().then((_) {}, onError: (_) {}));
+  return [uuidReverso, if (uuidSalida != null) uuidSalida];
 }
 
 /// v1.13.0 (Bloque 4, Argón ajuste 3): reponer un lote SOLO el dueño,

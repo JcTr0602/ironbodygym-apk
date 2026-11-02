@@ -294,6 +294,10 @@ class _ServiciosEstadisticasScreenState
       comisiones: semCom,
     );
 
+    // Argón Servicios #11: el simulador valora el agua al CPP
+    // vigente (el mismo de las ventas reales y la tarjeta 1B),
+    // no al costo de la última compra.
+    final costoAguaCpp = (await stockAguaLocal()).cpp;
     if (!mounted) return;
     setState(() {
       _a = {'porBote': porBote};
@@ -310,7 +314,7 @@ class _ServiciosEstadisticasScreenState
       // 12/25: el simulador reutiliza estas listas.
       _botes = botes;
       _nombreSup = nombreSup;
-      _costoAgua = ultimaEntradaAguaCosto(movsAgua);
+      _costoAgua = costoAguaCpp;
       _cargando = false;
     });
   }

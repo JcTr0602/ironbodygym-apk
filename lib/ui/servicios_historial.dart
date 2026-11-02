@@ -103,6 +103,9 @@ class _ServiciosHistorialScreenState
       for (final v in ventas)
         if ((v['reverso_de'] as num?) != null)
           (v['reverso_de'] as num).toInt(),
+      // Argón Servicios #6: también las reversiones aún en la
+      // cola (sin espejar), como en la pantalla principal.
+      ...await reversosPendientesVentaIds(),
     };
     final entradas = entradasHistorialServicios(
       ventas: historial,

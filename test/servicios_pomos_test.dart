@@ -219,6 +219,7 @@ void main() {
         salidasEspejo: [
           {'dosis': 1},
         ],
+        opsPendientes: const [],
       );
       expect(d.asignadas, 33);
       expect(d.repartidas, 10);

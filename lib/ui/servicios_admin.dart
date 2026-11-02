@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:uuid/uuid.dart';
 
@@ -90,22 +92,39 @@ class _ServiciosAdminScreenState extends State<ServiciosAdminScreen> {
         await LocalDb.instance.allMirror('suplementos');
     final categorias =
         await LocalDb.instance.allMirror('categorias_suplemento');
-    // Personas conocidas (para titulares y nombres): el dueño +
-    // quien haya registrado pagos o ventas de suplementos.
+    // Personas conocidas (para titulares y nombres).
+    // Argón Servicios #9: misma fuente que la pantalla
+    // principal (meta usuarios_apk + respaldo indexado por
+    // telegram_id). Antes esto escaneaba `pagos` y
+    // `ventas_suplementos` COMPLETOS, y un entrenador sin
+    // movimientos en esas tablas salía como «Entrenador»
+    // genérico teniendo pomo asignado.
     final personas = <int, String>{};
     final miTid = AuthService().telegramId;
     if (miTid != null) personas[miTid] = 'Yo (dueño)';
-    for (final p in await LocalDb.instance.allMirror('pagos')) {
-      final tid = LocalDb.normalizarTelegramId(p['telegram_user_id']);
-      final nombre = '${p['registrado_por'] ?? ''}';
-      if (tid != null && nombre.isNotEmpty) {
-        personas.putIfAbsent(tid, () => nombre);
+    try {
+      final rawApk = await LocalDb.instance.getMeta('usuarios_apk');
+      if (rawApk != null && rawApk.isNotEmpty) {
+        for (final u in jsonDecode(rawApk) as List) {
+          final m = Map<String, dynamic>.from(u as Map);
+          final utid = LocalDb.normalizarTelegramId(m['telegram_id']);
+          final nombre = '${m['nombre'] ?? ''}'.trim();
+          if (utid != null && nombre.isNotEmpty) {
+            personas.putIfAbsent(utid, () => nombre);
+          }
+        }
+      }
+    } catch (_) {}
+    final titularesSinNombre = <int>{};
+    for (final l in pomos) {
+      final rt = LocalDb.normalizarTelegramId(l['titular_telegram_id']);
+      if (rt != null && !personas.containsKey(rt)) {
+        titularesSinNombre.add(rt);
       }
     }
-    for (final v
-        in await LocalDb.instance.allMirror('ventas_suplementos')) {
-      final tid = LocalDb.normalizarTelegramId(v['registrado_por']);
-      if (tid != null) personas.putIfAbsent(tid, () => 'Entrenador');
+    if (titularesSinNombre.isNotEmpty) {
+      personas.addAll(await LocalDb.instance
+          .nombresPorTelegramIds(titularesSinNombre));
     }
     if (!mounted) return;
     setState(() {
