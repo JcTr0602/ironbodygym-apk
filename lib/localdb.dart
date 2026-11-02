@@ -6885,6 +6885,22 @@ class LocalDb {
         orderBy: 'creada_ts ASC');
   }
 
+  /// Lectura AMPLIA para cálculos de DINERO (Argón Dinero #4):
+  /// incluye también 'enviada'. Una op enviada puede tardar
+  /// minutos (atascada) u horas (retenida por el candado) en
+  /// confirmarse; sin ella, un cobro desaparecía de
+  /// pendienteEntrega, adelantos, bonos y gastos durante toda
+  /// la ventana. Los lectores que la usan DEBEN cruzar por
+  /// op_uuid contra el espejo (patrón B-03/FIN-09) para no
+  /// duplicar cuando el pull ya bajó la fila. NO usar para la
+  /// selección del push (eso es pendientesParaEnvio).
+  Future<List<Map<String, dynamic>>> pendingOpsLectura() async {
+    final d = await db;
+    return d.query('ops_queue',
+        where: "estado IN ('pendiente', 'enviada', 'error')",
+        orderBy: 'creada_ts ASC');
+  }
+
   /// Ops de un tipo en estados «vivos o ya aceptadas»:
   /// pendiente/enviada (aún en este teléfono) y aplicada (el
   /// servidor ya la aceptó; el espejo puede tardar un ciclo

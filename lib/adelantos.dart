@@ -124,13 +124,46 @@ double sumaAdelantosPendientes({
   double total = 0;
   final uuidsEspejo = <String>{};
   final porId = <int, Map<String, dynamic>>{};
+  // Argón Dinero #5: correcciones de origen AÚN encoladas. Sin
+  // este overlay, entre corregir y sincronizar la liquidación
+  // se calculaba con el origen VIEJO (el adelanto seguía
+  // descontando de la gaveta equivocada) y la lista permitía
+  // corregir dos veces con destinos contradictorios. La
+  // última corrección encolada manda.
+  final correcciones = <int, Map<String, dynamic>>{};
+  for (final op in opsPendientes) {
+    if ('${op['tipo']}' != 'corregir_origen_adelanto') continue;
+    try {
+      final p = jsonDecode(op['payload'] as String)
+          as Map<String, dynamic>;
+      final id = (p['adelanto_id'] as num?)?.toInt();
+      if (id != null) correcciones[id] = p;
+    } catch (_) {}
+  }
   for (final a in espejo) {
     final id = (a['id'] as num?)?.toInt();
     if (id != null) porId[id] = a;
     final u = a['op_uuid'];
     if (u != null) uuidsEspejo.add('$u');
-    if (normalizarTid(a['descuenta_a']) == telegramId &&
-        (a['en_pendiente'] as num?)?.toInt() == 1) {
+    if ((a['en_pendiente'] as num?)?.toInt() != 1) continue;
+    final corr = id == null ? null : correcciones[id];
+    if (corr != null) {
+      // Con corrección en curso, manda el origen NUEVO: solo
+      // descuenta si pasa a (o sigue en) caja_turno+efectivo y
+      // la gaveta es la de este entrenador (descuenta_a de la
+      // corrección; si no viene, el del propio adelanto, como
+      // hace el servidor).
+      final nuevoOrigen = '${corr['nuevo_origen'] ?? ''}';
+      final gaveta = normalizarTid(
+          corr['descuenta_a'] ?? a['descuenta_a']);
+      if (nuevoOrigen == 'caja_turno' &&
+          '${a['metodo'] ?? 'efectivo'}' == 'efectivo' &&
+          gaveta == telegramId) {
+        total += (a['monto'] as num?)?.toDouble() ?? 0;
+      }
+      continue;
+    }
+    if (normalizarTid(a['descuenta_a']) == telegramId) {
       total += (a['monto'] as num?)?.toDouble() ?? 0;
     }
   }
@@ -211,13 +244,20 @@ class AdelantosService {
           a,
     ];
     final anulacionesPendientes = <int>{};
-    for (final op in await _db.pendingOps()) {
+    final correccionesPendientes =
+        <int, Map<String, dynamic>>{};
+    for (final op in await _db.pendingOpsLectura()) {
       try {
         final p = jsonDecode(op['payload'] as String)
             as Map<String, dynamic>;
         if (op['tipo'] == 'anular_adelanto') {
           final id = (p['adelanto_id'] as num?)?.toInt();
           if (id != null) anulacionesPendientes.add(id);
+        } else if (op['tipo'] == 'corregir_origen_adelanto') {
+          // Argón Dinero #5: la fila muestra el origen EFECTIVO
+          // y la marca que bloquea una segunda corrección.
+          final id = (p['adelanto_id'] as num?)?.toInt();
+          if (id != null) correccionesPendientes[id] = p;
         } else if (op['tipo'] == 'registrar_adelanto' &&
             '${p['entrenador']}' == entrenadorId &&
             !uuidsEspejo.contains('${op['op_uuid']}')) {
@@ -230,7 +270,13 @@ class AdelantosService {
             // Estimación local del mes_nomina: el servidor lo
             // fija al aplicar (puede diferir si el mes ya está
             // liquidado; el espejo manda al sincronizar).
-            'mes_nomina': '${p['fecha']}'.substring(0, 7),
+            // Argón Dinero #9: si ESE mes ya está liquidado para
+            // este entrenador, el servidor lo rueda al siguiente:
+            // la estimación local hace lo mismo, para que el
+            // provisional no «caiga» en un mes cerrado (donde la
+            // UI ofrecería anular/corregir contra la guarda).
+            'mes_nomina': await _mesEstimadoAdelanto(
+                '${p['fecha']}'.substring(0, 7), entrenadorId),
             'nota': p['nota'],
             'metodo': p['metodo'],
             'origen': p['origen'],
@@ -244,10 +290,33 @@ class AdelantosService {
       if (id != null && anulacionesPendientes.contains(id)) {
         f['anulacion_pendiente'] = 1;
       }
+      final corr = id == null ? null : correccionesPendientes[id];
+      if (corr != null) {
+        f['origen_corregido_pendiente'] = 1;
+        f['origen'] = '${corr['nuevo_origen'] ?? f['origen'] ?? ''}';
+        if (corr['descuenta_a'] != null) {
+          f['descuenta_a'] = corr['descuenta_a'];
+        }
+      }
     }
     filas.sort((a, b) =>
         '${a['fecha']}'.compareTo('${b['fecha']}'));
     return filas;
+  }
+
+  /// Mes de nómina estimado para un adelanto provisional:
+  /// el de su fecha, rodado al siguiente si ya está liquidado
+  /// para el entrenador (Argón Dinero #9; espejo del servidor).
+  Future<String> _mesEstimadoAdelanto(
+      String mesFecha, String entrenadorId) async {
+    if (!await nominaLiquidada(mesFecha, entrenadorId)) {
+      return mesFecha;
+    }
+    final y = int.tryParse(mesFecha.substring(0, 4)) ?? 0;
+    final m = int.tryParse(mesFecha.substring(5, 7)) ?? 1;
+    final sig = DateTime(y, m + 1);
+    return '${sig.year.toString().padLeft(4, '0')}-'
+        '${sig.month.toString().padLeft(2, '0')}';
   }
 
   /// ¿El mes ya está liquidado para el entrenador? (espejo o la

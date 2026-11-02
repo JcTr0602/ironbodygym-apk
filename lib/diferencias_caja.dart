@@ -11,6 +11,8 @@
 /// son ops solo del dueño; el servidor las vuelve a exigir.
 library;
 
+import 'dart:convert';
+
 import 'package:uuid/uuid.dart';
 
 import 'localdb.dart';
@@ -69,8 +71,60 @@ class DiferenciasCajaService {
   /// Todos los expedientes del espejo: abiertas primero,
   /// después por fecha (la de la liquidación), recientes
   /// primero.
+  /// Argón Dinero #14: con overlay de la cola — una resolución
+  /// encolada marca el expediente como resuelto AQUÍ también
+  /// (antes seguía «Abierta» hasta el pull y el badge contaba
+  /// de más; y desde dos teléfonos se podía resolver dos
+  /// veces en la ventana), y una apertura encolada aparece
+  /// como expediente provisional.
   Future<List<Map<String, dynamic>>> todas() async {
     final rows = await _db.allMirror('diferencias_caja');
+    try {
+      final ops = await _db.pendingOpsLectura();
+      final porId = <String, Map<String, dynamic>>{
+        for (final r in rows) '${r['id']}': r,
+      };
+      final porLiquidacionId = <String, Map<String, dynamic>>{
+        for (final r in rows)
+          if ('${r['liquidacion_id'] ?? ''}'.isNotEmpty)
+            '${r['liquidacion_id']}': r,
+      };
+      for (final op in ops) {
+        Map<String, dynamic> p;
+        try {
+          p = jsonDecode(op['payload'] as String)
+              as Map<String, dynamic>;
+        } catch (_) {
+          continue;
+        }
+        if ('${op['tipo']}' == 'diferencia_resolver') {
+          final exp = porId['${p['expediente_id'] ?? ''}'];
+          if (exp != null && '${exp['estado']}' == 'abierta') {
+            exp['estado'] = 'resuelta';
+            exp['resolucion'] = p['resolucion'];
+            if (p['resolucion_nota'] != null) {
+              exp['resolucion_nota'] = p['resolucion_nota'];
+            }
+            exp['resolucion_pendiente_sync'] = 1;
+          }
+        } else if ('${op['tipo']}' == 'diferencia_abrir') {
+          final liqId = '${p['liquidacion_id'] ?? ''}';
+          if (liqId.isNotEmpty &&
+              !porLiquidacionId.containsKey(liqId)) {
+            final prov = <String, dynamic>{
+              'id': 'pendiente-${op['op_uuid']}',
+              'liquidacion_id': liqId,
+              'estado': 'abierta',
+              'fecha': '${op['creada_ts'] ?? ''}',
+              'explicacion': p['explicacion'],
+              'pendiente_sync': 1,
+            };
+            rows.add(prov);
+            porLiquidacionId[liqId] = prov;
+          }
+        }
+      }
+    } catch (_) {}
     rows.sort((a, b) {
       final ea = '${a['estado']}' == 'abierta' ? 0 : 1;
       final eb = '${b['estado']}' == 'abierta' ? 0 : 1;
@@ -81,8 +135,9 @@ class DiferenciasCajaService {
   }
 
   /// Cuántos expedientes siguen abiertos (badge del dueño).
+  /// Con el mismo overlay que [todas] (#14).
   Future<int> conteoAbiertas() async {
-    final rows = await _db.allMirror('diferencias_caja');
+    final rows = await todas();
     return rows.where((r) => '${r['estado']}' == 'abierta').length;
   }
 
@@ -152,6 +207,24 @@ class DiferenciasCajaService {
     required String resolucion,
     String? nota,
   }) async {
+    // Argón Dinero #14: no encolar una SEGUNDA resolución del
+    // mismo expediente mientras la primera sigue en la cola
+    // (el servidor la rechazaría por CAS, pero la op quedaría
+    // como ruido de revisión).
+    for (final op in await _db.pendingOpsLectura()) {
+      if ('${op['tipo']}' != 'diferencia_resolver') continue;
+      try {
+        final p = jsonDecode(op['payload'] as String)
+            as Map<String, dynamic>;
+        if ('${p['expediente_id'] ?? ''}' == expedienteId) {
+          throw StateError(
+              'Este expediente ya tiene una resolución en curso '
+              '(esperando sincronizar).');
+        }
+      } catch (e) {
+        if (e is StateError) rethrow;
+      }
+    }
     await _queueYEmpujar('diferencia_resolver', {
       'expediente_id': expedienteId,
       'resolucion': resolucion,

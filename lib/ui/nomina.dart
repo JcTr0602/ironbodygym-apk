@@ -204,8 +204,13 @@ class _NominaScreenState extends State<NominaScreen> {
             final m = Map<String, dynamic>.from(u as Map);
             // #6 (Argón nómina): llave única (antes filtro
             // estricto aquí y contains en comisiones).
+            // Argón Dinero #8: respaldo por NOMBRE si el
+            // username no resuelve la clave (un username sin el
+            // nombre dejaba a la persona fuera del mapa).
             final username =
-                NominaCalc.claveEntrenador('${m['username'] ?? ''}');
+                NominaCalc.claveEntrenador('${m['username'] ?? ''}') ??
+                    NominaCalc.claveEntrenador(
+                        '${m['nombre'] ?? ''}');
             if (username != null) {
               personasAdelantos[username] = (
                 id: '${m['id'] ?? ''}',
@@ -1023,6 +1028,8 @@ class _NominaScreenState extends State<NominaScreen> {
     final estaAnulado = id != null && anulados.contains(id);
     final pendiente = e['pendiente'] == 1;
     final anulacionPendiente = e['anulacion_pendiente'] == 1;
+    final correccionPendiente =
+        e['origen_corregido_pendiente'] == 1;
     final monto = (e['monto'] as num?)?.toDouble() ?? 0;
     final origen = '${e['origen'] ?? ''}' == 'fondo_dueno'
         ? 'del bolsillo de Jc'
@@ -1061,6 +1068,9 @@ class _NominaScreenState extends State<NominaScreen> {
                       style: AppTexto.metadato.copyWith(color: Colors.red)),
                 if (anulacionPendiente)
                   const Text('anulación en curso…',
+                      style: AppTexto.metadato),
+                if (correccionPendiente)
+                  const Text('corrección de origen en curso…',
                       style: AppTexto.metadato),
                 if (pendiente)
                   const Text('pendiente de sincronizar',
@@ -1131,6 +1141,7 @@ class _NominaScreenState extends State<NominaScreen> {
               !esReverso &&
               !estaAnulado &&
               !anulacionPendiente &&
+              !correccionPendiente &&
               id != null &&
               ('${e['origen'] ?? 'caja_turno'}' == 'caja_turno' ||
                   metodo == 'efectivo'))

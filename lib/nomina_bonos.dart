@@ -146,7 +146,7 @@ class BonosNominaService {
     try {
       todas = await _db.allMirror('nomina_bonos');
     } catch (_) {}
-    final ops = await _db.pendingOps();
+    final ops = await _db.pendingOpsLectura();
     final fusion =
         fusionarBonosNomina(espejo: todas, opsPendientes: ops);
     for (final b in fusion) {
@@ -176,7 +176,7 @@ class BonosNominaService {
           if ('${e['mes'] ?? ''}' == mes) e,
       ];
     } catch (_) {}
-    final ops = await _db.pendingOps();
+    final ops = await _db.pendingOpsLectura();
     return fusionarBonosNomina(espejo: espejo, opsPendientes: ops)
         .where((b) => '${b['mes']}' == mes)
         .toList();

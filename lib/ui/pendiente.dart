@@ -101,7 +101,7 @@ class _PendienteScreenState extends State<PendienteScreen> {
       }
     } else {
       final tid = auth.telegramId;
-      final (m, d, s) = await detallePendiente(tid);
+      final (m, d, s, _) = await detallePendiente(tid);
       // Ronda 17 M4-H2: los suplementos en efectivo en CUP
       // también son pendiente a entregar (misma fuente que
       // la vista del dueño, filtrada por este entrenador).
@@ -262,6 +262,7 @@ class _PendienteScreenState extends State<PendienteScreen> {
     });
     try {
       // Gemini: solo el guardado local va en el try.
+      final tidConf = int.tryParse(trainerTelegramId);
       await confirmarEntregaPorIds(
         mensualIds: dia.mensualIds,
         diarioIds: dia.diarioIds,
@@ -269,8 +270,15 @@ class _PendienteScreenState extends State<PendienteScreen> {
         suplementoIds: dia.suplementoIds,
         // Ítem 10: y las de servicios, con los ids que se ven.
         servicioIds: dia.servicioIds,
+        // Argón Dinero #2: saldar también los adelantos de su
+        // gaveta ya neteados en el total que se está
+        // confirmando (pendientePorEntrenador los resta).
+        adelantoIds: tidConf == null
+            ? const []
+            : (await idsPendientesEntrega(trainerId: tidConf))
+                .adelantos,
         entrenadorNombre: nombre,
-        trainerTelegramId: int.tryParse(trainerTelegramId),
+        trainerTelegramId: tidConf,
       );
     } catch (e) {
       if (mounted) {

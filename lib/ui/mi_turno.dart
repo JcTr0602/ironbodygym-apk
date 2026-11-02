@@ -61,7 +61,7 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
     final hist = await historialTurno(tid, dias: 60);
     final ult = await ultimaEntregaConfirmada(tid);
     final mes = await cobradoMes(tid);
-    final (pm, pd, ps) = await detallePendiente(tid);
+    final (pm, pd, ps, pSup) = await detallePendiente(tid);
     // Argón 1.21 AR-01: lo ya absorbido por una liquidación de
     // caja tampoco cuenta en los bucles locales de esta pantalla
     // (suplementos y la cola), igual que en detallePendiente.
@@ -71,22 +71,18 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
     // cola local no debe re-sumar lo que el pull ya bajó
     // (ventana push→pull, mismo cruce que B-03 en negocio).
     final uuidsEspejo = <String>{
-      for (final f in [...pm, ...pd, ...ps])
+      for (final f in [...pm, ...pd, ...ps, ...pSup])
         if (f['op_uuid'] != null) '${f['op_uuid']}',
     };
     // 1.15-turnos (#9): el detalle por día cubre también servicios,
     // suplementos, adelantos y la cola local (misma cobertura que
     // pendienteEntrega, salvo el USD que va en su propia línea).
-    final sup = <Map<String, dynamic>>[];
-    for (final v in await ventasSuplementosCup()) {
-      if (cubiertos.contains('ventas_suplementos:${v['id']}')) {
-        continue;
-      }
-      if (LocalDb.normalizarTelegramId(v['registrado_por']) == tid &&
-          esPendiente(v['entregado'])) {
-        sup.add(v);
-        if (v['op_uuid'] != null) uuidsEspejo.add('${v['op_uuid']}');
-      }
+    // Argón Dinero #12: los suplementos ya vienen de
+    // detallePendiente (su cuarta lista, con el mismo filtro);
+    // aquí solo se anotan sus uuids para el cruce de la cola.
+    final sup = pSup;
+    for (final v in sup) {
+      if (v['op_uuid'] != null) uuidsEspejo.add('${v['op_uuid']}');
     }
     final adel = <Map<String, dynamic>>[];
     for (final a in await LocalDb.instance.allMirror('adelantos')) {

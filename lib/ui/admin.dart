@@ -912,6 +912,10 @@ class _AdminScreenState extends State<AdminScreen> {
       diarioIds: diarioIds,
       suplementoIds: suplementoIds,
       servicioIds: servicioIds,
+      // Argón Dinero #2: la entrega también salda los
+      // adelantos de su gaveta que ya se descontaron del
+      // monto esperado (si no, descuentan dos veces).
+      adelantoIds: ids.adelantos,
       entrenadorNombre: nombre,
       trainerTelegramId: trainerId,
       nota: nota.isNotEmpty ? nota : null,

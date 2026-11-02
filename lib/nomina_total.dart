@@ -110,7 +110,9 @@ Future<double?> totalNetoNominaMes(String pref) async {
     // consultas al espejo).
     final conteoCache = <String, int>{};
     for (final u in usuariosApk) {
-      final username = NominaCalc.claveEntrenador('${u['username'] ?? ''}');
+      final username =
+          NominaCalc.claveEntrenador('${u['username'] ?? ''}') ??
+              NominaCalc.claveEntrenador('${u['nombre'] ?? ''}');
       if (username == null) continue;
       final id = '${u['id'] ?? ''}';
       if (id.isEmpty) continue;

@@ -375,8 +375,13 @@ class _NominaPrecalculadaScreenState extends State<NominaPrecalculadaScreen> {
             // en la capacidad del mes, el precálculo mostraba
             // una deuda entrante que la pantalla de Nómina no
             // muestra (los bonos cubren el exceso de adelantos).
+            // Argón Dinero #8: bonosPorMes casa por CLAVE
+            // canónica; el username crudo no resolvía y los
+            // bonos desaparecían del precálculo en silencio.
             bonosPorMes: await BonosNominaService.instance
-                .bonosPorMes(username, primero, mes),
+                .bonosPorMes(
+                    NominaCalc.claveEntrenador(username) ?? username,
+                    primero, mes),
             hastaMes: mes,
           );
           for (final filaLibro in libro) {

@@ -1215,7 +1215,7 @@ Future<double> adelantosEnPendiente(int? telegramId) async {
   // lo descuenta al momento en este mismo equipo.
   return sumaAdelantosPendientes(
     espejo: await LocalDb.instance.allMirror('adelantos'),
-    opsPendientes: await LocalDb.instance.pendingOps(),
+    opsPendientes: await LocalDb.instance.pendingOpsLectura(),
     telegramId: telegramId,
     normalizarTid: LocalDb.normalizarTelegramId,
   );
@@ -1286,7 +1286,7 @@ Future<double> pendienteEntrega(int? telegramId) async {
     }
   }
   final pr = await preciosVigentes();
-  for (final op in await LocalDb.instance.pendingOps()) {
+  for (final op in await LocalDb.instance.pendingOpsLectura()) {
     // B-03: si la op ya bajó al espejo, su dinero ya se sumó en
     // los bucles de arriba; contarla otra vez sería duplicar.
     if (uuidsEspejo.contains('${op['op_uuid']}')) continue;
@@ -1322,6 +1322,15 @@ Future<double> pendienteEntrega(int? telegramId) async {
   }
   // v1.8.0: los adelantos de su gaveta ya salieron de su mano.
   total -= await adelantosEnPendiente(telegramId);
+  // Argón Dinero #1: el libro C1 (entregas parciales confirmadas
+  // en el bot) también resta, igual que en pendienteArqueo y en
+  // pendientePorEntrenador. Sin esto, tras una entrega parcial
+  // por el bot, el arqueo bajaba pero la tarjeta del entrenador
+  // le seguía exigiendo el total entero. (No se excluyen los
+  // ids cubiertos de los bucles de arriba a propósito:
+  // contribucionLibroC1 ya descuenta resto + ids aún sin
+  // marcar, con el invariante anti-doble-descuento.)
+  total -= await contribucionLibroC1(telegramId);
   // H2 (Argón caja): el arrastre de parciales SÍ entra aquí, igual
   // que en pendienteArqueo y _pendiente_c1_servidor. Sin esto, tras
   // una parcial el arqueo mostraba 400 y la entrega mostraba 0.
@@ -1334,7 +1343,9 @@ Future<double> pendienteEntrega(int? telegramId) async {
     if ((l['moneda'] as String?) == 'USD') continue;
     total += (l['saldo_arrastre'] as num?)?.toDouble() ?? 0;
   }
-  return total;
+  // H3 de pendienteArqueo, también aquí: un pendiente negativo
+  // no significa nada (adelantos/C1 por encima de lo cobrado).
+  return total < 0 ? 0.0 : total;
 }
 
 /// USD que el entrenador logueado aún no le entrega al dueño.
@@ -1358,7 +1369,7 @@ Future<double> pendienteEntregaUsd(int? telegramId) async {
       total += totalVentaUsd(v);
     }
   }
-  for (final op in await LocalDb.instance.pendingOps()) {
+  for (final op in await LocalDb.instance.pendingOpsLectura()) {
     // 1.15-turnos (#7): igual que en CUP, la cola es de su dueño.
     if (op['telegram_id'] != telegramId) continue;
     if (uuidsEspejo.contains('${op['op_uuid']}')) continue; // B-03
@@ -2390,11 +2401,25 @@ Future<List<Map<String, dynamic>>> comparativaEntrenadores(
     return alt.isEmpty ? 'Desconocido' : alt;
   }
 
+  // Argón Dinero #11: Casa no es cobro de nadie (ingresosMes
+  // ya lo excluye con la misma regla).
+  final casasComp = await LocalDb.instance.idsCuentasCasa();
   for (final p in await LocalDb.instance.pagosDelMes(prefijo)) {
+    if (_esPagoCasa(p, casasComp)) continue;
     final f = fila(nombreDe(p));
     f['cobros_n'] = (f['cobros_n'] as int) + 1;
     f['cobros_monto'] = (f['cobros_monto'] as double) +
         ((p['monto'] as num?)?.toDouble() ?? 0);
+  }
+  // Argón Dinero #11: los pagos diarios también son cobros del
+  // entrenador; sin este bucle, un entrenador de puros diarios
+  // puntuaba por debajo sin haber cobrado menos.
+  for (final d in await LocalDb.instance.allMirror('pagos_diarios')) {
+    if (mesHabanaDe(d['fecha']) != prefijo) continue;
+    final f = fila(nombreDe(d));
+    f['cobros_n'] = (f['cobros_n'] as int) + 1;
+    f['cobros_monto'] = (f['cobros_monto'] as double) +
+        ((d['total'] as num?)?.toDouble() ?? 0);
   }
   for (final v
       in await LocalDb.instance.allMirror('ventas_suplementos')) {
@@ -3047,30 +3072,13 @@ String? motivoBloqueoEdicion(Map<String, dynamic> fila, int clienteId,
   return null;
 }
 
-/// Pagos diarios de hoy (del espejo).
-/// v1.2.7 (A1): incluye ops en cola (optimistic UI) además del mirror.
-/// Los pendientes llevan flag 'es_optimista' para la UI.
-/// Deduplicación por clave de negocio (fecha+turno+cantidad+registrado_por)
-/// — la solución definitiva con op_uuid requiere migración en servidor.
-Future<List<Map<String, dynamic>>> diariosDeHoy(
-    {int? soloTelegramId}) async {
-  final hoy = _hoyIso();
-  // v1.3.6 (Argón): filtro SQL cuando no es el dueño.
-  final todos = soloTelegramId == null
-      ? await LocalDb.instance.allMirror('pagos_diarios')
-      : await LocalDb.instance.mirrorFiltrado(
-          'pagos_diarios', {'registrado_por': soloTelegramId});
-  final res = todos.where((d) {
-    if ((d['fecha'] as String?) != hoy) return false;
-    // v1.3.6 (Argón): verificación de normalización post-SQL.
-    if (soloTelegramId != null &&
-        LocalDb.normalizarTelegramId(d['registrado_por']) !=
-            soloTelegramId) {
-      return false;
-    }
-    return true;
-  }).toList();
-
+  /// Overlay de ops pago_diario encoladas sobre una lista
+  /// del espejo para UNA fecha (Argón Dinero #10: el
+  /// reporte por fecha no lo aplicaba y un diario recién
+  /// registrado sin sincronizar no salía en su reporte).
+  Future<void> _overlayDiariosPendientes(
+      List<Map<String, dynamic>> res, String fechaIso,
+      {int? soloTelegramId}) async {
   // Ops pendientes de pago_diario (aún no en mirror)
   // FIX (Gemini BUG 6): incluir 'enviada' — si solo se filtra 'pendiente',
   // el pago desaparece de la pantalla en cuanto se sube pero antes de
@@ -3099,7 +3107,7 @@ Future<List<Map<String, dynamic>>> diariosDeHoy(
       final payload =
           jsonDecode(op['payload'] as String) as Map<String, dynamic>;
       final fecha = (payload['fecha'] as String?)?.substring(0, 10) ?? '';
-      if (fecha != hoy) continue;
+      if (fecha != fechaIso) continue;
       // v1.2.7 fix Gemini: incluir hora/timestamp para no colapsar
       // pagos legítimos idénticos (misma tarifa, mismo turno).
       final hora = (payload['hora'] as String?) ??
@@ -3138,6 +3146,34 @@ Future<List<Map<String, dynamic>>> diariosDeHoy(
     } catch (_) {}
   }
 
+  }
+
+/// Pagos diarios de hoy (del espejo).
+/// v1.2.7 (A1): incluye ops en cola (optimistic UI) además del mirror.
+/// Los pendientes llevan flag 'es_optimista' para la UI.
+/// Deduplicación por clave de negocio (fecha+turno+cantidad+registrado_por)
+/// — la solución definitiva con op_uuid requiere migración en servidor.
+Future<List<Map<String, dynamic>>> diariosDeHoy(
+    {int? soloTelegramId}) async {
+  final hoy = _hoyIso();
+  // v1.3.6 (Argón): filtro SQL cuando no es el dueño.
+  final todos = soloTelegramId == null
+      ? await LocalDb.instance.allMirror('pagos_diarios')
+      : await LocalDb.instance.mirrorFiltrado(
+          'pagos_diarios', {'registrado_por': soloTelegramId});
+  final res = todos.where((d) {
+    if ((d['fecha'] as String?) != hoy) return false;
+    // v1.3.6 (Argón): verificación de normalización post-SQL.
+    if (soloTelegramId != null &&
+        LocalDb.normalizarTelegramId(d['registrado_por']) !=
+            soloTelegramId) {
+      return false;
+    }
+    return true;
+  }).toList();
+
+  await _overlayDiariosPendientes(res, hoy,
+      soloTelegramId: soloTelegramId);
   res.sort((a, b) =>
       '${b['registrado_por_nombre']}'.compareTo('${a['registrado_por_nombre']}'));
   return res;
@@ -3160,6 +3196,8 @@ Future<List<Map<String, dynamic>>> diariosDeFecha(
     }
     return true;
   }).toList();
+  await _overlayDiariosPendientes(res, fechaIso,
+      soloTelegramId: soloTelegramId);
   res.sort((a, b) =>
       '${b['registrado_por_nombre']}'.compareTo('${a['registrado_por_nombre']}'));
   return res;
@@ -3404,16 +3442,28 @@ Future<(double, double)> miTurnoHoy(int? telegramId, {String? fecha}) async {
   // v1.3.1: incluir ops pendientes de hoy en cobrado (offline).
   // (B-03: el conjunto uuidsEspejo se llenó en los bucles espejo
   // de arriba; aquí solo se consulta.)
-  final pr = await preciosVigentes();
-  for (final op in await LocalDb.instance.pendingOps()) {
+  // Argón Dinero #3: los bucles del espejo suman TODOS los
+  // métodos (cobrado = total vendido), pero este bucle sumaba
+  // solo el efectivo (montoEfectivoOp): un cobro por
+  // transferencia sin sincronizar NO aparecía en «Cobrado hoy»
+  // y saltaba de golpe al sincronizar. Ahora suma el cobrado
+  // total de la op (montoCobradoCupOp, con los montos reales
+  // del payload), igual que el espejo. Y si el payload no trae
+  // fecha raíz, se usa la fecha de creación de la op.
+  for (final op in await LocalDb.instance.pendingOpsLectura()) {
     if (op['telegram_id'] != telegramId) continue;
     if (uuidsEspejo.contains('${op['op_uuid']}')) continue;
     try {
       final payload =
           jsonDecode(op['payload'] as String) as Map<String, dynamic>;
-      final fecha = (payload['fecha'] as String?)?.substring(0, 10) ?? '';
-      if (fecha != hoy) continue;
-      cobrado += montoEfectivoOp(op, pr);
+      var fecha = (payload['fecha'] as String?) ?? '';
+      if (fecha.length < 10) {
+        fecha = '${op['creada_ts'] ?? ''}';
+      }
+      if (fecha.length < 10 || fecha.substring(0, 10) != hoy) {
+        continue;
+      }
+      cobrado += await montoCobradoCupOp(op);
     } catch (_) {}
   }
   final pendiente = await pendienteEntrega(telegramId);
@@ -3508,12 +3558,20 @@ Future<
     (
       List<Map<String, dynamic>>,
       List<Map<String, dynamic>>,
+      List<Map<String, dynamic>>,
       List<Map<String, dynamic>>
     )> detallePendiente(int? telegramId) async {
   final mens = <Map<String, dynamic>>[];
   final diarios = <Map<String, dynamic>>[];
   final servicios = <Map<String, dynamic>>[];
-  if (telegramId == null) return (mens, diarios, servicios);
+  // Argón Dinero #12: las ventas de suplementos en efectivo
+  // también componen el pendiente (pendienteEntrega las suma);
+  // sin esta cuarta lista, el desglose de Mi Turno/Pendiente
+  // nunca cuadraba con su propio encabezado.
+  final suplementos = <Map<String, dynamic>>[];
+  if (telegramId == null) {
+    return (mens, diarios, servicios, suplementos);
+  }
   // Argón 1.21 AR-01: excluir lo ya absorbido por una
   // liquidación de caja, igual que pendienteEntrega y
   // pendienteArqueo. Sin este cruce, en la ventana entre
@@ -3549,10 +3607,22 @@ Future<
       servicios.add(v);
     }
   }
+  for (final v in await ventasSuplementosCup()) {
+    if (cubiertos.contains('ventas_suplementos:${v['id']}')) continue;
+    if (LocalDb.normalizarTelegramId(v['registrado_por']) !=
+        telegramId) {
+      continue;
+    }
+    if (esPendiente(v['entregado'])) {
+      suplementos.add(v);
+    }
+  }
   mens.sort((a, b) => '${b['fecha']}'.compareTo('${a['fecha']}'));
   diarios.sort((a, b) => '${b['fecha']}'.compareTo('${a['fecha']}'));
   servicios.sort((a, b) => '${b['fecha']}'.compareTo('${a['fecha']}'));
-  return (mens, diarios, servicios);
+  suplementos.sort(
+      (a, b) => '${b['fecha']}'.compareTo('${a['fecha']}'));
+  return (mens, diarios, servicios, suplementos);
 }
 
 /// Historial diario del entrenador: lista de días con lo cobrado,
@@ -3601,7 +3671,9 @@ Future<List<Map<String, dynamic>>> historialTurno(int? telegramId,
     final f = '${d['fecha'] ?? ''}';
     if (f.length < 10) continue;
     suma(f.substring(0, 10), (d['total'] as num?)?.toDouble() ?? 0,
-        'efectivo',
+        // Argón Dinero #11: método real (un diario por
+        // transferencia no engorda el efectivo del día).
+        esPagoDiarioEfectivo(d) ? 'efectivo' : 'transferencia',
         'Diario ${d['turno'] ?? ''} x${d['cantidad'] ?? '?'}');
   }
   // Argón P3#2-turno (REAL): las ventas de Servicios del espejo también
@@ -4420,6 +4492,10 @@ Future<void> confirmarEntregaPorIds({
   required List<int> diarioIds,
   List<int> suplementoIds = const [],
   List<int> servicioIds = const [],
+  // Argón Dinero #2: adelantos de gaveta que esta entrega
+  // salda (el servidor pone en_pendiente=0 y cierra la pareja
+  // de reversos, como hace la liquidación).
+  List<int> adelantoIds = const [],
   required String entrenadorNombre,
   int? trainerTelegramId,
   String? nota,
@@ -4457,6 +4533,23 @@ Future<void> confirmarEntregaPorIds({
     await marcarEntregados(txn, 'pagos_diarios', diarioIds);
     await marcarEntregados(txn, 'ventas_suplementos', suplementoIds);
     await marcarEntregados(txn, 'servicio_ventas', servicioIds);
+    // 1b. Los adelantos saldados salen del pendiente vivo también
+    // en el espejo local (en_pendiente=0 en su JSON).
+    for (final id in adelantoIds) {
+      final rows = await txn.query('adelantos',
+          columns: ['data'], where: 'id = ?', whereArgs: [id],
+          limit: 1);
+      if (rows.isEmpty) continue;
+      final data = Map<String, dynamic>.from(
+          jsonDecode(rows.first['data'] as String));
+      data['en_pendiente'] = 0;
+      await txn.update(
+        'adelantos',
+        {'data': jsonEncode(data)},
+        where: 'id = ?',
+        whereArgs: [id],
+      );
+    }
     // 2. Encolar la op en la misma transacción.
     await txn.insert('ops_queue', {
       'op_uuid': opUuid,
@@ -4475,6 +4568,8 @@ Future<void> confirmarEntregaPorIds({
         // empaqueta los ids que está mostrando, nunca una orden
         // ciega por categoría o por entrenador.
         'servicio_ids': servicioIds,
+        // Argón Dinero #2: el servidor cierra estos adelantos.
+        if (adelantoIds.isNotEmpty) 'adelanto_ids': adelantoIds,
       }),
       'estado': 'pendiente',
       'creada_ts': ahora,
@@ -4898,12 +4993,18 @@ Future<List<Map<String, dynamic>>> turnosAbiertosAyer() async {
 /// Casa fuera + responsable del efectivo, MENOS lo ya cubierto por
 /// una liquidación parcial (idsLiquidados por categoría).
 Future<({List<int> pagos, List<int> diarios, List<int> suplementos,
-    List<int> servicios})>
+    List<int> servicios, List<int> adelantos})>
     idsPendientesEntrega({int? trainerId}) async {
   final pagoIds = <int>[];
   final diarioIds = <int>[];
   final suplementoIds = <int>[];
   final servicioIds = <int>[];
+  // Argón Dinero #2: los adelantos vivos de su gaveta YA se
+  // descontaron del monto que el dueño espera recibir; al
+  // confirmar la entrega hay que CERRARLOS (en_pendiente=0),
+  // porque si no, el próximo cobro los vuelve a descontar
+  // (doble descuento del mismo adelanto).
+  final adelantoIds = <int>[];
   bool mismo(int? tid) => trainerId == null || tid == trainerId;
   final liqPorTid = <int, Set<String>>{};
   Future<Set<String>> liq(int tid) async {
@@ -4962,11 +5063,26 @@ Future<({List<int> pagos, List<int> diarios, List<int> suplementos,
       servicioIds.add(id);
     }
   }
+  for (final a in await LocalDb.instance.allMirror('adelantos')) {
+    if ((a['en_pendiente'] as num?)?.toInt() != 1) continue;
+    if ((a['monto'] as num?)?.toDouble() == null) continue;
+    // Solo los de gaveta (caja_turno + efectivo) descuentan del
+    // pendiente; misma regla que adelantosEnPendiente.
+    if ('${a['origen'] ?? 'caja_turno'}' != 'caja_turno') continue;
+    if ('${a['metodo'] ?? 'efectivo'}' != 'efectivo') continue;
+    final tid =
+        LocalDb.normalizarTelegramId(a['descuenta_a']) ??
+            LocalDb.normalizarTelegramId(a['entrenador_telegram_id']);
+    if (tid == null || !mismo(tid)) continue;
+    final id = (a['id'] as num?)?.toInt();
+    if (id != null) adelantoIds.add(id);
+  }
   return (
     pagos: pagoIds,
     diarios: diarioIds,
     suplementos: suplementoIds,
     servicios: servicioIds,
+    adelantos: adelantoIds,
   );
 }
 
@@ -5612,7 +5728,11 @@ Future<List<Map<String, dynamic>>> pagosDelPeriodo(
           dia.compareTo(hastaIso) <= 0) {
         out.add({
           'monto': (d['total'] as num?)?.toDouble() ?? 0,
-          'metodo': 'efectivo',
+          // Argón Dinero #6: el método REAL de la fila (un diario
+          // por transferencia no es efectivo).
+          'metodo': esPagoDiarioEfectivo(d)
+              ? 'efectivo'
+              : 'transferencia',
           'origen': 'diario',
         });
       }
@@ -5627,7 +5747,8 @@ Future<List<Map<String, dynamic>>> pagosDelPeriodo(
           dia.compareTo(hastaIso) <= 0) {
         out.add({
           'monto': totalVentaCup(v),
-          'metodo': 'efectivo',
+          // Argón Dinero #6: método real de la venta.
+          'metodo': '${v['metodo'] ?? 'efectivo'}',
           'origen': 'suplemento',
         });
       }
@@ -5643,7 +5764,8 @@ Future<List<Map<String, dynamic>>> pagosDelPeriodo(
           dia.compareTo(hastaIso) <= 0) {
         out.add({
           'monto': _montoServicioVenta(v),
-          'metodo': 'efectivo',
+          // Argón Dinero #6: método real de la venta.
+          'metodo': '${v['metodo'] ?? 'efectivo'}',
           'origen': 'servicios',
         });
       }
@@ -5742,11 +5864,25 @@ Future<int> morosos() async {
 Future<List<Map<String, dynamic>>> _gastosPendientes() async {
   final out = <Map<String, dynamic>>[];
   final db = await LocalDb.instance.db;
+  // Argón Dinero #4: también 'enviada' (en vuelo o retenida),
+  // cruzando contra el espejo por (fecha, concepto, monto): la
+  // tabla gastos no lleva op_uuid. Sin el cruce, un gasto ya
+  // bajado se contaría dos veces; sin 'enviada', desaparecía
+  // de los totales mientras el sync confirmaba.
+  final espejo = await LocalDb.instance.allMirror('gastos');
+  final clavesEspejo = <String>{
+    for (final g in espejo)
+      '${g['fecha']}|${g['concepto']}|'
+          '${(g['monto'] as num?)?.toDouble() ?? 0}',
+  };
   final rows = await db.rawQuery(
-      "SELECT rowid, payload FROM ops_queue WHERE tipo = 'gasto' AND estado = 'pendiente'");
+      "SELECT rowid, payload FROM ops_queue WHERE tipo = 'gasto' AND estado IN ('pendiente', 'enviada', 'error')");
   for (final r in rows) {
     try {
       final p = jsonDecode(r['payload'] as String) as Map<String, dynamic>;
+      final clave = '${p['fecha'] ?? ''}|${p['concepto'] ?? ''}|'
+          '${(p['monto'] as num?)?.toDouble() ?? 0}';
+      if (clavesEspejo.contains(clave)) continue;
       out.add({
         'id': -((r['rowid'] as num?)?.toInt() ?? 0),
         'fecha': '${p['fecha'] ?? ''}',

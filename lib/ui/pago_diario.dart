@@ -419,14 +419,27 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
       return;
     }
     // v1.3.1: actualización optimista local.
+    // Argón Dinero #10: el total se recalcula con el precio
+    // UNITARIO DEL PROPIO REGISTRO (total/cantidad guardados),
+    // no con la tarifa vigente: si el precio del diario subió
+    // entre el registro y la edición, editar solo la cantidad
+    // revaluaba cobros viejos a precio nuevo en espejo y
+    // servidor.
     final db = await LocalDb.instance.db;
     final rows = await db.query('pagos_diarios',
         columns: ['data'], where: 'id = ?', whereArgs: [id], limit: 1);
+    var precioUnitario = _precio;
     if (rows.isNotEmpty) {
-      final data = Map<String, dynamic>.from(
+      final previa = Map<String, dynamic>.from(
           jsonDecode(rows.first['data'] as String) as Map);
+      final cantVieja = (previa['cantidad'] as num?)?.toDouble() ?? 0;
+      final totalViejo = (previa['total'] as num?)?.toDouble() ?? 0;
+      if (cantVieja > 0 && totalViejo > 0) {
+        precioUnitario = totalViejo / cantVieja;
+      }
+      final data = previa;
       data['cantidad'] = cantidad;
-      data['total'] = cantidad * _precio;
+      data['total'] = cantidad * precioUnitario;
       data['nota'] = notaTexto;
       await db.update('pagos_diarios', {'data': jsonEncode(data)},
           where: 'id = ?', whereArgs: [id]);
@@ -441,7 +454,7 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
         // Argón lote 4 MEDIO: el espejo local ya actualizaba total
         // pero el payload no lo llevaba; si la tarifa cambió o el
         // servidor no recalcula igual, espejo y servidor divergen.
-        'total': cantidad * _precio,
+        'total': cantidad * precioUnitario,
       },
     );
     _cargarHoy();

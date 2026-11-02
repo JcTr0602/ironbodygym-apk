@@ -122,18 +122,27 @@ class _PagosPorMetodoState
           }
         }
         // Diarios (igual que pagosDelPeriodo: columna `total`).
+        // Argón Dinero #6: con su método real, no todo a efectivo.
         for (final d in await LocalDb.instance
             .mirrorPorFecha('pagos_diarios', 'fecha', desde, hasta)) {
-          efectivo += (d['total'] as num?)?.toDouble() ?? 0;
+          if (esPagoDiarioEfectivo(d)) {
+            efectivo += (d['total'] as num?)?.toDouble() ?? 0;
+          } else {
+            transferencia += (d['total'] as num?)?.toDouble() ?? 0;
+          }
         }
-        // Suplementos en CUP (efectivo).
+        // Suplementos en CUP, por su método real (#6).
         for (final v in await ventasSuplementosCup()) {
           final f = '${v['fecha'] ?? ''}';
           if (f.length >= 10) {
             final dia = f.substring(0, 10);
             if (dia.compareTo(desde) >= 0 &&
                 dia.compareTo(hasta) <= 0) {
-              efectivo += totalVentaCup(v);
+              if ('${v['metodo'] ?? 'efectivo'}' == 'transferencia') {
+                transferencia += totalVentaCup(v);
+              } else {
+                efectivo += totalVentaCup(v);
+              }
             }
           }
         }

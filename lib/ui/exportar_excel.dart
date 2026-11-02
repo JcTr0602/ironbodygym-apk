@@ -241,7 +241,8 @@ Future<bool> exportarExcel() async {
           <String, ({String id, int? telegramId, String nombre})>{};
       for (final u in usuariosApk) {
         final clave =
-            NominaCalc.claveEntrenador('${u['username'] ?? ''}');
+            NominaCalc.claveEntrenador('${u['username'] ?? ''}') ??
+                NominaCalc.claveEntrenador('${u['nombre'] ?? ''}');
         if (clave != null) {
           personas[clave] = (
             id: '${u['id'] ?? ''}',
