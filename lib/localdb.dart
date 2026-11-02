@@ -6322,6 +6322,9 @@ class LocalDb {
     'nomina_liquidada_snapshot',
     'nomina_confirmaciones',
     'diferencias_caja',
+    // 1.21: candado de acceso (nace ahora: su watermark propio
+    // empieza en 0, como las demás tablas de la 1.20).
+    'acceso_bloqueos',
   ];
 
   Future<int> getWatermarkTabla(String tabla) async {
@@ -6363,6 +6366,8 @@ class LocalDb {
     // T5 (1.20): expedientes de diferencia de caja, mismo
     // motivo.
     if (tabla == 'diferencias_caja') return 0;
+    // 1.21: candado de acceso, mismo motivo.
+    if (tabla == 'acceso_bloqueos') return 0;
     // v1.8.0 (v40): adelantos y liquidaciones, mismo motivo.
     if (tabla == 'adelantos' || tabla == 'nomina_liquidada') return 0;
     // v1.12.0 (G2): los espejos nuevos del Bloque 3 nacen con la
@@ -7090,6 +7095,32 @@ class LocalDb {
         'codigo_error=?, proximo_reintento=? WHERE op_uuid=?',
         [intentos, estado, error.toString(), ec.codigo, proximo, opUuid]);
     return ec.codigo;
+  }
+
+  /// 1.21 (candado, Opción B): retiene una op pausada por el
+  /// servidor (código ACCESO_PAUSADO): vuelve a 'pendiente' con
+  /// el próximo intento en [hastaIso] y —clave de la regla R4 de
+  /// Argón— SIN tocar el contador de intentos ni el error: no es
+  /// un fallo, es una espera ordenada por el dueño.
+  Future<void> retenerOpPausada(String opUuid, String hastaIso) async {
+    final d = await db;
+    await d.rawUpdate(
+        'UPDATE ops_queue SET estado = ?, proximo_reintento = ? '
+        'WHERE op_uuid = ?',
+        ['pendiente', hastaIso, opUuid]);
+  }
+
+  /// 1.21 (CD-01 de Argón): al caer el candado, despierta de
+  /// inmediato las ops retenidas por la pausa (su red de
+  /// seguridad era +6 h): limpia el próximo intento de las que
+  /// llevan el código en el resultado guardado, en cualquier
+  /// estado vivo. Devuelve cuántas despertaron.
+  Future<int> despertarOpsPausadas() async {
+    final d = await db;
+    return d.rawUpdate(
+        'UPDATE ops_queue SET proximo_reintento = NULL '
+        "WHERE estado IN ('pendiente', 'enviada', 'error') "
+        "AND resultado_servidor LIKE '%ACCESO_PAUSADO%'");
   }
 
   /// Ops que necesitan revisión manual (bloqueadas).

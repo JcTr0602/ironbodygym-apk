@@ -645,6 +645,18 @@ bool esRechazoServidor(dynamic resultado) {
   return resultado['ok'] == false;
 }
 
+/// 1.21 (candado, Opción B de Argón): true si el resultado es la
+/// PAUSA del candado: el puente no aplicó ni rechazó la op (la
+/// fila de sync_ops quedó pendiente con este código anotado) y
+/// la app debe retenerla sin quemar intentos hasta el desbloqueo.
+bool esAccesoPausado(dynamic resultado) {
+  if (resultado is Map && resultado['codigo'] == 'ACCESO_PAUSADO') {
+    return true;
+  }
+  return resultado is Map &&
+      '${resultado['error'] ?? ''}'.contains('ACCESO_PAUSADO');
+}
+
 /// Motivo legible del rechazo: primero la columna `error` del RPC si
 /// existe, si no el campo `error` del envelope. null si no hay motivo.
 String? motivoRechazo(dynamic resultado, String? errorServidor) {
@@ -2416,6 +2428,20 @@ class SyncEngine {
   Future<bool> _aplicarEstadoServidor(
       Map<String, dynamic> op, ResultadoOpServidor rec) async {
     final uuid = op['op_uuid'] as String;
+    // 1.21 (candado, Opción B): pausa del servidor — va PRIMERO
+    // que cualquier estado: la op vuelve a 'pendiente' con el
+    // próximo intento a +6 h (red de seguridad de Argón CD-01;
+    // el despertar normal es el desbloqueo) SIN tocar intentos:
+    // no es un error ni un rechazo. El resultado se guarda para
+    // que despertarOpsPausadas encuentre la op por su código.
+    if (esAccesoPausado(rec.resultado)) {
+      await _db.retenerOpPausada(
+          uuid,
+          isoHabana(
+              ahoraHabana().add(const Duration(hours: 6))));
+      await _guardarResultadoServidor(uuid, rec.resultado);
+      return false;
+    }
     final rechazadaPorPuente = esRechazoServidor(rec.resultado);
     if (rec.estado == 'aplicada' && !rechazadaPorPuente) {
       await _db.markOp(uuid, 'aplicada');
@@ -2742,7 +2768,9 @@ class SyncEngine {
         tabla == 'suplemento_ajustes' ||
         tabla == 'nomina_liquidada_snapshot' ||
         tabla == 'nomina_confirmaciones' ||
-        tabla == 'diferencias_caja') {
+        tabla == 'diferencias_caja' ||
+        // 1.21: candado de acceso (id TEXT + data jsonb).
+        tabla == 'acceso_bloqueos') {
       final id = '${m['id'] ?? ''}';
       if (id.isEmpty) return null;
       final rawData = m['data'];
@@ -3092,6 +3120,10 @@ class SyncEngine {
     'nomina_liquidada_snapshot',
     'nomina_confirmaciones',
     'diferencias_caja',
+    // 1.21: candado de acceso. Registrado desde el primer día
+    // en las tres listas y en la rama de id TEXT (lección A-01:
+    // un espejo fuera de alguna no baja nunca).
+    'acceso_bloqueos',
   ];
 
   Future<({int aplicadas, Map<String, int> porTabla})> _download(
@@ -3301,6 +3333,7 @@ class SyncEngine {
       'nomina_liquidada_snapshot': 'sync_nomina_liquidada_snapshot',
       'nomina_confirmaciones': 'sync_nomina_confirmaciones',
       'diferencias_caja': 'sync_diferencias_caja',
+      'acceso_bloqueos': 'sync_acceso_bloqueos',
       // v1.3.6 (v28): arqueo de caja e incidencias de sync.
       'liquidaciones_caja': 'sync_liquidaciones_caja',
       'incidencias_sync': 'sync_incidencias_sync',

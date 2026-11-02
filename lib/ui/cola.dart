@@ -2212,6 +2212,8 @@ const Map<String, String> kEtiquetasTablaSync = {
   'diferencias_caja': 'Diferencias de caja',
   'nomina_liquidada_snapshot': 'Fotos de nómina liquidada',
   'nomina_confirmaciones': 'Confirmaciones de nómina',
+  // 1.21: candado de acceso.
+  'acceso_bloqueos': 'Candado de acceso',
 };
 
 /// v1.3.4: detalle ampliable de un ciclo de sincronización.

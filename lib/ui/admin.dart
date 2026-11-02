@@ -62,6 +62,7 @@ import 'suplementos.dart';
 import 'widgets.dart';
 import 'mi_dia.dart';
 import 'panel_bloque2.dart';
+import 'panel_candado.dart';
 import 'panel_resto_caja.dart';
 import 'panel_resto_config.dart';
 import 'panel_resto_sistema.dart';
@@ -2172,6 +2173,14 @@ class _AdminScreenState extends State<AdminScreen> {
             : 'Entrenadores, clientes e invitados · '
                 '${_solicitudesInvitados.length} solicitud(es) por atender',
         () => _ir(const ControlAccesoScreen()),
+      ),
+      // 1.21: candado de acceso — pausa temporal de las apps
+      // sin cerrar sesiones (op acceso_bloqueo_set, solo dueño).
+      _tarjetaFlujo(
+        Icons.lock_rounded,
+        'Candado de acceso',
+        'Pausar Gestión y/o Clientes por alcance, rol o persona',
+        () => _ir(const PanelCandadoScreen()),
       ),
       _tarjetaFlujo(
         Icons.warning_amber_rounded,

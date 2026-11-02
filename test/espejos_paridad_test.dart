@@ -130,4 +130,29 @@ void main() {
               'entero y cada fila se descartaría');
     }
   });
+
+  test('la tabla del candado (1.21) está en las tres listas y en '
+      'la rama de id TEXT de _prepararFilaMirror', () {
+    final (:tablasEspejo, :supTablas, :conWatermark) = _sets();
+    final sync = File('lib/sync.dart').readAsStringSync();
+    expect(tablasEspejo, contains('acceso_bloqueos'),
+        reason: 'acceso_bloqueos fuera de tablasEspejo');
+    expect(supTablas, contains('acceso_bloqueos'),
+        reason: 'acceso_bloqueos fuera de supTablas');
+    expect(conWatermark, contains('acceso_bloqueos'),
+        reason: 'acceso_bloqueos fuera de tablasConWatermark');
+    final i = sync.indexOf("tabla == 'gympedia_articulos'");
+    expect(i, isNonNegative, reason: 'rama jsonb no encontrada');
+    final cierre = sync.indexOf(') {', i);
+    final rama = sync.substring(i, cierre);
+    expect(rama, contains("tabla == 'acceso_bloqueos'"),
+        reason: 'acceso_bloqueos fuera de la rama id TEXT + data '
+            'de _prepararFilaMirror');
+    // Y su watermark nace en 0 (no hereda el global).
+    final localdb = File('lib/localdb.dart').readAsStringSync();
+    expect(localdb, contains("if (tabla == 'acceso_bloqueos') return 0;"),
+        reason: 'acceso_bloqueos sin caso return 0 en '
+            'getWatermarkTabla: heredaría el watermark global y '
+            'la descarga inicial se saltaría los bloqueos');
+  });
 }

@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:workmanager/workmanager.dart';
 
+import 'acceso_bloqueo.dart';
 import 'app_log.dart';
 import 'auth.dart';
 import 'config.dart';
@@ -18,6 +19,7 @@ import 'sync.dart';
 import 'tarifa_especial.dart';
 import 'fotos_foreground.dart';
 import 'theme.dart';
+import 'ui/capa_candado.dart';
 import 'ui/diseno.dart';
 import 'ui/home.dart';
 import 'ui/login.dart';
@@ -159,6 +161,9 @@ Future<void> main() async {
   // 23/25: programar avisos de recordatorios de hoy (sin sesión
   // no hace nada; tras cada sync se reprograma con lista fresca).
   unawaited(AvisosRecordatorios.sincronizar());
+  // 1.21: candado de acceso — evalúa el espejo al arrancar y lo
+  // reevalúa tras cada sync y cada cambio de sesión.
+  AccesoBloqueoService.instance.iniciar();
   runApp(const IronBodyApp());
 }
 
@@ -244,11 +249,26 @@ class _IronBodyAppState extends State<IronBodyApp>
               // La escala de la app se multiplica por la de accesibilidad
               // del sistema, en vez de reemplazarla.
               final sistema = mq.textScaler.scale(1.0);
-              return MediaQuery(
+              final app = MediaQuery(
                 data: mq.copyWith(
                   textScaler: TextScaler.linear(escala * sistema),
                 ),
                 child: child!,
+              );
+              // 1.21: la capa del candado va sobre el Navigator
+              // entero (cubre también diálogos y pantallas
+              // apiladas) sin tocar la sesión ni la cola.
+              return ValueListenableBuilder<BloqueoVigente?>(
+                valueListenable: AccesoBloqueoService.instance.vigente,
+                builder: (_, bloqueo, __) {
+                  if (bloqueo == null) return app;
+                  return Stack(
+                    children: [
+                      app,
+                      Positioned.fill(child: CapaCandado(bloqueo: bloqueo)),
+                    ],
+                  );
+                },
               );
             },
             navigatorKey: navigatorKey,
