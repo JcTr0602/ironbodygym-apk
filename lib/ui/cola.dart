@@ -357,11 +357,22 @@ class _ColaScreenState extends State<ColaScreen> {
       // Quien esperó durante esta carga se libera cuando la
       // recarga coalescida termina (o ya, si la pantalla se
       // cerró y la recarga no va a correr: nadie queda colgado).
+      // AA3-1: la recarga va envuelta — si _cargarInterno lanza
+      // en sus primeros awaits (sin try/catch propio), el error
+      // no debe saltarse el complete(): el Future del que
+      // espera quedaría colgado para siempre (el indicador de
+      // pull-to-refresh girando sin fin).
       final espera = _recargaCompleter;
       _recargaCompleter = null;
       if (_recargaPendiente && mounted) {
         _recargaPendiente = false;
-        await _cargar();
+        try {
+          await _cargar();
+        } catch (_) {
+          // La recarga falló: el error ya quedó registrado en
+          // el ciclo que lo lanzó; aquí solo importa liberar
+          // a quien espera.
+        }
       }
       espera?.complete();
     }
