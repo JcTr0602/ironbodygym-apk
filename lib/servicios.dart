@@ -1105,7 +1105,9 @@ Future<bool> deshacerVentaServicio(
     if (op == null || '${op['estado']}' != 'pendiente') return false;
   }
   for (final uuid in opUuids) {
-    await db.deleteOp(uuid);
+    // SA-03: si alguna op ya subió entre la comprobación y el
+    // borrado, no se anuncia el deshacer como completo.
+    if (await db.deleteOp(uuid) == 0) return false;
   }
   return true;
 }

@@ -31,12 +31,45 @@ String _jwtFalso() {
       '.firma';
 }
 
+/// SB-03/SB-04 (auditoría sync 1.21): el servidor falso ahora
+/// HONRA el parámetro `select` como PostgREST: si la app pide
+/// una columna que la tabla real no tiene, responde 400. Antes
+/// el fake ignoraba el select y el test no cazó que
+/// sync_equipos_guia no tiene columna `id` (el catálogo de
+/// equipos nunca bajó en producción).
+bool _selectValido(HttpRequest req, Set<String> columnasReales) {
+  final select = req.uri.queryParameters['select'];
+  if (select == null || select.isEmpty) return true;
+  return select
+      .split(',')
+      .map((c) => c.trim())
+      .every(columnasReales.contains);
+}
+
 Future<HttpServer> _servidorGuia() async {
   final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
   server.listen((req) async {
     final res = req.response;
     try {
       final path = req.uri.path;
+      const columnasPorTabla = {
+        '/rest/v1/sync_guia_ejercicios': {'id', 'data', 'sync_seq'},
+        '/rest/v1/sync_equipos_guia': {'equipo_id', 'data', 'sync_seq'},
+        '/rest/v1/sync_guia_borrados': {'id', 'sync_seq'},
+      };
+      final columnas = columnasPorTabla[path];
+      if (req.method == 'GET' &&
+          columnas != null &&
+          !_selectValido(req, columnas)) {
+        res.statusCode = 400;
+        res.headers.contentType = ContentType.json;
+        res.write(jsonEncode({
+          'code': '42703',
+          'message': 'column does not exist (fake SB-03)',
+        }));
+        await res.close();
+        return;
+      }
       if (req.method == 'POST' && path.endsWith('/auth/v1/token')) {
         res.headers.contentType = ContentType.json;
         res.write(jsonEncode({

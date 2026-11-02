@@ -403,8 +403,14 @@ class _PagoScreenState extends State<PagoScreen> {
           }
         }
         // Nunca se envió: borrar la op es seguro.
-        await LocalDb.instance.deleteOp(u.opUuid!);
+        // SA-03: comprobar el borrado antes de anunciarlo.
+        final borradas =
+            await LocalDb.instance.deleteOp(u.opUuid!);
         if (!mounted) return;
+        if (borradas == 0) {
+          mostrarSnack(context, 'Ese pago se está sincronizando, intenta en unos segundos', significado: SignificadoChip.alerta);
+          return;
+        }
         mostrarSnack(context, 'Pago deshecho (no había sido enviado)', significado: SignificadoChip.exito);
       } else {
         // 'enviada': ya va en camino al servidor, no se puede borrar.

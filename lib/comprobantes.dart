@@ -167,7 +167,15 @@ class ComprobantesService {
     for (final f in await comprobantesEnError()) {
       final ruta = f['ruta_local'] as String?;
       if (ruta == null || !await File(ruta).exists()) continue;
-      await _marcar(db, f['comprobante_uuid'] as String, 'pendiente');
+      // SA-05: la reactivación deliberada también resetea el
+      // contador (si no, el próximo fallo lo devuelve a 'error'
+      // al instante por el tope ya alcanzado).
+      await db.update(
+        'comprobantes_pago',
+        {'estado': 'pendiente', 'intentos': 0},
+        where: 'comprobante_uuid = ?',
+        whereArgs: [f['comprobante_uuid']],
+      );
       n++;
     }
     if (n > 0) {
@@ -262,18 +270,45 @@ class ComprobantesService {
             case EstadoSubida.permitirFallback:
             case EstadoSubida.pausadaPorQos:
               // Queda 'pendiente': el próximo ciclo reintenta
-              // (la subida TUS reanuda en su offset).
+              // (la subida TUS reanuda en su offset). SA-05
+              // (auditoría sync 1.21): con TOPE — un fallo
+              // reintentable pero permanente (p. ej. el bucket
+              // rechaza siempre igual) ya no se reintenta en cada
+              // ciclo para siempre: a los 10 intentos pasa a
+              // 'error', visible y reactivable desde la ficha.
+              await _contarIntento(db, f);
               break;
           }
         } catch (e) {
           AppLog.error('comprobantes', 'excepcion_subida',
               d: 'uuid=$uuid error=$e');
+          await _contarIntento(db, f);
         }
       }
     } finally {
       _procesando = false;
     }
     return subidos;
+  }
+
+  /// SA-05: suma un intento fallido; al llegar a 10 la fila pasa
+  /// a 'error' (deja de reintentarse sola en cada ciclo).
+  Future<void> _contarIntento(
+      Database db, Map<String, Object?> f) async {
+    final uuid = f['comprobante_uuid'] as String;
+    final intentos = (f['intentos'] as int? ?? 0) + 1;
+    if (intentos >= 10) {
+      await _marcar(db, uuid, 'error');
+      AppLog.error('comprobantes', 'tope_intentos',
+          d: 'uuid=$uuid intentos=$intentos: pasa a error');
+    } else {
+      await db.update(
+        'comprobantes_pago',
+        {'intentos': intentos},
+        where: 'comprobante_uuid = ?',
+        whereArgs: [uuid],
+      );
+    }
   }
 
   Future<void> _marcar(Database db, String uuid, String estado) async {

@@ -133,6 +133,49 @@ void main() {
     expect(await LocalDb.instance.countPendingOps(), 1);
   });
 
+  test('SA-01: op PAUSADA por el candado (estado «pendiente» con '
+      'código ACCESO_PAUSADO) se retiene +6 h y guarda el código',
+      () async {
+    await _bdVacia();
+    await _insertarOp(
+      uuid: 'op-pausa-1',
+      tipo: 'pago_mensual',
+      estado: 'enviada',
+      enviadaTs: '2026-10-23T11:38:00.000-04:00',
+    );
+    final res = await SyncEngine.instance.barridoConfirmacion(
+      verificar: (uuids) async => {
+        'op-pausa-1': (
+          estado: 'pendiente',
+          resultado: {
+            'ok': false,
+            'reintentable': true,
+            'codigo': 'ACCESO_PAUSADO',
+            'error': 'Acceso pausado por el dueño.',
+          },
+          error: null,
+        ),
+      },
+    );
+    // No se confirma como aplicada, pero SÍ se procesa: vuelve a
+    // 'pendiente' con próximo intento futuro (retención) y el
+    // resultado con el código queda guardado para el despertar.
+    expect(res.confirmadas, 0);
+    expect(await _estadoDe('op-pausa-1'), 'pendiente');
+    final db = await LocalDb.instance.db;
+    final rows = await db.query('ops_queue',
+        columns: ['proximo_reintento', 'resultado_servidor', 'intentos'],
+        where: 'op_uuid = ?',
+        whereArgs: ['op-pausa-1']);
+    expect(rows.first['proximo_reintento'], isNotNull);
+    expect(rows.first['resultado_servidor'],
+        contains('ACCESO_PAUSADO'));
+    // La retención no quema intentos.
+    expect(rows.first['intentos'] ?? 0, 0);
+    // Y el despertar por desbloqueo la encuentra por su código.
+    expect(await LocalDb.instance.despertarOpsPausadas(), 1);
+  });
+
   test('triestado: si la verificación falla (red), no se marca '
       'nada y no se propaga', () async {
     await _bdVacia();

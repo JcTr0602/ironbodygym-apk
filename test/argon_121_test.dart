@@ -164,6 +164,22 @@ void main() {
     await tmp.delete(recursive: true);
   });
 
+  test('SB-01/SB-02: la purga resetea el watermark de gastos y '
+      'liquidaciones_caja no hereda el global congelado', () async {
+    await _preparar();
+    final db = LocalDb.instance;
+    await db.setWatermark(9000); // global avanzado
+    await db.setWatermarkTabla('gastos', 500);
+    await db.setWatermarkTabla('liquidaciones_caja', 700);
+    await db.purgarDatosSensibles();
+    // SB-01: wm_gastos reseteado a 0 en la purga (aunque el
+    // global heredado sea enorme) → vuelve a bajar todo.
+    expect(await db.getWatermarkTabla('gastos'), 0);
+    expect(await db.getMeta('wm_gastos'), '0');
+    // SB-02: su wm se borra en la purga y NO hereda el global.
+    expect(await db.getWatermarkTabla('liquidaciones_caja'), 0);
+  });
+
   test('Q6: fromMap normaliza en_revision a en_proceso',
       () async {
     final inc = Incidencia.fromMap({

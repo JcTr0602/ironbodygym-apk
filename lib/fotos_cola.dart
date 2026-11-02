@@ -325,8 +325,13 @@ class FotosColaService {
         '$workerId|${isoHabana(ahoraHabana().add(const Duration(minutes: 10)))}';
     final leaseReclamado = await db.rawUpdate(
       "UPDATE meta SET v = ? WHERE k = 'fotos_worker_lease' AND "
-      "(v = '' OR v NOT LIKE '%|%' OR substr(v, instr(v, '|') + 1) < ?)",
-      [leaseValor, isoHabana(ahoraHabana())],
+      // SA-04 (auditoría sync 1.21): la expiración se compara por
+      // EPOCH, no como texto ISO: con el cambio de hora de otoño
+      // la misma hora de pared existe dos veces con offsets
+      // distintos y el orden lexicográfico se rompe.
+      "(v = '' OR v NOT LIKE '%|%' OR "
+      "CAST(strftime('%s', substr(v, instr(v, '|') + 1)) AS INTEGER) < ?)",
+      [leaseValor, '${DateTime.now().millisecondsSinceEpoch ~/ 1000}'],
     );
     if (leaseReclamado != 1) {
       AppLog.aviso('fotos', 'worker_activo',
@@ -424,11 +429,15 @@ class FotosColaService {
         ahora: ahoraHabana(),
       );
       // v1.3.4 (Argón): hora Habana, estándar obligatorio.
-      final ahoraIso = isoHabana(ahoraHabana());
+      // SA-04: el corte de proximo_intento_en se compara por
+      // epoch (instante), no como texto ISO (ver lease arriba).
+      final ahoraIso =
+          '${DateTime.now().millisecondsSinceEpoch ~/ 1000}';
       final fotos = await db.query(
         'fotos_cola',
         where: "estado = 'pendiente' AND intentos < 5 "
-            "AND (proximo_intento_en IS NULL OR proximo_intento_en <= ?)"
+            "AND (proximo_intento_en IS NULL OR "
+            "CAST(strftime('%s', proximo_intento_en) AS INTEGER) <= ?)"
             // v1.3.10: el reintento manual (forzar_qos=1) salta el filtro QoS.
             // v1.13.0 (G5): ELIMINADO el bypass de 'original' ligera
             // (<=512 KB) de la v1.4.0: una original liviana ya NO
@@ -851,16 +860,9 @@ class FotosColaService {
       // La creación aún no se aplica: reintentable, no error.
       return null;
     }
-    // Persistir los IDs resueltos para no consultar de nuevo.
-    if (f['cliente_id'] == null && clienteId != null ||
-        f['suplemento_id'] == null && suplementoId != null) {
-      await db.update(
-        'fotos_cola',
-        {'cliente_id': clienteId, 'suplemento_id': suplementoId},
-        where: 'id = ?',
-        whereArgs: [id],
-      );
-    }
+    // (SA-09, auditoría sync 1.21: la persistencia de los IDs
+    // resueltos ya se hizo arriba, justo tras resolverlos; el
+    // segundo bloque idéntico que vivía aquí se eliminó.)
 
     // Corrección Gemini #4: ruta determinista con entidad, tipo y extensión real.
     final entidad = clienteId != null
@@ -1113,6 +1115,34 @@ class FotosColaService {
       limit: 1,
     );
     if (orig.isNotEmpty && orig.first['storage_path'] != null) {
+      // SA-10 (auditoría sync 1.21): si el espejo del cliente ya
+      // enlaza ESTA foto con ESTE path, la vinculación ya se hizo
+      // (y su op determinista ya pudo aplicarse): no se re-encola
+      // un duplicado por el fallback.
+      final cidOrig = orig.first['cliente_id'] as int?;
+      if (cidOrig != null) {
+        try {
+          final filasCli = await db.query('clientes',
+              columns: ['data'],
+              where: 'id = ?',
+              whereArgs: [cidOrig],
+              limit: 1);
+          if (filasCli.isNotEmpty) {
+            final rawCli = filasCli.first['data'];
+            final dataCli = Map<String, dynamic>.from(rawCli is String
+                ? jsonDecode(rawCli)
+                : rawCli as Map);
+            if (dataCli['foto_uuid'] == opUuid &&
+                dataCli['foto_storage'] ==
+                    orig.first['storage_path']) {
+              return;
+            }
+          }
+        } catch (_) {
+          // Espejo ilegible: se sigue con la vinculación normal
+          // (idempotente por UUID determinista).
+        }
+      }
       try {
         await db.transaction((txn) async {
           await _vincularEnTransaccion(
@@ -1218,7 +1248,13 @@ class FotosColaService {
               ? jsonDecode(rows.first['data'] as String)
               : rows.first['data'] as Map);
     } catch (_) {
-      return;
+      // SA-07 (auditoría sync 1.21): el JSON del cliente corrupto
+      // NO se traga en silencio: antes la función volvía sin
+      // vincular ni encolar la op y la foto se marcaba
+      // 'completada' — la vinculación se perdía sin rastro. Se
+      // relanza: la transacción revierte y el despachador cuenta
+      // el intento (a los 5 la foto va a 'error' visible).
+      rethrow;
     }
 
     // Verificar precedencia: no sobrescribir si ya hay una foto más nueva.
@@ -1264,11 +1300,14 @@ class FotosColaService {
   Future<int> contarPendientes() async {
     final db = await LocalDb.instance.db;
     // v1.3.4 (Argón): hora Habana, estándar obligatorio.
-    final ahoraIso = isoHabana(ahoraHabana());
+    // SA-04: comparación por epoch (ver procesarCola).
+    final ahoraIso =
+        '${DateTime.now().millisecondsSinceEpoch ~/ 1000}';
     final r = await db.rawQuery(
         "SELECT COUNT(*) as n FROM fotos_cola WHERE estado = 'pendiente' "
         "AND intentos < 5 "
-        "AND (proximo_intento_en IS NULL OR proximo_intento_en <= ?)",
+        "AND (proximo_intento_en IS NULL OR "
+            "CAST(strftime('%s', proximo_intento_en) AS INTEGER) <= ?)",
         [ahoraIso]);
     return (r.first['n'] as int? ?? 0);
   }
@@ -1290,11 +1329,13 @@ class FotosColaService {
       ultimoDisplayRapido: _ultimoDisplayRapido,
       ahora: ahora,
     );
-    final ahoraIso = isoHabana(ahora);
+    // SA-04: comparación por epoch (ver procesarCola).
+    final ahoraIso = '${ahora.millisecondsSinceEpoch ~/ 1000}';
     final r = await db.rawQuery(
         "SELECT COUNT(*) as n FROM fotos_cola WHERE estado = 'pendiente' "
         "AND intentos < 5 "
-        "AND (proximo_intento_en IS NULL OR proximo_intento_en <= ?)"
+        "AND (proximo_intento_en IS NULL OR "
+            "CAST(strftime('%s', proximo_intento_en) AS INTEGER) <= ?)"
         "${puedeOriginal ? '' : " AND (tipo != 'original' OR forzar_qos = 1)"}",
         [ahoraIso]);
     return (r.first['n'] as int? ?? 0);

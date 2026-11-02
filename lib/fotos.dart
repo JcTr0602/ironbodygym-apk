@@ -181,6 +181,18 @@ class FotoCache {
             totalBytes += stat.size;
             items.add(_CacheItem(entity, stat.size, stat.modified));
           } catch (_) {}
+        } else if (entity is File && entity.path.endsWith('.tmp')) {
+          // SB-09 (auditoría sync 1.21): los .tmp de escrituras
+          // atómicas interrumpidas quedaban fuera del LRU para
+          // siempre (no cuentan ni se expulsan): se borran los
+          // de más de 24 h en este mismo barrido.
+          try {
+            final stat = await entity.stat();
+            if (DateTime.now().difference(stat.modified).inHours >=
+                24) {
+              await entity.delete();
+            }
+          } catch (_) {}
         }
       }
 

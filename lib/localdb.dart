@@ -41,7 +41,7 @@ class LocalDb {
   /// v1.4.0 (Argón): versión actual del esquema local. Los tests de
   /// migración comparan contra esta constante en vez de un número
   /// fijo, para no caer en cascada de fallos con cada migración.
-  static const int versionActual = 58;
+  static const int versionActual = 59;
 
   /// v37: marcas de información pública pendiente de republicar,
   /// UNA FILA POR CLAVE (compartido entre onCreate y la migración
@@ -1230,6 +1230,12 @@ class LocalDb {
           await _addColumnIfMissing(
               db, 'app_log', 'repeticiones', 'INTEGER NOT NULL DEFAULT 1');
           await _addColumnIfMissing(db, 'app_log', 'primer_ts', 'TEXT');
+        }
+        if (oldV < 59) {
+          // SA-05 (auditoría sync 1.21): contador de intentos de
+          // subida de comprobantes (tope con paso a 'error').
+          await _addColumnIfMissing(db, 'comprobantes_pago',
+              'intentos', 'INTEGER NOT NULL DEFAULT 0');
         }
         if (oldV < 57) {
           // T5 (1.20): espejo de expedientes de diferencia
@@ -2783,7 +2789,9 @@ class LocalDb {
         'ruta_local TEXT, '
         'storage_path TEXT, '
         "estado TEXT NOT NULL DEFAULT 'pendiente', "
-        'creado_en TEXT NOT NULL)');
+        'creado_en TEXT NOT NULL, '
+        // SA-05 (1.21): tope de intentos de subida reintentables.
+        'intentos INTEGER NOT NULL DEFAULT 0)');
   }
 
   /// T22 (1.20): espejos de la foto de liquidación de nómina
@@ -4112,9 +4120,25 @@ class LocalDb {
   Future<List<Map<String, dynamic>>> allMirror(String tabla) async {
     final d = await db;
     final rows = await d.query(tabla);
-    return [
-      for (final r in rows) _mapaMirror(tabla, r),
-    ];
+    final salida = <Map<String, dynamic>>[];
+    var corruptas = 0;
+    for (final r in rows) {
+      try {
+        salida.add(_mapaMirror(tabla, r));
+      } catch (_) {
+        // SB-08 (auditoría sync 1.21): UNA fila con el JSON
+        // dañado ya no tumba la lectura ENTERA del espejo (las
+        // pantallas quedaban en cero, síntoma del incidente del
+        // espejo vacío 2026-10-30): se salta esa fila y se deja
+        // constancia; el resto del espejo sigue legible.
+        corruptas++;
+      }
+    }
+    if (corruptas > 0) {
+      debugPrint('[allMirror] $tabla: $corruptas fila(s) con JSON '
+          'dañado omitidas de la lectura');
+    }
+    return salida;
   }
 
   /// Arma el mapa de una fila espejo: JSON decodificado + columnas
@@ -5522,6 +5546,16 @@ class LocalDb {
     // auditoría local y la caché de usuarios APK (un entrenador no debe
     // ver datos del dueño tras el cambio de sesión).
     n += await d.delete('gastos');
+    // SB-01 (auditoría sync 1.21): el watermark de gastos también
+    // se resetea: sin esto, tras re-login el pull creía que los
+    // gastos ya estaban bajados y NUNCA volvían (la sync decía
+    // «completo»; solo lo curaba el manifiesto diario). Se pone
+    // a '0' (no se borra la fila): sin fila, getWatermarkTabla
+    // HEREDA el watermark global heredado de versiones viejas,
+    // que en teléfonos antiguos puede ser enorme y reproduciría
+    // el mismo bloqueo.
+    await d.insert('meta', {'k': 'wm_gastos', 'v': '0'},
+        conflictAlgorithm: ConflictAlgorithm.replace);
     n += await d.delete('auditoria_local');
     n += await d.delete('meta', where: "k = 'usuarios_apk'");
     // Argón P2#8: al cerrar sesión tampoco pueden quedar las
@@ -6369,7 +6403,16 @@ class LocalDb {
     // 1.21: candado de acceso, mismo motivo.
     if (tabla == 'acceso_bloqueos') return 0;
     // v1.8.0 (v40): adelantos y liquidaciones, mismo motivo.
-    if (tabla == 'adelantos' || tabla == 'nomina_liquidada') return 0;
+    // SB-02 (auditoría sync 1.21): liquidaciones_caja faltaba en
+    // esta lista — la purga SÍ borra su wm (meta) pero aquí
+    // heredaba el watermark GLOBAL congelado (setWatermark no
+    // tiene llamadores) y tras re-login la re-descarga era
+    // parcial y silenciosa, sin cura automática.
+    if (tabla == 'adelantos' ||
+        tabla == 'nomina_liquidada' ||
+        tabla == 'liquidaciones_caja') {
+      return 0;
+    }
     // v1.12.0 (G2): los espejos nuevos del Bloque 3 nacen con la
     // tabla y deben descargarse desde cero, por el mismo motivo.
     if (tabla == 'solicitudes_adelanto' ||
@@ -7041,9 +7084,15 @@ class LocalDb {
   /// el POST a Supabase nunca tuvo éxito, así que el servidor jamás la
   /// vio. Una op 'enviada'/'aplicada' NO debe borrarse: ya está (o estará)
   /// en el servidor; para esas se usa 'anular_pago'.
-  Future<void> deleteOp(String opUuid) async {
+  ///
+  /// SA-03 (auditoría sync 1.21): devuelve cuántas filas se
+  /// borraron (0 o 1). El llamador DEBE comprobarlo antes de
+  /// anunciar «deshecho»: entre su lectura del estado y este
+  /// borrado, un push forzado pudo subir la op (la WHERE la
+  /// protege, pero el anuncio salía igual y era falso).
+  Future<int> deleteOp(String opUuid) async {
     final d = await db;
-    await d.delete('ops_queue',
+    return d.delete('ops_queue',
         where: "op_uuid=? AND estado IN ('pendiente','error')",
         whereArgs: [opUuid]);
   }
@@ -7546,9 +7595,19 @@ class LocalDb {
   }
 
   /// v1.2.4: re-intenta una op rechazada o con error (vuelve a la cola).
+  /// SA-08 (auditoría sync 1.21): también limpia el backoff y los
+  /// intentos — un reintento MANUAL que hereda el proximo_reintento
+  /// viejo no se enviaba hasta que este venciera, sin explicación.
   Future<void> reintentarOp(String opUuid) async {
     final d = await db;
-    await d.update('ops_queue', {'estado': 'pendiente', 'error': null},
+    await d.update(
+        'ops_queue',
+        {
+          'estado': 'pendiente',
+          'error': null,
+          'proximo_reintento': null,
+          'intentos': 0,
+        },
         where: "op_uuid=? AND estado IN ('error','rechazada')",
         whereArgs: [opUuid]);
   }

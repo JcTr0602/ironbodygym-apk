@@ -110,9 +110,21 @@ class _ConfirmacionCobroScreenState
               'en el panel del dueño.', significado: SignificadoChip.alerta);
       return;
     }
-    await LocalDb.instance.deleteOp(uuid);
+    // SA-03: si el borrado no tocó la fila, un push forzado la
+    // subió entre la comprobación y aquí: no se anuncia deshecho.
+    final borradas = await LocalDb.instance.deleteOp(uuid);
     _timer?.cancel();
     if (!mounted) return;
+    if (borradas == 0) {
+      setState(() {
+        _puedeDeshacer = false;
+        _yaSubio = true;
+      });
+      mostrarSnack(context, 'El cobro ya subió: la corrección queda solo '
+              'en el panel del dueño.',
+          significado: SignificadoChip.alerta);
+      return;
+    }
     Navigator.of(context).pop('deshecho');
   }
 

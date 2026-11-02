@@ -34,7 +34,7 @@ void main() {
       () async {
     await _preparar();
     final d = await LocalDb.instance.db;
-    expect(LocalDb.versionActual, 58);
+    expect(LocalDb.versionActual, 59);
     final tablas = await d.rawQuery(
         "SELECT name FROM sqlite_master WHERE type='table' "
         "AND name='suplemento_ajustes'");

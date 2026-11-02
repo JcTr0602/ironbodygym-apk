@@ -1991,7 +1991,18 @@ class SyncEngine {
     for (final op in sinConfirmar) {
       final uuid = op['op_uuid'] as String;
       final rec = confirmados[uuid];
-      if (rec == null || rec.estado == 'pendiente') continue;
+      // SA-01 (auditoría sync 1.21): una op PAUSADA por el
+      // candado llega normalizada como 'pendiente' (el puente
+      // no la marca aplicada) pero su resultado trae el código
+      // ACCESO_PAUSADO: debe llegar a _aplicarEstadoServidor
+      // para retenerse +6 h; si se salta como 'pendiente' a
+      // secas, se re-POSTea en cada ciclo y el despertar por
+      // desbloqueo no la encuentra.
+      if (rec == null ||
+          (rec.estado == 'pendiente' &&
+              !esAccesoPausado(rec.resultado))) {
+        continue;
+      }
       if (await _aplicarEstadoServidor(op, rec)) {
         // v1.2.4: la incidencia local queda confirmada por el servidor
         if ('${op['tipo']}' == 'incidencia') {
@@ -2114,8 +2125,13 @@ class SyncEngine {
     for (final op in ops) {
       final uuid = op['op_uuid'] as String;
       final rec = estados[uuid];
-      if (rec == null || rec.estado == 'pendiente') {
+      if (rec == null ||
+          (rec.estado == 'pendiente' &&
+              !esAccesoPausado(rec.resultado))) {
         // Sin evidencia del servidor (o aún en vuelo): se reenvía.
+        // SA-01: la excepción es la op PAUSADA (código en el
+        // resultado): no se reenvía, se retiene vía
+        // _aplicarEstadoServidor.
         porEnviar.add(op);
         continue;
       }
@@ -2129,6 +2145,27 @@ class SyncEngine {
         uuids.add(uuid);
       }
     }
+    // SA-02 (auditoría sync 1.21): un payload corrupto en la cola
+    // envenenaba el push ENTERO para siempre: el jsonDecode del
+    // cuerpo del lote iba fuera del try y el FormatException
+    // abortaba cada ciclo sin marcar ninguna op. Ahora cada
+    // payload se valida ANTES de lotear: el corrupto va a
+    // 'necesita_revision' con su motivo (visible en la cola) y
+    // las demás ops siguen su curso.
+    final porEnviarSanos = <Map<String, dynamic>>[];
+    for (final op in porEnviar) {
+      try {
+        jsonDecode(op['payload'] as String);
+        porEnviarSanos.add(op);
+      } catch (_) {
+        await _db.markOp(op['op_uuid'] as String, 'necesita_revision',
+            error: 'El contenido de esta operación está dañado en '
+                'el teléfono (no se pudo leer). Revisión manual.');
+      }
+    }
+    porEnviar
+      ..clear()
+      ..addAll(porEnviarSanos);
     // 2) envío en lotes adaptativos (v1.3.4 Ítem 4, Argón): base 20,
     // baja a 10 en fallo de lote, sube a 30 y luego a 50 en racha de
     // 3 lotes OK. Commit local de avance entre lote y lote (markOp /
@@ -2245,12 +2282,22 @@ class SyncEngine {
     final tag = await deviceTag();
     for (final op in lote) {
       final uuid = op['op_uuid'] as String;
-      final body = jsonEncode({
-        'op_uuid': uuid,
-        'device_tag': tag,
-        'tipo': op['tipo'],
-        'payload': jsonDecode(op['payload'] as String),
-      });
+      // SA-02: el cuerpo se construye DENTRO del try: un payload
+      // corrupto marca solo a su op, no aborta el resto del lote.
+      String body;
+      try {
+        body = jsonEncode({
+          'op_uuid': uuid,
+          'device_tag': tag,
+          'tipo': op['tipo'],
+          'payload': jsonDecode(op['payload'] as String),
+        });
+      } catch (_) {
+        await _db.markOp(uuid, 'necesita_revision',
+            error: 'El contenido de esta operación está dañado en '
+                'el teléfono (no se pudo leer). Revisión manual.');
+        continue;
+      }
       try {
         final r = await _postAuth(
             Uri.parse('$_base/rest/v1/sync_ops?on_conflict=op_uuid'),
@@ -3485,6 +3532,11 @@ class SyncEngine {
             // columna 'data' y con telegram_id como PK (el default
             // 'id,data,sync_seq' daba 400 y la tabla jamás bajaba).
             'permisos_bandeja' => 'telegram_id,otorgado_en,sync_seq',
+            // SB-03 (auditoría sync 1.21): sync_equipos_guia NO
+            // tiene columna id (su PK es equipo_id): el default
+            // daba 400 y el catálogo de equipos de la Guía NUNCA
+            // bajaba (tolerado como «tabla ausente»).
+            'guia_equipos' => 'equipo_id,data,sync_seq',
             _ => 'id,data,sync_seq',
           };
           // v1.2.9+47 (AppLog): medir latencia del lote.
@@ -3515,7 +3567,21 @@ class SyncEngine {
           AppLog.info('sync', 'pull_lote',
               d: '$tabla wm=$pageWm http=${r.statusCode} '
                   'bytes=${r.body.length} ms=$latencia');
-          if (r.statusCode == 404 || r.statusCode == 400) {
+          if (r.statusCode == 400) {
+            // SB-04 (auditoría sync 1.21): un 400 NO es «tabla
+            // ausente» — es un error de CONTRATO (columna pedida
+            // que no existe, deriva de esquema). Antes se toleraba
+            // como ausente y el espejo quedaba congelado PARA
+            // SIEMPRE sin error visible (así murió guia_equipos).
+            // Ahora falla visible y reintentable: no se marca
+            // ausente, no avanza el cursor y el ciclo siguiente
+            // lo vuelve a intentar.
+            AppLog.error('sync', 'pull_tabla_400',
+                d: '$tabla http=400 (error de contrato)');
+            throw Exception(
+                'bajada $tabla: HTTP 400 (error de contrato)');
+          }
+          if (r.statusCode == 404) {
             AppLog.aviso('sync', 'pull_tabla_ausente',
                 d: '$tabla http=${r.statusCode}');
             // v1.2.1: la tabla no existe en Supabase o el rol no puede
@@ -4034,7 +4100,16 @@ class SyncEngine {
             '?select=entidad,entidad_id,sync_seq'
             '&sync_seq=gt.$pageWm&order=sync_seq.asc&limit=100'));
         // v1.3.1 (Argón pull): mismo tratamiento que las tablas de datos.
-        if (r.statusCode == 404 || r.statusCode == 400) {
+        // SB-04: 400 = error de contrato, no «ausente»: queda
+        // registrado y la pasada de borrados se marca fallida
+        // (borradosOk=false aguas abajo); 404 sí es ausente.
+        if (r.statusCode == 400) {
+          AppLog.error('sync', 'pull_borrados_400',
+              d: 'borrados http=400 (error de contrato)');
+          borradosOk = false;
+          break;
+        }
+        if (r.statusCode == 404) {
           await _db.setMeta('wm_borrados_ausente', '1');
           break;
         }
@@ -4356,7 +4431,14 @@ class SyncEngine {
             concluyente = false;
             break;
           }
-          if (r.statusCode != 200) continue;
+          if (r.statusCode != 200) {
+            // SB-06 (auditoría sync 1.21): un 401/403/429/5xx en
+            // un bucket NO es «sin divergencia»: es verificación
+            // NO concluyente (como el error de red). Antes se
+            // saltaba en silencio y el día se sellaba igual.
+            concluyente = false;
+            continue;
+          }
           final rows = jsonDecode(r.body) as List;
           // v1.2.5-rev2 (ChatGPT): protocolo de saturación. La RPC devuelve
           // hasta 2001 filas; MÁS de 2000 = truncado. Se marca divergente
@@ -4567,7 +4649,12 @@ class SyncEngine {
           [for (final o in enviadas) o['op_uuid'] as String]);
       for (final op in enviadas) {
         final rec = confirmados[op['op_uuid'] as String];
-        if (rec == null || rec.estado == 'pendiente') continue;
+        // SA-01: la op pausada también pasa (ver barridoConfirmacion).
+        if (rec == null ||
+            (rec.estado == 'pendiente' &&
+                !esAccesoPausado(rec.resultado))) {
+          continue;
+        }
         await _aplicarEstadoServidor(op, rec);
       }
     } catch (_) {
@@ -4745,6 +4832,14 @@ class SyncEngine {
       offset = 0;
     } else {
       final remoto = await _tusOffset(location);
+      if (remoto == -2) {
+        // SA-06 (auditoría sync 1.21): no se pudo averiguar el
+        // offset real del servidor: NO se sigue con el offset
+        // local guardado (puede no coincidir y dar por subida
+        // una foto que el servidor no tiene completa). Es un
+        // fallo reintentable: el próximo ciclo vuelve a medir.
+        return false;
+      }
       if (remoto == -1) {
         location = await _tusCrear(objectPath, bytes.length);
         if (location == null) return null;
@@ -4972,15 +5067,16 @@ class SyncEngine {
   /// `sync_ultimo_sync` (una fila por usuario: dueño + entrenadores).
   /// Watermark = MAX(sync_seq) local (0 si vacío); GET con
   /// `sync_seq=gt.<watermark>&order=sync_seq`; INSERT OR REPLACE por
-  /// telegram_user_id (idempotente ante re-pulls). 404/400 = el
+  /// telegram_user_id (idempotente ante re-pulls). 404 = el
   /// espejo aún no existe (SQL_113 sin ejecutar): se tolera y se
-  /// devuelve 0 sin romper el pull. Cualquier otro error se lanza
-  /// (el llamador lo registra en meta).
+  /// devuelve 0 sin romper el pull. SB-04: 400 ya NO se tolera
+  /// (es error de contrato, no ausencia): se lanza como los
+  /// demás errores y el llamador lo registra en meta.
   Future<int> _pullUltimoSync() async {
     final wm = await _db.watermarkUltimoSync();
     final r = await _getAuth(Uri.parse(
         '$_base/rest/v1/sync_ultimo_sync?sync_seq=gt.$wm&order=sync_seq'));
-    if (r.statusCode == 404 || r.statusCode == 400) return 0;
+    if (r.statusCode == 404) return 0;
     if (r.statusCode != 200) {
       throw Exception('sync_ultimo_sync HTTP ${r.statusCode}');
     }
