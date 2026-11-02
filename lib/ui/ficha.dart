@@ -204,8 +204,17 @@ class _FichaScreenState extends State<FichaScreen> {
     // v1.3.9 (F1): el caché de accesos también se carga en
     // _enriquecerDesdeServidor (era el segundo await de red
     // sin timeout antes de pintar; misma causa del cuelgue).
+    // Panel (Terra por Zen): la guarda de generación también
+    // protege la carga LOCAL — sin ella, una _cargar lenta
+    // (BD bloqueada) podía terminar después que una recarga
+    // más nueva y repintar datos viejos — y los dos estados
+    // de red se reinician aquí para que un valor de una
+    // recarga anterior no sobreviva a un fallo de la nueva.
+    if (!mounted || gen != _cargaGen) return;
     if (mounted) {
       setState(() {
+        _plusResidual = null;
+        _accesoSinConexion = false;
         _c = c;
         _pagos = pagos;
         _suplementos = suplementos;

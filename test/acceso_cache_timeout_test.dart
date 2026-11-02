@@ -18,13 +18,16 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   late HttpServer servidorMudo;
+  HttpOverrides? overridesPrevios;
 
   setUpAll(() async {
     SharedPreferences.setMockInitialValues({});
     // El binding de test instala un HttpClient falso que
     // responde 400 al instante: con eso el test no probaría
     // el cuelgue real. Se restaura la red verdadera para que
-    // la petición llegue al servidor mudo de verdad.
+    // la petición llegue al servidor mudo de verdad (y se
+    // repone el override al terminar: panel Terra por Zen).
+    overridesPrevios = HttpOverrides.current;
     HttpOverrides.global = null;
     // Servidor mudo: acepta y jamás responde.
     servidorMudo = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
@@ -39,6 +42,7 @@ void main() {
   });
 
   tearDownAll(() async {
+    HttpOverrides.global = overridesPrevios;
     await servidorMudo.close(force: true);
   });
 
@@ -47,7 +51,12 @@ void main() {
       'false en tiempo acotado (no cuelga la ficha)', () async {
     AccesoAppCache.instance.limpiar();
     final crono = Stopwatch()..start();
-    final ok = await AccesoAppCache.instance.cargar();
+    // La espera misma va envuelta en timeout: si el cuelgue
+    // reapareciera, el test falla a los 30 s en vez de
+    // esperar al timeout global del corredor (panel).
+    final ok = await AccesoAppCache.instance
+        .cargar()
+        .timeout(const Duration(seconds: 30));
     crono.stop();
     expect(ok, isFalse);
     // El timeout interno es de 10 s; se deja margen amplio

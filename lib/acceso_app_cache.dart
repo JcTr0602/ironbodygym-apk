@@ -127,7 +127,14 @@ class AccesoAppCache {
   static final AccesoAppCache instance = AccesoAppCache._();
 
   Map<int, AccesoCliente>? _porCliente;
-  bool _cargando = false;
+
+  /// Carga en curso, si la hay: quien llame a cargar()
+  /// mientras otra pantalla ya está cargando ESPERA esa
+  /// misma carga y recibe su resultado real. Antes devolvía
+  /// false («falló») aunque la carga concurrente terminara
+  /// bien, y un llamador podía marcar «sin conexión» por
+  /// error (panel Terra por Zen, 2026-11-02).
+  Future<bool>? _enCurso;
 
   /// true si el caché ya se cargó en esta sesión (aunque esté vacío).
   bool get cargado => _porCliente != null;
@@ -138,9 +145,18 @@ class AccesoAppCache {
 
   /// Carga el caché desde el servidor. Retorna true si tuvo éxito.
   /// Si falla (offline), deja el caché como estaba y retorna false.
-  Future<bool> cargar() async {
-    if (_cargando) return false;
-    _cargando = true;
+  Future<bool> cargar() {
+    final enCurso = _enCurso;
+    if (enCurso != null) return enCurso;
+    final f = _cargarInterno();
+    _enCurso = f;
+    f.whenComplete(() {
+      if (identical(_enCurso, f)) _enCurso = null;
+    });
+    return f;
+  }
+
+  Future<bool> _cargarInterno() async {
     try {
       // Timeout propio (10 s): sin conexión, una RPC sin
       // timeout puede no devolver nunca, y hay llamadores que
@@ -158,8 +174,6 @@ class AccesoAppCache {
       return true;
     } catch (_) {
       return false;
-    } finally {
-      _cargando = false;
     }
   }
 
