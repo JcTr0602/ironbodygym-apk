@@ -122,6 +122,49 @@ void main() {
     }
   });
 
+  test('cumple con el mes YA regalado: la bandeja anuncia el '
+      'regalo con las dos fechas (corrección de campo 1.21)',
+      () async {
+    final db = await _abrirDbVacia();
+    final hoy = hoyHabanaIso();
+    final hoyDt = DateTime.parse(hoy);
+    final carnetHoy = '95'
+        '${hoyDt.month.toString().padLeft(2, '0')}'
+        '${hoyDt.day.toString().padLeft(2, '0')}';
+    await _espejo(db, 'clientes', 31, {
+      'id': 31,
+      'nombre': 'Regalado Hoy',
+      'telefono': '58190031',
+      'estado': 'activo',
+      'pagado_hasta': _iso(hoyDt.add(const Duration(days: 55))),
+      'carnet': carnetHoy,
+    });
+    // El regalo de este año ya se aplicó (meta que guardan la
+    // ficha y la pantalla de Cumpleaños al regalar).
+    await LocalDb.instance.setMeta(
+      'regalo_cumple_31_${hoyDt.year}',
+      jsonEncode({
+        'anterior': _iso(hoyDt.add(const Duration(days: 25))),
+        'nuevo': _iso(hoyDt.add(const Duration(days: 55))),
+      }),
+    );
+    final avisos = await avisosWhatsappHoy();
+    final cumple =
+        avisos.firstWhere((a) => a['tipo'] == 'cumple');
+    final mensaje = '${cumple['mensaje']}';
+    expect(mensaje, contains('Te hemos regalado 1 mensualidad'));
+    expect(mensaje, contains('Vencía el:'));
+    expect(mensaje, contains('Nuevo vencimiento:'));
+    expect(mensaje.endsWith(_cierre), isTrue);
+    expect('${cumple['detalle']}', contains('Mes regalado'));
+    // Y el lector compartido devuelve el regalo guardado.
+    final regalo = await regaloCumpleDelAnio(31);
+    expect(regalo, isNotNull);
+    expect(regalo!['nuevo'],
+        _iso(hoyDt.add(const Duration(days: 55))));
+    expect(await regaloCumpleDelAnio(32), isNull);
+  });
+
   test('W8: el recibo reenviable de un pago trae método, fecha y cierre',
       () {
     final t = textoReciboPago(

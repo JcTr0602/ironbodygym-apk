@@ -433,6 +433,77 @@ String fmtFecha(String? iso) {
   return '${p[2]}/${p[1]}/${p[0]}';
 }
 
+/// "2026-12-27" → "27 de diciembre" (formato de los mensajes de
+/// cumpleaños/regalo; sin año, como en ficha y Cumpleaños).
+String fechaLargaCorta(String? iso) {
+  if (iso == null || iso.length < 10) return '—';
+  const meses = [
+    '',
+    'enero',
+    'febrero',
+    'marzo',
+    'abril',
+    'mayo',
+    'junio',
+    'julio',
+    'agosto',
+    'septiembre',
+    'octubre',
+    'noviembre',
+    'diciembre',
+  ];
+  try {
+    final d = DateTime.parse(iso.substring(0, 10));
+    return '${d.day} de ${meses[d.month]}';
+  } catch (_) {
+    return fmtFecha(iso);
+  }
+}
+
+/// Regalo de cumpleaños del año en curso guardado al regalar
+/// (meta `regalo_cumple_<id>_<año>` = {'anterior': iso,
+/// 'nuevo': iso}); null si este año aún no se ha regalado.
+Future<Map<String, dynamic>?> regaloCumpleDelAnio(
+    int clienteId) async {
+  final crudo = await LocalDb.instance
+      .getMeta('regalo_cumple_${clienteId}_${ahoraHabana().year}');
+  if (crudo == null || crudo.isEmpty) return null;
+  try {
+    final m = jsonDecode(crudo);
+    if (m is Map && m['nuevo'] != null) {
+      return Map<String, dynamic>.from(m);
+    }
+  } catch (_) {}
+  return null;
+}
+
+/// Mensaje de cumpleaños CUANDO el mes ya se regaló este año:
+/// mismo cuerpo que componen la ficha y la pantalla de
+/// Cumpleaños al regalar (regalo + vencía + nuevo vencimiento).
+/// Corrección de campo 1.21 (2026-11-02): la felicitación sola
+/// (botón Felicitar y aviso de la Bandeja) salía sin mencionar
+/// el regalo ya aplicado ni la nueva fecha; desde ahora, si el
+/// regalo existe, TODAS las felicitaciones lo anuncian.
+String mensajeCumpleConRegalo({
+  required String nombre,
+  required String? anteriorIso,
+  required String nuevoIso,
+}) {
+  final buf = StringBuffer()
+    ..writeln('¡Feliz cumpleaños, *$nombre*! 🎂🎉')
+    ..writeln('Te hemos regalado 1 mensualidad por tu día.');
+  if (anteriorIso != null && anteriorIso.length >= 10) {
+    buf.writeln('📅 Vencía el: *${fechaLargaCorta(anteriorIso)}*');
+    buf.writeln(
+        '✅ Nuevo vencimiento: *${fechaLargaCorta(nuevoIso)}*');
+  } else {
+    buf.writeln('✅ Válida hasta el: *${fechaLargaCorta(nuevoIso)}*');
+  }
+  buf.write('¡A seguir dándole duro! — Iron Body Gym 💪🔥');
+  buf.write(lineaMensajeAutomatico);
+  return buf.toString();
+}
+
 /// Etiqueta legible del periodo de un pago: Mensualidad, Semana, etc.
 /// Con [detallado] en true incluye el detalle de meses/días
 /// ("3 meses", "Personalizado (15 días)").
@@ -2099,15 +2170,29 @@ Future<List<Map<String, dynamic>>> avisosWhatsappHoy() async {
   for (final c in await cumpleanosProximos(dias: 0)) {
     if (esVistaProtegida(c, esDueno: esDueno)) continue;
     if ((c['_dias_para'] as int?) != 0) continue;
+    // Corrección de campo 1.21: si el mes de cumpleaños YA se
+    // regaló este año, el aviso anuncia el regalo con las dos
+    // fechas (antes salía el saludo pelado y el cliente no se
+    // enteraba del regalo por este mensaje).
+    final cidCumple = (c['id'] as num?)?.toInt() ?? 0;
+    final regalo = await regaloCumpleDelAnio(cidCumple);
     avisos.add({
       'tipo': 'cumple',
-      'cliente_id': (c['id'] as num?)?.toInt() ?? 0,
+      'cliente_id': cidCumple,
       'nombre': nombreDe(c),
       'telefono': telDe(c),
-      'detalle': 'Cumple ${c['_cumple']} años',
-      'mensaje': '¡Feliz cumpleaños, ${nombreDe(c)}! 🎂\n'
-          'De parte de todo el equipo de Iron Body Gym, '
-          'que tengas un día excelente 💪$lineaMensajeAutomatico',
+      'detalle': regalo != null
+          ? 'Cumple ${c['_cumple']} años · Mes regalado 🎁'
+          : 'Cumple ${c['_cumple']} años',
+      'mensaje': regalo != null
+          ? mensajeCumpleConRegalo(
+              nombre: nombreDe(c),
+              anteriorIso: regalo['anterior'] as String?,
+              nuevoIso: '${regalo['nuevo']}',
+            )
+          : '¡Feliz cumpleaños, ${nombreDe(c)}! 🎂\n'
+              'De parte de todo el equipo de Iron Body Gym, '
+              'que tengas un día excelente 💪$lineaMensajeAutomatico',
     });
   }
 

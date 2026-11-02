@@ -174,9 +174,21 @@ class _CumpleanosScreenState extends State<CumpleanosScreen>
       }
       return;
     }
-    final mensaje = '¡Feliz cumpleaños, $nombre! 🎂\n'
-        'De parte de todo el equipo de Iron Body Gym, '
-        'que tengas un día excelente 💪$lineaMensajeAutomatico';
+    // Corrección de campo 1.21 (2026-11-02): si el mes ya se
+    // regaló este año, la felicitación anuncia el regalo con
+    // las dos fechas; el saludo pelado solo va cuando aún no
+    // hay regalo (antes, felicitar tras regalar dejaba al
+    // cliente sin enterarse del mes ni de su nuevo vencimiento).
+    final regalo = await regaloCumpleDelAnio(id);
+    final mensaje = regalo != null
+        ? mensajeCumpleConRegalo(
+            nombre: nombre,
+            anteriorIso: regalo['anterior'] as String?,
+            nuevoIso: '${regalo['nuevo']}',
+          )
+        : '¡Feliz cumpleaños, $nombre! 🎂\n'
+            'De parte de todo el equipo de Iron Body Gym, '
+            'que tengas un día excelente 💪$lineaMensajeAutomatico';
     final url = Uri.parse(
         'https://wa.me/$waNum?text=${Uri.encodeComponent(mensaje)}');
     try {
