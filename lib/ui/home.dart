@@ -265,16 +265,20 @@ class _HomeScreenState extends State<HomeScreen>
 
   /// Turnos sin reporte visibles (excluye los descartados, ya
   /// persistidos, de la instancia fecha+turno de hoy).
-  /// D-17 (1.21): memoizado por (día, nº de descartes, nº de
-  /// turnos) — build lo accede varias veces y antes filtraba
-  /// la lista en cada acceso.
+  /// D-17 (1.21): memoizado — build lo accede varias veces y
+  /// antes filtraba la lista en cada acceso.
+  /// AA2 H-3: la clave va por CONTENIDO (los nombres de turno y
+  /// los descartes), no por conteos: con la misma longitud, un
+  /// turno que sale y otro que entra dejaba en pantalla el
+  /// nombre viejo durante toda la sesión.
   List<String>? _tsrvCache;
   String _tsrvClave = '';
 
   List<String> get _turnosSinReporteVisibles {
     final hoy = hoyHabanaIso();
+    final descartes = _turnosSinReporteDescartados.toList()..sort();
     final clave =
-        '$hoy|${_turnosSinReporteDescartados.length}|${_turnosSinReporte.length}';
+        '$hoy|${_turnosSinReporte.join('~')}|${descartes.join('~')}';
     if (_tsrvCache == null || _tsrvClave != clave) {
       _tsrvClave = clave;
       _tsrvCache = _turnosSinReporte

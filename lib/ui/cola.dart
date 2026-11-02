@@ -335,22 +335,35 @@ class _ColaScreenState extends State<ColaScreen> {
     }
   }
 
+  // AA2 H-4: quien llama durante una carga en curso espera a
+  // que la recarga coalescida TERMINE (Completer compartido):
+  // antes el Future volvía al instante y el pull-to-refresh o
+  // un snack encadenado podían adelantarse a los datos.
+  Completer<void>? _recargaCompleter;
+
   Future<void> _cargar() async {
     // D-03 (1.21): si ya hay una carga en curso, se marca y se
     // repite al terminar (no se solapan ni se pierde la última).
     if (_cargandoAhora) {
       _recargaPendiente = true;
-      return;
+      _recargaCompleter ??= Completer<void>();
+      return _recargaCompleter!.future;
     }
     _cargandoAhora = true;
     try {
       await _cargarInterno();
     } finally {
       _cargandoAhora = false;
+      // Quien esperó durante esta carga se libera cuando la
+      // recarga coalescida termina (o ya, si la pantalla se
+      // cerró y la recarga no va a correr: nadie queda colgado).
+      final espera = _recargaCompleter;
+      _recargaCompleter = null;
       if (_recargaPendiente && mounted) {
         _recargaPendiente = false;
         await _cargar();
       }
+      espera?.complete();
     }
   }
 

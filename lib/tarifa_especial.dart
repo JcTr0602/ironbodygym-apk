@@ -27,22 +27,6 @@ import 'tiempo.dart';
 const kSeedTarifaYennifer = 'seed_esp_145';
 const kSeedTarifaKevin = 'seed_esp_70';
 
-/// PURO (testeable sin BD): fusiona la tabla local de tarifas con
-/// el espejo bajado (D6, Fase A 2026-10-25). El espejo gana por id
-/// SALVO que la fila local sea más reciente: lo otorgado/revocado
-/// en otro teléfono aparece aquí, pero un cambio local aún sin
-/// subir (p. ej. una revocación offline) no lo pisa el espejo
-/// viejo. Corrección del panel 1.10: antes el espejo ganaba
-/// siempre y una revocación offline volvía a aparecer activa
-/// hasta que la op subiera y el espejo corregido bajara. La
-/// comparación es lexicográfica sobre actualizada_ts ISO; el
-/// espejo sin ts ('') se trata como el más viejo, lo cual es
-/// seguro porque las filas locales solo son propias o semillas
-/// (los ids son UUID salvo las semillas idénticas).
-/// Las filas inactivas del espejo SE conservan (no como en
-/// recordatorios): una tarifa revocada debe seguir contando como
-/// «algún registro» para que la siembra legacy no resucite. El
-/// historial del espejo llega como lista JSON y se normaliza a
 /// Compara dos marcas `actualizada_ts` por INSTANTE (auditoría
 /// 1.21 B-14): los ISO locales llevan offset Habana y los del
 /// espejo pueden venir en UTC; compararlos como texto invierte
@@ -55,6 +39,22 @@ int cmpTsTarifa(dynamic a, dynamic b) {
   return '${a ?? ''}'.compareTo('${b ?? ''}');
 }
 
+/// PURO (testeable sin BD): fusiona la tabla local de tarifas con
+/// el espejo bajado (D6, Fase A 2026-10-25). El espejo gana por id
+/// SALVO que la fila local sea más reciente: lo otorgado/revocado
+/// en otro teléfono aparece aquí, pero un cambio local aún sin
+/// subir (p. ej. una revocación offline) no lo pisa el espejo
+/// viejo. Corrección del panel 1.10: antes el espejo ganaba
+/// siempre y una revocación offline volvía a aparecer activa
+/// hasta que la op subiera y el espejo corregido bajara. La
+/// comparación va por instante (cmpTsTarifa, B-14); el espejo
+/// sin ts ('') se trata como el más viejo, lo cual es
+/// seguro porque las filas locales solo son propias o semillas
+/// (los ids son UUID salvo las semillas idénticas).
+/// Las filas inactivas del espejo SE conservan (no como en
+/// recordatorios): una tarifa revocada debe seguir contando como
+/// «algún registro» para que la siembra legacy no resucite. El
+/// historial del espejo llega como lista JSON y se normaliza a
 /// texto JSON, como lo guarda la tabla local.
 List<Map<String, dynamic>> fusionarTarifasEspeciales(
     List<Map<String, dynamic>> locales,

@@ -5522,6 +5522,11 @@ class LocalDb {
       // purga olvidó — el historial de ajustes de stock del
       // dueño y la cola local de comprobantes de pago (con sus
       // archivos, abajo) sobrevivían al cambio de sesión.
+      // AA2 H-2 (coste aceptado): la cola incluye comprobantes
+      // aún 'pendiente' de subir; al purgarlos, ese pago queda
+      // en el servidor con comprobante_uuid y sin imagen (el
+      // visor lo muestra como no disponible). La privacidad
+      // manda: subir antes de cerrar sesión evita el caso.
       'suplemento_ajustes',
       'comprobantes_pago',
     ]) {
@@ -6188,7 +6193,8 @@ class LocalDb {
         "WHERE COALESCE(CAST(json_extract(data, '\$.anulada') AS INTEGER), 0) != 1 "
         "AND COALESCE(CAST(json_extract(data, '\$.activo') AS INTEGER), 1) != 0 "
         "AND json_extract(data, '\$.suplemento_id') IS NOT NULL "
-        'GROUP BY sid HAVING total > 0 ORDER BY total DESC LIMIT ?',
+        'GROUP BY sid HAVING total > 0 '
+        'ORDER BY total DESC, sid ASC LIMIT ?',
         [limite]);
     return [
       for (final r in rows)
@@ -7069,7 +7075,15 @@ class LocalDb {
     // lexicográfica: con el cambio de hora (DST) el texto ISO
     // cambia de offset y el orden de caracteres erraba hasta
     // 1 h en el borde. Vale igual para count/liberar retenidas.
-    final ahoraEpoch = ahoraHabana().millisecondsSinceEpoch ~/ 1000;
+    // AA2 H-1: el epoch sale de DateTime.now() (instante real en
+    // cualquier zona del dispositivo). NO de ahoraHabana(): esa
+    // reconstruye la hora habanera como hora LOCAL del teléfono
+    // y su epoch solo es real si el teléfono está en La Habana;
+    // fuera de Cuba el corte se desplazaría horas enteras. Es un
+    // instante, no una fecha de negocio: no viola la regla de
+    // hora Habana para lógica/payloads.
+    final ahoraEpoch =
+        DateTime.now().millisecondsSinceEpoch ~/ 1000;
     final where = StringBuffer(
         "estado IN ('pendiente','error')");
     final args = <dynamic>[];
@@ -7485,7 +7499,8 @@ class LocalDb {
   // E2: cuántas ops están retenidas por retenerHasta (Bloque 1).
   Future<int> countOpsRetenidas() async {
     final d = await db;
-    final ahoraEpoch = ahoraHabana().millisecondsSinceEpoch ~/ 1000;
+    final ahoraEpoch =
+        DateTime.now().millisecondsSinceEpoch ~/ 1000;
     final r = await d.rawQuery(
         "SELECT COUNT(*) c FROM ops_queue WHERE estado IN ('pendiente','error') "
         'AND proximo_reintento IS NOT NULL AND '
@@ -7501,7 +7516,8 @@ class LocalDb {
   /// cobros retenidos en el teléfono.
   Future<int> liberarOpsRetenidas() async {
     final d = await db;
-    final ahoraEpoch = ahoraHabana().millisecondsSinceEpoch ~/ 1000;
+    final ahoraEpoch =
+        DateTime.now().millisecondsSinceEpoch ~/ 1000;
     return d.rawUpdate(
         "UPDATE ops_queue SET proximo_reintento=NULL "
         "WHERE estado IN ('pendiente','error') "

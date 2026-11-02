@@ -387,7 +387,11 @@ class FotosColaService {
       // (epoch vía strftime), no como texto: en el borde DST el
       // offset del ISO cambia y la comparación lexicográfica
       // liberaba el lease hasta 1 h antes o después.
-      final ahoraEpoch = ahoraHabana().millisecondsSinceEpoch ~/ 1000;
+      // AA2 H-1: epoch de DateTime.now() (instante real en
+      // cualquier zona); el de ahoraHabana() solo es real con
+      // el teléfono en La Habana. Ver LocalDb.pendientesParaEnvio.
+      final ahoraEpoch =
+        DateTime.now().millisecondsSinceEpoch ~/ 1000;
       await db.update(
         'fotos_cola',
         {

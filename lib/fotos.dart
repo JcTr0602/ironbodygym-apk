@@ -11,6 +11,7 @@ import 'dart:io';
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 
+import 'app_log.dart';
 import 'auth.dart';
 import 'config.dart';
 
@@ -111,9 +112,9 @@ class FotoCache {
         },
       ).timeout(const Duration(seconds: 30));
       if (r.statusCode != 200 || r.bodyBytes.isEmpty) {
-        // Log para diagnóstico (no rompe la app)
-        // ignore: avoid_print
-        print('FotoCache: HTTP ${r.statusCode} para $storagePath');
+        // AA2: a la bitácora, no print (queda en diagnóstico).
+        AppLog.error('fotos', 'cache_http',
+            d: 'HTTP ${r.statusCode} para $storagePath');
         return null;
       }
       final d = await _dir();
@@ -129,8 +130,8 @@ class FotoCache {
       await _aplicarLRU();
       return f;
     } catch (e) {
-      // ignore: avoid_print
-      print('FotoCache: error descargando $storagePath: $e');
+      AppLog.error('fotos', 'cache_descarga',
+          d: 'error descargando $storagePath: $e');
       return null;
     }
   }
