@@ -967,11 +967,37 @@ class SyncEngine {
               body: body)
           .timeout(timeout));
 
+  /// [ligero] (auditoría 1.21 A-10): emisión de solo progreso —
+  /// reutiliza los valores ya calculados de [_current] sin
+  /// rehacer el conteo de pendientes, el mínimo de watermarks
+  /// (~100 lecturas de meta) ni la resolución DNS. El recálculo
+  /// completo queda para el inicio/fin de ciclo y reemitirEstado.
   void _emit(SyncPhase phase,
       {ErrorSync? error,
       double? progreso,
       String? detalle,
-      String? resumen}) async {
+      String? resumen,
+      bool ligero = false}) async {
+    if (ligero) {
+      final resL = resumen ?? _current.ultimoResumen;
+      final resHoraL =
+          resumen != null ? ahoraHabana() : _current.ultimoResumenHora;
+      _current = SyncStatus(
+          phase: phase,
+          pending: _current.pending,
+          lastOk: _current.lastOk,
+          lastError: error,
+          progreso: progreso,
+          detalle: detalle,
+          hayNovedades: _current.hayNovedades,
+          ultimoResumen: resL,
+          ultimoResumenHora: resHoraL,
+          enLinea: _current.enLinea,
+          ultimoGuardado: _current.ultimoGuardado,
+          ultimoSincronizado: _current.ultimoSincronizado);
+      _status.add(_current);
+      return;
+    }
     final pending = await _db.countPendingOps();
     final lastOk = await _ultimaOk();
     // v1.0.15: detectar si el servidor tiene cambios sin bajar
@@ -2096,7 +2122,8 @@ class SyncEngine {
       final lote = porEnviar.sublist(i, fin);
       _emit(SyncPhase.uploading,
           detalle: 'Enviando tus cambios… $fin de ${porEnviar.length}',
-          progreso: fin / porEnviar.length);
+          progreso: fin / porEnviar.length,
+          ligero: true);
       final body = jsonEncode([
         for (final op in lote)
           {
@@ -2489,12 +2516,20 @@ class SyncEngine {
   }
 
   /// v1.2.9: wrapper público para la cola de fotos.
-  Future<int?> clienteDeOp(String uuid) => _clienteDeOp(uuid);
+  /// Auditoría 1.21 A-04: TRIESTADO como conflictoTurno —
+  /// (ok:false) = la lectura FALLÓ (red/HTTP): el llamador
+  /// difiere y NO concluye ausencia; (ok:true, id:null) = el
+  /// servidor respondió y aún no hay id (op sin aplicar o sin
+  /// ese dato); (ok:true, id) = resuelto. Antes todo era un
+  /// int? ambiguo (regla de la casa: prohibido en sync.dart).
+  Future<({bool ok, int? id})> clienteDeOp(String uuid) =>
+      _clienteDeOp(uuid);
 
   /// v1.2.9: wrapper público para la cola de fotos.
-  Future<int?> suplementoDeOp(String uuid) => _suplementoDeOp(uuid);
+  Future<({bool ok, int? id})> suplementoDeOp(String uuid) =>
+      _suplementoDeOp(uuid);
 
-  Future<int?> _clienteDeOp(String uuid) async {
+  Future<({bool ok, int? id})> _clienteDeOp(String uuid) async {
     // v1.3.4 Ítem 1: caché local primero; GET solo si no hay caché.
     final cache = await _leerResultadoLocal(uuid);
     if (cache.ok && cache.valor != null) {
@@ -2502,7 +2537,10 @@ class SyncEngine {
         // La caché solo existe si el servidor ya confirmó la op: el
         // servidor tiene exactamente este mismo resultado, el GET no
         // aportaría nada.
-        return extraerIdDeResultado(jsonDecode(cache.valor!), 'cliente_id');
+        return (
+          ok: true,
+          id: extraerIdDeResultado(jsonDecode(cache.valor!), 'cliente_id')
+        );
       } catch (_) {
         // Caché corrupta: cae al GET.
       }
@@ -2512,12 +2550,15 @@ class SyncEngine {
           Uri.parse('$_base/rest/v1/sync_ops?op_uuid=eq.$uuid'
               '&select=resultado'),
           timeout: const Duration(seconds: 20));
-      if (r.statusCode != 200) return null;
+      if (r.statusCode != 200) return (ok: false, id: null);
       final rows = jsonDecode(r.body) as List;
-      if (rows.isEmpty) return null;
-      return extraerIdDeResultado(rows.first['resultado'], 'cliente_id');
+      if (rows.isEmpty) return (ok: true, id: null);
+      return (
+        ok: true,
+        id: extraerIdDeResultado(rows.first['resultado'], 'cliente_id')
+      );
     } catch (_) {
-      return null;
+      return (ok: false, id: null);
     }
   }
 
@@ -2563,12 +2604,15 @@ class SyncEngine {
   /// v1.2.1 fix auditoría Gemini: resuelve el suplemento_id creado por
   /// una op `crear_suplemento` leyendo el resultado que guarda el puente.
   /// v1.3.4 Ítem 1: caché local primero; GET solo si no hay caché.
-  Future<int?> _suplementoDeOp(String uuid) async {
+  Future<({bool ok, int? id})> _suplementoDeOp(String uuid) async {
     final cache = await _leerResultadoLocal(uuid);
     if (cache.ok && cache.valor != null) {
       try {
-        return extraerIdDeResultado(
-            jsonDecode(cache.valor!), 'suplemento_id');
+        return (
+          ok: true,
+          id: extraerIdDeResultado(
+              jsonDecode(cache.valor!), 'suplemento_id')
+        );
       } catch (_) {
         // Caché corrupta: cae al GET.
       }
@@ -2578,12 +2622,15 @@ class SyncEngine {
           Uri.parse('$_base/rest/v1/sync_ops?op_uuid=eq.$uuid'
               '&select=resultado'),
           timeout: const Duration(seconds: 20));
-      if (r.statusCode != 200) return null;
+      if (r.statusCode != 200) return (ok: false, id: null);
       final rows = jsonDecode(r.body) as List;
-      if (rows.isEmpty) return null;
-      return extraerIdDeResultado(rows.first['resultado'], 'suplemento_id');
+      if (rows.isEmpty) return (ok: true, id: null);
+      return (
+        ok: true,
+        id: extraerIdDeResultado(rows.first['resultado'], 'suplemento_id')
+      );
     } catch (_) {
-      return null;
+      return (ok: false, id: null);
     }
   }
 
@@ -3302,7 +3349,8 @@ class SyncEngine {
         _emit(SyncPhase.downloading,
             detalle:
                 'Descargando ${_nombreAmigable(tabla)}… $ti de ${tablas.length}',
-            progreso: ti / (tablas.length + 1));
+            progreso: ti / (tablas.length + 1),
+            ligero: true);
       }
       // v1.2.5-rev6: cursor propio de la tabla. Si el manifiesto la marcó
       // divergente, se resetea a 0 (re-descarga solo ella).
@@ -3930,7 +3978,8 @@ class SyncEngine {
     if (!silencioso) {
       _emit(SyncPhase.downloading,
           detalle: 'Descargando eliminados…',
-          progreso: tablas.length / (tablas.length + 1));
+          progreso: tablas.length / (tablas.length + 1),
+          ligero: true);
     }
     // v1.2.5-rev6: los borrados también llevan cursor propio.
     var cursorBorrados = await _db.getWatermarkTabla('borrados');
@@ -4325,66 +4374,6 @@ class SyncEngine {
       return diffMin;
     } catch (_) {
       return null;
-    }
-  }
-
-  /// Watermark propio (max sync_seq del mirror), independiente del global.
-  Future<void> _downloadIncidencias({bool silencioso = false}) async {
-    var pageWm = await _db.maxIncidenciaSyncSeq();
-    while (true) {
-      final r = await _getAuth(Uri.parse(
-          '$_base/rest/v1/sync_incidencias?select=id,tipo,entidad,entidad_id,'
-          'descripcion,detalle,estado,creada_por,creada_en,resuelta_por,'
-          'resuelta_en,nota_resolucion,visibilidad,version,actualizada_en,sync_seq'
-          '&sync_seq=gt.$pageWm&order=sync_seq.asc&limit=200'));
-      if (r.statusCode == 404 || r.statusCode == 400) {
-        // Tabla aún no existe en Supabase: se omite silenciosamente.
-        return;
-      }
-     
-    if (r.statusCode != 200) {
-        throw Exception('bajada incidencias: HTTP ${r.statusCode}');
-      }
-      final rows = jsonDecode(r.body) as List;
-      if (rows.isEmpty) break;
-      for (final row in rows) {
-        final m = Map<String, dynamic>.from(row as Map);
-        final seq = (m['sync_seq'] as int?) ?? 0;
-        await _db.upsertIncidenciaMirror(m);
-        if (seq > pageWm) pageWm = seq;
-      }
-      if (rows.length < 200) break;
-    }
-  }
-
-  /// v1.2.5: descarga incremental de eventos autoritativos de incidencias.
-  /// Los genera el puente al aceptar cada mutación. RLS en Supabase ya
-  /// filtra por visibilidad para no-admin.
-  Future<void> _downloadIncidenciaEventos({bool silencioso = false}) async {
-    var pageWm = await _db.maxEventoSyncSeq();
-    while (true) {
-      final r = await _getAuth(Uri.parse(
-          '$_base/rest/v1/sync_incidencia_eventos?select=id,incidencia_id,'
-          'actor_id,actor_nombre,accion,valor_anterior,valor_nuevo,nota,'
-          'creada_en,sync_seq'
-          '&sync_seq=gt.$pageWm&order=sync_seq.asc&limit=200'));
-      if (r.statusCode == 404 || r.statusCode == 400) {
-        // Tabla aún no existe en Supabase: se omite silenciosamente.
-        return;
-      }
-     
-    if (r.statusCode != 200) {
-        throw Exception('bajada eventos incidencia: HTTP ${r.statusCode}');
-      }
-      final rows = jsonDecode(r.body) as List;
-      if (rows.isEmpty) break;
-      for (final row in rows) {
-        final m = Map<String, dynamic>.from(row as Map);
-        final seq = (m['sync_seq'] as int?) ?? 0;
-        await _db.upsertEventoMirror(m);
-        if (seq > pageWm) pageWm = seq;
-      }
-      if (rows.length < 200) break;
     }
   }
 

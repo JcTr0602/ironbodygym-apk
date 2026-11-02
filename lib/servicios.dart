@@ -825,6 +825,20 @@ Future<int> sinRepartirLocal(int boteId) async {
       repartidas -= (l['conteo_cierre'] as num?)?.toInt() ?? 0;
     }
   }
+  // Auditoría 1.21 B-11: derivar también las ops crear_lote YA
+  // encoladas para este bote — sin esto, dos creaciones seguidas
+  // (o un doble toque) pasaban ambas el chequeo local porque la
+  // primera aún no bajó al espejo, y el servidor rechazaba la
+  // segunda a incidencias.
+  for (final op in await _opsServicioPendientes()) {
+    if ('${op['tipo']}' != 'crear_lote_servicio') continue;
+    try {
+      final p = jsonDecode(op['payload'] as String) as Map<String, dynamic>;
+      if ((p['bote_id'] as num?)?.toInt() == boteId) {
+        repartidas += (p['dosis'] as num?)?.toInt() ?? 0;
+      }
+    } catch (_) {}
+  }
   return rend - repartidas;
 }
 
@@ -1135,7 +1149,9 @@ Future<String> crearLoteServicio({
 /// Edad del cliente identificado desde su carnet (null si no se
 /// puede saber). Única fuente: [fechaNacDeCarnet] de negocio.dart.
 int? _edadCliente(Map<String, dynamic> cliente) {
-  final nac = fechaNacDeCarnet(cliente['carnet'] as String?);
+  // Auditoría 1.21 B-12: parseo tolerante — un carnet numérico
+  // (JSON de otra vía) reventaba la venta entera con TypeError.
+  final nac = fechaNacDeCarnet(cliente['carnet']?.toString());
   if (nac == null) return null;
   final hoy = ahoraHabana();
   var edad = hoy.year - nac.year;

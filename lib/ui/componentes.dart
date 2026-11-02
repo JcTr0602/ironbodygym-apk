@@ -1136,8 +1136,17 @@ class AvatarCliente extends StatelessWidget {
     final Widget interior = foto != null
         ? ClipRRect(
             borderRadius: BorderRadius.circular(di / 2),
+            // D-02 (1.21): decodificar al tamaño mostrado × DPR,
+            // no la foto entera (las listas pintan decenas de
+            // avatares de 44-56 px con fotos de varios MB).
             child: Image.file(foto!,
-                width: di, height: di, fit: BoxFit.cover),
+                width: di,
+                height: di,
+                fit: BoxFit.cover,
+                cacheWidth:
+                    (di * MediaQuery.devicePixelRatioOf(context)).round(),
+                cacheHeight:
+                    (di * MediaQuery.devicePixelRatioOf(context)).round()),
           )
         : CircleAvatar(
             radius: di / 2,

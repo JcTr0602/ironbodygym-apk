@@ -163,16 +163,43 @@ class _HistorialVentasScreenState
     super.dispose();
   }
 
-  List<Map<String, dynamic>> get _ventasFiltradas =>
-      filtrarVentasHistorial(
-        ventas: _ventas,
-        productos: _productos,
-        texto: _texto,
-        productoId: _productoId,
-        moneda: _moneda,
-        desde: _desde,
-        hasta: _hasta,
-      );
+  // D-10 (1.21): filtrado e ítems agrupados MEMOIZADOS — antes
+  // el getter re-filtraba todo en cada acceso (2× por build y
+  // por tecla) y _cuerpo re-agrupaba y ESCRIBÍA _posResaltado
+  // durante el build. Se recalcula solo al cambiar datos o
+  // filtros, vía _refiltrar().
+  List<Map<String, dynamic>> _filtradasCache = [];
+  List<Object> _itemsCache = [];
+
+  List<Map<String, dynamic>> get _ventasFiltradas => _filtradasCache;
+
+  void _refiltrar() {
+    _filtradasCache = filtrarVentasHistorial(
+      ventas: _ventas,
+      productos: _productos,
+      texto: _texto,
+      productoId: _productoId,
+      moneda: _moneda,
+      desde: _desde,
+      hasta: _hasta,
+    );
+    final items = <Object>[];
+    String? diaActual;
+    _posResaltado = -1;
+    for (final v in _filtradasCache) {
+      final f = '${v['fecha'] ?? ''}';
+      final dia = f.length >= 10 ? f.substring(0, 10) : f;
+      if (dia != diaActual) {
+        diaActual = dia;
+        items.add(dia);
+      }
+      if ((v['id'] as num?)?.toInt() == widget.resaltarId) {
+        _posResaltado = items.length;
+      }
+      items.add(v);
+    }
+    _itemsCache = items;
+  }
 
   bool get _hayFiltros =>
       _texto.isNotEmpty ||
@@ -189,6 +216,7 @@ class _HistorialVentasScreenState
       _moneda = null;
       _desde = null;
       _hasta = null;
+      _refiltrar();
     });
   }
 
@@ -254,6 +282,10 @@ class _HistorialVentasScreenState
       _anuladasPendientes = anuladas;
       _clientes = mapaClientes;
       _cargando = false;
+      // D-17 (1.21): las llaves de resaltado se podan al
+      // recargar (crecían con cada venta mostrada).
+      _llaves.clear();
+      _refiltrar();
     });
     if (widget.resaltarId != null) {
       WidgetsBinding.instance
@@ -386,22 +418,10 @@ class _HistorialVentasScreenState
     }
     // V23: la lista se agrupa por día con encabezados claros;
     // cada tarjeta ya lee en tres niveles (producto → total →
-    // fecha · vendedor → comprador).
-    final items = <Object>[];
-    String? diaActual;
-    _posResaltado = -1;
-    for (final v in filtradas) {
-      final f = '${v['fecha'] ?? ''}';
-      final dia = f.length >= 10 ? f.substring(0, 10) : f;
-      if (dia != diaActual) {
-        diaActual = dia;
-        items.add(dia);
-      }
-      if ((v['id'] as num?)?.toInt() == widget.resaltarId) {
-        _posResaltado = items.length;
-      }
-      items.add(v);
-    }
+    // fecha · vendedor → comprador). La agrupación y la
+    // posición del resaltado vienen de la caché de _refiltrar()
+    // (D-10: nada de computar ni escribir estado en build).
+    final items = _itemsCache;
     return RefreshIndicator(
       onRefresh: _cargar,
       child: ListView.builder(
@@ -438,7 +458,10 @@ class _HistorialVentasScreenState
         children: [
           TextField(
             controller: _textoCtrl,
-            onChanged: (v) => setState(() => _texto = v),
+            onChanged: (v) => setState(() {
+                          _texto = v;
+                          _refiltrar();
+                        }),
             decoration: InputDecoration(
               prefixIcon: const Icon(Icons.search_rounded),
               hintText: 'Buscar producto, cliente o vendedor…',
@@ -447,7 +470,10 @@ class _HistorialVentasScreenState
                       icon: const Icon(Icons.clear_rounded),
                       onPressed: () {
                         _textoCtrl.clear();
-                        setState(() => _texto = '');
+                        setState(() {
+                          _texto = '';
+                          _refiltrar();
+                        });
                       },
                     )
                   : null,
@@ -477,23 +503,29 @@ class _HistorialVentasScreenState
                         child: Text('${p['nombre'] ?? 'Producto'}'),
                       ),
                   ],
-                  onChanged: (v) =>
-                      setState(() => _productoId = v),
+                  onChanged: (v) => setState(() {
+                        _productoId = v;
+                        _refiltrar();
+                      }),
                 ),
               ),
               const SizedBox(width: AppEspacio.sm),
               ChoiceChip(
                 label: const Text('CUP'),
                 selected: _moneda == 'CUP',
-                onSelected: (_) => setState(
-                    () => _moneda = _moneda == 'CUP' ? null : 'CUP'),
+                onSelected: (_) => setState(() {
+                      _moneda = _moneda == 'CUP' ? null : 'CUP';
+                      _refiltrar();
+                    }),
               ),
               const SizedBox(width: 4),
               ChoiceChip(
                 label: const Text('USD'),
                 selected: _moneda == 'USD',
-                onSelected: (_) => setState(
-                    () => _moneda = _moneda == 'USD' ? null : 'USD'),
+                onSelected: (_) => setState(() {
+                      _moneda = _moneda == 'USD' ? null : 'USD';
+                      _refiltrar();
+                    }),
               ),
             ],
           ),
@@ -551,6 +583,7 @@ class _HistorialVentasScreenState
       } else {
         _hasta = iso;
       }
+      _refiltrar();
     });
   }
 
@@ -813,18 +846,10 @@ class _HistorialVentasScreenState
   /// Detalle expandido de una venta con inscripción: dos bloques,
   /// "Cliente" (del espejo local si ya sincronizó) y "Venta".
   Future<void> _detalle(Map<String, dynamic> v) async {
-    Map<String, dynamic>? cliente;
+    // D-10 (1.21): el cliente sale del mapa ya cargado en el
+    // estado; antes se releía el espejo entero por un id.
     final cid = (v['cliente_id'] as num?)?.toInt();
-    if (cid != null) {
-      final todos =
-          await LocalDb.instance.allMirror('clientes');
-      for (final c in todos) {
-        if ((c['id'] as num?)?.toInt() == cid) {
-          cliente = c;
-          break;
-        }
-      }
-    }
+    final cliente = cid != null ? _clientes[cid] : null;
     final moneda = '${v['moneda'] ?? 'CUP'}';
     final esUsd = moneda == 'USD';
     final tasa = (v['usd_tasa'] as num?)?.toDouble();

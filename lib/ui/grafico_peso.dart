@@ -135,7 +135,7 @@ class _GraficoPesoPainter extends CustomPainter {
 
     // 1. Líneas guía punteadas
     final guiaPaint = Paint()
-      ..color = Colors.grey.withOpacity(0.3)
+      ..color = Colors.grey.withValues(alpha: 0.3)
       ..strokeWidth = 1
       ..style = PaintingStyle.stroke;
     for (final valor in [max, prom, min]) {
@@ -163,8 +163,8 @@ class _GraficoPesoPainter extends CustomPainter {
       begin: Alignment.topCenter,
       end: Alignment.bottomCenter,
       colors: [
-        _naranja.withOpacity(0.25),
-        _naranja.withOpacity(0.0),
+        _naranja.withValues(alpha: 0.25),
+        _naranja.withValues(alpha: 0.0),
       ],
     );
     canvas.drawPath(

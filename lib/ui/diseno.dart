@@ -444,8 +444,10 @@ class AppTema {
           shadowColor: AppColores.naranja.withValues(alpha: 0.45),
           minimumSize: minimo,
           shape: forma,
+          // D-16 (1.21): el 16 literal no existe en la escala;
+          // el botón primario usa el rol subtitulo (15).
           textStyle:
-              const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+              AppTexto.subtitulo.copyWith(fontWeight: FontWeight.bold),
         ),
       ),
       filledButtonTheme: FilledButtonThemeData(
@@ -465,7 +467,7 @@ class AppTema {
           minimumSize: minimo,
           shape: forma,
           textStyle:
-              const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+              AppTexto.subtitulo.copyWith(fontWeight: FontWeight.w600),
         ),
       ),
       textButtonTheme: TextButtonThemeData(
@@ -473,7 +475,7 @@ class AppTema {
           foregroundColor: AppColores.naranja,
           minimumSize: const Size(48, 44),
           textStyle:
-              const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+              AppTexto.cuerpo.copyWith(fontWeight: FontWeight.w600),
         ),
       ),
       inputDecorationTheme: InputDecorationTheme(

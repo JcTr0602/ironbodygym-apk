@@ -10,6 +10,7 @@ import 'package:flutter/foundation.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:uuid/uuid.dart';
 
+import 'app_log.dart';
 import 'auth.dart';
 import 'cliente_protegido.dart';
 import 'localdb.dart';
@@ -543,14 +544,20 @@ String fmtMonto(dynamic m) {
   if (entrada == null) return '—';
   final v = entrada.toDouble();
   if (v.isNaN || v.isInfinite) return '—';
-  final r = (v * 100).round() / 100;
-  if (r == r.roundToDouble()) return '${r.toInt()}';
-  var s = r.toStringAsFixed(2);
-  while (s.endsWith('0')) {
-    s = s.substring(0, s.length - 1);
+  // Auditoría 1.21 B-15: componer el texto desde los CENTAVOS
+  // enteros en vez de volver a double — (2.675 * 100).round()/100
+  // daba 2.67 por el artefacto binario de 2.675.
+  final centavos = (v * 100).round();
+  final signo = centavos < 0 ? '-' : '';
+  final absC = centavos.abs();
+  final entero = absC ~/ 100;
+  final dec = absC % 100;
+  if (dec == 0) return '$signo$entero';
+  var decS = dec.toString().padLeft(2, '0');
+  while (decS.endsWith('0')) {
+    decS = decS.substring(0, decS.length - 1);
   }
-  if (s.endsWith('.')) s = s.substring(0, s.length - 1);
-  return s;
+  return '$signo$entero.$decS';
 }
 
 /// v1.4.6: línea «Cobró: …» de los historiales de pago (ficha del
@@ -856,6 +863,12 @@ double montoEfectivoOp(
     // entregar. Sin método (ops viejas) se asume efectivo, como
     // la UI de diarios, que hoy es solo efectivo.
     if ('${payload['metodo'] ?? 'efectivo'}' != 'efectivo') return 0;
+    // Auditoría 1.21 B-10: si el payload trae el total cobrado,
+    // manda el snapshot — valorar al precio VIGENTE revalúa
+    // dinero ya cobrado si el dueño cambia el precio del diario
+    // con ops en cola.
+    final totalOp = (payload['total'] as num?)?.toDouble();
+    if (totalOp != null) return totalOp;
     final cant = (payload['cantidad'] as num?)?.toInt() ?? 0;
     return cant * pr['diario']!;
   }
@@ -948,7 +961,11 @@ Future<bool> _esCuentaCasaEspejo(dynamic clienteId) async {
     if (filas.isEmpty) return false;
     final casa = filas.first['cuenta_casa'];
     return casa == 1 || casa == true;
-  } catch (_) {
+  } catch (e) {
+    // Auditoría 1.21 B-07: el fallo degradaba en silencio a
+    // «no Casa» y el pago sumaba a precio completo en el KPI.
+    // Se conserva el false (no romper el KPI) pero queda señal.
+    AppLog.error('negocio', 'casa_espejo_fallo', d: '$e');
     return false;
   }
 }
@@ -1032,6 +1049,9 @@ Future<double> montoCobradoCupOp(Map<String, dynamic> op) async {
             await _esCuentaCasaEspejo(payload['cliente_id']));
   }
   if (tipo == 'pago_diario' || tipo == 'diario') {
+    // B-10 (1.21): snapshot del payload antes que precio vigente.
+    final totalOp = (payload['total'] as num?)?.toDouble();
+    if (totalOp != null) return totalOp;
     final cant = (payload['cantidad'] as num?)?.toInt() ?? 0;
     return cant * pr['diario']!;
   }
@@ -1138,9 +1158,21 @@ Future<double> pendienteEntrega(int? telegramId) async {
   // ventana pre-pull (espejo aún sin marcar) lo liquidado se
   // contaba dos veces: la entrega decía 1000 y el arqueo 600.
   final cubiertos = await idsLiquidados(telegramId);
+  // Auditoría 1.21 B-03: op_uuid ya presentes en el espejo. En la
+  // ventana push→pull (el pull bajó el pago pero la op sigue en
+  // la cola), sin este cruce el mismo cobro se sumaba DOS veces:
+  // una por el espejo y otra por la op pendiente. Mismo patrón
+  // que sumaAdelantosPendientes (FIN-09).
+  final uuidsEspejo = <String>{};
+  void notaUuid(Map<String, dynamic> fila) {
+    final u = fila['op_uuid'];
+    if (u != null) uuidsEspejo.add('$u');
+  }
+
   // v1.3-r3 (Gemini): filtrar por telegram_user_id en SQL primero.
   for (final p in await LocalDb.instance
       .mirrorFiltrado('pagos', {'telegram_user_id': telegramId})) {
+    notaUuid(p);
     if (cubiertos.contains('pagos:${p['id']}')) continue;
     if ((p['metodo'] as String?) == 'efectivo' &&
         esPendiente(p['entregado'])) {
@@ -1149,6 +1181,7 @@ Future<double> pendienteEntrega(int? telegramId) async {
   }
   for (final d in await LocalDb.instance
       .mirrorFiltrado('pagos_diarios', {'registrado_por': telegramId})) {
+    notaUuid(d);
     if (cubiertos.contains('pagos_diarios:${d['id']}')) continue;
     if (esPendiente(d['entregado']) && esPagoDiarioEfectivo(d)) {
       total += (d['total'] as num?)?.toDouble() ?? 0;
@@ -1156,6 +1189,7 @@ Future<double> pendienteEntrega(int? telegramId) async {
   }
   // Ventas de suplementos en CUP en efectivo pendientes de entregar.
   for (final v in await ventasSuplementosCup()) {
+    notaUuid(v);
     if (cubiertos.contains('ventas_suplementos:${v['id']}')) continue;
     if (LocalDb.normalizarTelegramId(v['registrado_por']) == telegramId &&
         esPendiente(v['entregado'])) {
@@ -1166,6 +1200,7 @@ Future<double> pendienteEntrega(int? telegramId) async {
   // reverso llevan cantidad negativa y netan solas; Casa queda fuera
   // por su entregado=1 en el servidor, y se excluye por si acaso).
   for (final v in await LocalDb.instance.allMirror('servicio_ventas')) {
+    notaUuid(v);
     // Ítems 8/10: la gaveta es del RESPONSABLE del efectivo.
     final resp =
         LocalDb.normalizarTelegramId(v['responsable_efectivo_id']) ??
@@ -1181,6 +1216,9 @@ Future<double> pendienteEntrega(int? telegramId) async {
   }
   final pr = await preciosVigentes();
   for (final op in await LocalDb.instance.pendingOps()) {
+    // B-03: si la op ya bajó al espejo, su dinero ya se sumó en
+    // los bucles de arriba; contarla otra vez sería duplicar.
+    if (uuidsEspejo.contains('${op['op_uuid']}')) continue;
     // 1.15 V6: para cada op venta_servicio, UN solo beneficiario:
     // responsable_efectivo_id del payload si viene; si no,
     // el autor (op['telegram_id']). Comparar con telegramId y
@@ -1239,7 +1277,10 @@ Future<double> pendienteEntregaUsd(int? telegramId) async {
   // H2 (Argón caja): misma regla que en CUP: excluir lo ya
   // liquidado y sumar el arrastre de parciales USD.
   final cubiertos = await idsLiquidados(telegramId);
+  final uuidsEspejo = <String>{};
   for (final v in await ventasSuplementosUsd()) {
+    final u = v['op_uuid'];
+    if (u != null) uuidsEspejo.add('$u');
     if (cubiertos.contains('ventas_suplementos:${v['id']}')) continue;
     if (LocalDb.normalizarTelegramId(v['registrado_por']) == telegramId &&
         esPendiente(v['entregado'])) {
@@ -1249,6 +1290,7 @@ Future<double> pendienteEntregaUsd(int? telegramId) async {
   for (final op in await LocalDb.instance.pendingOps()) {
     // 1.15-turnos (#7): igual que en CUP, la cola es de su dueño.
     if (op['telegram_id'] != telegramId) continue;
+    if (uuidsEspejo.contains('${op['op_uuid']}')) continue; // B-03
     total += _montoUsdOp(op);
   }
   for (final l in await LocalDb.instance.allMirror('liquidaciones_caja')) {
@@ -1328,7 +1370,13 @@ Future<Set<String>> idsLiquidados(int telegramId) async {
           cubiertos.add('$tabla:$x');
         }
       }
-    } catch (_) {}
+    } catch (e) {
+      // B-07 (1.21): una liquidación con op_ids ilegible se
+      // ignoraba en silencio y sus ítems reaparecían como
+      // pendientes (doble liquidación a la vista). Señal en
+      // bitácora; el servidor sigue protegiendo el dinero.
+      AppLog.error('negocio', 'liquidacion_opids_ilegible', d: '$e');
+    }
   }
   return cubiertos;
 }
@@ -2265,7 +2313,7 @@ Future<List<Map<String, dynamic>>> comparativaEntrenadores(
   }
   for (final v
       in await LocalDb.instance.allMirror('ventas_suplementos')) {
-    if (!'${v['fecha'] ?? ''}'.startsWith(prefijo)) continue;
+    if (mesHabanaDe(v['fecha']) != prefijo) continue;
     if (v['anulada'] == 1 || v['anulada'] == true) continue;
     // FIN-13 de Argón (1.20): un fiado sin saldar no es dinero
     // cobrado — el resto de negocio.dart lo excluye de los
@@ -2303,7 +2351,7 @@ Future<List<Map<String, dynamic>>> comparativaEntrenadores(
   final serviciosMes = <Map<String, dynamic>>[];
   for (final s
       in await LocalDb.instance.allMirror('servicio_ventas')) {
-    if (!'${s['fecha'] ?? ''}'.startsWith(prefijo)) continue;
+    if (mesHabanaDe(s['fecha']) != prefijo) continue;
     serviciosMes.add(s);
     final rid = LocalDb.normalizarTelegramId(s['registrado_por']);
     final rnom = '${s['registrado_por_nombre'] ?? ''}'.trim();
@@ -2322,16 +2370,19 @@ Future<List<Map<String, dynamic>>> comparativaEntrenadores(
     final monto =
         ((s['precio_unitario'] as num?)?.toDouble() ?? 0) *
             ((s['cantidad'] as num?)?.toDouble() ?? 0);
-    final signo = s['reverso_de'] != null ? -1 : 1;
-    f['dosis_n'] = (f['dosis_n'] as int) + signo * cant;
+    // Auditoría 1.21 B-01: las filas reverso YA traen cantidad
+    // NEGATIVA del servidor (misma convención que textoEstadoCuenta
+    // y pendienteEntrega): se suma con su signo natural. Aplicar un
+    // −1 extra volvía el reverso positivo y la dosis revertida
+    // aportaba el doble en vez de cero.
+    f['dosis_n'] = (f['dosis_n'] as int) + cant;
     if ((s['casa'] as num?)?.toInt() != 1) {
-      f['dosis_monto'] =
-          (f['dosis_monto'] as double) + signo * monto;
+      f['dosis_monto'] = (f['dosis_monto'] as double) + monto;
     }
   }
   for (final cl in await LocalDb.instance.allMirror('clientes')) {
     if (esClienteEliminado(cl)) continue;
-    if ('${cl['fecha_inscripcion'] ?? ''}'.startsWith(prefijo)) {
+    if (mesHabanaDe(cl['fecha_inscripcion']) == prefijo) {
       final f = fila(nombreDe(cl));
       f['inscripciones'] = (f['inscripciones'] as int) + 1;
     }
@@ -2419,9 +2470,13 @@ String textoEstadoCuenta({
       totalPagos += (p['monto'] as num?)?.toDouble() ?? 0;
     }
     for (final p in pagosOrd.take(10)) {
-      final metodo = '${p['metodo'] ?? ''}' == 'transferencia'
-          ? 'Transferencia'
-          : 'Efectivo';
+      // Auditoría 1.21 B-08: un pago promo (mes gratis por compra)
+      // se etiquetaba «Efectivo · 0 CUP» — un cobro que no existió.
+      final metodo = switch ('${p['metodo'] ?? ''}') {
+        'transferencia' => 'Transferencia',
+        'promo' => 'Promoción',
+        _ => 'Efectivo',
+      };
       b.writeln('• ${fmtFecha(p['fecha'] as String?)} · '
           '$metodo · ${fmtMonto(p['monto'])} CUP');
     }
@@ -3197,19 +3252,29 @@ Future<(double, double)> miTurnoHoy(int? telegramId, {String? fecha}) async {
   if (telegramId == null) return (0.0, 0.0);
   final hoy = fecha ?? _hoyIso();
   double cobrado = 0;
+  // B-03 (1.21): uuids ya espejados, para no recontar la op.
+  final uuidsEspejo = <String>{};
+  void notaUuid(Map<String, dynamic> fila) {
+    final u = fila['op_uuid'];
+    if (u != null) uuidsEspejo.add('$u');
+  }
+
   // v1.3.4 (ítem 2): lectura indexada (fecha, telegram_user_id) en vez
   // de allMirror('pagos') + filtro en Dart. Incluye fallback para filas
   // con columnas NULL.
   for (final p in await LocalDb.instance.pagosPorDiaYEntrenador(hoy, telegramId)) {
+    notaUuid(p);
     cobrado += (p['monto'] as num?)?.toDouble() ?? 0;
   }
   for (final d in await LocalDb.instance.allMirror('pagos_diarios')) {
+    notaUuid(d);
     if (LocalDb.normalizarTelegramId(d['registrado_por']) == telegramId &&
         (d['fecha'] as String?) == hoy) {
       cobrado += (d['total'] as num?)?.toDouble() ?? 0;
     }
   }
   for (final v in await ventasSuplementosCup()) {
+    notaUuid(v);
     if (LocalDb.normalizarTelegramId(v['registrado_por']) == telegramId &&
         (v['fecha'] as String?) == hoy) {
       cobrado += totalVentaCup(v);
@@ -3220,6 +3285,7 @@ Future<(double, double)> miTurnoHoy(int? telegramId, {String? fecha}) async {
   // perdía las dosis y el agua. _servicioVentasNetas() ya excluye Casa
   // y reversos; la gaveta es del responsable del efectivo.
   for (final v in await _servicioVentasNetas()) {
+    notaUuid(v);
     final resp = LocalDb.normalizarTelegramId(v['responsable_efectivo_id']) ??
         LocalDb.normalizarTelegramId(v['registrado_por']);
     if (resp != telegramId) continue;
@@ -3229,9 +3295,12 @@ Future<(double, double)> miTurnoHoy(int? telegramId, {String? fecha}) async {
     }
   }
   // v1.3.1: incluir ops pendientes de hoy en cobrado (offline).
+  // (B-03: el conjunto uuidsEspejo se llenó en los bucles espejo
+  // de arriba; aquí solo se consulta.)
   final pr = await preciosVigentes();
   for (final op in await LocalDb.instance.pendingOps()) {
     if (op['telegram_id'] != telegramId) continue;
+    if (uuidsEspejo.contains('${op['op_uuid']}')) continue;
     try {
       final payload =
           jsonDecode(op['payload'] as String) as Map<String, dynamic>;
@@ -3264,12 +3333,19 @@ Future<int> conteoPagosDia(int? telegramId, {String? fecha}) async {
   final hoy = fecha ?? _hoyIso();
   final pr = await preciosVigentes();
   var n = 0;
+  // B-03 (1.21): uuids ya espejados (ventana push→pull).
+  final uuidsEspejo = <String>{};
+  void notaUuid(Map<String, dynamic> fila) {
+    final u = fila['op_uuid'];
+    if (u != null) uuidsEspejo.add('$u');
+  }
   // v1.3.4 (ítem 2): lectura indexada (fecha, telegram_user_id) en vez
   // de allMirror('pagos') + filtro en Dart. El descarte de 'cortesia'
   // sigue en Dart: en SQL, `metodo != 'cortesia'` excluiría también los
   // NULL, y la semántica vieja los contaba (Argón spec 1: solo el
   // metodo 'cortesia' explícito se excluye).
   for (final p in await LocalDb.instance.pagosPorDiaYEntrenador(hoy, telegramId)) {
+    notaUuid(p);
     // v1.3.3 (Argón spec 1): los regalos de cumpleaños (metodo
     // 'cortesia', monto 0) no cuentan como cobro: no inflan el
     // pagos_count del cierre ni generan comisión.
@@ -3277,12 +3353,14 @@ Future<int> conteoPagosDia(int? telegramId, {String? fecha}) async {
     n++;
   }
   for (final d in await LocalDb.instance.allMirror('pagos_diarios')) {
+    notaUuid(d);
     if (LocalDb.normalizarTelegramId(d['registrado_por']) == telegramId &&
         (d['fecha'] as String?) == hoy) {
       n++;
     }
   }
   for (final v in await LocalDb.instance.allMirror('ventas_suplementos')) {
+    notaUuid(v);
     if (LocalDb.normalizarTelegramId(v['registrado_por']) == telegramId &&
         (v['fecha'] as String?) == hoy) {
       n++;
@@ -3293,6 +3371,7 @@ Future<int> conteoPagosDia(int? telegramId, {String? fecha}) async {
   for (final v in await _servicioVentasNetas()) {
     final resp = LocalDb.normalizarTelegramId(v['responsable_efectivo_id']) ??
         LocalDb.normalizarTelegramId(v['registrado_por']);
+    notaUuid(v);
     if (resp != telegramId) continue;
     final f = '${v['fecha'] ?? ''}';
     if (f.length >= 10 && f.substring(0, 10) == hoy) {
@@ -3301,6 +3380,7 @@ Future<int> conteoPagosDia(int? telegramId, {String? fecha}) async {
   }
   for (final op in await LocalDb.instance.pendingOps()) {
     if (op['telegram_id'] != telegramId) continue;
+    if (uuidsEspejo.contains('${op['op_uuid']}')) continue;
     try {
       final payload =
           jsonDecode(op['payload'] as String) as Map<String, dynamic>;
@@ -4071,6 +4151,9 @@ Future<List<Map<String, dynamic>>> detallePendienteEntrenador(
   // v1.3.1 (UI2): ventas de suplementos pendientes del entrenador.
   for (final s in await LocalDb.instance.allMirror('ventas_suplementos')) {
     if (!esPendiente(s['entregado'])) continue;
+    // Auditoría 1.21 B-05: un fiado sin saldar no es dinero por
+    // entregar (misma regla que los totales en ventasSuplementosCup).
+    if (_esFiadoSinSaldar(s)) continue;
     if (LocalDb.normalizarTelegramId(s['registrado_por']) != tid) continue;
     final moneda = s['moneda'] as String? ?? 'CUP';
     items.add({
@@ -4159,6 +4242,7 @@ Future<List<Map<String, dynamic>>> pagosPendientesDetalle(
   // v1.3.1 (B1): ventas de suplementos pendientes de entrega.
   for (final s in await LocalDb.instance.allMirror('ventas_suplementos')) {
     if (!esPendiente(s['entregado'])) continue;
+    if (_esFiadoSinSaldar(s)) continue; // B-05 (1.21): fiado ≠ entregable
     final tid = LocalDb.normalizarTelegramId(s['registrado_por']);
     if (tid == null) continue;
     if (excluirTid != null && tid == excluirTid) continue;
@@ -4737,6 +4821,9 @@ Future<({List<int> pagos, List<int> diarios, List<int> suplementos,
   }
   for (final v in await LocalDb.instance.allMirror('ventas_suplementos')) {
     if (!esPendiente(v['entregado'])) continue;
+    // B-05 (1.21): el id de un fiado sin saldar NO puede viajar en
+    // confirmarEntregaPorIds (dinero aún no cobrado).
+    if (_esFiadoSinSaldar(v)) continue;
     final tid = LocalDb.normalizarTelegramId(v['registrado_por']);
     if (tid == null || !mismo(tid)) continue;
     final id = (v['id'] as num?)?.toInt();
@@ -5229,15 +5316,24 @@ Future<double> ingresosMes() async {
 /// v1.0.16: mapa fecha (YYYY-MM-DD) -> total ingresos del día,
 /// incluyendo pagos mensuales Y pagos diarios. Centraliza el cálculo
 /// para que tarjetas, gráficos y desgloses usen los mismos números.
-Future<Map<String, double>> ingresosPorDia() async {
+Future<Map<String, double>> ingresosPorDia(
+    {String? desdeIso, String? hastaIso}) async {
   final porDia = <String, double>{};
   // Ronda 3-9 #2: Casa nunca suma en ingresos.
   final casas = await LocalDb.instance.idsCuentasCasa();
-  // v1.3.4 (ítem 2): full scan INTENCIONAL — agregación analítica sobre
-  // TODOS los pagos sin filtro por fecha/cliente/entrenador/método; el
-  // monto vive en el JSON (sin columna indexada) y hay que leer cada
-  // fila de todos modos. No migra a SQL indexado.
-  for (final p in await LocalDb.instance.allMirror('pagos')) {
+  // Auditoría 1.21 B-16 (W11): con ventana, pagos y pagos_diarios
+  // se leen por la columna fecha indexada en vez de escanear TODO
+  // el historial; ventas y servicios se filtran por la ventana
+  // en memoria (sus helpers compartidos leen la tabla entera).
+  // Sin ventana se conserva el barrido completo histórico.
+  final conVentana = desdeIso != null && hastaIso != null;
+  bool enVentana(String f) =>
+      !conVentana || (f.compareTo(desdeIso) >= 0 && f.compareTo(hastaIso) <= 0);
+  final pagos = conVentana
+      ? await LocalDb.instance
+          .mirrorPorFecha('pagos', 'fecha', desdeIso, hastaIso)
+      : await LocalDb.instance.allMirror('pagos');
+  for (final p in pagos) {
     if (_esPagoCasa(p, casas)) continue;
     final f = '${p['fecha'] ?? ''}';
     if (f.length >= 10) {
@@ -5246,7 +5342,11 @@ Future<Map<String, double>> ingresosPorDia() async {
           (porDia[dia] ?? 0) + ((p['monto'] as num?)?.toDouble() ?? 0);
     }
   }
-  for (final d in await LocalDb.instance.allMirror('pagos_diarios')) {
+  final diarios = conVentana
+      ? await LocalDb.instance
+          .mirrorPorFecha('pagos_diarios', 'fecha', desdeIso, hastaIso)
+      : await LocalDb.instance.allMirror('pagos_diarios');
+  for (final d in diarios) {
     final f = '${d['fecha'] ?? ''}';
     if (f.length >= 10) {
       final dia = f.substring(0, 10);
@@ -5256,14 +5356,14 @@ Future<Map<String, double>> ingresosPorDia() async {
   }
   for (final v in await ventasSuplementosCup()) {
     final f = '${v['fecha'] ?? ''}';
-    if (f.length >= 10) {
+    if (f.length >= 10 && enVentana(f.substring(0, 10))) {
       final dia = f.substring(0, 10);
       porDia[dia] = (porDia[dia] ?? 0) + totalVentaCup(v);
     }
   }
   for (final v in await _servicioVentasNetas()) {
     final f = '${v['fecha'] ?? ''}';
-    if (f.length >= 10) {
+    if (f.length >= 10 && enVentana(f.substring(0, 10))) {
       final dia = f.substring(0, 10);
       porDia[dia] = (porDia[dia] ?? 0) + _montoServicioVenta(v);
     }
@@ -5449,7 +5549,9 @@ Future<List<Map<String, dynamic>>> ingresosUltimos7Dias() async {
       '${d.month.toString().padLeft(2, '0')}-'
       '${d.day.toString().padLeft(2, '0')}';
   const diasSem = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'];
-  final porDia = await ingresosPorDia();
+  final porDia = await ingresosPorDia(
+      desdeIso: iso(hoy.subtract(const Duration(days: 6))),
+      hastaIso: iso(hoy));
   final resultado = <Map<String, dynamic>>[];
   for (int i = 6; i >= 0; i--) {
     final d = hoy.subtract(Duration(days: i));
@@ -5573,6 +5675,15 @@ Future<double> gastosDe(String fechaIso) async {
 Future<double> gastosDelMes(String pref) async {
   double t = 0;
   for (final g in await LocalDb.instance.allMirror('gastos')) {
+    if ('${g['fecha'] ?? ''}'.startsWith(pref)) {
+      t += (g['monto'] as num?)?.toDouble() ?? 0;
+    }
+  }
+  // Auditoría 1.21 B-04: sumar también las ops gasto aún sin
+  // sincronizar, como ya hace gastosDe (día) — sin esto el
+  // «Neto del mes» se sobreestimaba en los gastos registrados
+  // offline que aún no bajaron al espejo.
+  for (final g in await _gastosPendientes()) {
     if ('${g['fecha'] ?? ''}'.startsWith(pref)) {
       t += (g['monto'] as num?)?.toDouble() ?? 0;
     }

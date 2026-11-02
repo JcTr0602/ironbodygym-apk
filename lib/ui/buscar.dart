@@ -3,6 +3,7 @@
 /// El tap abre la ficha del cliente. El cobro vive en "Agregar pago".
 library;
 
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -94,21 +95,36 @@ class _BuscarScreenState extends State<BuscarScreen> {
 
   int _gen = 0;
 
+  // D-09 (1.21): debounce de tecleo — buscar en cada tecla
+  // cargaba el espejo completo varias veces por palabra.
+  Timer? _debounceBusqueda;
+
+  void _buscarConDebounce() {
+    _debounceBusqueda?.cancel();
+    _debounceBusqueda =
+        Timer(const Duration(milliseconds: 200), _buscar);
+  }
+
   Future<void> _buscar() async {
     // v1.3.1: descartar resultados obsoletos (race condition).
     final gen = ++_gen;
     final q = _q.text.trim();
     var r = await listaClientes(q);
     if (gen != _gen) return;
+    // D-09 (1.21): la lista completa se carga UNA vez por
+    // búsqueda aunque la pidan dos rutas (notas e id exacto).
+    List<Map<String, dynamic>>? todosCache;
+    Future<List<Map<String, dynamic>>> todos() async =>
+        todosCache ??= await listaClientes('');
     // v1.0.15: búsqueda avanzada — también en notas.
     if (_enNotas && q.isNotEmpty) {
       final nq = q.toLowerCase();
-      final todos = await listaClientes('');
+      final todosL = await todos();
       if (gen != _gen) return;
       final vistos = <dynamic>{for (final c in r) c['id']};
       // Cliente protegido (2026-10-26, Protegido 2 H2): las notas
       // de un protegido nunca lo hacen aparecer en la búsqueda.
-      final extra = todos.where((c) =>
+      final extra = todosL.where((c) =>
           !vistos.contains(c['id']) &&
           !esVistaProtegida(c) &&
           '${c['notas'] ?? ''}'.toLowerCase().contains(nq));
@@ -224,9 +240,9 @@ class _BuscarScreenState extends State<BuscarScreen> {
         if (i > 0) {
           r.insert(0, r.removeAt(i));
         } else if (i < 0) {
-          final todos = await listaClientes('');
+          final todosL2 = await todos();
           if (gen != _gen) return;
-          final porId = todos
+          final porId = todosL2
               .where((c) =>
                   (c['id'] as num?)?.toInt() == idBuscado)
               .toList();
@@ -265,6 +281,7 @@ class _BuscarScreenState extends State<BuscarScreen> {
 
   @override
   void dispose() {
+    _debounceBusqueda?.cancel();
     _q.dispose();
     _scroll.dispose();
     super.dispose();
@@ -292,7 +309,7 @@ class _BuscarScreenState extends State<BuscarScreen> {
               controller: _q,
               hint: 'Nombre, carnet o teléfono',
               icono: Icons.search_rounded,
-              onChanged: (_) => _buscar(),
+              onChanged: (_) => _buscarConDebounce(),
             ),
           ),
           Padding(
@@ -776,6 +793,12 @@ class _FilaClienteState extends State<_FilaCliente> {
   /// el estado y el initState no se repite).
   Future<void> _resolverFoto() async {
     final sp = widget.cliente['foto_storage'] as String?;
+    // D-09 (1.21): si ESTA foto ya está resuelta y mostrada, la
+    // re-comprobación de disco por reconstrucción no aporta
+    // nada y se salta. Si aún no hay foto, se sigue re-chequeando
+    // (la miniatura aparece al volver de la ficha, intención
+    // original de v1.1).
+    if (sp == _resueltoPara && _foto != null) return;
     // Argón: limpiar siempre que cambie el cliente, antes de async.
     if (sp != _resueltoPara && _foto != null && mounted) {
       setState(() => _foto = null);

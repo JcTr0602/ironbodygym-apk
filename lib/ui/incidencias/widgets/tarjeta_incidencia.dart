@@ -125,7 +125,7 @@ class TarjetaIncidencia extends StatelessWidget {
                       height: 36,
                       decoration: BoxDecoration(
                         color: tipo!.colorData
-                            .withOpacity(0.15),
+                            .withValues(alpha: 0.15),
                         borderRadius:
                             BorderRadius.circular(
                                 8),
@@ -177,7 +177,7 @@ class TarjetaIncidencia extends StatelessWidget {
                             vertical: 4),
                     decoration: BoxDecoration(
                       color: _colorEstado
-                          .withOpacity(0.15),
+                          .withValues(alpha: 0.15),
                       borderRadius:
                           BorderRadius.circular(
                               20),

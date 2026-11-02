@@ -74,7 +74,10 @@ void main() {
     });
     await esp('servicio_ventas', 2, {
       'id': 2, 'fecha': hoy, 'tipo': 'dosis_con_agua',
-      'cantidad': 1, 'precio_unitario': 600, 'reverso_de': 1,
+      // Convención del servidor (sync.py): la cantidad del
+      // reverso va en NEGATIVO. (Auditoría 1.21 B-01: el fixture
+      // traía +1 y enmascaraba el doble signo del agregador.)
+      'cantidad': -1, 'precio_unitario': 600, 'reverso_de': 1,
       'registrado_por_nombre': 'Gabriel',
     });
     await esp('servicio_ventas', 3, {

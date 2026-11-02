@@ -53,7 +53,11 @@ String etiquetaResolucionDiferencia(String? resolucion) {
 double diferenciaDeLiquidacion(Map<String, dynamic> liq) {
   final esp = (liq['monto_esperado'] as num?)?.toDouble() ?? 0;
   final ent = (liq['monto_entregado'] as num?)?.toDouble() ?? 0;
-  return esp - ent;
+  final d = esp - ent;
+  // Auditoría 1.21 B-06: la tolerancia vive DENTRO de la función
+  // (antes el doc la prometía y cada llamador debía acordarse):
+  // un residuo binario de restar montos «iguales» no es diferencia.
+  return d.abs() <= 0.01 ? 0 : d;
 }
 
 class DiferenciasCajaService {

@@ -203,6 +203,24 @@ String mesSiguiente(String mes) {
 bool esAnioBisiesto(int anio) =>
     anio % 4 == 0 && (anio % 100 != 0 || anio % 400 == 0);
 
+/// Mes calendario 'YYYY-MM' en hora Habana de una fecha del
+/// espejo (auditoría 1.21 B-09): fecha plana → su prefijo; ISO
+/// con hora y zona → se convierte a Habana ANTES de tomar el
+/// mes (un ISO en UTC de madrugada puede pertenecer al mes
+/// anterior en Habana). Null si no se interpreta.
+String? mesHabanaDe(dynamic v) {
+  final s = '${v ?? ''}';
+  if (s.length < 7) return null;
+  final conZona = s.length > 10 &&
+      (s.endsWith('Z') || s.contains('+') || s.lastIndexOf('-') > 9);
+  if (!conZona) return s.substring(0, 7);
+  final d = DateTime.tryParse(s);
+  if (d == null) return s.substring(0, 7);
+  final h = d.isUtc ? aHabana(d) : d;
+  return '${h.year.toString().padLeft(4, '0')}-'
+      '${h.month.toString().padLeft(2, '0')}';
+}
+
 /// Reloj del dispositivo para comparar con File.lastModified()
 /// (que es hora local del dispositivo). NO usar ahoraHabana()
 /// aquí: con el dispositivo fuera de Cuba desplazaría los

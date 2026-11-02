@@ -96,8 +96,10 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
         await LocalDb.instance.allMirror('categorias_suplemento');
     final aj = await LocalDb.instance.getAjustes();
     // v1.2.1: top vendidos para la sección destacada.
-    final ventas =
-        await LocalDb.instance.allMirror('ventas_suplementos');
+    // D-04 (1.21): agregado en SQL, sin decodificar el espejo
+    // entero de ventas solo para el top-4.
+    final topIds =
+        await LocalDb.instance.topVendidosSuplementos();
     if (!mounted) return;
     setState(() {
       // v1.2.2: entrenadores solo ven productos con stock > 0
@@ -123,33 +125,10 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
         ..sort(compararPorNombre);
       _promoActiva = (aj['promo_suplementos'] as num?)?.toInt() != 0;
       _tasaUsd = (aj['tasa_usd'] as num?)?.toDouble();
-      _topIds = _topVendidos(ventas);
+      _topIds = topIds;
       _cargando = false;
     });
     await _cargarReservasPendientes();
-  }
-
-  /// v1.2.1: ids de los 4 productos más vendidos (por cantidad).
-  List<int> _topVendidos(
-      List<Map<String, dynamic>> ventas) {
-    final porProd = <int, int>{};
-    for (final v in ventas) {
-      // Gemini-2: excluir ventas anuladas del top.
-      if ((v['anulada'] as int?) == 1 ||
-          (v['activo'] as int?) == 0) {
-        continue;
-      }
-      final id = (v['suplemento_id'] as num?)?.toInt();
-      if (id == null) {
-        continue;
-      }
-      porProd[id] =
-          (porProd[id] ?? 0) + ((v['cantidad'] as num?)?.toInt() ?? 0);
-    }
-    // v1.3.4 (C5): solo productos con ventas reales > 0 en el carrusel.
-    final ids = porProd.keys.where((id) => porProd[id]! > 0).toList()
-      ..sort((a, b) => porProd[b]!.compareTo(porProd[a]!));
-    return ids.take(4).toList();
   }
 
   /// v1.2.1: productos del top visibles (sin búsqueda ni filtro).
@@ -738,10 +717,6 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
   }
 
   Widget _miniTop(Map<String, dynamic> s) {
-    final foto = s['foto_storage'] as String?;
-    // v1.3.3: foto local recién tomada (offline) tiene prioridad sobre
-    // la remota (aún no subida o sin descargar).
-    final fotoLocal = s['foto_local'] as String?;
     final precio =
         (s['precio_oficial'] as num?)?.toDouble() ?? 0;
     return SizedBox(
@@ -752,55 +727,14 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            if (fotoLocal != null && fotoLocal.isNotEmpty && File(fotoLocal).existsSync())
-              ClipRRect(
-                borderRadius:
-                    BorderRadius.circular(AppRadio.md),
-                child: Image.file(File(fotoLocal),
-                    height: 64,
-                    width: double.infinity,
-                    fit: BoxFit.cover,
-                    errorBuilder: (_, __, ___) => Container(
-                      height: 64,
-                      width: double.infinity,
-                      decoration: BoxDecoration(
-                        color: AppColores.fondo(context),
-                        borderRadius: BorderRadius.circular(
-                            AppRadio.md),
-                      ),
-                      child: Icon(Icons.medication_rounded,
-                          color: AppColores.textoSecundario(context)),
-                    )),
-              )
-            else
-              FutureBuilder(
-                future: FotoCache.instance.obtener(foto),
-                builder: (ctx, snap) {
-                  final f = snap.data;
-                  if (f == null) {
-                    return Container(
-                      height: 64,
-                      width: double.infinity,
-                      decoration: BoxDecoration(
-                        color: AppColores.fondo(context),
-                        borderRadius: BorderRadius.circular(
-                            AppRadio.md),
-                      ),
-                      child: Icon(Icons.medication_rounded,
-                          color:
-                              AppColores.textoSecundario(ctx)),
-                    );
-                  }
-                  return ClipRRect(
-                    borderRadius:
-                        BorderRadius.circular(AppRadio.md),
-                    child: Image.file(f,
-                        height: 64,
-                        width: double.infinity,
-                        fit: BoxFit.cover),
-                  );
-                },
-              ),
+            // D-11 (1.21): la foto del mini-top vive en un
+            // StatefulWidget con el futuro en su State (patrón
+            // de _FotoSuplemento): nada de existsSync ni de
+            // futuros creados en build.
+            ClipRRect(
+              borderRadius: BorderRadius.circular(AppRadio.md),
+              child: _FotoMiniTop(sup: s),
+            ),
             const SizedBox(height: 4),
             Text('${s['nombre'] ?? 'Sin nombre'}',
                 maxLines: 1,
@@ -1125,6 +1059,79 @@ class _TarjetaSuplemento extends StatelessWidget {
 ///    null (fallo de red/offline) → placeholder elegante SIN cachear
 ///    el fallo (se reintenta en el próximo render).
 /// 4. Sin `foto_local` ni `foto_storage` → placeholder directo, sin red.
+/// D-11 (1.21): foto del mini-top de Suplementos con el futuro
+/// en el State (mismo patrón que _FotoSuplemento): la local
+/// recién tomada manda; si no, caché/descarga de la remota.
+/// Antes _miniTop hacía existsSync() y creaba el futuro de
+/// FotoCache DENTRO del build (parpadeo y E/S en el hilo de UI).
+class _FotoMiniTop extends StatefulWidget {
+  final Map<String, dynamic> sup;
+  const _FotoMiniTop({required this.sup});
+
+  @override
+  State<_FotoMiniTop> createState() => _FotoMiniTopState();
+}
+
+class _FotoMiniTopState extends State<_FotoMiniTop> {
+  late Future<File?> _futura;
+
+  @override
+  void initState() {
+    super.initState();
+    _futura = _resolver();
+  }
+
+  @override
+  void didUpdateWidget(covariant _FotoMiniTop oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.sup['id'] != widget.sup['id'] ||
+        oldWidget.sup['foto_local'] != widget.sup['foto_local'] ||
+        oldWidget.sup['foto_storage'] != widget.sup['foto_storage']) {
+      _futura = _resolver();
+    }
+  }
+
+  Future<File?> _resolver() async {
+    final s = widget.sup;
+    final local = s['foto_local'] as String?;
+    if (local != null && local.isNotEmpty && File(local).existsSync()) {
+      return File(local);
+    }
+    final storage = s['foto_storage'] as String?;
+    if (storage == null || storage.isEmpty) return null;
+    return FotoCache.instance.obtener(storage);
+  }
+
+  Widget _sinFoto(BuildContext context) => Container(
+        height: 64,
+        width: double.infinity,
+        decoration: BoxDecoration(
+          color: AppColores.fondo(context),
+          borderRadius: BorderRadius.circular(AppRadio.md),
+        ),
+        child: Icon(Icons.medication_rounded,
+            color: AppColores.textoSecundario(context)),
+      );
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<File?>(
+      future: _futura,
+      builder: (ctx, snap) {
+        final f = snap.data;
+        if (f == null) return _sinFoto(ctx);
+        return Image.file(f,
+            height: 64,
+            width: double.infinity,
+            fit: BoxFit.cover,
+            cacheHeight:
+                (64 * MediaQuery.devicePixelRatioOf(ctx)).round(),
+            errorBuilder: (_, __, ___) => _sinFoto(ctx));
+      },
+    );
+  }
+}
+
 class _FotoSuplemento extends StatefulWidget {
   final Map<String, dynamic> sup;
   const _FotoSuplemento({required this.sup});

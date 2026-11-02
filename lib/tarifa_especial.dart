@@ -19,6 +19,7 @@ import 'dart:convert';
 
 import 'package:uuid/uuid.dart';
 
+import 'app_log.dart';
 import 'localdb.dart';
 import 'tiempo.dart';
 
@@ -42,6 +43,18 @@ const kSeedTarifaKevin = 'seed_esp_70';
 /// recordatorios): una tarifa revocada debe seguir contando como
 /// «algún registro» para que la siembra legacy no resucite. El
 /// historial del espejo llega como lista JSON y se normaliza a
+/// Compara dos marcas `actualizada_ts` por INSTANTE (auditoría
+/// 1.21 B-14): los ISO locales llevan offset Habana y los del
+/// espejo pueden venir en UTC; compararlos como texto invierte
+/// el orden real en la franja del offset. Si alguno no parsea,
+/// se cae a la comparación de texto.
+int cmpTsTarifa(dynamic a, dynamic b) {
+  final pa = DateTime.tryParse('${a ?? ''}');
+  final pb = DateTime.tryParse('${b ?? ''}');
+  if (pa != null && pb != null) return pa.compareTo(pb);
+  return '${a ?? ''}'.compareTo('${b ?? ''}');
+}
+
 /// texto JSON, como lo guarda la tabla local.
 List<Map<String, dynamic>> fusionarTarifasEspeciales(
     List<Map<String, dynamic>> locales,
@@ -55,9 +68,7 @@ List<Map<String, dynamic>> fusionarTarifasEspeciales(
     if (id.isEmpty) continue;
     final local = porId[id];
     if (local != null &&
-        '${local['actualizada_ts'] ?? ''}'
-                .compareTo('${e['actualizada_ts'] ?? ''}') >
-            0) {
+        cmpTsTarifa(local['actualizada_ts'], e['actualizada_ts']) > 0) {
       continue;
     }
     final hist = e['historial'];
@@ -203,7 +214,7 @@ Future<List<Map<String, dynamic>>> tarifasDeCliente(int clienteId) async {
     final aa = (a['activa'] as num?)?.toInt() ?? 0;
     final bb = (b['activa'] as num?)?.toInt() ?? 0;
     if (aa != bb) return bb.compareTo(aa);
-    return '${b['actualizada_ts']}'.compareTo('${a['actualizada_ts']}');
+    return cmpTsTarifa(b['actualizada_ts'], a['actualizada_ts']);
   });
   return filas;
 }
@@ -257,15 +268,20 @@ Future<int> sembrarTarifasLegacy() async {
     };
     final ts = isoHabana(ahoraHabana());
     var sembradas = 0;
+    var fallos = 0;
     final db = await LocalDb.instance.db;
     await db.transaction((txn) async {
       for (final c in clientes) {
-        final cid = (c['id'] as num?)?.toInt() ?? 0;
-        final legacy =
-            (c['tarifa_especial_transferencia'] as num?)?.toDouble();
-        if (cid <= 0 || legacy == null || legacy <= 0) continue;
-        if (conRegistro.contains(cid)) continue;
-        sembradas += await txn.rawInsert(
+        // Auditoría 1.21 B-07: catch POR CLIENTE — antes un solo
+        // catch global abortaba la siembra de todos en silencio
+        // y un legacy (tipo Kevin) se cobraba a tarifa estándar.
+        try {
+          final cid = (c['id'] as num?)?.toInt() ?? 0;
+          final legacy =
+              (c['tarifa_especial_transferencia'] as num?)?.toDouble();
+          if (cid <= 0 || legacy == null || legacy <= 0) continue;
+          if (conRegistro.contains(cid)) continue;
+          sembradas += await txn.rawInsert(
             'INSERT OR IGNORE INTO tarifa_especial '
             '(id, cliente_id, nombre, monto_efectivo, '
             'monto_transferencia, periodo, vigente_desde, '
@@ -291,10 +307,18 @@ Future<int> sembrarTarifasLegacy() async {
               ts,
               ts,
             ]);
+        } catch (_) {
+          fallos++;
+        }
       }
     });
+    if (fallos > 0) {
+      AppLog.error('tarifas', 'siembra_legacy_parcial',
+          d: '$fallos clientes sin sembrar');
+    }
     return sembradas;
-  } catch (_) {
+  } catch (e) {
+    AppLog.error('tarifas', 'siembra_legacy_fallo', d: '$e');
     return 0;
   }
 }
@@ -314,8 +338,8 @@ Future<Map<String, dynamic>?> tarifaActivaPara(
   // Si por un pull a medias hubiera dos activas (la desactivación
   // aún no bajó), gana la más reciente: el servidor inactiva la
   // previa antes de activar la nueva, en ese orden por sync_seq.
-  activas.sort((a, b) => '${b['actualizada_ts']}'
-      .compareTo('${a['actualizada_ts']}'));
+  activas.sort(
+      (a, b) => cmpTsTarifa(b['actualizada_ts'], a['actualizada_ts']));
   return activas.first;
 }
 
@@ -370,7 +394,7 @@ Future<List<Map<String, dynamic>>> tarifasActivas() async {
     final ca = (a['cliente_id'] as num?)?.toInt() ?? 0;
     final cb = (b['cliente_id'] as num?)?.toInt() ?? 0;
     if (ca != cb) return ca.compareTo(cb);
-    return '${b['actualizada_ts']}'.compareTo('${a['actualizada_ts']}');
+    return cmpTsTarifa(b['actualizada_ts'], a['actualizada_ts']);
   });
   return activas;
 }

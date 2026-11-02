@@ -18,6 +18,7 @@ library;
 
 import 'dart:convert';
 
+import 'app_log.dart';
 import 'localdb.dart';
 import 'tiempo.dart';
 
@@ -57,7 +58,13 @@ Future<List<Map<String, dynamic>>> ultimoSyncPorTelefono() async {
         });
       }
     }
-  } catch (_) {}
+  } catch (e) {
+    // Auditoría 1.21 A-07: este catch mudo podía reintroducir
+    // la invisibilidad de entrenadores que el panel 1.13
+    // corrigió (si usuarios_apk no se puede leer, esos
+    // entrenadores desaparecen de la lista sin señal).
+    AppLog.error('ultimo_sync', 'usuarios_apk_ilegible', d: '$e');
+  }
   todas.sort((a, b) =>
       '${a['nombre'] ?? ''}'.compareTo('${b['nombre'] ?? ''}'));
   return todas;

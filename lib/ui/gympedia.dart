@@ -171,6 +171,9 @@ class _GympediaScreenState extends State<GympediaScreen> {
           width: 48,
           height: 48,
           fit: BoxFit.cover,
+          // D-02 (1.21): miniatura de 48 px, decodificar a eso.
+          cacheWidth: 144,
+          cacheHeight: 144,
           loadingBuilder: (_, hijo, progreso) => progreso == null
               ? hijo
               : Container(

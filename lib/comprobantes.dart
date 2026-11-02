@@ -146,6 +146,66 @@ class ComprobantesService {
     return filas.isEmpty ? null : filas.first;
   }
 
+  /// Comprobantes en estado 'error' (auditoría 1.21 A-03, patrón
+  /// H-12 de fotos): visibles para que el dueño decida.
+  Future<List<Map<String, dynamic>>> comprobantesEnError() async {
+    final db = await LocalDb.instance.db;
+    return db.query(
+      'comprobantes_pago',
+      where: "estado = 'error'",
+      orderBy: 'creado_en ASC',
+    );
+  }
+
+  /// Reactiva los comprobantes en 'error' cuyo archivo local
+  /// SIGUE existiendo (acción deliberada desde la Cola): un
+  /// 'error' por archivo ausente no se reactiva (no hay nada
+  /// que subir). Devuelve cuántos volvieron a 'pendiente'.
+  Future<int> reactivarComprobantesError() async {
+    final db = await LocalDb.instance.db;
+    var n = 0;
+    for (final f in await comprobantesEnError()) {
+      final ruta = f['ruta_local'] as String?;
+      if (ruta == null || !await File(ruta).exists()) continue;
+      await _marcar(db, f['comprobante_uuid'] as String, 'pendiente');
+      n++;
+    }
+    if (n > 0) {
+      AppLog.info('comprobantes', 'errores_reactivados', d: 'n=$n');
+    }
+    return n;
+  }
+
+  /// Poda de locales 'subido' con más de [dias] días (FIN-01b /
+  /// A-03): borra la fila y el archivo local. El comprobante
+  /// sigue en el bucket y el visor de la ficha lo baja por
+  /// FotoCache (ruta exacta o determinista), así que podar el
+  /// local no quita la capacidad de verlo.
+  Future<int> purgarSubidosViejos({int dias = 30}) async {
+    final db = await LocalDb.instance.db;
+    final corte = isoHabana(ahoraHabana().subtract(Duration(days: dias)));
+    final viejos = await db.query(
+      'comprobantes_pago',
+      columns: ['comprobante_uuid', 'ruta_local'],
+      where: "estado = 'subido' AND creado_en < ?",
+      whereArgs: [corte],
+    );
+    for (final f in viejos) {
+      final ruta = f['ruta_local'] as String?;
+      if (ruta != null) {
+        try {
+          await File(ruta).delete();
+        } catch (_) {}
+      }
+      await db.delete(
+        'comprobantes_pago',
+        where: 'comprobante_uuid = ?',
+        whereArgs: [f['comprobante_uuid']],
+      );
+    }
+    return viejos.length;
+  }
+
   /// Sube los comprobantes pendientes (máx. 10 por ciclo).
   /// Reutiliza la subida TUS de las fotos (con su pausa QoS:
   /// si entra un cobro, el comprobante espera al próximo
@@ -155,6 +215,7 @@ class ComprobantesService {
     _procesando = true;
     var subidos = 0;
     try {
+      await purgarSubidosViejos();
       final db = await LocalDb.instance.db;
       final filas = await db.query(
         'comprobantes_pago',

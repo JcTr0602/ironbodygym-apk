@@ -100,7 +100,7 @@ class _TiposIncidenciaScreenState
           width: 40,
           height: 40,
           decoration: BoxDecoration(
-            color: t.colorData.withOpacity(0.15),
+            color: t.colorData.withValues(alpha: 0.15),
             borderRadius:
                 BorderRadius.circular(8),
           ),
@@ -436,8 +436,7 @@ class _DialogoTipoState
                       decoration: BoxDecoration(
                         color: sel
                             ? Color(_color)
-                                .withOpacity(
-                                    0.2)
+                                .withValues(alpha: 0.2)
                             : Colors
                                 .grey[200],
                         borderRadius:

@@ -383,6 +383,11 @@ class FotosColaService {
       // (Antes comparaba contra ahora-10min, exigiendo 20min para liberar.)
       // v1.3.4 (Argón): hora Habana, estándar obligatorio.
       final ahoraCiclo = isoHabana(ahoraHabana());
+      // Auditoría 1.21 A-05: el lease se compara por INSTANTE
+      // (epoch vía strftime), no como texto: en el borde DST el
+      // offset del ISO cambia y la comparación lexicográfica
+      // liberaba el lease hasta 1 h antes o después.
+      final ahoraEpoch = ahoraHabana().millisecondsSinceEpoch ~/ 1000;
       await db.update(
         'fotos_cola',
         {
@@ -391,8 +396,9 @@ class FotosColaService {
           'lease_hasta': null,
           'actualizado_en': ahoraCiclo,
         },
-        where: "estado = 'subiendo' AND (lease_hasta IS NULL OR lease_hasta < ?)",
-        whereArgs: [ahoraCiclo],
+        where: "estado = 'subiendo' AND (lease_hasta IS NULL OR "
+            "CAST(strftime('%s', lease_hasta) AS INTEGER) < ?)",
+        whereArgs: [ahoraEpoch],
       );
 
       // Tomar la siguiente foto pendiente (con backoff respetado).
@@ -465,6 +471,15 @@ class FotosColaService {
           (sid != null && sid.toString().isNotEmpty);
       // v1.2.9+43 (Gemini R3): verificación detallada de operación padre.
       // Si no hay IDs, verificar el estado del padre en ops_queue.
+      // Auditoría 1.21 A-11: UNA sola consulta y UNA sola decisión
+      // (antes había dos bloques consecutivos que consultaban la
+      // misma fila y repetían la regla de rechazo).
+      // FIX (revisión pre-+37): bloquear mientras el op NO esté en
+      // estado terminal 'aplicada'. Cubre 'pendiente', 'enviada',
+      // 'error', etc. Si solo se filtraba 'pendiente', una op en
+      // 'error' dejaba pasar la foto y se subía a un cliente que
+      // jamás se creó en el servidor. (El estado terminal real en
+      // ops_queue es 'aplicada'.)
       if (!tieneIds && fotoOpUuid != null && fotoOpUuid.isNotEmpty) {
         final opPadre = await db.query(
           'ops_queue',
@@ -491,48 +506,22 @@ class FotosColaService {
               'op padre rechazada por el servidor');
           continue;
         }
-        // Si está pendiente/enviada/error: esperar (el lock de abajo lo maneja).
-      }
-
-      if (!tieneIds && fotoOpUuid != null && fotoOpUuid.isNotEmpty) {
-        // FIX (revisión pre-+37): bloquear mientras el op NO esté en estado
-        // terminal 'aplicada'. Cubre 'pendiente', 'enviada', 'error', etc.
-        // Si solo se filtraba 'pendiente', una op en 'error' dejaba pasar
-        // la foto y se subía a un cliente que jamás se creó en el servidor.
-        // (Nota: Gemini sugirió != 'completada', pero el estado terminal
-        // real en ops_queue es 'aplicada'.)
-        final opRows = await db.query(
-          'ops_queue',
-          columns: ['estado'],
-          where: "op_uuid = ? AND tipo NOT IN ('foto', 'foto_suplemento')",
-          whereArgs: [fotoOpUuid],
-          limit: 1,
-        );
-        if (opRows.isNotEmpty) {
-          final estadoOp = opRows.first['estado'] as String?;
-          if (estadoOp == 'rechazada') {
-            // La op fue rechazada por el servidor: el cliente/suplemento
-            // jamás se creó. G5: descartar la huérfana (no error eterno).
-            await _descartarHuerfana(
-                db, f['id'] as int, 'op rechazada por el servidor');
-            continue;
-          }
-          if (estadoOp != 'aplicada') {
-            debugPrint(
-                '[Fotos] Lock: el op $fotoOpUuid está en $estadoOp, la foto espera.');
-            await db.update(
-              'fotos_cola',
-              {
-                'proximo_intento_en':
-                    isoHabana(ahoraHabana().add(const Duration(minutes: 2))),
-                'actualizado_en': isoHabana(ahoraHabana()),
-              },
-              where: 'id = ?',
-              whereArgs: [f['id']],
-            );
-            continue;
-          }
+        if (estadoPadre != 'aplicada') {
+          debugPrint(
+              '[Fotos] Lock: el op $fotoOpUuid está en $estadoPadre, la foto espera.');
+          await db.update(
+            'fotos_cola',
+            {
+              'proximo_intento_en':
+                  isoHabana(ahoraHabana().add(const Duration(minutes: 2))),
+              'actualizado_en': isoHabana(ahoraHabana()),
+            },
+            where: 'id = ?',
+            whereArgs: [f['id']],
+          );
+          continue;
         }
+        // 'aplicada': la entidad ya existe en el servidor; seguir.
       } // fin if (fotoOpUuid != null)
       final id = f['id'] as int;
 
@@ -817,8 +806,17 @@ class FotosColaService {
     // entra en bucle infinito (retorna path sin IDs resueltos).
     var clienteId = f['cliente_id'] as int?;
     var suplementoId = f['suplemento_id'] as int?;
-    clienteId ??= await SyncEngine.instance.clienteDeOp(opUuid);
-    suplementoId ??= await SyncEngine.instance.suplementoDeOp(opUuid);
+    // A-04 (1.21): lectura triestado — un fallo de lectura
+    // (ok:false) difiere igual que «aún sin id», pero queda
+    // distinguido en la bitácora si se repite.
+    if (clienteId == null) {
+      final r = await SyncEngine.instance.clienteDeOp(opUuid);
+      clienteId = r.id;
+    }
+    if (suplementoId == null) {
+      final r = await SyncEngine.instance.suplementoDeOp(opUuid);
+      suplementoId = r.id;
+    }
 
     if ((f['cliente_id'] == null && clienteId != null) ||
         (f['suplemento_id'] == null && suplementoId != null)) {

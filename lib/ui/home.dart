@@ -265,12 +265,24 @@ class _HomeScreenState extends State<HomeScreen>
 
   /// Turnos sin reporte visibles (excluye los descartados, ya
   /// persistidos, de la instancia fecha+turno de hoy).
+  /// D-17 (1.21): memoizado por (día, nº de descartes, nº de
+  /// turnos) — build lo accede varias veces y antes filtraba
+  /// la lista en cada acceso.
+  List<String>? _tsrvCache;
+  String _tsrvClave = '';
+
   List<String> get _turnosSinReporteVisibles {
     final hoy = hoyHabanaIso();
-    return _turnosSinReporte
-        .where((t) => !_turnosSinReporteDescartados
-            .contains(claveDescarteSinReporte(hoy, t)))
-        .toList();
+    final clave =
+        '$hoy|${_turnosSinReporteDescartados.length}|${_turnosSinReporte.length}';
+    if (_tsrvCache == null || _tsrvClave != clave) {
+      _tsrvClave = clave;
+      _tsrvCache = _turnosSinReporte
+          .where((t) => !_turnosSinReporteDescartados
+              .contains(claveDescarteSinReporte(hoy, t)))
+          .toList();
+    }
+    return _tsrvCache!;
   }
 
   /// v1.6.0: vuelca al set en memoria los descartes de HOY guardados
@@ -2296,6 +2308,10 @@ class _FabAccionesRapidasState extends State<_FabAccionesRapidas>
     with SingleTickerProviderStateMixin {
   bool _abierto = false;
   late final AnimationController _ctrl;
+  // D-14 (1.21): las CurvedAnimation de cada píldora se crean
+  // UNA vez (antes nacía una nueva en cada build y nunca se
+  // liberaba: fuga lenta de listeners sobre _ctrl).
+  late final List<CurvedAnimation> _animsPildora;
 
   @override
   void initState() {
@@ -2305,10 +2321,23 @@ class _FabAccionesRapidasState extends State<_FabAccionesRapidas>
       vsync: this,
       duration: const Duration(milliseconds: 300),
     );
+    const total = 6;
+    _animsPildora = [
+      for (var index = 0; index < total; index++)
+        CurvedAnimation(
+          parent: _ctrl,
+          curve: Interval((0.3 / (total - 1)) * (total - 1 - index),
+              (0.3 / (total - 1)) * (total - 1 - index) + 0.7,
+              curve: Curves.easeOutCubic),
+        ),
+    ];
   }
 
   @override
   void dispose() {
+    for (final a in _animsPildora) {
+      a.dispose();
+    }
     _ctrl.dispose();
     super.dispose();
   }
@@ -2473,12 +2502,7 @@ class _FabAccionesRapidasState extends State<_FabAccionesRapidas>
     // hacia arriba. Con 6 píldoras el escalonado se reparte en el
     // mismo tramo total (0.3) que con 3 para que ningún Interval
     // pase de 1.0.
-    const total = 6;
-    final inicio = (0.3 / (total - 1)) * (total - 1 - index);
-    final itemAnim = CurvedAnimation(
-      parent: _ctrl,
-      curve: Interval(inicio, inicio + 0.7, curve: Curves.easeOutCubic),
-    );
+    final itemAnim = _animsPildora[index];
     return FadeTransition(
       opacity: itemAnim,
       child: SlideTransition(

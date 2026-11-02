@@ -53,6 +53,23 @@ class _ListasScreenState extends State<ListasScreen>
   // 16/25: buscador dentro de Listas (nombre o teléfono).
   String _busqueda = '';
   final _busquedaCtrl = TextEditingController();
+  // D-08 (1.21): visibles memoizados (antes _visibles() corría
+  // 5× por build, ordenando y filtrando todo en cada tecla) y
+  // avisados precargados (antes un FutureBuilder por fila).
+  List<Map<String, dynamic>> _visHoy = [];
+  List<Map<String, dynamic>> _visMenos30 = [];
+  List<Map<String, dynamic>> _visMas30 = [];
+  List<Map<String, dynamic>> _visPorVencer = [];
+  List<Map<String, dynamic>> _visAlDia = [];
+  Set<int> _avisados = {};
+
+  void _recalcularVisibles() {
+    _visHoy = _visibles(_hoy);
+    _visMenos30 = _visibles(_menos30);
+    _visMas30 = _visibles(_mas30);
+    _visPorVencer = _visibles(_porVencer);
+    _visAlDia = _visibles(_alDia);
+  }
 
   @override
   void dispose() {
@@ -81,6 +98,7 @@ class _ListasScreenState extends State<ListasScreen>
     List<Map<String, dynamic>> sinProtegidos(
         List<Map<String, dynamic>> l) =>
         l.where((c) => !esVistaProtegida(c)).toList();
+    final avisados = await LocalDb.instance.idsAvisados();
     if (mounted) {
       setState(() {
         _hoy = sinProtegidos(h);
@@ -88,6 +106,8 @@ class _ListasScreenState extends State<ListasScreen>
         _mas30 = sinProtegidos(p30);
         _porVencer = sinProtegidos(pv);
         _alDia = sinProtegidos(ad);
+        _avisados = avisados;
+        _recalcularVisibles();
       });
     }
   }
@@ -223,8 +243,10 @@ class _ListasScreenState extends State<ListasScreen>
                         value: 'dias',
                         child: Text('Días restantes')),
                   ],
-                  onChanged: (v) =>
-                      setState(() => _orden = v ?? 'nombre'),
+                  onChanged: (v) => setState(() {
+                        _orden = v ?? 'nombre';
+                        _recalcularVisibles();
+                      }),
                 ),
               ],
             ),
@@ -241,7 +263,10 @@ class _ListasScreenState extends State<ListasScreen>
                     hint: 'Buscar cliente…',
                     icono: Icons.search_rounded,
                     onChanged: (v) =>
-                        setState(() => _busqueda = v.trim()),
+                        setState(() {
+                          _busqueda = v.trim();
+                          _recalcularVisibles();
+                        }),
                   ),
                 ),
                 if (_busqueda.isNotEmpty)
@@ -250,7 +275,10 @@ class _ListasScreenState extends State<ListasScreen>
                     tooltip: 'Limpiar búsqueda',
                     onPressed: () {
                       _busquedaCtrl.clear();
-                      setState(() => _busqueda = '');
+                      setState(() {
+                        _busqueda = '';
+                        _recalcularVisibles();
+                      });
                     },
                   ),
               ],
@@ -260,18 +288,18 @@ class _ListasScreenState extends State<ListasScreen>
             child: TabBarView(
               controller: _tab,
               children: [
-                _lista(_visibles(_hoy), Icons.celebration_rounded,
+                _lista(_visHoy, Icons.celebration_rounded,
                     'Nadie vence hoy', 'Todo al día.'),
-                _lista(_visibles(_porVencer),
+                _lista(_visPorVencer,
                     Icons.celebration_rounded, 'Nadie por vencer',
                     'Nada en los próximos 3 días.'),
-                _lista(_visibles(_menos30),
+                _lista(_visMenos30,
                     Icons.celebration_rounded, 'Sin atrasados',
                     'Nada de menos de un mes.'),
-                _lista(_visibles(_mas30),
+                _lista(_visMas30,
                     Icons.celebration_rounded, 'Sin atrasados',
                     'Nada de más de un mes.'),
-                _lista(_visibles(_alDia), // v1.2.1
+                _lista(_visAlDia, // v1.2.1
                     Icons.check_circle_rounded, 'Nadie al día',
                     'Todos los activos están vencidos.'),
               ],
@@ -363,13 +391,16 @@ class _ListasScreenState extends State<ListasScreen>
     }
     await LocalDb.instance.marcarAvisado(id);
     if (!mounted) return;
+    // D-08: el conjunto en memoria refleja la marca al momento
+    // (la búsqueda del siguiente no relee la BD por candidato).
+    setState(() => _avisados.add(id));
     Map<String, dynamic>? siguiente;
     var idxSiguiente = -1;
     if (via == 'whatsapp') {
       for (var j = idx + 1; j < rows.length; j++) {
         final oid = (rows[j]['id'] as num?)?.toInt();
         if (oid == null || oid == id) continue;
-        if (await LocalDb.instance.getAvisado(oid) == null) {
+        if (!_avisados.contains(oid)) {
           siguiente = rows[j];
           idxSiguiente = j;
           break;
@@ -410,7 +441,10 @@ class _ListasScreenState extends State<ListasScreen>
           textoAccion: 'Limpiar búsqueda',
           onAccion: () {
             _busquedaCtrl.clear();
-            setState(() => _busqueda = '');
+            setState(() {
+              _busqueda = '';
+              _recalcularVisibles();
+            });
           },
         );
       }
@@ -432,11 +466,10 @@ class _ListasScreenState extends State<ListasScreen>
           final id = (c['id'] as int?) ?? 0;
           // L2 (estéticas 1.19): la fila avisada lleva acento
           // verde en el borde izquierdo.
-          return FutureBuilder<String?>(
-            future: LocalDb.instance.getAvisado(id),
-            builder: (ctx, snap) {
-              final avisado = snap.data != null;
-              return Container(
+          // D-08 (1.21): avisado sale del conjunto precargado,
+          // no de un FutureBuilder por fila y reconstrucción.
+          final avisado = _avisados.contains(id);
+          return Container(
                 decoration: avisado
                     ? const BoxDecoration(
                         border: Border(
@@ -461,7 +494,7 @@ class _ListasScreenState extends State<ListasScreen>
                           avisado
                               ? Icons.check_circle_rounded
                               : Icons
-                                  .notifications_outlined,
+                                  .notifications_rounded,
                           color: avisado
                               ? AppColores.exito
                               : AppColores.textoSecundario(
@@ -475,7 +508,7 @@ class _ListasScreenState extends State<ListasScreen>
                               .desmarcarAvisado(id);
                           if (mounted) {
                             mostrarSnack(context, 'Marca de avisado quitada para ${c['nombre']}', significado: SignificadoChip.exito);
-                            setState(() {});
+                            setState(() => _avisados.remove(id));
                           }
                         } else {
                           await _avisarEnCadena(rows, i);
@@ -507,8 +540,6 @@ class _ListasScreenState extends State<ListasScreen>
                 ),
               ),
             );
-          },
-        );
       },
       ),
     );

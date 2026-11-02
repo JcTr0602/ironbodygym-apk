@@ -193,7 +193,10 @@ class _PagoScreenState extends State<PagoScreen> {
       final nombre = '${porId[cid]?['nombre'] ?? '¿?'}';
       DateTime ts;
       try {
-        ts = DateTime.parse('${p['created_at']}').toLocal();
+        // Auditoría 1.21 D-01: a Habana por la regla canónica,
+        // no a la zona del dispositivo (.toLocal()).
+        final p0 = DateTime.parse('${p['created_at']}');
+        ts = p0.isUtc ? aHabana(p0) : p0;
       } catch (_) {
         ts = ahoraHabana();
       }
@@ -216,7 +219,8 @@ class _PagoScreenState extends State<PagoScreen> {
       final nombre = '${porId[cid]?['nombre'] ?? '¿?'}';
       DateTime ts;
       try {
-        ts = DateTime.parse('${op['creada_ts']}').toLocal();
+        final p0 = DateTime.parse('${op['creada_ts']}');
+        ts = p0.isUtc ? aHabana(p0) : p0;
       } catch (_) {
         ts = ahoraHabana();
       }

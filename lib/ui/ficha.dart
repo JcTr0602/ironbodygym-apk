@@ -139,6 +139,12 @@ class _FichaScreenState extends State<FichaScreen> {
   List<Map<String, dynamic>> _serviciosHist = [];
   // Bloque 1: filtro de la línea de tiempo ('todo' | 'pagos' | 'ventas').
   String _filtroHistorial = 'todo';
+  // D-13 (1.21): entradas del historial y resumen de pagos,
+  // precalculados en _cargar (antes se reconstruían, ordenaban
+  // y recorrían en CADA build de la ficha).
+  List<Map<String, dynamic>> _entradasCache = [];
+  ({int n, double total, String metodoTop}) _resumenPagos =
+      (n: 0, total: 0, metodoTop: '');
   // Bloque 1: ya se abrió Editar por editarAlAbrir (una sola vez).
   bool _editoAlAbrir = false;
 
@@ -204,6 +210,28 @@ class _FichaScreenState extends State<FichaScreen> {
         _especialActiva = especialActiva;
         _tieneRegistroTarifa = tieneRegistro;
         _plusResidual = plusResidual;
+        // D-13: con _pagos/_suplementos/_serviciosHist ya
+        // asignados, se precalculan entradas y resumen.
+        _entradasCache = _construirEntradas();
+        final pagosReales =
+            _pagos.where((p) => p['metodo'] != 'cortesia').toList();
+        final metodos = <String, int>{};
+        for (final p in pagosReales) {
+          final m = (p['metodo'] as String?) ?? 'efectivo';
+          metodos[m] = (metodos[m] ?? 0) + 1;
+        }
+        _resumenPagos = (
+          n: pagosReales.length,
+          total: pagosReales.fold<double>(
+              0,
+              (s, p) =>
+                  s + ((p['monto'] as num?)?.toDouble() ?? 0)),
+          metodoTop: metodos.entries.isEmpty
+              ? ''
+              : metodos.entries
+                  .reduce((a, b) => a.value >= b.value ? a : b)
+                  .key,
+        );
       });
     }
     // Bloque 1: abrir directo en Editar (deslizar en Buscar).
@@ -2978,7 +3006,11 @@ class _FichaScreenState extends State<FichaScreen> {
   /// transferencia azul, como en Pagos del día) y el botón de
   /// corregir del dueño. El acumulado de servicios (idea de Jc
   /// v1.8.1) se conserva arriba cuando se ven ventas.
-  Widget _tarjetaHistorial() {
+  /// D-13 (1.21): construcción de las entradas de la línea de
+  /// tiempo, separada del build: se calcula UNA vez por carga
+  /// (en _cargar) y se cachea; el build solo aplica el filtro
+  /// vigente sobre la lista ya ordenada.
+  List<Map<String, dynamic>> _construirEntradas() {
     final entradas = <Map<String, dynamic>>[];
     for (final p in _pagos) {
       final metodo = '${p['metodo'] ?? ''}';
@@ -3066,6 +3098,11 @@ class _FichaScreenState extends State<FichaScreen> {
       if (fb == null) return -1;
       return fb.compareTo(fa);
     });
+    return entradas;
+  }
+
+  Widget _tarjetaHistorial() {
+    final entradas = _entradasCache;
     final visibles = switch (_filtroHistorial) {
       'pagos' => entradas.where((e) => e['tipo'] == 'pago').toList(),
       'ventas' => entradas.where((e) => e['tipo'] == 'venta').toList(),
@@ -3394,26 +3431,11 @@ class _FichaScreenState extends State<FichaScreen> {
 
   Widget _resumen360() {
     // Argón #7B-7: la cortesía (regalo, monto 0) no es un pago ni
-    // un método preferido.
-    final pagosReales =
-        _pagos.where((p) => p['metodo'] != 'cortesia').toList();
-    final total = pagosReales.fold<double>(
-        0,
-        (s, p) =>
-            s +
-            ((p['monto'] as num?)?.toDouble() ??
-                0));
-    final metodos = <String, int>{};
-    for (final p in pagosReales) {
-      final m = (p['metodo'] as String?) ?? 'efectivo';
-      metodos[m] = (metodos[m] ?? 0) + 1;
-    }
-    final metodoTop = metodos.entries.isEmpty
-        ? ''
-        : metodos.entries
-            .reduce(
-                (a, b) => a.value >= b.value ? a : b)
-            .key;
+    // un método preferido. D-13 (1.21): los agregados vienen
+    // precalculados de _cargar (_resumenPagos), no se recorren
+    // en cada build.
+    final total = _resumenPagos.total;
+    final metodoTop = _resumenPagos.metodoTop;
     return Padding(
       padding:
           const EdgeInsets.only(bottom: AppEspacio.md),
@@ -3426,7 +3448,7 @@ class _FichaScreenState extends State<FichaScreen> {
           children: [
             Column(
               children: [
-                Text('${pagosReales.length}',
+                Text('${_resumenPagos.n}',
                     style: AppTexto.displayPequeno
                         .copyWith(
                             color:

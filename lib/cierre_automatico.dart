@@ -4,6 +4,7 @@
 // y no hay cierre manual, genera el auto-cierre.
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
+import 'app_log.dart';
 import 'tiempo.dart';
 import 'turno_service.dart';
 
@@ -125,12 +126,18 @@ Future<bool> verificarCierresAutomaticos() async {
         // Marcar como automático en la BD local
         // (se hace vía el campo tipo_cierre si existe)
         ejecutoAlguno = true;
-      } catch (_) {
-        // Continuar con el siguiente turno
+      } catch (e) {
+        // Continuar con el siguiente turno, pero con señal
+        // (auditoría 1.21 A-06): un fallo permanente aquí era
+        // invisible en campo y el turno quedaba abierto sin
+        // que nadie supiera por qué.
+        AppLog.error('cierre_automatico', 'cierre_fallo',
+            d: 'turno=$turnoId error=$e');
       }
     }
     return ejecutoAlguno;
-  } catch (_) {
+  } catch (e) {
+    AppLog.error('cierre_automatico', 'barrido_fallo', d: '$e');
     return false;
   }
 }

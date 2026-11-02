@@ -10,6 +10,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../acceso_app_cache.dart';
 import '../auth.dart';
 import '../negocio.dart' show tiempoRelativo;
+import '../tiempo.dart' show aHabana;
 import 'acciones_acceso.dart';
 import 'diseno.dart';
 import 'ficha.dart';
@@ -39,7 +40,10 @@ class _FichaAccesoScreenState extends State<FichaAccesoScreen> {
 
   String _fmtFecha(dynamic v) {
     if (v == null) return '—';
-    final dt = DateTime.tryParse('$v')?.toLocal();
+    // D-01 (1.21): la RPC devuelve marcas con zona; se muestran
+    // en hora de La Habana, no en la del dispositivo.
+    final p0 = DateTime.tryParse('$v');
+    final dt = p0 == null ? null : (p0.isUtc ? aHabana(p0) : p0);
     if (dt == null) return '—';
     String d2(int n) => n.toString().padLeft(2, '0');
     return '${d2(dt.day)}/${d2(dt.month)}/${dt.year} ${d2(dt.hour)}:${d2(dt.minute)}';

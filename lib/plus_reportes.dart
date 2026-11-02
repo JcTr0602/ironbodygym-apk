@@ -260,10 +260,21 @@ class PlusReportesService {
       // y una fila puede venir dos veces (y sumarse dos veces
       // en el C5). Dedup por id al acumular; el SQL compañero
       // añade id como desempate del ORDER BY de la RPC.
+      var nuevos = 0;
       for (final r in pagina) {
-        if (vistos.add(r.id)) todos.add(r);
+        if (vistos.add(r.id)) {
+          todos.add(r);
+          nuevos++;
+        }
       }
       if (pagina.length < kLimiteReportesPlus) break;
+      // Auditoría 1.21 B-02: guarda de progreso — si una página
+      // llena no aporta ningún id nuevo, la RPC no está honrando
+      // p_desde y seguir paginando sería un bucle infinito
+      // martilleando el servidor. Tope absoluto de páginas como
+      // segunda red (50 × 100 = 5000 reportes).
+      if (nuevos == 0) break;
+      if (desde ~/ kLimiteReportesPlus >= 50) break;
       desde += kLimiteReportesPlus;
     }
     todos.sort((a, b) => (a.creadoEn ?? DateTime(9999))

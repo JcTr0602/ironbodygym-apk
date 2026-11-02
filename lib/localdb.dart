@@ -11,6 +11,7 @@ import 'dart:io';
 import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
+import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:uuid/uuid.dart';
@@ -4078,10 +4079,13 @@ class LocalDb {
   /// por el pull y el temporal debe desaparecer para no duplicar.
   Future<void> limpiarOptimista(String tabla, String opUuid) async {
     final d = await db;
-    final rows = await d.query(tabla);
+    // Auditoría 1.21 A-09: antes cargaba y decodificaba la tabla
+    // ENTERA por cada op aplicada; las filas optimistas son por
+    // definición las de id negativo — se filtran en SQL y solo
+    // se decodifican esas (unas pocas).
+    final rows = await d.query(tabla, where: 'id < 0');
     for (final r in rows) {
       final id = r['id'] as int;
-      if (id >= 0) continue;
       try {
         final data =
             jsonDecode(r['data'] as String) as Map<String, dynamic>;
@@ -5514,12 +5518,28 @@ class LocalDb {
       'nomina_bonos',
       'nomina_precalc',
       'compras',
+      // Auditoría 1.21 A-02: las dos tablas de la 1.20 que la
+      // purga olvidó — el historial de ajustes de stock del
+      // dueño y la cola local de comprobantes de pago (con sus
+      // archivos, abajo) sobrevivían al cambio de sesión.
+      'suplemento_ajustes',
+      'comprobantes_pago',
     ]) {
       try {
         n += await d.delete(t);
         await d.delete('meta', where: 'k = ?', whereArgs: ['wm_$t']);
       } catch (_) {}
     }
+    // A-02: los ARCHIVOS de comprobantes (documents/comprobantes/)
+    // son fotos de transferencias: tampoco pueden quedar en un
+    // teléfono compartido tras cerrar sesión.
+    try {
+      final docs = await getApplicationDocumentsDirectory();
+      final dirComp = Directory(p.join(docs.path, 'comprobantes'));
+      if (await dirComp.exists()) {
+        await dirComp.delete(recursive: true);
+      }
+    } catch (_) {}
     // borradores y plantillas viven en SharedPreferences (perfil.dart);
     // se purgan desde AuthService.signOut.
     return n;
@@ -6150,6 +6170,42 @@ class LocalDb {
   /// Devuelve el timestamp de aviso, o null si no se ha avisado.
   Future<String?> getAvisado(int clienteId) async {
     return getMeta('avisado_$clienteId');
+  }
+
+  /// Top de suplementos por cantidad vendida, agregado en SQL
+  /// (auditoría 1.21 D-04): antes la pantalla de Suplementos
+  /// decodificaba el espejo ENTERO de ventas solo para este
+  /// top-4. Misma semántica que el cálculo en Dart que
+  /// sustituye: fuera anuladas (anulada=1) e inactivas
+  /// (activo=0 explícito; ausente cuenta como activa), solo
+  /// totales > 0, orden por cantidad desc.
+  Future<List<int>> topVendidosSuplementos({int limite = 4}) async {
+    final d = await db;
+    final rows = await d.rawQuery(
+        "SELECT CAST(json_extract(data, '\$.suplemento_id') AS INTEGER) AS sid, "
+        "SUM(CAST(json_extract(data, '\$.cantidad') AS INTEGER)) AS total "
+        'FROM ventas_suplementos '
+        "WHERE COALESCE(CAST(json_extract(data, '\$.anulada') AS INTEGER), 0) != 1 "
+        "AND COALESCE(CAST(json_extract(data, '\$.activo') AS INTEGER), 1) != 0 "
+        "AND json_extract(data, '\$.suplemento_id') IS NOT NULL "
+        'GROUP BY sid HAVING total > 0 ORDER BY total DESC LIMIT ?',
+        [limite]);
+    return [
+      for (final r in rows)
+        if (r['sid'] != null) (r['sid'] as num).toInt(),
+    ];
+  }
+
+  /// Todos los ids avisados de una vez (auditoría 1.21 D-08:
+  /// la lista de vencimientos consultaba getAvisado por fila y
+  /// por reconstrucción; ahora precarga el conjunto al cargar).
+  Future<Set<int>> idsAvisados() async {
+    final claves = await metasConPrefijo('avisado_');
+    return {
+      for (final k in claves)
+        if (int.tryParse(k.substring('avisado_'.length)) != null)
+          int.parse(k.substring('avisado_'.length)),
+    };
   }
 
   Future<int> getWatermark() async =>
@@ -7008,13 +7064,19 @@ class LocalDb {
   Future<List<Map<String, dynamic>>> pendientesParaEnvio(String? userId,
       {bool forzar = false}) async {
     final d = await db;
-    final ahora = isoHabana(ahoraHabana()); // v1.3.4 (Argón)
+    // Auditoría 1.21 A-05: la comparación va por INSTANTE
+    // (epoch vía strftime, que honra el offset del texto), no
+    // lexicográfica: con el cambio de hora (DST) el texto ISO
+    // cambia de offset y el orden de caracteres erraba hasta
+    // 1 h en el borde. Vale igual para count/liberar retenidas.
+    final ahoraEpoch = ahoraHabana().millisecondsSinceEpoch ~/ 1000;
     final where = StringBuffer(
         "estado IN ('pendiente','error')");
     final args = <dynamic>[];
     if (!forzar) {
-      where.write(' AND (proximo_reintento IS NULL OR proximo_reintento <= ?)');
-      args.add(ahora);
+      where.write(' AND (proximo_reintento IS NULL OR '
+          "CAST(strftime('%s', proximo_reintento) AS INTEGER) <= ?)");
+      args.add(ahoraEpoch);
     }
     if (userId != null) {
       where.write(' AND (user_id = ? OR user_id IS NULL)');
@@ -7423,11 +7485,12 @@ class LocalDb {
   // E2: cuántas ops están retenidas por retenerHasta (Bloque 1).
   Future<int> countOpsRetenidas() async {
     final d = await db;
-    final ahora = isoHabana(ahoraHabana());
+    final ahoraEpoch = ahoraHabana().millisecondsSinceEpoch ~/ 1000;
     final r = await d.rawQuery(
         "SELECT COUNT(*) c FROM ops_queue WHERE estado IN ('pendiente','error') "
-        'AND proximo_reintento IS NOT NULL AND proximo_reintento > ?',
-        [ahora]);
+        'AND proximo_reintento IS NOT NULL AND '
+        "CAST(strftime('%s', proximo_reintento) AS INTEGER) > ?",
+        [ahoraEpoch]);
     return (r.first['c'] as int?) ?? 0;
   }
 
@@ -7438,12 +7501,13 @@ class LocalDb {
   /// cobros retenidos en el teléfono.
   Future<int> liberarOpsRetenidas() async {
     final d = await db;
-    final ahora = isoHabana(ahoraHabana());
+    final ahoraEpoch = ahoraHabana().millisecondsSinceEpoch ~/ 1000;
     return d.rawUpdate(
         "UPDATE ops_queue SET proximo_reintento=NULL "
         "WHERE estado IN ('pendiente','error') "
-        'AND proximo_reintento IS NOT NULL AND proximo_reintento > ?',
-        [ahora]);
+        'AND proximo_reintento IS NOT NULL AND '
+        "CAST(strftime('%s', proximo_reintento) AS INTEGER) > ?",
+        [ahoraEpoch]);
   }
 
   /// ISO (Habana) de la op pendiente más antigua, o null si la cola

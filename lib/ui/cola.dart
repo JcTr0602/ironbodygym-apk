@@ -9,6 +9,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:sqflite/sqflite.dart';
 
+import '../comprobantes.dart';
 import '../errores_sync.dart';
 import '../fotos_qos.dart';
 import '../bloque3.dart';
@@ -257,6 +258,18 @@ class _ColaScreenState extends State<ColaScreen> {
   // sumaba 30 con solo 1 op en vuelo.
   Map<String, int> _desglosePendientes = {};
   String? _masAntiguaIso;
+  // D-03 (1.21): guardia de reentrada de _cargar (el listener de
+  // estado + pull-to-refresh + botones podían solapar cargas).
+  bool _cargandoAhora = false;
+  bool _recargaPendiente = false;
+  // A-03 (1.21): comprobantes de pago en error (reintento
+  // deliberado, patrón H-12 de fotos de incidencias).
+  List<Map<String, dynamic>> _compError = [];
+  // D-12 (1.21): títulos de op memoizados al cargar —
+  // tituloDeOp decodifica el payload JSON; hacerlo por op en
+  // cada build era el coste real de la lista (la lista en sí
+  // está acotada a las 30 ops recientes de recentOps).
+  Map<String, String> _titulosOp = {};
   bool _sincronizando = false;
   // v1.4.0: progreso visible de la sincronización manual.
   SyncProgress? _progresoSync;
@@ -323,6 +336,25 @@ class _ColaScreenState extends State<ColaScreen> {
   }
 
   Future<void> _cargar() async {
+    // D-03 (1.21): si ya hay una carga en curso, se marca y se
+    // repite al terminar (no se solapan ni se pierde la última).
+    if (_cargandoAhora) {
+      _recargaPendiente = true;
+      return;
+    }
+    _cargandoAhora = true;
+    try {
+      await _cargarInterno();
+    } finally {
+      _cargandoAhora = false;
+      if (_recargaPendiente && mounted) {
+        _recargaPendiente = false;
+        await _cargar();
+      }
+    }
+  }
+
+  Future<void> _cargarInterno() async {
     // Ronda 17 M6-H1: actor de la sesión (fail-closed).
     try {
       _miActor = AuthService().displayName;
@@ -347,6 +379,12 @@ class _ColaScreenState extends State<ColaScreen> {
     try {
       fotosIncError =
           await LocalDb.instance.fotosIncidenciasEnError();
+    } catch (_) {}
+    // A-03 (1.21): comprobantes de pago en error.
+    var compError = <Map<String, dynamic>>[];
+    try {
+      compError =
+          await ComprobantesService.instance.comprobantesEnError();
     } catch (_) {}
     try {
       final db = await LocalDb.instance.db;
@@ -417,7 +455,16 @@ class _ColaScreenState extends State<ColaScreen> {
     var fotosVisibles = fDet;
     if (!_esDueno) {
       try {
-        final clientes = await LocalDb.instance.allMirror('clientes');
+        // D-03 (1.21): solo hacen falta los clientes de las
+        // fotos visibles (≤50), no el espejo entero.
+        final idsFotos = <int>{
+          for (final f in fDet)
+            if (f['cliente_id'] is int) f['cliente_id'] as int,
+        };
+        final clientes = idsFotos.isEmpty
+            ? <Map<String, dynamic>>[]
+            : await LocalDb.instance
+                .mirrorPorIds('clientes', idsFotos.toList());
         final protegidos = <int>{
           for (final c in clientes)
             if (esVistaProtegida(c)) c['id'] as int,
@@ -454,6 +501,11 @@ class _ColaScreenState extends State<ColaScreen> {
         _fotosError = fErr;
         _fotosDetalle = fotosVisibles;
         _fotosIncError = fotosIncError;
+        _compError = compError;
+        _titulosOp = {
+          for (final op in [...opsVisibles, ...bloqueadasVisibles])
+            '${op['op_uuid']}': tituloDeOp(op),
+        };
         _retenidas = retenidas;
         _totalPendientes = totalPendientesFinal;
         _desglosePendientes = desgloseFinal;
@@ -568,6 +620,83 @@ class _ColaScreenState extends State<ColaScreen> {
     } finally {
       _reintentandoFotosInc = false;
     }
+  }
+
+  bool _reintentandoComp = false;
+
+  /// A-03 (1.21): reintento DELIBERADO de los comprobantes de
+  /// pago en 'error' cuyo archivo sigue en el teléfono (el
+  /// servicio decide; aquí solo se dispara y se reporta).
+  Future<void> _reintentarComprobantes() async {
+    if (_reintentandoComp) return;
+    _reintentandoComp = true;
+    try {
+      final n = await ComprobantesService.instance
+          .reactivarComprobantesError();
+      await _cargar();
+      if (mounted) {
+        mostrarSnack(
+            context,
+            n == 1
+                ? 'Comprobante marcado para reintento'
+                : '$n comprobantes marcados para reintento',
+            significado: SignificadoChip.exito);
+      }
+      unawaited(ComprobantesService.instance.procesar());
+    } catch (e) {
+      if (mounted) {
+        mostrarSnack(context, 'No se pudo reintentar: $e',
+            significado: SignificadoChip.error);
+      }
+    } finally {
+      _reintentandoComp = false;
+    }
+  }
+
+  /// A-03 (1.21): tarjeta de comprobantes de pago cuya subida
+  /// quedó en 'error' (espejo de la de fotos de incidencias).
+  Widget _tarjetaComprobantesError(BuildContext context) {
+    final total = _compError.length;
+    return Tarjeta(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.receipt_long_rounded,
+                  size: 24, color: AppColores.error),
+              const SizedBox(width: 12),
+              const Expanded(
+                child: Text('Comprobantes de pago sin subir',
+                    style: AppTexto.subtitulo),
+              ),
+              ContadorBadge(numero: total),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            total == 1
+                ? 'Un comprobante de transferencia no se pudo '
+                    'subir. Se reintentan solo los que aún tienen '
+                    'el archivo en este teléfono.'
+                : '$total comprobantes de transferencia no se '
+                    'pudieron subir. Se reintentan solo los que '
+                    'aún tienen el archivo en este teléfono.',
+            style: AppTexto.secundario,
+          ),
+          const SizedBox(height: 8),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              icon: const Icon(Icons.refresh_rounded, size: 18),
+              label: const Text('Reintentar'),
+              onPressed:
+                  _reintentandoComp ? null : _reintentarComprobantes,
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _sincronizar() async {
@@ -1422,7 +1551,20 @@ class _ColaScreenState extends State<ColaScreen> {
       errorClaro = 'La operación ya fue registrada (duplicada). No es necesario reintentar.';
     }
     // Detalles del payload según tipo (v1.0.11)
-    final detalles = await _detallesOp(op);
+    // D-17 (1.21): _verDetalle es fire-and-forget desde el
+    // onTap; un fallo resolviendo detalles dejaba el toque sin
+    // respuesta alguna. Ahora se reporta y se sigue sin detalle.
+    List<String> detalles;
+    try {
+      detalles = await _detallesOp(op);
+    } catch (e) {
+      AppLog.error('cola', 'detalle_op_fallo', d: '$e');
+      detalles = const [];
+      if (mounted) {
+        mostrarSnack(context, 'No se pudo cargar el detalle',
+            significado: SignificadoChip.error);
+      }
+    }
     if (!mounted) return;
     showDialog(
       context: context,
@@ -1808,6 +1950,10 @@ class _ColaScreenState extends State<ColaScreen> {
               const SizedBox(height: 16),
               _tarjetaFotosIncidencias(context),
             ],
+            if (_compError.isNotEmpty) ...[
+              const SizedBox(height: 16),
+              _tarjetaComprobantesError(context),
+            ],
             const SizedBox(height: 16),
             const Text(
               'Operaciones recientes',
@@ -1860,7 +2006,8 @@ class _ColaScreenState extends State<ColaScreen> {
                       leading: Icon(_iconoEstado(estado),
                           size: 26,
                           color: _colorEstado(estado)),
-                    title: Text(tituloDeOp(op)),
+                    title: Text(
+                        _titulosOp['${op['op_uuid']}'] ?? tituloDeOp(op)),
                     subtitle: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
@@ -2083,10 +2230,15 @@ class _DetalleSyncScreenState extends State<DetalleSyncScreen> {
     final detalleTs =
         await LocalDb.instance.getMeta('ultimo_push_detalle_ts');
     final ops = await LocalDb.instance.opsPorUuids(uuids);
-    final detalles = <String, List<String>>{};
-    for (final op in ops) {
-      detalles['${op['op_uuid']}'] = await detallesDeOp(op);
-    }
+    // D-17 (1.21): los detalles se resuelven en paralelo, no
+    // en serie op a op (las latencias se sumaban).
+    final detallesListas = await Future.wait([
+      for (final op in ops) detallesDeOp(op),
+    ]);
+    final detalles = <String, List<String>>{
+      for (var i = 0; i < ops.length; i++)
+        '${ops[i]['op_uuid']}': detallesListas[i],
+    };
     if (!mounted) return;
     setState(() {
       _ops = ops;

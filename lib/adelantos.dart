@@ -156,6 +156,12 @@ double sumaAdelantosPendientes({
       }
     } else {
       // Anulación encolada: resta lo que el original aún suma.
+      // LÍMITE CONOCIDO (auditoría 1.21 B-13): si el original aún
+      // es una op pendiente de ESTE teléfono (registrado y anulado
+      // antes de sincronizar), no está en el espejo ni la
+      // anulación conoce su id de servidor: el pendiente queda
+      // sobreestimado hasta que el ciclo de sync espeja ambas
+      // ops (ventana de un ciclo, mismo teléfono).
       final origId = (payload['adelanto_id'] as num?)?.toInt();
       final orig = origId == null ? null : porId[origId];
       if (orig != null &&

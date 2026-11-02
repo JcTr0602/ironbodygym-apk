@@ -1251,7 +1251,9 @@ class _ActividadScreenState extends State<ActividadScreen> {
   String _fechaHoraLarga(String ts) {
     if (ts.isEmpty) return '';
     try {
-      final dt = DateTime.parse(ts).toLocal();
+      // D-01 (1.21): conversión canónica a Habana, no .toLocal().
+      final p0 = DateTime.parse(ts);
+      final dt = p0.isUtc ? aHabana(p0) : p0;
       return '${dt.day.toString().padLeft(2, '0')}/'
           '${dt.month.toString().padLeft(2, '0')}/${dt.year} '
           '${dt.hour.toString().padLeft(2, '0')}:'
@@ -1368,7 +1370,8 @@ class _ActividadScreenState extends State<ActividadScreen> {
     final ts = '${a['ts'] ?? ''}';
     if (ts.isEmpty) return '';
     try {
-      final dt = DateTime.parse(ts).toLocal();
+      final p0 = DateTime.parse(ts);
+      final dt = p0.isUtc ? aHabana(p0) : p0;
       final ahora = ahoraHabana();
       final esHoy = dt.year == ahora.year &&
           dt.month == ahora.month &&
@@ -2366,7 +2369,7 @@ class _ActividadScreenState extends State<ActividadScreen> {
                               2),
                       Icon(
                           Icons
-                              .chevron_right,
+                              .chevron_right_rounded,
                           size:
                               20,
                           color: AppColores
