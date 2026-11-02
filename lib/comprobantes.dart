@@ -266,9 +266,16 @@ class ComprobantesService {
               await _marcar(db, uuid, 'error');
               AppLog.error('comprobantes', 'error_permanente',
                   d: 'uuid=$uuid error=${res.error}');
+            case EstadoSubida.pausadaPorQos:
+              // Panel de cierre 1.21: la pausa por QoS es una
+              // ESPERA deliberada (hay ops de cobro pendientes y
+              // la foto no compite con ellas), NO un fallo: queda
+              // 'pendiente' SIN contar intento. Contarla quemaba
+              // el tope de 10 sin un solo fallo real y el
+              // comprobante caía en 'error' solo por esperar.
+              break;
             case EstadoSubida.reintentable:
             case EstadoSubida.permitirFallback:
-            case EstadoSubida.pausadaPorQos:
               // Queda 'pendiente': el próximo ciclo reintenta
               // (la subida TUS reanuda en su offset). SA-05
               // (auditoría sync 1.21): con TOPE — un fallo
@@ -298,7 +305,15 @@ class ComprobantesService {
     final uuid = f['comprobante_uuid'] as String;
     final intentos = (f['intentos'] as int? ?? 0) + 1;
     if (intentos >= 10) {
-      await _marcar(db, uuid, 'error');
+      // Panel de cierre 1.21: estado e intentos se guardan
+      // JUNTOS (antes la fila quedaba en 'error' con intentos=9
+      // y el contador no reflejaba el motivo del estado).
+      await db.update(
+        'comprobantes_pago',
+        {'estado': 'error', 'intentos': intentos},
+        where: 'comprobante_uuid = ?',
+        whereArgs: [uuid],
+      );
       AppLog.error('comprobantes', 'tope_intentos',
           d: 'uuid=$uuid intentos=$intentos: pasa a error');
     } else {

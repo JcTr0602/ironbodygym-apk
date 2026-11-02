@@ -1099,17 +1099,37 @@ Future<String> _encolar(String tipo, Map<String, dynamic> payload,
 Future<bool> deshacerVentaServicio(
     List<String> opUuids, DateTime cobradoEn) async {
   if (!puedeDeshacerVenta(cobradoEn, ahoraHabana())) return false;
-  final db = LocalDb.instance;
-  for (final uuid in opUuids) {
-    final op = await db.opEnCola(uuid);
-    if (op == null || '${op['estado']}' != 'pendiente') return false;
+  // Panel de cierre 1.21: comprobación y borrados en UNA
+  // transacción, leyendo y borrando SOLO por txn (leer por
+  // LocalDb.instance.db dentro de una transacción bloquea
+  // sqflite para siempre). Antes eran dos pasadas sueltas: si
+  // una op subía entre la comprobación y su borrado, las ya
+  // borradas no volvían y la venta quedaba deshecha a medias
+  // aunque aquí se devolviera false. Con la transacción, un
+  // fallo revierte TODOS los borrados.
+  final raw = await LocalDb.instance.db;
+  try {
+    return await raw.transaction((txn) async {
+      for (final uuid in opUuids) {
+        final rows = await txn.query('ops_queue',
+            columns: ['estado'],
+            where: 'op_uuid = ?',
+            whereArgs: [uuid]);
+        if (rows.isEmpty || '${rows.first['estado']}' != 'pendiente') {
+          throw StateError('deshacer: op no pendiente');
+        }
+      }
+      for (final uuid in opUuids) {
+        final n = await txn.delete('ops_queue',
+            where: "op_uuid = ? AND estado IN ('pendiente','error')",
+            whereArgs: [uuid]);
+        if (n == 0) throw StateError('deshacer: borrado en 0');
+      }
+      return true;
+    });
+  } on StateError {
+    return false;
   }
-  for (final uuid in opUuids) {
-    // SA-03: si alguna op ya subió entre la comprobación y el
-    // borrado, no se anuncia el deshacer como completo.
-    if (await db.deleteOp(uuid) == 0) return false;
-  }
-  return true;
 }
 
 /// Solo dueño (lo impone el servidor): abre un bote del catálogo.
