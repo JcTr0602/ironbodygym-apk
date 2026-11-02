@@ -326,11 +326,14 @@ class FotosColaService {
     final leaseReclamado = await db.rawUpdate(
       "UPDATE meta SET v = ? WHERE k = 'fotos_worker_lease' AND "
       // SA-04 (auditoría sync 1.21): la expiración se compara por
-      // EPOCH, no como texto ISO: con el cambio de hora de otoño
-      // la misma hora de pared existe dos veces con offsets
-      // distintos y el orden lexicográfico se rompe.
+      // EPOCH, no como texto ISO: con el cambio de hora de pared
+      // la misma hora existe dos veces con offsets distintos y
+      // el orden lexicográfico se rompe. Sellado post-auditoría
+      // (Argón): COALESCE(..., 0) — si el texto tras el '|' viniera
+      // corrupto, strftime devuelve NULL y NULL < ? no reclama
+      // nunca; con 0 el lease se trata como vencido y se reclama.
       "(v = '' OR v NOT LIKE '%|%' OR "
-      "CAST(strftime('%s', substr(v, instr(v, '|') + 1)) AS INTEGER) < ?)",
+      "COALESCE(CAST(strftime('%s', substr(v, instr(v, '|') + 1)) AS INTEGER), 0) < ?)",
       [leaseValor, '${DateTime.now().millisecondsSinceEpoch ~/ 1000}'],
     );
     if (leaseReclamado != 1) {
@@ -406,7 +409,7 @@ class FotosColaService {
           'actualizado_en': ahoraCiclo,
         },
         where: "estado = 'subiendo' AND (lease_hasta IS NULL OR "
-            "CAST(strftime('%s', lease_hasta) AS INTEGER) < ?)",
+            "COALESCE(CAST(strftime('%s', lease_hasta) AS INTEGER), 0) < ?)",
         whereArgs: [ahoraEpoch],
       );
 
@@ -437,7 +440,7 @@ class FotosColaService {
         'fotos_cola',
         where: "estado = 'pendiente' AND intentos < 5 "
             "AND (proximo_intento_en IS NULL OR "
-            "CAST(strftime('%s', proximo_intento_en) AS INTEGER) <= ?)"
+            "COALESCE(CAST(strftime('%s', proximo_intento_en) AS INTEGER), 0) <= ?)"
             // v1.3.10: el reintento manual (forzar_qos=1) salta el filtro QoS.
             // v1.13.0 (G5): ELIMINADO el bypass de 'original' ligera
             // (<=512 KB) de la v1.4.0: una original liviana ya NO
@@ -1307,7 +1310,7 @@ class FotosColaService {
         "SELECT COUNT(*) as n FROM fotos_cola WHERE estado = 'pendiente' "
         "AND intentos < 5 "
         "AND (proximo_intento_en IS NULL OR "
-            "CAST(strftime('%s', proximo_intento_en) AS INTEGER) <= ?)",
+            "COALESCE(CAST(strftime('%s', proximo_intento_en) AS INTEGER), 0) <= ?)",
         [ahoraIso]);
     return (r.first['n'] as int? ?? 0);
   }
@@ -1335,7 +1338,7 @@ class FotosColaService {
         "SELECT COUNT(*) as n FROM fotos_cola WHERE estado = 'pendiente' "
         "AND intentos < 5 "
         "AND (proximo_intento_en IS NULL OR "
-            "CAST(strftime('%s', proximo_intento_en) AS INTEGER) <= ?)"
+            "COALESCE(CAST(strftime('%s', proximo_intento_en) AS INTEGER), 0) <= ?)"
         "${puedeOriginal ? '' : " AND (tipo != 'original' OR forzar_qos = 1)"}",
         [ahoraIso]);
     return (r.first['n'] as int? ?? 0);
