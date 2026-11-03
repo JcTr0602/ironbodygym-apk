@@ -11,7 +11,11 @@ library;
 import 'dart:convert';
 import 'dart:io';
 
+import 'dart:async';
+
+import 'package:fake_async/fake_async.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:ironbody_gym/invitados.dart';
 import 'package:ironbody_gym/localdb.dart';
 import 'package:ironbody_gym/negocio.dart';
 import 'package:ironbody_gym/ui/cola.dart';
@@ -117,4 +121,30 @@ void main() {
       expect(d.any((l) => l.contains('12500')), isTrue);
     });
   });
+
+  group('CAMPO dashboard: RPC de invitados colgada', () {
+    test('contarPlusVigentes corta por timeout y degrada a null',
+        () {
+      fakeAsync((async) {
+        final svc = InvitadosService(
+            rpc: (nombre, params) =>
+                Completer<dynamic>().future);
+        int? resultado = -999;
+        var termino = false;
+        svc.contarPlusVigentes().then((v) {
+          resultado = v;
+          termino = true;
+        });
+        async.elapse(const Duration(seconds: 11));
+        expect(termino, isFalse,
+            reason: 'dentro del timeout aún espera');
+        async.elapse(const Duration(seconds: 2));
+        expect(termino, isTrue,
+            reason: 'el timeout resolvió la espera');
+        expect(resultado, isNull,
+            reason: 'degrada a null: la UI omite el dato');
+      });
+    });
+  });
 }
+

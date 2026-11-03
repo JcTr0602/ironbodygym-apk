@@ -179,9 +179,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
       try {
         cli = await fClientes;
       } catch (_) {}
-      try {
-        nov = await fNovedades;
-      } catch (_) {}
       if (mounted && v == _versionCarga) {
         setState(() {
           if (ing != null) {
@@ -214,24 +211,38 @@ class _DashboardScreenState extends State<DashboardScreen> {
             _inactivos = cli[6] as int;
             _pend = cli[7] as List<Map<String, dynamic>>;
           }
-          if (nov != null) {
-            final nomina = nov[0] as double?;
-            if (nomina != null) _nominaProy = nomina;
-            _cumpleHoy = nov[1] as int;
-            _casaActivas = nov[2] as int;
-            _stockBajo = nov[3] as List<Map<String, dynamic>>;
-            _turnosOlvidados = nov[4] as List<Map<String, dynamic>>;
-            _plusVigentes = nov[5] as int?;
-            final porComprobarT4 = nov[6] as int?;
-            if (porComprobarT4 != null && porComprobarT4 >= 0) {
-              _porComprobar = porComprobarT4;
-            }
-            final diferenciasT5 = nov[7] as int?;
-            if (diferenciasT5 != null && diferenciasT5 >= 0) {
-              _diferenciasAbiertas = diferenciasT5;
-            }
-          }
           _cargando = false;
+        });
+      }
+      // Campo 2026-11-02 (1.22): las novedades se aplican en
+      // una SEGUNDA pintura. El grupo incluye la única lectura
+      // de red del panel (Plus vigentes por RPC de Invitados):
+      // con la conexión colgada, la primera pintura ya salió
+      // con los datos locales y el panel no queda en
+      // «Cargando panel…» (y la RPC de lectura ahora tiene
+      // timeout en InvitadosService).
+      try {
+        nov = await fNovedades;
+      } catch (_) {}
+      if (mounted && v == _versionCarga && nov != null) {
+        final novedades = nov!;
+        setState(() {
+          final nomina = novedades[0] as double?;
+          if (nomina != null) _nominaProy = nomina;
+          _cumpleHoy = novedades[1] as int;
+          _casaActivas = novedades[2] as int;
+          _stockBajo = novedades[3] as List<Map<String, dynamic>>;
+          _turnosOlvidados =
+              novedades[4] as List<Map<String, dynamic>>;
+          _plusVigentes = novedades[5] as int?;
+          final porComprobarT4 = novedades[6] as int?;
+          if (porComprobarT4 != null && porComprobarT4 >= 0) {
+            _porComprobar = porComprobarT4;
+          }
+          final diferenciasT5 = novedades[7] as int?;
+          if (diferenciasT5 != null && diferenciasT5 >= 0) {
+            _diferenciasAbiertas = diferenciasT5;
+          }
         });
       }
     } catch (_) {

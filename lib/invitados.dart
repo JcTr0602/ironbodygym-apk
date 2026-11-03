@@ -1304,12 +1304,37 @@ class InvitadosService {
     }
   }
 
+  /// Campo 2026-11-02 (1.22): tope de las LECTURAS por RPC.
+  /// Sin timeout, una conexión colgada dejaba el Dashboard en
+  /// «Cargando panel…» eterno: contarPlusVigentes espera la
+  /// RPC dentro de la carga inicial y un cuelgue no es un
+  /// error, así que ningún catch lo resolvía (la misma clase
+  /// de fallo que la ficha offline del 2026-11-02). Las
+  /// ESCRITURAS no llevan timeout a propósito: un corte del
+  /// lado cliente no debe fingir que el servidor no aplicó;
+  /// el lote es idempotente por opId y se reconcilia por su
+  /// resultado.
+  static const duracionTimeoutLecturaRpc = Duration(seconds: 12);
+
+  /// Como [_rpc] pero para lecturas: corta a los
+  /// [duracionTimeoutLecturaRpc] y el corte se mapea como un
+  /// fallo de conexión más.
+  Future<dynamic> _rpcLectura(String nombre,
+      [Map<String, dynamic>? params]) async {
+    try {
+      return await _rpc(nombre, params)
+          .timeout(duracionTimeoutLecturaRpc);
+    } catch (e) {
+      throw mapearErrorInvitado(e);
+    }
+  }
+
   Future<List<InvitadoResumen>> listar({
     String filtro = 'todos',
     int limite = 50,
     int desde = 0,
   }) async {
-    final res = await _rpc('invitados_listar', {
+    final res = await _rpcLectura('invitados_listar', {
       'p_filtro': filtro,
       'p_limite': limite,
       'p_desde': desde,
@@ -1351,7 +1376,7 @@ class InvitadosService {
   /// simplemente no se pinta, sin romper la bandeja.
   Future<InvitadosConteos?> resumen() async {
     try {
-      final res = await _rpc('invitados_resumen');
+      final res = await _rpcLectura('invitados_resumen');
       if (res is Map) {
         return InvitadosConteos.fromJson(
             res.map((k, v) => MapEntry('$k', v)));
