@@ -6197,9 +6197,10 @@ Future<String> registrarVentaSuplemento({
   if (!precioOficial.isFinite || precioOficial < 0) {
     throw Exception('Precio oficial inválido');
   }
-  if (usdTasa != null && (!usdTasa.isFinite || usdTasa <= 0)) {
-    throw Exception('Tasa USD inválida');
-  }
+  // usdTasa NO se valida aquí a propósito: la casa la normaliza
+  // a 1.0 en el payload cuando no es usable (test
+  // «usd_tasa inválida se normaliza a 1.0»); D2-08 solo cierra
+  // el hueco de Infinity en esa normalización (abajo).
   if (compradorTipo != 'cliente' && compradorTipo != 'externo') {
     throw Exception('comprador_tipo inválido');
   }
@@ -6226,7 +6227,11 @@ Future<String> registrarVentaSuplemento({
     'precio_venta_centavos': ventaCent,
     'descuento_autorizado_centavos': ventaCent - oficialCent,
     'moneda': moneda, // explícita, nunca implícita
-    'usd_tasa': (usdTasa != null && usdTasa > 0) ? usdTasa : 1.0,
+    // D2-08: isFinite exigido — Infinity pasaba el `> 0` y
+    // viajaba como tasa; NaN ya caía a 1.0 (comparación falsa).
+    'usd_tasa': (usdTasa != null && usdTasa.isFinite && usdTasa > 0)
+        ? usdTasa
+        : 1.0,
     'comprador_tipo': compradorTipo,
     if (compradorTipo == 'cliente') 'cliente_id': clienteId,
     'comprador_nombre': compradorNombre,

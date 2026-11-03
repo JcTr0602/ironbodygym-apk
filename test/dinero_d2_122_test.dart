@@ -201,7 +201,10 @@ void main() {
     test('D2-08 negocio: finitos en venta y liquidación', () {
       final src = _leer('lib/negocio.dart');
       expect(src.contains('Precio oficial inválido'), isTrue);
-      expect(src.contains('Tasa USD inválida'), isTrue);
+      // La tasa no lanza: se normaliza a 1.0 (comportamiento
+      // probado de la casa); D2-08 exige isFinite en esa
+      // normalización para que Infinity no viaje.
+      expect(src.contains('usdTasa.isFinite && usdTasa > 0'), isTrue);
       expect(src.contains('Montos inválidos'), isTrue);
     });
   });
