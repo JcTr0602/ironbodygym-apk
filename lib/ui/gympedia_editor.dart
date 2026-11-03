@@ -95,6 +95,18 @@ class _GympediaEditorScreenState extends State<GympediaEditorScreen> {
   bool _vistaPrevia = false;
   bool _ocupado = false;
 
+  /// 1.22 GY-09: huella del contenido al cargar/guardar;
+  /// si el contenido actual difiere, hay cambios sin guardar
+  /// y el botón atrás pregunta antes de salir.
+  String _huella = '';
+
+  String _huellaActual() {
+    final b = _borradorActual()..remove('actualizado_ts');
+    return jsonEncode(b);
+  }
+
+  bool get _sucio => _listo && _huellaActual() != _huella;
+
   @override
   void initState() {
     super.initState();
@@ -118,7 +130,56 @@ class _GympediaEditorScreenState extends State<GympediaEditorScreen> {
     }
     if (fuente != null) {
       if (desdeBorrador) {
-        _aplicarBorrador(fuente);
+        // 1.22 GY-04: si lo publicado ya avanzó más que la
+        // base de este borrador, PREGUNTAR antes de cargar el
+        // borrador viejo (antes entraba en silencio y el
+        // aviso recién saltaba al publicar).
+        final slugB = '${fuente['slug'] ?? ''}';
+        final pub = slugB.isEmpty
+            ? null
+            : await _db.gympediaPublicado(slugB);
+        // Panel Pieza 7: tras cada await, si el editor se
+        // desmontó no se aplica nada ni se borra nada.
+        if (!mounted) return;
+        final revPub = (pub?['revision'] as num?)?.toInt() ?? 0;
+        final baseB =
+            (fuente['base_revision'] as num?)?.toInt() ?? 0;
+        var usarPublicado = false;
+        if (pub != null && revPub > baseB && mounted) {
+          usarPublicado = await showDialog<bool>(
+                context: context,
+                builder: (c) => AlertDialog(
+                  title: const Text('Hay una versión más nueva'),
+                  content: Text(
+                      'Este borrador partió de la revisión $baseB '
+                      'y lo publicado ya va por la $revPub.\n\n'
+                      'Puedes cargar lo publicado (el borrador '
+                      'viejo se elimina) o abrir el borrador de '
+                      'todas formas.'),
+                  actions: [
+                    TextButton(
+                        onPressed: () => Navigator.pop(c, false),
+                        child: const Text('Abrir el borrador')),
+                    FilledButton(
+                        onPressed: () => Navigator.pop(c, true),
+                        child: const Text('Cargar lo publicado')),
+                  ],
+                ),
+              ) ??
+              false;
+        }
+        if (!mounted) return;
+        if (usarPublicado && pub != null) {
+          final rutaVieja = '${fuente['imagen_local'] ?? ''}';
+          _aplicarPublicado(pub);
+          await _db.gympediaEliminarBorrador(slugB);
+          await _db.setMeta('gympedia_en_cola_$slugB', '');
+          if (rutaVieja.isNotEmpty) {
+            await _db.gympediaBorrarImagenLocal(rutaVieja);
+          }
+        } else {
+          _aplicarBorrador(fuente);
+        }
       } else {
         _aplicarPublicado(fuente);
       }
@@ -127,6 +188,7 @@ class _GympediaEditorScreenState extends State<GympediaEditorScreen> {
       _pasos.add(TextEditingController());
       _errores.add(TextEditingController());
     }
+    _huella = _huellaActual();
     if (mounted) setState(() => _listo = true);
   }
 
@@ -141,16 +203,33 @@ class _GympediaEditorScreenState extends State<GympediaEditorScreen> {
     return const [];
   }
 
+  // 1.22 GY-10: los valores de catálogo se sanean contra el
+  // catálogo vigente al cargar (un espejo/borrador con una
+  // categoría o sello retirado dejaba el dropdown en un valor
+  // inexistente y el editor reventaba o publicaba basura).
+  static String _categoriaSegura(Object? v) =>
+      GympediaValidacion.categorias.contains('$v')
+          ? '$v'
+          : 'entrenamiento';
+  static String _selloSeguro(Object? v) =>
+      const {'verde', 'amarillo', 'gris'}.contains('$v')
+          ? '$v'
+          : 'verde';
+  static String _nivelSeguro(Map<String, dynamic> m) {
+    final n = LocalDb.nivelGympediaDe(m);
+    return const {'esencial', 'plus'}.contains(n) ? n : 'plus';
+  }
+
   void _aplicarPublicado(Map<String, dynamic> p) {
     _slug.text = '${p['id'] ?? ''}';
     _slugBloqueado = true;
     _hayPublicado = true;
     _titulo.text = '${p['titulo'] ?? ''}';
-    _categoria = '${p['categoria'] ?? 'entrenamiento'}';
+    _categoria = _categoriaSegura(p['categoria']);
     _esencial.text = '${p['lo_esencial'] ?? ''}';
     _explicacion.text = '${p['explicacion_md'] ?? ''}';
-    _sello = '${p['sello'] ?? 'verde'}';
-    _nivel = LocalDb.nivelGympediaDe(p);
+    _sello = _selloSeguro(p['sello']);
+    _nivel = _nivelSeguro(p);
     _baseRevision = (p['revision'] as num?)?.toInt() ?? 0;
     _imagenRev = (p['imagen_rev'] as num?)?.toInt() ?? 0;
     _tieneImagen = p['tiene_imagen'] == true || p['tiene_imagen'] == 1;
@@ -163,11 +242,11 @@ class _GympediaEditorScreenState extends State<GympediaEditorScreen> {
     _slug.text = '${b['slug'] ?? ''}';
     _slugBloqueado = _slug.text.isNotEmpty;
     _titulo.text = '${b['titulo'] ?? ''}';
-    _categoria = '${b['categoria'] ?? 'entrenamiento'}';
+    _categoria = _categoriaSegura(b['categoria']);
     _esencial.text = '${b['lo_esencial'] ?? ''}';
     _explicacion.text = '${b['explicacion_md'] ?? ''}';
-    _sello = '${b['sello'] ?? 'verde'}';
-    _nivel = LocalDb.nivelGympediaDe(
+    _sello = _selloSeguro(b['sello']);
+    _nivel = _nivelSeguro(
         {'id': '${b['slug'] ?? ''}', 'nivel': b['nivel']});
     _baseRevision = (b['base_revision'] as num?)?.toInt() ?? 0;
     _tieneImagen = b['tiene_imagen'] == 1 || b['tiene_imagen'] == true;
@@ -323,6 +402,10 @@ class _GympediaEditorScreenState extends State<GympediaEditorScreen> {
     }
     await _db.gympediaGuardarBorrador(_borradorActual());
     _slugBloqueado = true;
+    // 1.22 GY-04: una edición nueva guardada ya no es «lo
+    // que está en cola»: la marca de publicación se retira.
+    await _db.setMeta('gympedia_en_cola_${_slug.text.trim()}', '');
+    _huella = _huellaActual();
     _aviso('Borrador guardado en este teléfono.');
     setState(() {});
   }
@@ -408,7 +491,6 @@ class _GympediaEditorScreenState extends State<GympediaEditorScreen> {
       // borrador jamás toca el objeto público. Si la subida falla,
       // no se encola nada y el borrador queda intacto.
       final slug = '${a['id']}';
-      final quitabaImagen = _imagenCambiada && !_tieneImagen;
       if (_imagenCambiada && _tieneImagen && _imagenLocal.isNotEmpty) {
         if (!await _subirImagen(slug)) return;
       }
@@ -448,9 +530,16 @@ class _GympediaEditorScreenState extends State<GympediaEditorScreen> {
       if (rutaSubida.isNotEmpty) {
         await _db.gympediaBorrarImagenLocal(rutaSubida);
       }
-      // Quitar la imagen: el objeto público se borra al publicar,
-      // no al tocar «Quitar» en el borrador.
-      if (quitabaImagen) await _borrarImagenRemota(slug);
+      // 1.22 GY-03: si el artículo quedó SIN imagen, el
+      // objeto del bucket YA NO se borra aquí: la op aún no
+      // viajó y un rechazo del servidor dejaría lo publicado
+      // apuntando a una imagen borrada. Con tiene_imagen=
+      // false las apps dejan de mostrarla; el huérfano se
+      // limpia en el servidor (pendiente anotado).
+      // 1.22 GY-04: marca «en cola de publicación» + huella
+      // al día (salir tras publicar no pregunta por cambios).
+      await _db.setMeta('gympedia_en_cola_$slug', '1');
+      _huella = _huellaActual();
       _aviso('Publicado. Se enviará al servidor al sincronizar.');
       if (mounted) Navigator.of(context).pop(true);
     } finally {
@@ -489,26 +578,6 @@ class _GympediaEditorScreenState extends State<GympediaEditorScreen> {
     return false;
   }
 
-  /// Borra el objeto público de la imagen (mejor esfuerzo): se
-  /// llama SOLO al publicar un artículo que quedó sin imagen.
-  Future<void> _borrarImagenRemota(String slug) async {
-    // Ronda 17 M3-H1: borrar del bucket público es solo del dueño.
-    if (!AuthService().isOwner) return;
-    try {
-      final token = AuthService().session?.accessToken ?? '';
-      await http
-          .delete(
-            Uri.parse('${AppConfig.supabaseUrl}/storage/v1/object/'
-                '${AppConfig.bucketGympedia}/$slug.webp'),
-            headers: {
-              'apikey': AppConfig.anonKey,
-              if (token.isNotEmpty) 'Authorization': 'Bearer $token',
-            },
-          )
-          .timeout(const Duration(seconds: 30));
-    } catch (_) {}
-  }
-
   Future<void> _retirar() async {
     // Ronda 17 M3-H1.
     if (!AuthService().isOwner) return;
@@ -543,14 +612,26 @@ class _GympediaEditorScreenState extends State<GympediaEditorScreen> {
     );
     await _db.deleteMirrorTexto('gympedia_articulos', slug);
     await _db.gympediaEliminarBorrador(slug);
+    // Panel Pieza 7: retirar también apaga la marca de
+    // «en cola de publicación» de ese slug.
+    await _db.setMeta('gympedia_en_cola_$slug', '');
     _aviso('Artículo retirado. Se aplicará al sincronizar.');
     if (mounted) Navigator.of(context).pop(true);
   }
 
   Future<void> _elegirImagen() async {
-    final slug = _slug.text.trim();
+    // 1.22 GY-08: sin slug, se autogenera desde el título
+    // (antes obligaba a definirlo a mano primero) y queda
+    // BLOQUEADO tras elegir imagen: la imagen local se guarda
+    // POR slug, así que cambiarlo después la huérfana.
+    var slug = _slug.text.trim();
+    if (slug.isEmpty) {
+      slug = _slugDesdeTitulo(_titulo.text);
+      if (slug.isNotEmpty) _slug.text = slug;
+    }
     if (!GympediaValidacion.slugValido(slug)) {
-      _aviso('Primero define el identificador del artículo.');
+      _aviso('Escribe un título primero para generar el '
+          'identificador del artículo.');
       return;
     }
     // Tope real de 1024 px (panel): el selector ya entrega la
@@ -582,6 +663,8 @@ class _GympediaEditorScreenState extends State<GympediaEditorScreen> {
         _tieneImagen = true;
         _imagenCambiada = true;
         _imagenLocal = ruta;
+        // GY-08: el slug queda fijo desde que hay imagen.
+        _slugBloqueado = true;
       });
       _aviso('Imagen lista. Se subirá al publicar.');
     } catch (_) {
@@ -701,7 +784,46 @@ class _GympediaEditorScreenState extends State<GympediaEditorScreen> {
         .where((s) => s != _slug.text.trim())
         .toList()
       ..sort();
-    return Scaffold(
+    // 1.22 GY-09: atrás con cambios sin guardar pregunta
+    // (Guardar / Descartar / Cancelar) en vez de perderlos
+    // en silencio.
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) async {
+        if (didPop) return;
+        if (!_sucio || _ocupado) {
+          if (mounted) Navigator.of(context).pop();
+          return;
+        }
+        final accion = await showDialog<String>(
+          context: context,
+          builder: (c) => AlertDialog(
+            title: const Text('Cambios sin guardar'),
+            content: const Text(
+                'Tienes cambios que no están guardados ni '
+                'siquiera como borrador en este teléfono.'),
+            actions: [
+              TextButton(
+                  onPressed: () => Navigator.pop(c, 'cancelar'),
+                  child: const Text('Seguir editando')),
+              TextButton(
+                  onPressed: () => Navigator.pop(c, 'descartar'),
+                  child: const Text('Descartar')),
+              FilledButton(
+                  onPressed: () => Navigator.pop(c, 'guardar'),
+                  child: const Text('Guardar borrador')),
+            ],
+          ),
+        );
+        if (!mounted) return;
+        if (accion == 'guardar') {
+          await _guardarBorrador();
+          if (mounted) Navigator.of(context).pop();
+        } else if (accion == 'descartar') {
+          Navigator.of(context).pop();
+        }
+      },
+      child: Scaffold(
       appBar: AppBar(
         title: Text(_hayPublicado || _slugBloqueado
             ? 'Editar artículo'
@@ -895,6 +1017,11 @@ class _GympediaEditorScreenState extends State<GympediaEditorScreen> {
                             height: 160,
                             width: double.infinity,
                             fit: BoxFit.cover,
+                            // 1.22 GY-11: la vista previa no
+                            // decodifica la imagen a tamaño
+                            // completo (ahorro de memoria).
+                            cacheWidth: 1080,
+                            cacheHeight: 320,
                             errorBuilder: (_, __, ___) => const Padding(
                               padding: EdgeInsets.all(8),
                               child:
@@ -908,6 +1035,8 @@ class _GympediaEditorScreenState extends State<GympediaEditorScreen> {
                             height: 160,
                             width: double.infinity,
                             fit: BoxFit.cover,
+                            cacheWidth: 1080,
+                            cacheHeight: 320,
                             errorBuilder: (_, __, ___) => const Padding(
                               padding: EdgeInsets.all(8),
                               child:
@@ -987,6 +1116,7 @@ class _GympediaEditorScreenState extends State<GympediaEditorScreen> {
           ),
         ],
       ),
+    ),
     );
   }
 }

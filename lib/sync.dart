@@ -1425,9 +1425,13 @@ class SyncEngine {
   /// v1.2.8 (Paso 1): sincroniza solo las tablas del scope (pull parcial).
   /// El Push NO se filtra por scope (corrección Gemini): siempre es global
   /// para no violar FKs en el servidor.
-  Future<void> sincronizarScope(String scope) async {
+  /// 1.22 GY-06: devuelve si el ciclo CORRIÓ sin error (para
+  /// que la UI no anuncie «actualizado» cuando no hubo
+  /// conexión o el lock estaba ocupado).
+  Future<bool> sincronizarScope(String scope) async {
     final tablas = SyncScope.resolver(scope);
-    if (tablas.isEmpty) return;
+    if (tablas.isEmpty) return false;
+    var errorEnCiclo = false;
     final noCorrioScope = await _conLock(() async {
       try {
         // Push global primero (nunca filtrado por scope).
@@ -1505,6 +1509,7 @@ class SyncEngine {
         // gancho de fin de sync también corre aquí.
         _avisarSyncExitoso();
       } catch (e) {
+        errorEnCiclo = true;
         final errSync = await _describeErrorVisible(e);
         _emit(SyncPhase.error, error: errSync);
         await Future.delayed(const Duration(seconds: 2));
@@ -1513,6 +1518,7 @@ class SyncEngine {
     });
     // S2: fotos fuera del candado (ver _lanzarFotosIncidencias).
     if (noCorrioScope == null) _lanzarFotosIncidencias();
+    return noCorrioScope == null && !errorEnCiclo;
   }
 
   /// ¿Hay sesión activa? Defensivo: si el acceso a la sesión

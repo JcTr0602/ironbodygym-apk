@@ -75,16 +75,35 @@ class _GympediaScreenState extends State<GympediaScreen> {
     _cargar();
   }
 
+  /// 1.22 GY-04: slugs ya publicados desde este teléfono
+  /// cuya op sigue en cola (marca `gympedia_en_cola_<slug>`).
+  Set<String> _enCola = {};
+
   Future<void> _cargar() async {
     // Ronda 17 M3-H1 (defensa en profundidad): sin dueño no
     // se cargan publicados ni borradores aunque se invoque directo.
     if (!AuthService().isOwner) return;
     final pub = await _db.gympediaPublicados();
     final bor = await _db.gympediaBorradores();
+    final marcas = await _db.metasConPrefijo('gympedia_en_cola_');
+    // Panel Pieza 7: autolimpieza de la marca (borrador
+    // desaparecido u op ya resuelta → la marca se apaga).
+    final enCola = <String>{};
+    for (final k in marcas) {
+      if (k.isEmpty) continue;
+      final slug = k.substring('gympedia_en_cola_'.length);
+      final existeBorrador = bor.any((b) => '${b['slug']}' == slug);
+      if (existeBorrador && await _db.upsertBibliotecaEnCola(slug)) {
+        enCola.add(slug);
+      } else {
+        await _db.setMeta(k, '');
+      }
+    }
     if (!mounted) return;
     setState(() {
       _publicados = pub;
       _borradores = bor;
+      _enCola = enCola;
       _cargando = false;
     });
   }
@@ -92,13 +111,23 @@ class _GympediaScreenState extends State<GympediaScreen> {
   Future<void> _sincronizar() async {
     if (_sincronizando) return;
     setState(() => _sincronizando = true);
+    // 1.22 GY-07: scope de biblioteca (push global + pull de
+    // gympedia_articulos), simétrico con Guía — antes era un
+    // pull COMPLETO por un botón de una sola sección.
+    // 1.22 GY-06: snack honesto según si el ciclo corrió.
+    var corrio = false;
     try {
-      await SyncEngine.instance.pull();
+      corrio = await SyncEngine.instance.sincronizarScope('gympedia');
     } catch (_) {}
     await _cargar();
     if (!mounted) return;
     setState(() => _sincronizando = false);
-    mostrarSnack(context, 'GymPedia actualizada', significado: SignificadoChip.exito);
+    if (corrio) {
+      mostrarSnack(context, 'GymPedia actualizada',
+          significado: SignificadoChip.exito);
+    } else {
+      mostrarSnack(context, 'Sin conexión: catálogo local');
+    }
   }
 
   Map<String, dynamic>? _publicadoDe(String slug) {
@@ -303,11 +332,17 @@ class _GympediaScreenState extends State<GympediaScreen> {
                                 child: Icon(Icons.warning_amber_rounded,
                                     color: AppColores.error),
                               )
-                            : const Chip(
-                                label: Text('Borrador',
-                                    style: AppTexto.minuscula),
-                                visualDensity: VisualDensity.compact,
-                              ),
+                            : _enCola.contains('${b['slug']}')
+                                ? const Chip(
+                                    label: Text('En cola de publicación',
+                                        style: AppTexto.minuscula),
+                                    visualDensity: VisualDensity.compact,
+                                  )
+                                : const Chip(
+                                    label: Text('Borrador',
+                                        style: AppTexto.minuscula),
+                                    visualDensity: VisualDensity.compact,
+                                  ),
                         onTap: () => _abrirEditor(borrador: b),
                       ),
                     ),

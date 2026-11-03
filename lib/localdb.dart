@@ -3646,6 +3646,26 @@ class LocalDb {
     } catch (_) {}
   }
 
+  /// 1.22 GY-04 (panel Pieza 7): ¿sigue en cola el upsert de
+  /// biblioteca de [slug]? La marca «en cola de publicación»
+  /// (meta *_en_cola_<slug>) vive solo mientras su op no se
+  /// resolvió: aplicada o rechazada la apagan. El payload es
+  /// el jsonEncode compacto del documento, cuyo primer par
+  /// es "id":"<slug>" (los related_ids/sinónimos son cadenas
+  /// sueltas en listas, no pares "id":).
+  Future<bool> upsertBibliotecaEnCola(String slug) async {
+    final d = await db;
+    final rows = await d.query('ops_queue',
+        columns: ['op_uuid'],
+        where: "tipo IN ('gympedia_upsert_publicado', "
+            "'guia_upsert_publicado') "
+            "AND estado NOT IN ('aplicada', 'rechazada') "
+            'AND payload LIKE ?',
+        whereArgs: ['%"id":"$slug"%'],
+        limit: 1);
+    return rows.isNotEmpty;
+  }
+
   /// Actividad reciente de la Biblioteca: ops ya aplicadas DE ESTE
   /// TELÉFONO de GymPedia y de la Guía (fecha, tipo y ficha). NO
   /// es un historial global: otro teléfono no aparece aquí.

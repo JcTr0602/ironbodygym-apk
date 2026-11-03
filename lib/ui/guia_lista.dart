@@ -23,6 +23,27 @@ import 'guia_editor.dart';
 import 'guia_equipos.dart';
 import 'componentes.dart';
 
+/// 1.22 GY-05 (PURO): esenciales que quedarían tras publicar
+/// [candidatosDoc], fusionando POR SLUG sobre [publicadas]:
+/// un candidato que edita una ficha ya publicada la REEMPLAZA
+/// (antes sumaba: la publicada esencial + el mismo borrador
+/// contaban dos veces y la regla D7 se evaluaba mal), y el
+/// flag esencial se lee del DOCUMENTO del borrador
+/// (_docBorrador), no de la fila cruda.
+int esencialesTrasPublicar({
+  required List<Map<String, dynamic>> publicadas,
+  required List<Map<String, dynamic>> candidatosDoc,
+}) {
+  bool esEsencial(Object? v) => v == true || v == 1;
+  final porSlug = <String, bool>{
+    for (final p in publicadas) '${p['id']}': esEsencial(p['esencial']),
+  };
+  for (final doc in candidatosDoc) {
+    porSlug['${doc['id']}'] = esEsencial(doc['esencial']);
+  }
+  return porSlug.values.where((e) => e).length;
+}
+
 class GuiaScreen extends StatefulWidget {
   const GuiaScreen({super.key});
 
@@ -48,17 +69,46 @@ class _GuiaScreenState extends State<GuiaScreen> {
     _cargar();
   }
 
+  /// 1.22 GY-04: slugs de borradores ya publicados desde
+  /// este teléfono cuya op sigue en cola (marca en meta
+  /// `guia_en_cola_<slug>`, la pone el editor/lote al publicar
+  /// y la quita una nueva edición guardada).
+  Set<String> _enCola = {};
+
   Future<void> _cargar() async {
+    // 1.22 GY-02: sin dueño no se carga nada (defensa en
+    // profundidad; build ya lo bloquea visualmente).
+    if (!AuthService().isOwner) {
+      if (mounted) setState(() => _cargando = false);
+      return;
+    }
     final pub = await _db.guiaPublicadas();
     final bor = await _db.guiaBorradores();
     final eq = await _db.guiaEquipos();
     final act = await _db.opsRecientesBiblioteca();
+    final marcas = await _db.metasConPrefijo('guia_en_cola_');
+    // Panel Pieza 7: la marca se AUTOLIMPIA al cargar si el
+    // borrador ya no existe o su op ya se resolvió (aplicada
+    // o rechazada): sin esto quedaba pegada para siempre y
+    // el lote excluía el slug eternamente.
+    final enCola = <String>{};
+    for (final k in marcas) {
+      if (k.isEmpty) continue;
+      final slug = k.substring('guia_en_cola_'.length);
+      final existeBorrador = bor.any((b) => '${b['slug']}' == slug);
+      if (existeBorrador && await _db.upsertBibliotecaEnCola(slug)) {
+        enCola.add(slug);
+      } else {
+        await _db.setMeta(k, '');
+      }
+    }
     if (!mounted) return;
     setState(() {
       _publicadas = pub;
       _borradores = bor;
       _equipos = eq;
       _actividad = act;
+      _enCola = enCola;
       _cargando = false;
     });
   }
@@ -66,13 +116,21 @@ class _GuiaScreenState extends State<GuiaScreen> {
   Future<void> _sincronizar() async {
     if (_sincronizando) return;
     setState(() => _sincronizando = true);
+    // 1.22 GY-06: snack honesto — «actualizada» solo si el
+    // ciclo corrió; si no, se dice que manda el catálogo local.
+    var corrio = false;
     try {
-      await SyncEngine.instance.sincronizarScope('guia');
+      corrio = await SyncEngine.instance.sincronizarScope('guia');
     } catch (_) {}
     await _cargar();
     if (!mounted) return;
     setState(() => _sincronizando = false);
-    mostrarSnack(context, 'Guía actualizada', significado: SignificadoChip.exito);
+    if (corrio) {
+      mostrarSnack(context, 'Guía actualizada',
+          significado: SignificadoChip.exito);
+    } else {
+      mostrarSnack(context, 'Sin conexión: catálogo local');
+    }
   }
 
   Map<String, dynamic>? _publicadaDe(String slug) {
@@ -163,6 +221,8 @@ class _GuiaScreenState extends State<GuiaScreen> {
   }
 
   Future<void> _publicarLote() async {
+    // 1.22 GY-02: publicar en lote es solo del dueño.
+    if (!AuthService().isOwner) return;
     if (_publicandoLote || _borradores.isEmpty) return;
     // Argón Guía HIGH 2 (1.19), pre-paso: candidatos reales (no
     // obsoletos + válidos) y regla D7. Sin este pre-paso el lote
@@ -174,6 +234,13 @@ class _GuiaScreenState extends State<GuiaScreen> {
     final candidatos = <Map<String, dynamic>>[];
     final motivos = <String>[];
     for (final b in _borradores) {
+      // 1.22 GY-04: ya publicado desde este teléfono (op en
+      // cola): no se vuelve a encolar.
+      if (_enCola.contains('${b['slug']}')) {
+        motivos.add(
+            '${b['slug']}: ya está en cola de publicación.');
+        continue;
+      }
       if (_obsoleto(b)) {
         motivos.add(
             '${b['slug']}: obsoleto (hay una versión publicada más reciente).');
@@ -188,10 +255,11 @@ class _GuiaScreenState extends State<GuiaScreen> {
       }
       candidatos.add(b);
     }
-    final esencialesPub =
-        _publicadas.where((p) => esEsencial(p['esencial'])).length;
-    final esencialesTras = esencialesPub +
-        candidatos.where((b) => esEsencial(b['esencial'])).length;
+    // 1.22 GY-05: fusión por slug con el flag del documento.
+    final esencialesTras = esencialesTrasPublicar(
+      publicadas: _publicadas,
+      candidatosDoc: [for (final b in candidatos) _docBorrador(b)],
+    );
     if (esencialesTras == 0) {
       if (!mounted) return;
       await showDialog<void>(
@@ -269,6 +337,12 @@ class _GuiaScreenState extends State<GuiaScreen> {
     final fallos = <String>[];
     try {
       for (final b in List.of(_borradores)) {
+        // 1.22 GY-04: en cola de publicación no se re-encola.
+        if (_enCola.contains('${b['slug']}')) {
+          fallos.add(
+              '${b['slug']}: ya está en cola de publicación.');
+          continue;
+        }
         // Argón P2#13: un borrador obsoleto no se encola ni pierde
         // su imagen local; queda en fallos para revisarlo.
         if (_obsoleto(b)) {
@@ -328,9 +402,14 @@ class _GuiaScreenState extends State<GuiaScreen> {
           'actualizado_ts': isoHabana(ahoraHabana()),
         });
         if (local.isNotEmpty) await _db.guiaBorrarImagenLocal(local);
-        if (cambioImagen && !tieneImagen) {
-          await _borrarImagenRemota(slug);
-        }
+        // 1.22 GY-03: NO borrar el .webp del bucket al
+        // publicar: la op aún no viajó y si el servidor la
+        // rechaza, la ficha publicada quedaría apuntando a
+        // una imagen borrada. Con tiene_imagen=false las apps
+        // dejan de mostrarla; el objeto huérfano se limpia en
+        // el servidor (pendiente anotado), nunca por adelantado.
+        // 1.22 GY-04: marca de «en cola de publicación».
+        await _db.setMeta('guia_en_cola_$slug', '1');
         ok++;
       }
     } finally {
@@ -358,6 +437,8 @@ class _GuiaScreenState extends State<GuiaScreen> {
   }
 
   Future<bool> _subirImagen(String slug, String local) async {
+    // 1.22 GY-02: subir al bucket público es solo del dueño.
+    if (!AuthService().isOwner) return false;
     try {
       final bytes = await _leerArchivo(local);
       if (bytes == null) return false;
@@ -387,22 +468,6 @@ class _GuiaScreenState extends State<GuiaScreen> {
     } catch (_) {
       return null;
     }
-  }
-
-  Future<void> _borrarImagenRemota(String slug) async {
-    try {
-      final token = AuthService().session?.accessToken ?? '';
-      await http
-          .delete(
-            Uri.parse('${AppConfig.supabaseUrl}/storage/v1/object/'
-                '${AppConfig.bucketGuia}/$slug.webp'),
-            headers: {
-              'apikey': AppConfig.anonKey,
-              if (token.isNotEmpty) 'Authorization': 'Bearer $token',
-            },
-          )
-          .timeout(const Duration(seconds: 30));
-    } catch (_) {}
   }
 
   @override
@@ -539,11 +604,17 @@ class _GuiaScreenState extends State<GuiaScreen> {
                         child: Icon(Icons.warning_amber_rounded,
                             color: Colors.red),
                       )
-                    : const Chip(
-                        label: Text('Borrador',
-                            style: AppTexto.metadato),
-                        visualDensity: VisualDensity.compact,
-                      ),
+                    : _enCola.contains('${b['slug']}')
+                        ? const Chip(
+                            label: Text('En cola de publicación',
+                                style: AppTexto.metadato),
+                            visualDensity: VisualDensity.compact,
+                          )
+                        : const Chip(
+                            label: Text('Borrador',
+                                style: AppTexto.metadato),
+                            visualDensity: VisualDensity.compact,
+                          ),
                 onTap: () => _abrirEditor(borrador: b),
               ),
             ),

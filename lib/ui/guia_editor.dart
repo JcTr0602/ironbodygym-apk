@@ -110,6 +110,60 @@ class _GuiaEditorScreenState extends State<GuiaEditorScreen> {
     if (doc != null) _cargarDoc(doc);
     if (_ejecutar.isEmpty) _ejecutar = [TextEditingController()];
     if (_errores.isEmpty) _errores = [TextEditingController()];
+    // 1.22 GY-04: abierto desde un borrador sin la ficha
+    // publicada a la vista: comprobar si lo publicado ya
+    // avanzó más que la base y preguntar antes de seguir.
+    if (b != null && p == null) {
+      _revisarBorradorViejo();
+    }
+  }
+
+  /// GY-04: si la revisión publicada supera la base del
+  /// borrador cargado, pregunta si cargar lo publicado
+  /// (descartando el borrador viejo) o seguir con él.
+  Future<void> _revisarBorradorViejo() async {
+    final slug = _slug.text.trim();
+    if (slug.isEmpty) return;
+    final pub = await _db.guiaPublicada(slug);
+    if (pub == null || !mounted) return;
+    final rev = (pub['revision'] as num?)?.toInt() ?? 0;
+    if (rev <= _baseRevision) return;
+    final usarPublicado = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: const Text('Hay una versión más nueva'),
+        content: Text(
+            'Este borrador partió de la revisión $_baseRevision '
+            'y lo publicado ya va por la $rev.\n\n'
+            'Puedes cargar lo publicado (el borrador viejo se '
+            'elimina) o abrir el borrador de todas formas.'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(c, false),
+              child: const Text('Abrir el borrador')),
+          FilledButton(
+              onPressed: () => Navigator.pop(c, true),
+              child: const Text('Cargar lo publicado')),
+        ],
+      ),
+    );
+    if (usarPublicado != true || !mounted) return;
+    final rutaVieja = _imagenLocal;
+    setState(() {
+      _cargarDoc(pub);
+      _baseRevision = rev;
+      _imagenRev = (pub['imagen_rev'] as num?)?.toInt() ?? 0;
+      _tieneImagen =
+          pub['tiene_imagen'] == true || pub['tiene_imagen'] == 1;
+      _imagenCambiada = false;
+      _imagenLocal = '';
+      _publicadoExiste = true;
+    });
+    await _db.guiaEliminarBorrador(slug);
+    await _db.setMeta('guia_en_cola_$slug', '');
+    if (rutaVieja.isNotEmpty) {
+      await _db.guiaBorrarImagenLocal(rutaVieja);
+    }
   }
 
   Future<void> _cargarEquipos() async {
@@ -277,6 +331,9 @@ class _GuiaEditorScreenState extends State<GuiaEditorScreen> {
       return;
     }
     await _db.guiaGuardarBorrador(_borradorActual());
+    // 1.22 GY-04: edición nueva guardada: fuera la marca de
+    // «en cola de publicación».
+    await _db.setMeta('guia_en_cola_${_slug.text.trim()}', '');
     _aviso('Borrador guardado en este teléfono.');
   }
 
@@ -418,7 +475,6 @@ class _GuiaEditorScreenState extends State<GuiaEditorScreen> {
       );
       if (confirmar != true) return;
       final slug = '${a['id']}';
-      final quitabaImagen = _imagenCambiada && !_tieneImagen;
       if (_imagenCambiada && _tieneImagen && _imagenLocal.isNotEmpty) {
         if (!await _subirImagen(slug)) return;
       }
@@ -450,7 +506,12 @@ class _GuiaEditorScreenState extends State<GuiaEditorScreen> {
       if (rutaSubida.isNotEmpty) {
         await _db.guiaBorrarImagenLocal(rutaSubida);
       }
-      if (quitabaImagen) await _borrarImagenRemota(slug);
+      // 1.22 GY-03: sin imagen, el .webp del bucket YA NO se
+      // borra al publicar (la op puede ser rechazada y lo
+      // publicado quedaría sin imagen); con tiene_imagen=
+      // false las apps dejan de mostrarla.
+      // 1.22 GY-04: marca «en cola de publicación».
+      await _db.setMeta('guia_en_cola_$slug', '1');
       _aviso('Publicado. Se enviará al servidor al sincronizar.');
       if (mounted) Navigator.of(context).pop(true);
     } finally {
@@ -569,24 +630,6 @@ class _GuiaEditorScreenState extends State<GuiaEditorScreen> {
           'revisa la conexión e inténtalo de nuevo.');
     }
     return false;
-  }
-
-  Future<void> _borrarImagenRemota(String slug) async {
-    // Ronda 17 M3-H1: borrar del bucket público es solo del dueño.
-    if (!AuthService().isOwner) return;
-    try {
-      final token = AuthService().session?.accessToken ?? '';
-      await http
-          .delete(
-            Uri.parse('${AppConfig.supabaseUrl}/storage/v1/object/'
-                '${AppConfig.bucketGuia}/$slug.webp'),
-            headers: {
-              'apikey': AppConfig.anonKey,
-              if (token.isNotEmpty) 'Authorization': 'Bearer $token',
-            },
-          )
-          .timeout(const Duration(seconds: 30));
-    } catch (_) {}
   }
 
   Future<void> _elegirImagen() async {
