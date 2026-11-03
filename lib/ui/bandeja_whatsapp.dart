@@ -87,7 +87,7 @@ class _BandejaWhatsappScreenState extends State<BandejaWhatsappScreen>
     // Pasada 2 de Argón (1.20): si el SnackBar de confirmación
     // de un aviso anterior seguía en pantalla, su botón podía
     // marcar ese aviso viejo (o disparar el lote) a destiempo.
-    ScaffoldMessenger.of(context).hideCurrentSnackBar();
+    ScaffoldMessenger.of(context).clearSnackBars(); // 1.23: tambien la cola (gramatica de avisos)
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(
@@ -292,7 +292,7 @@ class _BandejaWhatsappScreenState extends State<BandejaWhatsappScreen>
     // Pasada 2 de Argón (1.20): al abrir otro aviso, cualquier
     // SnackBar de confirmación anterior muere (su acción ya no
     // corresponde a este contexto).
-    ScaffoldMessenger.of(context).hideCurrentSnackBar();
+    ScaffoldMessenger.of(context).clearSnackBars(); // 1.23: tambien la cola (gramatica de avisos)
     final texto =
         editado.trim().isEmpty ? '${a['mensaje']}' : editado;
     final url = Uri.parse(

@@ -1455,6 +1455,7 @@ void mostrarSnack(
   SignificadoChip significado = SignificadoChip.neutral,
   String? accion,
   VoidCallback? alAccion,
+  Duration? duracion,
 }) {
   final (icono, color) = switch (significado) {
     SignificadoChip.exito => (Icons.check_circle_rounded, AppColores.exito),
@@ -1465,11 +1466,17 @@ void mostrarSnack(
     SignificadoChip.neutral => (Icons.info_rounded, Colors.white),
   };
   final messenger = ScaffoldMessenger.of(context);
-  messenger.hideCurrentSnackBar();
+  // 1.23 (gramática de avisos, reporte de campo de Jc): la
+  // barra nueva REEMPLAZA a todo lo anterior — clearSnackBars
+  // descarta también la COLA; con hideCurrentSnackBar las
+  // barras viejas esperaban su turno y «se quedaban volando»
+  // sobre otras pantallas minutos después.
+  messenger.clearSnackBars();
   messenger.showSnackBar(
     SnackBar(
-      duration: Duration(
-          seconds: significado == SignificadoChip.error ? 6 : 4),
+      duration: duracion ??
+          Duration(
+              seconds: significado == SignificadoChip.error ? 6 : 4),
       content: Row(
         children: [
           Icon(icono, color: color, size: 20),

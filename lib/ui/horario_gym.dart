@@ -454,16 +454,10 @@ class _HorarioGymState extends State<HorarioGym> {
                           dia.apertura2 = null;
                           dia.cierre2 = null;
                         });
-                        ScaffoldMessenger.of(
-                                context)
-                            .showSnackBar(
-                          const SnackBar(
-                            content: Text(
-                                'Turno 2 eliminado (mantén para borrar)'),
-                            duration:
-                                Duration(seconds: 1),
-                          ),
-                        );
+                        mostrarSnack(context,
+                            'Turno 2 eliminado (mantén para borrar)',
+                            duracion:
+                                const Duration(seconds: 1));
                       },
                     ),
                   ),

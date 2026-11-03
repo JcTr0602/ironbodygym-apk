@@ -424,7 +424,6 @@ class _FichaScreenState extends State<FichaScreen> {
     if (_verificando) return;
     setState(() => _verificando = true);
     try {
-      final messenger = ScaffoldMessenger.of(context);
       final antes = _c;
       // Llamada RPC puntual (no dispara el pipeline de sync).
       // Con timeout: sin red, «Verificando…» no puede girar
@@ -473,28 +472,19 @@ class _FichaScreenState extends State<FichaScreen> {
         }
       }
       if (omitidoPorPendientes) {
-        messenger.showSnackBar(
-          const SnackBar(
-            content: Text(
-                'Hay cambios locales pendientes: no se pisó el espejo'),
-            duration: Duration(seconds: 3),
-          ),
-        );
+        mostrarSnack(context,
+            'Hay cambios locales pendientes: no se pisó el espejo',
+            significado: SignificadoChip.alerta,
+            duracion: const Duration(seconds: 3));
       } else if (cambios.isEmpty) {
-        messenger.showSnackBar(
-          const SnackBar(
-            content: Text('Datos al día con el servidor'),
-            duration: Duration(seconds: 2),
-          ),
-        );
+        mostrarSnack(context, 'Datos al día con el servidor',
+            significado: SignificadoChip.exito,
+            duracion: const Duration(seconds: 2));
       } else {
-        messenger.showSnackBar(
-          SnackBar(
-            content: Text(
-                'Actualizado desde el servidor: ${cambios.join(', ')}'),
-            duration: const Duration(seconds: 3),
-          ),
-        );
+        mostrarSnack(context,
+            'Actualizado desde el servidor: ${cambios.join(', ')}',
+            significado: SignificadoChip.info,
+            duracion: const Duration(seconds: 3));
       }
     } catch (e) {
       if (mounted) {

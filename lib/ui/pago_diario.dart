@@ -202,17 +202,14 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
     // v1.2.6 (Gemini): confirmación háptica al cobrar.
     vibrarConfirmacion();
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text('$cantidad pago(s) guardado(s)'),
-      // v1.2.7 (A3): se descarta solo a los 4s, no obliga a interactuar.
-      duration: const Duration(seconds: 4),
-      action: uuid == null
-          ? null
-          : SnackBarAction(
-              label: 'Deshacer',
-              onPressed: () => _deshacer(uuid),
-            ),
-    ));
+    // Gramática de avisos (1.23): por el helper único, que
+    // reemplaza la barra anterior en vez de encolarla.
+    mostrarSnack(context, '$cantidad pago(s) guardado(s)',
+        significado: SignificadoChip.exito,
+        // v1.2.7 (A3): se descarta solo a los 4s, no obliga a interactuar.
+        duracion: const Duration(seconds: 4),
+        accion: uuid == null ? null : 'Deshacer',
+        alAccion: uuid == null ? null : () => _deshacer(uuid));
   }
 
   /// Deshace un pago recién guardado (lo elimina de la cola si no subió).
@@ -221,12 +218,14 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
     final ok = await LocalDb.instance.cancelOp(uuid);
     _cargarHoy();
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text(ok
-          ? 'Registro deshecho'
-          : 'Ya se envió al servidor, no se puede deshacer'),
-      duration: const Duration(seconds: 3),
-    ));
+    mostrarSnack(
+        context,
+        ok
+            ? 'Registro deshecho'
+            : 'Ya se envió al servidor, no se puede deshacer',
+        significado:
+            ok ? SignificadoChip.exito : SignificadoChip.alerta,
+        duracion: const Duration(seconds: 3));
   }
 
   Future<void> _guardar() async {

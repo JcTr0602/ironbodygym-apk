@@ -139,7 +139,9 @@ Future<void> main() async {
     navigatorKey.currentState?.popUntil((r) => r.isFirst);
     final ctx = navigatorKey.currentContext;
     if (ctx != null) {
-      ScaffoldMessenger.of(ctx).showSnackBar(const SnackBar(
+      final messenger = ScaffoldMessenger.of(ctx);
+      messenger.clearSnackBars();
+      messenger.showSnackBar(const SnackBar(
           content: Text('Tu sesión venció. Entra de nuevo.')));
     }
   };

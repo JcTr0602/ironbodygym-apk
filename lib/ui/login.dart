@@ -136,6 +136,10 @@ class _LoginScreenState extends State<LoginScreen>
       // capturado al inicio (panel v1.4.4).
       final vinculado = await _verificarDispositivo(u);
       if (!vinculado) {
+        // Gramática de avisos (1.23): va directo porque el
+        // messenger se capturó antes de navegar (el context ya
+        // no es válido), pero limpia la cola como el helper.
+        messenger.clearSnackBars();
         messenger.showSnackBar(const SnackBar(
           content: Text(
               'Entrando desde un dispositivo no vinculado'),

@@ -206,14 +206,15 @@ class _PanelPermisosState extends State<PanelPermisos> {
         );
         final verificado = await _releerEntrenador(ent);
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(verificado
-                  ? '✓ Permiso actualizado'
-                  : 'Guardado, pero no se pudo verificar el estado'),
-              duration: const Duration(seconds: 2),
-            ),
-          );
+          mostrarSnack(
+              context,
+              verificado
+                  ? 'Permiso actualizado'
+                  : 'Guardado, pero no se pudo verificar el estado',
+              significado: verificado
+                  ? SignificadoChip.exito
+                  : SignificadoChip.alerta,
+              duracion: const Duration(seconds: 2));
         }
       } catch (e) {
         // Revertir
@@ -271,16 +272,17 @@ class _PanelPermisosState extends State<PanelPermisos> {
         // sentidos + relectura de la fila real.
         final verificado = await _releerEntrenador(ent);
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(verificado
+          mostrarSnack(
+              context,
+              verificado
                   ? (nuevo
-                      ? '✓ ${ent.nombre} reactivado'
-                      : '✓ Acceso de ${ent.nombre} suspendido')
-                  : 'Guardado, pero no se pudo verificar el estado'),
-              duration: const Duration(seconds: 2),
-            ),
-          );
+                      ? '${ent.nombre} reactivado'
+                      : 'Acceso de ${ent.nombre} suspendido')
+                  : 'Guardado, pero no se pudo verificar el estado',
+              significado: verificado
+                  ? SignificadoChip.exito
+                  : SignificadoChip.alerta,
+              duracion: const Duration(seconds: 2));
         }
       } catch (e) {
         if (mounted) {

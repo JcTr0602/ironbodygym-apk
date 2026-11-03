@@ -40,6 +40,13 @@ class ServiciosScreen extends StatefulWidget {
 }
 
 class _ServiciosScreenState extends State<ServiciosScreen> {
+  @override
+  void dispose() {
+    // 1.23: la barra Deshacer muere con su pantalla.
+    _ctrlDeshacer?.close();
+    super.dispose();
+  }
+
   bool _cargando = true;
   bool _actualizando = false;
   bool _esDueno = false;
@@ -682,12 +689,22 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
     }
   }
 
+  /// Controlador de la barra Deshacer viva (1.23): se cierra
+  /// al salir de la pantalla para que no «quede volando»
+  /// sobre Home (reporte de campo de Jc, 2026-11-03).
+  ScaffoldFeatureController<SnackBar, SnackBarClosedReason>?
+      _ctrlDeshacer;
+
   /// Snackbar Deshacer E3 (15 s): si la op sigue 'pendiente' y no
   /// pasaron 15 s, se borra la venta completa (en múltiple, todo el
   /// grupo). Si no, solo cabe Reversión.
   void _mostrarDeshacer(List<String> opUuids, DateTime cobradoEn) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
+    final messenger = ScaffoldMessenger.of(context);
+    // Gramática de avisos (1.23): una venta nueva REEMPLAZA la
+    // barra anterior en vez de encolarse detrás de ella.
+    messenger.clearSnackBars();
+    _ctrlDeshacer = messenger.showSnackBar(
       SnackBar(
         content: const Text('Venta registrada'),
         duration: const Duration(seconds: 15),

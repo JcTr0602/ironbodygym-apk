@@ -840,19 +840,14 @@ class _SeccionDiagnosticoScreenState extends State<SeccionDiagnosticoScreen> {
     final pendientes = await LocalDb.instance.countPendingOps();
     if (pendientes > 0) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: const Text(
-              'Primero sube la cola: hay operaciones pendientes.'),
-          action: SnackBarAction(
-            label: 'Subir cola',
-            onPressed: () async {
-              await SyncEngine.instance.push();
-              await _cargar();
-            },
-          ),
-        ),
-      );
+      mostrarSnack(
+          context, 'Primero sube la cola: hay operaciones pendientes.',
+          significado: SignificadoChip.alerta,
+          accion: 'Subir cola',
+          alAccion: () async {
+            await SyncEngine.instance.push();
+            await _cargar();
+          });
       return;
     }
     try {
