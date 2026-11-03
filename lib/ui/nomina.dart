@@ -342,7 +342,11 @@ class _NominaScreenState extends State<NominaScreen> {
     if (_operando) return;
     final texto =
         _bonoMontoCtrl.text.trim().replaceAll(',', '.');
-    final monto = double.tryParse(texto) ?? 0;
+    // Autoauditoría 1.22 #1: montoTolerante (N-2) en vez del
+    // tryParse crudo: un 'Infinity'/'NaN' pegado en el campo
+    // pasaba el filtro (≠0) y reventaba al encolar el bono
+    // (JSON no codifica infinitos) sin aviso al dueño.
+    final monto = NominaCalc.montoTolerante(texto) ?? 0;
     if (monto == 0) {
       mostrarSnack(context, 'Ingresa un monto válido', significado: SignificadoChip.alerta);
       return;
@@ -590,7 +594,10 @@ class _NominaScreenState extends State<NominaScreen> {
     if (_operando) return;
     _operando = true;
     final texto = _tarifaCtrl.text.trim().replaceAll(',', '.');
-    final tarifa = double.tryParse(texto) ?? 150;
+    // Autoauditoría 1.22 #1: montoTolerante (N-2): 'Infinity'/
+    // 'NaN' pegados pasaban el filtro (<=0 es falso para ambos)
+    // y tarifa.toInt() lanzaba sin guardar ni avisar.
+    final tarifa = NominaCalc.montoTolerante(texto) ?? 150;
     if (tarifa <= 0) {
       _operando = false;
       mostrarSnack(context, 'Ingresa una tarifa válida', significado: SignificadoChip.alerta);
