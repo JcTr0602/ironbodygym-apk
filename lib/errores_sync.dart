@@ -218,10 +218,23 @@ ErrorSync traducirErrorSync(Object error, {int? httpStatus, StackTrace? stack}) 
   }
 
   // 6. Red y conexión
+  // 1.23 (Push-S P-2; Argón, pasada 2 del Push — H-03): paridad
+  // de patrones con los clasificadores hermanos de este mismo
+  // dominio (resumenErrorDiagnostico reconoce handshake/reset/
+  // certificate; errorSyncLegible reconoce clientexception).
+  // Sin ellos, un corte TLS o un ClientException del push caía
+  // al fallback «desconocido» con datosGuardadosLocalmente en
+  // false — la app decía que los datos podían no estar
+  // guardados por un simple corte de red.
   if (raw.contains('socketexception') ||
       raw.contains('socket') && raw.contains('exception') ||
       raw.contains('failed host lookup') ||
       raw.contains('network is unreachable') ||
+      raw.contains('handshakeexception') ||
+      raw.contains('clientexception') ||
+      raw.contains('connection closed') ||
+      raw.contains('connection reset') ||
+      raw.contains('certificate') ||
       raw.contains('sin internet') ||
       raw.contains('sin conexión')) {
     return ErrorSync(

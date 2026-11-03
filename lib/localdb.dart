@@ -7157,6 +7157,21 @@ class LocalDb {
         where: 'estado = ?', whereArgs: [estado], orderBy: 'creada_ts ASC');
   }
 
+  /// 1.23 (Push-S P-5; Argón, pasada 2 del Push — nota 2): ops
+  /// que SALIERON alguna vez de este teléfono: en 'enviada', o
+  /// ya reseteadas a 'pendiente' por el desbloqueo de atascadas
+  /// conservando su enviada_ts. Si _uploadOps muere tras el
+  /// UPDATE del reset, la op queda 'pendiente' pero el servidor
+  /// pudo haberla aplicado: quien decide si barrer (confirmar
+  /// contra el servidor) debe verla sin esperar al próximo POST.
+  Future<List<Map<String, dynamic>>> opsEnviadasOSospechosas() async {
+    final d = await db;
+    return d.query('ops_queue',
+        where: "estado = 'enviada' OR "
+            "(estado = 'pendiente' AND enviada_ts IS NOT NULL)",
+        orderBy: 'creada_ts ASC');
+  }
+
   /// v1.3.5 (detalle Subidos): ops de la cola por lista de UUIDs,
   /// ordenadas por creación descendente (las más recientes primero).
   /// Es la lectura del detalle: los UUIDs vienen de la meta

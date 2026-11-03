@@ -630,12 +630,45 @@ ResultadoOpServidor normalizarFilaResultado(Map<String, dynamic> fila) {
       // '' (GET fallback), 'pendiente', 'enviada' u otro: en vuelo.
       estado = aplicada ? 'aplicada' : 'pendiente';
   }
+  // 1.23 (Push-S P-1; Argón, pasada 2 del Push — cierra H-02):
+  // si el envelope dice ok=false, la op fue RECHAZADA aunque la
+  // fila venga 'aplicada' (el puente marca aplicada=true para
+  // no reintentarla infinitamente). Forzarlo AQUÍ unifica a
+  // todos los consumidores de la normalización: antes solo
+  // _aplicarEstadoServidor re-derivaba el rechazo, y otro
+  // consumidor podía contar la op como aplicada. Excepción de
+  // Argón: la PAUSA del candado (ok=false con codigo
+  // ACCESO_PAUSADO) NO es un rechazo — la fila no se tocó y
+  // _aplicarEstadoServidor la retiene por su código.
+  var estadoFinal = estado;
+  if (estadoFinal == 'aplicada' &&
+      esRechazoServidor(fila['resultado']) &&
+      !esAccesoPausado(fila['resultado'])) {
+    estadoFinal = 'rechazada';
+  }
   final err = fila['error'];
   return (
-    estado: estado,
+    estado: estadoFinal,
     resultado: fila['resultado'],
     error: err == null ? null : '$err',
   );
+}
+
+/// 1.23 (Push-S P-4; Argón, pasada 2 del Push — nota 1): ¿una op
+/// en 'enviada' debe volver a 'pendiente' por llevar demasiado
+/// esperando confirmación? La comparación es por INSTANTE
+/// (epoch), no por texto ISO: enviada_ts se guarda con
+/// isoHabana (offset explícito), así que DateTime.tryParse
+/// recupera el instante real y la hora repetida del fall-back
+/// (1-nov, 01:00–02:00 dos veces) no resbala el corte como sí
+/// hacía la comparación lexicográfica en SQL. Sin sello
+/// (filas previas a v21) → se resetea; sello ilegible → NO se
+/// toca (el barrido la confirmará contra el servidor).
+bool enviadaDebeResetear(String? enviadaTs, int corteEpochMs) {
+  if (enviadaTs == null) return true;
+  final inst = DateTime.tryParse(enviadaTs);
+  if (inst == null) return false;
+  return inst.millisecondsSinceEpoch < corteEpochMs;
 }
 
 /// true si el puente procesó la op pero la RECHAZÓ: la fila quedó con
@@ -1988,14 +2021,18 @@ class SyncEngine {
   }
 
   /// 1.15 (caso c): verificación silenciosa del pull — solo barre
-  /// cuando existen ops 'enviada'. Ops solo 'pendiente' o 'error'
-  /// NO disparan el barrido (aún no salieron; no hay nada que
-  /// confirmar en el servidor).
+  /// cuando existen ops que salieron alguna vez. Ops 'pendiente'
+  /// que nunca salieron o 'error' NO disparan el barrido (no hay
+  /// nada que confirmar en el servidor).
+  /// 1.23 (Push-S P-5): el criterio se amplía a las 'pendiente'
+  /// con enviada_ts (opsEnviadasOSospechosas): son las que el
+  /// reset de atascadas devolvió a 'pendiente' y cuyo POST pudo
+  /// haber sido aceptado antes de morir el ciclo.
   Future<({int confirmadas, List<String> uuids})> barridoSiHayEnviadas({
     Future<Map<String, ResultadoOpServidor>> Function(List<String> uuids)?
         verificar,
   }) async {
-    final enviadas = await _db.opsByEstado('enviada');
+    final enviadas = await _db.opsEnviadasOSospechosas();
     if (enviadas.isEmpty) {
       return (confirmadas: 0, uuids: <String>[]);
     }
@@ -2054,15 +2091,10 @@ class SyncEngine {
         continue;
       }
       if (await _aplicarEstadoServidor(op, rec)) {
-        // v1.2.4: la incidencia local queda confirmada por el servidor
-        if ('${op['tipo']}' == 'incidencia') {
-          try {
-            final pl = jsonDecode(op['payload'] as String);
-            final iid = pl['id'] as String?;
-            if (iid != null) await _db.marcarIncidenciaSincronizada(iid);
-          } catch (_) {}
-        }
-        await _limpiarOptimistaDeOp(op);
+        // 1.23 (Push-S P-3): marcar la incidencia sincronizada y
+        // limpiar la fila optimista viven dentro de
+        // _aplicarEstadoServidor (antes solo este llamador los
+        // hacía; el paso 1 de _uploadOps confirmaba sin ellos).
         confirmadas++;
         uuids.add(uuid);
       } else if (esTerminalParaDetalle(rec)) {
@@ -2128,25 +2160,39 @@ class SyncEngine {
     // vuelven a 'pendiente' para reintento idempotente. Evita que
     // queden en limbo perpetuo si la confirmación falló.
     try {
-      final db = await _db.db;
-      // v1.3.4 (Argón, veredicto final): corte en hora de La Habana, porque
-      // enviada_ts se guarda con isoHabana() y la comparación en SQLite es
-      // lexicográfica (DateTime.now() crudo fallaba con otra zona horaria).
-      final corte =
-          isoHabana(ahoraHabana().subtract(const Duration(minutes: 2)));
-      // Argón P1#3: igual que _forzarAtascadas, no reactivar ops de
-      // otro usuario en este teléfono.
+      // 1.23 (Push-S P-4): el corte se evalúa por INSTANTE en
+      // Dart (enviadaDebeResetear) y el UPDATE va por UUIDs
+      // explícitos. La comparación anterior era lexicográfica
+      // en SQL sobre el texto ISO: en la hora repetida del
+      // fall-back el orden de los textos no es el orden de los
+      // instantes y el reset resbalaba hasta una hora.
+      // Argón P1#3: igual que _forzarAtascadas, no reactivar
+      // ops de otro usuario en este teléfono (user_id NULL sí:
+      // son previas a la atribución por usuario).
+      final corteMs = ahoraUtcReal()
+          .subtract(const Duration(minutes: 2))
+          .millisecondsSinceEpoch;
       final uidR = _auth.userId;
-      final filtroR =
-          uidR == null ? '' : ' AND (user_id = ? OR user_id IS NULL)';
-      final argsR = <Object?>[corte, if (uidR != null) uidR];
-      await db.update(
-        'ops_queue',
-        {'estado': 'pendiente', 'error': null},
-        // v1.3.1 (E4): comparar contra enviada_ts (NULL = antes de v21).
-        where: "estado = 'enviada' AND (enviada_ts IS NULL OR enviada_ts < ?)$filtroR",
-        whereArgs: argsR,
-      );
+      final aResetear = <String>[];
+      for (final op in await _db.opsByEstado('enviada')) {
+        final duenio = op['user_id'];
+        if (uidR != null && duenio != null && '$duenio' != '$uidR') {
+          continue;
+        }
+        if (enviadaDebeResetear(op['enviada_ts'] as String?, corteMs)) {
+          aResetear.add(op['op_uuid'] as String);
+        }
+      }
+      if (aResetear.isNotEmpty) {
+        final db = await _db.db;
+        final marcas = List.filled(aResetear.length, '?').join(',');
+        await db.update(
+          'ops_queue',
+          {'estado': 'pendiente', 'error': null},
+          where: "estado = 'enviada' AND op_uuid IN ($marcas)",
+          whereArgs: aResetear,
+        );
+      }
     } catch (_) {}
     // v1.0.16: solo subir las ops del usuario actual. Las de otro
     // usuario quedan en espera hasta que su dueño vuelva a entrar.
@@ -2543,6 +2589,23 @@ class SyncEngine {
     if (rec.estado == 'aplicada' && !rechazadaPorPuente) {
       await _db.markOp(uuid, 'aplicada');
       await _guardarResultadoServidor(uuid, rec.resultado);
+      // 1.23 (Push-S P-3; Argón, pasada 2 del Push — H-01 Alta):
+      // los efectos laterales de la confirmación viven AQUÍ y
+      // no en los llamadores. El barrido los hacía, pero el
+      // paso 1 de _uploadOps y _syncOpStatus confirmaban SIN
+      // ellos: una op aplicada cuyo POST sufrió timeout (y cuyo
+      // barrido inmediato falló) se confirmaba en el ciclo
+      // siguiente con su fila optimista (id negativo) viva —
+      // venta o categoría DUPLICADA al bajar la fila real — y
+      // la incidencia nunca quedaba marcada sincronizada.
+      if ('${op['tipo']}' == 'incidencia') {
+        try {
+          final pl = jsonDecode(op['payload'] as String);
+          final iid = pl['id'] as String?;
+          if (iid != null) await _db.marcarIncidenciaSincronizada(iid);
+        } catch (_) {}
+      }
+      await _limpiarOptimistaDeOp(op);
       return true;
     }
     if (rec.estado == 'rechazada' ||
