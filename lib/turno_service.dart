@@ -17,6 +17,7 @@
 ///   Las franjas son informativas; el cuadre es diario.
 library;
 
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:uuid/uuid.dart';
@@ -261,6 +262,28 @@ class TurnoService {
   Future<void> marcarTurnosSincronizados() async {
     final tid = _auth.telegramId;
     if (tid == null) return;
+    await promoverTurnosConEvidencia(tid);
+    // v1.3.3 (Argón P1): reconciliar turno_id canónicos al final.
+    await reconciliarTurnoIdCanonico();
+  }
+
+  /// Núcleo de la promoción, con el telegram explícito (costura
+  /// de test; [marcarTurnosSincronizados] lo envuelve con la
+  /// sesión y la reconciliación canónica).
+  ///
+  /// 1.23 AT-13 (panel): la promoción que dispara el callback
+  /// tardío de [_syncConTope] NO es global a ciegas: por CADA
+  /// turno se exige la evidencia de SU op concreta
+  /// ([LocalDb.estadoOpTurno] por tipo + turno_id, solo
+  /// 'aplicada'; la ausencia devuelve null y no confirma).
+  /// La carrera preparar→confirmar es segura: si el run de
+  /// prepararCierre termina DESPUÉS de que confirmarCierre
+  /// encoló el cierre, esa op sigue 'pendiente' (el run la
+  /// seleccionó antes de existir o ni la vio) y el turno NO se
+  /// promueve; promueve el run que de verdad la aplicó o la
+  /// reconciliación del Home. Fijado por test en
+  /// auditoria_total_at_123_test.dart.
+  Future<void> promoverTurnosConEvidencia(int tid) async {
     try {
       final db = await _db.db;
       final abiertos = await db.query('turnos',
@@ -285,8 +308,6 @@ class TurnoService {
         }
       }
     } catch (_) {}
-    // v1.3.3 (Argón P1): reconciliar turno_id canónicos al final.
-    await reconciliarTurnoIdCanonico();
   }
 
   /// Reconcilia el turno_id local con el canónico del servidor
@@ -416,6 +437,46 @@ class TurnoService {
   }
 
   /// Paso 1 del cierre rápido: sincroniza y reporta el estado real.
+  /// 1.23 AT-13 (auditoría total de Argón): run del motor con
+  /// tope de espera CORTO para el flujo de cierre. El flujo
+  /// completo esperaba DOS syncs de 10 s en serie (preparar +
+  /// confirmar) y sin conexión la UI se quedaba hasta 20 s en
+  /// «Sincronizando…». Ahora se espera como máximo [espera]:
+  /// si el run termina (bien o con error), se promueven los
+  /// turnos con la evidencia que haya; si sigue vivo al
+  /// vencer el tope, continúa EN SEGUNDO PLANO y al completar
+  /// promueve vía [marcarTurnosSincronizados] (la promoción
+  /// tardía ya es un camino previsto del diseño v25, con
+  /// reconciliarTurnos como red final en el Home).
+  /// Seguridad de la promoción tardía (panel AT-13): aunque
+  /// este run haya seleccionado sus ops ANTES de que
+  /// confirmarCierre encolara el cierre, su callback no puede
+  /// promover ese turno: la promoción exige por turno su op
+  /// de cierre en 'aplicada' (ver promoverTurnosConEvidencia).
+  Future<void> _syncConTope(Duration espera) async {
+    final runFut = SyncEngine.instance.run(forzar: true);
+    var termino = false;
+    try {
+      await runFut.timeout(espera);
+      termino = true;
+    } on TimeoutException {
+      termino = false;
+    } catch (_) {
+      // Terminó con error: se promueve con lo que haya, como
+      // hacía el flujo anterior tras su catch.
+      termino = true;
+    }
+    if (termino) {
+      await marcarTurnosSincronizados();
+    } else {
+      unawaited(runFut.then((_) async {
+        try {
+          await marcarTurnosSincronizados();
+        } catch (_) {}
+      }).catchError((_) {}));
+    }
+  }
+
   /// No cierra nada; la UI decide (diálogo) si llamar a confirmarCierre.
   ///
   /// Retorna: {ok, turnoId, fechaTurno, turno, horaApertura,
@@ -434,12 +495,9 @@ class TurnoService {
     // "Sincronizando..." se quedaba esperando timeouts de 30-120s).
     // Si no hay red, se continúa con los datos locales y el cierre queda
     // como cerrado_local hasta que el sync normal lo suba.
-    try {
-      await SyncEngine.instance
-          .run(forzar: true)
-          .timeout(const Duration(seconds: 10));
-    } catch (_) {}
-    await marcarTurnosSincronizados();
+    // 1.23 AT-13: el tope baja a 5 s y el run sigue en segundo
+    // plano si no termina (ver _syncConTope).
+    await _syncConTope(const Duration(seconds: 5));
     final d = await desglosePendientes();
     final limpio = (d['count'] as int) == 0 &&
         (d['revisionCount'] as int) == 0 &&
@@ -570,12 +628,12 @@ class TurnoService {
     } catch (_) {}
     // 3) Segundo sync para enviar el propio cierre, con tiempo límite
     // corto para no colgar sin conexión (ver prepararCierre).
-    try {
-      await SyncEngine.instance
-          .run(forzar: true)
-          .timeout(const Duration(seconds: 10));
-    } catch (_) {}
-    await marcarTurnosSincronizados();
+    // 1.23 AT-13: tope de 3 s — el grueso ya subió en
+    // prepararCierre; si este run no termina a tiempo, sigue
+    // en segundo plano y la promoción llega por
+    // marcarTurnosSincronizados/reconciliarTurnos, como ya
+    // preveía el diseño v25 para la promoción tardía.
+    await _syncConTope(const Duration(seconds: 3));
     // El PK pudo reconciliarse al canónico durante el run (Argón P1):
     // re-leer por clave natural antes del paso 4.
     final relectura =

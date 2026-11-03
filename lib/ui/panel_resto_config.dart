@@ -51,6 +51,8 @@ class AjustesGymScreen extends StatefulWidget {
 
 class _AjustesGymScreenState extends State<AjustesGymScreen> {
   bool _cargando = true;
+  // 1.23 AT-14: candado anti-doble-toque del guardado.
+  bool _guardando = false;
   final _metodosCtrl = TextEditingController();
   final _textosCtrl = TextEditingController();
 
@@ -81,6 +83,13 @@ class _AjustesGymScreenState extends State<AjustesGymScreen> {
   }
 
   Future<void> _guardar() async {
+    // 1.23 AT-14 (auditoría total de Argón): sin candado, un
+    // doble toque encolaba la op de configuración dos veces y
+    // disparaba dos syncs; el botón además quedaba activo
+    // durante la espera. Guarda + botón deshabilitado mientras
+    // guarda (patrón _operacionEnCurso del Panel).
+    if (_guardando) return;
+    setState(() => _guardando = true);
     try {
       // Corrección panel 1.11 (ALTO): el servidor exige lista para
       // metodos_aceptados y mapa para textos_base; antes se
@@ -120,6 +129,8 @@ class _AjustesGymScreenState extends State<AjustesGymScreen> {
       if (mounted) {
         mostrarSnack(context, '$e', significado: SignificadoChip.error);
       }
+    } finally {
+      if (mounted) setState(() => _guardando = false);
     }
   }
 
@@ -186,7 +197,8 @@ class _AjustesGymScreenState extends State<AjustesGymScreen> {
                 const SizedBox(height: 12),
                 BotonPrimario(
                   texto: 'Guardar y sincronizar',
-                  onPressed: _guardar,
+                  onPressed: _guardando ? null : _guardar,
+                  cargando: _guardando,
                   expandido: false,
                 ),
                 const SizedBox(height: 8),

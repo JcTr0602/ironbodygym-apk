@@ -195,6 +195,38 @@ String isoHabana(DateTime habana) {
 /// Fecha ISO (yyyy-MM-dd) de hoy en La Habana.
 String hoyHabanaIso() => isoHabana(ahoraHabana()).substring(0, 10);
 
+/// 1.23 AT-07 (auditoría total de Argón): la fecha de NEGOCIO
+/// (YYYY-MM-DD en hora de La Habana) de un valor `fecha` crudo
+/// del espejo o de un payload. Los datos que baja el servidor
+/// pueden traer la fecha plana ('2026-10-31', ya es la fecha de
+/// negocio y se respeta tal cual), un timestamp sin zona (hora
+/// de pared ya habanera: manda su fecha escrita) o un timestamp
+/// CON zona ('2026-11-01T02:30:00Z' = 31-oct 22:30 en La
+/// Habana): ese instante se convierte a La Habana antes de
+/// tomar la fecha. Antes, los filtros por día/mes cortaban el
+/// string crudo (substring(0, 10)) y un pago de madrugada UTC
+/// caía en el día/mes equivocado. Devuelve '' si el valor no
+/// trae una fecha válida al frente.
+String fechaNegocioHabana(dynamic cruda) {
+  final s = '${cruda ?? ''}'.trim();
+  if (s.length < 10) return '';
+  final frente = s.substring(0, 10);
+  if (!RegExp(r'^\d{4}-\d{2}-\d{2}$').hasMatch(frente)) return '';
+  if (s.length == 10) return frente;
+  // ¿Trae designador de zona (Z o ±hh:mm al final)? Solo
+  // entonces es un instante convertible; sin zona, la fecha
+  // escrita ya es la de negocio.
+  final conZona = RegExp(r'(Z|[+-]\d{2}:?\d{2})$', caseSensitive: false)
+      .hasMatch(s);
+  if (!conZona) return frente;
+  final dt = DateTime.tryParse(s);
+  if (dt == null) return frente;
+  final h = aHabana(dt);
+  final mm = h.month.toString().padLeft(2, '0');
+  final dd = h.day.toString().padLeft(2, '0');
+  return '${h.year}-$mm-$dd';
+}
+
 /// Mes siguiente a [mes] ('YYYY-MM'). ÚNICA definición (antes
 /// vivía en adelantos.dart y se duplicaba inline en
 /// comisionesPorMesDesdeVentas): solo se usan año y mes, así que

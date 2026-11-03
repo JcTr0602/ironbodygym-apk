@@ -113,6 +113,10 @@ Future<List<Map<String, dynamic>>> medicionesClienteLocal(
     porId[id] = {
       'medicion_id': id,
       'fecha_medicion': '${r['fecha_medicion'] ?? r['fecha'] ?? ''}',
+      // 1.23 AT-03: el instante REAL de creación si la fila lo
+      // trae (created_at del servidor); la UI lo usa para la
+      // ventana de edición de 24 h en vez de la fecha plana.
+      'creado_en': '${r['created_at'] ?? r['creada_en'] ?? ''}',
       'medidas': medidasEspejo,
       'espejado': true,
     };
@@ -133,6 +137,12 @@ Future<List<Map<String, dynamic>>> medicionesClienteLocal(
     porId[id] = {
       'medicion_id': id,
       'fecha_medicion': '${p['fecha_medicion'] ?? ''}',
+      // 1.23 AT-03: la op en cola SÍ sabe cuándo se creó
+      // (creada_ts de ops_queue): ese instante manda para la
+      // ventana de 24 h; antes la UI reconstruía created_at
+      // desde la FECHA plana y una medición de las 23:00
+      // «cumplía 24 h» a las 00:01.
+      'creado_en': '${op['creada_ts'] ?? ''}',
       'medidas': p['medidas'] is Map
           ? Map<String, dynamic>.from(p['medidas'] as Map)
           : <String, dynamic>{},

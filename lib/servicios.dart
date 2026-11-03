@@ -218,8 +218,10 @@ List<Map<String, dynamic>> entradasHistorialServicios({
     });
   }
   String f10(Map<String, dynamic> e) {
+    // 1.23 AT-07: ordenar por la fecha de negocio (Habana).
     final f = '${e['fecha']}';
-    return f.length >= 10 ? f.substring(0, 10) : f;
+    final n = fechaNegocioHabana(e['fecha']);
+    return n.isNotEmpty ? n : f;
   }
 
   entradas.sort((a, b) {
@@ -986,8 +988,7 @@ Future<Map<String, dynamic>> _cuadreServiciosDia(
   for (final v in await LocalDb.instance
       .mirrorPorFecha('servicio_ventas', 'fecha', fechaIso, fechaIso)) {
     uuidsEspejo.add('${v['op_uuid'] ?? ''}');
-    if ('${v['fecha'] ?? ''}'.length >= 10 &&
-        '${v['fecha']}'.substring(0, 10) == fechaIso) {
+    if (fechaNegocioHabana(v['fecha']) == fechaIso) {
       final vid = (v['id'] as num?)?.toInt();
       if (vid != null) ventasDiaPorId[vid] = v;
       final revDe = (v['reverso_de'] as num?)?.toInt();
@@ -1024,7 +1025,8 @@ Future<Map<String, dynamic>> _cuadreServiciosDia(
     if ('${op['tipo']}' != 'venta_servicio') continue;
     if (uuidsEspejo.contains('${op['op_uuid'] ?? ''}')) continue;
     final p = _payloadDeOp(op);
-    if ('${p['fecha'] ?? ''}' != '' && '${p['fecha']}' != fechaIso) {
+    final fechaP = fechaNegocioHabana(p['fecha']);
+    if (fechaP.isNotEmpty && fechaP != fechaIso) {
       continue;
     }
     // 1.23 S-4 (Argón H-03): las filas locales de ops_queue no
@@ -1065,8 +1067,7 @@ Future<Map<String, dynamic>> _cuadreServiciosDia(
   for (final op in opsPendientes) {
     if ('${op['tipo']}' != 'revertir_venta_servicio') continue;
     if (uuidsEspejo.contains('${op['op_uuid'] ?? ''}')) continue;
-    final creada = '${op['creada_ts'] ?? ''}';
-    if (creada.length < 10 || creada.substring(0, 10) != fechaIso) {
+    if (fechaNegocioHabana(op['creada_ts']) != fechaIso) {
       continue;
     }
     final p = _payloadDeOp(op);

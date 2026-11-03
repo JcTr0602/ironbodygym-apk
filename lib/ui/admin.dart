@@ -967,7 +967,10 @@ class _AdminScreenState extends State<AdminScreen> {
       ),
     );
     final nota = notaCtrl.text.trim();
-    notaCtrl.dispose();
+    // 1.23 AT-09: sin dispose aquí — el TextField sigue montado
+    // durante la animación de salida del diálogo y disponerlo
+    // revienta con «used after being disposed» (mismo arreglo
+    // v1.3.1 de _editarPagoEntrenador).
     if (ok != true || !mounted) return;
     // 1.15 (Panel A2): confirmar SIEMPRE por listas de ids explícitas
     // (la pantalla empaqueta lo que muestra, nunca una orden ciega
@@ -1084,7 +1087,8 @@ class _AdminScreenState extends State<AdminScreen> {
     );
     final monto =
         double.tryParse(montoCtrl.text.trim().replaceAll(',', '.'));
-    montoCtrl.dispose();
+    // 1.23 AT-09: sin dispose aquí (animación de salida del
+    // diálogo; ver _confirmarEntregaImpl).
     if (ok != true || !mounted) return;
     if (monto == null || !monto.isFinite || monto <= 0) {
       mostrarSnack(context, 'Monto inválido', significado: SignificadoChip.alerta);
@@ -1162,8 +1166,8 @@ class _AdminScreenState extends State<AdminScreen> {
     );
     final concepto = conceptoCtrl.text.trim();
     final montoTexto = montoCtrl.text.replaceAll(',', '.');
-    conceptoCtrl.dispose();
-    montoCtrl.dispose();
+    // 1.23 AT-09: sin dispose aquí (animación de salida del
+    // diálogo; ver _confirmarEntregaImpl).
     if (ok != true || !mounted) return;
     final monto = double.tryParse(montoTexto);
     // Autoauditoría 1.22 #2 (clase N-2): NaN/Infinity pasaban el

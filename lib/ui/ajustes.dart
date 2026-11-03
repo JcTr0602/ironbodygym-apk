@@ -25,6 +25,7 @@ import '../novedades.dart';
 import '../perfil.dart';
 import '../sync.dart';
 import '../theme.dart';
+import '../tiempo.dart';
 import 'avisos.dart';
 import 'componentes.dart';
 import 'diseno.dart';
@@ -699,8 +700,10 @@ class _AjustesScreenState extends State<AjustesScreen> {
       }
       final ruta = await LocalDb.instance.dbPath();
       final tmp = await getTemporaryDirectory();
-      final fecha =
-          DateTime.now().toIso8601String().substring(0, 10);
+      // 1.23 AT-15: fecha de La Habana, no la del reloj crudo
+      // del dispositivo (un teléfono fuera de zona fechaba el
+      // respaldo con otro día).
+      final fecha = hoyHabanaIso();
       final destino =
           '${tmp.path}/ironbody-respaldo-$fecha.db';
       await File(ruta).copy(destino);
@@ -1203,7 +1206,7 @@ class _AjustesScreenState extends State<AjustesScreen> {
           '• Versión: ${AppConfig.appVersion}\n'
           '• Usuario: ${_auth.username}\n'
           '• Pendientes por subir: $pendientes\n'
-          '• Fecha: ${DateTime.now().toIso8601String().substring(0, 16)}\n\n'
+          '• Fecha: ${isoHabana(ahoraHabana()).substring(0, 16)}\n\n'
           'Descripción del problema:\n';
       final url = Uri.parse(
           'https://wa.me/5358191577?text=${Uri.encodeComponent(texto)}');

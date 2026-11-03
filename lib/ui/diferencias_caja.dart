@@ -123,7 +123,9 @@ Future<bool> mostrarDialogoResolverDiferencia(
       },
     ),
   );
-  notaCtrl.dispose();
+  // 1.23 AT-09: sin dispose aquí — el TextField sigue montado
+  // durante la animación de salida del diálogo y disponerlo
+  // revienta con «used after being disposed» (patrón v1.3.1).
   if (ok == true && context.mounted) {
     mostrarSnack(context, 'Diferencia resuelta (se sincronizará)',
         significado: SignificadoChip.exito);

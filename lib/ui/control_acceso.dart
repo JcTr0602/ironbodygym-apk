@@ -15,7 +15,7 @@ import '../acceso_app_cache.dart';
 import '../auth.dart';
 import '../localdb.dart';
 import '../tiempo.dart';
-import '../negocio.dart' show tiempoRelativo;
+import '../negocio.dart' show tiempoRelativo, normalizarTelefonoWaMe;
 import 'acciones_acceso.dart';
 import 'campana_wa.dart';
 import 'estadisticas_adopcion.dart';
@@ -1042,8 +1042,15 @@ class _AccesosClientesTabState extends State<AccesosClientesTab> {
                         subtitle: Text('${r['error'] ?? 'Error'}'),
                       );
                     }
-                    final telWa =
-                        sanitizarParaWaMe('${r['telefono'] ?? ''}');
+                    // 1.23 AT-01: misma normalización única
+                    // que el modal del PIN (antes el
+                    // sanitizador laxo propio + teléfono crudo
+                    // en el mensaje).
+                    final telWa = normalizarTelefonoWaMe(
+                        '${r['telefono'] ?? ''}');
+                    final tel8 = telWa.length >= 8
+                        ? telWa.substring(telWa.length - 8)
+                        : '${r['telefono'] ?? ''}';
                     return ListTile(
                       dense: true,
                       title: Text('${r['nombre'] ?? ''}'),
@@ -1052,12 +1059,12 @@ class _AccesosClientesTabState extends State<AccesosClientesTab> {
                       trailing: IconButton(
                         icon: const Icon(Icons.chat_rounded, size: 20),
                         tooltip: 'Enviar por WhatsApp',
-                        onPressed: telWa == null
+                        onPressed: telWa.isEmpty
                             ? null
                             : () {
                                 final mensaje =
                                     'Hola ${r['nombre']}, tu acceso a Iron Body App:\n'
-                                    'Teléfono: ${r['telefono']}\n'
+                                    'Teléfono: $tel8\n'
                                     'PIN: ${r['pin_temporal']}\n'
                                     'Descarga la app y entra con estos datos.';
                                 launchUrl(

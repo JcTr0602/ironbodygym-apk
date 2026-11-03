@@ -2845,7 +2845,7 @@ Future<int> pagosRealizadosMes() async {
   // columna fecha NULL.
   for (final p in await LocalDb.instance.pagosPorFiltro(fechaPrefijo: pref)) {
     final f = p['fecha'] as String?;
-    if (f != null && f.startsWith(pref)) {
+    if (f != null && fechaNegocioHabana(f).startsWith(pref)) {
       // v1.3.3: los regalos/promos (monto 0) no cuentan como pago cobrado.
       if ((p['monto'] as num? ?? 0) <= 0) continue;
       final cid = p['cliente_id'] as int?;
@@ -3172,7 +3172,7 @@ String? motivoBloqueoEdicion(Map<String, dynamic> fila, int clienteId,
     try {
       final payload =
           jsonDecode(op['payload'] as String) as Map<String, dynamic>;
-      final fecha = (payload['fecha'] as String?)?.substring(0, 10) ?? '';
+      final fecha = fechaNegocioHabana(payload['fecha']);
       if (fecha != fechaIso) continue;
       // v1.2.7 fix Gemini: incluir hora/timestamp para no colapsar
       // pagos legítimos idénticos (misma tarifa, mismo turno).
@@ -3298,9 +3298,9 @@ Future<Map<String, dynamic>> resumenMensualDiarios(
             soloTelegramId) {
       continue;
     }
-    final f = '${d['fecha'] ?? ''}';
-    if (f.length < 10) continue;
-    final dia = f.substring(0, 10);
+    // 1.23 AT-07: día de negocio (Habana), no el corte crudo.
+    final dia = fechaNegocioHabana(d['fecha']);
+    if (dia.isEmpty) continue;
     final partes = dia.split('-');
     if (partes.length < 3) continue;
     if (int.tryParse(partes[0]) != year ||
@@ -3364,7 +3364,7 @@ Future<List<String>> turnosSinReporte(String fechaIso,
   try {
     final cierres = await LocalDb.instance.allMirror('turnos_cierre');
     for (final c in cierres) {
-      if ('${c['fecha'] ?? ''}'.substring(0, 10) == fechaIso) {
+      if (fechaNegocioHabana(c['fecha']) == fechaIso) {
         turnos.add('${c['turno'] ?? ''}'
             .toLowerCase()
             .replaceAll('manana', 'mañana'));
@@ -3435,9 +3435,8 @@ Future<List<Map<String, dynamic>>> totalesDiariosUltimos(
   final todos = await LocalDb.instance.allMirror('pagos_diarios');
   final porFecha = <String, double>{};
   for (final d in todos) {
-    final f = '${d['fecha'] ?? ''}';
-    if (f.length >= 10) {
-      final dia = f.substring(0, 10);
+    final dia = fechaNegocioHabana(d['fecha']);
+    if (dia.isNotEmpty) {
       porFecha[dia] =
           (porFecha[dia] ?? 0) + ((d['total'] as num?)?.toDouble() ?? 0);
     }
@@ -3480,14 +3479,14 @@ Future<(double, double)> miTurnoHoy(int? telegramId, {String? fecha}) async {
   for (final d in await LocalDb.instance.allMirror('pagos_diarios')) {
     notaUuid(d);
     if (LocalDb.normalizarTelegramId(d['registrado_por']) == telegramId &&
-        (d['fecha'] as String?) == hoy) {
+        fechaNegocioHabana(d['fecha']) == hoy) {
       cobrado += (d['total'] as num?)?.toDouble() ?? 0;
     }
   }
   for (final v in await ventasSuplementosCup()) {
     notaUuid(v);
     if (LocalDb.normalizarTelegramId(v['registrado_por']) == telegramId &&
-        (v['fecha'] as String?) == hoy) {
+        fechaNegocioHabana(v['fecha']) == hoy) {
       cobrado += totalVentaCup(v);
     }
   }
@@ -3500,8 +3499,7 @@ Future<(double, double)> miTurnoHoy(int? telegramId, {String? fecha}) async {
     final resp = LocalDb.normalizarTelegramId(v['responsable_efectivo_id']) ??
         LocalDb.normalizarTelegramId(v['registrado_por']);
     if (resp != telegramId) continue;
-    final f = '${v['fecha'] ?? ''}';
-    if (f.length >= 10 && f.substring(0, 10) == hoy) {
+    if (fechaNegocioHabana(v['fecha']) == hoy) {
       cobrado += _montoServicioVenta(v);
     }
   }
@@ -3526,7 +3524,7 @@ Future<(double, double)> miTurnoHoy(int? telegramId, {String? fecha}) async {
       if (fecha.length < 10) {
         fecha = '${op['creada_ts'] ?? ''}';
       }
-      if (fecha.length < 10 || fecha.substring(0, 10) != hoy) {
+      if (fechaNegocioHabana(fecha) != hoy) {
         continue;
       }
       cobrado += await montoCobradoCupOp(op);
@@ -3578,14 +3576,14 @@ Future<int> conteoPagosDia(int? telegramId, {String? fecha}) async {
   for (final d in await LocalDb.instance.allMirror('pagos_diarios')) {
     notaUuid(d);
     if (LocalDb.normalizarTelegramId(d['registrado_por']) == telegramId &&
-        (d['fecha'] as String?) == hoy) {
+        fechaNegocioHabana(d['fecha']) == hoy) {
       n++;
     }
   }
   for (final v in await LocalDb.instance.allMirror('ventas_suplementos')) {
     notaUuid(v);
     if (LocalDb.normalizarTelegramId(v['registrado_por']) == telegramId &&
-        (v['fecha'] as String?) == hoy) {
+        fechaNegocioHabana(v['fecha']) == hoy) {
       n++;
     }
   }
@@ -3596,8 +3594,7 @@ Future<int> conteoPagosDia(int? telegramId, {String? fecha}) async {
         LocalDb.normalizarTelegramId(v['registrado_por']);
     notaUuid(v);
     if (resp != telegramId) continue;
-    final f = '${v['fecha'] ?? ''}';
-    if (f.length >= 10 && f.substring(0, 10) == hoy) {
+    if (fechaNegocioHabana(v['fecha']) == hoy) {
       n++;
     }
   }
@@ -3607,7 +3604,7 @@ Future<int> conteoPagosDia(int? telegramId, {String? fecha}) async {
     try {
       final payload =
           jsonDecode(op['payload'] as String) as Map<String, dynamic>;
-      final fecha = (payload['fecha'] as String?)?.substring(0, 10) ?? '';
+      final fecha = fechaNegocioHabana(payload['fecha']);
       if (fecha != hoy) continue;
       // Solo tipos que representan un cobro (igual que montoEfectivoOp
       // cubre); el resto no cuenta como "pago".
@@ -3724,19 +3721,19 @@ Future<List<Map<String, dynamic>>> historialTurno(int? telegramId,
 
   // v1.3.4 (B2): filtro por columna indexada telegram_user_id (v26).
   for (final p in await LocalDb.instance.pagosPorFiltro(telegramId: telegramId)) {
-    final f = '${p['fecha'] ?? ''}';
-    if (f.length < 10) continue;
+    final dia = fechaNegocioHabana(p['fecha']);
+    if (dia.isEmpty) continue;
     final cid = p['cliente_id'] as int?;
     final quien = nombres[cid] ?? 'Cliente $cid';
     final metodo = '${p['metodo'] ?? 'efectivo'}';
-    suma(f.substring(0, 10), (p['monto'] as num?)?.toDouble() ?? 0,
+    suma(dia, (p['monto'] as num?)?.toDouble() ?? 0,
         metodo, '$quien · ${p['periodo'] ?? 'mensual'} ($metodo)');
   }
   for (final d in await LocalDb.instance.allMirror('pagos_diarios')) {
     if (LocalDb.normalizarTelegramId(d['registrado_por']) != telegramId) continue;
-    final f = '${d['fecha'] ?? ''}';
-    if (f.length < 10) continue;
-    suma(f.substring(0, 10), (d['total'] as num?)?.toDouble() ?? 0,
+    final diaD = fechaNegocioHabana(d['fecha']);
+    if (diaD.isEmpty) continue;
+    suma(diaD, (d['total'] as num?)?.toDouble() ?? 0,
         // Argón Dinero #11: método real (un diario por
         // transferencia no engorda el efectivo del día).
         esPagoDiarioEfectivo(d) ? 'efectivo' : 'transferencia',
@@ -3748,10 +3745,10 @@ Future<List<Map<String, dynamic>>> historialTurno(int? telegramId,
     final resp = LocalDb.normalizarTelegramId(v['responsable_efectivo_id']) ??
         LocalDb.normalizarTelegramId(v['registrado_por']);
     if (resp != telegramId) continue;
-    final f = '${v['fecha'] ?? ''}';
-    if (f.length < 10) continue;
+    final diaV = fechaNegocioHabana(v['fecha']);
+    if (diaV.isEmpty) continue;
     final metodo = '${v['metodo'] ?? 'efectivo'}';
-    suma(f.substring(0, 10), _montoServicioVenta(v), metodo,
+    suma(diaV, _montoServicioVenta(v), metodo,
         'Servicio x${v['cantidad'] ?? '?'} ($metodo)');
   }
   final lista = porDia.values.toList()
@@ -3829,14 +3826,12 @@ Future<double> cobradoAyer() async {
     total += (d['total'] as num?)?.toDouble() ?? 0;
   }
   for (final v in await ventasSuplementosCup()) {
-    if ('${v['fecha'] ?? ''}'.length >= 10 &&
-        '${v['fecha']}'.substring(0, 10) == ayer) {
+    if (fechaNegocioHabana(v['fecha']) == ayer) {
       total += totalVentaCup(v);
     }
   }
   for (final v in await _servicioVentasNetas()) {
-    final f = '${v['fecha'] ?? ''}';
-    if (f.length >= 10 && f.substring(0, 10) == ayer) {
+    if (fechaNegocioHabana(v['fecha']) == ayer) {
       total += _montoServicioVenta(v);
     }
   }
@@ -3849,9 +3844,10 @@ Future<double> cobradoAyer() async {
 Future<int?> antiguedadPendiente({int? telegramId}) async {
   DateTime? masVieja;
   void considera(String? fecha) {
-    if (fecha == null || fecha.length < 10) return;
+    final diaNeg = fechaNegocioHabana(fecha);
+    if (diaNeg.isEmpty) return;
     try {
-      final f = DateTime.parse(fecha.substring(0, 10));
+      final f = DateTime.parse(diaNeg);
       if (masVieja == null || f.isBefore(masVieja!)) {
         masVieja = f;
       }
@@ -3961,20 +3957,17 @@ Future<Map<String, dynamic>> resumenSemanal() async {
   // columna fecha NULL.
   for (final p in await LocalDb.instance.pagosPorFiltro(fechaDesde: inicio)) {
     if (_esPagoCasa(p, casas)) continue;
-    final f = '${p['fecha'] ?? ''}';
-    if (f.length >= 10 && f.substring(0, 10).compareTo(inicio) >= 0) {
+    if (fechaNegocioHabana(p['fecha']).compareTo(inicio) >= 0) {
       cobrado += (p['monto'] as num?)?.toDouble() ?? 0;
     }
   }
   for (final d in await LocalDb.instance.allMirror('pagos_diarios')) {
-    final f = '${d['fecha'] ?? ''}';
-    if (f.length >= 10 && f.substring(0, 10).compareTo(inicio) >= 0) {
+    if (fechaNegocioHabana(d['fecha']).compareTo(inicio) >= 0) {
       cobrado += (d['total'] as num?)?.toDouble() ?? 0;
     }
   }
   for (final v in await _servicioVentasNetas()) {
-    final f = '${v['fecha'] ?? ''}';
-    if (f.length >= 10 && f.substring(0, 10).compareTo(inicio) >= 0) {
+    if (fechaNegocioHabana(v['fecha']).compareTo(inicio) >= 0) {
       cobrado += _montoServicioVenta(v);
     }
   }
@@ -4030,8 +4023,7 @@ Future<Map<String, dynamic>> pendienteDetalleHoy(
         LocalDb.normalizarTelegramId(d['registrado_por']) != telegramId) {
       continue;
     }
-    if ('${d['fecha'] ?? ''}'.length < 10 ||
-        '${d['fecha']}'.substring(0, 10) != hoy) {
+    if (fechaNegocioHabana(d['fecha']) != hoy) {
       continue;
     }
     diar += (d['total'] as num?)?.toDouble() ?? 0;
@@ -4056,13 +4048,13 @@ Future<double> cobradoMes(int? telegramId) async {
   }
   for (final d in await LocalDb.instance.allMirror('pagos_diarios')) {
     if (LocalDb.normalizarTelegramId(d['registrado_por']) != telegramId) continue;
-    if ('${d['fecha'] ?? ''}'.startsWith(pref)) {
+    if (fechaNegocioHabana(d['fecha']).startsWith(pref)) {
       t += (d['total'] as num?)?.toDouble() ?? 0;
     }
   }
   for (final v in await ventasSuplementosCup()) {
     if (LocalDb.normalizarTelegramId(v['registrado_por']) != telegramId) continue;
-    if ('${v['fecha'] ?? ''}'.startsWith(pref)) {
+    if (fechaNegocioHabana(v['fecha']).startsWith(pref)) {
       t += totalVentaCup(v);
     }
   }
@@ -4072,7 +4064,7 @@ Future<double> cobradoMes(int? telegramId) async {
     final resp = LocalDb.normalizarTelegramId(v['responsable_efectivo_id']) ??
         LocalDb.normalizarTelegramId(v['registrado_por']);
     if (resp != telegramId) continue;
-    if ('${v['fecha'] ?? ''}'.startsWith(pref)) {
+    if (fechaNegocioHabana(v['fecha']).startsWith(pref)) {
       t += _montoServicioVenta(v);
     }
   }
@@ -4095,15 +4087,13 @@ Future<double> ingresosHoyPorEntrenador(int? telegramId) async {
   }
   for (final d in await LocalDb.instance.allMirror('pagos_diarios')) {
     if (LocalDb.normalizarTelegramId(d['registrado_por']) != telegramId) continue;
-    final f = '${d['fecha'] ?? ''}';
-    if (f.length >= 10 && f.substring(0, 10) == hoy) {
+    if (fechaNegocioHabana(d['fecha']) == hoy) {
       t += (d['total'] as num?)?.toDouble() ?? 0;
     }
   }
   for (final v in await ventasSuplementosCup()) {
     if (LocalDb.normalizarTelegramId(v['registrado_por']) != telegramId) continue;
-    final f = '${v['fecha'] ?? ''}';
-    if (f.length >= 10 && f.substring(0, 10) == hoy) {
+    if (fechaNegocioHabana(v['fecha']) == hoy) {
       t += totalVentaCup(v);
     }
   }
@@ -4112,8 +4102,7 @@ Future<double> ingresosHoyPorEntrenador(int? telegramId) async {
     final resp = LocalDb.normalizarTelegramId(v['responsable_efectivo_id']) ??
         LocalDb.normalizarTelegramId(v['registrado_por']);
     if (resp != telegramId) continue;
-    final f = '${v['fecha'] ?? ''}';
-    if (f.length >= 10 && f.substring(0, 10) == hoy) {
+    if (fechaNegocioHabana(v['fecha']) == hoy) {
       t += _montoServicioVenta(v);
     }
   }
@@ -4140,9 +4129,8 @@ Future<double> ingresosSemanaPorEntrenador(int? telegramId) async {
   }
   for (final d in await LocalDb.instance.allMirror('pagos_diarios')) {
     if (LocalDb.normalizarTelegramId(d['registrado_por']) != telegramId) continue;
-    final f = '${d['fecha'] ?? ''}';
-    if (f.length >= 10) {
-      final dia = f.substring(0, 10);
+    final dia = fechaNegocioHabana(d['fecha']);
+    if (dia.isNotEmpty) {
       if (dia.compareTo(desdeIso) >= 0 && dia.compareTo(hoyIso) <= 0) {
         t += (d['total'] as num?)?.toDouble() ?? 0;
       }
@@ -4150,9 +4138,8 @@ Future<double> ingresosSemanaPorEntrenador(int? telegramId) async {
   }
   for (final v in await ventasSuplementosCup()) {
     if (LocalDb.normalizarTelegramId(v['registrado_por']) != telegramId) continue;
-    final f = '${v['fecha'] ?? ''}';
-    if (f.length >= 10) {
-      final dia = f.substring(0, 10);
+    final dia = fechaNegocioHabana(v['fecha']);
+    if (dia.isNotEmpty) {
       if (dia.compareTo(desdeIso) >= 0 && dia.compareTo(hoyIso) <= 0) {
         t += totalVentaCup(v);
       }
@@ -4163,9 +4150,8 @@ Future<double> ingresosSemanaPorEntrenador(int? telegramId) async {
     final resp = LocalDb.normalizarTelegramId(v['responsable_efectivo_id']) ??
         LocalDb.normalizarTelegramId(v['registrado_por']);
     if (resp != telegramId) continue;
-    final f = '${v['fecha'] ?? ''}';
-    if (f.length >= 10) {
-      final dia = f.substring(0, 10);
+    final dia = fechaNegocioHabana(v['fecha']);
+    if (dia.isNotEmpty) {
       if (dia.compareTo(desdeIso) >= 0 && dia.compareTo(hoyIso) <= 0) {
         t += _montoServicioVenta(v);
       }
@@ -4204,13 +4190,13 @@ Future<Map<String, double>> ingresosPorMetodoEntrenador(
   }
   for (final d in await LocalDb.instance.allMirror('pagos_diarios')) {
     if (LocalDb.normalizarTelegramId(d['registrado_por']) != telegramId) continue;
-    if ('${d['fecha'] ?? ''}'.startsWith(pref)) {
+    if (fechaNegocioHabana(d['fecha']).startsWith(pref)) {
       efectivo += (d['total'] as num?)?.toDouble() ?? 0;
     }
   }
   for (final v in await ventasSuplementosCup()) {
     if (LocalDb.normalizarTelegramId(v['registrado_por']) != telegramId) continue;
-    if ('${v['fecha'] ?? ''}'.startsWith(pref)) {
+    if (fechaNegocioHabana(v['fecha']).startsWith(pref)) {
       suplementos += totalVentaCup(v);
     }
   }
@@ -4220,7 +4206,7 @@ Future<Map<String, double>> ingresosPorMetodoEntrenador(
     final resp = LocalDb.normalizarTelegramId(v['responsable_efectivo_id']) ??
         LocalDb.normalizarTelegramId(v['registrado_por']);
     if (resp != telegramId) continue;
-    if ('${v['fecha'] ?? ''}'.startsWith(pref)) {
+    if (fechaNegocioHabana(v['fecha']).startsWith(pref)) {
       servicios += _montoServicioVenta(v);
     }
   }
@@ -4252,13 +4238,13 @@ Future<Map<String, double>> ingresosPorTipoEntrenador(
   }
   for (final d in await LocalDb.instance.allMirror('pagos_diarios')) {
     if (LocalDb.normalizarTelegramId(d['registrado_por']) != telegramId) continue;
-    if ('${d['fecha'] ?? ''}'.startsWith(pref)) {
+    if (fechaNegocioHabana(d['fecha']).startsWith(pref)) {
       diario += (d['total'] as num?)?.toDouble() ?? 0;
     }
   }
   for (final v in await ventasSuplementosCup()) {
     if (LocalDb.normalizarTelegramId(v['registrado_por']) != telegramId) continue;
-    if ('${v['fecha'] ?? ''}'.startsWith(pref)) {
+    if (fechaNegocioHabana(v['fecha']).startsWith(pref)) {
       suplementos += totalVentaCup(v);
     }
   }
@@ -4268,7 +4254,7 @@ Future<Map<String, double>> ingresosPorTipoEntrenador(
     final resp = LocalDb.normalizarTelegramId(v['responsable_efectivo_id']) ??
         LocalDb.normalizarTelegramId(v['registrado_por']);
     if (resp != telegramId) continue;
-    if ('${v['fecha'] ?? ''}'.startsWith(pref)) {
+    if (fechaNegocioHabana(v['fecha']).startsWith(pref)) {
       servicios += _montoServicioVenta(v);
     }
   }
@@ -4295,9 +4281,8 @@ Future<Map<String, Map<String, dynamic>>> mejorPeorDiaEntrenador(
   for (final p
       in await LocalDb.instance.pagosMesPorEntrenador(telegramId, pref)) {
     if (_esPagoCasa(p, casas)) continue;
-    final f = '${p['fecha'] ?? ''}';
-    if (f.length >= 10) {
-      final dia = f.substring(0, 10);
+    final dia = fechaNegocioHabana(p['fecha']);
+    if (dia.isNotEmpty) {
       porDia[dia] =
           (porDia[dia] ?? 0) + ((p['monto'] as num?)?.toDouble() ?? 0);
     }
@@ -4305,8 +4290,8 @@ Future<Map<String, Map<String, dynamic>>> mejorPeorDiaEntrenador(
   for (final d in await LocalDb.instance.allMirror('pagos_diarios')) {
     if (LocalDb.normalizarTelegramId(d['registrado_por']) != telegramId) continue;
     final f = '${d['fecha'] ?? ''}';
-    if (f.startsWith(pref) && f.length >= 10) {
-      final dia = f.substring(0, 10);
+    final dia = fechaNegocioHabana(f);
+    if (dia.startsWith(pref)) {
       porDia[dia] =
           (porDia[dia] ?? 0) + ((d['total'] as num?)?.toDouble() ?? 0);
     }
@@ -4314,8 +4299,8 @@ Future<Map<String, Map<String, dynamic>>> mejorPeorDiaEntrenador(
   for (final v in await ventasSuplementosCup()) {
     if (LocalDb.normalizarTelegramId(v['registrado_por']) != telegramId) continue;
     final f = '${v['fecha'] ?? ''}';
-    if (f.startsWith(pref) && f.length >= 10) {
-      final dia = f.substring(0, 10);
+    final dia = fechaNegocioHabana(f);
+    if (dia.startsWith(pref)) {
       porDia[dia] = (porDia[dia] ?? 0) + totalVentaCup(v);
     }
   }
@@ -4325,8 +4310,8 @@ Future<Map<String, Map<String, dynamic>>> mejorPeorDiaEntrenador(
         LocalDb.normalizarTelegramId(v['registrado_por']);
     if (resp != telegramId) continue;
     final f = '${v['fecha'] ?? ''}';
-    if (f.startsWith(pref) && f.length >= 10) {
-      final dia = f.substring(0, 10);
+    final dia = fechaNegocioHabana(f);
+    if (dia.startsWith(pref)) {
       porDia[dia] = (porDia[dia] ?? 0) + _montoServicioVenta(v);
     }
   }
@@ -4941,7 +4926,14 @@ Future<
     } else {
       efectivo += m;
     }
-    n++;
+    // 1.23 AT-12 (auditoría total de Argón): cortesía (regalo
+    // de cumpleaños) y promo (mes gratis por compra) NO son
+    // cobros — monto 0 — y no cuentan como «movimientos» del
+    // día; el contador los inflaba. Misma regla que
+    // conteoPagosDia (spec 1 de Argón, 1.3.3). El dinero no
+    // cambia: esos pagos suman 0 en su bucket.
+    final metodoP = '${p['metodo'] ?? ''}';
+    if (metodoP != 'cortesia' && metodoP != 'promo') n++;
   }
   for (final d in await LocalDb.instance
       .mirrorPorFecha('pagos_diarios', 'fecha', fechaIso, fechaIso)) {
@@ -4949,8 +4941,7 @@ Future<
     n++;
   }
   for (final v in await ventasSuplementosCup()) {
-    final f = '${v['fecha'] ?? ''}';
-    if (f.length >= 10 && f.substring(0, 10) == fechaIso) {
+    if (fechaNegocioHabana(v['fecha']) == fechaIso) {
       suplementos += totalVentaCup(v);
       n++;
     }
@@ -5296,17 +5287,17 @@ Future<double> ingresosMesAnterior() async {
     t += (p['monto'] as num?)?.toDouble() ?? 0;
   }
   for (final d in await LocalDb.instance.allMirror('pagos_diarios')) {
-    if ('${d['fecha'] ?? ''}'.startsWith(pref)) {
+    if (fechaNegocioHabana(d['fecha']).startsWith(pref)) {
       t += (d['total'] as num?)?.toDouble() ?? 0;
     }
   }
   for (final v in await ventasSuplementosCup()) {
-    if ('${v['fecha'] ?? ''}'.startsWith(pref)) {
+    if (fechaNegocioHabana(v['fecha']).startsWith(pref)) {
       t += totalVentaCup(v);
     }
   }
   for (final v in await _servicioVentasNetas()) {
-    if ('${v['fecha'] ?? ''}'.startsWith(pref)) {
+    if (fechaNegocioHabana(v['fecha']).startsWith(pref)) {
       t += _montoServicioVenta(v);
     }
   }
@@ -5331,17 +5322,17 @@ Future<Map<String, double>> ingresosPorMetodo() async {
     }
   }
   for (final d in await LocalDb.instance.allMirror('pagos_diarios')) {
-    if ('${d['fecha'] ?? ''}'.startsWith(pref)) {
+    if (fechaNegocioHabana(d['fecha']).startsWith(pref)) {
       efectivo += (d['total'] as num?)?.toDouble() ?? 0;
     }
   }
   for (final v in await ventasSuplementosCup()) {
-    if ('${v['fecha'] ?? ''}'.startsWith(pref)) {
+    if (fechaNegocioHabana(v['fecha']).startsWith(pref)) {
       suplementos += totalVentaCup(v);
     }
   }
   for (final v in await _servicioVentasNetas()) {
-    if ('${v['fecha'] ?? ''}'.startsWith(pref)) {
+    if (fechaNegocioHabana(v['fecha']).startsWith(pref)) {
       servicios += _montoServicioVenta(v);
     }
   }
@@ -5366,17 +5357,17 @@ Future<Map<String, double>> ingresosPorTipo() async {
     mensual += (p['monto'] as num?)?.toDouble() ?? 0;
   }
   for (final d in await LocalDb.instance.allMirror('pagos_diarios')) {
-    if ('${d['fecha'] ?? ''}'.startsWith(pref)) {
+    if (fechaNegocioHabana(d['fecha']).startsWith(pref)) {
       diario += (d['total'] as num?)?.toDouble() ?? 0;
     }
   }
   for (final v in await ventasSuplementosCup()) {
-    if ('${v['fecha'] ?? ''}'.startsWith(pref)) {
+    if (fechaNegocioHabana(v['fecha']).startsWith(pref)) {
       suplementos += totalVentaCup(v);
     }
   }
   for (final v in await _servicioVentasNetas()) {
-    if ('${v['fecha'] ?? ''}'.startsWith(pref)) {
+    if (fechaNegocioHabana(v['fecha']).startsWith(pref)) {
       servicios += _montoServicioVenta(v);
     }
   }
@@ -5408,33 +5399,32 @@ Future<Map<String, Map<String, dynamic>>> mejorPeorDia() async {
   final casas = await LocalDb.instance.idsCuentasCasa();
   for (final p in await LocalDb.instance.pagosDelMes(pref)) {
     if (_esPagoCasa(p, casas)) continue;
-    final f = '${p['fecha'] ?? ''}';
-    if (f.length >= 10) {
-      final dia = f.substring(0, 10);
+    final dia = fechaNegocioHabana(p['fecha']);
+    if (dia.isNotEmpty) {
       porDia[dia] =
           (porDia[dia] ?? 0) + ((p['monto'] as num?)?.toDouble() ?? 0);
     }
   }
   for (final d in await LocalDb.instance.allMirror('pagos_diarios')) {
     final f = '${d['fecha'] ?? ''}';
-    if (f.startsWith(pref) && f.length >= 10) {
-      final dia = f.substring(0, 10);
+    final dia = fechaNegocioHabana(f);
+    if (dia.startsWith(pref)) {
       porDia[dia] =
           (porDia[dia] ?? 0) + ((d['total'] as num?)?.toDouble() ?? 0);
     }
   }
   for (final v in await ventasSuplementosCup()) {
     final f = '${v['fecha'] ?? ''}';
-    if (f.startsWith(pref) && f.length >= 10) {
-      final dia = f.substring(0, 10);
+    final dia = fechaNegocioHabana(f);
+    if (dia.startsWith(pref)) {
       porDia[dia] = (porDia[dia] ?? 0) + totalVentaCup(v);
     }
   }
   // Ronda 3-9 #7: servicios del mes en mejor/peor día.
   for (final v in await _servicioVentasNetas()) {
     final f = '${v['fecha'] ?? ''}';
-    if (f.startsWith(pref) && f.length >= 10) {
-      final dia = f.substring(0, 10);
+    final dia = fechaNegocioHabana(f);
+    if (dia.startsWith(pref)) {
       porDia[dia] = (porDia[dia] ?? 0) + _montoServicioVenta(v);
     }
   }
@@ -5460,7 +5450,7 @@ Future<int> nuevosEsteMes() async {
   for (final cl in await LocalDb.instance.allMirror('clientes')) {
     if (esClienteEliminado(cl)) continue; // v1.8.0: no es persona
     final f = '${cl['creado'] ?? cl['fecha_inscripcion'] ?? ''}';
-    if (f.startsWith(pref)) c++;
+    if (fechaNegocioHabana(f).startsWith(pref)) c++;
   }
   return c;
 }
@@ -5513,25 +5503,22 @@ Future<List<Map<String, dynamic>>> ingresosUltimos30Dias() async {
   final casas = await LocalDb.instance.idsCuentasCasa();
   for (final p in pagos) {
     if (_esPagoCasa(p, casas)) continue;
-    final f = '${p['fecha'] ?? ''}';
-    if (f.length >= 10) {
-      final dia = f.substring(0, 10);
+    final dia = fechaNegocioHabana(p['fecha']);
+    if (dia.isNotEmpty) {
       porDia[dia] = (porDia[dia] ?? 0) +
           ((p['monto'] as num?)?.toDouble() ?? 0);
     }
   }
   for (final d in diarios) {
-    final f = '${d['fecha'] ?? ''}';
-    if (f.length >= 10) {
-      final dia = f.substring(0, 10);
+    final dia = fechaNegocioHabana(d['fecha']);
+    if (dia.isNotEmpty) {
       porDia[dia] =
           (porDia[dia] ?? 0) + ((d['total'] as num?)?.toDouble() ?? 0);
     }
   }
   for (final v in suplementos) {
-    final f = '${v['fecha'] ?? ''}';
-    if (f.length >= 10) {
-      final dia = f.substring(0, 10);
+    final dia = fechaNegocioHabana(v['fecha']);
+    if (dia.isNotEmpty) {
       if (dia.compareTo(desdeIso) >= 0 && dia.compareTo(hastaIso) <= 0) {
         porDia[dia] = (porDia[dia] ?? 0) + totalVentaCup(v);
       }
@@ -5539,9 +5526,8 @@ Future<List<Map<String, dynamic>>> ingresosUltimos30Dias() async {
   }
   // Ronda 3-9 #7: servicios de los últimos 30 días.
   for (final v in await _servicioVentasNetas()) {
-    final f = '${v['fecha'] ?? ''}';
-    if (f.length >= 10) {
-      final dia = f.substring(0, 10);
+    final dia = fechaNegocioHabana(v['fecha']);
+    if (dia.isNotEmpty) {
       if (dia.compareTo(desdeIso) >= 0 && dia.compareTo(hastaIso) <= 0) {
         porDia[dia] = (porDia[dia] ?? 0) + _montoServicioVenta(v);
       }
@@ -5609,7 +5595,7 @@ Future<List<Map<String, dynamic>>> rankingEntrenadores() async {
         (porEntrenador[ent] ?? 0) + ((p['monto'] as num?)?.toDouble() ?? 0);
   }
   for (final d in await LocalDb.instance.allMirror('pagos_diarios')) {
-    if ('${d['fecha'] ?? ''}'.startsWith(pref)) {
+    if (fechaNegocioHabana(d['fecha']).startsWith(pref)) {
       anotaNombre(d['registrado_por'], d['registrado_por_nombre']);
       final ent =
           '${d['registrado_por_nombre'] ?? d['registrado_por'] ?? '?'}';
@@ -5618,7 +5604,7 @@ Future<List<Map<String, dynamic>>> rankingEntrenadores() async {
     }
   }
   for (final v in await ventasSuplementosCup()) {
-    if ('${v['fecha'] ?? ''}'.startsWith(pref)) {
+    if (fechaNegocioHabana(v['fecha']).startsWith(pref)) {
       anotaNombre(v['registrado_por'], v['registrado_por_nombre']);
       final ent =
           '${v['registrado_por_nombre'] ?? v['registrado_por'] ?? '?'}';
@@ -5626,7 +5612,7 @@ Future<List<Map<String, dynamic>>> rankingEntrenadores() async {
     }
   }
   for (final v in await _servicioVentasNetas()) {
-    if ('${v['fecha'] ?? ''}'.startsWith(pref)) {
+    if (fechaNegocioHabana(v['fecha']).startsWith(pref)) {
       // Ajuste A3: mismo criterio que las funciones PorEntrenador
       // (responsable efectivo, no quien registró); la clave sigue
       // siendo el nombre para no partir el ranking en dos filas.
@@ -5723,12 +5709,12 @@ Future<double> ingresosMes() async {
     t += (d['total'] as num?)?.toDouble() ?? 0;
   }
   for (final v in await ventasSuplementosCup()) {
-    if ('${v['fecha'] ?? ''}'.startsWith(pref)) {
+    if (fechaNegocioHabana(v['fecha']).startsWith(pref)) {
       t += totalVentaCup(v);
     }
   }
   for (final v in await _servicioVentasNetas()) {
-    if ('${v['fecha'] ?? ''}'.startsWith(pref)) {
+    if (fechaNegocioHabana(v['fecha']).startsWith(pref)) {
       t += _montoServicioVenta(v);
     }
   }
@@ -5757,9 +5743,8 @@ Future<Map<String, double>> ingresosPorDia(
       : await LocalDb.instance.allMirror('pagos');
   for (final p in pagos) {
     if (_esPagoCasa(p, casas)) continue;
-    final f = '${p['fecha'] ?? ''}';
-    if (f.length >= 10) {
-      final dia = f.substring(0, 10);
+    final dia = fechaNegocioHabana(p['fecha']);
+    if (dia.isNotEmpty) {
       porDia[dia] =
           (porDia[dia] ?? 0) + ((p['monto'] as num?)?.toDouble() ?? 0);
     }
@@ -5769,24 +5754,21 @@ Future<Map<String, double>> ingresosPorDia(
           .mirrorPorFecha('pagos_diarios', 'fecha', desdeIso, hastaIso)
       : await LocalDb.instance.allMirror('pagos_diarios');
   for (final d in diarios) {
-    final f = '${d['fecha'] ?? ''}';
-    if (f.length >= 10) {
-      final dia = f.substring(0, 10);
+    final dia = fechaNegocioHabana(d['fecha']);
+    if (dia.isNotEmpty) {
       porDia[dia] =
           (porDia[dia] ?? 0) + ((d['total'] as num?)?.toDouble() ?? 0);
     }
   }
   for (final v in await ventasSuplementosCup()) {
-    final f = '${v['fecha'] ?? ''}';
-    if (f.length >= 10 && enVentana(f.substring(0, 10))) {
-      final dia = f.substring(0, 10);
+    final dia = fechaNegocioHabana(v['fecha']);
+    if (dia.isNotEmpty && enVentana(dia)) {
       porDia[dia] = (porDia[dia] ?? 0) + totalVentaCup(v);
     }
   }
   for (final v in await _servicioVentasNetas()) {
-    final f = '${v['fecha'] ?? ''}';
-    if (f.length >= 10 && enVentana(f.substring(0, 10))) {
-      final dia = f.substring(0, 10);
+    final dia = fechaNegocioHabana(v['fecha']);
+    if (dia.isNotEmpty && enVentana(dia)) {
       porDia[dia] = (porDia[dia] ?? 0) + _montoServicioVenta(v);
     }
   }
@@ -5809,14 +5791,12 @@ Future<double> ingresosHoy() async {
     t += (d['total'] as num?)?.toDouble() ?? 0;
   }
   for (final v in await ventasSuplementosCup()) {
-    final f = '${v['fecha'] ?? ''}';
-    if (f.length >= 10 && f.substring(0, 10) == hoy) {
+    if (fechaNegocioHabana(v['fecha']) == hoy) {
       t += totalVentaCup(v);
     }
   }
   for (final v in await _servicioVentasNetas()) {
-    final f = '${v['fecha'] ?? ''}';
-    if (f.length >= 10 && f.substring(0, 10) == hoy) {
+    if (fechaNegocioHabana(v['fecha']) == hoy) {
       t += _montoServicioVenta(v);
     }
   }
@@ -5846,18 +5826,16 @@ Future<double> ingresosSemana() async {
   }
   // v1.3.2 (Argón #5): incluir suplementos en CUP como en ingresosHoy/Mes.
   for (final v in await ventasSuplementosCup()) {
-    final f = '${v['fecha'] ?? ''}';
-    if (f.length >= 10) {
-      final dia = f.substring(0, 10);
+    final dia = fechaNegocioHabana(v['fecha']);
+    if (dia.isNotEmpty) {
       if (dia.compareTo(desdeIso) >= 0 && dia.compareTo(hoyIso) <= 0) {
         t += totalVentaCup(v);
       }
     }
   }
   for (final v in await _servicioVentasNetas()) {
-    final f = '${v['fecha'] ?? ''}';
-    if (f.length >= 10) {
-      final dia = f.substring(0, 10);
+    final dia = fechaNegocioHabana(v['fecha']);
+    if (dia.isNotEmpty) {
       if (dia.compareTo(desdeIso) >= 0 && dia.compareTo(hoyIso) <= 0) {
         t += _montoServicioVenta(v);
       }
@@ -5911,9 +5889,8 @@ Future<List<Map<String, dynamic>>> pagosDelPeriodo(
   }
   // v1.0.16: incluir pagos diarios (antes se excluían del desglose)
   for (final d in await LocalDb.instance.allMirror('pagos_diarios')) {
-    final f = '${d['fecha'] ?? ''}';
-    if (f.length >= 10) {
-      final dia = f.substring(0, 10);
+    final dia = fechaNegocioHabana(d['fecha']);
+    if (dia.isNotEmpty) {
       if (dia.compareTo(desdeIso) >= 0 &&
           dia.compareTo(hastaIso) <= 0) {
         out.add({
@@ -5930,9 +5907,8 @@ Future<List<Map<String, dynamic>>> pagosDelPeriodo(
   }
   // v1.3.2 (Argón #5): incluir suplementos en CUP en el desglose.
   for (final v in await ventasSuplementosCup()) {
-    final f = '${v['fecha'] ?? ''}';
-    if (f.length >= 10) {
-      final dia = f.substring(0, 10);
+    final dia = fechaNegocioHabana(v['fecha']);
+    if (dia.isNotEmpty) {
       if (dia.compareTo(desdeIso) >= 0 &&
           dia.compareTo(hastaIso) <= 0) {
         out.add({
@@ -5947,9 +5923,8 @@ Future<List<Map<String, dynamic>>> pagosDelPeriodo(
   // Argón stats MEDIO (dashboard): Servicios (dosis y agua) como
   // origen propio; sin esto el detalle no sumaba la tarjeta.
   for (final v in await _servicioVentasNetas()) {
-    final f = '${v['fecha'] ?? ''}';
-    if (f.length >= 10) {
-      final dia = f.substring(0, 10);
+    final dia = fechaNegocioHabana(v['fecha']);
+    if (dia.isNotEmpty) {
       if (dia.compareTo(desdeIso) >= 0 &&
           dia.compareTo(hastaIso) <= 0) {
         out.add({
@@ -6097,13 +6072,13 @@ Future<double> gastosDe(String fechaIso) async {
   double t = 0;
   for (final g in await LocalDb.instance.allMirror('gastos')) {
     if ('${g['fecha'] ?? ''}'.length >= 10 &&
-        '${g['fecha']}'.substring(0, 10) == fechaIso) {
+        fechaNegocioHabana(g['fecha']) == fechaIso) {
       t += (g['monto'] as num?)?.toDouble() ?? 0;
     }
   }
   for (final g in await _gastosPendientes()) {
     if ('${g['fecha'] ?? ''}'.length >= 10 &&
-        '${g['fecha']}'.substring(0, 10) == fechaIso) {
+        fechaNegocioHabana(g['fecha']) == fechaIso) {
       t += (g['monto'] as num?)?.toDouble() ?? 0;
     }
   }
@@ -6117,7 +6092,7 @@ Future<double> gastosDe(String fechaIso) async {
 Future<double> gastosDelMes(String pref) async {
   double t = 0;
   for (final g in await LocalDb.instance.allMirror('gastos')) {
-    if ('${g['fecha'] ?? ''}'.startsWith(pref)) {
+    if (fechaNegocioHabana(g['fecha']).startsWith(pref)) {
       t += (g['monto'] as num?)?.toDouble() ?? 0;
     }
   }
@@ -6126,7 +6101,7 @@ Future<double> gastosDelMes(String pref) async {
   // «Neto del mes» se sobreestimaba en los gastos registrados
   // offline que aún no bajaron al espejo.
   for (final g in await _gastosPendientes()) {
-    if ('${g['fecha'] ?? ''}'.startsWith(pref)) {
+    if (fechaNegocioHabana(g['fecha']).startsWith(pref)) {
       t += (g['monto'] as num?)?.toDouble() ?? 0;
     }
   }
@@ -6263,10 +6238,21 @@ Future<String> registrarVentaSuplemento({
   if (!precioOficial.isFinite || precioOficial < 0) {
     throw Exception('Precio oficial inválido');
   }
-  // usdTasa NO se valida aquí a propósito: la casa la normaliza
-  // a 1.0 en el payload cuando no es usable (test
-  // «usd_tasa inválida se normaliza a 1.0»); D2-08 solo cierra
-  // el hueco de Infinity en esa normalización (abajo).
+  // usdTasa (1.23 AT-15, auditoría total de Argón, verificado
+  // contra el servidor): en ventas en USD el servidor EXIGE
+  // la tasa (sync.py la valida > 0 y la guarda en la fila: es
+  // el valor de conversión de la venta) — y el centinela 1.0
+  // de antes la superaba, dejando la venta valorada 1:1
+  // («30 USD» = «30 CUP») y el aviso al dueño con «tasa 1».
+  // Sin tasa válida NO se vende en USD, igual que ya hacía el
+  // payload de inscripción (lote 3). En CUP la tasa solo
+  // convierte el oficial de un suplemento del catálogo en USD
+  // y el servidor la tolera ausente: viaja si es válida y se
+  // omite si no (nunca más el 1.0 inventado).
+  if (moneda == 'USD' &&
+      (usdTasa == null || !usdTasa.isFinite || usdTasa <= 0)) {
+    throw Exception('Falta la tasa USD válida para la venta en USD');
+  }
   if (compradorTipo != 'cliente' && compradorTipo != 'externo') {
     throw Exception('comprador_tipo inválido');
   }
@@ -6295,9 +6281,12 @@ Future<String> registrarVentaSuplemento({
     'moneda': moneda, // explícita, nunca implícita
     // D2-08: isFinite exigido — Infinity pasaba el `> 0` y
     // viajaba como tasa; NaN ya caía a 1.0 (comparación falsa).
-    'usd_tasa': (usdTasa != null && usdTasa.isFinite && usdTasa > 0)
-        ? usdTasa
-        : 1.0,
+    // 1.23 AT-15: la tasa viaja solo si es válida; en USD la
+    // validación de arriba la garantiza (el servidor la
+    // exige), en CUP se omite si no hay una válida en vez de
+    // viajar el centinela 1.0.
+    if (usdTasa != null && usdTasa.isFinite && usdTasa > 0)
+      'usd_tasa': usdTasa,
     'comprador_tipo': compradorTipo,
     if (compradorTipo == 'cliente') 'cliente_id': clienteId,
     'comprador_nombre': compradorNombre,

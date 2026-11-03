@@ -75,6 +75,9 @@ void main() {
         cantidad: 3,
         precioOficial: 35.00,
         precioVenta: 35.00,
+        // 1.23 AT-15: la venta por defecto es USD y ya exige
+        // tasa válida (antes viajaba el centinela 1.0).
+        usdTasa: 400,
         compradorTipo: 'externo',
         compradorNombre: 'Cliente externo',
         nota: 'venta rápida',
@@ -97,7 +100,7 @@ void main() {
       expect(pay['precio_venta_centavos'], 3500);
       expect(pay['descuento_autorizado_centavos'], 0);
       expect(pay['moneda'], 'USD');
-      expect(pay['usd_tasa'], 1.0);
+      expect(pay['usd_tasa'], 400);
       expect(pay['comprador_tipo'], 'externo');
       expect(pay.containsKey('cliente_id'), isFalse);
       expect(pay['comprador_nombre'], 'Cliente externo');
@@ -119,6 +122,7 @@ void main() {
           cantidad: 2,
           precioOficial: 35.00,
           precioVenta: 30.00,
+          usdTasa: 400,
           compradorTipo: 'cliente',
           clienteId: 42,
           compradorNombre: 'Juan Pérez',
@@ -147,6 +151,8 @@ void main() {
           cantidad: 99, // stock = 10
           precioOficial: 35.00,
           precioVenta: 35.00,
+          // Con tasa válida para que el fallo sea el de stock.
+          usdTasa: 400,
           compradorTipo: 'externo',
           compradorNombre: 'Cliente externo',
         ),
@@ -211,18 +217,56 @@ void main() {
       expect(await _opsVenta(), isEmpty);
     });
 
-    test('usd_tasa inválida se normaliza a 1.0', () async {
+    // 1.23 AT-15: el centinela 1.0 desapareció. La moneda por
+    // defecto de registrarVentaSuplemento es USD y el servidor
+    // EXIGE la tasa para valorar la venta: sin una válida la
+    // venta se rechaza en la app y no se encola nada. (Antes
+    // este test fijaba «inválida se normaliza a 1.0»: ese 1.0
+    // dejaba la venta valorada 1:1 en el servidor.)
+    test('venta USD sin tasa válida se rechaza (AT-15)', () async {
+      await expectLater(
+        registrarVentaSuplemento(
+          suplementoId: 1,
+          cantidad: 1,
+          precioOficial: 35.00,
+          precioVenta: 35.00,
+          usdTasa: -5,
+          compradorTipo: 'externo',
+          compradorNombre: 'Cliente externo',
+        ),
+        throwsException,
+      );
+      expect(await _opsVenta(), isEmpty);
+    });
+
+    test('venta USD con tasa válida la incluye en el payload',
+        () async {
       await registrarVentaSuplemento(
         suplementoId: 1,
         cantidad: 1,
         precioOficial: 35.00,
         precioVenta: 35.00,
-        usdTasa: -5,
+        usdTasa: 400,
         compradorTipo: 'externo',
         compradorNombre: 'Cliente externo',
       );
       final pay = _payload((await _opsVenta()).first);
-      expect(pay['usd_tasa'], 1.0);
+      expect(pay['usd_tasa'], 400);
+    });
+
+    test('venta CUP sin tasa encola y NO viaja usd_tasa (AT-15)',
+        () async {
+      await registrarVentaSuplemento(
+        suplementoId: 1,
+        cantidad: 1,
+        precioOficial: 35.00,
+        precioVenta: 35.00,
+        moneda: 'CUP',
+        compradorTipo: 'externo',
+        compradorNombre: 'Cliente externo',
+      );
+      final pay = _payload((await _opsVenta()).first);
+      expect(pay.containsKey('usd_tasa'), isFalse);
     });
   });
 

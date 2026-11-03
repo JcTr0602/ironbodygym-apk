@@ -1255,6 +1255,43 @@ class LocalDb {
           // que onCreate (paridad garantizada, no SQL copiado).
           await _crearTablaEnviosTransferencia(db);
         }
+        // 1.23 AT-11 (auditoría total de Argón): los bloques
+        // v51–v59 corrían DESORDENADOS (54, 55, 56, 58, 59, 57,
+        // 53, 52, 51). Hoy son independientes e idempotentes y
+        // el desorden no rompe, pero es una mina para el próximo
+        // bloque que dependa de uno anterior. Reordenados en
+        // orden ascendente estricto, cuerpos intactos.
+        if (oldV < 51) {
+          // 10/25 (rendimiento Servicios): índice de fecha en
+          // servicio_ventas (misma expresión que onCreate).
+          try {
+            await db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_servicio_ventas_fecha ON servicio_ventas(substr(json_extract(data, '\$.fecha'), 1, 10))");
+          } catch (_) {
+            // JSON1 ausente o tabla aún no creada: no aborta el upgrade.
+          }
+        }
+        if (oldV < 52) {
+          // F4 (1.20): frecuencia de los recordatorios
+          // personalizados (ninguna|semanal|mensual).
+          try {
+            await db.execute(
+                "ALTER TABLE recordatorio_config ADD COLUMN frecuencia TEXT NOT NULL DEFAULT 'ninguna'");
+          } catch (_) {
+            // Tabla aún no creada en esta ruta de upgrade:
+            // _crearTablasBloque2Resto la crea ya con la
+            // columna cuando toque.
+          }
+        }
+        if (oldV < 53) {
+          // F9 (1.20): suplente de turno en la tabla local.
+          try {
+            await db.execute(
+                'ALTER TABLE turnos ADD COLUMN cubre_a TEXT');
+          } catch (_) {
+            // La tabla se crea con la columna cuando toque.
+          }
+        }
         if (oldV < 54) {
           // F5 (1.20): espejo de ajustes de stock (mismo
           // método que onCreate).
@@ -1271,6 +1308,11 @@ class LocalDb {
           // onCreate).
           await _crearTablasNominaT22(db);
         }
+        if (oldV < 57) {
+          // T5 (1.20): espejo de expedientes de diferencia
+          // de caja (mismo método que onCreate).
+          await _crearTablaDiferenciasCaja(db);
+        }
         if (oldV < 58) {
           // 1.21 (Argón 121B): la bitácora agrupa tormentas y
           // exporta por delta: firma del evento normalizado,
@@ -1285,42 +1327,6 @@ class LocalDb {
           // subida de comprobantes (tope con paso a 'error').
           await _addColumnIfMissing(db, 'comprobantes_pago',
               'intentos', 'INTEGER NOT NULL DEFAULT 0');
-        }
-        if (oldV < 57) {
-          // T5 (1.20): espejo de expedientes de diferencia
-          // de caja (mismo método que onCreate).
-          await _crearTablaDiferenciasCaja(db);
-        }
-        if (oldV < 53) {
-          // F9 (1.20): suplente de turno en la tabla local.
-          try {
-            await db.execute(
-                'ALTER TABLE turnos ADD COLUMN cubre_a TEXT');
-          } catch (_) {
-            // La tabla se crea con la columna cuando toque.
-          }
-        }
-        if (oldV < 52) {
-          // F4 (1.20): frecuencia de los recordatorios
-          // personalizados (ninguna|semanal|mensual).
-          try {
-            await db.execute(
-                "ALTER TABLE recordatorio_config ADD COLUMN frecuencia TEXT NOT NULL DEFAULT 'ninguna'");
-          } catch (_) {
-            // Tabla aún no creada en esta ruta de upgrade:
-            // _crearTablasBloque2Resto la crea ya con la
-            // columna cuando toque.
-          }
-        }
-        if (oldV < 51) {
-          // 10/25 (rendimiento Servicios): índice de fecha en
-          // servicio_ventas (misma expresión que onCreate).
-          try {
-            await db.execute(
-                "CREATE INDEX IF NOT EXISTS idx_servicio_ventas_fecha ON servicio_ventas(substr(json_extract(data, '\$.fecha'), 1, 10))");
-          } catch (_) {
-            // JSON1 ausente o tabla aún no creada: no aborta el upgrade.
-          }
         }
       },
     );
@@ -1400,12 +1406,6 @@ class LocalDb {
     return int.tryParse(v.toString().trim());
   }
 
-  /// La columna `fecha` solo se indexa si empieza con YYYY-MM-DD
-  /// (el formato que usan los filtros); el resto queda en NULL y se
-  /// cuenta como anómala en el backfill.
-  static bool _fechaCortaValida(String f) =>
-      RegExp(r'^\d{4}-\d{2}-\d{2}').hasMatch(f);
-
   /// v1.3.4 (ítem 2): extrae las columnas indexadas del espejo `pagos`
   /// desde el Map ya decodificado en Dart, sin depender del módulo
   /// JSON1 del teléfono. Se usa en los dos caminos de escritura
@@ -1422,10 +1422,14 @@ class LocalDb {
   static Map<String, Object?> columnasPagos(Map<String, dynamic> data) {
     final f = data['fecha'];
     final fs = f is String ? f.trim() : null;
+    // 1.23 AT-07: la columna guarda la fecha de NEGOCIO
+    // (Habana) vía fechaNegocioHabana: un timestamp UTC con
+    // zona de madrugada ('2026-11-01T02:30Z') es 31-oct en
+    // Cuba y su columna debe decir 2026-10-31; antes el corte
+    // crudo substring(0, 10) lo indexaba en noviembre.
+    final fechaNeg = fs == null ? '' : fechaNegocioHabana(fs);
     return {
-      'fecha': (fs != null && fs.length >= 10 && _fechaCortaValida(fs))
-          ? fs.substring(0, 10)
-          : null,
+      'fecha': fechaNeg.isNotEmpty ? fechaNeg : null,
       'cliente_id': normalizarTelegramId(data['cliente_id']),
       'telegram_user_id': normalizarTelegramId(data['telegram_user_id']),
       'metodo': data['metodo'] is String ? data['metodo'] as String : null,
@@ -1463,6 +1467,21 @@ class LocalDb {
   static Map<String, Object?> columnasMoneda(Map<String, dynamic> data) {
     return {'moneda': monedaDe(data)};
   }
+
+  /// Sentencia del batch del pull para la tabla suplementos
+  /// (v1.3.1 B2; constante única desde 1.23 AT-06): UPSERT que
+  /// actualiza SOLO las columnas remotas (data, sync_seq,
+  /// moneda) y PRESERVA las columnas locales — en particular
+  /// `ultimo_precio`, que un INSERT OR REPLACE pisaría al
+  /// recrear la fila. Un solo punto de verdad: la usa el commit
+  /// por página del pull en sync.dart y la ejerce tal cual el
+  /// test comportamental de AT-06 (ya no es un pin de texto).
+  /// Parámetros: (id, dataJson, sync_seq, moneda).
+  static const String sqlUpsertSuplementoPull =
+      'INSERT INTO suplementos (id, data, sync_seq, moneda) '
+      'VALUES (?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET '
+      'data=excluded.data, sync_seq=excluded.sync_seq, '
+      'moneda=excluded.moneda';
 
   /// v1.4.6 (v35): rellena la columna `moneda` de las filas ya
   /// existentes de [tabla] desde su JSON (migración v35). Las filas
@@ -4376,7 +4395,7 @@ class LocalDb {
         'fecha',
         'fecha LIKE ?',
         '$fechaPrefijo%',
-        (p) => '${p['fecha'] ?? ''}'.startsWith(fechaPrefijo),
+        (p) => fechaNegocioHabana(p['fecha']).startsWith(fechaPrefijo),
       ));
     }
     if (fechaDesde != null) {
@@ -4384,11 +4403,8 @@ class LocalDb {
         'fecha',
         'fecha >= ?',
         fechaDesde,
-        (p) {
-          final f = '${p['fecha'] ?? ''}';
-          return f.length >= 10 &&
-              f.substring(0, 10).compareTo(fechaDesde) >= 0;
-        },
+        (p) =>
+            fechaNegocioHabana(p['fecha']).compareTo(fechaDesde) >= 0,
       ));
     }
     // Sin filtros no hay nada que indexar: full scan como antes.
@@ -4455,7 +4471,7 @@ class LocalDb {
     for (final r in nulos) {
       try {
         final p = jsonDecode(r['data'] as String) as Map<String, dynamic>;
-        if ('${p['fecha'] ?? ''}'.startsWith(pref)) {
+        if (fechaNegocioHabana(p['fecha']).startsWith(pref)) {
           res.add({...p, 'id': r['id']});
         }
       } catch (_) {}
@@ -4493,8 +4509,7 @@ class LocalDb {
     for (final r in nulos) {
       try {
         final p = jsonDecode(r['data'] as String) as Map<String, dynamic>;
-        final f = '${p['fecha'] ?? ''}';
-        if (f.length >= 10 && f.substring(0, 10) == fechaIso) {
+        if (fechaNegocioHabana(p['fecha']) == fechaIso) {
           res.add({...p, 'id': r['id']});
         }
       } catch (_) {}
@@ -4524,11 +4539,10 @@ class LocalDb {
     for (final r in nulos) {
       try {
         final p = jsonDecode(r['data'] as String) as Map<String, dynamic>;
-        // Misma semántica que fechaCorta(p['fecha'], 10) + compareTo
-        // (negocio.dart): primeros 10 chars o el string completo.
-        final s = '${p['fecha'] ?? ''}';
-        final f = s.length >= 10 ? s.substring(0, 10) : s;
-        if (f.compareTo(desdeIso) >= 0) {
+        // 1.23 AT-07: comparación por la fecha de negocio
+        // (Habana) en vez del corte crudo de fechaCorta.
+        final f = fechaNegocioHabana(p['fecha']);
+        if (f.isNotEmpty && f.compareTo(desdeIso) >= 0) {
           res.add({...p, 'id': r['id']});
         }
       } catch (_) {}
@@ -4682,10 +4696,10 @@ class LocalDb {
     for (final r in nulos) {
       try {
         final p = jsonDecode(r['data'] as String) as Map<String, dynamic>;
-        final f = '${p['fecha'] ?? ''}';
+        final dia = fechaNegocioHabana(p['fecha']);
         final tid = normalizarTelegramId(p['telegram_user_id']);
-        if (f.length < 10 || tid == null) continue;
-        if (pares.contains('${f.substring(0, 10)}|$tid')) {
+        if (dia.isEmpty || tid == null) continue;
+        if (pares.contains('$dia|$tid')) {
           res.add({...p, 'id': r['id']});
         }
       } catch (_) {}
@@ -4721,7 +4735,7 @@ class LocalDb {
       try {
         final p = jsonDecode(r['data'] as String) as Map<String, dynamic>;
         if (normalizarTelegramId(p['telegram_user_id']) == telegramId &&
-            '${p['fecha'] ?? ''}'.startsWith(prefijoMes)) {
+            fechaNegocioHabana(p['fecha']).startsWith(prefijoMes)) {
           res.add({...p, 'id': r['id']});
         }
       } catch (_) {}
@@ -4758,9 +4772,8 @@ class LocalDb {
         if (normalizarTelegramId(p['telegram_user_id']) != telegramId) {
           continue;
         }
-        final f = '${p['fecha'] ?? ''}';
-        if (f.length < 10) continue;
-        final dia = f.substring(0, 10);
+        final dia = fechaNegocioHabana(p['fecha']);
+        if (dia.isEmpty) continue;
         if (dia.compareTo(desde) >= 0 && dia.compareTo(hasta) <= 0) {
           res.add({...p, 'id': r['id']});
         }
@@ -4853,8 +4866,7 @@ class LocalDb {
     for (final r in nulos) {
       try {
         final p = jsonDecode(r['data'] as String) as Map<String, dynamic>;
-        final f = '${p['fecha'] ?? ''}';
-        if (f.length < 10 || f.substring(0, 10) != fecha) continue;
+        if (fechaNegocioHabana(p['fecha']) != fecha) continue;
         if (p['metodo'] != metodo) continue;
         if (telegramId != null &&
             normalizarTelegramId(p['telegram_user_id']) != telegramId) {
@@ -5025,9 +5037,10 @@ class LocalDb {
       for (final r in nulos) {
         try {
           final m = jsonDecode(r['data'] as String) as Map<String, dynamic>;
-          final f = '${m[campoFecha] ?? ''}';
-          final dia = f.length >= 10 ? f.substring(0, 10) : f;
-          if (dia.compareTo(desde) >= 0 && dia.compareTo(hasta) <= 0) {
+          final dia = fechaNegocioHabana(m[campoFecha]);
+          if (dia.isNotEmpty &&
+              dia.compareTo(desde) >= 0 &&
+              dia.compareTo(hasta) <= 0) {
             res.add({...m, 'id': r['id']});
           }
         } catch (_) {}
@@ -5050,9 +5063,10 @@ class LocalDb {
     } catch (_) {
       final todos = await allMirror(tabla);
       return todos.where((m) {
-        final f = '${m[campoFecha] ?? ''}';
-        final dia = f.length >= 10 ? f.substring(0, 10) : f;
-        return dia.compareTo(desde) >= 0 && dia.compareTo(hasta) <= 0;
+        final dia = fechaNegocioHabana(m[campoFecha]);
+        return dia.isNotEmpty &&
+            dia.compareTo(desde) >= 0 &&
+            dia.compareTo(hasta) <= 0;
       }).toList();
     }
   }
@@ -5663,7 +5677,22 @@ class LocalDb {
     ]) {
       try {
         n += await d.delete(t);
-        await d.delete('meta', where: 'k = ?', whereArgs: ['wm_$t']);
+        // 1.23 AT-05 (auditoría total de Argón): la purga
+        // dejaba vivas las marcas de la tabla. Tres correcciones:
+        // (1) wm_<t> se pone a '0' con INSERT OR REPLACE — como
+        // wm_gastos arriba — y NO se borra la fila: sin fila,
+        // getWatermarkTabla hereda el watermark global heredado
+        // y el pull puede creerse la tabla ya bajada (SB-01).
+        // (2) Las marcas wm_<t>_sin_permiso y wm_<t>_ausente
+        // también se limpian: si quedan en '1', al volver el
+        // dueño el pull se salta la tabla por «sin permiso» o
+        // «ausente» y los datos del dueño nunca regresan a este
+        // teléfono.
+        await d.insert('meta', {'k': 'wm_$t', 'v': '0'},
+            conflictAlgorithm: ConflictAlgorithm.replace);
+        await d.delete('meta',
+            where: 'k IN (?, ?)',
+            whereArgs: ['wm_${t}_sin_permiso', 'wm_${t}_ausente']);
       } catch (_) {}
     }
     // A-02: los ARCHIVOS de comprobantes (documents/comprobantes/)
@@ -7292,9 +7321,19 @@ class LocalDb {
     } else {
       estado = 'necesita_revision';
     }
+    // 1.23 AT-10 (auditoría total de Argón): al fallar un
+    // intento se BORRA el resultado_servidor guardado: era del
+    // intento anterior y ya no describe a la op. Sin esto, una
+    // op pausada (ACCESO_PAUSADO en su resultado) que luego
+    // fallaba de verdad quedaba en 'error' CON el código viejo
+    // dentro, y despertarOpsPausadas le limpiaba el backoff
+    // legítimo al caer el candado, reintentándola al momento.
+    // La resolución de ids (clienteDeOp) cae a su GET de
+    // respaldo cuando no hay caché, como está diseñada.
     await d.rawUpdate(
         'UPDATE ops_queue SET intentos=?, estado=?, error=?, '
-        'codigo_error=?, proximo_reintento=? WHERE op_uuid=?',
+        'codigo_error=?, proximo_reintento=?, '
+        'resultado_servidor=NULL WHERE op_uuid=?',
         [intentos, estado, error.toString(), ec.codigo, proximo, opUuid]);
     return ec.codigo;
   }

@@ -10,6 +10,7 @@ library;
 
 import 'package:flutter/material.dart';
 
+import '../auth.dart';
 import '../cliente_protegido.dart';
 import '../localdb.dart';
 import '../negocio.dart';
@@ -91,6 +92,7 @@ class CuentasCasaScreen extends StatefulWidget {
 
 class _CuentasCasaScreenState extends State<CuentasCasaScreen> {
   var _cargando = true;
+  var _sinAcceso = false;
   List<Map<String, dynamic>> _casas = [];
 
   @override
@@ -100,9 +102,25 @@ class _CuentasCasaScreenState extends State<CuentasCasaScreen> {
   }
 
   Future<void> _cargar() async {
+    // 1.23 AT-02 (auditoría total de Argón): la Casa la otorga
+    // y la quita SOLO el dueño, pero esta lista no tenía
+    // guarda: un entrenador que alcanzara la ruta veía la
+    // lista completa de cuentas a la Casa. Guarda en la carga
+    // + pantalla de bloqueo + filtro de protegidos (la lista
+    // tampoco debe mostrar clientes protegidos a un no-dueño
+    // si algún día la guarda cambia).
+    if (!AuthService().isOwner) {
+      if (!mounted) return;
+      setState(() {
+        _sinAcceso = true;
+        _cargando = false;
+      });
+      return;
+    }
     final todos = await LocalDb.instance.allMirror('clientes');
     final casas = todos
         .where((c) => c['cuenta_casa'] == 1 || c['cuenta_casa'] == true)
+        .where((c) => !esVistaProtegida(c))
         .toList();
     if (!mounted) return;
     setState(() {
@@ -113,6 +131,21 @@ class _CuentasCasaScreenState extends State<CuentasCasaScreen> {
 
   @override
   Widget build(BuildContext context) {
+    if (_sinAcceso) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Cuentas a la Casa')),
+        body: const Center(
+          child: Padding(
+            padding: EdgeInsets.all(24),
+            child: Text(
+              'Solo el dueño puede ver las cuentas a la Casa.',
+              style: AppTexto.secundario,
+              textAlign: TextAlign.center,
+            ),
+          ),
+        ),
+      );
+    }
     return Scaffold(
       appBar: AppBar(title: const Text('Cuentas a la Casa')),
       body: _cargando

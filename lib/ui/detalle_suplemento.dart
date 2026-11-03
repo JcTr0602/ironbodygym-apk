@@ -54,7 +54,11 @@ Future<bool> ventaRapidaSuplemento(
   if (!context.mounted) return false;
   final res = await showDialog<bool>(
     context: context,
-    builder: (ctx) => _DialogoVentaRapida(sup: s, stock: stock),
+    // 1.23 AT-15: la tasa que los llamadores ya pasaban se
+    // perdía aquí y la venta rápida en USD viajaba sin ella
+    // (el servidor la exige para valorar la venta).
+    builder: (ctx) =>
+        _DialogoVentaRapida(sup: s, stock: stock, tasaUsd: tasaUsd),
   );
   return res == true;
 }
@@ -67,8 +71,11 @@ Future<bool> ventaRapidaSuplemento(
 class _DialogoVentaRapida extends StatefulWidget {
   final Map<String, dynamic> sup;
   final int stock;
+  // 1.23 AT-15: tasa del día para valorar la venta en USD.
+  final double? tasaUsd;
 
-  const _DialogoVentaRapida({required this.sup, required this.stock});
+  const _DialogoVentaRapida(
+      {required this.sup, required this.stock, this.tasaUsd});
 
   @override
   State<_DialogoVentaRapida> createState() =>
@@ -230,6 +237,10 @@ class _DialogoVentaRapidaState extends State<_DialogoVentaRapida> {
         precioOficial: _precioOficial,
         precioVenta: _precioVenta!,
         moneda: _monedaSup,
+        // 1.23 AT-15: sin esto, la venta rápida en USD caía al
+        // centinela 1.0 (registrarVentaSuplemento ahora la
+        // exige y lanza si falta: el catch de abajo lo muestra).
+        usdTasa: widget.tasaUsd,
         compradorTipo: _conCliente ? 'cliente' : 'externo',
         clienteId: _clienteId,
         compradorNombre:

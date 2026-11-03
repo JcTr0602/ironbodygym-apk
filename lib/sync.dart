@@ -2556,10 +2556,12 @@ class SyncEngine {
   }
 
   /// Cliente protegido (2026-10-26, A4 Argón): si hay un pull
-  /// pendiente por un rechazo CLIENTE_PROTEGIDO, lo ejecuta ahora
-  /// (silencioso, dentro del lock del ciclo en curso: _doPull nunca
-  /// adquiere el lock, así que no hay auto-bloqueo). Solo corre
-  /// cuando hubo un rechazo real, así que el costo es despreciable.
+  /// pendiente por un rechazo que exige refrescar el espejo
+  /// (CLIENTE_PROTEGIDO, o 1.23 AT-04: mutación rechazada sobre
+  /// un cliente existente), lo ejecuta ahora (silencioso, dentro
+  /// del lock del ciclo en curso: _doPull nunca adquiere el lock,
+  /// así que no hay auto-bloqueo). Solo corre cuando hubo un
+  /// rechazo real, así que el costo es despreciable.
   Future<void> _pullSiProtegidoPendiente() async {
     if (!_pullProtegidoPendiente) return;
     _pullProtegidoPendiente = false;
@@ -2632,6 +2634,23 @@ class SyncEngine {
       final motivo = motivoRechazo(rec.resultado, rec.error) ?? '';
       if (motivo.contains('CLIENTE_PROTEGIDO') ||
           (rec.error ?? '').contains('CLIENTE_PROTEGIDO')) {
+        _pullProtegidoPendiente = true;
+      }
+      // 1.23 AT-04 (auditoría total de Argón): el rechazo de
+      // una MUTACIÓN sobre un cliente EXISTENTE (fila id > 0)
+      // no revertía el cambio optimista: limpiarOptimista solo
+      // borra filas temporales (id < 0), así que un pago_mensual
+      // rechazado dejaba el pagado_hasta falso pegado hasta que
+      // el servidor tocara esa fila por otro motivo. Para estos
+      // tipos, el mismo pull silencioso de fin de ciclo pisa el
+      // espejo con la verdad del servidor.
+      if (const {
+        'pago_mensual',
+        'cambiar_estado',
+        'editar_cliente',
+        'update_cliente_sensible',
+        'regalar_mes_cumpleanos',
+      }.contains('${op['tipo']}')) {
         _pullProtegidoPendiente = true;
       }
       if (op['tipo'] == 'reponer_lote') {
@@ -3990,9 +4009,7 @@ class SyncEngine {
                         jsonDecode(op['dataJson'] as String)
                             as Map<String, dynamic>);
                   } catch (_) {}
-                  batch.rawInsert(
-                      'INSERT INTO suplementos (id, data, sync_seq, moneda) VALUES (?, ?, ?, ?)'
-                      ' ON CONFLICT(id) DO UPDATE SET data=excluded.data, sync_seq=excluded.sync_seq, moneda=excluded.moneda',
+                  batch.rawInsert(LocalDb.sqlUpsertSuplementoPull,
                       [op['id'], op['dataJson'], op['seq'], monedaOp]);
                 } else {
                   // v1.3.4 (ítem 2): para 'pagos' incluye las 4 columnas

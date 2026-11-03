@@ -148,7 +148,14 @@ class _PestanaProgresoState extends State<PestanaProgreso> {
               'muslo_cm': m['muslo_cm'],
               'notas': null,
               'registrado_por': '',
-              'created_at': r['fecha_medicion'],
+              // 1.23 AT-03: created_at = el instante real de
+              // creación (creada_ts de la op / created_at del
+              // espejo) si viene; la fecha plana solo como
+              // último recurso de filas viejas sin instante.
+              'created_at':
+                  ('${r['creado_en'] ?? ''}'.isNotEmpty)
+                      ? r['creado_en']
+                      : r['fecha_medicion'],
             });
           }).toList();
           _cargando = false;
@@ -305,10 +312,16 @@ class _PestanaProgresoState extends State<PestanaProgreso> {
   }
 
   Widget _buildMedicionCard(Medicion m) {
+    // 1.23 AT-03: la ventana de 24 h se mide entre INSTANTES
+    // (ahora UTC real contra el created_at llevado a UTC):
+    // con DateTime.now() del dispositivo y un created_at
+    // reconstruido desde la fecha plana, la ventana se cerraba
+    // horas antes de tiempo (o se abría de más, según la zona
+    // del teléfono).
     final puedeEditar = AuthService().isOwner ||
         (PermisosEntrenador().canRecordMeasurements &&
-            DateTime.now()
-                    .difference(m.createdAt)
+            ahoraUtcReal()
+                    .difference(m.createdAt.toUtc())
                     .inHours <
                 24);
 

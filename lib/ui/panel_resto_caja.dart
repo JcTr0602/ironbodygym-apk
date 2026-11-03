@@ -17,15 +17,13 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 
-import '../adelantos.dart';
 import '../auth.dart';
 import '../bloque2_resto.dart';
 import '../invitados.dart' as invitados_svc;
 import '../localdb.dart';
 import '../negocio.dart';
-import '../nomina_bonos.dart';
 import '../nomina_calc.dart';
-import '../perfil.dart';
+import '../nomina_foto.dart';
 import '../plus_reportes.dart';
 import '../tiempo.dart';
 import 'componentes.dart';
@@ -404,19 +402,30 @@ class _NominaPrecalculadaScreenState extends State<NominaPrecalculadaScreen> {
     if (!AuthService().isOwner) return;
     final mes = mesHabanaActual();
     try {
+      // 1.23 AT-08 (auditoría total de Argón): TODOS los
+      // componentes salen de la FOTO compartida del mes
+      // (fotoNominaMes, la misma que consume la pantalla de
+      // Nómina): tarifa, comisiones por dosis acumuladas por
+      // clave con TODOS sus telegram_id, y el libro de
+      // adelantos con las fotos de los meses liquidados ya
+      // aplicadas (aplicarFotosLibro). Esta pantalla armaba el
+      // libro por su cuenta — sin fotos de liquidación y con
+      // una sola id por entrenador — y divergía de Nómina en
+      // cuanto cambiaba la tarifa tras liquidar un mes.
+      final foto = await fotoNominaMes(mes);
       // P2#10: base GLOBAL, no agrupada por quién cobró. Es la
       // misma definición que la pantalla de Nómina: clientes
       // únicos que pagaron el mes (NominaCalc, ya excluye Casa y
-      // el vencido-dentro-del-mes) × tarifa configurable.
+      // el vencido-dentro-del-mes) × tarifa configurable. La
+      // foto no incluye el conteo por diseño: se lee de la
+      // definición única, como hace la pantalla.
       final pagaron =
           await NominaCalc.clientesQuePagaronElMes(mes);
-      final tarifa =
-          (await PerfilService.instance.getPagoEntrenador())
-              .toDouble();
+      final tarifa = foto.tarifa.toDouble();
       final baseGlobal = pagaron * tarifa;
-      final bonos = await BonosNominaService.instance.leerBonos(mes);
-      final ventasServ =
-          await LocalDb.instance.allMirror('servicio_ventas');
+      // Bonos por el MISMO camino que la pantalla (con la
+      // migración legada de prefs aplicada).
+      final bonos = await leerBonosMesConMigracion(mes);
       // Entrenadores desde usuarios_apk (rol != admin); si el meta
       // falta, respaldo con los cobradores del mes sin el dueño.
       final personas = <Map<String, dynamic>>[];
@@ -459,64 +468,31 @@ class _NominaPrecalculadaScreenState extends State<NominaPrecalculadaScreen> {
       for (final persona in personas) {
         final username = persona['username'] as String;
         final tid = persona['tid'] as int?;
-        final id = persona['id'] as String;
-        final bono = username.isEmpty
+        // 1.23 AT-08: bono, comisión y libro salen de la FOTO
+        // compartida, por la CLAVE canónica de la persona (la
+        // clave resuelve por username y, en el respaldo sin
+        // username, por nombre — mismo criterio que la foto y
+        // que la pantalla de Nómina al repartir los bonos).
+        // La comisión de la foto acumula TODOS los telegram_id
+        // de la clave y el libro ya trae aplicarFotosLibro:
+        // un mes liquidado manda por su foto, no por la tarifa
+        // viva. Sin clave (persona del respaldo por cobros que
+        // no resuelve), los componentes quedan en 0 como
+        // degradación visible, no con un libro paralelo.
+        final claveFoto =
+            NominaCalc.claveEntrenador(username) ??
+                NominaCalc.claveEntrenador(
+                    '${persona['nombre'] ?? ''}');
+        final bono = claveFoto == null
             ? NominaCalc.bonoSoloAmbos(bonos)
-            : NominaCalc.bonosPara(bonos, username);
-        final comision = tid == null
+            : NominaCalc.bonosPara(bonos, claveFoto);
+        final comision = claveFoto == null
             ? 0.0
-            : NominaCalc.comisionDosisDesdeVentas(
-                    ventasServ, tid, mes)
-                .total;
-        // Libro corrido de adelantos hasta este mes (igual que la
-        // pantalla de Nómina): adelantos del mes y deuda entrante.
-        var adelantosMes = 0.0;
-        var deudaEntrante = 0.0;
-        try {
-          final eventos = await AdelantosService.instance
-              .eventosDe(id, telegramId: tid);
-          var primero = mes;
-          for (final ev in eventos) {
-            final mm = '${ev['mes_nomina'] ?? ''}';
-            if (mm.length == 7 && mm.compareTo(primero) < 0) {
-              primero = mm;
-            }
-          }
-          final brutoPorMes = <String, double>{};
-          var m = primero;
-          while (m.compareTo(mes) <= 0) {
-            brutoPorMes[m] =
-                (await NominaCalc.clientesQuePagaronElMes(m)) *
-                    tarifa;
-            m = mesSiguiente(m);
-          }
-          final libro = libroAdelantos(
-            eventos: eventos,
-            brutoPorMes: brutoPorMes,
-            comisionesPorMes: tid == null
-                ? {mes: comision}
-                : NominaCalc.comisionesPorMesDesdeVentas(
-                    ventasServ, tid, primero, mes),
-            // Pasada 2 de Argón (1.20): faltaba — sin los bonos
-            // en la capacidad del mes, el precálculo mostraba
-            // una deuda entrante que la pantalla de Nómina no
-            // muestra (los bonos cubren el exceso de adelantos).
-            // Argón Dinero #8: bonosPorMes casa por CLAVE
-            // canónica; el username crudo no resolvía y los
-            // bonos desaparecían del precálculo en silencio.
-            bonosPorMes: await BonosNominaService.instance
-                .bonosPorMes(
-                    NominaCalc.claveEntrenador(username) ?? username,
-                    primero, mes),
-            hastaMes: mes,
-          );
-          for (final filaLibro in libro) {
-            if (filaLibro.mes == mes) {
-              adelantosMes = filaLibro.adelantos;
-              deudaEntrante = filaLibro.deudaEntrante;
-            }
-          }
-        } catch (_) {}
+            : (foto.comisionDosis[claveFoto]?.total ?? 0.0);
+        final libroFoto =
+            claveFoto == null ? null : foto.libroMes[claveFoto];
+        final adelantosMes = libroFoto?.adelantos ?? 0.0;
+        final deudaEntrante = libroFoto?.deudaEntrante ?? 0.0;
         final neto = NominaCalc.totalVivo(
           base: baseGlobal,
           bono: bono,

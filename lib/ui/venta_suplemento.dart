@@ -289,15 +289,21 @@ class _VentaSuplementoScreenState
           cancelar: '');
       return;
     }
-    // v1.3.4 (pedido Jc 2026-10-16): en USD la tasa es irrelevante — el
-    // campo se oculta y no se envía (se normaliza a 1.0 en el payload).
-    // Solo en CUP es obligatoria.
-    final tasa = _moneda == 'CUP' ? _tasaUsd : null;
-    if (_moneda == 'CUP' && (tasa == null || tasa <= 0)) {
+    // 1.23 AT-15: la tasa viaja siempre que haya una válida.
+    // En CUP convierte el oficial; en USD el servidor la
+    // EXIGE para valorar la venta (con el centinela 1.0 de
+    // antes, una venta de 30 USD quedaba valorada a 30 CUP y
+    // el aviso al dueño decía «tasa 1»). El campo sigue oculto
+    // en USD (pedido de Jc 2026-10-16): el valor es la tasa
+    // del día precargada desde Admin; sin ella no se vende.
+    final tasa = _tasaUsd;
+    if (tasa == null || tasa <= 0 || !tasa.isFinite) {
       await DialogoApp.confirmar(context,
           titulo: 'Revisa la valoración',
-          mensaje:
-              'Indica a cuántos CUP equivale 1 USD para esta venta.',
+          mensaje: _moneda == 'CUP'
+              ? 'Indica a cuántos CUP equivale 1 USD para esta venta.'
+              : 'Falta la tasa del día para valorar la venta en '
+                  'USD. Jc la configura en Admin (tasa USD).',
           aceptar: 'Entendido',
           cancelar: '');
       return;

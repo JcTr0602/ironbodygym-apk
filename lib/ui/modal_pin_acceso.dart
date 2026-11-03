@@ -9,25 +9,24 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../negocio.dart' show normalizarTelefonoWaMe;
 import 'diseno.dart';
 import 'componentes.dart';
 
-/// Sanitiza el teléfono para wa.me (regla de Argón):
-/// - Limpia no-numéricos.
-/// - 8 dígitos → antepone 53.
-/// - 10 dígitos empezando con 53 → tal cual.
-/// - Otro caso → null (teléfono inválido para WhatsApp).
-String? sanitizarParaWaMe(String telefono) {
-  final limpio = telefono.replaceAll(RegExp(r'[^0-9]'), '');
-  if (limpio.length == 8) return '53$limpio';
-  if (limpio.length == 10 && limpio.startsWith('53')) return limpio;
-  return null;
-}
-
 /// Muestra el modal del PIN. barrierDismissible: false.
+/// 1.23 AT-01 (auditoría total de Argón): el teléfono se
+/// normaliza con la función ÚNICA del proyecto
+/// (normalizarTelefonoWaMe: exige móvil cubano 5/6, '' si no
+/// vale) — el sanitizador propio que vivía aquí era laxo (no
+/// exigía 5/6) y el mensaje imprimía el teléfono CRUDO, con el
+/// prefijo o los separadores que trajera la ficha.
 void mostrarModalPin(
     BuildContext context, String pin, String telefono, String nombre) {
-  final telWa = sanitizarParaWaMe(telefono);
+  final telWa = normalizarTelefonoWaMe(telefono);
+  // Los 8 dígitos limpios que el cliente teclea en la app.
+  final tel8 = telWa.length >= 8
+      ? telWa.substring(telWa.length - 8)
+      : telefono.replaceAll(RegExp(r'[^0-9]'), '');
   showDialog(
     context: context,
     barrierDismissible: false,
@@ -67,13 +66,13 @@ void mostrarModalPin(
           icon: const Icon(Icons.chat_rounded, size: 18),
           label: const Text('WhatsApp'),
           onPressed: () {
-            if (telWa == null) {
+            if (telWa.isEmpty) {
               mostrarSnack(ctx, 'Teléfono inválido para WhatsApp ("$telefono"). Usa Copiar PIN.', significado: SignificadoChip.alerta);
               return;
             }
             final mensaje =
                 'Hola $nombre, tu acceso a Iron Body App:\n'
-                'Teléfono: $telefono\n'
+                'Teléfono: $tel8\n'
                 'PIN: $pin\n'
                 'Descarga la app y entra con estos datos.';
             final url = Uri.parse(
