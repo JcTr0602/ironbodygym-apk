@@ -118,6 +118,40 @@ class MainActivity : FlutterActivity() {
                     }
                     result.success(null)
                 }
+                // 1.22 R-9: banner de la pantalla de
+                // recordatorios cuando el permiso está
+                // denegado: llevar al usuario a los Ajustes
+                // de notificaciones de ESTA app.
+                "abrirAjustesNotificaciones" -> {
+                    try {
+                        val intento = Intent(
+                            android.provider.Settings
+                                .ACTION_APP_NOTIFICATION_SETTINGS
+                        ).apply {
+                            putExtra(
+                                android.provider.Settings
+                                    .EXTRA_APP_PACKAGE, packageName)
+                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        }
+                        startActivity(intento)
+                        result.success(true)
+                    } catch (e: Exception) {
+                        try {
+                            val respaldo = Intent(
+                                android.provider.Settings
+                                    .ACTION_APPLICATION_DETAILS_SETTINGS
+                            ).apply {
+                                data = Uri.fromParts(
+                                    "package", packageName, null)
+                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            }
+                            startActivity(respaldo)
+                            result.success(true)
+                        } catch (e2: Exception) {
+                            result.success(false)
+                        }
+                    }
+                }
                 else -> result.notImplemented()
             }
         }

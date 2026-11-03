@@ -48,6 +48,14 @@ class RecordatorioDebido {
   final String? clienteNombre;
   final bool yaDisparado;
   final bool puedoDisparar;
+
+  /// 1.22 R-2: el día Habana para el que se calculó este
+  /// debido. disparar/cancelar usan ESTA fecha y no un «hoy»
+  /// recalculado al tocar: con la pantalla abierta cruzando
+  /// la medianoche, el disparo se asentaba en el día nuevo y
+  /// el debido de ayer quedaba «sin disparar» (y al revés, un
+  /// disparo podía contar para el día equivocado).
+  final String fechaHabana;
   const RecordatorioDebido({
     required this.recordatorioId,
     required this.titulo,
@@ -58,7 +66,22 @@ class RecordatorioDebido {
     this.clienteNombre,
     required this.yaDisparado,
     required this.puedoDisparar,
+    required this.fechaHabana,
   });
+}
+
+/// 1.22 R-7: gancho que main.dart conecta con
+/// AvisosRecordatorios.sincronizar (ese archivo importa este;
+/// el gancho evita el import circular). Las mutaciones de
+/// recordatorios lo invocan: antes sincronizar solo corría al
+/// arrancar y tras un sync, así que pausar un recordatorio a
+/// las 07:50 NO cancelaba su alarma de las 08:00.
+Future<void> Function()? ganchoSincronizarAvisos;
+
+void _sincronizarAvisos() {
+  final g = ganchoSincronizarAvisos;
+  if (g == null) return;
+  unawaited(g().then((_) {}, onError: (_) {}));
 }
 
 /// Estado de un debido POR CLIENTE (Argón #10-1, PURO).
@@ -99,7 +122,11 @@ bool recordatorioPersonalizadoTocaHoy(
   final dH = DateTime.tryParse(hoyIso);
   if (dF == null || dH == null) return false;
   if (frec == 'semanal') return dF.weekday == dH.weekday;
-  final ultimoDia = DateTime(dH.year, dH.month + 1, 0).day;
+  // 1.22 R-3: DateTime.utc — el último día del mes en hora
+  // LOCAL puede caer corrido en los días de cambio DST (Cuba
+  // cambia a las 00:00/01:00 y un DateTime local de medianoche
+  // puede no existir o repetir hora).
+  final ultimoDia = DateTime.utc(dH.year, dH.month + 1, 0).day;
   final diaObjetivo = dF.day > ultimoDia ? ultimoDia : dF.day;
   return dH.day == diaObjetivo;
 }
@@ -157,6 +184,7 @@ class RecordatoriosService {
       );
     });
     _empujarRecordatorios();
+    _sincronizarAvisos();
     return id;
   }
 
@@ -194,6 +222,7 @@ class RecordatoriosService {
       );
     });
     _empujarRecordatorios();
+    _sincronizarAvisos();
   }
 
   Future<void> eliminar(String id) async {
@@ -214,13 +243,22 @@ class RecordatoriosService {
         !_soyDueno) {
       throw Exception('Ese recordatorio no es tuyo');
     }
-    await LocalDb.instance.borrarRecordatorio(id);
-    await LocalDb.instance.queueOp(
-      opUuid: const Uuid().v4(),
-      tipo: kTipoOpDeleteRecordatorio,
-      payload: {'recordatorio_id': id},
-    );
+    // 1.22 R-6: borrado + op en UNA transacción, como
+    // crear/cambiarActiva (panel 9/10): dos pasos separados
+    // dejaban la config borrada local sin op si la app se
+    // cerraba entre ambos, y el próximo pull la resucitaba.
+    final d = await LocalDb.instance.db;
+    await d.transaction((txn) async {
+      await LocalDb.instance.borrarRecordatorio(id, txn: txn);
+      await LocalDb.instance.queueOp(
+        opUuid: const Uuid().v4(),
+        tipo: kTipoOpDeleteRecordatorio,
+        payload: {'recordatorio_id': id},
+        txn: txn,
+      );
+    });
     _empujarRecordatorios();
+    _sincronizarAvisos();
   }
 
   /// Recordatorios vencidos hoy (para la pantalla G2).
@@ -268,6 +306,7 @@ class RecordatoriosService {
           tipo: tipo,
           alcance: alcance,
           targetKey: 'todos',
+          fechaHabana: hoy,
           yaDisparado: ya,
           puedoDisparar: alcance == 'todos'
               ? puedeDispararMasivo(
@@ -297,6 +336,11 @@ class RecordatoriosService {
           continue;
         }
         if (esVistaProtegida(c, esDueno: _soyDueno)) continue;
+        // 1.22 R-4: Cuenta a la Casa no paga mensualidad ni
+        // vence: fuera de la rama de vencimiento (conserva su
+        // pagado_hasta y generaba avisos falsos de «vence
+        // pronto»). Su cumpleaños SÍ sigue avisando.
+        if (tipo == 'vencimiento' && esCuentaCasa(c)) continue;
         final target = 'cliente:$cid';
         bool aplica = false;
         if (tipo == 'cumpleanos') {
@@ -326,6 +370,7 @@ class RecordatoriosService {
           targetKey: target,
           clienteId: cid,
           clienteNombre: '${c['nombre'] ?? ''}',
+          fechaHabana: hoy,
           yaDisparado: est.yaDisparado,
           puedoDisparar: est.puedoDisparar,
         ));
@@ -345,7 +390,12 @@ class RecordatoriosService {
   /// a medias y el disparo se puede reintentar limpio.
   Future<bool> disparar(RecordatorioDebido debido,
       {String? hoyHabana}) async {
-    final hoy = hoyHabana ?? hoyHabanaIso();
+    // 1.22 R-2: manda la fecha del DEBIDO (ver el campo); el
+    // parámetro queda solo como respaldo para debidos sin
+    // fecha (no ocurre en producción: debidosHoy la sella).
+    final hoy = debido.fechaHabana.isNotEmpty
+        ? debido.fechaHabana
+        : (hoyHabana ?? hoyHabanaIso());
     if (!debido.puedoDisparar) return false;
     final db = await LocalDb.instance.db;
     var nuevo = false;
@@ -389,7 +439,10 @@ class RecordatoriosService {
         }
       }
     });
-    if (nuevo) _empujarRecordatorios();
+    if (nuevo) {
+      _empujarRecordatorios();
+      _sincronizarAvisos();
+    }
     return nuevo;
   }
 }

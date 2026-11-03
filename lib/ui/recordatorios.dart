@@ -33,6 +33,10 @@ class _RecordatoriosScreenState extends State<RecordatoriosScreen> {
   List<RecordatorioDebido> _debidos = [];
   List<Map<String, dynamic>> _configs = [];
 
+  /// 1.22 R-9: permiso de notificaciones denegado (las
+  /// alarmas se programan pero Android no las muestra).
+  bool _sinPermisoNotif = false;
+
   bool get _soyDueno => AuthService().isOwner;
   int? get _yo => AuthService().telegramId;
 
@@ -58,10 +62,12 @@ class _RecordatoriosScreenState extends State<RecordatoriosScreen> {
               _soyDueno ||
               c['creado_por'] == _yo)
           .toList();
+      final permiso = await AvisosRecordatorios.tienePermiso();
       if (mounted) {
         setState(() {
           _debidos = debidos;
           _configs = visibles;
+          _sinPermisoNotif = !permiso;
           _cargando = false;
         });
       }
@@ -248,6 +254,32 @@ class _RecordatoriosScreenState extends State<RecordatoriosScreen> {
           : ListView(
               padding: const EdgeInsets.all(16),
               children: [
+                // 1.22 R-9: sin permiso, los avisos de las
+                // 08:00 nunca se ven: avisar aquí, donde se
+                // gestionan, con salto directo a Ajustes.
+                if (_sinPermisoNotif) ...[
+                  Tarjeta(
+                    child: ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      leading: const Icon(
+                          Icons.notifications_off_rounded,
+                          color: AppColores.alerta),
+                      title: const Text(
+                          'Sin permiso de notificaciones',
+                          style: AppTexto.cuerpo),
+                      subtitle: const Text(
+                          'Los avisos automáticos (08:00) no se '
+                          'verán en este teléfono hasta activarlo.',
+                          style: AppTexto.secundario),
+                      trailing: TextButton(
+                        onPressed: () => unawaited(AvisosRecordatorios
+                            .abrirAjustesNotificaciones()),
+                        child: const Text('Ajustes'),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                ],
                 const Text('Hoy', style: AppTexto.titulo),
                 const SizedBox(height: 4),
                 if (_debidos.isEmpty)

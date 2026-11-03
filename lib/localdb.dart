@@ -6604,9 +6604,13 @@ class LocalDb {
         conflictAlgorithm: ConflictAlgorithm.replace);
   }
 
-  Future<void> borrarRecordatorio(String id) async {
-    final d = await db;
-    await d.delete('recordatorio_config', where: 'id = ?', whereArgs: [id]);
+  Future<void> borrarRecordatorio(String id,
+      {DatabaseExecutor? txn}) async {
+    // 1.22 R-6: ejecutor inyectable para borrar dentro de la
+    // misma transacción que encola la op de borrado.
+    final ex = txn ?? await db;
+    await ex.delete('recordatorio_config',
+        where: 'id = ?', whereArgs: [id]);
   }
 
   Future<void> marcarRecordatorioDisparadoMasivo(

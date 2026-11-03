@@ -24,6 +24,7 @@ void main() {
         clienteNombre: cliente,
         yaDisparado: false,
         puedoDisparar: true,
+        fechaHabana: '2026-11-02',
       );
 
   test('texto: cumpleaños y vencimiento con nombre', () {

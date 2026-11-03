@@ -163,7 +163,7 @@ void main() {
         () async {
       await _seedConfig();
       await _seedCliente(101);
-      const debido = RecordatorioDebido(
+      final debido = RecordatorioDebido(
         recordatorioId: 'cfg-cumple',
         titulo: 'Cumple',
         tipo: 'cumpleanos',
@@ -173,6 +173,10 @@ void main() {
         clienteNombre: 'Cliente 101',
         yaDisparado: false,
         puedoDisparar: true,
+        // 1.22 R-2: el debido lleva su fecha; el disparo se
+        // asienta en ELLA (aquí: hoy, como lo construye
+        // debidosHoy en producción).
+        fechaHabana: hoyHabanaIso(),
       );
       final svc = RecordatoriosService.instance;
       expect(await svc.disparar(debido), isTrue);

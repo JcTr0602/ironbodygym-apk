@@ -123,16 +123,23 @@ class AvisosRecordatorios {
       final vigentes = <String>{};
       for (final d in debidos) {
         if (d.yaDisparado || !d.puedoDisparar) continue;
+        // 1.22 R-2: la clave lleva la fecha del debido.
         final clave = claveAvisoRecordatorio(
             recordatorioId: d.recordatorioId,
             targetKey: d.targetKey,
-            fecha: hoy);
+            fecha: d.fechaHabana);
         vigentes.add(clave);
         final ya = await LocalDb.instance.getMeta(clave);
         if (ya != null && ya.isNotEmpty) continue;
         final t = textoAvisoRecordatorio(d);
+        // 1.22 R-1: el instante de comparación es el UTC
+        // REAL. ahoraHabana().toUtc() reinterpretaba el
+        // wall-clock como hora local del dispositivo y el
+        // aviso salía corrido (disparaba al momento).
+        // 1.22 R-2: la fecha es la del debido, no un «hoy»
+        // recalculado aquí.
         final inst = instanteAvisoDebido(
-            fecha: hoy, ahoraUtc: ahoraHabana().toUtc());
+            fecha: d.fechaHabana, ahoraUtc: ahoraUtcReal());
         await _canal.invokeMethod('programar', {
           'id': clave,
           'titulo': t.titulo,
@@ -158,11 +165,33 @@ class AvisosRecordatorios {
     } catch (_) {}
   }
 
+  /// 1.22 R-9: ¿hay permiso de notificaciones? (true si el
+  /// canal no responde: no alarmar por un fallo de plataforma).
+  static Future<bool> tienePermiso() async {
+    try {
+      return await _canal
+              .invokeMethod<bool>('tienePermisoNotificacion') ??
+          true;
+    } catch (_) {
+      return true;
+    }
+  }
+
+  /// 1.22 R-9: abre los Ajustes de notificaciones de la app.
+  static Future<void> abrirAjustesNotificaciones() async {
+    try {
+      await _canal.invokeMethod('abrirAjustesNotificaciones');
+    } catch (_) {}
+  }
+
   /// Cancela el aviso de un debido recién disparado. Nunca lanza.
   static Future<void> cancelarAviso(RecordatorioDebido d,
       {String? hoyHabana}) async {
     try {
-      final hoy = hoyHabana ?? hoyHabanaIso();
+      // 1.22 R-2: la fecha del debido manda (borde de
+      // medianoche con la pantalla abierta).
+      final hoy = hoyHabana ??
+          (d.fechaHabana.isNotEmpty ? d.fechaHabana : hoyHabanaIso());
       final clave = claveAvisoRecordatorio(
           recordatorioId: d.recordatorioId,
           targetKey: d.targetKey,

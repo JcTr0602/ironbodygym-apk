@@ -15,6 +15,7 @@ import 'config.dart';
 import 'invitados.dart';
 import 'localdb.dart';
 import 'notificaciones_recordatorios.dart';
+import 'recordatorios.dart';
 import 'sync.dart';
 import 'tarifa_especial.dart';
 import 'fotos_foreground.dart';
@@ -158,6 +159,11 @@ Future<void> main() async {
   // actualizar la app ya vea las filas seed_legacy_<id>
   // (nunca lanza; también corre tras cada sync exitosa).
   unawaited(sembrarTarifasLegacy());
+  // 1.22 R-7: las mutaciones de recordatorios (crear, pausar,
+  // eliminar, disparar) re-sincronizan los avisos al momento
+  // vía este gancho (sin él, pausar a las 07:50 no cancelaba
+  // la alarma de las 08:00 hasta el próximo sync o reinicio).
+  ganchoSincronizarAvisos = AvisosRecordatorios.sincronizar;
   // 23/25: programar avisos de recordatorios de hoy (sin sesión
   // no hace nada; tras cada sync se reprograma con lista fresca).
   unawaited(AvisosRecordatorios.sincronizar());

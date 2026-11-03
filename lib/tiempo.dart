@@ -142,6 +142,17 @@ DateTime aHabana(DateTime dt) {
   );
 }
 
+/// Instante REAL actual en UTC (1.22 R-1).
+///
+/// Para programar alarmas y comparar contra instantes UTC.
+/// [ahoraHabana] devuelve un wall-clock (isUtc == false) y su
+/// `.toUtc()` reinterpreta los campos como hora LOCAL del
+/// dispositivo: si la zona del teléfono no coincide con La
+/// Habana, el instante sale corrido y el aviso de las 08:00
+/// se programaba «al momento» en vez de a su hora. El
+/// `DateTime.now()` crudo queda encapsulado en esta función.
+DateTime ahoraUtcReal() => DateTime.now().toUtc();
+
 /// Fecha corta (d/m/aaaa) de un instante, en hora de La Habana.
 String fmtFechaHabana(DateTime dt) {
   final h = aHabana(dt);
