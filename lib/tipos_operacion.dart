@@ -164,6 +164,74 @@ const Map<String, TipoOperacionInfo> kTiposOperacion = {
       TipoOperacionInfo('Bono de nómina', Icons.card_giftcard_rounded),
   'eliminar_bono_nomina':
       TipoOperacionInfo('Bono de nómina eliminado', Icons.undo_rounded),
+  // 1.23 (contrato de ops): tipos vivos que faltaban en el
+  // registro — se encolaban por opTipo:/constantes y la cola
+  // los mostraba con el identificador crudo. El test
+  // test_contrato_ops exige registro == servidor == CHECK.
+  'crear_incidencia': TipoOperacionInfo(
+      'Incidencia creada', Icons.report_problem_rounded),
+  'editar_incidencia': TipoOperacionInfo(
+      'Incidencia editada', Icons.edit_note_rounded),
+  'incidencia': TipoOperacionInfo(
+      'Incidencia', Icons.report_problem_rounded),
+  'incidencia_estado': TipoOperacionInfo(
+      'Estado de incidencia', Icons.swap_horiz_rounded),
+  'cambiar_estado_incidencia': TipoOperacionInfo(
+      'Estado de incidencia', Icons.swap_horiz_rounded),
+  'agregar_comentario_incidencia': TipoOperacionInfo(
+      'Comentario en incidencia', Icons.comment_rounded),
+  'registrar_foto_incidencia': TipoOperacionInfo(
+      'Foto de incidencia', Icons.photo_camera_rounded),
+  'upsert_tipo_incidencia': TipoOperacionInfo(
+      'Tipo de incidencia', Icons.category_rounded),
+  'reordenar_tipos_incidencia': TipoOperacionInfo(
+      'Orden de tipos de incidencia', Icons.reorder_rounded),
+  'foto_suplemento': TipoOperacionInfo(
+      'Foto de suplemento', Icons.photo_rounded),
+  'gympedia_borrador_upsert': TipoOperacionInfo(
+      'Borrador de GymPedia', Icons.edit_note_rounded),
+  'gympedia_solicitud_descartar': TipoOperacionInfo(
+      'Solicitud de GymPedia descartada', Icons.block_rounded),
+  'nomina_confirmar_recepcion': TipoOperacionInfo(
+      'Recepción de nómina confirmada', Icons.fact_check_rounded),
+  'permiso_bandeja': TipoOperacionInfo(
+      'Permiso de bandeja', Icons.mark_email_read_rounded),
+  'acceso_bloqueo_set': TipoOperacionInfo(
+      'Candado de acceso', Icons.lock_rounded),
+  'ajustar_stock_suplemento': TipoOperacionInfo(
+      'Ajuste de stock de suplemento', Icons.inventory_2_rounded),
+  'anular_pago_diario': TipoOperacionInfo(
+      'Pago diario anulado', Icons.cancel_rounded),
+  'editar_pago_diario': TipoOperacionInfo(
+      'Corrección de pago diario', Icons.edit_note_rounded),
+  'anular_venta_suplemento': TipoOperacionInfo(
+      'Venta de suplemento anulada', Icons.cancel_rounded),
+  'saldar_fiado_suplemento': TipoOperacionInfo(
+      'Fiado de suplemento saldado', Icons.payments_rounded),
+  'apertura_turno':
+      TipoOperacionInfo('Apertura de turno', Icons.play_circle_rounded),
+  'cierre_turno':
+      TipoOperacionInfo('Cierre de turno', Icons.stop_circle_rounded),
+  'liquidar_caja': TipoOperacionInfo(
+      'Liquidación de caja', Icons.fact_check_rounded),
+  'aprobar_incidencia_sync': TipoOperacionInfo(
+      'Incidencia de sync aprobada', Icons.task_alt_rounded),
+  'descartar_incidencia_sync': TipoOperacionInfo(
+      'Incidencia de sync descartada', Icons.block_rounded),
+  'auditoria':
+      TipoOperacionInfo('Auditoría', Icons.fact_check_rounded),
+  'eliminar_foto':
+      TipoOperacionInfo('Foto eliminada', Icons.hide_image_rounded),
+  'guardar_tipos_pago': TipoOperacionInfo(
+      'Tipos de pago guardados', Icons.payments_rounded),
+  'guia_upsert_publicado': TipoOperacionInfo(
+      'Guía publicada', Icons.menu_book_rounded),
+  'guia_equipo_upsert': TipoOperacionInfo(
+      'Equipo de guía guardado', Icons.fitness_center_rounded),
+  'guia_retirar':
+      TipoOperacionInfo('Guía retirada', Icons.block_rounded),
+  'set_cliente_protegido': TipoOperacionInfo(
+      'Cliente protegido', Icons.shield_rounded),
 };
 
 /// v1.4.4: etiquetas de la op 'ajuste' según su clave. Antes TODA
