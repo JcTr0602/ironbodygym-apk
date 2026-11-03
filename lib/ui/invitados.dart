@@ -371,7 +371,9 @@ class _InvitadosScreenState extends State<InvitadosScreen> {
         if (_seleccion.contains(inv.id)) inv,
     ];
     if (seleccionados.isEmpty) return;
-    final parte = partirLote(seleccionados, accion);
+    // 1.22 IG-01: el lote ve también las conversiones locales.
+    final parte =
+        partirLote(seleccionados, accion, locales: _locales);
     final aplicables = parte.aplicables;
     final excluidos = parte.excluidos;
     final params = await showDialog<({int dias, String motivo})>(
@@ -1051,13 +1053,25 @@ String _n(double v) => v == v.roundToDouble() ? '${v.toInt()}' : '$v';
 /// bloquean al resto. (La guardia real es el servidor; esto es
 /// solo la explicación previa.)
 ({List<InvitadoResumen> aplicables, List<(InvitadoResumen, String)> excluidos})
-    partirLote(List<InvitadoResumen> seleccion, String accion) {
+    partirLote(List<InvitadoResumen> seleccion, String accion,
+        {Map<String, ConversionInvitado> locales = const {}}) {
   final aplicables = <InvitadoResumen>[];
   final excluidos = <(InvitadoResumen, String)>[];
   for (final inv in seleccion) {
-    if (inv.convertido) {
+    // 1.22 IG-01: el estado LOCAL de conversión manda igual
+    // que el del resumen del servidor. Sin esto, a un invitado
+    // cuya inscripción ya estaba encolada en ESTE teléfono se
+    // le podía quitar el Plus, y al subir la inscripción
+    // perdía su Plus residual.
+    final local = locales[inv.id];
+    if (inv.convertido ||
+        local?.estado == EstadoConversion.confirmada) {
       excluidos.add((inv, 'ya es cliente'));
-    } else if (inv.enConversion && accion != 'vida_extender') {
+    } else if ((inv.enConversion ||
+            (local != null &&
+                (local.estado == EstadoConversion.preparada ||
+                    local.estado == EstadoConversion.opEncolada))) &&
+        accion != 'vida_extender') {
       excluidos.add((inv, 'conversión en curso'));
     } else if (accion == 'plus_quitar' && !inv.plusActivo) {
       excluidos.add((inv, 'no tiene Plus activo'));
@@ -1439,6 +1453,12 @@ class _InvitadoDetalleScreenState extends State<InvitadoDetalleScreen> {
         if (cache != null) {
           setState(() {
             _d = cache.detalle;
+            // 1.22 IG-05: el fallback offline limpia el estado
+            // local de conversión (solo lectura de verdad: sin
+            // una conversión local colgando de una carga vieja).
+            _local = null;
+            _estadoConvertido = null;
+            _eliminadoEn = null;
             _offlineCache = true;
             _cacheAt = cache.cachedAt;
             _cargando = false;
@@ -1528,6 +1548,18 @@ class _InvitadoDetalleScreenState extends State<InvitadoDetalleScreen> {
   Future<void> _reanudar() async {
     final d = _d!;
     final local = _local!;
+    // 1.22 IG-05: las mismas guardias que _convertir (aquí
+    // faltaban: se podía reanudar desde la caché de solo
+    // lectura o con el invitado caducado).
+    if (_offlineCache) {
+      _snack('Sin conexión: el detalle está en solo lectura.');
+      return;
+    }
+    if (d.caducado) {
+      _snack(
+          'Este invitado está caducado: extiende su vida antes de reanudar la conversión.');
+      return;
+    }
     final datos = DatosConversionInvitado(
       invitadoId: d.id,
       conversionUuid: local.conversionUuid,
@@ -2194,6 +2226,12 @@ class _InvitadoDetalleScreenState extends State<InvitadoDetalleScreen> {
   Widget _tarjetaPlus(InvitadoDetalle d) {
     final p = d.plus!;
     final esDueno = AuthService().isOwner;
+    // 1.22 IG-02: con una conversión en curso, los botones
+    // Plus quedan bloqueados (el mismo criterio que ya
+    // bloquea Eliminar: eliminarInvitadoBloqueado). Extender
+    // vida NO se bloquea (vive en la tarjeta de Acciones).
+    final plusBloqueado = eliminarInvitadoBloqueado(
+        local: _local, enServidor: d.conversionPreparada);
     String textoEstado() {
       switch (p.estado) {
         case 'activo':
@@ -2311,7 +2349,7 @@ class _InvitadoDetalleScreenState extends State<InvitadoDetalleScreen> {
                   FilledButton.icon(
                     icon: const Icon(Icons.star_rounded, size: 18),
                     label: const Text('Dar Plus de cortesía'),
-                    onPressed: _actuando
+                    onPressed: _actuando || plusBloqueado
                         ? null
                         : () => _accionUnica('plus_cortesia'),
                   ),
@@ -2320,7 +2358,7 @@ class _InvitadoDetalleScreenState extends State<InvitadoDetalleScreen> {
                     icon: const Icon(Icons.star_border_rounded,
                         size: 18),
                     label: const Text('Quitar Plus'),
-                    onPressed: _actuando
+                    onPressed: _actuando || plusBloqueado
                         ? null
                         : () => _accionUnica('plus_quitar'),
                   ),
@@ -2389,12 +2427,23 @@ class _InvitadoDetalleScreenState extends State<InvitadoDetalleScreen> {
       estado: d.estado,
       plusActivo: d.plus?.activo ?? false,
     );
+    // 1.22 IG-02: la acción individual pasa por el MISMO
+    // partirLote que la multiselección (antes iba directa al
+    // diálogo con aplicables=[resumen] y excluidos vacío: desde
+    // el detalle se podía quitar el Plus con la conversión en
+    // curso, el hueco de IG-01 por la puerta de al lado).
+    final parte = partirLote([resumen], accion,
+        locales: _local == null ? const {} : {d.id: _local!});
+    if (parte.aplicables.isEmpty) {
+      _snack('No se puede aplicar: ${parte.excluidos.first.$2}.');
+      return;
+    }
     final params = await showDialog<({int dias, String motivo})>(
       context: context,
       builder: (_) => _DialogoLote(
         accion: accion,
-        aplicables: [resumen],
-        excluidos: const [],
+        aplicables: parte.aplicables,
+        excluidos: parte.excluidos,
       ),
     );
     if (params == null || !mounted) return;
