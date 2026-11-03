@@ -36,7 +36,7 @@ import 'panel_resto_caja.dart';
 import 'tarifas_especiales.dart';
 
 void _ir(BuildContext context, Widget pantalla) {
-  Navigator.push(context, MaterialPageRoute(builder: (_) => pantalla));
+  Navigator.push(context, RutaIron(builder: (_) => pantalla));
 }
 
 // ---------------------------------------------------------------------------

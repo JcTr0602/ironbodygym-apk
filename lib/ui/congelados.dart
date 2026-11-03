@@ -123,7 +123,7 @@ class _CongeladosScreenState extends State<CongeladosScreen> {
                                     ),
                                     onTap: () => Navigator.push(
                                       context,
-                                      MaterialPageRoute(
+                                      RutaIron(
                                           builder: (_) =>
                                               FichaScreen(
                                                   clienteId:

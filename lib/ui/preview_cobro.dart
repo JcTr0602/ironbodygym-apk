@@ -273,7 +273,7 @@ Future<bool> cobrarConPreviewYRecibo({
   final monto = (payload['monto'] as num?) ?? 0;
   final vencRaw = '${payload['pagado_hasta'] ?? ''}';
   final confirmado = await Navigator.of(context).push<bool>(
-    MaterialPageRoute(
+    RutaIron(
       builder: (_) => PreviewCobroScreen(
         nombreCliente: nombreCliente,
         montoTexto: '${fmtMonto(monto)} CUP',
@@ -365,7 +365,7 @@ Future<bool> cobrarConPreviewYRecibo({
   if (!context.mounted) return false;
 
   final resultado = await Navigator.of(context).push<String>(
-    MaterialPageRoute(
+    RutaIron(
       builder: (_) => ConfirmacionCobroScreen(
         nombreCliente: nombreCliente,
         monto: '${fmtMonto(monto)} CUP',

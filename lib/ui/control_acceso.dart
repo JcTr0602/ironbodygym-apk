@@ -55,7 +55,7 @@ class ControlAccesoScreen extends StatelessWidget {
               icon: const Icon(Icons.calendar_month_rounded),
               tooltip: 'Turnos',
               onPressed: () => Navigator.of(context).push(
-                MaterialPageRoute(
+                RutaIron(
                   builder: (_) => const TurnosHubScreen(),
                 ),
               ),
@@ -88,7 +88,7 @@ class ControlAccesoScreen extends StatelessWidget {
                           'Cuentas de entrenadores: crear, contraseña, bloquear'),
                       trailing: const Icon(Icons.chevron_right_rounded),
                       onTap: () => Navigator.of(context).push(
-                        MaterialPageRoute(
+                        RutaIron(
                           builder: (_) => const UsuariosScreen(),
                         ),
                       ),
@@ -380,7 +380,7 @@ class _AccesosClientesTabState extends State<AccesosClientesTab> {
                   icon: const Icon(Icons.bar_chart_rounded, size: 18),
                   label: const Text('Adopción'),
                   onPressed: () => Navigator.of(context).push(
-                    MaterialPageRoute(
+                    RutaIron(
                       builder: (_) =>
                           const EstadisticasAdopcionScreen(),
                     ),
@@ -393,7 +393,7 @@ class _AccesosClientesTabState extends State<AccesosClientesTab> {
                   icon: const Icon(Icons.campaign_rounded, size: 18),
                   label: const Text('Campaña WA'),
                   onPressed: () => Navigator.of(context).push(
-                    MaterialPageRoute(
+                    RutaIron(
                       builder: (_) => const CampanaWaScreen(),
                     ),
                   ),
@@ -460,7 +460,7 @@ class _AccesosClientesTabState extends State<AccesosClientesTab> {
                 icon: const Icon(Icons.history_rounded),
                 tooltip: 'Auditoría del panel',
                 onPressed: () => Navigator.of(context).push(
-                  MaterialPageRoute(
+                  RutaIron(
                     builder: (_) => const AuditoriaAccesosScreen(),
                   ),
                 ),
@@ -715,7 +715,7 @@ class _AccesosClientesTabState extends State<AccesosClientesTab> {
 
   Future<void> _abrirFicha(AccesoCliente a) async {
     await Navigator.of(context).push(
-      MaterialPageRoute(
+      RutaIron(
         builder: (_) => FichaAccesoScreen(clienteId: a.clienteId),
       ),
     );

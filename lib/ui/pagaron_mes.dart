@@ -177,7 +177,7 @@ class _PagaronMesScreenState extends State<PagaronMesScreen> {
                               onTap: sinDatos || !esDueno
                                   ? null
                                   : () => Navigator.of(context)
-                                      .push(MaterialPageRoute(
+                                      .push(RutaIron(
                                         builder: (_) => FichaScreen(
                                             clienteId: c['id'] as int),
                                       )).then((_) => _cargar()),

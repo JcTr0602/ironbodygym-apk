@@ -81,6 +81,7 @@ class _ListasScreenState extends State<ListasScreen>
   @override
   void initState() {
     super.initState();
+    FadeEntrada.reiniciarVentana(); // T3: ventana de cascada
     _tab = TabController(
         length: 5, vsync: this, initialIndex: widget.inicial);
     _cargar();
@@ -469,7 +470,12 @@ class _ListasScreenState extends State<ListasScreen>
           // D-08 (1.21): avisado sale del conjunto precargado,
           // no de un FutureBuilder por fila y reconstrucción.
           final avisado = _avisados.contains(id);
-          return Container(
+          // 1.22 Diseño Bloque 1 (T3): cascada acotada —
+          // FadeEntrada solo anima los primeros 10 ítems y
+          // dentro de la ventana de 400 ms del montaje.
+          return FadeEntrada(
+            indice: i,
+            child: Container(
                 decoration: avisado
                     ? const BoxDecoration(
                         border: Border(
@@ -481,7 +487,7 @@ class _ListasScreenState extends State<ListasScreen>
                 child: FilaCliente(
             cliente: c,
             onTap: () => Navigator.of(context)
-                .push(MaterialPageRoute(
+                .push(RutaIron(
                     builder: (_) => FichaScreen(
                         clienteId: id)))
                 .then((_) => _cargar()),
@@ -539,7 +545,8 @@ class _ListasScreenState extends State<ListasScreen>
               ],
                 ),
               ),
-            );
+            ),
+          );
       },
       ),
     );

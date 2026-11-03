@@ -2156,7 +2156,7 @@ class _ColaScreenState extends State<ColaScreen> {
       return;
     }
     if (!mounted) return;
-    await Navigator.of(context).push(MaterialPageRoute(
+    await Navigator.of(context).push(RutaIron(
       builder: (_) =>
           const DetalleSyncScreen(tipo: TipoDetalleSync.subidos)));
   }
@@ -2171,7 +2171,7 @@ class _ColaScreenState extends State<ColaScreen> {
       return;
     }
     if (!mounted) return;
-    await Navigator.of(context).push(MaterialPageRoute(
+    await Navigator.of(context).push(RutaIron(
       builder: (_) =>
           const DetalleSyncScreen(tipo: TipoDetalleSync.bajados)));
   }

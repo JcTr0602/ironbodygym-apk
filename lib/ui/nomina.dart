@@ -1614,7 +1614,7 @@ class TarjetaNominaEntrenador extends StatelessWidget {
           // bonos), no la pantalla del dueño.
           Navigator.push(
             context,
-            MaterialPageRoute(
+            RutaIron(
                 builder: (_) => const MiNominaScreen()),
           );
         },

@@ -1463,7 +1463,7 @@ class _AjustesScreenState extends State<AjustesScreen> {
                       'Vencimientos, cumpleaños y sincronización',
                   onTap: () =>
                       Navigator.of(context).push(
-                          MaterialPageRoute(
+                          RutaIron(
                               builder: (_) =>
                                   const AvisosScreen())),
                 ),

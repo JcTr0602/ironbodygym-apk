@@ -228,7 +228,7 @@ class _PestanaProgresoState extends State<PestanaProgreso> {
               onTap: () {
                 Navigator.push(
                   context,
-                  MaterialPageRoute(
+                  RutaIron(
                     builder: (_) => EditorPlanNutricional(
                       clienteId: widget.clienteId,
                       nombreCliente: widget.nombreCliente,

@@ -302,16 +302,148 @@ class BotonPeligro extends StatelessWidget {
 /// Bloque 1: fundido suave de entrada (250 ms). Solo anima al
 /// montar: con el mismo tween no se repite en cada setState ni
 /// retrasa las tarjetas al hacer scroll.
-class FadeEntrada extends StatelessWidget {
+///
+/// 1.22 Diseño Bloque 1 (T3, ajustes de Argón): la cascada
+/// está ACOTADA — solo anima dentro de la ventana de 400 ms
+/// desde que la pantalla se monta (las pantallas llaman a
+/// [reiniciarVentana] en su initState) y solo los primeros
+/// 10 ítems ([indice] 0-9, con 35 ms de escalón). Fuera de
+/// la ventana o del cupo, el hijo se renderiza directo en
+/// opacidad 1, sin crear maquinaria de animación: al hacer
+/// scroll rápido no hay tirones ni latencia artificial en
+/// pantallas de gama alta a 120 Hz.
+class FadeEntrada extends StatefulWidget {
   final Widget child;
-  const FadeEntrada({super.key, required this.child});
+
+  /// Posición en la lista para la cascada; null = sin
+  /// escalón (fundido simple de bloque, el uso histórico).
+  final int? indice;
+
+  const FadeEntrada({super.key, required this.child, this.indice});
+
+  static DateTime? _inicioVentana;
+
+  /// Abre la ventana de cascada (400 ms). Las pantallas con
+  /// listas la llaman en initState.
+  static void reiniciarVentana() => _inicioVentana = DateTime.now();
+
+  static bool get ventanaActiva {
+    final ahora = DateTime.now();
+    _inicioVentana ??= ahora;
+    return ahora.difference(_inicioVentana!) <
+        const Duration(milliseconds: 400);
+  }
+
   @override
-  Widget build(BuildContext context) => TweenAnimationBuilder<double>(
-        tween: Tween(begin: 0.0, end: 1.0),
-        duration: const Duration(milliseconds: 250),
-        builder: (ctx, v, ch) => Opacity(opacity: v, child: ch),
-        child: child,
-      );
+  State<FadeEntrada> createState() => _FadeEntradaState();
+}
+
+class _FadeEntradaState extends State<FadeEntrada> {
+  late final bool _animar;
+  bool _visible = false;
+
+  @override
+  void initState() {
+    super.initState();
+    final i = widget.indice;
+    _animar =
+        FadeEntrada.ventanaActiva && (i == null || i < 10);
+    if (!_animar) {
+      _visible = true;
+      return;
+    }
+    final retraso = i == null
+        ? Duration.zero
+        : Duration(milliseconds: i * 35);
+    if (retraso == Duration.zero) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) setState(() => _visible = true);
+      });
+    } else {
+      Future.delayed(retraso, () {
+        if (mounted) setState(() => _visible = true);
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!_animar) return widget.child;
+    return AnimatedOpacity(
+      opacity: _visible ? 1.0 : 0.0,
+      duration: const Duration(milliseconds: 250),
+      curve: Curves.easeOut,
+      child: widget.child,
+    );
+  }
+}
+
+/// 1.22 Diseño Bloque 1 (T7, ajustes de Argón): cruce
+/// desvanecido entre los estados de una pantalla (carga →
+/// contenido → vacío/error) sin parpadeo. La key del hijo es
+/// SOLO el tipo de estado ([estado]), NUNCA los datos: si la
+/// key cambiara con los datos, el switcher destruiría el
+/// contenido (y su ScrollController) en cada refresco.
+/// PROHIBIDO poner GlobalKey dentro del hijo directo:
+/// durante el crossfade conviven el árbol saliente y el
+/// entrante y una GlobalKey duplicada revienta en runtime.
+/// Un refresco con datos debe MANTENER el estado
+/// 'contenido' (no volver a 'cargando') para no perder el
+/// scroll: 'cargando' es solo para la carga inicial.
+class CruceEstados extends StatelessWidget {
+  /// 'cargando' | 'contenido' | 'vacio' | 'error'.
+  final String estado;
+  final Widget child;
+
+  const CruceEstados({super.key, required this.estado, required this.child});
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedSwitcher(
+      duration: const Duration(milliseconds: 220),
+      switchInCurve: Curves.easeOutCubic,
+      switchOutCurve: Curves.easeInCubic,
+      child: KeyedSubtree(key: ValueKey<String>(estado), child: child),
+    );
+  }
+}
+
+/// 1.22 Diseño Bloque 1 (base B10 adelantada por Argón): la
+/// AppBar del sistema. Devuelve un AppBar ESTÁNDAR (no una
+/// jerarquía nueva): find.byType(AppBar) y el tema siguen
+/// funcionando igual en toda la app y en la suite. Las
+/// pantallas nuevas la usan desde el nacimiento; la
+/// migración de las existentes es progresiva (Boy Scout).
+class IronAppBar extends StatelessWidget implements PreferredSizeWidget {
+  final Widget? title;
+  final List<Widget>? actions;
+  final Widget? leading;
+  final bool automaticallyImplyLeading;
+  final PreferredSizeWidget? bottom;
+
+  const IronAppBar({
+    super.key,
+    this.title,
+    this.actions,
+    this.leading,
+    this.automaticallyImplyLeading = true,
+    this.bottom,
+  });
+
+  @override
+  Size get preferredSize =>
+      Size.fromHeight(kToolbarHeight + (bottom?.preferredSize.height ?? 0));
+
+  @override
+  Widget build(BuildContext context) {
+    return AppBar(
+      title: title,
+      actions: actions,
+      leading: leading,
+      automaticallyImplyLeading: automaticallyImplyLeading,
+      bottom: bottom,
+    );
+  }
 }
 
 class Tarjeta extends StatelessWidget {

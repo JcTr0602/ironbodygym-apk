@@ -1030,7 +1030,7 @@ class _SeccionDiagnosticoScreenState extends State<SeccionDiagnosticoScreen> {
                       texto: 'Revisar incidencias de sync',
                       icono: Icons.sync_problem_rounded,
                       onPressed: () => Navigator.of(context).push(
-                        MaterialPageRoute(
+                        RutaIron(
                             builder: (_) =>
                                 const IncidenciasSyncScreen()),
                       ),

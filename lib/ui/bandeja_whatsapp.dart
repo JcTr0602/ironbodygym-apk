@@ -420,7 +420,7 @@ class _BandejaWhatsappScreenState extends State<BandejaWhatsappScreen>
     final cid = (a['cliente_id'] as num?)?.toInt() ?? 0;
     if (cid <= 0) return;
     Navigator.of(context)
-        .push(MaterialPageRoute(
+        .push(RutaIron(
             builder: (_) => FichaScreen(clienteId: cid)))
         .then((_) => _cargar());
   }

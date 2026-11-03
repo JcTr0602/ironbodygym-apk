@@ -1311,7 +1311,7 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                     OutlinedButton.icon(
                       onPressed: () => Navigator.push(
                         context,
-                        MaterialPageRoute(
+                        RutaIron(
                             builder: (_) =>
                                 const ServiciosAdminScreen()),
                       ).then((_) => _cargar()),
@@ -1340,7 +1340,7 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                         label: const Text('Historial'),
                         onPressed: () => Navigator.push(
                           context,
-                          MaterialPageRoute(
+                          RutaIron(
                             builder: (_) => ServiciosHistorialScreen(
                               esDueno: _esDueno,
                               miTid: _miTid,
@@ -1843,7 +1843,7 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                   TextButton.icon(
                     onPressed: () => Navigator.push(
                       context,
-                      MaterialPageRoute(
+                      RutaIron(
                           builder: (_) =>
                               const ServiciosEstadisticasScreen()),
                     ).then((_) => _cargar()),
@@ -1855,7 +1855,7 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                   TextButton.icon(
                     onPressed: () => Navigator.push(
                       context,
-                      MaterialPageRoute(
+                      RutaIron(
                           builder: (_) =>
                               const RankingServiciosScreen()),
                     ),

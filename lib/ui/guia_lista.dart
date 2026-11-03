@@ -211,7 +211,7 @@ class _GuiaScreenState extends State<GuiaScreen> {
   Future<void> _abrirEditor(
       {Map<String, dynamic>? publicado,
       Map<String, dynamic>? borrador}) async {
-    await Navigator.of(context).push(MaterialPageRoute(
+    await Navigator.of(context).push(RutaIron(
       builder: (_) => GuiaEditorScreen(
         publicado: publicado,
         borrador: borrador,
@@ -530,7 +530,7 @@ class _GuiaScreenState extends State<GuiaScreen> {
             Expanded(
               child: OutlinedButton.icon(
                 onPressed: () => Navigator.of(context)
-                    .push(MaterialPageRoute(
+                    .push(RutaIron(
                         builder: (_) => const GuiaEquiposScreen()))
                     .then((_) => _cargar()),
                 icon: const Icon(Icons.fitness_center_rounded),

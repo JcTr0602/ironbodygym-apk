@@ -14,6 +14,7 @@ import '../tiempo.dart';
 import 'auditoria.dart';
 import 'arqueo.dart';
 import 'componentes.dart';
+import 'skeleton.dart';
 import 'diseno.dart';
 import 'ficha.dart';
 import 'historial_ventas.dart';
@@ -1200,7 +1201,7 @@ class _ActividadScreenState extends State<ActividadScreen> {
                     onPressed: () {
                       Navigator.of(ctx).pop();
                       Navigator.of(context).push(
-                        MaterialPageRoute(
+                        RutaIron(
                             builder: (_) =>
                                 _destinoSalto(accion)!.$2),
                       );
@@ -1285,7 +1286,7 @@ class _ActividadScreenState extends State<ActividadScreen> {
     }
     if (mounted) {
       await Navigator.of(context).push(
-        MaterialPageRoute(builder: (_) => FichaScreen(clienteId: id)),
+        RutaIron(builder: (_) => FichaScreen(clienteId: id)),
       );
     }
   }
@@ -2105,9 +2106,23 @@ class _ActividadScreenState extends State<ActividadScreen> {
               ),
             ),
           Expanded(
-            child: _cargando
-                ? const EstadoCargando(texto: 'Cargando actividad…')
-                : filtrados.isEmpty
+            // 1.22 Diseño Bloque 1 (T7+T4): cruce entre
+            // estados con key por TIPO de estado y esqueletos
+            // en la carga inicial. Un refresco CON datos
+            // mantiene 'contenido' (antes volvía al spinner y
+            // se perdía el scroll).
+            child: CruceEstados(
+              estado: _cargando && _items.isEmpty
+                  ? 'cargando'
+                  : filtrados.isEmpty
+                      ? 'vacio'
+                      : 'contenido',
+              child: _cargando && _items.isEmpty
+                  ? const Padding(
+                      padding: EdgeInsets.all(AppEspacio.lg),
+                      child: SkeletonLista(items: 5),
+                    )
+                  : filtrados.isEmpty
                     // v1.3.5 (Fase 1, F1): distinguir "sin datos" de
                     // "filtros sin resultados".
                     ? (_items.isEmpty
@@ -2152,6 +2167,7 @@ class _ActividadScreenState extends State<ActividadScreen> {
                           ],
                         ),
                       ),
+            ),
           ),
         ],
       ),

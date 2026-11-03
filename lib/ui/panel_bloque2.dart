@@ -140,7 +140,7 @@ class _CuentasCasaScreenState extends State<CuentasCasaScreen> {
                           subtitle: Text('${c['telefono'] ?? ''}'),
                           onTap: () => Navigator.push(
                               context,
-                              MaterialPageRoute(
+                              RutaIron(
                                   builder: (_) => FichaScreen(
                                       clienteId:
                                           (c['id'] as num).toInt()))),
@@ -217,7 +217,7 @@ class _SinFotoPrecioScreenState extends State<SinFotoPrecioScreen> {
                           // P2#7: tocar abre la edición del producto.
                           onTap: () => Navigator.push(
                               context,
-                              MaterialPageRoute(
+                              RutaIron(
                                   builder: (_) =>
                                       EditarSuplementoScreen(
                                           suplemento: s))).then(
@@ -336,7 +336,7 @@ class _VencimientosProximosScreenState
           trailing: const Icon(Icons.chevron_right_rounded),
           onTap: () => Navigator.push(
               context,
-              MaterialPageRoute(
+              RutaIron(
                   builder: (_) =>
                       FichaScreen(clienteId: (c['id'] as num).toInt()))),
         ),

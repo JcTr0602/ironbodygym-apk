@@ -319,7 +319,7 @@ class _DetallePendienteScreenState extends State<DetallePendienteScreen> {
                                     return;
                                   }
                                   Navigator.of(context)
-                                      .push(MaterialPageRoute(
+                                      .push(RutaIron(
                                           builder: (_) =>
                                               FichaScreen(
                                                   clienteId:

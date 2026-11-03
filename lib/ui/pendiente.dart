@@ -202,7 +202,7 @@ class _PendienteScreenState extends State<PendienteScreen> {
         if (!mounted) return;
         mostrarSnack(context, 'Este entrenador tiene adelantos o entregas parciales sin liquidar: liquida desde Arqueo para no dejar descuadres.', significado: SignificadoChip.alerta);
         Navigator.push(context,
-            MaterialPageRoute(builder: (_) => const ArqueoScreen()));
+            RutaIron(builder: (_) => const ArqueoScreen()));
         return;
       }
     }
@@ -224,7 +224,7 @@ class _PendienteScreenState extends State<PendienteScreen> {
       if (!mounted) return;
       mostrarSnack(context, 'El pendiente en $monedaDia se liquida en el Arqueo principal, no en la confirmación de entrega.', significado: SignificadoChip.alerta);
       Navigator.push(context,
-          MaterialPageRoute(builder: (_) => const ArqueoScreen()));
+          RutaIron(builder: (_) => const ArqueoScreen()));
       return;
     }
     // Fix #15 (Sol): el día ya viene separado por moneda (ver
@@ -602,7 +602,7 @@ class _PendienteScreenState extends State<PendienteScreen> {
           if (cup.isEmpty) {
             mostrarSnack(context, 'El pendiente de ${_entrenadores[i].nombre} es en USD: se liquida en el Arqueo principal, no en la confirmación de entrega.', significado: SignificadoChip.alerta);
             Navigator.push(context,
-                MaterialPageRoute(builder: (_) => const ArqueoScreen()));
+                RutaIron(builder: (_) => const ArqueoScreen()));
             return;
           }
           final pseudo = PendienteDia(

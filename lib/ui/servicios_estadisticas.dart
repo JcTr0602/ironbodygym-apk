@@ -464,7 +464,7 @@ class _ServiciosEstadisticasScreenState
                   FilledButton.icon(
                     onPressed: () => Navigator.push(
                       context,
-                      MaterialPageRoute(
+                      RutaIron(
                           builder: (_) =>
                               const ReporteMargenesScreen()),
                     ),

@@ -503,7 +503,7 @@ class _CumpleanosScreenState extends State<CumpleanosScreen>
         child: FilaCliente(
         cliente: c,
         onTap: () => Navigator.of(context)
-            .push(MaterialPageRoute(
+            .push(RutaIron(
                 builder: (_) => FichaScreen(clienteId: id)))
             .then((_) => _cargar()),
         trailing: Column(

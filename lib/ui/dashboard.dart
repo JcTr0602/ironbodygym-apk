@@ -731,7 +731,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   /// Navega a una pantalla y recarga al volver (v1.0.11).
   Future<void> _ir(Widget w) async {
     await Navigator.of(context)
-        .push(MaterialPageRoute(builder: (_) => w));
+        .push(RutaIron(builder: (_) => w));
     if (mounted) _cargar();
   }
 

@@ -158,7 +158,7 @@ class _ComparativaEntrenadoresScreenState
                   child: InkWell(
                     onTap: () => Navigator.push(
                       context,
-                      MaterialPageRoute(
+                      RutaIron(
                         builder: (_) => DetalleEntrenadorScreen(
                             nombre: '${f['nombre']}'),
                       ),

@@ -501,7 +501,7 @@ class _PapeleraScreenState extends State<PapeleraScreen> {
                               });
                             } else {
                               Navigator.of(context).push(
-                                  MaterialPageRoute(
+                                  RutaIron(
                                       builder: (_) =>
                                           FichaScreen(clienteId: id)));
                             }

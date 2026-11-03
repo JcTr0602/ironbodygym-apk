@@ -140,7 +140,7 @@ class _DetalleIncidenciaScreenState
               onPressed: () async {
                 await Navigator.push(
                   context,
-                  MaterialPageRoute(
+                  RutaIron(
                     builder: (_) =>
                         EditarIncidenciaScreen(
                             existente: inc),
@@ -320,7 +320,7 @@ class _DetalleIncidenciaScreenState
                     onTap: () {
                       Navigator.push(
                         context,
-                        MaterialPageRoute(
+                        RutaIron(
                           builder: (_) => FichaScreen(
                               clienteId: clienteId),
                         ),

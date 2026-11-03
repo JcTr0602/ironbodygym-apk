@@ -293,7 +293,7 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
   void _irDetalle(Map<String, dynamic> s) {
     Navigator.push<bool>(
       context,
-      MaterialPageRoute(
+      RutaIron(
         builder: (_) => DetalleSuplementoScreen(
           suplemento: s,
           categoriaNombre:
@@ -309,7 +309,7 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
   void _irEditar(Map<String, dynamic>? s) {
     Navigator.push(
       context,
-      MaterialPageRoute(
+      RutaIron(
         builder: (_) => EditarSuplementoScreen(suplemento: s),
       ),
     ).then((_) => _cargar());
@@ -351,7 +351,7 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
               onPressed: () async {
                 await Navigator.push(
                   context,
-                  MaterialPageRoute(
+                  RutaIron(
                       builder: (_) => const ReservasScreen()),
                 );
                 if (mounted) _cargar();
@@ -363,7 +363,7 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
             tooltip: 'Fiados por cobrar',
             onPressed: () => Navigator.push(
               context,
-              MaterialPageRoute(
+              RutaIron(
                   builder: (_) =>
                       const CuentasPorCobrarScreen()),
             ),
@@ -378,14 +378,14 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
               if (v == 'historial') {
                 await Navigator.push(
                   context,
-                  MaterialPageRoute(
+                  RutaIron(
                       builder: (_) => HistorialVentasScreen(
                           soloMias: !_esDueno)),
                 );
               } else if (v == 'categorias') {
                 await Navigator.push(
                   context,
-                  MaterialPageRoute(
+                  RutaIron(
                       builder: (_) =>
                           const CategoriasSuplementoScreen()),
                 );
@@ -393,7 +393,7 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
               } else if (v == 'servicios') {
                 await Navigator.push(
                   context,
-                  MaterialPageRoute(
+                  RutaIron(
                       builder: (_) => const ServiciosScreen()),
                 );
               }

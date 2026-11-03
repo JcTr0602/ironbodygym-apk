@@ -596,7 +596,7 @@ class _HubTurnosScreenState extends State<HubTurnosScreen> {
                       child: Tarjeta(
                         child: InkWell(
                           onTap: () => Navigator.of(context).push(
-                            MaterialPageRoute(
+                            RutaIron(
                               builder: (_) => _soyDueno
                                   ? const ArqueoScreen()
                                   : const MiTurnoScreen(),
@@ -625,7 +625,7 @@ class _HubTurnosScreenState extends State<HubTurnosScreen> {
                   Tarjeta(
                     child: InkWell(
                       onTap: () => Navigator.of(context).push(
-                        MaterialPageRoute(
+                        RutaIron(
                           builder: (_) => const TurnosHubScreen(),
                         ),
                       ),

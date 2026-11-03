@@ -2474,7 +2474,7 @@ class _FichaScreenState extends State<FichaScreen> {
                           final cli = _c;
                           Navigator.push(
                             context,
-                            MaterialPageRoute(
+                            RutaIron(
                               builder: (_) => PestanaProgreso(
                                 clienteId: '${widget.clienteId}',
                                 nombreCliente:
@@ -3055,7 +3055,7 @@ class _FichaScreenState extends State<FichaScreen> {
   /// Abre la vista previa de la app del cliente (F6).
   void _abrirVistaPrevia() {
     Navigator.of(context).push(
-      MaterialPageRoute(
+      RutaIron(
         builder: (_) => VistaPreviaClienteScreen(
           clienteId: widget.clienteId,
           nombreCliente: '${_c?['nombre'] ?? ''}',
@@ -3221,7 +3221,7 @@ class _FichaScreenState extends State<FichaScreen> {
                     Icons.receipt_long_rounded, size: 22),
                 onPressed: () => Navigator.push(
                   context,
-                  MaterialPageRoute(
+                  RutaIron(
                     builder: (_) => EstadoCuentaScreen(
                         clienteId: widget.clienteId),
                   ),

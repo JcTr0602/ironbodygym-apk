@@ -227,7 +227,7 @@ class _FichaAccesoScreenState extends State<FichaAccesoScreen> {
               label: const Text('Abrir ficha del cliente'),
               onPressed: () async {
                 await Navigator.of(context).push(
-                  MaterialPageRoute(
+                  RutaIron(
                     builder: (_) =>
                         FichaScreen(clienteId: widget.clienteId),
                   ),

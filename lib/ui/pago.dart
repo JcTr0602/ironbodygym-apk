@@ -653,7 +653,7 @@ class _PagoScreenState extends State<PagoScreen> {
                       return FilaCliente(
                         cliente: c,
                         onTap: () => Navigator.of(context).push(
-                            MaterialPageRoute(
+                            RutaIron(
                                 builder: (_) => FichaScreen(
                                     clienteId:
                                         (c['id'] as int?) ??

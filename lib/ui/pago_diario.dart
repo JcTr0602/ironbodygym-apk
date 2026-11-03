@@ -687,7 +687,7 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
                   onPressed: () =>
                       Navigator.push(
                     context,
-                    MaterialPageRoute(
+                    RutaIron(
                       builder: (_) =>
                           const ReporteMensualDiariosScreen(),
                     ),

@@ -576,7 +576,7 @@ class DetalleSuplementoScreen extends StatelessWidget {
   Future<void> _vender(BuildContext context) async {
     final vendido = await Navigator.push<bool>(
       context,
-      MaterialPageRoute(
+      RutaIron(
         builder: (_) =>
             VentaSuplementoScreen(suplemento: suplemento),
       ),
@@ -644,7 +644,7 @@ class DetalleSuplementoScreen extends StatelessWidget {
                   // F12: crear desde plantilla (sin id ni foto).
                   final creado = await Navigator.push<bool>(
                     context,
-                    MaterialPageRoute(
+                    RutaIron(
                       builder: (_) => EditarSuplementoScreen(
                           plantilla: suplemento),
                     ),
@@ -655,7 +655,7 @@ class DetalleSuplementoScreen extends StatelessWidget {
                 } else if (v == 'editar') {
                   final editado = await Navigator.push<bool>(
                     context,
-                    MaterialPageRoute(
+                    RutaIron(
                       builder: (_) => EditarSuplementoScreen(
                           suplemento: suplemento),
                     ),

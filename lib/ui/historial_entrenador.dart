@@ -115,7 +115,7 @@ class _HistorialEntrenadorScreenState
             icon: const Icon(Icons.compare_arrows_rounded),
             onPressed: () => Navigator.push(
               context,
-              MaterialPageRoute(
+              RutaIron(
                 builder: (_) =>
                     const ComparativaEntrenadoresScreen(),
               ),
@@ -153,7 +153,7 @@ class _HistorialEntrenadorScreenState
                                     const EdgeInsets.all(12),
                                 onTap: () =>
                                     Navigator.of(context).push(
-                                  MaterialPageRoute(
+                                  RutaIron(
                                     builder: (_) =>
                                         DetalleEntrenadorScreen(
                                             nombre:

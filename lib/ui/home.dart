@@ -466,7 +466,7 @@ class _HomeScreenState extends State<HomeScreen>
       // se bloquea igual (fail-closed), no se regala la sesión.
       if ((transcurridos < 0 || transcurridos >= minutos) && mounted) {
         await Navigator.of(context).push(
-          MaterialPageRoute(
+          RutaIron(
             builder: (_) => const PinLockScreen(),
             fullscreenDialog: true,
           ),
@@ -813,7 +813,7 @@ class _HomeScreenState extends State<HomeScreen>
 
   void _ir(Widget w) {
     Navigator.of(context)
-        .push(MaterialPageRoute(builder: (_) => w))
+        .push(RutaIron(builder: (_) => w))
         // Gemini: forzar refresh al volver (bypass caché 30s).
         .then((_) {
       if (mounted) _cargar(forceRefresh: true);

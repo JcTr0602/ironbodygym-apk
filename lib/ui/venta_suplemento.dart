@@ -705,7 +705,7 @@ class _VentaSuplementoScreenState
     }
     final ok = await Navigator.push<bool>(
       context,
-      MaterialPageRoute(
+      RutaIron(
         builder: (_) => VentaSuplementoInscripcionScreen(
           suplemento: widget.suplemento,
           cantidad: _cantidad,

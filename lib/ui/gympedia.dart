@@ -148,7 +148,7 @@ class _GympediaScreenState extends State<GympediaScreen> {
   Future<void> _abrirEditor(
       {Map<String, dynamic>? publicado,
       Map<String, dynamic>? borrador}) async {
-    await Navigator.of(context).push(MaterialPageRoute(
+    await Navigator.of(context).push(RutaIron(
       builder: (_) => GympediaEditorScreen(
         publicado: publicado,
         borrador: borrador,

@@ -891,7 +891,7 @@ class _MiNominaScreenState extends State<MiNominaScreen> {
                             size: 18),
                         label: const Text('Dosis sin agua'),
                         onPressed: () => Navigator.of(context).push(
-                          MaterialPageRoute(
+                          RutaIron(
                             builder: (_) => const ServiciosScreen(
                                 tipoInicial: 'dosis_sin_agua'),
                           ),
@@ -902,7 +902,7 @@ class _MiNominaScreenState extends State<MiNominaScreen> {
                             size: 18),
                         label: const Text('Dosis con agua'),
                         onPressed: () => Navigator.of(context).push(
-                          MaterialPageRoute(
+                          RutaIron(
                             builder: (_) => const ServiciosScreen(
                                 tipoInicial: 'dosis_con_agua'),
                           ),

@@ -335,14 +335,14 @@ class _AdminScreenState extends State<AdminScreen> {
 
   void _ir(Widget w) {
     Navigator.of(context)
-        .push(MaterialPageRoute(builder: (_) => w))
+        .push(RutaIron(builder: (_) => w))
         .then((_) => _cargar());
   }
 
   /// Navega a una subpantalla y recarga al volver (para las secciones).
   Future<void> _irYRecargar(Widget w) async {
     await Navigator.of(context)
-        .push(MaterialPageRoute(builder: (_) => w));
+        .push(RutaIron(builder: (_) => w));
     await _cargar();
   }
 

@@ -496,7 +496,7 @@ class _AuditoriaScreenState extends State<AuditoriaScreen> {
             icon: const Icon(Icons.person_search_rounded),
             tooltip: 'Por persona',
             onPressed: () => Navigator.of(context).push(
-              MaterialPageRoute(
+              RutaIron(
                 builder: (_) => const AuditoriaPersonaScreen(),
               ),
             ),
@@ -803,7 +803,7 @@ class _AuditoriaScreenState extends State<AuditoriaScreen> {
   void _abrirOp(BuildContext ctx, Map<String, dynamic> op, int? cid) {
     if (cid != null && !_protegidosIds.contains(cid)) {
       Navigator.of(ctx).push(
-        MaterialPageRoute(builder: (_) => FichaScreen(clienteId: cid)),
+        RutaIron(builder: (_) => FichaScreen(clienteId: cid)),
       );
       return;
     }

@@ -187,7 +187,7 @@ class _BandejaScreenState extends State<BandejaScreen>
     if (!mounted) return;
     await Navigator.push<void>(
       context,
-      MaterialPageRoute(
+      RutaIron(
         builder: (_) => GympediaEditorScreen(
           borrador: {
             'slug': slugBandeja('${s['tema'] ?? ''}'),
@@ -379,7 +379,7 @@ class _BandejaScreenState extends State<BandejaScreen>
     if (!mounted) return;
     final publicado = await Navigator.push<bool>(
       context,
-      MaterialPageRoute(
+      RutaIron(
         builder: (_) => GympediaEditorScreen(
           borrador: {
             'slug': '${b['id']}',

@@ -523,7 +523,7 @@ class _BuscarScreenState extends State<BuscarScreen> {
                                           : int.tryParse('$id');
                                       if (cid == null) return;
                                       Navigator.of(context)
-                                          .push(MaterialPageRoute(
+                                          .push(RutaIron(
                                               builder: (_) => FichaScreen(
                                                   clienteId: cid)))
                                           .then((_) {
@@ -687,13 +687,13 @@ class _BuscarScreenState extends State<BuscarScreen> {
       case 'diario':
         if (!mounted) return;
         await Navigator.of(context).push(
-            MaterialPageRoute(builder: (_) => const PagoDiarioScreen()));
+            RutaIron(builder: (_) => const PagoDiarioScreen()));
         if (mounted) await _buscar();
         return;
       case 'venta':
         if (!mounted) return;
         await Navigator.of(context).push(
-            MaterialPageRoute(
+            RutaIron(
                 builder: (_) => const SuplementosScreen()));
         if (mounted) await _buscar();
         return;
@@ -701,7 +701,7 @@ class _BuscarScreenState extends State<BuscarScreen> {
         final id = c['id'];
         final cid = id is int ? id : int.tryParse('$id');
         if (cid == null || !mounted) return;
-        await Navigator.of(context).push(MaterialPageRoute(
+        await Navigator.of(context).push(RutaIron(
             builder: (_) =>
                 FichaScreen(clienteId: cid, editarAlAbrir: true)));
         if (mounted) await _buscar();

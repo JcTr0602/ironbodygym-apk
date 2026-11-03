@@ -206,7 +206,7 @@ class _ListaIncidenciasScreenState
               onPressed: () async {
                 await Navigator.push(
                   context,
-                  MaterialPageRoute(
+                  RutaIron(
                     builder: (_) =>
                         const TiposIncidenciaScreen(),
                   ),
@@ -498,7 +498,7 @@ class _ListaIncidenciasScreenState
   void _irDetalle(Incidencia inc) {
     Navigator.push(
       context,
-      MaterialPageRoute(
+      RutaIron(
         builder: (_) =>
             DetalleIncidenciaScreen(
                 incidenciaId: inc.id),
@@ -509,7 +509,7 @@ class _ListaIncidenciasScreenState
   void _crearNueva() {
     Navigator.push(
       context,
-      MaterialPageRoute(
+      RutaIron(
         builder: (_) =>
             const EditarIncidenciaScreen(),
       ),

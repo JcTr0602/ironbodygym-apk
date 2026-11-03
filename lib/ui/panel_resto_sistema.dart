@@ -90,7 +90,7 @@ class AuditoriaPanelScreen extends StatelessWidget {
       );
     }
     void ir(Widget p) => Navigator.push(
-        context, MaterialPageRoute(builder: (_) => p));
+        context, RutaIron(builder: (_) => p));
     return Scaffold(
       appBar: AppBar(title: const Text('Auditoría (F1)')),
       body: ListView(
@@ -474,7 +474,7 @@ class _MantenimientoScreenState extends State<MantenimientoScreen> {
               trailing: TextButton(
                 onPressed: () => Navigator.push(
                     context,
-                    MaterialPageRoute(
+                    RutaIron(
                         builder: (_) => const ErroresSyncPanelScreen())),
                 child: const Text('Abrir F3'),
               ),

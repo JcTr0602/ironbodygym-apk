@@ -772,7 +772,7 @@ class _AdelantosListaScreenState extends State<AdelantosListaScreen> {
                 TextButton(
                   onPressed: () => Navigator.push(
                       context,
-                      MaterialPageRoute(
+                      RutaIron(
                           builder: (_) => const NominaScreen())),
                   child: const Text(
                       'Registrar un adelanto nuevo (pantalla de Nómina)'),

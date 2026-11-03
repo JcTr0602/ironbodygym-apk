@@ -445,7 +445,7 @@ class _DetalleEntrenadorScreenState extends State<DetalleEntrenadorScreen> {
                                     }
                                     Navigator.of(context)
                                         .push(
-                                            MaterialPageRoute(
+                                            RutaIron(
                                                 builder: (_) =>
                                                     FichaScreen(
                                                         clienteId:
@@ -494,7 +494,7 @@ class _DetalleEntrenadorScreenState extends State<DetalleEntrenadorScreen> {
                                     }
                                     Navigator.of(context)
                                         .push(
-                                            MaterialPageRoute(
+                                            RutaIron(
                                                 builder: (_) =>
                                                     FichaScreen(
                                                         clienteId:

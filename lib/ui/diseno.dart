@@ -382,6 +382,20 @@ class AppTema {
     return ThemeData(
       useMaterial3: true,
       brightness: b,
+      // 1.22 Diseño Bloque 1 (T1): UNA transición del sistema
+      // para las 95 rutas (desvanecido + desplazamiento corto,
+      // duración y curva únicas), en vez del salto por defecto
+      // de cada plataforma.
+      pageTransitionsTheme: const PageTransitionsTheme(
+        builders: {
+          TargetPlatform.android: TransicionPaginaIron(),
+          TargetPlatform.iOS: TransicionPaginaIron(),
+          TargetPlatform.windows: TransicionPaginaIron(),
+          TargetPlatform.macOS: TransicionPaginaIron(),
+          TargetPlatform.linux: TransicionPaginaIron(),
+          TargetPlatform.fuchsia: TransicionPaginaIron(),
+        },
+      ),
       colorScheme: ColorScheme.fromSeed(
         seedColor: AppColores.naranja,
         brightness: b,
@@ -537,6 +551,64 @@ class AppTema {
         labelLarge: AppTexto.etiqueta,
         labelSmall: AppTexto.minuscula,
       ).apply(bodyColor: texto, displayColor: texto),
+    );
+  }
+}
+
+/// 1.22 Diseño Bloque 1 (T1, corrección de panel): la ruta
+/// del sistema. El PageTransitionsBuilder da la FORMA de la
+/// transición pero NO su duración (la manda el PageRoute);
+/// RutaIron fija 220 ms en entrada y salida para que la
+/// promesa de T1 sea real en las 95 rutas, que la usan
+/// todas tras la migración mecánica de MaterialPageRoute.
+class RutaIron<T> extends MaterialPageRoute<T> {
+  RutaIron({
+    required super.builder,
+    super.settings,
+    super.maintainState = true,
+    super.fullscreenDialog = false,
+    super.allowSnapshotting = true,
+  });
+
+  @override
+  Duration get transitionDuration =>
+      const Duration(milliseconds: 220);
+
+  @override
+  Duration get reverseTransitionDuration =>
+      const Duration(milliseconds: 220);
+}
+
+/// 1.22 Diseño Bloque 1 (T1): la transición de página del
+/// sistema — desvanecido + desplazamiento vertical corto
+/// (24 px), con curva easeOutCubic, idéntica en
+/// entrada y salida. Sustituye el salto por defecto de
+/// Material en todas las rutas.
+class TransicionPaginaIron extends PageTransitionsBuilder {
+  const TransicionPaginaIron();
+
+  @override
+  Widget buildTransitions<T>(
+    PageRoute<T> route,
+    BuildContext context,
+    Animation<double> animation,
+    Animation<double> secondaryAnimation,
+    Widget child,
+  ) {
+    final curva = CurvedAnimation(
+      parent: animation,
+      curve: Curves.easeOutCubic,
+      reverseCurve: Curves.easeInCubic,
+    );
+    return FadeTransition(
+      opacity: curva,
+      child: SlideTransition(
+        position: Tween<Offset>(
+          begin: const Offset(0, 0.04),
+          end: Offset.zero,
+        ).animate(curva),
+        child: child,
+      ),
     );
   }
 }

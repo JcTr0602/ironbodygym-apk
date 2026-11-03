@@ -95,7 +95,7 @@ class _ArqueoScreenState extends State<ArqueoScreen> {
             child: Tarjeta(
               onTap: () async {
                 await Navigator.of(context).push(
-                  MaterialPageRoute(
+                  RutaIron(
                     builder: (_) => const DiferenciasCajaScreen(),
                   ),
                 );
@@ -164,7 +164,7 @@ class _ArqueoScreenState extends State<ArqueoScreen> {
                               child: Tarjeta(
                                 onTap: () async {
                                   await Navigator.of(context).push(
-                                    MaterialPageRoute(
+                                    RutaIron(
                                       builder: (_) => _DetalleArqueoScreen(
                                         telegramId: e['telegram_id'] as int,
                                         nombre: '${e['nombre']}',

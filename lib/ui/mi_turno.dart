@@ -816,7 +816,7 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
                         trailing:
                             const Icon(Icons.chevron_right_rounded),
                         onTap: () => Navigator.of(context)
-                            .push(MaterialPageRoute(
+                            .push(RutaIron(
                                 builder: (_) =>
                                     const PendienteScreen()))
                             .then((_) => _cargar()),
@@ -960,7 +960,7 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
                                     return;
                                   }
                                   Navigator.of(context)
-                                      .push(MaterialPageRoute(
+                                      .push(RutaIron(
                                           builder: (_) =>
                                               FichaScreen(
                                                   clienteId:

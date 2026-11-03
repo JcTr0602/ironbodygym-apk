@@ -65,7 +65,7 @@ class TurnosHubScreen extends StatelessWidget {
             'Quién trabaja cada día de la semana (mañana y tarde). '
                 'Es la base que anuncia la app de clientes.',
             () => Navigator.of(context).push(
-              MaterialPageRoute(
+              RutaIron(
                 builder: (_) => const HorarioTurnosScreen(),
               ),
             ),
@@ -78,7 +78,7 @@ class TurnosHubScreen extends StatelessWidget {
                 'ausencias): corrigen lo programado de ese día '
                 'sin tocar el patrón.',
             () => Navigator.of(context).push(
-              MaterialPageRoute(
+              RutaIron(
                 builder: (_) => const CalendarioTurnosScreen(),
               ),
             ),

@@ -538,7 +538,7 @@ class _InvitadosScreenState extends State<InvitadosScreen> {
           tooltip: 'Información pública de la app',
           icon: const Icon(Icons.public_rounded),
           onPressed: () => Navigator.of(context).push(
-            MaterialPageRoute(builder: (_) => const InfoPublicaScreen()),
+            RutaIron(builder: (_) => const InfoPublicaScreen()),
           ),
         ),
       IconButton(
@@ -697,7 +697,7 @@ class _InvitadosScreenState extends State<InvitadosScreen> {
                 label: Text('Reportes Plus por atender '
                     '($_reportesPlusPendientes)'),
                 onPressed: () => Navigator.of(context).push(
-                  MaterialPageRoute(
+                  RutaIron(
                       builder: (_) => const ReportesPlusScreen()),
                 ),
               ),
@@ -849,7 +849,7 @@ class _InvitadosScreenState extends State<InvitadosScreen> {
                   alternar();
                   return;
                 }
-                await Navigator.of(context).push(MaterialPageRoute(
+                await Navigator.of(context).push(RutaIron(
                   builder: (_) =>
                       InvitadoDetalleScreen(invitadoId: inv.id),
                 ));
@@ -1532,7 +1532,7 @@ class _InvitadoDetalleScreenState extends State<InvitadoDetalleScreen> {
     try {
       final datos = await _svc.prepararConversion(d);
       if (!mounted) return;
-      await Navigator.of(context).push(MaterialPageRoute(
+      await Navigator.of(context).push(RutaIron(
         builder: (_) => InscribirScreen(conversion: datos),
       ));
       await _cargar();
@@ -1580,7 +1580,7 @@ class _InvitadoDetalleScreenState extends State<InvitadoDetalleScreen> {
       carnet: d.carnet,
       medidas: d.mediciones,
     );
-    await Navigator.of(context).push(MaterialPageRoute(
+    await Navigator.of(context).push(RutaIron(
       builder: (_) => InscribirScreen(conversion: datos),
     ));
     await _cargar();
@@ -2038,7 +2038,7 @@ class _InvitadoDetalleScreenState extends State<InvitadoDetalleScreen> {
                 texto: 'Ver ficha del cliente',
                 icono: Icons.badge_rounded,
                 onPressed: () => Navigator.of(context).push(
-                  MaterialPageRoute(
+                  RutaIron(
                       builder: (_) =>
                           FichaScreen(clienteId: d.clienteId!)),
                 ),
@@ -2347,7 +2347,7 @@ class _InvitadoDetalleScreenState extends State<InvitadoDetalleScreen> {
               label: const Text(
                   'Editar precio del Plus en Administración'),
               onPressed: () => Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => const AdminScreen()),
+                RutaIron(builder: (_) => const AdminScreen()),
               ),
             ),
           ],

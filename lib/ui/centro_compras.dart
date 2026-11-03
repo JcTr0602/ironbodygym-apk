@@ -441,7 +441,7 @@ class _CentroComprasScreenState extends State<CentroComprasScreen> {
     if (destino.pantalla == 'historial_ventas') {
       await Navigator.push(
         context,
-        MaterialPageRoute(
+        RutaIron(
           builder: (_) => HistorialVentasScreen(resaltarId: destino.id),
         ),
       );
@@ -458,7 +458,7 @@ class _CentroComprasScreenState extends State<CentroComprasScreen> {
     if (!mounted) return;
     await Navigator.push(
       context,
-      MaterialPageRoute(
+      RutaIron(
         builder: (_) => ServiciosHistorialScreen(
           esDueno: true,
           personas: personas,

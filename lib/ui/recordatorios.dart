@@ -311,7 +311,7 @@ class _RecordatoriosScreenState extends State<RecordatoriosScreen> {
                                 ? TextButton(
                                     onPressed: () => Navigator.push(
                                         context,
-                                        MaterialPageRoute(
+                                        RutaIron(
                                             builder: (_) => FichaScreen(
                                                 clienteId: d.clienteId!))),
                                     child: const Text('Ver ficha'))

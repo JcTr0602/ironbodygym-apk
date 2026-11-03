@@ -187,7 +187,7 @@ class _CuentasCobrarScreenState
                               final cid = c['cliente_id'] as int?;
                               if (cid == null || cid == 0) return;
                               Navigator.of(context).push(
-                                  MaterialPageRoute(
+                                  RutaIron(
                                       builder: (_) => FichaScreen(
                                           clienteId: cid)));
                             },
