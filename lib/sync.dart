@@ -604,6 +604,23 @@ int topePaginaSeguro(int paginaMax, int pageWm, int? minSinVerificar) {
   return tope < paginaMax ? tope : paginaMax;
 }
 
+/// 1.23 PL-7 (banco de pruebas, 2026-11-03): ¿la respuesta de una
+/// página del pull es utilizable? 200 = la página cubre todo el
+/// resultado; 206 = página parcial VÁLIDA: PostgREST la devuelve
+/// cuando la petición lleva `Prefer: count=exact` (las tablas que
+/// purgan — clientes y pagos — lo piden para H-03) y quedan
+/// filas fuera del rango devuelto. Tratarla como error, como
+/// hacía el chequeo del lote, aborta la bajada de esas dos
+/// tablas en cuanto el resultado pasa de una página: en el
+/// emulador del banco, wm_clientes y wm_pagos quedaron en 0 con
+/// «bajada …: HTTP 206» y el espejo sin las últimas filas
+/// (contadores de Home por debajo). Verificado en vivo contra
+/// Supabase: mismo rango con count=exact → 206; sin count → 200.
+/// El body de un 206 ES la página y su Content-Range trae el
+/// total, que H-03 ya parsea aguas abajo.
+bool esPaginaPullValida(int statusCode) =>
+    statusCode == 200 || statusCode == 206;
+
 /// Normaliza una fila del RPC `op_aplicada_con_resultado_batch`
 /// (TABLE(op_uuid text, estado text, resultado jsonb, error text)) o del
 /// GET de fallback (op_uuid, aplicada boolean, resultado) a un
@@ -3784,7 +3801,7 @@ class SyncEngine {
                 d: '$tabla http=${r.statusCode}');
             throw Exception('bajada $tabla: HTTP ${r.statusCode}');
           }
-    if (r.statusCode != 200) {
+    if (!esPaginaPullValida(r.statusCode)) {
             // v1.2.9+47 (AppLog): fallo HTTP con fragmento sanitizado.
             final frag = r.body.length > 200
                 ? r.body.substring(0, 200)
