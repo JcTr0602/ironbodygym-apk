@@ -661,7 +661,11 @@ class _AdelantosListaScreenState extends State<AdelantosListaScreen> {
         if (u.isNotEmpty) uuidsEspejo.add(u);
       }
       // Registrar_adelanto aún en cola en este teléfono (provisional).
-      for (final op in await LocalDb.instance.pendingOps()) {
+      // Autoauditoría 1.22 #1: pendingOpsLectura (incluye
+      // 'enviada'): con pendingOps, un adelanto recién enviado
+      // desaparecía de la lista en esa ventana (T-06 era solo
+      // el duplicado; la ventana inversa quedaba).
+      for (final op in await LocalDb.instance.pendingOpsLectura()) {
         final opUuid = '${op['op_uuid'] ?? ''}'.trim();
         if (opUuid.isNotEmpty && uuidsEspejo.contains(opUuid)) {
           continue;

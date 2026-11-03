@@ -1546,15 +1546,26 @@ class _InvitadoDetalleScreenState extends State<InvitadoDetalleScreen> {
   /// «Reanudar inscripción»: reabre Inscribir con el MISMO
   /// conversion_uuid durable (el formulario se cerró a mitad).
   Future<void> _reanudar() async {
-    final d = _d!;
-    final local = _local!;
-    // 1.22 IG-05: las mismas guardias que _convertir (aquí
-    // faltaban: se podía reanudar desde la caché de solo
-    // lectura o con el invitado caducado).
+    // Autoauditoría 1.22 #1 (2026-11-03): las guardias van
+    // ANTES de desenvolver _d/_local. La propia IG-05 hizo
+    // alcanzable el null: su fallback offline pone _local=null,
+    // y con el orden anterior un _reanudar invocado en ese
+    // estado reventaba con el force-unwrap en vez de mostrar
+    // el snack de solo lectura (hoy el botón no se ofrece en
+    // offline, pero la guarda no puede depender de eso).
     if (_offlineCache) {
       _snack('Sin conexión: el detalle está en solo lectura.');
       return;
     }
+    final d = _d;
+    final local = _local;
+    if (d == null || local == null) {
+      _snack('No hay una conversión preparada para reanudar.');
+      return;
+    }
+    // 1.22 IG-05: las mismas guardias que _convertir (aquí
+    // faltaban: se podía reanudar desde la caché de solo
+    // lectura o con el invitado caducado).
     if (d.caducado) {
       _snack(
           'Este invitado está caducado: extiende su vida antes de reanudar la conversión.');

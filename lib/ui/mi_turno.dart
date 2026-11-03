@@ -133,7 +133,12 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
     }
     final opsDia = <(String, double)>[];
     final pr = await preciosVigentes();
-    for (final op in await LocalDb.instance.pendingOps()) {
+    // Autoauditoría 1.22 #1: pendingOpsLectura (incluye
+    // 'enviada'), no pendingOps: el total de arriba sale de
+    // pendienteEntrega, que SÍ cuenta las ops en vuelo; con la
+    // lista corta, una op recién enviada desaparecía del
+    // desglose por día pero no del total.
+    for (final op in await LocalDb.instance.pendingOpsLectura()) {
       // Argón 1.21 AR-C03: si la op ya bajó al espejo, la
       // cuentan las listas de espejo; re-sumarla aquí duplicaba
       // el desglose por día frente al total superior.
