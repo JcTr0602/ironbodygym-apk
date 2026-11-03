@@ -12,6 +12,7 @@ void main() {
     int locales = 10,
     bool conteo = false,
     int? total,
+    bool troncal = false,
   }) =>
       SyncEngine.purgaPermitida(
         viable: viable,
@@ -20,6 +21,7 @@ void main() {
         filasLocales: locales,
         conteoConfirmado: conteo,
         totalServidor: total,
+        esTroncal: troncal,
       );
 
   test('caso feliz: pasada completa con ids', () {
@@ -40,8 +42,42 @@ void main() {
     expect(base(vistos: 0, locales: 10), isFalse);
   });
 
-  test('conjunto vacío con conteo 0 SÍ purga (tabla vacía real)', () {
-    expect(base(vistos: 0, locales: 10, conteo: true, total: 0), isTrue);
+  // 1.23 (Argón Pull H-01, BLOQUEANTE — invierte el caso que
+  // antes lo celebraba): un conjunto vacío con conteo 0 puede
+  // ser una lectura rota (200 [] con RLS degradado), no la
+  // verdad. Con filas locales, el vacío no purga: ni en
+  // troncales (nunca) ni en el resto con 5+ filas.
+  test('conjunto vacío con conteo 0 y 10 locales NO purga', () {
+    expect(base(vistos: 0, locales: 10, conteo: true, total: 0),
+        isFalse);
+  });
+
+  test('conjunto vacío en TRONCAL con 1 local NO purga', () {
+    expect(
+        base(
+            vistos: 0,
+            locales: 1,
+            conteo: true,
+            total: 0,
+            troncal: true),
+        isFalse);
+  });
+
+  test('conjunto vacío no troncal con 3 locales SÍ purga '
+      '(vacío real de tabla menor)', () {
+    expect(base(vistos: 0, locales: 3, conteo: true, total: 0),
+        isTrue);
+  });
+
+  test('troncal con ids vistos y conteo coherente SÍ purga', () {
+    expect(
+        base(
+            vistos: 8,
+            locales: 10,
+            conteo: true,
+            total: 8,
+            troncal: true),
+        isTrue);
   });
 
   test('local vacío sin ids: nada que borrar, purga inocua', () {

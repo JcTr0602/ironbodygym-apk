@@ -308,11 +308,18 @@ void main() {
       // programada hace que el pull re-descargue la tabla desde 0
       // (sin él, el cursor inicial dependería del estado de la BD
       // compartida y el valor esperado cambiaría). Con el arreglo
-      // S3, el marcador queda en 0: las filas 101 y 102 no se
+      // S3, el marcador NO salta: las filas 101 y 102 no se
       // verificaron y el tope impide avanzar; sin el arreglo, el
       // cierre forzaba el marcador a serverSeq (500) aunque
-      // ninguna fila se verificó. El caso "cursor 100 + fallo en
-      // 101 → queda en 100" lo cubren los tests puros de arriba.
+      // ninguna fila se verificó.
+      // 1.23 (Argón Pull H-05): el reset ya no se escribe en
+      // disco antes del HTTP — vive en la variable del pull
+      // hasta el primer commit de página. Como aquí ninguna
+      // página comitea, el cursor persistido queda en su valor
+      // previo (100), intacto, y la bandera de reseteo sobrevive
+      // para reintentar la re-descarga el próximo ciclo. Lo que
+      // este test garantiza sigue siendo lo mismo: ni salto ni
+      // forzado a serverSeq (500).
       await db.insert('meta',
           {'k': 'purga_v144_suplementos', 'v': '1'},
           conflictAlgorithm: ConflictAlgorithm.replace);
@@ -324,8 +331,10 @@ void main() {
       expect(res.corrio, isTrue);
       final wm =
           await LocalDb.instance.getWatermarkTabla('suplementos');
-      expect(wm, 0,
-          reason: 'sin S3, el cierre forzaría el marcador a 500');
+      expect(wm, 100,
+          reason: 'sin S3, el cierre forzaría el marcador a 500; '
+              'con H-05 el reset no se persiste y el cursor previo '
+              'queda intacto cuando ninguna página comitea');
     } finally {
       // Restaurar esquema exacto y metas, pase lo que pase.
       await db.execute('DROP TABLE IF EXISTS suplementos');

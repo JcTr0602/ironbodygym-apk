@@ -3111,6 +3111,22 @@ class SyncEngine {
   ///    solo se purga si el conteo confirma que lo visto es todo.
   ///    En el peor caso se retrasa la purga un ciclo, nunca se
   ///    borra a ciegas.
+  /// 6. Vacío total (1.23, Argón Pull H-01 — BLOQUEANTE): con 0
+  ///    ids vistos y filas locales, NUNCA se purga una tabla
+  ///    troncal (ni con conteo confirmado en 0: un 200 [] con
+  ///    Content-Range */0 puede ser RLS evaluado con contexto
+  ///    degradado, no la verdad; en producción esas tablas
+  ///    jamás tienen 0 filas reales). En el resto de purgables,
+  ///    0 vistos con 5+ locales tampoco borra en automático.
+  static const Set<String> tablasTroncales = {
+    'clientes',
+    'pagos',
+    'pagos_diarios',
+    'suplementos',
+    'categorias_suplemento',
+    'ventas_suplementos',
+  };
+
   static bool purgaPermitida({
     required bool viable,
     required bool pasadaCompleta,
@@ -3118,8 +3134,13 @@ class SyncEngine {
     required int filasLocales,
     required bool conteoConfirmado,
     required int? totalServidor,
+    required bool esTroncal,
   }) {
     if (!viable || !pasadaCompleta) return false;
+    if (idsVistos == 0 && filasLocales > 0) {
+      if (esTroncal) return false;
+      if (filasLocales >= 5) return false;
+    }
     if (conteoConfirmado && totalServidor != idsVistos) return false;
     final conjuntoFiable = idsVistos > 0 ||
         filasLocales == 0 ||
@@ -3495,8 +3516,13 @@ class SyncEngine {
       // divergente, se resetea a 0 (re-descarga solo ella).
       var cursor = await _db.getWatermarkTabla(tabla);
       if (tablasReseteadas.contains(tabla)) {
+        // 1.23 (Argón Pull H-05): el reset vive SOLO en la
+        // variable hasta que la primera página comitea. Antes
+        // se escribía wm=0 en disco antes del primer HTTP: si
+        // la descarga moría ahí, el cursor quedaba destruido
+        // en 0 sin haber bajado nada (y el mínimo global caía
+        // a 0 acusando un sync que nunca ocurrió).
         cursor = 0;
-        await _db.setWatermarkTabla(tabla, 0);
       }
       var pageWm = cursor;
       var tablaMax = cursor;
@@ -3779,6 +3805,12 @@ class SyncEngine {
                 // esta tabla queda bloqueada en el cierre.
                 fallidas++;
                 fallidasTabla++;
+                // 1.23 (Argón Pull H-03): una fila con seq <= 0
+                // (nulo/corrupto) no puede topar el marcador,
+                // pero su fallo SÍ marca la tabla sin verificar:
+                // sin esto, la pasada se cerraba como completa y
+                // la tabla podía purgar/saltar con una fila rota.
+                if (seqEnCurso <= 0) tablaConSinVerificar = true;
                 final minActual = minSinVerificar;
                 if (seqEnCurso > 0 &&
                     (minActual == null || seqEnCurso < minActual)) {
@@ -3788,6 +3820,7 @@ class SyncEngine {
             } catch (_) {
               fallidas++;
               fallidasTabla++;
+              if (seqEnCurso <= 0) tablaConSinVerificar = true;
               // S3: la fila que falló en la 1ª pasada también
               // topa el marcador (si otra posterior avanzara,
               // la saltaría para siempre).
@@ -3816,6 +3849,13 @@ class SyncEngine {
                         tabla, p['id'], p['dataJson']);
               } catch (_) {
                 fallidas++;
+                // 1.23 (Argón Pull H-03): este catch olvidaba
+                // fallidasTabla — la fila quedaba sin verificar
+                // pero la purga de la tabla no se bloqueaba.
+                fallidasTabla++;
+                if ((p['seq'] as int) <= 0) {
+                  tablaConSinVerificar = true;
+                }
               }
             }
           }
@@ -3827,6 +3867,10 @@ class SyncEngine {
               // pasada. Sin esto, la fila posterior que sí se
               // verificó avanzaba paginaMax y la saltaba.
               final seqP = p['seq'] as int;
+              // 1.23 (Argón Pull H-03): seq <= 0 sin verificar
+              // también marca la tabla (no puede topar, pero
+              // tampoco puede cerrar como completa).
+              if (seqP <= 0) tablaConSinVerificar = true;
               final minActual = minSinVerificar;
               if (seqP > 0 &&
                   (minActual == null || seqP < minActual)) {
@@ -4060,6 +4104,7 @@ class SyncEngine {
             filasLocales: filasLocales,
             conteoConfirmado: conteoConfirmado,
             totalServidor: totalServidor,
+            esTroncal: tablasTroncales.contains(tabla),
           );
           if (purgaValidada) {
             final borradas =
@@ -4094,20 +4139,24 @@ class SyncEngine {
         final wmActual = await _db.getWatermarkTabla(tabla);
         if (wmActual < serverSeq) {
           // v1.3.1 (Argón pull): NO forzar el watermark si la tabla es
-          // troncal, el cursor estaba en 0, el servidor devolvió 0 filas
-          // y la tabla local está vacía. En producción esas tablas nunca
-          // están vacías: forzar aquí escondería un RLS roto que devuelve
-          // 200 con [] y se perdería el historial al corregirlo.
+          // troncal, el cursor estaba en 0 y el servidor devolvió 0
+          // filas. En producción esas tablas nunca están vacías:
+          // forzar aquí escondería un RLS roto que devuelve 200 con
+          // [] y se perdería el historial al corregirlo.
+          // 1.23 (Argón Pull H-02): la condición ya no exige que la
+          // tabla local esté vacía — el conteo se evaluaba DESPUÉS
+          // de la purga y bastaba 1 fila optimista superviviente
+          // para saltar el cursor a serverSeq con tablaMax == 0,
+          // dejando el espejo ciego para siempre. Si se pidió la
+          // tabla troncal desde 0 y no bajó ni una fila, el cursor
+          // no avanza, haya lo que haya en local.
           var forzar = true;
           if (cursor == 0 &&
-              const {'clientes', 'pagos', 'suplementos'}
-                  .contains(tabla)) {
-            final filasLocales = await _db.contar(tabla);
-            if (tablaMax == 0 && filasLocales == 0) {
-              forzar = false;
-              AppLog.aviso('sync', 'pull_wm_no_forzado',
-                  d: '$tabla cursor=0 servidor=0 filas=0');
-            }
+              tablaMax == 0 &&
+              tablasTroncales.contains(tabla)) {
+            forzar = false;
+            AppLog.aviso('sync', 'pull_wm_no_forzado',
+                d: '$tabla cursor=0 servidor=0');
           }
           if (forzar && !tablasSecuenciaPropia.contains(tabla)) {
             await _db.setWatermarkTabla(tabla, serverSeq);
@@ -4182,10 +4231,37 @@ class SyncEngine {
         final dateHdrBorrados = r.headers['date'];
         if (dateHdrBorrados != null) ultimoDateHdr = dateHdrBorrados;
         if (rows.isEmpty) break;
+        // 1.23 (Argón Pull H-06): cada fila va en su propio
+        // try/catch con tope de cursor — si una revienta, las
+        // demás de la página se procesan y el cursor se topa a
+        // (seq de la mala - 1); sin esto, una sola fila mala
+        // abortaba la pasada entera y congelaba todas las
+        // eliminaciones futuras en cada pull.
+        int? minBorradoFallido;
         for (final row in rows) {
-          final m = Map<String, dynamic>.from(row as Map);
-          final seq = (m['sync_seq'] as int?) ?? 0;
-          final entidad = '${m['entidad'] ?? ''}';
+          // Panel Pull-S M-01: TODA la decodificación va dentro
+          // del try — `row as Map`, Map.from y el parseo de
+          // sync_seq también revientan con un payload anómalo
+          // (un sync_seq como texto lanzaba ANTES del catch y
+          // congelaba la pasada entera, el mismo fallo que el
+          // cast de entidad_id). seq se declara fuera para que
+          // el catch pueda topar el cursor con ella.
+          var seq = 0;
+          try {
+            final m = Map<String, dynamic>.from(row as Map);
+            final rawSeq = m['sync_seq'];
+            seq = rawSeq is num
+                ? rawSeq.toInt()
+                : int.tryParse('${rawSeq ?? ''}') ?? 0;
+            // El máximo de la página se anota al DECODIFICAR la
+            // fila, no al completar su trabajo: si el trabajo
+            // revienta a mitad (p. ej. la constancia local), el
+            // tope de después necesita el máximo visto para
+            // cortar en (seq fallido - 1); anotarlo al final del
+            // cuerpo dejaba el máximo en el cursor y el tope no
+            // podía expresarse.
+            if (seq > borradosMax) borradosMax = seq;
+            final entidad = '${m['entidad'] ?? ''}';
           const mapaEntidades = {
             'clientes': 'clientes',
             'pagos': 'pagos',
@@ -4214,7 +4290,14 @@ class SyncEngine {
             aplicadas++;
             contarEnDetallePull(porTabla, tabla);
           } else {
-            final entidadIdBorrado = (m['entidad_id'] as int?) ?? -1;
+            // 1.23 (Argón Pull H-06): parseo defensivo — el id
+            // puede llegar como texto desde PostgREST; el cast
+            // directo (as int?) lanzaba TypeError y congelaba
+            // TODOS los tombstones posteriores en cada ciclo.
+            final rawEntidadId = m['entidad_id'];
+            final entidadIdBorrado = rawEntidadId is num
+                ? rawEntidadId.toInt()
+                : int.tryParse('${rawEntidadId ?? ''}') ?? -1;
             await _db.deleteMirror(tabla, entidadIdBorrado);
             // v1.12.0 (B4): el tombstone BORRA la fila del espejo, así
             // que sin un registro local sería imposible distinguir
@@ -4229,8 +4312,15 @@ class SyncEngine {
             aplicadas++;
             contarEnDetallePull(porTabla, tabla);
           }
-          if (seq > borradosMax) borradosMax = seq;
+          } catch (_) {
+            if (minBorradoFallido == null ||
+                seq < minBorradoFallido) {
+              minBorradoFallido = seq;
+            }
+          }
         }
+        borradosMax =
+            topePaginaSeguro(borradosMax, pageWm, minBorradoFallido);
         if (rows.length < kPisoPagina) break;
         pageWm = borradosMax;
       }
@@ -4358,12 +4448,12 @@ class SyncEngine {
     // Argón v1.3.0: bajadas viejas v1.2.4/v1.2.5 DESACTIVADAS.
     // Ahora se usan _pullTiposIncidencia(), _pullIncidencias(),
     // _pullIncidenciasComentarios(), _pullIncidenciasHistorial().
-    if (erroresTablas.isNotEmpty) {
-      // Alguna tabla falló: las demás ya guardaron su progreso en sus
-      // cursores propios; se reporta para que run() reintente solo lo
-      // pendiente.
-      throw Exception('bajada incompleta: ${erroresTablas.first}');
-    }
+    // 1.23 (Argón Pull H-04): sello, estado de ops y stats se
+    // persisten AUNQUE alguna tabla haya fallado, ANTES del
+    // throw. Antes el throw saltaba todo: las filas comiteadas
+    // por las tablas sanas desaparecían de los contadores para
+    // siempre (sus cursores ya avanzaron; no vuelven a bajar)
+    // y el panel mostraba «0 bajados» con la BD ya actualizada.
     // v1.2.5 (D17): marca por ámbito con HORA DEL SERVIDOR (header Date),
     // no del dispositivo (D18: el reloj local puede estar mal).
     // Argón (sync adaptativa, paso 2a): la fecha ya viene en las
@@ -4381,6 +4471,17 @@ class SyncEngine {
           // la zona del teléfono y corría la hora fuera de Cuba.
           : isoHabana(ahoraHabana());
       for (final tabla in tablas) {
+        // 1.23 (Argón Pull H-05): el sello «ok» solo va a las
+        // tablas que completaron sin error, sin estar ausentes
+        // y sin falta de permiso; antes se estampaban TODAS,
+        // incluidas las que dieron 403/404.
+        if (erroresTablas.any((e) => e.startsWith('$tabla:'))) {
+          continue;
+        }
+        if (await _db.getMeta('wm_${tabla}_ausente') == '1') continue;
+        if (await _db.getMeta('wm_${tabla}_sin_permiso') == '1') {
+          continue;
+        }
         await _db.setMeta('last_remote_sync_ok_$tabla', horaServidor);
       }
       await _db.setMeta('last_remote_sync_ok', horaServidor);
@@ -4400,6 +4501,12 @@ class SyncEngine {
     AppLog.info('sync', 'pull_fin',
         d: 'vistas=$vistas aplicadas=$aplicadas '
             'sinCambios=$sinCambios fallidas=$fallidas');
+    if (erroresTablas.isNotEmpty) {
+      // Alguna tabla falló: las demás ya guardaron su progreso en sus
+      // cursores propios; se reporta para que run() reintente solo lo
+      // pendiente.
+      throw Exception('bajada incompleta: ${erroresTablas.first}');
+    }
     return (aplicadas: aplicadas, porTabla: porTabla);
   }
 
