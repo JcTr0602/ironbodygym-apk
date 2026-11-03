@@ -1148,13 +1148,42 @@ class _HomeScreenState extends State<HomeScreen>
                   crossAxisAlignment:
                       CrossAxisAlignment.start,
                   children: [
-                    Text('${saludoHora()}, $nombre',
+                    // B9 (1.23): marca en Home — el wordmark
+                    // con la misma voz del login (IRON en
+                    // blanco, BODY en naranja) manda en la
+                    // cabecera; el saludo baja a línea
+                    // personal secundaria con su rol.
+                    RichText(
+                      overflow: TextOverflow.ellipsis,
+                      text: TextSpan(
                         style: AppTexto.tituloPagina.copyWith(
-                            color: Colors.white),
-                        overflow:
-                            TextOverflow.ellipsis),
+                            fontWeight: FontWeight.w900,
+                            letterSpacing: 1),
+                        children: const [
+                          TextSpan(
+                              text: 'IRON ',
+                              style:
+                                  TextStyle(color: Colors.white)),
+                          TextSpan(
+                              text: 'BODY',
+                              style: TextStyle(
+                                  color: AppColores.naranja)),
+                        ],
+                      ),
+                    ),
                     const SizedBox(height: 2),
-                    _chipRol(),
+                    Row(
+                      children: [
+                        Flexible(
+                          child: Text('${saludoHora()}, $nombre',
+                              style: AppTexto.secundario.copyWith(
+                                  color: Colors.white70),
+                              overflow: TextOverflow.ellipsis),
+                        ),
+                        const SizedBox(width: 8),
+                        _chipRol(),
+                      ],
+                    ),
                   ],
                 ),
               ),
@@ -1206,6 +1235,16 @@ class _HomeScreenState extends State<HomeScreen>
                   onTap: () =>
                       _ir(const ColaScreen())),
             ],
+          ),
+          // B9: acento de marca — filete con el gradiente
+          // naranja de la casa cerrando la cabecera.
+          const SizedBox(height: AppEspacio.sm),
+          Container(
+            height: 3,
+            decoration: BoxDecoration(
+              gradient: AppColores.gradienteNaranja,
+              borderRadius: BorderRadius.circular(999),
+            ),
           ),
         ],
       ),
