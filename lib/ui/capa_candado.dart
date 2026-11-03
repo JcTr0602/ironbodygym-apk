@@ -5,10 +5,19 @@ import '../tiempo.dart';
 import 'diseno.dart';
 
 /// 1.21 — Capa del candado de acceso (CD-03 de Argón): se monta
-/// sobre el Navigator entero (main.dart la apila sobre la app),
-/// gris semitransparente, candado grande y el mensaje del dueño.
-/// Nada más: la sesión, la cola y los datos quedan intactos por
-/// debajo, y la sync sigue corriendo para recibir el desbloqueo.
+/// sobre el Navigator entero (main.dart la apila sobre la app)
+/// y anuncia la pausa con una tarjeta opaca centrada: medallón
+/// con el candado, título, el mensaje del dueño y la hora de
+/// reactivación. Nada más: la sesión, la cola y los datos
+/// quedan intactos por debajo, y la sync sigue corriendo para
+/// recibir el desbloqueo.
+///
+/// 1.23 (campo, 2026-11-03): la primera versión pintaba el
+/// mensaje en texto blanco sobre el velo gris translúcido —
+/// «se ve feo y poco legible» (Jc, con captura desde la app de
+/// Clientes). Ahora el velo es casi opaco y el anuncio vive en
+/// una tarjeta oscura con contraste pleno, igual en las dos
+/// apps.
 ///
 /// - [AbsorbPointer] sobre todo el Navigator: ningún toque
 ///   llega a las pantallas ni a los diálogos abiertos.
@@ -48,40 +57,102 @@ class _CapaCandadoState extends State<CapaCandado> {
     final expiraHabana = expira == null ? null : aHabana(expira);
     return AbsorbPointer(
       child: ColoredBox(
-        color: const Color(0xD95A5A5A),
+        color: const Color(0xF0141414),
         child: SafeArea(
           child: Center(
             child: Padding(
-              padding: const EdgeInsets.all(AppEspacio.xxl),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Icon(
-                    Icons.lock_rounded,
-                    size: 96,
-                    color: Colors.white,
-                  ),
-                  const SizedBox(height: AppEspacio.xl),
-                  Text(
-                    b.mensaje,
-                    textAlign: TextAlign.center,
-                    style: AppTexto.titulo.copyWith(color: Colors.white),
-                  ),
-                  if (expiraHabana != null) ...[
-                    const SizedBox(height: AppEspacio.md),
-                    Text(
-                      'Se reactiva solo el '
-                      '${expiraHabana.day.toString().padLeft(2, '0')}/'
-                      '${expiraHabana.month.toString().padLeft(2, '0')} '
-                      'a las '
-                      '${expiraHabana.hour.toString().padLeft(2, '0')}:'
-                      '${expiraHabana.minute.toString().padLeft(2, '0')}.',
-                      textAlign: TextAlign.center,
-                      style: AppTexto.metadato
-                          .copyWith(color: Colors.white70),
+              padding: const EdgeInsets.all(AppEspacio.xl),
+              child: Container(
+                constraints: const BoxConstraints(maxWidth: 420),
+                decoration: BoxDecoration(
+                  color: AppColores.carbon,
+                  borderRadius: BorderRadius.circular(AppRadio.xl),
+                  border: Border.all(color: Colors.white12),
+                  boxShadow: const [
+                    BoxShadow(
+                      color: Colors.black54,
+                      blurRadius: 32,
+                      offset: Offset(0, 12),
                     ),
                   ],
-                ],
+                ),
+                padding: const EdgeInsets.fromLTRB(
+                    AppEspacio.xl, AppEspacio.xxl, AppEspacio.xl,
+                    AppEspacio.xl),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      width: 76,
+                      height: 76,
+                      decoration: const BoxDecoration(
+                        shape: BoxShape.circle,
+                        gradient: AppColores.gradienteNaranja,
+                      ),
+                      child: const Icon(
+                        Icons.lock_rounded,
+                        size: 38,
+                        color: Colors.white,
+                      ),
+                    ),
+                    const SizedBox(height: AppEspacio.lg),
+                    Text(
+                      'Acceso pausado',
+                      textAlign: TextAlign.center,
+                      style: AppTexto.tituloPagina
+                          .copyWith(color: Colors.white),
+                    ),
+                    const SizedBox(height: AppEspacio.sm),
+                    Text(
+                      b.mensaje,
+                      textAlign: TextAlign.center,
+                      style: AppTexto.cuerpo.copyWith(
+                        color: Colors.white,
+                        fontSize: 16,
+                        height: 1.45,
+                      ),
+                    ),
+                    if (expiraHabana != null) ...[
+                      const SizedBox(height: AppEspacio.lg),
+                      const Divider(color: Colors.white10, height: 1),
+                      const SizedBox(height: AppEspacio.md),
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(
+                            Icons.schedule_rounded,
+                            size: 16,
+                            color: AppColores.naranja,
+                          ),
+                          const SizedBox(width: AppEspacio.xs),
+                          Flexible(
+                            child: Text(
+                              'Se reactiva solo el '
+                              '${expiraHabana.day.toString().padLeft(2, '0')}/'
+                              '${expiraHabana.month.toString().padLeft(2, '0')} '
+                              'a las '
+                              '${expiraHabana.hour.toString().padLeft(2, '0')}:'
+                              '${expiraHabana.minute.toString().padLeft(2, '0')}.',
+                              textAlign: TextAlign.center,
+                              style: AppTexto.metadato.copyWith(
+                                  color: Colors.white70, fontSize: 13),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                    const SizedBox(height: AppEspacio.lg),
+                    Text(
+                      'IRON BODY GYM',
+                      style: AppTexto.metadato.copyWith(
+                        color: Colors.white38,
+                        fontSize: 11,
+                        letterSpacing: 2.4,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
           ),
