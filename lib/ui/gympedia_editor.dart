@@ -1012,31 +1012,35 @@ class _GympediaEditorScreenState extends State<GympediaEditorScreen> {
                   ClipRRect(
                     borderRadius: BorderRadius.circular(8),
                     child: _imagenLocal.isNotEmpty
-                        ? Image.file(
-                            File(_imagenLocal),
+                        ? Image(
+                            image: providerFotoAcotada(
+                                FileImage(File(_imagenLocal)),
+                                ancho: 1080),
                             height: 160,
                             width: double.infinity,
                             fit: BoxFit.cover,
                             // 1.22 GY-11: la vista previa no
                             // decodifica la imagen a tamaño
-                            // completo (ahorro de memoria).
-                            cacheWidth: 1080,
-                            cacheHeight: 320,
+                            // completo (ahorro de memoria). El
+                            // acotado va SIN deformar (hotfix
+                            // campo: cacheWidth+cacheHeight
+                            // estiraba la foto).
                             errorBuilder: (_, __, ___) => const Padding(
                               padding: EdgeInsets.all(8),
                               child:
                                   Text('Imagen local (sin vista previa)'),
                             ),
                           )
-                        : Image.network(
-                            '${AppConfig.supabaseUrl}/storage/v1/object/public/'
-                            '${AppConfig.bucketGympedia}/${_slug.text.trim()}.webp'
-                            '?v=$_imagenRev',
+                        : Image(
+                            image: providerFotoAcotada(
+                                NetworkImage(
+                                    '${AppConfig.supabaseUrl}/storage/v1/object/public/'
+                                    '${AppConfig.bucketGympedia}/${_slug.text.trim()}.webp'
+                                    '?v=$_imagenRev'),
+                                ancho: 1080),
                             height: 160,
                             width: double.infinity,
                             fit: BoxFit.cover,
-                            cacheWidth: 1080,
-                            cacheHeight: 320,
                             errorBuilder: (_, __, ___) => const Padding(
                               padding: EdgeInsets.all(8),
                               child:

@@ -194,15 +194,19 @@ class _GympediaScreenState extends State<GympediaScreen> {
       ),
       child: ClipRRect(
         borderRadius: BorderRadius.circular(7),
-        child: Image.network(
-          '${AppConfig.supabaseUrl}/storage/v1/object/public/'
-          '${AppConfig.bucketGympedia}/$slug.webp?v=$rev',
+        child: Image(
+          // D-02 (1.21) + hotfix campo: miniatura de 48 px,
+          // decodificar acotado SIN deformar (providerFoto-
+          // Acotada; con cacheWidth+cacheHeight la foto se
+          // estiraba al cuadrado).
+          image: providerFotoAcotada(
+              NetworkImage('${AppConfig.supabaseUrl}/storage/v1/'
+                  'object/public/${AppConfig.bucketGympedia}/'
+                  '$slug.webp?v=$rev'),
+              ancho: 288),
           width: 48,
           height: 48,
           fit: BoxFit.cover,
-          // D-02 (1.21): miniatura de 48 px, decodificar a eso.
-          cacheWidth: 144,
-          cacheHeight: 144,
           loadingBuilder: (_, hijo, progreso) => progreso == null
               ? hijo
               : Container(
