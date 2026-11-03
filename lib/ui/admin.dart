@@ -24,12 +24,14 @@ import '../localdb.dart';
 import '../plus_reportes.dart';
 import '../negocio.dart';
 import '../nomina_calc.dart';
+import '../nomina_foto.dart';
 import '../perfil.dart';
 import '../sync.dart';
 import '../tiempo.dart';
 import '../tipos_pago.dart';
 import 'componentes.dart';
 import 'diseno.dart';
+import 'config_precios_bancarios.dart';
 import 'panel_dueno_swr.dart';
 import 'panel_dueno_atencion.dart';
 import 'buscar.dart';
@@ -108,6 +110,10 @@ class _AdminScreenState extends State<AdminScreen> {
 
   // Panel del dueño (v1.6.0): datos de los bloques nuevos.
   int _pagosMes = 0;
+  // 1.23 (B3 Paso 3b): neto de nómina del mes (foto compartida
+  // con la pantalla de Nómina). null = sin foto: la línea del
+  // hub pinta «-- CUP», nunca un 0 inventado (regla de Argón).
+  double? _netoNominaMes;
   int _clientesActivos = 0;
   List<Map<String, dynamic>> _reservasSolicitadas = [];
   Map<String, String> _nombreSupl = {};
@@ -139,18 +145,9 @@ class _AdminScreenState extends State<AdminScreen> {
   // v1.3.1: pago por cliente a entrenadores (movido desde Ajustes, solo dueño).
   int _pagoEntrenador = 150;
 
-  static const _clavesMonto = [
-    ('transferencia', 'Mensualidad por transferencia'),
-    ('pago_diario', 'Pago diario'),
-    // v1.2.1: precio de menores configurable (antes hardcodeado 1500).
-    ('mensualidad_menores', 'Mensualidad menores'),
-    // v1.2.1: tasa USD del día para mostrar precios CUP en suplementos.
-    ('tasa_usd', 'Tasa USD (CUP por 1 USD)'),
-    // v1.7.0 (G2): precio del App Plus (30 días). Default 1000 CUP;
-    // al guardar se republica a info_publica, que es lo que lee la
-    // cotización de S2 (ver _guardarMontos).
-    ('precio_app_plus', 'Precio App Plus (30 días)'),
-  ];
+  // 1.23 (B3 Paso 3a): las claves de monto viven en
+  // config_precios_bancarios.dart (clavesMontoConfig), única
+  // definición compartida con la pantalla de ajustes.
 
   @override
   void initState() {
@@ -216,6 +213,22 @@ class _AdminScreenState extends State<AdminScreen> {
     final incidencias = await incidenciasSyncPendientes();
     // v1.7.0: contador de Cuentas a la Casa (consulta local).
     final casa = await LocalDb.instance.conteoCuentasCasa();
+    // 1.23 (B3 Paso 3b): neto de nómina del mes desde la foto
+    // compartida (nomina_foto.dart — la misma que arma la
+    // pantalla de Nómina). Si la foto falla o aún no hay
+    // entrenadores en usuarios_apk, queda null y la línea del
+    // hub pinta «-- CUP» (regla de Argón: nunca un 0 inventado).
+    double? netoNomina;
+    try {
+      final prefNom = NominaCalc.prefMesActual();
+      final fotoNom = await fotoNominaMes(prefNom);
+      final bonosNom =
+          await leerBonosMesConMigracion(prefNom);
+      netoNomina = netoTotalDueno(fotoNom,
+          clientesPagados: pagosMes, bonos: bonosNom);
+    } catch (_) {
+      netoNomina = null;
+    }
     // Solicitudes de invitados: la bandeja vive en el servidor y
     // su RPC ya NO se espera aquí (panel 1.6.0): con la red
     // colgada, esperar en serie retrasaba TODO el panel aunque
@@ -235,6 +248,7 @@ class _AdminScreenState extends State<AdminScreen> {
         _syncDet = det;
         _pendientesSubir = pendSubir;
         _pagosMes = pagosMes;
+        _netoNominaMes = netoNomina;
         _clientesActivos = activos;
         _reservasSolicitadas = solicitadas;
         _nombreSupl = nombreSupl;
@@ -249,7 +263,7 @@ class _AdminScreenState extends State<AdminScreen> {
         _cuentasCasa = casa;
         _tipos = tipos;
         _pagoEntrenador = pagoEnt;
-        for (final (clave, _) in _clavesMonto) {
+        for (final (clave, _) in clavesMontoConfig) {
           final v = aj[clave] as num?;
           _montos
               .putIfAbsent(clave, () => TextEditingController())
@@ -474,21 +488,16 @@ class _AdminScreenState extends State<AdminScreen> {
   }
 
   Future<void> _guardarMontosImpl() async {
-    final cambios = <String, double>{};
-    for (final (clave, _) in _clavesMonto) {
-      final v = double.tryParse(
-          (_montos[clave]?.text ?? '').replaceAll(',', '.'));
-      // Autoauditoría 1.22 #2 (clase N-2): Infinity SÍ es > 0 y
-      // se guardaba como monto de configuración del gym.
-      if (v != null && v.isFinite && v > 0) cambios[clave] = v;
-    }
+    // 1.23 (B3 Paso 3a): parseo puro en config_precios_bancarios
+    // (solo finitos y > 0; Infinity se colaba como precio).
+    final cambios = parsearCambiosMontos(_montos);
     if (cambios.isEmpty) {
       mostrarSnack(context, 'No hay montos válidos para guardar', significado: SignificadoChip.alerta);
       return;
     }
     final mensaje = [
       for (final e in cambios.entries)
-        '• ${_etiqueta(e.key)}: ${fmtMonto(e.value)} CUP',
+        '• ${etiquetaMonto(e.key)}: ${fmtMonto(e.value)} CUP',
       '',
       'Se aplicará en la próxima sincronización.',
     ].join('\n');
@@ -500,28 +509,9 @@ class _AdminScreenState extends State<AdminScreen> {
       icono: Icons.price_change_rounded,
     );
     if (ok != true || !mounted) return;
-    // Autoauditoría 1.22 #2 (D2-01): las ops `ajuste` y el
-    // espejo local van en UNA transacción. Antes el bucle
-    // encolaba clave a clave sin transacción: un fallo a mitad
-    // dejaba un subconjunto de precios sincronizado y el espejo
-    // local viejo (o al revés).
-    final aj = await LocalDb.instance.getAjustes();
-    for (final e in cambios.entries) {
-      aj[e.key] = e.value;
-    }
-    final conn = await LocalDb.instance.db;
-    await conn.transaction((txn) async {
-      for (final e in cambios.entries) {
-        await LocalDb.instance.queueOp(
-          opUuid: const Uuid().v4(),
-          tipo: 'ajuste',
-          payload: {'clave': e.key, 'valor': e.value},
-          txn: txn,
-        );
-      }
-      // v1.3.1: actualización optimista del espejo local.
-      await LocalDb.instance.setAjustes(aj, executor: txn);
-    });
+    // Autoauditoría 1.22 #2 (D2-01): ops + espejo en UNA
+    // transacción (aplicarCambiosMontos, B3 Paso 3a).
+    await aplicarCambiosMontos(cambios);
     if (!mounted) return;
     mostrarSnack(context, 'Precios guardados (se sincronizarán)', significado: SignificadoChip.exito);
     SyncEngine.instance.push();
@@ -559,43 +549,13 @@ class _AdminScreenState extends State<AdminScreen> {
 
   Future<void> _guardarBancariosImpl() async {
     // v1.2.4 (Hark): valida formato y solo envía lo que cambió.
+    // 1.23 (B3 Paso 3a): la validación es pura y vive en
+    // config_precios_bancarios.dart (validarCambiosBancarios).
     final aj = await LocalDb.instance.getAjustes();
     if (!mounted) return;
-    final cambios = <String, String>{};
-    final errores = <String>[];
-    for (final clave in ['tarjeta_bandec', 'tarjeta_bpa', 'movil_confirmacion', 'titular']) {
-      final v = (_bancarios[clave]?.text ?? '').trim();
-      // v1.2.4: vaciar un dato bancario se decide en el servidor
-      // (pendiente de aprobación); la app solo envía valores no vacíos.
-      if (v.isEmpty) continue;
-      // v0.6.0: el titular es un nombre, no un número: sin validación
-      // de dígitos ni normalización; se envía el texto tal cual.
-      if (clave == 'titular') {
-        if (v.length > 80) {
-          errores.add('Titular: máx. 80 caracteres');
-          continue;
-        }
-        if (v != '${aj[clave] ?? ''}'.trim()) cambios[clave] = v;
-        continue;
-      }
-      final digitos = v.replaceAll(RegExp(r'[\s-]'), '');
-      {
-        if (clave.startsWith('tarjeta') &&
-            !RegExp(r'^\d{16}$').hasMatch(digitos)) {
-          errores.add('${clave == 'tarjeta_bandec' ? 'BANDEC' : 'BPA'}: 16 dígitos');
-          continue;
-        }
-        if (clave == 'movil_confirmacion' &&
-            !RegExp(r'^[56]\d{7}$').hasMatch(digitos)) {
-          errores.add('Móvil: 8 dígitos, empieza por 5 o 6');
-          continue;
-        }
-      }
-      final normal = clave.startsWith('tarjeta') && digitos.length == 16
-          ? [for (var i = 0; i < 16; i += 4) digitos.substring(i, i + 4)].join(' ')
-          : digitos;
-      if (normal != '${aj[clave] ?? ''}'.trim()) cambios[clave] = normal;
-    }
+    final r = validarCambiosBancarios(_bancarios, aj);
+    final cambios = r.cambios;
+    final errores = r.errores;
     if (errores.isNotEmpty) {
       mostrarSnack(context, 'Revisa: ${errores.join(' · ')}', significado: SignificadoChip.alerta);
       return;
@@ -613,29 +573,12 @@ class _AdminScreenState extends State<AdminScreen> {
       icono: Icons.account_balance_rounded,
     );
     if (ok != true || !mounted) return;
-    for (final e in cambios.entries) {
-      await LocalDb.instance.queueOp(
-        opUuid: const Uuid().v4(),
-        tipo: 'ajuste',
-        payload: {'clave': e.key, 'valor': e.value},
-      );
-    }
-    // v1.3.1: actualización optimista del espejo local.
-    for (final e in cambios.entries) {
-      aj[e.key] = e.value;
-    }
-    await LocalDb.instance.setAjustes(aj);
+    await aplicarCambiosBancarios(cambios, aj);
     if (!mounted) return;
     mostrarSnack(context, 'Datos bancarios guardados (se sincronizarán)', significado: SignificadoChip.exito);
     SyncEngine.instance.push();
   }
 
-  String _etiqueta(String clave) {
-    for (final (c, e) in _clavesMonto) {
-      if (c == clave) return e;
-    }
-    return clave;
-  }
 
   // -- tipos de pago dinámicos (v1.0.16) --------------------------------
   static const _tiposFijos = {
@@ -1375,6 +1318,7 @@ class _AdminScreenState extends State<AdminScreen> {
                             derecha: _textoActualizado()),
                         _resumenMes(),
                         _lineaCuentasCasa(),
+                        _lineaNomina(),
                         _tituloSeccion('MÓDULOS'),
                         _tarjetasModulos(),
                         Padding(
@@ -1850,6 +1794,38 @@ class _AdminScreenState extends State<AdminScreen> {
             child: _kpi('$_clientesActivos', 'Clientes activos',
                 onTap: () => _ir(const BuscarScreen()))),
       ],
+    );
+  }
+
+  /// 1.23 (B3 Paso 3b): línea resumen de la nómina del mes
+  /// bajo los KPI — el neto total a pagar a los entrenadores
+  /// desde la foto compartida; sin foto, «-- CUP» (nunca 0).
+  /// Tocar abre la pantalla de Nómina.
+  Widget _lineaNomina() {
+    final neto = _netoNominaMes;
+    return Padding(
+      padding: const EdgeInsets.only(top: 12),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(8),
+        onTap: () => _ir(const NominaScreen()),
+        child: Row(
+          children: [
+            const Icon(Icons.payments_rounded,
+                size: 16, color: AppColores.naranja),
+            const SizedBox(width: 8),
+            Text(
+              neto == null
+                  ? 'Nómina del mes: -- CUP'
+                  : 'Nómina del mes: \$${fmtMonto(neto)} CUP a pagar',
+              style: AppTexto.etiqueta
+                  .copyWith(color: AppColores.textoSecundario(context)),
+            ),
+            const SizedBox(width: 4),
+            const Icon(Icons.chevron_right_rounded,
+                size: 16, color: AppColores.naranja),
+          ],
+        ),
+      ),
     );
   }
 
@@ -2588,7 +2564,7 @@ class _AdminScreenState extends State<AdminScreen> {
       onAgregarTipo: _agregarTipo,
       onGuardarTipos: _guardarTipos,
       montos: _montos,
-      clavesMonto: _clavesMonto,
+      clavesMonto: clavesMontoConfig,
       onGuardarMontos: _guardarMontos,
       bancarios: _bancarios,
       onGuardarBancarios: _guardarBancarios,

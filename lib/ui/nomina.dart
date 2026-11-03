@@ -1,7 +1,4 @@
-import 'dart:convert';
-
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 import '../auth.dart';
 import '../localdb.dart';
@@ -9,6 +6,7 @@ import '../adelantos.dart';
 import '../negocio.dart';
 import '../nomina_bonos.dart';
 import '../nomina_calc.dart';
+import '../nomina_foto.dart';
 import '../nomina_precalc.dart';
 import '../perfil.dart';
 import '../permisos_entrenador.dart';
@@ -61,9 +59,6 @@ class _NominaScreenState extends State<NominaScreen> {
   // (espejo u op local), para mostrar el acuse al dueño.
   Map<String, Map<String, dynamic>?> _confirmacionMes = {};
 
-  String _bonosKey(DateTime d) =>
-      'nomina_bonos_${d.year}_${d.month}';
-
   @override
   void initState() {
     super.initState();
@@ -100,233 +95,38 @@ class _NominaScreenState extends State<NominaScreen> {
         ? cache.clientes
         : await NominaPrecalc.instance.asegurar(pref);
     if (mounted) {
-      final prefs = await SharedPreferences.getInstance();
-      // La pantalla pudo cerrarse durante los awaits: no seguir
-      // hasta el setState con el widget desmontado (auditoría, terra).
-      if (!mounted) return;
-      // Fase A 2026-10-25 (A4): los bonos ya NO viven en
-      // SharedPreferences sino en gym.db sincronizado. La lista
-      // vieja de prefs (si queda) se migra UNA vez: se encola
-      // como ops y luego se borran las claves, para no duplicar
-      // en la próxima apertura.
-      List<Map<String, dynamic>> bonos = [];
-      final jsonStr = prefs.getString(_bonosKey(ahoraHabana()));
-      if (jsonStr != null && jsonStr.isNotEmpty) {
-        try {
-          final lista = jsonDecode(jsonStr) as List;
-          bonos = lista
-              .map((e) => Map<String, dynamic>.from(e as Map))
-              .toList();
-        } catch (_) {}
-      } else {
-        // Migración: bono simple viejo → entrada en la lista
-        final bonoViejo =
-            prefs.getDouble('nomina_bono_${ahora.year}_${ahora.month}');
-        if (bonoViejo != null && bonoViejo != 0) {
-          bonos.add({
-            'id': DateTime.now().millisecondsSinceEpoch.toString(),
-            'entrenador': 'ambos',
-            'monto': bonoViejo,
-            'nota': 'Migrado del sistema anterior',
-            'creado_en': ahoraHabana().toIso8601String(),
-          });
-        }
-      }
-      if (bonos.isNotEmpty) {
-        // 1.14 (Fix 4): si el sello ya existe, la migración YA
-        // entró (cierre entre el commit y el borrado de prefs):
-        // no se re-encola, solo se borran las prefs. Si no hay
-        // sello, migrarDesdePrefs encola + sella en una sola
-        // transacción y luego se borran las prefs.
-        final sello = BonosNominaService.claveSelloMigracionPrefs(pref);
-        if (await LocalDb.instance.getMeta(sello) != '1') {
-          await BonosNominaService.instance
-              .migrarDesdePrefs(bonos, pref);
-        }
-        await prefs.remove(_bonosKey(ahoraHabana()));
-        await prefs.remove(
-            'nomina_bono_${ahora.year}_${ahora.month}');
-      }
-      bonos = await BonosNominaService.instance.leerBonos(pref);
-      final tarifa =
-          await PerfilService.instance.getPagoEntrenador();
-      // v1.8.0: comisión por dosis del mes (espejo de ventas de
-      // servicios; función pura de NominaCalc). La clave sale del
-      // nombre registrado del vendedor.
-      final comisionDosis = <String, ({int dosis, double total})>{};
-      // Autoauditoría 1.22 #1: clave → TODOS sus telegram_id
-      // (para las comisiones POR MES del libro, ver
-      // comisionesPorMesDesdeVentasMulti).
-      var tidsPorClave = <String, List<int>>{};
-      var ventasServ = <Map<String, dynamic>>[];
-      try {
-        ventasServ =
-            await LocalDb.instance.allMirror('servicio_ventas');
-        final miTid = AuthService().telegramId;
-        // Fix 1.15 (caso 2026-10-27): iterar también a quienes
-        // GANARON comisión, no solo a quienes registraron. El
-        // nombre del que solo ganó sale de usuarios_apk.
-        final usuariosApk = <Map<String, dynamic>>[];
-        try {
-          final rawApk = await LocalDb.instance.getMeta('usuarios_apk');
-          if (rawApk != null && rawApk.isNotEmpty) {
-            for (final u in jsonDecode(rawApk) as List) {
-              usuariosApk.add(Map<String, dynamic>.from(u as Map));
-            }
-          }
-        } catch (_) {}
-        final nombrePorTid = NominaCalc.tidsConComisionServicio(
-            ventasServ, usuariosApk);
-        tidsPorClave = {};
-        for (final e in nombrePorTid.entries) {
-          final clave = NominaCalc.claveEntrenador(e.value);
-          if (clave != null) {
-            tidsPorClave.putIfAbsent(clave, () => []).add(e.key);
-          }
-        }
-        for (final tid in nombrePorTid.keys) {
-          final r = NominaCalc.comisionDosisDesdeVentas(
-              ventasServ, tid, pref);
-          if (r.total == 0 && r.dosis == 0) continue;
-          // #6 (Argón nómina): llave única (igual que el libro).
-          // N-3 (1.22): ACUMULAR, no sobrescribir (dos tid
-          // históricos pueden caer en la misma clave).
-          final clave = NominaCalc.claveEntrenador(nombrePorTid[tid]);
-          if (clave != null) {
-            final prev = comisionDosis[clave];
-            comisionDosis[clave] = prev == null
-                ? r
-                : (
-                    dosis: prev.dosis + r.dosis,
-                    total: prev.total + r.total
-                  );
-          }
-          if (tid == miTid) comisionDosis['mi'] = r;
-        }
-      } catch (_) {
-        // Sin espejo de servicios (BD vieja): la nómina clásica
-        // no se rompe por esto.
-      }
-      // v1.8.0: adelantos — libro corrido hasta el mes en curso.
-      // El bruto de cada mes sale de la MISMA definición de
-      // «pagaron el mes» (NominaCalc) para que la cadena de deuda
-      // sea auditable; las comisiones de cada mes salen del
-      // espejo de ventas (fix Argón post-1.15: con solo la del
-      // mes en curso, un mes anterior con adelantos por encima
-      // de su base pero cubiertos por sus dosis generaba una
-      // deuda entrante falsa). La lista de ventas se izó fuera
-      // del try de comisiones para poder usarla aquí.
-      final personasAdelantos =
-          <String, ({String id, int? telegramId, String nombre})>{};
-      try {
-        final raw = await LocalDb.instance.getMeta('usuarios_apk');
-        if (raw != null && raw.isNotEmpty) {
-          for (final u in jsonDecode(raw) as List) {
-            final m = Map<String, dynamic>.from(u as Map);
-            // #6 (Argón nómina): llave única (antes filtro
-            // estricto aquí y contains en comisiones).
-            // Argón Dinero #8: respaldo por NOMBRE si el
-            // username no resuelve la clave (un username sin el
-            // nombre dejaba a la persona fuera del mapa).
-            final username =
-                NominaCalc.claveEntrenador('${m['username'] ?? ''}') ??
-                    NominaCalc.claveEntrenador(
-                        '${m['nombre'] ?? ''}');
-            if (username != null) {
-              personasAdelantos[username] = (
-                id: '${m['id'] ?? ''}',
-                telegramId: (m['telegram_id'] as num?)?.toInt() ??
-                    int.tryParse('${m['telegram_id'] ?? ''}'),
-                nombre: (m['nombre'] as String?) ?? username,
-              );
-            }
-          }
-        }
-      } catch (_) {}
-      final libroMes = <String, MesLibroAdelantos>{};
-      final eventosPorEnt = <String, List<Map<String, dynamic>>>{};
-      final liquidadas = <String, bool>{};
-      final confirmaciones = <String, Map<String, dynamic>?>{};
-      // #6 (Argón nómina): conteo por mes memorizado (antes se
-      // recalculaba por entrenador).
-      final conteoCache = <String, int>{};
-      for (final e in personasAdelantos.entries) {
-        if (e.value.id.isEmpty) continue;
-        final eventos = await AdelantosService.instance
-            .eventosDe(e.value.id, telegramId: e.value.telegramId);
-        eventosPorEnt[e.key] = eventos;
-        var primero = pref;
-        for (final ev in eventos) {
-          final mm = '${ev['mes_nomina'] ?? ''}';
-          if (mm.length == 7 && mm.compareTo(primero) < 0) {
-            primero = mm;
-          }
-        }
-        final brutoPorMes = <String, double>{};
-        var mes = primero;
-        while (mes.compareTo(pref) <= 0) {
-          conteoCache[mes] ??=
-              await NominaCalc.clientesQuePagaronElMes(mes);
-          brutoPorMes[mes] = conteoCache[mes]! * tarifa.toDouble();
-          mes = mesSiguiente(mes);
-        }
-        // Autoauditoría 1.22 #1: las comisiones POR MES suman
-        // TODOS los tid de la clave (el libro debe cuadrar con
-        // el total N-3 y con la foto al liquidar); sin tid
-        // conocidos se degrada como antes.
-        final tidsClave = tidsPorClave[e.key] ?? const <int>[];
-        final comisionesPorMes = tidsClave.isNotEmpty
-            ? NominaCalc.comisionesPorMesDesdeVentasMulti(
-                ventasServ, tidsClave, primero, pref)
-            : (e.value.telegramId == null
-                ? {pref: comisionDosis[e.key]?.total ?? 0}
-                : NominaCalc.comisionesPorMesDesdeVentas(
-                    ventasServ, e.value.telegramId!, primero, pref));
-        // #2 (Argón nómina): los bonos suman a la capacidad
-        // del mes.
-        final bonosPorMes = await BonosNominaService.instance
-            .bonosPorMes(e.key, primero, pref);
-        // N-5 (1.22): los meses ya liquidados mandan por su
-        // foto, no por la tarifa viva (ver aplicarFotosLibro).
-        await AdelantosService.instance.aplicarFotosLibro(
-          brutoPorMes: brutoPorMes,
-          comisionesPorMes: comisionesPorMes,
-          bonosPorMes: bonosPorMes,
-          conteoPorMes: conteoCache,
-          entrenadorId: e.value.id,
-          telegramId: e.value.telegramId,
-        );
-        final libro = libroAdelantos(
-          eventos: eventos,
-          brutoPorMes: brutoPorMes,
-          comisionesPorMes: comisionesPorMes,
-          bonosPorMes: bonosPorMes,
-          hastaMes: pref,
-        );
-        for (final m in libro) {
-          if (m.mes == pref) libroMes[e.key] = m;
-        }
-        liquidadas[e.key] = await AdelantosService.instance
-            .nominaLiquidada(pref, e.value.id);
-        confirmaciones[e.key] =
-            await AdelantosService.instance.confirmacionNomina(
-                pref,
-                entrenadorId: e.value.id,
-                telegramId: e.value.telegramId);
-      }
+      // La pantalla pudo cerrarse durante los awaits que
+      // siguen: la guarda previa al setState está más abajo
+      // (auditoría, terra).
+      // Fase A 2026-10-25 (A4) + 1.23 (B3 Paso 3, delta del
+      // panel): la migración de bonos legados desde prefs y la
+      // lectura del mes viven en nomina_foto.dart
+      // (leerBonosMesConMigracion), compartidas con el Panel
+      // del dueño — el panel leía los bonos SIN migrar y su
+      // neto podía omitir un bono legado que esta pantalla sí
+      // incorporaba al abrirla.
+      final bonos = await leerBonosMesConMigracion(pref);
+      // 1.23 (B3 Paso 3b): el ensamblado de componentes del
+      // mes (tarifa, comisiones, personas, libro de adelantos,
+      // liquidadas y confirmaciones) vive en nomina_foto.dart,
+      // compartido con la tarjeta de nómina del Panel del
+      // dueño: una sola foto, dos pantallas. Aquí quedan el
+      // conteo del pre-cálculo y el estado de la UI; los bonos
+      // llegan de leerBonosMesConMigracion (arriba).
+      final foto = await fotoNominaMes(pref);
       // #7 (Argón nómina): el doble chequeo era redundante.
       if (!mounted) return;
       setState(() {
-        _comisionDosis = comisionDosis;
-        _personasAdelantos = personasAdelantos;
-        _libroMes = libroMes;
-        _eventosAdelantos = eventosPorEnt;
-        _nominaLiquidadaMes = liquidadas;
-        _confirmacionMes = confirmaciones;
+        _comisionDosis = foto.comisionDosis;
+        _personasAdelantos = foto.personas;
+        _libroMes = foto.libroMes;
+        _eventosAdelantos = foto.eventosPorEnt;
+        _nominaLiquidadaMes = foto.liquidadas;
+        _confirmacionMes = foto.confirmaciones;
         _clientesPagados = clientesPagados;
         _bonos = bonos;
-        _tarifa = tarifa.toDouble();
-        _tarifaCtrl.text = tarifa.toString();
+        _tarifa = foto.tarifa.toDouble();
+        _tarifaCtrl.text = foto.tarifa.toString();
         _actualizadoEtiqueta = _etiquetaActualizado(desdeCache
             ? cache.calculadoEn
             : ahoraHabana().toIso8601String());
