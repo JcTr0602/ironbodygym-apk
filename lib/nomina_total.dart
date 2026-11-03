@@ -83,12 +83,22 @@ Future<double?> totalNetoNominaMes(String pref) async {
     // del try para que el libro de abajo también la use (fix
     // Argón post-1.15: comisiones mes a mes, no solo el mes).
     final comisionDosis = <String, ({int dosis, double total})>{};
+    // Autoauditoría 1.22 #1: clave → TODOS sus telegram_id
+    // (comisiones POR MES del libro, ver NominaCalc).
+    var tidsPorClave = <String, List<int>>{};
     var ventasServ = <Map<String, dynamic>>[];
     try {
       ventasServ =
           await LocalDb.instance.allMirror('servicio_ventas');
       final nombrePorTid =
           NominaCalc.tidsConComisionServicio(ventasServ, usuariosApk);
+      tidsPorClave = {};
+      for (final e in nombrePorTid.entries) {
+        final clave = NominaCalc.claveEntrenador(e.value);
+        if (clave != null) {
+          tidsPorClave.putIfAbsent(clave, () => []).add(e.key);
+        }
+      }
       for (final tid in nombrePorTid.keys) {
         final r =
             NominaCalc.comisionDosisDesdeVentas(ventasServ, tid, pref);
@@ -151,10 +161,16 @@ Future<double?> totalNetoNominaMes(String pref) async {
       // generaba una deuda entrante falsa en el mes en curso.
       // Sin tid no se puede atribuir comisión: se degrada al
       // mapa viejo (solo el mes en curso).
-      final comisionesPorMes = telegramId == null
-          ? {pref: comisionDosis[username]?.total ?? 0}
-          : NominaCalc.comisionesPorMesDesdeVentas(
-              ventasServ, telegramId, primero, pref);
+      // Autoauditoría 1.22 #1: por mes se suman TODOS los tid
+      // de la clave (como el total N-3), no solo el vigente.
+      final tidsClave = tidsPorClave[username] ?? const <int>[];
+      final comisionesPorMes = tidsClave.isNotEmpty
+          ? NominaCalc.comisionesPorMesDesdeVentasMulti(
+              ventasServ, tidsClave, primero, pref)
+          : (telegramId == null
+              ? {pref: comisionDosis[username]?.total ?? 0}
+              : NominaCalc.comisionesPorMesDesdeVentas(
+                  ventasServ, telegramId, primero, pref));
       // #2 (Argón nómina): los bonos suman a la capacidad del
       // mes (sin esto, un adelanto cubierto por un bono dejaba
       // deuda fantasma).

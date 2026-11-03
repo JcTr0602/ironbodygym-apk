@@ -133,6 +133,29 @@ class _MiNominaScreenState extends State<MiNominaScreen> {
     return null;
   }
 
+  /// Autoauditoría 1.22 #1: TODOS los telegram_id de usuarios_apk
+  /// que resuelven a MI clave (el histórico y el actual si el
+  /// entrenador cambió de cuenta): las comisiones por mes del
+  /// libro deben sumar ambos, como hace el dueño con N-3.
+  Future<List<int>> _misTids() async {
+    final clave = await _miClave();
+    if (clave == null) return const [];
+    final out = <int>{};
+    try {
+      final raw = await LocalDb.instance.getMeta('usuarios_apk');
+      if (raw != null && raw.isNotEmpty) {
+        for (final u in jsonDecode(raw) as List) {
+          final m = Map<String, dynamic>.from(u as Map);
+          final c = NominaCalc.claveEntrenador('${m['username'] ?? ''}') ??
+              NominaCalc.claveEntrenador('${m['nombre'] ?? ''}');
+          final t = LocalDb.normalizarTelegramId(m['telegram_id']);
+          if (c == clave && t != null) out.add(t);
+        }
+      }
+    } catch (_) {}
+    return out.toList();
+  }
+
   /// Bonos por mes del entrenador actual (llave única), o mapa
   /// vacío si no se resuelve su identidad (sin identidad no se
   /// puede atribuir bono: no se inventa).
@@ -199,10 +222,16 @@ class _MiNominaScreenState extends State<MiNominaScreen> {
       // algún día _miIdUsuarioApk dejara de exigir tid, esta rama
       // habría que revisarla: no se puede inventar comisión sin
       // identidad atribuible.
+      // Autoauditoría 1.22 #1: por mes se suman TODOS mis tid
+      // (histórico + actual), no solo el de la sesión.
+      final misTids = tid == null ? const <int>[] : await _misTids();
       final comisionesPorMes = tid == null
           ? {pref: comision}
-          : NominaCalc.comisionesPorMesDesdeVentas(
-              ventasServicio, tid, primero, pref);
+          : NominaCalc.comisionesPorMesDesdeVentasMulti(
+              ventasServicio,
+              misTids.isNotEmpty ? misTids : [tid],
+              primero,
+              pref);
       // #2 (Argón nómina): los bonos suman a la capacidad del
       // mes (misma regla que la pantalla del dueño).
       final bonosPorMes = await _bonosPorMes(primero, pref);

@@ -544,6 +544,18 @@ class AdelantosService {
 
   /// T22 (1.20): la foto de liquidación de un mes (espejo
   /// nomina_liquidada_snapshot), o null si aún no bajó.
+  ///
+  /// Autoauditoría 1.22 #1 (2026-11-03): si el espejo aún no
+  /// la trae, manda la op `liquidar_nomina` de ESTE teléfono
+  /// (pendiente/enviada/aplicada): su payload lleva la misma
+  /// foto (base/bonos/comisiones/tarifa) que se encoló al
+  /// liquidar. Sin esto, tras liquidar OFFLINE el libro del
+  /// mes seguía con tarifa y conteo VIVOS hasta que el
+  /// snapshot bajara por pull (en campo esa ventana duró
+  /// ~2,5 h el 2026-11-02): nominaLiquidada() ya reconocía la
+  /// liquidación en la cola, pero N-5 no la veía y un cambio
+  /// de tarifa en la ventana reescribía el mes cerrado en
+  /// pantalla, en Mi Nómina y en el Excel.
   Future<Map<String, dynamic>?> snapshotNomina(String mes,
       {required String entrenadorId, int? telegramId}) async {
     for (final s
@@ -551,6 +563,15 @@ class AdelantosService {
       if (_coincideEntrenador(s, mes, entrenadorId, telegramId)) {
         return s;
       }
+    }
+    for (final op in await _db.opsDeTipo('liquidar_nomina')) {
+      try {
+        final p = jsonDecode(op['payload'] as String)
+            as Map<String, dynamic>;
+        if (_coincideEntrenador(p, mes, entrenadorId, telegramId)) {
+          return p;
+        }
+      } catch (_) {}
     }
     return null;
   }

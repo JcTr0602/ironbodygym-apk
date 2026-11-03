@@ -478,6 +478,41 @@ class NominaCalc {
     return out;
   }
 
+  /// Autoauditoría 1.22 #1 (2026-11-03): todos los telegram_id
+  /// que resuelven a la MISMA clave de entrenador en
+  /// [nombrePorTid] (el histórico y el actual de quien cambió
+  /// de cuenta de Telegram).
+  static List<int> tidsDeClave(
+          Map<int, String> nombrePorTid, String clave) =>
+      [
+        for (final e in nombrePorTid.entries)
+          if (claveEntrenador(e.value) == clave) e.key,
+      ];
+
+  /// Comisiones por mes sumando TODOS los tid dados.
+  ///
+  /// N-3 (pieza 1) acumuló los tid en el total del mes en
+  /// curso, pero los mapas POR MES del libro de adelantos se
+  /// seguían construyendo con UN solo tid en los 4 sitios: en
+  /// el escenario de N-3, la cadena de deuda usaba la comisión
+  /// de un solo tid mientras la fila de Nómina y la foto al
+  /// liquidar usaban la suma — deuda y neto del libro no
+  /// cuadraban con lo mostrado.
+  static Map<String, double> comisionesPorMesDesdeVentasMulti(
+    List<Map<String, dynamic>> ventas,
+    Iterable<int> telegramIds,
+    String primero,
+    String hastaMes,
+  ) {
+    final out = <String, double>{};
+    for (final tid in telegramIds) {
+      final parcial =
+          comisionesPorMesDesdeVentas(ventas, tid, primero, hastaMes);
+      parcial.forEach((mes, v) => out[mes] = (out[mes] ?? 0) + v);
+    }
+    return out;
+  }
+
   /// Nómina del dueño (fix 1.15, PURO): entrenadores a evaluar para
   /// la comisión = unión de quienes REGISTRARON ventas de servicios
   /// y quienes GANARON comisión (comision_entrenador_id). Sin la

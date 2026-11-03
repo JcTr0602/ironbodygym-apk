@@ -295,10 +295,18 @@ Future<bool> exportarExcel() async {
           brutoPorMes[mes] = conteoCache[mes]! * tarifa.toDouble();
           mes = mesSiguiente(mes);
         }
-        final comisionesPorMes = e.value.telegramId == null
-            ? {pref: comisionDosis[e.key]?.total ?? 0}
-            : NominaCalc.comisionesPorMesDesdeVentas(
-                ventasServ, e.value.telegramId!, primero, pref);
+        // Autoauditoría 1.22 #1: por mes se suman TODOS los
+        // tid de la clave (como el total N-3), no solo el
+        // vigente (nombrePorTid está en ámbito en este sitio).
+        final tidsClave =
+            NominaCalc.tidsDeClave(nombrePorTid, e.key);
+        final comisionesPorMes = tidsClave.isNotEmpty
+            ? NominaCalc.comisionesPorMesDesdeVentasMulti(
+                ventasServ, tidsClave, primero, pref)
+            : (e.value.telegramId == null
+                ? {pref: comisionDosis[e.key]?.total ?? 0}
+                : NominaCalc.comisionesPorMesDesdeVentas(
+                    ventasServ, e.value.telegramId!, primero, pref));
         final bonosPorMes = await BonosNominaService.instance
             .bonosPorMes(e.key, primero, pref);
         // N-5 (1.22): los meses ya liquidados mandan por su

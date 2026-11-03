@@ -154,6 +154,10 @@ class _NominaScreenState extends State<NominaScreen> {
       // servicios; función pura de NominaCalc). La clave sale del
       // nombre registrado del vendedor.
       final comisionDosis = <String, ({int dosis, double total})>{};
+      // Autoauditoría 1.22 #1: clave → TODOS sus telegram_id
+      // (para las comisiones POR MES del libro, ver
+      // comisionesPorMesDesdeVentasMulti).
+      var tidsPorClave = <String, List<int>>{};
       var ventasServ = <Map<String, dynamic>>[];
       try {
         ventasServ =
@@ -173,6 +177,13 @@ class _NominaScreenState extends State<NominaScreen> {
         } catch (_) {}
         final nombrePorTid = NominaCalc.tidsConComisionServicio(
             ventasServ, usuariosApk);
+        tidsPorClave = {};
+        for (final e in nombrePorTid.entries) {
+          final clave = NominaCalc.claveEntrenador(e.value);
+          if (clave != null) {
+            tidsPorClave.putIfAbsent(clave, () => []).add(e.key);
+          }
+        }
         for (final tid in nombrePorTid.keys) {
           final r = NominaCalc.comisionDosisDesdeVentas(
               ventasServ, tid, pref);
@@ -259,10 +270,18 @@ class _NominaScreenState extends State<NominaScreen> {
           brutoPorMes[mes] = conteoCache[mes]! * tarifa.toDouble();
           mes = mesSiguiente(mes);
         }
-        final comisionesPorMes = e.value.telegramId == null
-            ? {pref: comisionDosis[e.key]?.total ?? 0}
-            : NominaCalc.comisionesPorMesDesdeVentas(
-                ventasServ, e.value.telegramId!, primero, pref);
+        // Autoauditoría 1.22 #1: las comisiones POR MES suman
+        // TODOS los tid de la clave (el libro debe cuadrar con
+        // el total N-3 y con la foto al liquidar); sin tid
+        // conocidos se degrada como antes.
+        final tidsClave = tidsPorClave[e.key] ?? const <int>[];
+        final comisionesPorMes = tidsClave.isNotEmpty
+            ? NominaCalc.comisionesPorMesDesdeVentasMulti(
+                ventasServ, tidsClave, primero, pref)
+            : (e.value.telegramId == null
+                ? {pref: comisionDosis[e.key]?.total ?? 0}
+                : NominaCalc.comisionesPorMesDesdeVentas(
+                    ventasServ, e.value.telegramId!, primero, pref));
         // #2 (Argón nómina): los bonos suman a la capacidad
         // del mes.
         final bonosPorMes = await BonosNominaService.instance
@@ -603,14 +622,22 @@ class _NominaScreenState extends State<NominaScreen> {
       mostrarSnack(context, 'Ingresa una tarifa válida', significado: SignificadoChip.alerta);
       return;
     }
-    await PerfilService.instance.setPagoEntrenador(tarifa.toInt());
-    // Argón Acceso #9: que el cambio viaje ya, no en el próximo
-    // evento de sync.
-    SyncEngine.instance.push();
-    _operando = false;
-    setState(() => _tarifa = tarifa);
-    if (mounted) {
-      mostrarSnack(context, 'Tarifa actualizada', significado: SignificadoChip.exito);
+    // Autoauditoría 1.22 #1: la guarda se libera en finally,
+    // como en los cinco métodos que corrigió el panel en la
+    // pieza 1 (este quedó fuera): si setPagoEntrenador lanzaba
+    // (BD/prefs), _operando quedaba pegado y TODAS las acciones
+    // de dinero de la pantalla morían hasta recrearla.
+    try {
+      await PerfilService.instance.setPagoEntrenador(tarifa.toInt());
+      // Argón Acceso #9: que el cambio viaje ya, no en el próximo
+      // evento de sync.
+      SyncEngine.instance.push();
+      setState(() => _tarifa = tarifa);
+      if (mounted) {
+        mostrarSnack(context, 'Tarifa actualizada', significado: SignificadoChip.exito);
+      }
+    } finally {
+      _operando = false;
     }
   }
 
@@ -1241,7 +1268,26 @@ class _NominaScreenState extends State<NominaScreen> {
   /// W3 (1.20): diálogo de corrección de origen de un adelanto.
   /// Explica el efecto en simple por dirección; la op la
   /// valida el servidor (guarda de mes liquidado incluida).
+  ///
+  /// Autoauditoría 1.22 #1 (2026-11-03): era la única acción
+  /// de dinero de la pantalla sin la guarda _operando de N-7:
+  /// un doble toque abría dos diálogos y podía encolar dos
+  /// correcciones del mismo adelanto. La guarda vive en este
+  /// envoltorio; el cuerpo no cambia.
   Future<void> _dialogoCorregirOrigen(
+      BuildContext context, Map<String, dynamic> e,
+      {String? entrenadorId, String? mesNomina}) async {
+    if (_operando) return;
+    _operando = true;
+    try {
+      await _dialogoCorregirOrigenReal(context, e,
+          entrenadorId: entrenadorId, mesNomina: mesNomina);
+    } finally {
+      _operando = false;
+    }
+  }
+
+  Future<void> _dialogoCorregirOrigenReal(
       BuildContext context, Map<String, dynamic> e,
       {String? entrenadorId, String? mesNomina}) async {
     final id = (e['id'] as num?)?.toInt();

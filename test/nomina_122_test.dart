@@ -77,6 +77,55 @@ void main() {
     });
   });
 
+  group('N-3b: comisiones POR MES suman todos los tid de la clave',
+      () {
+    // Autoauditoría 1.22 #1: N-3 acumulaba solo el mes en
+    // curso; el libro por mes usaba un solo tid.
+    final ventas = <Map<String, dynamic>>[
+      {
+        'comision_entrenador_id': 111,
+        'fecha': '2026-09-10',
+        'cantidad': 2,
+        'comision_unitaria': 50,
+      },
+      {
+        'comision_entrenador_id': 222,
+        'fecha': '2026-09-20',
+        'cantidad': 1,
+        'comision_unitaria': 50,
+      },
+      {
+        'comision_entrenador_id': 222,
+        'fecha': '2026-10-05',
+        'cantidad': 3,
+        'comision_unitaria': 50,
+      },
+      {
+        'comision_entrenador_id': 333,
+        'fecha': '2026-09-11',
+        'cantidad': 9,
+        'comision_unitaria': 50,
+      },
+    ];
+
+    test('tidsDeClave agrupa por nombre de entrenador', () {
+      final porTid = {111: 'Duany A', 222: 'Duany B', 333: 'Gabriel'};
+      expect(NominaCalc.tidsDeClave(porTid, 'duany'), [111, 222]);
+      expect(NominaCalc.tidsDeClave(porTid, 'gabriel'), [333]);
+    });
+
+    test('multi suma ambos tid mes a mes; el simple no', () {
+      final multi = NominaCalc.comisionesPorMesDesdeVentasMulti(
+          ventas, [111, 222], '2026-09', '2026-10');
+      expect(multi['2026-09'], 150);
+      expect(multi['2026-10'], 150);
+      final simple = NominaCalc.comisionesPorMesDesdeVentas(
+          ventas, 111, '2026-09', '2026-10');
+      expect(simple['2026-09'], 100);
+      expect(simple['2026-10'], 0);
+    });
+  });
+
   group('N-5: aplicarFotosLibro manda la foto en meses liquidados', () {
     setUpAll(_abrirDbVacia);
     setUp(_limpiar);
@@ -128,6 +177,43 @@ void main() {
         entrenadorId: 'uid-duany',
       );
       expect(bruto['2026-09'], 5000);
+    });
+
+    test('sin snapshot en espejo: manda la op liquidar_nomina '
+        'encolada en este teléfono (liquidación offline)',
+        () async {
+      // Autoauditoría 1.22 #1: la liquidación se encoló y el
+      // snapshot aún no bajó; la foto vive en el payload.
+      await LocalDb.instance.queueOp(
+        opUuid: 'op-liq-offline-1',
+        tipo: 'liquidar_nomina',
+        payload: {
+          'mes': '2026-09',
+          'entrenador': 'uid-duany',
+          'entrenador_telegram_id': 969869611,
+          'tarifa_por_cliente': 150,
+          'base': 9000,
+          'bonos': 500,
+          'comisiones': 300,
+          'neto': 8000,
+        },
+      );
+      final bruto = {'2026-09': 99999.0};
+      final comisiones = {'2026-09': 111.0};
+      final bonos = {'2026-09': 222.0};
+      await AdelantosService.instance.aplicarFotosLibro(
+        brutoPorMes: bruto,
+        comisionesPorMes: comisiones,
+        bonosPorMes: bonos,
+        conteoPorMes: const {'2026-09': 60},
+        entrenadorId: 'uid-duany',
+        telegramId: 969869611,
+      );
+      expect(bruto['2026-09'], 9000);
+      expect(comisiones['2026-09'], 300);
+      expect(bonos['2026-09'], 500);
+      final d = await LocalDb.instance.db;
+      await d.delete('ops_queue');
     });
 
     test('la foto de OTRO entrenador no toca mis mapas', () async {
