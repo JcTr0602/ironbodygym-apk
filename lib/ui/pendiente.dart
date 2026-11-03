@@ -206,6 +206,23 @@ class _PendienteScreenState extends State<PendienteScreen> {
         return;
       }
     }
+    // Campo 2026-11-02 (1.22): un día que no es CUP NO se
+    // confirma por esta vía: confirmar_entrega valida solo
+    // efectivo CUP y el servidor rechaza la op entera (la
+    // venta USD #5 bloqueó la entrega de Gabriel). El USD se
+    // liquida en el Arqueo principal (liquidar_caja), como los
+    // adelantos de H11: se redirige en vez de encolar una op
+    // condenada.
+    final monedaDia = dia.pagos.isEmpty
+        ? 'CUP'
+        : dia.pagos.first.moneda;
+    if (monedaDia != 'CUP') {
+      if (!mounted) return;
+      mostrarSnack(context, 'El pendiente en $monedaDia se liquida en el Arqueo principal, no en la confirmación de entrega.', significado: SignificadoChip.alerta);
+      Navigator.push(context,
+          MaterialPageRoute(builder: (_) => const ArqueoScreen()));
+      return;
+    }
     // Fix #15 (Sol): el día ya viene separado por moneda (ver
     // procesarPendientes), pero mostramos la moneda real por seguridad.
     final moneda = dia.pagos.isEmpty

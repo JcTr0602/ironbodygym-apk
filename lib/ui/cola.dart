@@ -128,8 +128,44 @@ Future<List<String>> detallesDeOp(Map<String, dynamic> op) async {
       detalles.add('Monto: ${payload['monto']} CUP');
     }
   } else if (tipo == 'confirmar_entrega') {
+    // Campo 2026-11-02 (1.22): el payload de confirmar_entrega
+    // NO trae 'monto': trae entrenador y las listas de ids. El
+    // detalle salía VACÍO (solo fecha y estado) y el dueño no
+    // podía ver qué confirmó ni por qué falló.
+    if (payload['trainer_nombre'] != null) {
+      detalles.add('Entrenador: ${payload['trainer_nombre']}');
+    }
     if (payload['monto'] != null) {
       detalles.add('Monto: ${payload['monto']} CUP');
+    }
+    int nDe(String clave) => (payload[clave] as List?)?.length ?? 0;
+    final partes = <String>[
+      if (nDe('pago_ids') > 0) '${nDe('pago_ids')} mensualidades',
+      if (nDe('pago_diario_ids') > 0)
+        '${nDe('pago_diario_ids')} pagos diarios',
+      if (nDe('suplemento_ids') > 0)
+        '${nDe('suplemento_ids')} ventas de suplementos',
+      if (nDe('servicio_ids') > 0)
+        '${nDe('servicio_ids')} ventas de servicios',
+      if (nDe('adelanto_ids') > 0)
+        '${nDe('adelanto_ids')} adelantos saldados',
+    ];
+    if (partes.isNotEmpty) {
+      detalles.add('Ítems: ${partes.join(' · ')}');
+    }
+    final nota = '${payload['nota'] ?? ''}'.trim();
+    if (nota.isNotEmpty) detalles.add('Nota: $nota');
+  } else if (tipo == 'liquidar_nomina') {
+    // Campo 2026-11-02 (1.22): su detalle también salía vacío.
+    if (payload['entrenador_nombre'] != null) {
+      detalles.add('Entrenador: ${payload['entrenador_nombre']}');
+    }
+    if (payload['mes'] != null) {
+      detalles.add('Mes: ${payload['mes']}');
+    }
+    final neto = (payload['neto'] as num?)?.toDouble();
+    if (neto != null) {
+      detalles.add('Neto pagado: ${fmtMonto(neto)} CUP');
     }
   } else if (tipo == 'venta_suplemento') {
     if (payload['suplemento_nombre'] != null) {

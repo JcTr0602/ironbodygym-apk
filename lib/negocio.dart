@@ -5067,6 +5067,14 @@ Future<({List<int> pagos, List<int> diarios, List<int> suplementos,
     // B-05 (1.21): el id de un fiado sin saldar NO puede viajar en
     // confirmarEntregaPorIds (dinero aún no cobrado).
     if (_esFiadoSinSaldar(v)) continue;
+    // Campo 2026-11-02 (1.22): la venta que NO es CUP tampoco
+    // viaja: la entrega que se confirma aquí es la del efectivo
+    // CUP y el servidor valida moneda='CUP' — una venta USD en
+    // la lista rechazaba la op ENTERA (la #5, USD de Gabriel,
+    // bloqueó su confirmación del 2026-11-02). El USD se
+    // liquida en el Arqueo principal. La suma ya la excluía
+    // (totalVentaCup); faltaba en la selección de ids.
+    if ('${v['moneda'] ?? 'CUP'}'.toUpperCase() != 'CUP') continue;
     final tid = LocalDb.normalizarTelegramId(v['registrado_por']);
     if (tid == null || !mismo(tid)) continue;
     final id = (v['id'] as num?)?.toInt();
