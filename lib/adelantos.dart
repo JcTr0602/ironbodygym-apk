@@ -115,6 +115,38 @@ List<MesLibroAdelantos> libroAdelantos({
 /// duplicar las que ya bajaron al espejo (se cruzan por op_uuid),
 /// − las anulaciones encoladas cuyo original sigue pendiente en
 /// el espejo. Los reversos del espejo netan solos (monto < 0).
+/// Overlay de la cola sobre el espejo de adelantos: correcciones
+/// de origen encoladas (la última manda, por adelanto_id) y el
+/// conjunto de adelantos con anulación encolada. Lo comparten la
+/// SUMA del pendiente (sumaAdelantosPendientes) y la selección de
+/// ids al confirmar una entrega (idsPendientesEntrega): ambas
+/// deben decidir con el origen EFECTIVO, no con el del espejo
+/// (Argón Dinero #5; Panel final 1.21, Terra por Zen).
+({Map<int, Map<String, dynamic>> correcciones, Set<int> anuladosEnCola})
+    overlayAdelantosEnCola(List<Map<String, dynamic>> opsPendientes) {
+  final correcciones = <int, Map<String, dynamic>>{};
+  final anuladosEnCola = <int>{};
+  for (final op in opsPendientes) {
+    final tipo = '${op['tipo']}';
+    if (tipo != 'corregir_origen_adelanto' &&
+        tipo != 'anular_adelanto') {
+      continue;
+    }
+    try {
+      final p = jsonDecode(op['payload'] as String)
+          as Map<String, dynamic>;
+      final id = (p['adelanto_id'] as num?)?.toInt();
+      if (id == null) continue;
+      if (tipo == 'corregir_origen_adelanto') {
+        correcciones[id] = p;
+      } else {
+        anuladosEnCola.add(id);
+      }
+    } catch (_) {}
+  }
+  return (correcciones: correcciones, anuladosEnCola: anuladosEnCola);
+}
+
 double sumaAdelantosPendientes({
   required List<Map<String, dynamic>> espejo,
   required List<Map<String, dynamic>> opsPendientes,
@@ -130,16 +162,7 @@ double sumaAdelantosPendientes({
   // descontando de la gaveta equivocada) y la lista permitía
   // corregir dos veces con destinos contradictorios. La
   // última corrección encolada manda.
-  final correcciones = <int, Map<String, dynamic>>{};
-  for (final op in opsPendientes) {
-    if ('${op['tipo']}' != 'corregir_origen_adelanto') continue;
-    try {
-      final p = jsonDecode(op['payload'] as String)
-          as Map<String, dynamic>;
-      final id = (p['adelanto_id'] as num?)?.toInt();
-      if (id != null) correcciones[id] = p;
-    } catch (_) {}
-  }
+  final correcciones = overlayAdelantosEnCola(opsPendientes).correcciones;
   for (final a in espejo) {
     final id = (a['id'] as num?)?.toInt();
     if (id != null) porId[id] = a;

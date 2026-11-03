@@ -5089,9 +5089,36 @@ Future<({List<int> pagos, List<int> diarios, List<int> suplementos,
       servicioIds.add(id);
     }
   }
+  // Panel final 1.21 (Terra por Zen, ALTO): la selección de
+  // adelantos a cerrar debe usar el origen EFECTIVO (espejo +
+  // correcciones/anulaciones aún en cola), como ya hace la suma
+  // del pendiente (sumaAdelantosPendientes, Argón Dinero #5).
+  // Sin esto, un adelanto corregido offline a fondo_dueno se
+  // cerraba en la entrega sin haberse descontado de ella, y uno
+  // corregido a caja_turno se descontaba pero quedaba abierto
+  // y volvía a descontar en la próxima entrega.
+  final overlay =
+      overlayAdelantosEnCola(await LocalDb.instance.pendingOpsLectura());
   for (final a in await LocalDb.instance.allMirror('adelantos')) {
     if ((a['en_pendiente'] as num?)?.toInt() != 1) continue;
     if ((a['monto'] as num?)?.toDouble() == null) continue;
+    final aId = (a['id'] as num?)?.toInt();
+    if (aId != null && overlay.anuladosEnCola.contains(aId)) {
+      continue;
+    }
+    final corr = aId == null ? null : overlay.correcciones[aId];
+    if (corr != null) {
+      // Con corrección en curso manda el origen NUEVO (misma
+      // regla que la suma): solo cierra si pasa a (o sigue en)
+      // caja_turno+efectivo y la gaveta es de este entrenador.
+      if ('${corr['nuevo_origen'] ?? ''}' != 'caja_turno') continue;
+      if ('${a['metodo'] ?? 'efectivo'}' != 'efectivo') continue;
+      final gaveta = LocalDb.normalizarTelegramId(
+          corr['descuenta_a'] ?? a['descuenta_a']);
+      if (gaveta == null || !mismo(gaveta)) continue;
+      if (aId != null) adelantoIds.add(aId);
+      continue;
+    }
     // Solo los de gaveta (caja_turno + efectivo) descuentan del
     // pendiente; misma regla que adelantosEnPendiente.
     if ('${a['origen'] ?? 'caja_turno'}' != 'caja_turno') continue;
@@ -5100,8 +5127,7 @@ Future<({List<int> pagos, List<int> diarios, List<int> suplementos,
         LocalDb.normalizarTelegramId(a['descuenta_a']) ??
             LocalDb.normalizarTelegramId(a['entrenador_telegram_id']);
     if (tid == null || !mismo(tid)) continue;
-    final id = (a['id'] as num?)?.toInt();
-    if (id != null) adelantoIds.add(id);
+    if (aId != null) adelantoIds.add(aId);
   }
   return (
     pagos: pagoIds,

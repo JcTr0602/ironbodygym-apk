@@ -1591,20 +1591,6 @@ Future<List<String>> revertirVentaServicio({
     throw Exception(
         'Para registrar la pérdida hace falta el pomo y la cantidad');
   }
-  // Argón Servicios #6: guarda anti-doble reversión. Si ya hay
-  // un reverso de ESTA venta en la cola, el segundo se bloquea
-  // aquí (la UI también lo oculta con reversosPendientesVentaIds,
-  // pero la guarda de fondo es esta): el servidor rechaza el
-  // segundo reverso, mas la segunda merma enlazada podría
-  // aplicarse contra el reverso ya aplicado y descontar dos
-  // veces el polvo.
-  final pendientesPrevias = await _opsServicioPendientes();
-  final yaEnCola = pendientesPrevias.any((op) =>
-      '${op['tipo']}' == 'revertir_venta_servicio' &&
-      (_payloadDeOp(op)['venta_id'] as num?)?.toInt() == ventaId);
-  if (yaEnCola) {
-    throw Exception('Esta venta ya tiene una reversión en cola');
-  }
   // Argón Servicios #5: reverso y merma se encolan en UNA
   // transacción con un solo push al final (antes eran dos
   // _encolar separados, cada uno con su push: si el proceso
@@ -1614,6 +1600,46 @@ Future<List<String>> revertirVentaServicio({
   final uuidSalida = polvoPerdido ? const Uuid().v4() : null;
   final conn = await LocalDb.instance.db;
   await conn.transaction((txn) async {
+    // Guarda anti-doble reversión (Argón Servicios #6, reforzada
+    // por el Panel final 1.21, Terra por Zen): vive DENTRO de la
+    // transacción y mira TAMBIÉN el espejo. Fuera de ella, dos
+    // llamadas concurrentes leían la cola antes de que ninguna
+    // insertara y encolaban dos reversos (las transacciones de
+    // sqflite se serializan: la segunda ya ve la op de la
+    // primera). Y un reverso ya sincronizado vive en el espejo
+    // como fila con reverso_de = ventaId, invisible para la
+    // guarda vieja de solo-cola: la segunda merma enlazada
+    // podía aplicar contra el primer reverso y descontar el
+    // polvo dos veces. La UI también lo oculta con
+    // reversosPendientesVentaIds, pero la guarda de fondo es
+    // esta. Lanzar dentro de la transacción la revierte entera:
+    // no queda ni reverso ni merma a medias.
+    final opsCola = await txn.query('ops_queue',
+        columns: ['tipo', 'payload'],
+        where: "tipo = 'revertir_venta_servicio' AND "
+            "estado IN ('pendiente', 'error', 'enviada', 'aplicada')");
+    final yaEnCola = opsCola.any((op) =>
+        (_payloadDeOp(op)['venta_id'] as num?)?.toInt() == ventaId);
+    if (yaEnCola) {
+      throw Exception('Esta venta ya tiene una reversión en cola');
+    }
+    // El espejo guarda cada fila como JSON en `data` (sin
+    // columnas por campo): el reverso espejado se busca
+    // decodificando, como hace el resto del módulo.
+    final filasEspejo =
+        await txn.query('servicio_ventas', columns: ['data']);
+    final yaEspejado = filasEspejo.any((f) {
+      try {
+        final m =
+            jsonDecode(f['data'] as String) as Map<String, dynamic>;
+        return (m['reverso_de'] as num?)?.toInt() == ventaId;
+      } catch (_) {
+        return false;
+      }
+    });
+    if (yaEspejado) {
+      throw Exception('Esta venta ya fue revertida');
+    }
     await LocalDb.instance.queueOp(
       opUuid: uuidReverso,
       tipo: 'revertir_venta_servicio',

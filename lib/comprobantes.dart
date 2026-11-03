@@ -280,6 +280,20 @@ class ComprobantesService {
   Future<int> procesar() async {
     if (_procesando) return 0;
     _procesando = true;
+    try {
+      return await _procesarInterno();
+    } catch (_) {
+      // Panel final 1.21 (Terra por Zen): la apertura de la BD y
+      // el cálculo del lease van ANTES del try interno; si lanzan,
+      // el flag quedaba pegado en true y el worker no volvía a
+      // correr en este isolate. Se libera y se propaga el error,
+      // igual que se propagaba antes.
+      _procesando = false;
+      rethrow;
+    }
+  }
+
+  Future<int> _procesarInterno() async {
     var subidos = 0;
     // Caza Fotos L4-CRÍTICA (Argón): el booleano en RAM solo
     // protege DENTRO de un isolate, pero procesar() corre en tres
@@ -338,12 +352,21 @@ class ComprobantesService {
         // en el bucket pese al cobro deshecho.
         final vigente = await db.query(
           'comprobantes_pago',
-          columns: ['comprobante_uuid'],
+          columns: ['comprobante_uuid', 'ruta_local', 'storage_path'],
           where: 'comprobante_uuid = ?',
           whereArgs: [f['comprobante_uuid']],
           limit: 1,
         );
         if (vigente.isEmpty) continue;
+        // Panel final 1.21 (Terra por Zen): si la fila se
+        // REEMPLAZÓ tras leer el lote (mismo uuid, otro archivo u
+        // otro destino), la copia en memoria ya no es la vigente:
+        // subirla marcaría como subido un archivo que nunca
+        // subió. Se salta; el próximo ciclo procesa la fila nueva.
+        if (vigente.first['ruta_local'] != f['ruta_local'] ||
+            vigente.first['storage_path'] != f['storage_path']) {
+          continue;
+        }
         final uuid = f['comprobante_uuid'] as String;
         final ruta = f['ruta_local'] as String?;
         final storagePath = f['storage_path'] as String?;

@@ -26,11 +26,14 @@ class PermisosEntrenador {
       'cache_entrenador_activo@${AuthService().username}';
   static String get _kPrefsHabilitado =>
       'cache_entrenador_habilitado@${AuthService().username}';
-  // Claves viejas (globales, pre-1.21): solo se usan UNA vez
-  // para migrar la foto al primer usuario que cargue tras la
-  // actualización (en los teléfonos de los entrenadores es su
-  // propia foto; sin migración, un entrenador offline tras
-  // actualizar quedaría bloqueado sin culpa).
+  // Claves viejas (globales, pre-1.21): al cargar se BORRAN sin
+  // copiarlas a nadie (Panel final 1.21, Terra por Zen,
+  // BLOQUEANTE): la foto global no lleva identidad y copiarla
+  // al primer usuario que entrara tras actualizar podía
+  // regalarle la foto del dueño en un teléfono compartido. El
+  // costo aceptado: tras actualizar, la primera carga con red
+  // siembra la foto propia; sin red, mandan los defaults
+  // fail-closed.
   static const _kGlobalPermisos = 'cache_permisos_entrenador_json';
   static const _kGlobalActivo = 'cache_entrenador_activo';
   static const _kGlobalHabilitado = 'cache_entrenador_habilitado';
@@ -92,20 +95,18 @@ class PermisosEntrenador {
     }
     _cargaIntentada = true;
 
-    // Migración única de las claves globales a las del usuario
-    // (solo si este usuario aún no tiene foto propia).
-    if (!prefs.containsKey(_kPrefsPermisos) &&
-        prefs.containsKey(_kGlobalPermisos)) {
-      final rawG = prefs.getString(_kGlobalPermisos);
-      if (rawG != null) {
-        await prefs.setString(_kPrefsPermisos, rawG);
-      }
-      final actG = prefs.getBool(_kGlobalActivo);
-      if (actG != null) await prefs.setBool(_kPrefsActivo, actG);
-      final habG = prefs.getBool(_kGlobalHabilitado);
-      if (habG != null) {
-        await prefs.setBool(_kPrefsHabilitado, habG);
-      }
+    // Migración única de las claves globales: se DESCARTAN, no
+    // se copian a ningún usuario. Panel final 1.21 (Terra por
+    // Zen, BLOQUEANTE): la caché global pre-1.21 no lleva
+    // identidad de dueño; copiarla al primer usuario que entrara
+    // tras actualizar le regalaba esa foto (p. ej. los permisos
+    // del dueño) si el primer ingreso era de un entrenador
+    // offline en un teléfono compartido — exactamente la fuga
+    // que la foto por usuario vino a eliminar. Sin foto propia
+    // mandan los defaults fail-closed hasta que responda la RPC.
+    if (prefs.containsKey(_kGlobalPermisos) ||
+        prefs.containsKey(_kGlobalActivo) ||
+        prefs.containsKey(_kGlobalHabilitado)) {
       await prefs.remove(_kGlobalPermisos);
       await prefs.remove(_kGlobalActivo);
       await prefs.remove(_kGlobalHabilitado);

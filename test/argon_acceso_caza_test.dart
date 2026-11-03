@@ -96,19 +96,27 @@ void main() {
       expect(per.sinHabilitar, isTrue);
     });
 
-    test('migración: la foto global vieja se adopta una vez', () async {
+    test(
+        'migración: la foto global vieja se DESCARTA, no se adopta',
+        () async {
+      // Panel final 1.21 (Terra por Zen, BLOQUEANTE): la foto
+      // global pre-1.21 no lleva identidad; adoptarla regalaba
+      // los permisos de su dueño al primer usuario que entrara
+      // tras actualizar (teléfono compartido, entrenador
+      // offline). Ahora se borra sin copiarse a ninguna clave.
       final p = await SharedPreferences.getInstance();
       await p.setString('cache_permisos_entrenador_json',
           jsonEncode({'can_ver_cifras': true}));
       await p.setBool('cache_entrenador_activo', true);
       await p.setBool('cache_entrenador_habilitado', true);
       await PermisosEntrenador().cargar();
-      expect(PermisosEntrenador().canVerCifras, isTrue);
-      // Las claves globales se consumen (no quedan para otro).
+      expect(PermisosEntrenador().canVerCifras, isFalse);
+      expect(PermisosEntrenador().sinHabilitar, isTrue);
       expect(p.containsKey('cache_permisos_entrenador_json'),
           isFalse);
+      expect(p.containsKey('cache_entrenador_activo'), isFalse);
       expect(
-          p.containsKey('cache_permisos_entrenador_json@'), isTrue);
+          p.containsKey('cache_permisos_entrenador_json@'), isFalse);
     });
   });
 

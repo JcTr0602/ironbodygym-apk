@@ -452,8 +452,10 @@ int diasDesdePrimeraVenta(
 /// - Si varias ventanas contienen la fecha (datos solapados),
 ///   manda la de apertura más reciente.
 /// - Si ninguna la contiene pero hay botes abiertos antes de
-///   la fecha (p. ej. cerrado_en sin registrar), se toma el
-///   último abierto antes de la fecha.
+///   la fecha SIN cierre utilizable (cerrado_en sin registrar),
+///   se toma el último de esos. Un bote con cerrado_en
+///   registrado y anterior a la fecha nunca recibe la venta:
+///   no pudo salir de él.
 /// - Sin fecha o sin botes con abierto_en utilizable: el
 ///   [respaldo] (la resolución estática por pomo de antes).
 int? botePorVentana(
@@ -481,8 +483,16 @@ int? botePorVentana(
       enVentana = id;
       aperturaEnVentana = ap;
     }
-    if (aperturaUltimoAntes == null ||
-        ap.compareTo(aperturaUltimoAntes) > 0) {
+    // El fallback «último abierto antes» solo vale si el bote
+    // no tiene un cierre UTILIZABLE: con cerrado_en registrado
+    // y anterior a la fecha, la venta no pudo salir de ese bote
+    // (Panel final 1.21, Terra por Zen: se le atribuían dosis,
+    // ingreso y margen a un bote ya cerrado). Sin cierre
+    // registrado, el último abierto antes sigue siendo la
+    // atribución plausible: el caso que el fallback cubre.
+    if (cierre.length < 10 &&
+        (aperturaUltimoAntes == null ||
+            ap.compareTo(aperturaUltimoAntes) > 0)) {
       ultimoAntes = id;
       aperturaUltimoAntes = ap;
     }

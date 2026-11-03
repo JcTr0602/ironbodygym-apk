@@ -252,6 +252,46 @@ void main() {
     });
   });
 
+  group('Panel final 1.21: doble reversión espejada/concurrente', () {
+    test('reverso ya sincronizado (en el espejo): bloqueado',
+        () async {
+      await _siembra();
+      // La venta 79 ya tiene su reverso espejado (reverso_de).
+      await _espejo('servicio_ventas', 900, {
+        'reverso_de': 79,
+        'pomo_id': 10,
+        'cantidad': 1,
+      });
+      expect(
+          () => revertirVentaServicio(ventaId: 79, motivo: 'tarde'),
+          throwsException);
+      expect(await _opsPendientes(), isEmpty);
+    });
+
+    test('dos reversos concurrentes de la misma venta: pasa uno',
+        () async {
+      await _siembra();
+      var exitos = 0;
+      var fallos = 0;
+      Future<void> intento() async {
+        try {
+          await revertirVentaServicio(ventaId: 80, motivo: 'error');
+          exitos++;
+        } catch (_) {
+          fallos++;
+        }
+      }
+
+      await Future.wait([intento(), intento()]);
+      expect(exitos, 1);
+      expect(fallos, 1);
+      final reversos = (await _opsPendientes())
+          .where((o) => '${o['tipo']}' == 'revertir_venta_servicio')
+          .toList();
+      expect(reversos, hasLength(1));
+    });
+  });
+
   group('Argón #10: salidas acotadas al saldo local', () {
     test('salida de dosis mayor que el saldo: rechazada', () async {
       await _siembra();

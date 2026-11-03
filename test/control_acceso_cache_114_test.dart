@@ -20,13 +20,16 @@ void main() {
     // se traga, como en offline real. Sin inicializar,
     // AuthService.isOwner revienta con assert y ningún getter se
     // puede probar.
+    // Desde la 1.21 la caché es POR USUARIO (claves con '@'):
+    // sin sesión el usuario es '' y sus claves son las de '@'.
+    // (La semilla global vieja ya no se adopta: panel final.)
     SharedPreferences.setMockInitialValues({
-      'cache_permisos_entrenador_json': jsonEncode({
+      'cache_permisos_entrenador_json@': jsonEncode({
         'can_ver_ranking_servicios': true,
         'can_cobrar_pagos': false,
       }),
-      'cache_entrenador_activo': false,
-      'cache_entrenador_habilitado': true,
+      'cache_entrenador_activo@': false,
+      'cache_entrenador_habilitado@': true,
     });
     await Supabase.initialize(
       url: 'http://127.0.0.1:9',
