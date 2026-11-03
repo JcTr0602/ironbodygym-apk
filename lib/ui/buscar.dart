@@ -516,6 +516,7 @@ class _BuscarScreenState extends State<BuscarScreen> {
                                   ),
                                   child: FilaCliente(
                                     cliente: c,
+                                    origenHero: 'buscar',
                                     onTap: () {
                                       final id = c['id'];
                                       final cid = id is int
@@ -525,7 +526,9 @@ class _BuscarScreenState extends State<BuscarScreen> {
                                       Navigator.of(context)
                                           .push(RutaIron(
                                               builder: (_) => FichaScreen(
-                                                  clienteId: cid)))
+                                                  clienteId: cid,
+                                                  origenHero:
+                                                      'buscar')))
                                           .then((_) {
                                         if (mounted) _buscar();
                                       });
@@ -703,7 +706,10 @@ class _BuscarScreenState extends State<BuscarScreen> {
         if (cid == null || !mounted) return;
         await Navigator.of(context).push(RutaIron(
             builder: (_) =>
-                FichaScreen(clienteId: cid, editarAlAbrir: true)));
+                FichaScreen(
+                    clienteId: cid,
+                    editarAlAbrir: true,
+                    origenHero: 'buscar')));
         if (mounted) await _buscar();
         return;
       default:
@@ -750,13 +756,19 @@ class FilaCliente extends StatelessWidget {
   final VoidCallback? onLongPress;
   final Widget? trailing;
   final Widget? leading;
+
+  /// T2 (Bloque 2): origen del Hero de la foto ('buscar',
+  /// 'listas'…). Sin origen, la fila no vuela.
+  final String? origenHero;
+
   const FilaCliente(
       {super.key,
       required this.cliente,
       this.onTap,
       this.onLongPress,
       this.trailing,
-      this.leading});
+      this.leading,
+      this.origenHero});
 
   @override
   Widget build(BuildContext context) => _FilaCliente(
@@ -765,7 +777,8 @@ class FilaCliente extends StatelessWidget {
       onTap: onTap,
       onLongPress: onLongPress,
       trailing: trailing,
-      leading: leading);
+      leading: leading,
+      origenHero: origenHero);
 }
 
 class _FilaCliente extends StatefulWidget {
@@ -774,13 +787,15 @@ class _FilaCliente extends StatefulWidget {
   final VoidCallback? onLongPress;
   final Widget? trailing;
   final Widget? leading;
+  final String? origenHero;
   const _FilaCliente(
       {super.key,
       required this.cliente,
       this.onTap,
       this.onLongPress,
       this.trailing,
-      this.leading});
+      this.leading,
+      this.origenHero});
 
   @override
   State<_FilaCliente> createState() => _FilaClienteState();
@@ -856,7 +871,9 @@ class _FilaClienteState extends State<_FilaCliente> {
       nombre: nombre,
       foto: _foto,
       tamano: TamanoAvatar.l,
-      heroTag: 'avatar-cliente-${c['id']}',
+      heroTag: widget.origenHero == null
+          ? null
+          : tagHeroCliente(widget.origenHero!, c['id']),
     );
     // Cliente protegido (2026-10-26, A1 Argón): el entrenador solo
     // ve avatar, nombre y candado. Sin badge, sin días, sin

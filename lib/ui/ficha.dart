@@ -102,8 +102,17 @@ class FichaScreen extends StatefulWidget {
   /// Bloque 1: si es true, al cargar la ficha abre directo el
   /// diálogo Editar (acción al deslizar en Buscar).
   final bool editarAlAbrir;
+
+  /// T2 (Diseño Bloque 2): origen del Hero de la foto
+  /// ('buscar' | 'listas'). La cabecera usa el tag de ESE
+  /// origen; sin origen no hay vuelo.
+  final String? origenHero;
+
   const FichaScreen(
-      {super.key, required this.clienteId, this.editarAlAbrir = false});
+      {super.key,
+      required this.clienteId,
+      this.editarAlAbrir = false,
+      this.origenHero});
   @override
   State<FichaScreen> createState() => _FichaScreenState();
 }
@@ -1984,7 +1993,10 @@ class _FichaScreenState extends State<FichaScreen> {
                 foto: _foto,
                 tamano: TamanoAvatar.xl,
                 iconoFallback: Icons.person_rounded,
-                heroTag: 'avatar-cliente-${widget.clienteId}',
+                heroTag: widget.origenHero == null
+                    ? null
+                    : tagHeroCliente(
+                        widget.origenHero!, widget.clienteId),
               ),
             ),
             const SizedBox(height: AppEspacio.md),
@@ -2046,97 +2058,20 @@ class _FichaScreenState extends State<FichaScreen> {
                     padding: const EdgeInsets.all(
                         AppEspacio.lg),
                     children: [
-                      // Cabecera: foto + nombre + badge (etapa 4 ·
-                      // F3: banda con gradiente sutil naranja).
-                      Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.symmetric(
-                            vertical: AppEspacio.md),
-                        decoration: BoxDecoration(
-                          gradient: LinearGradient(
-                            begin: Alignment.topCenter,
-                            end: Alignment.bottomCenter,
-                            colors: [
-                              AppColores.naranja
-                                  .withValues(alpha: 0.10),
-                              AppColores.naranja
-                                  .withValues(alpha: 0.0),
-                            ],
-                          ),
-                          borderRadius: BorderRadius.circular(
-                              AppRadio.lg),
-                        ),
-                        child: Column(
-                          children: [
-                      Center(
-                        child: GestureDetector(
-                          onTap: _foto != null
-                              ? () => _verFotoGrande()
-                              : null,
-                          child: AvatarCliente(
-                            nombre: nombre,
-                            foto: _foto,
-                            tamano: TamanoAvatar.perfil,
-                            colorBorde: colorMarco,
-                            grosorBorde: 3,
-                            heroTag:
-                                'avatar-cliente-${widget.clienteId}',
-                          ),
-                        ),
-                      ),
-                      const SizedBox(
-                          height: AppEspacio.sm),
-                      Center(
-                        child: TextButton.icon(
-                          icon: const Icon(
-                              Icons.camera_alt_rounded,
-                              size: 18),
-                          label:
-                              const Text('Cambiar foto'),
-                          onPressed: _cambiarFoto,
-                        ),
-                      ),
-                      Center(
-                        child: Text(nombre,
-                            style: AppTexto.displayPequeno),
-                      ),
-                      const SizedBox(
-                          height: AppEspacio.sm),
-                      // Argón Clientes #3: con Casa, el badge de
-                      // días no se pinta: manda el chip dorado
-                      // de abajo (como en Buscar).
-                      if (!esCasa)
-                        Center(
-                            child: BadgeEstado.desdeDias(
-                                dias)),
-                      // v1.7.0: distintivo DORADO de Cuenta a la Casa.
-                      if (esCasa) ...[
-                        const SizedBox(height: AppEspacio.sm),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 12, vertical: 5),
-                          decoration: BoxDecoration(
-                            color: AppColores.alerta.withValues(alpha: 0.15),
-                            borderRadius:
-                                BorderRadius.circular(999),
-                            border: Border.all(
-                                color: AppColores.alerta),
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(Icons.home_rounded,
-                                  size: 15,
-                                  color: AppColores.alerta),
-                              SizedBox(width: 8),
-                              Text('Cuenta a la Casa',
-                                  style: AppTexto.etiqueta.copyWith(color: AppColores.alerta, fontWeight: FontWeight.w700)),
-                            ],
-                          ),
-                        ),
-                      ],
-                          ],
-                        ),
+                      CabeceraFicha(
+                        nombre: nombre,
+                        foto: _foto,
+                        colorMarco: colorMarco,
+                        esCasa: esCasa,
+                        dias: dias,
+                        heroTag: widget.origenHero == null
+                            ? null
+                            : tagHeroCliente(
+                                widget.origenHero!, widget.clienteId),
+                        onFotoTap: _foto != null
+                            ? () => _verFotoGrande()
+                            : null,
+                        onCambiarFoto: _cambiarFoto,
                       ),
                       const SizedBox(
                           height: AppEspacio.lg),

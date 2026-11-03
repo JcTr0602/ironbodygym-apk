@@ -25,6 +25,33 @@ class _CacheItem {
   _CacheItem(this.file, this.size, this.lastAccessed);
 }
 
+/// Fuente ÚNICA de la foto de un suplemento (tarjeta y
+/// detalle): la foto local recién tomada manda si existe
+/// en disco; si no, manda la remota vía FotoCache. Es
+/// compartida a propósito: el Hero de T2 solo vuela sin
+/// parpadeo si AMBOS extremos construyen el FileImage
+/// desde el MISMO archivo; si cada pantalla eligiera por
+/// su lado y las rutas difirieran, el vuelo mostraría
+/// otra imagen (panel delta-2, Media).
+File? archivoFotoLocalSuplemento(Map<String, dynamic> sup) {
+  final local = sup['foto_local'] as String?;
+  if (local != null && local.isNotEmpty && File(local).existsSync()) {
+    return File(local);
+  }
+  return null;
+}
+
+/// La foto vigente de un suplemento: local si existe;
+/// si no, la de FotoCache (o null si tampoco hay remota).
+Future<File?> resolverFotoSuplemento(
+    Map<String, dynamic> sup) async {
+  final local = archivoFotoLocalSuplemento(sup);
+  if (local != null) return local;
+  final storage = sup['foto_storage'] as String?;
+  if (storage == null || storage.isEmpty) return null;
+  return FotoCache.instance.obtener(storage);
+}
+
 class FotoCache {
   FotoCache._();
   static final FotoCache instance = FotoCache._();

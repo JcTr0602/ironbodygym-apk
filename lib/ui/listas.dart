@@ -486,10 +486,11 @@ class _ListasScreenState extends State<ListasScreen>
                     : null,
                 child: FilaCliente(
             cliente: c,
+            origenHero: 'listas',
             onTap: () => Navigator.of(context)
                 .push(RutaIron(
                     builder: (_) => FichaScreen(
-                        clienteId: id)))
+                        clienteId: id, origenHero: 'listas')))
                 .then((_) => _cargar()),
             trailing: Row(
               mainAxisSize: MainAxisSize.min,

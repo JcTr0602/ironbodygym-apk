@@ -1214,6 +1214,72 @@ enum TamanoAvatar { s, m, l, xl, perfil }
 /// por la pantalla (archivo local); este componente no hace E/S.
 /// El borde es fino y neutro por defecto; la ficha pasa su marco
 /// de estado con [colorBorde] y [grosorBorde].
+/// Decodificación acotada SIN deformar (reporte de campo
+/// de Jc, 1.22): cuando a Image.file/Image.network se le
+/// dan cacheWidth Y cacheHeight a la vez, Flutter decodifica
+/// con ResizeImagePolicy.exact y ESTIRA el bitmap al
+/// rectángulo destino ANTES de que BoxFit.cover recorte —
+/// las fotos salían aplastadas/estiradas en miniaturas y en
+/// la ficha.
+///
+/// La acotación es por UN SOLO eje (el ancho): el bitmap
+/// conserva su aspecto exacto y, pasando ~2× el ancho de
+/// la caja de destino, el eje libre queda siempre por
+/// encima de lo que BoxFit.cover necesita recortar (vale
+/// para retratos y paisajes hasta 2:1; el panel descartó
+/// acotar por los dos ejes con policy fit porque el eje
+/// corto quedaba por debajo de la caja y perdía nitidez).
+/// [ancho] va en píxeles de dispositivo.
+ImageProvider providerFotoAcotada(ImageProvider base,
+        {required int ancho}) =>
+    ResizeImage(base, width: ancho);
+
+/// 1.22 Diseño Bloque 2 (T2, ajustes de Argón): el tag del
+/// Hero de la foto de un cliente SIEMPRE lleva el origen
+/// (`hero_<origen>_cliente_<id>`) para que dos superficies
+/// con el mismo cliente no colisionen y el vuelo sepa de
+/// dónde viene. La ficha usa el tag del origen que la abrió.
+String tagHeroCliente(String origen, Object id) =>
+    'hero_${origen}_cliente_$id';
+
+/// T2: tag del Hero de la foto de un suplemento (lista →
+/// detalle).
+String tagHeroSuplemento(Object id) => 'hero_suplemento_$id';
+
+/// Shuttle del Hero rectangular (fotos de suplemento): el
+/// hijo destino se estira al rectángulo interpolado, con
+/// las esquinas recortadas al radio del sistema.
+///
+/// Panel delta (Media): el hijo que se anima es SIEMPRE el
+/// de la lista (imagen ya resuelta): en la ida es el
+/// origen y en la vuelta es el destino. El hijo del
+/// detalle es un FutureBuilder (rama FotoCache) y clonarlo
+/// en el shuttle lo reinicia en espera — el vuelo animaba
+/// el marcador en vez de la foto.
+Widget shuttleHeroFoto(
+    BuildContext context,
+    Animation<double> animation,
+    HeroFlightDirection flightDirection,
+    BuildContext fromHeroContext,
+    BuildContext toHeroContext) {
+  final lista = flightDirection == HeroFlightDirection.push
+      ? (fromHeroContext.widget as Hero).child
+      : (toHeroContext.widget as Hero).child;
+  return Material(
+    color: Colors.transparent,
+    child: ClipRRect(
+      borderRadius: BorderRadius.circular(AppRadio.lg),
+      child: SizedBox.expand(
+        child: FittedBox(
+          fit: BoxFit.cover,
+          clipBehavior: Clip.hardEdge,
+          child: lista,
+        ),
+      ),
+    ),
+  );
+}
+
 class AvatarCliente extends StatelessWidget {
   final String nombre;
   final File? foto;
@@ -1265,20 +1331,27 @@ class AvatarCliente extends StatelessWidget {
     // El interior respira dentro del borde (como el marco de la
     // ficha: borde + padding del mismo grosor).
     final di = d - 2 * grosorBorde;
+    // T2 (Bloque 2): con Hero, AMBOS extremos decodifican
+    // al mismo ancho fijo (720) para que el ImageProvider
+    // sea el MISMO en la lista y en la ficha — si cada
+    // extremo decodifica a su tamaño, el vuelo re-decodifica
+    // y la foto parpadea. Sin Hero, 2x el tamaño mostrado
+    // (D-02 con el margen anti-nitidez del panel delta).
+    final cacheHero = heroTag != null
+        ? 720
+        : (2 * di * MediaQuery.devicePixelRatioOf(context)).round();
     final Widget interior = foto != null
         ? ClipRRect(
             borderRadius: BorderRadius.circular(di / 2),
             // D-02 (1.21): decodificar al tamaño mostrado × DPR,
             // no la foto entera (las listas pintan decenas de
             // avatares de 44-56 px con fotos de varios MB).
-            child: Image.file(foto!,
+            child: Image(
+                image: providerFotoAcotada(FileImage(foto!),
+                    ancho: cacheHero),
                 width: di,
                 height: di,
-                fit: BoxFit.cover,
-                cacheWidth:
-                    (di * MediaQuery.devicePixelRatioOf(context)).round(),
-                cacheHeight:
-                    (di * MediaQuery.devicePixelRatioOf(context)).round()),
+                fit: BoxFit.cover),
           )
         : CircleAvatar(
             radius: di / 2,
@@ -1304,9 +1377,33 @@ class AvatarCliente extends StatelessWidget {
       ),
       child: interior,
     );
-    return heroTag == null
-        ? conBorde
-        : Hero(tag: heroTag!, child: conBorde);
+    if (heroTag == null) return conBorde;
+    // T2 (Bloque 2, ajustes de Argón): placeholder mientras
+    // el destino no está listo y shuttle circular que
+    // estira el avatar destino al rectángulo interpolado
+    // (sin esto, el avatar salta de tamaño a mitad de vuelo).
+    return Hero(
+      tag: heroTag!,
+      placeholderBuilder: (ctx, size, child) =>
+          Opacity(opacity: 0.35, child: child),
+      flightShuttleBuilder:
+          (ctx, animation, direction, fromCtx, toCtx) {
+        final destino = (toCtx.widget as Hero).child;
+        return Material(
+          color: Colors.transparent,
+          child: ClipOval(
+            child: SizedBox.expand(
+              child: FittedBox(
+                fit: BoxFit.cover,
+                clipBehavior: Clip.hardEdge,
+                child: destino,
+              ),
+            ),
+          ),
+        );
+      },
+      child: conBorde,
+    );
   }
 }
 

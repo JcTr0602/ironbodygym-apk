@@ -7,6 +7,8 @@
 /// FichaScreen; el layout nuevo llega en el Paso 2.
 library;
 
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 
 import '../conciliacion.dart';
@@ -17,6 +19,129 @@ import 'componentes.dart';
 import 'conciliacion.dart';
 import 'diseno.dart';
 import 'estado_cuenta.dart';
+
+/// Diseño Bloque 2 Paso 2 (B1): la cabecera NUEVA de la
+/// ficha — foto grande a la izquierda con su anillo de
+/// estado, y a la derecha la jerarquía que importa: nombre,
+/// insignia de estado (o el distintivo dorado de Casa) y el
+/// acceso a cambiar la foto. El botón de cobrar NO va aquí:
+/// sigue fijo abajo, siempre visible. Vista tonta: la
+/// ficha calcula color/días y pasa los callbacks.
+class CabeceraFicha extends StatelessWidget {
+  final String nombre;
+  final File? foto;
+
+  /// Color del anillo de estado (verde al día, ámbar por
+  /// vencer o Casa, rojo vencido) — lo calcula la ficha.
+  final Color colorMarco;
+  final bool esCasa;
+
+  /// Días restantes (para la insignia; ignorado si esCasa).
+  final int dias;
+  final String? heroTag;
+  final VoidCallback? onFotoTap;
+  final VoidCallback onCambiarFoto;
+
+  const CabeceraFicha(
+      {super.key,
+      required this.nombre,
+      required this.foto,
+      required this.colorMarco,
+      required this.esCasa,
+      required this.dias,
+      required this.heroTag,
+      required this.onFotoTap,
+      required this.onCambiarFoto});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(AppEspacio.md),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [
+            AppColores.naranja.withValues(alpha: 0.10),
+            AppColores.naranja.withValues(alpha: 0.0),
+          ],
+        ),
+        borderRadius: BorderRadius.circular(AppRadio.lg),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          GestureDetector(
+            onTap: onFotoTap,
+            child: AvatarCliente(
+              nombre: nombre,
+              foto: foto,
+              tamano: TamanoAvatar.perfil,
+              colorBorde: colorMarco,
+              grosorBorde: 3,
+              heroTag: heroTag,
+            ),
+          ),
+          const SizedBox(width: AppEspacio.md),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(nombre,
+                    style: AppTexto.displayPequeno,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis),
+                const SizedBox(height: AppEspacio.sm),
+                // Argón Clientes #3: con Casa manda el chip
+                // dorado; la insignia de días no se pinta.
+                if (!esCasa)
+                  BadgeEstado.desdeDias(dias)
+                else
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 12, vertical: 5),
+                    decoration: BoxDecoration(
+                      color:
+                          AppColores.alerta.withValues(alpha: 0.15),
+                      borderRadius: BorderRadius.circular(999),
+                      border: Border.all(color: AppColores.alerta),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.home_rounded,
+                            size: 15, color: AppColores.alerta),
+                        const SizedBox(width: 8),
+                        Text('Cuenta a la Casa',
+                            style: AppTexto.etiqueta.copyWith(
+                                color: AppColores.alerta,
+                                fontWeight: FontWeight.w700)),
+                      ],
+                    ),
+                  ),
+                const SizedBox(height: AppEspacio.xs),
+                TextButton.icon(
+                  icon: const Icon(Icons.camera_alt_rounded,
+                      size: 18),
+                  label: const Text('Cambiar foto'),
+                  onPressed: onCambiarFoto,
+                  style: TextButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: AppEspacio.sm),
+                    minimumSize: Size.zero,
+                    tapTargetSize:
+                        MaterialTapTargetSize.shrinkWrap,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
 
 class FilaInfoFicha extends StatelessWidget {
   final IconData icono;

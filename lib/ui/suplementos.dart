@@ -1091,16 +1091,9 @@ class _FotoMiniTopState extends State<_FotoMiniTop> {
     }
   }
 
-  Future<File?> _resolver() async {
-    final s = widget.sup;
-    final local = s['foto_local'] as String?;
-    if (local != null && local.isNotEmpty && File(local).existsSync()) {
-      return File(local);
-    }
-    final storage = s['foto_storage'] as String?;
-    if (storage == null || storage.isEmpty) return null;
-    return FotoCache.instance.obtener(storage);
-  }
+  // Fuente única compartida con el detalle (fotos.dart):
+  // mismo archivo en ambos extremos del Hero.
+  Future<File?> _resolver() => resolverFotoSuplemento(widget.sup);
 
   Widget _sinFoto(BuildContext context) => Container(
         height: 64,
@@ -1120,13 +1113,22 @@ class _FotoMiniTopState extends State<_FotoMiniTop> {
       builder: (ctx, snap) {
         final f = snap.data;
         if (f == null) return _sinFoto(ctx);
-        return Image.file(f,
-            height: 64,
-            width: double.infinity,
-            fit: BoxFit.cover,
-            cacheHeight:
-                (64 * MediaQuery.devicePixelRatioOf(ctx)).round(),
-            errorBuilder: (_, __, ___) => _sinFoto(ctx));
+        // T2 (Bloque 2): la foto vuela al detalle. La
+        // decodificación va acotada por ancho a 1080 con
+        // providerFotoAcotada en AMBOS extremos: el
+        // ImageProvider es el mismo (no parpadea) y no
+        // deforma (hotfix de campo).
+        return Hero(
+          tag: tagHeroSuplemento(widget.sup['id']),
+          flightShuttleBuilder: shuttleHeroFoto,
+          child: Image(
+              image: providerFotoAcotada(FileImage(f),
+                  ancho: 1080),
+              height: 64,
+              width: double.infinity,
+              fit: BoxFit.cover,
+              errorBuilder: (_, __, ___) => _sinFoto(ctx)),
+        );
       },
     );
   }
@@ -1161,18 +1163,10 @@ class _FotoSuplementoState extends State<_FotoSuplemento> {
     }
   }
 
-  Future<File?> _resolver() async {
-    final s = widget.sup;
-    final local = s['foto_local'] as String?;
-    if (local != null && local.isNotEmpty && File(local).existsSync()) {
-      return File(local);
-    }
-    final storage = s['foto_storage'] as String?;
-    if (storage == null || storage.isEmpty) return null;
-    final enCache = await FotoCache.instance.enCache(storage);
-    if (enCache != null) return enCache;
-    return FotoCache.instance.obtener(storage);
-  }
+  // Fuente única compartida con el detalle (fotos.dart).
+  // (Antes consultaba enCache antes que obtener: obtener
+  // ya devuelve el archivo de caché si está, sin red.)
+  Future<File?> _resolver() => resolverFotoSuplemento(widget.sup);
 
   @override
   Widget build(BuildContext context) {

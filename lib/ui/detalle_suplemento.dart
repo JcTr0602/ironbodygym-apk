@@ -610,6 +610,9 @@ class DetalleSuplementoScreen extends StatelessWidget {
     final foto = suplemento['foto_storage'] as String?;
     // v1.3.3: foto local recién tomada (offline) tiene prioridad.
     final fotoLocal = suplemento['foto_local'] as String?;
+    // Fuente única (fotos.dart): el MISMO archivo que
+    // resuelve la tarjeta — el Hero vuela sin parpadeo.
+    final archivoLocal = archivoFotoLocalSuplemento(suplemento);
     // v1.4.6: el equivalente en CUP solo aplica si el precio
     // oficial está en USD (moneda del propio suplemento).
     final monedaSup = LocalDb.monedaDe(suplemento);
@@ -730,11 +733,17 @@ class DetalleSuplementoScreen extends StatelessWidget {
           // Foto grande.
           // v1.3.3: foto local recién tomada (offline) tiene prioridad
           // sobre la remota (aún no subida o sin descargar).
-          if (fotoLocal != null && fotoLocal.isNotEmpty && File(fotoLocal).existsSync())
-            ClipRRect(
+          if (archivoLocal != null)
+            Hero(
+              tag: tagHeroSuplemento(suplemento['id']),
+              flightShuttleBuilder: shuttleHeroFoto,
+              child: ClipRRect(
               borderRadius:
                   BorderRadius.circular(AppRadio.lg),
-              child: Image.file(File(fotoLocal),
+              child: Image(
+                  image: providerFotoAcotada(
+                      FileImage(archivoLocal),
+                      ancho: 1080),
                   height: 200,
                   width: double.infinity,
                   fit: BoxFit.cover,
@@ -750,36 +759,50 @@ class DetalleSuplementoScreen extends StatelessWidget {
                         size: 72,
                         color: AppColores.textoSecundario(context)),
                   )),
+              ),
             )
           else
-            FutureBuilder(
-              future: FotoCache.instance.obtener(foto),
-              builder: (ctx, snap) {
-                final f = snap.data;
-                if (f == null) {
-                  return Container(
-                    height: 200,
-                    decoration: BoxDecoration(
-                      color: AppColores.fondo(context),
-                      borderRadius:
-                          BorderRadius.circular(AppRadio.lg),
-                    ),
-                    child: Icon(
-                        Icons.medication_rounded,
-                        size: 72,
-                        color: AppColores.textoSecundario(context)),
+            // Panel Bloque 2 Paso 2 (Media): el Hero envuelve
+            // al FutureBuilder, NO a su resultado — el
+            // HeroController empareja origen y destino al
+            // INICIAR la transición; si el Hero solo existe
+            // cuando la foto ya bajó, el vuelo nunca arranca
+            // en la rama FotoCache (la habitual). Montado
+            // siempre, durante la carga pinta el marcador.
+            Hero(
+              tag: tagHeroSuplemento(suplemento['id']),
+              flightShuttleBuilder: shuttleHeroFoto,
+              child: FutureBuilder(
+                future: FotoCache.instance.obtener(foto),
+                builder: (ctx, snap) {
+                  final f = snap.data;
+                  if (f == null) {
+                    return Container(
+                      height: 200,
+                      decoration: BoxDecoration(
+                        color: AppColores.fondo(context),
+                        borderRadius:
+                            BorderRadius.circular(AppRadio.lg),
+                      ),
+                      child: Icon(
+                          Icons.medication_rounded,
+                          size: 72,
+                          color: AppColores.textoSecundario(context)),
+                    );
+                  }
+                  return ClipRRect(
+                    borderRadius:
+                        BorderRadius.circular(AppRadio.lg),
+                    child: Image(
+                        image: providerFotoAcotada(FileImage(f),
+                            ancho: 1080),
+                        height: 200,
+                        width: double.infinity,
+                        fit: BoxFit.cover),
                   );
-                }
-                return ClipRRect(
-                  borderRadius:
-                      BorderRadius.circular(AppRadio.lg),
-                child: Image.file(f,
-                    height: 200,
-                    width: double.infinity,
-                    fit: BoxFit.cover),
-              );
-            },
-          ),
+                },
+              ),
+            ),
           // Rediseño 1.20: foto_local presente = foto nueva
           // aún no confirmada por el servidor (el pull la
           // limpia); se avisa sin bloquear nada.
