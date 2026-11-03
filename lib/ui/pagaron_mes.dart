@@ -37,6 +37,14 @@ class _PagaronMesScreenState extends State<PagaronMesScreen> {
   bool _cargando = true;
   List<Map<String, dynamic>> _filas = [];
 
+  /// 1.23 (H-04, Argón): total canónico de la cifra de Home
+  /// (ids ANTES de ocultar protegidos a un no-dueño). El título
+  /// usa ESTE número — el mismo que ve en Home y en su nómina —
+  /// y al pie de la lista se explica la diferencia, para que
+  /// el entrenador no sospeche de su base ni deduzca cuántos
+  /// protegidos hay contando filas.
+  int _totalCanonico = 0;
+
   @override
   void initState() {
     super.initState();
@@ -106,6 +114,7 @@ class _PagaronMesScreenState extends State<PagaronMesScreen> {
     if (mounted) {
       setState(() {
         _filas = lista;
+        _totalCanonico = ids.length;
         _cargando = false;
       });
     }
@@ -124,7 +133,7 @@ class _PagaronMesScreenState extends State<PagaronMesScreen> {
       appBar: AppBar(
         title: Text(_cargando
             ? 'Pagaron este mes'
-            : 'Pagaron este mes (${_filas.length})'),
+            : 'Pagaron este mes ($_totalCanonico)'),
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh_rounded),
@@ -148,8 +157,27 @@ class _PagaronMesScreenState extends State<PagaronMesScreen> {
                     : RefreshIndicator(
                         onRefresh: _actualizar,
                         child: ListView.builder(
-                          itemCount: _filas.length,
+                          // H-04: si hay protegidos ocultos, la
+                          // última fila es la nota que reconcilia
+                          // el título (canónico) con las filas.
+                          itemCount: _filas.length +
+                              (_totalCanonico > _filas.length
+                                  ? 1
+                                  : 0),
                           itemBuilder: (ctx, i) {
+                            if (i == _filas.length) {
+                              return Padding(
+                                padding: const EdgeInsets.all(
+                                    AppEspacio.lg),
+                                child: Text(
+                                  '+ ${_totalCanonico - _filas.length} '
+                                  'con privacidad reservada, '
+                                  'incluidos en tu base de nómina.',
+                                  style: AppTexto.secundario,
+                                  textAlign: TextAlign.center,
+                                ),
+                              );
+                            }
                             final c = _filas[i];
                             final sinDatos = c['sin_datos'] == true;
                             return ListTile(

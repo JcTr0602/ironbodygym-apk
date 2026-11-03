@@ -128,9 +128,39 @@ void main() {
       }
     }
 
-    testWidgets('Home: construye y muestra el grid de módulos',
-        (tester) async {
+    testWidgets('Home: dos niveles — Hoy por defecto y Módulos '
+        'a un toque con su grid', (tester) async {
       await tester.pumpWidget(const MaterialApp(home: HomeScreen()));
+      await avanzarTiempo(tester);
+      // En este entorno sin sesión, Home abre el diálogo de
+      // «Cuenta no habilitada» (barrera modal, no descartable):
+      // se acepta como haría el usuario y la barrera se retira.
+      // Sin este paso ningún toque llega a la pantalla. El
+      // diálogo llega por una lectura REAL asíncrona (permisos):
+      // los pumps de tiempo falso no la hacen avanzar; runAsync
+      // deja correr ~2 s reales y el diálogo aparece (medido).
+      await tester.runAsync(() async {
+        await Future<void>.delayed(const Duration(seconds: 2));
+      });
+      await tester.pump(const Duration(milliseconds: 300));
+      // Puede haber DOS diálogos apilados al abrir (permisos,
+      // con botón «ENTENDIDO», y «Lo nuevo en esta versión»,
+      // con botón «Entendido»): se aceptan en cadena hasta
+      // que no quede ninguno tapando la pantalla.
+      for (var i = 0; i < 5; i++) {
+        final mayus = find.text('ENTENDIDO');
+        final boton = mayus.evaluate().isNotEmpty
+            ? mayus
+            : find.text('Entendido');
+        if (boton.evaluate().isEmpty) break;
+        await tester.tap(boton.first);
+        await tester.pump(const Duration(milliseconds: 400));
+      }
+      // Nivel 1 por defecto: el selector se ve y el grid no.
+      expect(find.text('Hoy'), findsOneWidget);
+      expect(find.text('Módulos'), findsOneWidget);
+      expect(find.text('MÓDULOS'), findsNothing);
+      await tester.tap(find.text('Módulos'));
       await avanzarTiempo(tester);
       expect(find.text('MÓDULOS'), findsOneWidget);
       expect(find.byType(GridView), findsWidgets);

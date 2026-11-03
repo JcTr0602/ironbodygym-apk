@@ -114,6 +114,16 @@ class SenalAtencion {
   bool get visible => total > 0;
 }
 
+/// 1.23 (B2): urgencias que la pestaña «Hoy» anuncia estando en
+/// Módulos — atrasados + incidencias abiertas + personas
+/// esperando la atención del dueño. Función pura para test.
+int urgenciasHome({
+  required int atras,
+  required int incidencias,
+  required int atencion,
+}) =>
+    atras + incidencias + atencion;
+
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
   @override
@@ -156,6 +166,18 @@ class _HomeScreenState extends State<HomeScreen>
   /// Evita recargas simultáneas de _cargar().
   bool _cargando = false;
 
+  /// Panel B2 (Alta): una recarga forzada que llega con otra
+  /// carga en curso queda pendiente aquí y se ejecuta al
+  /// terminar la actual — no se descarta.
+  bool _refreshForzadoPendiente = false;
+
+  /// 1.23 (B2, diseño de Argón): nivel activo de la Home —
+  /// 0 = «Hoy» (operación inmediata), 1 = «Módulos»
+  /// (herramientas). Vive en el State (H-03): ningún setState
+  /// de fondo devuelve al usuario al nivel 1 ni le pierde el
+  /// sitio.
+  int _nivelActivo = 0;
+
   /// Evita apilar el diálogo de suspendido (Argón).
   bool _mostrandoDialogoSuspendido = false;
 
@@ -180,7 +202,9 @@ class _HomeScreenState extends State<HomeScreen>
           ],
         ),
       );
-      _cargar(); // Recargar datos
+      // H-01 (Argón): tras un cierre automático los datos
+      // cambiaron; la recarga salta la caché de 30 s.
+      _cargar(forceRefresh: true);
     }
   }
 
@@ -248,11 +272,8 @@ class _HomeScreenState extends State<HomeScreen>
   /// v1.3.3: evita dobles taps mientras se abre/cierra el turno.
   bool _procesandoTurno = false;
 
-  /// v1.3.3: entrenadores sin actividad reciente (alerta "turnos sin
-  /// reporte" en la tarjeta Estadísticas Rápidas del dueño).
-  List<Map<String, dynamic>> _entrenadoresSinSync = [];
   // v1.3.3 (Argón): turnos de hoy sin reporte real (para el chip de
-  // "Pulso del Día"; _entrenadoresSinSync medía otra cosa).
+  // "Pulso del Día").
   List<String> _turnosSinReporte = [];
   // v1.3.6 (ítem 4, Jc): turnos sin reporte descartados por el usuario.
   // v1.3.9 (Bug 3, Argón): STATIC para que sobreviva en RAM aunque Home
@@ -347,7 +368,9 @@ class _HomeScreenState extends State<HomeScreen>
     _sub = SyncEngine.instance.statusStream.listen((s) async {
       if (s.phase == SyncPhase.idle) {
         if (mounted) setState(() => _falloSync = null);
-        _cargar();
+        // H-01 (Argón): una sync que termina ES un cambio de
+        // datos, no un evento pasivo: salta la caché de 30 s.
+        _cargar(forceRefresh: true);
       } else if (s.phase == SyncPhase.error) {
         final quiere =
             await PerfilService.instance.getAvisoFalloSync();
@@ -457,9 +480,9 @@ class _HomeScreenState extends State<HomeScreen>
         if (alAbrir) await _sellarActividad();
         return;
       }
-      final transcurridos = DateTime.now()
+      final transcurridos = ahoraUtcReal()
           .difference(
-              DateTime.fromMillisecondsSinceEpoch(ultima))
+              DateTime.fromMillisecondsSinceEpoch(ultima, isUtc: true))
           .inMinutes;
       // Argón Acceso #7: un transcurrido NEGATIVO significa que
       // el reloj del teléfono se atrasó tras sellar la actividad:
@@ -527,12 +550,23 @@ class _HomeScreenState extends State<HomeScreen>
 
   Future<void> _cargar({bool forceRefresh = false}) async {
     // v1.3.0 (Gemini): caché 30s, bypass en pull-to-refresh.
+    // H-01 (Argón, 1.23): la caché SOLO frena eventos pasivos;
+    // volver de una pantalla de acción, una sync terminada o un
+    // cierre automático llaman con forceRefresh: true y nunca
+    // ven contadores viejos. La diferencia se mide entre
+    // instantes UTC (H-05), no con el reloj local crudo.
     if (!forceRefresh && _lastFetch != null) {
       final diff =
-          DateTime.now().difference(_lastFetch!).inSeconds;
+          ahoraUtcReal().difference(_lastFetch!).inSeconds;
       if (diff < 30) return;
     }
-    if (_cargando) return;
+    if (_cargando) {
+      // La forzada no se pierde: se anota y corre al terminar
+      // la carga actual (ver el finally). La pasiva sí se
+      // descarta, como siempre.
+      if (forceRefresh) _refreshForzadoPendiente = true;
+      return;
+    }
     _cargando = true;
     try {
       // Lecturas independientes en paralelo (no secuenciales).
@@ -548,10 +582,12 @@ class _HomeScreenState extends State<HomeScreen>
         cobradoHoyPorMetodo(), // 8
         PerfilService.instance.getRecordatorioSync(), // 9
         PerfilService.instance.getHorasAviso(), // 10
-        // Solo dueño:
-        _auth.isOwner
-            ? ultimaActividadPorActor()
-            : Future.value(<String, DateTime>{}), // 11
+        // 11: hueco retirado en la 1.23 — aquí bajaba el feed de
+        // actividad por actor para la alerta de «sin actividad
+        // +12h», muerta desde la v1.3.3 (la sustituyó turnos sin
+        // reporte) pero aún calculada en cada carga (H-05). El
+        // hueco se conserva para no mover los índices 12-18.
+        Future.value(<String, DateTime>{}), // 11
         _auth.isOwner
             ? pendienteRecoger(excluirTelegramId: _auth.telegramId)
             : Future.value(0.0), // 12
@@ -594,7 +630,6 @@ class _HomeScreenState extends State<HomeScreen>
       final cobrado = res[8] as Map<String, double>;
       final quiereAviso = res[9] as bool;
       final horasUmbral = res[10] as int;
-      final acts = res[11] as Map<String, DateTime>;
       final porRecoger = res[12] as double;
       // Cliente protegido (2026-10-26, Protegido 2 H6): igual que
       // los vencimientos, los cumpleaños de hoy no cuentan
@@ -615,24 +650,9 @@ class _HomeScreenState extends State<HomeScreen>
       if (_auth.isOwner) {
         await _cargarDescartesSinReporte(hoyHabanaIso());
       }
-      // Alerta de entrenadores sin actividad reciente (solo dueño).
-      final sinSync = <Map<String, dynamic>>[];
-      if (_auth.isOwner) {
-        final ahora = DateTime.now();
-        for (final entry in acts.entries) {
-          final actor = entry.key;
-          // No alertar sobre uno mismo (usuario de la sesión actual).
-          if (actor.toLowerCase() == _auth.username.toLowerCase()) {
-            continue;
-          }
-          final horas = ahora.difference(entry.value).inHours;
-          if (horas >= 12) {
-            sinSync.add({'actor': actor, 'horas': horas});
-          }
-        }
-        sinSync.sort((a, b) =>
-            (b['horas'] as int).compareTo(a['horas'] as int));
-      }
+      // (La alerta de entrenadores sin actividad del feed se
+      // retiró en la 1.23: llevaba muerta desde la v1.3.3 y era
+      // el último DateTime.now() crudo de la carga — H-05.)
       // v1.3.3: estado del turno del entrenador (abrir/cerrar turno).
       // turnoVisible() trae cualquier estado (no solo abierto) para
       // mostrar el chip correcto tras cerrar (auditoría ChatGPT #1).
@@ -665,7 +685,10 @@ class _HomeScreenState extends State<HomeScreen>
       // Aviso "llevas +Xh sin subir" (item 10: horas configurables)
       String? aviso;
       if (quiereAviso && porSubir > 0 && det.ultimaPush != null) {
-        final horas = DateTime.now().difference(det.ultimaPush!).inHours;
+        // H-05: diferencia entre instantes, en UTC (no el reloj
+        // local crudo del teléfono).
+        final horas =
+            ahoraUtcReal().difference(det.ultimaPush!).inHours;
         if (horas >= horasUmbral) {
           aviso = '⏳ Llevas $horas h sin subir cambios';
         }
@@ -689,7 +712,6 @@ class _HomeScreenState extends State<HomeScreen>
           if (neto != null) _pagoEntrenadoresNeto = neto;
           _avisoSync = aviso;
           _nombreVisible = nombreVisible;
-          _entrenadoresSinSync = sinSync;
           _turnosSinReporte = turnosSinRep;
           _turnoActual = turnoAct;
           _turnosPendientes = turnosPend;
@@ -723,9 +745,17 @@ class _HomeScreenState extends State<HomeScreen>
       return;
     } finally {
       _cargando = false;
+      // La recarga forzada pendiente corre UNA vez, salga la
+      // carga por éxito o por fallo; la bandera se limpia
+      // antes de lanzar para que no haya recursión: solo un
+      // evento forzado NUEVO durante esa recarga la rearma.
+      if (_refreshForzadoPendiente) {
+        _refreshForzadoPendiente = false;
+        if (mounted) unawaited(_cargar(forceRefresh: true));
+      }
     }
     // Fix #29: solo marcar caché si llegamos aquí (éxito).
-    _lastFetch = DateTime.now();
+    _lastFetch = ahoraUtcReal();
   }
 
   /// v1.19 (bandeja): segundo pase de _cargar. Visible para el
@@ -897,83 +927,188 @@ class _HomeScreenState extends State<HomeScreen>
                 // _bannerSync): si coexisten fallo y aviso, manda
                 // el fallo; al descartarlo reaparece el aviso.
                 _bannerSync(),
+                // 1.23 (B2): selector de nivel fijo bajo la
+                // cabecera y el banner — Hoy | Módulos, a un toque
+                // y sin empujar ninguna zona interactiva (H-02).
+                _selectorNivel(),
                 // v1.3.6: el dock fijo se reemplazó por el botón flotante de
                 // acciones rápidas (speed dial); se elimina del scroll para
                 // no duplicar las acciones.
-                // Zona 2 — Mostrador rápido (rediseño Argón):
-                // buscar + 4 acciones a 1 toque, antes de la
-                // tarjeta financiera.
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(
-                      AppEspacio.lg,
-                      AppEspacio.md,
-                      AppEspacio.lg,
-                      0),
-                  child: Column(
-                    children: [
-                      _botonBuscarCliente(),
-                      const SizedBox(height: AppEspacio.sm),
-                      _mostradorRapido(),
-                    ],
-                  ),
+                // El contenido del nivel cruza con la gramática
+                // T7: ValueKey por nivel, nunca GlobalKey (H-03).
+                AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 220),
+                  child: _contenidoNivel(esDueno),
                 ),
-                // v1.3.3: tarjeta financiera por rol
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(
-                      AppEspacio.lg,
-                      AppEspacio.md,
-                      AppEspacio.lg,
-                      0),
-                  child: _tarjetaFinanciera(esDueno),
-                ),
-                // Zona 4 — Atención hoy (rediseño Argón): la
-                // bandeja del dueño sube aquí, sobre la tira de
-                // alertas. SOLO del dueño (abre su WhatsApp y el
-                // check vive en su teléfono; si un entrenador la
-                // usara, el dueño re-escribiría al mismo cliente
-                // sin saberlo).
-                if (_auth.isOwner)
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(
-                        AppEspacio.lg,
-                        AppEspacio.md,
-                        AppEspacio.lg,
-                        0),
-                    child: _botonBandejaWhatsapp(),
-                  ),
-                // v1.3.3: tira de alertas (solo si hay algo)
-                _tiraAlertas(),
-                // v1.3.3: grid de módulos (rediseño Argón: solo el
-                // grid; Buscar, Servicios y Bandeja subieron a las
-                // zonas 2 y 4).
-                const EncabezadoSeccion(titulo: 'MÓDULOS'),
-                Padding(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: AppEspacio.lg),
-                  child: _gridModulos(),
-                ),
-                // v1.3.3: resto de herramientas (ninguna pantalla se pierde)
-                const EncabezadoSeccion(titulo: 'MÁS'),
-                Padding(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: AppEspacio.lg),
-                  child: _gridMas(),
-                ),
-                const SizedBox(height: AppEspacio.lg),
-                Center(
-                  child: Text('© Creado por JcTr0602',
-                      style: AppTexto.minuscula.copyWith(
-                          color: Colors.grey,
-                          fontWeight: FontWeight.bold)),
-                ),
-                // v1.3.6: aire inferior para que el FAB de acciones rápidas
-                // no tape el pie al llegar al final del scroll.
-                const SizedBox(height: 96),
               ],
             ),
           ),
         ),
       ),
+    );
+  }
+
+  /// 1.23 (B2): selector segmentado Hoy | Módulos. La pestaña
+  /// «Hoy» lleva el contador de urgencias (atrasados +
+  /// incidencias + personas esperando al dueño): estando en
+  /// Módulos, lo urgente nunca queda escondido. El segundo pase
+  /// de _cargar solo muta ese contador — la barra no cambia de
+  /// alto ni empuja nada (H-02).
+  Widget _selectorNivel() {
+    final urgencias = urgenciasHome(
+        atras: _atras,
+        incidencias: _incidenciasAbiertas,
+        atencion: _atencion.total);
+    Widget segmento(int nivel, IconData icono, String texto,
+        {int contador = 0}) {
+      final activo = _nivelActivo == nivel;
+      final colorTexto = activo
+          ? Colors.white
+          : AppColores.textoSecundario(context);
+      return Expanded(
+        child: InkWell(
+          borderRadius: BorderRadius.circular(999),
+          onTap: () => setState(() => _nivelActivo = nivel),
+          child: Container(
+            padding:
+                const EdgeInsets.symmetric(vertical: AppEspacio.md),
+            decoration: BoxDecoration(
+              gradient:
+                  activo ? AppColores.gradienteNaranja : null,
+              borderRadius: BorderRadius.circular(999),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(icono, size: 18, color: colorTexto),
+                const SizedBox(width: 6),
+                Text(texto,
+                    style: AppTexto.secundario.copyWith(
+                        fontWeight: FontWeight.w700,
+                        color: colorTexto)),
+                if (contador > 0) ...[
+                  const SizedBox(width: 6),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 7, vertical: 1),
+                    decoration: BoxDecoration(
+                      color: AppColores.error,
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                    child: Text(contador > 99 ? '99+' : '$contador',
+                        style: AppTexto.etiqueta.copyWith(
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold)),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(
+          AppEspacio.lg, AppEspacio.md, AppEspacio.lg, 0),
+      child: Container(
+        decoration: BoxDecoration(
+          color: Theme.of(context).cardColor,
+          borderRadius: BorderRadius.circular(999),
+          border: Border.all(color: Theme.of(context).dividerColor),
+        ),
+        padding: const EdgeInsets.all(4),
+        child: Row(
+          children: [
+            segmento(0, Icons.bolt_rounded, 'Hoy',
+                contador: urgencias),
+            segmento(1, Icons.grid_view_rounded, 'Módulos'),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// El contenido del nivel activo, con su ValueKey<int> para
+  /// el AnimatedSwitcher del build (gramática T7 / H-03).
+  Widget _contenidoNivel(bool esDueno) {
+    if (_nivelActivo == 0) {
+      // Nivel 1 «Hoy»: operación inmediata — buscar, cobrar,
+      // el dinero del día, la bandeja y la tira de alertas.
+      return Column(
+        key: const ValueKey(0),
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Zona 2 — Mostrador rápido (rediseño Argón):
+          // buscar + 4 acciones a 1 toque, antes de la
+          // tarjeta financiera.
+          Padding(
+            padding: const EdgeInsets.fromLTRB(
+                AppEspacio.lg, AppEspacio.md, AppEspacio.lg, 0),
+            child: Column(
+              children: [
+                _botonBuscarCliente(),
+                const SizedBox(height: AppEspacio.sm),
+                _mostradorRapido(),
+              ],
+            ),
+          ),
+          // v1.3.3: tarjeta financiera por rol
+          Padding(
+            padding: const EdgeInsets.fromLTRB(
+                AppEspacio.lg, AppEspacio.md, AppEspacio.lg, 0),
+            child: _tarjetaFinanciera(esDueno),
+          ),
+          // Zona 4 — Atención hoy (rediseño Argón): la
+          // bandeja del dueño sube aquí, sobre la tira de
+          // alertas. SOLO del dueño (abre su WhatsApp y el
+          // check vive en su teléfono; si un entrenador la
+          // usara, el dueño re-escribiría al mismo cliente
+          // sin saberlo).
+          if (_auth.isOwner)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(
+                  AppEspacio.lg, AppEspacio.md, AppEspacio.lg, 0),
+              child: _botonBandejaWhatsapp(),
+            ),
+          // v1.3.3: tira de alertas (solo si hay algo)
+          _tiraAlertas(),
+          // Aire inferior para que el FAB no tape el final.
+          const SizedBox(height: 96),
+        ],
+      );
+    }
+    // Nivel 2 «Módulos»: herramientas de gestión y consulta.
+    // Sin tarjetas que abran en crudo Cobrar / Pago diario /
+    // Inscribir (ya viven en el mostrador y en el FAB): el
+    // grupo «Cobrar y clientes» es de gestión y auditoría.
+    return Column(
+      key: const ValueKey(1),
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const EncabezadoSeccion(titulo: 'MÓDULOS'),
+        Padding(
+          padding: const EdgeInsets.symmetric(
+              horizontal: AppEspacio.lg),
+          child: _gridModulos(),
+        ),
+        // v1.3.3: resto de herramientas (ninguna pantalla se pierde)
+        const EncabezadoSeccion(titulo: 'MÁS'),
+        Padding(
+          padding: const EdgeInsets.symmetric(
+              horizontal: AppEspacio.lg),
+          child: _gridMas(),
+        ),
+        const SizedBox(height: AppEspacio.lg),
+        Center(
+          child: Text('© Creado por JcTr0602',
+              style: AppTexto.minuscula.copyWith(
+                  color: Colors.grey, fontWeight: FontWeight.bold)),
+        ),
+        // v1.3.6: aire inferior para que el FAB de acciones rápidas
+        // no tape el pie al llegar al final del scroll.
+        const SizedBox(height: 96),
+      ],
     );
   }
 
@@ -1990,6 +2125,15 @@ class _HomeScreenState extends State<HomeScreen>
   /// resto del texto neutro). Cada fila navega a su destino actual.
   Widget _tiraAlertas() {
     final filas = <({IconData icono, String texto, int conteo, Color color, VoidCallback ir})>[];
+    // 1.23 (H-02): la señal de atención del dueño vive DENTRO
+    // de la tira, al final del Nivel 1 — el segundo pase solo
+    // la añade aquí, nunca sobre zonas interactivas.
+    if (_atencion.visible) {
+      filas.add((icono: Icons.person_add_rounded,
+          texto: 'Esperando atención', conteo: _atencion.total,
+          color: AppColores.naranja,
+          ir: () => _ir(const AdminScreen())));
+    }
     if (_vencen > 0) {
       filas.add((icono: Icons.event_available_rounded,
           texto: 'Vencen hoy', conteo: _vencen, color: AppColores.error,

@@ -46,9 +46,15 @@ void main() {
         duracion: const Duration(seconds: 1));
     await t.pump();
     expect(find.text('Aviso breve'), findsOneWidget);
-    // Vence su segundo + la animación de salida.
-    await t.pump(const Duration(seconds: 1));
-    await t.pump(const Duration(milliseconds: 300));
+    // Vence su segundo + entrada y salida. Bajo FakeAsync el
+    // ciclo depende de los frames: la entrada se completa en
+    // un frame, el temporizador de 1 s corre desde ahí y la
+    // salida tarda otro tanto (~2,5 s en pasos de 500 ms,
+    // medido). La aserción sigue probando la duración pedida:
+    // una barra por defecto (4 s) seguiría visible a los 3 s.
+    for (var i = 0; i < 6; i++) {
+      await t.pump(const Duration(milliseconds: 500));
+    }
     expect(find.text('Aviso breve'), findsNothing);
   });
 }
