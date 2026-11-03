@@ -1428,10 +1428,27 @@ class SyncEngine {
   /// 1.22 GY-06: devuelve si el ciclo CORRIÓ sin error (para
   /// que la UI no anuncie «actualizado» cuando no hubo
   /// conexión o el lock estaba ocupado).
-  Future<bool> sincronizarScope(String scope) async {
+  /// 1.22 (campo, botón Recargar de Servicios): resultado
+  /// DETALLADO — la UI distingue «corrió y actualizó»,
+  /// «corrió sin cambios», «NO corrió» (lock ocupado o sin
+  /// sesión, con el motivo) y «corrió con error». Antes
+  /// Servicios infería el éxito comparando ultimo_pull_ts y
+  /// todo lo que no fuera un ciclo completo y exitoso se
+  /// anunciaba como «Sin conexión», también cuando el ciclo
+  /// ni siquiera corrió porque ya había uno en curso.
+  Future<
+      ({
+        bool corrio,
+        bool error,
+        int bajados,
+        SyncMotivoNoCorrio? motivo
+      })> sincronizarScopeDetallado(String scope) async {
     final tablas = SyncScope.resolver(scope);
-    if (tablas.isEmpty) return false;
+    if (tablas.isEmpty) {
+      return (corrio: false, error: false, bajados: 0, motivo: null);
+    }
     var errorEnCiclo = false;
+    var bajadosScope = 0;
     final noCorrioScope = await _conLock(() async {
       try {
         // Push global primero (nunca filtrado por scope).
@@ -1446,10 +1463,13 @@ class SyncEngine {
         };
         var n = 0;
         if (tablas.any(tablasIncidencias.contains)) {
-          await _pullTiposIncidencia();
-          await _pullIncidencias();
-          await _pullIncidenciasComentarios();
-          await _pullIncidenciasFotos();
+          // Panel campo Recargar (2026-11-03): los conteos de
+          // la rama de incidencias también alimentan n (antes
+          // bajados salía 0 aunque bajaran incidencias).
+          n += await _pullTiposIncidencia();
+          n += await _pullIncidencias();
+          n += await _pullIncidenciasComentarios();
+          n += await _pullIncidenciasFotos();
           // Argón 1.21 (pregunta 1): NO se llama a
           // _pullIncidenciasHistorial(): la tabla
           // sync_incidencias_historial no existe en Supabase y
@@ -1466,10 +1486,11 @@ class SyncEngine {
         var porTablaScope = <String, int>{};
         if (tablasNormales.isNotEmpty) {
           final resScope = await _download(tablasFiltro: tablasNormales);
-          n = resScope.aplicadas;
+          n += resScope.aplicadas;
           porTablaScope = resScope.porTabla;
         }
         await _db.setMeta('last_pull_scope_ok', isoHabana(ahoraHabana()));
+        bajadosScope = n;
         // v1.3.1 (E5): scope sync es manual, siempre refleja el ciclo real.
         await _db.setMeta('last_downloaded', '$n');
         await _db.setMeta('last_scope', scope);
@@ -1518,7 +1539,19 @@ class SyncEngine {
     });
     // S2: fotos fuera del candado (ver _lanzarFotosIncidencias).
     if (noCorrioScope == null) _lanzarFotosIncidencias();
-    return noCorrioScope == null && !errorEnCiclo;
+    return (
+      corrio: noCorrioScope == null,
+      error: errorEnCiclo,
+      bajados: bajadosScope,
+      motivo: noCorrioScope,
+    );
+  }
+
+  /// Compatibilidad GY-06: true solo si el ciclo corrió
+  /// sin error (ver sincronizarScopeDetallado).
+  Future<bool> sincronizarScope(String scope) async {
+    final r = await sincronizarScopeDetallado(scope);
+    return r.corrio && !r.error;
   }
 
   /// ¿Hay sesión activa? Defensivo: si el acceso a la sesión
@@ -5102,7 +5135,7 @@ class SyncEngine {
     return rows.length;
   }
 
-  Future<void> _pullTiposIncidencia() async {
+  Future<int> _pullTiposIncidencia() async {
     final wm =
         await _db.getWatermarkTabla('incidencias_tipos');
     try {
@@ -5115,7 +5148,7 @@ class SyncEngine {
             'pull_tipos_incidencia HTTP ${r.statusCode}');
       }
       final rows = jsonDecode(r.body) as List;
-      if (rows.isEmpty) return;
+      if (rows.isEmpty) return 0;
       final d = await _db.db;
       await d.transaction((txn) async {
         var maxSeq = wm;
@@ -5195,6 +5228,7 @@ class SyncEngine {
           d: 'n=${rows.length}');
       // v1.3.1 (Argón pull r2): limpiar error por tabla.
       await _db.setMeta('wm_err_incidencias_tipos', '');
+      return rows.length;
     } catch (e) {
       AppLog.error(
           'sync', 'pull_tipos_fallo', d: '$e');
@@ -5209,7 +5243,7 @@ class SyncEngine {
 
   /// v1.3.0: Pull de incidencias con OCC por version.
   /// Fix #11 (Sol): no silenciar errores HTTP.
-  Future<void> _pullIncidencias() async {
+  Future<int> _pullIncidencias() async {
     final wm =
         await _db.getWatermarkTabla('incidencias');
     try {
@@ -5222,7 +5256,7 @@ class SyncEngine {
             'pull_incidencias HTTP ${r.statusCode}');
       }
       final rows = jsonDecode(r.body) as List;
-      if (rows.isEmpty) return;
+      if (rows.isEmpty) return 0;
       final d = await _db.db;
       await d.transaction((txn) async {
         var maxSeq = wm;
@@ -5407,6 +5441,7 @@ class SyncEngine {
           d: 'n=${rows.length}');
       // v1.3.1 (Argón pull r2): limpiar error por tabla.
       await _db.setMeta('wm_err_incidencias', '');
+      return rows.length;
     } catch (e) {
       AppLog.error(
           'sync', 'pull_inc_fallo', d: '$e');
@@ -5420,20 +5455,20 @@ class SyncEngine {
   }
 
   /// Argón A2: descarga comentarios de incidencias desde Supabase.
-  Future<void> _pullIncidenciasComentarios() async {
+  Future<int> _pullIncidenciasComentarios() async {
     final wm = await _db.getWatermarkTabla(
         'incidencias_comentarios');
     try {
       final r = await _getAuth(Uri.parse(
           '$_base/rest/v1/sync_incidencias_comentarios?sync_seq=gt.$wm'
           '&order=sync_seq&limit=100'));
-      if (r.statusCode == 404) return; // Argón: tabla no desplegada
+      if (r.statusCode == 404) return 0; // Argón: tabla no desplegada
     if (r.statusCode != 200) {
         throw Exception(
             'pull_inc_comentarios HTTP ${r.statusCode}');
       }
       final rows = jsonDecode(r.body) as List;
-      if (rows.isEmpty) return;
+      if (rows.isEmpty) return 0;
       final d = await _db.db;
       await d.transaction((txn) async {
         var maxSeq = wm;
@@ -5495,6 +5530,7 @@ class SyncEngine {
       });
       // v1.3.1 (Argón pull r2): limpiar error por tabla.
       await _db.setMeta('wm_err_incidencias_comentarios', '');
+      return rows.length;
     } catch (e) {
       AppLog.error(
           'sync', 'pull_inc_com_fallo',
@@ -5524,20 +5560,20 @@ class SyncEngine {
   /// Mismo patrón que comentarios: padre ausente = incidencia no
   /// visible en este teléfono (no-dueño descarta y avanza; dueño
   /// retiene el cursor para no perderla).
-  Future<void> _pullIncidenciasFotos() async {
+  Future<int> _pullIncidenciasFotos() async {
     final wm =
         await _db.getWatermarkTabla('incidencias_fotos');
     try {
       final r = await _getAuth(Uri.parse(
           '$_base/rest/v1/sync_incidencias_fotos?sync_seq=gt.$wm'
           '&order=sync_seq&limit=100'));
-      if (r.statusCode == 404) return; // tabla no desplegada
+      if (r.statusCode == 404) return 0; // tabla no desplegada
       if (r.statusCode != 200) {
         throw Exception(
             'pull_inc_fotos HTTP ${r.statusCode}');
       }
       final rows = jsonDecode(r.body) as List;
-      if (rows.isEmpty) return;
+      if (rows.isEmpty) return 0;
       final d = await _db.db;
       await d.transaction((txn) async {
         var maxSeq = wm;
@@ -5582,6 +5618,7 @@ class SyncEngine {
             executor: txn);
       });
       await _db.setMeta('wm_err_incidencias_fotos', '');
+      return rows.length;
     } catch (e) {
       AppLog.error('sync', 'pull_inc_fotos_fallo', d: '$e');
       final errTxt = '$e';

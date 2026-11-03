@@ -261,25 +261,39 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
   Future<void> _actualizar() async {
     if (_actualizando) return;
     setState(() => _actualizando = true);
-    var ok = false;
+    // 1.22 (campo): antes el éxito se infería comparando
+    // ultimo_pull_ts antes/después y TODO lo que no fuera un
+    // ciclo completo y exitoso se anunciaba «Sin conexión» —
+    // también cuando el ciclo ni siquiera corrió porque ya
+    // había una sincronización automática en curso (el botón
+    // «no funcionaba» y el aviso mentía). Ahora se usa el
+    // resultado detallado del motor y cada caso dice la
+    // verdad; la vista siempre se recarga con lo local.
+    var mensaje = 'Servicios actualizados';
+    var esError = false;
     try {
-      final antes = await LocalDb.instance.getMeta('ultimo_pull_ts');
-      await SyncEngine.instance.sincronizarScope('servicios');
-      final despues = await LocalDb.instance.getMeta('ultimo_pull_ts');
-      ok = antes != despues;
-      await _cargar();
+      final r =
+          await SyncEngine.instance.sincronizarScopeDetallado('servicios');
+      if (!r.corrio) {
+        mensaje = r.motivo == SyncMotivoNoCorrio.sinSesion
+            ? 'Sin sesión: vuelve a iniciar sesión para sincronizar'
+            : 'Ya hay una sincronización en curso';
+      } else if (r.error) {
+        mensaje = 'Sin conexión, mostrando datos locales';
+        esError = true;
+      } else if (r.bajados == 0) {
+        mensaje = 'Servicios al día, sin cambios';
+      }
     } catch (_) {
-      ok = false;
-      try {
-        await _cargar();
-      } catch (_) {}
+      mensaje = 'Sin conexión, mostrando datos locales';
+      esError = true;
     }
+    try {
+      await _cargar();
+    } catch (_) {}
     if (!mounted) return;
     setState(() => _actualizando = false);
-    _aviso(
-      ok ? 'Servicios actualizados' : 'Sin conexión, mostrando datos locales',
-      error: !ok,
-    );
+    _aviso(mensaje, error: esError);
   }
 
   Map<String, dynamic>? get _pomoActual {
