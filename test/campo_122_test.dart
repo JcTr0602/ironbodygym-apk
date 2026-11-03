@@ -22,6 +22,7 @@ import 'package:ironbody_gym/ui/cola.dart';
 import 'package:path/path.dart' as p;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 Future<Database> _abrirDbVacia() async {
   sqfliteFfiInit();
@@ -119,6 +120,72 @@ void main() {
       expect(d.any((l) => l.contains('Duany')), isTrue);
       expect(d.any((l) => l.contains('2026-10')), isTrue);
       expect(d.any((l) => l.contains('12500')), isTrue);
+    });
+  });
+
+  group('1B-d: moneda nula = CUP en los totales (auditoría #1)', () {
+    test('totalVentaCup trata la venta legada sin moneda como CUP',
+        () {
+      expect(totalVentaCup({'total': 500}), 500);
+      expect(totalVentaCup({'moneda': 'CUP', 'total': 500}), 500);
+      expect(totalVentaCup({'moneda': 'USD', 'total': 500}), 0);
+      expect(totalVentaCup({'precio': 100, 'cantidad': 3}), 300);
+    });
+  });
+
+  group('1B-c: confirmarEntregaPorIds no mete ventas USD '
+      '(«Cobrar todo»)', () {
+    // Autoauditoría 1.22 #1 (2026-11-03): la guarda de la 1B
+    // vivía en idsPendientesEntrega y en la pantalla por día,
+    // pero «Cobrar todo» remezcla los días CUP+USD en un
+    // pseudo-día y confirmarEntregaPorIds encolaba EXACTAMENTE
+    // los ids recibidos: la op volvía a rebotar entera en el
+    // servidor (el bug de la venta #5 por otra puerta). La
+    // función que encola filtra las ventas que no sean CUP
+    // contra el espejo, como idsPendientesEntrega.
+    test('la op sale solo con la venta CUP y el espejo USD no '
+        'se marca entregado', () async {
+      try {
+        await Supabase.initialize(
+            url: 'http://127.0.0.1:9', anonKey: 'dummy');
+      } catch (_) {}
+      final db = await _abrirDbVacia();
+      const tid = 1403501391;
+      await _espejo(db, 'ventas_suplementos', 5, {
+        'registrado_por': tid,
+        'entregado': 0,
+        'moneda': 'USD',
+        'precio': 30,
+      });
+      await _espejo(db, 'ventas_suplementos', 6, {
+        'registrado_por': tid,
+        'entregado': 0,
+        'moneda': 'CUP',
+        'precio': 600,
+      });
+      await confirmarEntregaPorIds(
+        mensualIds: const [],
+        diarioIds: const [],
+        suplementoIds: const [5, 6],
+        entrenadorNombre: 'Gabriel',
+        trainerTelegramId: tid,
+      );
+      final ops = await db.query('ops_queue',
+          where: 'tipo = ?', whereArgs: ['confirmar_entrega']);
+      expect(ops, hasLength(1));
+      final payload =
+          jsonDecode(ops.single['payload'] as String)
+              as Map<String, dynamic>;
+      expect(payload['suplemento_ids'], [6],
+          reason: 'la venta USD no viaja en la op CUP');
+      final espejo =
+          await LocalDb.instance.allMirror('ventas_suplementos');
+      final v5 = espejo.singleWhere((v) => v['id'] == 5);
+      final v6 = espejo.singleWhere((v) => v['id'] == 6);
+      expect(v5['entregado'], isNot(1),
+          reason: 'el espejo USD no se marca entregado');
+      expect(v6['entregado'], 1);
+      await db.close();
     });
   });
 

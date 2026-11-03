@@ -798,7 +798,11 @@ double? precioOficialEn(String moneda, double oficialUsd, double? tasa) {
 /// Monto en CUP de una venta de suplemento (0 si es en USD u otra moneda).
 /// Las ventas en USD se reportan por separado y no entran a los totales CUP.
 double totalVentaCup(Map<String, dynamic> v) {
-  if ((v['moneda'] as String?) != 'CUP') return 0;
+  // Autoauditoría 1.22 #1: moneda nula = CUP, como en
+  // idsPendientesEntrega y PagoPendiente. Antes una venta
+  // legada sin moneda aparecía entregable pero sumaba 0 al
+  // pendiente (asimetría entre la lista y el total).
+  if (((v['moneda'] as String?) ?? 'CUP') != 'CUP') return 0;
   final total = (v['total'] as num?)?.toDouble();
   if (total != null) return total;
   final precio = (v['precio'] as num?)?.toDouble() ?? 0;
@@ -815,7 +819,9 @@ double totalVentaCup(Map<String, dynamic> v) {
 Future<List<Map<String, dynamic>>> ventasSuplementosCup() async {
   final out = <Map<String, dynamic>>[];
   for (final v in await LocalDb.instance.allMirror('ventas_suplementos')) {
-    if ((v['moneda'] as String?) == 'CUP' && !_esFiadoSinSaldar(v)) {
+    // Autoauditoría 1.22 #1: moneda nula = CUP (ver totalVentaCup).
+    if (((v['moneda'] as String?) ?? 'CUP') == 'CUP' &&
+        !_esFiadoSinSaldar(v)) {
       out.add(v);
     }
   }
@@ -4316,6 +4322,13 @@ Future<Map<String, Map<String, dynamic>>> mejorPeorDiaEntrenador(
 Future<List<Map<String, dynamic>>> detallePendienteEntrenador(
     int tid) async {
   final items = <Map<String, dynamic>>[];
+  // Autoauditoría 1.22 #1: fuera los ítems ya cubiertos por
+  // una liquidación/arqueo C1 (idsLiquidados, la misma fuente
+  // de pendienteArqueo): su fila espejo sigue sin marcar
+  // hasta que el servidor aplica, y la lista los mostraba
+  // como pendientes cuando la cabecera canónica (T-01) ya
+  // no los contaba — la lista sumaba MÁS que el total.
+  final liquidados = await idsLiquidados(tid);
   // Mapa cliente_id -> {nombre, fecha_inscripcion} (una sola pasada)
   final clientes = <int, Map<String, String>>{};
   for (final c in await LocalDb.instance.allMirror('clientes')) {
@@ -4329,6 +4342,7 @@ Future<List<Map<String, dynamic>>> detallePendienteEntrenador(
   for (final p
       in await LocalDb.instance.pagosEfectivoPorEntrenador(tid)) {
     if (!esPendiente(p['entregado'])) continue;
+    if (liquidados.contains('pagos:${p['id']}')) continue;
     final cid = (p['cliente_id'] as num?)?.toInt() ?? 0;
     final cli = clientes[cid];
     final fecha = '${p['fecha'] ?? ''}';
@@ -4350,6 +4364,7 @@ Future<List<Map<String, dynamic>>> detallePendienteEntrenador(
   }
   for (final d in await LocalDb.instance.allMirror('pagos_diarios')) {
     if (!esPendiente(d['entregado'])) continue;
+    if (liquidados.contains('pagos_diarios:${d['id']}')) continue;
     if (!esPagoDiarioEfectivo(d)) continue;
     if (LocalDb.normalizarTelegramId(d['registrado_por']) != tid) continue;
     items.add({
@@ -4365,6 +4380,9 @@ Future<List<Map<String, dynamic>>> detallePendienteEntrenador(
   // v1.3.1 (UI2): ventas de suplementos pendientes del entrenador.
   for (final s in await LocalDb.instance.allMirror('ventas_suplementos')) {
     if (!esPendiente(s['entregado'])) continue;
+    if (liquidados.contains('ventas_suplementos:${s['id']}')) {
+      continue;
+    }
     // Auditoría 1.21 B-05: un fiado sin saldar no es dinero por
     // entregar (misma regla que los totales en ventasSuplementosCup).
     if (_esFiadoSinSaldar(s)) continue;
@@ -4387,6 +4405,7 @@ Future<List<Map<String, dynamic>>> detallePendienteEntrenador(
   // traen cantidad negativa y netean en el total.
   for (final s in await LocalDb.instance.allMirror('servicio_ventas')) {
     if (!esPendiente(s['entregado'])) continue;
+    if (liquidados.contains('servicio_ventas:${s['id']}')) continue;
     if ('${s['metodo']}' != 'efectivo') continue;
     if (((s['casa'] as num?)?.toInt() ?? 0) == 1) continue;
     final resp =
@@ -4553,11 +4572,43 @@ Future<void> confirmarEntregaPorIds({
     }
   }
 
+  // Autoauditoría 1.22 #1 (2026-11-03): las ventas de
+  // suplementos que viajan se filtran por moneda AQUÍ, en la
+  // función que encola (defensa en profundidad): la 1B lo puso
+  // en idsPendientesEntrega y en la pantalla por día, pero
+  // «Cobrar todo» remezcla los días CUP+USD y esta función
+  // encolaba exactamente los ids recibidos — la op volvía a
+  // rebotar ENTERA en el servidor (moneda='CUP') y ningún
+  // ítem se confirmaba. Mismo criterio que idsPendientesEntrega:
+  // sin moneda = legado CUP; el USD se liquida por liquidar_caja.
+  var suplementoIdsCup = suplementoIds;
   await d.transaction((txn) async {
+    if (suplementoIds.isNotEmpty) {
+      final noCup = <int>{};
+      for (final id in suplementoIds) {
+        final rows = await txn.query('ventas_suplementos',
+            columns: ['data'], where: 'id = ?', whereArgs: [id],
+            limit: 1);
+        if (rows.isEmpty) continue;
+        try {
+          final data = jsonDecode(rows.first['data'] as String)
+              as Map<String, dynamic>;
+          if ('${data['moneda'] ?? 'CUP'}'.toUpperCase() != 'CUP') {
+            noCup.add(id);
+          }
+        } catch (_) {}
+      }
+      if (noCup.isNotEmpty) {
+        suplementoIdsCup = [
+          for (final id in suplementoIds)
+            if (!noCup.contains(id)) id,
+        ];
+      }
+    }
     // 1. Marcar mirrors como entregados (optimismo persistente).
     await marcarEntregados(txn, 'pagos', mensualIds);
     await marcarEntregados(txn, 'pagos_diarios', diarioIds);
-    await marcarEntregados(txn, 'ventas_suplementos', suplementoIds);
+    await marcarEntregados(txn, 'ventas_suplementos', suplementoIdsCup);
     await marcarEntregados(txn, 'servicio_ventas', servicioIds);
     // 1b. Los adelantos saldados salen del pendiente vivo también
     // en el espejo local (en_pendiente=0 en su JSON).
@@ -4588,7 +4639,7 @@ Future<void> confirmarEntregaPorIds({
         if (nota != null && nota.isNotEmpty) 'nota': nota,
         'pago_ids': mensualIds,
         'pago_diario_ids': diarioIds,
-        'suplemento_ids': suplementoIds,
+        'suplemento_ids': suplementoIdsCup,
         // Ítem 10 (Argón): la confirmación va SIEMPRE por lista de
         // ids explícita — también «confirmar todo»: la pantalla
         // empaqueta los ids que está mostrando, nunca una orden

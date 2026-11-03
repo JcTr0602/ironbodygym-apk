@@ -16,6 +16,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:ironbody_gym/bloque2_resto.dart';
 import 'package:ironbody_gym/localdb.dart';
 import 'package:ironbody_gym/negocio.dart';
 import 'package:ironbody_gym/tiempo.dart';
@@ -127,6 +128,66 @@ void main() {
     });
   });
 
+  group('T-01b: pendienteDeltaC1 NO resta el libro C1 dos veces',
+      () {
+    // Autoauditoría 1.22 #1 (2026-11-03): pendienteEntrega ya
+    // resta contribucionLibroC1 desde la caza Dinero #1 de la
+    // 1.21, y pendienteDeltaC1 la restaba OTRA vez vía
+    // entregasEfectivoRegistradas (que ES contribucionLibroC1).
+    // Con la fixture de argon_dinero_caza #1 (pagos 2000+1500 y
+    // una entrega C1 que cubre el de 2000 aún sin marcar en el
+    // espejo), el delta decía 0 donde el canónico dice 1500:
+    // la tarjeta C1 y su Liquidar negaban un pendiente real.
+    test('delta == canónico == 1500 con entrega C1 por ids',
+        () async {
+      SharedPreferences.setMockInitialValues({});
+      try {
+        await Supabase.initialize(
+            url: 'http://127.0.0.1:9', anonKey: 'dummy');
+      } catch (_) {}
+      final db = await _abrirDbVacia();
+      const tid = 111;
+      final hoy = hoyHabanaIso();
+      await _espejo(db, 'pagos', 10, {
+        'id': 10,
+        'cliente_id': 10,
+        'fecha': hoy,
+        'monto': 2000,
+        'metodo': 'efectivo',
+        'telegram_user_id': tid,
+        'entregado': 0,
+      }, cols: {
+        'metodo': 'efectivo',
+        'telegram_user_id': tid,
+      });
+      await _espejo(db, 'pagos', 11, {
+        'id': 11,
+        'cliente_id': 11,
+        'fecha': hoy,
+        'monto': 1500,
+        'metodo': 'efectivo',
+        'telegram_user_id': tid,
+        'entregado': 0,
+      }, cols: {
+        'metodo': 'efectivo',
+        'telegram_user_id': tid,
+      });
+      await _espejo(db, 'espejo_entregas_efectivo', 77, {
+        'id': 77,
+        'op_uuid': 'c1-77',
+        'entrenador_telegram_id': tid,
+        'monto_entregado': 2000,
+        'op_ids_json': '{"pagos":[10]}',
+        'resto_sin_ids': 0,
+      });
+      expect(await pendienteEntrega(tid), 1500);
+      expect(await pendienteDeltaC1(tid), 1500,
+          reason: 'el delta C1 es el MISMO pendiente canónico: '
+              'la contribución del libro ya va restada dentro');
+      await db.close();
+    });
+  });
+
   group('T-03: la tarjeta del Arqueo C1 ve el USD en cola', () {
     // Autoauditoría 1.22 #1 (2026-11-03): la pieza 2 añadió a
     // la lista a los entrenadores con pendiente SOLO en cola,
@@ -166,6 +227,47 @@ void main() {
     });
   });
 
+  group('T-07b: el turno abierto se encuentra aunque la '
+      'franja del instante sea otra', () {
+    // Autoauditoría 1.22 #1 (2026-11-03): TurnoService buscaba
+    // el turno abierto SOLO por (fecha, franja del instante con
+    // el reloj viejo de turnoIdDe): abierto a las 16:00 como
+    // «tarde», a las 18:05 la clave saltaba a «noche», la
+    // búsqueda daba null y el cierre de Mi Turno caía al camino
+    // legado (cierre de mentira de T-08). El respaldo por día
+    // (turnoAbiertoDelDia/ultimoTurnoDelDia) lo encuentra.
+    test('turnoAbierto por franja falla; el del día lo halla',
+        () async {
+      final db = await _abrirDbVacia();
+      const tid = 444;
+      final hoy = hoyHabanaIso();
+      await LocalDb.instance.insertarTurno(
+        turnoId: 'turno-tarde-1',
+        fechaTurno: hoy,
+        turno: 'tarde',
+        horaApertura: '$hoy 16:00',
+        telegramId: tid,
+      );
+      // La búsqueda exacta por la franja equivocada: el hueco.
+      expect(
+          await LocalDb.instance.turnoAbierto(hoy, 'noche', tid),
+          isNull);
+      // El respaldo por día: el turno abierto de hoy.
+      final abierto =
+          await LocalDb.instance.turnoAbiertoDelDia(hoy, tid);
+      expect(abierto?['turno_id'], 'turno-tarde-1');
+      expect(abierto?['turno'], 'tarde');
+      final visible =
+          await LocalDb.instance.ultimoTurnoDelDia(hoy, tid);
+      expect(visible?['turno_id'], 'turno-tarde-1');
+      // Otro entrenador no lo ve.
+      expect(
+          await LocalDb.instance.turnoAbiertoDelDia(hoy, 999),
+          isNull);
+      await db.close();
+    });
+  });
+
   group('T-07: franja canónica', () {
     DateTime en(int dia, int h, int m) => DateTime(2026, 11, dia, h, m);
     // 2026-11-02 = lunes; 07 = sábado; 08 = domingo.
@@ -188,6 +290,46 @@ void main() {
     test('domingo: sin franja en todo el día', () {
       expect(franjaDeInstante(en(8, 8, 0)), isNull);
       expect(franjaDeInstante(en(8, 16, 0)), isNull);
+    });
+  });
+
+  group('T-01c: Detalle no lista ítems ya liquidados (auditoría #1)',
+      () {
+    test('la venta cubierta por el arqueo C1 sale de la lista; '
+        'la no cubierta queda', () async {
+      final db = await _abrirDbVacia();
+      const tid = 555;
+      await _espejo(db, 'ventas_suplementos', 7, {
+        'id': 7,
+        'registrado_por': tid,
+        'entregado': 0,
+        'moneda': 'CUP',
+        'precio': 500,
+        'cantidad': 1,
+        'fecha': '2026-11-02',
+      });
+      await _espejo(db, 'ventas_suplementos', 8, {
+        'id': 8,
+        'registrado_por': tid,
+        'entregado': 0,
+        'moneda': 'CUP',
+        'precio': 300,
+        'cantidad': 1,
+        'fecha': '2026-11-02',
+      });
+      await _espejo(db, 'liquidaciones_caja', 90, {
+        'id': 90,
+        'entrenador_telegram_id': tid,
+        'op_ids': {
+          'ventas_suplementos': [7],
+        },
+      });
+      final items = await detallePendienteEntrenador(tid);
+      final ids = [for (final i in items) i['suplemento_id']];
+      expect(ids, [8],
+          reason: 'la 7 ya se entregó en el arqueo C1: listarla '
+              'sumaría la lista por encima de la cabecera');
+      await db.close();
     });
   });
 }

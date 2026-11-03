@@ -175,20 +175,30 @@ Future<List<Map<String, dynamic>>> _entregasFusionadas(
 /// Suma de entregas C1 registradas en el libro local para un entrenador.
 /// 1.15-turnos (mecanismo único): es la contribución con marca de
 /// negocio.contribucionLibroC1 (resto + ids aún sin marcar; las
-/// filas viejas sin ids restan su monto entero). Los llamadores
-/// viejos (pendienteDeltaC1) no cambian de firma.
+/// filas viejas sin ids restan su monto entero).
+/// OJO (auditoría 1.22 #1): pendienteEntrega YA resta esta
+/// contribución por dentro; restarla otra vez del canónico es
+/// la doble resta que aquí se corrigió. Queda como consulta
+/// informativa del libro, no como paso del cálculo.
 Future<double> entregasEfectivoRegistradas(int telegramId) =>
     contribucionLibroC1(telegramId);
 
-/// Pendiente delta C1 de un entrenador: pendiente vigente menos las
-/// entregas C1 ya registradas. Ver el encabezado del archivo para la
-/// demostración de que en la transición coincide con el pendiente
-/// viejo y que un cobro tardío suma limpio.
-Future<double> pendienteDeltaC1(int telegramId) async {
-  final vigente = await pendienteEntrega(telegramId);
-  final entregas = await entregasEfectivoRegistradas(telegramId);
-  return pendienteTrasEntregas(vigente, entregas);
-}
+/// Pendiente delta C1 de un entrenador: EL pendiente canónico
+/// (pendienteEntrega), que desde la caza Dinero #1 de la 1.21
+/// YA resta la contribución del libro C1 no reflejada en el
+/// espejo (contribucionLibroC1).
+///
+/// Autoauditoría 1.22 #1 (2026-11-03) — DOBLE RESTA corregida:
+/// esta función restaba entregasEfectivoRegistradas (que ES
+/// contribucionLibroC1) por segunda vez. Con pagos 2000+1500 y
+/// una entrega C1 que cubre el de 2000 aún sin marcar, el
+/// canónico dice 1500 y el delta decía 0: la tarjeta del Arqueo
+/// C1 y su Liquidar negaban un pendiente real, y
+/// registrarEntregaEfectivo validaba contra ese 0. La resta
+/// única vive en pendienteEntrega/pendienteArqueo (invariante
+/// triple de la pieza 2); el delta es ese mismo número.
+Future<double> pendienteDeltaC1(int telegramId) =>
+    pendienteEntrega(telegramId);
 
 /// Historial de entregas C1 del libro local (más recientes primero).
 Future<List<Map<String, dynamic>>> historialEntregasC1(

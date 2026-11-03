@@ -213,10 +213,14 @@ class _PendienteScreenState extends State<PendienteScreen> {
     // liquida en el Arqueo principal (liquidar_caja), como los
     // adelantos de H11: se redirige en vez de encolar una op
     // condenada.
-    final monedaDia = dia.pagos.isEmpty
-        ? 'CUP'
-        : dia.pagos.first.moneda;
-    if (monedaDia != 'CUP') {
+    // Autoauditoría 1.22 #1: la guarda mira CUALQUIER pago no
+    // CUP del grupo, no solo el primero (un pseudo-día mezclado
+    // con el primer pago en CUP colaba la venta USD igual).
+    final monedaDia = dia.pagos
+        .where((p) => p.moneda != 'CUP')
+        .firstOrNull
+        ?.moneda;
+    if (monedaDia != null) {
       if (!mounted) return;
       mostrarSnack(context, 'El pendiente en $monedaDia se liquida en el Arqueo principal, no en la confirmación de entrega.', significado: SignificadoChip.alerta);
       Navigator.push(context,
@@ -578,16 +582,36 @@ class _PendienteScreenState extends State<PendienteScreen> {
           _entrenadores[i].trainerTelegramId,
         ),
         onConfirmarTodo: () {
-          // Combinar todos los días en un pseudo-día.
+          // Autoauditoría 1.22 #1 (2026-11-03): «Cobrar todo»
+          // NO remezcla monedas. Los días vienen separados por
+          // fecha+moneda (Fix #15) y el pseudo-día viejo los
+          // volvía a juntar: con el primer pago en CUP, la venta
+          // USD viajaba en la op y el servidor la rechazaba
+          // ENTERA (el bug de campo de la 1B por otra puerta);
+          // con el primero en USD, ni la parte CUP se confirmaba.
+          // Aquí solo entra lo CUP; lo demás se avisa y sigue
+          // su vía (Arqueo principal), como el día no-CUP.
           final todos = _entrenadores[i].dias
               .expand((d) => d.pagos)
               .toList();
+          final cup = [
+            for (final p in todos)
+              if (p.moneda == 'CUP') p,
+          ];
+          final hayOtraMoneda = cup.length != todos.length;
+          if (cup.isEmpty) {
+            mostrarSnack(context, 'El pendiente de ${_entrenadores[i].nombre} es en USD: se liquida en el Arqueo principal, no en la confirmación de entrega.', significado: SignificadoChip.alerta);
+            Navigator.push(context,
+                MaterialPageRoute(builder: (_) => const ArqueoScreen()));
+            return;
+          }
           final pseudo = PendienteDia(
-              fecha: ahoraHabana(), pagos: todos);
+              fecha: ahoraHabana(), pagos: cup);
           _confirmarPorIds(
             pseudo,
             _entrenadores[i].nombre,
-            'Se marcarán como entregados todos sus pagos pendientes.',
+            'Se marcarán como entregados todos sus pagos pendientes en CUP.'
+            '${hayOtraMoneda ? '\n\nEl pendiente en USD no entra aquí: se liquida en el Arqueo principal.' : ''}',
             _entrenadores[i].trainerTelegramId,
           );
         },
