@@ -2955,6 +2955,23 @@ bool esMenor(String? carnet) {
   return edad != null && edad < 18;
 }
 
+/// PURO (auditoría 1.22 #5, F4): próxima fecha de CELEBRACIÓN de
+/// un cumpleaños nacido el (mesNac, diaNac) a partir de [hoyDia]
+/// (UTC, solo fecha). Pasa por [mesDiaCumple] explícito: antes
+/// cumpleanosProximos construía DateTime.utc(año, 2, 29) y se
+/// fiaba de la normalización implícita de Dart (29-feb → 1-mar);
+/// el resultado era el mismo, pero era la única vía frágil ante
+/// un refactor a parseo estricto.
+DateTime proximoCumple(int mesNac, int diaNac, DateTime hoyDia) {
+  final cel = mesDiaCumple(mesNac, diaNac, hoyDia.year);
+  var proximo = DateTime.utc(hoyDia.year, cel.mes, cel.dia);
+  if (proximo.isBefore(hoyDia)) {
+    final cel2 = mesDiaCumple(mesNac, diaNac, hoyDia.year + 1);
+    proximo = DateTime.utc(hoyDia.year + 1, cel2.mes, cel2.dia);
+  }
+  return proximo;
+}
+
 /// Clientes que cumplen años en los próximos [dias] (incluye hoy).
 /// Cada mapa trae '_dias_para' (días que faltan) y '_cumple' (edad que cumple).
 Future<List<Map<String, dynamic>>> cumpleanosProximos(
@@ -2969,10 +2986,7 @@ Future<List<Map<String, dynamic>>> cumpleanosProximos(
   for (final c in rows) {
     final nac = fechaNacDeCarnet('${c['carnet'] ?? ''}');
     if (nac == null) continue;
-    var proximo = DateTime.utc(hoyDia.year, nac.month, nac.day);
-    if (proximo.isBefore(hoyDia)) {
-      proximo = DateTime.utc(hoyDia.year + 1, nac.month, nac.day);
-    }
+    final proximo = proximoCumple(nac.month, nac.day, hoyDia);
     final falta = proximo.difference(hoyDia).inDays;
     if (falta <= dias) {
       res.add({

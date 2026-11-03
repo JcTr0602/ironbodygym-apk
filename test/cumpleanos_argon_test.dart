@@ -50,4 +50,19 @@ void main() {
     expect(mesDiaCumple(2, 29, 2024), (mes: 2, dia: 29));
     expect(mesDiaCumple(3, 17, 2026), (mes: 3, dia: 17));
   });
+
+  // Auditoría 1.22 #5 (F4): proximoCumple pasa por mesDiaCumple
+  // explícito en vez de fiarse de la normalización de DateTime.
+  test('proximoCumple: 29-feb celebra el 1-mar en año no bisiesto', () {
+    expect(proximoCumple(2, 29, DateTime.utc(2026, 2, 15)),
+        DateTime.utc(2026, 3, 1));
+    expect(proximoCumple(2, 29, DateTime.utc(2026, 3, 1)),
+        DateTime.utc(2026, 3, 1), reason: 'el propio día cuenta');
+    expect(proximoCumple(2, 29, DateTime.utc(2026, 3, 2)),
+        DateTime.utc(2027, 3, 1));
+    expect(proximoCumple(2, 29, DateTime.utc(2027, 12, 31)),
+        DateTime.utc(2028, 2, 29), reason: '2028 sí es bisiesto');
+    expect(proximoCumple(3, 17, DateTime.utc(2026, 3, 18)),
+        DateTime.utc(2027, 3, 17));
+  });
 }
