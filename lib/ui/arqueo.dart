@@ -288,7 +288,10 @@ class _DetalleArqueoScreenState extends State<_DetalleArqueoScreen> {
   Future<void> _liquidar() async {
     final entregado =
         double.tryParse(_entregadoCtrl.text.replaceAll(',', '.'));
-    if (entregado == null || entregado < 0) {
+    // Autoauditoría 1.22 #2 (clase N-2 fuera de nómina): NaN no
+    // es < 0 ni supera lo esperado (toda comparación con NaN es
+    // falsa) y se colaba como monto de liquidación válido.
+    if (entregado == null || !entregado.isFinite || entregado < 0) {
       _aviso('Escribe un monto válido.');
       return;
     }

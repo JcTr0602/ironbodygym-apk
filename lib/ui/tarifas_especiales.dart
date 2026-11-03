@@ -574,7 +574,11 @@ Future<String?> _pedirMotivo(BuildContext context) async {
 double? _parseMonto(String raw) {
   final t = raw.trim().replaceAll(',', '.');
   if (t.isEmpty) return null;
-  return double.tryParse(t);
+  // Autoauditoría 1.22 #2 (clase N-2): un monto no finito no es
+  // un monto (NaN pasaba la validación <= 0 de la tarifa y
+  // viajaba en su payload).
+  final v = double.tryParse(t);
+  return (v != null && v.isFinite) ? v : null;
 }
 
 String _num(double v) =>

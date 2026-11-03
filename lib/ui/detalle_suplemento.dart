@@ -104,8 +104,13 @@ class _DialogoVentaRapidaState extends State<_DialogoVentaRapida> {
   /// quedado vendido como si fuera en USD).
   String get _monedaSup => LocalDb.monedaDe(widget.sup);
 
-  double? get _precioVenta =>
-      double.tryParse(_precio.text.trim().replaceAll(',', '.'));
+  // Autoauditoría 1.22 #2 (clase N-2): precio no finito = sin
+  // precio (NaN hacía _puedeVender true y la venta rápida
+  // operaba con NaN hasta reventar en los centavos).
+  double? get _precioVenta {
+    final v = double.tryParse(_precio.text.trim().replaceAll(',', '.'));
+    return (v != null && v.isFinite) ? v : null;
+  }
 
   /// v1.3.4 (candado a): comparación en centavos enteros.
   bool get _precioDifiere {

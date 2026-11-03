@@ -185,9 +185,13 @@ class _ServiciosAdminScreenState extends State<ServiciosAdminScreen> {
     for (final s in _stemsPrecio) {
       final tipo = _tipoDeStem(s);
       for (final m in const ['efectivo', 'transferencia']) {
-        final valor = double.tryParse(
-                _precioCtrl['${s}_$m']!.text.trim().replaceAll(',', '.')) ??
-            -1;
+        // Autoauditoría 1.22 #2 (clase N-2): lo no finito cae al
+        // -1 «inválido» de siempre (NaN no era <= 0 y se guardaba
+        // como precio de dosis en los ajustes).
+        final valorCrudo = double.tryParse(
+            _precioCtrl['${s}_$m']!.text.trim().replaceAll(',', '.'));
+        final valor =
+            (valorCrudo != null && valorCrudo.isFinite) ? valorCrudo : -1;
         // Las dosis deben costar más de 0; el agua admite 0 (sin
         // fijar) y la comisión también.
         if (s == 'agua' ? valor < 0 : valor <= 0) {
@@ -204,9 +208,10 @@ class _ServiciosAdminScreenState extends State<ServiciosAdminScreen> {
         }
       }
     }
-    final comision = double.tryParse(
-            _comisionCtrl.text.trim().replaceAll(',', '.')) ??
-        -1;
+    final comisionCruda = double.tryParse(
+        _comisionCtrl.text.trim().replaceAll(',', '.'));
+    final comision =
+        (comisionCruda != null && comisionCruda.isFinite) ? comisionCruda : -1;
     if (comision < 0) {
       _aviso('Revisa la comisión', error: true);
       return;
@@ -322,11 +327,14 @@ class _ServiciosAdminScreenState extends State<ServiciosAdminScreen> {
     );
     if (ok != true) return;
     try {
+      // Clase N-2 (#2): lo no finito cae al 0 «inválido» que el
+      // servicio ya rechaza (NaN pasaba su validación <= 0).
+      final costoCrudo =
+          double.tryParse(costoCtrl.text.trim().replaceAll(',', '.'));
       await reponerAguaServicio(
         cantidad: int.tryParse(cantCtrl.text.trim()) ?? 0,
         costoUnitario:
-            double.tryParse(costoCtrl.text.trim().replaceAll(',', '.')) ??
-                0,
+            (costoCrudo != null && costoCrudo.isFinite) ? costoCrudo : 0,
       );
       _aviso('Entrada de agua registrada');
       await _cargar();

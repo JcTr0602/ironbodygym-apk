@@ -601,7 +601,9 @@ class _CentroComprasScreenState extends State<CentroComprasScreen> {
     String? error;
     if (conceptoCtrl.text.trim().isEmpty) {
       error = 'Falta el concepto.';
-    } else if (monto == null || monto <= 0) {
+    } else if (monto == null || !monto.isFinite || monto <= 0) {
+      // Autoauditoría 1.22 #2 (clase N-2): NaN/Infinity no son
+      // <= 0 y llegaban a la fila local y al payload de la op.
       error = 'Monto inválido.';
     } else if (DateTime.tryParse(fechaCtrl.text.trim()) == null) {
       error = 'Fecha inválida (AAAA-MM-DD).';

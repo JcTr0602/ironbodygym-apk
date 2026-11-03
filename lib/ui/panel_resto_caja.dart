@@ -276,7 +276,10 @@ class _ArqueoEntregaScreenState extends State<ArqueoEntregaScreen> {
         montoCtrl.text = nuevo.toStringAsFixed(0);
         continue;
       }
-      if (monto <= 0 || monto - pendiente > 0.01) {
+      // Autoauditoría 1.22 #2 (clase N-2): NaN no es <= 0 ni
+      // supera el pendiente (comparaciones falsas) y llegaba a
+      // registrarEntregaEfectivo como monto de la entrega C1.
+      if (!monto.isFinite || monto <= 0 || monto - pendiente > 0.01) {
         if (mounted) {
           mostrarSnack(context, 'Monto inválido o mayor que el pendiente', significado: SignificadoChip.alerta);
         }
@@ -1053,7 +1056,9 @@ class _PreciosMetodoScreenState extends State<PreciosMetodoScreen> {
     for (final k in kClavesPreciosC6) {
       final v = double.tryParse(_ctrls[k]!.text.trim());
       // P2#16: el 0 también se rechaza (antes pasaba con v < 0).
-      if (v == null || v <= 0) {
+      // Autoauditoría 1.22 #2 (clase N-2): NaN/Infinity tampoco
+      // son <= 0 y se guardaban como precio del gym.
+      if (v == null || !v.isFinite || v <= 0) {
         mostrarSnack(context, 'Precio inválido: ${_kEtiquetasPrecios[k]}', significado: SignificadoChip.alerta);
         return;
       }

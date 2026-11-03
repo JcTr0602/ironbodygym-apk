@@ -229,8 +229,11 @@ class _InscribirScreenState extends State<InscribirScreen> {
       return _tipoCustomSel?.monto ?? 0;
     }
     if (_periodo == 'personalizado') {
-      return double.tryParse(_monto.text.trim().replaceAll(',', '.')) ??
-          0;
+      // Autoauditoría 1.22 #2 (clase N-2): NaN no es <= 0 y
+      // pasaba la validación de «días y monto válidos» hasta el
+      // payload de la inscripción (JSON no codifica NaN).
+      final v = double.tryParse(_monto.text.trim().replaceAll(',', '.'));
+      return (v != null && v.isFinite) ? v : 0;
     }
     // v1.2.2: menores pagan precio reducido
     // v1.3.9 (Bug 2, Argón): respetar el método de pago elegido —

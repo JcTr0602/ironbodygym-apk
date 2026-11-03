@@ -364,7 +364,9 @@ class _AdminScreenState extends State<AdminScreen> {
     for (final (clave, _) in _clavesMonto) {
       final v = double.tryParse(
           (_montos[clave]?.text ?? '').replaceAll(',', '.'));
-      if (v != null && v > 0) cambios[clave] = v;
+      // Autoauditoría 1.22 #2 (clase N-2): Infinity SÍ es > 0 y
+      // se guardaba como monto de configuración del gym.
+      if (v != null && v.isFinite && v > 0) cambios[clave] = v;
     }
     if (cambios.isEmpty) {
       mostrarSnack(context, 'No hay montos válidos para guardar', significado: SignificadoChip.alerta);
@@ -622,7 +624,7 @@ class _AdminScreenState extends State<AdminScreen> {
     // sigue animando su cierre y el controller aún está en uso.
     // Los controllers locales los recoge el GC (igual que dialogo_pago).
     if (ok != true || !mounted) return;
-    if (nombre.isEmpty || monto == null || monto <= 0) {
+    if (nombre.isEmpty || monto == null || !monto.isFinite || monto <= 0) {
       mostrarSnack(context, 'Nombre y monto válido requeridos', significado: SignificadoChip.alerta);
       return;
     }
@@ -698,7 +700,11 @@ class _AdminScreenState extends State<AdminScreen> {
     final dias = int.tryParse(diasCtrl.text.trim()) ?? 30;
     // v1.3.2 (Argón #11): sin dispose tras showDialog (ver arriba).
     if (ok != true || !mounted) return;
-    if (nombre.isEmpty || monto == null || monto <= 0 || dias <= 0) {
+    if (nombre.isEmpty ||
+        monto == null ||
+        !monto.isFinite ||
+        monto <= 0 ||
+        dias <= 0) {
       mostrarSnack(context, 'Nombre, monto y días válidos requeridos', significado: SignificadoChip.alerta);
       return;
     }
@@ -1094,7 +1100,10 @@ class _AdminScreenState extends State<AdminScreen> {
     montoCtrl.dispose();
     if (ok != true || !mounted) return;
     final monto = double.tryParse(montoTexto);
-    if (concepto.isEmpty || monto == null || monto <= 0) {
+    // Autoauditoría 1.22 #2 (clase N-2): NaN/Infinity pasaban el
+    // <= 0 y el payload del gasto reventaba al codificarse (JSON
+    // no admite no-finitos) o quedaba envenenado.
+    if (concepto.isEmpty || monto == null || !monto.isFinite || monto <= 0) {
       mostrarSnack(context, 'Concepto o monto inválidos', significado: SignificadoChip.alerta);
       return;
     }

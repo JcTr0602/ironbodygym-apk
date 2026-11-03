@@ -169,8 +169,13 @@ class _VentaSuplementoScreenState
     });
   }
 
-  double? get _tasaUsd =>
-      double.tryParse(_tasa.text.trim().replaceAll(',', '.'));
+  // Autoauditoría 1.22 #2 (clase N-2): la tasa no finita no es
+  // una tasa (NaN pasaba las validaciones <= 0 de las dos rutas
+  // de venta y viajaba en el payload).
+  double? get _tasaUsd {
+    final v = double.tryParse(_tasa.text.trim().replaceAll(',', '.'));
+    return (v != null && v.isFinite) ? v : null;
+  }
 
   double get _total {
     final p =
@@ -256,7 +261,7 @@ class _VentaSuplementoScreenState
     }
     final precio =
         double.tryParse(_precio.text.trim().replaceAll(',', '.'));
-    if (precio == null || precio <= 0) {
+    if (precio == null || !precio.isFinite || precio <= 0) {
       await DialogoApp.confirmar(context,
           titulo: 'Revisa el precio',
           mensaje: 'Indica un precio de venta mayor que 0.',
@@ -643,7 +648,7 @@ class _VentaSuplementoScreenState
     }
     final precio =
         double.tryParse(_precio.text.trim().replaceAll(',', '.'));
-    if (precio == null || precio <= 0) {
+    if (precio == null || !precio.isFinite || precio <= 0) {
       await DialogoApp.confirmar(context,
           titulo: 'Revisa el precio',
           mensaje: 'Indica un precio de venta mayor que 0.',

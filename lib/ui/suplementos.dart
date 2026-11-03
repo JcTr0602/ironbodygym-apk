@@ -1475,7 +1475,7 @@ class _EditarSuplementoScreenState
         _precio.text.trim().replaceAll(',', '.'));
     final stock =
         int.tryParse(_stock.text.trim()) ?? 0;
-    if (nombre.isEmpty || precio == null || precio <= 0) {
+    if (nombre.isEmpty || precio == null || !precio.isFinite || precio <= 0) {
       await DialogoApp.confirmar(context,
           titulo: 'Revisa los datos',
           mensaje:
@@ -1535,8 +1535,12 @@ class _EditarSuplementoScreenState
     setState(() => _guardando = true);
     try {
       // v1.3.7 (Fase B §6.2): costo (solo dueño) y umbral de stock.
-      final costo =
+      // Autoauditoría 1.22 #2 (clase N-2): un costo no finito se
+      // trata como «sin costo», igual que un texto no numérico.
+      final costoCrudo =
           double.tryParse(_costo.text.trim().replaceAll(',', '.'));
+      final costo =
+          (costoCrudo != null && costoCrudo.isFinite) ? costoCrudo : null;
       final umbral =
           int.tryParse(_umbral.text.trim()) ?? 3;
       final payload = {
