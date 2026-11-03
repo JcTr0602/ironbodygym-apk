@@ -1474,8 +1474,15 @@ class InvitadosService {
   }
 
   Future<InvitadoDetalle> detalle(String invitadoId) async {
-    final res =
-        await _rpc('invitado_detalle', {'p_invitado_id': invitadoId});
+    // Autoauditoría 1.22 #1 (2026-11-03): detalle es LECTURA y
+    // va por _rpcLectura (timeout 12 s), como listar/resumen
+    // desde la 1C. Con _rpc crudo, una conexión colgada dejaba
+    // la ficha del invitado en spinner eterno: la pantalla
+    // espera esta llamada antes de pintar y el timeout es lo
+    // que produce el error RED que dispara su fallback a la
+    // caché offline (D5).
+    final res = await _rpcLectura(
+        'invitado_detalle', {'p_invitado_id': invitadoId});
     if (res is! Map) {
       throw const InvitadoError(
           'RED', 'Respuesta inesperada del servidor.');
@@ -1714,7 +1721,9 @@ class InvitadosService {
   }
 
   Future<Map<String, String>> infoPublica() async {
-    final res = await _rpc('info_publica_listar');
+    // Autoauditoría 1.22 #1: lectura → _rpcLectura (timeout),
+    // igual que el resto de lecturas del servicio.
+    final res = await _rpcLectura('info_publica_listar');
     final info = res is Map ? res['info_publica'] : null;
     if (info is! Map) return {};
     return info.map((k, v) => MapEntry('$k', '${v ?? ''}'));

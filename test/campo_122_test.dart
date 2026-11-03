@@ -145,6 +145,60 @@ void main() {
             reason: 'degrada a null: la UI omite el dato');
       });
     });
+
+    // Autoauditoría 1.22 #1 (2026-11-03): la 1C dejó fuera dos
+    // LECTURAS del mismo servicio — detalle() e infoPublica()
+    // seguían con _rpc sin timeout. La ficha del invitado
+    // espera detalle() antes de pintar: con la conexión
+    // colgada quedaba en spinner eterno (la misma clase de
+    // fallo que el Dashboard) y su catch nunca veía el error
+    // RED que dispara el fallback a la caché offline (D5).
+    test('detalle() corta por timeout con error RED', () {
+      fakeAsync((async) {
+        final svc = InvitadosService(
+            rpc: (nombre, params) =>
+                Completer<dynamic>().future);
+        Object? error;
+        var termino = false;
+        svc.detalle('inv-1').then((_) {
+          termino = true;
+        }, onError: (Object e) {
+          error = e;
+          termino = true;
+        });
+        async.elapse(const Duration(seconds: 11));
+        expect(termino, isFalse,
+            reason: 'dentro del timeout aún espera');
+        async.elapse(const Duration(seconds: 2));
+        expect(termino, isTrue,
+            reason: 'el timeout resolvió la espera');
+        expect(error, isA<InvitadoError>());
+        expect((error as InvitadoError).codigo, 'RED',
+            reason: 'RED es lo que la ficha usa para caer a '
+                'la caché offline');
+      });
+    });
+
+    test('infoPublica() corta por timeout con error RED', () {
+      fakeAsync((async) {
+        final svc = InvitadosService(
+            rpc: (nombre, params) =>
+                Completer<dynamic>().future);
+        Object? error;
+        var termino = false;
+        svc.infoPublica().then((_) {
+          termino = true;
+        }, onError: (Object e) {
+          error = e;
+          termino = true;
+        });
+        async.elapse(const Duration(seconds: 13));
+        expect(termino, isTrue,
+            reason: 'el timeout resolvió la espera');
+        expect(error, isA<InvitadoError>());
+        expect((error as InvitadoError).codigo, 'RED');
+      });
+    });
   });
 }
 
