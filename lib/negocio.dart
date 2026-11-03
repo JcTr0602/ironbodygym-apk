@@ -884,6 +884,13 @@ double _montoUsdOp(Map<String, dynamic> op) {
   }
   if (venta == null) return 0;
   if ((venta['moneda'] as String?) != 'USD') return 0;
+  // Auditoría 1.22 #5 (X5): un fiado NO es cobro ni pendiente —
+  // su gemela CUP (montoEfectivoOp / montoCobradoCupOp) lo
+  // anula y el espejo también (_esFiadoSinSaldar); esta vía de
+  // cola era la única sin el filtro: una venta USD al fiado
+  // registrada offline inflaba el «USD a entregar» y el KPI
+  // cobrado hasta que el sync la sustituía por el espejo.
+  if (venta['es_fiado'] == 1 || venta['es_fiado'] == true) return 0;
   final precio = (venta['precio'] as num?)?.toDouble() ?? 0;
   final cant = (venta['cantidad'] as num?)?.toInt() ?? 0;
   return precio * cant;
