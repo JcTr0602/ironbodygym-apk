@@ -238,6 +238,25 @@ class _VentaSuplementoScreenState
     }
   }
 
+  /// 1.23 S-7 (Argón H-06): stock VIGENTE del suplemento,
+  /// releído del espejo en el momento de confirmar. El mapa
+  /// del widget es una foto de cuando se abrió la pantalla:
+  /// un pull puede haber bajado el stock (hasta 0) con la
+  /// pantalla abierta, y el pre-chequeo contra la foto dejaba
+  /// confirmar una venta que el espejo ya no respalda.
+  Future<int> _stockVigente() async {
+    final sid = (widget.suplemento['id'] as num?)?.toInt();
+    if (sid == null) {
+      return (widget.suplemento['stock'] as num?)?.toInt() ?? 0;
+    }
+    final filas =
+        await LocalDb.instance.mirrorPorIds('suplementos', [sid]);
+    if (filas.isEmpty) {
+      return (widget.suplemento['stock'] as num?)?.toInt() ?? 0;
+    }
+    return (filas.first['stock'] as num?)?.toInt() ?? 0;
+  }
+
   Future<void> _confirmar() async {
     // v1.3.1: guarda de reentrada (evita venta duplicada).
     // Argón (regresión 1): _guardando solo se activa DESPUÉS de pasar todas
@@ -247,8 +266,9 @@ class _VentaSuplementoScreenState
     // Argón P1#2-parte: pre-chequeo de stock antes de confirmar
     // (la transacción ya lanza «Stock insuficiente», pero sin esto
     // el usuario llegaba al final para enterarse).
-    final stockActual =
-        (widget.suplemento['stock'] as num?)?.toInt() ?? 0;
+    // 1.23 S-7: contra el espejo VIGENTE, no contra la foto
+    // del widget (ver _stockVigente).
+    final stockActual = await _stockVigente();
     if (_cantidad < 1 || _cantidad > stockActual) {
       await DialogoApp.confirmar(context,
           titulo: 'Stock insuficiente',
@@ -634,8 +654,8 @@ class _VentaSuplementoScreenState
   /// ya elegidos. Si vuelve con éxito, cierra esta pantalla también.
   Future<void> _irAInscripcionVenta() async {
     // Argón P1#2-parte: mismo pre-chequeo de stock que _confirmar.
-    final stockActual =
-        (widget.suplemento['stock'] as num?)?.toInt() ?? 0;
+    // 1.23 S-7: contra el espejo VIGENTE (ver _stockVigente).
+    final stockActual = await _stockVigente();
     if (_cantidad < 1 || _cantidad > stockActual) {
       await DialogoApp.confirmar(context,
           titulo: 'Stock insuficiente',

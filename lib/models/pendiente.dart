@@ -29,13 +29,20 @@ class PagoPendiente {
   });
 
   /// Fix #26 (Sol): valida en vez de inventar defaults.
-  /// Retorna null si el registro es inválido (sin ID, monto <= 0,
-  /// fecha inválida). El llamador debe filtrar los null.
+  /// Retorna null si el registro es inválido (sin ID, monto
+  /// nulo o cero, fecha inválida). El llamador debe filtrar
+  /// los null.
+  /// 1.23 S2-1: un reverso de servicio trae monto NEGATIVO y
+  /// debe contar — netea contra su venta en esta vista
+  /// agrupada igual que en detallePendienteEntrenador. Solo
+  /// el tipo 'servicio' admite monto < 0.
   static PagoPendiente? tryFromMap(Map<String, dynamic> map) {
     final id = map['id'] as int?;
     if (id == null || id <= 0) return null;
+    final tipo = map['tipo'] as String? ?? 'mensual';
     final monto = (map['monto'] as num?)?.toDouble();
-    if (monto == null || monto <= 0) return null;
+    if (monto == null || monto == 0) return null;
+    if (monto < 0 && tipo != 'servicio') return null;
     final fechaRaw = map['creada_en'] ?? map['fecha'];
     final fechaParsed = fechaRaw == null
         ? null
@@ -50,7 +57,7 @@ class PagoPendiente {
       monto: monto,
       moneda: moneda ?? 'CUP',
       fecha: aHabana(fechaParsed),
-      tipo: map['tipo'] as String? ?? 'mensual',
+      tipo: tipo,
       descripcion: map['descripcion'] as String? ?? '',
       entrenador:
           map['entrenador_nombre'] as String? ?? 'Sin asignar',

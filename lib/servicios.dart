@@ -72,7 +72,12 @@ const kTiposVentaServicio = {
 
 /// Precios y comisión de servicios desde los ajustes (con los
 /// defaults de lanzamiento: 600 sin agua / 900 con agua; el agua
-/// suelta nace en 0 = «sin fijar» hasta que el dueño la fije).
+/// suelta nace en 0 = «sin fijar» hasta que el dueño la fije —
+/// bloqueo intencional, no un precio).
+/// 1.23 S-6 (Argón H-05): la comisión por defecto pasa de 0 a
+/// 50 (la vigente de Jc): si la clave falta en ajustes, antes
+/// las ventas de los entrenadores nacían con comisión 0 en
+/// silencio y la nómina salía corta sin que nadie lo notara.
 Future<({
   double sinAgua,
   double conAgua,
@@ -85,7 +90,7 @@ Future<({
     sinAgua: v('servicio_precio_sin_agua', 600),
     conAgua: v('servicio_precio_con_agua', 900),
     agua: v('servicio_precio_agua', 0),
-    comision: v('servicio_comision_dosis', 0),
+    comision: v('servicio_comision_dosis', 50),
   );
 }
 
@@ -1022,7 +1027,13 @@ Future<Map<String, dynamic>> _cuadreServiciosDia(
     if ('${p['fecha'] ?? ''}' != '' && '${p['fecha']}' != fechaIso) {
       continue;
     }
-    final reg = (op['telegram_id'] as num?)?.toInt();
+    // 1.23 S-4 (Argón H-03): las filas locales de ops_queue no
+    // siempre traen telegram_id; sin fallback, la venta
+    // pendiente de un entrenador no se atribuía a nadie en su
+    // propio cuadre hasta sincronizar. Las ops en cola son del
+    // usuario de ESTE dispositivo.
+    final reg = (op['telegram_id'] as num?)?.toInt() ??
+        AuthService().telegramId;
     final vend = (p['vendedor_id'] as num?)?.toInt() ?? reg;
     sumar(
       '${p['tipo']}',
@@ -1084,7 +1095,8 @@ Future<Map<String, dynamic>> _cuadreServiciosDia(
       // si es un entrenador, devuelve de su gaveta (él mismo).
       responsable = AuthService().isOwner
           ? null
-          : (op['telegram_id'] as num?)?.toInt();
+          : ((op['telegram_id'] as num?)?.toInt() ??
+              AuthService().telegramId);
     } else {
       responsable =
           LocalDb.normalizarTelegramId(orig['responsable_efectivo_id']);
@@ -1399,6 +1411,18 @@ Future<({Map<String, dynamic> payload, String? retener})>
       ((casa || tipo == 'agua_suelta' || vendedorEsDueno)
           ? 0.0
           : pr.comision);
+  // 1.23 S-3 (Argón H-02): la comisión que viaja en el payload
+  // se valida SIEMPRE aquí, venga del campo editable o del
+  // default: finita y entre 0 y el precio de la venta (en Casa
+  // el precio es 0, así que la comisión debe ser 0). Antes un
+  // negativo, un valor mayor que el precio o un Infinity
+  // pasaban tal cual y contaminaban cuadre, estadísticas y
+  // nómina (y el Infinity rompía el jsonEncode de la op).
+  if (!comision.isFinite || comision < 0 || comision > precio) {
+    throw Exception(
+        'Comisión inválida: debe estar entre 0 y el precio de '
+        'la venta (${precio.toStringAsFixed(0)} CUP)');
+  }
   // v1.13.0 (E3): la venta de dosis nace retenida 15 s exactos para
   // la ventana de Deshacer; el agua suelta sube de inmediato (sin
   // Deshacer especificado para ella).

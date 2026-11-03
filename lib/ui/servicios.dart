@@ -310,6 +310,23 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
     return _misPomos.isEmpty ? null : _misPomos.first;
   }
 
+  /// 1.23 S-1 (Argón H-01): el pomo PROPIO del dueño (él es el
+  /// titular) del mismo suplemento que [pomo], o null si no
+  /// tiene. Cuando el dueño vende «a nombre de: Yo» parado en
+  /// el pomo de un entrenador, la dosis sale de este pomo —
+  /// nunca del ajeno.
+  Map<String, dynamic>? _pomoPrincipalPropio(
+      Map<String, dynamic> pomo) {
+    final sup = (pomo['suplemento_id'] as num?)?.toInt();
+    for (final l in _misPomos) {
+      if ((l['titular_tid'] as int?) == _miTid &&
+          (l['suplemento_id'] as num?)?.toInt() == sup) {
+        return l;
+      }
+    }
+    return null;
+  }
+
   void _aviso(String msg, {bool error = false}) {
     if (!mounted) return;
     mostrarSnack(context, msg,
@@ -361,7 +378,11 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
     var vendedorSel = pomoTitularTid;
     var responsableSel = pomoTitularTid;
     final comisionCtrl = TextEditingController(
-        text: (_precios?.comision ?? 0).toStringAsFixed(0));
+        text: (_precios?.comision ?? 50).toStringAsFixed(0));
+    // 1.23 S-3: error de validación de la comisión, visible
+    // DENTRO del diálogo (antes un valor vacío caía en silencio
+    // al default y uno inválido contaminaba el payload).
+    var errorComision = '';
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => StatefulBuilder(
@@ -543,7 +564,7 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                         ),
                       ],
                     ),
-                    if (vendedorSel != _miTid)
+                    if (vendedorSel != _miTid) ...[
                       TextField(
                         controller: comisionCtrl,
                         keyboardType: const TextInputType
@@ -552,6 +573,14 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                             labelText: 'Comisión para '
                                 '${_personas[vendedorSel] ?? 'el entrenador'} (CUP)'),
                       ),
+                      if (errorComision.isNotEmpty)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 4),
+                          child: Text(errorComision,
+                              style: AppTexto.secundario.copyWith(
+                                  color: AppColores.error)),
+                        ),
+                    ],
                     if (metodo == 'efectivo' &&
                         vendedorSel != _miTid)
                       Row(
@@ -609,7 +638,30 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
               ),
               FilledButton(
                 onPressed: (esCasa || metodosActivos.isNotEmpty)
-                    ? () => Navigator.pop(ctx, true)
+                    ? () {
+                        // 1.23 S-3: la comisión tecleada se
+                        // valida ANTES de cerrar el diálogo:
+                        // vacía, no numérica, negativa o mayor
+                        // que el precio → error visible aquí,
+                        // sin encolar nada.
+                        if (_esDueno &&
+                            vendedorSel != _miTid &&
+                            !esCasa) {
+                          final c = double.tryParse(comisionCtrl.text
+                              .trim()
+                              .replaceAll(',', '.'));
+                          if (c == null ||
+                              !c.isFinite ||
+                              c < 0 ||
+                              c > precioUnit) {
+                            setD(() => errorComision =
+                                'Comisión inválida: escribe un monto '
+                                'entre 0 y ${fmtMonto(precioUnit)} CUP');
+                            return;
+                          }
+                        }
+                        Navigator.pop(ctx, true);
+                      }
                     : null,
                 child: Text(esCasa ? 'Registrar' : 'Cobrar'),
               ),
@@ -646,12 +698,32 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
           ' x$cantidad',
     );
     if (!sigueServ) return;
+    // 1.23 S-1 (Argón H-01a): dueño + pomo de un entrenador +
+    // «A nombre de: Yo» → la dosis sale del pomo principal
+    // PROPIO del mismo suplemento; si no tiene uno, se bloquea
+    // aquí con el motivo. Antes salía del pomo ajeno con
+    // comisión 0 y el cartel «vendida por el dueño de tu pomo».
+    var pomoVenta = _pomoActual;
+    if (tipo != 'agua_suelta' &&
+        _esDueno &&
+        vendedorSel == _miTid &&
+        pomoTitularTid != _miTid) {
+      pomoVenta = _pomoPrincipalPropio(_pomoActual!);
+      if (pomoVenta == null) {
+        _aviso(
+            'Vendes a tu nombre pero no tienes un pomo propio '
+            'de este suplemento: abre uno en Administración o '
+            'vende a nombre del titular del pomo',
+            error: true);
+        return;
+      }
+    }
     try {
       final opUuid = await registrarVentaServicio(
         tipo: tipo,
         pomoId: tipo == 'agua_suelta'
             ? null
-            : (_pomoActual!['id'] as num).toInt(),
+            : (pomoVenta!['id'] as num).toInt(),
         cantidad: cantidad,
         clienteId: (cliente?['id'] as num?)?.toInt(),
         metodo: metodo,
@@ -792,7 +864,14 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
     // vendiendo desde el pomo de un entrenador, la comisión
     // salía en 0 y el efectivo se le cargaba al dueño, aunque
     // el stock sí salía del pomo del entrenador.
-    final vendedorSel = (_pomoActual!['titular_tid'] as int?) ?? _miTid;
+    // 1.23 S-2 (Argón H-01b): la múltiple gana los selectores
+    // «A nombre de» y «Efectivo lo entrega» de la venta simple
+    // (antes el vendedor quedaba fijo en el titular del pomo y
+    // el efectivo se cargaba siempre a su gaveta, cobrara
+    // quien cobrara).
+    var vendedorSel = (_pomoActual!['titular_tid'] as int?) ?? _miTid;
+    var responsableSel = vendedorSel;
+    final titularPomoTid = vendedorSel;
     // Argón Servicios #2: los métodos ofrecidos son la
     // INTERSECCIÓN de los activos de los componentes presentes
     // (con agua si m > 0, sin agua si m < n), recalculada en
@@ -800,14 +879,24 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
     // dosis_con_agua: una venta de puras raciones podía quedar
     // bloqueada sin motivo, y una mixta podía ofrecer una
     // transferencia que la subventa sin agua rechazaba.
+    // 1.23 S-5 (Argón H-04): además de «activo», el componente
+    // PRESENTE en la mezcla debe tener precio > 0 — antes un
+    // componente sin precio fijado ofrecía el método y la
+    // venta explotaba al final en el payload con total 0.
     List<String> metodosPara(int nn, int mm) => <String>[
           for (final x in const ['efectivo', 'transferencia'])
             if ((mm <= 0 ||
-                    metodoServicioActivo(
-                        _ajustes, 'dosis_con_agua', x)) &&
+                    (metodoServicioActivo(
+                            _ajustes, 'dosis_con_agua', x) &&
+                        precioServicioMetodo(
+                                _ajustes, 'dosis_con_agua', x) >
+                            0)) &&
                 (mm >= nn ||
-                    metodoServicioActivo(
-                        _ajustes, 'dosis_sin_agua', x)))
+                    (metodoServicioActivo(
+                            _ajustes, 'dosis_sin_agua', x) &&
+                        precioServicioMetodo(
+                                _ajustes, 'dosis_sin_agua', x) >
+                            0)))
               x,
         ];
     var metodosActivos = metodosPara(n, m);
@@ -838,6 +927,25 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
           final esCasaCliente = cliente != null &&
               (cliente!['cuenta_casa'] as num?)?.toInt() == 1;
           final esCasa = esCasaCliente || paraDuenoCasa;
+          // 1.23 S-1/S-2: si el dueño vende «a nombre de: Yo»
+          // desde el pomo de un entrenador, la múltiple sale
+          // del pomo principal PROPIO del mismo suplemento
+          // (tope y descuento de ese pomo); sin pomo propio,
+          // Cobrar se bloquea con el motivo visible abajo.
+          final pomoEfectivo = (_esDueno &&
+                  vendedorSel == _miTid &&
+                  titularPomoTid != _miTid)
+              ? _pomoPrincipalPropio(pomo)
+              : pomo;
+          final topeEfectivo = pomoEfectivo == null
+              ? 0
+              : _esDueno
+                  ? ((pomoEfectivo['saldo_local'] as num?)?.toInt() ??
+                      0)
+                  : 999999;
+          if (topeEfectivo >= 2 && n > topeEfectivo) {
+            n = topeEfectivo;
+          }
           final precioSin =
               precioServicioMetodo(_ajustes, 'dosis_sin_agua', metodo);
           final precioCon =
@@ -873,7 +981,7 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                     style: AppTexto.secundario,
                   ),
                 if (_esDueno) ...[
-                  _medidor('Dosis en el pomo', topeDosis, 5),
+                  _medidor('Dosis en el pomo', topeEfectivo, 5),
                   const SizedBox(height: 8),
                 ],
                 _medidor('Pomos en stock', topePomos,
@@ -943,7 +1051,7 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                     Text('$n',
                         style: AppTexto.titulo),
                     IconButton(
-                      onPressed: n < topeDosis
+                      onPressed: n < topeEfectivo
                           ? () => setD(() => n++)
                           : null,
                       icon: const Icon(Icons.add_circle_outline_rounded),
@@ -966,6 +1074,79 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                     ),
                   ],
                 ),
+                // 1.23 S-2: roles de la venta (solo el dueño),
+                // la misma lógica de la venta simple: «A nombre
+                // de» ofrece solo al titular del pomo y a «Yo»
+                // (regla de Jc 2026-10-29 para dosis).
+                if (_esDueno && !esCasa) ...[
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      const Text('A nombre de:'),
+                      const SizedBox(width: 8),
+                      DropdownButton<int>(
+                        value: vendedorSel,
+                        items: [
+                          if (titularPomoTid != null &&
+                              titularPomoTid != _miTid)
+                            DropdownMenuItem(
+                                value: titularPomoTid,
+                                child: Text(
+                                    _personas[titularPomoTid] ??
+                                        'Entrenador')),
+                          if (_miTid != null)
+                            DropdownMenuItem(
+                                value: _miTid,
+                                child: const Text('Yo (dueño)')),
+                        ],
+                        onChanged: (v) => setD(() {
+                          vendedorSel = v ?? vendedorSel;
+                          responsableSel = vendedorSel;
+                        }),
+                      ),
+                    ],
+                  ),
+                  if (metodo == 'efectivo' &&
+                      vendedorSel != _miTid)
+                    Row(
+                      children: [
+                        const Text('Efectivo lo entrega:'),
+                        const SizedBox(width: 8),
+                        DropdownButton<int>(
+                          value: responsableSel,
+                          items: [
+                            DropdownMenuItem(
+                                value: vendedorSel,
+                                child: Text(
+                                    _personas[vendedorSel] ??
+                                        'El vendedor')),
+                            if (_miTid != null)
+                              DropdownMenuItem(
+                                  value: _miTid,
+                                  child: const Text('Yo (dueño)')),
+                          ],
+                          onChanged: (v) => setD(() =>
+                              responsableSel =
+                                  v ?? responsableSel),
+                        ),
+                      ],
+                    ),
+                ],
+                // Delta del panel (S-1): el aviso de «sin pomo
+                // propio» se ve TAMBIÉN con la Casa marcada (los
+                // selectores se ocultan en Casa, pero el dueño
+                // pudo elegir «Yo» antes de marcarla y Cobrar
+                // queda deshabilitado por esta causa).
+                if (_esDueno &&
+                    vendedorSel == _miTid &&
+                    titularPomoTid != _miTid &&
+                    pomoEfectivo == null)
+                  Text(
+                    '⚠️ Vendes a tu nombre pero no tienes un '
+                    'pomo propio de este suplemento.',
+                    style: AppTexto.secundario
+                        .copyWith(color: AppColores.error),
+                  ),
                 // 1.15 V7: Casa no ofrece método de cobro.
                 if (!esCasa && metodosActivos.length > 1) ...[
                   const SizedBox(height: 8),
@@ -1017,7 +1198,16 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                 // 1.15 V7: Casa registra sin cobrar (como la venta
                 // simple); sin métodos activos y sin Casa, no hay
                 // cobro posible.
-                onPressed: (esCasa || metodosActivos.isNotEmpty)
+                // 1.23 S-1: vendiendo el dueño a su nombre, sin
+                // pomo propio del suplemento o sin dosis para la
+                // mezcla en ese pomo, tampoco hay cobro posible.
+                // Delta del panel: la Casa NO se salta esta
+                // guarda — la múltiple siempre lleva dosis, y
+                // una Casa «a nombre de Yo» desde pomo ajeno sin
+                // pomo propio reabría el drenaje de S-1.
+                onPressed: (pomoEfectivo != null &&
+                        (!_esDueno || topeEfectivo >= 2) &&
+                        (esCasa || metodosActivos.isNotEmpty))
                     ? () => Navigator.pop(ctx, true)
                     : null,
                 child: Text(esCasa ? 'Registrar' : 'Cobrar'),
@@ -1051,25 +1241,47 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
       descripcion: 'una venta de dosis a este cliente',
     );
     if (!sigueMult) return;
+    // 1.23 S-1: el pomo efectivo tras el diálogo — si el dueño
+    // vendió a su nombre desde el pomo de un entrenador, es su
+    // principal propio del mismo suplemento.
+    // Delta del panel: SIN fallback al pomo ajeno — si el
+    // propio no existe al confirmar, se aborta con aviso (el
+    // diálogo ya deshabilita Cobrar en ese caso; esto es la
+    // segunda barrera, también para la Casa).
+    final pomoFinal =
+        (_esDueno && vendedorSel == _miTid && titularPomoTid != _miTid)
+            ? _pomoPrincipalPropio(pomo)
+            : pomo;
+    if (pomoFinal == null) {
+      _aviso(
+          'Vendes a tu nombre pero no tienes un pomo propio '
+          'de este suplemento: abre uno en Administración o '
+          'vende a nombre del titular del pomo',
+          error: true);
+      return;
+    }
+    final topeFinal = _esDueno
+        ? ((pomoFinal['saldo_local'] as num?)?.toInt() ?? 0)
+        : topeDosis;
     try {
       final opUuids = await registrarVentaMultipleServicio(
-        pomoId: (pomo['id'] as num).toInt(),
+        pomoId: (pomoFinal['id'] as num).toInt(),
         dosisN: n,
         pomosM: m,
         clienteId: (cliente?['id'] as num?)?.toInt(),
         metodo: metodo,
         casa: esCasa,
         beneficiario: paraDuenoCasa ? 'dueno' : null,
-        // Argón Servicios #1: roles como en la venta simple
-        // (vendedor = titular del pomo; el efectivo lo responde
-        // el mismo cuando el dueño cobra en efectivo).
+        // Argón Servicios #1 + 1.23 S-2: roles como en la venta
+        // simple, con los selectores del diálogo (vendedor y
+        // responsable del efectivo pueden diferir).
         vendedorEsDueno: _esDueno && vendedorSel == _miTid,
         vendedorId: _esDueno ? vendedorSel : null,
         responsableEfectivoId:
             _esDueno && !esCasa && metodo == 'efectivo'
-                ? vendedorSel
+                ? responsableSel
                 : null,
-        topeDosis: topeDosis,
+        topeDosis: topeFinal,
         topePomos: topePomos,
       );
       final cobradoEn = ahoraHabana();

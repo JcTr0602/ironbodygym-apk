@@ -4469,6 +4469,30 @@ Future<List<Map<String, dynamic>>> detallePendienteEntrenador(
 Future<List<Map<String, dynamic>>> pagosPendientesDetalle(
     {int? excluirTid}) async {
   final lista = <Map<String, dynamic>>[];
+  // 1.23 S2-2: las mismas guardas de liquidados que
+  // detallePendienteEntrenador — tras un arqueo C1 offline, la
+  // vista agrupada revivía cobros ya liquidados porque aquí
+  // no se filtraba. Caché por entrenador: idsLiquidados
+  // recorre liquidaciones_caja entera en cada llamada.
+  final liquidadosCache = <int, Set<String>>{};
+  Future<Set<String>> liquidadosDe(int tid) async =>
+      liquidadosCache[tid] ??= await idsLiquidados(tid);
+  // 1.23 S2-3: nombre por telegram_id desde usuarios_apk (la
+  // misma fuente que el ranking FIN-13), para rotular cada
+  // grupo por su RESPONSABLE del efectivo y no por quien
+  // registró la venta.
+  final nombresPorTid = <int, String>{};
+  try {
+    final rawApk = await LocalDb.instance.getMeta('usuarios_apk');
+    if (rawApk != null && rawApk.isNotEmpty) {
+      for (final u in jsonDecode(rawApk) as List) {
+        final m = Map<String, dynamic>.from(u as Map);
+        final t = LocalDb.normalizarTelegramId(m['telegram_id']);
+        final nom = '${m['nombre'] ?? m['username'] ?? ''}';
+        if (t != null && nom.isNotEmpty) nombresPorTid[t] = nom;
+      }
+    }
+  } catch (_) {}
 
   for (final p
       in await LocalDb.instance.pagosEfectivoPorEntrenador(null)) {
@@ -4476,6 +4500,9 @@ Future<List<Map<String, dynamic>>> pagosPendientesDetalle(
     final tid = LocalDb.normalizarTelegramId(p['telegram_user_id']);
     if (tid == null) continue;
     if (excluirTid != null && tid == excluirTid) continue;
+    if ((await liquidadosDe(tid)).contains('pagos:${p['id']}')) {
+      continue;
+    }
     lista.add({
       'id': p['id'],
       'monto': (p['monto'] as num?)?.toDouble() ?? 0,
@@ -4494,6 +4521,10 @@ Future<List<Map<String, dynamic>>> pagosPendientesDetalle(
     final tid = LocalDb.normalizarTelegramId(d['registrado_por']);
     if (tid == null) continue;
     if (excluirTid != null && tid == excluirTid) continue;
+    if ((await liquidadosDe(tid))
+        .contains('pagos_diarios:${d['id']}')) {
+      continue;
+    }
     lista.add({
       'id': d['id'],
       'monto': (d['total'] as num?)?.toDouble() ?? 0,
@@ -4513,6 +4544,10 @@ Future<List<Map<String, dynamic>>> pagosPendientesDetalle(
     final tid = LocalDb.normalizarTelegramId(s['registrado_por']);
     if (tid == null) continue;
     if (excluirTid != null && tid == excluirTid) continue;
+    if ((await liquidadosDe(tid))
+        .contains('ventas_suplementos:${s['id']}')) {
+      continue;
+    }
     final moneda = s['moneda'] as String? ?? 'CUP';
     final monto = moneda == 'USD' ? totalVentaUsd(s) : totalVentaCup(s);
     lista.add({
@@ -4538,7 +4573,18 @@ Future<List<Map<String, dynamic>>> pagosPendientesDetalle(
             LocalDb.normalizarTelegramId(s['registrado_por']);
     if (tid == null) continue;
     if (excluirTid != null && tid == excluirTid) continue;
+    if ((await liquidadosDe(tid))
+        .contains('servicio_ventas:${s['id']}')) {
+      continue;
+    }
     final cant = (s['cantidad'] as num?)?.toInt() ?? 1;
+    // S2-3: el rótulo es el RESPONSABLE del efectivo (tid),
+    // resuelto en usuarios_apk; el nombre de quien registró
+    // solo vale cuando el registrador ES el responsable.
+    final nombreResp = nombresPorTid[tid] ??
+        (LocalDb.normalizarTelegramId(s['registrado_por']) == tid
+            ? '${s['registrado_por_nombre'] ?? 'Entrenador $tid'}'
+            : 'Entrenador $tid');
     lista.add({
       'id': s['id'],
       'monto': ((s['precio_unitario'] as num?)?.toDouble() ?? 0) * cant,
@@ -4550,8 +4596,7 @@ Future<List<Map<String, dynamic>>> pagosPendientesDetalle(
         'agua_suelta' => 'Pomo de agua',
         _ => 'Ración (dosis)',
       },
-      'entrenador_nombre':
-          '${s['registrado_por_nombre'] ?? 'Entrenador $tid'}',
+      'entrenador_nombre': nombreResp,
       'trainer_telegram_id': tid,
     });
   }
