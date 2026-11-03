@@ -1214,6 +1214,24 @@ enum TamanoAvatar { s, m, l, xl, perfil }
 /// por la pantalla (archivo local); este componente no hace E/S.
 /// El borde es fino y neutro por defecto; la ficha pasa su marco
 /// de estado con [colorBorde] y [grosorBorde].
+/// Decodificación acotada SIN deformar (hotfix 1.22.1,
+/// reporte de campo de Jc): cuando a Image.file/
+/// Image.network se le dan cacheWidth Y cacheHeight a la
+/// vez, Flutter decodifica con ResizeImagePolicy.exact y
+/// ESTIRA el bitmap al rectángulo destino ANTES de que
+/// BoxFit.cover recorte — las fotos salían aplastadas en
+/// miniaturas y en la ficha.
+///
+/// La acotación es por UN SOLO eje (el ancho): el bitmap
+/// conserva su aspecto exacto y, pasando ~2× el ancho de
+/// la caja de destino, el eje libre queda siempre por
+/// encima de lo que BoxFit.cover necesita recortar
+/// (retratos y paisajes hasta 2:1). [ancho] en píxeles
+/// de dispositivo.
+ImageProvider providerFotoAcotada(ImageProvider base,
+        {required int ancho}) =>
+    ResizeImage(base, width: ancho);
+
 class AvatarCliente extends StatelessWidget {
   final String nombre;
   final File? foto;
@@ -1271,14 +1289,15 @@ class AvatarCliente extends StatelessWidget {
             // D-02 (1.21): decodificar al tamaño mostrado × DPR,
             // no la foto entera (las listas pintan decenas de
             // avatares de 44-56 px con fotos de varios MB).
-            child: Image.file(foto!,
+            child: Image(
+                image: providerFotoAcotada(FileImage(foto!),
+                    ancho: (2 *
+                            di *
+                            MediaQuery.devicePixelRatioOf(context))
+                        .round()),
                 width: di,
                 height: di,
-                fit: BoxFit.cover,
-                cacheWidth:
-                    (di * MediaQuery.devicePixelRatioOf(context)).round(),
-                cacheHeight:
-                    (di * MediaQuery.devicePixelRatioOf(context)).round()),
+                fit: BoxFit.cover),
           )
         : CircleAvatar(
             radius: di / 2,
