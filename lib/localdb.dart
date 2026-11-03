@@ -4188,8 +4188,12 @@ class LocalDb {
     }
   }
 
-  Future<List<Map<String, dynamic>>> allMirror(String tabla) async {
-    final d = await db;
+  Future<List<Map<String, dynamic>>> allMirror(String tabla,
+      {DatabaseExecutor? txn}) async {
+    // 1.22 PF-6: ejecutor inyectable — dentro de una
+    // transacción las lecturas de espejo van por el txn
+    // (con el handle principal sqflite se bloquea).
+    final d = txn ?? await db;
     final rows = await d.query(tabla);
     final salida = <Map<String, dynamic>>[];
     var corruptas = 0;
@@ -6953,8 +6957,10 @@ class LocalDb {
     );
   }
 
-  Future<List<Map<String, dynamic>>> pendingOps() async {
-    final d = await db;
+  Future<List<Map<String, dynamic>>> pendingOps(
+      {DatabaseExecutor? txn}) async {
+    // 1.22 PF-6: ejecutor inyectable (ver allMirror).
+    final d = txn ?? await db;
     return d.query('ops_queue',
         where: 'estado IN (\'pendiente\', \'error\')',
         orderBy: 'creada_ts ASC');

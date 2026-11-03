@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:sqflite/sqflite.dart' show DatabaseExecutor;
 import 'package:uuid/uuid.dart';
 
 import 'auth.dart';
@@ -710,8 +711,9 @@ Future<Set<int>> reversosPendientesVentaIds() async {
 Future<List<Map<String, dynamic>>> opsPendientesServicios() =>
     _opsServicioPendientes();
 
-Future<List<Map<String, dynamic>>> _opsServicioPendientes() async {
-  final ops = await LocalDb.instance.pendingOps();
+Future<List<Map<String, dynamic>>> _opsServicioPendientes(
+    {DatabaseExecutor? txn}) async {
+  final ops = await LocalDb.instance.pendingOps(txn: txn);
   const tipos = {
     'venta_servicio',
     'salida_servicio',
@@ -744,14 +746,15 @@ Future<int> saldoLoteLocal(int loteId) async {
   );
 }
 
-Future<({int saldo, double cpp})> stockAguaLocal() async {
-  final movs =
-      await LocalDb.instance.allMirror('servicio_agua_movimientos');
+Future<({int saldo, double cpp})> stockAguaLocal(
+    {DatabaseExecutor? txn}) async {
+  final movs = await LocalDb.instance
+      .allMirror('servicio_agua_movimientos', txn: txn);
   return aguaDesde(
     movimientosEspejo: movs,
-    opsPendientes: await _opsServicioPendientes(),
+    opsPendientes: await _opsServicioPendientes(txn: txn),
     ventasEspejo:
-        await LocalDb.instance.allMirror('servicio_ventas'),
+        await LocalDb.instance.allMirror('servicio_ventas', txn: txn),
   );
 }
 
@@ -788,21 +791,24 @@ Future<List<Map<String, dynamic>>> lotesActivosLocal(
 }
 
 /// Saldo local de un pomo (espejo + pendientes).
-Future<int> saldoPomoLocal(int pomoId) async {
-  final pomos = await LocalDb.instance.allMirror('servicio_pomos');
+Future<int> saldoPomoLocal(int pomoId, {DatabaseExecutor? txn}) async {
+  final pomos =
+      await LocalDb.instance.allMirror('servicio_pomos', txn: txn);
   final pomo = pomos.where((l) => (l['id'] as num?)?.toInt() == pomoId);
   if (pomo.isEmpty) return 0;
-  final ventas = (await LocalDb.instance.allMirror('servicio_ventas'))
-      .where((v) => (v['pomo_id'] as num?)?.toInt() == pomoId)
-      .toList();
-  final salidas = (await LocalDb.instance.allMirror('servicio_salidas'))
-      .where((s) => (s['pomo_id'] as num?)?.toInt() == pomoId)
-      .toList();
+  final ventas =
+      (await LocalDb.instance.allMirror('servicio_ventas', txn: txn))
+          .where((v) => (v['pomo_id'] as num?)?.toInt() == pomoId)
+          .toList();
+  final salidas =
+      (await LocalDb.instance.allMirror('servicio_salidas', txn: txn))
+          .where((s) => (s['pomo_id'] as num?)?.toInt() == pomoId)
+          .toList();
   return saldoPomoDesde(
     pomo: pomo.first,
     ventasEspejo: ventas,
     salidasEspejo: salidas,
-    opsPendientes: await _opsServicioPendientes(),
+    opsPendientes: await _opsServicioPendientes(txn: txn),
   );
 }
 
@@ -1111,14 +1117,20 @@ Future<Map<String, dynamic>> _cuadreServiciosDia(
 // ------------------------------------------------------------------
 
 Future<String> _encolar(String tipo, Map<String, dynamic> payload,
-    {String? retenerHastaIso}) async {
+    {String? retenerHastaIso, DatabaseExecutor? txn}) async {
   final opUuid = const Uuid().v4();
   await LocalDb.instance.queueOp(
       opUuid: opUuid,
       tipo: tipo,
       payload: payload,
-      retenerHastaIso: retenerHastaIso);
-  unawaited(SyncEngine.instance.push().then((_) {}, onError: (_) {}));
+      retenerHastaIso: retenerHastaIso,
+      txn: txn);
+  // 1.22 PF-6: dentro de una transacción el push lo dispara
+  // el llamador AL SALIR (empujar a mitad de transacción
+  // leería una cola aún no confirmada).
+  if (txn == null) {
+    unawaited(SyncEngine.instance.push().then((_) {}, onError: (_) {}));
+  }
   return opUuid;
 }
 
@@ -1520,17 +1532,31 @@ Future<String> registrarSalidaServicio({
   // Argón Servicios #10: la salida no puede superar el saldo
   // local del pomo (un dedo de más —22 por 2— dejaba el saldo
   // en -19 y apagaba los botones de venta del dueño).
-  final saldoPomo = await saldoPomoLocal(pomoId);
-  if (dosis > saldoPomo) {
-    throw Exception('Solo quedan $saldoPomo dosis en el pomo');
-  }
-  return _encolar('salida_servicio', {
-    'pomo_id': pomoId,
-    'dosis': dosis,
-    'motivo': motivo,
-    if (nota != null && nota.isNotEmpty) 'nota': nota,
-    'fecha': hoyHabanaIso(),
+  // 1.22 PF-6: validación y encolado DENTRO de una
+  // transacción (saldoPomoLocal/stockAguaLocal aceptan el
+  // ejecutor): dos salidas programáticas concurrentes ya no
+  // pueden validar ambas contra el mismo saldo y
+  // sobre-vender el pomo entre la lectura y el encolado.
+  final db = await LocalDb.instance.db;
+  late final String opUuid;
+  await db.transaction((txn) async {
+    final saldoPomo = await saldoPomoLocal(pomoId, txn: txn);
+    if (dosis > saldoPomo) {
+      throw Exception('Solo quedan $saldoPomo dosis en el pomo');
+    }
+    opUuid = await _encolar(
+        'salida_servicio',
+        {
+          'pomo_id': pomoId,
+          'dosis': dosis,
+          'motivo': motivo,
+          if (nota != null && nota.isNotEmpty) 'nota': nota,
+          'fecha': hoyHabanaIso(),
+        },
+        txn: txn);
   });
+  unawaited(SyncEngine.instance.push().then((_) {}, onError: (_) {}));
+  return opUuid;
 }
 
 /// Ítem 11 (post-1.8.0, Argón): salida sin venta del stock común de
@@ -1545,17 +1571,27 @@ Future<String> registrarSalidaAguaServicio({
 }) async {
   if (cantidad < 1) throw Exception('La salida debe ser de al menos 1 pomo');
   // Argón Servicios #10: tampoco del agua común.
-  final agua = await stockAguaLocal();
-  if (cantidad > agua.saldo) {
-    throw Exception('Solo quedan ${agua.saldo} pomos de agua');
-  }
-  return _encolar('salida_servicio', {
-    'tipo_item': 'agua',
-    'cantidad': cantidad,
-    'motivo': motivo,
-    if (nota != null && nota.isNotEmpty) 'nota': nota,
-    'fecha': hoyHabanaIso(),
+  // 1.22 PF-6: validación + encolado en una transacción.
+  final db = await LocalDb.instance.db;
+  late final String opUuid;
+  await db.transaction((txn) async {
+    final agua = await stockAguaLocal(txn: txn);
+    if (cantidad > agua.saldo) {
+      throw Exception('Solo quedan ${agua.saldo} pomos de agua');
+    }
+    opUuid = await _encolar(
+        'salida_servicio',
+        {
+          'tipo_item': 'agua',
+          'cantidad': cantidad,
+          'motivo': motivo,
+          if (nota != null && nota.isNotEmpty) 'nota': nota,
+          'fecha': hoyHabanaIso(),
+        },
+        txn: txn);
   });
+  unawaited(SyncEngine.instance.push().then((_) {}, onError: (_) {}));
+  return opUuid;
 }
 
 /// Reverso auditable de una venta ya espejada (la UI solo lo ofrece
