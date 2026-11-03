@@ -385,6 +385,22 @@ class _PagoScreenState extends State<PagoScreen> {
 
     if (u.esLocal && u.opUuid != null) {
       if (u.estadoOp == 'pendiente' || u.estadoOp == 'error') {
+        // Nunca se envió: borrar la op es seguro.
+        // SA-03: comprobar el borrado antes de anunciarlo.
+        // Autoauditoría 1.22 #2 (D2-06): el ORDEN importa —
+        // primero se borra la op y SOLO si se borró se restaura
+        // el espejo. Antes se restauraba el pagado_hasta primero
+        // y, si deleteOp devolvía 0 (la op ya había subido entre
+        // la carga y el toque), el espejo quedaba revertido con
+        // el pago vivo en el servidor: el cliente aparecía
+        // vencido en este teléfono estando pagado.
+        final borradas =
+            await LocalDb.instance.deleteOp(u.opUuid!);
+        if (!mounted) return;
+        if (borradas == 0) {
+          mostrarSnack(context, 'Ese pago se está sincronizando, intenta en unos segundos', significado: SignificadoChip.alerta);
+          return;
+        }
         // P1#4 (contrato): si la op trae 'pagado_hasta_anterior',
         // restaurar el espejo a ese valor al borrarla. Sin ese
         // campo (otro agente aún no lo escribe en preview_cobro),
@@ -401,15 +417,6 @@ class _PagoScreenState extends State<PagoScreen> {
             await LocalDb.instance.updateMirrorBasico(
                 u.clienteId!, {'pagado_hasta': null});
           }
-        }
-        // Nunca se envió: borrar la op es seguro.
-        // SA-03: comprobar el borrado antes de anunciarlo.
-        final borradas =
-            await LocalDb.instance.deleteOp(u.opUuid!);
-        if (!mounted) return;
-        if (borradas == 0) {
-          mostrarSnack(context, 'Ese pago se está sincronizando, intenta en unos segundos', significado: SignificadoChip.alerta);
-          return;
         }
         mostrarSnack(context, 'Pago deshecho (no había sido enviado)', significado: SignificadoChip.exito);
       } else {

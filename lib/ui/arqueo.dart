@@ -305,6 +305,23 @@ class _DetalleArqueoScreenState extends State<_DetalleArqueoScreen> {
       _aviso('No hay pendiente confirmado en $_moneda.');
       return;
     }
+    // Autoauditoría 1.22 #2 (D2-04): el «esperado» de la
+    // pantalla es una FOTO de _cargar(); los ids se leen frescos
+    // aquí. Si entre la carga y la confirmación entró un cobro
+    // nuevo (o se anuló uno), validar y confirmar contra la
+    // foto liquidaba un monto que ya no era el real y dejaba el
+    // resto como arrastre fantasma. Se recalcula y, si cambió,
+    // se avisa y se aborta ESTE intento (patrón C1 de
+    // panel_resto_caja): Jc confirma de nuevo con la cifra real.
+    final fresco = await pendienteArqueo(widget.telegramId);
+    final esperadoFresco = _moneda == 'USD' ? fresco.usd : fresco.cup;
+    if ((esperadoFresco - esperado).abs() > 0.01) {
+      _aviso('El pendiente cambió: era ${fmtMonto(esperado)} '
+          '$_moneda y ahora es ${fmtMonto(esperadoFresco)} '
+          '$_moneda. La pantalla se actualizó; confirma de nuevo.');
+      await _cargar();
+      return;
+    }
     final opIds =
         await idsPendienteArqueo(widget.telegramId, moneda: _moneda);
     final totalIds = opIds.values.fold<int>(0, (s, l) => s + l.length);

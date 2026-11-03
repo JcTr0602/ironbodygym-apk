@@ -1484,6 +1484,24 @@ class _EditarSuplementoScreenState
           cancelar: '');
       return;
     }
+    // Autoauditoría 1.22 #2 (D2-07): el stock tecleado viajaba
+    // sin validar signo: «-5» se guardaba como stock -5 (y un
+    // texto no numérico se convertía en 0 en silencio, borrando
+    // el stock real al editar). Misma doctrina estricta de la
+    // presentación (v1.4.3): campo no vacío no interpretable =
+    // error, nunca traducción silenciosa.
+    final stockTxt = _stock.text.trim();
+    final stockParse = int.tryParse(stockTxt);
+    if ((stockTxt.isNotEmpty && stockParse == null) ||
+        (stockParse != null && stockParse < 0)) {
+      await DialogoApp.confirmar(context,
+          titulo: 'Revisa el stock',
+          mensaje:
+              'El stock debe ser un número entero de 0 en adelante.',
+          aceptar: 'Entendido',
+          cancelar: '');
+      return;
+    }
     // v1.4.3: presentación del envase, con validación ESTRICTA
     // (panel de código 2026-10-21): un campo NO vacío que no se
     // puede interpretar es un ERROR y no se guarda — jamás se
@@ -1535,12 +1553,26 @@ class _EditarSuplementoScreenState
     setState(() => _guardando = true);
     try {
       // v1.3.7 (Fase B §6.2): costo (solo dueño) y umbral de stock.
-      // Autoauditoría 1.22 #2 (clase N-2): un costo no finito se
-      // trata como «sin costo», igual que un texto no numérico.
-      final costoCrudo =
-          double.tryParse(_costo.text.trim().replaceAll(',', '.'));
-      final costo =
-          (costoCrudo != null && costoCrudo.isFinite) ? costoCrudo : null;
+      // Autoauditoría 1.22 #2 (D2-07): el costo sigue la MISMA
+      // doctrina estricta de la presentación (v1.4.3): un texto
+      // NO vacío que no se puede interpretar (o no es finito, o
+      // es negativo) es un ERROR y no se guarda — jamás se
+      // traduce en silencio a «sin costo», porque al editar eso
+      // significaba perder el costo bueno sin darse cuenta.
+      final costoTxt = _costo.text.trim().replaceAll(',', '.');
+      double? costo;
+      if (costoTxt.isNotEmpty) {
+        costo = double.tryParse(costoTxt);
+        if (costo == null || !costo.isFinite || costo < 0) {
+          await DialogoApp.confirmar(context,
+              titulo: 'Revisa el costo',
+              mensaje:
+                  'El costo debe ser un número de 0 en adelante, o el campo vacío.',
+              aceptar: 'Entendido',
+              cancelar: '');
+          return;
+        }
+      }
       final umbral =
           int.tryParse(_umbral.text.trim()) ?? 3;
       final payload = {

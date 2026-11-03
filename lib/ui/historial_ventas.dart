@@ -49,13 +49,43 @@ import 'widgets.dart';
     final cant = (v['cantidad'] as num?)?.toInt() ?? 0;
     final total =
         (v['total'] as num?)?.toDouble() ?? precio * cant;
-    if ((v['moneda'] as String?) == 'USD') {
+    // D2-09: moneda normalizada (LocalDb.monedaDe).
+    if (LocalDb.monedaDe(v) == 'USD') {
       usd += total;
     } else {
       cup += total;
     }
   }
   return (cup: cup, usd: usd);
+}
+
+/// Autoauditoría 1.22 #2 (D2-10): encola la anulación de una
+/// venta UNA sola vez. Dentro de una transacción re-verifica
+/// que no exista ya una op viva `anular_venta_suplemento` para
+/// la misma venta; devuelve false si ya la había (nada escrito).
+Future<bool> encolarAnulacionVenta(int ventaId) async {
+  final db = LocalDb.instance;
+  final conn = await db.db;
+  return conn.transaction((txn) async {
+    final vivas = await txn.query('ops_queue',
+        columns: ['payload'],
+        where: "tipo = 'anular_venta_suplemento' "
+            "AND estado NOT IN ('aplicada', 'rechazada')");
+    for (final o in vivas) {
+      try {
+        final p =
+            jsonDecode(o['payload'] as String) as Map<String, dynamic>;
+        if ((p['venta_id'] as num?)?.toInt() == ventaId) return false;
+      } catch (_) {}
+    }
+    await db.queueOp(
+      opUuid: const Uuid().v4(),
+      tipo: 'anular_venta_suplemento',
+      payload: {'venta_id': ventaId},
+      txn: txn,
+    );
+    return true;
+  });
 }
 
 /// Filtro del historial de ventas (PURO): texto (producto, comprador o
@@ -330,11 +360,20 @@ class _HistorialVentasScreenState
       aceptar: 'Anular venta',
     );
     if (!ok) return;
-    await LocalDb.instance.queueOp(
-      opUuid: const Uuid().v4(),
-      tipo: 'anular_venta_suplemento',
-      payload: {'venta_id': v['id']},
-    );
+    // Autoauditoría 1.22 #2 (D2-10): re-chequeo DENTRO de la
+    // función (antes solo el botón se ocultaba): un doble toque
+    // o una lista sin refrescar encolaba DOS anulaciones de la
+    // misma venta.
+    final encolada =
+        await encolarAnulacionVenta((v['id'] as num).toInt());
+    if (!mounted) return;
+    if (!encolada) {
+      mostrarSnack(context,
+          'Esta venta ya tiene una anulación pendiente de sincronizar',
+          significado: SignificadoChip.alerta);
+      _cargar();
+      return;
+    }
     unawaited(SyncEngine.instance.push());
     if (mounted) {
       mostrarSnack(context, 'Venta anulada (se sincronizará)', significado: SignificadoChip.exito);

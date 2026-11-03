@@ -802,7 +802,13 @@ double totalVentaCup(Map<String, dynamic> v) {
   // idsPendientesEntrega y PagoPendiente. Antes una venta
   // legada sin moneda aparecía entregable pero sumaba 0 al
   // pendiente (asimetría entre la lista y el total).
-  if (((v['moneda'] as String?) ?? 'CUP') != 'CUP') return 0;
+  // Autoauditoría 1.22 #2 (D2-09): la comparación pasa por el
+  // normalizador canónico (LocalDb.monedaDe: trim + mayúsculas,
+  // ausente = CUP). Con la comparación exacta, una fila legada
+  // con moneda 'usd'/'cup' en minúsculas sumaba 0 en AMBOS
+  // totales mientras Historial y Cuentas por cobrar la contaban
+  // como CUP: tres cifras distintas para la misma venta.
+  if (LocalDb.monedaDe(v) != 'CUP') return 0;
   final total = (v['total'] as num?)?.toDouble();
   if (total != null) return total;
   final precio = (v['precio'] as num?)?.toDouble() ?? 0;
@@ -819,9 +825,9 @@ double totalVentaCup(Map<String, dynamic> v) {
 Future<List<Map<String, dynamic>>> ventasSuplementosCup() async {
   final out = <Map<String, dynamic>>[];
   for (final v in await LocalDb.instance.allMirror('ventas_suplementos')) {
-    // Autoauditoría 1.22 #1: moneda nula = CUP (ver totalVentaCup).
-    if (((v['moneda'] as String?) ?? 'CUP') == 'CUP' &&
-        !_esFiadoSinSaldar(v)) {
+    // Autoauditoría 1.22 #1/#2: moneda normalizada (ver
+    // totalVentaCup / D2-09).
+    if (LocalDb.monedaDe(v) == 'CUP' && !_esFiadoSinSaldar(v)) {
       out.add(v);
     }
   }
@@ -838,7 +844,8 @@ bool _esFiadoSinSaldar(Map<String, dynamic> v) {
 /// Monto en USD de una venta de suplemento (0 si es en CUP u otra moneda).
 /// Las ventas en USD se reportan por separado y no entran a los totales CUP.
 double totalVentaUsd(Map<String, dynamic> v) {
-  if ((v['moneda'] as String?) != 'USD') return 0;
+  // D2-09: normalizada (ver totalVentaCup).
+  if (LocalDb.monedaDe(v) != 'USD') return 0;
   final total = (v['total'] as num?)?.toDouble();
   if (total != null) return total;
   final precio = (v['precio'] as num?)?.toDouble() ?? 0;
@@ -851,7 +858,7 @@ double totalVentaUsd(Map<String, dynamic> v) {
 Future<List<Map<String, dynamic>>> ventasSuplementosUsd() async {
   final out = <Map<String, dynamic>>[];
   for (final v in await LocalDb.instance.allMirror('ventas_suplementos')) {
-    if ((v['moneda'] as String?) == 'USD' && !_esFiadoSinSaldar(v)) {
+    if (LocalDb.monedaDe(v) == 'USD' && !_esFiadoSinSaldar(v)) {
       out.add(v);
     }
   }
@@ -1980,6 +1987,12 @@ Future<String> crearLiquidacion({
 }) async {
   if (!AuthService().isOwner) {
     throw Exception('Solo el dueño puede liquidar caja');
+  }
+  // Autoauditoría 1.22 #2 (D2-08): NaN no es < 0 ni supera lo
+  // esperado (comparaciones falsas): sin el chequeo de finito,
+  // una liquidación NaN viajaba en el payload.
+  if (!montoEsperado.isFinite || !montoEntregado.isFinite) {
+    throw Exception('Montos inválidos');
   }
   if (montoEsperado < 0 || montoEntregado < 0) {
     throw Exception('Montos no pueden ser negativos');
@@ -6175,7 +6188,18 @@ Future<String> registrarVentaSuplemento({
 }) async {
   // Validación PRE-transacción (no necesita BD).
   if (cantidad <= 0) throw Exception('Cantidad inválida');
-  if (precioVenta <= 0) throw Exception('Precio de venta inválido');
+  // Autoauditoría 1.22 #2 (D2-08, clase N-2): NaN no es <= 0 y
+  // (NaN * 100).round() revienta; Infinity pasaba como precio.
+  // La API de negocio valida finito aunque la UI ya lo haga.
+  if (!precioVenta.isFinite || precioVenta <= 0) {
+    throw Exception('Precio de venta inválido');
+  }
+  if (!precioOficial.isFinite || precioOficial < 0) {
+    throw Exception('Precio oficial inválido');
+  }
+  if (usdTasa != null && (!usdTasa.isFinite || usdTasa <= 0)) {
+    throw Exception('Tasa USD inválida');
+  }
   if (compradorTipo != 'cliente' && compradorTipo != 'externo') {
     throw Exception('comprador_tipo inválido');
   }

@@ -525,7 +525,8 @@ FilaIngreso? filaIngresoDesdeEspejo(
     case 'ventas_suplementos':
       // Solo CUP: el USD no entra al reporte en CUP (se muestra aparte
       // en la pantalla si hace falta; el total C5 es en CUP).
-      if ((r['moneda'] as String?) == 'USD') return null;
+      // D2-09: moneda normalizada — 'usd' antes entraba como CUP.
+      if (LocalDb.monedaDe(r) == 'USD') return null;
       // 1.15 (Panel A3): una venta fiada no es ingreso hasta saldarse.
       if ((r['es_fiado'] as num?)?.toInt() == 1 &&
           (r['fiado_saldado'] as num?)?.toInt() != 1) return null;
@@ -569,6 +570,23 @@ const kClavesPreciosC6 = [
 /// base. Los precios y períodos viven solo en C6 (Argón ajuste 3).
 const kClavesAjustesH1 = ['metodos_aceptados', 'textos_base'];
 
+/// Autoauditoría 1.22 #2 (D2-01): todo valor numérico de un
+/// cambio de configuración debe ser finito. Un NaN/Infinity que
+/// llegara al sumidero se guardaba en los ajustes locales y
+/// DESPUÉS reventaba el jsonEncode del payload de la op: el
+/// teléfono quedaba cobrando con el precio venenoso y el
+/// servidor (y los demás teléfonos) nunca recibían el cambio.
+/// Pura y probada; guardarConfigGym la invoca antes de tocar
+/// la BD y las pantallas validan además en origen (clase N-2).
+void validarCambiosConfigFinitos(Map<String, dynamic> cambios) {
+  for (final e in cambios.entries) {
+    final v = e.value;
+    if (v is num && !v.isFinite) {
+      throw Exception('Precio inválido: ${e.key}');
+    }
+  }
+}
+
 /// Guarda un mapa de precios/ajustes en la meta local y encola la op
 /// `actualizar_config_gym` para que el cambio baje a los teléfonos de
 /// los entrenadores. Solo el dueño. [cambios] se fusiona con lo
@@ -577,19 +595,29 @@ Future<void> guardarConfigGym(Map<String, dynamic> cambios) async {
   if (!AuthService().isOwner) {
     throw Exception('Solo el dueño puede cambiar la configuración');
   }
+  // Autoauditoría 1.22 #2 (D2-01): validación en el SUMIDERO,
+  // ANTES de escribir nada (ver validarCambiosConfigFinitos).
+  validarCambiosConfigFinitos(cambios);
   final db = LocalDb.instance;
   final actuales = await db.getAjustes();
   final nuevos = {...actuales, ...cambios};
-  await db.setAjustes(nuevos);
-  await db.queueOp(
-    opUuid: const Uuid().v4(),
-    tipo: kTipoOpActualizarConfigGym,
-    payload: {
-      'config': cambios,
-      'fecha_hora_havana': isoHabana(ahoraHabana()),
-      'autor_dueno_id': AuthService().telegramId,
-    },
-  );
+  // Atómico (misma auditoría): ajustes locales + op en UNA
+  // transacción; si el proceso muere entre ambos, no queda ni
+  // precio local sin op ni op sin precio local.
+  final conn = await db.db;
+  await conn.transaction((txn) async {
+    await db.setAjustes(nuevos, executor: txn);
+    await db.queueOp(
+      opUuid: const Uuid().v4(),
+      tipo: kTipoOpActualizarConfigGym,
+      payload: {
+        'config': cambios,
+        'fecha_hora_havana': isoHabana(ahoraHabana()),
+        'autor_dueno_id': AuthService().telegramId,
+      },
+      txn: txn,
+    );
+  });
   // 1.15 (Panel A4): si cambió el precio Plus, publicar el precio
   // público (la pantalla C6 no pasa por _guardarMontos, que es la
   // que hoy dispara el aviso).

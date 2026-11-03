@@ -386,19 +386,28 @@ class _AdminScreenState extends State<AdminScreen> {
       icono: Icons.price_change_rounded,
     );
     if (ok != true || !mounted) return;
-    for (final e in cambios.entries) {
-      await LocalDb.instance.queueOp(
-        opUuid: const Uuid().v4(),
-        tipo: 'ajuste',
-        payload: {'clave': e.key, 'valor': e.value},
-      );
-    }
-    // v1.3.1: actualización optimista del espejo local.
+    // Autoauditoría 1.22 #2 (D2-01): las ops `ajuste` y el
+    // espejo local van en UNA transacción. Antes el bucle
+    // encolaba clave a clave sin transacción: un fallo a mitad
+    // dejaba un subconjunto de precios sincronizado y el espejo
+    // local viejo (o al revés).
     final aj = await LocalDb.instance.getAjustes();
     for (final e in cambios.entries) {
       aj[e.key] = e.value;
     }
-    await LocalDb.instance.setAjustes(aj);
+    final conn = await LocalDb.instance.db;
+    await conn.transaction((txn) async {
+      for (final e in cambios.entries) {
+        await LocalDb.instance.queueOp(
+          opUuid: const Uuid().v4(),
+          tipo: 'ajuste',
+          payload: {'clave': e.key, 'valor': e.value},
+          txn: txn,
+        );
+      }
+      // v1.3.1: actualización optimista del espejo local.
+      await LocalDb.instance.setAjustes(aj, executor: txn);
+    });
     if (!mounted) return;
     mostrarSnack(context, 'Precios guardados (se sincronizarán)', significado: SignificadoChip.exito);
     SyncEngine.instance.push();

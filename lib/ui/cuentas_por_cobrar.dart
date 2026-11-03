@@ -34,7 +34,9 @@ import 'widgets.dart';
     final cant = (v['cantidad'] as num?)?.toInt() ?? 0;
     final precio = (v['precio'] as num?)?.toDouble() ?? 0;
     final total = cant * precio;
-    if ((v['moneda'] as String?) == 'USD') {
+    // D2-09: moneda normalizada (LocalDb.monedaDe) — 'usd' en
+    // minúsculas antes caía en el cubo CUP.
+    if (LocalDb.monedaDe(v) == 'USD') {
       usd += total;
     } else {
       cup += total;
@@ -70,6 +72,54 @@ Map<String, dynamic> payloadSaldarFiado({
       'monto': monto,
       'moneda': moneda,
     };
+
+/// Autoauditoría 1.22 #2 (D2-03): salda un fiado de forma
+/// atómica y sin duplicar. Dentro de UNA transacción:
+/// (1) re-verifica que NO exista ya una op viva
+/// `saldar_fiado_suplemento` para la misma venta (la lista
+/// filtra al cargar, pero entre la carga y el toque el espejo
+/// pudo refrescarse o perderse la marca optimista: un doble
+/// toque encolaba DOS cobros del mismo fiado y el segundo se
+/// aplicaba contra una venta ya saldada); (2) encola la op;
+/// (3) marca el espejo. Devuelve false si ya había un cobro
+/// pendiente (nada escrito).
+Future<bool> encolarSaldarFiado({
+  required int ventaId,
+  required String fecha,
+  required String metodo,
+  required double monto,
+  required String moneda,
+}) async {
+  final db = LocalDb.instance;
+  final conn = await db.db;
+  return conn.transaction((txn) async {
+    final vivas = await txn.query('ops_queue',
+        columns: ['payload'],
+        where: "tipo = 'saldar_fiado_suplemento' "
+            "AND estado NOT IN ('aplicada', 'rechazada')");
+    for (final o in vivas) {
+      try {
+        final p =
+            jsonDecode(o['payload'] as String) as Map<String, dynamic>;
+        if ((p['venta_id'] as num?)?.toInt() == ventaId) return false;
+      } catch (_) {}
+    }
+    await db.queueOp(
+      opUuid: const Uuid().v4(),
+      tipo: 'saldar_fiado_suplemento',
+      payload: payloadSaldarFiado(
+        ventaId: ventaId,
+        fecha: fecha,
+        metodo: metodo,
+        monto: monto,
+        moneda: moneda,
+      ),
+      txn: txn,
+    );
+    await db.marcarFiadoSaldado(ventaId, fecha, txn: txn);
+    return true;
+  });
+}
 
 class _CuentasPorCobrarScreenState
     extends State<CuentasPorCobrarScreen> {
@@ -238,19 +288,24 @@ class _CuentasPorCobrarScreenState
     );
     if (ok != true) return;
     final fechaCobro = hoyHabanaIso();
-    await LocalDb.instance.queueOp(
-      opUuid: const Uuid().v4(),
-      tipo: 'saldar_fiado_suplemento',
-      payload: payloadSaldarFiado(
-        ventaId: ventaId,
-        fecha: fechaCobro,
-        metodo: metodo,
-        monto: total,
-        moneda: moneda,
-      ),
+    // D2-03: op + marca optimista en una transacción y con
+    // re-chequeo de duplicado dentro (ver encolarSaldarFiado).
+    final encolado = await encolarSaldarFiado(
+      ventaId: ventaId,
+      fecha: fechaCobro,
+      metodo: metodo,
+      monto: total,
+      moneda: moneda,
     );
-    // Optimista: actualiza el espejo local (el pull lo confirma).
-    await LocalDb.instance.marcarFiadoSaldado(ventaId, fechaCobro);
+    if (!encolado) {
+      if (mounted) {
+        mostrarSnack(context,
+            'Este fiado ya tiene un cobro pendiente de sincronizar',
+            significado: SignificadoChip.alerta);
+        _cargar();
+      }
+      return;
+    }
     if (mounted) {
       setState(() {
         _fiados.remove(v);

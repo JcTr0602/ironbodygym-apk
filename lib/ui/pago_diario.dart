@@ -398,12 +398,21 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
       );
       if (ok != true) return;
       // v1.3.1: borrado optimista local.
-      await LocalDb.instance.deleteMirror('pagos_diarios', id);
-      await LocalDb.instance.queueOp(
-        opUuid: const Uuid().v4(),
-        tipo: 'anular_pago_diario',
-        payload: {'pago_diario_id': id},
-      );
+      // Autoauditoría 1.22 #2 (D2-05): borrado del espejo + op
+      // en UNA transacción (antes dos awaits sueltos: un cierre
+      // entre ambos dejaba el registro borrado localmente sin
+      // que el servidor se enterara jamás).
+      final connDel = await LocalDb.instance.db;
+      await connDel.transaction((txn) async {
+        await LocalDb.instance
+            .deleteMirror('pagos_diarios', id, txn: txn);
+        await LocalDb.instance.queueOp(
+          opUuid: const Uuid().v4(),
+          tipo: 'anular_pago_diario',
+          payload: {'pago_diario_id': id},
+          txn: txn,
+        );
+      });
       _cargarHoy();
       SyncEngine.instance.push();
       if (!mounted) return;
@@ -425,38 +434,53 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
     // entre el registro y la edición, editar solo la cantidad
     // revaluaba cobros viejos a precio nuevo en espejo y
     // servidor.
+    // Autoauditoría 1.22 #2 (D2-05): si la fila YA NO está en
+    // el espejo (anulada en otro teléfono, pull que la borró),
+    // NO se edita: antes se caía al precio VIGENTE (_precio) y
+    // se encolaba una edición con total recalculado a precio
+    // nuevo contra un registro que este teléfono no tiene.
     final db = await LocalDb.instance.db;
     final rows = await db.query('pagos_diarios',
         columns: ['data'], where: 'id = ?', whereArgs: [id], limit: 1);
-    var precioUnitario = _precio;
-    if (rows.isNotEmpty) {
-      final previa = Map<String, dynamic>.from(
-          jsonDecode(rows.first['data'] as String) as Map);
-      final cantVieja = (previa['cantidad'] as num?)?.toDouble() ?? 0;
-      final totalViejo = (previa['total'] as num?)?.toDouble() ?? 0;
-      if (cantVieja > 0 && totalViejo > 0) {
-        precioUnitario = totalViejo / cantVieja;
-      }
-      final data = previa;
-      data['cantidad'] = cantidad;
-      data['total'] = cantidad * precioUnitario;
-      data['nota'] = notaTexto;
-      await db.update('pagos_diarios', {'data': jsonEncode(data)},
-          where: 'id = ?', whereArgs: [id]);
+    if (rows.isEmpty) {
+      if (!mounted) return;
+      mostrarSnack(context,
+          'Ese registro ya no está en este teléfono; no se editó',
+          significado: SignificadoChip.alerta);
+      _cargarHoy();
+      return;
     }
-    await LocalDb.instance.queueOp(
-      opUuid: const Uuid().v4(),
-      tipo: 'editar_pago_diario',
-      payload: {
-        'pago_diario_id': id,
-        'cantidad': cantidad,
-        'nota': notaTexto,
-        // Argón lote 4 MEDIO: el espejo local ya actualizaba total
-        // pero el payload no lo llevaba; si la tarifa cambió o el
-        // servidor no recalcula igual, espejo y servidor divergen.
-        'total': cantidad * precioUnitario,
-      },
-    );
+    final previa = Map<String, dynamic>.from(
+        jsonDecode(rows.first['data'] as String) as Map);
+    final cantVieja = (previa['cantidad'] as num?)?.toDouble() ?? 0;
+    final totalViejo = (previa['total'] as num?)?.toDouble() ?? 0;
+    var precioUnitario = _precio;
+    if (cantVieja > 0 && totalViejo > 0) {
+      precioUnitario = totalViejo / cantVieja;
+    }
+    final data = previa;
+    data['cantidad'] = cantidad;
+    data['total'] = cantidad * precioUnitario;
+    data['nota'] = notaTexto;
+    // Espejo + op en UNA transacción (antes dos awaits sueltos).
+    await db.transaction((txn) async {
+      await txn.update('pagos_diarios', {'data': jsonEncode(data)},
+          where: 'id = ?', whereArgs: [id]);
+      await LocalDb.instance.queueOp(
+        opUuid: const Uuid().v4(),
+        tipo: 'editar_pago_diario',
+        payload: {
+          'pago_diario_id': id,
+          'cantidad': cantidad,
+          'nota': notaTexto,
+          // Argón lote 4 MEDIO: el espejo local ya actualizaba total
+          // pero el payload no lo llevaba; si la tarifa cambió o el
+          // servidor no recalcula igual, espejo y servidor divergen.
+          'total': cantidad * precioUnitario,
+        },
+        txn: txn,
+      );
+    });
     _cargarHoy();
     SyncEngine.instance.push();
     if (!mounted) return;

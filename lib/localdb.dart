@@ -3872,8 +3872,9 @@ class LocalDb {
   /// v1.3.7 (Fase B §6.2): marca un fiado como saldado en el espejo local
   /// (optimista; el pull lo confirma). Actualiza es_fiado=0 y la fecha
   /// a la del cobro para que sume al "Total cobrado" del día correcto.
-  Future<void> marcarFiadoSaldado(int ventaId, String fechaCobro) async {
-    final d = await db;
+  Future<void> marcarFiadoSaldado(int ventaId, String fechaCobro,
+      {DatabaseExecutor? txn}) async {
+    final d = txn ?? await db;
     final rows = await d.query('ventas_suplementos',
         where: 'id=?', whereArgs: [ventaId], limit: 1);
     if (rows.isEmpty) return;
@@ -6578,8 +6579,9 @@ class LocalDb {
     return jsonDecode(raw) as Map<String, dynamic>;
   }
 
-  Future<void> setAjustes(Map<String, dynamic> a) =>
-      setMeta('ajustes', jsonEncode(a));
+  Future<void> setAjustes(Map<String, dynamic> a,
+          {DatabaseExecutor? executor}) =>
+      setMeta('ajustes', jsonEncode(a), executor: executor);
 
   // -- Bloque 2 RESTO (v1.11.0, G2 + C1) ------------------------------
   // Recordatorios: CRUD local + log anti-duplicado. La sincronización
