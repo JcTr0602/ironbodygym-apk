@@ -88,6 +88,14 @@ class _PanelPermisosState extends State<PanelPermisos> {
   }
 
   Future<void> _cargar() async {
+    // Autoauditoría 1.22 #2 (P-1): la guarda de dueño también
+    // en el MÉTODO, no solo en build (defensa en profundidad:
+    // el estándar de la casa en admin/control_acceso/ficha es
+    // guardar en ambos sitios).
+    if (!AuthService().isOwner) {
+      setState(() => _cargando = false);
+      return;
+    }
     setState(() => _cargando = true);
     try {
       // Autoauditoría 1.22 #2: lectura con timeout (12 s): sin
@@ -142,6 +150,8 @@ class _PanelPermisosState extends State<PanelPermisos> {
   /// relectura falló (la RPC ya confirmó el guardado: el llamador
   /// conserva el estado optimista y avisa «sin verificar»).
   Future<bool> _releerEntrenador(EntrenadorPermiso ent) async {
+    // P-1: guarda de método (ver _cargar).
+    if (!AuthService().isOwner) return false;
     try {
       // Autoauditoría 1.22 #2: la RELECTURA con timeout (12 s):
       // es una lectura y su llamador ya sabe tratar el false
@@ -178,6 +188,8 @@ class _PanelPermisosState extends State<PanelPermisos> {
   /// fila real del servidor.
   Future<void> _togglePermiso(
       EntrenadorPermiso ent, String key, bool valor) {
+    // P-1: guarda de método (ver _cargar).
+    if (!AuthService().isOwner) return Future.value();
     // Serializado por entrenador (panel de código): el estado
     // anterior se lee al ejecutar la operación, no al tocar.
     return _enSerie(ent.email, () async {
@@ -215,6 +227,8 @@ class _PanelPermisosState extends State<PanelPermisos> {
   }
 
   Future<void> _toggleActivo(EntrenadorPermiso ent) async {
+    // P-1: guarda de método (ver _cargar).
+    if (!AuthService().isOwner) return;
     if (ent.activo) {
       // Suspender requiere confirmación (Argón)
       final confirmar = await showDialog<bool>(

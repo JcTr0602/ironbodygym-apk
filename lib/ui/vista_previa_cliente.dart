@@ -10,6 +10,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../auth.dart';
 import '../config.dart';
 import 'diseno.dart';
 import 'horario_gym.dart';
@@ -182,6 +183,19 @@ class _VistaPreviaClienteScreenState
   }
 
   Future<void> _cargar() async {
+    // Autoauditoría 1.22 #2 (P-2): la pantalla se declara
+    // «Solo dueño» en su cabecera pero NO tenía guarda alguna:
+    // el botón de la ficha se muestra a todos y cualquier
+    // sesión que llegara aquí invocaba el RPC de vista previa.
+    // Guarda fail-closed en el método (patrón ficha_acceso).
+    if (!AuthService().isOwner) {
+      setState(() {
+        _error = 'Solo el dueño puede ver la vista previa '
+            'de la app del cliente.';
+        _cargando = false;
+      });
+      return;
+    }
     setState(() {
       _cargando = true;
       _error = null;

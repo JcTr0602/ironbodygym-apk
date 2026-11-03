@@ -15,6 +15,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../acceso_app_cache.dart';
+import '../auth.dart';
 import '../tiempo.dart';
 import 'componentes.dart';
 import 'diseno.dart';
@@ -23,6 +24,18 @@ import 'modal_pin_acceso.dart';
 void _snack(BuildContext ctx, String mensaje) {
   if (!ctx.mounted) return;
   mostrarSnack(ctx, mensaje);
+}
+
+/// Autoauditoría 1.22 #2 (P-3): guarda de dueño COMPARTIDA.
+/// Todas las acciones de este archivo son operaciones del
+/// dueño; los llamadores ya filtran la UI, pero la función
+/// compartida es el hogar natural de la guarda (defensa en
+/// profundidad, fail-closed): si una vía futura la invoca sin
+/// filtrar, no ejecuta la RPC.
+bool _soloDueno(BuildContext ctx) {
+  if (AuthService().isOwner) return true;
+  _snackError(ctx, 'Solo el dueño puede hacer esto');
+  return false;
 }
 
 void _snackError(BuildContext ctx, Object e) {
@@ -76,6 +89,7 @@ Future<void> accionSimpleAcceso(
   String titulo = '',
   String texto = '',
 }) async {
+  if (!_soloDueno(ctx)) return;
   if (confirmarAntes) {
     if (!await confirmarAccionAcceso(ctx, titulo, texto,
         boton: 'Sí, continuar')) {
@@ -107,6 +121,7 @@ Future<void> resetearPinAcceso(
   required Future<void> Function() alTerminar,
   String? titulo,
 }) async {
+  if (!_soloDueno(ctx)) return;
   final ok = await confirmarAccionAcceso(
     ctx,
     titulo ??
@@ -150,6 +165,7 @@ Future<void> bloquearAcceso(
   required int clienteId,
   required Future<void> Function() alTerminar,
 }) async {
+  if (!_soloDueno(ctx)) return;
   if (!ctx.mounted) return;
   final ctrlMotivo = TextEditingController();
   var dias = 7; // -1 = indefinido
@@ -239,6 +255,7 @@ Future<void> cambiarTelefonoAcceso(
   required String telefonoActual,
   required Future<void> Function() alTerminar,
 }) async {
+  if (!_soloDueno(ctx)) return;
   if (!ctx.mounted) return;
   final ctrl = TextEditingController(text: telefonoActual);
   final ok = await showDialog<bool>(

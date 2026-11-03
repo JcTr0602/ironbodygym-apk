@@ -57,8 +57,13 @@ class Medicion {
       musloCm: ((j['muslo_cm'] ?? j['pierna_cm']) as num?)?.toDouble(),
       notas: j['notas']?.toString(),
       registradoPor: '${j['registrado_por'] ?? ''}',
+      // Autoauditoría 1.22 #2 (D-1): el respaldo NO puede ser
+      // «ahora»: una medición con created_at corrupto se volvía
+      // la más reciente (orden descendente) y, peor, EDITABLE
+      // dentro de la ventana de 24 h. Respaldo neutro (época):
+      // queda la última y fuera de la ventana de edición.
       createdAt: DateTime.tryParse('${j['created_at'] ?? ''}') ??
-          DateTime.now(),
+          DateTime.fromMillisecondsSinceEpoch(0),
     );
   }
 }

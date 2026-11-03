@@ -101,6 +101,17 @@ class _EditorPlanNutricionalState
   }
 
   Future<void> _guardar() async {
+    // Autoauditoría 1.22 #2 (P-3): revalidar el permiso EN el
+    // guardado, no solo en el botón que lo invoca (puedeEditar
+    // se calculó al pintar; la sesión pudo cambiar con la
+    // pantalla abierta). Fail-closed.
+    if (!(AuthService().isOwner ||
+        PermisosEntrenador().canEditNutrition)) {
+      mostrarSnack(context,
+          'No tienes permiso para editar planes nutricionales',
+          significado: SignificadoChip.error);
+      return;
+    }
     final texto = _ctrl.text.trim();
     if (texto.isEmpty) {
       mostrarSnack(context, 'El plan no puede estar vacío', significado: SignificadoChip.alerta);
