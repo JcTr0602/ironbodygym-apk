@@ -52,9 +52,6 @@ class _InscribirScreenState extends State<InscribirScreen> {
   String _metodoPago = 'efectivo';
   File? _foto;
   bool _guardando = false;
-  // Pasada 2 de Argón (1.20): si la pantalla se cierra sin
-  // completar la inscripción, la foto tomada queda huérfana.
-  bool _inscripcionCompletada = false;
   bool _esMenor = false;
   // v1.5.0 (Bloque G): aviso de fecha de carnet imposible (no bloquea).
   bool _carnetFechaInvalida = false;
@@ -143,10 +140,17 @@ class _InscribirScreenState extends State<InscribirScreen> {
     _monto.dispose();
     // Pasada 2 de Argón (1.20): foto tomada y nunca entregada
     // (se canceló el diálogo o se salió con Atrás) → borrar el
-    // archivo. Si la inscripción se completó, la cola de fotos
-    // ya copió sus variantes y el original tampoco se usa.
+    // archivo.
+    // Argón Estadísticas (extra): el original TAMBIÉN se
+    // borra cuando la inscripción SÍ se completó — verificado
+    // que nadie lo lee después: encolarFoto ya copió sus
+    // variantes a la cola de fotos (documents/fotos/) antes
+    // de que _guardarAhora marcara completada, y el foto_path
+    // de ops_queue no tiene lectores en la app. Sin este
+    // borrado, cada inscripción con foto dejaba el original
+    // del picker ocupando espacio para siempre.
     final foto = _foto;
-    if (foto != null && !_inscripcionCompletada) {
+    if (foto != null) {
       // Borrado en segundo plano: dispose no puede esperar.
       foto.delete().catchError((_) => foto);
     }
@@ -450,7 +454,6 @@ class _InscribirScreenState extends State<InscribirScreen> {
           );
         }
         if (!mounted) return;
-        _inscripcionCompletada = true;
         mostrarSnack(context, 'Cuenta a la Casa guardada (se sincronizará)', significado: SignificadoChip.exito);
         Navigator.of(context).pop();
         SyncEngine.instance.push();
@@ -558,7 +561,6 @@ class _InscribirScreenState extends State<InscribirScreen> {
         );
       }
       if (!mounted) return;
-      _inscripcionCompletada = true;
       mostrarSnack(context, 'Guardado (se sincronizará)', significado: SignificadoChip.exito);
       Navigator.of(context).pop();
       SyncEngine.instance.push();

@@ -818,6 +818,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
             ],
             _filaDetalle('Utilidad neta real', _mes - _gastosMes,
                 negrita: true),
+            // Argón Estadísticas #4: con la fila de nómina
+            // proyectada justo encima, la «utilidad» parecía
+            // ignorarla. Se añade la cifra tras nómina para
+            // que el dueño no la calcule de cabeza.
+            if (_nominaProy != null)
+              _filaDetalle('Utilidad estimada tras nómina',
+                  _mes - _gastosMes - _nominaProy!),
             // Q3 (Argón): la proyección es «Ritmo de cierre
             // estimado» y NO se muestra los días 1–2 del mes: con
             // 1 día de ingreso, actual/1*díasMes proyecta 30× el
@@ -937,8 +944,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   children: [
                     if (!es30 || monto > 0)
                       Text(
+                        // Argón Estadísticas #8: mismo formato
+                        // que el resto de montos de la app.
                         monto > 0
-                            ? monto.toStringAsFixed(0)
+                            ? fmtMonto(monto)
                             : '',
                         style: AppTexto.metadato.copyWith(fontWeight: FontWeight.w700),
                       ),
@@ -1257,9 +1266,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
   Widget build(BuildContext context) {
     // Dashboard por rol (v1.2): el entrenador ve solo sus propios números.
     if (!_esDueno) return _buildEntrenador();
-    final alDia = _activos - _morosos;
+    // Argón Estadísticas #5: acotados siempre. Hoy morosos()
+    // sale de los propios _activos (no puede excederlos),
+    // pero si una definición cambia, un pct fuera de [0,1]
+    // revienta el LinearProgressIndicator y un alDia
+    // negativo se vería como un dato, no como un error.
+    final alDia = (_activos - _morosos).clamp(0, _activos);
     final pctAlDia =
-        _activos > 0 ? alDia / _activos : 0.0;
+        _activos > 0 ? (alDia / _activos).clamp(0.0, 1.0) : 0.0;
     return Scaffold(
       appBar: AppBar(
         title: const Text('Dashboard'),

@@ -62,17 +62,39 @@ class _ServiciosEstadisticasScreenState
     return fecha.substring(0, 7) == hoyHabanaIso().substring(0, 7);
   }
 
-  Future<void> _cargar() async {
-    final ventas =
-        await LocalDb.instance.allMirror('servicio_ventas');
-    final salidas =
-        await LocalDb.instance.allMirror('servicio_salidas');
-    final botes = await LocalDb.instance.allMirror('servicio_botes');
-    final lotes = await LocalDb.instance.allMirror('servicio_lotes');
-    final movsAgua = await LocalDb.instance
-        .allMirror('servicio_agua_movimientos');
-    final suplementos =
-        await LocalDb.instance.allMirror('suplementos');
+  // Argón Estadísticas #3: espejos crudos cacheados en el
+  // State. Antes, cada apertura y cada cambio del selector
+  // «Este mes/Todo» releía las 7 tablas completas de SQLite
+  // solo para refiltrar en memoria. Ahora la BD se lee en
+  // initState y con el botón de refrescar; cambiar el
+  // período recalcula sobre lo ya cargado (releer: false).
+  List<Map<String, dynamic>>? _eVentas;
+  List<Map<String, dynamic>>? _eSalidas;
+  List<Map<String, dynamic>>? _eBotes;
+  List<Map<String, dynamic>>? _eLotes;
+  List<Map<String, dynamic>>? _eMovsAgua;
+  List<Map<String, dynamic>>? _eSuplementos;
+  List<Map<String, dynamic>>? _ePomos;
+
+  Future<void> _cargar({bool releer = true}) async {
+    if (releer || _eVentas == null) {
+      _eVentas = await LocalDb.instance.allMirror('servicio_ventas');
+      _eSalidas =
+          await LocalDb.instance.allMirror('servicio_salidas');
+      _eBotes = await LocalDb.instance.allMirror('servicio_botes');
+      _eLotes = await LocalDb.instance.allMirror('servicio_lotes');
+      _eMovsAgua = await LocalDb.instance
+          .allMirror('servicio_agua_movimientos');
+      _eSuplementos =
+          await LocalDb.instance.allMirror('suplementos');
+      _ePomos = await LocalDb.instance.allMirror('servicio_pomos');
+    }
+    final ventas = _eVentas!;
+    final salidas = _eSalidas!;
+    final botes = _eBotes!;
+    final lotes = _eLotes!;
+    final movsAgua = _eMovsAgua!;
+    final suplementos = _eSuplementos!;
     final nombreSup = <int, String>{
       for (final s in suplementos)
         if ((s['id'] as num?) != null)
@@ -89,8 +111,7 @@ class _ServiciosEstadisticasScreenState
     // suplemento -> bote: el abierto, y si hay varios, el más
     // reciente (id mayor). Sin pomo_id o sin bote resoluble por
     // pomo, se cae a lote_id (ventas viejas).
-    final pomosEspejo =
-        await LocalDb.instance.allMirror('servicio_pomos');
+    final pomosEspejo = _ePomos!;
     final pomosActivos = await pomosActivosLocal();
     final suplementoDePomo = <int, int>{
       for (final p in pomosEspejo)
@@ -125,9 +146,29 @@ class _ServiciosEstadisticasScreenState
         if (botePorSuplemento.containsKey(e.value))
           e.key: botePorSuplemento[e.value]!,
     };
+    // Argón Estadísticas #2: la resolución por pomo pasa por
+    // la VENTANA del bote (mismo criterio que calcular1B): el
+    // mapa estático boteDePomo queda solo como respaldo para
+    // filas sin fecha o botes sin abierto_en utilizable.
+    final botesPorSuplemento = <int, List<Map<String, dynamic>>>{};
+    for (final b in botes) {
+      final sup = (b['suplemento_id'] as num?)?.toInt();
+      if (sup == null) continue;
+      (botesPorSuplemento[sup] ??= []).add(b);
+    }
+
     int? boteDe(Map<String, dynamic> r) {
       final pomoId = (r['pomo_id'] as num?)?.toInt();
       if (pomoId != null) {
+        final sup = suplementoDePomo[pomoId];
+        if (sup != null) {
+          final porVentana = botePorVentana(
+            botesPorSuplemento[sup] ?? const [],
+            r['fecha'] as String?,
+            respaldo: boteDePomo[pomoId],
+          );
+          if (porVentana != null) return porVentana;
+        }
         final porPomo = boteDePomo[pomoId];
         if (porPomo != null) return porPomo;
       }
@@ -201,12 +242,19 @@ class _ServiciosEstadisticasScreenState
     }
 
     // ---- 1B: inversión y margen (puro, testeable: calcular1B) ----
+    // Argón Estadísticas #1/#2: en modo 'mes' la inversión se
+    // acota al mes (mesInversion) y el bote de cada venta se
+    // resuelve por ventana (suplementoDePomo), no por el bote
+    // abierto actual.
     final agg1B = calcular1B(
       ventas: ventasP,
       salidas: salidasP,
       botes: botes,
       boteDeLote: boteDeLote,
       boteDePomo: boteDePomo,
+      suplementoDePomo: suplementoDePomo,
+      mesInversion:
+          _periodo == 'mes' ? hoyHabanaIso().substring(0, 7) : null,
       movsAgua: movsAgua,
     );
     final ingBote = agg1B.ingBote;
@@ -217,9 +265,18 @@ class _ServiciosEstadisticasScreenState
     // Argón stats MEDIO 2 (autonomía): en modo 'todo', días desde la
     // primera venta, no 30 fijos (con 30 fijos, dosisDia se infla y
     // la autonomía se subestima desde el segundo mes).
+    // Argón Estadísticas #6 (segunda parte): la «primera venta»
+    // es la primera DOSIS COMERCIAL — un consumo de la Casa o
+    // un agua suelta no abren el contador (el numerador nDosis
+    // ya los excluía; el denominador no).
+    final ventasComerciales = ventasP
+        .where((v) =>
+            '${v['tipo']}'.startsWith('dosis') &&
+            (v['casa'] as num?)?.toInt() != 1)
+        .toList();
     final dias = _periodo == 'mes'
         ? ahoraHabana().day
-        : diasDesdePrimeraVenta(ventasP, ahoraHabana());
+        : diasDesdePrimeraVenta(ventasComerciales, ahoraHabana());
     // Argón pasada 1 #1: el stock vivo son pomos (v1.15), no
     // lotes: saldoTotal suma saldo_local de pomosActivosLocal().
     var saldoTotal = 0;
@@ -229,6 +286,36 @@ class _ServiciosEstadisticasScreenState
     final dosisDia = dias > 0 ? nDosis / dias : 0.0;
     final autonomia =
         dosisDia > 0 ? (saldoTotal / dosisDia).floor() : null;
+    // Argón Estadísticas #6: autonomía del pomo que ANTES se
+    // agota. La global mezcla pomos lentos y rápidos (85 dosis
+    // a ritmo global pueden esconder un pomo que se acaba
+    // mañana). Por pomo: ritmo = sus dosis comerciales del
+    // período / días; autonomía = su saldo / su ritmo. Solo
+    // pomos con ritmo > 0 (sin ventas no hay señal).
+    int? autonomiaPomoMin;
+    String? autonomiaPomoNombre;
+    if (dias > 0) {
+      final dosisPorPomo = <int, int>{};
+      for (final v in ventasComerciales) {
+        final pomoId = (v['pomo_id'] as num?)?.toInt();
+        if (pomoId == null) continue;
+        dosisPorPomo[pomoId] = (dosisPorPomo[pomoId] ?? 0) +
+            ((v['cantidad'] as num?)?.toInt() ?? 0);
+      }
+      for (final p in pomosActivos) {
+        final pomoId = (p['id'] as num?)?.toInt();
+        final vendidas = pomoId == null ? 0 : (dosisPorPomo[pomoId] ?? 0);
+        if (pomoId == null || vendidas <= 0) continue;
+        final ritmo = vendidas / dias;
+        final saldo = (p['saldo_local'] as num?)?.toInt() ?? 0;
+        final aut = (saldo / ritmo).floor();
+        if (autonomiaPomoMin == null || aut < autonomiaPomoMin) {
+          autonomiaPomoMin = aut;
+          final sup = (p['suplemento_id'] as num?)?.toInt();
+          autonomiaPomoNombre = nombreSup[sup] ?? 'Pomo #$pomoId';
+        }
+      }
+    }
 
     // v1.13.0 (Bloque 4, ajuste 6): indicadores por bote con guarda
     // NaN (bote nuevo o solo Casa/mermas → «Pendiente de primeras
@@ -310,6 +397,8 @@ class _ServiciosEstadisticasScreenState
         ...agg1B.b,
         'autonomia_dias': autonomia,
         'saldo_total': saldoTotal,
+        'autonomia_pomo_min': autonomiaPomoMin,
+        'autonomia_pomo_nombre': autonomiaPomoNombre,
       };
       // 12/25: el simulador reutiliza estas listas.
       _botes = botes;
@@ -397,7 +486,10 @@ class _ServiciosEstadisticasScreenState
                         _periodo = s.first;
                         _cargando = true;
                       });
-                      _cargar();
+                      // Argón Estadísticas #3: cambiar el
+                      // período NO relee la BD; recalcula
+                      // sobre los espejos cacheados.
+                      _cargar(releer: false);
                     },
                   ),
                   const SizedBox(height: AppEspacio.md),
@@ -552,22 +644,28 @@ class _ServiciosEstadisticasScreenState
           '${e.value['nombre']}',
           '${e.value['servidas']}',
           '${e.value['merma']}',
+          // Argón Estadísticas #7: celdas numéricas LIMPIAS
+          // (sin « %» ni « dosis» pegados) para que Excel las
+          // sume; la unidad va en la cabecera.
           ind == null || ind.pendiente
               ? 'Pendiente de primeras ventas'
-              : '${ind.margenPct?.toStringAsFixed(1)} %',
+              : '${ind.margenPct?.toStringAsFixed(1)}',
           ind == null || ind.pendiente || ind.puntoEquilibrioDosis == null
               ? 'Pendiente de primeras ventas'
-              : '${ind.puntoEquilibrioDosis!.toStringAsFixed(0)} dosis',
+              : '${ind.puntoEquilibrioDosis!.toStringAsFixed(0)}',
         ]);
       }
       final csv = csvEstadisticas(
         ['Bote', 'Dosis servidas', 'Mermas', 'Margen %',
-         'Punto de equilibrio'],
+         'Punto de equilibrio (dosis)'],
         filas,
       );
       final dir = await getTemporaryDirectory();
+      // Argón Estadísticas #7: el nombre lleva el período —
+      // un CSV de «Todo» y uno de «Este mes» ya no se
+      // confunden en la carpeta de descargas.
       final f = await File(
-              '${dir.path}/estadisticas_servicios_${hoyHabanaIso()}.csv')
+              '${dir.path}/estadisticas_servicios_${_periodo}_${hoyHabanaIso()}.csv')
           .writeAsString(csv);
       await Share.shareXFiles([XFile(f.path)],
           text: 'Estadísticas de Servicios Iron Body Gym');
@@ -736,9 +834,19 @@ class _ServiciosEstadisticasScreenState
           Text('1B · Inversión y margen',
               style: AppTexto.titulo),
           const Divider(height: 20),
-          _fila('Inversión en botes (acumulada)',
+          // Argón Estadísticas #1: en «Este mes» la inversión
+          // ya es SOLO del mes (calcular1B filtra por
+          // abierto_en/fecha); la etiqueta lo dice tal cual.
+          // En «Todo» sigue siendo la acumulada histórica.
+          _fila(
+              _periodo == 'mes'
+                  ? 'Inversión en botes (este mes)'
+                  : 'Inversión en botes (acumulada)',
               cup('inversion_botes')),
-          _fila('Inversión en agua (acumulada)',
+          _fila(
+              _periodo == 'mes'
+                  ? 'Inversión en agua (este mes)'
+                  : 'Inversión en agua (acumulada)',
               cup('inversion_agua')),
           const Divider(height: 20),
           _fila('Ingresos dosis sin agua', cup('ing_sin')),
@@ -763,6 +871,14 @@ class _ServiciosEstadisticasScreenState
               b['autonomia_dias'] == null
                   ? '—'
                   : '${b['autonomia_dias']} días (${b['saldo_total']} dosis)'),
+          // Argón Estadísticas #6: la autonomía global puede
+          // esconder el pomo que se agota primero; si se pudo
+          // calcular su ritmo, se muestra aparte.
+          if (b['autonomia_pomo_min'] != null)
+            _fila(
+                'Pomo que antes se agota',
+                '${b['autonomia_pomo_nombre']}: '
+                '${b['autonomia_pomo_min']} días'),
         ],
       ),
     );

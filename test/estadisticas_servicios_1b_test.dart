@@ -354,4 +354,180 @@ void main() {
         260.0);
     expect(ultimaEntradaAguaCosto(const []), 0);
   });
+
+  // ─── Argón Estadísticas 1.21 (#1, #2, #8) ───────────────────
+  // #2: dos botes del mismo suplemento: la venta por pomo se
+  // atribuye al bote cuya ventana [abierto_en, cerrado_en)
+  // contiene su fecha, NO al bote abierto actual.
+  group('Argón Estadísticas #2: atribución por ventana de bote', () {
+    const botesDos = [
+      {
+        'id': 11,
+        'suplemento_id': 5,
+        'dosis_rendimiento': 60,
+        'costo_bote': 30000.0,
+        'abierto_en': '2026-09-01',
+        'cerrado_en': '2026-10-15',
+        'estado': 'cerrado',
+      },
+      {
+        'id': 12,
+        'suplemento_id': 5,
+        'dosis_rendimiento': 60,
+        'costo_bote': 20000.0,
+        'abierto_en': '2026-10-15',
+        'cerrado_en': null,
+        'estado': 'abierto',
+      },
+    ];
+
+    Map<String, dynamic> ventaPomo(String fecha, int cantidad) => {
+          'id': 1,
+          'pomo_id': 7,
+          'lote_id': null,
+          'tipo': 'dosis_sin_agua',
+          'cantidad': cantidad,
+          'precio_unitario': 600.0,
+          'costo_dosis_snapshot': null,
+          'costo_agua_snapshot': null,
+          'casa': 0,
+          'comision_unitaria': 50.0,
+          'fecha': fecha,
+        };
+
+    test('la venta de octubre va al bote cerrado; la de noviembre, al abierto',
+        () {
+      final r = calcular1B(
+        ventas: [ventaPomo('2026-10-10', 10), ventaPomo('2026-11-02', 3)],
+        salidas: const [],
+        botes: botesDos,
+        boteDeLote: const {},
+        // El respaldo estático apunta al bote NUEVO (el
+        // comportamiento viejo): la ventana debe corregirlo.
+        boteDePomo: const {7: 12},
+        suplementoDePomo: const {7: 5},
+        movsAgua: const [],
+      );
+      expect(r.dosisBote[11], 10, reason: 'bote cerrado con SUS dosis');
+      expect(r.dosisBote[12], 3, reason: 'bote abierto solo con las suyas');
+      expect(r.ingBote[11], 6000.0);
+      expect(r.ingBote[12], 1800.0);
+      // El costo también se resuelve por bote correcto:
+      // 10 × (30000/60) y 3 × (20000/60).
+      expect(r.costoBoteV[11], closeTo(5000.0, 0.01));
+      expect(r.costoBoteV[12], closeTo(1000.0, 0.01));
+    });
+
+    test('sin suplementoDePomo se conserva el respaldo estático', () {
+      final r = calcular1B(
+        ventas: [ventaPomo('2026-10-10', 10)],
+        salidas: const [],
+        botes: botesDos,
+        boteDeLote: const {},
+        boteDePomo: const {7: 12},
+        movsAgua: const [],
+      );
+      expect(r.dosisBote[12], 10);
+      expect(r.dosisBote[11], isNull);
+    });
+
+    test('botePorVentana: bordes y respaldo', () {
+      // El día del cierre ya pertenece al bote nuevo.
+      expect(botePorVentana(botesDos, '2026-10-15'), 12);
+      // Antes de cualquier apertura: respaldo.
+      expect(botePorVentana(botesDos, '2026-08-01', respaldo: 99), 99);
+      // Sin fecha: respaldo.
+      expect(botePorVentana(botesDos, null, respaldo: 99), 99);
+      // Bote sin cerrado_en registrado: el último abierto
+      // antes de la fecha manda.
+      expect(
+          botePorVentana([
+            {
+              'id': 21,
+              'suplemento_id': 5,
+              'abierto_en': '2026-09-01',
+              'cerrado_en': null
+            },
+            {
+              'id': 22,
+              'suplemento_id': 5,
+              'abierto_en': '2026-10-15',
+              'cerrado_en': null
+            },
+          ], '2026-10-10'),
+          21);
+    });
+  });
+
+  group('Argón Estadísticas #1: inversión acotada al mes', () {
+    const botesMes = [
+      {
+        'id': 11,
+        'suplemento_id': 5,
+        'dosis_rendimiento': 60,
+        'costo_bote': 60000.0,
+        'abierto_en': '2026-10-05',
+      },
+      {
+        'id': 12,
+        'suplemento_id': 5,
+        'dosis_rendimiento': 60,
+        'costo_bote': 20000.0,
+        'abierto_en': '2026-11-02',
+      },
+      {
+        // Sin abierto_en: no se ubica en el tiempo; con mes
+        // no cuenta, sin mes sí (acumulado).
+        'id': 13,
+        'suplemento_id': 6,
+        'dosis_rendimiento': 60,
+        'costo_bote': 5000.0,
+      },
+    ];
+    const aguaMes = [
+      {'tipo': 'entrada', 'cantidad': 10, 'costo_unitario': 200.0, 'fecha': '2026-10-20'},
+      {'tipo': 'entrada', 'cantidad': 5, 'costo_unitario': 200.0, 'fecha': '2026-11-01'},
+      {'tipo': 'salida_sin_venta', 'cantidad': 3, 'costo_unitario': 200.0, 'fecha': '2026-11-01'},
+    ];
+
+    test('con mesInversion solo suman las compras del mes', () {
+      final r = calcular1B(
+        ventas: const [],
+        salidas: const [],
+        botes: botesMes,
+        boteDeLote: const {},
+        mesInversion: '2026-11',
+        movsAgua: aguaMes,
+      );
+      expect(r.b['inversion_botes'], 20000.0);
+      expect(r.b['inversion_agua'], 1000.0);
+    });
+
+    test('sin mesInversion la inversión es la acumulada de siempre', () {
+      final r = calcular1B(
+        ventas: const [],
+        salidas: const [],
+        botes: botesMes,
+        boteDeLote: const {},
+        movsAgua: aguaMes,
+      );
+      expect(r.b['inversion_botes'], 85000.0);
+      expect(r.b['inversion_agua'], 3000.0);
+    });
+  });
+
+  test('Argón Estadísticas #8: textoResumenSemanal sin artefactos IEEE 754',
+      () {
+    final t = textoResumenSemanal(
+      lunes: '2026-10-26',
+      domingo: '2026-11-01',
+      dosis: 10,
+      pomosSueltos: 2,
+      ingresos: 3119.9999999999995,
+      comisiones: 0.1 + 0.2,
+    );
+    expect(t, contains('Ingresos: 3120 CUP'));
+    expect(t, contains('Comisiones: 0.3 CUP'));
+    expect(t, isNot(contains('3120.00')));
+  });
 }

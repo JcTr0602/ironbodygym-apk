@@ -151,8 +151,25 @@ String textoResumenSemanal({
   required double ingresos,
   required double comisiones,
 }) {
-  String cup(double v) =>
-      v.toStringAsFixed(v.truncateToDouble() == v ? 0 : 2);
+  // Argón Estadísticas #8: la comparación anterior usaba el
+  // double crudo (truncateToDouble() == v) y un artefacto
+  // como 3119.9999999999995 salía como «3120.00». Misma
+  // regla que fmtMonto (negocio.dart, B-15): componer desde
+  // los centavos enteros, sin ceros de más. (Este archivo es
+  // puro y no importa negocio.dart; la regla se replica.)
+  String cup(double v) {
+    final centavos = (v * 100).round();
+    final signo = centavos < 0 ? '-' : '';
+    final absC = centavos.abs();
+    final entero = absC ~/ 100;
+    final dec = absC % 100;
+    if (dec == 0) return '$signo$entero';
+    var decS = dec.toString().padLeft(2, '0');
+    while (decS.endsWith('0')) {
+      decS = decS.substring(0, decS.length - 1);
+    }
+    return '$signo$entero.$decS';
+  }
   return 'Iron Body Gym — Semana $lunes al $domingo\n'
       'Dosis vendidas: $dosis\n'
       'Pomos sueltos: $pomosSueltos\n'
@@ -224,16 +241,47 @@ String textoResumenSemanal({
   // El respaldo costo_dosis_snapshot NO se toca: costo total
   // y costo Casa ya lo usan y deben seguir igual.
   Map<int, int>? boteDePomo,
+  // Argón Estadísticas #2: pomo -> suplemento. Si viene, el
+  // bote de cada venta se resuelve por la VENTANA del bote
+  // (abierto_en..cerrado_en) que contiene la fecha de la
+  // venta, no por «el bote abierto actual»: con dos botes
+  // del mismo suplemento, las ventas del bote cerrado ya no
+  // se le atribuyen al nuevo.
+  Map<int, int>? suplementoDePomo,
+  // Argón Estadísticas #1: mes 'YYYY-MM' para la INVERSIÓN.
+  // Si viene, inversionBotes suma solo los botes abiertos en
+  // ese mes (abierto_en) e inversionAgua solo las entradas
+  // con fecha en ese mes. El catálogo costoDosisPorBote NO
+  // se filtra: una venta de este mes puede salir de un bote
+  // comprado el mes pasado y su costo debe resolver igual.
+  String? mesInversion,
   required List<Map<String, dynamic>> movsAgua,
 }) {
+  final botesPorSuplemento = <int, List<Map<String, dynamic>>>{};
+  for (final b in botes) {
+    final sup = (b['suplemento_id'] as num?)?.toInt();
+    if (sup == null) continue;
+    (botesPorSuplemento[sup] ??= []).add(b);
+  }
+
   int? boteDe(Map<String, dynamic> r) {
     final pomoId = (r['pomo_id'] as num?)?.toInt();
     if (pomoId != null) {
+      final sup = suplementoDePomo?[pomoId];
+      if (sup != null) {
+        final porVentana = botePorVentana(
+          botesPorSuplemento[sup] ?? const [],
+          r['fecha'] as String?,
+          respaldo: boteDePomo?[pomoId],
+        );
+        if (porVentana != null) return porVentana;
+      }
       final porPomo = boteDePomo?[pomoId];
       if (porPomo != null) return porPomo;
     }
     return boteDeLote[(r['lote_id'] as num?)?.toInt()];
   }
+
   final costoDosisPorBote = <int, double>{};
   var inversionBotes = 0.0;
   for (final b in botes) {
@@ -242,11 +290,20 @@ String textoResumenSemanal({
     final rend = (b['dosis_rendimiento'] as num?)?.toInt() ?? 0;
     final costo = (b['costo_bote'] as num?)?.toDouble() ?? 0;
     costoDosisPorBote[id] = rend > 0 ? costo / rend : 0;
-    inversionBotes += costo;
+    // Sin mesInversion: acumulado histórico (modo «Todo»).
+    // Con mes: solo si el bote se abrió en ese mes; un
+    // abierto_en ausente no se puede ubicar en el tiempo y
+    // no cuenta como inversión del mes.
+    if (mesInversion == null ||
+        '${b['abierto_en'] ?? ''}'.startsWith(mesInversion)) {
+      inversionBotes += costo;
+    }
   }
   var inversionAgua = 0.0;
   for (final m in movsAgua) {
-    if ('${m['tipo']}' == 'entrada') {
+    if ('${m['tipo']}' == 'entrada' &&
+        (mesInversion == null ||
+            '${m['fecha'] ?? ''}'.startsWith(mesInversion))) {
       inversionAgua += ((m['cantidad'] as num?)?.toDouble() ?? 0) *
           ((m['costo_unitario'] as num?)?.toDouble() ?? 0);
     }
@@ -383,6 +440,54 @@ int diasDesdePrimeraVenta(
   final fin = DateTime(hoy.year, hoy.month, hoy.day);
   final dias = fin.difference(inicio).inDays + 1;
   return dias > 0 ? dias : 1;
+}
+
+/// Argón Estadísticas #2: resuelve a qué bote pertenece una
+/// venta/salida de fecha [fecha] entre los botes de UN
+/// suplemento, por la ventana [abierto_en, cerrado_en) que
+/// contiene la fecha. Las ventas llevan pomo (→ suplemento),
+/// no bote: sin esta resolución, TODAS las ventas históricas
+/// del pomo se atribuían al bote abierto actual y el bote
+/// cerrado quedaba con 0 dosis servidas.
+/// - Si varias ventanas contienen la fecha (datos solapados),
+///   manda la de apertura más reciente.
+/// - Si ninguna la contiene pero hay botes abiertos antes de
+///   la fecha (p. ej. cerrado_en sin registrar), se toma el
+///   último abierto antes de la fecha.
+/// - Sin fecha o sin botes con abierto_en utilizable: el
+///   [respaldo] (la resolución estática por pomo de antes).
+int? botePorVentana(
+  List<Map<String, dynamic>> botesDelSuplemento,
+  String? fecha, {
+  int? respaldo,
+}) {
+  if (fecha == null || fecha.length < 10) return respaldo;
+  final f = fecha.substring(0, 10);
+  int? enVentana;
+  String? aperturaEnVentana;
+  int? ultimoAntes;
+  String? aperturaUltimoAntes;
+  for (final b in botesDelSuplemento) {
+    final id = (b['id'] as num?)?.toInt();
+    final apertura = (b['abierto_en'] as String?) ?? '';
+    if (id == null || apertura.length < 10) continue;
+    final ap = apertura.substring(0, 10);
+    if (ap.compareTo(f) > 0) continue; // abierto después: no
+    final cierre = (b['cerrado_en'] as String?) ?? '';
+    final dentro = cierre.length < 10 || f.compareTo(cierre.substring(0, 10)) < 0;
+    if (dentro &&
+        (aperturaEnVentana == null ||
+            ap.compareTo(aperturaEnVentana) > 0)) {
+      enVentana = id;
+      aperturaEnVentana = ap;
+    }
+    if (aperturaUltimoAntes == null ||
+        ap.compareTo(aperturaUltimoAntes) > 0) {
+      ultimoAntes = id;
+      aperturaUltimoAntes = ap;
+    }
+  }
+  return enVentana ?? ultimoAntes ?? respaldo;
 }
 
 /// Costo de la entrada de agua más reciente (simulador): el espejo

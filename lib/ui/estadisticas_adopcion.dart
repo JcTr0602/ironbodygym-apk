@@ -11,6 +11,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../auth.dart';
 import 'componentes.dart';
 import 'diseno.dart';
+import 'widgets.dart';
 
 class EstadisticasAdopcionScreen extends StatefulWidget {
   const EstadisticasAdopcionScreen({super.key});
@@ -112,7 +113,12 @@ class _EstadisticasAdopcionScreenState
                     ],
                   ),
                 )
-              : _contenido(),
+              // Argón Estadísticas #9: pull-to-refresh como
+              // el resto de pantallas de estadísticas.
+              : RefreshIndicator(
+                  onRefresh: _cargar,
+                  child: _contenido(),
+                ),
     );
   }
 
@@ -125,6 +131,11 @@ class _EstadisticasAdopcionScreenState
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
+        // Argón Estadísticas #9: banner de sincronización
+        // como en Dashboard y Estadísticas de Servicios (sin
+        // él, el dueño veía cifras viejas sin advertencia).
+        const SyncBanner(),
+        const SizedBox(height: 12),
         Row(
           children: [
             _tarjetaNumero('Accesos creados', '${_n('generados')}'),
@@ -220,14 +231,16 @@ class _EstadisticasAdopcionScreenState
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(titulo,
-                  style: AppTexto.minuscula.copyWith(color: Colors.grey)),
+                  style: AppTexto.minuscula.copyWith(
+                      color: AppColores.textoSecundario(context))),
               const SizedBox(height: 4),
               Text(valor,
                   style: AppTexto.metrica),
               if (pie != null) ...[
                 const SizedBox(height: 2),
                 Text(pie,
-                    style: AppTexto.minuscula.copyWith(color: Colors.grey)),
+                    style: AppTexto.minuscula.copyWith(
+                        color: AppColores.textoSecundario(context))),
               ],
             ],
           ),
