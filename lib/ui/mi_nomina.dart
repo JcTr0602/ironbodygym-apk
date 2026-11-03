@@ -110,12 +110,35 @@ class _MiNominaScreenState extends State<MiNominaScreen> {
     return '';
   }
 
+  /// Mi clave de entrenador con el MISMO fallback que
+  /// NominaScreen y nomina_total: clave del username y, si no
+  /// resuelve, clave del nombre (N-4, 1.22: con solo el
+  /// username, un entrenador cuyo username no contiene su
+  /// nombre veía bonos 0 y deuda falsa en su libro).
+  Future<String?> _miClave() async {
+    final tid = AuthService().telegramId;
+    if (tid == null) return null;
+    try {
+      final raw = await LocalDb.instance.getMeta('usuarios_apk');
+      if (raw != null && raw.isNotEmpty) {
+        for (final u in jsonDecode(raw) as List) {
+          final m = Map<String, dynamic>.from(u as Map);
+          if (LocalDb.normalizarTelegramId(m['telegram_id']) == tid) {
+            return NominaCalc.claveEntrenador('${m['username'] ?? ''}') ??
+                NominaCalc.claveEntrenador('${m['nombre'] ?? ''}');
+          }
+        }
+      }
+    } catch (_) {}
+    return null;
+  }
+
   /// Bonos por mes del entrenador actual (llave única), o mapa
   /// vacío si no se resuelve su identidad (sin identidad no se
   /// puede atribuir bono: no se inventa).
   Future<Map<String, double>> _bonosPorMes(
       String desde, String hasta) async {
-    final clave = NominaCalc.claveEntrenador(await _miUsername());
+    final clave = await _miClave();
     if (clave == null) return const {};
     return BonosNominaService.instance.bonosPorMes(clave, desde, hasta);
   }
@@ -160,30 +183,44 @@ class _MiNominaScreenState extends State<MiNominaScreen> {
         }
       }
       final brutoPorMes = <String, double>{};
+      final conteoPorMes = <String, int>{};
       var mesCadena = primero;
       while (mesCadena.compareTo(pref) <= 0) {
         final n =
             await NominaCalc.clientesQuePagaronElMes(mesCadena);
+        conteoPorMes[mesCadena] = n;
         brutoPorMes[mesCadena] = n * tarifa.toDouble();
         mesCadena = mesSiguiente(mesCadena);
       }
+      // Terra lote-4 MEDIO (verificado NO-problema, se documenta):
+      // con tid == null, _miIdUsuarioApk() devuelve '' y eventos
+      // es [] por construcción, y comision es 0 en esa rama; el
+      // libro sale trivialmente en ceros, sin deuda falsa. Si
+      // algún día _miIdUsuarioApk dejara de exigir tid, esta rama
+      // habría que revisarla: no se puede inventar comisión sin
+      // identidad atribuible.
+      final comisionesPorMes = tid == null
+          ? {pref: comision}
+          : NominaCalc.comisionesPorMesDesdeVentas(
+              ventasServicio, tid, primero, pref);
+      // #2 (Argón nómina): los bonos suman a la capacidad del
+      // mes (misma regla que la pantalla del dueño).
+      final bonosPorMes = await _bonosPorMes(primero, pref);
+      // N-5 (1.22): los meses ya liquidados mandan por su foto,
+      // no por la tarifa viva (ver aplicarFotosLibro).
+      await AdelantosService.instance.aplicarFotosLibro(
+        brutoPorMes: brutoPorMes,
+        comisionesPorMes: comisionesPorMes,
+        bonosPorMes: bonosPorMes,
+        conteoPorMes: conteoPorMes,
+        entrenadorId: miId,
+        telegramId: tid,
+      );
       final libros = libroAdelantos(
         eventos: eventos,
         brutoPorMes: brutoPorMes,
-        // Terra lote-4 MEDIO (verificado NO-problema, se documenta):
-        // con tid == null, _miIdUsuarioApk() devuelve '' y eventos
-        // es [] por construcción, y comision es 0 en esa rama; el
-        // libro sale trivialmente en ceros, sin deuda falsa. Si
-        // algún día _miIdUsuarioApk dejara de exigir tid, esta rama
-        // habría que revisarla: no se puede inventar comisión sin
-        // identidad atribuible.
-        comisionesPorMes: tid == null
-            ? {pref: comision}
-            : NominaCalc.comisionesPorMesDesdeVentas(
-                ventasServicio, tid, primero, pref),
-        // #2 (Argón nómina): los bonos suman a la capacidad del
-        // mes (misma regla que la pantalla del dueño).
-        bonosPorMes: await _bonosPorMes(primero, pref),
+        comisionesPorMes: comisionesPorMes,
+        bonosPorMes: bonosPorMes,
         hastaMes: pref,
       );
       for (final m in libros) {
@@ -569,12 +606,9 @@ class _MiNominaScreenState extends State<MiNominaScreen> {
                   ),
                   const SizedBox(height: 4),
                   Text(_syncTexto, style: AppTexto.secundario),
-                  const SizedBox(height: 4),
-                  const Text(
-                    'Sin bonos: los gestiona el dueño y no entran '
-                    'en esta vista previa.',
-                    style: AppTexto.secundario,
-                  ),
+                  // N-11 (1.22): fuera el texto obsoleto «Sin
+                  // bonos… no entran en esta vista previa»: los
+                  // bonos SÍ entran en el resumen desde la 1.19.
                 ],
               ),
             ),
@@ -898,7 +932,12 @@ class _MiNominaScreenState extends State<MiNominaScreen> {
         ? 'Cliente protegido 🔒'
         : (cid != null
             ? (_nombresClientes[cid] ?? 'Cliente #$cid')
-            : ('${v['cliente_nombre'] ?? ''}'));
+            // N-10 (1.22): sin cliente_id no hay cruce posible
+            // con protegidos: el nombre crudo solo lo ve el
+            // dueño; el entrenador ve el genérico.
+            : (AuthService().isOwner
+                ? ('${v['cliente_nombre'] ?? ''}')
+                : 'Cliente'));
     final tipo = v['origen'] == 'suplemento'
         ? 'suplemento'
         : ('${v['tipo'] ?? 'servicio'}');

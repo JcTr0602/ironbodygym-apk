@@ -97,8 +97,11 @@ class NominaPrecalc {
         final pagadoHasta = data['pagado_hasta'] == null
             ? '<null>'
             : '${data['pagado_hasta']}';
+        // N-1 (1.22): las marcas de anulado/eliminado también
+        // (esPagoMensualidad las descarta: si aparecen, la
+        // caché debe invalidarse).
         estado =
-            '$cliente|$periodo|$metodo|$montoStr|${dias ?? '<null>'}|$fecha|$pagadoHasta';
+            '$cliente|$periodo|$metodo|$montoStr|${dias ?? '<null>'}|$fecha|$pagadoHasta|${data['anulado'] ?? ''}|${data['eliminado'] ?? ''}|${data['estado'] ?? ''}';
       } catch (_) {
         estado = '<ilegible>';
       }

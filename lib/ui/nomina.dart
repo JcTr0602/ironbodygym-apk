@@ -178,8 +178,18 @@ class _NominaScreenState extends State<NominaScreen> {
               ventasServ, tid, pref);
           if (r.total == 0 && r.dosis == 0) continue;
           // #6 (Argón nómina): llave única (igual que el libro).
+          // N-3 (1.22): ACUMULAR, no sobrescribir (dos tid
+          // históricos pueden caer en la misma clave).
           final clave = NominaCalc.claveEntrenador(nombrePorTid[tid]);
-          if (clave != null) comisionDosis[clave] = r;
+          if (clave != null) {
+            final prev = comisionDosis[clave];
+            comisionDosis[clave] = prev == null
+                ? r
+                : (
+                    dosis: prev.dosis + r.dosis,
+                    total: prev.total + r.total
+                  );
+          }
           if (tid == miTid) comisionDosis['mi'] = r;
         }
       } catch (_) {
@@ -249,17 +259,29 @@ class _NominaScreenState extends State<NominaScreen> {
           brutoPorMes[mes] = conteoCache[mes]! * tarifa.toDouble();
           mes = mesSiguiente(mes);
         }
+        final comisionesPorMes = e.value.telegramId == null
+            ? {pref: comisionDosis[e.key]?.total ?? 0}
+            : NominaCalc.comisionesPorMesDesdeVentas(
+                ventasServ, e.value.telegramId!, primero, pref);
+        // #2 (Argón nómina): los bonos suman a la capacidad
+        // del mes.
+        final bonosPorMes = await BonosNominaService.instance
+            .bonosPorMes(e.key, primero, pref);
+        // N-5 (1.22): los meses ya liquidados mandan por su
+        // foto, no por la tarifa viva (ver aplicarFotosLibro).
+        await AdelantosService.instance.aplicarFotosLibro(
+          brutoPorMes: brutoPorMes,
+          comisionesPorMes: comisionesPorMes,
+          bonosPorMes: bonosPorMes,
+          conteoPorMes: conteoCache,
+          entrenadorId: e.value.id,
+          telegramId: e.value.telegramId,
+        );
         final libro = libroAdelantos(
           eventos: eventos,
           brutoPorMes: brutoPorMes,
-          comisionesPorMes: e.value.telegramId == null
-              ? {pref: comisionDosis[e.key]?.total ?? 0}
-              : NominaCalc.comisionesPorMesDesdeVentas(
-                  ventasServ, e.value.telegramId!, primero, pref),
-          // #2 (Argón nómina): los bonos suman a la capacidad
-          // del mes.
-          bonosPorMes: await BonosNominaService.instance
-              .bonosPorMes(e.key, primero, pref),
+          comisionesPorMes: comisionesPorMes,
+          bonosPorMes: bonosPorMes,
           hastaMes: pref,
         );
         for (final m in libro) {
@@ -336,6 +358,18 @@ class _NominaScreenState extends State<NominaScreen> {
     // Fase A 2026-10-25 (A4): el bono se guarda sincronizado
     // (espejo + op), no en SharedPreferences.
     final pref = hoyHabanaIso().substring(0, 7);
+    // N-6 (1.22): un mes ya liquidado no admite bonos: el bono
+    // descuadraría la foto de liquidación y el Dashboard.
+    final objetivosBono = _bonoEntrenador == 'ambos'
+        ? const ['duany', 'gabriel']
+        : [_bonoEntrenador];
+    if (objetivosBono.any((c) => _nominaLiquidadaMes[c] == true)) {
+      _operando = false;
+      mostrarSnack(context,
+          'La nómina de este mes ya está liquidada: no se pueden agregar bonos',
+          significado: SignificadoChip.alerta);
+      return;
+    }
     await BonosNominaService.instance.agregar(
       mes: pref,
       entrenador: _bonoEntrenador,
@@ -359,12 +393,28 @@ class _NominaScreenState extends State<NominaScreen> {
   Future<void> _eliminarBono(String id) async {
     // Ronda 17 M4-H1: eliminar bonos es solo del dueño.
     if (!AuthService().isOwner) return;
+    // N-7 (1.22): guarda anti-doble toque (no la tenía).
+    if (_operando) return;
+    // N-6 (1.22): tampoco se eliminan bonos de un mes ya
+    // liquidado (misma foto que no se debe reescribir).
+    final fila = _bonos.where((b) => '${b['id']}' == id).firstOrNull;
+    final entBono = '${fila?['entrenador'] ?? 'ambos'}';
+    final objetivosBono =
+        entBono == 'ambos' ? const ['duany', 'gabriel'] : [entBono];
+    if (objetivosBono.any((c) => _nominaLiquidadaMes[c] == true)) {
+      mostrarSnack(context,
+          'La nómina de este mes ya está liquidada: no se pueden eliminar bonos',
+          significado: SignificadoChip.alerta);
+      return;
+    }
+    _operando = true;
     // Fase A 2026-10-25 (A4): encola la eliminación; la lectura
     // fusionada lo oculta al instante.
     await BonosNominaService.instance.eliminar(id);
     final pref = hoyHabanaIso().substring(0, 7);
     final actualizados =
         await BonosNominaService.instance.leerBonos(pref);
+    _operando = false;
     if (!mounted) return;
     setState(() => _bonos = actualizados);
     if (mounted) {
@@ -915,6 +965,11 @@ class _NominaScreenState extends State<NominaScreen> {
                 icon: const Icon(Icons.fact_check_rounded, size: 18),
                 label: const Text('Marcar nómina del mes como pagada'),
                 onPressed: () async {
+                  // N-7 (1.22): guarda anti-doble toque en la
+                  // liquidación (un doble toque encolaba dos
+                  // liquidaciones del mismo mes).
+                  if (_operando) return;
+                  _operando = true;
                   // T22 (1.20): el resumen se calcula ANTES
                   // del diálogo: lo que el dueño ve al
                   // confirmar es exactamente la foto que
@@ -992,7 +1047,10 @@ class _NominaScreenState extends State<NominaScreen> {
                       ],
                     ),
                   );
-                  if (ok != true) return;
+                  if (ok != true) {
+                    _operando = false;
+                    return;
+                  }
                   await AdelantosService.instance.liquidarNomina(
                     mes: pref,
                     entrenadorId: persona.id,
@@ -1006,6 +1064,7 @@ class _NominaScreenState extends State<NominaScreen> {
                     adelantos: adelantosLiq,
                     deudaEntrante: deudaLiq,
                   );
+                  _operando = false;
                   if (mounted) {
                     mostrarSnack(context, 'Nómina marcada como pagada', significado: SignificadoChip.exito);
                     _cargar();
@@ -1092,6 +1151,9 @@ class _NominaScreenState extends State<NominaScreen> {
               icon: const Icon(Icons.undo_rounded, size: 18),
               tooltip: 'Anular adelanto',
               onPressed: () async {
+                // N-7 (1.22): guarda anti-doble toque.
+                if (_operando) return;
+                _operando = true;
                 final ok = await showDialog<bool>(
                   context: context,
                   builder: (ctx) => AlertDialog(
@@ -1116,7 +1178,10 @@ class _NominaScreenState extends State<NominaScreen> {
                     ],
                   ),
                 );
-                if (ok != true) return;
+                if (ok != true) {
+                  _operando = false;
+                  return;
+                }
                 try {
                   await AdelantosService.instance.anular(id,
                       entrenadorId: entrenadorId,
@@ -1124,11 +1189,13 @@ class _NominaScreenState extends State<NominaScreen> {
                 } catch (err) {
                   // M1: mes liquidado (u otro rechazo): se avisa
                   // y no se recarga como si hubiera funcionado.
+                  _operando = false;
                   if (mounted) {
                     mostrarSnack(context, '$err', significado: SignificadoChip.error);
                   }
                   return;
                 }
+                _operando = false;
                 if (mounted) _cargar();
               },
             ),
@@ -1297,6 +1364,9 @@ class _NominaScreenState extends State<NominaScreen> {
       BuildContext context, String ent) async {
     // Ronda 17 M4-H1: registrar adelantos es solo del dueño.
     if (!AuthService().isOwner) return;
+    // N-7 (1.22): guarda anti-doble toque.
+    if (_operando) return;
+    _operando = true;
     final persona = _personasAdelantos[ent]!;
     final montoCtrl = TextEditingController();
     final notaCtrl = TextEditingController();
@@ -1440,6 +1510,7 @@ class _NominaScreenState extends State<NominaScreen> {
     if (guardado != true) {
       montoCtrl.dispose();
       notaCtrl.dispose();
+      _operando = false;
       return;
     }
     final monto = int.tryParse(montoCtrl.text.trim()) ?? 0;
@@ -1457,6 +1528,7 @@ class _NominaScreenState extends State<NominaScreen> {
     );
     montoCtrl.dispose();
     notaCtrl.dispose();
+    _operando = false;
     if (mounted) {
       mostrarSnack(context, 'Adelanto registrado (se sincronizará)', significado: SignificadoChip.exito);
       _cargar();

@@ -262,7 +262,17 @@ Future<bool> exportarExcel() async {
             ventasServ, tid, pref);
         if (r.total == 0 && r.dosis == 0) continue;
         final clave = NominaCalc.claveEntrenador(nombrePorTid[tid]);
-        if (clave != null) comisionDosis[clave] = r;
+        // N-3 (1.22): ACUMULAR, no sobrescribir (dos tid
+        // históricos pueden caer en la misma clave).
+        if (clave != null) {
+          final prev = comisionDosis[clave];
+          comisionDosis[clave] = prev == null
+              ? r
+              : (
+                  dosis: prev.dosis + r.dosis,
+                  total: prev.total + r.total
+                );
+        }
       }
       final conteoCache = <String, int>{};
       final filasNomina = <List<String>>[];
@@ -285,15 +295,27 @@ Future<bool> exportarExcel() async {
           brutoPorMes[mes] = conteoCache[mes]! * tarifa.toDouble();
           mes = mesSiguiente(mes);
         }
+        final comisionesPorMes = e.value.telegramId == null
+            ? {pref: comisionDosis[e.key]?.total ?? 0}
+            : NominaCalc.comisionesPorMesDesdeVentas(
+                ventasServ, e.value.telegramId!, primero, pref);
+        final bonosPorMes = await BonosNominaService.instance
+            .bonosPorMes(e.key, primero, pref);
+        // N-5 (1.22): los meses ya liquidados mandan por su
+        // foto, no por la tarifa viva (ver aplicarFotosLibro).
+        await AdelantosService.instance.aplicarFotosLibro(
+          brutoPorMes: brutoPorMes,
+          comisionesPorMes: comisionesPorMes,
+          bonosPorMes: bonosPorMes,
+          conteoPorMes: conteoCache,
+          entrenadorId: e.value.id,
+          telegramId: e.value.telegramId,
+        );
         final libro = libroAdelantos(
           eventos: eventos,
           brutoPorMes: brutoPorMes,
-          comisionesPorMes: e.value.telegramId == null
-              ? {pref: comisionDosis[e.key]?.total ?? 0}
-              : NominaCalc.comisionesPorMesDesdeVentas(
-                  ventasServ, e.value.telegramId!, primero, pref),
-          bonosPorMes: await BonosNominaService.instance
-              .bonosPorMes(e.key, primero, pref),
+          comisionesPorMes: comisionesPorMes,
+          bonosPorMes: bonosPorMes,
           hastaMes: pref,
         );
         final liquidada = await AdelantosService.instance

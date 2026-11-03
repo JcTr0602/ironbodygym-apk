@@ -95,8 +95,19 @@ Future<double?> totalNetoNominaMes(String pref) async {
         if (r.total == 0 && r.dosis == 0) continue;
         // #6 (Argón nómina): llave única (antes contains inline
         // aquí y filtro estricto en el libro).
+        // N-3 (1.22): ACUMULAR, no sobrescribir: dos telegram_id
+        // históricos pueden resolver a la misma clave y el
+        // segundo pisaba la comisión del primero.
         final clave = NominaCalc.claveEntrenador(nombrePorTid[tid]);
-        if (clave != null) comisionDosis[clave] = r;
+        if (clave != null) {
+          final prev = comisionDosis[clave];
+          comisionDosis[clave] = prev == null
+              ? r
+              : (
+                  dosis: prev.dosis + r.dosis,
+                  total: prev.total + r.total
+                );
+        }
       }
     } catch (_) {
       // Sin espejo de servicios: comisiones en 0, como la pantalla.
@@ -140,18 +151,30 @@ Future<double?> totalNetoNominaMes(String pref) async {
       // generaba una deuda entrante falsa en el mes en curso.
       // Sin tid no se puede atribuir comisión: se degrada al
       // mapa viejo (solo el mes en curso).
+      final comisionesPorMes = telegramId == null
+          ? {pref: comisionDosis[username]?.total ?? 0}
+          : NominaCalc.comisionesPorMesDesdeVentas(
+              ventasServ, telegramId, primero, pref);
+      // #2 (Argón nómina): los bonos suman a la capacidad del
+      // mes (sin esto, un adelanto cubierto por un bono dejaba
+      // deuda fantasma).
+      final bonosPorMes = await BonosNominaService.instance
+          .bonosPorMes(username, primero, pref);
+      // N-5 (1.22): los meses ya liquidados mandan por su foto,
+      // no por la tarifa viva (ver aplicarFotosLibro).
+      await AdelantosService.instance.aplicarFotosLibro(
+        brutoPorMes: brutoPorMes,
+        comisionesPorMes: comisionesPorMes,
+        bonosPorMes: bonosPorMes,
+        conteoPorMes: conteoCache,
+        entrenadorId: id,
+        telegramId: telegramId,
+      );
       final libro = libroAdelantos(
         eventos: eventos,
         brutoPorMes: brutoPorMes,
-        comisionesPorMes: telegramId == null
-            ? {pref: comisionDosis[username]?.total ?? 0}
-            : NominaCalc.comisionesPorMesDesdeVentas(
-                ventasServ, telegramId, primero, pref),
-        // #2 (Argón nómina): los bonos suman a la capacidad del
-        // mes (sin esto, un adelanto cubierto por un bono dejaba
-        // deuda fantasma).
-        bonosPorMes: await BonosNominaService.instance
-            .bonosPorMes(username, primero, pref),
+        comisionesPorMes: comisionesPorMes,
+        bonosPorMes: bonosPorMes,
         hastaMes: pref,
       );
       for (final m in libro) {

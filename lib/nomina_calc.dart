@@ -141,8 +141,16 @@ class NominaCalc {
   /// como String por JSON ('2000', '2000.5') también vale; lo no
   /// interpretable es null, nunca una excepción.
   static double? montoTolerante(dynamic v) {
-    if (v is num) return v.toDouble();
-    if (v is String) return double.tryParse(v.trim());
+    // N-2 (1.22): un monto no finito NO es un monto: 'Infinity'
+    // y NaN pasaban tryParse y se colaban como válidos.
+    if (v is num) {
+      final d = v.toDouble();
+      return d.isFinite ? d : null;
+    }
+    if (v is String) {
+      final d = double.tryParse(v.trim());
+      return (d != null && d.isFinite) ? d : null;
+    }
     return null;
   }
 
@@ -183,6 +191,19 @@ class NominaCalc {
   /// tampoco en personalizados ni ofertas. El monto se parsea
   /// tolerante (num o String numérico).
   static bool esPagoMensualidad(Map<String, dynamic> p) {
+    // N-1 (1.22, blindaje): un pago anulado/eliminado nunca
+    // cuenta como mensualidad (misma tolerancia de tipos que
+    // esVentaAnulada). Hoy anular_pago BORRA la fila en el
+    // servidor y `pagos` no trae estas marcas: es consistencia
+    // defensiva para el día que las traiga.
+    bool marca(dynamic x) => x == 1 || x == true;
+    if (marca(p['anulado']) ||
+        marca(p['anulada']) ||
+        marca(p['eliminado']) ||
+        '${p['estado'] ?? ''}' == 'anulada' ||
+        '${p['estado'] ?? ''}' == 'anulado') {
+      return false;
+    }
     var periodo = '${p['periodo'] ?? 'mensual'}';
     if (periodo.isEmpty) periodo = 'mensual';
     if (p['metodo'] == 'promo') return false;

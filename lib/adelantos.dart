@@ -555,6 +555,49 @@ class AdelantosService {
     return null;
   }
 
+  /// N-5 (1.22): aplica las fotos de liquidación a los mapas
+  /// de un libro de adelantos en construcción. Para cada mes
+  /// con snapshot de ESTE entrenador, bruto/bonos/comisiones
+  /// salen de la FOTO (congelados al liquidar), no del cálculo
+  /// vivo: antes, un cambio de tarifa reescribía los meses ya
+  /// pagados y el arrastre de la cadena inventaba una deuda
+  /// que nunca existió. La foto sin `base` (legado) cae a
+  /// conteo × tarifa de la propia foto.
+  Future<void> aplicarFotosLibro({
+    required Map<String, double> brutoPorMes,
+    required Map<String, double> comisionesPorMes,
+    required Map<String, double> bonosPorMes,
+    required Map<String, int> conteoPorMes,
+    required String entrenadorId,
+    int? telegramId,
+  }) async {
+    final meses = <String>{
+      ...brutoPorMes.keys,
+      ...comisionesPorMes.keys,
+      ...bonosPorMes.keys,
+    };
+    for (final mes in meses) {
+      final snap = await snapshotNomina(mes,
+          entrenadorId: entrenadorId, telegramId: telegramId);
+      if (snap == null) continue;
+      final base = (snap['base'] as num?)?.toDouble();
+      final tarifaFoto =
+          (snap['tarifa_por_cliente'] as num?)?.toDouble();
+      if (base != null) {
+        brutoPorMes[mes] = base;
+      } else if (tarifaFoto != null && conteoPorMes[mes] != null) {
+        brutoPorMes[mes] = conteoPorMes[mes]! * tarifaFoto;
+      }
+      final bonosFoto = (snap['bonos'] as num?)?.toDouble();
+      if (bonosFoto != null) bonosPorMes[mes] = bonosFoto;
+      final comisionesFoto =
+          (snap['comisiones'] as num?)?.toDouble();
+      if (comisionesFoto != null) {
+        comisionesPorMes[mes] = comisionesFoto;
+      }
+    }
+  }
+
   /// T22 (1.20): la confirmación de recepción de un mes: la
   /// fila del espejo, o una marca local si la op ya salió de
   /// este teléfono (pendiente/enviada/aplicada) y el espejo
