@@ -79,7 +79,21 @@ class TurnoService {
     final tid = _auth.telegramId;
     if (tid == null) return null;
     final ahora = ahoraHabana();
-    return _db.turnoAbierto(fechaIsoDe(ahora), turnoIdDe(ahora), tid);
+    final fecha = fechaIsoDe(ahora);
+    // Autoauditoría 1.22 #1 (2026-11-03): si la franja del
+    // instante no tiene el turno, se busca el abierto de HOY
+    // sin franja. turnoIdDe (5-12/12-18/resto) y la franja
+    // canónica de turnos_resolucion (6-12/14-20, sáb 7-12 sin
+    // tarde, dom sin franja) no coinciden en los bordes: un
+    // turno abierto a las 16:00 como «tarde» no se encontraba
+    // a las 18:05 («noche») y el cierre de Mi Turno caía al
+    // camino legado dejando el turno real abierto (el «cierre
+    // de mentira» que T-08 cerraba solo cuando el reloj no
+    // había cruzado de franja). Un turno abierto hoy ES el
+    // turno actual, abra cuando abra.
+    final exacto = await _db.turnoAbierto(fecha, turnoIdDe(ahora), tid);
+    if (exacto != null) return exacto;
+    return _db.turnoAbiertoDelDia(fecha, tid);
   }
 
   /// Último turno de hoy (cualquier estado: abierto, cerrado,
@@ -90,7 +104,13 @@ class TurnoService {
     final tid = _auth.telegramId;
     if (tid == null) return null;
     final ahora = ahoraHabana();
-    return _db.ultimoTurno(fechaIsoDe(ahora), turnoIdDe(ahora), tid);
+    final fecha = fechaIsoDe(ahora);
+    // Autoauditoría 1.22 #1: mismo respaldo por día que
+    // turnoActual (el «último turno de hoy» de la doc de
+    // ultimoTurno no puede depender de la franja del instante).
+    final exacto = await _db.ultimoTurno(fecha, turnoIdDe(ahora), tid);
+    if (exacto != null) return exacto;
+    return _db.ultimoTurnoDelDia(fecha, tid);
   }
 
   /// Turnos abiertos de (fecha, franja) anteriores a la actual, sin

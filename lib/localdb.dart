@@ -5983,6 +5983,41 @@ class LocalDb {
     return rows.isEmpty ? null : rows.first;
   }
 
+  /// Turno abierto de un entrenador en una FECHA, sin filtrar
+  /// por franja (el más reciente). Respaldo de turnoAbierto:
+  /// Autoauditoría 1.22 #1 (2026-11-03) — un turno abierto a las
+  /// 16:00 («tarde») dejaba de encontrarse a las 18:05 porque la
+  /// búsqueda por franja del instante saltaba a otra clave, y
+  /// el cierre caía al camino legado («cierre de mentira» de
+  /// T-08). Si hay UN turno abierto hoy, ese es el turno actual
+  /// aunque la franja del reloj haya cambiado.
+  Future<Map<String, dynamic>?> turnoAbiertoDelDia(
+      String fechaTurno, int telegramId) async {
+    final d = await db;
+    final rows = await d.query('turnos',
+        where: 'fecha_turno=? AND telegram_id=? AND '
+            'estado IN (?,?)',
+        whereArgs: [fechaTurno, telegramId,
+            'abierto_local', 'abierto_sincronizado'],
+        orderBy: 'rowid DESC',
+        limit: 1);
+    return rows.isEmpty ? null : rows.first;
+  }
+
+  /// Último turno de un entrenador en una FECHA, sin filtrar
+  /// por franja ni estado. Respaldo de ultimoTurno (misma
+  /// razón que turnoAbiertoDelDia).
+  Future<Map<String, dynamic>?> ultimoTurnoDelDia(
+      String fechaTurno, int telegramId) async {
+    final d = await db;
+    final rows = await d.query('turnos',
+        where: 'fecha_turno=? AND telegram_id=?',
+        whereArgs: [fechaTurno, telegramId],
+        orderBy: 'rowid DESC',
+        limit: 1);
+    return rows.isEmpty ? null : rows.first;
+  }
+
   /// Orden canónico de franjas para comparar "anterioridad".
   static int _ordenTurno(String turno) {
     switch (turno) {
