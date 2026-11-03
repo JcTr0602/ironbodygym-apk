@@ -90,10 +90,14 @@ class _PanelPermisosState extends State<PanelPermisos> {
   Future<void> _cargar() async {
     setState(() => _cargando = true);
     try {
+      // Autoauditoría 1.22 #2: lectura con timeout (12 s): sin
+      // tope, una conexión colgada dejaba el panel en «cargando»
+      // eterno (un cuelgue no es un error; el catch no corría).
       final res = await Supabase.instance.client
           .from('entrenadores_autorizados')
           .select('email, activo, permisos')
-          .order('email');
+          .order('email')
+          .timeout(const Duration(seconds: 12));
       final lista = (res as List).map((e) {
         final m = Map<String, dynamic>.from(e as Map);
         final email = m['email']?.toString() ?? '';
@@ -139,11 +143,17 @@ class _PanelPermisosState extends State<PanelPermisos> {
   /// conserva el estado optimista y avisa «sin verificar»).
   Future<bool> _releerEntrenador(EntrenadorPermiso ent) async {
     try {
+      // Autoauditoría 1.22 #2: la RELECTURA con timeout (12 s):
+      // es una lectura y su llamador ya sabe tratar el false
+      // («guardado, pero no se pudo verificar»); sin tope, un
+      // cuelgue dejaba la cadena serializada del entrenador
+      // esperando para siempre tras un guardado ya confirmado.
       final res = await Supabase.instance.client
           .from('entrenadores_autorizados')
           .select('activo, permisos')
           .eq('email', ent.email)
-          .single();
+          .single()
+          .timeout(const Duration(seconds: 12));
       final m = Map<String, dynamic>.from(res as Map);
       final perms = m['permisos'];
       if (!mounted) return false;

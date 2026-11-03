@@ -129,8 +129,16 @@ class PermisosEntrenador {
 
     // 2. Intentar refrescar desde Supabase
     try {
+      // Autoauditoría 1.22 #2: con timeout (12 s). Home espera
+      // cargar() en _verificarPermisos para expulsar a un
+      // suspendido o no habilitado: con la conexión colgada la
+      // RPC no devolvía nunca, ningún catch resolvía (un cuelgue
+      // no es un error) y la verificación jamás corría en la
+      // sesión. Con el corte se cae al catch y manda la foto de
+      // la caché por usuario del paso 1 (fail-closed sin foto).
       final res = await Supabase.instance.client
-          .rpc('obtener_mis_permisos');
+          .rpc('obtener_mis_permisos')
+          .timeout(const Duration(seconds: 12));
       final data = Map<String, dynamic>.from(res as Map);
       if (data['es_admin'] == true) {
         _permisos = {

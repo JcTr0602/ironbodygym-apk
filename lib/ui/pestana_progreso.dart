@@ -98,10 +98,17 @@ class _PestanaProgresoState extends State<PestanaProgreso> {
       _error = null;
     });
     try {
-      final res = await Supabase.instance.client.rpc(
-        'listar_mediciones_cliente',
-        params: {'p_cliente_id': widget.clienteId},
-      );
+      // Autoauditoría 1.22 #2: con timeout (12 s). El catch de
+      // abajo trae el respaldo del espejo local, pero un cuelgue
+      // no es un error: sin tope, la RPC colgada jamás llegaba al
+      // catch y la pestaña quedaba en «Cargando progreso…» con
+      // las mediciones en el teléfono.
+      final res = await Supabase.instance.client
+          .rpc(
+            'listar_mediciones_cliente',
+            params: {'p_cliente_id': widget.clienteId},
+          )
+          .timeout(const Duration(seconds: 12));
       final lista = ((res as List?) ?? [])
           .map((e) =>
               Medicion.fromJson(Map<String, dynamic>.from(e as Map)))

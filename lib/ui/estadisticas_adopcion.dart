@@ -50,8 +50,12 @@ class _EstadisticasAdopcionScreenState
       _error = null;
     });
     try {
+      // Autoauditoría 1.22 #2: lectura con timeout (12 s): sin
+      // tope, una conexión colgada dejaba el spinner eterno y el
+      // error con reintento de abajo nunca se alcanzaba.
       final res = await Supabase.instance.client
-          .rpc('estadisticas_adopcion');
+          .rpc('estadisticas_adopcion')
+          .timeout(const Duration(seconds: 12));
       if (mounted) {
         setState(() {
           _d = Map<String, dynamic>.from(res as Map);

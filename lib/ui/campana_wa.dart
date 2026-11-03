@@ -207,7 +207,12 @@ class _CampanaWaScreenState extends State<CampanaWaScreen> {
   }
 
   Future<List<Map<String, dynamic>>> _audienciaSinAcceso() async {
-    final res = await Supabase.instance.client.rpc('clientes_sin_acceso');
+    // Autoauditoría 1.22 #2: lectura con timeout (12 s): la
+    // audiencia de la campaña se espera al construirla y una
+    // conexión colgada la dejaba esperando sin error posible.
+    final res = await Supabase.instance.client
+        .rpc('clientes_sin_acceso')
+        .timeout(const Duration(seconds: 12));
     return [
       for (final e in (res as List? ?? []))
         if (_telValido('${(e as Map)['telefono'] ?? ''}'))

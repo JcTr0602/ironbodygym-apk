@@ -110,11 +110,18 @@ class PerfilService {
       final username = _cleanUsername(AuthService().username);
       if (username.isEmpty) return;
       final emailPrefix = username;
+      // Autoauditoría 1.22 #2: con timeout (10 s). El login
+      // ESPERA esta lectura en _entrar antes de verificar el
+      // dispositivo y arrancar la sync: con la conexión colgada
+      // no devolvía nunca (un cuelgue no es un error y el catch
+      // no lo resolvía) y la entrada quedaba a mitad de camino.
+      // Con el corte se cae al catch y se entra con lo local.
       final res = await Supabase.instance.client
           .from('sync_usuarios_perfil')
           .select('movil, carnet')
           .eq('username', emailPrefix)
-          .maybeSingle();
+          .maybeSingle()
+          .timeout(const Duration(seconds: 10));
       if (res != null) {
         if (faltaMovil && res['movil'] != null) {
           await p.setString(_key('perfil_movil'), res['movil'] as String);

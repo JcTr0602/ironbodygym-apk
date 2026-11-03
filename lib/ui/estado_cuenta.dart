@@ -83,10 +83,19 @@ class _EstadoCuentaScreenState extends State<EstadoCuentaScreen> {
     String? plusTxt;
     if (AuthService().isOwner) {
       try {
-        final res = await Supabase.instance.client.rpc(
-          'cliente_plus_residual_staff',
-          params: {'p_cliente_id': widget.clienteId},
-        );
+        // Autoauditoría 1.22 #2: con timeout (12 s). Todo lo
+        // demás de esta pantalla sale del espejo LOCAL y ya está
+        // computado, pero el primer setState esperaba esta RPC:
+        // con la conexión colgada, spinner eterno con el estado
+        // de cuenta listo en el teléfono (la clase del Dashboard
+        // 1C). Con el corte, el catch la omite y se pinta sin la
+        // línea Plus, como ya estaba previsto.
+        final res = await Supabase.instance.client
+            .rpc(
+              'cliente_plus_residual_staff',
+              params: {'p_cliente_id': widget.clienteId},
+            )
+            .timeout(const Duration(seconds: 12));
         final r = plusResidualDe(res);
         plusTxt = textoPlusResidual(
             activo: r.activo, hasta: r.hasta, hoyIso: hoyHabanaIso());

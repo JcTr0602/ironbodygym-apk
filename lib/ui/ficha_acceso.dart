@@ -61,10 +61,15 @@ class _FichaAccesoScreenState extends State<FichaAccesoScreen> {
     }
     setState(() => _cargando = true);
     try {
-      final res = await Supabase.instance.client.rpc(
-        'detalle_acceso_cliente',
-        params: {'p_cliente_id': widget.clienteId},
-      );
+      // Autoauditoría 1.22 #2: lectura con timeout (12 s): sin
+      // tope, una conexión colgada dejaba «Cargando acceso…»
+      // eterno (un cuelgue no es un error; el catch no corría).
+      final res = await Supabase.instance.client
+          .rpc(
+            'detalle_acceso_cliente',
+            params: {'p_cliente_id': widget.clienteId},
+          )
+          .timeout(const Duration(seconds: 12));
       final data = Map<String, dynamic>.from(res as Map);
       if (mounted) {
         setState(() {

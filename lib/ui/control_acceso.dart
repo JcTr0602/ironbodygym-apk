@@ -188,7 +188,14 @@ class _AccesosClientesTabState extends State<AccesosClientesTab> {
     });
     final ok = await AccesoAppCache.instance.cargar();
     try {
-      final res = await Supabase.instance.client.rpc('clientes_sin_acceso');
+      // Autoauditoría 1.22 #2: lectura con timeout (12 s). La
+      // caché de accesos ya trae el suyo (10 s), pero esta RPC
+      // no: _cargando esperaba su resultado y una conexión
+      // colgada dejaba la pantalla girando pese a tener la
+      // lista principal ya bajada.
+      final res = await Supabase.instance.client
+          .rpc('clientes_sin_acceso')
+          .timeout(const Duration(seconds: 12));
       _sinAcceso = ((res as List?) ?? []).map((e) {
         final m = Map<String, dynamic>.from(e as Map);
         return _SinAcceso(
@@ -1124,10 +1131,15 @@ class _AuditoriaAccesosScreenState extends State<AuditoriaAccesosScreen> {
     if (!AuthService().isOwner) return;
     setState(() => _cargando = true);
     try {
-      final res = await Supabase.instance.client.rpc(
-        'listar_auditoria_accesos',
-        params: {'p_limite': 100},
-      );
+      // Autoauditoría 1.22 #2: lectura con timeout (12 s): sin
+      // tope, una conexión colgada dejaba «Cargando control de
+      // acceso…» eterno (un cuelgue no es un error).
+      final res = await Supabase.instance.client
+          .rpc(
+            'listar_auditoria_accesos',
+            params: {'p_limite': 100},
+          )
+          .timeout(const Duration(seconds: 12));
       if (mounted) {
         setState(() {
           _items = (res as List?) ?? [];

@@ -63,10 +63,16 @@ class _SeccionFotoPersonalState extends State<SeccionFotoPersonal> {
 
   Future<void> _consultar() async {
     try {
-      final res = await Supabase.instance.client.rpc(
-        'admin_foto_personal_de',
-        params: {'p_cliente_id': widget.clienteId},
-      );
+      // Autoauditoría 1.22 #2: lectura con timeout (12 s): la
+      // sección quedaba en «cargando» para siempre si la RPC
+      // colgaba (un cuelgue no llega al catch de abajo, que ya
+      // sabe pintar el estado de error).
+      final res = await Supabase.instance.client
+          .rpc(
+            'admin_foto_personal_de',
+            params: {'p_cliente_id': widget.clienteId},
+          )
+          .timeout(const Duration(seconds: 12));
       final data = Map<String, dynamic>.from(res as Map);
       if (data['ok'] != true) {
         throw Exception('${data['codigo'] ?? 'ERROR'}');

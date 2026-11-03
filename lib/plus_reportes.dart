@@ -200,6 +200,32 @@ class PlusReportesService {
 
   SupabaseClient get _c => Supabase.instance.client;
 
+  /// Autoauditoría 1.22 #2: tope de las LECTURAS por RPC (12 s,
+  /// el mismo de InvitadosService). Este servicio es SOLO lectura
+  /// y sus llamadores esperaban sin tope: el segundo pase de Home
+  /// y del Panel (conteos de atención), la bandeja de reportes y
+  /// la línea Plus del C5 — en panel_resto_caja, confirmados()
+  /// se espera ANTES del primer setState tras computar los datos
+  /// LOCALES, así que una conexión colgada dejaba esa pantalla en
+  /// spinner eterno con el resumen ya calculable en el teléfono
+  /// (la clase del Dashboard 1C y de la ficha). Un cuelgue no es
+  /// un error: ningún catch lo resolvía. Con el corte, cada
+  /// llamador cae en su camino ya previsto (fail-silent por
+  /// fuente, «sin datos» en el C5, error con reintento en la
+  /// bandeja). confirmados() pagina: el tope es POR PÁGINA.
+  static const duracionTimeoutLecturaRpc = Duration(seconds: 12);
+
+  Future<dynamic> _rpcLectura(
+      String nombre, Map<String, dynamic>? params) async {
+    final f = _rpcInyectado;
+    if (f != null) {
+      return f(nombre, params).timeout(duracionTimeoutLecturaRpc);
+    }
+    return _c
+        .rpc(nombre, params: params)
+        .timeout(duracionTimeoutLecturaRpc);
+  }
+
   /// Reportes Plus pendientes de decisión, más antiguos primero
   /// (FIFO, como la bandeja de reservas; la RPC ya ordena así y
   /// el orden local es solo un seguro). Lanza si la RPC falla:
@@ -214,13 +240,7 @@ class PlusReportesService {
       'p_limite': kLimiteReportesPlus,
       'p_desde': 0,
     };
-    final dynamic res;
-    final f = _rpcInyectado;
-    if (f != null) {
-      res = await f(kRpcListarReportesPlus, params);
-    } else {
-      res = await _c.rpc(kRpcListarReportesPlus, params: params);
-    }
+    final res = await _rpcLectura(kRpcListarReportesPlus, params);
     final lista = parsearReportesPlus(res);
     lista.sort((a, b) => (a.creadoEn ?? DateTime(9999))
         .compareTo(b.creadoEn ?? DateTime(9999)));
@@ -246,13 +266,7 @@ class PlusReportesService {
         'p_limite': kLimiteReportesPlus,
         'p_desde': desde,
       };
-      final dynamic res;
-      final f = _rpcInyectado;
-      if (f != null) {
-        res = await f(kRpcListarReportesPlus, params);
-      } else {
-        res = await _c.rpc(kRpcListarReportesPlus, params: params);
-      }
+      final res = await _rpcLectura(kRpcListarReportesPlus, params);
       final pagina = parsearReportesPlus(res);
       // H-04 Plus (Argón, 1.20): la paginación es por OFFSET
       // sobre una lista viva — si un reporte entra o sale del

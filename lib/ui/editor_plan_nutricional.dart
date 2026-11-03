@@ -48,10 +48,17 @@ class _EditorPlanNutricionalState
   Future<void> _cargar() async {
     setState(() => _cargando = true);
     try {
-      final res = await Supabase.instance.client.rpc(
-        'obtener_plan_cliente',
-        params: {'p_cliente_id': widget.clienteId},
-      );
+      // Autoauditoría 1.22 #2: la LECTURA con timeout (12 s):
+      // sin tope, una conexión colgada dejaba el editor en
+      // «cargando» eterno. La ESCRITURA (_guardar) no lleva
+      // timeout a propósito, como en Invitados: un corte del
+      // lado cliente no debe fingir que el servidor no guardó.
+      final res = await Supabase.instance.client
+          .rpc(
+            'obtener_plan_cliente',
+            params: {'p_cliente_id': widget.clienteId},
+          )
+          .timeout(const Duration(seconds: 12));
       if (res != null && mounted) {
         // Fix 2026-10-19: el RPC puede devolver List (PostgREST) o Map.
         dynamic data = res;

@@ -128,7 +128,13 @@ Future<List<DiaHorario>> cargarHorarioCanonico() async {
     }
   } catch (_) {}
   try {
-    final res = await Supabase.instance.client.rpc('obtener_horarios');
+    // Autoauditoría 1.22 #2: lectura con timeout (12 s): los
+    // llamadores esperan este futuro (la vista previa lo compone
+    // con .then sobre la pintura, pero un cuelgue lo dejaba sin
+    // llegar nunca en vez de quedarse con la caché local).
+    final res = await Supabase.instance.client
+        .rpc('obtener_horarios')
+        .timeout(const Duration(seconds: 12));
     final lista = ((res as List?) ?? []).map((e) {
       final m = Map<String, dynamic>.from(e as Map);
       final ds = (m['dia_semana'] as num?)?.toInt() ?? 1;
@@ -200,8 +206,12 @@ class _HorarioGymState extends State<HorarioGym> {
     }
     // 2. Refrescar desde Supabase
     try {
+      // Autoauditoría 1.22 #2: con timeout (12 s): sin caché
+      // local, el spinner esperaba esta RPC y un cuelgue no es
+      // un error (el catch no corría nunca).
       final res = await Supabase.instance.client
-          .rpc('obtener_horarios');
+          .rpc('obtener_horarios')
+          .timeout(const Duration(seconds: 12));
       final lista = ((res as List?) ?? [])
           .map((e) {
             final m =

@@ -194,10 +194,14 @@ class _VistaPreviaClienteScreenState
       }
     }).catchError((_) {});
     try {
+      // Autoauditoría 1.22 #2: lectura con timeout (12 s): sin
+      // tope, una conexión colgada dejaba la vista previa en
+      // «cargando» eterno (un cuelgue no es un error).
       final res = await Supabase.instance.client
           .rpc('preview_datos_cliente', params: {
-        'p_cliente_id': widget.clienteId,
-      });
+            'p_cliente_id': widget.clienteId,
+          })
+          .timeout(const Duration(seconds: 12));
       final data = Map<String, dynamic>.from(res as Map);
       if (data['status'] != 200) {
         throw '${data['error'] ?? 'Error desconocido'}';
