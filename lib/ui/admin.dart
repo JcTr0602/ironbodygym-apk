@@ -30,6 +30,7 @@ import '../tiempo.dart';
 import '../tipos_pago.dart';
 import 'componentes.dart';
 import 'diseno.dart';
+import 'panel_dueno_swr.dart';
 import 'buscar.dart';
 import 'admin_secciones.dart';
 import 'cola.dart';
@@ -114,13 +115,12 @@ class _AdminScreenState extends State<AdminScreen> {
   List<String> _sinReporteHoy = [];
   int _incidenciasPend = 0;
   // Solicitudes de inscripción de invitados por atender (del
-  // servicio de Invitados; vacío si no hay conexión al cargar).
-  List<invitados_svc.InvitadoResumen> _solicitudesInvitados = [];
-  // Panel 1.6.0: la RPC de solicitudes NO bloquea el pintado del
-  // panel: _cargar pinta con los datos locales y la fila queda en
-  // estado «cargando» hasta que la RPC resuelve (ver
-  // _cargarSolicitudesInvitados).
-  bool _solicitudesCargando = true;
+  // servicio de Invitados). 1.23 (B3): estado SWR — la RPC no
+  // bloquea el pintado (panel 1.6.0) y un fallo ya NO vacía la
+  // bandeja: se conserva el último payload bueno con su sello
+  // (ver panel_dueno_swr.dart).
+  final _swrSolicitudes =
+      BandejaSwr<invitados_svc.InvitadoResumen>();
   int _solicitudesGen = 0;
   // 1.14 (rediseño): el bloque de atención muestra 5 alertas y
   // despliega el resto (hasta 9) al tocar «Ver más».
@@ -129,8 +129,7 @@ class _AdminScreenState extends State<AdminScreen> {
   // fases que las solicitudes: la RPC no bloquea el pintado; si
   // falla, la fila no aparece) y contador de Cuentas a la Casa
   // (consulta local al espejo, en el pase principal).
-  List<ReportePlus> _reportesPlus = [];
-  bool _reportesPlusCargando = true;
+  final _swrReportes = BandejaSwr<ReportePlus>();
   int _reportesPlusGen = 0;
   int _cuentasCasa = 0;
   final PlusReportesService _plusSvc = PlusReportesService();
@@ -263,10 +262,10 @@ class _AdminScreenState extends State<AdminScreen> {
         _sinReporteAyer = sinAyer;
         _sinReporteHoy = sinHoy;
         _incidenciasPend = incidencias.length;
-        _solicitudesInvitados = [];
-        _solicitudesCargando = true;
-        _reportesPlus = [];
-        _reportesPlusCargando = true;
+        // B3 (SWR): las bandejas RPC NO se vacían al recargar —
+        // conservan su último payload bueno hasta que el
+        // segundo pase lo renueve o falle (y si falla, queda la
+        // caché con su nota «Sin red · datos de…»).
         _cuentasCasa = casa;
         _tipos = tipos;
         _pagoEntrenador = pagoEnt;
@@ -295,42 +294,36 @@ class _AdminScreenState extends State<AdminScreen> {
   }
 
   /// G2 (v1.7.0): segundo pase — trae los reportes App Plus
-  /// pendientes por RPC. Si la RPC falla, la fila no aparece (el
-  /// panel sigue offline-first), como las solicitudes.
+  /// pendientes por RPC. 1.23 (B3): pauta SWR — el éxito guarda
+  /// payload y sello; el fallo marca error y CONSERVA lo bueno
+  /// (antes: catch a lista vacía, un falso «sin reportes»).
   Future<void> _cargarReportesPlus() async {
     final gen = ++_reportesPlusGen;
-    List<ReportePlus> lista;
     try {
-      lista = await _plusSvc.pendientes();
+      final lista = await _plusSvc.pendientes();
+      if (!mounted || gen != _reportesPlusGen) return;
+      setState(() => _swrReportes.exito(lista, ahoraHabana()));
     } catch (_) {
-      lista = [];
+      if (!mounted || gen != _reportesPlusGen) return;
+      setState(() => _swrReportes.fallo());
     }
-    if (!mounted || gen != _reportesPlusGen) return;
-    setState(() {
-      _reportesPlus = lista;
-      _reportesPlusCargando = false;
-    });
   }
 
   /// Segundo pase de _cargar: resuelve la RPC de solicitudes de
-  /// invitados y rellena su fila con un segundo setState. Si la
-  /// RPC falla, la fila simplemente no aparece (el panel sigue
-  /// offline-first, como antes). La generación descarta el
-  /// resultado si una recarga más nueva ya pidió el suyo.
+  /// invitados y rellena su fila con un segundo setState. La
+  /// generación descarta el resultado si una recarga más nueva
+  /// ya pidió el suyo. Pauta SWR como los reportes (B3).
   Future<void> _cargarSolicitudesInvitados() async {
     final gen = ++_solicitudesGen;
-    List<invitados_svc.InvitadoResumen> lista;
     try {
-      lista =
-          await invitados_svc.InvitadosService().solicitudesPendientes();
+      final lista = await invitados_svc.InvitadosService()
+          .solicitudesPendientes();
+      if (!mounted || gen != _solicitudesGen) return;
+      setState(() => _swrSolicitudes.exito(lista, ahoraHabana()));
     } catch (_) {
-      lista = [];
+      if (!mounted || gen != _solicitudesGen) return;
+      setState(() => _swrSolicitudes.fallo());
     }
-    if (!mounted || gen != _solicitudesGen) return;
-    setState(() {
-      _solicitudesInvitados = lista;
-      _solicitudesCargando = false;
-    });
   }
 
   void _ir(Widget w) {
@@ -1398,12 +1391,16 @@ class _AdminScreenState extends State<AdminScreen> {
     // 2026-10-22): decisión del dueño con acción en 1 toque; el
     // botón abre la bandeja YA filtrada en solicitudes. Misma
     // fuente que la pantalla de Invitados (InvitadosService).
-    if (_solicitudesInvitados.isNotEmpty) {
-      final n = _solicitudesInvitados.length;
-      final s = _solicitudesInvitados.first;
+    if (_swrSolicitudes.datos.isNotEmpty) {
+      final n = _swrSolicitudes.datos.length;
+      final s = _swrSolicitudes.datos.first;
       var detalle = s.nombre;
       if (s.solicitudDesde != null) {
         detalle += ' · ${hace(s.solicitudDesde)}';
+      }
+      // B3: si son caché por fallo de red, se dice con su hora.
+      if (_swrSolicitudes.notaSinRed.isNotEmpty) {
+        detalle += ' · ${_swrSolicitudes.notaSinRed}';
       }
       pendientes.add(_PendientePanel(
         icono: Icons.mark_email_unread_rounded,
@@ -1416,6 +1413,36 @@ class _AdminScreenState extends State<AdminScreen> {
         primario: true,
         onTap: () =>
             _ir(const InvitadosScreen(filtroInicial: 'solicitudes')),
+      ));
+    }
+
+    // B3: fallo de red SIN caché — la bandeja se declara sin
+    // cargar, con reintento; jamás «todo en orden» a ciegas.
+    // (Panel B3: «sin caché» se mide por el sello — un éxito
+    // vacío anterior ES caché, no ausencia de carga.)
+    if (_swrSolicitudes.sinCargar) {
+      pendientes.add(_PendientePanel(
+        icono: Icons.cloud_off_rounded,
+        tinte: AppColores.error,
+        titulo: 'Solicitudes de inscripción sin cargar',
+        detalle: 'Sin conexión para consultar la bandeja',
+        boton: 'Reintentar',
+        primario: true,
+        onTap: () => unawaited(_cargarSolicitudesInvitados()),
+      ));
+    }
+
+    // B3: vacío confirmado que no se pudo revalidar — no se
+    // afirma «todo en orden» sin decir que el dato es de antes.
+    if (_swrSolicitudes.vacioSinRevalidar) {
+      pendientes.add(_PendientePanel(
+        icono: Icons.cloud_off_rounded,
+        tinte: AppColores.alerta,
+        titulo: 'Solicitudes sin revalidar',
+        detalle: _swrSolicitudes.notaSinRed,
+        boton: 'Reintentar',
+        primario: false,
+        onTap: () => unawaited(_cargarSolicitudesInvitados()),
       ));
     }
 
@@ -1440,28 +1467,61 @@ class _AdminScreenState extends State<AdminScreen> {
         boton: 'Revisar',
         // Botón lleno solo si es la primera fila (sin solicitudes
         // y ya sin su carga en curso).
-        primario: _solicitudesInvitados.isEmpty && !_solicitudesCargando,
+        primario: _swrSolicitudes.datos.isEmpty &&
+            !_swrSolicitudes.cargando &&
+            !_swrSolicitudes.error,
         onTap: () => _ir(const ReservasScreen()),
       ));
     }
 
     // G2 (v1.7.0): reportes de pago App Plus por confirmar. Solo
-    // aparece con pendientes CONOCIDOS: si la RPC del segundo
-    // pase falló, la fila no se pinta (sin cifras inventadas).
-    if (_reportesPlus.isNotEmpty) {
-      final n = _reportesPlus.length;
-      final r = _reportesPlus.first;
+    // aparece con pendientes CONOCIDOS. 1.23 (B3): con caché de
+    // un éxito anterior, un fallo de red ya no la hace
+    // desaparecer: se pinta con la nota «Sin red · datos de…».
+    if (_swrReportes.datos.isNotEmpty) {
+      final n = _swrReportes.datos.length;
+      final r = _swrReportes.datos.first;
+      var detalle = '${r.nombre} · ${fmtMonto(r.monto)} CUP · '
+          'ref. ${r.referencia}';
+      if (_swrReportes.notaSinRed.isNotEmpty) {
+        detalle += ' · ${_swrReportes.notaSinRed}';
+      }
       pendientes.add(_PendientePanel(
         icono: Icons.star_rounded,
         tinte: AppColores.naranja,
         titulo: n == 1
             ? '1 reporte App Plus por confirmar'
             : '$n reportes App Plus por confirmar',
-        detalle: '${r.nombre} · ${fmtMonto(r.monto)} CUP · '
-            'ref. ${r.referencia}',
+        detalle: detalle,
         boton: 'Revisar',
         primario: false,
         onTap: () => _ir(const ReportesPlusScreen()),
+      ));
+    }
+
+    // B3: fallo de red sin caché en la bandeja del Plus.
+    if (_swrReportes.sinCargar) {
+      pendientes.add(_PendientePanel(
+        icono: Icons.cloud_off_rounded,
+        tinte: AppColores.error,
+        titulo: 'Reportes App Plus sin cargar',
+        detalle: 'Sin conexión para consultar la bandeja',
+        boton: 'Reintentar',
+        primario: false,
+        onTap: () => unawaited(_cargarReportesPlus()),
+      ));
+    }
+
+    // B3: vacío del Plus confirmado sin revalidar.
+    if (_swrReportes.vacioSinRevalidar) {
+      pendientes.add(_PendientePanel(
+        icono: Icons.cloud_off_rounded,
+        tinte: AppColores.alerta,
+        titulo: 'Reportes App Plus sin revalidar',
+        detalle: _swrReportes.notaSinRed,
+        boton: 'Reintentar',
+        primario: false,
+        onTap: () => unawaited(_cargarReportesPlus()),
       ));
     }
 
@@ -1566,7 +1626,7 @@ class _AdminScreenState extends State<AdminScreen> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         _tituloSeccion('NECESITA TU ATENCIÓN', naranja: true),
-        if (pendientes.isEmpty && !_solicitudesCargando)
+        if (pendientes.isEmpty && !_swrSolicitudes.cargando)
           Container(
             padding:
                 const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
@@ -1601,7 +1661,7 @@ class _AdminScreenState extends State<AdminScreen> {
                 // Panel 1.6.0: mientras la RPC de solicitudes no
                 // resuelve, su fila va en estado «cargando» (sin
                 // conteo) en vez de bloquear todo el bloque.
-                if (_solicitudesCargando)
+                if (_swrSolicitudes.cargando)
                   _filaSolicitudesCargando(
                       ultima: visibles.isEmpty && ocultos == 0),
                 for (var i = 0; i < visibles.length; i++)
@@ -1948,9 +2008,9 @@ class _AdminScreenState extends State<AdminScreen> {
         tinte: AppColores.info,
         titulo: 'Clientes, Invitados y Comunicación',
         resumen: 'Clientes · Invitados · Plantillas · Avisos',
-        badge: _solicitudesInvitados.isEmpty
+        badge: _swrSolicitudes.datos.isEmpty
             ? null
-            : _solicitudesInvitados.length,
+            : _swrSolicitudes.datos.length,
         tarjetas: _tarjetasModuloClientes,
       ),
       (
@@ -2193,10 +2253,10 @@ class _AdminScreenState extends State<AdminScreen> {
       _tarjetaFlujo(
         Icons.manage_accounts_rounded,
         'Usuarios',
-        _solicitudesInvitados.isEmpty
+        _swrSolicitudes.datos.isEmpty
             ? 'Entrenadores, clientes e invitados'
             : 'Entrenadores, clientes e invitados · '
-                '${_solicitudesInvitados.length} solicitud(es) por atender',
+                '${_swrSolicitudes.datos.length} solicitud(es) por atender',
         () => _ir(const ControlAccesoScreen()),
       ),
       // 1.21: candado de acceso — pausa temporal de las apps
@@ -2358,11 +2418,16 @@ class _AdminScreenState extends State<AdminScreen> {
       _tarjetaFlujo(
         Icons.star_rounded,
         'Reportes App Plus',
-        _reportesPlusCargando
+        _swrReportes.cargando
             ? 'Consultando reportes…'
-            : _reportesPlus.isEmpty
-                ? 'Pagos del Plus reportados por invitados'
-                : '${_reportesPlus.length} por confirmar',
+            : _swrReportes.sinCargar
+                ? 'Sin conexión para consultar reportes'
+                : _swrReportes.vacioSinRevalidar
+                    ? 'Sin reportes conocidos · '
+                        '${_swrReportes.notaSinRed}'
+                    : _swrReportes.datos.isEmpty
+                        ? 'Pagos del Plus reportados por invitados'
+                        : '${_swrReportes.datos.length} por confirmar',
         () => _ir(const ReportesPlusScreen()),
       ),
       _tarjetaFlujo(
