@@ -7,6 +7,7 @@ library;
 
 import 'package:flutter/material.dart';
 
+import '../auth.dart';
 import '../negocio.dart';
 import 'componentes.dart';
 import 'diseno.dart';
@@ -26,8 +27,17 @@ class DetallePendienteScreen extends StatefulWidget {
 
 class _DetallePendienteScreenState extends State<DetallePendienteScreen> {
   bool _cargando = true;
+  bool _restringido = false;
   List<Map<String, dynamic>> _items = [];
   double _adelantos = 0;
+  // 1.22 T-01: la cabecera sale de la función CANÓNICA
+  // (pendienteEntrega/pendienteEntregaUsd), no de sumar los
+  // ítems: la suma de ítems ignora los adelantos de gaveta, el
+  // libro C1 y el arrastre de parciales, y la cabecera decía
+  // 2000 donde Mi Turno y el Arqueo decían 1500/2700 para el
+  // mismo bolsillo.
+  double _totalCup = 0;
+  double _totalUsd = 0;
 
   @override
   void initState() {
@@ -36,12 +46,28 @@ class _DetallePendienteScreenState extends State<DetallePendienteScreen> {
   }
 
   Future<void> _cargar() async {
+    // 1.22 T-10: un entrenador solo puede ver SU detalle; el
+    // dueño ve el de cualquiera.
+    final auth = AuthService();
+    if (!auth.isOwner && auth.telegramId != widget.trainerId) {
+      if (mounted) {
+        setState(() {
+          _restringido = true;
+          _cargando = false;
+        });
+      }
+      return;
+    }
     final items = await detallePendienteEntrenador(widget.trainerId);
     final adelantos = await adelantosEnPendiente(widget.trainerId);
+    final totalCup = await pendienteEntrega(widget.trainerId);
+    final totalUsd = await pendienteEntregaUsd(widget.trainerId);
     if (mounted) {
       setState(() {
         _items = items;
         _adelantos = adelantos;
+        _totalCup = totalCup;
+        _totalUsd = totalUsd;
         _cargando = false;
       });
     }
@@ -123,17 +149,23 @@ class _DetallePendienteScreenState extends State<DetallePendienteScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // v1.3.1: total CUP (los USD van aparte).
-    final total = _items.fold<double>(
-        0,
-        (s, e) => s +
-            (((e['tipo'] == 'pago' ? e['monto'] : e['total']) as num).toDouble() *
-                ((e['moneda'] as String? ?? 'CUP') == 'USD' ? 0 : 1)));
-    final totalUsd = _items.fold<double>(
-        0,
-        (s, e) => s +
-            (((e['tipo'] == 'pago' ? e['monto'] : e['total']) as num).toDouble() *
-                ((e['moneda'] as String? ?? 'CUP') == 'USD' ? 1 : 0)));
+    if (_restringido) {
+      return Scaffold(
+        appBar: AppBar(
+          title: Text(widget.nombre),
+        ),
+        body: const Center(
+          child: Padding(
+            padding: EdgeInsets.all(24),
+            child: Text(
+                'Solo puedes ver tu propio pendiente a entregar.'),
+          ),
+        ),
+      );
+    }
+    // 1.22 T-01: totales canónicos (ver _totalCup en _cargar).
+    final total = _totalCup;
+    final totalUsd = _totalUsd;
     return Scaffold(
       appBar: AppBar(
         title: Text(widget.nombre),

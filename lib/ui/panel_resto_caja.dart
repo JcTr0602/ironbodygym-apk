@@ -60,6 +60,80 @@ class _ArqueoEntregaScreenState extends State<ArqueoEntregaScreen> {
     setState(() => _cargando = true);
     try {
       final lista = await entrenadoresConPendiente();
+      // 1.22 T-03: la membresía de la lista no puede salir
+      // solo del espejo: un entrenador cuyo pendiente vive
+      // SOLO en la cola local de este teléfono (ops que aún
+      // no bajan al espejo) no aparecía nunca, aunque
+      // pendienteEntrega — que sí suma la cola — lo contaba.
+      // Se añaden los beneficiarios con monto en cola que no
+      // estén ya en la lista; el monto fino lo sigue dando
+      // pendienteDeltaC1 más abajo, como a todos.
+      try {
+        // Panel Pieza 2: los ids se NORMALIZAN también en la
+        // lista base (no solo en la cola): si un productor
+        // futuro devolviera el telegram_id como texto, el
+        // entrenador saldría dos veces (su tarjeta del espejo
+        // y la de la cola).
+        final tidsEnLista = <int>{
+          for (final e in lista)
+            if (LocalDb.normalizarTelegramId(e['telegram_id'])
+                case final tidEnLista?)
+              tidEnLista,
+        };
+        final pr = await preciosVigentes();
+        final enCola = <int>{};
+        for (final op
+            in await LocalDb.instance.pendingOpsLectura()) {
+          int? benef;
+          if ('${op['tipo']}' == 'venta_servicio') {
+            Map<String, dynamic>? pay;
+            try {
+              pay = jsonDecode(op['payload'] as String)
+                  as Map<String, dynamic>;
+            } catch (_) {}
+            benef = (pay == null
+                    ? null
+                    : LocalDb.normalizarTelegramId(
+                        pay['responsable_efectivo_id'])) ??
+                LocalDb.normalizarTelegramId(op['telegram_id']);
+          } else {
+            benef = LocalDb.normalizarTelegramId(op['telegram_id']);
+          }
+          if (benef == null || tidsEnLista.contains(benef)) {
+            continue;
+          }
+          if (montoEfectivoOp(op, pr) > 0 ||
+              montoCobradoUsdOp(op) > 0) {
+            enCola.add(benef);
+          }
+        }
+        if (enCola.isNotEmpty) {
+          final nombres = <int, String>{};
+          try {
+            final raw =
+                await LocalDb.instance.getMeta('usuarios_apk');
+            if (raw != null && raw.isNotEmpty) {
+              for (final u in jsonDecode(raw) as List) {
+                final m = Map<String, dynamic>.from(u as Map);
+                final tidU =
+                    LocalDb.normalizarTelegramId(m['telegram_id']);
+                final n = '${m['nombre'] ?? ''}';
+                if (tidU != null && n.isNotEmpty) {
+                  nombres[tidU] = n;
+                }
+              }
+            }
+          } catch (_) {}
+          for (final tid in enCola) {
+            lista.add({
+              'telegram_id': tid,
+              'nombre': nombres[tid] ?? 'Entrenador $tid',
+              'cup': 0.0,
+              'usd': 0.0,
+            });
+          }
+        }
+      } catch (_) {}
       // H10 (Argón caja): la lista y el diálogo de liquidar usan
       // LA MISMA función. Antes la lista venía de pendienteArqueo
       // (e['cup']) y _liquidarAhora validaba con pendienteDeltaC1:
@@ -67,7 +141,7 @@ class _ArqueoEntregaScreenState extends State<ArqueoEntregaScreen> {
       // que no había pendiente. entrenadoresConPendiente solo se
       // conserva para la lista de entrenadores/nombres.
       for (final e in lista) {
-        final tid = e['telegram_id'] as int?;
+        final tid = LocalDb.normalizarTelegramId(e['telegram_id']);
         e['pendiente_c1'] =
             tid != null ? await pendienteDeltaC1(tid) : e['cup'] as double;
       }
@@ -87,7 +161,7 @@ class _ArqueoEntregaScreenState extends State<ArqueoEntregaScreen> {
     // método también la exige, y la bandera bloquea el doble toque.
     if (!AuthService().isOwner) return;
     if (_liquidando) return;
-    final tid = e['telegram_id'] as int?;
+    final tid = LocalDb.normalizarTelegramId(e['telegram_id']);
     if (tid == null) return;
     setState(() => _liquidando = true);
     try {
@@ -105,7 +179,18 @@ class _ArqueoEntregaScreenState extends State<ArqueoEntregaScreen> {
     var pendiente = await pendienteDeltaC1(tid);
     if (pendiente <= 0) {
       if (mounted) {
-        mostrarSnack(context, 'Ya no hay pendiente que liquidar', significado: SignificadoChip.alerta);
+        // 1.22 T-03: si lo único pendiente es USD, el callejón
+        // «Ya no hay pendiente» mentía: el USD existe y se
+        // liquida en el Arqueo principal.
+        final usd = (e['usd'] as num?)?.toDouble() ?? 0;
+        mostrarSnack(
+            context,
+            usd > 0
+                ? 'El pendiente de $nombre es solo en USD: se '
+                    'liquida en el Arqueo principal, no en esta '
+                    'pantalla.'
+                : 'Ya no hay pendiente que liquidar',
+            significado: SignificadoChip.alerta);
       }
       return;
     }
@@ -196,6 +281,22 @@ class _ArqueoEntregaScreenState extends State<ArqueoEntregaScreen> {
     montoCtrl.dispose();
   }
 
+  /// 1.22 T-03: subtítulo de la tarjeta. Si el pendiente CUP
+  /// es 0 pero hay USD, la tarjeta lo dice y apunta al Arqueo
+  /// principal (antes el USD quedaba como un apunte «aparte»
+  /// y el botón Liquidar caía en «Ya no hay pendiente»).
+  String _subtituloPendiente(Map<String, dynamic> e) {
+    final pend = ((e['pendiente_c1'] ?? e['cup']) as double);
+    final usd = (e['usd'] as num?)?.toDouble() ?? 0;
+    if (pend <= 0 && usd > 0) {
+      return 'Sin pendiente en CUP · USD aparte: '
+          '${usd.toStringAsFixed(0)} — el USD se liquida en el '
+          'Arqueo principal';
+    }
+    return 'Pendiente: ${pend.toStringAsFixed(0)} CUP'
+        '${usd > 0 ? ' · USD aparte: ${usd.toStringAsFixed(0)}' : ''}';
+  }
+
   @override
   Widget build(BuildContext context) {
     if (!AuthService().isOwner) {
@@ -228,10 +329,7 @@ class _ArqueoEntregaScreenState extends State<ArqueoEntregaScreen> {
                         contentPadding: EdgeInsets.zero,
                         title: Text('${e['nombre']}',
                             style: AppTexto.cuerpo),
-                        subtitle: Text(
-                            'Pendiente: '
-                            '${((e['pendiente_c1'] ?? e['cup']) as double).toStringAsFixed(0)} CUP'
-                            '${((e['usd'] as double) > 0) ? ' · USD aparte: ${(e['usd'] as double).toStringAsFixed(0)}' : ''}',
+                        subtitle: Text(_subtituloPendiente(e),
                             style: AppTexto.secundario),
                         trailing: TextButton(
                             onPressed:
@@ -527,11 +625,22 @@ class _AdelantosListaScreenState extends State<AdelantosListaScreen> {
     if (!AuthService().isOwner) return;
     try {
       final filas = <Map<String, dynamic>>[];
+      // 1.22 T-06: uuids ya presentes en el espejo, para cruzar
+      // con la cola (patrón AR-C03): sin el cruce, un adelanto
+      // recién sincronizado salía DOS veces en la ventana
+      // push→pull (la fila del espejo y su op aún en cola).
+      final uuidsEspejo = <String>{};
       for (final a in await LocalDb.instance.allMirror('adelantos')) {
         filas.add(a);
+        final u = '${a['op_uuid'] ?? ''}'.trim();
+        if (u.isNotEmpty) uuidsEspejo.add(u);
       }
       // Registrar_adelanto aún en cola en este teléfono (provisional).
       for (final op in await LocalDb.instance.pendingOps()) {
+        final opUuid = '${op['op_uuid'] ?? ''}'.trim();
+        if (opUuid.isNotEmpty && uuidsEspejo.contains(opUuid)) {
+          continue;
+        }
         try {
           final p = jsonDecode(op['payload'] as String)
               as Map<String, dynamic>;
@@ -881,6 +990,9 @@ class _PreciosMetodoScreenState extends State<PreciosMetodoScreen> {
   }
 
   Future<void> _cargar() async {
+    // 1.22 T-10: guarda de dueño también en el método (la de
+    // build sola no basta si el estado se crea por otra vía).
+    if (!AuthService().isOwner) return;
     final aj = await LocalDb.instance.getAjustes();
     for (final k in kClavesPreciosC6) {
       // Pasada 2 de Argón (1.20): liberar el controlador
@@ -905,6 +1017,9 @@ class _PreciosMetodoScreenState extends State<PreciosMetodoScreen> {
   }
 
   Future<void> _guardarPrecios() async {
+    // 1.22 T-10: cambiar precios es solo del dueño, también
+    // guardado en el método.
+    if (!AuthService().isOwner) return;
     final cambios = <String, dynamic>{};
     for (final k in kClavesPreciosC6) {
       final v = double.tryParse(_ctrls[k]!.text.trim());

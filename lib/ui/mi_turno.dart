@@ -15,6 +15,7 @@ import '../negocio.dart';
 import '../sync.dart';
 import '../tiempo.dart';
 import '../turno_service.dart';
+import '../turnos_resolucion.dart';
 import 'componentes.dart';
 import 'diseno.dart';
 import 'ficha.dart';
@@ -42,6 +43,11 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
   List<Map<String, dynamic>> _pendSuplementos = [];
   List<Map<String, dynamic>> _pendAdelantos = [];
   List<(String, double)> _pendOps = [];
+  // 1.22 T-02: arrastre vigente de la liquidación parcial (su
+  // línea en el desglose por día, para que el desglose cuadre
+  // con el total canónico de arriba).
+  double _arrastreCup = 0;
+  String? _arrastreFecha;
   // v1.0.16: mejoras para entrenadores
   List<Map<String, dynamic>> _vencimientos = [];
   double _cobradoAyer = 0;
@@ -62,17 +68,18 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
     final ult = await ultimaEntregaConfirmada(tid);
     final mes = await cobradoMes(tid);
     final (pm, pd, ps, pSup) = await detallePendiente(tid);
-    // Argón 1.21 AR-01: lo ya absorbido por una liquidación de
-    // caja tampoco cuenta en los bucles locales de esta pantalla
-    // (suplementos y la cola), igual que en detallePendiente.
-    final cubiertos =
-        tid == null ? <String>{} : await idsLiquidados(tid);
+    // (1.22 T-04: fuera la variable `cubiertos` muerta que aquí
+    // se calculaba sin usarse: detallePendiente ya excluye lo
+    // liquidado por dentro, AR-01.)
     // Argón 1.21 AR-C03: op_uuid ya presentes en el espejo; la
     // cola local no debe re-sumar lo que el pull ya bajó
     // (ventana push→pull, mismo cruce que B-03 en negocio).
+    // 1.22 T-05: el cruce ignora uuid nulo/vacío (un 'null'
+    // convertido a texto colisionaba entre filas sin uuid).
     final uuidsEspejo = <String>{
       for (final f in [...pm, ...pd, ...ps, ...pSup])
-        if (f['op_uuid'] != null) '${f['op_uuid']}',
+        if ('${f['op_uuid'] ?? ''}'.trim().isNotEmpty)
+          '${f['op_uuid']}'.trim(),
     };
     // 1.15-turnos (#9): el detalle por día cubre también servicios,
     // suplementos, adelantos y la cola local (misma cobertura que
@@ -82,7 +89,40 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
     // aquí solo se anotan sus uuids para el cruce de la cola.
     final sup = pSup;
     for (final v in sup) {
-      if (v['op_uuid'] != null) uuidsEspejo.add('${v['op_uuid']}');
+      final u = '${v['op_uuid'] ?? ''}'.trim();
+      if (u.isNotEmpty) uuidsEspejo.add(u);
+    }
+    // 1.22 T-02: arrastre vigente (liquidación parcial CUP) con
+    // su fecha: entra como línea del desglose por día.
+    var arrastreCup = 0.0;
+    String? arrastreFecha;
+    if (tid != null) {
+      for (final l
+          in await LocalDb.instance.allMirror('liquidaciones_caja')) {
+        if (LocalDb.normalizarTelegramId(l['entrenador_telegram_id']) !=
+            tid) {
+          continue;
+        }
+        if ((l['estado'] as String?) != 'parcial') continue;
+        if ((l['moneda'] as String?) == 'USD') continue;
+        final a = (l['saldo_arrastre'] as num?)?.toDouble() ?? 0;
+        // Mismo criterio que pendienteEntrega: se suman TODAS
+        // las parciales CUP (en la práctica el servidor deja
+        // como 'parcial' solo la vigente por entrenador/moneda:
+        // al registrar otra liquidación, las anteriores pasan
+        // a 'liquidado' con su arrastre absorbido).
+        if (a == 0) continue;
+        arrastreCup += a;
+        // Panel Pieza 2: la fecha de la línea es la de la
+        // parcial MÁS RECIENTE por creada_en (determinista;
+        // el orden del espejo no se garantiza).
+        final f = '${l['creada_en'] ?? ''}';
+        if (f.length >= 10 &&
+            (arrastreFecha == null ||
+                f.substring(0, 10).compareTo(arrastreFecha!) >= 0)) {
+          arrastreFecha = f.substring(0, 10);
+        }
+      }
     }
     final adel = <Map<String, dynamic>>[];
     for (final a in await LocalDb.instance.allMirror('adelantos')) {
@@ -97,7 +137,11 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
       // Argón 1.21 AR-C03: si la op ya bajó al espejo, la
       // cuentan las listas de espejo; re-sumarla aquí duplicaba
       // el desglose por día frente al total superior.
-      if (uuidsEspejo.contains('${op['op_uuid']}')) continue;
+      // 1.22 T-05: uuid nulo/vacío no cruza (no es identidad).
+      final opUuid = '${op['op_uuid'] ?? ''}'.trim();
+      if (opUuid.isNotEmpty && uuidsEspejo.contains(opUuid)) {
+        continue;
+      }
       try {
         final payload =
             jsonDecode(op['payload'] as String) as Map<String, dynamic>;
@@ -110,7 +154,12 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
                   payload['responsable_efectivo_id']) ??
               LocalDb.normalizarTelegramId(op['telegram_id']);
           if (resp != tid) continue;
-        } else if (op['telegram_id'] != tid) {
+          // 1.22 T-05: el telegram_id se normaliza en TODAS las
+          // ramas (antes solo en venta_servicio: una op con el
+          // id como texto no casaba con el tid numérico y su
+          // dinero desaparecía del desglose).
+        } else if (LocalDb.normalizarTelegramId(op['telegram_id']) !=
+            tid) {
           continue;
         }
         final fecha =
@@ -161,6 +210,8 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
         _pendSuplementos = sup;
         _pendAdelantos = adel;
         _pendOps = opsDia;
+        _arrastreCup = arrastreCup;
+        _arrastreFecha = arrastreFecha;
         _pendienteUsd = pendUsd;
         _cobradoAyer = cobradoAyer;
         _semanaAnt = semanaAnt;
@@ -218,14 +269,16 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
   String _ayerIso() =>
       _iso(ahoraHabana().subtract(const Duration(days: 1)));
 
-  /// Turno actual según la hora (v1.0.16).
-  /// v1.1.1: id corto para la clave de cierre (mañana/tarde/noche).
-  String _turnoId() {
-    final h = ahoraHabana().hour;
-    if (h >= 5 && h < 12) return 'manana';
-    if (h >= 12 && h < 18) return 'tarde';
-    return 'noche';
-  }
+  /// Turno actual según la hora.
+  /// 1.22 T-07: franja CANÓNICA de turnos_resolucion (mañana
+  /// 6-12, sáb 7-12; tarde 14-20, sáb sin tarde; domingo sin
+  /// franja; hueco 12-14 sin franja; NO existe «noche»). El
+  /// reloj propio anterior (5-12/12-18/resto noche) cerraba
+  /// como «noche» un turno de tarde a las 18:05 y la etiqueta
+  /// mentía. Sin franja vigente, el token 'sin_franja' sirve
+  /// solo para la clave/meta del camino legado.
+  String _turnoId() =>
+      franjaDeInstante(ahoraHabana()) ?? 'sin_franja';
 
   /// Clave del cierre del turno actual (por día, turno y entrenador).
   String _claveCierre() =>
@@ -245,18 +298,21 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
   }
 
   String _turnoActual() {
-    final h = ahoraHabana().hour;
-    if (h >= 5 && h < 12) return 'Turno de mañana';
-    if (h >= 12 && h < 18) return 'Turno de tarde';
-    return 'Turno de noche';
+    // 1.22 T-07: misma franja canónica que _turnoId.
+    return switch (franjaDeInstante(ahoraHabana())) {
+      'manana' => 'Turno de mañana',
+      'tarde' => 'Turno de tarde',
+      _ => 'Fuera de franja de turno',
+    };
   }
 
   /// Icono según el turno actual.
   IconData _iconoTurno() {
-    final h = ahoraHabana().hour;
-    if (h >= 5 && h < 12) return Icons.wb_sunny_rounded;
-    if (h >= 12 && h < 18) return Icons.wb_sunny_rounded;
-    return Icons.nights_stay_rounded;
+    return switch (franjaDeInstante(ahoraHabana())) {
+      'manana' => Icons.wb_sunny_rounded,
+      'tarde' => Icons.wb_twilight_rounded,
+      _ => Icons.schedule_rounded,
+    };
   }
 
   /// Total cobrado en los últimos 7 días (incluye hoy).
@@ -505,6 +561,24 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
                     }
                     return;
                   }
+                  // 1.22 T-08: hay turno abierto pero la
+                  // preparación falló: se muestra el motivo y
+                  // NO se cae al camino legado (antes se
+                  // «cerraba de mentira» con la meta legada y
+                  // el turno real quedaba abierto).
+                  final motivo =
+                      '${prep['error'] ?? ''}' == 'sin_turno_abierto'
+                          ? 'El turno ya no está abierto: pudo '
+                              'cerrarse desde otro flujo. Actualiza '
+                              'la pantalla e inténtalo de nuevo.'
+                          : 'No se pudo preparar el cierre: '
+                              '${prep['error'] ?? 'motivo desconocido'}';
+                  if (ctx.mounted) Navigator.of(ctx).pop();
+                  if (mounted) {
+                    mostrarSnack(context, motivo,
+                        significado: SignificadoChip.error);
+                  }
+                  return;
                 }
                 await LocalDb.instance.setMeta(
                     _claveCierre(),
@@ -570,6 +644,12 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
     for (final o in _pendOps) {
       suma(o.$1, o.$2);
     }
+    // 1.22 T-02: el arrastre de la parcial es una línea del día
+    // de la liquidación; sin ella el desglose no cuadraba con
+    // el total canónico (que sí lo suma, pendienteEntrega).
+    if (_arrastreCup > 0) {
+      suma(_arrastreFecha, _arrastreCup);
+    }
     final dias = m.keys.toList()..sort((a, b) => b.compareTo(a));
     return {for (final d in dias) d: m[d]!};
   }
@@ -611,7 +691,9 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
   Widget build(BuildContext context) {
     // v1.0.16: para el dueño es "Mis cobros" (no trabaja turnos);
     // se oculta todo lo de pendiente/entregas que no le aplica.
-    final esDueno = _auth.isAdmin;
+    // 1.22 T-10: esDueno unificado a isOwner (antes isAdmin: un
+    // admin que no es el dueño veía la vista del dueño).
+    final esDueno = _auth.isOwner;
     return Scaffold(
       appBar: AppBar(
           title: Text(esDueno ? 'Mis cobros' : 'Mi turno')),
