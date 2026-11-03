@@ -78,8 +78,8 @@ Future<({
   double conAgua,
   double agua,
   double comision
-})> preciosServicios() async {
-  final aj = await LocalDb.instance.getAjustes();
+})> preciosServicios({DatabaseExecutor? txn}) async {
+  final aj = await LocalDb.instance.getAjustes(txn: txn);
   double v(String k, double d) => (aj[k] as num?)?.toDouble() ?? d;
   return (
     sinAgua: v('servicio_precio_sin_agua', 600),
@@ -848,14 +848,16 @@ Future<List<Map<String, dynamic>>> pomosActivosLocal(
 /// Dosis sin repartir de un bote (espejo): rendimiento − Σ lotes.
 /// v1.13.0: las reposiciones también salen del «sin repartir» del
 /// mismo bote (el lote repuesto crece a costa del pool sin asignar).
-Future<int> sinRepartirLocal(int boteId) async {
-  final botes = await LocalDb.instance.allMirror('servicio_botes');
+Future<int> sinRepartirLocal(int boteId, {DatabaseExecutor? txn}) async {
+  final botes =
+      await LocalDb.instance.allMirror('servicio_botes', txn: txn);
   final bote =
       botes.where((b) => (b['id'] as num?)?.toInt() == boteId).toList();
   if (bote.isEmpty) return 0;
   final rend = (bote.first['dosis_rendimiento'] as num?)?.toInt() ?? 0;
   var repartidas = 0;
-  for (final l in await LocalDb.instance.allMirror('servicio_lotes')) {
+  for (final l
+      in await LocalDb.instance.allMirror('servicio_lotes', txn: txn)) {
     if ((l['bote_id'] as num?)?.toInt() == boteId) {
       repartidas += (l['dosis_iniciales'] as num?)?.toInt() ?? 0;
       repartidas += (l['dosis_repuestas'] as num?)?.toInt() ?? 0;
@@ -868,7 +870,7 @@ Future<int> sinRepartirLocal(int boteId) async {
   // (o un doble toque) pasaban ambas el chequeo local porque la
   // primera aún no bajó al espejo, y el servidor rechazaba la
   // segunda a incidencias.
-  for (final op in await _opsServicioPendientes()) {
+  for (final op in await _opsServicioPendientes(txn: txn)) {
     if ('${op['tipo']}' != 'crear_lote_servicio') continue;
     try {
       final p = jsonDecode(op['payload'] as String) as Map<String, dynamic>;
@@ -1200,16 +1202,30 @@ Future<String> crearLoteServicio({
   required int responsableId,
 }) async {
   if (dosis < 1) throw Exception('El lote debe tener al menos 1 dosis');
-  final sinRepartir = await sinRepartirLocal(boteId);
-  if (dosis > sinRepartir) {
-    throw Exception('Solo quedan $sinRepartir dosis sin repartir');
-  }
-  return _encolar('crear_lote_servicio', {
-    'bote_id': boteId,
-    'dosis': dosis,
-    'responsable_tipo': responsableTipo,
-    'responsable_id': responsableId,
+  // Autoauditoría 1.22 #2 (D2-02, patrón PF-6): la comprobación
+  // de «sin repartir» y el encolado en UNA transacción (la
+  // lectura por el ejecutor ya descuenta los crear_lote
+  // encolados dentro de ella). Fuera, dos creaciones
+  // concurrentes pasaban ambas contra el mismo pool.
+  final conn = await LocalDb.instance.db;
+  late final String opUuid;
+  await conn.transaction((txn) async {
+    final sinRepartir = await sinRepartirLocal(boteId, txn: txn);
+    if (dosis > sinRepartir) {
+      throw Exception('Solo quedan $sinRepartir dosis sin repartir');
+    }
+    opUuid = await _encolar(
+        'crear_lote_servicio',
+        {
+          'bote_id': boteId,
+          'dosis': dosis,
+          'responsable_tipo': responsableTipo,
+          'responsable_id': responsableId,
+        },
+        txn: txn);
   });
+  unawaited(SyncEngine.instance.push().then((_) {}, onError: (_) {}));
+  return opUuid;
 }
 
 /// Edad del cliente identificado desde su carnet (null si no se
@@ -1236,15 +1252,20 @@ int? _edadCliente(Map<String, dynamic> cliente) {
 /// dosis nacen RETENIDAS 15 s (retenerHastaIso, como el cobro del
 /// Bloque 1): es la ventana de Deshacer E3; al vencer, el push las
 /// Payload de una venta de servicio: TODAS las validaciones y
-/// lecturas, SIN escribir nada. La venta múltiple calcula los
-/// payloads de sus subventas primero (si uno falla, no se encola
-/// ninguno) y luego encola todos en UNA transacción.
+/// lecturas, SIN escribir nada.
 /// Corrección panel 1.13 (2º intento): la 1ª versión pasaba la
 /// transacción a registrarVentaServicio, pero sus lecturas por
 /// `LocalDb.instance.db` dentro del callback se bloqueaban con
 /// la transacción abierta (deadlock de sqflite: el test de
-/// bloque4 se quedó colgado sin CPU). Las lecturas van FUERA
-/// de la transacción; dentro solo van los queueOp.
+/// bloque4 se quedó colgado sin CPU).
+/// Autoauditoría 1.22 #2 (D2-02): el deadlock era por el HANDLE
+/// principal, no por leer en transacción: desde PF-6 los
+/// helpers aceptan el ejecutor (txn) y leer por él es seguro.
+/// registrarVentaServicio y la múltiple ahora calculan el
+/// payload DENTRO de su transacción pasando [txn], así la
+/// validación de saldo y el encolado son atómicos. Sin txn
+/// (llamadores de solo lectura/preview) el comportamiento es el
+/// de siempre: lecturas por el handle principal, sin escribir.
 Future<({Map<String, dynamic> payload, String? retener})>
     _payloadVentaServicio({
   required String tipo, // dosis_sin_agua | dosis_con_agua | agua_suelta
@@ -1264,6 +1285,12 @@ Future<({Map<String, dynamic> payload, String? retener})>
   // v1.13.0 (B2): grupo de venta múltiple; obligatorio si cantidad
   // > 1 en dosis. Viaja en el payload para Deshacer y servidor.
   String? ventaGrupoId,
+  // Autoauditoría 1.22 #2 (D2-02, patrón PF-6): ejecutor de la
+  // transacción que va a encolar la venta. Con txn, TODAS las
+  // lecturas de validación van por él: validar fuera y encolar
+  // dentro dejaba la ventana de PF-6 abierta en ventas (dos
+  // llamadas concurrentes validaban contra el mismo saldo).
+  DatabaseExecutor? txn,
 }) async {
   if (!kTiposVentaServicio.contains(tipo)) {
     throw Exception('Tipo de servicio inválido');
@@ -1276,7 +1303,8 @@ Future<({Map<String, dynamic> payload, String? retener})>
   final db = LocalDb.instance;
   Map<String, dynamic>? cliente;
   if (clienteId != null) {
-    final filas = await db.mirrorPorIds('clientes', [clienteId]);
+    final filas =
+        await db.mirrorPorIds('clientes', [clienteId], txn: txn);
     if (filas.isEmpty) throw Exception('Cliente no encontrado');
     cliente = filas.first;
   }
@@ -1313,13 +1341,13 @@ Future<({Map<String, dynamic> payload, String? retener})>
   // Pomo y saldo local (bloqueo en el teléfono si el saldo es 0).
   if (tipo != 'agua_suelta') {
     if (pomoId == null) throw Exception('Falta el pomo de venta');
-    final pomos = await db.allMirror('servicio_pomos');
+    final pomos = await db.allMirror('servicio_pomos', txn: txn);
     final pomo =
         pomos.where((l) => (l['id'] as num?)?.toInt() == pomoId).toList();
     if (pomo.isEmpty || (pomo.first['activo'] as num?)?.toInt() != 1) {
       throw Exception('El pomo no está activo');
     }
-    final saldo = await saldoPomoLocal(pomoId);
+    final saldo = await saldoPomoLocal(pomoId, txn: txn);
     // Ítem 6 (pomo ciego): el bloqueo por saldo local solo aplica
     // cuando vende el DUEÑO (él sí conoce la cantidad de su pomo).
     // Al entrenador no se le bloquea ni se le revela el saldo: el
@@ -1327,19 +1355,32 @@ Future<({Map<String, dynamic> payload, String? retener})>
     if (saldo <= 0 && vendedorEsDueno) {
       throw Exception('El pomo no tiene dosis disponibles');
     }
+    // Autoauditoría 1.22 #2 (D2-02): el dueño tampoco puede
+    // vender MÁS dosis de las que quedan. La venta simple vende
+    // de 1 en 1 (saldo <= 0 ya cubre su caso); quien lo necesita
+    // es la venta MÚLTIPLE, que antes solo se fiaba del
+    // topeDosis que trae la UI — una foto del saldo tomada en
+    // _cargar(): si otra venta/salida consumía dosis entre la
+    // carga y la confirmación, la múltiple se encolaba por
+    // encima del saldo real y el pomo quedaba negativo. Dentro
+    // de la transacción, el saldo ya descuenta las subventas
+    // hermanas encoladas antes en el mismo grupo.
+    if (vendedorEsDueno && cantidad > saldo) {
+      throw Exception('Solo quedan $saldo dosis en el pomo');
+    }
   }
   // Agua común: se bloquea la variante si no hay pomos.
   if (tipo == 'dosis_con_agua' || tipo == 'agua_suelta') {
-    final agua = await stockAguaLocal();
+    final agua = await stockAguaLocal(txn: txn);
     if (agua.saldo < cantidad) {
       throw Exception('Sin pomos de agua en el stock común');
     }
   }
-  final pr = await preciosServicios();
+  final pr = await preciosServicios(txn: txn);
   // Ítem 7: el precio sale del (producto, método) vigente y viaja
   // como snapshot en la op — si el dueño cambia precios o deshabilita
   // el método después, el servidor acepta la venta tal cual se cobró.
-  final aj = await LocalDb.instance.getAjustes();
+  final aj = await LocalDb.instance.getAjustes(txn: txn);
   if (!casa && !metodoServicioActivo(aj, tipo, metodo!)) {
     throw Exception(
         'Ese método de cobro está deshabilitado para este producto');
@@ -1407,26 +1448,36 @@ Future<String> registrarVentaServicio({
   double? comisionUnitaria,
   String? ventaGrupoId,
 }) async {
-  final calc = await _payloadVentaServicio(
-    tipo: tipo,
-    pomoId: pomoId,
-    cantidad: cantidad,
-    clienteId: clienteId,
-    metodo: metodo,
-    casa: casa,
-    beneficiario: beneficiario,
-    vendedorEsDueno: vendedorEsDueno,
-    vendedorId: vendedorId,
-    responsableEfectivoId: responsableEfectivoId,
-    comisionUnitaria: comisionUnitaria,
-    ventaGrupoId: ventaGrupoId,
-  );
-  final opUuid = const Uuid().v4();
-  await LocalDb.instance.queueOp(
-      opUuid: opUuid,
-      tipo: 'venta_servicio',
-      payload: calc.payload,
-      retenerHastaIso: calc.retener);
+  // Autoauditoría 1.22 #2 (D2-02, patrón PF-6): payload y
+  // encolado en UNA transacción, con las lecturas del payload
+  // por el ejecutor. Antes el payload se calculaba fuera y dos
+  // ventas concurrentes validaban contra el mismo saldo.
+  final db = await LocalDb.instance.db;
+  late final String opUuid;
+  await db.transaction((txn) async {
+    final calc = await _payloadVentaServicio(
+      tipo: tipo,
+      pomoId: pomoId,
+      cantidad: cantidad,
+      clienteId: clienteId,
+      metodo: metodo,
+      casa: casa,
+      beneficiario: beneficiario,
+      vendedorEsDueno: vendedorEsDueno,
+      vendedorId: vendedorId,
+      responsableEfectivoId: responsableEfectivoId,
+      comisionUnitaria: comisionUnitaria,
+      ventaGrupoId: ventaGrupoId,
+      txn: txn,
+    );
+    opUuid = const Uuid().v4();
+    await LocalDb.instance.queueOp(
+        opUuid: opUuid,
+        tipo: 'venta_servicio',
+        payload: calc.payload,
+        retenerHastaIso: calc.retener,
+        txn: txn);
+  });
   unawaited(SyncEngine.instance.push().then((_) {}, onError: (_) {}));
   return opUuid;
 }
@@ -1466,46 +1517,47 @@ Future<List<String>> registrarVentaMultipleServicio({
     throw Exception('Solo quedan $topePomos pomos de agua');
   }
   final grupo = const Uuid().v4();
-  // Corrección panel 1.13 (BLOQUEANTE): primero se calculan los
-  // payloads de las subventas (lecturas + validaciones, sin
-  // escribir); si uno falla, no se encola ninguno. Luego los
-  // queueOp van en UNA transacción y el push una sola vez al
+  // Corrección panel 1.13 (BLOQUEANTE): si un payload falla, no
+  // se encola ninguno del grupo; el push va una sola vez al
   // final. Antes cada subventa encolaba y empujaba por su lado:
   // una caída entre ambas dejaba el grupo a medias y el Deshacer
   // no podía garantizar borrarlo completo.
-  Future<({Map<String, dynamic> payload, String? retener})> una(
-      String tipo, int cant) {
-    return _payloadVentaServicio(
-      tipo: tipo,
-      pomoId: pomoId,
-      cantidad: cant,
-      clienteId: clienteId,
-      metodo: metodo,
-      casa: casa,
-      beneficiario: beneficiario,
-      vendedorEsDueno: vendedorEsDueno,
-      vendedorId: vendedorId,
-      responsableEfectivoId: responsableEfectivoId,
-      comisionUnitaria: comisionUnitaria,
-      ventaGrupoId: grupo,
-    );
-  }
-
-  final List<({Map<String, dynamic> payload, String? retener})> calcs;
-  if (pomosM == 0) {
-    calcs = [await una('dosis_sin_agua', dosisN)];
-  } else if (pomosM == dosisN) {
-    calcs = [await una('dosis_con_agua', dosisN)];
-  } else {
-    calcs = [
-      await una('dosis_con_agua', pomosM),
-      await una('dosis_sin_agua', dosisN - pomosM),
-    ];
-  }
+  // Autoauditoría 1.22 #2 (D2-02): los payloads se calculan
+  // DENTRO de la transacción y cada subventa se encola al
+  // calcularse, por el ejecutor: la segunda subventa ya
+  // descuenta a la primera al validar su saldo (y una múltiple
+  // concurrente no valida contra el mismo saldo que esta). Si
+  // un payload lanza, la transacción revierte las subventas ya
+  // encoladas: el grupo sigue siendo todo o nada.
+  final plan = <(String, int)>[
+    if (pomosM == 0)
+      ('dosis_sin_agua', dosisN)
+    else if (pomosM == dosisN)
+      ('dosis_con_agua', dosisN)
+    else ...[
+      ('dosis_con_agua', pomosM),
+      ('dosis_sin_agua', dosisN - pomosM),
+    ],
+  ];
   final uuids = <String>[];
   final db = await LocalDb.instance.db;
   await db.transaction((txn) async {
-    for (final c in calcs) {
+    for (final (tipoSub, cant) in plan) {
+      final c = await _payloadVentaServicio(
+        tipo: tipoSub,
+        pomoId: pomoId,
+        cantidad: cant,
+        clienteId: clienteId,
+        metodo: metodo,
+        casa: casa,
+        beneficiario: beneficiario,
+        vendedorEsDueno: vendedorEsDueno,
+        vendedorId: vendedorId,
+        responsableEfectivoId: responsableEfectivoId,
+        comisionUnitaria: comisionUnitaria,
+        ventaGrupoId: grupo,
+        txn: txn,
+      );
       final opUuid = const Uuid().v4();
       await LocalDb.instance.queueOp(
           opUuid: opUuid,
@@ -1725,21 +1777,24 @@ Future<String> reponerLoteServicio({
 }) async {
   if (dosis < 1) throw Exception('La reposición debe ser de al menos 1 dosis');
   final db = LocalDb.instance;
-  final lotes = await db.allMirror('servicio_lotes');
-  final lote =
-      lotes.where((l) => (l['id'] as num?)?.toInt() == loteId).toList();
-  if (lote.isEmpty || '${lote.first['estado']}' != 'activo') {
-    throw Exception('El lote no está activo');
-  }
-  final boteId = (lote.first['bote_id'] as num?)?.toInt();
-  if (boteId == null) throw Exception('El lote no tiene bote');
-  final sinRepartir = await sinRepartirLocal(boteId);
-  if (dosis > sinRepartir) {
-    throw Exception('Solo quedan $sinRepartir dosis sin repartir');
-  }
   final opUuid = const Uuid().v4();
   final conn = await db.db;
   await conn.transaction((txn) async {
+    // Autoauditoría 1.22 #2 (D2-02): la validación vivía FUERA
+    // de esta transacción: lote y «sin repartir» se leen ahora
+    // por el ejecutor, dentro, junto al encolado y al reflejo.
+    final lotes = await db.allMirror('servicio_lotes', txn: txn);
+    final lote =
+        lotes.where((l) => (l['id'] as num?)?.toInt() == loteId).toList();
+    if (lote.isEmpty || '${lote.first['estado']}' != 'activo') {
+      throw Exception('El lote no está activo');
+    }
+    final boteId = (lote.first['bote_id'] as num?)?.toInt();
+    if (boteId == null) throw Exception('El lote no tiene bote');
+    final sinRepartir = await sinRepartirLocal(boteId, txn: txn);
+    if (dosis > sinRepartir) {
+      throw Exception('Solo quedan $sinRepartir dosis sin repartir');
+    }
     await db.queueOp(
       opUuid: opUuid,
       tipo: 'reponer_lote',
@@ -1771,38 +1826,53 @@ Future<String> reponerPomoServicio({
 }) async {
   if (dosis < 1) throw Exception('El relleno debe ser de al menos 1 dosis');
   final db = LocalDb.instance;
-  final pomos = await db.allMirror('servicio_pomos');
-  final destino = pomos
-      .where((l) => (l['id'] as num?)?.toInt() == pomoDestinoId)
-      .toList();
-  if (destino.isEmpty || (destino.first['activo'] as num?)?.toInt() != 1) {
-    throw Exception('El pomo destino no está activo');
-  }
-  if ((destino.first['es_principal'] as num?)?.toInt() == 1) {
-    throw Exception('No se rellena el propio principal');
-  }
-  final suplementoId = (destino.first['suplemento_id'] as num?)?.toInt();
-  final principal = pomos
-      .where((l) =>
-          (l['es_principal'] as num?)?.toInt() == 1 &&
-          (l['suplemento_id'] as num?)?.toInt() == suplementoId)
-      .toList();
-  if (principal.isEmpty) {
-    throw Exception('No hay pomo principal para este producto');
-  }
-  final saldoPrincipal =
-      await saldoPomoLocal((principal.first['id'] as num).toInt());
-  if (dosis > saldoPrincipal) {
-    throw Exception('El principal solo tiene $saldoPrincipal dosis');
-  }
-  return _encolar('reponer_pomo', {
-    'pomo_destino_id': pomoDestinoId,
-    'dosis': dosis,
-    // Panel Luna: sin el producto, un relleno pendiente restaba
-    // del principal de CUALQUIER producto al derivar saldos.
-    'suplemento_id': suplementoId,
-    'fecha': hoyHabanaIso(),
+  // Autoauditoría 1.22 #2 (D2-02, patrón PF-6): lecturas,
+  // validación del saldo del principal y encolado en UNA
+  // transacción. Fuera, dos rellenos concurrentes de 20 con el
+  // principal en 25 pasaban ambos y el segundo lo rechazaba el
+  // servidor (incidencia evitable, principal local negativo).
+  final conn = await db.db;
+  late final String opUuid;
+  await conn.transaction((txn) async {
+    final pomos = await db.allMirror('servicio_pomos', txn: txn);
+    final destino = pomos
+        .where((l) => (l['id'] as num?)?.toInt() == pomoDestinoId)
+        .toList();
+    if (destino.isEmpty || (destino.first['activo'] as num?)?.toInt() != 1) {
+      throw Exception('El pomo destino no está activo');
+    }
+    if ((destino.first['es_principal'] as num?)?.toInt() == 1) {
+      throw Exception('No se rellena el propio principal');
+    }
+    final suplementoId = (destino.first['suplemento_id'] as num?)?.toInt();
+    final principal = pomos
+        .where((l) =>
+            (l['es_principal'] as num?)?.toInt() == 1 &&
+            (l['suplemento_id'] as num?)?.toInt() == suplementoId)
+        .toList();
+    if (principal.isEmpty) {
+      throw Exception('No hay pomo principal para este producto');
+    }
+    final saldoPrincipal = await saldoPomoLocal(
+        (principal.first['id'] as num).toInt(),
+        txn: txn);
+    if (dosis > saldoPrincipal) {
+      throw Exception('El principal solo tiene $saldoPrincipal dosis');
+    }
+    opUuid = await _encolar(
+        'reponer_pomo',
+        {
+          'pomo_destino_id': pomoDestinoId,
+          'dosis': dosis,
+          // Panel Luna: sin el producto, un relleno pendiente restaba
+          // del principal de CUALQUIER producto al derivar saldos.
+          'suplemento_id': suplementoId,
+          'fecha': hoyHabanaIso(),
+        },
+        txn: txn);
   });
+  unawaited(SyncEngine.instance.push().then((_) {}, onError: (_) {}));
+  return opUuid;
 }
 
 /// Solo dueño: repone el stock común de agua con su costo (CPP).

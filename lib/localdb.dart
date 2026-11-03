@@ -3284,9 +3284,12 @@ class LocalDb {
   /// Lee solo las filas pedidas (evita el full scan de [allMirror] en
   /// rutas calientes como la búsqueda).
   Future<List<Map<String, dynamic>>> mirrorPorIds(
-      String tabla, List<int> ids) async {
+      String tabla, List<int> ids,
+      {DatabaseExecutor? txn}) async {
     if (ids.isEmpty) return [];
-    final d = await db;
+    // Autoauditoría 1.22 #2 (D2-02): ejecutor inyectable, como
+    // allMirror — dentro de una transacción se lee por el txn.
+    final d = txn ?? await db;
     final ph = List.filled(ids.length, '?').join(',');
     final rows =
         await d.query(tabla, where: 'id IN ($ph)', whereArgs: ids);
@@ -5836,7 +5839,8 @@ class LocalDb {
     await d.insert('meta', {'k': k, 'v': v},
         conflictAlgorithm: ConflictAlgorithm.replace);
   }
-  Future<String?> getMeta(String k) async {    final d = await db;
+  Future<String?> getMeta(String k, {DatabaseExecutor? txn}) async {
+    final d = txn ?? await db;
     final rows = await d.query('meta', where: 'k=?', whereArgs: [k]);
     return rows.isEmpty ? null : rows.first['v'] as String;
   }
@@ -6568,8 +6572,8 @@ class LocalDb {
     return hay ? m : 0;
   }
 
-  Future<Map<String, dynamic>> getAjustes() async {
-    final raw = await getMeta('ajustes');
+  Future<Map<String, dynamic>> getAjustes({DatabaseExecutor? txn}) async {
+    final raw = await getMeta('ajustes', txn: txn);
     if (raw == null) return {};
     return jsonDecode(raw) as Map<String, dynamic>;
   }
