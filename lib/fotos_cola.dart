@@ -115,6 +115,29 @@ Future<Map<String, String>> _generarVariantesInterno(
 /// del bucle de inmediato.
 class _PausaQosCola implements Exception {}
 
+/// Autoauditoría 1.22 #2: la resolución de ids de la foto no tuvo
+/// evidencia — una de las lecturas triestado devolvió ok:false
+/// (la lectura FALLÓ: red/HTTP) y los ids siguen sin conocerse.
+/// No es «ID nunca resuelto» (ok:true sostenido, contrato #8-1):
+/// procesarCola difiere la fila SIN quemar intentos, porque el
+/// fallo es de la lectura, no de la foto.
+class _LecturaIdsSinEvidencia implements Exception {}
+
+/// Decisión pura de _subirUna: ¿la salida «sin ids» de este ciclo
+/// es falta de evidencia (alguna lectura ok:false) y no ausencia
+/// confirmada? Solo si AMBOS ids siguen sin resolverse: si uno
+/// se resolvió, la foto procede con ese y el otro es irrelevante.
+@visibleForTesting
+bool lecturaIdsSinEvidencia({
+  required bool clienteOk,
+  required bool suplementoOk,
+  required int? clienteId,
+  required int? suplementoId,
+}) =>
+    clienteId == null &&
+    suplementoId == null &&
+    (!clienteOk || !suplementoOk);
+
 class FotosColaService {
   FotosColaService._();
   static final FotosColaService instance = FotosColaService._();
@@ -685,6 +708,27 @@ class FotosColaService {
         storagePathTmp = await _subirUna(f, workerId);
       } on _PausaQosCola {
         break;
+      } on _LecturaIdsSinEvidencia {
+        // Autoauditoría 1.22 #2: la resolución de ids no tuvo
+        // evidencia (lectura ok:false). Diferir SIN quemar
+        // intentos ni pasar por la rama sinIds (que quema hasta
+        // 'error' con «ID de entidad nunca resuelto»): el fallo
+        // es de la lectura, no de la foto. Mismo diferimiento de
+        // +2 min que la rama sinIds, pero con intentos intactos.
+        await db.update(
+          'fotos_cola',
+          {
+            'estado': 'pendiente',
+            'worker_id': null,
+            'lease_hasta': null,
+            'proximo_intento_en':
+                isoHabana(ahoraHabana().add(const Duration(minutes: 2))),
+            'actualizado_en': isoHabana(ahoraHabana()),
+          },
+          where: 'id = ? AND worker_id = ?',
+          whereArgs: [id, workerId],
+        );
+        continue;
       }
       final storagePath = storagePathTmp;
       if (storagePath != null) {
@@ -935,16 +979,35 @@ class FotosColaService {
     // entra en bucle infinito (retorna path sin IDs resueltos).
     var clienteId = f['cliente_id'] as int?;
     var suplementoId = f['suplemento_id'] as int?;
-    // A-04 (1.21): lectura triestado — un fallo de lectura
-    // (ok:false) difiere igual que «aún sin id», pero queda
-    // distinguido en la bitácora si se repite.
+    // A-04 (1.21): lectura triestado — (ok:false) = la lectura
+    // FALLÓ; (ok:true, id:null) = el servidor respondió y aún no
+    // hay id. Autoauditoría 1.22 #2: antes el ok se DESCARTABA y
+    // ambos casos colapsaban a id=null, así que un fallo de red
+    // sostenido quemaba intentos como si el id «nunca se
+    // resolviera» y la foto caía a 'error' con ese motivo falso.
+    // Ahora la falta de evidencia se distingue (ver
+    // lecturaIdsSinEvidencia) y difiere SIN quemar.
+    var clienteOk = true;
+    var suplementoOk = true;
     if (clienteId == null) {
       final r = await SyncEngine.instance.clienteDeOp(opUuid);
       clienteId = r.id;
+      clienteOk = r.ok;
     }
     if (suplementoId == null) {
       final r = await SyncEngine.instance.suplementoDeOp(opUuid);
       suplementoId = r.id;
+      suplementoOk = r.ok;
+    }
+    bool sinEvidencia() => lecturaIdsSinEvidencia(
+        clienteOk: clienteOk,
+        suplementoOk: suplementoOk,
+        clienteId: clienteId,
+        suplementoId: suplementoId);
+    void diferirSinEvidencia() {
+      AppLog.aviso('fotos', 'lectura_ids_sin_evidencia',
+          d: 'op=$opUuid clienteOk=$clienteOk suplementoOk=$suplementoOk');
+      throw _LecturaIdsSinEvidencia();
     }
 
     if ((f['cliente_id'] == null && clienteId != null) ||
@@ -963,6 +1026,7 @@ class FotosColaService {
     if (prevStoragePath != null && prevStoragePath.isNotEmpty) {
       // Si los IDs siguen sin resolverse, esperar sin vincular a ciegas.
       if (clienteId == null && suplementoId == null) {
+        if (sinEvidencia()) diferirSinEvidencia();
         debugPrint(
             '[Fotos] Foto $id ya subida pero IDs aún no resueltos. Esperando op padre.');
         return null;
@@ -973,6 +1037,7 @@ class FotosColaService {
     // v1.2.9: si aún no se conocen los IDs (la op de creación aún no se
     // aplicó en el servidor), diferir sin quemar intentos.
     if (clienteId == null && suplementoId == null) {
+      if (sinEvidencia()) diferirSinEvidencia();
       // La creación aún no se aplica: reintentable, no error.
       return null;
     }
@@ -1496,7 +1561,14 @@ class FotosColaService {
     );
     // SA-04: comparación por epoch (ver procesarCola).
     // Caza Fotos: epoch ENTERO (ver la selección en procesarCola).
-    final ahoraIso = ahora.millisecondsSinceEpoch ~/ 1000;
+    // Autoauditoría 1.22 #2: el epoch sale del INSTANTE REAL
+    // (DateTime.now()), no de ahoraHabana(): millisecondsSinceEpoch
+    // de la hora de pared Habana reinterpretada en la zona del
+    // teléfono se desplaza horas si la zona no es America/Havana
+    // (doctrina AA2 H-1; así lo hacen contarPendientes y las
+    // selecciones de procesarCola). [ahora] se conserva solo para
+    // la QoS de 'original', que sí razona en hora de pared.
+    final ahoraIso = DateTime.now().millisecondsSinceEpoch ~/ 1000;
     final r = await db.rawQuery(
         "SELECT COUNT(*) as n FROM fotos_cola WHERE estado = 'pendiente' "
         "AND intentos < 5 "

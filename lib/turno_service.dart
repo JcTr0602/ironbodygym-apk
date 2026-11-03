@@ -316,8 +316,14 @@ class TurnoService {
         }
         final opUuid = await _db.opUuidTurno('apertura_turno', localId);
         if (opUuid == null) {
-          await db.update('turnos', {'turno_id_reconciliado': 1},
-              where: 'turno_id=?', whereArgs: [localId]);
+          // Autoauditoría 1.22 #2: SIN evidencia no se marca el
+          // flag irreversible. La apertura consta 'aplicada' pero
+          // su op_uuid no se resolvió (la fila pudo podarse entre
+          // ambas lecturas, o divergen por el fallback sin JSON1):
+          // marcar reconciliado=1 aquí dejaría el turno con el id
+          // local para siempre aunque el servidor hubiera asignado
+          // otro canónico. Se reintenta en la próxima pasada, como
+          // hace la rama ok:false de conflictoTurno justo debajo.
           continue;
         }
         // v1.3.3 (veredicto de Argón): triestado. Si la lectura FALLÓ
