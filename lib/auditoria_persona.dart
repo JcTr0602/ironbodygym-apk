@@ -18,6 +18,7 @@
 ///   se usa cuando la fila no trae ninguna clave de actor.
 library;
 
+import 'tiempo.dart';
 import 'turnos_resolucion.dart';
 
 /// Una persona auditable (usuario APK).
@@ -93,7 +94,20 @@ class TurnoAuditado {
 }
 
 DateTime? _instante(dynamic v) {
-  if (v is String && v.isNotEmpty) return DateTime.tryParse(v);
+  if (v is String && v.isNotEmpty) {
+    final dt = DateTime.tryParse(v);
+    if (dt == null) return null;
+    // 1.23 (deuda del panel 2026-10-24): hora Habana EXPLÍCITA.
+    // Los instantes guardados llevan offset (-04:00) y
+    // tryParse los deja en la zona LOCAL del teléfono: en un
+    // teléfono fuera de Cuba la tardanza salía desplazada por
+    // el offset (260 en vez de 20 en la VM, UTC). aHabana
+    // normaliza los campos a wall-clock de La Habana — el
+    // mismo marco de `dia`/`inicio` en esta auditoría — y el
+    // resultado solo alimenta diferencias y pintado, nunca se
+    // guarda ni se reconvierte.
+    return aHabana(dt);
+  }
   return null;
 }
 
