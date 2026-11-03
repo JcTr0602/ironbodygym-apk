@@ -39,6 +39,7 @@ import 'preview_cobro.dart';
 import 'tarifas_especiales.dart';
 import 'estado_cuenta.dart';
 import 'diseno.dart';
+import 'ficha_secciones.dart';
 import 'editor_foto.dart';
 import 'modal_pin_acceso.dart';
 import 'medidas_cliente.dart';
@@ -2221,21 +2222,12 @@ class _FichaScreenState extends State<FichaScreen> {
                             ),
                             const SizedBox(
                                 height: AppEspacio.sm),
-                            _filaInfo(
-                                Icons.badge_rounded,
-                                'Carnet',
-                                '${c['carnet'] ?? '—'}'),
+                            FilaInfoFicha(icono: Icons.badge_rounded, etiqueta: 'Carnet', valor: '${c['carnet'] ?? '—'}'),
                             if (edadDeCarnet(
                                     '${c['carnet'] ?? ''}') !=
                                 null)
-                              _filaInfo(
-                                  Icons.cake_rounded,
-                                  'Edad',
-                                  '${edadDeCarnet('${c['carnet']}')} años'),
-                            _filaInfo(
-                                Icons.person_rounded,
-                                'Sexo',
-                                '${c['sexo'] ?? '—'}'),
+                              FilaInfoFicha(icono: Icons.cake_rounded, etiqueta: 'Edad', valor: '${edadDeCarnet('${c['carnet']}')} años'),
+                            FilaInfoFicha(icono: Icons.person_rounded, etiqueta: 'Sexo', valor: '${c['sexo'] ?? '—'}'),
                             // Bloque 1: teléfono tocable para
                             // WhatsApp (abre wa.me, no registra nada).
                             InkWell(
@@ -2274,10 +2266,7 @@ class _FichaScreenState extends State<FichaScreen> {
                                 ),
                               ),
                             ),
-                            _filaInfo(
-                                Icons.person_add_rounded,
-                                'Inscrito por',
-                                _textoInscritoPor(c[
+                            FilaInfoFicha(icono: Icons.person_add_rounded, etiqueta: 'Inscrito por', valor: _textoInscritoPor(c[
                                         'registrado_por_nombre']
                                     as String?)),
                             InkWell(
@@ -2341,31 +2330,19 @@ class _FichaScreenState extends State<FichaScreen> {
                                 style: AppTexto.titulo),
                             const SizedBox(
                                 height: AppEspacio.sm),
-                            _filaInfo(
-                                Icons.calendar_today_rounded,
-                                'Pagado hasta',
-                                esCasa
+                            FilaInfoFicha(icono: Icons.calendar_today_rounded, etiqueta: 'Pagado hasta', valor: esCasa
                                     ? 'Sin vencimiento'
                                     : fmtFecha(c['pagado_hasta']
                                         as String?)),
-                            _filaInfo(
-                                Icons.event_rounded,
-                                'Estado',
-                                esCasa
+                            FilaInfoFicha(icono: Icons.event_rounded, etiqueta: 'Estado', valor: esCasa
                                     ? 'Cuenta a la Casa'
                                     : textoEstado(c['pagado_hasta']
                                         as String?)),
-                            _filaInfo(
-                                Icons.payments_rounded,
-                                'Último pago',
-                                _pagos.isEmpty
+                            FilaInfoFicha(icono: Icons.payments_rounded, etiqueta: 'Último pago', valor: _pagos.isEmpty
                                     ? '—'
                                     : fmtFecha(_pagos.first['fecha']
                                         as String?)),
-                            _filaInfo(
-                                Icons.repeat_rounded,
-                                'Tipo',
-                                _pagos.isEmpty
+                            FilaInfoFicha(icono: Icons.repeat_rounded, etiqueta: 'Tipo', valor: _pagos.isEmpty
                                     ? '—'
                                     : etiquetaPeriodo(_pagos.first)),
                             // v1.10.0 (Bloque 2, D6): la entidad
@@ -2374,25 +2351,25 @@ class _FichaScreenState extends State<FichaScreen> {
                             // si existe aunque sea inactivo, la
                             // legacy se ignora para siempre).
                             if (_textoTarifaEspecial(c) != null)
-                              _filaInfo(
-                                  Icons.local_offer_rounded,
-                                  'Tarifa especial',
-                                  _textoTarifaEspecial(c)!),
+                              FilaInfoFicha(icono: Icons.local_offer_rounded, etiqueta: 'Tarifa especial', valor: _textoTarifaEspecial(c)!),
                             // 17/25: Plus residual del convertido
                             // (solo dueño; sin Plus no hay fila).
                             if (_textoPlus() != null)
-                              _filaInfo(
-                                  Icons.star_rounded, 'Plus', _textoPlus()!),
-                            _filaInfo(
-                                Icons.date_range_rounded,
-                                'Inscripción',
-                                fmtFecha(c[
+                              FilaInfoFicha(icono: Icons.star_rounded, etiqueta: 'Plus', valor: _textoPlus()!),
+                            FilaInfoFicha(icono: Icons.date_range_rounded, etiqueta: 'Inscripción', valor: fmtFecha(c[
                                         'fecha_inscripcion']
                                     as String?)),
                             // Bloque 1: barra del mes pagado (del
                             // último pago al vencimiento). En Casa
                             // no hay vencimiento: no se muestra.
-                            if (!esCasa) _barraMes(),
+                            if (!esCasa)
+                              BarraMesFicha(
+                                fechaInicioRaw: _pagos.isEmpty
+                                    ? null
+                                    : '${_pagos.first['fecha'] ?? ''}',
+                                pagadoHastaRaw:
+                                    '${_c?['pagado_hasta'] ?? ''}',
+                              ),
                           ],
                         ),
                       ),
@@ -2400,13 +2377,29 @@ class _FichaScreenState extends State<FichaScreen> {
                           height: AppEspacio.md),
                       // Resumen 360
                       if (_pagos.isNotEmpty)
-                        _resumen360(),
+                        Resumen360Ficha(resumen: _resumenPagos),
                       // Bloque 1: línea de tiempo única (pagos +
                       // ventas de suplementos y servicios) con
                       // filtros. Absorbe las 3 tarjetas sueltas
                       // anteriores (C4 fuera: no más tarjetas
                       // sueltas de historial).
-                      _tarjetaHistorial(),
+                      TarjetaHistorialFicha(
+                        entradas: _entradasCache,
+                        filtro: _filtroHistorial,
+                        onFiltro: (v) {
+                          if (mounted) {
+                            setState(() => _filtroHistorial = v);
+                          }
+                        },
+                        serviciosHist: _serviciosHist,
+                        clienteId: widget.clienteId,
+                        esAdmin: AuthService().isAdmin,
+                        esOwner: AuthService().isOwner,
+                        onReenviarRecibo: _reenviarRecibo,
+                        onVerComprobante: _verComprobante,
+                        onCorregirPago: _corregirPago,
+                        onConciliar: _conciliarDesdeHistorial,
+                      ),
                       const SizedBox(
                           height: AppEspacio.md),
                       // v1.13.0 (D4): medidas del entrenador (filas
@@ -2689,90 +2682,10 @@ class _FichaScreenState extends State<FichaScreen> {
 
   /// Bloque 1: barra del mes pagado (del último pago al
   /// vencimiento). Si no hay fechas válidas, no ocupa espacio.
-  Widget _barraMes() {
-    if (_pagos.isEmpty) return const SizedBox.shrink();
-    final iniRaw = '${_pagos.first['fecha'] ?? ''}';
-    final finRaw = '${_c?['pagado_hasta'] ?? ''}';
-    if (iniRaw.length < 10 || finRaw.length < 10) {
-      return const SizedBox.shrink();
-    }
-    final ini = DateTime.tryParse(iniRaw.substring(0, 10));
-    final fin = DateTime.tryParse(finRaw.substring(0, 10));
-    if (ini == null || fin == null || !fin.isAfter(ini)) {
-      return const SizedBox.shrink();
-    }
-    final hoy = ahoraHabana();
-    final hoyDia = DateTime(hoy.year, hoy.month, hoy.day);
-    final total = fin.difference(ini).inDays;
-    var usado = hoyDia.difference(ini).inDays;
-    if (usado < 0) usado = 0;
-    if (usado > total) usado = total;
-    final frac = total == 0 ? 1.0 : usado / total;
-    final diasRest = fin.difference(hoyDia).inDays;
-    final color = diasRest < 0
-        ? AppColores.error
-        : diasRest <= 7
-            ? AppColores.alerta
-            : AppColores.exito;
-    return Padding(
-      padding: const EdgeInsets.only(top: AppEspacio.sm),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          ClipRRect(
-            borderRadius: BorderRadius.circular(999),
-            child: LinearProgressIndicator(
-              value: frac,
-              minHeight: 8,
-              backgroundColor:
-                  AppColores.borde(context).withValues(alpha: 0.3),
-              valueColor: AlwaysStoppedAnimation<Color>(color),
-            ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            diasRest < 0
-                ? 'Vencido hace ${-diasRest} día${-diasRest == 1 ? '' : 's'}'
-                : diasRest == 0
-                    ? 'Vence hoy'
-                    : 'Quedan $diasRest días del mes pagado',
-            style: AppTexto.secundario,
-          ),
-        ],
-      ),
-    );
-  }
+
 
   /// Fila de información con icono.
-  Widget _filaInfo(
-      IconData icono, String etiqueta, String valor) {
-    // Etapa 4 · F3: hairline inferior sutil entre filas.
-    return Container(
-      decoration: BoxDecoration(
-        border: Border(
-          bottom: BorderSide(
-              color: AppColores.borde(context)
-                  .withValues(alpha: 0.5)),
-        ),
-      ),
-      padding: const EdgeInsets.symmetric(
-          vertical: AppEspacio.sm),
-      child: Row(
-        children: [
-          Icon(icono,
-              color: AppColores.textoSecundario(context), size: 20),
-          const SizedBox(width: AppEspacio.md),
-          Expanded(
-              child: Text(etiqueta,
-                  style: AppTexto.cuerpo)),
-          Text(valor,
-              style: AppTexto.cuerpo.copyWith(
-                  fontWeight: FontWeight.w600),
-              textAlign: TextAlign.right),
-        ],
-      ),
-    );
-  }
+
 
   // ============================================================
   // v1.3.9 (F1): Acceso a la App de Clientes
@@ -3186,245 +3099,27 @@ class _FichaScreenState extends State<FichaScreen> {
     return entradas;
   }
 
-  Widget _tarjetaHistorial() {
-    final entradas = _entradasCache;
-    final visibles = switch (_filtroHistorial) {
-      'pagos' => entradas.where((e) => e['tipo'] == 'pago').toList(),
-      'ventas' => entradas.where((e) => e['tipo'] == 'venta').toList(),
-      _ => entradas,
-    };
-    Widget chipFiltro(String valor, String texto) {
-      final activo = _filtroHistorial == valor;
-      return ChoiceChip(
-        label: Text(texto),
-        selected: activo,
-        onSelected: (_) {
-          if (mounted) setState(() => _filtroHistorial = valor);
-        },
-      );
-    }
 
-    return Tarjeta(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              const Expanded(
-                child:
-                    Text('Historial', style: AppTexto.titulo),
-              ),
-              // T24 (1.20): estado de cuenta del cliente.
-              IconButton(
-                tooltip: 'Estado de cuenta',
-                icon: const Icon(
-                    Icons.receipt_long_rounded, size: 22),
-                onPressed: () => Navigator.push(
-                  context,
-                  RutaIron(
-                    builder: (_) => EstadoCuentaScreen(
-                        clienteId: widget.clienteId),
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: AppEspacio.sm),
-          Wrap(
-            spacing: 8,
-            children: [
-              chipFiltro('todo', 'Todo'),
-              chipFiltro('pagos', 'Solo pagos'),
-              chipFiltro('ventas', 'Solo ventas'),
-            ],
-          ),
-          // v1.8.1 (idea de Jc): acumulado de servicios, solo
-          // cuando se ven ventas.
-          if (_serviciosHist.isNotEmpty && _filtroHistorial != 'pagos')
-            Builder(builder: (_) {
-              final r = servicios_svc
-                  .resumenServiciosDeCliente(_serviciosHist);
-              final partes = <String>[
-                if (r.dosis > 0) '${r.dosis} dosis',
-                if (r.pomos > 0) '${r.pomos} pomos de agua',
-                if (r.importe > 0)
-                  '${fmtMonto(r.importe)} CUP en compras',
-              ];
-              if (partes.isEmpty) return const SizedBox.shrink();
-              return Padding(
-                padding: const EdgeInsets.only(top: 8),
-                child: Text(
-                  'Acumulado: ${partes.join(' · ')}',
-                  style: AppTexto.secundario,
-                ),
-              );
-            }),
-          const SizedBox(height: AppEspacio.sm),
-          if (visibles.isEmpty)
-            const EstadoVacio(
-              icono: Icons.history_rounded,
-              titulo: 'Sin movimientos en este filtro',
-              subtitulo: 'Prueba con otro filtro.',
-            ),
-          for (var i = 0; i < visibles.length; i++)
-            _filaTimeline(visibles[i],
-                esUltima: i == visibles.length - 1),
-        ],
-      ),
-    );
-  }
 
   /// Fila de la línea de tiempo del historial (V18): riel vertical
   /// que une los eventos, icono semántico en círculo tintado según
   /// el tipo (F2 de la 1.19), título, detalle con fecha y monto
   /// alineado a la derecha en todos los tipos; en pagos con permiso
   /// de administrador, el botón de corregir va junto al monto.
-  Widget _filaTimeline(Map<String, dynamic> e,
-      {required bool esUltima}) {
-    final color = e['color'] as Color;
-    // W8: el recibo se puede reenviar en pagos reales (no
-    // en cortesías ni en pagos en cero).
-    final pagoFila = e['pago'] as Map<String, dynamic>?;
-    final puedeRecibo = e['tipo'] == 'pago' &&
-        pagoFila != null &&
-        '${pagoFila['metodo'] ?? ''}' != 'cortesia' &&
-        ((pagoFila['monto'] as num?) ?? 0) > 0;
-    // F1 (1.20): comprobante adjunto a un pago por
-    // transferencia (el uuid baja con el espejo del pago).
-    final uuidComprobante = (pagoFila != null &&
-            '${pagoFila['metodo'] ?? ''}' == 'transferencia')
-        ? '${pagoFila['comprobante_uuid'] ?? ''}'
-        : '';
-    // T4 (1.20): estado de conciliación del pago (solo
-    // tiene sentido en transferencias; en el resto da
-    // 'no_aplica' y no se muestra nada).
-    final estadoConcil = pagoFila == null
-        ? 'no_aplica'
-        : estadoConciliacion(pagoFila);
-    final notaConcil =
-        '${pagoFila?['conciliacion_nota'] ?? ''}'.trim();
-    return IntrinsicHeight(
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Column(
-            children: [
-              CircleAvatar(
-                radius: 16,
-                backgroundColor: color.withValues(alpha: 0.15),
-                child: Icon(e['icono'] as IconData,
-                    size: 18, color: color),
-              ),
-              if (!esUltima)
-                Expanded(
-                  child: Container(
-                      width: 2, color: AppColores.borde(context)),
-                ),
-            ],
-          ),
-          const SizedBox(width: AppEspacio.sm),
-          Expanded(
-            child: Padding(
-              padding:
-                  EdgeInsets.only(bottom: esUltima ? 0 : AppEspacio.sm),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Text('${e['titulo']}',
-                            style: AppTexto.cuerpo),
-                      ),
-                      Text('${e['trailing'] ?? ''}',
-                          style: AppTexto.cuerpo.copyWith(
-                              fontWeight: FontWeight.bold,
-                              color: AppColores.naranja)),
-                      if (puedeRecibo)
-                        IconButton(
-                          tooltip: 'Reenviar recibo',
-                          icon: const Icon(
-                              Icons.share_rounded, size: 20),
-                          onPressed: () =>
-                              _reenviarRecibo(pagoFila),
-                        ),
-                      if (uuidComprobante.isNotEmpty)
-                        IconButton(
-                          tooltip: 'Ver comprobante',
-                          icon: const Icon(
-                              Icons.image_rounded, size: 20),
-                          onPressed: () =>
-                              _verComprobante(uuidComprobante),
-                        ),
-                      if (e['tipo'] == 'pago' &&
-                          AuthService().isAdmin)
-                        IconButton(
-                          tooltip: 'Corregir pago',
-                          icon:
-                              const Icon(Icons.tune_rounded, size: 20),
-                          onPressed: () => _corregirPago(
-                              e['pago'] as Map<String, dynamic>),
-                        ),
-                      // T4 (1.20): conciliar la transferencia
-                      // (solo el dueño; el servidor lo exige).
-                      if (e['tipo'] == 'pago' &&
-                          pagoFila != null &&
-                          '${pagoFila['metodo'] ?? ''}' ==
-                              'transferencia' &&
-                          AuthService().isOwner)
-                        IconButton(
-                          tooltip: 'Conciliar transferencia',
-                          icon: const Icon(
-                              Icons.fact_check_rounded, size: 20),
-                          onPressed: () async {
-                            final okConc =
-                                await mostrarDialogoConciliar(
-                              context,
-                              pago: pagoFila,
-                              nombreCliente:
-                                  '${_c?['nombre'] ?? ''}',
-                            );
-                            if (okConc && mounted) _cargar();
-                          },
-                        ),
-                    ],
-                  ),
-                  Text('${e['subtitulo']}',
-                      style: AppTexto.secundario),
-                  // T4 (1.20): chip de conciliación en pagos
-                  // por transferencia (el histórico también se
-                  // muestra: señala que nunca se comprobó; la
-                  // bandeja del dueño lo excluye).
-                  if (e['tipo'] == 'pago' &&
-                      pagoFila != null &&
-                      '${pagoFila['metodo'] ?? ''}' ==
-                          'transferencia') ...[
-                    const SizedBox(height: AppEspacio.xs),
-                    ChipEstado.semantico(
-                      texto: etiquetaConciliacion(estadoConcil),
-                      significado:
-                          significadoConciliacion(estadoConcil),
-                    ),
-                    if ((estadoConcil == 'problema' ||
-                            estadoConcil == 'rechazada') &&
-                        notaConcil.isNotEmpty)
-                      Padding(
-                        padding: const EdgeInsets.only(
-                            top: AppEspacio.xs),
-                        child: Text(
-                          'Nota: $notaConcil',
-                          style: AppTexto.metadato
-                              .copyWith(color: AppColores.error),
-                        ),
-                      ),
-                  ],
-                ],
-              ),
-            ),
-          ),
-        ],
-      ),
+
+
+  /// T4 (1.20) vía Bloque 2 Paso 1: conciliar una
+  /// transferencia desde el historial (el diálogo y la
+  /// recarga viven en la ficha; la fila del historial es
+  /// una vista tonta que solo invoca el callback).
+  Future<void> _conciliarDesdeHistorial(
+      Map<String, dynamic> pago) async {
+    final okConc = await mostrarDialogoConciliar(
+      context,
+      pago: pago,
+      nombreCliente: '${_c?['nombre'] ?? ''}',
     );
+    if (okConc && mounted) _cargar();
   }
 
   /// W8 (1.20): reenviar el recibo de un pago del
@@ -3514,63 +3209,7 @@ class _FichaScreenState extends State<FichaScreen> {
     );
   }
 
-  Widget _resumen360() {
-    // Argón #7B-7: la cortesía (regalo, monto 0) no es un pago ni
-    // un método preferido. D-13 (1.21): los agregados vienen
-    // precalculados de _cargar (_resumenPagos), no se recorren
-    // en cada build.
-    final total = _resumenPagos.total;
-    final metodoTop = _resumenPagos.metodoTop;
-    return Padding(
-      padding:
-          const EdgeInsets.only(bottom: AppEspacio.md),
-      child: Tarjeta(
-        color:
-            AppColores.naranja.withValues(alpha: 0.08),
-        child: Row(
-          mainAxisAlignment:
-              MainAxisAlignment.spaceAround,
-          children: [
-            Column(
-              children: [
-                Text('${_resumenPagos.n}',
-                    style: AppTexto.displayPequeno
-                        .copyWith(
-                            color:
-                                AppColores.naranja)),
-                const Text('pagos',
-                    style: AppTexto.secundario),
-              ],
-            ),
-            Column(
-              children: [
-                Text(total.toStringAsFixed(0),
-                    style: AppTexto.displayPequeno
-                        .copyWith(
-                            color:
-                                AppColores.naranja)),
-                const Text('CUP total',
-                    style: AppTexto.secundario),
-              ],
-            ),
-            if (metodoTop.isNotEmpty)
-              Column(
-                children: [
-                  Icon(
-                      metodoTop == 'efectivo'
-                          ? Icons.payments_rounded
-                          : Icons.smartphone_rounded,
-                      color: AppColores.textoSecundario(context),
-                      size: 28),
-                  const Text('prefiere',
-                      style: AppTexto.secundario),
-                ],
-              ),
-          ],
-        ),
-      ),
-    );
-  }
+
 
   /// Texto amigable para "Inscrito por" (v1.1).
   /// Los importados del Excel muestran "Migración del sistema anterior".
