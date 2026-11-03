@@ -251,8 +251,10 @@ void main() {
           contains('isFinite'));
       final sup = _fuente('lib/ui/suplementos.dart');
       expect(sup, contains('!precio.isFinite'));
-      expect(sup, contains('costoCrudo'),
-          reason: 'el costo no finito se trata como «sin costo»');
+      expect(sup, contains('Revisa el costo'),
+          reason: 'D2-07 endureció el costo: texto no vacío no '
+              'interpretable o no finito es ERROR (doctrina '
+              'v1.4.3), no «sin costo» en silencio');
     });
 
     test('inscripción, servicios y tarifas especiales', () {
