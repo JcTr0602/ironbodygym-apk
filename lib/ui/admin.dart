@@ -31,6 +31,7 @@ import '../tipos_pago.dart';
 import 'componentes.dart';
 import 'diseno.dart';
 import 'panel_dueno_swr.dart';
+import 'panel_dueno_atencion.dart';
 import 'buscar.dart';
 import 'admin_secciones.dart';
 import 'cola.dart';
@@ -200,31 +201,10 @@ class _AdminScreenState extends State<AdminScreen> {
     final pagosMes = await NominaCalc.clientesQuePagaronElMes(
         NominaCalc.prefMesActual());
     final activos = await activosCount();
-    final reservas = await LocalDb.instance.allMirror('reservas');
-    final solicitadas = [
-      for (final r in reservas)
-        if (r['estado'] == 'solicitada') r,
-    ]..sort((a, b) => '${a['creada_ts']}'.compareTo('${b['creada_ts']}'));
-    final supls = await LocalDb.instance.allMirror('suplementos');
-    final nombreSupl = {
-      for (final s in supls) '${s['id']}': '${s['nombre'] ?? ''}',
-    };
-    // Stock crítico: mismo criterio que el chip de Suplementos
-    // (activo y 0 < stock <= umbral propio, 3 por defecto).
-    final criticos = <Map<String, dynamic>>[];
-    for (final s in supls) {
-      final act = s['activo'];
-      final inactivo = act == 0 ||
-          act == false ||
-          s['eliminado'] == 1 ||
-          s['eliminado'] == true;
-      if (inactivo) continue;
-      final stock = (s['stock'] as num?)?.toInt() ?? 0;
-      final umbral = (s['umbral_stock'] as num?)?.toInt() ?? 3;
-      if (stock > 0 && stock <= umbral) criticos.add(s);
-    }
-    criticos.sort((a, b) => ((a['stock'] as num?)?.toInt() ?? 0)
-        .compareTo((b['stock'] as num?)?.toInt() ?? 0));
+    final fotoRS = await _fotoReservasStock();
+    final solicitadas = fotoRS.solicitadas;
+    final nombreSupl = fotoRS.nombreSupl;
+    final criticos = fotoRS.criticos;
     final hoyH = ahoraHabana();
     String isoDia(DateTime d) =>
         '${d.year.toString().padLeft(4, '0')}-'
@@ -293,6 +273,51 @@ class _AdminScreenState extends State<AdminScreen> {
     unawaited(_cargarReportesPlus());
   }
 
+
+  /// Foto local de reservas y stock (B3 Paso 2: extraída de
+  /// _cargar para compartirla con la recarga ligera): reservas
+  /// solicitadas en orden FIFO, nombres de suplementos y la
+  /// lista de stock crítico con el criterio del chip de
+  /// Suplementos (activo y 0 < stock <= umbral propio, 3 por
+  /// defecto).
+  Future<
+      ({
+        List<Map<String, dynamic>> solicitadas,
+        Map<String, String> nombreSupl,
+        List<Map<String, dynamic>> criticos
+      })> _fotoReservasStock() async {
+    final reservas = await LocalDb.instance.allMirror('reservas');
+    final solicitadas = [
+      for (final r in reservas)
+        if (r['estado'] == 'solicitada') r,
+    ]..sort((a, b) => '${a['creada_ts']}'.compareTo('${b['creada_ts']}'));
+    final supls = await LocalDb.instance.allMirror('suplementos');
+    final nombreSupl = {
+      for (final s in supls) '${s['id']}': '${s['nombre'] ?? ''}',
+    };
+    // Stock crítico: mismo criterio que el chip de Suplementos
+    // (activo y 0 < stock <= umbral propio, 3 por defecto).
+    final criticos = <Map<String, dynamic>>[];
+    for (final s in supls) {
+      final act = s['activo'];
+      final inactivo = act == 0 ||
+          act == false ||
+          s['eliminado'] == 1 ||
+          s['eliminado'] == true;
+      if (inactivo) continue;
+      final stock = (s['stock'] as num?)?.toInt() ?? 0;
+      final umbral = (s['umbral_stock'] as num?)?.toInt() ?? 3;
+      if (stock > 0 && stock <= umbral) criticos.add(s);
+    }
+    criticos.sort((a, b) => ((a['stock'] as num?)?.toInt() ?? 0)
+        .compareTo((b['stock'] as num?)?.toInt() ?? 0));
+    return (
+      solicitadas: solicitadas,
+      nombreSupl: nombreSupl,
+      criticos: criticos
+    );
+  }
+
   /// G2 (v1.7.0): segundo pase — trae los reportes App Plus
   /// pendientes por RPC. 1.23 (B3): pauta SWR — el éxito guarda
   /// payload y sello; el fallo marca error y CONSERVA lo bueno
@@ -326,10 +351,78 @@ class _AdminScreenState extends State<AdminScreen> {
     }
   }
 
+  /// 1.23 (B3 Paso 2): recarga LIGERA al volver de una
+  /// subpantalla ESTRICTAMENTE operativa (hoy: solo
+  /// Diagnóstico, vía _irLigera). Refresca lo que el hub y el
+  /// bloque de atención muestran (contadores, efectivo por
+  /// liquidar, reservas/stock, reportes de turno, incidencias,
+  /// salud de sync) y re-dispara los dos pases SWR, SIN repetir
+  /// los agregados del mes ni el relleno de configuración del
+  /// pase completo.
+  ///
+  /// CONTRATO (panel B3 Paso 2, NO APTO → corrección): esta
+  /// recarga omite ingresos/inscripciones/gastos/cobrado hoy/
+  /// tipos/pagoEntrenador, así que SOLO puede usarse tras
+  /// destinos que no mutan dinero, inscripciones ni
+  /// configuración. Todo lo demás vuelve con _cargar completo:
+  /// un KPI de dinero rancio en el panel del dueño es peor que
+  /// 19 lecturas locales. Si un destino futuro parece ligero,
+  /// la carga de la prueba es demostrar que nada de lo que
+  /// muta alimenta un agregado omitido.
+  Future<void> _cargarContadores() async {
+    if (!AuthService().isOwner) return;
+    final pend = await pendientePorEntrenador();
+    final det = await SyncEngine.instance.detalle();
+    final pendSubir = await LocalDb.instance.countPendingOps();
+    final pagosMes = await NominaCalc.clientesQuePagaronElMes(
+        NominaCalc.prefMesActual());
+    final activos = await activosCount();
+    final mor = await morosos();
+    final fotoRS = await _fotoReservasStock();
+    final hoyH = ahoraHabana();
+    String isoDia(DateTime d) =>
+        '${d.year.toString().padLeft(4, '0')}-'
+        '${d.month.toString().padLeft(2, '0')}-'
+        '${d.day.toString().padLeft(2, '0')}';
+    final sinHoy = await turnosSinReporte(isoDia(hoyH));
+    final sinAyer = await turnosSinReporte(
+        isoDia(hoyH.subtract(const Duration(days: 1))));
+    final incidencias = await incidenciasSyncPendientes();
+    final casa = await LocalDb.instance.conteoCuentasCasa();
+    if (!mounted) return;
+    setState(() {
+      _pend = pend;
+      _syncDet = det;
+      _pendientesSubir = pendSubir;
+      _pagosMes = pagosMes;
+      _clientesActivos = activos;
+      _morosos = mor;
+      _reservasSolicitadas = fotoRS.solicitadas;
+      _nombreSupl = fotoRS.nombreSupl;
+      _stockCritico = fotoRS.criticos;
+      _sinReporteAyer = sinAyer;
+      _sinReporteHoy = sinHoy;
+      _incidenciasPend = incidencias.length;
+      _cuentasCasa = casa;
+    });
+    unawaited(_cargarSolicitudesInvitados());
+    unawaited(_cargarReportesPlus());
+  }
+
   void _ir(Widget w) {
     Navigator.of(context)
         .push(RutaIron(builder: (_) => w))
         .then((_) => _cargar());
+  }
+
+  /// Navega a un destino estrictamente operativo (sin
+  /// mutaciones de dinero/inscripciones/configuración) y al
+  /// volver recarga SOLO los contadores. Ver el contrato en
+  /// _cargarContadores: ante la duda, usa _ir.
+  void _irLigera(Widget w) {
+    Navigator.of(context)
+        .push(RutaIron(builder: (_) => w))
+        .then((_) => _cargarContadores());
   }
 
   /// Navega a una subpantalla y recarga al volver (para las secciones).
@@ -337,6 +430,34 @@ class _AdminScreenState extends State<AdminScreen> {
     await Navigator.of(context)
         .push(RutaIron(builder: (_) => w));
     await _cargar();
+  }
+
+  /// 1.23 (B3 Paso 2): resuelve el destino de una fila del
+  /// bloque de atención (la fila pura trae el destino; la
+  /// navegación y los reintentos viven aquí).
+  void _accionAtencion(DestinoAtencion destino) {
+    switch (destino) {
+      case DestinoAtencion.solicitudes:
+        _ir(const InvitadosScreen(filtroInicial: 'solicitudes'));
+      case DestinoAtencion.reintentarSolicitudes:
+        unawaited(_cargarSolicitudesInvitados());
+      case DestinoAtencion.reservas:
+        _ir(const ReservasScreen());
+      case DestinoAtencion.reportes:
+        _ir(const ReportesPlusScreen());
+      case DestinoAtencion.reintentarReportes:
+        unawaited(_cargarReportesPlus());
+      case DestinoAtencion.arqueo:
+        _ir(const ArqueoScreen());
+      case DestinoAtencion.cierre:
+        _ir(_pantallaCierre());
+      case DestinoAtencion.incidencias:
+        _ir(const IncidenciasSyncScreen());
+      case DestinoAtencion.diagnostico:
+        _irLigera(const SeccionDiagnosticoScreen());
+      case DestinoAtencion.suplementos:
+        _ir(const SuplementosScreen());
+    }
   }
 
   // -- montos ----------------------------------------------------------
@@ -1322,7 +1443,7 @@ class _AdminScreenState extends State<AdminScreen> {
         // «Problema de sincronización» del bloque de atención.
         InkWell(
           borderRadius: BorderRadius.circular(999),
-          onTap: () => _ir(const SeccionDiagnosticoScreen()),
+          onTap: () => _irLigera(const SeccionDiagnosticoScreen()),
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
             decoration: BoxDecoration(
@@ -1385,236 +1506,33 @@ class _AdminScreenState extends State<AdminScreen> {
   /// una con su botón de acción, máx. 5 visibles (consenso del panel
   /// de diseño). Sin pendientes: una línea discreta, no una tarjeta.
   Widget _bloqueAtencion() {
-    final pendientes = <_PendientePanel>[];
-
-    // Solicitudes de inscripción de invitados (pedido de Jc,
-    // 2026-10-22): decisión del dueño con acción en 1 toque; el
-    // botón abre la bandeja YA filtrada en solicitudes. Misma
-    // fuente que la pantalla de Invitados (InvitadosService).
-    if (_swrSolicitudes.datos.isNotEmpty) {
-      final n = _swrSolicitudes.datos.length;
-      final s = _swrSolicitudes.datos.first;
-      var detalle = s.nombre;
-      if (s.solicitudDesde != null) {
-        detalle += ' · ${hace(s.solicitudDesde)}';
-      }
-      // B3: si son caché por fallo de red, se dice con su hora.
-      if (_swrSolicitudes.notaSinRed.isNotEmpty) {
-        detalle += ' · ${_swrSolicitudes.notaSinRed}';
-      }
-      pendientes.add(_PendientePanel(
-        icono: Icons.mark_email_unread_rounded,
-        tinte: AppColores.naranja,
-        titulo: n == 1
-            ? '1 solicitud de inscripción por atender'
-            : '$n solicitudes de inscripción por atender',
-        detalle: detalle,
-        boton: 'Atender',
-        primario: true,
-        onTap: () =>
-            _ir(const InvitadosScreen(filtroInicial: 'solicitudes')),
-      ));
-    }
-
-    // B3: fallo de red SIN caché — la bandeja se declara sin
-    // cargar, con reintento; jamás «todo en orden» a ciegas.
-    // (Panel B3: «sin caché» se mide por el sello — un éxito
-    // vacío anterior ES caché, no ausencia de carga.)
-    if (_swrSolicitudes.sinCargar) {
-      pendientes.add(_PendientePanel(
-        icono: Icons.cloud_off_rounded,
-        tinte: AppColores.error,
-        titulo: 'Solicitudes de inscripción sin cargar',
-        detalle: 'Sin conexión para consultar la bandeja',
-        boton: 'Reintentar',
-        primario: true,
-        onTap: () => unawaited(_cargarSolicitudesInvitados()),
-      ));
-    }
-
-    // B3: vacío confirmado que no se pudo revalidar — no se
-    // afirma «todo en orden» sin decir que el dato es de antes.
-    if (_swrSolicitudes.vacioSinRevalidar) {
-      pendientes.add(_PendientePanel(
-        icono: Icons.cloud_off_rounded,
-        tinte: AppColores.alerta,
-        titulo: 'Solicitudes sin revalidar',
-        detalle: _swrSolicitudes.notaSinRed,
-        boton: 'Reintentar',
-        primario: false,
-        onTap: () => unawaited(_cargarSolicitudesInvitados()),
-      ));
-    }
-
-    // Reservas por confirmar (bandeja FIFO; la primera manda el detalle).
-    if (_reservasSolicitadas.isNotEmpty) {
-      final n = _reservasSolicitadas.length;
-      final r = _reservasSolicitadas.first;
-      final nombreSupl =
-          _nombreSupl['${r['suplemento_id']}'] ?? 'Suplemento';
-      var detalle = '$nombreSupl ×${(r['cantidad'] as num?)?.toInt() ?? 1}';
-      final exp = r['expira_en'] as String?;
-      if (exp != null && exp.isNotEmpty) {
-        detalle += ' · vence ${fmtFecha(exp)}';
-      }
-      pendientes.add(_PendientePanel(
-        icono: Icons.inventory_2_rounded,
-        tinte: AppColores.naranja,
-        titulo: n == 1
-            ? '1 reserva por confirmar'
-            : '$n reservas por confirmar',
-        detalle: detalle,
-        boton: 'Revisar',
-        // Botón lleno solo si es la primera fila (sin solicitudes
-        // y ya sin su carga en curso).
-        primario: _swrSolicitudes.datos.isEmpty &&
-            !_swrSolicitudes.cargando &&
-            !_swrSolicitudes.error,
-        onTap: () => _ir(const ReservasScreen()),
-      ));
-    }
-
-    // G2 (v1.7.0): reportes de pago App Plus por confirmar. Solo
-    // aparece con pendientes CONOCIDOS. 1.23 (B3): con caché de
-    // un éxito anterior, un fallo de red ya no la hace
-    // desaparecer: se pinta con la nota «Sin red · datos de…».
-    if (_swrReportes.datos.isNotEmpty) {
-      final n = _swrReportes.datos.length;
-      final r = _swrReportes.datos.first;
-      var detalle = '${r.nombre} · ${fmtMonto(r.monto)} CUP · '
-          'ref. ${r.referencia}';
-      if (_swrReportes.notaSinRed.isNotEmpty) {
-        detalle += ' · ${_swrReportes.notaSinRed}';
-      }
-      pendientes.add(_PendientePanel(
-        icono: Icons.star_rounded,
-        tinte: AppColores.naranja,
-        titulo: n == 1
-            ? '1 reporte App Plus por confirmar'
-            : '$n reportes App Plus por confirmar',
-        detalle: detalle,
-        boton: 'Revisar',
-        primario: false,
-        onTap: () => _ir(const ReportesPlusScreen()),
-      ));
-    }
-
-    // B3: fallo de red sin caché en la bandeja del Plus.
-    if (_swrReportes.sinCargar) {
-      pendientes.add(_PendientePanel(
-        icono: Icons.cloud_off_rounded,
-        tinte: AppColores.error,
-        titulo: 'Reportes App Plus sin cargar',
-        detalle: 'Sin conexión para consultar la bandeja',
-        boton: 'Reintentar',
-        primario: false,
-        onTap: () => unawaited(_cargarReportesPlus()),
-      ));
-    }
-
-    // B3: vacío del Plus confirmado sin revalidar.
-    if (_swrReportes.vacioSinRevalidar) {
-      pendientes.add(_PendientePanel(
-        icono: Icons.cloud_off_rounded,
-        tinte: AppColores.alerta,
-        titulo: 'Reportes App Plus sin revalidar',
-        detalle: _swrReportes.notaSinRed,
-        boton: 'Reintentar',
-        primario: false,
-        onTap: () => unawaited(_cargarReportesPlus()),
-      ));
-    }
-
-    // Efectivo por liquidar (pendiente a entregar, por entrenador).
-    final pendTotal =
-        _pend.fold<double>(0, (s, e) => s + (e['total'] as double? ?? 0));
-    if (pendTotal > 0) {
-      final detalle = [
-            for (final t in _pend.take(2))
-              '${t['nombre']} \$${fmtMonto(t['total'])}',
-          ].join(' · ') +
-          (_pend.length > 2 ? ' · …' : '');
-      pendientes.add(_PendientePanel(
-        icono: Icons.payments_rounded,
-        tinte: AppColores.alerta,
-        titulo: 'Efectivo por liquidar',
-        detalle: detalle,
-        boton: 'Arqueo',
-        primario: false,
-        onTap: () => _ir(const ArqueoScreen()),
-      ));
-    }
-
-    // Cierre de caja pendiente: ayer ya es exigible completo;
-    // hoy solo tras el cierre + gracia (regla de turnosSinReporte).
-    if (_sinReporteAyer.isNotEmpty) {
-      pendientes.add(_PendientePanel(
-        icono: Icons.task_alt_rounded,
-        tinte: AppColores.info,
-        titulo: 'Cierre de caja pendiente',
-        detalle: 'Ayer · turno ${_sinReporteAyer.join(' y ')}',
-        boton: 'Cerrar',
-        primario: false,
-        onTap: () => _ir(_pantallaCierre()),
-      ));
-    }
-    if (_sinReporteHoy.isNotEmpty) {
-      pendientes.add(_PendientePanel(
-        icono: Icons.task_alt_rounded,
-        tinte: AppColores.info,
-        titulo: 'Sin reporte de caja',
-        detalle: 'Hoy · turno ${_sinReporteHoy.join(' y ')}',
-        boton: 'Cerrar',
-        primario: false,
-        onTap: () => _ir(_pantallaCierre()),
-      ));
-    }
-
-    // Incidencias de sync por revisar (aprobar/descartar, solo dueño).
-    if (_incidenciasPend > 0) {
-      pendientes.add(_PendientePanel(
-        icono: Icons.sync_problem_rounded,
-        tinte: AppColores.error,
-        titulo: _incidenciasPend == 1
-            ? '1 incidencia de sync por revisar'
-            : '$_incidenciasPend incidencias de sync por revisar',
-        detalle: 'Operaciones rechazadas o en revisión',
-        boton: 'Revisar',
-        primario: false,
-        onTap: () => _ir(const IncidenciasSyncScreen()),
-      ));
-    }
-
-    // Error de sincronización (último error, en lenguaje común).
-    if (_syncDet.error != null && _syncDet.error!.isNotEmpty) {
-      pendientes.add(_PendientePanel(
-        icono: Icons.error_outline_rounded,
-        tinte: AppColores.error,
-        titulo: 'Problema de sincronización',
-        detalle: errorSyncLegible(_syncDet.error!),
-        boton: 'Ver',
-        primario: false,
-        onTap: () => _ir(const SeccionDiagnosticoScreen()),
-      ));
-    }
-
-    // Stock crítico (mismo criterio que el chip de Suplementos).
-    if (_stockCritico.isNotEmpty) {
-      final s = _stockCritico.first;
-      final stock = (s['stock'] as num?)?.toInt() ?? 0;
-      pendientes.add(_PendientePanel(
-        icono: Icons.warning_amber_rounded,
-        tinte: AppColores.alerta,
-        titulo: 'Stock crítico',
-        detalle: _stockCritico.length == 1
-            ? '${s['nombre']} · queda $stock'
-            : '${_stockCritico.length} productos bajo el mínimo · '
-                '${s['nombre']} queda $stock',
-        boton: 'Ver',
-        primario: false,
-        onTap: () => _ir(const SuplementosScreen()),
-      ));
-    }
+    // 1.23 (B3 Paso 2): la lista se deriva con la función pura
+    // pendientesAtencion (panel_dueno_atencion.dart) — orden,
+    // textos y «primario» probados sin widgets. Aquí solo se
+    // envuelve cada dato en su fila y se resuelve la acción.
+    final pendientes = <_PendientePanel>[
+      for (final d in pendientesAtencion(FotoAtencion(
+        solicitudes: _swrSolicitudes,
+        reportes: _swrReportes,
+        reservasSolicitadas: _reservasSolicitadas,
+        nombreSupl: _nombreSupl,
+        pendienteEntrenadores: _pend,
+        sinReporteAyer: _sinReporteAyer,
+        sinReporteHoy: _sinReporteHoy,
+        incidenciasPend: _incidenciasPend,
+        syncError: _syncDet.error,
+        stockCritico: _stockCritico,
+      )))
+        _PendientePanel(
+          icono: d.icono,
+          tinte: d.tinte,
+          titulo: d.titulo,
+          detalle: d.detalle,
+          boton: d.boton,
+          primario: d.primario,
+          onTap: () => _accionAtencion(d.destino),
+        ),
+    ];
 
     // 1.14 (rediseño): 5 visibles y el resto (hasta 9 en total)
     // desplegable, en vez de quedarse fuera con una nota.
@@ -2532,7 +2450,7 @@ class _AdminScreenState extends State<AdminScreen> {
         _pendientesSubir > 0
             ? '$_pendientesSubir ops por subir'
             : 'Sincronizado',
-        () => _ir(const SeccionDiagnosticoScreen()),
+        () => _irLigera(const SeccionDiagnosticoScreen()),
       ),
       // Módulo 6 (pendientes + reintento): la pantalla ya existía
       // (detalle por operación, reintento uno/a uno y por lote,
