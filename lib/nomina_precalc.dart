@@ -99,9 +99,12 @@ class NominaPrecalc {
             : '${data['pagado_hasta']}';
         // N-1 (1.22): las marcas de anulado/eliminado también
         // (esPagoMensualidad las descarta: si aparecen, la
-        // caché debe invalidarse).
+        // caché debe invalidarse). Panel Zen pieza 1: faltaba
+        // `anulada`, que esPagoMensualidad también descarta —
+        // sin ella, un pago que pasara a anulada no invalidaba
+        // el precálculo y seguía contando.
         estado =
-            '$cliente|$periodo|$metodo|$montoStr|${dias ?? '<null>'}|$fecha|$pagadoHasta|${data['anulado'] ?? ''}|${data['eliminado'] ?? ''}|${data['estado'] ?? ''}';
+            '$cliente|$periodo|$metodo|$montoStr|${dias ?? '<null>'}|$fecha|$pagadoHasta|${data['anulado'] ?? ''}|${data['anulada'] ?? ''}|${data['eliminado'] ?? ''}|${data['estado'] ?? ''}';
       } catch (_) {
         estado = '<ilegible>';
       }

@@ -355,38 +355,43 @@ class _NominaScreenState extends State<NominaScreen> {
     _bonoMontoCtrl.clear();
     _bonoNotaCtrl.clear();
     _operando = true;
-    // Fase A 2026-10-25 (A4): el bono se guarda sincronizado
-    // (espejo + op), no en SharedPreferences.
-    final pref = hoyHabanaIso().substring(0, 7);
-    // N-6 (1.22): un mes ya liquidado no admite bonos: el bono
-    // descuadraría la foto de liquidación y el Dashboard.
-    final objetivosBono = _bonoEntrenador == 'ambos'
-        ? const ['duany', 'gabriel']
-        : [_bonoEntrenador];
-    if (objetivosBono.any((c) => _nominaLiquidadaMes[c] == true)) {
+    // Panel Zen pieza 1 (MEDIO): la guarda se libera en
+    // finally: si agregar o la relectura lanzan (BD/encolado),
+    // _operando no puede quedar pegado bloqueando la pantalla.
+    try {
+      // Fase A 2026-10-25 (A4): el bono se guarda sincronizado
+      // (espejo + op), no en SharedPreferences.
+      final pref = hoyHabanaIso().substring(0, 7);
+      // N-6 (1.22): un mes ya liquidado no admite bonos: el bono
+      // descuadraría la foto de liquidación y el Dashboard.
+      final objetivosBono = _bonoEntrenador == 'ambos'
+          ? const ['duany', 'gabriel']
+          : [_bonoEntrenador];
+      if (objetivosBono.any((c) => _nominaLiquidadaMes[c] == true)) {
+        mostrarSnack(context,
+            'La nómina de este mes ya está liquidada: no se pueden agregar bonos',
+            significado: SignificadoChip.alerta);
+        return;
+      }
+      await BonosNominaService.instance.agregar(
+        mes: pref,
+        entrenador: _bonoEntrenador,
+        monto: monto,
+        nota: notaBono,
+      );
+      final actualizados =
+          await BonosNominaService.instance.leerBonos(pref);
+      if (!mounted) return;
+      setState(() {
+        _bonos = actualizados;
+        _bonoMontoCtrl.clear();
+        _bonoNotaCtrl.clear();
+      });
+      if (mounted) {
+        mostrarSnack(context, 'Bono agregado', significado: SignificadoChip.exito);
+      }
+    } finally {
       _operando = false;
-      mostrarSnack(context,
-          'La nómina de este mes ya está liquidada: no se pueden agregar bonos',
-          significado: SignificadoChip.alerta);
-      return;
-    }
-    await BonosNominaService.instance.agregar(
-      mes: pref,
-      entrenador: _bonoEntrenador,
-      monto: monto,
-      nota: notaBono,
-    );
-    _operando = false;
-    final actualizados =
-        await BonosNominaService.instance.leerBonos(pref);
-    if (!mounted) return;
-    setState(() {
-      _bonos = actualizados;
-      _bonoMontoCtrl.clear();
-      _bonoNotaCtrl.clear();
-    });
-    if (mounted) {
-      mostrarSnack(context, 'Bono agregado', significado: SignificadoChip.exito);
     }
   }
 
@@ -408,17 +413,21 @@ class _NominaScreenState extends State<NominaScreen> {
       return;
     }
     _operando = true;
-    // Fase A 2026-10-25 (A4): encola la eliminación; la lectura
-    // fusionada lo oculta al instante.
-    await BonosNominaService.instance.eliminar(id);
-    final pref = hoyHabanaIso().substring(0, 7);
-    final actualizados =
-        await BonosNominaService.instance.leerBonos(pref);
-    _operando = false;
-    if (!mounted) return;
-    setState(() => _bonos = actualizados);
-    if (mounted) {
-      mostrarSnack(context, 'Bono eliminado', significado: SignificadoChip.exito);
+    // Panel Zen pieza 1 (MEDIO): guarda liberada en finally.
+    try {
+      // Fase A 2026-10-25 (A4): encola la eliminación; la
+      // lectura fusionada lo oculta al instante.
+      await BonosNominaService.instance.eliminar(id);
+      final pref = hoyHabanaIso().substring(0, 7);
+      final actualizados =
+          await BonosNominaService.instance.leerBonos(pref);
+      if (!mounted) return;
+      setState(() => _bonos = actualizados);
+      if (mounted) {
+        mostrarSnack(context, 'Bono eliminado', significado: SignificadoChip.exito);
+      }
+    } finally {
+      _operando = false;
     }
   }
 
@@ -970,104 +979,104 @@ class _NominaScreenState extends State<NominaScreen> {
                   // liquidaciones del mismo mes).
                   if (_operando) return;
                   _operando = true;
-                  // T22 (1.20): el resumen se calcula ANTES
-                  // del diálogo: lo que el dueño ve al
-                  // confirmar es exactamente la foto que
-                  // viaja con la liquidación.
-                  final libroLiq = _libroMes[ent];
-                  final baseLiq = _clientesPagados * _tarifa;
-                  final bonoLiq = ent == 'mi'
-                      ? _bonoSoloAmbos()
-                      : _bonoPara(ent);
-                  final comisionLiq =
-                      _comisionDosis[ent]?.total ?? 0;
-                  final adelantosLiq = libroLiq?.adelantos ?? 0;
-                  final deudaLiq = libroLiq?.deudaEntrante ?? 0;
-                  final netoLiq = NominaCalc.totalVivo(
-                    base: baseLiq,
-                    bono: bonoLiq,
-                    comision: comisionLiq,
-                    adelantos: adelantosLiq,
-                    deudaEntrante: deudaLiq,
-                  );
-                  if (!context.mounted) return;
-                  final ok = await showDialog<bool>(
-                    context: context,
-                    builder: (ctx) => AlertDialog(
-                      title: const Text('¿Nómina pagada?'),
-                      content: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text('Resumen de ${persona.nombre}:',
-                              style: AppTexto.subtitulo),
-                          const SizedBox(height: AppEspacio.sm),
-                          Text('Clientes que pagaron: '
-                              '$_clientesPagados × '
-                              '${fmtMonto(_tarifa)} CUP'),
-                          Text('Base: ${fmtMonto(baseLiq)} CUP'),
-                          if (bonoLiq > 0)
-                            Text('Bono: ${fmtMonto(bonoLiq)} CUP'),
-                          if (comisionLiq > 0)
-                            Text('Comisión por dosis: '
-                                '${fmtMonto(comisionLiq)} CUP'),
-                          if (adelantosLiq > 0)
-                            Text('Adelantos: '
-                                '−${fmtMonto(adelantosLiq)} CUP'),
-                          if (deudaLiq > 0)
-                            Text('Deuda del mes anterior: '
-                                '−${fmtMonto(deudaLiq)} CUP'),
-                          const Divider(),
-                          Text('Neto a pagar: '
-                              '${fmtMonto(netoLiq)} CUP',
-                              style: AppTexto.subtitulo),
-                          const SizedBox(height: AppEspacio.sm),
-                          const Text(
-                              'Se marca la nómina de este mes '
-                              'como PAGADA. Desde ese momento, '
-                              'los adelantos que se registren '
-                              'con fecha de este mes caerán en '
-                              'la nómina del mes siguiente (el '
-                              'mes pagado no se reescribe). El '
-                              'entrenador verá este resumen y '
-                              'podrá confirmar que la recibió.'),
+                  try {
+                    // T22 (1.20): el resumen se calcula ANTES
+                    // del diálogo: lo que el dueño ve al
+                    // confirmar es exactamente la foto que
+                    // viaja con la liquidación.
+                    final libroLiq = _libroMes[ent];
+                    final baseLiq = _clientesPagados * _tarifa;
+                    final bonoLiq = ent == 'mi'
+                        ? _bonoSoloAmbos()
+                        : _bonoPara(ent);
+                    final comisionLiq =
+                        _comisionDosis[ent]?.total ?? 0;
+                    final adelantosLiq = libroLiq?.adelantos ?? 0;
+                    final deudaLiq = libroLiq?.deudaEntrante ?? 0;
+                    final netoLiq = NominaCalc.totalVivo(
+                      base: baseLiq,
+                      bono: bonoLiq,
+                      comision: comisionLiq,
+                      adelantos: adelantosLiq,
+                      deudaEntrante: deudaLiq,
+                    );
+                    if (!context.mounted) return;
+                    final ok = await showDialog<bool>(
+                      context: context,
+                      builder: (ctx) => AlertDialog(
+                        title: const Text('¿Nómina pagada?'),
+                        content: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text('Resumen de ${persona.nombre}:',
+                                style: AppTexto.subtitulo),
+                            const SizedBox(height: AppEspacio.sm),
+                            Text('Clientes que pagaron: '
+                                '$_clientesPagados × '
+                                '${fmtMonto(_tarifa)} CUP'),
+                            Text('Base: ${fmtMonto(baseLiq)} CUP'),
+                            if (bonoLiq > 0)
+                              Text('Bono: ${fmtMonto(bonoLiq)} CUP'),
+                            if (comisionLiq > 0)
+                              Text('Comisión por dosis: '
+                                  '${fmtMonto(comisionLiq)} CUP'),
+                            if (adelantosLiq > 0)
+                              Text('Adelantos: '
+                                  '−${fmtMonto(adelantosLiq)} CUP'),
+                            if (deudaLiq > 0)
+                              Text('Deuda del mes anterior: '
+                                  '−${fmtMonto(deudaLiq)} CUP'),
+                            const Divider(),
+                            Text('Neto a pagar: '
+                                '${fmtMonto(netoLiq)} CUP',
+                                style: AppTexto.subtitulo),
+                            const SizedBox(height: AppEspacio.sm),
+                            const Text(
+                                'Se marca la nómina de este mes '
+                                'como PAGADA. Desde ese momento, '
+                                'los adelantos que se registren '
+                                'con fecha de este mes caerán en '
+                                'la nómina del mes siguiente (el '
+                                'mes pagado no se reescribe). El '
+                                'entrenador verá este resumen y '
+                                'podrá confirmar que la recibió.'),
+                          ],
+                        ),
+                        actions: [
+                          TextButton(
+                            onPressed: () =>
+                                Navigator.of(ctx).pop(false),
+                            child: const Text('Cancelar'),
+                          ),
+                          FilledButton(
+                            onPressed: () =>
+                                Navigator.of(ctx).pop(true),
+                            child: const Text('Sí, pagada'),
+                          ),
                         ],
                       ),
-                      actions: [
-                        TextButton(
-                          onPressed: () =>
-                              Navigator.of(ctx).pop(false),
-                          child: const Text('Cancelar'),
-                        ),
-                        FilledButton(
-                          onPressed: () =>
-                              Navigator.of(ctx).pop(true),
-                          child: const Text('Sí, pagada'),
-                        ),
-                      ],
-                    ),
-                  );
-                  if (ok != true) {
+                    );
+                    if (ok != true) return;
+                    await AdelantosService.instance.liquidarNomina(
+                      mes: pref,
+                      entrenadorId: persona.id,
+                      entrenadorNombre: persona.nombre,
+                      entrenadorTelegramId: persona.telegramId,
+                      tarifaPorCliente: _tarifa,
+                      neto: netoLiq,
+                      base: baseLiq,
+                      bonos: bonoLiq,
+                      comisiones: comisionLiq,
+                      adelantos: adelantosLiq,
+                      deudaEntrante: deudaLiq,
+                    );
+                    if (mounted) {
+                      mostrarSnack(context, 'Nómina marcada como pagada', significado: SignificadoChip.exito);
+                      _cargar();
+                    }
+                  } finally {
                     _operando = false;
-                    return;
-                  }
-                  await AdelantosService.instance.liquidarNomina(
-                    mes: pref,
-                    entrenadorId: persona.id,
-                    entrenadorNombre: persona.nombre,
-                    entrenadorTelegramId: persona.telegramId,
-                    tarifaPorCliente: _tarifa,
-                    neto: netoLiq,
-                    base: baseLiq,
-                    bonos: bonoLiq,
-                    comisiones: comisionLiq,
-                    adelantos: adelantosLiq,
-                    deudaEntrante: deudaLiq,
-                  );
-                  _operando = false;
-                  if (mounted) {
-                    mostrarSnack(context, 'Nómina marcada como pagada', significado: SignificadoChip.exito);
-                    _cargar();
                   }
                 },
               ),
@@ -1154,49 +1163,48 @@ class _NominaScreenState extends State<NominaScreen> {
                 // N-7 (1.22): guarda anti-doble toque.
                 if (_operando) return;
                 _operando = true;
-                final ok = await showDialog<bool>(
-                  context: context,
-                  builder: (ctx) => AlertDialog(
-                    title: const Text('¿Anular este adelanto?'),
-                    content: const Text(
-                        'Se crea el apunte contrario (nunca se '
-                        'borra). Si la caja de ese día ya se '
-                        'liquidó, la anulación queda marcada como '
-                        'fuera de cierre y no toca arqueos '
-                        'cerrados.'),
-                    actions: [
-                      TextButton(
-                        onPressed: () =>
-                            Navigator.of(ctx).pop(false),
-                        child: const Text('Cancelar'),
-                      ),
-                      FilledButton(
-                        onPressed: () =>
-                            Navigator.of(ctx).pop(true),
-                        child: const Text('Anular'),
-                      ),
-                    ],
-                  ),
-                );
-                if (ok != true) {
-                  _operando = false;
-                  return;
-                }
                 try {
-                  await AdelantosService.instance.anular(id,
-                      entrenadorId: entrenadorId,
-                      mesNomina: mesNomina);
-                } catch (err) {
-                  // M1: mes liquidado (u otro rechazo): se avisa
-                  // y no se recarga como si hubiera funcionado.
-                  _operando = false;
-                  if (mounted) {
-                    mostrarSnack(context, '$err', significado: SignificadoChip.error);
+                  final ok = await showDialog<bool>(
+                    context: context,
+                    builder: (ctx) => AlertDialog(
+                      title: const Text('¿Anular este adelanto?'),
+                      content: const Text(
+                          'Se crea el apunte contrario (nunca se '
+                          'borra). Si la caja de ese día ya se '
+                          'liquidó, la anulación queda marcada como '
+                          'fuera de cierre y no toca arqueos '
+                          'cerrados.'),
+                      actions: [
+                        TextButton(
+                          onPressed: () =>
+                              Navigator.of(ctx).pop(false),
+                          child: const Text('Cancelar'),
+                        ),
+                        FilledButton(
+                          onPressed: () =>
+                              Navigator.of(ctx).pop(true),
+                          child: const Text('Anular'),
+                        ),
+                      ],
+                    ),
+                  );
+                  if (ok != true) return;
+                  try {
+                    await AdelantosService.instance.anular(id,
+                        entrenadorId: entrenadorId,
+                        mesNomina: mesNomina);
+                  } catch (err) {
+                    // M1: mes liquidado (u otro rechazo): se avisa
+                    // y no se recarga como si hubiera funcionado.
+                    if (mounted) {
+                      mostrarSnack(context, '$err', significado: SignificadoChip.error);
+                    }
+                    return;
                   }
-                  return;
+                  if (mounted) _cargar();
+                } finally {
+                  _operando = false;
                 }
-                _operando = false;
-                if (mounted) _cargar();
               },
             ),
           // W3 (1.20): corregir el origen (solo dueño, mes sin
@@ -1367,171 +1375,173 @@ class _NominaScreenState extends State<NominaScreen> {
     // N-7 (1.22): guarda anti-doble toque.
     if (_operando) return;
     _operando = true;
-    final persona = _personasAdelantos[ent]!;
-    final montoCtrl = TextEditingController();
-    final notaCtrl = TextEditingController();
-    var fecha = ahoraHabana();
-    var metodo = 'efectivo';
-    var origen = 'caja_turno';
-    var gaveta = ent; // username de cuya gaveta sale
-    final guardado = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setLocal) => AlertDialog(
-          title: Text('Adelanto a ${persona.nombre}'),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                TextField(
-                  controller: montoCtrl,
-                  keyboardType: TextInputType.number,
-                  decoration: const InputDecoration(
-                      labelText: 'Monto (CUP entero)'),
-                ),
-                const SizedBox(height: 12),
-                Row(
-                  children: [
-                    const Text('Fecha: '),
-                    TextButton(
-                      onPressed: () async {
-                        final f = await showDatePicker(
-                          context: ctx,
-                          initialDate: fecha,
-                          firstDate: DateTime(fecha.year - 1, 1, 1),
-                          lastDate: ahoraHabana(),
-                        );
-                        if (f != null) {
-                          setLocal(() => fecha = f);
-                        }
-                      },
-                      child: Text(
-                          '${fecha.year}-${fecha.month.toString().padLeft(2, '0')}-${fecha.day.toString().padLeft(2, '0')}'),
-                    ),
-                  ],
-                ),
-                Text('Método',
-                    style: AppTexto.metadato.copyWith(fontWeight: FontWeight.w700)),
-                Wrap(
-                  spacing: 8,
-                  children: [
-                    ChoiceChip(
-                      label: const Text('Efectivo'),
-                      selected: metodo == 'efectivo',
-                      onSelected: (_) =>
-                          setLocal(() => metodo = 'efectivo'),
-                    ),
-                    ChoiceChip(
-                      label: const Text('Transferencia'),
-                      selected: metodo == 'transferencia',
-                      onSelected: (_) =>
-                          setLocal(() => metodo = 'transferencia'),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                Text('¿De dónde sale?',
-                    style: AppTexto.metadato.copyWith(fontWeight: FontWeight.w700)),
-                Wrap(
-                  spacing: 8,
-                  children: [
-                    ChoiceChip(
-                      label: const Text('Caja del turno'),
-                      selected: origen == 'caja_turno',
-                      onSelected: (_) =>
-                          setLocal(() => origen = 'caja_turno'),
-                    ),
-                    ChoiceChip(
-                      label: const Text('Mi bolsillo'),
-                      selected: origen == 'fondo_dueno',
-                      onSelected: (_) =>
-                          setLocal(() => origen = 'fondo_dueno'),
-                    ),
-                  ],
-                ),
-                if (origen == 'caja_turno' &&
-                    metodo == 'efectivo') ...[
-                  const SizedBox(height: 8),
-                  const Text('Sale de la gaveta de:',
-                      style: AppTexto.metadato),
-                  DropdownButton<String>(
-                    value: gaveta,
-                    isExpanded: true,
-                    items: const [
-                      DropdownMenuItem(
-                          value: 'duany', child: Text('Duany')),
-                      DropdownMenuItem(
-                          value: 'gabriel',
-                          child: Text('Gabriel')),
-                    ],
-                    onChanged: (v) =>
-                        setLocal(() => gaveta = v ?? ent),
+    try {
+      final persona = _personasAdelantos[ent]!;
+      final montoCtrl = TextEditingController();
+      final notaCtrl = TextEditingController();
+      var fecha = ahoraHabana();
+      var metodo = 'efectivo';
+      var origen = 'caja_turno';
+      var gaveta = ent; // username de cuya gaveta sale
+      final guardado = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => StatefulBuilder(
+          builder: (ctx, setLocal) => AlertDialog(
+            title: Text('Adelanto a ${persona.nombre}'),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  TextField(
+                    controller: montoCtrl,
+                    keyboardType: TextInputType.number,
+                    decoration: const InputDecoration(
+                        labelText: 'Monto (CUP entero)'),
                   ),
-                  const Text(
-                    'Ese dinero ya no estará en su «pendiente a '
-                    'entregar»: cuadra con su arqueo.',
-                    style: AppTexto.metadato,
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      const Text('Fecha: '),
+                      TextButton(
+                        onPressed: () async {
+                          final f = await showDatePicker(
+                            context: ctx,
+                            initialDate: fecha,
+                            firstDate: DateTime(fecha.year - 1, 1, 1),
+                            lastDate: ahoraHabana(),
+                          );
+                          if (f != null) {
+                            setLocal(() => fecha = f);
+                          }
+                        },
+                        child: Text(
+                            '${fecha.year}-${fecha.month.toString().padLeft(2, '0')}-${fecha.day.toString().padLeft(2, '0')}'),
+                      ),
+                    ],
+                  ),
+                  Text('Método',
+                      style: AppTexto.metadato.copyWith(fontWeight: FontWeight.w700)),
+                  Wrap(
+                    spacing: 8,
+                    children: [
+                      ChoiceChip(
+                        label: const Text('Efectivo'),
+                        selected: metodo == 'efectivo',
+                        onSelected: (_) =>
+                            setLocal(() => metodo = 'efectivo'),
+                      ),
+                      ChoiceChip(
+                        label: const Text('Transferencia'),
+                        selected: metodo == 'transferencia',
+                        onSelected: (_) =>
+                            setLocal(() => metodo = 'transferencia'),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Text('¿De dónde sale?',
+                      style: AppTexto.metadato.copyWith(fontWeight: FontWeight.w700)),
+                  Wrap(
+                    spacing: 8,
+                    children: [
+                      ChoiceChip(
+                        label: const Text('Caja del turno'),
+                        selected: origen == 'caja_turno',
+                        onSelected: (_) =>
+                            setLocal(() => origen = 'caja_turno'),
+                      ),
+                      ChoiceChip(
+                        label: const Text('Mi bolsillo'),
+                        selected: origen == 'fondo_dueno',
+                        onSelected: (_) =>
+                            setLocal(() => origen = 'fondo_dueno'),
+                      ),
+                    ],
+                  ),
+                  if (origen == 'caja_turno' &&
+                      metodo == 'efectivo') ...[
+                    const SizedBox(height: 8),
+                    const Text('Sale de la gaveta de:',
+                        style: AppTexto.metadato),
+                    DropdownButton<String>(
+                      value: gaveta,
+                      isExpanded: true,
+                      items: const [
+                        DropdownMenuItem(
+                            value: 'duany', child: Text('Duany')),
+                        DropdownMenuItem(
+                            value: 'gabriel',
+                            child: Text('Gabriel')),
+                      ],
+                      onChanged: (v) =>
+                          setLocal(() => gaveta = v ?? ent),
+                    ),
+                    const Text(
+                      'Ese dinero ya no estará en su «pendiente a '
+                      'entregar»: cuadra con su arqueo.',
+                      style: AppTexto.metadato,
+                    ),
+                  ],
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: notaCtrl,
+                    maxLength: 80,
+                    decoration: const InputDecoration(
+                        labelText: 'Nota (opcional)'),
                   ),
                 ],
-                const SizedBox(height: 12),
-                TextField(
-                  controller: notaCtrl,
-                  maxLength: 80,
-                  decoration: const InputDecoration(
-                      labelText: 'Nota (opcional)'),
-                ),
-              ],
+              ),
             ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(ctx).pop(false),
+                child: const Text('Cancelar'),
+              ),
+              FilledButton(
+                onPressed: () {
+                  final monto = int.tryParse(montoCtrl.text.trim());
+                  if (monto == null || monto <= 0) {
+                    mostrarSnack(ctx, 'Monto inválido: entero mayor que 0', significado: SignificadoChip.alerta);
+                    return;
+                  }
+                  Navigator.of(ctx).pop(true);
+                },
+                child: const Text('Registrar'),
+              ),
+            ],
           ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(ctx).pop(false),
-              child: const Text('Cancelar'),
-            ),
-            FilledButton(
-              onPressed: () {
-                final monto = int.tryParse(montoCtrl.text.trim());
-                if (monto == null || monto <= 0) {
-                  mostrarSnack(ctx, 'Monto inválido: entero mayor que 0', significado: SignificadoChip.alerta);
-                  return;
-                }
-                Navigator.of(ctx).pop(true);
-              },
-              child: const Text('Registrar'),
-            ),
-          ],
         ),
-      ),
-    );
-    // #7 (Argón nómina): al cancelar también se liberan los
-    // controladores del diálogo (antes solo se liberaban al
-    // guardar).
-    if (guardado != true) {
+      );
+      // #7 (Argón nómina): al cancelar también se liberan los
+      // controladores del diálogo (antes solo se liberaban al
+      // guardar).
+      if (guardado != true) {
+        montoCtrl.dispose();
+        notaCtrl.dispose();
+        return;
+      }
+      final monto = int.tryParse(montoCtrl.text.trim()) ?? 0;
+      final gavetaPersona = _personasAdelantos[gaveta];
+      await AdelantosService.instance.registrar(
+        entrenadorId: persona.id,
+        entrenadorNombre: persona.nombre,
+        entrenadorTelegramId: persona.telegramId,
+        monto: monto,
+        fecha: fecha,
+        nota: notaCtrl.text,
+        metodo: metodo,
+        origen: origen,
+        descuentaA: gavetaPersona?.telegramId,
+      );
       montoCtrl.dispose();
       notaCtrl.dispose();
+      if (mounted) {
+        mostrarSnack(context, 'Adelanto registrado (se sincronizará)', significado: SignificadoChip.exito);
+        _cargar();
+      }
+    } finally {
       _operando = false;
-      return;
-    }
-    final monto = int.tryParse(montoCtrl.text.trim()) ?? 0;
-    final gavetaPersona = _personasAdelantos[gaveta];
-    await AdelantosService.instance.registrar(
-      entrenadorId: persona.id,
-      entrenadorNombre: persona.nombre,
-      entrenadorTelegramId: persona.telegramId,
-      monto: monto,
-      fecha: fecha,
-      nota: notaCtrl.text,
-      metodo: metodo,
-      origen: origen,
-      descuentaA: gavetaPersona?.telegramId,
-    );
-    montoCtrl.dispose();
-    notaCtrl.dispose();
-    _operando = false;
-    if (mounted) {
-      mostrarSnack(context, 'Adelanto registrado (se sincronizará)', significado: SignificadoChip.exito);
-      _cargar();
     }
   }
 }
