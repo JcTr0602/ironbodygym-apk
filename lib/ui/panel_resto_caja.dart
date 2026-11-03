@@ -36,6 +36,32 @@ import 'nomina.dart';
 // C1
 // ---------------------------------------------------------------------------
 
+/// Completa cada tarjeta de la lista C1 con su pendiente CUP
+/// del delta (pendienteDeltaC1) y su pendiente USD CANÓNICO
+/// (pendienteEntregaUsd: espejo + cola + arrastre).
+///
+/// Autoauditoría 1.22 #1 (2026-11-03): la pieza 2 (T-03)
+/// añadía a la lista a los entrenadores con pendiente solo en
+/// cola con la entrada en ceros, y el `usd` de la tarjeta nunca
+/// se recalculaba (el de la lista base sale de pendienteArqueo,
+/// que NO mira la cola). Si lo único pendiente era una venta
+/// USD aún en cola, la tarjeta decía «Pendiente: 0 CUP» y el
+/// botón Liquidar caía en «Ya no hay pendiente que liquidar»:
+/// el callejón sin salida que T-03 quería cerrar. El subtítulo
+/// y el aviso de solo-USD leen `e['usd']`: tiene que ser el
+/// canónico, para todas las entradas.
+Future<void> completarPendientesArqueoC1(
+    List<Map<String, dynamic>> lista) async {
+  for (final e in lista) {
+    final tid = LocalDb.normalizarTelegramId(e['telegram_id']);
+    e['pendiente_c1'] =
+        tid != null ? await pendienteDeltaC1(tid) : e['cup'] as double;
+    if (tid != null) {
+      e['usd'] = await pendienteEntregaUsd(tid);
+    }
+  }
+}
+
 class ArqueoEntregaScreen extends StatefulWidget {
   const ArqueoEntregaScreen({super.key});
   @override
@@ -140,11 +166,10 @@ class _ArqueoEntregaScreenState extends State<ArqueoEntregaScreen> {
       // tras una parcial la tarjeta decía 700 y el botón decía
       // que no había pendiente. entrenadoresConPendiente solo se
       // conserva para la lista de entrenadores/nombres.
-      for (final e in lista) {
-        final tid = LocalDb.normalizarTelegramId(e['telegram_id']);
-        e['pendiente_c1'] =
-            tid != null ? await pendienteDeltaC1(tid) : e['cup'] as double;
-      }
+      // Autoauditoría 1.22 #1: pendiente_c1 Y el USD canónico
+      // (ver completarPendientesArqueoC1; antes el usd quedaba
+      // el de la lista base, ciego a la cola).
+      await completarPendientesArqueoC1(lista);
       if (mounted) {
         setState(() {
           _entrenadores = lista;

@@ -20,6 +20,7 @@ import 'package:ironbody_gym/localdb.dart';
 import 'package:ironbody_gym/negocio.dart';
 import 'package:ironbody_gym/tiempo.dart';
 import 'package:ironbody_gym/turnos_resolucion.dart';
+import 'package:ironbody_gym/ui/panel_resto_caja.dart';
 import 'package:path/path.dart' as p;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
@@ -122,6 +123,45 @@ void main() {
           reason: 'el arqueo y el total canónico no divergen');
       expect(desglose, canonico,
           reason: 'el desglose recompuesto cuadra con la cabecera');
+      await db.close();
+    });
+  });
+
+  group('T-03: la tarjeta del Arqueo C1 ve el USD en cola', () {
+    // Autoauditoría 1.22 #1 (2026-11-03): la pieza 2 añadió a
+    // la lista a los entrenadores con pendiente SOLO en cola,
+    // pero su tarjeta nacía con usd=0.0 y ese campo nunca se
+    // recalculaba: si lo único pendiente era una venta USD aún
+    // en cola, la tarjeta decía «Pendiente: 0 CUP» y Liquidar
+    // caía en «Ya no hay pendiente» — el callejón que T-03
+    // quería cerrar. completarPendientesArqueoC1 refresca el
+    // USD con la función canónica (pendienteEntregaUsd: espejo
+    // + cola + arrastre) para TODAS las entradas.
+    test('venta USD en cola: pendiente_c1=0 y usd=30', () async {
+      final db = await _abrirDbVacia();
+      const tid = 333;
+      await db.insert('ops_queue', {
+        'op_uuid': 'op-usd-cola-1',
+        'tipo': 'venta_suplemento',
+        'payload': jsonEncode({
+          'moneda': 'USD',
+          'precio': 30,
+          'cantidad': 1,
+        }),
+        'estado': 'pendiente',
+        'telegram_id': tid,
+        'creada_ts': '2026-11-02T10:00:00.000-04:00',
+      });
+      final lista = <Map<String, dynamic>>[
+        {'telegram_id': tid, 'nombre': 'Entrenador $tid',
+         'cup': 0.0, 'usd': 0.0},
+      ];
+      await completarPendientesArqueoC1(lista);
+      expect(lista.single['pendiente_c1'], 0.0,
+          reason: 'la venta USD no es pendiente CUP del C1');
+      expect(lista.single['usd'], 30.0,
+          reason: 'el USD en cola SÍ debe verse en la tarjeta '
+              'para apuntar al Arqueo principal');
       await db.close();
     });
   });
