@@ -362,8 +362,21 @@ class _GuiaScreenState extends State<GuiaScreen> {
         final cambioImagen =
             b['imagen_cambiada'] == 1 || b['imagen_cambiada'] == true;
         final local = '${b['imagen_local'] ?? ''}';
+        // imagen_rev base: la publicada para este slug (0 si es
+        // nueva). Se resuelve ANTES de subir la imagen porque el
+        // objeto subido lleva el nombre de la revisión destino
+        // (1.23 #9: revPub + 1, la que el servidor asignará si
+        // acepta la op; si la rechaza, queda huérfano y la
+        // imagen viva no se toca).
+        var revPub = 0;
+        for (final p in _publicadas) {
+          if ('${p['id']}' == slug) {
+            revPub = (p['imagen_rev'] as num?)?.toInt() ?? 0;
+            break;
+          }
+        }
         if (cambioImagen && tieneImagen && local.isNotEmpty) {
-          if (!await _subirImagen(slug, local)) {
+          if (!await _subirImagen(slug, local, revPub + 1)) {
             fallos.add('$slug: la imagen no se pudo subir.');
             continue;
           }
@@ -380,16 +393,9 @@ class _GuiaScreenState extends State<GuiaScreen> {
           tipo: 'guia_upsert_publicado',
           payload: payload,
         );
-        // imagen_rev base: la publicada para este slug (0 si es
-        // nueva). Si la imagen cambió, el servidor la subirá en 1
-        // y el espejo local lo refleja al instante.
-        var revPub = 0;
-        for (final p in _publicadas) {
-          if ('${p['id']}' == slug) {
-            revPub = (p['imagen_rev'] as num?)?.toInt() ?? 0;
-            break;
-          }
-        }
+        // El espejo optimista refleja la imagen_rev que el
+        // servidor asignará (revPub ya resuelta arriba, antes
+        // de la subida versionada).
         final optimista = Map<String, dynamic>.from(doc)
           ..['revision'] = base + 1
           ..['imagen_rev'] = cambioImagen ? revPub + 1 : revPub;
@@ -436,7 +442,8 @@ class _GuiaScreenState extends State<GuiaScreen> {
     );
   }
 
-  Future<bool> _subirImagen(String slug, String local) async {
+  Future<bool> _subirImagen(String slug, String local, int revDestino)
+      async {
     // 1.22 GY-02: subir al bucket público es solo del dueño.
     if (!AuthService().isOwner) return false;
     try {
@@ -446,7 +453,8 @@ class _GuiaScreenState extends State<GuiaScreen> {
       final r = await http
           .post(
             Uri.parse('${AppConfig.supabaseUrl}/storage/v1/object/'
-                '${AppConfig.bucketGuia}/$slug.webp'),
+                '${AppConfig.bucketGuia}/'
+                '${AppConfig.objetoImagenGuia(slug, revDestino)}'),
             headers: {
               'apikey': AppConfig.anonKey,
               if (token.isNotEmpty) 'Authorization': 'Bearer $token',

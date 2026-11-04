@@ -13,6 +13,25 @@ class AppConfig {
   // Biblioteca / Guía (v47): bucket público de imágenes de fichas.
   static const bucketGuia = 'guia-imagenes';
 
+  // 1.23 (#9 de la auditoría extra): nombre VERSIONADO del objeto
+  // de imagen de una ficha de la Guía: <slug>-v<imagen_rev>.webp.
+  // La foto se sube con el nombre de la revisión que el servidor
+  // asignará SI acepta la op de publicación; si la rechaza
+  // (conflicto de revisión), el objeto subido queda huérfano y la
+  // imagen viva — la de la revisión publicada — no se toca:
+  // imagen pública y ficha ya no divergen. Con rev <= 0 cae al
+  // nombre legado (defensivo: el servidor asigna >= 1 a la
+  // primera imagen de una ficha, así que no debería ocurrir).
+  static String objetoImagenGuia(String slug, int imagenRev) =>
+      imagenRev > 0 ? '$slug-v$imagenRev.webp' : '$slug.webp';
+
+  // URL pública de la imagen PUBLICADA de una ficha (la de su
+  // imagen_rev vigente). El nombre versionado hace innecesario
+  // el ?v= de caché: cada revisión es un objeto distinto.
+  static String urlImagenGuia(String slug, int imagenRev) =>
+      '$supabaseUrl/storage/v1/object/public/$bucketGuia/'
+      '${objetoImagenGuia(slug, imagenRev)}';
+
   // Datos de transferencia (Transfermóvil/Enzona) — fijos del negocio.
   //
   // v1.2.4 (seguridad): los números reales se eliminaron del repo público.

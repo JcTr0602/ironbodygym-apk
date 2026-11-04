@@ -477,7 +477,12 @@ class _GuiaEditorScreenState extends State<GuiaEditorScreen> {
       if (confirmar != true) return;
       final slug = '${a['id']}';
       if (_imagenCambiada && _tieneImagen && _imagenLocal.isNotEmpty) {
-        if (!await _subirImagen(slug)) return;
+        // 1.23 (#9): la foto sube con el nombre de la revisión
+        // que el servidor asignará si acepta la op (_imagenRev
+        // publicada + 1, el mismo cálculo del espejo optimista
+        // de abajo). Si la op se rechaza, ese objeto queda
+        // huérfano y la imagen viva no cambia.
+        if (!await _subirImagen(slug, _imagenRev + 1)) return;
       }
       final payload = Map<String, dynamic>.from(_fichaActual())
         ..['base_revision'] = _baseRevision
@@ -543,9 +548,8 @@ class _GuiaEditorScreenState extends State<GuiaEditorScreen> {
           Padding(
             padding: const EdgeInsets.only(bottom: AppEspacio.sm),
             child: Image.network(
-              '${AppConfig.supabaseUrl}/storage/v1/object/public/'
-              '${AppConfig.bucketGuia}/${_slug.text.trim()}.webp'
-              '?v=$_imagenRev',
+              // 1.23 (#9): URL versionada por imagen_rev.
+              AppConfig.urlImagenGuia(_slug.text.trim(), _imagenRev),
               height: 120,
               errorBuilder: (_, __, ___) =>
                   const Text('Sin vista previa de la imagen.'),
@@ -604,7 +608,7 @@ class _GuiaEditorScreenState extends State<GuiaEditorScreen> {
     );
   }
 
-  Future<bool> _subirImagen(String slug) async {
+  Future<bool> _subirImagen(String slug, int revDestino) async {
     // Ronda 17 M3-H1: subir al bucket público es solo del dueño.
     if (!AuthService().isOwner) return false;
     try {
@@ -613,7 +617,8 @@ class _GuiaEditorScreenState extends State<GuiaEditorScreen> {
       final r = await http
           .post(
             Uri.parse('${AppConfig.supabaseUrl}/storage/v1/object/'
-                '${AppConfig.bucketGuia}/$slug.webp'),
+                '${AppConfig.bucketGuia}/'
+                '${AppConfig.objetoImagenGuia(slug, revDestino)}'),
             headers: {
               'apikey': AppConfig.anonKey,
               if (token.isNotEmpty) 'Authorization': 'Bearer $token',
@@ -1003,10 +1008,12 @@ class _GuiaEditorScreenState extends State<GuiaEditorScreen> {
               Padding(
                 padding: const EdgeInsets.only(bottom: AppEspacio.sm),
                 child: Image.network(
-                  // Argón P2#14: revienta la caché tras republicar.
-                  '${AppConfig.supabaseUrl}/storage/v1/object/public/'
-                  '${AppConfig.bucketGuia}/${_slug.text.trim()}.webp'
-                  '?v=$_imagenRev',
+                  // Argón P2#14 pedía reventar la caché tras
+                  // republicar: con el nombre versionado por
+                  // imagen_rev (1.23 #9) cada revisión es un
+                  // objeto distinto y la caché se invalida sola.
+                  AppConfig.urlImagenGuia(
+                      _slug.text.trim(), _imagenRev),
                   height: 160,
                   errorBuilder: (_, __, ___) =>
                       const Text('Sin vista previa de la imagen.'),
