@@ -32,6 +32,7 @@ import 'diseno.dart';
 import 'historial_ventas.dart';
 import 'reservas.dart';
 import 'servicios.dart';
+import 'servicios_admin.dart';
 import 'widgets.dart';
 
 class SuplementosScreen extends StatefulWidget {
@@ -392,6 +393,18 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
                           const CategoriasSuplementoScreen()),
                 );
                 if (mounted) _cargar();
+              } else if (v == 'admin_servicios') {
+                // 1.23 (backlog de campo): la administración de
+                // dosis y botes (precios, comisión, pomos, agua)
+                // también se alcanza desde la sección, sin tener
+                // que entrar primero a vender un servicio.
+                await Navigator.push(
+                  context,
+                  RutaIron(
+                      builder: (_) =>
+                          const ServiciosAdminScreen()),
+                );
+                if (mounted) _cargar();
               } else if (v == 'servicios') {
                 await Navigator.push(
                   context,
@@ -425,6 +438,20 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
                       Icon(Icons.category_rounded, size: 20),
                       SizedBox(width: AppEspacio.sm),
                       Text('Categorías'),
+                    ],
+                  ),
+                ),
+              // 1.23 (backlog de campo): administración completa
+              // de las dosis a mano desde la sección (solo dueño;
+              // la pantalla además se protege sola).
+              if (_esDueno)
+                const PopupMenuItem(
+                  value: 'admin_servicios',
+                  child: Row(
+                    children: [
+                      Icon(Icons.settings_rounded, size: 20),
+                      SizedBox(width: AppEspacio.sm),
+                      Text('Administrar dosis y botes'),
                     ],
                   ),
                 ),

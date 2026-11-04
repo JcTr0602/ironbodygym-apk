@@ -663,13 +663,15 @@ String fmtMonto(dynamic m) {
   return '$signo$entero.$decS';
 }
 
-/// v1.4.6: línea «Cobró: …» de los historiales de pago (ficha del
-/// cliente y «Pagos realizados»). `registrado_por` ya viaja en el
-/// espejo de pagos; si falta o viene vacío se dice explícito en
-/// vez de dejar la línea en blanco.
+/// v1.4.6: línea «Cobró: …» del historial de pagos de la ficha
+/// del cliente. `registrado_por` ya viaja en el espejo de pagos
+/// (también en las filas optimistas locales aún sin sincronizar).
+/// 1.23 (backlog de campo): si falta o viene vacío NO se muestra
+/// nada (cadena vacía) — las filas viejas sin cobrador quedan
+/// como siempre, sin una línea «No registrado» que no aporta.
 String textoCobradoPor(dynamic registradoPor) {
   final s = '${registradoPor ?? ''}'.trim();
-  return s.isEmpty ? 'Cobró: No registrado' : 'Cobró: $s';
+  return s.isEmpty ? '' : 'Cobró: $s';
 }
 
 /// Nuevo pagado_hasta estimado si se pagan `meses` hoy.

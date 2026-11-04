@@ -37,6 +37,10 @@ import 'arqueo.dart';
 import 'nomina.dart';
 import 'historial_ventas.dart';
 import 'suplementos.dart';
+import 'cuentas_por_cobrar.dart';
+import 'panel_bloque2.dart';
+import 'reservas.dart';
+import 'servicios_admin.dart';
 
 /// Tarjeta de sección (mismo diseño que la antigua administración).
 /// v1.3.6 (Argón, diseño): el icono del encabezado usa el badge squircle
@@ -594,9 +598,37 @@ class SeccionSuplementosScreen extends StatelessWidget {
               icono: Icons.receipt_long_rounded,
               onPressed: () => onIr(const HistorialVentasScreen()),
             ),
+            const SizedBox(height: AppEspacio.sm),
+            // 1.23 (backlog de campo): el resto de la
+            // administración de suplementos y dosis queda a mano
+            // en la sección, sin saltar a otras zonas del Panel.
+            BotonSecundario(
+              texto: 'Dosis y botes',
+              icono: Icons.bolt_rounded,
+              onPressed: () => onIr(const ServiciosAdminScreen()),
+            ),
+            const SizedBox(height: AppEspacio.sm),
+            BotonSecundario(
+              texto: 'Reservas',
+              icono: Icons.bookmark_rounded,
+              onPressed: () => onIr(const ReservasScreen()),
+            ),
+            const SizedBox(height: AppEspacio.sm),
+            BotonSecundario(
+              texto: 'Fiados por cobrar',
+              icono: Icons.account_balance_wallet_rounded,
+              onPressed: () =>
+                  onIr(const CuentasPorCobrarScreen()),
+            ),
+            const SizedBox(height: AppEspacio.sm),
+            BotonSecundario(
+              texto: 'Sin foto o sin precio',
+              icono: Icons.warning_amber_rounded,
+              onPressed: () => onIr(const SinFotoPrecioScreen()),
+            ),
             const SizedBox(height: 4),
             Text(
-              'Productos, precios oficiales, stock, promo "mes gratis" y ventas.',
+              'Productos, precios oficiales, stock, promo "mes gratis", ventas, dosis, reservas y fiados.',
               style: AppTexto.metadato.copyWith(color: AppColores.textoSecundario(context)),
             ),
           ]),

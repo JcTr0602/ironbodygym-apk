@@ -2936,6 +2936,11 @@ class _FichaScreenState extends State<FichaScreen> {
     }
     for (final p in _pagos) {
       final metodo = '${p['metodo'] ?? ''}';
+      // 1.23 (backlog de campo): quién cobró, como segunda
+      // línea del subtítulo — solo si el espejo trae el dato
+      // (las filas viejas sin registrado_por quedan de una
+      // sola línea, sin «No registrado»).
+      final cobradoPor = textoCobradoPor(p['registrado_por']);
       entradas.add({
         'tipo': 'pago',
         'fecha': '${p['fecha'] ?? ''}',
@@ -2946,8 +2951,8 @@ class _FichaScreenState extends State<FichaScreen> {
                 : 'Efectivo',
         'trailing': '${fmtMonto(p['monto'])} CUP',
         'subtitulo':
-            '${fmtFecha(p['fecha'] as String?)} · ${p['periodo'] ?? 'mensual'}\n'
-            '${textoCobradoPor(p['registrado_por'])}',
+            '${fmtFecha(p['fecha'] as String?)} · ${p['periodo'] ?? 'mensual'}'
+            '${cobradoPor.isEmpty ? '' : '\n$cobradoPor'}',
         'icono': metodo == 'cortesia'
             ? Icons.card_giftcard_rounded
             : metodo == 'transferencia'
