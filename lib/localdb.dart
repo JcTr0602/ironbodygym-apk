@@ -33,6 +33,32 @@ class _CondicionPago {
   const _CondicionPago(this.columna, this.sql, this.arg, this.dart);
 }
 
+/// Una condición de [LocalDb.servicioVentasPorFiltro] (v61):
+/// fragmento SQL con sus argumentos ligados, el fragmento que
+/// detecta las filas a las que el fallback en Dart debe mirar
+/// (alguna de las columnas de la condición en NULL: escritura
+/// vieja o backfill incompleto) y el predicado equivalente en
+/// Dart para esas filas.
+class _CondicionServicioVenta {
+  final String sql;
+  final List<Object?> args;
+  final String sqlNulo;
+  final bool Function(Map<String, dynamic>) dart;
+  const _CondicionServicioVenta(
+      this.sql, this.args, this.sqlNulo, this.dart);
+}
+
+/// Una condición de [LocalDb.ventasSuplementosPorFiltro] (v61).
+/// Misma estructura que [_CondicionServicioVenta].
+class _CondicionVentaSuplemento {
+  final String sql;
+  final List<Object?> args;
+  final String sqlNulo;
+  final bool Function(Map<String, dynamic>) dart;
+  const _CondicionVentaSuplemento(
+      this.sql, this.args, this.sqlNulo, this.dart);
+}
+
 class LocalDb {
   LocalDb._();
   static final LocalDb instance = LocalDb._();
@@ -41,7 +67,12 @@ class LocalDb {
   /// v1.4.0 (Argón): versión actual del esquema local. Los tests de
   /// migración comparan contra esta constante en vez de un número
   /// fijo, para no caer en cascada de fallos con cada migración.
-  static const int versionActual = 60;
+  /// v61 (1.23, P1 auditoría extra ítem 10): columnas dedicadas en
+  /// los espejos servicio_ventas y ventas_suplementos, patrón
+  /// pagos v26 (ver columnasServicioVentas/columnasVentasSuplementos);
+  /// + índice compuesto idx_ops_tipo_estado en ops_queue
+  /// (Argón 3ª pasada, optimización 5).
+  static const int versionActual = 61;
 
   /// v37: marcas de información pública pendiente de republicar,
   /// UNA FILA POR CLAVE (compartido entre onCreate y la migración
@@ -1334,6 +1365,40 @@ class LocalDb {
           // asistencia entre aparatos).
           await _crearTablaVisitasInvitados(db);
         }
+        if (oldV < 61) {
+          // 1.23 (P1, auditoría extra ítem 10): columnas
+          // dedicadas en los espejos de ventas, patrón pagos
+          // v26 — los lectores de dinero de negocio.dart dejan
+          // de escanear allMirror completo por fecha/entrenador/
+          // método/moneda. La definición sale de los MISMOS
+          // _addColumnIfMissing que usa onCreate (paridad de
+          // esquema) y los índices de _crearIndicesVentasV61.
+          await _addColumnIfMissing(db, 'servicio_ventas', 'fecha', 'TEXT');
+          await _addColumnIfMissing(
+              db, 'servicio_ventas', 'registrado_por', 'INTEGER');
+          await _addColumnIfMissing(
+              db, 'servicio_ventas', 'responsable_efectivo_id', 'INTEGER');
+          await _addColumnIfMissing(db, 'servicio_ventas', 'metodo', 'TEXT');
+          await _addColumnIfMissing(
+              db, 'servicio_ventas', 'cliente_id', 'INTEGER');
+          await _addColumnIfMissing(
+              db, 'ventas_suplementos', 'fecha', 'TEXT');
+          await _addColumnIfMissing(
+              db, 'ventas_suplementos', 'cliente_id', 'INTEGER');
+          await _addColumnIfMissing(
+              db, 'ventas_suplementos', 'registrado_por', 'INTEGER');
+          await _addColumnIfMissing(
+              db, 'ventas_suplementos', 'moneda', 'TEXT');
+          await _crearIndicesVentasV61(db);
+          await _backfillColumnasVentas(db);
+          // Argón 3ª pasada (optimización 5): el índice
+          // compuesto de la cola viaja en esta misma migración
+          // para no abrir una v62 solo por él. Tolerante como
+          // el resto de índices del upgrade.
+          await _crearIndiceSiExisteTabla(db, 'ops_queue',
+              'CREATE INDEX IF NOT EXISTS idx_ops_tipo_estado '
+              'ON ops_queue(tipo, estado)');
+        }
       },
     );
     // v1.2.5+28: repara el índice FTS si la migración lo omitió y el
@@ -1440,6 +1505,175 @@ class LocalDb {
       'telegram_user_id': normalizarTelegramId(data['telegram_user_id']),
       'metodo': data['metodo'] is String ? data['metodo'] as String : null,
     };
+  }
+
+  /// 1.23 (v61, P1 de la auditoría extra, ítem 10): columnas
+  /// dedicadas del espejo `servicio_ventas`, extraídas del JSON
+  /// ya decodificado. Mismo patrón que [columnasPagos]: se
+  /// pueblan en los dos caminos de escritura ([upsertMirror] y
+  /// el batch del pull vía [filaParaBatchMirror]) y en el
+  /// backfill de la migración v61. Son SOLO las claves que los
+  /// lectores de dinero de negocio.dart filtran de verdad:
+  /// - `fecha`: día de negocio Habana (fechaNegocioHabana, como
+  ///   en pagos tras AT-07); NULL si la fecha no se interpreta.
+  ///   La usan los filtros de día/mes (comparativa, detalle).
+  /// - `registrado_por` y `responsable_efectivo_id`: la pareja
+  ///   de la gaveta (resp = responsable ?? registrado), con la
+  ///   normalización de ids que pueden llegar como String.
+  /// - `metodo`: filtro de efectivo en todos los pendientes.
+  /// - `cliente_id`: historial de servicios del cliente.
+  /// Sin columna de monto: los lectores calculan el importe
+  /// desde el JSON de las filas ya filtradas.
+  static Map<String, Object?> columnasServicioVentas(
+      Map<String, dynamic> data) {
+    final f = data['fecha'];
+    final fs = f is String ? f.trim() : null;
+    final fechaNeg = fs == null ? '' : fechaNegocioHabana(fs);
+    return {
+      'fecha': fechaNeg.isNotEmpty ? fechaNeg : null,
+      'registrado_por': normalizarTelegramId(data['registrado_por']),
+      'responsable_efectivo_id':
+          normalizarTelegramId(data['responsable_efectivo_id']),
+      'metodo': data['metodo'] is String ? data['metodo'] as String : null,
+      'cliente_id': normalizarTelegramId(data['cliente_id']),
+    };
+  }
+
+  /// 1.23 (v61, P1 de la auditoría extra, ítem 10): columnas
+  /// dedicadas del espejo `ventas_suplementos`. Mismo patrón y
+  /// mismos caminos de escritura que [columnasServicioVentas]:
+  /// - `fecha`: día de negocio Habana; NULL si no se interpreta.
+  /// - `cliente_id`: ventas del cliente (la ficha ya pagaba un
+  ///   índice de expresión por esta clave desde v1.2.5-rev6).
+  /// - `registrado_por`: gaveta del entrenador en pendientes,
+  ///   detalle e ids de liquidación.
+  /// - `moneda`: normalizada con [monedaDe] ('CUP' salvo USD
+  ///   explícito, nunca NULL): separa los totales por moneda
+  ///   sin escanear el espejo (ventasSuplementosCup/Usd).
+  /// Sin columna `metodo` (ningún lector lo filtra en esta
+  /// tabla) ni de monto (se calcula del JSON filtrado).
+  static Map<String, Object?> columnasVentasSuplementos(
+      Map<String, dynamic> data) {
+    final f = data['fecha'];
+    final fs = f is String ? f.trim() : null;
+    final fechaNeg = fs == null ? '' : fechaNegocioHabana(fs);
+    return {
+      'fecha': fechaNeg.isNotEmpty ? fechaNeg : null,
+      'cliente_id': normalizarTelegramId(data['cliente_id']),
+      'registrado_por': normalizarTelegramId(data['registrado_por']),
+      'moneda': monedaDe(data),
+    };
+  }
+
+  /// 1.23 (v61): índices de las columnas dedicadas de ventas.
+  /// Un solo punto de verdad: lo llaman onCreate (_crearTablas)
+  /// y la migración v61, para que el esquema sea idéntico en
+  /// instalación limpia y en upgrade (paridad de esquema).
+  /// Tolerante como [_crearIndicesPagosSiExiste]: en BDs
+  /// mínimas de test la tabla puede no existir.
+  static Future<void> _crearIndicesVentasV61(DatabaseExecutor db) async {
+    await _crearIndiceSiExisteTabla(
+        db,
+        'servicio_ventas',
+        'CREATE INDEX IF NOT EXISTS idx_servicio_ventas_dia '
+        'ON servicio_ventas(fecha)');
+    await _crearIndiceSiExisteTabla(
+        db,
+        'servicio_ventas',
+        'CREATE INDEX IF NOT EXISTS idx_servicio_ventas_resp_fecha '
+        'ON servicio_ventas(responsable_efectivo_id, fecha)');
+    await _crearIndiceSiExisteTabla(
+        db,
+        'servicio_ventas',
+        'CREATE INDEX IF NOT EXISTS idx_servicio_ventas_reg_fecha '
+        'ON servicio_ventas(registrado_por, fecha)');
+    await _crearIndiceSiExisteTabla(
+        db,
+        'servicio_ventas',
+        'CREATE INDEX IF NOT EXISTS idx_servicio_ventas_cliente_fecha '
+        'ON servicio_ventas(cliente_id, fecha)');
+    await _crearIndiceSiExisteTabla(
+        db,
+        'servicio_ventas',
+        'CREATE INDEX IF NOT EXISTS idx_servicio_ventas_metodo_fecha '
+        'ON servicio_ventas(metodo, fecha)');
+    await _crearIndiceSiExisteTabla(
+        db,
+        'ventas_suplementos',
+        'CREATE INDEX IF NOT EXISTS idx_ventas_suplementos_fecha '
+        'ON ventas_suplementos(fecha)');
+    await _crearIndiceSiExisteTabla(
+        db,
+        'ventas_suplementos',
+        'CREATE INDEX IF NOT EXISTS idx_ventas_suplementos_cliente_fecha '
+        'ON ventas_suplementos(cliente_id, fecha)');
+    await _crearIndiceSiExisteTabla(
+        db,
+        'ventas_suplementos',
+        'CREATE INDEX IF NOT EXISTS idx_ventas_suplementos_reg_fecha '
+        'ON ventas_suplementos(registrado_por, fecha)');
+    await _crearIndiceSiExisteTabla(
+        db,
+        'ventas_suplementos',
+        'CREATE INDEX IF NOT EXISTS idx_ventas_suplementos_moneda_fecha '
+        'ON ventas_suplementos(moneda, fecha)');
+  }
+
+  /// 1.23 (v61): backfill de las columnas dedicadas de los dos
+  /// espejos de ventas desde el JSON existente (migración v61).
+  /// En Dart puro con los extractores, sin depender del módulo
+  /// JSON1 del teléfono (precedente _backfillMoneda v35).
+  /// Tolerante: tabla ausente o fila con JSON dañado no abortan
+  /// la migración; las fechas anómalas quedan en NULL (los
+  /// lectores indexados las recogen por su fallback en Dart) y
+  /// se cuentan en app_log como en el backfill de pagos v26.
+  static Future<void> _backfillColumnasVentas(Database db) async {
+    var anomalas = 0;
+    Future<void> rellenar(
+        String tabla,
+        Map<String, Object?> Function(Map<String, dynamic>)
+            extractor) async {
+      try {
+        final t = await db.rawQuery(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
+            [tabla]);
+        if (t.isEmpty) return;
+        final rows = await db.rawQuery('SELECT id, data FROM $tabla');
+        final batch = db.batch();
+        var cambios = 0;
+        for (final r in rows) {
+          try {
+            final data =
+                jsonDecode(r['data'] as String) as Map<String, dynamic>;
+            final cols = extractor(data);
+            if (data['fecha'] != null && cols['fecha'] == null) {
+              anomalas++;
+            }
+            batch.update(tabla, cols,
+                where: 'id=?', whereArgs: [r['id']]);
+            cambios++;
+          } catch (_) {
+            anomalas++;
+          }
+        }
+        if (cambios > 0) await batch.commit(noResult: true);
+      } catch (_) {}
+    }
+
+    await rellenar('servicio_ventas', columnasServicioVentas);
+    await rellenar('ventas_suplementos', columnasVentasSuplementos);
+    if (anomalas > 0) {
+      try {
+        await db.insert('app_log', {
+          'ts': isoHabana(ahoraHabana()),
+          'modulo': 'migracion',
+          'evento': 'backfill_ventas_v61',
+          'detalle': '$anomalas filas con fecha anómala o JSON '
+              'dañado (columna fecha en NULL)',
+          'nivel': 'aviso',
+        });
+      } catch (_) {}
+    }
   }
 
   /// Fase A 2026-10-25 (A1): método de un pago diario desde su JSON.
@@ -1737,6 +1971,9 @@ class LocalDb {
   /// cantidad × precio. Lo usa el diálogo de eliminar conservando
   /// estadísticas para avisar de que la deuda se dará por
   /// incobrable (candado 3 de Argón).
+  /// v61 (P1): sigue con allMirror a propósito — el deudor es
+  /// fiado_cliente_id ?? cliente_id, una clave con fallback que
+  /// no es igualdad sobre una sola columna indexable.
   Future<Map<String, double>> fiadoPendienteDeCliente(
       int clienteId) async {
     final tot = <String, double>{'CUP': 0.0, 'USD': 0.0};
@@ -1832,6 +2069,22 @@ class LocalDb {
       try {
         fila.addAll(
             columnasPagos(jsonDecode(dataJson) as Map<String, dynamic>));
+      } catch (_) {}
+    }
+    // 1.23 (v61, P1): el batch del pull también puebla las
+    // columnas dedicadas de los espejos de ventas (mismo punto
+    // de verdad que upsertMirror; sin este camino el índice
+    // quedaría vacío para las filas del pull, el camino real).
+    if (tabla == 'servicio_ventas') {
+      try {
+        fila.addAll(columnasServicioVentas(
+            jsonDecode(dataJson) as Map<String, dynamic>));
+      } catch (_) {}
+    }
+    if (tabla == 'ventas_suplementos') {
+      try {
+        fila.addAll(columnasVentasSuplementos(
+            jsonDecode(dataJson) as Map<String, dynamic>));
       } catch (_) {}
     }
     // Fase A 2026-10-25 (A1): la fila del batch también puebla la
@@ -2066,6 +2319,17 @@ class LocalDb {
     await _addColumnIfMissing(db, 'clientes', 'cuenta_casa_motivo', 'TEXT');
     await _addColumnIfMissing(db, 'clientes', 'cuenta_casa_en', 'TEXT');
     await _addColumnIfMissing(db, 'clientes', 'cuenta_casa_por', 'TEXT');
+    // 1.23 (v61, P1): columnas dedicadas del espejo
+    // ventas_suplementos — paridad con la migración v61 (la
+    // definición sale del MISMO _addColumnIfMissing para que
+    // onCreate y onUpgrade produzcan el mismo esquema). Los
+    // índices van tras el bucle de servicios, abajo.
+    await _addColumnIfMissing(db, 'ventas_suplementos', 'fecha', 'TEXT');
+    await _addColumnIfMissing(
+        db, 'ventas_suplementos', 'cliente_id', 'INTEGER');
+    await _addColumnIfMissing(
+        db, 'ventas_suplementos', 'registrado_por', 'INTEGER');
+    await _addColumnIfMissing(db, 'ventas_suplementos', 'moneda', 'TEXT');
     // v1.3.4 (v26, ítem 2): el espejo `pagos` lleva 4 columnas dedicadas
     // (fecha, cliente_id, telegram_user_id, metodo) con índices, para
     // eliminar los escaneos completos en memoria de allMirror('pagos').
@@ -2140,6 +2404,19 @@ class LocalDb {
       await db.execute(
           'CREATE TABLE IF NOT EXISTS $t (id INTEGER PRIMARY KEY, data TEXT NOT NULL, sync_seq INTEGER NOT NULL)');
     }
+    // 1.23 (v61, P1): columnas dedicadas del espejo
+    // servicio_ventas + índices de AMBOS espejos de ventas
+    // (ventas_suplementos ganó sus columnas arriba) — paridad
+    // con la migración v61: mismas definiciones vía
+    // _addColumnIfMissing y _crearIndicesVentasV61.
+    await _addColumnIfMissing(db, 'servicio_ventas', 'fecha', 'TEXT');
+    await _addColumnIfMissing(
+        db, 'servicio_ventas', 'registrado_por', 'INTEGER');
+    await _addColumnIfMissing(
+        db, 'servicio_ventas', 'responsable_efectivo_id', 'INTEGER');
+    await _addColumnIfMissing(db, 'servicio_ventas', 'metodo', 'TEXT');
+    await _addColumnIfMissing(db, 'servicio_ventas', 'cliente_id', 'INTEGER');
+    await _crearIndicesVentasV61(db);
     // v1.8.0 (v39): espejo de APERTURAS de turno (sync_turnos_
     // apertura; id TEXT = uuid de la apertura). Lo puebla el pull
     // desde cero y lo consume la Auditoría por persona: sin este
@@ -2254,6 +2531,12 @@ class LocalDb {
         'resultado_servidor TEXT)');
     await db.execute(
         'CREATE INDEX IF NOT EXISTS idx_ops_estado ON ops_queue(estado)');
+        // 1.23 (v61, Argón 3ª pasada, optimización 5): índice
+        // compuesto (tipo, estado) para las consultas de la cola
+        // por tipo+estado; nace aquí en limpio y en la migración
+        // v61, sin abrir una v62 solo por el índice.
+        await db.execute(
+            'CREATE INDEX IF NOT EXISTS idx_ops_tipo_estado ON ops_queue(tipo, estado)');
         // v32: la tabla legada fotos_pendientes ya no se crea;
         // la cola persistente (fotos_cola) es el único camino.
         // v15: cola persistente de fotos (también en onUpgrade para
@@ -3228,6 +3511,15 @@ class LocalDb {
       // filaParaBatchMirror en sync.dart; si se olvida uno, el índice
       // queda vacío.)
       if (tabla == 'pagos') fila.addAll(columnasPagos(data));
+      // 1.23 (v61, P1): columnas dedicadas de los espejos de
+      // ventas (el otro camino —batch del pull— vía
+      // filaParaBatchMirror).
+      if (tabla == 'servicio_ventas') {
+        fila.addAll(columnasServicioVentas(data));
+      }
+      if (tabla == 'ventas_suplementos') {
+        fila.addAll(columnasVentasSuplementos(data));
+      }
       // Fase A 2026-10-25 (A1): columna método del espejo
       // pagos_diarios. Sin método en el JSON (filas viejas) es
       // 'efectivo': la UI de diarios siempre fue solo efectivo.
@@ -4078,8 +4370,14 @@ class LocalDb {
         jsonDecode(rows.first['data'] as String) as Map<String, dynamic>;
     data['es_fiado'] = 0;
     data['fecha'] = fechaCobro;
-    await d.update('ventas_suplementos', {'data': jsonEncode(data)},
-        where: 'id=?', whereArgs: [ventaId]);
+    // v61 (P1): la fecha nueva también va a la columna dedicada;
+    // sin refrescarla, la fila quedaría indexada en el día de la
+    // venta original y los lectores por columnas la perderían.
+    await d.update(
+        'ventas_suplementos',
+        {'data': jsonEncode(data), ...columnasVentasSuplementos(data)},
+        where: 'id=?',
+        whereArgs: [ventaId]);
   }
 
   /// Actualización optimista del teléfono en el espejo local
@@ -4612,6 +4910,212 @@ class LocalDb {
     // v1.3.4 (Argón, luz roja condicional): anti-duplicados. Aunque el
     // fallback es disjunto por construcción, en SQLite con escrituras
     // concurrentes de pulls no se asume disyunción pura sin un Set vistos.
+    final vistos = res.map((p) => p['id']).toSet();
+    for (final r in nulos) {
+      if (vistos.contains(r['id'])) continue;
+      try {
+        final p = jsonDecode(r['data'] as String) as Map<String, dynamic>;
+        if (conds.every((c) => c.dart(p))) {
+          res.add({...p, 'id': r['id']});
+          vistos.add(r['id']);
+        }
+      } catch (_) {}
+    }
+    return res;
+  }
+
+  /// 1.23 (v61, P1): ventas de servicios filtradas por las
+  /// columnas dedicadas (patrón [pagosPorFiltro]): la consulta
+  /// principal usa los índices y las filas con alguna columna
+  /// filtrada en NULL (escritura vieja o backfill incompleto)
+  /// se recogen con el predicado equivalente en Dart sobre el
+  /// JSON. Devuelve los mismos mapas que allMirror (JSON
+  /// decodificado + id). Sin filtros no hay nada que indexar:
+  /// escaneo completo como antes.
+  ///
+  /// [responsableId] filtra por la gaveta del efectivo:
+  /// responsable_efectivo_id con fallback a registrado_por (la
+  /// regla que aplican en Dart pendienteEntrega y compañía);
+  /// por eso su condición mira las DOS columnas a la vez.
+  Future<List<Map<String, dynamic>>> servicioVentasPorFiltro({
+    String? fecha,
+    String? fechaPrefijo,
+    int? registradoPor,
+    int? responsableId,
+    String? metodo,
+    int? clienteId,
+  }) async {
+    final conds = <_CondicionServicioVenta>[];
+    if (fecha != null) {
+      conds.add(_CondicionServicioVenta(
+        'fecha = ?',
+        [fecha],
+        'fecha IS NULL',
+        (p) => fechaNegocioHabana(p['fecha']) == fecha,
+      ));
+    }
+    if (fechaPrefijo != null) {
+      conds.add(_CondicionServicioVenta(
+        'fecha LIKE ?',
+        ['$fechaPrefijo%'],
+        'fecha IS NULL',
+        (p) => fechaNegocioHabana(p['fecha']).startsWith(fechaPrefijo),
+      ));
+    }
+    if (registradoPor != null) {
+      conds.add(_CondicionServicioVenta(
+        'registrado_por = ?',
+        [registradoPor],
+        'registrado_por IS NULL',
+        (p) => normalizarTelegramId(p['registrado_por']) == registradoPor,
+      ));
+    }
+    if (responsableId != null) {
+      conds.add(_CondicionServicioVenta(
+        '(responsable_efectivo_id = ? OR '
+            '(responsable_efectivo_id IS NULL AND registrado_por = ?))',
+        [responsableId, responsableId],
+        '(responsable_efectivo_id IS NULL OR registrado_por IS NULL)',
+        (p) =>
+            (normalizarTelegramId(p['responsable_efectivo_id']) ??
+                normalizarTelegramId(p['registrado_por'])) ==
+            responsableId,
+      ));
+    }
+    if (metodo != null) {
+      conds.add(_CondicionServicioVenta(
+        'metodo = ?',
+        [metodo],
+        'metodo IS NULL',
+        (p) => p['metodo'] == metodo,
+      ));
+    }
+    if (clienteId != null) {
+      conds.add(_CondicionServicioVenta(
+        'cliente_id = ?',
+        [clienteId],
+        'cliente_id IS NULL',
+        (p) => normalizarTelegramId(p['cliente_id']) == clienteId,
+      ));
+    }
+    // Sin filtros no hay nada que indexar: full scan como antes.
+    if (conds.isEmpty) return allMirror('servicio_ventas');
+
+    final d = await db;
+    final res = <Map<String, dynamic>>[];
+    final rows = await d.rawQuery(
+      'SELECT id, data FROM servicio_ventas WHERE '
+      '${conds.map((c) => c.sql).join(' AND ')}',
+      [for (final c in conds) ...c.args],
+    );
+    for (final r in rows) {
+      try {
+        res.add({
+          ...jsonDecode(r['data'] as String) as Map<String, dynamic>,
+          'id': r['id'],
+        });
+      } catch (_) {}
+    }
+    // Fallback: filas con alguna columna de las filtradas en
+    // NULL. Disjunto de la consulta principal por construcción
+    // (aquí alguna es NULL, allá la condición SQL se cumple con
+    // las columnas pobladas); aun así, Set de vistos por la
+    // misma cautela que pagosPorFiltro.
+    final nulos = await d.rawQuery(
+      'SELECT id, data FROM servicio_ventas WHERE '
+      '${conds.map((c) => c.sqlNulo).join(' OR ')}',
+    );
+    final vistos = res.map((p) => p['id']).toSet();
+    for (final r in nulos) {
+      if (vistos.contains(r['id'])) continue;
+      try {
+        final p = jsonDecode(r['data'] as String) as Map<String, dynamic>;
+        if (conds.every((c) => c.dart(p))) {
+          res.add({...p, 'id': r['id']});
+          vistos.add(r['id']);
+        }
+      } catch (_) {}
+    }
+    return res;
+  }
+
+  /// 1.23 (v61, P1): ventas de suplementos filtradas por las
+  /// columnas dedicadas (patrón [pagosPorFiltro], con el mismo
+  /// fallback en Dart para filas con columnas en NULL). Devuelve
+  /// los mismos mapas que allMirror (JSON decodificado + id).
+  /// Sin filtros no hay nada que indexar: escaneo como antes.
+  Future<List<Map<String, dynamic>>> ventasSuplementosPorFiltro({
+    String? fecha,
+    String? fechaPrefijo,
+    int? clienteId,
+    int? registradoPor,
+    String? moneda,
+  }) async {
+    final conds = <_CondicionVentaSuplemento>[];
+    if (fecha != null) {
+      conds.add(_CondicionVentaSuplemento(
+        'fecha = ?',
+        [fecha],
+        'fecha IS NULL',
+        (p) => fechaNegocioHabana(p['fecha']) == fecha,
+      ));
+    }
+    if (fechaPrefijo != null) {
+      conds.add(_CondicionVentaSuplemento(
+        'fecha LIKE ?',
+        ['$fechaPrefijo%'],
+        'fecha IS NULL',
+        (p) => fechaNegocioHabana(p['fecha']).startsWith(fechaPrefijo),
+      ));
+    }
+    if (clienteId != null) {
+      conds.add(_CondicionVentaSuplemento(
+        'cliente_id = ?',
+        [clienteId],
+        'cliente_id IS NULL',
+        (p) => normalizarTelegramId(p['cliente_id']) == clienteId,
+      ));
+    }
+    if (registradoPor != null) {
+      conds.add(_CondicionVentaSuplemento(
+        'registrado_por = ?',
+        [registradoPor],
+        'registrado_por IS NULL',
+        (p) => normalizarTelegramId(p['registrado_por']) == registradoPor,
+      ));
+    }
+    if (moneda != null) {
+      conds.add(_CondicionVentaSuplemento(
+        'moneda = ?',
+        [moneda],
+        'moneda IS NULL',
+        (p) => monedaDe(p) == moneda,
+      ));
+    }
+    // Sin filtros no hay nada que indexar: full scan como antes.
+    if (conds.isEmpty) return allMirror('ventas_suplementos');
+
+    final d = await db;
+    final res = <Map<String, dynamic>>[];
+    final rows = await d.rawQuery(
+      'SELECT id, data FROM ventas_suplementos WHERE '
+      '${conds.map((c) => c.sql).join(' AND ')}',
+      [for (final c in conds) ...c.args],
+    );
+    for (final r in rows) {
+      try {
+        res.add({
+          ...jsonDecode(r['data'] as String) as Map<String, dynamic>,
+          'id': r['id'],
+        });
+      } catch (_) {}
+    }
+    // Fallback: filas con alguna columna de las filtradas en
+    // NULL, con Set de vistos como en pagosPorFiltro.
+    final nulos = await d.rawQuery(
+      'SELECT id, data FROM ventas_suplementos WHERE '
+      '${conds.map((c) => c.sqlNulo).join(' OR ')}',
+    );
     final vistos = res.map((p) => p['id']).toSet();
     for (final r in nulos) {
       if (vistos.contains(r['id'])) continue;

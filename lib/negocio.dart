@@ -824,10 +824,13 @@ double totalVentaCup(Map<String, dynamic> v) {
 /// borra con DELETE + tombstone, no quedan filas marcadas en el espejo.
 Future<List<Map<String, dynamic>>> ventasSuplementosCup() async {
   final out = <Map<String, dynamic>>[];
-  for (final v in await LocalDb.instance.allMirror('ventas_suplementos')) {
-    // Autoauditoría 1.22 #1/#2: moneda normalizada (ver
-    // totalVentaCup / D2-09).
-    if (LocalDb.monedaDe(v) == 'CUP' && !_esFiadoSinSaldar(v)) {
+  // v61 (P1): filtro por la columna `moneda` (normalizada con
+  // monedaDe al poblar, el mismo criterio de la autoauditoría
+  // 1.22 #1/#2 en totalVentaCup); el fiado sin saldar no tiene
+  // columna y sigue en Dart.
+  for (final v in await LocalDb.instance
+      .ventasSuplementosPorFiltro(moneda: 'CUP')) {
+    if (!_esFiadoSinSaldar(v)) {
       out.add(v);
     }
   }
@@ -857,8 +860,10 @@ double totalVentaUsd(Map<String, dynamic> v) {
 /// Igual que en CUP: fuera las ventas al fiado sin saldar (Argón P3#2).
 Future<List<Map<String, dynamic>>> ventasSuplementosUsd() async {
   final out = <Map<String, dynamic>>[];
-  for (final v in await LocalDb.instance.allMirror('ventas_suplementos')) {
-    if (LocalDb.monedaDe(v) == 'USD' && !_esFiadoSinSaldar(v)) {
+  // v61 (P1): por la columna `moneda`, como ventasSuplementosCup.
+  for (final v in await LocalDb.instance
+      .ventasSuplementosPorFiltro(moneda: 'USD')) {
+    if (!_esFiadoSinSaldar(v)) {
       out.add(v);
     }
   }
@@ -1343,7 +1348,15 @@ Future<double> pendienteEntrega(int? telegramId) async {
   // v1.8.0: ventas de servicios en efectivo pendientes (las filas de
   // reverso llevan cantidad negativa y netan solas; Casa queda fuera
   // por su entregado=1 en el servidor, y se excluye por si acaso).
-  for (final v in await LocalDb.instance.allMirror('servicio_ventas')) {
+  // v61 (P1): lectura por columnas (responsable + método); casa y
+  // entregado no tienen columna y siguen en Dart. notaUuid sigue
+  // viendo cada fila devuelta ANTES de los filtros residuales, y
+  // las filas fuera de la consulta (otro responsable o método no
+  // efectivo) no aportan a la suma por la vía de ops:
+  // montoEfectivoOp devuelve 0 para venta_servicio no efectiva y
+  // la gaveta de otro se descarta por beneficiario.
+  for (final v in await LocalDb.instance.servicioVentasPorFiltro(
+      responsableId: telegramId, metodo: 'efectivo')) {
     notaUuid(v);
     // Ítems 8/10: la gaveta es del RESPONSABLE del efectivo.
     final resp =
@@ -1659,7 +1672,9 @@ Future<double> contribucionLibroC1(int? telegramId) async {
     supMarcados[id] = esPendiente(v['entregado']) ? totalVentaCup(v) : -1;
   }
   final servMarcados = <int, double>{};
-  for (final v in await LocalDb.instance.allMirror('servicio_ventas')) {
+  // v61 (P1): por la columna del responsable (con su fallback).
+  for (final v in await LocalDb.instance
+      .servicioVentasPorFiltro(responsableId: telegramId)) {
     final resp =
         LocalDb.normalizarTelegramId(v['responsable_efectivo_id']) ??
             LocalDb.normalizarTelegramId(v['registrado_por']);
@@ -1770,7 +1785,10 @@ Future<({double cup, double usd})> pendienteArqueo(int? telegramId) async {
   // arqueo; los reversos (cantidad negativa) netan solos.
   // 1.15-turnos: la gaveta es del RESPONSABLE (igual que en
   // pendienteEntrega), no de quien registró la venta.
-  for (final v in await LocalDb.instance.allMirror('servicio_ventas')) {
+  // v61 (P1): por columnas (responsable + método); casa y
+  // entregado siguen en Dart.
+  for (final v in await LocalDb.instance.servicioVentasPorFiltro(
+      responsableId: telegramId, metodo: 'efectivo')) {
     final resp =
         LocalDb.normalizarTelegramId(v['responsable_efectivo_id']) ??
             LocalDb.normalizarTelegramId(v['registrado_por']);
@@ -1870,7 +1888,10 @@ Future<Map<String, List<int>>> idsPendienteArqueo(int? telegramId,
     }
   }
   if (!esUsd) {
-    for (final v in await LocalDb.instance.allMirror('servicio_ventas')) {
+    // v61 (P1): por columnas (responsable + método, abajo); el
+    // resto de guardas sigue en Dart.
+    for (final v in await LocalDb.instance.servicioVentasPorFiltro(
+        responsableId: telegramId, metodo: 'efectivo')) {
       final resp =
           LocalDb.normalizarTelegramId(v['responsable_efectivo_id']) ??
               LocalDb.normalizarTelegramId(v['registrado_por']);
@@ -2507,8 +2528,11 @@ Future<List<Map<String, dynamic>>> comparativaEntrenadores(
     f['cobros_monto'] = (f['cobros_monto'] as double) +
         ((d['total'] as num?)?.toDouble() ?? 0);
   }
-  for (final v
-      in await LocalDb.instance.allMirror('ventas_suplementos')) {
+  // v61 (P1): precorte por la columna fecha (prefijo del mes);
+  // el chequeo mesHabanaDe se queda como residual exacto y
+  // anulada/fiado siguen en Dart (sin columna).
+  for (final v in await LocalDb.instance
+      .ventasSuplementosPorFiltro(fechaPrefijo: prefijo)) {
     if (mesHabanaDe(v['fecha']) != prefijo) continue;
     if (v['anulada'] == 1 || v['anulada'] == true) continue;
     // FIN-13 de Argón (1.20): un fiado sin saldar no es dinero
@@ -2545,8 +2569,10 @@ Future<List<Map<String, dynamic>>> comparativaEntrenadores(
     }
   } catch (_) {}
   final serviciosMes = <Map<String, dynamic>>[];
-  for (final s
-      in await LocalDb.instance.allMirror('servicio_ventas')) {
+  // v61 (P1): precorte por la columna fecha; mesHabanaDe queda
+  // como residual exacto.
+  for (final s in await LocalDb.instance
+      .servicioVentasPorFiltro(fechaPrefijo: prefijo)) {
     if (mesHabanaDe(s['fecha']) != prefijo) continue;
     serviciosMes.add(s);
     final rid = LocalDb.normalizarTelegramId(s['registrado_por']);
@@ -3625,6 +3651,11 @@ Future<int> conteoPagosDia(int? telegramId, {String? fecha}) async {
       n++;
     }
   }
+  // v61 (P1): este bucle NO se precorta por columnas a propósito:
+  // notaUuid debe ver los uuids de TODAS las filas para el dedupe
+  // de ops pendientes (B-03); precortar por registrado/fecha
+  // cambiaría ese conjunto (p. ej. un fiado saldado reescribe la
+  // fecha del espejo y su op seguiría contando por la cola).
   for (final v in await LocalDb.instance.allMirror('ventas_suplementos')) {
     notaUuid(v);
     if (LocalDb.normalizarTelegramId(v['registrado_por']) == telegramId &&
@@ -3707,7 +3738,11 @@ Future<
       diarios.add(d);
     }
   }
-  for (final v in await LocalDb.instance.allMirror('servicio_ventas')) {
+  // v61 (P1): por columnas (responsable + método); cubiertos,
+  // casa y entregado siguen en Dart. La lista se ordena al
+  // final de la función, como antes.
+  for (final v in await LocalDb.instance.servicioVentasPorFiltro(
+      responsableId: telegramId, metodo: 'efectivo')) {
     final resp =
         LocalDb.normalizarTelegramId(v['responsable_efectivo_id']) ??
             LocalDb.normalizarTelegramId(v['registrado_por']);
@@ -4459,7 +4494,10 @@ Future<List<Map<String, dynamic>>> detallePendienteEntrenador(
     });
   }
   // v1.3.1 (UI2): ventas de suplementos pendientes del entrenador.
-  for (final s in await LocalDb.instance.allMirror('ventas_suplementos')) {
+  // v61 (P1): precorte por la columna registrado_por; entregado,
+  // liquidados y fiado siguen en Dart.
+  for (final s in await LocalDb.instance
+      .ventasSuplementosPorFiltro(registradoPor: tid)) {
     if (!esPendiente(s['entregado'])) continue;
     if (liquidados.contains('ventas_suplementos:${s['id']}')) {
       continue;
@@ -4484,7 +4522,10 @@ Future<List<Map<String, dynamic>>> detallePendienteEntrenador(
   // gaveta es del RESPONSABLE del efectivo (ítem 8), no de quien
   // registró; sin la columna se cae a registrado_por. Los reversos
   // traen cantidad negativa y netean en el total.
-  for (final s in await LocalDb.instance.allMirror('servicio_ventas')) {
+  // v61 (P1): por columnas (responsable + método); el chequeo
+  // '${s['metodo']}' se queda como residual exacto.
+  for (final s in await LocalDb.instance.servicioVentasPorFiltro(
+      responsableId: tid, metodo: 'efectivo')) {
     if (!esPendiente(s['entregado'])) continue;
     if (liquidados.contains('servicio_ventas:${s['id']}')) continue;
     if ('${s['metodo']}' != 'efectivo') continue;
@@ -4611,7 +4652,11 @@ Future<List<Map<String, dynamic>>> pagosPendientesDetalle(
   }
   // post-1.8.0 (ítem 10): servicios en efectivo pendientes, por
   // RESPONSABLE del efectivo (ítem 8) con fallback a registrado_por.
-  for (final s in await LocalDb.instance.allMirror('servicio_ventas')) {
+  // v61 (P1): precorte por la columna metodo (el entrenador varía
+  // por fila: no hay un único responsable que empujar); el resto
+  // de guardas sigue en Dart y la lista se ordena al final.
+  for (final s in await LocalDb.instance
+      .servicioVentasPorFiltro(metodo: 'efectivo')) {
     if (!esPendiente(s['entregado'])) continue;
     if ('${s['metodo']}' != 'efectivo') continue;
     if (((s['casa'] as num?)?.toInt() ?? 0) == 1) continue;
@@ -4885,7 +4930,10 @@ Future<List<Map<String, dynamic>>> pendientePorEntrenador(
   }
   // post-1.8.0 (ítem 10): servicios en efectivo pendientes, por
   // RESPONSABLE del efectivo (ítem 8) con fallback a registrado_por.
-  for (final v in await LocalDb.instance.allMirror('servicio_ventas')) {
+  // v61 (P1): precorte por la columna metodo; el entrenador varía
+  // por fila y el resto de guardas sigue en Dart.
+  for (final v in await LocalDb.instance
+      .servicioVentasPorFiltro(metodo: 'efectivo')) {
     if (!esPendiente(v['entregado'])) continue;
     if ('${v['metodo']}' != 'efectivo') continue;
     if (((v['casa'] as num?)?.toInt() ?? 0) == 1) continue;
@@ -5245,7 +5293,12 @@ Future<({List<int> pagos, List<int> diarios, List<int> suplementos,
       diarioIds.add(id);
     }
   }
-  for (final v in await LocalDb.instance.allMirror('ventas_suplementos')) {
+  // v61 (P1): precorte por columnas (moneda CUP + registrado_por
+  // del entrenador pedido; sin trainerId, solo moneda). El
+  // chequeo de moneda por texto de abajo se queda como residual
+  // exacto (no recorta espacios como monedaDe).
+  for (final v in await LocalDb.instance.ventasSuplementosPorFiltro(
+      moneda: 'CUP', registradoPor: trainerId)) {
     if (!esPendiente(v['entregado'])) continue;
     // B-05 (1.21): el id de un fiado sin saldar NO puede viajar en
     // confirmarEntregaPorIds (dinero aún no cobrado).
@@ -5266,7 +5319,10 @@ Future<({List<int> pagos, List<int> diarios, List<int> suplementos,
       suplementoIds.add(id);
     }
   }
-  for (final v in await LocalDb.instance.allMirror('servicio_ventas')) {
+  // v61 (P1): precorte por columnas (método + responsable del
+  // entrenador pedido); mismo() y el resto siguen en Dart.
+  for (final v in await LocalDb.instance.servicioVentasPorFiltro(
+      metodo: 'efectivo', responsableId: trainerId)) {
     if (!esPendiente(v['entregado'])) continue;
     if ('${v['metodo']}' != 'efectivo') continue;
     if (((v['casa'] as num?)?.toInt() ?? 0) == 1) continue;
@@ -5727,6 +5783,10 @@ Future<int> inactivosCount() async {
 /// las filas reverso (reverso_de != null) y las originales referenciadas
 /// por un reverso. No se importa de servicios.dart para evitar un ciclo
 /// (servicios.dart importa negocio.dart).
+/// v61 (P1): sigue con allMirror a propósito — el neteo es GLOBAL
+/// (un original de marzo revertido en abril debe excluirse igual),
+/// así que ningún precorte por columnas (fecha/entrenador) puede
+/// sustituir este escaneo sin cambiar la semántica.
 /// Argón stats MEDIO (dashboard): el dinero de Servicios (dosis y agua)
 /// no aparecía en ningún total del dashboard; es ingreso real y debe
 /// sumar igual que mensualidades, diarios y suplementos.
@@ -6237,6 +6297,11 @@ Future<Map<String, double>> cobradoHoyPorMetodo(
   // v1.8.0: servicios del día por método (Casa fuera: precio 0).
   // 1.15-turnos (#5): la gaveta es del RESPONSABLE del efectivo,
   // no de quien registró la venta.
+  // v61 (P1): NO se precorta por la columna fecha a propósito —
+  // este bucle compara el día por substring crudo del JSON
+  // (f.substring(0, 10)), que no es la fecha de negocio Habana
+  // que guarda la columna v61; y el desglose por método necesita
+  // igualmente todas las filas del día.
   for (final v in await LocalDb.instance.allMirror('servicio_ventas')) {
     if (soloTelegramId != null) {
       final resp =

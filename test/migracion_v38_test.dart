@@ -59,7 +59,22 @@ void main() {
       expect(tablas, contains(t), reason: 'falta la tabla $t');
       final cols = await db.rawQuery('PRAGMA table_info($t)');
       final nombres = cols.map((c) => '${c['name']}').toList();
-      expect(nombres, ['id', 'data', 'sync_seq']);
+      if (t == 'servicio_ventas') {
+        // v61 (1.23, P1): servicio_ventas gana además las
+        // columnas dedicadas de la migración v61.
+        expect(nombres, [
+          'id',
+          'data',
+          'sync_seq',
+          'fecha',
+          'registrado_por',
+          'responsable_efectivo_id',
+          'metodo',
+          'cliente_id',
+        ]);
+      } else {
+        expect(nombres, ['id', 'data', 'sync_seq']);
+      }
     }
   });
 

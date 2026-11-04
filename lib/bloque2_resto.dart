@@ -361,7 +361,11 @@ Future<String> _registrarEntregaEfectivoImpl({
       ));
     }
   }
-  for (final v in await LocalDb.instance.allMirror('servicio_ventas')) {
+  // v61 (P1): por columnas (responsable + método); cubiertos,
+  // casa y entregado siguen en Dart. Los candidatos se ordenan
+  // más abajo, como antes.
+  for (final v in await LocalDb.instance.servicioVentasPorFiltro(
+      responsableId: entrenadorTelegramId, metodo: 'efectivo')) {
     final id = (v['id'] as num?)?.toInt();
     if (id == null ||
         cubiertosLibro.contains('servicio_ventas:$id') ||

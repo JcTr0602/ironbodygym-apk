@@ -893,7 +893,12 @@ Future<int> sinRepartirLocal(int boteId, {DatabaseExecutor? txn}) async {
 /// recientes primero.
 Future<List<Map<String, dynamic>>> historialServiciosCliente(
     int clienteId) async {
-  final ventas = await LocalDb.instance.allMirror('servicio_ventas');
+  // v61 (P1): precorte por la columna cliente_id; el where
+  // original se queda como residual exacto (solo acepta num,
+  // la columna también normaliza ids en texto) y el orden
+  // recientes-primero se sigue aplicando igual.
+  final ventas = await LocalDb.instance
+      .servicioVentasPorFiltro(clienteId: clienteId);
   final out = ventas
       .where((v) => (v['cliente_id'] as num?)?.toInt() == clienteId)
       .toList()
