@@ -19,9 +19,14 @@ import androidx.core.app.NotificationCompat
 class RecordatorioReceiver : BroadcastReceiver() {
     companion object {
         const val CANAL_ID = "recordatorios"
+        // 1.23 (sync en 2º plano): canal de importancia BAJA para
+        // el aviso de sincronización pendiente (sello de Argón:
+        // silencioso, sin competir con los recordatorios).
+        const val CANAL_BAJA_ID = "avisos_baja"
         const val EXTRA_TITULO = "titulo"
         const val EXTRA_TEXTO = "texto"
         const val EXTRA_ID = "id"
+        const val EXTRA_BAJA = "baja"
 
         fun codigoDe(id: String): Int = id.hashCode()
     }
@@ -30,14 +35,24 @@ class RecordatorioReceiver : BroadcastReceiver() {
         val titulo = intent.getStringExtra(EXTRA_TITULO) ?: "Recordatorio"
         val texto = intent.getStringExtra(EXTRA_TEXTO) ?: "Toca para ver tus avisos"
         val id = intent.getStringExtra(EXTRA_ID) ?: return
+        val baja = intent.getBooleanExtra(EXTRA_BAJA, false)
+        val canalId = if (baja) CANAL_BAJA_ID else CANAL_ID
         val manager =
             context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val canal = NotificationChannel(
-                CANAL_ID,
-                "Recordatorios",
-                NotificationManager.IMPORTANCE_DEFAULT
-            ).apply { description = "Avisos de cumpleaños, vencimientos y recordatorios" }
+            val canal = if (baja) {
+                NotificationChannel(
+                    CANAL_BAJA_ID,
+                    "Avisos del sistema",
+                    NotificationManager.IMPORTANCE_LOW
+                ).apply { description = "Avisos silenciosos (sincronización pendiente)" }
+            } else {
+                NotificationChannel(
+                    CANAL_ID,
+                    "Recordatorios",
+                    NotificationManager.IMPORTANCE_DEFAULT
+                ).apply { description = "Avisos de cumpleaños, vencimientos y recordatorios" }
+            }
             manager.createNotificationChannel(canal)
         }
         val abrir = context.packageManager
@@ -51,11 +66,17 @@ class RecordatorioReceiver : BroadcastReceiver() {
         } else {
             null
         }
-        val noti = NotificationCompat.Builder(context, CANAL_ID)
+        val noti = NotificationCompat.Builder(context, canalId)
             .setSmallIcon(R.mipmap.ic_launcher)
             .setContentTitle(titulo)
             .setContentText(texto)
-            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            .setPriority(
+                if (baja) NotificationCompat.PRIORITY_LOW
+                else NotificationCompat.PRIORITY_DEFAULT
+            )
+            // Sello de Argón: el aviso de pendientes no vuelve a
+            // sonar si se reprograma con el mismo id.
+            .setOnlyAlertOnce(baja)
             .setAutoCancel(true)
             .setContentIntent(pendiente)
             .build()

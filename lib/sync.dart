@@ -34,6 +34,7 @@ import 'package:uuid/uuid.dart';
 
 import 'acceso_bloqueo.dart';
 import 'app_log.dart';
+import 'aviso_pendientes.dart';
 import 'auth.dart';
 import 'comprobantes.dart';
 import 'diagnostico_espejo.dart';
@@ -893,6 +894,18 @@ class SyncEngine {
   /// rompe el ciclo (corre en segundo plano, con try/catch).
   Future<void> Function()? onSyncExitoso;
 
+  /// 1.23 (sync en 2º plano, sello de Argón): gancho para
+  /// arrancar el Foreground Service que drena la cola con la
+  /// app en segundo plano. Lo registra main.dart
+  /// (iniciarSubidaFotosForeground). El motor NO importa la
+  /// pieza del FGS (evita el ciclo sync ↔ fotos_foreground) y
+  /// el gancho decide por su cuenta (primer plano, debounce,
+  /// si hay trabajo reclamable). Se invoca al INICIO de push(),
+  /// ANTES de _conLock: el isolate de UI puede estar congelado
+  /// reteniendo el sync_lock y el FGS no debe esperar a que
+  /// expire para existir.
+  Future<void> Function()? onArrancarSegundoPlano;
+
   void _avisarSyncExitoso() {
     final g = onSyncExitoso;
     if (g == null) return;
@@ -1634,6 +1647,12 @@ class SyncEngine {
   Future<SyncMotivoNoCorrio?> _conLock(Future<void> Function() fn) async {
     if (_running) return SyncMotivoNoCorrio.enCurso;
     if (!_haySesion) return SyncMotivoNoCorrio.sinSesion;
+    // 1.23: barrera de mantenimiento (importación de respaldo
+    // en curso): ningún isolate arranca un ciclo mientras el
+    // archivo de la base se está reemplazando.
+    if (await _db.mantenimientoActivo()) {
+      return SyncMotivoNoCorrio.enCurso;
+    }
     // Lock persistente: protege contra Workmanager en otro isolate.
     final owner = await _db.adquirirSyncLock();
     if (owner == null) return SyncMotivoNoCorrio.enCurso;
@@ -1656,11 +1675,37 @@ class SyncEngine {
   /// falla, la excepción se propaga COMO ANTES: los llamadores que
   /// la esperaban (p. ej. Workmanager, que reintenta la tarea)
   /// conservan su comportamiento.
-  Future<SyncResultado> push() async {
+  /// [desdeForeground]: la corrida la está haciendo el propio
+  /// Foreground Service (1.23, sync en 2º plano): el drenado de
+  /// fotos NO se salta por «el servicio ya corre» (el que corre
+  /// es este) y no se intenta arrancar el FGS de nuevo.
+  /// [esperarIncidencias]: las fotos de incidencias se suben
+  /// ESPERADAS dentro del candado, al final de la tubería
+  /// (ops → fotos → comprobantes → 2º uploadOps → incidencias):
+  /// en un isolate de fondo (WorkManager/FGS) el disparo
+  /// unawaited de siempre moriría al retornar el callback.
+  Future<SyncResultado> push({
+    bool desdeForeground = false,
+    bool esperarIncidencias = false,
+  }) async {
+    // Sello de Argón: el arranque del FGS va AQUÍ, al inicio y
+    // antes del candado — nunca en la capa de BD. El gancho
+    // decide (solo primer plano, con debounce, si hay trabajo
+    // reclamable); desde fondo no se arranca nada.
+    if (!desdeForeground) {
+      final gancho = onArrancarSegundoPlano;
+      if (gancho != null) {
+        unawaited(() async {
+          try {
+            await gancho();
+          } catch (_) {}
+        }());
+      }
+    }
     var subidos = 0;
     var bajados = 0;
     final noCorrio = await _conLock(() async {
-      subidos = await _doPush();
+      subidos = await _doPush(desdeForeground: desdeForeground);
       // v1.0.14: limpiar error viejo si el push tuvo éxito
       await _db.setMeta('last_sync_error', '');
       // v1.0.17: pull silencioso tras el push para actualizar el watermark.
@@ -1671,14 +1716,20 @@ class SyncEngine {
       } catch (_) {}
       // Cliente protegido (2026-10-26, A4): ídem que en pull().
       await _pullSiProtegidoPendiente();
+      // 1.23: cierre de la tubería del drenado de fondo — las
+      // fotos de incidencias, esperadas (ver el doc de arriba).
+      if (esperarIncidencias) {
+        await _subirFotosIncidenciasConGuarda();
+      }
       // v1.5.0 (Bloque G): push exitoso → gancho de fin de sync.
       _avisarSyncExitoso();
     });
     if (noCorrio != null) return SyncResultado.noCorrio(noCorrio);
     // S2: fotos fuera del candado (ver _lanzarFotosIncidencias).
-    _lanzarFotosIncidencias();
+    // Con esperarIncidencias ya corrieron dentro: no relanzar.
+    if (!esperarIncidencias) _lanzarFotosIncidencias();
     final conteo = await _conteoPendientesSeguro();
-    return SyncResultado(
+    final resultado = SyncResultado(
       corrio: true,
       subidos: subidos,
       bajados: bajados,
@@ -1688,6 +1739,13 @@ class SyncEngine {
       conError: conteo.conError,
       deOtroUsuario: conteo.deOtroUsuario,
     );
+    // Sello de Argón (fusión 1+4): un push que deja la cola
+    // propia en cero CANCELA el aviso de pendientes que el
+    // cortacircuitos del FGS hubiera dejado programado.
+    if (resultado.porSubir == 0 && resultado.conError == 0) {
+      unawaited(AvisoPendientesSync.cancelar());
+    }
+    return resultado;
   }
 
   /// Lógica interna de subida (sin guard _running).
@@ -1699,6 +1757,7 @@ class SyncEngine {
   /// corrida).
   Future<int> _doPush(
       {bool forzar = false,
+      bool desdeForeground = false,
       void Function(SyncProgress)? onProgreso}) async {
     // v1.2.9+46 (AppLog): inicio de push.
     AppLog.info('sync', 'push_ini');
@@ -1752,7 +1811,11 @@ class SyncEngine {
       try {
         final fgCorriendo =
             await FlutterForegroundTask.isRunningService;
-        if (!fgCorriendo) {
+        // 1.23 (sello de Argón): si el que corre ES el propio
+        // FGS (desdeForeground), la guarda no salta el drenado
+        // — saltarlo dejaba al servicio girando sin hacer su
+        // trabajo principal.
+        if (!fgCorriendo || desdeForeground) {
           fotosSubidas =
               await FotosColaService.instance.procesarCola();
         }
@@ -5961,12 +6024,24 @@ class SyncEngine {
   void reintentarFotosIncidencias() => _lanzarFotosIncidencias();
 
   void _lanzarFotosIncidencias() {
+    unawaited(_subirFotosIncidenciasConGuarda());
+  }
+
+  /// La subida de fotos de incidencias con el guard
+  /// anti-paralelo, ESPERABLE: la usan push(esperarIncidencias)
+  /// desde los isolates de fondo, donde el disparo unawaited
+  /// moriría al retornar el callback sin terminar la subida.
+  Future<void> _subirFotosIncidenciasConGuarda() async {
     if (_fotosIncidenciasEnCurso) return;
     _fotosIncidenciasEnCurso = true;
-    unawaited(subirFotosIncidencias().then<void>((_) {}, onError: (Object e) {
+    try {
+      await subirFotosIncidencias();
+    } catch (e) {
       debugPrint('WARN subirFotosIncidencias falló: $e');
       AppLog.error('sync', 'fotos_incidencias_fallo', d: '$e');
-    }).whenComplete(() => _fotosIncidenciasEnCurso = false));
+    } finally {
+      _fotosIncidenciasEnCurso = false;
+    }
   }
 
   Future<void> subirFotosIncidencias() async {

@@ -6149,6 +6149,71 @@ class LocalDb {
     };
   }
 
+  // ── 1.23: barrera de mantenimiento (importación de respaldo)
+  //
+  // El candado de sync vive en la meta de la PROPIA base: al
+  // importar, la base se cierra y el archivo se reemplaza, y
+  // el candado muere con ella. La barrera vive FUERA, en un
+  // archivo junto a la base (compartido por todos los
+  // isolates, que comparten el sistema de archivos): mientras
+  // existe y es reciente, SyncEngine no arranca ciclos y el
+  // FGS se detiene. Si el proceso muere a mitad de la
+  // importación, la marca caduca sola a los 15 minutos.
+
+  Future<File> _archivoMantenimiento() async {
+    // Deriva de la RUTA de la base (no del directorio a secas):
+    // sobrevive al cierre/reemplazo del archivo .db y, en los
+    // tests con base por proceso, cada proceso tiene su propia
+    // barrera sin pisar a los demás.
+    final ruta = await dbPath();
+    return File('$ruta.mantenimiento.flag');
+  }
+
+  Future<void> iniciarMantenimiento() async {
+    try {
+      final f = await _archivoMantenimiento();
+      await f.writeAsString(
+          DateTime.now().toUtc().toIso8601String());
+    } catch (_) {}
+  }
+
+  Future<void> finMantenimiento() async {
+    try {
+      final f = await _archivoMantenimiento();
+      if (await f.exists()) await f.delete();
+    } catch (_) {}
+  }
+
+  Future<bool> mantenimientoActivo() async {
+    try {
+      final f = await _archivoMantenimiento();
+      if (!await f.exists()) return false;
+      final mod = await f.lastModified();
+      return DateTime.now().difference(mod) <
+          const Duration(minutes: 15);
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Comprobantes de transferencia aún sin subir.
+  Future<int> contarComprobantesPendientes() async {
+    final d = await db;
+    final r = await d.rawQuery(
+        "SELECT COUNT(*) c FROM comprobantes_pago "
+        "WHERE estado = 'pendiente'");
+    return (r.first['c'] as int?) ?? 0;
+  }
+
+  /// Fotos de incidencias aún sin subir (pending/retry).
+  Future<int> contarFotosIncidenciasPendientes() async {
+    final d = await db;
+    final r = await d.rawQuery(
+        "SELECT COUNT(*) c FROM incidencias_fotos "
+        "WHERE sync_estado IN ('pending', 'retry')");
+    return (r.first['c'] as int?) ?? 0;
+  }
+
   /// Último turno de un entrenador en una FECHA, sin filtrar
   /// por franja ni estado. Respaldo de ultimoTurno (misma
   /// razón que turnoAbiertoDelDia).

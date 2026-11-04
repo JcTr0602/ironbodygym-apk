@@ -47,6 +47,7 @@ class MainActivity : FlutterActivity() {
                     val texto = call.argument<String>("texto") ?: ""
                     val epoch = call.argument<Number>("epochMillis")?.toLong()
                         ?: System.currentTimeMillis()
+                    val baja = call.argument<Boolean>("baja") ?: false
                     val intento = Intent(this, RecordatorioReceiver::class.java).apply {
                         // Panel Terra A3: identidad única por clave.
                         // Sin data, dos claves con el mismo hashCode
@@ -55,6 +56,7 @@ class MainActivity : FlutterActivity() {
                         putExtra(RecordatorioReceiver.EXTRA_ID, id)
                         putExtra(RecordatorioReceiver.EXTRA_TITULO, titulo)
                         putExtra(RecordatorioReceiver.EXTRA_TEXTO, texto)
+                        putExtra(RecordatorioReceiver.EXTRA_BAJA, baja)
                     }
                     val pendiente = PendingIntent.getBroadcast(
                         this, RecordatorioReceiver.codigoDe(id), intento,

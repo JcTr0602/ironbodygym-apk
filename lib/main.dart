@@ -11,7 +11,9 @@ import 'package:workmanager/workmanager.dart';
 import 'acceso_bloqueo.dart';
 import 'app_log.dart';
 import 'auth.dart';
+import 'aviso_pendientes.dart';
 import 'config.dart';
+import 'fotos_cola.dart';
 import 'invitados.dart';
 import 'localdb.dart';
 import 'notificaciones_recordatorios.dart';
@@ -69,6 +71,12 @@ Future<void> _trasSyncExitosa() async {
 
 /// Tarea en segundo plano (punto 21): sube lo pendiente aunque la app
 /// esté cerrada. Todo va en try/catch: si falla, se reintenta luego.
+/// 1.23 (sello de Argón): el resultado es HONESTO — si el ciclo no
+/// corrió o quedaron pendientes propios, devuelve false y
+/// WorkManager reintenta la tarea, en vez del «true» de siempre
+/// que enterraba los fallos. Y el push ESPERA las fotos de
+/// incidencias: en este isolate, el disparo sin esperar moría al
+/// retornar el callback.
 @pragma('vm:entry-point')
 void callbackDispatcher() {
   Workmanager().executeTask((task, inputData) async {
@@ -80,8 +88,27 @@ void callbackDispatcher() {
       );
       SyncEngine.instance.onSyncExitoso = _trasSyncExitosa;
       final auth = AuthService();
-      if (auth.loggedIn) {
-        await SyncEngine.instance.push();
+      if (!auth.loggedIn) return true;
+      final res = await SyncEngine.instance
+          .push(esperarIncidencias: true);
+      if (!res.corrio || res.porSubir > 0 || res.conError > 0) {
+        return false;
+      }
+      // Delta del panel: el éxito también exige las OTRAS
+      // colas vacías — SyncResultado solo refleja ops_queue y
+      // un fallo de fotos/comprobantes tolerado por _doPush no
+      // debe disfrazarse de éxito ante WorkManager.
+      final fotos = await FotosColaService.instance
+          .contarPendientesReclamables();
+      if (fotos > 0) return false;
+      if (await LocalDb.instance.contarComprobantesPendientes() >
+          0) {
+        return false;
+      }
+      if (await LocalDb.instance
+              .contarFotosIncidenciasPendientes() >
+          0) {
+        return false;
       }
       return true;
     } catch (_) {
@@ -98,10 +125,49 @@ Future<void> _programarSubidaFondo() async {
       'subirPendientes',
       frequency: const Duration(hours: 1),
       constraints: Constraints(networkType: NetworkType.connected),
-      existingWorkPolicy: ExistingPeriodicWorkPolicy.keep,
+      // 1.23 (sello de Argón): update, no keep — con keep, un
+      // cambio futuro de frecuencia/restricciones jamás se
+      // aplicaría a la tarea ya registrada.
+      existingWorkPolicy: ExistingPeriodicWorkPolicy.update,
     );
   } catch (_) {
     // sin segundo plano no se rompe nada: la app sincroniza al abrirse
+  }
+}
+
+/// 1.23: tarea ÚNICA de subida en segundo plano. Se encola al
+/// pasar la app a segundo plano con trabajo reclamable: si el
+/// usuario cierra la app justo tras cobrar sin cobertura, el
+/// sistema la corre en cuanto haya red, sin esperar a la
+/// periódica de 1 h. appendOrReplace (sello de Argón): encolar
+/// otra no duplica ni descarta la anterior a la fuerza.
+Future<void> programarOneOffSyncSiPendientes() async {
+  try {
+    String? uid;
+    try {
+      uid = AuthService().userId;
+    } catch (_) {}
+    final conteo =
+        await LocalDb.instance.conteoPendientesSync(uid);
+    final ops = conteo.porSubir + conteo.conError;
+    final fotos =
+        await FotosColaService.instance.contarPendientesReclamables();
+    if (ops == 0 && fotos == 0) return;
+    await Workmanager().registerOneOffTask(
+      'ironbody-sync-oneoff',
+      'subirPendientes',
+      constraints: Constraints(networkType: NetworkType.connected),
+      // El sello dice appendOrReplace (no replace): en la API
+      // Dart de workmanager 0.10 ese valor se llama `update`
+      // (su doc: «maps to appendOrReplace in the native
+      // implementation»).
+      existingWorkPolicy: ExistingWorkPolicy.update,
+      backoffPolicy: BackoffPolicy.exponential,
+      backoffPolicyDelay: const Duration(minutes: 10),
+    );
+  } catch (_) {
+    // Sin segundo plano no se rompe nada: la app sincroniza al
+    // abrirse y el FGS cubre el primer plano.
   }
 }
 
@@ -155,6 +221,10 @@ Future<void> main() async {
   SyncEngine.instance.onSyncExitoso = _trasSyncExitosa;
   // v1.3.1 (B4): inicializar servicio foreground de fotos.
   initForegroundFotos();
+  // 1.23 (sync en 2º plano): el motor arranca el FGS por este
+  // gancho al inicio de cada push() (sello de Argón).
+  SyncEngine.instance.onArrancarSegundoPlano =
+      iniciarSubidaFotosForeground;
   // v1.3.4 (item 3): poda diaria de ops aplicadas viejas en
   // background, guardada por fecha (meta 'ultima_poda_ops');
   // no bloquea el arranque.
@@ -212,6 +282,12 @@ class _IronBodyAppState extends State<IronBodyApp>
     if (state == AppLifecycleState.paused ||
         state == AppLifecycleState.inactive) {
       _detenerTimers();
+      // 1.23: al salir, si queda trabajo reclamable, se deja
+      // encolada la tarea única de WorkManager (la red la
+      // dispara en cuanto vuelve, sin esperar a la periódica).
+      if (_auth.loggedIn) {
+        unawaited(programarOneOffSyncSiPendientes());
+      }
     } else if (state == AppLifecycleState.resumed) {
       _iniciarTimers();
       // v1.5.0 (Bloque G): al volver a primer plano se verifican
@@ -220,8 +296,36 @@ class _IronBodyAppState extends State<IronBodyApp>
       // toca la red).
       if (_auth.loggedIn) {
         unawaited(_verificarConversionesInvitados());
+        // 1.23 (pieza que faltaba, sello de Argón): push
+        // INMEDIATO al volver si hay reclamables — antes solo
+        // se rearmaban los timers y lo pendiente podía esperar
+        // hasta 60 min con la app abierta.
+        unawaited(_pushSiReclamablesAlVolver());
+        // 1.23: el aviso de pendientes que el cortacircuitos
+        // del FGS hubiera dejado marcado se muestra ahora.
+        unawaited(AvisoPendientesSync.mostrarSiPendiente());
       }
     }
+  }
+
+  /// Push inmediato al volver a primer plano cuando hay
+  /// trabajo reclamable (ops por subir o fotos reclamables).
+  /// Sin reclamables no toca la red: el pull de 2 min y el
+  /// push horario cubren el resto.
+  Future<void> _pushSiReclamablesAlVolver() async {
+    try {
+      String? uid;
+      try {
+        uid = _auth.userId;
+      } catch (_) {}
+      final conteo =
+          await LocalDb.instance.conteoPendientesSync(uid);
+      final ops = conteo.porSubir + conteo.conError;
+      final fotos = await FotosColaService.instance
+          .contarPendientesReclamables();
+      if (ops == 0 && fotos == 0) return;
+      await SyncEngine.instance.push();
+    } catch (_) {}
   }
 
   @override

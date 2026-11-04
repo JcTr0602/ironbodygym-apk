@@ -2,6 +2,7 @@
 /// datos y acerca de. Organizado por secciones con iconos.
 library;
 
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -19,6 +20,7 @@ import '../auth.dart';
 import '../app_log.dart';
 import '../config.dart';
 import '../fotos_cola.dart';
+import '../fotos_foreground.dart';
 import '../localdb.dart';
 import '../negocio.dart';
 import '../novedades.dart';
@@ -41,6 +43,10 @@ class AjustesScreen extends StatefulWidget {
 class _AjustesScreenState extends State<AjustesScreen> {
   final _auth = AuthService();
   final _perfil = PerfilService.instance;
+  // 1.23: estado nativo de la exención de batería (null =
+  // aún comprobando). Se refresca al abrir Ajustes y al volver
+  // del diálogo del sistema.
+  bool? _exencionBateria;
   File? _avatar;
   String? _nombreVisible;
   String? _movil;
@@ -65,6 +71,24 @@ class _AjustesScreenState extends State<AjustesScreen> {
   void initState() {
     super.initState();
     _cargar();
+    _refrescarExencionBateria();
+  }
+
+  Future<void> _refrescarExencionBateria() async {
+    final activa = await exencionBateriaActiva();
+    if (!mounted) return;
+    setState(() => _exencionBateria = activa);
+  }
+
+  Future<void> _pedirExencionBateria() async {
+    if (_exencionBateria == true) {
+      _msg('La exención de batería ya está activa en este '
+          'teléfono.');
+      return;
+    }
+    await solicitarExencionBateria();
+    // Al volver del diálogo del sistema, el estado real manda.
+    await _refrescarExencionBateria();
   }
 
   Future<void> _cargar() async {
@@ -909,8 +933,66 @@ class _AjustesScreenState extends State<AjustesScreen> {
       } finally {
         await testDb.close();
       }
-      // 3. Copia de recuperación de la base actual.
-      await LocalDb.instance.close();
+      // 1.23 (sello de importación, con el delta del panel):
+      // la exclusión cubre TODO el intercambio, no un chequeo
+      // previo. (a) La barrera de mantenimiento — un archivo
+      // FUERA de la base, porque el candado de sync vive en la
+      // meta de la propia base y muere al cerrarla — bloquea
+      // ciclos nuevos en TODOS los isolates (SyncEngine la
+      // lee en _conLock; el FGS se detiene al verla). (b) Se
+      // detiene el FGS (tiene la misma base abierta en su
+      // isolate). (c) Se espera a que el ciclo en curso, si
+      // lo hay, suelte el candado, y el candado adquirido se
+      // SOSTIENE hasta reabrir la base nueva.
+      await LocalDb.instance.iniciarMantenimiento();
+      // Latido de la barrera (delta 2 del panel): la marca
+      // caduca a los 15 min para no bloquear tras una muerte
+      // del proceso, pero una importación VIVA la renueva
+      // cada 5 min — 15 min significan «proceso muerto», no
+      // «importación lenta en un teléfono degradado».
+      // Delta 3: las renovaciones van SERIALIZADAS por una
+      // cadena y con bandera de cierre: un latido ya en vuelo
+      // cuando la importación termina no puede recrear la
+      // marca después de borrarla (carrera Timer/finally).
+      // Invariante: UNA sola importación por base — el flujo
+      // es modal, de un solo hilo de UI (selector + confirmación
+      // + esta función), así que la marca tiene un único dueño.
+      var cerrandoMantenimiento = false;
+      Future<void> cadenaLatido = Future<void>.value();
+      void renovarMantenimiento() {
+        // La cadena se recupera de errores: un latido fallido
+        // no envenena los siguientes ni el cierre.
+        cadenaLatido = cadenaLatido
+            .catchError((Object _) {})
+            .then((_) async {
+          if (!cerrandoMantenimiento) {
+            try {
+              await LocalDb.instance.iniciarMantenimiento();
+            } catch (_) {}
+          }
+        });
+      }
+
+      final latidoMantenimiento = Timer.periodic(
+          const Duration(minutes: 5), (_) => renovarMantenimiento());
+      try {
+        await detenerSubidaFotosForeground();
+        String? candado;
+        for (var i = 0; i < 25 && candado == null; i++) {
+          candado = await LocalDb.instance.adquirirSyncLock();
+          if (candado == null) {
+            await Future<void>.delayed(
+                const Duration(milliseconds: 600));
+          }
+        }
+        if (candado == null) {
+          _msg('Hay una sincronización en curso. Espera a que '
+              'termine y vuelve a importar.');
+          return;
+        }
+        try {
+          // 3. Copia de recuperación de la base actual.
+          await LocalDb.instance.close();
       final destino = await LocalDb.instance.dbPath();
       final rollback = File('${tmp.path}/ironbody-antes-de-importar.db');
       if (await rollback.exists()) await rollback.delete();
@@ -933,6 +1015,28 @@ class _AjustesScreenState extends State<AjustesScreen> {
           await LocalDb.instance.db;
         }
         throw 'el respaldo no se pudo abrir; se restauró la base anterior';
+      }
+        } finally {
+          // El candado vivía en la base VIEJA (ya reemplazada):
+          // liberarlo escribe sobre la base reabierta y limpia
+          // la meta que el respaldo trajera.
+          try {
+            await LocalDb.instance.liberarSyncLock(candado);
+          } catch (_) {}
+        }
+      } finally {
+        cerrandoMantenimiento = true;
+        latidoMantenimiento.cancel();
+        // Esperar al último latido en vuelo ANTES de borrar:
+        // con la bandera puesta ya no escribe, y la cadena
+        // garantiza que ninguna escritura queda a medias. El
+        // borrado va en su propio finally: ocurre SIEMPRE,
+        // aunque la cadena cerrara con error.
+        try {
+          await cadenaLatido;
+        } finally {
+          await LocalDb.instance.finMantenimiento();
+        }
       }
       if (!mounted) return;
       await showDialog(
@@ -1589,6 +1693,23 @@ class _AjustesScreenState extends State<AjustesScreen> {
 
                 // ----- DATOS -----
                 _seccion('Datos'),
+                // 1.23 (sync en 2º plano, sello de Argón): la
+                // exención de batería es por PAQUETE y se pide
+                // a mano aquí — nunca tras el login (el diálogo
+                // pausa la app y corta el arranque).
+                _opcion(
+                  icono: Icons.battery_saver_rounded,
+                  titulo: 'Subida en segundo plano',
+                  subtitulo: _exencionBateria == null
+                      ? 'Comprobando la exención de batería…'
+                      : _exencionBateria!
+                          ? 'Exención de batería activa: la subida '
+                              'de fondo no se duerme'
+                          : 'Sin exención de batería: el sistema '
+                              'puede dormir la subida de fondo. '
+                              'Toca para pedirla',
+                  onTap: _pedirExencionBateria,
+                ),
                 if (_auth.isOwner)
                   _opcion(
                     icono: Icons.cloud_upload_rounded,
