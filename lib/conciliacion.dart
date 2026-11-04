@@ -11,6 +11,8 @@
 /// con la misma regla que el backfill del servidor.
 library;
 
+import 'dart:async';
+
 import 'package:uuid/uuid.dart';
 
 import 'localdb.dart';
@@ -77,9 +79,10 @@ class ConciliacionService {
           'nota': nota.trim(),
       },
     );
-    try {
-      await SyncEngine.instance.push();
-    } catch (_) {}
+    // 1.23 (auditoría extra P3): sin await — no congelar la UI.
+    // Delta panel M2: helper compartido (consume el error
+    // asíncrono; el try/catch de antes no lo veía).
+    SyncEngine.instance.pushEnSegundoPlano();
   }
 
   /// Pagos por transferencia del espejo con su estado ya

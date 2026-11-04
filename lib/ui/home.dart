@@ -24,6 +24,7 @@ import '../perfil.dart';
 import '../permisos_entrenador.dart';
 import '../cierre_automatico.dart';
 import 'diagnostico_espejo_card.dart';
+import 'cierre_sesion.dart';
 import '../sync.dart';
 import '../theme.dart';
 import '../tiempo.dart';
@@ -814,18 +815,25 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   Future<void> _salir() async {
+    // 1.23 (auditoría extra #3): aviso previo a la purga. Si hay
+    // comprobantes u ops/fotos de incidencias privadas SIN SUBIR,
+    // la purga los destruye: el diálogo lo dice con los números
+    // y el botón pasa a «Cerrar sesión igualmente». Sin
+    // pendientes, el diálogo es el de siempre.
+    final aviso = await avisoPerdidaAlCerrarSesion();
+    if (!mounted) return;
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Cerrar sesión'),
-        content: const Text(
+        content: Text(aviso ??
             'Tus operaciones pendientes se quedan guardadas en el teléfono.'),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(ctx, false),
               child: const Text('Cancelar')),
           BotonPrimario(
-            texto: 'Salir',
+            texto: aviso == null ? 'Salir' : 'Cerrar sesión igualmente',
             onPressed: () => Navigator.pop(ctx, true),
             expandido: false,
           ),

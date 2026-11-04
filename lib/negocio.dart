@@ -1103,6 +1103,29 @@ bool _esPagoCasa(Map<String, dynamic> p, Set<int> casas) {
   return false;
 }
 
+/// 1.23 (auditoría extra #6): ¿este pago del espejo está anulado
+/// a efectos de dinero? Dos fuentes, cualquiera basta:
+/// - la marca del propio JSON (`anulado`): la pone la marca
+///   optimista al encolar `anular_pago` (o el servidor el día que
+///   la traiga; hoy el servidor BORRA la fila al anular).
+/// - [anuladosEnCola]: ids con anulación viva en la cola de este
+///   teléfono (LocalDb.pagosAnuladosEnCola). Es la fuente que
+///   SOBREVIVE a un pull previo a la aplicación de la op, porque
+///   el pull reescribe `data` pero nunca toca ops_queue.
+/// Los lectores que SUMAN dinero deben saltar estas filas: sin
+/// esto, un pago anulado seguía contando en ingresos, caja y
+/// nómina hasta que el pull retiraba la fila del espejo.
+bool esPagoAnulado(Map<String, dynamic> p, Set<int> anuladosEnCola) {
+  if (p['anulado'] == 1 || p['anulado'] == true) return true;
+  final id = p['id'];
+  if (id is num) return anuladosEnCola.contains(id.toInt());
+  if (id is String) {
+    final n = int.tryParse(id);
+    if (n != null) return anuladosEnCola.contains(n);
+  }
+  return false;
+}
+
 /// v1.3.3: monto en CUP cobrado que representa una op encolada.
 /// Como [montoEfectivoOp] pero SIN filtrar por método de pago ni por
 /// entrega: para el KPI "Total cobrado" de Actividad reciente.
@@ -1275,6 +1298,9 @@ Future<double> pendienteEntrega(int? telegramId) async {
   // ventana pre-pull (espejo aún sin marcar) lo liquidado se
   // contaba dos veces: la entrega decía 1000 y el arqueo 600.
   final cubiertos = await idsLiquidados(telegramId);
+  // 1.23 (auditoría extra #6): lo anulado (o con anulación en
+  // cola) no es pendiente a entregar.
+  final anuladosCola = await LocalDb.instance.pagosAnuladosEnCola();
   // Auditoría 1.21 B-03: op_uuid ya presentes en el espejo. En la
   // ventana push→pull (el pull bajó el pago pero la op sigue en
   // la cola), sin este cruce el mismo cobro se sumaba DOS veces:
@@ -1290,6 +1316,7 @@ Future<double> pendienteEntrega(int? telegramId) async {
   for (final p in await LocalDb.instance
       .mirrorFiltrado('pagos', {'telegram_user_id': telegramId})) {
     notaUuid(p);
+    if (esPagoAnulado(p, anuladosCola)) continue;
     if (cubiertos.contains('pagos:${p['id']}')) continue;
     if ((p['metodo'] as String?) == 'efectivo' &&
         esPendiente(p['entregado'])) {
@@ -1703,10 +1730,13 @@ Future<double> contribucionLibroC1(int? telegramId) async {
 Future<({double cup, double usd})> pendienteArqueo(int? telegramId) async {
   if (telegramId == null) return (cup: 0.0, usd: 0.0);
   final cubiertos = await idsLiquidados(telegramId);
+  // 1.23 (auditoría extra #6): lo anulado no entra al arqueo.
+  final anuladosCola = await LocalDb.instance.pagosAnuladosEnCola();
   var cup = 0.0;
   var usd = 0.0;
   for (final p in await LocalDb.instance
       .mirrorFiltrado('pagos', {'telegram_user_id': telegramId})) {
+    if (esPagoAnulado(p, anuladosCola)) continue;
     if (cubiertos.contains('pagos:${p['id']}')) continue;
     if ((p['metodo'] as String?) == 'efectivo' &&
         esPendiente(p['entregado'])) {
@@ -1797,10 +1827,14 @@ Future<Map<String, List<int>>> idsPendienteArqueo(int? telegramId,
   final cubiertos = await idsLiquidados(telegramId);
   // 1.15-turnos (#2): ids ya cubiertos por el libro C1.
   final cubiertosLibro = await idsCubiertosLibroC1(telegramId);
+  // 1.23 (auditoría extra #6): un pago anulado no se ofrece
+  // para liquidar (su dinero ya no está en la gaveta).
+  final anuladosCola = await LocalDb.instance.pagosAnuladosEnCola();
   final esUsd = moneda == 'USD';
   for (final p in await LocalDb.instance
       .mirrorFiltrado('pagos', {'telegram_user_id': telegramId})) {
     if (esUsd) continue; // los pagos siempre son CUP
+    if (esPagoAnulado(p, anuladosCola)) continue;
     if (cubiertos.contains('pagos:${p['id']}')) continue;
     if (cubiertosLibro.contains('pagos:${p['id']}')) continue;
     if ((p['metodo'] as String?) == 'efectivo' &&
@@ -2840,10 +2874,14 @@ Future<int> pagosRealizadosMes() async {
   final ids = <int>{};
   // Ronda 3-9 #2: Casa nunca cuenta como cliente pagado.
   final casas = await LocalDb.instance.idsCuentasCasa();
+  // 1.23 (auditoría extra #6): un pago con anulación viva no
+  // cuenta como «pagó el mes» aunque el espejo aún lo traiga.
+  final anuladosCola = await LocalDb.instance.pagosAnuladosEnCola();
   // v1.3.4 (B2): filtro fecha LIKE 'yyyy-MM%' por columna indexada (v26).
   // El chequeo en Dart se conserva para las filas del fallback con
   // columna fecha NULL.
   for (final p in await LocalDb.instance.pagosPorFiltro(fechaPrefijo: pref)) {
+    if (esPagoAnulado(p, anuladosCola)) continue;
     final f = p['fecha'] as String?;
     if (f != null && fechaNegocioHabana(f).startsWith(pref)) {
       // v1.3.3: los regalos/promos (monto 0) no cuentan como pago cobrado.
@@ -3472,8 +3510,11 @@ Future<(double, double)> miTurnoHoy(int? telegramId, {String? fecha}) async {
   // v1.3.4 (ítem 2): lectura indexada (fecha, telegram_user_id) en vez
   // de allMirror('pagos') + filtro en Dart. Incluye fallback para filas
   // con columnas NULL.
+  // 1.23 (auditoría extra #6): lo anulado no es cobrado del día.
+  final anuladosCola = await LocalDb.instance.pagosAnuladosEnCola();
   for (final p in await LocalDb.instance.pagosPorDiaYEntrenador(hoy, telegramId)) {
     notaUuid(p);
+    if (esPagoAnulado(p, anuladosCola)) continue;
     cobrado += (p['monto'] as num?)?.toDouble() ?? 0;
   }
   for (final d in await LocalDb.instance.allMirror('pagos_diarios')) {
@@ -3565,8 +3606,12 @@ Future<int> conteoPagosDia(int? telegramId, {String? fecha}) async {
   // sigue en Dart: en SQL, `metodo != 'cortesia'` excluiría también los
   // NULL, y la semántica vieja los contaba (Argón spec 1: solo el
   // metodo 'cortesia' explícito se excluye).
+  // 1.23 (auditoría extra #6): un pago anulado tampoco cuenta
+  // como operación del día (misma regla que miTurnoHoy).
+  final anuladosCola = await LocalDb.instance.pagosAnuladosEnCola();
   for (final p in await LocalDb.instance.pagosPorDiaYEntrenador(hoy, telegramId)) {
     notaUuid(p);
+    if (esPagoAnulado(p, anuladosCola)) continue;
     // v1.3.3 (Argón spec 1): los regalos de cumpleaños (metodo
     // 'cortesia', monto 0) no cuentan como cobro: no inflan el
     // pagos_count del cierre ni generan comisión.
@@ -3641,10 +3686,14 @@ Future<
   // tablas del pull el desglose de Mi Turno listaba cobros
   // ya liquidados que el total superior ya descontaba.
   final cubiertos = await idsLiquidados(telegramId);
+  // 1.23 (auditoría extra #6): el desglose tampoco lista lo
+  // anulado (cuadra con pendienteEntrega/pendienteArqueo).
+  final anuladosCola = await LocalDb.instance.pagosAnuladosEnCola();
   // v1.3.4 (B2): filtro por columnas indexadas (v26);
   // 'entregado' no tiene columna y sigue filtrándose en Dart.
   for (final p in await LocalDb.instance
       .pagosPorFiltro(telegramId: telegramId, metodo: 'efectivo')) {
+    if (esPagoAnulado(p, anuladosCola)) continue;
     if (cubiertos.contains('pagos:${p['id']}')) continue;
     if (esPendiente(p['entregado'])) {
       mens.add(p);
@@ -3910,10 +3959,14 @@ Future<List<Map<String, dynamic>>> entregasRecientes(
 Future<double> entregadoHoy() async {
   final hoy = _isoDia(ahoraHabana());
   double total = 0;
+  // 1.23 (auditoría extra #6): un pago anulado no suma como
+  // entregado aunque conservara la marca de entrega.
+  final anuladosCola = await LocalDb.instance.pagosAnuladosEnCola();
   // v1.3.4 (B2): full scan INTENCIONAL — el filtro es `entregado_ts`
   // (fecha de confirmación que guarda el servidor), campo del JSON sin
   // columna indexada en la migración v26. No migra a SQL indexado.
   for (final p in await LocalDb.instance.allMirror('pagos')) {
+    if (esPagoAnulado(p, anuladosCola)) continue;
     if (_diaEntrega(p) == hoy) {
       total += (p['monto'] as num?)?.toDouble() ?? 0;
     }
@@ -3952,11 +4005,14 @@ Future<Map<String, dynamic>> resumenSemanal() async {
   // Ronda 3-9 #7: servicios de la semana. Casa nunca suma
   // (extensión del #2, misma clase de bug).
   final casas = await LocalDb.instance.idsCuentasCasa();
+  // 1.23 (auditoría extra #6): lo anulado no es cobrado semanal.
+  final anuladosCola = await LocalDb.instance.pagosAnuladosEnCola();
   // v1.3.4 (B2): filtro fecha >= inicio por columna indexada (v26).
   // El chequeo en Dart se conserva para las filas del fallback con
   // columna fecha NULL.
   for (final p in await LocalDb.instance.pagosPorFiltro(fechaDesde: inicio)) {
     if (_esPagoCasa(p, casas)) continue;
+    if (esPagoAnulado(p, anuladosCola)) continue;
     if (fechaNegocioHabana(p['fecha']).compareTo(inicio) >= 0) {
       cobrado += (p['monto'] as num?)?.toDouble() ?? 0;
     }
@@ -4079,10 +4135,13 @@ Future<double> ingresosHoyPorEntrenador(int? telegramId) async {
   final hoy = _hoyIso();
   // Ajuste A1 (Argón delta 3-9): Casa nunca suma, tampoco aquí.
   final casas = await LocalDb.instance.idsCuentasCasa();
+  // 1.23 (auditoría extra #6): lo anulado no es ingreso.
+  final anuladosCola = await LocalDb.instance.pagosAnuladosEnCola();
   double t = 0;
   for (final p in await LocalDb.instance
       .pagosPorDiaYEntrenador(hoy, telegramId)) {
     if (_esPagoCasa(p, casas)) continue;
+    if (esPagoAnulado(p, anuladosCola)) continue;
     t += (p['monto'] as num?)?.toDouble() ?? 0;
   }
   for (final d in await LocalDb.instance.allMirror('pagos_diarios')) {
@@ -4121,10 +4180,13 @@ Future<double> ingresosSemanaPorEntrenador(int? telegramId) async {
   final hoyIso = iso(hoy);
   // Ajuste A1 (Argón delta 3-9): Casa nunca suma, tampoco aquí.
   final casas = await LocalDb.instance.idsCuentasCasa();
+  // 1.23 (auditoría extra #6): lo anulado no es ingreso.
+  final anuladosCola = await LocalDb.instance.pagosAnuladosEnCola();
   double t = 0;
   for (final p in await LocalDb.instance
       .pagosRangoPorEntrenador(telegramId, desdeIso, hoyIso)) {
     if (_esPagoCasa(p, casas)) continue;
+    if (esPagoAnulado(p, anuladosCola)) continue;
     t += (p['monto'] as num?)?.toDouble() ?? 0;
   }
   for (final d in await LocalDb.instance.allMirror('pagos_diarios')) {
@@ -5729,6 +5791,8 @@ Future<Map<String, double>> ingresosPorDia(
   final porDia = <String, double>{};
   // Ronda 3-9 #2: Casa nunca suma en ingresos.
   final casas = await LocalDb.instance.idsCuentasCasa();
+  // 1.23 (auditoría extra #6): lo anulado no es ingreso.
+  final anuladosCola = await LocalDb.instance.pagosAnuladosEnCola();
   // Auditoría 1.21 B-16 (W11): con ventana, pagos y pagos_diarios
   // se leen por la columna fecha indexada en vez de escanear TODO
   // el historial; ventas y servicios se filtran por la ventana
@@ -5743,6 +5807,8 @@ Future<Map<String, double>> ingresosPorDia(
       : await LocalDb.instance.allMirror('pagos');
   for (final p in pagos) {
     if (_esPagoCasa(p, casas)) continue;
+    // 1.23 (auditoría extra #6): lo anulado no es ingreso.
+    if (esPagoAnulado(p, anuladosCola)) continue;
     final dia = fechaNegocioHabana(p['fecha']);
     if (dia.isNotEmpty) {
       porDia[dia] =
@@ -5781,9 +5847,12 @@ Future<double> ingresosHoy() async {
   double t = 0;
   // Ronda 3-9 #2: Casa nunca suma en ingresos.
   final casas = await LocalDb.instance.idsCuentasCasa();
+  // 1.23 (auditoría extra #6): lo anulado no es ingreso.
+  final anuladosCola = await LocalDb.instance.pagosAnuladosEnCola();
   for (final p
       in await LocalDb.instance.mirrorPorFecha('pagos', 'fecha', hoy, hoy)) {
     if (_esPagoCasa(p, casas)) continue;
+    if (esPagoAnulado(p, anuladosCola)) continue;
     t += (p['monto'] as num?)?.toDouble() ?? 0;
   }
   for (final d in await LocalDb.instance
@@ -5815,9 +5884,12 @@ Future<double> ingresosSemana() async {
   double t = 0;
   // Ronda 3-9 #2: Casa nunca suma en ingresos.
   final casas = await LocalDb.instance.idsCuentasCasa();
+  // 1.23 (auditoría extra #6): lo anulado no es ingreso.
+  final anuladosCola = await LocalDb.instance.pagosAnuladosEnCola();
   for (final p in await LocalDb.instance
       .mirrorPorFecha('pagos', 'fecha', desdeIso, hoyIso)) {
     if (_esPagoCasa(p, casas)) continue;
+    if (esPagoAnulado(p, anuladosCola)) continue;
     t += (p['monto'] as num?)?.toDouble() ?? 0;
   }
   for (final d in await LocalDb.instance
@@ -6113,9 +6185,12 @@ Future<Map<String, double>> cobradoHoyPorMetodo(
     {int? soloTelegramId}) async {
   final hoy = _hoyIso();
   double ef = 0, tr = 0;
+  // 1.23 (auditoría extra #6): lo anulado no es cobrado de hoy.
+  final anuladosCola = await LocalDb.instance.pagosAnuladosEnCola();
   // v1.3.6: propagar el filtro por entrenador (usa columna indexada).
   for (final p
       in await LocalDb.instance.pagosDelDia(hoy, soloTelegramId: soloTelegramId)) {
+    if (esPagoAnulado(p, anuladosCola)) continue;
     final m = (p['monto'] as num?)?.toDouble() ?? 0;
     if ('${p['metodo']}' == 'transferencia') {
       tr += m;

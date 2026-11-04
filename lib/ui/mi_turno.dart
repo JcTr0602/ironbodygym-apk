@@ -385,9 +385,21 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
             0)
         : 0;
     // v1.2.5 (2.4): ops del turno sin sincronizar.
-    final pendientes =
-        await LocalDb.instance.pendientesParaEnvio(_auth.userId);
-    final bloqueadas = await LocalDb.instance.opsNecesitanRevision();
+    // 1.23 (auditoría extra #5, delta panel A2): misma política
+    // que TurnoService.desglosePendientes — este diálogo SUMA
+    // dinero como «pendiente del turno», así que solo cuenta lo
+    // PROPIO: pendientes estrictamente del usuario (sin el OR
+    // user_id IS NULL del push, que le atribuía las ops sin
+    // autor), revisión solo de su usuario (la ajena y la sin
+    // autor ya no inflan su cierre en teléfono compartido) y
+    // forzar: true (informar lo pendiente aunque esté en
+    // backoff, igual que el desglose).
+    final pendientes = await LocalDb.instance.pendientesParaEnvio(
+        _auth.userId,
+        forzar: true,
+        soloPropias: true);
+    final bloqueadas =
+        await LocalDb.instance.opsNecesitanRevision(userId: _auth.userId);
     // v1.2.6 (Gemini): desglose financiero de lo pendiente.
     final montoPendiente =
         await montoEfectivoOps([...pendientes, ...bloqueadas]);

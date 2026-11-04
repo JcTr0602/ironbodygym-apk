@@ -1,4 +1,5 @@
 import 'localdb.dart';
+import 'negocio.dart';
 import 'tiempo.dart';
 
 /// Cálculo de nómina compartido entre la pantalla de Nómina, la tarjeta
@@ -87,6 +88,18 @@ class NominaCalc {
   static Future<Set<int>?> _conjunto(String pref) async {
     try {
       final pagos = await LocalDb.instance.pagosDelMes(pref);
+      // 1.23 (auditoría extra #6): un pago con anulación viva en
+      // la cola de este teléfono tampoco genera comisión, aunque
+      // el espejo aún no refleje la marca (un pull previo a la
+      // aplicación de la op reescribe el JSON sin ella).
+      // Delta panel M3: la exclusión va por el predicado
+      // COMPARTIDO esPagoAnulado (negocio.dart) — la versión
+      // local que vivía aquí reimplementaba el overlay con
+      // `p['id'] is num` y dejaba pasar un pago anulado si alguna
+      // ruta entregaba el id como String ('502'): el overlay
+      // contiene 502 pero el pago volvía a generar comisión.
+      final anuladosCola =
+          await LocalDb.instance.pagosAnuladosEnCola();
       // Fase A 2026-10-25 (A3): la base solo cuenta mensualidades.
       // El filtro va ANTES de cualquier otra exclusión (Casa, mes
       // en curso): semanas/quincenas/personalizados cortos no
@@ -94,7 +107,7 @@ class NominaCalc {
       // en la excepción del mes en curso.
       final mensuales = [
         for (final p in pagos)
-          if (esPagoMensualidad(p)) p,
+          if (esPagoMensualidad(p) && !esPagoAnulado(p, anuladosCola)) p,
       ];
       final vistos = idsDesdePagos(mensuales);
       // v1.7.0 (Argón, separación estricta): la contabilidad

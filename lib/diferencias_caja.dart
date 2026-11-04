@@ -11,6 +11,7 @@
 /// son ops solo del dueño; el servidor las vuelve a exigir.
 library;
 
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:uuid/uuid.dart';
@@ -181,9 +182,10 @@ class DiferenciasCajaService {
       tipo: tipo,
       payload: payload,
     );
-    try {
-      await SyncEngine.instance.push();
-    } catch (_) {}
+    // 1.23 (auditoría extra P3): sin await — no congelar la UI.
+    // Delta panel M2: helper compartido (consume el error
+    // asíncrono; el try/catch de antes no lo veía).
+    SyncEngine.instance.pushEnSegundoPlano();
   }
 
   /// Abrir el expediente de una liquidación ya hecha. El

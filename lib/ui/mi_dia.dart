@@ -83,8 +83,11 @@ class _MiDiaScreenState extends State<MiDiaScreen> {
     };
     final cobrados = <Map<String, dynamic>>[];
     double total = 0;
+    // 1.23 (auditoría extra #6): lo anulado no es cobrado del día.
+    final anuladosCola = await LocalDb.instance.pagosAnuladosEnCola();
     // v1.3.4 (ítem 2): columna `fecha` indexada en vez de allMirror.
     for (final p in await LocalDb.instance.pagosDelDia(hoy, soloTelegramId: soloTid)) {
+      if (esPagoAnulado(p, anuladosCola)) continue;
       final monto = (p['monto'] as num?)?.toDouble() ?? 0;
       total += monto;
       cobrados.add({

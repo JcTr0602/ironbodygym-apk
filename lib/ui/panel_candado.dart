@@ -182,9 +182,10 @@ class _PanelCandadoScreenState extends State<PanelCandadoScreen> {
       tipo: 'acceso_bloqueo_set',
       payload: payload,
     );
-    try {
-      await SyncEngine.instance.push();
-    } catch (_) {}
+    // 1.23 (auditoría extra P3): sin await — no congelar la UI.
+    // Delta panel M2: helper compartido (consume el error
+    // asíncrono; el try/catch de antes no lo veía).
+    SyncEngine.instance.pushEnSegundoPlano();
   }
 
   Future<void> _crear() async {

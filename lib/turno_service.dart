@@ -412,8 +412,14 @@ class TurnoService {
   /// parcial como definitiva).
   Future<Map<String, dynamic>> desglosePendientes() async {
     final uid = _auth.userId;
-    final pendientes = await _db.pendientesParaEnvio(uid, forzar: true);
-    final revision = await _db.opsNecesitanRevision();
+    // 1.23 (auditoría extra #5): el desglose del que cierra solo
+    // cuenta LO SUYO: pendientes estrictamente propios (las filas
+    // sin autor ya no inflan sus sumas; el push las sube igual por
+    // su propio camino) y revisión solo de su usuario (la ajena
+    // ensuciaba todos los cierres en teléfono compartido).
+    final pendientes =
+        await _db.pendientesParaEnvio(uid, forzar: true, soloPropias: true);
+    final revision = await _db.opsNecesitanRevision(userId: uid);
     double cup = 0, usd = 0;
     var noCalculados = 0;
     for (final op in pendientes) {

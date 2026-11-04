@@ -9,6 +9,7 @@ import 'package:flutter/material.dart';
 import '../auth.dart';
 import '../localdb.dart';
 import '../perfil.dart';
+import 'cierre_sesion.dart';
 import 'componentes.dart';
 import 'diseno.dart';
 
@@ -59,11 +60,17 @@ class _PinLockScreenState extends State<PinLockScreen> {
   /// No es un bypass: para volver a entrar necesita la contraseña
   /// de su cuenta, y el PIN se puede reconfigurar en Ajustes.
   Future<void> _olvidePin() async {
+    // 1.23 (auditoría extra #3): mismo aviso previo a la purga
+    // que en Home: si hay material sin subir que la purga
+    // destruiría, el mensaje de confirmación lo advierte.
+    final aviso = await avisoPerdidaAlCerrarSesion();
+    if (!mounted) return;
     final ok = await DialogoApp.confirmar(
       context,
       titulo: 'Olvidé mi PIN',
       mensaje: 'Se cerrará tu sesión en este teléfono. Para volver a entrar '
-          'necesitarás tu contraseña de la cuenta. ¿Continuar?',
+          'necesitarás tu contraseña de la cuenta. ¿Continuar?'
+          '${aviso == null ? '' : '\n\n⚠️ $aviso'}',
       aceptar: 'Cerrar sesión',
       icono: Icons.lock_open_rounded,
     );

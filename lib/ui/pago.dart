@@ -166,10 +166,17 @@ class _PagoScreenState extends State<PagoScreen> {
     // anulación ya en cola NO se ofrecen otra vez en «Deshacer
     // último» (la fila sigue en el espejo hasta que el pull la
     // retira; sin esto, un segundo toque encolaba otra
-    // anular_pago para el mismo pago). El pago SIGUE contando
-    // en los totales del día hasta que la anulación se aplica:
-    // solo se excluye de _ultimoMio vía este conjunto.
-    _anulacionesVivas = <int>{};
+    // anular_pago para el mismo pago).
+    // 1.23 (auditoría extra #6): además, el pago anulado ya NO
+    // entra en _cobros: deja de contar en los totales del día en
+    // el acto (antes seguía sumando hasta que la anulación se
+    // aplicaba y el pull retiraba la fila).
+    // 1.23 (auditoría extra #6): la base del conjunto es el
+    // overlay de la cola (toda anulación viva, no solo
+    // pendiente/enviada): es el mismo conjunto que excluye al
+    // pago de _cobros más abajo.
+    _anulacionesVivas =
+        await LocalDb.instance.pagosAnuladosEnCola();
     for (final op in [
       ...await LocalDb.instance.pendingOps(),
       ...await LocalDb.instance.opsByEstado('enviada'),
@@ -205,6 +212,10 @@ class _PagoScreenState extends State<PagoScreen> {
     for (final p in pagosHoy) {
       final cid = (p['cliente_id'] as num?)?.toInt() ?? 0;
       if (protegido(cid)) continue;
+      // 1.23 (auditoría extra #6): con anulación viva (cola o
+      // marca en el JSON) el cobro ya no es del día: ni lista
+      // ni totales.
+      if (esPagoAnulado(p, _anulacionesVivas)) continue;
       final nombre = '${porId[cid]?['nombre'] ?? '¿?'}';
       DateTime ts;
       try {

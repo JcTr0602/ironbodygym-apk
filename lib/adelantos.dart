@@ -7,6 +7,7 @@
 /// arrastra la deuda cuando los adelantos superan lo devengado.
 library;
 
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:uuid/uuid.dart';
@@ -385,9 +386,11 @@ class AdelantosService {
       tipo: tipo,
       payload: payload,
     );
-    try {
-      await SyncEngine.instance.push();
-    } catch (_) {}
+    // 1.23 (auditoría extra P3): sin await — el push puede tardar
+    // (red lenta) y congelaba la UI que llamó a registrar.
+    // Delta panel M2: vía el helper compartido, que consume el
+    // error asíncrono (el try/catch de antes no lo veía).
+    SyncEngine.instance.pushEnSegundoPlano();
   }
 
   Future<void> registrar({

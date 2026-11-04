@@ -3982,6 +3982,89 @@ class LocalDb {
         where: 'id=?', whereArgs: [clienteId]);
   }
 
+  /// 1.23 (auditoría extra #6): marca optimista `anulado=1` en el
+  /// JSON del espejo `pagos` al encolar `anular_pago`.
+  ///
+  /// OJO al mecanismo: en el servidor, anular_pago BORRA la fila
+  /// (ver nota N-1 en nomina_calc): el espejo nunca recibirá un
+  /// `anulado` del servidor — la fila simplemente desaparecerá en
+  /// un pull futuro. Y un pull que baje ANTES de que la op se
+  /// aplique reescribe `data` con el JSON del servidor (sin la
+  /// marca) y la pisaría. Por eso esta marca es solo la mitad del
+  /// fix: los lectores de dinero combinan la marca con
+  /// [pagosAnuladosEnCola], que se recalcula desde ops_queue en
+  /// cada lectura y ningún pull toca. Si la op termina RECHAZADA,
+  /// el conjunto deja de incluir el pago Y [markOp] revierte esta
+  /// marca en la misma transacción del rechazo (delta panel A1):
+  /// el pago vuelve a contar en el acto, sin esperar a un pull.
+  Future<void> marcarPagoAnuladoEnEspejo(int pagoId,
+      {DatabaseExecutor? txn}) async {
+    final DatabaseExecutor ex = txn ?? await db;
+    final rows = await ex.query('pagos',
+        where: 'id=?', whereArgs: [pagoId], limit: 1);
+    if (rows.isEmpty) return;
+    final data =
+        jsonDecode(rows.first['data'] as String) as Map<String, dynamic>;
+    data['anulado'] = 1;
+    await ex.update('pagos', {'data': jsonEncode(data)},
+        where: 'id=?', whereArgs: [pagoId]);
+  }
+
+  /// 1.23 (auditoría extra #6, delta panel A1): revierte la marca
+  /// optimista `anulado` del espejo SOLO si ya no queda ninguna
+  /// anulación VIVA (≠ 'rechazada': la misma definición de
+  /// [pagosAnuladosEnCola]) para el mismo pago. Con doble
+  /// anulación, si una se rechaza pero otra sigue en cola, el
+  /// pago debe seguir excluido. La llama [markOp] dentro de la
+  /// transacción que marca el rechazo, sobre el mismo executor:
+  /// transición y compensación son atómicas.
+  Future<void> _desmarcarPagoAnuladoSiSinViva(
+      DatabaseExecutor ex, int pagoId) async {
+    final vivas = await ex.query('ops_queue',
+        columns: ['payload'],
+        where: "tipo='anular_pago' AND estado != 'rechazada'");
+    for (final r in vivas) {
+      try {
+        final p =
+            jsonDecode(r['payload'] as String) as Map<String, dynamic>;
+        if ((p['pago_id'] as num?)?.toInt() == pagoId) return;
+      } catch (_) {}
+    }
+    final rows = await ex.query('pagos',
+        where: 'id=?', whereArgs: [pagoId], limit: 1);
+    if (rows.isEmpty) return;
+    final data =
+        jsonDecode(rows.first['data'] as String) as Map<String, dynamic>;
+    if (data.remove('anulado') == null) return;
+    await ex.update('pagos', {'data': jsonEncode(data)},
+        where: 'id=?', whereArgs: [pagoId]);
+  }
+
+  /// 1.23 (auditoría extra #6): ids de pagos con una anulación
+  /// VIVA en la cola de este teléfono: ops `anular_pago` en
+  /// cualquier estado menos 'rechazada' (pendiente, enviada,
+  /// error, necesita_revision y aplicada — la aplicada se incluye
+  /// para cubrir la ventana entre la aplicación en el servidor,
+  /// que BORRA la fila, y el pull que la retira del espejo).
+  /// Es el overlay que hace sobrevivir la exclusión a los pulls
+  /// (mismo patrón que el overlay de adelantos en adelantos.dart).
+  Future<Set<int>> pagosAnuladosEnCola() async {
+    final d = await db;
+    final rows = await d.query('ops_queue',
+        columns: ['payload'],
+        where: "tipo='anular_pago' AND estado != 'rechazada'");
+    final ids = <int>{};
+    for (final r in rows) {
+      try {
+        final p = jsonDecode(r['payload'] as String)
+            as Map<String, dynamic>;
+        final id = (p['pago_id'] as num?)?.toInt();
+        if (id != null) ids.add(id);
+      } catch (_) {}
+    }
+    return ids;
+  }
+
   /// v1.3.7 (Fase B §6.2): marca un fiado como saldado en el espejo local
   /// (optimista; el pull lo confirma). Actualiza es_fiado=0 y la fecha
   /// a la del cobro para que sume al "Total cobrado" del día correcto.
@@ -6214,6 +6297,107 @@ class LocalDb {
     return (r.first['c'] as int?) ?? 0;
   }
 
+  /// 1.23 (auditoría extra #3, decisión de Jc): lo que la purga
+  /// de cierre de sesión DESTRUIRÍA sin haber subido nunca:
+  /// - comprobantes: filas de comprobantes_pago aún 'pendiente'
+  ///   (la purga borra la tabla entera y los archivos; lo ya
+  ///   subido vive en el servidor y no es pérdida).
+  /// - incidencias: ops VIVAS de incidencias PRIVADAS (las que
+  ///   [purgarDatosSensibles] elimina de ops_queue: crear/editar
+  ///   con visibilidad privada y las hijas que referencian ids
+  ///   privados) + fotos NO confirmadas de esas incidencias
+  ///   (sync_estado ≠ 'synced'; la purga borra la fila y el
+  ///   archivo físico sin filtrar por estado — delta panel N1).
+  /// Solo se cuentan elementos en estados vivos: una op ya
+  /// 'aplicada' está en el servidor y no se pierde. Alimenta el
+  /// aviso previo al cerrar sesión (la purga se mantiene; lo que
+  /// cambia es que ya no es silenciosa).
+  ///
+  /// 1.23 (delta panel M1): [indeterminado] distingue «cero
+  /// confirmado» de «no se pudo determinar»: si CUALQUIER
+  /// subconteo falla (BD bloqueada, tabla ausente, json_extract
+  /// roto), el resultado lo dice en vez de devolver ceros
+  /// parciales que el aviso interpretaba como «sin pérdida» y
+  /// la purga destruía en silencio. El consumidor muestra una
+  /// advertencia genérica en ese caso.
+  Future<({int comprobantes, int incidencias, bool indeterminado})>
+      conteoSinSubirQuePurgaria() async {
+    final d = await db;
+    var indeterminado = false;
+    var comprobantes = 0;
+    try {
+      comprobantes = await contarComprobantesPendientes();
+    } catch (_) {
+      indeterminado = true;
+    }
+    var incidencias = 0;
+    // Mismos ids privados que recoge purgarDatosSensibles.
+    final idsPrivadas = <String>{};
+    try {
+      for (final t in ['incidencias_local', 'incidencias_mirror']) {
+        final filas = await d.query(t,
+            columns: ['id'], where: "visibilidad='privada'");
+        for (final f in filas) {
+          final id = '${f['id']}';
+          if (id.isNotEmpty && id != 'null') idsPrivadas.add(id);
+        }
+      }
+    } catch (_) {
+      indeterminado = true;
+    }
+    const vivos = "estado IN ('pendiente','enviada','error','necesita_revision')";
+    try {
+      final r = await d.rawQuery(
+          'SELECT COUNT(*) c FROM ops_queue WHERE $vivos AND '
+          "tipo IN ('crear_incidencia','editar_incidencia') AND "
+          "json_extract(payload,'\$.visibilidad')='privada'");
+      incidencias += (r.first['c'] as int?) ?? 0;
+    } catch (_) {
+      indeterminado = true;
+    }
+    if (idsPrivadas.isNotEmpty) {
+      final marcas =
+          List.filled(idsPrivadas.length, '?').join(',');
+      final argsIds = idsPrivadas.toList();
+      try {
+        final r = await d.rawQuery(
+            'SELECT COUNT(*) c FROM ops_queue WHERE $vivos AND '
+            "tipo IN ('cambiar_estado_incidencia','agregar_comentario_incidencia','registrar_foto_incidencia') "
+            "AND (json_extract(payload,'\$.id') IN ($marcas) OR json_extract(payload,'\$.incidencia_id') IN ($marcas))",
+            [...argsIds, ...argsIds]);
+        incidencias += (r.first['c'] as int?) ?? 0;
+      } catch (_) {
+        indeterminado = true;
+      }
+      try {
+        // 1.23 (delta panel N1): NO ('pending','retry') — esa es
+        // la lista de RECLAMABLES por el worker de subida
+        // (contarFotosIncidenciasPendientes), no la de
+        // destruibles. purgarDatosSensibles borra TODAS las
+        // fotos de las incidencias privadas, sin filtro de
+        // estado, y el archivo físico con ellas. Lo «sin subir
+        // que se perdería» es lo no confirmado en el servidor:
+        // todo estado ≠ 'synced' (pending, retry, uploading —
+        // reclamada pero sin confirmar — y error — agotó
+        // intentos o sin archivo, reactivable y tampoco está
+        // en el servidor).
+        final r = await d.rawQuery(
+            'SELECT COUNT(*) c FROM incidencias_fotos '
+            "WHERE sync_estado <> 'synced' "
+            'AND incidencia_id IN ($marcas)',
+            argsIds);
+        incidencias += (r.first['c'] as int?) ?? 0;
+      } catch (_) {
+        indeterminado = true;
+      }
+    }
+    return (
+      comprobantes: comprobantes,
+      incidencias: incidencias,
+      indeterminado: indeterminado
+    );
+  }
+
   /// Último turno de un entrenador en una FECHA, sin filtrar
   /// por franja ni estado. Respaldo de ultimoTurno (misma
   /// razón que turnoAbiertoDelDia).
@@ -7039,17 +7223,22 @@ class LocalDb {
       final cid = (payload['cliente_id'] as int?) ?? 0;
       final est = (payload['estado'] as String?) ?? '';
       if (cid > 0 && est.isNotEmpty) {
-        // v1.3.4: inline sobre el mismo executor para no romper la
-        // atomicidad cuando queueOp corre dentro de una transacción.
-        final rows = await ex.query('clientes',
-            where: 'id=?', whereArgs: [cid], limit: 1);
-        if (rows.isNotEmpty) {
-          final data = jsonDecode(rows.first['data'] as String)
-              as Map<String, dynamic>;
-          data['estado'] = est;
-          await ex.update('clientes', {'data': jsonEncode(data)},
-              where: 'id=?', whereArgs: [cid]);
-        }
+        // 1.23 (auditoría extra #1): delegar en updateMirrorEstado
+        // sobre el mismo executor. La copia inline que vivía aquí
+        // solo tocaba 'data' y NO propagaba las columnas dedicadas
+        // (columnasClientes): riesgo latente de divergencia entre
+        // el JSON y las columnas cuenta_casa/protegido.
+        await updateMirrorEstado(cid, est, txn: ex);
+      }
+    }
+    // 1.23 (auditoría extra #6): marca optimista del pago anulado,
+    // sobre el mismo executor (atómico con el encolado). Sin ella,
+    // el pago seguía sumando en ingresos/nómina/caja hasta que el
+    // pull lo retiraba del espejo.
+    if (tipo == 'anular_pago') {
+      final pid = (payload['pago_id'] as num?)?.toInt() ?? 0;
+      if (pid > 0) {
+        await marcarPagoAnuladoEnEspejo(pid, txn: ex);
       }
     }
   }
@@ -7432,6 +7621,36 @@ class LocalDb {
     if (estado == 'enviada') {
       update['enviada_ts'] = isoHabana(ahoraHabana()); // v1.3.4 (Argón): formato Habana para la poda
     }
+    if (estado == 'rechazada') {
+      // 1.23 (auditoría extra #6, delta panel A1): compensación
+      // de la marca optimista de anular_pago, ATÓMICA con la
+      // transición. Vive en markOp porque es el embudo único por
+      // el que TODA op pasa a 'rechazada' (resultado del servidor
+      // y rechazo HTTP 4xx del upload van por aquí). Si la
+      // anulación queda rechazada, el pago debe volver a contar
+      // EN EL ACTO: esPagoAnulado honra la marca del JSON antes
+      // que el overlay de la cola, y sin quitarla el pago válido
+      // quedaba excluido hasta un pull que reescribiera la fila
+      // (offline, potencialmente nunca).
+      await d.transaction((txn) async {
+        final rows = await txn.query('ops_queue',
+            columns: ['tipo', 'payload'],
+            where: 'op_uuid=?', whereArgs: [opUuid]);
+        await txn.update('ops_queue', update,
+            where: 'op_uuid=?', whereArgs: [opUuid]);
+        if (rows.isNotEmpty && rows.first['tipo'] == 'anular_pago') {
+          try {
+            final p = jsonDecode(rows.first['payload'] as String)
+                as Map<String, dynamic>;
+            final pid = (p['pago_id'] as num?)?.toInt();
+            if (pid != null && pid > 0) {
+              await _desmarcarPagoAnuladoSiSinViva(txn, pid);
+            }
+          } catch (_) {}
+        }
+      });
+      return;
+    }
     await d.update('ops_queue', update,
         where: 'op_uuid=?', whereArgs: [opUuid]);
   }
@@ -7541,17 +7760,38 @@ class LocalDb {
   }
 
   /// Ops que necesitan revisión manual (bloqueadas).
-  Future<List<Map<String, dynamic>>> opsNecesitanRevision() async {
+  ///
+  /// 1.23 (auditoría extra #5): con [userId] se filtra ESTRICTO a
+  /// las ops de ese usuario (user_id = ?): en un teléfono
+  /// compartido, la revisión AJENA no debe ensuciar el desglose
+  /// ni el cierre de quien está cerrando. Las filas con user_id
+  /// NULL no se atribuyen a nadie (no cuentan para un usuario
+  /// concreto). Sin [userId] se conserva el comportamiento
+  /// histórico (toda la cola; lo usa la pantalla de la cola).
+  Future<List<Map<String, dynamic>>> opsNecesitanRevision(
+      {String? userId}) async {
     final d = await db;
+    if (userId == null) {
+      return d.query('ops_queue',
+          where: "estado='necesita_revision'",
+          orderBy: 'creada_ts ASC');
+    }
     return d.query('ops_queue',
-        where: "estado='necesita_revision'",
+        where: "estado='necesita_revision' AND user_id = ?",
+        whereArgs: [userId],
         orderBy: 'creada_ts ASC');
   }
 
   /// v1.2.5 (D14): pendientes listas para enviar. Respeta el backoff salvo
   /// [forzar] ("Sincronizar ahora" cancela el temporizador).
+  ///
+  /// 1.23 (auditoría extra #5): [soloPropias] endurece el filtro de
+  /// usuario a `user_id = ?` (sin el `OR user_id IS NULL` del push):
+  /// para DESGLOSES y CIERRES de un usuario concreto, las filas sin
+  /// autor no deben sumarse a su nombre. El push NO lo usa: las ops
+  /// sin autor sí deben subir con la sesión que haya.
   Future<List<Map<String, dynamic>>> pendientesParaEnvio(String? userId,
-      {bool forzar = false}) async {
+      {bool forzar = false, bool soloPropias = false}) async {
     final d = await db;
     // Auditoría 1.21 A-05: la comparación va por INSTANTE
     // (epoch vía strftime, que honra el offset del texto), no
@@ -7576,7 +7816,11 @@ class LocalDb {
       args.add(ahoraEpoch);
     }
     if (userId != null) {
-      where.write(' AND (user_id = ? OR user_id IS NULL)');
+      if (soloPropias) {
+        where.write(' AND user_id = ?');
+      } else {
+        where.write(' AND (user_id = ? OR user_id IS NULL)');
+      }
       args.add(userId);
     }
     return d.query('ops_queue',

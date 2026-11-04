@@ -1669,6 +1669,31 @@ class SyncEngine {
     }
   }
 
+  /// 1.23 (auditoría extra P3, delta panel M2): disparo de push
+  /// en segundo plano con el error CONSUMIDO — la política
+  /// compartida de «encolé algo, empuja cuando puedas» de las
+  /// pantallas que no pueden esperar la red. Antes cada sitio
+  /// hacía `unawaited(push())` dentro de un try/catch: el catch
+  /// solo veía errores SÍNCRONOS de la invocación y el fallo
+  /// asíncrono del Future quedaba como error no manejado de
+  /// zona (antes de P3, el `await` sí lo absorbía el catch).
+  /// Aquí el fallo se traga a propósito: la cola conserva las
+  /// ops y el sync reintenta por sus vías (programado, FGS, al
+  /// volver a primer plano). NO usar donde el llamador necesite
+  /// el resultado o el error de la corrida (p. ej. WorkManager).
+  void pushEnSegundoPlano() {
+    unawaited(() async {
+      try {
+        await push();
+      } catch (_) {
+        // Consumido a propósito (política del método): la cola
+        // conserva las ops y el sync reintenta por sus vías.
+        // Un fallo de este disparo NO lleva ni AppLog: su
+        // único ruido útil ya lo dejó la propia corrida.
+      }
+    }());
+  }
+
   /// Solo subida (cada hora o manual).
   /// v1.8.0 (Frente 5): devuelve el [SyncResultado] de la corrida
   /// (o el «no corrió» si el lock/sesión lo impidió). Si el push
