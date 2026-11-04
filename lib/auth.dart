@@ -56,10 +56,31 @@ class AuthService {
   String? get userId => session?.user.id;
 
   /// Telegram ID del entrenador (guardado al crear su usuario).
-  int? get telegramId {
-    final v = session?.user.userMetadata?['telegram_id'];
-    if (v is int) return v;
-    return int.tryParse('$v');
+  ///
+  /// H-08 (1.23, fix #4): se lee PRIMERO de appMetadata, que solo
+  /// el servidor puede escribir. userMetadata es editable por el
+  /// propio usuario (updateUser), así que un telegram_id que viva
+  /// solo ahí es suplantable (un entrenador podría hacerse pasar
+  /// por otro o por el dueño ante las políticas RLS): queda solo
+  /// como fallback para cuentas creadas antes de duplicar el
+  /// dato en app_metadata (SQL-0 de H-08), nunca como fuente
+  /// principal.
+  int? get telegramId => telegramIdDesdeMetadatos(
+      session?.user.appMetadata, session?.user.userMetadata);
+
+  /// H-08: resolución pura del telegram_id (testeable sin
+  /// sesión): appMetadata manda; userMetadata solo rellena si el
+  /// primero no trae un valor parseable.
+  static int? telegramIdDesdeMetadatos(
+      Map<String, dynamic>? appMetadata,
+      Map<String, dynamic>? userMetadata) {
+    for (final meta in [appMetadata, userMetadata]) {
+      final v = meta?['telegram_id'];
+      if (v is int) return v;
+      final n = int.tryParse('$v');
+      if (n != null) return n;
+    }
+    return null;
   }
 
   Map<String, String> get authHeaders => {

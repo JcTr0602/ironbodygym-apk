@@ -209,7 +209,13 @@ class SyncScope {
   };
 
   /// Resuelve las tablas del scope en orden topológico (padres primero).
-  static List<String> resolver(String scope) {
+  ///
+  /// H-08 (1.23): con [esAdmin] == false, las tablas del Grupo 1
+  /// salen del resultado: el entrenador ni siquiera las pide por
+  /// alcance (el scope «servicios», p. ej., incluye lotes,
+  /// compras y pomos, que son solo del dueño). Con null (rol no
+  /// informado) se conserva el comportamiento histórico.
+  static List<String> resolver(String scope, {bool? esAdmin}) {
     final visitadas = <String>{};
     final resultado = <String>[];
 
@@ -224,6 +230,10 @@ class SyncScope {
 
     for (final tabla in _scopes[scope] ?? const []) {
       resolverTopologico(tabla);
+    }
+    if (esAdmin == false) {
+      resultado.removeWhere(
+          (t) => LocalDb.tablasProhibidasEntrenador.contains(t));
     }
     return resultado;
   }
@@ -1087,7 +1097,10 @@ class SyncEngine {
       // mínimo con borrados quedaba por debajo para siempre y el
       // cartel «Hay cambios nuevos» no se apagaba nunca, aunque la
       // pantalla de Sincronización dijera «Todo al día».
-      final wm = await _db.getWatermarkMinimo(excluir: {'borrados'});
+      // H-08: el mínimo se mide sobre las tablas del rol (las
+      // prohibidas del entrenador no lo bloquean para siempre).
+      final wm = await _db.getWatermarkMinimo(
+          excluir: {'borrados'}, esAdmin: _esAdminSeguro);
       final ss = int.tryParse(await _db.getMeta('server_seq') ?? '0') ?? 0;
       novedades = ss > wm;
     } catch (_) {}
@@ -1362,7 +1375,8 @@ class SyncEngine {
                 'sync', 'pull_fallo', d: 'intento=$i error=$e');
             continue;
           }
-          final wm = await _db.getWatermarkMinimo();
+          // H-08: «completo» se juzga con las tablas del rol.
+          final wm = await _db.getWatermarkMinimo(esAdmin: _esAdminSeguro);
           final ss = int.tryParse(await _db.getMeta('server_seq') ?? '0') ?? 0;
           if (wm >= ss) {
             completo = true;
@@ -1507,7 +1521,8 @@ class SyncEngine {
         int bajados,
         SyncMotivoNoCorrio? motivo
       })> sincronizarScopeDetallado(String scope) async {
-    final tablas = SyncScope.resolver(scope);
+    // H-08: el alcance también se intersecta con el rol.
+    final tablas = SyncScope.resolver(scope, esAdmin: _esAdminSeguro);
     if (tablas.isEmpty) {
       return (corrio: false, error: false, bajados: 0, motivo: null);
     }
@@ -2016,6 +2031,157 @@ class SyncEngine {
     } catch (_) {}
   }
 
+  /// H-08 (1.23): rol leído a prueba de contexto sin Supabase
+  /// inicializado (tests sin sesión, isolates de diagnóstico):
+  /// los getters de auth revientan con assert si la instancia
+  /// no existe (lección 1.14 de tests), y ningún punto nuevo de
+  /// H-08 puede tumbar un flujo que antes no tocaba auth. Sin
+  /// sesión legible se asume NO admin: el corte conservador
+  /// (menos tablas, mínimo de watermarks más corto). En la app
+  /// real Supabase siempre está inicializado antes de sync.
+  bool get _esAdminSeguro {
+    try {
+      return _auth.isAdmin;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// H-08 (1.23): borra las metas derivadas de sync_estado que
+  /// un no-admin no debe conservar en el teléfono (usuarios APK
+  /// y el feed global de actividad con montos). La llaman la
+  /// descarga (al guardar el estado) y la purga de transición.
+  Future<void> _limpiarMetasEstadoNoAdmin() async {
+    await _db.borrarMeta('usuarios_apk');
+    await _db.borrarMeta('sync_estado_actividad');
+    await _db.borrarMeta('sync_estado_actividad_serie');
+  }
+
+  /// H-08 (1.23): purga de transición por rol, UNA sola vez
+  /// (meta `migracion_h08_rol_v123`). Los teléfonos de entrenador
+  /// que ya corren la app traen en su espejo datos que con el
+  /// RLS nuevo ya no podrían bajar (gastos, pomos, cierres…):
+  /// esta purga los destruye en el propio teléfono la primera
+  /// vez que la 1.23 sincroniza como no-admin. Pasos:
+  /// (a) fuera las filas CONFIRMADAS (sync_seq > 0) de las 12
+  ///     tablas del Grupo 1 — ops_queue y filas optimistas
+  ///     (sync_seq 0/NULL) jamás se tocan —;
+  /// (b) liquidaciones_caja e incidencias_sync (Grupo 2, fuera
+  ///     de tablasPurgables): fuera lo confirmado + watermark
+  ///     de la tabla a 0, para que el servidor las repueble solo
+  ///     con las filas del propio entrenador;
+  /// (c) re-descarga forzada de clientes y pagos: bajan de nuevo
+  ///     ya ENMASCARADOS por las vistas del servidor (sin
+  ///     teléfono ni pagado_por de otros);
+  /// (d) fuera las metas de sync_estado que exponen el negocio;
+  /// (e) VACUUM forense único (ver LocalDb.vacuumForenseH08).
+  /// La meta se marca SOLO si todo terminó bien: cualquier fallo
+  /// deja el ciclo sin completar y el próximo sync reintenta.
+  /// Nunca lanza: una purga fallida no puede tumbar el pull.
+  /// Devuelve true si la migración quedó completa (o no tocaba
+  /// correrla en este rol).
+  Future<bool> purgaTransicionH08SiToca({required bool esAdmin}) async {
+    if (esAdmin) return true; // el dueño conserva todo su espejo
+    try {
+      if (await _db.getMeta('migracion_h08_rol_v123') == '1') {
+        return true;
+      }
+      final g1 = await _db.borrarEspejosConfirmados(
+          LocalDb.tablasProhibidasEntrenador.toList());
+      if (g1.fallos.isNotEmpty) {
+        AppLog.error('sync', 'h08_transicion_fallos',
+            d: 'grupo1=${g1.fallos.join(',')}');
+        return false;
+      }
+      const grupo2FueraDePurga = ['liquidaciones_caja', 'incidencias_sync'];
+      final g2 = await _db.borrarEspejosConfirmados(grupo2FueraDePurga);
+      if (g2.fallos.isNotEmpty) {
+        AppLog.error('sync', 'h08_transicion_fallos',
+            d: 'grupo2=${g2.fallos.join(',')}');
+        return false;
+      }
+      for (final t in grupo2FueraDePurga) {
+        await _db.setWatermarkTabla(t, 0);
+      }
+      await _db.setMeta('forzar_redescarga_clientes', '1');
+      await _db.setMeta('forzar_redescarga_pagos', '1');
+      await _limpiarMetasEstadoNoAdmin();
+      if (!await _db.vacuumForenseH08()) {
+        // Sin VACUUM la purga es cosmética: lo borrado queda
+        // legible en páginas libres. No se marca la meta y se
+        // reintenta entero en el próximo sync.
+        AppLog.aviso('sync', 'h08_transicion_vacuum_pendiente');
+        return false;
+      }
+      await _db.setMeta('migracion_h08_rol_v123', '1');
+      AppLog.info('sync', 'h08_transicion_ok',
+          d: 'borradas=${g1.borradas + g2.borradas}');
+      return true;
+    } catch (e) {
+      AppLog.error('sync', 'h08_transicion_fallo', d: '$e');
+      return false;
+    }
+  }
+
+  /// H-08 (1.23): huella del dueño actual del espejo —
+  /// `"${userId}_${rol}_$telegramId"`. Si cambia (otro usuario
+  /// u otro rol en el MISMO teléfono), el espejo local pertenece
+  /// a otra persona y no puede heredarse.
+  String get huellaEspejoActual {
+    final rol = _auth.isOwner
+        ? 'dueno'
+        : (_auth.isAdmin ? 'admin' : 'entrenador');
+    return '${_auth.userId ?? 'anon'}_${rol}_${_auth.telegramId ?? 0}';
+  }
+
+  /// H-08 (1.23): resync limpio si la huella del espejo cambió.
+  /// - Sin huella guardada: se registra la actual y no se toca
+  ///   nada (primera corrida; la purga de transición cubre los
+  ///   teléfonos que ya traen datos de otro rol).
+  /// - Huella igual: nada.
+  /// - Huella distinta y cola de ops CON pendientes: se POSPONE
+  ///   sin tocar nada (las ops sin subir son del usuario que las
+  ///   creó; en run() el push ya tuvo su oportunidad antes de
+  ///   este chequeo y el próximo ciclo reintenta).
+  /// - Huella distinta y cola vacía: fuera TODAS las filas
+  ///   confirmadas (sync_seq > 0) de los espejos, watermarks de
+  ///   las 39 a 0, huella actualizada — el _download que sigue
+  ///   repuebla con las tablas del nuevo rol. Las filas
+  ///   optimistas locales tampoco se tocan aquí (sync_seq 0).
+  /// Nunca lanza. Devuelve (resyncHecho, pospuesto).
+  Future<({bool resyncHecho, bool pospuesto})> resyncEspejoSiCambioHuella(
+      String huellaActual) async {
+    try {
+      final guardada = await _db.getMeta('espejo_owner_fingerprint');
+      if (guardada == null) {
+        await _db.setMeta('espejo_owner_fingerprint', huellaActual);
+        return (resyncHecho: false, pospuesto: false);
+      }
+      if (guardada == huellaActual) {
+        return (resyncHecho: false, pospuesto: false);
+      }
+      if (await _db.countPendingOps() > 0) {
+        AppLog.aviso('sync', 'h08_resync_pospuesto_cola');
+        return (resyncHecho: false, pospuesto: true);
+      }
+      final r = await _db.borrarEspejosConfirmados(tablasEspejo);
+      if (r.fallos.isNotEmpty) {
+        AppLog.error('sync', 'h08_resync_fallos',
+            d: r.fallos.join(','));
+        return (resyncHecho: false, pospuesto: true);
+      }
+      for (final t in tablasEspejo) {
+        await _db.setWatermarkTabla(t, 0);
+      }
+      await _db.setMeta('espejo_owner_fingerprint', huellaActual);
+      AppLog.info('sync', 'h08_resync_ok', d: 'borradas=${r.borradas}');
+      return (resyncHecho: true, pospuesto: false);
+    } catch (e) {
+      AppLog.error('sync', 'h08_resync_fallo', d: '$e');
+      return (resyncHecho: false, pospuesto: true);
+    }
+  }
+
   /// Lógica interna de bajada (sin guard _running).
   /// Si [silencioso] es true, no emite fases de progreso (pull de
   /// mantenimiento tras un push; el usuario no pidió ver el proceso).
@@ -2024,6 +2190,18 @@ class SyncEngine {
   Future<int> _doPull({bool silencioso = false}) async {
     // v1.2.9+47 (AppLog): instrumentación del pull.
     AppLog.info('sync', 'pull_ini');
+    // H-08 (1.23): preparación del espejo por rol ANTES de bajar:
+    // purga de transición (una sola vez) y resync si cambió el
+    // dueño del espejo. En run() el push ya corrió antes de este
+    // punto, que es el orden que exige el resync (la cola tuvo
+    // su oportunidad de vaciarse). Ambos pasos se tragan sus
+    // errores: jamás pueden tumbar el pull.
+    try {
+      await purgaTransicionH08SiToca(esAdmin: _esAdminSeguro);
+      await resyncEspejoSiCambioHuella(huellaEspejoActual);
+    } catch (e) {
+      AppLog.error('sync', 'h08_preparacion_fallo', d: '$e');
+    }
     try {
       if (!silencioso) _emit(SyncPhase.downloading);
       final resDownload = await _download(silencioso: silencioso);
@@ -3352,6 +3530,24 @@ class SyncEngine {
     return true;
   }
 
+  /// H-08 (1.23): guarda anti-espejo-vacío EXPLÍCITA en el punto
+  /// exacto del borrado (ajuste de Argón para H-08, cinturón y
+  /// tirantes sobre purgaPermitida, que ya es más estricta con
+  /// las troncales): en clientes o suplementos, un conjunto del
+  /// servidor VACÍO contra un espejo local con sustancia (>10
+  /// filas) jamás autoriza la purga. Un gimnasio real nunca pasa
+  /// de ~160 clientes a 0 de un ciclo a otro: ese 200 [] es una
+  /// lectura degradada (RLS sin contexto, JWT a medio refrescar),
+  /// no la verdad. Pura: testeable sin motor.
+  static bool purgaVacioProhibidaH08({
+    required String tabla,
+    required int idsVistos,
+    required int filasLocales,
+  }) =>
+      (tabla == 'clientes' || tabla == 'suplementos') &&
+      idsVistos == 0 &&
+      filasLocales > 10;
+
   static bool banderaRedescargaSeConsume({
     required bool esPurgable,
     required bool fueReseteada,
@@ -3444,10 +3640,59 @@ class SyncEngine {
     'acceso_bloqueos',
   ];
 
+  /// H-08 (1.23, capa 3 del diseño de Argón): espejos que un rol
+  /// puede tener en el teléfono. Admin/dueño: las 39. Entrenador:
+  /// las 39 menos las 12 del Grupo 1
+  /// (LocalDb.tablasProhibidasEntrenador) — no las pide al
+  /// servidor y no cuentan en su salud de sincronización. El
+  /// corte real es el RLS de Supabase; esto ahorra la descarga y
+  /// hace imposible que el dato prohibido se re-espeje local.
+  /// `nomina_bonos` SÍ baja para el entrenador (Grupo 2: corte
+  /// por fila en el servidor; su pantalla Mi Nómina la lee).
+  static List<String> tablasEspejoActivasParaRol(bool esAdmin) =>
+      esAdmin
+          ? tablasEspejo
+          : [
+              for (final t in tablasEspejo)
+                if (!LocalDb.tablasProhibidasEntrenador.contains(t)) t,
+            ];
+
+  /// H-08 (1.23): ¿hay un JWT utilizable AHORA? Si el de la
+  /// sesión venció, se intenta UN refresco (el mismo camino que
+  /// _reqAuth, pero verificado ANTES de cualquier descarga o
+  /// purga, no a mitad del bucle).
+  Future<bool> _jwtVigente() async {
+    try {
+      final ses = _auth.session;
+      if (ses == null) return false;
+      if (!ses.isExpired) return true;
+      final res = await Supabase.instance.client.auth.refreshSession();
+      final nueva = res.session;
+      return nueva != null && !nueva.isExpired;
+    } catch (_) {
+      return false;
+    }
+  }
+
   Future<({int aplicadas, Map<String, int> porTabla})> _download(
       {bool silencioso = false, List<String>? tablasFiltro}) async {
     // v1.2.8 (Paso 1): si se pasa tablasFiltro (scope), solo esas tablas.
-    final tablas = tablasFiltro ?? tablasEspejo;
+    // H-08 (1.23): sin filtro explícito, el pull completo pide
+    // solo las tablas activas del rol (el entrenador ni gasta
+    // datos en las 12 prohibidas; el corte real es el RLS).
+    final tablas =
+        tablasFiltro ?? tablasEspejoActivasParaRol(_esAdminSeguro);
+    // H-08 (1.23, guarda de Argón): con la sesión caída o el JWT
+    // vencido sin refresco posible, PostgREST puede responder
+    // 200 con [] (RLS evaluado sin contexto) y la purga leería
+    // un espejo «vacío» como verdad — la sospecha principal del
+    // incidente del espejo vacío del 2026-10-30. Sin JWT válido
+    // no se descarga NI se purga nada: el ciclo se salta entero
+    // y el próximo reintenta con la sesión sana.
+    if (!await _jwtVigente()) {
+      AppLog.aviso('sync', 'pull_sin_jwt_valido');
+      return (aplicadas: 0, porTabla: const <String, int>{});
+    }
     // v1.2.5 (D19): si el manifiesto marcó algún ámbito divergente,
     // re-descarga completa desde cero en este ciclo.
     // v1.2.5-rev5 (Gemini): reseteo GRANULAR por tabla, no nuclear global.
@@ -3579,32 +3824,46 @@ class SyncEngine {
             await _db
                 .setAjustes(Map<String, dynamic>.from(rows.first['ajustes']));
           }
-          // v1.0.12: lista de usuarios APK para gestión
-          if (rows.first['usuarios'] is List) {
-            await _db.setMeta(
-                'usuarios_apk', jsonEncode(rows.first['usuarios']));
-          }
-          // v1.0.15: feed de actividad reciente
-          if (rows.first['actividad'] is List) {
-            await _db.setMeta(
-                'sync_estado_actividad', jsonEncode(rows.first['actividad']));
-          }
-          // v1.4.1 (Pieza 7, D3): serie diaria agregada de 30 días.
-          // La columna puede no existir aún en sync_estado (el select
-          // la pide igual: PostgREST respondería 400 y el bloque
-          // entero fallaría... por eso va en su PROPIA lectura).
-          try {
-            final rs = await _getAuth(Uri.parse(
-                '$_base/rest/v1/sync_estado?id=eq.1'
-                '&select=actividad_serie'));
-            if (rs.statusCode == 200) {
-              final rowsS = jsonDecode(rs.body) as List;
-              if (rowsS.isNotEmpty && rowsS.first['actividad_serie'] is List) {
-                await _db.setMeta('sync_estado_actividad_serie',
-                    jsonEncode(rowsS.first['actividad_serie']));
-              }
+          // H-08 (1.23): las tres metas derivadas de sync_estado
+          // que siguen (usuarios APK, feed de actividad y serie)
+          // exponen el negocio entero — cuentas del personal y
+          // actividad global con montos — y solo las consume el
+          // Panel del dueño. En un teléfono de entrenador NO se
+          // guardan (y se borran las que una sesión anterior, p.
+          // ej. el teléfono compartido del dueño, hubiera dejado
+          // escritas). La vista del servidor además las entrega
+          // vacías al no-admin: esto es la defensa en el cliente.
+          if (_esAdminSeguro) {
+            // v1.0.12: lista de usuarios APK para gestión
+            if (rows.first['usuarios'] is List) {
+              await _db.setMeta(
+                  'usuarios_apk', jsonEncode(rows.first['usuarios']));
             }
-          } catch (_) {}
+            // v1.0.15: feed de actividad reciente
+            if (rows.first['actividad'] is List) {
+              await _db.setMeta('sync_estado_actividad',
+                  jsonEncode(rows.first['actividad']));
+            }
+            // v1.4.1 (Pieza 7, D3): serie diaria agregada de 30 días.
+            // La columna puede no existir aún en sync_estado (el select
+            // la pide igual: PostgREST respondería 400 y el bloque
+            // entero fallaría... por eso va en su PROPIA lectura).
+            try {
+              final rs = await _getAuth(Uri.parse(
+                  '$_base/rest/v1/sync_estado?id=eq.1'
+                  '&select=actividad_serie'));
+              if (rs.statusCode == 200) {
+                final rowsS = jsonDecode(rs.body) as List;
+                if (rowsS.isNotEmpty &&
+                    rowsS.first['actividad_serie'] is List) {
+                  await _db.setMeta('sync_estado_actividad_serie',
+                      jsonEncode(rowsS.first['actividad_serie']));
+                }
+              }
+            } catch (_) {}
+          } else {
+            await _limpiarMetasEstadoNoAdmin();
+          }
           serverSeq = rows.first['server_seq'] as int?;
           if (serverSeq != null) {
             await _db.setMeta('server_seq', '$serverSeq');
@@ -4296,14 +4555,21 @@ class SyncEngine {
           // del pull (watermark topado, datos aplicados) sigue.
           if (fallidasTabla > 0) viable = false;
           purgaValidada = purgaPermitida(
-            viable: viable,
-            pasadaCompleta: pasadaCompleta,
-            idsVistos: idsPurga.length,
-            filasLocales: filasLocales,
-            conteoConfirmado: conteoConfirmado,
-            totalServidor: totalServidor,
-            esTroncal: tablasTroncales.contains(tabla),
-          );
+                viable: viable,
+                pasadaCompleta: pasadaCompleta,
+                idsVistos: idsPurga.length,
+                filasLocales: filasLocales,
+                conteoConfirmado: conteoConfirmado,
+                totalServidor: totalServidor,
+                esTroncal: tablasTroncales.contains(tabla),
+              ) &&
+              // H-08: la guarda anti-espejo-vacío manda aunque
+              // todo lo demás valide (ver purgaVacioProhibidaH08).
+              !purgaVacioProhibidaH08(
+                tabla: tabla,
+                idsVistos: idsPurga.length,
+                filasLocales: filasLocales,
+              );
           if (purgaValidada) {
             final borradas =
                 await _db.purgarMirrorAusentes(tabla, idsPurga);

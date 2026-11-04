@@ -3816,6 +3816,77 @@ class LocalDb {
     return borrar;
   }
 
+  /// H-08 (1.23): borra las filas CONFIRMADAS por el servidor
+  /// (sync_seq > 0) de los espejos [tablas], en UNA transacción.
+  /// Es la primitiva de la purga de transición por rol y del
+  /// resync limpio al cambiar el dueño del espejo. Las filas
+  /// optimistas locales (sync_seq 0 o NULL: aún no espejadas,
+  /// su op vive en la cola) jamás se tocan, y ops_queue menos:
+  /// solo se borra lo que el servidor ya confirmó y puede
+  /// volver a bajar.
+  ///
+  /// Devuelve cuántas filas se borraron y qué tablas fallaron.
+  /// Una tabla aún inexistente en la BD («no such table»:
+  /// espejo que su migración aún no creó) no cuenta como fallo
+  /// — no había nada que borrar —; cualquier otro error sí se
+  /// reporta para que el llamador no dé la purga por completa.
+  Future<({int borradas, List<String> fallos})> borrarEspejosConfirmados(
+      List<String> tablas) async {
+    final d = await db;
+    var borradas = 0;
+    final fallos = <String>[];
+    await d.transaction((txn) async {
+      for (final t in tablas) {
+        try {
+          borradas +=
+              await txn.rawDelete('DELETE FROM "$t" WHERE sync_seq > 0');
+        } catch (e) {
+          if (!'$e'.contains('no such table')) fallos.add(t);
+        }
+      }
+    });
+    return (borradas: borradas, fallos: fallos);
+  }
+
+  /// H-08 (1.23): VACUUM forense ÚNICO tras la purga de
+  /// transición por rol. Un DELETE solo marca las páginas como
+  /// libres: los datos borrados (teléfonos, nóminas, gastos)
+  /// seguirían legibles con `strings` sobre el archivo .db o el
+  /// -wal. El checkpoint (TRUNCATE) + VACUUM reescribe el
+  /// archivo físico y destruye ese rastro.
+  ///
+  /// TENSIÓN DOCUMENTADA con la regla v1.3.4 («prohibido VACUUM
+  /// en producción»): aquella regla prohíbe el VACUUM como
+  /// RUTINA de mantenimiento (p. ej. la poda de ops_queue)
+  /// porque bloquea el WAL y duplica el disco en caliente. Esto
+  /// NO es rutina: es un borrado forense de una sola vez, en el
+  /// momento exacto de la purga de transición, y ningún otro
+  /// flujo lo invoca.
+  ///
+  /// Devuelve true si el archivo quedó reescrito. Si el
+  /// checkpoint no puede volcar el WAL (fila busy=1 o
+  /// DatabaseException SQLITE_LOCKED según la plataforma — el
+  /// mismo doble camino que normaliza exportarCopiaFria), se
+  /// devuelve false SIN lanzar: el llamador no marca la
+  /// migración como completa y lo reintenta en el próximo sync.
+  Future<bool> vacuumForenseH08() async {
+    final d = await db;
+    try {
+      final res = await d.rawQuery('PRAGMA wal_checkpoint(TRUNCATE)');
+      final busy =
+          res.isNotEmpty ? (res.first['busy'] as num?)?.toInt() ?? 1 : 1;
+      if (busy != 0) return false;
+    } catch (_) {
+      return false;
+    }
+    try {
+      await d.execute('VACUUM');
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
   // ── GymPedia (v33) ────────────────────────────────────────────────
 
   /// Artículos publicados del espejo local, decodificados, en el
@@ -6630,6 +6701,15 @@ class LocalDb {
     return rows.isEmpty ? null : rows.first['v'] as String;
   }
 
+  /// H-08 (1.23): borra una meta por completo. setMeta con ''
+  /// deja la fila viva y hay lectores para los que '' no
+  /// equivale a ausente; la purga de las metas de sync_estado
+  /// para no-admin necesita la fila GONE, no vacía.
+  Future<void> borrarMeta(String k) async {
+    final d = await db;
+    await d.delete('meta', where: 'k=?', whereArgs: [k]);
+  }
+
   // -- info pública pendiente (v37) --------------------------------
   // Una fila por clave pendiente de republicar en `info_publica`
   // (hoy: el precio del App Plus). Cada operación es UNA sentencia:
@@ -7465,6 +7545,29 @@ class LocalDb {
   /// próximo ciclo. Migración perezosa: si la tabla aún no tiene cursor
   /// propio, hereda el global `sync_seq` (no hay re-descarga masiva al
   /// actualizar).
+  /// H-08 (1.23): espejos del Grupo 1 — prohibidos para el
+  /// entrenador (diseño de Argón, APTO con ajustes críticos). El
+  /// corte real es el RLS del servidor; esta lista es la capa de
+  /// la app: esas tablas no se piden, no cuentan en el mínimo de
+  /// watermarks y su contenido confirmado se purga en la
+  /// transición. `nomina_bonos` NO está aquí a propósito: la
+  /// pantalla Mi Nómina del entrenador la lee y su corte es por
+  /// FILA en el servidor (Grupo 2), no por tabla.
+  static const tablasProhibidasEntrenador = {
+    'gastos',
+    'servicio_pomos',
+    'servicio_lotes',
+    'servicio_compras',
+    'suplemento_ajustes',
+    'espejo_entregas_efectivo',
+    'diferencias_caja',
+    'espejo_tarifas_especiales',
+    'espejo_recordatorio_config',
+    'turnos_apertura',
+    'turnos_cierre',
+    'espejo_gympedia_borradores',
+  };
+
   static const tablasConWatermark = [
     'clientes',
     'pagos',
@@ -7529,6 +7632,18 @@ class LocalDb {
     // empieza en 0, como las demás tablas de la 1.20).
     'acceso_bloqueos',
   ];
+
+  /// H-08 (1.23): [tablasConWatermark] vistas por un rol. Para
+  /// el entrenador, las del Grupo 1 salen del cálculo: nunca
+  /// bajan a su teléfono, así que su watermark quedaría
+  /// congelado y el mínimo diría «faltan datos» para siempre.
+  static List<String> tablasConWatermarkParaRol(bool esAdmin) =>
+      esAdmin
+          ? tablasConWatermark
+          : [
+              for (final t in tablasConWatermark)
+                if (!tablasProhibidasEntrenador.contains(t)) t,
+            ];
 
   Future<int> getWatermarkTabla(String tabla) async {
     final v = await getMeta('wm_$tabla');
@@ -7610,11 +7725,19 @@ class LocalDb {
   /// Supabase o el rol no las lee) no bloquean el "completo".
   /// [excluir] permite ignorar tablas concretas (v1.4.4: el cartel
   /// de novedades excluye 'borrados' — ver _emit en sync.dart).
+  /// H-08: con [esAdmin] informado, el mínimo se calcula sobre
+  /// las tablas activas del rol (tablasConWatermarkParaRol): las
+  /// prohibidas del entrenador no pueden bloquear su «completo».
+  /// Sin [esAdmin] (null) se conserva el cálculo histórico sobre
+  /// la lista completa.
   Future<int> getWatermarkMinimo(
-      {Set<String> excluir = const {}}) async {
+      {Set<String> excluir = const {}, bool? esAdmin}) async {
     var m = 1 << 62;
     var hay = false;
-    for (final t in tablasConWatermark) {
+    final tablas = esAdmin == null
+        ? tablasConWatermark
+        : tablasConWatermarkParaRol(esAdmin);
+    for (final t in tablas) {
       if (excluir.contains(t)) continue;
       if (await getMeta('wm_${t}_ausente') == '1') continue;
       // v1.3.1 (Argón pull): las tablas sin permiso (403 para entrenadores)
