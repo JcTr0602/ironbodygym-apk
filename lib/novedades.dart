@@ -16,6 +16,16 @@ class Novedad {
 }
 
 const novedades = [
+  Novedad('1.23.0', [
+    'Diseño renovado (segunda parte): tarjetas, superficies y diálogos uniformes en toda la app, con el naranja de la casa y cifras alineadas',
+    'Sincronización en segundo plano: la app se pone al día sola aunque esté cerrada, sin tener que abrirla para sincronizar',
+    'Cada teléfono descarga solo los datos que su rol necesita: los entrenadores ya no bajan la información interna del dueño',
+    'Aviso antes de cerrar sesión: si quedan cobros o comprobantes sin subir, la app te avisa antes de que se pierdan al salir',
+    'Importar un respaldo ahora puede hacerlo cualquier miembro del staff (con aviso si hay material sin subir); exportarlo sigue siendo solo del dueño',
+    'Historial de pagos con quién cobró cada mensualidad, y administración de suplementos ampliada: dosis y botes, reservas, fiados y productos sin foto o sin precio',
+    'La Guía puede actualizar sus imágenes sin que tengas que actualizar la app',
+    'Correcciones de conteo y de sincronización detectadas en la doble auditoría de cierre de esta versión',
+  ]),
   Novedad('1.22.0', [
     'Diseño renovado (primera parte): cabeceras con la identidad del gym, tarjetas y botones más claros en la pantalla principal y en las secciones más usadas',
     'Sincronización reforzada: la bajada de datos se verifica fila a fila para que el espejo local nunca quede a medias cuando la conexión falla',
