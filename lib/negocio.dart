@@ -2653,8 +2653,13 @@ Future<List<Map<String, dynamic>>> comparativaEntrenadores(
   // Argón Dinero #11: Casa no es cobro de nadie (ingresosMes
   // ya lo excluye con la misma regla).
   final casasComp = await LocalDb.instance.idsCuentasCasa();
+  // 1.23 (2ª auditoría): la comparativa también salta anulados
+  // (ingresosMes, su global, ya lo hace desde B-1).
+  final anuladosColaComp =
+      await LocalDb.instance.pagosAnuladosEnCola();
   for (final p in await LocalDb.instance.pagosDelMes(prefijo)) {
     if (_esPagoCasa(p, casasComp)) continue;
+    if (esPagoAnulado(p, anuladosColaComp)) continue;
     final f = fila(nombreDe(p));
     f['cobros_n'] = (f['cobros_n'] as int) + 1;
     f['cobros_monto'] = (f['cobros_monto'] as double) +
@@ -3846,6 +3851,16 @@ Future<int> conteoPagosDia(int? telegramId, {String? fecha}) async {
         fechaOp = '${op['creada_ts'] ?? ''}';
       }
       if (fechaNegocioHabana(fechaOp) != hoy) continue;
+      // Cierre 1.23 (D-02, 2ª auditoría): el mismo guard de
+      // miTurnoHoy — si el espejo ya refleja el saldo de este
+      // fiado, el bucle espejo de ventas ya contó la venta con
+      // su fecha reescrita a hoy; contar también la op de saldo
+      // (otro op_uuid: el descarte B-03 no la caza) duplicaría
+      // el registro en el conteo del cierre.
+      if ('${op['tipo']}' == 'saldar_fiado_suplemento' &&
+          await _fiadoDeOpYaSaldadoEnEspejo(payload)) {
+        continue;
+      }
       // Predicado de conteo (registros, no dinero): cuenta si la
       // op cobró algo en CUP (cualquier método) o en USD. Y por
       // la regla de Jc de arriba, un fiado CUENTA como registro
@@ -3985,8 +4000,11 @@ Future<List<Map<String, dynamic>>> historialTurno(int? telegramId,
         .add({'etiqueta': etiqueta, 'monto': fmtMonto(monto)});
   }
 
+  // 1.23 (2ª auditoría): un pago anulado no es cobro del turno.
+  final anuladosCola = await LocalDb.instance.pagosAnuladosEnCola();
   // v1.3.4 (B2): filtro por columna indexada telegram_user_id (v26).
   for (final p in await LocalDb.instance.pagosPorFiltro(telegramId: telegramId)) {
+    if (esPagoAnulado(p, anuladosCola)) continue;
     final dia = fechaNegocioHabana(p['fecha']);
     if (dia.isEmpty) continue;
     final cid = p['cliente_id'] as int?;
@@ -4284,9 +4302,13 @@ Future<Map<String, dynamic>> pendienteDetalleHoy(
   final hoy = _isoDia(ahoraHabana());
   double mens = 0, diar = 0;
   var n = 0;
+  // 1.23 (2ª auditoría): el detalle no puede sumar más que el
+  // total canónico (pendienteEntrega): fuera pagos anulados.
+  final anuladosCola = await LocalDb.instance.pagosAnuladosEnCola();
   for (final p in await LocalDb.instance
       .pagosPorDiaMetodo(hoy, 'efectivo', telegramId)) {
     if (!esPendiente(p['entregado'])) continue;
+    if (esPagoAnulado(p, anuladosCola)) continue;
     mens += (p['monto'] as num?)?.toDouble() ?? 0;
     n++;
   }
@@ -4313,10 +4335,15 @@ Future<double> cobradoMes(int? telegramId) async {
       '${n.month.toString().padLeft(2, '0')}';
   // Ajuste A1 (Argón delta 3-9): Casa nunca suma, tampoco aquí.
   final casas = await LocalDb.instance.idsCuentasCasa();
+  // 1.23 (2ª auditoría): B-1 dejó el gemelo global con overlay
+  // y este sin él: un pago anulado seguía sumando en la ficha
+  // del entrenador mientras el Dashboard ya lo había bajado.
+  final anuladosCola = await LocalDb.instance.pagosAnuladosEnCola();
   double t = 0;
   for (final p
       in await LocalDb.instance.pagosMesPorEntrenador(telegramId, pref)) {
     if (_esPagoCasa(p, casas)) continue;
+    if (esPagoAnulado(p, anuladosCola)) continue;
     t += (p['monto'] as num?)?.toDouble() ?? 0;
   }
   for (final d in await LocalDb.instance.allMirror('pagos_diarios')) {
@@ -4456,10 +4483,13 @@ Future<Map<String, double>> ingresosPorMetodoEntrenador(
       '${n.month.toString().padLeft(2, '0')}';
   // Ajuste A1 (Argón delta 3-9): Casa nunca suma, tampoco aquí.
   final casas = await LocalDb.instance.idsCuentasCasa();
+  // 1.23 (2ª auditoría): overlay de anulados, como el global.
+  final anuladosCola = await LocalDb.instance.pagosAnuladosEnCola();
   double efectivo = 0, transferencia = 0, suplementos = 0, servicios = 0;
   for (final p
       in await LocalDb.instance.pagosMesPorEntrenador(telegramId, pref)) {
     if (_esPagoCasa(p, casas)) continue;
+    if (esPagoAnulado(p, anuladosCola)) continue;
     final m = (p['monto'] as num?)?.toDouble() ?? 0;
     if ('${p['metodo']}' == 'transferencia') {
       transferencia += m;
@@ -4509,10 +4539,13 @@ Future<Map<String, double>> ingresosPorTipoEntrenador(
       '${n.month.toString().padLeft(2, '0')}';
   // Ajuste A1 (Argón delta 3-9): Casa nunca suma, tampoco aquí.
   final casas = await LocalDb.instance.idsCuentasCasa();
+  // 1.23 (2ª auditoría): overlay de anulados, como el global.
+  final anuladosCola = await LocalDb.instance.pagosAnuladosEnCola();
   double mensual = 0, diario = 0, suplementos = 0, servicios = 0;
   for (final p
       in await LocalDb.instance.pagosMesPorEntrenador(telegramId, pref)) {
     if (_esPagoCasa(p, casas)) continue;
+    if (esPagoAnulado(p, anuladosCola)) continue;
     mensual += (p['monto'] as num?)?.toDouble() ?? 0;
   }
   for (final d in await LocalDb.instance.allMirror('pagos_diarios')) {
@@ -4557,9 +4590,12 @@ Future<Map<String, Map<String, dynamic>>> mejorPeorDiaEntrenador(
   final porDia = <String, double>{};
   // Ajuste A1 (Argón delta 3-9): Casa nunca suma, tampoco aquí.
   final casas = await LocalDb.instance.idsCuentasCasa();
+  // 1.23 (2ª auditoría): overlay de anulados, como el global.
+  final anuladosCola = await LocalDb.instance.pagosAnuladosEnCola();
   for (final p
       in await LocalDb.instance.pagosMesPorEntrenador(telegramId, pref)) {
     if (_esPagoCasa(p, casas)) continue;
+    if (esPagoAnulado(p, anuladosCola)) continue;
     final dia = fechaNegocioHabana(p['fecha']);
     if (dia.isNotEmpty) {
       porDia[dia] =
@@ -4637,9 +4673,13 @@ Future<List<Map<String, dynamic>>> detallePendienteEntrenador(
       'fecha_inscripcion': '${c['fecha_inscripcion'] ?? ''}',
     };
   }
+  // 1.23 (2ª auditoría): el detalle no lista como pendiente lo
+  // que el total (pendienteEntrega) ya excluye por anulado.
+  final anuladosCola = await LocalDb.instance.pagosAnuladosEnCola();
   for (final p
       in await LocalDb.instance.pagosEfectivoPorEntrenador(tid)) {
     if (!esPendiente(p['entregado'])) continue;
+    if (esPagoAnulado(p, anuladosCola)) continue;
     if (liquidados.contains('pagos:${p['id']}')) continue;
     final cid = (p['cliente_id'] as num?)?.toInt() ?? 0;
     final cli = clientes[cid];
@@ -4764,9 +4804,13 @@ Future<List<Map<String, dynamic>>> pagosPendientesDetalle(
     }
   } catch (_) {}
 
+  // 1.23 (2ª auditoría): fuera anulados, como en el total —
+  // S2-2 añadió aquí el filtro de liquidados y omitió este.
+  final anuladosCola = await LocalDb.instance.pagosAnuladosEnCola();
   for (final p
       in await LocalDb.instance.pagosEfectivoPorEntrenador(null)) {
     if (!esPendiente(p['entregado'])) continue;
+    if (esPagoAnulado(p, anuladosCola)) continue;
     final tid = LocalDb.normalizarTelegramId(p['telegram_user_id']);
     if (tid == null) continue;
     if (excluirTid != null && tid == excluirTid) continue;
@@ -5058,9 +5102,14 @@ Future<List<Map<String, dynamic>>> pendientePorEntrenador(
     return s;
   }
 
+  // 1.23 (2ª auditoría): la vista agrupada tampoco suma un
+  // pago con anulación viva (su total debe coincidir con el
+  // de la vista del entrenador sobre lo mismo).
+  final anuladosCola = await LocalDb.instance.pagosAnuladosEnCola();
   for (final p
       in await LocalDb.instance.pagosEfectivoPorEntrenador(null)) {
     if (!esPendiente(p['entregado'])) continue;
+    if (esPagoAnulado(p, anuladosCola)) continue;
     final tid = LocalDb.normalizarTelegramId(p['telegram_user_id']);
     if (tid == null) continue;
     if (excluirTid != null && tid == excluirTid) continue;
@@ -5211,7 +5260,12 @@ Future<
   double efectivo = 0, transferencia = 0, diario = 0;
   double suplementos = 0, servicios = 0;
   int n = 0;
+  // 1.23 (2ª auditoría): un pago anulado no suma ni cuenta
+  // como movimiento del día (misma regla que AT-12 aplicó a
+  // cortesía/promo en este mismo bucle).
+  final anuladosCola = await LocalDb.instance.pagosAnuladosEnCola();
   for (final p in await LocalDb.instance.pagosDelDia(fechaIso)) {
+    if (esPagoAnulado(p, anuladosCola)) continue;
     final m = (p['monto'] as num?)?.toDouble() ?? 0;
     if ('${p['metodo']}' == 'transferencia') {
       transferencia += m;
@@ -5455,8 +5509,17 @@ Future<({List<int> pagos, List<int> diarios, List<int> suplementos,
     return s;
   }
 
+  // 1.23 (2ª auditoría): un pago con anulación viva en cola NO
+  // viaja a la confirmación de entrega (misma regla que
+  // idsPendienteArqueo #6): el total canónico ya lo excluye, y si
+  // viajara quedaría cerrado como «entregado» — si el servidor
+  // luego rechaza la anulación, el pago revive ya entregado y ese
+  // efectivo no se vuelve a cobrar.
+  final anuladosColaEntrega =
+      await LocalDb.instance.pagosAnuladosEnCola();
   for (final p in await LocalDb.instance.pagosEfectivoPorEntrenador(null)) {
     if (!esPendiente(p['entregado'])) continue;
+    if (esPagoAnulado(p, anuladosColaEntrega)) continue;
     final tid = LocalDb.normalizarTelegramId(p['telegram_user_id']);
     if (tid == null || !mismo(tid)) continue;
     final id = (p['id'] as num?)?.toInt();
@@ -5815,8 +5878,11 @@ Future<List<Map<String, dynamic>>> ingresosUltimos30Dias() async {
   final porDia = <String, double>{};
   // Ronda 3-9 #7: Casa nunca suma (extensión del #2).
   final casas = await LocalDb.instance.idsCuentasCasa();
+  // 1.23 (2ª auditoría): overlay de anulados en la serie diaria.
+  final anuladosCola = await LocalDb.instance.pagosAnuladosEnCola();
   for (final p in pagos) {
     if (_esPagoCasa(p, casas)) continue;
+    if (esPagoAnulado(p, anuladosCola)) continue;
     final dia = fechaNegocioHabana(p['fecha']);
     if (dia.isNotEmpty) {
       porDia[dia] = (porDia[dia] ?? 0) +
@@ -5870,6 +5936,9 @@ Future<List<Map<String, dynamic>>> rankingEntrenadores() async {
   // Ronda 3-9 #7: servicios del mes + Casa nunca suma (extensión
   // del #2, misma clase de bug).
   final casas = await LocalDb.instance.idsCuentasCasa();
+  // 1.23 (2ª auditoría): el ranking tampoco suma anulados.
+  final anuladosColaRank =
+      await LocalDb.instance.pagosAnuladosEnCola();
   // Ajuste A3 (Argón delta 3-9): id -> nombre del entrenador,
   // para acreditar los servicios al responsable efectivo con la
   // misma clave (nombre) que el resto de bucles.
@@ -5903,6 +5972,7 @@ Future<List<Map<String, dynamic>>> rankingEntrenadores() async {
     // que un entrenador con solo pagos Casa también resuelva.
     anotaNombre(p['registrado_por'], p['registrado_por_nombre']);
     if (_esPagoCasa(p, casas)) continue;
+    if (esPagoAnulado(p, anuladosColaRank)) continue;
     final ent =
         '${p['registrado_por_nombre'] ?? p['registrado_por'] ?? '?'}';
     porEntrenador[ent] =

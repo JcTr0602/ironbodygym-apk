@@ -78,6 +78,24 @@ class LocalDb {
   /// devuelven COPIAS: los llamadores mutan el mapa recibido.
   Map<String, dynamic>? _ajustesCache;
 
+  /// 1.23 (2ª auditoría): la caché es por isolate y el sync
+  /// también corre en el isolate del FGS: si ESE ciclo aplica
+  /// unos ajustes nuevos (setAjustes escribe la BD compartida),
+  /// la caché de este isolate no se entera y seguiría sirviendo
+  /// precios viejos en pantalla sin límite. TTL de 60 s: pasado
+  /// ese plazo, getAjustes relee de la BD. Acota la ventana sin
+  /// renunciar a la caché; el servidor recalcula el dinero de
+  /// todos modos, así que nunca hubo riesgo de cobro erróneo.
+  final Stopwatch _ajustesCacheReloj = Stopwatch();
+  static const Duration _ttlAjustesCache = Duration(seconds: 60);
+
+  void _sellarCacheAjustes(Map<String, dynamic> v) {
+    _ajustesCache = Map<String, dynamic>.from(v);
+    _ajustesCacheReloj
+      ..reset()
+      ..start();
+  }
+
   /// v1.4.0 (Argón): versión actual del esquema local. Los tests de
   /// migración comparan contra esta constante en vez de un número
   /// fijo, para no caer en cascada de fallos con cada migración.
@@ -7801,15 +7819,18 @@ class LocalDb {
   }
 
   Future<Map<String, dynamic>> getAjustes({DatabaseExecutor? txn}) async {
-    // Caché 3ª-O4: solo fuera de transacción (ver [_ajustesCache]).
-    if (txn == null && _ajustesCache != null) {
+    // Caché 3ª-O4: solo fuera de transacción (ver [_ajustesCache])
+    // y solo dentro de su TTL (ver [_ajustesCacheReloj]).
+    if (txn == null &&
+        _ajustesCache != null &&
+        _ajustesCacheReloj.elapsed < _ttlAjustesCache) {
       return Map<String, dynamic>.from(_ajustesCache!);
     }
     final raw = await getMeta('ajustes', txn: txn);
     if (raw == null) return {};
     final out = jsonDecode(raw) as Map<String, dynamic>;
     if (txn == null) {
-      _ajustesCache = Map<String, dynamic>.from(out);
+      _sellarCacheAjustes(out);
     }
     return out;
   }
@@ -7820,8 +7841,11 @@ class LocalDb {
     // Caché 3ª-O4: sin executor el valor ya es firme → se
     // refresca; con executor la escritura vive en una
     // transacción ajena que puede revertirse → se invalida.
-    _ajustesCache =
-        executor == null ? Map<String, dynamic>.from(a) : null;
+    if (executor == null) {
+      _sellarCacheAjustes(a);
+    } else {
+      _ajustesCache = null;
+    }
   }
 
   // -- Bloque 2 RESTO (v1.11.0, G2 + C1) ------------------------------

@@ -1241,7 +1241,15 @@ class SyncEngine {
       // La purga es best-effort: su fallo no puede dejar la
       // sesión vencida colgada sin cerrar.
     }
-    await _auth.signOut();
+    try {
+      await _auth.signOut();
+    } catch (_) {
+      // Igual que la purga: un fallo al cerrar la sesión remota
+      // (sin conexión, sesión ya vencida en el servidor) no puede
+      // impedir que la UI reciba el aviso de sesión vencida; sin
+      // esta protección la app quedaba en una sesión zombi hasta
+      // cerrarla a mano (2ª auditoría 1.23).
+    }
     onSessionExpired?.call();
   }
 
@@ -4893,6 +4901,18 @@ class SyncEngine {
         }
         borradosMax =
             topePaginaSeguro(borradosMax, pageWm, minBorradoFallido);
+        // S3 (espejo de la guarda de las tablas de datos; 2ª
+        // auditoría 1.23): si el tope impidió avanzar — la primera
+        // fila de la página falló — no re-pedir la misma página en
+        // este ciclo: el bucle giraría para siempre sobre ella
+        // reteniendo el sync_lock y re-descargándola sin pausa.
+        // El cursor no avanzó más allá de la fila mala (tope), así
+        // que el próximo ciclo la reintenta desde el mismo punto.
+        if (borradosMax <= pageWm) {
+          AppLog.info('sync', 'pull_estancado',
+              d: 'borrados pageWm=$pageWm borradosMax=$borradosMax');
+          break;
+        }
         if (rows.length < kPisoPagina) break;
         pageWm = borradosMax;
       }

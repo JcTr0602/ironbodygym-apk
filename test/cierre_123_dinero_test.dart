@@ -210,4 +210,67 @@ void main() {
       expect(c.indeterminado, isFalse);
     });
   });
+
+  group('2ª auditoría: el overlay de anulados llega a todos los '
+      'lectores y D-02 también guarda el conteo', () {
+    Future<void> pagoEfectivoPendiente(int id) async {
+      await LocalDb.instance.upsertMirror('pagos', id, {
+        'cliente_id': 9100 + id,
+        'monto': 2000,
+        'fecha': hoyHabanaIso(),
+        'metodo': 'efectivo',
+        'periodo': 'mensual',
+        'telegram_user_id': _tid,
+        'entregado': 0,
+      }, 1);
+    }
+
+    test('idsPendientesEntrega NO ofrece un pago con anulación '
+        'viva (no puede cerrarse como entregado)', () async {
+      await pagoEfectivoPendiente(701);
+      var ids = await idsPendientesEntrega(trainerId: _tid);
+      expect(ids.pagos, contains(701));
+
+      await LocalDb.instance.queueOp(
+          opUuid: 'anul-701',
+          tipo: 'anular_pago',
+          payload: {'pago_id': 701});
+
+      ids = await idsPendientesEntrega(trainerId: _tid);
+      expect(ids.pagos, isNot(contains(701)));
+    });
+
+    test('pagosPendientesDetalle excluye el anulado (la lista no '
+        'suma más que el total)', () async {
+      await pagoEfectivoPendiente(702);
+      var lista = await pagosPendientesDetalle();
+      expect(lista.map((e) => e['id']), contains(702));
+
+      await LocalDb.instance.queueOp(
+          opUuid: 'anul-702',
+          tipo: 'anular_pago',
+          payload: {'pago_id': 702});
+
+      lista = await pagosPendientesDetalle();
+      expect(lista.map((e) => e['id']), isNot(contains(702)));
+    });
+
+    test('conteoPagosDia: fiado saldado offline cuenta UNA vez '
+        '(el espejo ya lo trae; la op de saldo no duplica)',
+        () async {
+      final hoy = hoyHabanaIso();
+      await _ventaFiadaEspejo(57, fecha: _ayerIso());
+      await _opSaldarCruda(57, fecha: hoy);
+      await LocalDb.instance.marcarFiadoSaldado(57, hoy);
+      expect(await conteoPagosDia(_tid), 1);
+    });
+
+    test('conteoPagosDia: espejo aún al fiado — la op de saldo '
+        'aporta el registro (total 1, por la otra vía)', () async {
+      final hoy = hoyHabanaIso();
+      await _ventaFiadaEspejo(58, fecha: _ayerIso());
+      await _opSaldarCruda(58, fecha: hoy);
+      expect(await conteoPagosDia(_tid), 1);
+    });
+  });
 }
