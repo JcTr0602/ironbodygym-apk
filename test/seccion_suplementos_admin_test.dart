@@ -36,7 +36,8 @@ Future<void> _prepararBase(WidgetTester tester) async {
     SharedPreferences.setMockInitialValues({});
     final dir = await getDatabasesPath();
     try {
-      await File(p.join(dir, 'ironbody.db')).delete();
+      await File(p.join(dir, 'test_seccion_suplementos_admin.db'))
+          .delete();
     } catch (_) {}
     await LocalDb.resetParaTest();
     await LocalDb.instance.db;
@@ -44,6 +45,12 @@ Future<void> _prepararBase(WidgetTester tester) async {
 }
 
 void main() {
+  // Higiene (nota de Argón al APTO del backlog): BD propia del
+  // test — sin nombre forzado, _prepararBase borraba el
+  // ironbody.db por defecto y la suite en paralelo podía
+  // cruzarlo con otro test.
+  LocalDb.nombreArchivoDbForzado = 'test_seccion_suplementos_admin.db';
+
   setUpAll(() async {
     SharedPreferences.setMockInitialValues({});
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger

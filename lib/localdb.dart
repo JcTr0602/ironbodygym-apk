@@ -4412,7 +4412,17 @@ class LocalDb {
     final data =
         jsonDecode(rows.first['data'] as String) as Map<String, dynamic>;
     if (monto != null) data['monto'] = monto;
-    if (fecha != null && fecha.isNotEmpty) data['fecha'] = fecha;
+    if (fecha != null && fecha.isNotEmpty) {
+      // 1.23 (delta Argón H2, endurecimiento de frontera): el
+      // JSON guarda la misma fecha de negocio que la columna —
+      // columnasPagos ya normalizaba con fechaNegocioHabana
+      // desde AT-07 y el único productor (ficha) valida el
+      // formato YYYY-MM-DD antes de encolar, así que en campo
+      // nunca llegó un timestamp; esto cierra la divergencia
+      // JSON/columna para cualquier llamante futuro.
+      final fn = fechaNegocioHabana(fecha);
+      data['fecha'] = fn.isNotEmpty ? fn : fecha;
+    }
     if (metodo != null && metodo.isNotEmpty) data['metodo'] = metodo;
     await ex.update('pagos',
         {'data': jsonEncode(data), ...columnasPagos(data)},

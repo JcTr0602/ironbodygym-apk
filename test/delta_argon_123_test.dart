@@ -197,6 +197,33 @@ void main() {
     expect(d51['monto'], 1500);
   });
 
+  test('3ª#4b reflejo de editar_pago: un timestamp ISO completo '
+      'se normaliza a fecha de negocio en JSON y columna '
+      '(delta Argón H2)', () async {
+    final db = await _abrirDbVacia();
+    await _espejo(db, 'pagos', 52, {
+      'id': 52,
+      'cliente_id': 7,
+      'fecha': '2026-10-30',
+      'monto': 2000,
+      'metodo': 'efectivo',
+    }, cols: {
+      'fecha': '2026-10-30',
+      'metodo': 'efectivo',
+      'cliente_id': 7,
+    });
+    // 2026-11-01T02:30Z es 2026-10-31 en La Habana (UTC-4):
+    // el JSON no puede quedar con el string largo ni con el
+    // día UTC — manda la fecha de negocio, como en la columna.
+    await LocalDb.instance.reflejarEditarPagoEnEspejo(52,
+        fecha: '2026-11-01T02:30:00Z');
+    final crudas = await db.query('pagos', where: 'id=52');
+    final c52 = crudas.single;
+    final d52 = jsonDecode(c52['data'] as String) as Map<String, dynamic>;
+    expect(d52['fecha'], '2026-10-31');
+    expect(c52['fecha'], '2026-10-31');
+  });
+
   test('3ª#3 auditoriaInsert: 50 eventos en lote sin colisión '
       'y cadena de hashes íntegra', () async {
     final db = await _abrirDbVacia();

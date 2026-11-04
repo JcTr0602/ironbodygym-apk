@@ -5,8 +5,14 @@
 /// - huella distinta con la cola vacía: resync limpio (fuera
 ///   todo lo confirmado de las 39, watermarks a 0, huella
 ///   actualizada) respetando las filas optimistas;
-/// - huella distinta con ops pendientes: se POSPONE sin tocar
-///   ni el espejo ni la huella.
+/// - huella distinta hacia un rol NO admin con ops pendientes:
+///   borrado INMEDIATO de lo confirmado (delta Argón H1) — las
+///   ops y sus reflejos optimistas (sync_seq 0) quedan; la
+///   postergación con cola ocupada solo sobrevive para el rol
+///   admin, que en tests no se puede montar (sin sesión real:
+///   _esAdminSeguro es false y ese camino se razona);
+/// - huella «anon_*» contra una real guardada: jamás borra
+///   (delta Argón H2).
 library;
 
 import 'dart:convert';
@@ -104,13 +110,21 @@ void main() {
           'userA_dueno_111');
     });
 
-    test('cambio de huella con la cola ocupada: se pospone intacto',
-        () async {
+    test(
+        'cambio a no-admin con la cola ocupada: borrado inmediato '
+        'de confirmados (delta Argón H1)', () async {
       final db = await _abrirDbVacia();
       final ldb = LocalDb.instance;
       await ldb.setMeta(
-          'espejo_owner_fingerprint', 'userB_entrenador_222');
-      await _espejo(db, 'clientes', 1, {'nombre': 'De B'}, seq: 100);
+          'espejo_owner_fingerprint', 'userA_dueno_111');
+      await _espejo(db, 'clientes', 1, {'nombre': 'Del dueño'},
+          seq: 100);
+      await _espejo(db, 'clientes', 2, {'nombre': 'Optimista'},
+          seq: 0);
+      await _espejo(db, 'gastos', 1, {'concepto': 'Del dueño'},
+          seq: 101);
+      await ldb.setMeta('usuarios_apk', '[]');
+      await ldb.setMeta('sync_estado_actividad', '[]');
       await db.insert('ops_queue', {
         'op_uuid': 'op-h08-huella',
         'tipo': 'registrar_pago',
@@ -119,15 +133,42 @@ void main() {
         'creada_ts': '2026-11-04T00:00:00',
       });
 
+      // Entra un entrenador (en tests no hay sesión: el rol se
+      // evalúa no-admin, que es justo el caso del hallazgo).
       final r = await SyncEngine.instance
-          .resyncEspejoSiCambioHuella('userA_dueno_111');
-      expect(r.resyncHecho, isFalse);
-      expect(r.pospuesto, isTrue);
-      // Ni el espejo ni la huella se tocaron.
+          .resyncEspejoSiCambioHuella('userB_entrenador_222');
+      expect(r.resyncHecho, isTrue);
+      expect(r.pospuesto, isFalse);
+      // Lo confirmado del dueño fuera; la fila optimista y la
+      // op pendiente quedan intactas.
       expect(await ldb.contar('clientes'), 1);
+      final restan = await db.query('clientes');
+      expect(restan.single['id'], 2);
+      expect(await ldb.contar('gastos'), 0);
+      expect(await ldb.countPendingOps(), 1);
+      // Huella actualizada y metas de estado de no-admin fuera.
       expect(await ldb.getMeta('espejo_owner_fingerprint'),
           'userB_entrenador_222');
-      expect(await ldb.countPendingOps(), 1);
+      expect(await ldb.getMeta('usuarios_apk'), isNull);
+      expect(await ldb.getMeta('sync_estado_actividad'), isNull);
+    });
+
+    test('huella anónima contra una real: jamás borra (delta H2)',
+        () async {
+      final db = await _abrirDbVacia();
+      final ldb = LocalDb.instance;
+      await ldb.setMeta(
+          'espejo_owner_fingerprint', 'userA_dueno_111');
+      await _espejo(db, 'clientes', 1, {'nombre': 'Del dueño'},
+          seq: 100);
+
+      final r = await SyncEngine.instance
+          .resyncEspejoSiCambioHuella('anon_entrenador_0');
+      expect(r.resyncHecho, isFalse);
+      expect(r.pospuesto, isTrue);
+      expect(await ldb.contar('clientes'), 1);
+      expect(await ldb.getMeta('espejo_owner_fingerprint'),
+          'userA_dueno_111');
     });
   });
 }

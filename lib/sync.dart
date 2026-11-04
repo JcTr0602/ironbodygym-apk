@@ -2139,15 +2139,25 @@ class SyncEngine {
   ///   nada (primera corrida; la purga de transición cubre los
   ///   teléfonos que ya traen datos de otro rol).
   /// - Huella igual: nada.
-  /// - Huella distinta y cola de ops CON pendientes: se POSPONE
-  ///   sin tocar nada (las ops sin subir son del usuario que las
-  ///   creó; en run() el push ya tuvo su oportunidad antes de
-  ///   este chequeo y el próximo ciclo reintenta).
+  /// - Huella distinta y el rol nuevo NO es admin: borrado
+  ///   INMEDIATO de lo confirmado, aunque haya ops pendientes
+  ///   (delta Argón H1: posponerlo dejaba el espejo del dueño
+  ///   legible por el entrenador hasta que la cola se vaciara;
+  ///   las ops pendientes viven en ops_queue y sus reflejos
+  ///   locales tienen sync_seq == 0, que el borrado respeta).
+  ///   De paso caen las metas de estado de no-admin.
+  /// - Huella distinta, rol nuevo admin y cola CON pendientes:
+  ///   se POSPONE sin tocar nada (las ops sin subir son del
+  ///   usuario que las creó; en run() el push ya tuvo su
+  ///   oportunidad antes de este chequeo y el próximo ciclo
+  ///   reintenta; un admin no expone nada al esperar).
   /// - Huella distinta y cola vacía: fuera TODAS las filas
   ///   confirmadas (sync_seq > 0) de los espejos, watermarks de
   ///   las 39 a 0, huella actualizada — el _download que sigue
   ///   repuebla con las tablas del nuevo rol. Las filas
   ///   optimistas locales tampoco se tocan aquí (sync_seq 0).
+  /// - Huella «anon_*» (sin sesión) contra una huella real
+  ///   guardada: jamás dispara el borrado (delta Argón H2).
   /// Nunca lanza. Devuelve (resyncHecho, pospuesto).
   Future<({bool resyncHecho, bool pospuesto})> resyncEspejoSiCambioHuella(
       String huellaActual) async {
@@ -2160,7 +2170,16 @@ class SyncEngine {
       if (guardada == huellaActual) {
         return (resyncHecho: false, pospuesto: false);
       }
-      if (await _db.countPendingOps() > 0) {
+      // Delta Argón H2: una huella degradada por falta de sesión
+      // ('anon_entrenador_0') no es un cambio de usuario: nunca
+      // borra contra una huella real guardada.
+      if (huellaActual.startsWith('anon_')) {
+        AppLog.aviso('sync', 'h08_resync_huella_anon');
+        return (resyncHecho: false, pospuesto: true);
+      }
+      // Delta Argón H1: la postergación por cola ocupada solo
+      // vale si el rol nuevo es admin (ver el doc de arriba).
+      if (_esAdminSeguro && await _db.countPendingOps() > 0) {
         AppLog.aviso('sync', 'h08_resync_pospuesto_cola');
         return (resyncHecho: false, pospuesto: true);
       }
@@ -2172,6 +2191,9 @@ class SyncEngine {
       }
       for (final t in tablasEspejo) {
         await _db.setWatermarkTabla(t, 0);
+      }
+      if (!_esAdminSeguro) {
+        await _limpiarMetasEstadoNoAdmin();
       }
       await _db.setMeta('espejo_owner_fingerprint', huellaActual);
       AppLog.info('sync', 'h08_resync_ok', d: 'borradas=${r.borradas}');
@@ -2190,15 +2212,29 @@ class SyncEngine {
   Future<int> _doPull({bool silencioso = false}) async {
     // v1.2.9+47 (AppLog): instrumentación del pull.
     AppLog.info('sync', 'pull_ini');
-    // H-08 (1.23): preparación del espejo por rol ANTES de bajar:
-    // purga de transición (una sola vez) y resync si cambió el
-    // dueño del espejo. En run() el push ya corrió antes de este
-    // punto, que es el orden que exige el resync (la cola tuvo
-    // su oportunidad de vaciarse). Ambos pasos se tragan sus
-    // errores: jamás pueden tumbar el pull.
+    // H-08 (1.23): preparación del espejo por rol ANTES de bajar.
+    // En run() el push ya corrió antes de este punto (la cola
+    // tuvo su oportunidad de vaciarse). Ambos pasos se tragan
+    // sus errores: jamás pueden tumbar el pull.
+    // Delta Argón H2: sin JWT vigente la preparación NO corre —
+    // sin sesión, huellaEspejoActual degrada a 'anon_entrenador_0'
+    // y un «cambio de huella» ficticio podía destruir el espejo
+    // del dueño antes de que _download abortara por JWT. El
+    // chequeo vivía solo dentro de _download; aquí protege los
+    // dos pasos destructivos (la descarga conserva el suyo).
+    // Delta Argón H1: el orden se invierte — PRIMERO el resync
+    // por huella (si el rol nuevo no es admin, borra lo
+    // confirmado del anterior de inmediato) y DESPUÉS la purga
+    // de transición, para que sus banderas forzar_redescarga_*
+    // queden puestas tras el resync y la descarga de este mismo
+    // ciclo las honre.
     try {
-      await purgaTransicionH08SiToca(esAdmin: _esAdminSeguro);
-      await resyncEspejoSiCambioHuella(huellaEspejoActual);
+      if (await _jwtVigente()) {
+        await resyncEspejoSiCambioHuella(huellaEspejoActual);
+        await purgaTransicionH08SiToca(esAdmin: _esAdminSeguro);
+      } else {
+        AppLog.aviso('sync', 'h08_prep_sin_jwt');
+      }
     } catch (e) {
       AppLog.error('sync', 'h08_preparacion_fallo', d: '$e');
     }
