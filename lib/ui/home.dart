@@ -224,6 +224,16 @@ class _HomeScreenState extends State<HomeScreen>
     if (!permisos.estaSuspendido && !permisos.sinHabilitar) return;
     _mostrandoDialogoSuspendido = true;
     final suspendido = permisos.estaSuspendido;
+    // C-3 (cierre 1.23): el «Entendido» de este diálogo cierra
+    // la sesión y AuthService.signOut PURGA el material local
+    // sin subir. Las demás salidas con UI muestran el aviso
+    // previo (cierre_sesion.dart); esta lo omitía. Se calcula
+    // ANTES de mostrar el diálogo y se incorpora a su texto.
+    final aviso = await avisoPerdidaAlCerrarSesion();
+    if (!mounted) {
+      _mostrandoDialogoSuspendido = false;
+      return;
+    }
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -231,12 +241,13 @@ class _HomeScreenState extends State<HomeScreen>
         title: Text(suspendido
             ? 'Acceso suspendido'
             : 'Cuenta no habilitada'),
-        content: Text(suspendido
-            ? 'Tu acceso fue suspendido por el administrador. '
-                'Contacta a Julio Cesar.'
-            : 'Tu cuenta todavía no fue habilitada por el '
-                'administrador. Avisa a Julio César para que la '
-                'active.'),
+        content: Text((suspendido
+                ? 'Tu acceso fue suspendido por el administrador. '
+                    'Contacta a Julio Cesar.'
+                : 'Tu cuenta todavía no fue habilitada por el '
+                    'administrador. Avisa a Julio César para que la '
+                    'active.') +
+            (aviso == null ? '' : '\n\n$aviso')),
         actions: [
           TextButton(
             onPressed: () {

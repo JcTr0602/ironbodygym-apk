@@ -252,7 +252,18 @@ class _PanelCandadoScreenState extends State<PanelCandadoScreen> {
       await _enviarOp({
         'id': const Uuid().v4(),
         'alcance': _alcance,
-        'app': _alcance == 'global' ? 'ambas' : _app,
+        // C-1: la app sale DERIVADA del objetivo (regla D), no
+        // del selector libre: una combinación incoherente la
+        // rechazaba el servidor en silencio tras el «Candado
+        // aplicado». Sin derivación posible (alcance «app»),
+        // manda el selector.
+        'app': _alcance == 'global'
+            ? 'ambas'
+            : (appForzadaCandado(
+                    alcance: _alcance,
+                    rol: _rol,
+                    personaTipo: _personaTipo) ??
+                _app),
         if (objetivo != null) 'objetivo': objetivo,
         if (tipoObj != null) 'tipo_objetivo': tipoObj,
         if (mensaje.isNotEmpty) 'mensaje': mensaje,
@@ -342,6 +353,11 @@ class _PanelCandadoScreenState extends State<PanelCandadoScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // C-1 (cierre 1.23): app derivada del objetivo elegido
+    // cuando el servidor no acepta otra (regla D); null = el
+    // selector de app queda libre (alcances «app» y «global»).
+    final appForzada = appForzadaCandado(
+        alcance: _alcance, rol: _rol, personaTipo: _personaTipo);
     if (!AuthService().isOwner) {
       return Scaffold(
         appBar: appBarIron(context, 'Candado de acceso'),
@@ -435,9 +451,21 @@ class _PanelCandadoScreenState extends State<PanelCandadoScreen> {
                       if (_alcance != 'global') ...[
                         const SizedBox(height: AppEspacio.md),
                         DropdownButtonFormField<String>(
-                          initialValue: _app,
-                          decoration: const InputDecoration(
-                              labelText: 'App'),
+                          // C-1: con app derivada, la llave
+                          // fuerza el remontaje al cambiar el
+                          // objetivo y el selector queda
+                          // deshabilitado con el valor forzado.
+                          key: ValueKey(
+                              'app-candado-${appForzada ?? 'libre'}'),
+                          initialValue: appForzada ?? _app,
+                          decoration: InputDecoration(
+                            labelText: 'App',
+                            helperText: appForzada == null
+                                ? null
+                                : 'Fijada por el tipo de objetivo: '
+                                    'el servidor no acepta otra app '
+                                    'para este candado.',
+                          ),
                           items: const [
                             DropdownMenuItem(
                                 value: 'ambas',
@@ -449,8 +477,10 @@ class _PanelCandadoScreenState extends State<PanelCandadoScreen> {
                                 value: 'clientes',
                                 child: Text('Solo Clientes')),
                           ],
-                          onChanged: (v) =>
-                              setState(() => _app = v ?? 'ambas'),
+                          onChanged: appForzada == null
+                              ? (v) =>
+                                  setState(() => _app = v ?? 'ambas')
+                              : null,
                         ),
                       ],
                       if (_alcance == 'rol') ...[
@@ -617,6 +647,31 @@ class _PanelCandadoScreenState extends State<PanelCandadoScreen> {
               ],
             ),
     );
+  }
+}
+
+/// 1.23 (C-1, cierre): app que el servidor ACEPTA para el
+/// candado según su objetivo — la misma derivación que hace
+/// el bot. Regla D del diseño tipo_objetivo: un objetivo de
+/// dominio telegram (entrenador) solo admite app «gestion» (o
+/// «ambas», pero el panel fuerza la precisa); un objetivo de
+/// dominio cliente/invitado solo admite «clientes». Dejarla
+/// libre producía candados que la UI anunciaba como aplicados
+/// y el servidor rechazaba en silencio. Devuelve null cuando
+/// ningún dominio ata la app (alcances «app» y «global») y el
+/// selector queda libre.
+String? appForzadaCandado({
+  required String alcance,
+  required String rol,
+  required String personaTipo,
+}) {
+  switch (alcance) {
+    case 'persona':
+      return personaTipo == 'entrenador' ? 'gestion' : 'clientes';
+    case 'rol':
+      return rol == 'entrenador' ? 'gestion' : 'clientes';
+    default:
+      return null;
   }
 }
 

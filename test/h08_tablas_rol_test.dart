@@ -1,6 +1,9 @@
 /// Tests de H-08 (1.23, espejo por rol) — parte pura:
-/// - tablas activas por rol: 39 admin / 27 entrenador (las 12
+/// - tablas activas por rol: 39 admin / 28 entrenador (las 11
 ///   del Grupo 1 resuelto fuera; nomina_bonos NO es Grupo 1).
+/// - D-01 (cierre 1.23): servicio_pomos NO es Grupo 1 — la
+///   fila del pomo es operativa para vender dosis; el conteo
+///   se oculta vía servicio_lotes, que sí sigue prohibida.
 /// - la intersección en LocalDb.tablasConWatermarkParaRol.
 /// - SyncScope.resolver intersectado con el rol.
 /// - la guarda anti-espejo-vacío de clientes/suplementos.
@@ -21,7 +24,6 @@ void main() {
     test('el Grupo 1 resuelto es exactamente el de la decisión', () {
       expect(LocalDb.tablasProhibidasEntrenador, {
         'gastos',
-        'servicio_pomos',
         'servicio_lotes',
         'servicio_compras',
         'suplemento_ajustes',
@@ -33,15 +35,33 @@ void main() {
         'turnos_cierre',
         'espejo_gympedia_borradores',
       });
-      expect(LocalDb.tablasProhibidasEntrenador.length, 12);
+      expect(LocalDb.tablasProhibidasEntrenador.length, 11);
     });
 
-    test('entrenador: 39 − 12 = 27, sin ninguna del Grupo 1', () {
+    test('entrenador: 39 − 11 = 28, sin ninguna del Grupo 1', () {
       final t = SyncEngine.tablasEspejoActivasParaRol(false);
-      expect(t.length, 27);
+      expect(t.length, 28);
       for (final g1 in LocalDb.tablasProhibidasEntrenador) {
         expect(t.contains(g1), isFalse, reason: g1);
       }
+    });
+
+    test('D-01: servicio_pomos SÍ baja al entrenador (fila '
+        'operativa); el conteo sigue oculto vía servicio_lotes',
+        () {
+      expect(LocalDb.tablasProhibidasEntrenador.contains('servicio_pomos'),
+          isFalse);
+      expect(SyncEngine.tablasEspejoActivasParaRol(false),
+          contains('servicio_pomos'));
+      expect(LocalDb.tablasProhibidasEntrenador.contains('servicio_lotes'),
+          isTrue);
+      expect(SyncEngine.tablasEspejoActivasParaRol(false)
+          .contains('servicio_lotes'), isFalse);
+      // Y su watermark entra en el mínimo del entrenador.
+      expect(LocalDb.tablasConWatermarkParaRol(false),
+          contains('servicio_pomos'));
+      expect(LocalDb.tablasConWatermarkParaRol(false)
+          .contains('servicio_lotes'), isFalse);
     });
 
     test('nomina_bonos NO es Grupo 1: el entrenador sí la pide', () {
@@ -60,16 +80,16 @@ void main() {
           LocalDb.tablasConWatermark);
     });
 
-    test('entrenador: fuera el Grupo 1 que lleva watermark (11)', () {
+    test('entrenador: fuera el Grupo 1 que lleva watermark (10)', () {
       final admin = LocalDb.tablasConWatermarkParaRol(true);
       final ent = LocalDb.tablasConWatermarkParaRol(false);
       for (final t in ent) {
         expect(LocalDb.tablasProhibidasEntrenador.contains(t), isFalse,
             reason: t);
       }
-      // 11 de las 12 del Grupo 1 están en tablasConWatermark;
+      // 10 de las 11 del Grupo 1 están en tablasConWatermark;
       // espejo_gympedia_borradores está exenta de antemano.
-      expect(admin.length - ent.length, 11);
+      expect(admin.length - ent.length, 10);
       expect(ent, contains('nomina_bonos'));
       expect(ent, contains('clientes'));
     });
@@ -85,7 +105,9 @@ void main() {
       final ent = SyncScope.resolver('servicios', esAdmin: false);
       expect(ent.contains('servicio_lotes'), isFalse);
       expect(ent.contains('servicio_compras'), isFalse);
-      expect(ent.contains('servicio_pomos'), isFalse);
+      // D-01: el pomo operativo SÍ entra en el scope del
+      // entrenador (la venta de dosis lo lee localmente).
+      expect(ent.contains('servicio_pomos'), isTrue);
       expect(ent, contains('servicio_ventas'));
       expect(ent, contains('servicio_botes'));
     });

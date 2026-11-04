@@ -6956,6 +6956,37 @@ class LocalDb {
     return (r.first['c'] as int?) ?? 0;
   }
 
+  /// 1.23 (cierre F-7): fotos de la cola que aún NO están en
+  /// el servidor: todo estado distinto de 'completada'
+  /// ('pendiente', 'subiendo', 'error' — incluidas las que
+  /// agotaron intentos: tampoco llegaron). Alimenta la
+  /// salvaguarda previa a importar un respaldo.
+  Future<int> contarFotosSinSubir() async {
+    final d = await db;
+    final r = await d.rawQuery(
+        "SELECT COUNT(*) c FROM fotos_cola "
+        "WHERE estado <> 'completada'");
+    return (r.first['c'] as int?) ?? 0;
+  }
+
+  /// Comprobantes que la purga de cierre de sesión destruiría sin
+  /// haber subido nunca: los 'pendiente' Y los 'error'
+  /// reactivables (Cierre 1.23, C-2). NO sustituye a
+  /// [contarComprobantesPendientes]: la semántica de aquella
+  /// ('pendiente' a secas) es la compuerta de éxito del
+  /// WorkManager en main.dart — un 'error' no se sube solo y no
+  /// debe bloquear esa compuerta para siempre. Pero el 'error'
+  /// sí es material vivo (la Cola lo reactiva si el archivo
+  /// sigue en el teléfono) y la purga borra la fila y el archivo:
+  /// el aviso previo debe contarlo.
+  Future<int> contarComprobantesSinSubir() async {
+    final d = await db;
+    final r = await d.rawQuery(
+        "SELECT COUNT(*) c FROM comprobantes_pago "
+        "WHERE estado IN ('pendiente', 'error')");
+    return (r.first['c'] as int?) ?? 0;
+  }
+
   /// Fotos de incidencias aún sin subir (pending/retry).
   Future<int> contarFotosIncidenciasPendientes() async {
     final d = await db;
@@ -6967,9 +6998,10 @@ class LocalDb {
 
   /// 1.23 (auditoría extra #3, decisión de Jc): lo que la purga
   /// de cierre de sesión DESTRUIRÍA sin haber subido nunca:
-  /// - comprobantes: filas de comprobantes_pago aún 'pendiente'
-  ///   (la purga borra la tabla entera y los archivos; lo ya
-  ///   subido vive en el servidor y no es pérdida).
+  /// - comprobantes: filas de comprobantes_pago aún sin subir
+  ///   ('pendiente' y 'error' reactivable — C-2; la purga borra
+  ///   la tabla entera y los archivos; lo ya subido vive en el
+  ///   servidor y no es pérdida).
   /// - incidencias: ops VIVAS de incidencias PRIVADAS (las que
   ///   [purgarDatosSensibles] elimina de ops_queue: crear/editar
   ///   con visibilidad privada y las hijas que referencian ids
@@ -6994,7 +7026,9 @@ class LocalDb {
     var indeterminado = false;
     var comprobantes = 0;
     try {
-      comprobantes = await contarComprobantesPendientes();
+      // Cierre 1.23 (C-2): pendiente + error reactivable, no la
+      // compuerta de WorkManager (contarComprobantesPendientes).
+      comprobantes = await contarComprobantesSinSubir();
     } catch (_) {
       indeterminado = true;
     }
@@ -7565,7 +7599,13 @@ class LocalDb {
   /// FILA en el servidor (Grupo 2), no por tabla.
   static const tablasProhibidasEntrenador = {
     'gastos',
-    'servicio_pomos',
+    // D-01 (cierre 1.23): 'servicio_pomos' NO está aquí a
+    // propósito. La fila del pomo es OPERATIVA: la venta de
+    // dosis del entrenador la lee localmente (pomosActivosLocal
+    // / _payloadVentaServicio) y sin ella no puede vender. Lo
+    // que el entrenador no debe ver es el CONTEO de dosis, y
+    // ese no vive en la fila del pomo: se deriva de
+    // 'servicio_lotes', que SÍ queda solo-dueño en esta lista.
     'servicio_lotes',
     'servicio_compras',
     'suplemento_ajustes',

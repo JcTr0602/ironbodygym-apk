@@ -28,8 +28,13 @@ void main() {
       expect(base()['metodo_pago'], 'efectivo');
     });
 
-    test('la venta conserva sus campos (sin método propio: el servidor '
-        'aplica el del tope)', () {
+    test('D-04: el método del tope es SOLO de la inscripción — la '
+        'venta no lleva metodo (el servidor la cobra aparte, en '
+        'efectivo, salvo método propio explícito)', () {
+      // Ni con metodo_pago='transferencia' el constructor fuerza un
+      // 'metodo' sobre la venta: si lo pusiera, el servidor lo
+      // respetaría y la venta heredaría el método de la inscripción,
+      // justo lo que D-04 (cierre 1.23) eliminó.
       final p = base(metodoPago: 'transferencia');
       final v = p['venta'] as Map;
       expect(v['suplemento_id'], 7);

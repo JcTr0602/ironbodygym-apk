@@ -1223,9 +1223,25 @@ class SyncEngine {
   }
 
   void _sesionVencida() {
-    // v1.2.5: purga de datos sensibles (best-effort, sin await).
-    unawaited(LocalDb.purgaAlCerrarSesion());
-    _auth.signOut();
+    unawaited(_sesionVencidaEncadenada());
+  }
+
+  /// A-3 (cierre 1.23): la salida por sesión vencida ESPERA a
+  /// que la purga termine antes de cerrar la sesión y avisar a
+  /// la UI. Antes la purga iba suelta (unawaited, v1.2.5) y el
+  /// signOut arrancaba en paralelo: en un teléfono compartido,
+  /// el siguiente login podía pintar — y su worker de
+  /// comprobantes subir material — mientras la purga del
+  /// usuario anterior aún corría. La firma pública no cambia:
+  /// los llamadores siguen sin esperar nada.
+  Future<void> _sesionVencidaEncadenada() async {
+    try {
+      await LocalDb.purgaAlCerrarSesion();
+    } catch (_) {
+      // La purga es best-effort: su fallo no puede dejar la
+      // sesión vencida colgada sin cerrar.
+    }
+    await _auth.signOut();
     onSessionExpired?.call();
   }
 
@@ -2060,10 +2076,10 @@ class SyncEngine {
   /// H-08 (1.23): purga de transición por rol, UNA sola vez
   /// (meta `migracion_h08_rol_v123`). Los teléfonos de entrenador
   /// que ya corren la app traen en su espejo datos que con el
-  /// RLS nuevo ya no podrían bajar (gastos, pomos, cierres…):
+  /// RLS nuevo ya no podrían bajar (gastos, lotes, cierres…):
   /// esta purga los destruye en el propio teléfono la primera
   /// vez que la 1.23 sincroniza como no-admin. Pasos:
-  /// (a) fuera las filas CONFIRMADAS (sync_seq > 0) de las 12
+  /// (a) fuera las filas CONFIRMADAS (sync_seq > 0) de las
   ///     tablas del Grupo 1 — ops_queue y filas optimistas
   ///     (sync_seq 0/NULL) jamás se tocan —;
   /// (b) liquidaciones_caja e incidencias_sync (Grupo 2, fuera
@@ -2075,8 +2091,17 @@ class SyncEngine {
   ///     teléfono ni pagado_por de otros);
   /// (d) fuera las metas de sync_estado que exponen el negocio;
   /// (e) VACUUM forense único (ver LocalDb.vacuumForenseH08).
-  /// La meta se marca SOLO si todo terminó bien: cualquier fallo
-  /// deja el ciclo sin completar y el próximo sync reintenta.
+  /// La meta de transición se marca cuando los BORRADOS tienen
+  /// éxito. A-2 (cierre 1.23): el VACUUM ya NO es compuerta de
+  /// la meta — si falla (teléfono casi lleno, WAL retenido), la
+  /// transición quedaba sin marcar y cada pull repetía los
+  /// borrados y volvía a fijar las re-descargas forzadas
+  /// (clientes y pagos completos, para siempre). Ahora el
+  /// VACUUM fallido deja solo la meta `h08_vacuum_pendiente`,
+  /// que se reintenta en syncs posteriores SIN repetir borrados
+  /// ni re-fijar re-descargas (ver _reintentarVacuumH08Pendiente).
+  /// Un fallo de BORRADO sí deja la meta sin marcar y el
+  /// próximo sync reintenta la transición entera.
   /// Nunca lanza: una purga fallida no puede tumbar el pull.
   /// Devuelve true si la migración quedó completa (o no tocaba
   /// correrla en este rol).
@@ -2084,6 +2109,11 @@ class SyncEngine {
     if (esAdmin) return true; // el dueño conserva todo su espejo
     try {
       if (await _db.getMeta('migracion_h08_rol_v123') == '1') {
+        // Transición ya hecha: solo quedan los rezagos de una
+        // sola vez (VACUUM forense pendiente y reparación de
+        // pomos D-01), cada uno con su propia meta.
+        await _reintentarVacuumH08Pendiente();
+        await _repararPomosH08SiToca();
         return true;
       }
       final g1 = await _db.borrarEspejosConfirmados(
@@ -2106,20 +2136,62 @@ class SyncEngine {
       await _db.setMeta('forzar_redescarga_clientes', '1');
       await _db.setMeta('forzar_redescarga_pagos', '1');
       await _limpiarMetasEstadoNoAdmin();
-      if (!await _db.vacuumForenseH08()) {
-        // Sin VACUUM la purga es cosmética: lo borrado queda
-        // legible en páginas libres. No se marca la meta y se
-        // reintenta entero en el próximo sync.
-        AppLog.aviso('sync', 'h08_transicion_vacuum_pendiente');
-        return false;
-      }
+      // A-2: los borrados tuvieron éxito → la transición queda
+      // marcada AQUÍ, pase lo que pase con el VACUUM.
       await _db.setMeta('migracion_h08_rol_v123', '1');
+      // Con la lista corregida (D-01), servicio_pomos nunca se
+      // purgó en esta transición: la reparación no le toca.
+      await _db.setMeta('h08_reparar_pomos_v1', '1');
+      if (!await _db.vacuumForenseH08()) {
+        // Sin VACUUM lo borrado queda legible en páginas libres,
+        // pero la transición NO se repite: queda solo el
+        // reintento del propio VACUUM en syncs posteriores.
+        await _db.setMeta('h08_vacuum_pendiente', '1');
+        AppLog.aviso('sync', 'h08_transicion_vacuum_pendiente');
+      }
       AppLog.info('sync', 'h08_transicion_ok',
           d: 'borradas=${g1.borradas + g2.borradas}');
       return true;
     } catch (e) {
       AppLog.error('sync', 'h08_transicion_fallo', d: '$e');
       return false;
+    }
+  }
+
+  /// A-2 (cierre 1.23): reintento del VACUUM forense de la
+  /// transición H-08 cuando quedó pendiente. Solo corre si la
+  /// meta `h08_vacuum_pendiente` está puesta; al lograrlo la
+  /// limpia. No repite borrados ni re-fija re-descargas: el
+  /// archivo se reescribe y nada más. Nunca lanza.
+  Future<void> _reintentarVacuumH08Pendiente() async {
+    try {
+      if (await _db.getMeta('h08_vacuum_pendiente') != '1') return;
+      if (await _db.vacuumForenseH08()) {
+        await _db.borrarMeta('h08_vacuum_pendiente');
+        AppLog.info('sync', 'h08_vacuum_pendiente_ok');
+      } else {
+        AppLog.aviso('sync', 'h08_vacuum_pendiente_reintento_fallo');
+      }
+    } catch (e) {
+      AppLog.error('sync', 'h08_vacuum_pendiente_fallo', d: '$e');
+    }
+  }
+
+  /// D-01 (cierre 1.23): reparación única de los teléfonos que
+  /// corrieron la transición H-08 con la lista vieja, que SÍ
+  /// purgaba `servicio_pomos`. Esas filas quedaron por debajo
+  /// del watermark local, así que el pull normal jamás las
+  /// re-trae: se resetea el watermark de la tabla a 0 UNA vez
+  /// (meta `h08_reparar_pomos_v1`) y la próxima descarga la
+  /// repuebla entera. Nunca lanza.
+  Future<void> _repararPomosH08SiToca() async {
+    try {
+      if (await _db.getMeta('h08_reparar_pomos_v1') == '1') return;
+      await _db.setWatermarkTabla('servicio_pomos', 0);
+      await _db.setMeta('h08_reparar_pomos_v1', '1');
+      AppLog.info('sync', 'h08_pomos_reparacion_watermark');
+    } catch (e) {
+      AppLog.error('sync', 'h08_pomos_reparacion_fallo', d: '$e');
     }
   }
 

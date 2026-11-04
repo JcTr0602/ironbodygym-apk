@@ -112,6 +112,50 @@ void main() {
         'invitado');
   });
 
+  test('1.23 C-1: la app del candado se deriva del objetivo '
+      '(regla D), como hace el bot', () {
+    // Persona: entrenador (dominio telegram) → Gestión;
+    // cliente/invitado (dominio Clientes) → Clientes.
+    expect(
+        appForzadaCandado(
+            alcance: 'persona', rol: 'entrenador',
+            personaTipo: 'entrenador'),
+        'gestion');
+    expect(
+        appForzadaCandado(
+            alcance: 'persona', rol: 'entrenador',
+            personaTipo: 'cliente'),
+        'clientes');
+    // Rol: entrenadores → Gestión; clientes/invitados →
+    // Clientes.
+    expect(
+        appForzadaCandado(
+            alcance: 'rol', rol: 'entrenador',
+            personaTipo: 'entrenador'),
+        'gestion');
+    expect(
+        appForzadaCandado(
+            alcance: 'rol', rol: 'cliente',
+            personaTipo: 'entrenador'),
+        'clientes');
+    expect(
+        appForzadaCandado(
+            alcance: 'rol', rol: 'invitado',
+            personaTipo: 'entrenador'),
+        'clientes');
+    // Sin dominio que ate la app: selector libre (null).
+    expect(
+        appForzadaCandado(
+            alcance: 'app', rol: 'entrenador',
+            personaTipo: 'entrenador'),
+        isNull);
+    expect(
+        appForzadaCandado(
+            alcance: 'global', rol: 'entrenador',
+            personaTipo: 'entrenador'),
+        isNull);
+  });
+
   test('el id del cliente viaja como texto (objetivo del servidor)',
       () {
     final r = personasCandadoFiltradas(

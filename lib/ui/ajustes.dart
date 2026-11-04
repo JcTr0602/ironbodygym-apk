@@ -32,6 +32,7 @@ import 'app_bar.dart';
 import 'avisos.dart';
 import 'componentes.dart';
 import 'diseno.dart';
+import 'importar_respaldo.dart';
 import 'widgets.dart';
 
 class AjustesScreen extends StatefulWidget {
@@ -856,15 +857,21 @@ class _AjustesScreenState extends State<AjustesScreen> {
     }
   }
 
-  /// Importar respaldo de la BD (SOLO DUEÑO desde lote 2 Argón:
-  /// antes estaba abierto a entrenadores y cualquiera podía
-  /// reemplazar la base viva del teléfono, perdiendo la cola
-  /// pendiente de subir).
+  /// Importar respaldo de la BD (regla de Jc, decisión
+  /// 2026-11-04): importar lo puede cualquier staff con sesión
+  /// (dueño y entrenadores); solo EXPORTAR es exclusivo del
+  /// dueño. Historia del riesgo: fue SOLO DUEÑO desde lote 2
+  /// Argón porque importar reemplaza la base viva del teléfono
+  /// y destruye la cola pendiente de subir. La reapertura lleva
+  /// salvaguarda: antes de reemplazar, si hay material sin
+  /// subir (ops vivas, comprobantes, fotos en cola), una
+  /// advertencia fuerte con los conteos exige confirmar con
+  /// «Importar igualmente» (ver importar_respaldo.dart).
   /// Importación segura por etapas: el archivo se valida ANTES de tocar
   /// la base actual, y se guarda una copia de recuperación por si falla.
   Future<void> _importarRespaldo() async {
-    if (!_auth.isOwner) {
-      _msg('Solo el dueño puede importar un respaldo');
+    if (!puedeImportarRespaldo(haySesionStaff: _auth.userId != null)) {
+      _msg('Inicia sesión para importar un respaldo');
       return;
     }
     // v1.2.1: pickFiles dentro del try para mostrar error si falla
@@ -887,16 +894,37 @@ class _AjustesScreenState extends State<AjustesScreen> {
       _msg('El archivo debe tener extensión .db');
       return;
     }
-    final ok = await DialogoApp.confirmar(
-      context,
-      titulo: 'Importar respaldo',
-      mensaje: 'Se reemplazarán todos los datos de este teléfono con el '
-          'respaldo elegido. ¿Continuar?',
-      aceptar: 'Importar',
-      peligro: true,
-      icono: Icons.cloud_download_rounded,
-    );
-    if (ok != true || !mounted) return;
+    // 1.23 (cierre F-7): salvaguarda de material sin subir.
+    // Importar reemplaza la base viva: lo que aún no subió se
+    // pierde para siempre. Con material pendiente — o con el
+    // conteo indeterminado — la confirmación ES la advertencia
+    // fuerte con los conteos («Importar igualmente»); sin
+    // material confirmado, la confirmación de siempre.
+    final conteoImp = await conteoSinSubirParaImportar();
+    if (!mounted) return;
+    final avisoImp = textoAdvertenciaImportacion(conteoImp);
+    if (avisoImp != null) {
+      final okAviso = await DialogoApp.confirmar(
+        context,
+        titulo: 'Material sin subir en este teléfono',
+        mensaje: avisoImp,
+        aceptar: 'Importar igualmente',
+        peligro: true,
+        icono: Icons.warning_amber_rounded,
+      );
+      if (okAviso != true || !mounted) return;
+    } else {
+      final ok = await DialogoApp.confirmar(
+        context,
+        titulo: 'Importar respaldo',
+        mensaje: 'Se reemplazarán todos los datos de este teléfono con el '
+            'respaldo elegido. ¿Continuar?',
+        aceptar: 'Importar',
+        peligro: true,
+        icono: Icons.cloud_download_rounded,
+      );
+      if (ok != true || !mounted) return;
+    }
     _msg('Validando respaldo…');
     try {
       final tmp = await getTemporaryDirectory();
@@ -1718,14 +1746,18 @@ class _AjustesScreenState extends State<AjustesScreen> {
                         'Guarda la base de datos para compartirla',
                     onTap: _exportarRespaldo,
                   ),
-                if (_auth.isOwner)
-                  _opcion(
-                    icono: Icons.cloud_download_rounded,
-                    titulo: 'Importar respaldo',
-                    subtitulo:
-                        'Restaura los datos desde un archivo',
-                    onTap: _importarRespaldo,
-                  ),
+                // 1.23 (cierre F-7, regla de Jc 2026-11-04):
+                // importar NO es solo del dueño (exportar sí):
+                // la opción se ve para todo el staff y la
+                // protección es la salvaguarda de material sin
+                // subir dentro de _importarRespaldo.
+                _opcion(
+                  icono: Icons.cloud_download_rounded,
+                  titulo: 'Importar respaldo',
+                  subtitulo:
+                      'Restaura los datos desde un archivo',
+                  onTap: _importarRespaldo,
+                ),
                 _opcion(
                   icono: Icons.storage_rounded,
                   titulo: 'Espacio usado',

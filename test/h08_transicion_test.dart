@@ -1,10 +1,16 @@
 /// Tests de H-08 (1.23) — purga de transición por rol:
-/// - borra SOLO las filas confirmadas (sync_seq > 0) de las 12
+/// - borra SOLO las filas confirmadas (sync_seq > 0) de las 11
 ///   tablas del Grupo 1 y de liquidaciones_caja/incidencias_sync;
 /// - jamás toca ops_queue ni las filas optimistas (sync_seq 0);
 /// - fuerza la re-descarga de clientes y pagos, limpia las
 ///   metas de sync_estado y marca `migracion_h08_rol_v123`
-///   SOLO al completar (con su VACUUM forense);
+///   cuando los BORRADOS tienen éxito;
+/// - A-2 (cierre): el VACUUM forense ya no es compuerta de la
+///   meta — si queda pendiente se reintenta solo, sin repetir
+///   borrados ni re-fijar las re-descargas forzadas;
+/// - D-01 (cierre): servicio_pomos NO se purga (fila operativa
+///   de la venta de dosis) y los teléfonos que corrieron la
+///   transición vieja reciben UNA reparación de su watermark;
 /// - para admin no corre ni marca nada.
 library;
 
@@ -97,7 +103,9 @@ void main() {
       expect(await ldb.contar('gastos'), 1);
       final restan = await db.query('gastos');
       expect(restan.single['id'], 2);
-      expect(await ldb.contar('servicio_pomos'), 0);
+      // D-01: servicio_pomos ya NO es Grupo 1 — su fila
+      // confirmada SOBREVIVE a la transición (es operativa).
+      expect(await ldb.contar('servicio_pomos'), 1);
       expect(await ldb.contar('turnos_cierre'), 0);
       // Grupo 2: fuera + watermarks a 0.
       expect(await ldb.contar('liquidaciones_caja'), 0);
@@ -113,8 +121,13 @@ void main() {
       expect(await ldb.getMeta('usuarios_apk'), isNull);
       expect(await ldb.getMeta('sync_estado_actividad'), isNull);
       expect(await ldb.getMeta('sync_estado_actividad_serie'), isNull);
-      // Meta de migración marcada SOLO tras completar (con VACUUM).
+      // Meta de migración marcada con los borrados completos.
       expect(await ldb.getMeta('migracion_h08_rol_v123'), '1');
+      // La transición nueva nunca purgó pomos: su reparación
+      // queda marcada como no necesaria, y el VACUUM (sano en
+      // el test) no deja pendiente.
+      expect(await ldb.getMeta('h08_reparar_pomos_v1'), '1');
+      expect(await ldb.getMeta('h08_vacuum_pendiente'), isNull);
 
       // Segunda corrida: no-op por la meta — lo que el espejo
       // haya ganado después ya no se vuelve a purgar.
@@ -140,6 +153,59 @@ void main() {
         () async {
       await _abrirDbVacia();
       expect(await LocalDb.instance.vacuumForenseH08(), isTrue);
+    });
+
+    test(
+        'D-01 reparación: con la transición vieja ya marcada, el '
+        'watermark de pomos se resetea a 0 UNA sola vez', () async {
+      final db = await _abrirDbVacia();
+      final ldb = LocalDb.instance;
+      // Teléfono que corrió la transición con la lista vieja:
+      // meta puesta y watermark de pomos alto (sus filas
+      // confirmadas ya no están: fueron purgadas).
+      await ldb.setMeta('migracion_h08_rol_v123', '1');
+      await ldb.setWatermarkTabla('servicio_pomos', 999);
+
+      final ok =
+          await SyncEngine.instance.purgaTransicionH08SiToca(esAdmin: false);
+      expect(ok, isTrue);
+      expect(await ldb.getMeta('wm_servicio_pomos'), '0');
+      expect(await ldb.getMeta('h08_reparar_pomos_v1'), '1');
+      expect(db, isNotNull); // la BD sigue usable tras el paso
+
+      // Segunda corrida: la reparación NO se repite — el
+      // watermark que la re-descarga haya avanzado se respeta.
+      await ldb.setWatermarkTabla('servicio_pomos', 555);
+      final ok2 =
+          await SyncEngine.instance.purgaTransicionH08SiToca(esAdmin: false);
+      expect(ok2, isTrue);
+      expect(await ldb.getMeta('wm_servicio_pomos'), '555');
+    });
+
+    test(
+        'A-2: el VACUUM pendiente se reintenta sin repetir '
+        'borrados ni re-fijar las re-descargas forzadas', () async {
+      final db = await _abrirDbVacia();
+      final ldb = LocalDb.instance;
+      // Estado tras una transición cuyo VACUUM falló: meta de
+      // transición marcada + solo el VACUUM pendiente.
+      await ldb.setMeta('migracion_h08_rol_v123', '1');
+      await ldb.setMeta('h08_vacuum_pendiente', '1');
+      // Fila confirmada POSTERIOR a la transición: un reintento
+      // que repitiera borrados la destruiría por error.
+      await _espejo(db, 'gastos', 9, {'concepto': 'posterior'},
+          seq: 900);
+
+      final ok =
+          await SyncEngine.instance.purgaTransicionH08SiToca(esAdmin: false);
+      expect(ok, isTrue);
+      // VACUUM sano en el test: el pendiente se limpia…
+      expect(await ldb.getMeta('h08_vacuum_pendiente'), isNull);
+      // …sin borrar lo ganado después…
+      expect(await ldb.contar('gastos'), 1);
+      // …y sin volver a forzar la re-descarga de clientes/pagos.
+      expect(await ldb.getMeta('forzar_redescarga_clientes'), isNull);
+      expect(await ldb.getMeta('forzar_redescarga_pagos'), isNull);
     });
   });
 }

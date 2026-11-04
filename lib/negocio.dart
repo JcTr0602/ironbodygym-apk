@@ -1287,6 +1287,33 @@ Future<double> montoCobradoCupOp(Map<String, dynamic> op) async {
 /// (ventas de suplementos). Para el KPI "Total cobrado" de Actividad.
 double montoCobradoUsdOp(Map<String, dynamic> op) => _montoUsdOp(op);
 
+/// Cierre 1.23 (D-02): ¿la venta de una op `saldar_fiado_suplemento`
+/// ya figura saldada en el espejo? Al saldar, la UI marca la fila
+/// espejo en la misma transacción que encola la op
+/// (LocalDb.marcarFiadoSaldado: es_fiado=0 y fecha del cobro),
+/// pero la fila conserva el op_uuid de la VENTA original — el
+/// cruce B-03 por uuidsEspejo no descarta la op de saldo y los
+/// lectores que suman espejo + cola (cobradoHoyPorMetodo,
+/// miTurnoHoy, pendienteEntrega) contaban el mismo cobro dos
+/// veces. El criterio es el del propio bucle espejo: la venta ya
+/// no es «fiado sin saldar» (es_fiado=0, o fiado_saldado=1 si el
+/// pull ya confirmó el saldo). Sin fila en el espejo, o si sigue
+/// al fiado (un pull previo a la aplicación de la op reescribe
+/// el JSON con es_fiado=1), la op aporta como siempre.
+Future<bool> _fiadoDeOpYaSaldadoEnEspejo(
+    Map<String, dynamic> payload) async {
+  final ventaId = (payload['venta_id'] as num?)?.toInt();
+  if (ventaId == null) return false;
+  try {
+    final filas = await LocalDb.instance
+        .mirrorPorIds('ventas_suplementos', [ventaId]);
+    if (filas.isEmpty) return false;
+    return !_esFiadoSinSaldar(filas.first);
+  } catch (_) {
+    return false;
+  }
+}
+
 /// Dinero en efectivo que el entrenador logueado aún no le entrega al dueño.
 ///
 /// Regla del servidor (ronda 14): efectivo registrado por entrenador queda
@@ -1422,6 +1449,24 @@ Future<double> pendienteEntrega(int? telegramId) async {
     // 1.15-turnos (#7): la cola del teléfono es de SU dueño: sin
     // este filtro se sumaba al pendiente de cualquier entrenador.
     if (op['telegram_id'] != telegramId) continue;
+    // Cierre 1.23 (D-02): fiado ya saldado en el espejo — el
+    // bucle de ventas de arriba ya sumó la venta (es_fiado=0
+    // tras marcarFiadoSaldado) y la op de saldo conserva otro
+    // op_uuid, así que el cruce B-03 no la descarta: sin este
+    // corte el mismo cobro se contaba dos veces en el pendiente.
+    if ('${op['tipo']}' == 'saldar_fiado_suplemento') {
+      Map<String, dynamic>? payloadSaldo;
+      try {
+        payloadSaldo = jsonDecode(op['payload'] as String)
+            as Map<String, dynamic>;
+      } catch (_) {
+        payloadSaldo = null;
+      }
+      if (payloadSaldo != null &&
+          await _fiadoDeOpYaSaldadoEnEspejo(payloadSaldo)) {
+        continue;
+      }
+    }
     total += montoEfectivoOp(op, pr);
   }
   // v1.8.0: los adelantos de su gaveta ya salieron de su mano.
@@ -3696,6 +3741,13 @@ Future<(double, double)> miTurnoHoy(int? telegramId, {String? fecha}) async {
       if (fechaNegocioHabana(fecha) != hoy) {
         continue;
       }
+      // Cierre 1.23 (D-02): si el espejo ya refleja el saldo de
+      // este fiado, el bucle espejo de ventas ya sumó la venta;
+      // sumar también la op contaría el cobro dos veces.
+      if ('${op['tipo']}' == 'saldar_fiado_suplemento' &&
+          await _fiadoDeOpYaSaldadoEnEspejo(payload)) {
+        continue;
+      }
       cobrado += await montoCobradoCupOp(op);
     } catch (_) {}
   }
@@ -5530,8 +5582,11 @@ Future<double> ingresosMesAnterior() async {
   double t = 0;
   // Ronda 3-9 #2: Casa nunca suma en ingresos.
   final casasMesAnt = await LocalDb.instance.idsCuentasCasa();
+  // Cierre 1.23 (B-1): overlay de anulados (ver ingresosMes).
+  final anuladosCola = await LocalDb.instance.pagosAnuladosEnCola();
   for (final p in await LocalDb.instance.pagosDelMes(pref)) {
     if (_esPagoCasa(p, casasMesAnt)) continue;
+    if (esPagoAnulado(p, anuladosCola)) continue;
     t += (p['monto'] as num?)?.toDouble() ?? 0;
   }
   for (final d in await LocalDb.instance.allMirror('pagos_diarios')) {
@@ -5560,8 +5615,11 @@ Future<Map<String, double>> ingresosPorMetodo() async {
   double efectivo = 0, transferencia = 0, suplementos = 0, servicios = 0;
   // Ronda 3-9 #2: Casa nunca suma en ingresos.
   final casas = await LocalDb.instance.idsCuentasCasa();
+  // Cierre 1.23 (B-1): overlay de anulados (ver ingresosMes).
+  final anuladosCola = await LocalDb.instance.pagosAnuladosEnCola();
   for (final p in await LocalDb.instance.pagosDelMes(pref)) {
     if (_esPagoCasa(p, casas)) continue;
+    if (esPagoAnulado(p, anuladosCola)) continue;
     final m = (p['monto'] as num?)?.toDouble() ?? 0;
     if ('${p['metodo']}' == 'transferencia') {
       transferencia += m;
@@ -5600,8 +5658,11 @@ Future<Map<String, double>> ingresosPorTipo() async {
   double mensual = 0, diario = 0, suplementos = 0, servicios = 0;
   // Ronda 3-9 #2: Casa nunca suma en ingresos.
   final casas = await LocalDb.instance.idsCuentasCasa();
+  // Cierre 1.23 (B-1): overlay de anulados (ver ingresosMes).
+  final anuladosCola = await LocalDb.instance.pagosAnuladosEnCola();
   for (final p in await LocalDb.instance.pagosDelMes(pref)) {
     if (_esPagoCasa(p, casas)) continue;
+    if (esPagoAnulado(p, anuladosCola)) continue;
     mensual += (p['monto'] as num?)?.toDouble() ?? 0;
   }
   for (final d in await LocalDb.instance.allMirror('pagos_diarios')) {
@@ -5633,6 +5694,8 @@ Future<double> proyeccionMes() async {
   final dia = n.day;
   final diasMes = DateTime(n.year, n.month + 1, 0).day;
   if (dia < 1) return 0;
+  // Cierre 1.23 (B-1): sin bucle propio — delega en ingresosMes,
+  // que ya aplica el overlay de anulados.
   final actual = await ingresosMes();
   return actual / dia * diasMes;
 }
@@ -5645,8 +5708,11 @@ Future<Map<String, Map<String, dynamic>>> mejorPeorDia() async {
   final porDia = <String, double>{};
   // Ronda 3-9 #2: Casa nunca suma en ingresos.
   final casas = await LocalDb.instance.idsCuentasCasa();
+  // Cierre 1.23 (B-1): overlay de anulados (ver ingresosMes).
+  final anuladosCola = await LocalDb.instance.pagosAnuladosEnCola();
   for (final p in await LocalDb.instance.pagosDelMes(pref)) {
     if (_esPagoCasa(p, casas)) continue;
+    if (esPagoAnulado(p, anuladosCola)) continue;
     final dia = fechaNegocioHabana(p['fecha']);
     if (dia.isNotEmpty) {
       porDia[dia] =
@@ -5951,9 +6017,15 @@ Future<double> ingresosMes() async {
   double t = 0;
   // Ronda 3-9 #2: Casa nunca suma en ingresos.
   final casas = await LocalDb.instance.idsCuentasCasa();
+  // Cierre 1.23 (B-1): overlay de anulados, el mismo que
+  // ingresosPorDia ya aplicaba — sin él, este total del mes
+  // seguía contando un pago anulado offline hasta que el pull
+  // retiraba la fila, y el Dashboard mostraba dos verdades.
+  final anuladosCola = await LocalDb.instance.pagosAnuladosEnCola();
   for (final p in await LocalDb.instance
       .mirrorPorFecha('pagos', 'fecha', desde, hasta)) {
     if (_esPagoCasa(p, casas)) continue;
+    if (esPagoAnulado(p, anuladosCola)) continue;
     t += (p['monto'] as num?)?.toDouble() ?? 0;
   }
   for (final d in await LocalDb.instance
@@ -6502,9 +6574,17 @@ Future<Map<String, double>> cobradoHoyPorMetodo(
         fechaOp = '${op['creada_ts'] ?? ''}';
       }
       if (fechaNegocioHabana(fechaOp) != hoy) continue;
+      final tipo = '${op['tipo']}';
+      // Cierre 1.23 (D-02): si el espejo ya refleja el saldo de
+      // este fiado, el bucle espejo de ventas ya sumó la venta
+      // (marcarFiadoSaldado pone es_fiado=0 y la fecha del
+      // cobro); sumar también la op contaría el cobro dos veces.
+      if (tipo == 'saldar_fiado_suplemento' &&
+          await _fiadoDeOpYaSaldadoEnEspejo(payload)) {
+        continue;
+      }
       final monto = await montoCobradoCupOp(op);
       if (monto <= 0) continue;
-      final tipo = '${op['tipo']}';
       // Paridad con los bucles espejo de arriba: la venta de
       // suplementos en CUP siempre cae en efectivo en esta
       // función (v1.3.2); inscribir/inscripción+venta leen su

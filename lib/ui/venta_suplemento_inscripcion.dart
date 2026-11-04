@@ -25,8 +25,12 @@ import 'widgets.dart';
 /// Construye el payload de la op 'inscripcion_venta_suplemento'.
 ///
 /// Función pura (testeable sin montar la pantalla): el método de pago
-/// viaja en el tope del payload y el servidor lo aplica a la
-/// inscripción y, por defecto, también a la venta.
+/// del tope ('metodo_pago') es SOLO de la inscripción. El suplemento
+/// se cobra aparte (D-04, cierre 1.23, decisión de Jc 2026-11-04):
+/// la venta NO hereda ese método — el servidor usa el método propio
+/// del sub-payload 'venta' si algún día trae 'metodo' explícito, y
+/// si no, 'efectivo' (cobro de mostrador). Por eso este constructor
+/// no pone 'metodo' en 'venta'.
 Map<String, dynamic> payloadInscripcionVentaSuplemento({
   required String nombre,
   String? telefono,
@@ -108,10 +112,12 @@ class _VentaSuplementoInscripcionScreenState
   final _telefono = TextEditingController();
   final _carnet = TextEditingController();
   String? _sexo; // 'M' | 'F' | null (sin especificar)
-  // Fase A 1.9: método de pago real de la inscripción + venta.
-  // Antes no se elegía ni se enviaba y el servidor caía en
-  // 'efectivo' por omisión, descuadrando la caja al pagar por
-  // transferencia. El servidor ya acepta 'metodo_pago' (B2).
+  // Fase A 1.9: método de pago real de la inscripción. Antes no se
+  // elegía ni se enviaba y el servidor caía en 'efectivo' por
+  // omisión, descuadrando la caja al pagar por transferencia. El
+  // servidor ya acepta 'metodo_pago' (B2).
+  // D-04 (cierre 1.23): es SOLO de la inscripción — el suplemento
+  // se cobra aparte, en efectivo (ver el constructor del payload).
   String _metodo = 'efectivo'; // 'efectivo' | 'transferencia'
   bool _promoActiva = false;
   bool _guardando = false;
@@ -290,9 +296,11 @@ class _VentaSuplementoInscripcionScreenState
       titulo: 'Confirmar inscripción + venta',
       icono: Icons.person_add_rounded,
       mensaje: 'Cliente: $nombre\n'
-          'Método: ${_metodo == 'efectivo' ? 'Efectivo' : 'Transferencia'}\n'
+          'Método de la inscripción: '
+          '${_metodo == 'efectivo' ? 'Efectivo' : 'Transferencia'}\n'
           'Venta: ${widget.suplemento['nombre']} x${widget.cantidad}'
-          ' = $totalTxt'
+          ' = $totalTxt\n'
+          'El suplemento se cobra aparte, en efectivo.'
           '${_promoActiva ? '\n\nSe le asignará 1 mes de mensualidad gratis (promo activa).' : ''}',
       aceptar: 'Confirmar',
     );
@@ -471,7 +479,9 @@ class _VentaSuplementoInscripcionScreenState
           const SizedBox(height: AppEspacio.md),
           const EncabezadoSeccion(
               titulo: 'Método de pago'),
-          const Text('Inscripción y venta se pagan con el mismo método.',
+          const Text(
+              'La inscripción se paga con este método; el suplemento '
+              'se cobra aparte, en efectivo.',
               style: AppTexto.secundario),
           const SizedBox(height: 4),
           Wrap(
