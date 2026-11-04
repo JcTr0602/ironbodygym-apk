@@ -372,6 +372,10 @@ Future<bool> cobrarConPreviewYRecibo({
         nuevoVencimiento:
             vencRaw.length >= 10 ? vencRaw.substring(0, 10) : vencRaw,
         opUuid: opUuid,
+        // Bloque 4 (T6): el monto del recibo cuenta hasta su
+        // valor con MontoAnimado.
+        montoValor: monto.toDouble(),
+        montoFormato: (v) => '${fmtMonto(v)} CUP',
       ),
     ),
   );

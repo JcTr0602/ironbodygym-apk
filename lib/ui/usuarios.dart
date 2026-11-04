@@ -449,10 +449,18 @@ Hola $username, estas son tus credenciales para la app del gym:
         icon: const Icon(Icons.person_add_rounded),
         label: const Text('Crear'),
       ),
-      body: _cargando
-          ? const EstadoCargando(texto: 'Cargando usuarios…')
-          : _usuarios.isEmpty
-              ? EstadoVacio(
+      // 1.23 T7: cruce por tipo de estado (el vacío ya era el
+      // compartido EstadoVacio).
+      body: CruceEstados(
+        estado: _cargando
+            ? 'cargando'
+            : _usuarios.isEmpty
+                ? 'vacio'
+                : 'contenido',
+        child: _cargando
+            ? const EstadoCargando(texto: 'Cargando usuarios…')
+            : _usuarios.isEmpty
+                ? EstadoVacio(
                   icono: Icons.people_outline_rounded,
                   titulo: 'Sin datos',
                   subtitulo: 'Sincroniza para ver la lista.',
@@ -600,6 +608,7 @@ Hola $username, estas son tus credenciales para la app del gym:
                     },
                   ),
                 ),
+        ),
     );
   }
 }

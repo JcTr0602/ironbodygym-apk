@@ -27,6 +27,11 @@ class _EstadisticasAdopcionScreenState
   String? _error;
   Map<String, dynamic> _d = {};
 
+  /// El aviso de permiso (no es un fallo de lectura): B6 lo
+  /// clasifica C4 y no ofrece Reintentar.
+  bool get _esErrorDePermiso =>
+      _error != null && _error!.startsWith('Solo el dueño');
+
   @override
   void initState() {
     super.initState();
@@ -96,26 +101,26 @@ class _EstadisticasAdopcionScreenState
           ),
         ],
       ),
-      body: _cargando
-          ? const EstadoCargando(texto: 'Cargando estadísticas…')
-          : _error != null
-              ? Center(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Padding(
-                        padding: const EdgeInsets.all(24),
-                        child: Text(_error!,
-                            textAlign: TextAlign.center,
-                            style: AppTexto.secundario),
-                      ),
-                      FilledButton.icon(
-                        icon: const Icon(Icons.refresh_rounded, size: 18),
-                        label: const Text('Reintentar'),
-                        onPressed: _cargar,
-                      ),
-                    ],
-                  ),
+      // 1.23 T7: cruce por tipo de estado (cargando/error/
+      // contenido). 1.23 B6: el error es el EstadoError
+      // clasificado — el fallo de lectura es C1 (Reintentar
+      // idempotente); el aviso de «solo el dueño» es permiso
+      // (C4: sin acción, reintentar no cambia nada).
+      body: CruceEstados(
+        estado: _cargando
+            ? 'cargando'
+            : _error != null
+                ? 'error'
+                : 'contenido',
+        child: _cargando
+            ? const EstadoCargando(texto: 'Cargando estadísticas…')
+            : _error != null
+              ? EstadoError(
+                  detalle: _error!,
+                  claseError: _esErrorDePermiso
+                      ? ClaseError.validacion
+                      : ClaseError.lectura,
+                  onReintentar: _cargar,
                 )
               // Argón Estadísticas #9: pull-to-refresh como
               // el resto de pantallas de estadísticas.
@@ -123,6 +128,7 @@ class _EstadisticasAdopcionScreenState
                   onRefresh: _cargar,
                   child: _contenido(),
                 ),
+      ),
     );
   }
 

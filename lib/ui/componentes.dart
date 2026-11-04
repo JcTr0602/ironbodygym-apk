@@ -821,28 +821,58 @@ class EstadoVacio extends StatelessWidget {
 }
 
 /// v1.2.4: estado de error con explicación y botón Reintentar.
+///
+/// 1.23 B6: con [claseError] el widget NACE clasificado: la
+/// acción visible es la de su clase (ver
+/// [configErrorClasificado]) — C1 ofrece «Reintentar», C3
+/// «Verificar» (JAMÁS «Reintentar»: repetir la escritura podría
+/// duplicarla) y C2/C4 no ofrecen botón aunque haya callback.
+/// Sin clase se conserva el comportamiento histórico.
 class EstadoError extends StatelessWidget {
   final String titulo;
   final String? detalle;
   final VoidCallback? onReintentar;
+  final ClaseError? claseError;
 
   const EstadoError({
     super.key,
     this.titulo = 'No se pudo cargar',
     this.detalle,
     this.onReintentar,
+    this.claseError,
   });
 
   @override
   Widget build(BuildContext context) {
+    final cfg =
+        claseError == null ? null : configErrorClasificado(claseError!);
+    final esErrorDuro =
+        cfg == null || cfg.significado == SignificadoChip.error;
+    // La etiqueta sale de la clase, nunca del llamador: sin
+    // clase es «Reintentar»; con clase, la suya (null en C2/C4
+    // = sin botón, aunque haya callback).
+    final etiqueta = onReintentar == null
+        ? null
+        : (cfg == null ? 'Reintentar' : cfg.etiquetaAccion);
+    final iconoAccion = switch (etiqueta) {
+      'Verificar' => Icons.fact_check_outlined,
+      'Ver cola' => Icons.list_alt_rounded,
+      _ => Icons.refresh_rounded,
+    };
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(AppEspacio.xxl),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.error_outline_rounded,
-                size: 48, color: AppColores.error),
+            Icon(
+                esErrorDuro
+                    ? Icons.error_outline_rounded
+                    : Icons.warning_amber_rounded,
+                size: 48,
+                color: esErrorDuro
+                    ? AppColores.error
+                    : AppColores.alerta),
             const SizedBox(height: AppEspacio.md),
             Text(titulo,
                 style: AppTexto.subtitulo, textAlign: TextAlign.center),
@@ -853,16 +883,49 @@ class EstadoError extends StatelessWidget {
                       color: AppColores.textoSecundario(context)),
                   textAlign: TextAlign.center),
             ],
-            if (onReintentar != null) ...[
+            if (etiqueta != null) ...[
               const SizedBox(height: AppEspacio.lg),
               BotonSecundario(
-                  texto: 'Reintentar',
-                  icono: Icons.refresh_rounded,
+                  texto: etiqueta,
+                  icono: iconoAccion,
                   onPressed: onReintentar),
             ],
           ],
         ),
       ),
+    );
+  }
+}
+
+/// 1.23 B6 (H-03 de Argón): error de validación INLINE para
+/// formularios dentro de Dialog/BottomSheet. REGLA de la
+/// gramática: una validación que nace dentro de un modal se
+/// muestra DENTRO del modal con este widget, nunca como
+/// SnackBar del Scaffold de fondo (la barra se pinta detrás
+/// del velo, choca con el FAB y el usuario no la asocia al
+/// campo). El SnackBar queda para el feedback de la pantalla
+/// tras cerrar el modal.
+class ErrorInline extends StatelessWidget {
+  final String mensaje;
+
+  const ErrorInline(this.mensaje, {super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Icon(Icons.error_rounded,
+            size: 16, color: AppColores.error),
+        const SizedBox(width: AppEspacio.xs),
+        Expanded(
+          child: Text(
+            mensaje,
+            style: AppTexto.metadato.copyWith(
+                color: AppColores.error, fontWeight: FontWeight.w600),
+          ),
+        ),
+      ],
     );
   }
 }
@@ -1440,11 +1503,116 @@ class MontoAnimado extends StatelessWidget {
   }
 }
 
+/// 1.23 B6 (Argón, feedback): origen de un aviso. Los avisos
+/// AUTOMÁTICOS (sync de fondo, procesos sin el usuario delante)
+/// respetan la ventana de protección de una barra crítica; los
+/// de una acción directa del usuario pisan siempre.
+enum OrigenAviso { usuario, automatico }
+
+/// Ventana que protege una barra crítica/accionable (P2) frente
+/// a avisos automáticos P1: si la crítica lleva menos que esto
+/// en pantalla, el aviso automático se DESCARTA (Argón B6 §1).
+const Duration kProteccionAvisoCritico = Duration(seconds: 3);
+
+/// Duración VISUAL de la barra Deshacer (Argón B6 §3). La
+/// ventana de negocio en BD sigue siendo de 15 s: si el usuario
+/// toca a los 7,9 s, la holgura cubre el procesamiento.
+const Duration kDuracionVisualDeshacer = Duration(seconds: 8);
+
+/// Duración por defecto de un aviso según su significado
+/// (Argón B6 §3): éxito/info/neutral 3 s; alerta/agotado 4 s;
+/// error 6 s (el error siempre lleva texto, nunca solo color,
+/// V8, y dura más para que se alcance a leer).
+Duration duracionAviso(SignificadoChip significado) =>
+    switch (significado) {
+      SignificadoChip.exito ||
+      SignificadoChip.info ||
+      SignificadoChip.neutral =>
+        const Duration(seconds: 3),
+      SignificadoChip.alerta ||
+      SignificadoChip.agotado =>
+        const Duration(seconds: 4),
+      SignificadoChip.error => const Duration(seconds: 6),
+    };
+
+/// ¿El aviso es crítico/accionable (P2 en la política de
+/// Argón B6 §1)? Todo error y toda barra con acción (p. ej.
+/// Deshacer) lo es; el resto es P1 normal.
+bool avisoEsCritico(SignificadoChip significado,
+        {bool conAccion = false}) =>
+    conAccion || significado == SignificadoChip.error;
+
+/// Decisión pura de la política de prioridades (Argón B6 §1),
+/// testeable sin temporizadores: ¿se descarta el aviso
+/// entrante? Solo se descarta un P1 AUTOMÁTICO cuando una P2
+/// lleva menos de [kProteccionAvisoCritico] en pantalla. Una
+/// acción directa del usuario pisa siempre, y un P2 entrante
+/// también (reemplaza a lo que haya).
+bool avisoEntranteSeDescarta({
+  required bool activaEsCritica,
+  required Duration antiguedadActiva,
+  required bool entranteEsCritica,
+  required OrigenAviso origenEntrante,
+}) {
+  if (origenEntrante == OrigenAviso.usuario) return false;
+  if (entranteEsCritica) return false;
+  if (!activaEsCritica) return false;
+  return antiguedadActiva < kProteccionAvisoCritico;
+}
+
+/// Barra viva según el helper, para la política de
+/// prioridades. [dueno] es el messenger que la mostró: la
+/// protección solo vale dentro del mismo messenger. `desde`
+/// es un instante para MEDIR antigüedad (una diferencia),
+/// no una fecha de negocio.
+class _AvisoActivo {
+  final ScaffoldMessengerState dueno;
+  final bool critica;
+  final DateTime desde;
+  const _AvisoActivo({
+    required this.dueno,
+    required this.critica,
+    required this.desde,
+  });
+}
+
+_AvisoActivo? _avisoActivo;
+
+/// Reloj con el que se MIDE la antigüedad de la barra activa
+/// (solo diferencias de instantes; no es fecha de negocio).
+/// Sustituible en tests: el reloj falso de testWidgets mueve
+/// los temporizadores pero NO mueve DateTime.now(), así que
+/// sin esta costura la ventana de 3 s no se puede envejecer
+/// de forma determinista.
+DateTime Function() _relojAvisos = DateTime.now;
+
+@visibleForTesting
+void fijarRelojAvisosParaTest(DateTime Function()? reloj) {
+  _relojAvisos = reloj ?? DateTime.now;
+}
+
 /// Aviso breve unificado (V7): SnackBar con icono y color según el
 /// significado (mismo vocabulario que [SignificadoChip], V6). El
 /// fondo, la forma flotante y la acción los da el tema; aquí solo se
-/// fija el significado visual. El error siempre lleva texto (nunca
-/// solo color, V8) y dura más, para que se alcance a leer.
+/// fija el significado visual.
+///
+/// 1.23 B6 (Argón): duraciones por clase ([duracionAviso]),
+/// política de prioridades P1/P2 ([avisoEntranteSeDescarta]) y
+/// [messengerState] opcional (H-04) para llamarlo con un
+/// messenger capturado ANTES de un await, sin tocar el contexto
+/// después. Quien ya solo tenga el messenger (feedback
+/// post-await que no debe depender de `mounted`, H-01) usa
+/// [mostrarSnackEnMessenger].
+///
+/// Nota de framework (verificado en el SDK en uso): una
+/// SnackBar CON acción nace con `persist: true` y no vence
+/// sola. Por eso el helper fija `persist: false` en TODAS sus
+/// barras: las duraciones por clase mandan también con acción
+/// (y la ventana visual del Deshacer es real). Ninguna
+/// pantalla debe construir un SnackBar directo para avisar:
+/// perdería el registro de prioridades P1/P2 (panel Bloque 4);
+/// quien necesite el controlador usa
+/// [mostrarSnackControladoEnMessenger].
 ///
 /// La migración de los SnackBar existentes a este helper va pantalla
 /// a pantalla con los grupos de diseño (V9–V35); el código nuevo usa
@@ -1456,6 +1624,81 @@ void mostrarSnack(
   String? accion,
   VoidCallback? alAccion,
   Duration? duracion,
+  OrigenAviso origen = OrigenAviso.usuario,
+  ScaffoldMessengerState? messengerState,
+}) {
+  _mostrarSnackEn(
+    messengerState ?? ScaffoldMessenger.of(context),
+    mensaje,
+    significado: significado,
+    accion: accion,
+    alAccion: alAccion,
+    duracion: duracion,
+    origen: origen,
+  );
+}
+
+/// Como [mostrarSnack] pero sobre un messenger ya capturado:
+/// no necesita BuildContext. Es la vía del feedback post-await
+/// (H-01/H-04 de Argón B6): el resultado de una acción se
+/// anuncia aunque la pantalla que la lanzó ya no esté montada.
+void mostrarSnackEnMessenger(
+  ScaffoldMessengerState messenger,
+  String mensaje, {
+  SignificadoChip significado = SignificadoChip.neutral,
+  String? accion,
+  VoidCallback? alAccion,
+  Duration? duracion,
+  OrigenAviso origen = OrigenAviso.usuario,
+}) {
+  _mostrarSnackEn(
+    messenger,
+    mensaje,
+    significado: significado,
+    accion: accion,
+    alAccion: alAccion,
+    duracion: duracion,
+    origen: origen,
+  );
+}
+
+/// Como [mostrarSnackEnMessenger] pero devuelve el controlador
+/// de la barra (null si la política de prioridades la descartó)
+/// para quien necesita cerrarla por su cuenta — el Deshacer de
+/// Servicios al salir de la pantalla (panel Bloque 4: TODA barra
+/// con acción pasa por el mecanismo central, para que quede
+/// registrada como P2 y protegida; ninguna pantalla construye
+/// su SnackBar directo).
+ScaffoldFeatureController<SnackBar, SnackBarClosedReason>?
+    mostrarSnackControladoEnMessenger(
+  ScaffoldMessengerState messenger,
+  String mensaje, {
+  SignificadoChip significado = SignificadoChip.neutral,
+  String? accion,
+  VoidCallback? alAccion,
+  Duration? duracion,
+  OrigenAviso origen = OrigenAviso.usuario,
+}) {
+  return _mostrarSnackEn(
+    messenger,
+    mensaje,
+    significado: significado,
+    accion: accion,
+    alAccion: alAccion,
+    duracion: duracion,
+    origen: origen,
+  );
+}
+
+ScaffoldFeatureController<SnackBar, SnackBarClosedReason>?
+    _mostrarSnackEn(
+  ScaffoldMessengerState messenger,
+  String mensaje, {
+  required SignificadoChip significado,
+  String? accion,
+  VoidCallback? alAccion,
+  Duration? duracion,
+  required OrigenAviso origen,
 }) {
   final (icono, color) = switch (significado) {
     SignificadoChip.exito => (Icons.check_circle_rounded, AppColores.exito),
@@ -1465,18 +1708,40 @@ void mostrarSnack(
     SignificadoChip.agotado => (Icons.warning_amber_rounded, AppColores.alerta),
     SignificadoChip.neutral => (Icons.info_rounded, Colors.white),
   };
-  final messenger = ScaffoldMessenger.of(context);
+  final conAccion = accion != null && alAccion != null;
+  final critica = avisoEsCritico(significado, conAccion: conAccion);
+  // Política de prioridades (Argón B6 §1): una P2 joven no la
+  // pisa un aviso automático P1; ese aviso se descarta.
+  final activo = _avisoActivo;
+  if (activo != null &&
+      identical(activo.dueno, messenger) &&
+      avisoEntranteSeDescarta(
+        activaEsCritica: activo.critica,
+        antiguedadActiva: _relojAvisos().difference(activo.desde),
+        entranteEsCritica: critica,
+        origenEntrante: origen,
+      )) {
+    return null;
+  }
   // 1.23 (gramática de avisos, reporte de campo de Jc): la
   // barra nueva REEMPLAZA a todo lo anterior — clearSnackBars
   // descarta también la COLA; con hideCurrentSnackBar las
   // barras viejas esperaban su turno y «se quedaban volando»
-  // sobre otras pantallas minutos después.
+  // sobre otras pantallas minutos después. Ningún aviso se
+  // encola jamás (Argón B6 §1).
   messenger.clearSnackBars();
-  messenger.showSnackBar(
+  final registro = _AvisoActivo(
+      dueno: messenger, critica: critica, desde: _relojAvisos());
+  _avisoActivo = registro;
+  final ctrl = messenger.showSnackBar(
     SnackBar(
-      duration: duracion ??
-          Duration(
-              seconds: significado == SignificadoChip.error ? 6 : 4),
+      // En este SDK, un SnackBar CON acción nace persistente
+      // (persist = action != null) y la duración sería nominal:
+      // las duraciones por clase de B6 (y la ventana visual de
+      // 8 s del Deshacer) mandan, así que ninguna barra del
+      // sistema es persistente.
+      persist: false,
+      duration: duracion ?? duracionAviso(significado),
       content: Row(
         children: [
           Icon(icono, color: color, size: 20),
@@ -1484,10 +1749,134 @@ void mostrarSnack(
           Expanded(child: Text(mensaje)),
         ],
       ),
-      action: (accion != null && alAccion != null)
+      action: conAccion
           ? SnackBarAction(label: accion, onPressed: alAccion)
           : null,
     ),
+  );
+  // Al cerrarse la barra (vence, acción o descarte), su
+  // protección muere con ella: nada queda «protegido» en vacío.
+  ctrl.closed.then((_) {
+    if (identical(_avisoActivo, registro)) _avisoActivo = null;
+  });
+  return ctrl;
+}
+
+// ---------------------------------------------------------------------------
+// B6: errores clasificados C1–C5 (Argón §4)
+// ---------------------------------------------------------------------------
+
+/// Clase de error B6 (Argón §4). La clase decide el
+/// significado, la duración y la ÚNICA acción permitida:
+/// Reintentar solo tiene sentido donde repetir es idempotente.
+enum ClaseError {
+  /// C1 — Lectura idempotente (red caída, se muestran datos
+  /// locales): Reintentar es seguro.
+  lectura,
+
+  /// C2 — Escritura local SQLite (constraint/disco/corrupción):
+  /// reintentar a ciegas no arregla nada; sin acción.
+  escrituraLocal,
+
+  /// C3 — Escritura al servidor con confirmación incierta
+  /// (timeout): PROHIBIDO Reintentar (podría duplicar la
+  /// escritura, que no es idempotente); la salida es Verificar
+  /// con una lectura.
+  confirmacionIncierta,
+
+  /// C4 — Validación de negocio o permisos: la causa exacta va
+  /// en el mensaje; sin acción.
+  validacion,
+
+  /// C5 — Rechazo PERMANENTE del servidor al sincronizar (el
+  /// fallo de red del push NO avisa: para eso está el indicador
+  /// de sync): se resuelve en la cola; acción «Ver cola».
+  rechazoSync,
+}
+
+/// Configuración pura de una clase de error B6 (testeable sin
+/// widgets): significado visual, duración en pantalla y
+/// etiqueta de la acción permitida (null = sin acción).
+///
+/// EXCEPCIÓN APROBADA a la matriz general 3/4/6 por
+/// significado ([duracionAviso]): las duraciones de los
+/// errores CLASIFICADOS son las de la tabla por clase de
+/// Argón B6 §4 (C1 5 s, C3 6 s, C4 5 s), que es la norma
+/// específica para estas superficies y manda sobre la matriz
+/// general — un C3 (confirmación incierta) necesita que el
+/// usuario alcance a leer que NO se sabe si el servidor
+/// aplicó el cambio antes de decidir Verificar. La matriz
+/// 3/4/6 sigue rigiendo todos los avisos no clasificados
+/// (panel Bloque 4, ajuste 2, opción «excepción documentada»).
+({
+  SignificadoChip significado,
+  Duration duracion,
+  String? etiquetaAccion,
+}) configErrorClasificado(ClaseError clase) => switch (clase) {
+      ClaseError.lectura => (
+          significado: SignificadoChip.alerta,
+          duracion: const Duration(seconds: 5),
+          etiquetaAccion: 'Reintentar',
+        ),
+      ClaseError.escrituraLocal => (
+          significado: SignificadoChip.error,
+          duracion: const Duration(seconds: 6),
+          etiquetaAccion: null,
+        ),
+      ClaseError.confirmacionIncierta => (
+          significado: SignificadoChip.alerta,
+          duracion: const Duration(seconds: 6),
+          // PROHIBIDO 'Reintentar' en C3 (Argón §4).
+          etiquetaAccion: 'Verificar',
+        ),
+      ClaseError.validacion => (
+          significado: SignificadoChip.alerta,
+          duracion: const Duration(seconds: 5),
+          etiquetaAccion: null,
+        ),
+      ClaseError.rechazoSync => (
+          significado: SignificadoChip.error,
+          duracion: const Duration(seconds: 6),
+          etiquetaAccion: 'Ver cola',
+        ),
+    };
+
+/// Texto canónico de las clases cuyo mensaje no depende del
+/// contexto (Argón §4). Null = el llamador pone el suyo.
+String? textoCanonicoErrorClasificado(ClaseError clase) =>
+    switch (clase) {
+      ClaseError.lectura =>
+        'Sin conexión al servidor. Mostrando datos locales.',
+      ClaseError.confirmacionIncierta =>
+        'La conexión tardó demasiado. No sabemos aún si el '
+            'servidor aplicó el cambio.',
+      _ => null,
+    };
+
+/// Muestra un error ya clasificado (B6) como aviso: el
+/// significado, la duración y la acción salen de la CLASE,
+/// nunca del llamador — así ningún C3 puede ofrecer Reintentar
+/// por accidente. [alAccion] ejecuta la acción de la clase
+/// (Reintentar en C1, Verificar en C3, Ver cola en C5); si es
+/// null, o la clase no admite acción, la barra va sin botón.
+void mostrarErrorClasificado(
+  BuildContext context,
+  ClaseError clase,
+  String mensaje, {
+  VoidCallback? alAccion,
+  OrigenAviso origen = OrigenAviso.usuario,
+  ScaffoldMessengerState? messengerState,
+}) {
+  final cfg = configErrorClasificado(clase);
+  mostrarSnack(
+    context,
+    mensaje,
+    significado: cfg.significado,
+    duracion: cfg.duracion,
+    accion: cfg.etiquetaAccion,
+    alAccion: alAccion,
+    origen: origen,
+    messengerState: messengerState,
   );
 }
 

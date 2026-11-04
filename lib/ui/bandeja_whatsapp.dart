@@ -87,45 +87,37 @@ class _BandejaWhatsappScreenState extends State<BandejaWhatsappScreen>
     // Pasada 2 de Argón (1.20): si el SnackBar de confirmación
     // de un aviso anterior seguía en pantalla, su botón podía
     // marcar ese aviso viejo (o disparar el lote) a destiempo.
-    ScaffoldMessenger.of(context).clearSnackBars(); // 1.23: tambien la cola (gramatica de avisos)
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-            '¿Enviaste el mensaje a ${a['nombre'] ?? 'este cliente'}?'),
-        action: SnackBarAction(
-          label: 'Sí, enviado',
-          onPressed: () async {
-            await _setAtendido(a, true);
-            if (!mounted) return;
-            if (enLote) {
-              final quedan = _pendientesLote();
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: Text(quedan > 0
-                      ? 'Contactado. Quedan $quedan en el lote.'
-                      : 'Lote completo.'),
-                  action: quedan > 0
-                      ? SnackBarAction(
-                          label: 'Siguiente',
-                          onPressed: _enviarLote,
-                        )
-                      : null,
-                ),
-              );
-            } else {
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: const Text('Marcado como contactado.'),
-                  action: SnackBarAction(
-                    label: 'Deshacer',
-                    onPressed: () => _setAtendido(a, false),
-                  ),
-                ),
-              );
-            }
-          },
-        ),
-      ),
+    // B6 (1.23): los tres avisos del flujo van por el helper
+    // único (mostrarSnack ya limpia también la cola al entrar).
+    // La pregunta conserva 4 s explícitos: hay que leerla y
+    // decidir, no es un aviso de paso.
+    mostrarSnack(
+      context,
+      '¿Enviaste el mensaje a ${a['nombre'] ?? 'este cliente'}?',
+      duracion: const Duration(seconds: 4),
+      accion: 'Sí, enviado',
+      alAccion: () async {
+        await _setAtendido(a, true);
+        if (!mounted) return;
+        if (enLote) {
+          final quedan = _pendientesLote();
+          mostrarSnack(
+            context,
+            quedan > 0
+                ? 'Contactado. Quedan $quedan en el lote.'
+                : 'Lote completo.',
+            accion: quedan > 0 ? 'Siguiente' : null,
+            alAccion: quedan > 0 ? _enviarLote : null,
+          );
+        } else {
+          mostrarSnack(
+            context,
+            'Marcado como contactado.',
+            accion: 'Deshacer',
+            alAccion: () => _setAtendido(a, false),
+          );
+        }
+      },
     );
   }
 

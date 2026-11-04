@@ -265,7 +265,20 @@ class _AvisosEntrenadorScreenState
       body: Column(
         children: [
           const SyncBanner(compact: true),
-          Expanded(child: FadeEntrada(child: _cuerpo())),
+          Expanded(
+            child: FadeEntrada(
+              // 1.23 T7: cruce por tipo de estado (la key es solo
+              // el tipo, nunca los datos).
+              child: CruceEstados(
+                estado: _cargando
+                    ? 'cargando'
+                    : _avisos.isEmpty
+                        ? 'vacio'
+                        : 'contenido',
+                child: _cuerpo(),
+              ),
+            ),
+          ),
         ],
       ),
     );
@@ -277,16 +290,12 @@ class _AvisosEntrenadorScreenState
           child: CircularProgressIndicator(color: AppColores.naranja));
     }
     if (_avisos.isEmpty) {
-      return const Center(
-        child: Padding(
-          padding: EdgeInsets.all(AppEspacio.xl),
-          child: Text(
-            'No hay avisos. Crea uno con el botón «Nuevo aviso»: '
+      // 1.23 B7: vacío compartido del sistema.
+      return const EstadoVacio(
+        icono: Icons.campaign_rounded,
+        titulo: 'No hay avisos.',
+        subtitulo: 'Crea uno con el botón «Nuevo aviso»: '
             'aparecerá en el Home de los entrenadores.',
-            textAlign: TextAlign.center,
-            style: AppTexto.secundario,
-          ),
-        ),
       );
     }
     return RefreshIndicator(

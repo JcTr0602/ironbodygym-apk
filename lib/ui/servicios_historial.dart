@@ -399,46 +399,29 @@ class _ServiciosHistorialScreenState
               ),
             ),
           Expanded(
-            child: visibles.isEmpty
-                ? Center(
-                    child: Container(
-                      padding: const EdgeInsets.all(AppEspacio.lg),
-                      decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(12),
-                        color: AppColores.textoSecundario(context)
-                            .withValues(alpha: 0.08),
-                      ),
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(
-                            Icons.history_rounded,
-                            color: AppColores.textoSecundario(context)
-                                .withValues(alpha: 0.5),
-                          ),
-                          const SizedBox(height: AppEspacio.sm),
-                          Text(
-                              _entradas.isEmpty
-                                  ? 'Sin operaciones registradas.'
-                                  : _busqueda.isNotEmpty
-                                      ? 'Sin operaciones con esa búsqueda.'
-                                      : 'Sin operaciones con ese filtro.',
-                              style: AppTexto.cuerpo.copyWith(
-                                  color: AppColores.textoSecundario(
-                                      context))),
-                          if (_busqueda.isNotEmpty)
-                            TextButton(
-                              onPressed: () {
-                                _busquedaCtrl.clear();
-                                setState(() => _busqueda = '');
-                              },
-                              child: const Text('Limpiar búsqueda'),
-                            ),
-                        ],
-                      ),
-                    ),
-                  )
-                : ListView.builder(
+            // 1.23 B7+T7: cruce por tipo de estado en la zona de
+            // resultados y vacío compartido (la carga sigue con
+            // su Scaffold propio y la cabecera de filtros fija).
+            child: CruceEstados(
+              estado: visibles.isEmpty ? 'vacio' : 'contenido',
+              child: visibles.isEmpty
+                  ? EstadoVacio(
+                      icono: Icons.history_rounded,
+                      titulo: _entradas.isEmpty
+                          ? 'Sin operaciones registradas.'
+                          : _busqueda.isNotEmpty
+                              ? 'Sin operaciones con esa búsqueda.'
+                              : 'Sin operaciones con ese filtro.',
+                      textoAccion:
+                          _busqueda.isNotEmpty ? 'Limpiar búsqueda' : null,
+                      onAccion: _busqueda.isNotEmpty
+                          ? () {
+                              _busquedaCtrl.clear();
+                              setState(() => _busqueda = '');
+                            }
+                          : null,
+                    )
+                  : ListView.builder(
                     padding: const EdgeInsets.all(AppEspacio.lg),
                     itemCount: itemsHist.length + 1,
                     itemBuilder: (context, index) {
@@ -467,6 +450,7 @@ class _ServiciosHistorialScreenState
                       return _filaEntrada(it as Map<String, dynamic>);
                     },
                   ),
+            ),
           ),
         ],
       ),

@@ -32,6 +32,7 @@ import '../tiempo.dart';
 import '../cliente_protegido.dart';
 import 'componentes.dart';
 import 'aviso_duplicado.dart';
+import 'confirmacion_cobro.dart';
 import 'diseno.dart';
 import 'venta_suplemento_inscripcion.dart';
 import 'widgets.dart';
@@ -471,7 +472,8 @@ class _VentaSuplementoScreenState
   }
 
   /// v1.8.1: arma el comprobante de la venta — lo usan la VISTA
-  /// PREVIA (antes de registrar) y el diálogo «Venta registrada».
+  /// PREVIA (antes de registrar) y la pantalla de éxito
+  /// «¡Venta registrada!» (Bloque 4, T5).
   /// Devuelve el texto y, si el cliente tiene móvil, el número
   /// listo para wa.me. Con promo, la nueva fecha de vencimiento
   /// sale de previewHasta sobre la ficha local: la MISMA regla
@@ -597,6 +599,12 @@ class _VentaSuplementoScreenState
   /// v1.3.7: muestra el comprobante de la venta con opción de enviarlo
   /// por WhatsApp al cliente (si tiene móvil en su ficha).
   /// Pedido de Jc: comprobante + detalles de la promo (mes gratis).
+  /// 1.23 Bloque 4 (T5/T6): el éxito deja de ser un diálogo y pasa
+  /// a la pantalla compartida de confirmación (la misma gramática
+  /// del cobro): marca animada, total que cuenta con MontoAnimado,
+  /// comprobante y el botón de WhatsApp como acción extra de la
+  /// pantalla. Al cerrar («Entendido») se vuelve a esta pantalla,
+  /// igual que al cerrar el diálogo.
   Future<void> _mostrarComprobante({
     required String nombreComprador,
     required double total,
@@ -612,46 +620,46 @@ class _VentaSuplementoScreenState
     final textoComprobante = c.texto;
     final waNum = c.waNum;
     if (!mounted) return;
-    await showDialog(
-      context: context,
-      builder: (ctx) => DialogoApp(
-        titulo: 'Venta registrada',
-        iconoTitulo: Icons.receipt_long_rounded,
-        contenido: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(textoComprobante.replaceAll('*', '')),
-            if (waNum != null) ...[
-              const SizedBox(height: 12),
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton.icon(
-                  icon: const Icon(Icons.send_rounded),
-                  label: const Text('Enviar por WhatsApp'),
-                  onPressed: () async {
+    await Navigator.of(context).push(
+      RutaIron(
+        builder: (_) => ConfirmacionOperacionScreen(
+          titulo: '¡Venta registrada!',
+          etiquetaMonto: 'Total',
+          monto: textoTotalVenta(
+              total, _moneda, _moneda == 'CUP' ? _tasaUsd : null),
+          montoValor: total,
+          montoFormato: (v) => textoTotalVenta(
+              v, _moneda, _moneda == 'CUP' ? _tasaUsd : null),
+          detalles: [
+            (
+              etiqueta: 'Producto',
+              valor: '${widget.suplemento['nombre']} ×$_cantidad'
+            ),
+            (etiqueta: 'Comprador', valor: nombreComprador),
+          ],
+          comprobanteTitulo: 'Comprobante',
+          comprobanteTexto: textoComprobante.replaceAll('*', ''),
+          accionExtra: waNum == null
+              ? null
+              : AccionExtraConfirmacion(
+                  texto: 'Enviar por WhatsApp',
+                  icono: Icons.send_rounded,
+                  alPulsar: () async {
                     final url = Uri.parse(
                         'https://wa.me/$waNum?text=${Uri.encodeComponent(textoComprobante)}');
                     try {
                       await launchUrl(url,
                           mode: LaunchMode.externalApplication);
                     } catch (_) {
-                      if (ctx.mounted) {
-                        mostrarSnack(ctx, 'No se pudo abrir WhatsApp', significado: SignificadoChip.error);
+                      if (mounted) {
+                        mostrarSnack(
+                            context, 'No se pudo abrir WhatsApp',
+                            significado: SignificadoChip.error);
                       }
                     }
                   },
                 ),
-              ),
-            ],
-          ],
         ),
-        acciones: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cerrar'),
-          ),
-        ],
       ),
     );
   }

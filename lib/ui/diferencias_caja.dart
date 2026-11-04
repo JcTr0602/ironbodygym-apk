@@ -266,9 +266,13 @@ class _DiferenciasCajaScreenState
           ),
         ],
       ),
-      body: _cargando
-          ? const EstadoCargando(texto: 'Cargando diferencias…')
-          : RefreshIndicator(
+      // 1.23 T7: cruce por tipo de estado (sin estado vacío de
+      // pantalla: el «sin abiertas» es una tarjeta de sección).
+      body: CruceEstados(
+        estado: _cargando ? 'cargando' : 'contenido',
+        child: _cargando
+            ? const EstadoCargando(texto: 'Cargando diferencias…')
+            : RefreshIndicator(
               onRefresh: _cargar,
               child: ListView(
                 padding: const EdgeInsets.all(AppEspacio.lg),
@@ -290,6 +294,7 @@ class _DiferenciasCajaScreenState
                 ],
               ),
             ),
+        ),
     );
   }
 }

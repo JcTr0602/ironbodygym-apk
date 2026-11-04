@@ -16,6 +16,12 @@ class Novedad {
 }
 
 const novedades = [
+  Novedad('1.22.0', [
+    'Diseño renovado (primera parte): cabeceras con la identidad del gym, tarjetas y botones más claros en la pantalla principal y en las secciones más usadas',
+    'Sincronización reforzada: la bajada de datos se verifica fila a fila para que el espejo local nunca quede a medias cuando la conexión falla',
+    'Tarifas: cuando un cliente tiene tarifa especial pactada, esa manda siempre sobre la tarifa de menores, igual en la app y en el servidor',
+    'Corrección (1.22.1): las fotos de los clientes ya no se ven deformadas en la ficha ni en las listas',
+  ]),
   Novedad('1.21.0', [
     'Candado de acceso (solo dueño): pausa el acceso a la app para todos, para un rol o para una persona, con tu mensaje y caducidad; lo que se intente registrar durante la pausa se guarda y sube solo al reactivar',
     'Cumpleaños: si ya regalaste el mes a un cliente, la felicitación de WhatsApp ahora anuncia el regalo con su nuevo vencimiento (antes salía el saludo sin mencionarlo)',

@@ -230,7 +230,11 @@ void main() {
       expect('!monto.isFinite'.allMatches(adm).length,
           greaterThanOrEqualTo(2),
           reason: 'tipos de pago (×2) y gasto');
-      expect(adm, contains('v.isFinite && v > 0'),
+      // 1.23 B3 Paso 3: la config de precios se extrajo de
+      // admin.dart a config_precios_bancarios.dart; la guarda
+      // sigue la validación a su archivo nuevo.
+      expect(_fuente('lib/ui/config_precios_bancarios.dart'),
+          contains('v.isFinite && v > 0'),
           reason: 'montos de configuración: Infinity es > 0');
       expect(_fuente('lib/ui/centro_compras.dart'),
           contains('!monto.isFinite'));

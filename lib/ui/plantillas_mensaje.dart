@@ -60,14 +60,21 @@ class _PlantillasScreenState extends State<PlantillasScreen> {
               label: const Text('Nueva plantilla'),
             )
           : null,
-      body: _cargando
-          ? const EstadoCargando(texto: 'Cargando plantillas…')
-          : _plantillas.isEmpty
-              ? const Center(
-                  child: Text(
-                      'Sin plantillas. Crea la primera con el botón +.',
-                      style: AppTexto.secundario))
-              : RefreshIndicator(
+      // 1.23 B7+T7: cruce por tipo de estado y vacío compartido.
+      body: CruceEstados(
+        estado: _cargando
+            ? 'cargando'
+            : _plantillas.isEmpty
+                ? 'vacio'
+                : 'contenido',
+        child: _cargando
+            ? const EstadoCargando(texto: 'Cargando plantillas…')
+            : _plantillas.isEmpty
+                ? const EstadoVacio(
+                    icono: Icons.message_rounded,
+                    titulo: 'Sin plantillas.',
+                    subtitulo: 'Crea la primera con el botón +.')
+                : RefreshIndicator(
                   onRefresh: _cargar,
                   child: ListView(
                     padding: const EdgeInsets.all(16),
@@ -118,6 +125,7 @@ class _PlantillasScreenState extends State<PlantillasScreen> {
                     ],
                   ),
                 ),
+        ),
     );
   }
 

@@ -706,16 +706,35 @@ class _MiNominaScreenState extends State<MiNominaScreen> {
                       style: AppTexto.subtitulo),
                   const SizedBox(height: AppEspacio.sm),
                   _linea('Base', fmtMonto(_base)),
+                  // B5 (1.23): las cifras hermanas llevan el
+                  // MISMO semántico que en la cara del dueño
+                  // (nomina.dart): a favor en exito (vía
+                  // colorCifraNomina), lo que descuenta
+                  // (adelantos y deuda) en error, y el neto en
+                  // exito. En cero, neutro: el dueño ni siquiera
+                  // pinta la línea. Es el mismo criterio que ya
+                  // usaba la barra apilada de abajo (verde lo
+                  // que cobra, rojo lo descontado).
                   _linea('Comisión dosis',
-                      '$_dosis dosis · ${fmtMonto(_comision)}'),
-                  _linea('Bonos', '+${fmtMonto(_bonosMes)}'),
+                      '$_dosis dosis · ${fmtMonto(_comision)}',
+                      color: _comision != 0
+                          ? colorCifraNomina(_comision)
+                          : null),
+                  _linea('Bonos', '+${fmtMonto(_bonosMes)}',
+                      color: _bonosMes != 0
+                          ? colorCifraNomina(_bonosMes)
+                          : null),
                   _linea(
-                      'Adelantos del mes', '-${fmtMonto(_adelantosMes)}'),
+                      'Adelantos del mes', '-${fmtMonto(_adelantosMes)}',
+                      color:
+                          _adelantosMes > 0 ? AppColores.error : null),
                   _linea(
-                      'Deuda arrastrada', '-${fmtMonto(_deudaEntrante)}'),
+                      'Deuda arrastrada', '-${fmtMonto(_deudaEntrante)}',
+                      color:
+                          _deudaEntrante > 0 ? AppColores.error : null),
                   const Divider(),
                   _linea('NETO ESTIMADO', fmtMonto(_neto),
-                      negrita: true),
+                      negrita: true, color: colorCifraNomina(_neto)),
                   const SizedBox(height: AppEspacio.sm),
                   // N2 (estéticas 1.19): el neto como barra
                   // apilada — verde lo que cobra, rojo claro lo
@@ -976,7 +995,8 @@ class _MiNominaScreenState extends State<MiNominaScreen> {
     return '· $fechaCorta · $cliente · $tipo$montoTxt';
   }
 
-  Widget _linea(String etiqueta, String valor, {bool negrita = false}) {
+  Widget _linea(String etiqueta, String valor,
+      {bool negrita = false, Color? color}) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 2),
       child: Row(
@@ -986,13 +1006,24 @@ class _MiNominaScreenState extends State<MiNominaScreen> {
             valor,
             style: AppTexto.cuerpo.copyWith(
                 fontWeight:
-                    negrita ? FontWeight.w700 : FontWeight.w400),
+                    negrita ? FontWeight.w700 : FontWeight.w400,
+                color: color),
           ),
         ],
       ),
     );
   }
 }
+
+/// B5 (1.23, Bloque 4): color semántico de una cifra de nómina.
+/// LA MISMA regla en las dos caras (la del dueño en nomina.dart
+/// y esta del entrenador): cifra a favor (positiva o cero) en
+/// exito; cifra en contra (negativa: debe o falta) en error.
+/// Siempre tokens de AppColores, nunca colores sueltos de
+/// Material. Vive aquí porque nomina.dart ya importa esta
+/// pantalla; es pura para fijarla en tests sin base de datos.
+Color colorCifraNomina(num monto) =>
+    monto >= 0 ? AppColores.exito : AppColores.error;
 
 /// Texto del recibo de nómina del entrenador (1.14, M5.2): el
 /// mismo que la pantalla copiaba al portapapeles, con su sello de

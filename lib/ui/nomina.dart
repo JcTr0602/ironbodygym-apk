@@ -332,33 +332,32 @@ class _NominaScreenState extends State<NominaScreen> {
               children: [
                 Text(
                   '${fmtMonto(total)} CUP',
-                  style: AppTexto.tituloPagina.copyWith(color: AppColores.exito),
+                  style: AppTexto.tituloPagina.copyWith(
+                      color: colorCifraNomina(total)),
                 ),
                 if (bono != 0)
                   Text(
                     '${bono > 0 ? '+' : ''}${fmtMonto(bono)} bono',
-                    style: AppTexto.metadato.copyWith(color: bono > 0
-                          ? AppColores.exito
-                          : Colors.red),
+                    style: AppTexto.metadato.copyWith(
+                        color: colorCifraNomina(bono)),
                   ),
                 if (comision.total != 0)
                   Text(
                     '${comision.total > 0 ? '+' : ''}'
                     '${fmtMonto(comision.total)} comisión dosis '
                     '(${comision.dosis})',
-                    style: AppTexto.metadato.copyWith(color: comision.total > 0
-                          ? AppColores.exito
-                          : Colors.red),
+                    style: AppTexto.metadato.copyWith(
+                        color: colorCifraNomina(comision.total)),
                   ),
                 if (adelantosMes != 0)
                   Text(
                     '−${fmtMonto(adelantosMes)} adelantos',
-                    style: AppTexto.metadato.copyWith(color: Colors.red),
+                    style: AppTexto.metadato.copyWith(color: AppColores.error),
                   ),
                 if (deudaEntrante > 0)
                   Text(
                     '−${fmtMonto(deudaEntrante)} deuda anterior',
-                    style: AppTexto.metadato.copyWith(color: Colors.red),
+                    style: AppTexto.metadato.copyWith(color: AppColores.error),
                   ),
                 if (liquidada)
                   Text(
@@ -391,7 +390,7 @@ class _NominaScreenState extends State<NominaScreen> {
       child: ListTile(
         leading: Icon(
           monto >= 0 ? Icons.add_circle_rounded : Icons.remove_circle_rounded,
-          color: monto >= 0 ? AppColores.exito : Colors.red,
+          color: colorCifraNomina(monto),
         ),
         title: Text(
           '${monto > 0 ? '+' : ''}${fmtMonto(monto)} CUP — $destino',
@@ -399,7 +398,7 @@ class _NominaScreenState extends State<NominaScreen> {
         ),
         subtitle: nota.isNotEmpty ? Text(nota) : null,
         trailing: IconButton(
-          icon: const Icon(Icons.delete_rounded, color: Colors.red),
+          icon: const Icon(Icons.delete_rounded, color: AppColores.error),
           tooltip: 'Eliminar bono',
           onPressed: () => _eliminarBono('${b['id']}'),
         ),
@@ -794,7 +793,7 @@ class _NominaScreenState extends State<NominaScreen> {
               child: Text(
                 'Queda una deuda de ${fmtMonto(libro.deudaSaliente)} '
                 'CUP para el mes que viene.',
-                style: AppTexto.metadato.copyWith(color: Colors.red),
+                style: AppTexto.metadato.copyWith(color: AppColores.error),
               ),
             ),
           // T22 (1.20): acuse del entrenador (solo lectura
@@ -967,7 +966,7 @@ class _NominaScreenState extends State<NominaScreen> {
                       style: AppTexto.metadato),
                 if (estaAnulado)
                   Text('anulado',
-                      style: AppTexto.metadato.copyWith(color: Colors.red)),
+                      style: AppTexto.metadato.copyWith(color: AppColores.error)),
                 if (anulacionPendiente)
                   const Text('anulación en curso…',
                       style: AppTexto.metadato),
@@ -982,7 +981,7 @@ class _NominaScreenState extends State<NominaScreen> {
           ),
           Text(
             '${monto >= 0 ? '' : '+'}${fmtMonto(monto.abs())} CUP',
-            style: AppTexto.secundario.copyWith(color: esReverso ? AppColores.exito : Colors.red, fontWeight: FontWeight.w700),
+            style: AppTexto.secundario.copyWith(color: esReverso ? AppColores.exito : AppColores.error, fontWeight: FontWeight.w700),
           ),
           if (esDueno &&
               !liquidada &&
@@ -1236,6 +1235,9 @@ class _NominaScreenState extends State<NominaScreen> {
       var metodo = 'efectivo';
       var origen = 'caja_turno';
       var gaveta = ent; // username de cuya gaveta sale
+      // 1.23 B6 (H-03): la validación del monto va INLINE en
+      // el diálogo, no como SnackBar tras el velo.
+      String? errorMonto;
       final guardado = await showDialog<bool>(
         context: context,
         builder: (ctx) => StatefulBuilder(
@@ -1252,6 +1254,10 @@ class _NominaScreenState extends State<NominaScreen> {
                     decoration: const InputDecoration(
                         labelText: 'Monto (CUP entero)'),
                   ),
+                  if (errorMonto != null) ...[
+                    const SizedBox(height: 8),
+                    ErrorInline(errorMonto!),
+                  ],
                   const SizedBox(height: 12),
                   Row(
                     children: [
@@ -1355,7 +1361,8 @@ class _NominaScreenState extends State<NominaScreen> {
                 onPressed: () {
                   final monto = int.tryParse(montoCtrl.text.trim());
                   if (monto == null || monto <= 0) {
-                    mostrarSnack(ctx, 'Monto inválido: entero mayor que 0', significado: SignificadoChip.alerta);
+                    setLocal(() => errorMonto =
+                        'Monto inválido: entero mayor que 0');
                     return;
                   }
                   Navigator.of(ctx).pop(true);

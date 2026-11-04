@@ -767,34 +767,44 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
   ScaffoldFeatureController<SnackBar, SnackBarClosedReason>?
       _ctrlDeshacer;
 
-  /// Snackbar Deshacer E3 (15 s): si la op sigue 'pendiente' y no
-  /// pasaron 15 s, se borra la venta completa (en múltiple, todo el
-  /// grupo). Si no, solo cabe Reversión.
+  /// Snackbar Deshacer E3: duración VISUAL de 8 s (B6,
+  /// [kDuracionVisualDeshacer]); la ventana de negocio en BD
+  /// sigue siendo de 15 s — si la op sigue 'pendiente' y no
+  /// pasaron 15 s, se borra la venta completa (en múltiple,
+  /// todo el grupo). Si no, solo cabe Reversión.
   void _mostrarDeshacer(List<String> opUuids, DateTime cobradoEn) {
     if (!mounted) return;
     final messenger = ScaffoldMessenger.of(context);
-    // Gramática de avisos (1.23): una venta nueva REEMPLAZA la
-    // barra anterior en vez de encolarse detrás de ella.
-    messenger.clearSnackBars();
-    _ctrlDeshacer = messenger.showSnackBar(
-      SnackBar(
-        content: const Text('Venta registrada'),
-        duration: const Duration(seconds: 15),
-        action: SnackBarAction(
-          label: 'Deshacer',
-          onPressed: () async {
-            final ok = await deshacerVentaServicio(opUuids, cobradoEn);
-            if (!mounted) return;
-            if (ok) {
-              _aviso('Venta deshecha');
-              await _cargar();
-            } else {
-              _aviso('Ya no se puede deshacer: solo cabe Reversión',
-                  error: true);
-            }
-          },
-        ),
-      ),
+    // Panel Bloque 4: la barra pasa por el mecanismo central
+    // (mostrarSnackControladoEnMessenger) — queda registrada
+    // como P2 (tiene acción) y un aviso automático posterior
+    // no puede matarla en sus primeros 3 s con un
+    // clearSnackBars; el helper ya reemplaza lo anterior,
+    // fija persist: false y devuelve el controlador para
+    // poder cerrarla en dispose.
+    _ctrlDeshacer = mostrarSnackControladoEnMessenger(
+      messenger,
+      'Venta registrada',
+      significado: SignificadoChip.exito,
+      duracion: kDuracionVisualDeshacer,
+      accion: 'Deshacer',
+      alAccion: () async {
+        final ok = await deshacerVentaServicio(opUuids, cobradoEn);
+        // H-01 mitad 2 (Argón B6): el feedback post-await va
+        // sobre el messenger CAPTURADO al mostrar la barra,
+        // sin gate mounted — si el usuario salió de
+        // Servicios, el resultado de su toque no se traga
+        // en silencio. Solo el refresco de ESTA pantalla
+        // depende de mounted.
+        if (ok) {
+          mostrarSnackEnMessenger(messenger, 'Venta deshecha');
+          if (mounted) await _cargar();
+        } else {
+          mostrarSnackEnMessenger(messenger,
+              'Ya no se puede deshacer: solo cabe Reversión',
+              significado: SignificadoChip.error);
+        }
+      },
     );
   }
 

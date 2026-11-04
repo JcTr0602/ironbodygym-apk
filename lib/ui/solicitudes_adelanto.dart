@@ -250,7 +250,18 @@ class _SolicitudesAdelantoScreenState
       body: Column(
         children: [
           const SyncBanner(compact: true),
-          Expanded(child: _cuerpo()),
+          Expanded(
+            // 1.23 T7: cruce por tipo de estado (la key es solo
+            // el tipo, nunca los datos).
+            child: CruceEstados(
+              estado: _cargando
+                  ? 'cargando'
+                  : _lista.isEmpty
+                      ? 'vacio'
+                      : 'contenido',
+              child: _cuerpo(),
+            ),
+          ),
         ],
       ),
     );
@@ -262,15 +273,10 @@ class _SolicitudesAdelantoScreenState
           child: CircularProgressIndicator(color: AppColores.naranja));
     }
     if (_lista.isEmpty) {
-      return const Center(
-        child: Padding(
-          padding: EdgeInsets.all(AppEspacio.xl),
-          child: Text(
-            'No hay solicitudes de adelanto.',
-            textAlign: TextAlign.center,
-            style: AppTexto.secundario,
-          ),
-        ),
+      // 1.23 B7: vacío compartido del sistema.
+      return const EstadoVacio(
+        icono: Icons.payments_rounded,
+        titulo: 'No hay solicitudes de adelanto.',
       );
     }
     return FadeEntrada(

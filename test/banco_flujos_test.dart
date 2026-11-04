@@ -359,9 +359,10 @@ void main() {
       expect((filas.single['stock'] as num).toInt(), 3,
           reason: 'el stock del espejo se descuenta en la venta');
 
-      // Comprobante final de la venta.
-      expect(find.text('Venta registrada'), findsOneWidget);
-      await tester.tap(find.text('Cerrar'));
+      // Comprobante final de la venta (1.23 Bloque 4, T5: la
+      // pantalla compartida de éxito sustituye al diálogo).
+      expect(find.text('¡Venta registrada!'), findsOneWidget);
+      await tester.tap(find.text('Entendido'));
       await tester.pumpAndSettle();
     });
   });

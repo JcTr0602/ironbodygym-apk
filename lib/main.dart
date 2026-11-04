@@ -21,6 +21,7 @@ import 'tarifa_especial.dart';
 import 'fotos_foreground.dart';
 import 'theme.dart';
 import 'ui/capa_candado.dart';
+import 'ui/componentes.dart';
 import 'ui/diseno.dart';
 import 'ui/home.dart';
 import 'ui/login.dart';
@@ -139,10 +140,12 @@ Future<void> main() async {
     navigatorKey.currentState?.popUntil((r) => r.isFirst);
     final ctx = navigatorKey.currentContext;
     if (ctx != null) {
+      // B6/H-04: helper único sobre el messenger capturado de
+      // la raíz (limpia la cola y aplica la gramática).
       final messenger = ScaffoldMessenger.of(ctx);
-      messenger.clearSnackBars();
-      messenger.showSnackBar(const SnackBar(
-          content: Text('Tu sesión venció. Entra de nuevo.')));
+      mostrarSnack(ctx, 'Tu sesión venció. Entra de nuevo.',
+          significado: SignificadoChip.alerta,
+          messengerState: messenger);
     }
   };
   // v1.5.0 (Bloque G): confirmación automática de conversiones
