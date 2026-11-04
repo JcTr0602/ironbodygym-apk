@@ -26,6 +26,7 @@ import '../perfil.dart';
 import '../sync.dart';
 import '../theme.dart';
 import '../tiempo.dart';
+import 'app_bar.dart';
 import 'avisos.dart';
 import 'componentes.dart';
 import 'diseno.dart';
@@ -324,7 +325,7 @@ class _AjustesScreenState extends State<AjustesScreen> {
             width: 44,
             height: 28,
             decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(8),
+              borderRadius: BorderRadius.circular(AppRadio.sm),
               color: oscuro
                   ? AppColores.carbonProfundo
                   : AppColores.borde(ctx).withValues(alpha: 0.4),
@@ -1147,7 +1148,7 @@ class _AjustesScreenState extends State<AjustesScreen> {
               final n = novedades[i];
               return Padding(
                 padding:
-                    const EdgeInsets.only(bottom: 12),
+                    const EdgeInsets.only(bottom: AppEspacio.md),
                 child: Column(
                   crossAxisAlignment:
                       CrossAxisAlignment.start,
@@ -1310,13 +1311,13 @@ class _AjustesScreenState extends State<AjustesScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Ajustes')),
+      appBar: appBarIron(context, 'Ajustes'),
       body: Column(
         children: [
           const SyncBanner(),
           Expanded(
             child: ListView(
-              padding: const EdgeInsets.all(16),
+              padding: const EdgeInsets.all(AppEspacio.lg),
               children: [
                 // ----- PERFIL -----
                 _seccion('Perfil'),
@@ -1326,7 +1327,7 @@ class _AjustesScreenState extends State<AjustesScreen> {
                     child: _avatar != null
                         ? ClipRRect(
                             borderRadius:
-                                BorderRadius.circular(999),
+                                BorderRadius.circular(AppRadio.circular),
                             child: Image.file(_avatar!,
                                 width: 100,
                                 height: 100,
@@ -1412,7 +1413,7 @@ class _AjustesScreenState extends State<AjustesScreen> {
                   onTap: _elegirTema,
                 ),
                 Padding(
-                  padding: const EdgeInsets.only(top: 4),
+                  padding: const EdgeInsets.only(top: AppEspacio.xs),
                   child: Tarjeta(
                     child: Row(
                       children: [

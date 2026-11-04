@@ -6,6 +6,7 @@ import '../../auth.dart';
 import '../../localdb.dart';
 import '../../modelos/incidencia.dart';
 import '../../tiempo.dart';
+import '../app_bar.dart';
 import '../diseno.dart';
 
 /// CRUD de tipos de incidencia (solo dueño).
@@ -53,16 +54,12 @@ class _TiposIncidenciaScreenState
     // P2#9: CRUD solo dueño sin guarda.
     if (!AuthService().isOwner) {
       return Scaffold(
-          appBar: AppBar(
-              title: const Text('Tipos de incidencia')),
+          appBar: appBarIron(context, 'Tipos de incidencia'),
           body: const Center(
               child: Text('Solo el dueño ve esta pantalla.')));
     }
     return Scaffold(
-      appBar: AppBar(
-        title:
-            const Text('Tipos de incidencia'),
-      ),
+      appBar: appBarIron(context, 'Tipos de incidencia'),
       body: _cargando
           ? const Center(
               child: CircularProgressIndicator())
@@ -94,7 +91,7 @@ class _TiposIncidenciaScreenState
     return Card(
       key: key,
       margin: const EdgeInsets.symmetric(
-          horizontal: 12, vertical: 4),
+          horizontal: AppEspacio.md, vertical: AppEspacio.xs),
       child: ListTile(
         leading: Container(
           width: 40,
@@ -102,7 +99,7 @@ class _TiposIncidenciaScreenState
           decoration: BoxDecoration(
             color: t.colorData.withValues(alpha: 0.15),
             borderRadius:
-                BorderRadius.circular(8),
+                BorderRadius.circular(AppRadio.sm),
           ),
           child: Icon(t.iconoData,
               color: t.colorData),
@@ -428,8 +425,7 @@ class _DialogoTipoState
                     onTap: () => setState(
                         () => _icono = n),
                     borderRadius:
-                        BorderRadius.circular(
-                            8),
+                        BorderRadius.circular(AppRadio.sm),
                     child: Container(
                       width: 44,
                       height: 44,

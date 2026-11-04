@@ -5,6 +5,7 @@ library;
 import 'package:flutter/material.dart';
 
 import '../localdb.dart';
+import 'app_bar.dart';
 import 'diseno.dart';
 import 'widgets.dart';
 import 'componentes.dart';
@@ -48,7 +49,7 @@ class _AvisosScreenState extends State<AvisosScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Mis avisos')),
+      appBar: appBarIron(context, 'Mis avisos'),
       body: _cargando
           ? const EstadoCargando(texto: 'Cargando avisos…')
           : Column(
@@ -56,7 +57,7 @@ class _AvisosScreenState extends State<AvisosScreen> {
                 const SyncBanner(),
                 Expanded(
                   child: ListView(
-                    padding: const EdgeInsets.all(16),
+                    padding: const EdgeInsets.all(AppEspacio.lg),
                     children: [
                       Text(
                         'Elige qué avisos quieres recibir en la app.',

@@ -7,6 +7,7 @@ import '../../localdb.dart';
 import '../../negocio.dart';
 import '../../modelos/incidencia.dart';
 import '../../tiempo.dart';
+import '../app_bar.dart';
 import '../diseno.dart';
 import '../../auth.dart';
 
@@ -216,15 +217,14 @@ class _EditarIncidenciaScreenState
   Widget build(BuildContext context) {
     final editando = widget.existente != null;
     return Scaffold(
-      appBar: AppBar(
-        title: Text(editando
-            ? 'Editar incidencia'
-            : 'Nueva incidencia'),
+      appBar: appBarIron(
+        context,
+        editando ? 'Editar incidencia' : 'Nueva incidencia',
       ),
       body: Form(
         key: _formKey,
         child: ListView(
-          padding: const EdgeInsets.all(16),
+          padding: const EdgeInsets.all(AppEspacio.lg),
           children: [
             // Tipo
             DropdownButtonFormField<String>(
@@ -372,9 +372,9 @@ class _EditarIncidenciaScreenState
             if (!_esDueno && _tipoResponsable == 'entrenador') ...[
               const SizedBox(height: 8),
               Container(
-                padding: const EdgeInsets.all(12),
+                padding: const EdgeInsets.all(AppEspacio.md),
                 decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(8),
+                  borderRadius: BorderRadius.circular(AppRadio.sm),
                   border: Border.all(color: Colors.grey.withValues(alpha: 0.4)),
                 ),
                 child: Row(
@@ -433,12 +433,12 @@ class _EditarIncidenciaScreenState
               if (_sugerenciasCliente.isNotEmpty)
                 Container(
                   margin:
-                      const EdgeInsets.only(top: 4),
+                      const EdgeInsets.only(top: AppEspacio.xs),
                   decoration: BoxDecoration(
                     border: Border.all(
                         color: Colors.grey[700]!),
                     borderRadius:
-                        BorderRadius.circular(8),
+                        BorderRadius.circular(AppRadio.sm),
                   ),
                   child: Column(
                     children:
@@ -473,7 +473,7 @@ class _EditarIncidenciaScreenState
                 Padding(
                   padding:
                       const EdgeInsets.only(
-                          top: 4),
+                          top: AppEspacio.xs),
                   child: Chip(
                     avatar: const Icon(
                         Icons.person_rounded,

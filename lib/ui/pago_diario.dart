@@ -14,6 +14,7 @@ import '../localdb.dart';
 import '../negocio.dart';
 import '../sync.dart';
 import '../tiempo.dart';
+import 'app_bar.dart';
 import 'componentes.dart';
 import 'diseno.dart';
 import 'reporte_mensual_diarios.dart';
@@ -489,9 +490,10 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Pago diario'),
-        actions: [
+      appBar: appBarIron(
+        context,
+        'Pago diario',
+        acciones: [
           // v1.0.15: alternar entre registrar y reporte
           // Argón PASADA 2 MEDIO: el reporte muestra totales globales
           // y filas de todos; solo el dueño lo abre. Sin botón, el
@@ -525,7 +527,7 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
   /// v1.0.15: vista de registro (la original).
   Widget _vistaRegistro() {
     return ListView(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(AppEspacio.lg),
       children: [
                 Text('(${fmtMonto(_precio)} CUP por turno)',
                     style: TextStyle(
@@ -612,7 +614,7 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
                           color: AppColores.textoSecundario(context))),
                 for (final d in _hoy)
                   Padding(
-                    padding: const EdgeInsets.only(bottom: 8),
+                    padding: const EdgeInsets.only(bottom: AppEspacio.sm),
                     child: Tarjeta(
                       padding: EdgeInsets.zero,
                       child: ListTile(
@@ -672,12 +674,12 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
     return _cargandoReporte
         ? const EstadoCargando(texto: 'Cargando pago diario…')
         : ListView(
-            padding: const EdgeInsets.all(16),
+            padding: const EdgeInsets.all(AppEspacio.lg),
             children: [
               // v1.3.2: acceso al resumen mensual.
               Padding(
                 padding:
-                    const EdgeInsets.only(bottom: 12),
+                    const EdgeInsets.only(bottom: AppEspacio.md),
                 child: OutlinedButton.icon(
                   icon: const Icon(
                       Icons.calendar_month_rounded),
@@ -711,12 +713,12 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
                       onTap: _elegirFecha,
                       child: Container(
                         padding: const EdgeInsets.symmetric(
-                            vertical: 12),
+                            vertical: AppEspacio.md),
                         decoration: BoxDecoration(
                           border: Border.all(
                               color: AppColores.borde(context)),
                           borderRadius:
-                              BorderRadius.circular(12),
+                              BorderRadius.circular(AppRadio.md),
                         ),
                         child: Text(
                           fmtFecha(_fechaReporte.toIso8601String().substring(0, 10)),
@@ -807,12 +809,12 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
                 const SizedBox(height: 8),
                 Container(
                   height: 100,
-                  padding: const EdgeInsets.all(8),
+                  padding: const EdgeInsets.all(AppEspacio.sm),
                   decoration: BoxDecoration(
                     color: AppColores.superficie(context),
                     border: Border.all(
                         color: AppColores.borde(context)),
-                    borderRadius: BorderRadius.circular(12),
+                    borderRadius: BorderRadius.circular(AppRadio.md),
                   ),
                   child: Row(
                     crossAxisAlignment:
@@ -869,7 +871,7 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
                         color: AppColores.textoSecundario(context))),
               for (final d in _reporteDatos)
                 Padding(
-                  padding: const EdgeInsets.only(bottom: 8),
+                  padding: const EdgeInsets.only(bottom: AppEspacio.sm),
                   child: Tarjeta(
                     padding: EdgeInsets.zero,
                     child: ListTile(
@@ -904,7 +906,7 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
 
   Widget _tarjetaTurno(String titulo, int cantidad, double total) {
     return Tarjeta(
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.all(AppEspacio.md),
       child: Column(
         children: [
           Text(titulo,

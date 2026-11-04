@@ -53,6 +53,7 @@ import 'pagaron_mes.dart';
 import 'pagos_por_metodo.dart';
 import 'incidencias/lista_incidencias.dart';
 import 'historial_caja.dart';
+import 'app_bar.dart';
 import 'invitados.dart';
 import 'solicitudes_adelanto.dart';
 import 'avisos_entrenador.dart';
@@ -1296,13 +1297,13 @@ class _AdminScreenState extends State<AdminScreen> {
     // todos los KPIs financieros del mes.
     if (!AuthService().isOwner) {
       return Scaffold(
-        appBar: AppBar(title: const Text('Administración')),
+        appBar: appBarIron(context, 'Administración'),
         body: const Center(
             child: Text('Panel del dueño · Solo tú ves esta sección')),
       );
     }
     return Scaffold(
-      appBar: AppBar(title: const Text('Administración')),
+      appBar: appBarIron(context, 'Administración'),
       body: Column(
         children: [
           const SyncBanner(),
@@ -1312,7 +1313,7 @@ class _AdminScreenState extends State<AdminScreen> {
                 : RefreshIndicator(
                     onRefresh: _cargar,
                     child: ListView(
-                      padding: const EdgeInsets.all(16),
+                      padding: const EdgeInsets.all(AppEspacio.lg),
                       children: [
                         _cabeceraPanel(),
                         _bloqueAtencion(),
@@ -1390,13 +1391,13 @@ class _AdminScreenState extends State<AdminScreen> {
         // diagnóstico de sync, el mismo destino de la fila
         // «Problema de sincronización» del bloque de atención.
         InkWell(
-          borderRadius: BorderRadius.circular(999),
+          borderRadius: BorderRadius.circular(AppRadio.circular),
           onTap: () => _irLigera(const SeccionDiagnosticoScreen()),
           child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+            padding: const EdgeInsets.symmetric(horizontal: AppEspacio.md, vertical: AppEspacio.xs),
             decoration: BoxDecoration(
               color: chipColor.withValues(alpha: 0.14),
-              borderRadius: BorderRadius.circular(999),
+              borderRadius: BorderRadius.circular(AppRadio.circular),
               border: Border.all(color: chipColor.withValues(alpha: 0.4)),
             ),
             child: Row(
@@ -1495,7 +1496,7 @@ class _AdminScreenState extends State<AdminScreen> {
         if (pendientes.isEmpty && !_swrSolicitudes.cargando)
           Container(
             padding:
-                const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                const EdgeInsets.symmetric(horizontal: AppEspacio.lg, vertical: AppEspacio.md),
             decoration: BoxDecoration(
               color: AppColores.superficie(context),
               borderRadius: BorderRadius.circular(AppRadio.lg),
@@ -1560,7 +1561,7 @@ class _AdminScreenState extends State<AdminScreen> {
   /// los datos locales; esta fila se sustituye al llegar el dato).
   Widget _filaSolicitudesCargando({required bool ultima}) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      padding: const EdgeInsets.symmetric(horizontal: AppEspacio.lg, vertical: AppEspacio.md),
       decoration: BoxDecoration(
         border: ultima
             ? null
@@ -1608,7 +1609,7 @@ class _AdminScreenState extends State<AdminScreen> {
     return InkWell(
       onTap: p.onTap,
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        padding: const EdgeInsets.symmetric(horizontal: AppEspacio.lg, vertical: AppEspacio.md),
         decoration: BoxDecoration(
           border: ultima
               ? null
@@ -1644,16 +1645,16 @@ class _AdminScreenState extends State<AdminScreen> {
             ),
             const SizedBox(width: 8),
             InkWell(
-              borderRadius: BorderRadius.circular(999),
+              borderRadius: BorderRadius.circular(AppRadio.circular),
               onTap: p.onTap,
               child: Container(
                 padding:
-                    const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    const EdgeInsets.symmetric(horizontal: AppEspacio.md, vertical: AppEspacio.sm),
                 decoration: BoxDecoration(
                   color: p.primario
                       ? AppColores.naranja
                       : AppColores.superficie(context),
-                  borderRadius: BorderRadius.circular(999),
+                  borderRadius: BorderRadius.circular(AppRadio.circular),
                   border: p.primario
                       ? null
                       : Border.all(color: AppColores.borde(context)),
@@ -1808,9 +1809,9 @@ class _AdminScreenState extends State<AdminScreen> {
   Widget _lineaNomina() {
     final neto = _netoNominaMes;
     return Padding(
-      padding: const EdgeInsets.only(top: 12),
+      padding: const EdgeInsets.only(top: AppEspacio.md),
       child: InkWell(
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(AppRadio.sm),
         onTap: () => _ir(const NominaScreen()),
         child: Row(
           children: [
@@ -1841,9 +1842,9 @@ class _AdminScreenState extends State<AdminScreen> {
     // 1.14 (rediseño): la línea es tocable — abre la pantalla de
     // Cuentas a la Casa, el mismo destino del módulo 2.
     return Padding(
-      padding: const EdgeInsets.only(top: 12),
+      padding: const EdgeInsets.only(top: AppEspacio.md),
       child: InkWell(
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(AppRadio.sm),
         onTap: () => _ir(const CuentasCasaScreen()),
         child: Row(
           children: [
@@ -1869,7 +1870,7 @@ class _AdminScreenState extends State<AdminScreen> {
       {Color? color, VoidCallback? onTap}) {
     return Tarjeta(
       onTap: onTap,
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+      padding: const EdgeInsets.symmetric(horizontal: AppEspacio.md, vertical: AppEspacio.md),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -1962,7 +1963,7 @@ class _AdminScreenState extends State<AdminScreen> {
                   tarjetas: modulos[i].tarjetas())),
               child: Padding(
                 padding: const EdgeInsets.symmetric(
-                    horizontal: 14, vertical: 12),
+                    horizontal: 14, vertical: AppEspacio.md),
                 child: Row(
                   children: [
                     IconoModuloBadge(
@@ -1994,7 +1995,7 @@ class _AdminScreenState extends State<AdminScreen> {
                             horizontal: 6, vertical: 2),
                         decoration: BoxDecoration(
                           color: AppColores.error,
-                          borderRadius: BorderRadius.circular(999),
+                          borderRadius: BorderRadius.circular(AppRadio.circular),
                         ),
                         child: Text('${modulos[i].badge}',
                             style: AppTexto.minuscula.copyWith(color: Colors.white, fontWeight: FontWeight.w800)),
@@ -2580,7 +2581,7 @@ class _AdminScreenState extends State<AdminScreen> {
   Widget _tarjetaFlujo(
       IconData icono, String titulo, String resumen, VoidCallback onTap) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.only(bottom: AppEspacio.sm),
       child: Tarjeta(
         onTap: onTap,
         child: Row(
@@ -2614,7 +2615,7 @@ class _AdminScreenState extends State<AdminScreen> {
   Widget _tarjetaCompacta(
       IconData icono, String titulo, String detalle, Color color) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.only(bottom: AppEspacio.sm),
       child: Tarjeta(
         child: Row(
           children: [
@@ -2687,9 +2688,9 @@ class _ModuloAdminScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text(titulo)),
+      appBar: appBarIron(context, titulo),
       body: ListView(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(AppEspacio.lg),
         children: tarjetas,
       ),
     );

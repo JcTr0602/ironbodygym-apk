@@ -10,6 +10,7 @@ import '../config.dart';
 import '../gympedia_validacion.dart';
 import '../localdb.dart';
 import '../sync.dart';
+import 'app_bar.dart';
 import 'componentes.dart';
 import 'diseno.dart';
 import 'gympedia_editor.dart';
@@ -189,7 +190,7 @@ class _GympediaScreenState extends State<GympediaScreen> {
       width: 48,
       height: 48,
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(AppRadio.sm),
         border: Border.all(color: AppColores.borde(context)),
       ),
       child: ClipRRect(
@@ -227,16 +228,17 @@ class _GympediaScreenState extends State<GympediaScreen> {
   Widget build(BuildContext context) {
     if (!AuthService().isOwner) {
       return Scaffold(
-        appBar: AppBar(title: const Text('GymPedia')),
+        appBar: appBarIron(context, 'GymPedia'),
         body: const Center(
             child: Text('Solo el dueño administra la GymPedia.')),
       );
     }
     if (widget.embebida) return _cuerpo();
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('GymPedia'),
-        actions: [
+      appBar: appBarIron(
+        context,
+        'GymPedia',
+        acciones: [
           IconButton(
             icon: _sincronizando
                 ? const SizedBox(
@@ -357,7 +359,7 @@ class _GympediaScreenState extends State<GympediaScreen> {
                 const SizedBox(height: 8),
                 if (_publicadosVisibles.isEmpty)
                   Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 24),
+                    padding: const EdgeInsets.symmetric(vertical: AppEspacio.xl),
                     child: EstadoVacio(
                       icono: Icons.menu_book_rounded,
                       titulo: _busqueda.isNotEmpty
@@ -378,7 +380,7 @@ class _GympediaScreenState extends State<GympediaScreen> {
                 for (final cat in GympediaValidacion.categorias)
                   if (_publicadosVisibles.any((p) => '${p['categoria']}' == cat)) ...[
                     Padding(
-                      padding: const EdgeInsets.only(top: 12, bottom: 4),
+                      padding: const EdgeInsets.only(top: AppEspacio.md, bottom: AppEspacio.xs),
                       child: Text(
                         GympediaValidacion.nombreCategoria[cat] ?? cat,
                         style: AppTexto.etiqueta.copyWith(

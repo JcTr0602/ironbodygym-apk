@@ -462,7 +462,7 @@ class _CumpleanosScreenState extends State<CumpleanosScreen>
         itemBuilder: (ctx, i) {
           if (i == 0) {
             return Padding(
-              padding: const EdgeInsets.all(12),
+              padding: const EdgeInsets.all(AppEspacio.md),
               child: Text(
                 '$fel de ${items.length} felicitados en los $etiqueta',
                 style: AppTexto.secundario.copyWith(
@@ -537,10 +537,10 @@ class _CumpleanosScreenState extends State<CumpleanosScreen>
               children: [
                 // Check "Felicitado" con su propia área táctil.
                 InkWell(
-                  borderRadius: BorderRadius.circular(16),
+                  borderRadius: BorderRadius.circular(AppRadio.lg),
                   onTap: () => _setFelicitado(id, !felicitado),
                   child: Padding(
-                    padding: const EdgeInsets.all(8),
+                    padding: const EdgeInsets.all(AppEspacio.sm),
                     child: Icon(
                       felicitado
                           ? Icons.check_circle_rounded

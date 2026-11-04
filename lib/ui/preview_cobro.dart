@@ -23,6 +23,7 @@ import '../comprobantes.dart';
 import '../localdb.dart';
 import '../negocio.dart';
 import '../tiempo.dart';
+import 'app_bar.dart';
 import 'componentes.dart';
 import 'aviso_duplicado.dart';
 import 'confirmacion_cobro.dart';
@@ -59,13 +60,13 @@ class _PreviewCobroScreenState extends State<PreviewCobroScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Revisar cobro')),
+      appBar: appBarIron(context, 'Revisar cobro'),
       body: SafeArea(
         child: Column(
           children: [
             Expanded(
               child: SingleChildScrollView(
-                padding: const EdgeInsets.all(16),
+                padding: const EdgeInsets.all(AppEspacio.lg),
                 child: Tarjeta(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -129,7 +130,7 @@ class _PreviewCobroScreenState extends State<PreviewCobroScreen> {
 
   Widget _fila(BuildContext context, String etiqueta, String valor) {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8),
+      padding: const EdgeInsets.symmetric(vertical: AppEspacio.sm),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
@@ -150,7 +151,7 @@ class _PreviewCobroScreenState extends State<PreviewCobroScreen> {
   /// encontrar el dinero antes que cualquier otro dato.
   Widget _filaMonto(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8),
+      padding: const EdgeInsets.symmetric(vertical: AppEspacio.sm),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
@@ -173,7 +174,7 @@ class _PreviewCobroScreenState extends State<PreviewCobroScreen> {
   Widget _filaMetodo(BuildContext context) {
     final esTransf = widget.metodoTexto == 'Transferencia';
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8),
+      padding: const EdgeInsets.symmetric(vertical: AppEspacio.sm),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [

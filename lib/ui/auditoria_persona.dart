@@ -19,6 +19,7 @@ import '../localdb.dart';
 import '../negocio.dart' show fmtMonto;
 import '../tiempo.dart';
 import '../turnos_resolucion.dart';
+import 'app_bar.dart';
 import 'auditoria.dart' show descripcionOp, payloadDeOp, tiposOpSensibles;
 import 'componentes.dart';
 import 'diseno.dart';
@@ -234,9 +235,10 @@ class _AuditoriaPersonaScreenState extends State<AuditoriaPersonaScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Auditoría por persona'),
-        actions: [
+      appBar: appBarIron(
+        context,
+        'Auditoría por persona',
+        acciones: [
           IconButton(
               icon: const Icon(Icons.refresh_rounded), onPressed: _cargar),
         ],
@@ -246,7 +248,7 @@ class _AuditoriaPersonaScreenState extends State<AuditoriaPersonaScreen> {
           : _persona == null
               ? const Center(
                   child: Padding(
-                    padding: EdgeInsets.all(24),
+                    padding: EdgeInsets.all(AppEspacio.xl),
                     child: Text(
                         'No se pudo identificar tu usuario en este '
                         'teléfono. Sincroniza y vuelve a intentarlo.'),
@@ -407,7 +409,7 @@ class _AuditoriaPersonaScreenState extends State<AuditoriaPersonaScreen> {
       partes.add('arqueo ${fmtMonto(t.diferenciaArqueo!)}');
     }
     return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.only(bottom: AppEspacio.sm),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -429,7 +431,7 @@ class _AuditoriaPersonaScreenState extends State<AuditoriaPersonaScreen> {
   Widget _bloqueDinero() {
     final d = _dinero;
     Widget fila(String etiqueta, String valor) => Padding(
-          padding: const EdgeInsets.only(bottom: 4),
+          padding: const EdgeInsets.only(bottom: AppEspacio.xs),
           child: Row(
             children: [
               Expanded(
@@ -488,7 +490,7 @@ class _AuditoriaPersonaScreenState extends State<AuditoriaPersonaScreen> {
           else
             for (final op in _sensibles.take(30))
               Padding(
-                padding: const EdgeInsets.only(bottom: 4),
+                padding: const EdgeInsets.only(bottom: AppEspacio.xs),
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [

@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 import '../auth.dart';
 import '../negocio.dart';
 import '../tiempo.dart';
+import 'app_bar.dart';
 import 'componentes.dart';
 import 'diseno.dart';
 
@@ -78,14 +79,12 @@ class _ReporteMensualDiariosScreenState
     final diasConRegistro = porDia.keys.toList()..sort();
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Pagos diarios del mes'),
-      ),
+      appBar: appBarIron(context, 'Pagos diarios del mes'),
       body: _cargando
           ? const Center(
               child: CircularProgressIndicator())
           : ListView(
-              padding: const EdgeInsets.all(16),
+              padding: const EdgeInsets.all(AppEspacio.lg),
               children: [
                 // Selector de mes
                 Row(
@@ -120,7 +119,7 @@ class _ReporteMensualDiariosScreenState
                 Tarjeta(
                   color: AppColores.naranja,
                   padding:
-                      const EdgeInsets.all(16),
+                      const EdgeInsets.all(AppEspacio.lg),
                   child: Column(
                     children: [
                       Text('Total del mes',
@@ -192,7 +191,7 @@ class _ReporteMensualDiariosScreenState
                         0) >
                     0)
                   Padding(
-                    padding: const EdgeInsets.only(top: 8),
+                    padding: const EdgeInsets.only(top: AppEspacio.sm),
                     child: Tarjeta(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -230,7 +229,7 @@ class _ReporteMensualDiariosScreenState
                     Padding(
                       padding:
                           const EdgeInsets.only(
-                              bottom: 8),
+                              bottom: AppEspacio.sm),
                       child: Tarjeta(
                         child: ListTile(
                           contentPadding:

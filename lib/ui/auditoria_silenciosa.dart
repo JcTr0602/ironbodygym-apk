@@ -5,6 +5,7 @@ import '../localdb.dart';
 import '../negocio.dart';
 import '../tiempo.dart';
 import '../turno_service.dart';
+import 'app_bar.dart';
 import 'componentes.dart';
 import 'diseno.dart';
 
@@ -215,7 +216,7 @@ class _AuditoriaSilenciosaScreenState
   Widget build(BuildContext context) {
     if (!AuthService().isOwner) {
       return Scaffold(
-        appBar: AppBar(title: const Text('Auditoría')),
+        appBar: appBarIron(context, 'Auditoría'),
         body: const Center(
           child: Text('Solo el dueño puede ver la auditoría.'),
         ),
@@ -226,9 +227,10 @@ class _AuditoriaSilenciosaScreenState
       grupos.putIfAbsent(c.tipo, () => []).add(c);
     }
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Auditoría silenciosa'),
-        actions: [
+      appBar: appBarIron(
+        context,
+        'Auditoría silenciosa',
+        acciones: [
           IconButton(
             icon: const Icon(Icons.refresh_rounded),
             tooltip: 'Actualizar',
@@ -246,11 +248,11 @@ class _AuditoriaSilenciosaScreenState
                       'No se detectaron patrones sospechosos.',
                 )
               : ListView(
-                  padding: const EdgeInsets.all(16),
+                  padding: const EdgeInsets.all(AppEspacio.lg),
                   children: [
                     Container(
                       padding: const EdgeInsets.symmetric(
-                          horizontal: 12, vertical: 8),
+                          horizontal: AppEspacio.md, vertical: AppEspacio.sm),
                       decoration: BoxDecoration(
                         color: AppColores.textoSecundario(
                                 context)
@@ -282,7 +284,7 @@ class _AuditoriaSilenciosaScreenState
                       for (final c in grupos[tipo]!)
                         Padding(
                           padding: const EdgeInsets.only(
-                              bottom: 8),
+                              bottom: AppEspacio.sm),
                           child: Tarjeta(
                             padding: const EdgeInsets.symmetric(
                                 horizontal: 14, vertical: 10),

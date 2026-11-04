@@ -9,6 +9,7 @@ import '../localdb.dart';
 import '../negocio.dart' show fmtMonto;
 import '../servicios.dart';
 import '../sync.dart';
+import 'app_bar.dart';
 import 'componentes.dart';
 import 'diseno.dart';
 
@@ -544,7 +545,7 @@ class _ServiciosAdminScreenState extends State<ServiciosAdminScreen> {
                 children: [
                   for (final atajo in const [4, 5])
                     Padding(
-                      padding: const EdgeInsets.only(right: 8),
+                      padding: const EdgeInsets.only(right: AppEspacio.sm),
                       child: OutlinedButton(
                         onPressed: () =>
                             setD(() => dosisCtrl.text = '$atajo'),
@@ -674,15 +675,16 @@ class _ServiciosAdminScreenState extends State<ServiciosAdminScreen> {
   Widget build(BuildContext context) {
     if (!AuthService().isOwner) {
       return Scaffold(
-        appBar: AppBar(title: const Text('Servicios · Admin')),
+        appBar: appBarIron(context, 'Servicios · Admin'),
         body: const Center(
             child: Text('Solo el dueño administra los servicios.')),
       );
     }
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Servicios · Admin'),
-        actions: [
+      appBar: appBarIron(
+        context,
+        'Servicios · Admin',
+        acciones: [
           IconButton(
             tooltip: 'Actualizar',
             icon: const Icon(Icons.refresh_rounded),

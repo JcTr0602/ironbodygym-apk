@@ -13,6 +13,7 @@ import '../servicios.dart';
 import '../sync.dart';
 import '../tiempo.dart';
 import '../cliente_protegido.dart';
+import 'app_bar.dart';
 import 'componentes.dart';
 import 'aviso_duplicado.dart';
 import 'diseno.dart';
@@ -438,7 +439,7 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                 // suplementos — el botón «Elegir» pequeño no se
                 // percibía como buscador de clientes del gym.
                 InkWell(
-                  borderRadius: BorderRadius.circular(12),
+                  borderRadius: BorderRadius.circular(AppRadio.md),
                   onTap: () async {
                     final sel = await _elegirCliente();
                     if (sel != null) {
@@ -451,10 +452,10 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                   child: Container(
                     width: double.infinity,
                     padding: const EdgeInsets.symmetric(
-                        horizontal: 12, vertical: 6),
+                        horizontal: AppEspacio.md, vertical: 6),
                     decoration: BoxDecoration(
                       border: Border.all(color: AppColores.borde(context)),
-                      borderRadius: BorderRadius.circular(12),
+                      borderRadius: BorderRadius.circular(AppRadio.md),
                     ),
                     child: Row(
                       children: [
@@ -575,7 +576,7 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                       ),
                       if (errorComision.isNotEmpty)
                         Padding(
-                          padding: const EdgeInsets.only(top: 4),
+                          padding: const EdgeInsets.only(top: AppEspacio.xs),
                           child: Text(errorComision,
                               style: AppTexto.secundario.copyWith(
                                   color: AppColores.error)),
@@ -833,7 +834,7 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
         ),
         const SizedBox(height: 2),
         ClipRRect(
-          borderRadius: BorderRadius.circular(999),
+          borderRadius: BorderRadius.circular(AppRadio.circular),
           child: LinearProgressIndicator(
             value: frac,
             minHeight: 6,
@@ -1010,10 +1011,10 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                   child: Container(
                     width: double.infinity,
                     padding: const EdgeInsets.symmetric(
-                        horizontal: 12, vertical: 10),
+                        horizontal: AppEspacio.md, vertical: 10),
                     decoration: BoxDecoration(
                       border: Border.all(color: AppColores.borde(context)),
-                      borderRadius: BorderRadius.circular(12),
+                      borderRadius: BorderRadius.circular(AppRadio.md),
                     ),
                     child: Row(
                       children: [
@@ -1513,14 +1514,15 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Servicios ⚡'),
-        // Rediseño 1.18 (Jc 2026-10-29): arriba queda solo
-        // refrescar. Administración baja a un botón con texto
-        // debajo de MI POMO; Estadísticas y Ranking bajan como
-        // enlaces con texto dentro del Cuadre. Los iconos sin
-        // texto eran poco intuitivos.
-        actions: [
+      // Rediseño 1.18 (Jc 2026-10-29): en la cabecera queda solo
+      // refrescar. Administración baja a un botón con texto
+      // debajo de MI POMO; Estadísticas y Ranking bajan como
+      // enlaces con texto dentro del Cuadre. Los iconos sin
+      // texto eran poco intuitivos.
+      appBar: appBarIron(
+        context,
+        'Servicios ⚡',
+        acciones: [
           IconButton(
             tooltip: 'Actualizar',
             icon: _actualizando
@@ -1601,7 +1603,7 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                       child: Container(
                         padding: const EdgeInsets.all(AppEspacio.lg),
                         decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(12),
+                          borderRadius: BorderRadius.circular(AppRadio.md),
                           color: AppColores.textoSecundario(context)
                               .withValues(alpha: 0.08),
                         ),
@@ -1638,7 +1640,7 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
   Widget _botonSalidaCompacto() {
     return TextButton.icon(
       style: TextButton.styleFrom(
-        padding: const EdgeInsets.symmetric(horizontal: 8),
+        padding: const EdgeInsets.symmetric(horizontal: AppEspacio.sm),
         minimumSize: const Size(0, 40),
         tapTargetSize: MaterialTapTargetSize.shrinkWrap,
       ),
@@ -1790,11 +1792,11 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
               avisoLotePorAgotarse(
                   (pomo['saldo_local'] as num?)?.toInt() ?? 999))
             Padding(
-              padding: const EdgeInsets.only(top: 8),
+              padding: const EdgeInsets.only(top: AppEspacio.sm),
               child: Container(
-                padding: const EdgeInsets.all(8),
+                padding: const EdgeInsets.all(AppEspacio.sm),
                 decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(8),
+                  borderRadius: BorderRadius.circular(AppRadio.sm),
                   color: AppColores.alertaOscuro
                       .withValues(alpha: 0.15),
                 ),
@@ -1863,7 +1865,7 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                 // venta desbordaban; padding horizontal reducido
                 // y densidad compacta.
                 padding: const EdgeInsets.symmetric(
-                    horizontal: 8, vertical: 10),
+                    horizontal: AppEspacio.sm, vertical: 10),
                 visualDensity: VisualDensity.compact,
               ),
               onPressed:
@@ -1900,7 +1902,7 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
               accion,
             if (!est.habilitado && est.motivo != null)
               Padding(
-                padding: const EdgeInsets.only(top: 4),
+                padding: const EdgeInsets.only(top: AppEspacio.xs),
                 child: Text(
                   est.motivo!,
                   style: AppTexto.secundario,
@@ -1943,7 +1945,7 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
         const SizedBox(height: AppEspacio.sm),
         OutlinedButton.icon(
           style: OutlinedButton.styleFrom(
-            padding: const EdgeInsets.symmetric(vertical: 16),
+            padding: const EdgeInsets.symmetric(vertical: AppEspacio.lg),
           ),
           onPressed: _pomoActual == null ? null : _ventaMultiple,
           icon: const Icon(Icons.library_add_rounded, size: 20),
@@ -2160,7 +2162,7 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
       }
     }
     return Card(
-      margin: const EdgeInsets.only(bottom: 8),
+      margin: const EdgeInsets.only(bottom: AppEspacio.sm),
       child: ListTile(
         onTap: () => _detalleVenta(v),
         leading: Icon(
@@ -2239,7 +2241,7 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
     if (!mounted) return;
 
     Widget fila(String e, String valor) => Padding(
-          padding: const EdgeInsets.only(bottom: 4),
+          padding: const EdgeInsets.only(bottom: AppEspacio.xs),
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -2388,7 +2390,7 @@ class _DialogoClienteState extends State<_DialogoCliente> {
                 prefixIcon: Icon(Icons.search_rounded),
                 border: OutlineInputBorder(),
                 contentPadding:
-                    EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    EdgeInsets.symmetric(horizontal: AppEspacio.md, vertical: AppEspacio.sm),
               ),
               onChanged: (_) => setState(() {}),
             ),
@@ -2397,7 +2399,7 @@ class _DialogoClienteState extends State<_DialogoCliente> {
               child: filtrados.isEmpty
                   ? Center(
                       child: Padding(
-                        padding: const EdgeInsets.all(16),
+                        padding: const EdgeInsets.all(AppEspacio.lg),
                         child: Text(
                           // v1.8.1: distinguir «el teléfono aún no
                           // tiene clientes» de «la búsqueda no dio

@@ -13,6 +13,7 @@ import '../negocio.dart' show fmtMonto;
 import '../permisos_entrenador.dart';
 import '../servicios.dart';
 import '../tiempo.dart';
+import 'app_bar.dart';
 import 'componentes.dart';
 import 'diseno.dart';
 import 'widgets.dart';
@@ -78,12 +79,12 @@ class _RankingServiciosScreenState extends State<RankingServiciosScreen> {
     if (!AuthService().isOwner &&
         !PermisosEntrenador().canVerRankingServicios) {
       return Scaffold(
-          appBar: AppBar(title: const Text('Ranking de Servicios')),
+          appBar: appBarIron(context, 'Ranking de Servicios'),
           body: const Center(
               child: Text('No tienes permiso para ver el ranking.')));
     }
     return Scaffold(
-      appBar: AppBar(title: const Text('Ranking de Servicios')),
+      appBar: appBarIron(context, 'Ranking de Servicios'),
       body: _cargando
           ? const EstadoCargando(texto: 'Cargando ranking…')
           : Column(
@@ -114,7 +115,7 @@ class _RankingServiciosScreenState extends State<RankingServiciosScreen> {
                                   color: AppColores.textoSecundario(
                                       context))))
                       : ListView.builder(
-                          padding: const EdgeInsets.all(12),
+                          padding: const EdgeInsets.all(AppEspacio.md),
                           itemCount: _filas.length,
                           itemBuilder: (c, i) {
                             final f = _filas[i];
@@ -128,7 +129,7 @@ class _RankingServiciosScreenState extends State<RankingServiciosScreen> {
                             ].join(' · ');
                             return Padding(
                               padding:
-                                  const EdgeInsets.only(bottom: 8),
+                                  const EdgeInsets.only(bottom: AppEspacio.sm),
                               child: Tarjeta(
                                 padding: EdgeInsets.zero,
                                 child: ListTile(

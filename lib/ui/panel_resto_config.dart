@@ -29,6 +29,7 @@ import '../copia_seguridad.dart';
 import '../localdb.dart';
 import '../nomina_calc.dart';
 import '../tiempo.dart';
+import 'app_bar.dart';
 import 'componentes.dart';
 import 'diseno.dart';
 import 'horario_turnos.dart';
@@ -138,16 +139,16 @@ class _AjustesGymScreenState extends State<AjustesGymScreen> {
   Widget build(BuildContext context) {
     if (!AuthService().isOwner) {
       return Scaffold(
-          appBar: AppBar(title: const Text('Ajustes del gym')),
+          appBar: appBarIron(context, 'Ajustes del gym'),
           body: const Center(
               child: Text('Solo el dueño cambia ajustes.')));
     }
     return Scaffold(
-      appBar: AppBar(title: const Text('Ajustes del gym')),
+      appBar: appBarIron(context, 'Ajustes del gym'),
       body: _cargando
           ? const EstadoCargando(texto: 'Cargando ajustes…')
           : ListView(
-              padding: const EdgeInsets.all(16),
+              padding: const EdgeInsets.all(AppEspacio.lg),
               children: [
                 const Text(
                   'Los precios y períodos NO se editan aquí: viven en '
@@ -280,7 +281,7 @@ class _RegistroMensualScreenState extends State<RegistroMensualScreen> {
   Widget build(BuildContext context) {
     if (!AuthService().isOwner) {
       return Scaffold(
-          appBar: AppBar(title: const Text('Registro mensual')),
+          appBar: appBarIron(context, 'Registro mensual'),
           body: const Center(
               child: Text('Solo el dueño ve el registro mensual.')));
     }
@@ -289,11 +290,11 @@ class _RegistroMensualScreenState extends State<RegistroMensualScreen> {
         ? ''
         : resumenMensualMarkdown(mes: _mes, ingresos: r, pagaron: _pagaron);
     return Scaffold(
-      appBar: AppBar(title: const Text('Registro mensual')),
+      appBar: appBarIron(context, 'Registro mensual'),
       body: _cargando
           ? const EstadoCargando(texto: 'Cargando ajustes…')
           : ListView(
-              padding: const EdgeInsets.all(16),
+              padding: const EdgeInsets.all(AppEspacio.lg),
               children: [
                 const Text(
                   'Visor de solo lectura. La copia maestra sigue siendo '
@@ -356,9 +357,9 @@ class TurnosPanelScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Turnos y horarios')),
+      appBar: appBarIron(context, 'Turnos y horarios'),
       body: ListView(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(AppEspacio.lg),
         children: [
           const Text(
             'El editor de turnos es ÚNICO (1.8.0): esta pantalla lo '
@@ -619,14 +620,14 @@ class _CopiaSeguridadScreenState extends State<CopiaSeguridadScreen> {
   Widget build(BuildContext context) {
     if (!AuthService().isOwner) {
       return Scaffold(
-          appBar: AppBar(title: const Text('Copia de seguridad')),
+          appBar: appBarIron(context, 'Copia de seguridad'),
           body: const Center(
               child: Text('Exportar la BD es solo el dueño.')));
     }
     return Scaffold(
-      appBar: AppBar(title: const Text('Copia de seguridad')),
+      appBar: appBarIron(context, 'Copia de seguridad'),
       body: ListView(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(AppEspacio.lg),
         children: [
           Tarjeta(
             child: Column(
@@ -690,7 +691,7 @@ class _CopiaSeguridadScreenState extends State<CopiaSeguridadScreen> {
             const SizedBox(height: 8),
             for (final r in _registro)
               Padding(
-                padding: const EdgeInsets.only(bottom: 8),
+                padding: const EdgeInsets.only(bottom: AppEspacio.sm),
                 child: Tarjeta(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,

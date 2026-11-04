@@ -279,7 +279,7 @@ class _VistaPreviaClienteScreenState
             width: double.infinity,
             color: _naranja,
             padding:
-                const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+                const EdgeInsets.symmetric(vertical: AppEspacio.sm, horizontal: AppEspacio.lg),
             child: Text(
               'VISTA PREVIA — lo que ve el cliente en su app',
               style: AppTexto.metadato.copyWith(color: Colors.white, fontWeight: FontWeight.w600),
@@ -293,7 +293,7 @@ class _VistaPreviaClienteScreenState
                 : _error != null
                     ? Center(
                         child: Padding(
-                          padding: const EdgeInsets.all(24),
+                          padding: const EdgeInsets.all(AppEspacio.xl),
                           child: Text(_error!,
                               style:
                                   const TextStyle(color: Colors.white70),
@@ -337,7 +337,7 @@ class _VistaPreviaClienteScreenState
         _total('total_registros_marcas') ?? _registrosMarcas().length;
 
     return ListView(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(AppEspacio.lg),
       children: [
         _tarjeta([
           Row(
@@ -366,11 +366,11 @@ class _VistaPreviaClienteScreenState
         ]),
         // Semáforo de membresía (espejo de Clientes).
         Container(
-          margin: const EdgeInsets.only(bottom: 8),
-          padding: const EdgeInsets.all(12),
+          margin: const EdgeInsets.only(bottom: AppEspacio.sm),
+          padding: const EdgeInsets.all(AppEspacio.md),
           decoration: BoxDecoration(
             color: semaforo.color.withValues(alpha: 0.15),
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: BorderRadius.circular(AppRadio.md),
             border: Border.all(
                 color: semaforo.color.withValues(alpha: 0.55)),
           ),
@@ -440,7 +440,7 @@ class _VistaPreviaClienteScreenState
     final pagos = _lista('historial_pagos');
     final total = _total('total_pagos');
     return ListView(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(AppEspacio.lg),
       children: [
         _tarjeta([
           _fila('Mensualidad',
@@ -481,11 +481,11 @@ class _VistaPreviaClienteScreenState
         if (s['id'] is num) (s['id'] as num).toInt(): '${s['nombre'] ?? ''}',
     };
     return ListView(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(AppEspacio.lg),
       children: [
         _tituloSeccion('Catálogo (${catalogo.length})'),
         Padding(
-          padding: EdgeInsets.only(bottom: 8),
+          padding: EdgeInsets.only(bottom: AppEspacio.sm),
           child: Text('Vista previa: las acciones están deshabilitadas',
               style: AppTexto.metadato.copyWith(color: Colors.white54)),
         ),
@@ -614,7 +614,7 @@ class _VistaPreviaClienteScreenState
     }
     final detalle = '${plan['detalle'] ?? ''}';
     return ListView(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(AppEspacio.lg),
       children: [
         _tarjeta([
           Text('Objetivo: ${plan['objetivo'] ?? '—'}',
@@ -662,7 +662,7 @@ class _VistaPreviaClienteScreenState
     final registros = _registrosMarcas();
     final totalReg = _total('total_registros_marcas');
     return ListView(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(AppEspacio.lg),
       children: [
         _tituloSeccion('Mediciones'),
         if (totalMed != null && totalMed > mediciones.length)
@@ -760,7 +760,7 @@ class _VistaPreviaClienteScreenState
 
   Widget _rotuloCorte(int mostrados, int total) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.only(bottom: AppEspacio.sm),
       child: Text('Mostrando últimos $mostrados de $total',
           style: AppTexto.metadato.copyWith(color: Colors.white54)),
     );
@@ -815,7 +815,7 @@ class _VistaPreviaClienteScreenState
 
   Widget _tituloSeccion(String t) {
     return Padding(
-      padding: const EdgeInsets.only(top: 4, bottom: 8),
+      padding: const EdgeInsets.only(top: AppEspacio.xs, bottom: AppEspacio.sm),
       child: Text(t,
           style: AppTexto.titulo.copyWith(color: _naranja)),
     );
@@ -823,11 +823,11 @@ class _VistaPreviaClienteScreenState
 
   Widget _tarjeta(List<Widget> hijos) {
     return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      padding: const EdgeInsets.all(12),
+      margin: const EdgeInsets.only(bottom: AppEspacio.sm),
+      padding: const EdgeInsets.all(AppEspacio.md),
       decoration: BoxDecoration(
         color: _colorTarjeta,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(AppRadio.md),
         border:
             Border.all(color: Colors.white.withValues(alpha: 0.08)),
       ),
@@ -857,10 +857,10 @@ class _VistaPreviaClienteScreenState
 
   Widget _chip(String texto, Color color) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      padding: const EdgeInsets.symmetric(horizontal: AppEspacio.sm, vertical: AppEspacio.xs),
       decoration: BoxDecoration(
         color: color.withValues(alpha: 0.2),
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(AppRadio.md),
         border: Border.all(color: color.withValues(alpha: 0.5)),
       ),
       child: Text(texto, style: AppTexto.metadato.copyWith(color: color)),

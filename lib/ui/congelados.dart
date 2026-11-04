@@ -10,6 +10,7 @@ import '../cliente_protegido.dart';
 import '../negocio.dart';
 
 import '../localdb.dart';
+import 'app_bar.dart';
 import 'componentes.dart';
 import 'diseno.dart';
 import 'ficha.dart';
@@ -54,7 +55,7 @@ class _CongeladosScreenState extends State<CongeladosScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Congelados')),
+      appBar: appBarIron(context, 'Congelados'),
       body: _cargando
           ? const EstadoCargando(texto: 'Cargando congelados…')
           : Column(

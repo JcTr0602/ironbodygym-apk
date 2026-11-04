@@ -13,6 +13,7 @@ import '../cliente_protegido.dart';
 import '../localdb.dart';
 import '../negocio.dart';
 import '../tiempo.dart';
+import 'app_bar.dart';
 import 'componentes.dart';
 import 'diseno.dart';
 import 'widgets.dart';
@@ -92,15 +93,15 @@ class _RiesgoScreenState extends State<RiesgoScreen> {
     // "solo dueño" pero no había guarda).
     if (!AuthService().isOwner) {
       return Scaffold(
-          appBar: AppBar(
-              title: const Text('Clientes en riesgo')),
+          appBar: appBarIron(context, 'Clientes en riesgo'),
           body: const Center(
               child: Text('Solo el dueño ve esta pantalla.')));
     }
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Clientes en riesgo'),
-        actions: [
+      appBar: appBarIron(
+        context,
+        'Clientes en riesgo',
+        acciones: [
           IconButton(
             icon: const Icon(Icons.refresh_rounded),
             onPressed: _cargar,

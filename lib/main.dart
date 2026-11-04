@@ -283,6 +283,9 @@ class _IronBodyAppState extends State<IronBodyApp>
               );
             },
             navigatorKey: navigatorKey,
+            // 1.23 T8: scroll con inercia natural y rebote
+            // suave en toda la app (ver componentes.dart).
+            scrollBehavior: const ComportamientoScrollSuave(),
             title: 'Iron Body Gestión',
             themeMode: mode,
             // v1.2.4: tema unificado (lib/ui/diseno.dart → AppTema).

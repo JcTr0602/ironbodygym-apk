@@ -15,6 +15,7 @@ import '../cliente_protegido.dart';
 import '../localdb.dart';
 import '../negocio.dart';
 import '../sync.dart';
+import 'app_bar.dart';
 import 'buscar.dart';
 import 'componentes.dart';
 import 'dialogo_pago.dart';
@@ -386,9 +387,10 @@ class _PapeleraScreenState extends State<PapeleraScreen> {
     // v1.3.9 (Argón): lista filtrada en tiempo real.
     final listaFiltrada = _filtrarInactivos(_res);
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Papelera'),
-        actions: _seleccionados.isNotEmpty
+      appBar: appBarIron(
+        context,
+        'Papelera',
+        acciones: _seleccionados.isNotEmpty
             ? [
                 TextButton(
                   onPressed: () =>
@@ -433,9 +435,9 @@ class _PapeleraScreenState extends State<PapeleraScreen> {
                     : null,
                 filled: true,
                 contentPadding: const EdgeInsets.symmetric(
-                    horizontal: 16, vertical: 12),
+                    horizontal: AppEspacio.lg, vertical: AppEspacio.md),
                 border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
+                  borderRadius: BorderRadius.circular(AppRadio.md),
                 ),
               ),
             ),

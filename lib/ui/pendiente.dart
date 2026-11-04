@@ -19,6 +19,7 @@ import '../tiempo.dart';
 import '../models/pendiente.dart';
 import 'package:flutter/services.dart';
 import '../sync.dart';
+import 'app_bar.dart';
 import 'arqueo.dart';
 import 'componentes.dart';
 import 'diseno.dart';
@@ -329,9 +330,10 @@ class _PendienteScreenState extends State<PendienteScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-          title: Text(
-              _esDueno ? 'Pendiente a recoger' : 'Pendiente a entregar')),
+      appBar: appBarIron(
+        context,
+        _esDueno ? 'Pendiente a recoger' : 'Pendiente a entregar',
+      ),
       body: Column(
         children: [
           const SyncBanner(),
@@ -438,7 +440,7 @@ class _PendienteScreenState extends State<PendienteScreen> {
     required String monto,
   }) {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8),
+      padding: const EdgeInsets.symmetric(vertical: AppEspacio.sm),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -468,7 +470,7 @@ class _PendienteScreenState extends State<PendienteScreen> {
 
   Widget _listaEntrenador() {
     return ListView(
-      padding: const EdgeInsets.symmetric(horizontal: 16),
+      padding: const EdgeInsets.symmetric(horizontal: AppEspacio.lg),
       children: [
         if (_mens.isNotEmpty) ...[
           const Text('Mensualidades en efectivo:',
@@ -538,7 +540,7 @@ class _PendienteScreenState extends State<PendienteScreen> {
             _servicios.isEmpty &&
             _suplementos.isEmpty)
           const Padding(
-            padding: EdgeInsets.only(top: 32),
+            padding: EdgeInsets.only(top: AppEspacio.xxl),
             child: Text(
                 'Sin pagos pendientes de entrega.',
                 textAlign: TextAlign.center,
@@ -552,10 +554,10 @@ class _PendienteScreenState extends State<PendienteScreen> {
   Widget _listaDueno() {
     if (_entrenadores.isEmpty) {
       return ListView(
-        padding: const EdgeInsets.symmetric(horizontal: 16),
+        padding: const EdgeInsets.symmetric(horizontal: AppEspacio.lg),
         children: const [
           Padding(
-            padding: EdgeInsets.only(top: 32),
+            padding: EdgeInsets.only(top: AppEspacio.xxl),
             child: Text(
                 'Nada pendiente de recoger.',
                 textAlign: TextAlign.center,
@@ -566,7 +568,7 @@ class _PendienteScreenState extends State<PendienteScreen> {
     }
     return ListView.builder(
       padding:
-          const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+          const EdgeInsets.symmetric(horizontal: AppEspacio.lg, vertical: AppEspacio.xs),
       itemCount: _entrenadores.length,
       itemBuilder: (ctx, i) =>
           _EntrenadorCard(
@@ -680,7 +682,7 @@ class _EntrenadorCard extends StatelessWidget {
         : '${fmtMonto(totalCup)} CUP';
     final n = entrenador.totalPagos;
     return Card(
-      margin: const EdgeInsets.only(bottom: 12),
+      margin: const EdgeInsets.only(bottom: AppEspacio.md),
       child: ExpansionTile(
         leading: CircleAvatar(
           backgroundColor:
@@ -719,7 +721,7 @@ class _EntrenadorCard extends StatelessWidget {
         children: [
           Padding(
             padding: const EdgeInsets.symmetric(
-                horizontal: 12, vertical: 4),
+                horizontal: AppEspacio.md, vertical: AppEspacio.xs),
             child: Column(
               children: [
                 for (final dia in entrenador.dias)
@@ -820,14 +822,14 @@ class _DiaTileState extends State<_DiaTile> {
     final mon = '${v['moneda'] ?? p.moneda}';
     final nota = (v['nota_precio'] as String?)?.trim();
     return Padding(
-      padding: const EdgeInsets.only(left: 20, top: 3, right: 4),
+      padding: const EdgeInsets.only(left: 20, top: 3, right: AppEspacio.xs),
       child: Container(
         width: double.infinity,
         padding: const EdgeInsets.symmetric(
-            horizontal: 8, vertical: 5),
+            horizontal: AppEspacio.sm, vertical: 5),
         decoration: BoxDecoration(
           color: Colors.amber.shade100,
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(AppRadio.sm),
           border: Border.all(color: Colors.amber.shade800),
         ),
         child: Column(
@@ -871,11 +873,11 @@ class _DiaTileState extends State<_DiaTile> {
             : '';
 
     return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      padding: const EdgeInsets.all(12),
+      margin: const EdgeInsets.only(bottom: AppEspacio.sm),
+      padding: const EdgeInsets.all(AppEspacio.md),
       decoration: BoxDecoration(
         color: Colors.grey.shade50,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(AppRadio.md),
         border: Border.all(
             color: Colors.grey.shade300),
       ),
@@ -891,12 +893,12 @@ class _DiaTileState extends State<_DiaTile> {
             children: [
               Container(
                 padding: const EdgeInsets.symmetric(
-                    horizontal: 8, vertical: 4),
+                    horizontal: AppEspacio.sm, vertical: AppEspacio.xs),
                 decoration: BoxDecoration(
                   color:
                       _badgeBg(dia.nivelAlerta),
                   borderRadius:
-                      BorderRadius.circular(8),
+                      BorderRadius.circular(AppRadio.sm),
                 ),
                 child: Text(
                   '$icono${dia.etiquetaFecha}',
@@ -966,7 +968,7 @@ class _DiaTileState extends State<_DiaTile> {
                       !_mostrarTodos),
               child: Padding(
                 padding:
-                    const EdgeInsets.only(top: 4),
+                    const EdgeInsets.only(top: AppEspacio.xs),
                 child: Text(
                   _mostrarTodos
                       ? 'Ocultar detalles'

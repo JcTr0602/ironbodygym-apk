@@ -18,6 +18,7 @@ import '../auth.dart';
 import '../localdb.dart';
 import '../negocio.dart';
 import '../tiempo.dart';
+import 'app_bar.dart';
 import 'componentes.dart';
 import 'diseno.dart';
 import 'ficha.dart';
@@ -240,12 +241,12 @@ class _DetalleEntrenadorScreenState extends State<DetalleEntrenadorScreen> {
     // P2#9: pantalla de admin sin guarda de dueño.
     if (!AuthService().isOwner) {
       return Scaffold(
-          appBar: AppBar(title: Text(widget.nombre)),
+          appBar: appBarIron(context, widget.nombre),
           body: const Center(
               child: Text('Solo el dueño ve esta pantalla.')));
     }
     return Scaffold(
-      appBar: AppBar(title: Text(widget.nombre)),
+      appBar: appBarIron(context, widget.nombre),
       body: Column(
         children: [
           const SyncBanner(),
@@ -274,7 +275,7 @@ class _DetalleEntrenadorScreenState extends State<DetalleEntrenadorScreen> {
                 : RefreshIndicator(
                     onRefresh: _cargar,
                     child: ListView(
-                      padding: const EdgeInsets.all(16),
+                      padding: const EdgeInsets.all(AppEspacio.lg),
                       children: [
                         // Resumen
                         Row(
@@ -346,7 +347,7 @@ class _DetalleEntrenadorScreenState extends State<DetalleEntrenadorScreen> {
                           for (final o in _otros.take(3))
                             Padding(
                               padding: const EdgeInsets.only(
-                                  bottom: 4),
+                                  bottom: AppEspacio.xs),
                               child: Row(
                                 children: [
                                   Expanded(
@@ -513,9 +514,9 @@ class _DetalleEntrenadorScreenState extends State<DetalleEntrenadorScreen> {
 
   Widget _seccion(IconData icono, String titulo, List<Widget> hijos) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.only(bottom: AppEspacio.md),
       child: Tarjeta(
-        padding: const EdgeInsets.all(12),
+        padding: const EdgeInsets.all(AppEspacio.md),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -538,7 +539,7 @@ class _DetalleEntrenadorScreenState extends State<DetalleEntrenadorScreen> {
   Widget _tarjeta(
       String titulo, String valor, String subtitulo) {
     return Tarjeta(
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.all(AppEspacio.md),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [

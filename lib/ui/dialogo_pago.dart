@@ -532,8 +532,8 @@ Future<Map<String, dynamic>?> pagoDialogo(
                 if (menor)
                   Container(
                     margin:
-                        const EdgeInsets.only(top: 8, bottom: 4),
-                    padding: const EdgeInsets.all(12),
+                        const EdgeInsets.only(top: AppEspacio.sm, bottom: AppEspacio.xs),
+                    padding: const EdgeInsets.all(AppEspacio.md),
                     decoration: BoxDecoration(
                       color: AppColores.info
                           .withValues(alpha: 0.08),
@@ -570,8 +570,8 @@ Future<Map<String, dynamic>?> pagoDialogo(
                         .inDays;
                     return Container(
                       margin: const EdgeInsets.only(
-                          top: 8, bottom: 4),
-                      padding: const EdgeInsets.all(12),
+                          top: AppEspacio.sm, bottom: AppEspacio.xs),
+                      padding: const EdgeInsets.all(AppEspacio.md),
                       decoration: BoxDecoration(
                         color: AppColores.exito
                             .withValues(alpha: 0.08),
@@ -685,11 +685,11 @@ Future<Map<String, dynamic>?> pagoDialogo(
                   },
                   child: Container(
                     padding: const EdgeInsets.symmetric(
-                        horizontal: 12, vertical: 10),
+                        horizontal: AppEspacio.md, vertical: 10),
                     decoration: BoxDecoration(
                       border: Border.all(
                           color: AppColores.borde(ctx)),
-                      borderRadius: BorderRadius.circular(8),
+                      borderRadius: BorderRadius.circular(AppRadio.sm),
                     ),
                     child: Row(
                       children: [
@@ -909,7 +909,7 @@ Future<Map<String, dynamic>?> pagoDialogo(
                 // que decidió el precio (no bloquean, informan).
                 if (s.escalon == 'especial')
                   const Padding(
-                    padding: EdgeInsets.only(top: 4),
+                    padding: EdgeInsets.only(top: AppEspacio.xs),
                     child: Chip(
                       label: Text('Tarifa especial'),
                       visualDensity: VisualDensity.compact,

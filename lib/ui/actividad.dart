@@ -11,6 +11,7 @@ import '../localdb.dart';
 import '../negocio.dart';
 import '../permisos_entrenador.dart';
 import '../tiempo.dart';
+import 'app_bar.dart';
 import 'auditoria.dart';
 import 'arqueo.dart';
 import 'componentes.dart';
@@ -1593,7 +1594,7 @@ class _ActividadScreenState extends State<ActividadScreen> {
       child: SingleChildScrollView(
         scrollDirection: Axis.horizontal,
         padding:
-            const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            const EdgeInsets.symmetric(horizontal: AppEspacio.md, vertical: AppEspacio.sm),
         child: Row(
           children: [
             _chipFechaRapida('hoy', 'Hoy'),
@@ -1637,7 +1638,7 @@ class _ActividadScreenState extends State<ActividadScreen> {
           style: AppTexto.metadato),
       style: OutlinedButton.styleFrom(
         padding:
-            const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            const EdgeInsets.symmetric(horizontal: AppEspacio.md, vertical: AppEspacio.sm),
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(AppRadio.lg),
         ),
@@ -1924,7 +1925,7 @@ class _ActividadScreenState extends State<ActividadScreen> {
                   if (fMonto == 'rango')
                     Padding(
                       padding:
-                          const EdgeInsets.only(bottom: 16),
+                          const EdgeInsets.only(bottom: AppEspacio.lg),
                       child: Row(
                         children: [
                           Expanded(
@@ -1938,8 +1939,8 @@ class _ActividadScreenState extends State<ActividadScreen> {
                                     OutlineInputBorder(),
                                 contentPadding:
                                     EdgeInsets.symmetric(
-                                        horizontal: 12,
-                                        vertical: 8),
+                                        horizontal: AppEspacio.md,
+                                        vertical: AppEspacio.sm),
                               ),
                               onChanged: (_) =>
                                   setSheet(() {}),
@@ -1957,8 +1958,8 @@ class _ActividadScreenState extends State<ActividadScreen> {
                                     OutlineInputBorder(),
                                 contentPadding:
                                     EdgeInsets.symmetric(
-                                        horizontal: 12,
-                                        vertical: 8),
+                                        horizontal: AppEspacio.md,
+                                        vertical: AppEspacio.sm),
                               ),
                               onChanged: (_) =>
                                   setSheet(() {}),
@@ -2042,9 +2043,10 @@ class _ActividadScreenState extends State<ActividadScreen> {
         ? _agruparPorDia(filtrados)
         : _agruparPorEntrenador(filtrados);
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Actividad reciente'),
-        actions: [
+      appBar: appBarIron(
+        context,
+        'Actividad reciente',
+        acciones: [
           IconButton(
             icon: const Icon(Icons.refresh_rounded),
             tooltip: 'Actualizar',
@@ -2076,7 +2078,7 @@ class _ActividadScreenState extends State<ActividadScreen> {
                       BorderRadius.circular(AppRadio.md),
                 ),
                 contentPadding: const EdgeInsets.symmetric(
-                    horizontal: 12, vertical: 8),
+                    horizontal: AppEspacio.md, vertical: AppEspacio.sm),
               ),
               onChanged: (v) =>
                   setState(() => _busqueda = v),

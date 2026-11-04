@@ -18,6 +18,7 @@ import '../auth.dart';
 import '../localdb.dart';
 import '../tiempo.dart';
 import '../turnos_resolucion.dart';
+import 'app_bar.dart';
 import 'componentes.dart';
 import 'diseno.dart';
 
@@ -186,7 +187,7 @@ class _CalendarioTurnosScreenState extends State<CalendarioTurnosScreen> {
               children: [
                 if (pasado)
                   const Padding(
-                    padding: EdgeInsets.only(bottom: 12),
+                    padding: EdgeInsets.only(bottom: AppEspacio.md),
                     child: Text('Día pasado: solo lectura.',
                         style: AppTexto.secundario),
                   ),
@@ -280,7 +281,7 @@ class _CalendarioTurnosScreenState extends State<CalendarioTurnosScreen> {
   Widget build(BuildContext context) {
     if (!AuthService().isOwner) {
       return Scaffold(
-        appBar: AppBar(title: const Text('Horario y turnos')),
+        appBar: appBarIron(context, 'Horario y turnos'),
         body: const Center(
           child: Text('Solo el dueño puede gestionar los turnos.'),
         ),
@@ -293,9 +294,10 @@ class _CalendarioTurnosScreenState extends State<CalendarioTurnosScreen> {
     final celdas = offset + diasEnMes;
     final filas = (celdas / 7).ceil();
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Calendario de turnos'),
-        actions: [
+      appBar: appBarIron(
+        context,
+        'Calendario de turnos',
+        acciones: [
           IconButton(
             icon: const Icon(Icons.chevron_left_rounded),
             onPressed: () => setState(() =>
@@ -389,10 +391,10 @@ class _CalendarioTurnosScreenState extends State<CalendarioTurnosScreen> {
         Expanded(
           child: Container(
             padding:
-                const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                const EdgeInsets.symmetric(horizontal: AppEspacio.xs, vertical: 1),
             decoration: BoxDecoration(
               color: color.withValues(alpha: 0.15),
-              borderRadius: BorderRadius.circular(999),
+              borderRadius: BorderRadius.circular(AppRadio.circular),
             ),
             child: Text(
               nombre.split(' ').first,
@@ -436,15 +438,15 @@ class _CalendarioTurnosScreenState extends State<CalendarioTurnosScreen> {
         color: esHoy
             ? AppColores.naranja.withValues(alpha: 0.12)
             : Theme.of(context).cardColor,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(AppRadio.md),
         child: InkWell(
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(AppRadio.md),
           onTap: domingo ? null : () => _editarDia(fecha),
           child: Container(
             height: 64,
-            padding: const EdgeInsets.all(4),
+            padding: const EdgeInsets.all(AppEspacio.xs),
             decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(12),
+              borderRadius: BorderRadius.circular(AppRadio.md),
               border: Border.all(
                 color: esHoy
                     ? AppColores.naranja

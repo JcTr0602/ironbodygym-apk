@@ -22,6 +22,7 @@ import '../config.dart';
 import '../guia_validacion.dart';
 import '../localdb.dart';
 import '../tiempo.dart';
+import 'app_bar.dart';
 import 'componentes.dart';
 import 'diseno.dart';
 
@@ -535,12 +536,12 @@ class _GuiaEditorScreenState extends State<GuiaEditorScreen> {
         // del editor (local si cambió, remota con rev si no).
         if (_tieneImagen && _imagenLocal.isNotEmpty)
           Padding(
-            padding: const EdgeInsets.only(bottom: 8),
+            padding: const EdgeInsets.only(bottom: AppEspacio.sm),
             child: Image.file(File(_imagenLocal), height: 120),
           )
         else if (_tieneImagen && _publicadoExiste)
           Padding(
-            padding: const EdgeInsets.only(bottom: 8),
+            padding: const EdgeInsets.only(bottom: AppEspacio.sm),
             child: Image.network(
               '${AppConfig.supabaseUrl}/storage/v1/object/public/'
               '${AppConfig.bucketGuia}/${_slug.text.trim()}.webp'
@@ -723,7 +724,7 @@ class _GuiaEditorScreenState extends State<GuiaEditorScreen> {
   Widget _campo(TextEditingController c, String etiqueta,
       {int maxLines = 1, String? ayuda, TextInputType? tipo}) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.only(bottom: AppEspacio.md),
       child: TextField(
         controller: c,
         maxLines: maxLines,
@@ -789,7 +790,7 @@ class _GuiaEditorScreenState extends State<GuiaEditorScreen> {
             for (var i = 0; i < items.length; i++)
               Padding(
                 key: ValueKey('item_$i'),
-                padding: const EdgeInsets.only(bottom: 8),
+                padding: const EdgeInsets.only(bottom: AppEspacio.sm),
                 child: Row(
                   children: [
                     const Icon(Icons.drag_handle_rounded, color: Colors.grey),
@@ -832,15 +833,17 @@ class _GuiaEditorScreenState extends State<GuiaEditorScreen> {
   Widget build(BuildContext context) {
     if (!AuthService().isOwner) {
       return Scaffold(
-        appBar: AppBar(title: const Text('Ficha')),
+        appBar: appBarIron(context, 'Ficha'),
         body: const Center(
             child: Text('Solo el dueño administra la Biblioteca.')),
       );
     }
     final slugBloqueado = _publicadoExiste || _baseRevision > 0;
     return Scaffold(
-      appBar: AppBar(
-          title: Text(_slug.text.isEmpty ? 'Nueva ficha' : _slug.text)),
+      appBar: appBarIron(
+        context,
+        _slug.text.isEmpty ? 'Nueva ficha' : _slug.text,
+      ),
       body: ListView(
         padding: const EdgeInsets.fromLTRB(16, 12, 16, 96),
         children: [
@@ -990,12 +993,12 @@ class _GuiaEditorScreenState extends State<GuiaEditorScreen> {
           _seccion('Imagen (1 por ficha)', [
             if (_tieneImagen && _imagenLocal.isNotEmpty)
               Padding(
-                padding: const EdgeInsets.only(bottom: 8),
+                padding: const EdgeInsets.only(bottom: AppEspacio.sm),
                 child: Image.file(File(_imagenLocal), height: 160),
               )
             else if (_tieneImagen && _publicadoExiste)
               Padding(
-                padding: const EdgeInsets.only(bottom: 8),
+                padding: const EdgeInsets.only(bottom: AppEspacio.sm),
                 child: Image.network(
                   // Argón P2#14: revienta la caché tras republicar.
                   '${AppConfig.supabaseUrl}/storage/v1/object/public/'

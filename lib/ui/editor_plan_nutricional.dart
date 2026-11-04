@@ -5,6 +5,7 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'app_bar.dart';
 import 'diseno.dart';
 import 'componentes.dart';
 import '../auth.dart';
@@ -190,9 +191,10 @@ class _EditorPlanNutricionalState
         PermisosEntrenador().canEditNutrition;
 
     return Scaffold(
-      appBar: AppBar(
-        title: Text('Plan: ${widget.nombreCliente}'),
-        actions: [
+      appBar: appBarIron(
+        context,
+        'Plan: ${widget.nombreCliente}',
+        acciones: [
           if (puedeEditar && !_cargando)
             IconButton(
               icon: const Icon(Icons.save_rounded),
@@ -209,7 +211,7 @@ class _EditorPlanNutricionalState
               children: [
                 if (_actualizadoPor != null)
                   Padding(
-                    padding: const EdgeInsets.all(8),
+                    padding: const EdgeInsets.all(AppEspacio.sm),
                     child: Text(
                       'Última actualización: ${_actualizadoPor ?? ''}'
                       '${_actualizadoEn != null ? ' • ${_actualizadoEn!.day}/${_actualizadoEn!.month}/${_actualizadoEn!.year}' : ''}',
@@ -219,7 +221,7 @@ class _EditorPlanNutricionalState
                 if (puedeEditar)
                   Padding(
                     padding: const EdgeInsets.symmetric(
-                        horizontal: 16),
+                        horizontal: AppEspacio.lg),
                     child: Row(
                       children: [
                         Expanded(
@@ -254,7 +256,7 @@ class _EditorPlanNutricionalState
                 Expanded(
                   child: Padding(
                     padding: const EdgeInsets.symmetric(
-                        horizontal: 16),
+                        horizontal: AppEspacio.lg),
                     child: TextField(
                       controller: _ctrl,
                       maxLines: null,
@@ -268,7 +270,7 @@ class _EditorPlanNutricionalState
                             : 'Sin plan asignado.',
                         border: OutlineInputBorder(
                           borderRadius:
-                              BorderRadius.circular(12),
+                              BorderRadius.circular(AppRadio.md),
                         ),
                       ),
                     ),

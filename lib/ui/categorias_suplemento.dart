@@ -10,6 +10,7 @@ import 'package:uuid/uuid.dart';
 import '../auth.dart';
 import '../localdb.dart';
 import '../sync.dart';
+import 'app_bar.dart';
 import 'componentes.dart';
 import 'diseno.dart';
 import 'widgets.dart';
@@ -148,9 +149,7 @@ class _CategoriasSuplementoScreenState
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Categorías'),
-      ),
+      appBar: appBarIron(context, 'Categorías'),
       floatingActionButton: _esDueno
           ? FloatingActionButton.extended(
               onPressed: () => _dialogoNombre(),

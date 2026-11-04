@@ -7,6 +7,7 @@ import '../auth.dart';
 import '../mediciones_cliente.dart';
 import '../tiempo.dart';
 import '../permisos_entrenador.dart';
+import 'app_bar.dart';
 import 'editor_plan_nutricional.dart';
 import 'grafico_peso.dart';
 import 'componentes.dart';
@@ -174,9 +175,7 @@ class _PestanaProgresoState extends State<PestanaProgreso> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: Text('Progreso: ${widget.nombreCliente}'),
-      ),
+      appBar: appBarIron(context, 'Progreso: ${widget.nombreCliente}'),
       body: _buildBody(context),
     );
   }
@@ -187,7 +186,7 @@ class _PestanaProgresoState extends State<PestanaProgreso> {
         !AuthService().isOwner) {
       return const Center(
         child: Padding(
-          padding: EdgeInsets.all(32),
+          padding: EdgeInsets.all(AppEspacio.xxl),
           child: Text(
             'No tienes permisos para visualizar el progreso.',
             textAlign: TextAlign.center,
@@ -221,7 +220,7 @@ class _PestanaProgresoState extends State<PestanaProgreso> {
     return RefreshIndicator(
       onRefresh: _cargar,
       child: ListView(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(AppEspacio.lg),
         children: [
           // Botón de plan nutricional
           Card(
@@ -254,7 +253,7 @@ class _PestanaProgresoState extends State<PestanaProgreso> {
           ] else if (_mediciones.length == 1) ...[
             Card(
               child: Padding(
-                padding: const EdgeInsets.all(16),
+                padding: const EdgeInsets.all(AppEspacio.lg),
                 child: Column(
                   crossAxisAlignment:
                       CrossAxisAlignment.start,
@@ -295,7 +294,7 @@ class _PestanaProgresoState extends State<PestanaProgreso> {
           if (_mediciones.isEmpty)
             const Center(
               child: Padding(
-                padding: EdgeInsets.all(32),
+                padding: EdgeInsets.all(AppEspacio.xxl),
                 child: Text(
                   'Sin mediciones registradas.',
                   style: TextStyle(color: Colors.grey),
@@ -326,7 +325,7 @@ class _PestanaProgresoState extends State<PestanaProgreso> {
                 24);
 
     return Card(
-      margin: const EdgeInsets.only(bottom: 8),
+      margin: const EdgeInsets.only(bottom: AppEspacio.sm),
       child: ListTile(
         title: Text(
           '${m.pesoKg.toStringAsFixed(1)} kg',

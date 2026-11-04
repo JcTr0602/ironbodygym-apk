@@ -11,6 +11,7 @@ import '../localdb.dart';
 import '../negocio.dart' show fmtMonto;
 import '../servicios.dart';
 import '../tiempo.dart';
+import 'app_bar.dart';
 import 'componentes.dart';
 import 'diseno.dart';
 import 'reporte_margenes.dart';
@@ -412,15 +413,16 @@ class _ServiciosEstadisticasScreenState
   Widget build(BuildContext context) {
     if (!AuthService().isOwner) {
       return Scaffold(
-        appBar: AppBar(title: const Text('Servicios · Estadísticas')),
+        appBar: appBarIron(context, 'Servicios · Estadísticas'),
         body: const Center(
             child: Text('Solo el dueño ve las estadísticas.')),
       );
     }
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Servicios · Estadísticas'),
-        actions: [
+      appBar: appBarIron(
+        context,
+        'Servicios · Estadísticas',
+        acciones: [
           IconButton(
             tooltip: 'Actualizar',
             icon: const Icon(Icons.refresh_rounded),
@@ -574,7 +576,7 @@ class _ServiciosEstadisticasScreenState
             costoAgua: costoAgua,
           );
           return Padding(
-            padding: const EdgeInsets.all(16),
+            padding: const EdgeInsets.all(AppEspacio.lg),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,

@@ -84,13 +84,13 @@ class TarjetaIncidencia extends StatelessWidget {
 
     return Padding(
       padding: const EdgeInsets.symmetric(
-          horizontal: 12, vertical: 4),
+          horizontal: AppEspacio.md, vertical: AppEspacio.xs),
       child: InkWell(
         onTap: onTap,
         onLongPress: onLongPress,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(AppRadio.md),
         child: Container(
-          padding: const EdgeInsets.all(12),
+          padding: const EdgeInsets.all(AppEspacio.md),
           decoration: BoxDecoration(
             color: seleccionada
                 ? Theme.of(context)
@@ -98,7 +98,7 @@ class TarjetaIncidencia extends StatelessWidget {
                     .primaryContainer
                 : AppColores.fondo(context),
             borderRadius:
-                BorderRadius.circular(12),
+                BorderRadius.circular(AppRadio.md),
             border: seleccionada
                 ? Border.all(
                     color: Theme.of(context)
@@ -127,8 +127,7 @@ class TarjetaIncidencia extends StatelessWidget {
                         color: tipo!.colorData
                             .withValues(alpha: 0.15),
                         borderRadius:
-                            BorderRadius.circular(
-                                8),
+                            BorderRadius.circular(AppRadio.sm),
                       ),
                       child: Icon(
                         tipo!.iconoData,
@@ -174,7 +173,7 @@ class TarjetaIncidencia extends StatelessWidget {
                     padding:
                         const EdgeInsets.symmetric(
                             horizontal: 10,
-                            vertical: 4),
+                            vertical: AppEspacio.xs),
                     decoration: BoxDecoration(
                       color: _colorEstado
                           .withValues(alpha: 0.15),

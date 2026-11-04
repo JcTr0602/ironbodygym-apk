@@ -12,6 +12,7 @@ import 'package:flutter/material.dart';
 import '../auth.dart';
 import '../diferencias_caja.dart';
 import '../negocio.dart';
+import 'app_bar.dart';
 import 'componentes.dart';
 import 'diseno.dart';
 
@@ -249,7 +250,7 @@ class _DiferenciasCajaScreenState
   Widget build(BuildContext context) {
     if (!AuthService().isOwner) {
       return Scaffold(
-        appBar: AppBar(title: const Text('Diferencias de caja')),
+        appBar: appBarIron(context, 'Diferencias de caja'),
         body: const EstadoVacio(
           icono: Icons.lock_rounded,
           titulo: 'Solo el dueño lleva las diferencias de caja',
@@ -257,9 +258,10 @@ class _DiferenciasCajaScreenState
       );
     }
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Diferencias de caja'),
-        actions: [
+      appBar: appBarIron(
+        context,
+        'Diferencias de caja',
+        acciones: [
           IconButton(
             icon: const Icon(Icons.refresh_rounded),
             onPressed: _cargar,

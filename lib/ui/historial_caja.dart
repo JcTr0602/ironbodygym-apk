@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 import '../auth.dart';
 import '../localdb.dart';
 import '../negocio.dart';
+import 'app_bar.dart';
 import 'componentes.dart';
 import 'diseno.dart';
 import 'skeleton.dart';
@@ -240,16 +241,16 @@ class _HistorialCajaScreenState extends State<HistorialCajaScreen> {
     // P2#9: historial solo admin sin guarda de dueño.
     if (!AuthService().isOwner) {
       return Scaffold(
-          appBar: AppBar(title: const Text('Historial de caja')),
+          appBar: appBarIron(context, 'Historial de caja'),
           body: const Center(
               child: Text('Solo el dueño ve esta pantalla.')));
     }
     return Scaffold(
-      appBar: AppBar(title: const Text('Historial de caja')),
+      appBar: appBarIron(context, 'Historial de caja'),
       body: _cargando
           // v1.2.6 (Gemini): skeleton consistente con el resto de listas.
           ? const Padding(
-              padding: EdgeInsets.all(16),
+              padding: EdgeInsets.all(AppEspacio.lg),
               child: SkeletonLista(items: 4),
             )
           : _cierres.isEmpty
@@ -262,7 +263,7 @@ class _HistorialCajaScreenState extends State<HistorialCajaScreen> {
               : RefreshIndicator(
                   onRefresh: _cargar,
                   child: ListView.separated(
-                    padding: const EdgeInsets.all(16),
+                    padding: const EdgeInsets.all(AppEspacio.lg),
                     itemCount: _cierres.length,
                     separatorBuilder: (_, __) =>
                         const SizedBox(height: 8),

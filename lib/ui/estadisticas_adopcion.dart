@@ -9,6 +9,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../auth.dart';
+import 'app_bar.dart';
 import 'componentes.dart';
 import 'diseno.dart';
 import 'widgets.dart';
@@ -91,9 +92,10 @@ class _EstadisticasAdopcionScreenState
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Adopción de la app'),
-        actions: [
+      appBar: appBarIron(
+        context,
+        'Adopción de la app',
+        acciones: [
           IconButton(
             icon: const Icon(Icons.refresh_rounded),
             tooltip: 'Actualizar',
@@ -139,7 +141,7 @@ class _EstadisticasAdopcionScreenState
     final horas = _lista('histograma_horas');
     final top = _lista('top_10');
     return ListView(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(AppEspacio.lg),
       children: [
         // Argón Estadísticas #9: banner de sincronización
         // como en Dashboard y Estadísticas de Servicios (sin
@@ -236,7 +238,7 @@ class _EstadisticasAdopcionScreenState
     return Expanded(
       child: Card(
         child: Padding(
-          padding: const EdgeInsets.all(12),
+          padding: const EdgeInsets.all(AppEspacio.md),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [

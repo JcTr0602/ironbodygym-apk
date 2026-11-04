@@ -8,6 +8,7 @@ import '../../fotos.dart';
 import '../../localdb.dart';
 import '../../tiempo.dart';
 import '../../modelos/incidencia.dart';
+import '../app_bar.dart';
 import '../diseno.dart';
 import '../componentes.dart';
 import '../ficha.dart';
@@ -130,9 +131,10 @@ class _DetalleIncidenciaScreenState
   Widget build(BuildContext context) {
     final inc = _inc;
     return Scaffold(
-      appBar: AppBar(
-        title: Text(inc?.descripcion ?? 'Incidencia'),
-        actions: [
+      appBar: appBarIron(
+        context,
+        inc?.descripcion ?? 'Incidencia',
+        acciones: [
           if (inc != null)
             IconButton(
               icon: const Icon(Icons.edit_rounded),
@@ -199,7 +201,7 @@ class _DetalleIncidenciaScreenState
                       Text('No encontrada'))
               : ListView(
                   padding:
-                      const EdgeInsets.all(16),
+                      const EdgeInsets.all(AppEspacio.lg),
                   children: [
                     _seccionInfo(inc),
                     const SizedBox(height: 16),
@@ -216,7 +218,7 @@ class _DetalleIncidenciaScreenState
   Widget _seccionInfo(Incidencia inc) {
     return Card(
       child: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(AppEspacio.lg),
         child: Column(
           crossAxisAlignment:
               CrossAxisAlignment.start,
@@ -422,7 +424,7 @@ class _DetalleIncidenciaScreenState
                         );
               return ClipRRect(
                 borderRadius:
-                    BorderRadius.circular(8),
+                    BorderRadius.circular(AppRadio.sm),
                 child: imagen,
               );
             }).toList(),

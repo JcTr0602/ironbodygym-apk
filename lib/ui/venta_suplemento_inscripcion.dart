@@ -17,6 +17,7 @@ import '../negocio.dart';
 import '../localdb.dart';
 import '../sync.dart';
 import '../tiempo.dart';
+import 'app_bar.dart';
 import 'componentes.dart';
 import 'diseno.dart';
 import 'widgets.dart';
@@ -383,8 +384,7 @@ class _VentaSuplementoInscripcionScreenState
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-          title: const Text('Nuevo cliente y venta de suplemento')),
+      appBar: appBarIron(context, 'Nuevo cliente y venta de suplemento'),
       body: ListView(
         padding: const EdgeInsets.all(AppEspacio.lg),
         children: [

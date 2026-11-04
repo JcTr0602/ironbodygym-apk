@@ -23,6 +23,7 @@ import '../auth.dart';
 import '../localdb.dart';
 import '../negocio.dart';
 import '../tiempo.dart';
+import 'app_bar.dart';
 import 'diseno.dart';
 import 'componentes.dart';
 
@@ -580,7 +581,7 @@ class _CampanaWaScreenState extends State<CampanaWaScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Campaña WhatsApp')),
+      appBar: appBarIron(context, 'Campaña WhatsApp'),
       body: _cargando
           ? const EstadoCargando(texto: 'Cargando campaña…')
           : switch (_fase) {
@@ -594,7 +595,7 @@ class _CampanaWaScreenState extends State<CampanaWaScreen> {
   Widget _vistaSetup() {
     final esDueno = AuthService().isOwner;
     return ListView(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(AppEspacio.lg),
       children: [
         if (_hayTandaPrevia)
           Card(
@@ -703,10 +704,10 @@ class _CampanaWaScreenState extends State<CampanaWaScreen> {
         else
           Container(
             width: double.infinity,
-            padding: const EdgeInsets.all(12),
+            padding: const EdgeInsets.all(AppEspacio.md),
             decoration: BoxDecoration(
               border: Border.all(color: Colors.grey.shade400),
-              borderRadius: BorderRadius.circular(8),
+              borderRadius: BorderRadius.circular(AppRadio.sm),
             ),
             child: Text(_textoElegido),
           ),
@@ -738,7 +739,7 @@ class _CampanaWaScreenState extends State<CampanaWaScreen> {
     }
     final abierto = actual['estado'] == 'abierto';
     return ListView(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(AppEspacio.lg),
       children: [
         LinearProgressIndicator(
           value: _items.isEmpty ? 0 : _resueltos / _items.length,
@@ -752,7 +753,7 @@ class _CampanaWaScreenState extends State<CampanaWaScreen> {
         const SizedBox(height: 16),
         Card(
           child: Padding(
-            padding: const EdgeInsets.all(16),
+            padding: const EdgeInsets.all(AppEspacio.lg),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -820,7 +821,7 @@ class _CampanaWaScreenState extends State<CampanaWaScreen> {
   Widget _vistaFin() {
     return Center(
       child: Padding(
-        padding: const EdgeInsets.all(24),
+        padding: const EdgeInsets.all(AppEspacio.xl),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../localdb.dart';
 import '../negocio.dart' show fmtMonto, fmtFecha;
 import '../servicios.dart';
+import 'app_bar.dart';
 import 'diseno.dart';
 import 'componentes.dart';
 
@@ -187,7 +188,7 @@ class _ServiciosHistorialScreenState
 
   Widget _chip(String clave, String texto) {
     return Padding(
-      padding: const EdgeInsets.only(right: 8),
+      padding: const EdgeInsets.only(right: AppEspacio.sm),
       child: ChoiceChip(
         label: Text(texto),
         selected: _filtroTipo == clave,
@@ -235,7 +236,7 @@ class _ServiciosHistorialScreenState
     final hora = '${e['hora']}';
     if (!esVenta) {
       return Card(
-        margin: const EdgeInsets.only(bottom: 8),
+        margin: const EdgeInsets.only(bottom: AppEspacio.sm),
         child: ListTile(
           leading: Icon(Icons.outbox_rounded,
               color: AppColores.textoSecundario(context)),
@@ -284,7 +285,7 @@ class _ServiciosHistorialScreenState
       color: _resaltado == idVenta
           ? AppColores.naranja.withValues(alpha: 0.15)
           : null,
-      margin: const EdgeInsets.only(bottom: 8),
+      margin: const EdgeInsets.only(bottom: AppEspacio.sm),
       child: ListTile(
         leading: Icon(icono, color: colorIcono),
         title: Text(titulo, style: AppTexto.cuerpo),
@@ -313,7 +314,7 @@ class _ServiciosHistorialScreenState
   Widget build(BuildContext context) {
     if (_cargando) {
       return Scaffold(
-        appBar: AppBar(title: const Text('Historial de Servicios')),
+        appBar: appBarIron(context, 'Historial de Servicios'),
         body: const EstadoCargando(texto: 'Cargando historial…'),
       );
     }
@@ -321,7 +322,7 @@ class _ServiciosHistorialScreenState
     final itemsHist = _itemsPorDia(visibles);
     final vendedores = _vendedores;
     return Scaffold(
-      appBar: AppBar(title: const Text('Historial de Servicios')),
+      appBar: appBarIron(context, 'Historial de Servicios'),
       body: Column(
         children: [
           // 11/25: buscador por cliente, vendedor o tipo.

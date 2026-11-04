@@ -89,7 +89,7 @@ class _PinLockScreenState extends State<PinLockScreen> {
       child: Scaffold(
       body: SafeArea(
         child: Padding(
-          padding: const EdgeInsets.all(32),
+          padding: const EdgeInsets.all(AppEspacio.xxl),
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
@@ -109,7 +109,7 @@ class _PinLockScreenState extends State<PinLockScreen> {
                   final lleno = i < _pin.length;
                   return Container(
                     margin:
-                        const EdgeInsets.symmetric(horizontal: 8),
+                        const EdgeInsets.symmetric(horizontal: AppEspacio.sm),
                     width: 18,
                     height: 18,
                     decoration: BoxDecoration(
@@ -150,9 +150,9 @@ class _PinLockScreenState extends State<PinLockScreen> {
     Widget tecla(String d, {IconData? icono, VoidCallback? fn}) {
       return Expanded(
         child: Padding(
-          padding: const EdgeInsets.all(8),
+          padding: const EdgeInsets.all(AppEspacio.sm),
           child: InkWell(
-            borderRadius: BorderRadius.circular(999),
+            borderRadius: BorderRadius.circular(AppRadio.circular),
             onTap: fn ?? () => _tecla(d),
             child: Container(
               height: 64,

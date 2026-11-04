@@ -12,6 +12,7 @@ import '../auth.dart';
 import '../negocio.dart' show tiempoRelativo;
 import '../tiempo.dart' show aHabana;
 import 'acciones_acceso.dart';
+import 'app_bar.dart';
 import 'diseno.dart';
 import 'ficha.dart';
 import 'foto_personal_ficha.dart';
@@ -109,7 +110,7 @@ class _FichaAccesoScreenState extends State<FichaAccesoScreen> {
   Widget build(BuildContext context) {
     if (!AuthService().isOwner) {
       return Scaffold(
-        appBar: AppBar(title: const Text('Acceso del cliente')),
+        appBar: appBarIron(context, 'Acceso del cliente'),
         body: const Center(
             child: Text('La ficha de acceso es solo el dueño.')),
       );

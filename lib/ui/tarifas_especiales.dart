@@ -20,6 +20,7 @@ import '../negocio.dart';
 import '../sync.dart';
 import '../tarifa_especial.dart';
 import '../tiempo.dart';
+import 'app_bar.dart';
 import 'componentes.dart';
 import 'diseno.dart';
 
@@ -63,13 +64,13 @@ class _TarifasScreenState extends State<TarifasScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Tarifas')),
+      appBar: appBarIron(context, 'Tarifas'),
       body: _cargando
           ? const EstadoCargando(texto: 'Cargando tarifas…')
           : RefreshIndicator(
               onRefresh: _cargar,
               child: ListView(
-                padding: const EdgeInsets.all(16),
+                padding: const EdgeInsets.all(AppEspacio.lg),
                 children: [
                   const Text('Precios estándar', style: AppTexto.titulo),
                   const SizedBox(height: 8),
@@ -204,7 +205,7 @@ class _TarifasScreenState extends State<TarifasScreen> {
   }
 
   Widget _filaPrecio(String etiqueta, double monto) => Padding(
-        padding: const EdgeInsets.only(bottom: 4),
+        padding: const EdgeInsets.only(bottom: AppEspacio.xs),
         child: Row(
           children: [
             Expanded(child: Text(etiqueta, style: AppTexto.cuerpo)),

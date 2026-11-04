@@ -12,6 +12,7 @@ import '../negocio.dart' show fmtMonto;
 import '../permisos_entrenador.dart';
 import '../sync.dart';
 import '../tiempo.dart';
+import 'app_bar.dart';
 import 'componentes.dart';
 import 'dialogo_pago.dart' show metodosAceptadosEfectivos;
 import 'diseno.dart';
@@ -611,10 +612,10 @@ class _ReservasScreenState extends State<ReservasScreen> {
     // única ruta posible hasta aquí.
     if (!_puedeAcceder) {
       return Scaffold(
-        appBar: AppBar(title: const Text('Reservas')),
+        appBar: appBarIron(context, 'Reservas'),
         body: const Center(
           child: Padding(
-            padding: EdgeInsets.all(24),
+            padding: EdgeInsets.all(AppEspacio.xl),
             child: Text(
               'No tienes permiso para ver las reservas.\n'
               'Pídele al dueño que te active «Vender suplementos».',
@@ -626,9 +627,10 @@ class _ReservasScreenState extends State<ReservasScreen> {
     }
     final b = _bandeja;
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Reservas'),
-        actions: [
+      appBar: appBarIron(
+        context,
+        'Reservas',
+        acciones: [
           IconButton(
             icon: const Icon(Icons.refresh_rounded),
             tooltip: 'Sincronizar',
@@ -653,7 +655,7 @@ class _ReservasScreenState extends State<ReservasScreen> {
               : RefreshIndicator(
                   onRefresh: _refrescar,
                   child: ListView(
-                    padding: const EdgeInsets.all(12),
+                    padding: const EdgeInsets.all(AppEspacio.md),
                     children: [
                       if (b.solicitadas.isNotEmpty) ...[
                         _tituloSeccion(
@@ -878,7 +880,7 @@ class TarjetaReserva extends StatelessWidget {
     final reservada = r.estado == 'reservada';
     final ahora = ahoraHabana();
     return Tarjeta(
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.all(AppEspacio.md),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -914,7 +916,7 @@ class TarjetaReserva extends StatelessWidget {
                   width: 48,
                   height: 48,
                   decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(8),
+                    borderRadius: BorderRadius.circular(AppRadio.sm),
                     border:
                         Border.all(color: AppColores.borde(context)),
                   ),
@@ -952,7 +954,7 @@ class TarjetaReserva extends StatelessWidget {
             // en 24 h o ya venció; si no, en secundario.
             if (solicitada || reservada)
               Padding(
-                padding: const EdgeInsets.only(top: 4),
+                padding: const EdgeInsets.only(top: AppEspacio.xs),
                 child: Row(
                   children: [
                     Icon(Icons.schedule_rounded,
@@ -975,7 +977,7 @@ class TarjetaReserva extends StatelessWidget {
                   style: AppTexto.secundario),
             if (bloqueada)
               const Padding(
-                padding: EdgeInsets.only(top: 8),
+                padding: EdgeInsets.only(top: AppEspacio.sm),
                 child: ChipEstado.semantico(
                   texto: 'Acción encolada — sincronizando',
                   significado: SignificadoChip.info,

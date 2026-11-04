@@ -17,6 +17,7 @@ import '../localdb.dart';
 import '../negocio.dart';
 import '../plus_residual.dart';
 import '../tiempo.dart';
+import 'app_bar.dart';
 import 'componentes.dart';
 import 'diseno.dart';
 
@@ -141,7 +142,7 @@ class _EstadoCuentaScreenState extends State<EstadoCuentaScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Estado de cuenta')),
+      appBar: appBarIron(context, 'Estado de cuenta'),
       body: _cargando
           ? const EstadoCargando()
           : _protegido

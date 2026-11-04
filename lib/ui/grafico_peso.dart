@@ -41,7 +41,7 @@ class GraficoPesoEntrenador extends StatelessWidget {
 
     return Card(
       child: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(AppEspacio.lg),
         child: Column(
           crossAxisAlignment:
               CrossAxisAlignment.start,

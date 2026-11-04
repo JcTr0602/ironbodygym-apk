@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../auth.dart';
 import '../localdb.dart';
+import 'app_bar.dart';
 import 'diseno.dart';
 
 /// Margen en USD de un suplemento del espejo (Argón #9 BLOQUEANTE).
@@ -116,8 +117,7 @@ class _ReporteMargenesScreenState
     // gate (un entrenador por ruta veía costos USD y márgenes).
     if (!AuthService().isOwner) {
       return Scaffold(
-          appBar: AppBar(
-              title: const Text('Márgenes de Suplementos')),
+          appBar: appBarIron(context, 'Márgenes de Suplementos'),
           body: const Center(
               child: Text('Solo el dueño ve este reporte.')));
     }
@@ -128,20 +128,19 @@ class _ReporteMargenesScreenState
     }
 
     return Scaffold(
-      appBar: AppBar(
-          title: const Text('Márgenes de Suplementos')),
+      appBar: appBarIron(context, 'Márgenes de Suplementos'),
       body: _cargando
           ? const Center(
               child: CircularProgressIndicator())
           : Column(
               children: [
                 Container(
-                  margin: const EdgeInsets.all(16),
-                  padding: const EdgeInsets.all(16),
+                  margin: const EdgeInsets.all(AppEspacio.lg),
+                  padding: const EdgeInsets.all(AppEspacio.lg),
                   decoration: BoxDecoration(
                     color: AppColores.fondo(context),
                     borderRadius:
-                        BorderRadius.circular(12),
+                        BorderRadius.circular(AppRadio.md),
                   ),
                   child: Row(
                     mainAxisAlignment:

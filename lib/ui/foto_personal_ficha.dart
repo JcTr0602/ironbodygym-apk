@@ -180,7 +180,7 @@ class _SeccionFotoPersonalState extends State<SeccionFotoPersonal> {
               const SizedBox(height: AppEspacio.sm),
               if (_archivo != null)
                 ClipRRect(
-                  borderRadius: BorderRadius.circular(12),
+                  borderRadius: BorderRadius.circular(AppRadio.md),
                   child: Image.file(_archivo!,
                       height: 220,
                       width: double.infinity,
@@ -192,7 +192,7 @@ class _SeccionFotoPersonalState extends State<SeccionFotoPersonal> {
                   width: double.infinity,
                   decoration: BoxDecoration(
                     color: Colors.grey.shade200,
-                    borderRadius: BorderRadius.circular(12),
+                    borderRadius: BorderRadius.circular(AppRadio.md),
                   ),
                   // Argón #8-5: sin botón de reintento, el dueño
                   // tenía que salir y volver a entrar a la ficha.

@@ -25,6 +25,7 @@ import '../auth.dart';
 import '../localdb.dart';
 import '../sync.dart';
 import '../tiempo.dart';
+import 'app_bar.dart';
 import 'componentes.dart';
 import 'diseno.dart';
 import 'ficha.dart';
@@ -420,9 +421,10 @@ class _BandejaWhatsappScreenState extends State<BandejaWhatsappScreen>
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Avisos WhatsApp de hoy'),
-        actions: [
+      appBar: appBarIron(
+        context,
+        'Avisos WhatsApp de hoy',
+        acciones: [
           IconButton(
             tooltip: 'Actualizar',
             icon: const Icon(Icons.refresh_rounded),
@@ -507,7 +509,7 @@ class _BandejaWhatsappScreenState extends State<BandejaWhatsappScreen>
                     // v1.3.6 (auditoría Argón, Fix 1a): solo el dueño.
                     ? Center(
                         child: Padding(
-                          padding: const EdgeInsets.all(32),
+                          padding: const EdgeInsets.all(AppEspacio.xxl),
                           child: Text(
                             'Esta bandeja es solo para el dueño del gym.',
                             textAlign: TextAlign.center,
@@ -518,7 +520,7 @@ class _BandejaWhatsappScreenState extends State<BandejaWhatsappScreen>
                     : _avisos.isEmpty
                     ? Center(
                         child: Padding(
-                          padding: const EdgeInsets.all(32),
+                          padding: const EdgeInsets.all(AppEspacio.xxl),
                           child: Column(
                             mainAxisSize: MainAxisSize.min,
                             children: [
@@ -543,7 +545,7 @@ class _BandejaWhatsappScreenState extends State<BandejaWhatsappScreen>
                     : _avisosFiltrados.isEmpty
                     ? const Center(
                         child: Padding(
-                          padding: EdgeInsets.all(32),
+                          padding: EdgeInsets.all(AppEspacio.xxl),
                           child: Text(
                             'Ningún aviso coincide con los filtros.',
                             textAlign: TextAlign.center,
@@ -554,7 +556,7 @@ class _BandejaWhatsappScreenState extends State<BandejaWhatsappScreen>
                     : RefreshIndicator(
                         onRefresh: _cargar,
                         child: ListView(
-                          padding: const EdgeInsets.all(16),
+                          padding: const EdgeInsets.all(AppEspacio.lg),
                           children: [
                             for (final seccion in _secciones())
                               ..._bloqueSeccion(seccion),
@@ -616,7 +618,7 @@ class _BandejaWhatsappScreenState extends State<BandejaWhatsappScreen>
       return [
         Padding(
           padding:
-              const EdgeInsets.only(top: AppEspacio.sm, bottom: 8),
+              const EdgeInsets.only(top: AppEspacio.sm, bottom: AppEspacio.sm),
           child: Row(
             children: [
               Icon(seccion.icono,
@@ -629,7 +631,7 @@ class _BandejaWhatsappScreenState extends State<BandejaWhatsappScreen>
         ),
         if (recientes.isNotEmpty) ...[
           const Padding(
-            padding: EdgeInsets.only(bottom: 4),
+            padding: EdgeInsets.only(bottom: AppEspacio.xs),
             child: Text('Hace 1–7 días',
                 style: TextStyle(fontWeight: FontWeight.w600)),
           ),
@@ -637,7 +639,7 @@ class _BandejaWhatsappScreenState extends State<BandejaWhatsappScreen>
         ],
         if (viejos.isNotEmpty) ...[
           const Padding(
-            padding: EdgeInsets.only(bottom: 4, top: 4),
+            padding: EdgeInsets.only(bottom: AppEspacio.xs, top: AppEspacio.xs),
             child: Text('Hace 8–30 días',
                 style: TextStyle(fontWeight: FontWeight.w600)),
           ),
@@ -649,7 +651,7 @@ class _BandejaWhatsappScreenState extends State<BandejaWhatsappScreen>
     return [
       Padding(
         padding:
-            const EdgeInsets.only(top: AppEspacio.sm, bottom: 8),
+            const EdgeInsets.only(top: AppEspacio.sm, bottom: AppEspacio.sm),
         child: Row(
           children: [
             Icon(seccion.icono,
@@ -683,7 +685,7 @@ class _BandejaWhatsappScreenState extends State<BandejaWhatsappScreen>
                 borderRadius: BorderRadius.circular(20),
                 onTap: () => _setAtendido(a, !atendido),
                 child: Padding(
-                  padding: const EdgeInsets.all(8),
+                  padding: const EdgeInsets.all(AppEspacio.sm),
                   child: Icon(
                     atendido
                         ? Icons.check_circle_rounded
@@ -698,10 +700,10 @@ class _BandejaWhatsappScreenState extends State<BandejaWhatsappScreen>
               // v1.3.8: tocar la tarjeta abre la ficha del cliente.
               Expanded(
                 child: InkWell(
-                  borderRadius: BorderRadius.circular(8),
+                  borderRadius: BorderRadius.circular(AppRadio.sm),
                   onTap: () => _irAFicha(a),
                   child: Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 4),
+                    padding: const EdgeInsets.symmetric(vertical: AppEspacio.xs),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
@@ -744,7 +746,7 @@ class _BandejaWhatsappScreenState extends State<BandejaWhatsappScreen>
               const SizedBox(width: 8),
               // Botón WhatsApp: verde reconocible, 1 toque.
               InkWell(
-                borderRadius: BorderRadius.circular(24),
+                borderRadius: BorderRadius.circular(AppRadio.xl),
                 onTap: tieneTelefono ? () => _abrirWhatsapp(a) : null,
                 child: Container(
                   width: 48,

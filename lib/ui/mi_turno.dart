@@ -16,6 +16,7 @@ import '../sync.dart';
 import '../tiempo.dart';
 import '../turno_service.dart';
 import '../turnos_resolucion.dart';
+import 'app_bar.dart';
 import 'componentes.dart';
 import 'diseno.dart';
 import 'ficha.dart';
@@ -423,11 +424,11 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
                 (pendientes.isNotEmpty || bloqueadas.isNotEmpty)) ...[
               const SizedBox(height: 12),
               Container(
-                padding: const EdgeInsets.all(12),
+                padding: const EdgeInsets.all(AppEspacio.md),
                 decoration: BoxDecoration(
                   color: AppColores.alerta
                       .withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(12),
+                  borderRadius: BorderRadius.circular(AppRadio.md),
                   border: Border.all(
                       color: AppColores.alerta
                           .withValues(alpha: 0.4)),
@@ -700,8 +701,7 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
     // admin que no es el dueño veía la vista del dueño).
     final esDueno = _auth.isOwner;
     return Scaffold(
-      appBar: AppBar(
-          title: Text(esDueno ? 'Mis cobros' : 'Mi turno')),
+      appBar: appBarIron(context, esDueno ? 'Mis cobros' : 'Mi turno'),
       body: Column(
         children: [
           const SyncBanner(),
@@ -709,7 +709,7 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
             child: RefreshIndicator(
               onRefresh: _cargar,
               child: ListView(
-                padding: const EdgeInsets.all(16),
+                padding: const EdgeInsets.all(AppEspacio.lg),
                 children: [
                   Tarjeta(
                     child: Column(

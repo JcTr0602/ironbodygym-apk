@@ -21,6 +21,7 @@ import '../conciliacion.dart';
 import '../fotos.dart';
 import '../localdb.dart';
 import '../negocio.dart';
+import 'app_bar.dart';
 import 'componentes.dart';
 import 'diseno.dart';
 
@@ -372,7 +373,7 @@ class _ConciliacionScreenState extends State<ConciliacionScreen> {
   Widget build(BuildContext context) {
     if (!AuthService().isOwner) {
       return Scaffold(
-        appBar: AppBar(title: const Text('Transferencias')),
+        appBar: appBarIron(context, 'Transferencias'),
         body: const EstadoVacio(
           icono: Icons.lock_rounded,
           titulo: 'Solo el dueño concilia transferencias',
@@ -380,9 +381,10 @@ class _ConciliacionScreenState extends State<ConciliacionScreen> {
       );
     }
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Transferencias por comprobar'),
-        actions: [
+      appBar: appBarIron(
+        context,
+        'Transferencias por comprobar',
+        acciones: [
           IconButton(
             icon: const Icon(Icons.refresh_rounded),
             onPressed: _cargar,

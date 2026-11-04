@@ -23,6 +23,7 @@ import '../plus_reportes.dart';
 import '../sync.dart';
 import '../tiempo.dart';
 import 'admin.dart';
+import 'app_bar.dart';
 import 'componentes.dart';
 import 'diseno.dart';
 import 'ficha.dart';
@@ -277,7 +278,7 @@ class _InvitadosScreenState extends State<InvitadosScreen> {
                 },
           child: Padding(
             padding: const EdgeInsets.symmetric(
-                horizontal: 6, vertical: 4),
+                horizontal: 6, vertical: AppEspacio.xs),
             child: Text(texto,
                 style: AppTexto.secundario.copyWith(
                     fontWeight: FontWeight.w600,
@@ -731,9 +732,10 @@ class _InvitadosScreenState extends State<InvitadosScreen> {
     );
     if (widget.embebido) return cuerpo;
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Invitados'),
-        actions: _acciones(esAdmin),
+      appBar: appBarIron(
+        context,
+        'Invitados',
+        acciones: _acciones(esAdmin),
       ),
       body: cuerpo,
     );
@@ -1035,7 +1037,7 @@ class _InvitadosScreenState extends State<InvitadosScreen> {
 
 Widget _chip(String texto, Color color) {
   return Container(
-    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+    padding: const EdgeInsets.symmetric(horizontal: AppEspacio.sm, vertical: 3),
     decoration: BoxDecoration(
       color: color.withValues(alpha: 0.12),
       borderRadius: BorderRadius.circular(20),
@@ -1314,7 +1316,7 @@ class _DialogoResultadoLote extends StatelessWidget {
             const SizedBox(height: AppEspacio.sm),
             for (final it in res.items)
               Padding(
-                padding: const EdgeInsets.only(bottom: 4),
+                padding: const EdgeInsets.only(bottom: AppEspacio.xs),
                 child: Text(
                   it.ok
                       ? '✅ ${nombreDe(it)}'
@@ -1641,7 +1643,7 @@ class _InvitadoDetalleScreenState extends State<InvitadoDetalleScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Detalle del invitado')),
+      appBar: appBarIron(context, 'Detalle del invitado'),
       body: Column(
         children: [
           const SyncBanner(compact: true),
@@ -1691,7 +1693,7 @@ class _InvitadoDetalleScreenState extends State<InvitadoDetalleScreen> {
               margin: const EdgeInsets.only(bottom: AppEspacio.md),
               decoration: BoxDecoration(
                 color: AppColores.alerta.withValues(alpha: 0.12),
-                borderRadius: BorderRadius.circular(12),
+                borderRadius: BorderRadius.circular(AppRadio.md),
               ),
               child: Text(
                 '📴 Sin conexión · datos de '
@@ -2327,12 +2329,12 @@ class _InvitadoDetalleScreenState extends State<InvitadoDetalleScreen> {
             for (final h in p.historial)
               Container(
                 width: double.infinity,
-                margin: const EdgeInsets.only(top: 8),
+                margin: const EdgeInsets.only(top: AppEspacio.sm),
                 padding: const EdgeInsets.symmetric(
-                    horizontal: 10, vertical: 8),
+                    horizontal: 10, vertical: AppEspacio.sm),
                 decoration: BoxDecoration(
                   color: Colors.grey.withValues(alpha: 0.10),
-                  borderRadius: BorderRadius.circular(12),
+                  borderRadius: BorderRadius.circular(AppRadio.md),
                 ),
                 child: Text(textoHistorial(h),
                     style: AppTexto.secundario),
@@ -2411,7 +2413,7 @@ class _InvitadoDetalleScreenState extends State<InvitadoDetalleScreen> {
           const SizedBox(height: AppEspacio.sm),
           for (final a in d.staffAcciones)
             Padding(
-              padding: const EdgeInsets.only(bottom: 4),
+              padding: const EdgeInsets.only(bottom: AppEspacio.xs),
               child: Text(textoAccion(a),
                   style: AppTexto.secundario),
             ),
@@ -2869,7 +2871,7 @@ class _InfoPublicaScreenState extends State<InfoPublicaScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Información pública')),
+      appBar: appBarIron(context, 'Información pública'),
       body: Column(
         children: [
           const SyncBanner(compact: true),

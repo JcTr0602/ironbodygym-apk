@@ -28,6 +28,7 @@ import '../negocio.dart';
 import '../plus_reportes.dart';
 import '../sync.dart';
 import '../tiempo.dart';
+import 'app_bar.dart';
 import 'componentes.dart';
 import 'diseno.dart';
 import 'widgets.dart';
@@ -255,7 +256,7 @@ class _ReportesPlusScreenState extends State<ReportesPlusScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Reportes App Plus')),
+      appBar: appBarIron(context, 'Reportes App Plus'),
       body: Column(
         children: [
           const SyncBanner(),
@@ -374,7 +375,7 @@ class _ReportesPlusScreenState extends State<ReportesPlusScreen> {
             // avisa; NO se bloquea la confirmación.
             if (r.alertaReferenciaRechazada)
               Padding(
-                padding: EdgeInsets.only(top: 8),
+                padding: EdgeInsets.only(top: AppEspacio.sm),
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [

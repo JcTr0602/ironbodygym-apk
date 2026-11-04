@@ -4,6 +4,7 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../auth.dart';
+import 'app_bar.dart';
 import 'componentes.dart';
 import 'diseno.dart';
 
@@ -302,7 +303,7 @@ class _PanelPermisosState extends State<PanelPermisos> {
           Center(child: Text('Solo el dueño puede gestionar permisos.'));
       if (widget.embebido) return denegado;
       return Scaffold(
-        appBar: AppBar(title: const Text('Permisos')),
+        appBar: appBarIron(context, 'Permisos'),
         body: denegado,
       );
     }
@@ -313,7 +314,7 @@ class _PanelPermisosState extends State<PanelPermisos> {
             ? const Center(
                 child: Text('No hay entrenadores registrados.'))
             : ListView.builder(
-                padding: const EdgeInsets.all(16),
+                padding: const EdgeInsets.all(AppEspacio.lg),
                 itemCount: _entrenadores.length,
                 itemBuilder: (ctx, i) =>
                     _buildEntrenadorCard(_entrenadores[i]),
@@ -322,9 +323,10 @@ class _PanelPermisosState extends State<PanelPermisos> {
     if (widget.embebido) return contenido;
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Permisos de Entrenadores'),
-        actions: [
+      appBar: appBarIron(
+        context,
+        'Permisos de Entrenadores',
+        acciones: [
           IconButton(
             icon: const Icon(Icons.refresh_rounded),
             onPressed: _cargar,
@@ -341,9 +343,9 @@ class _PanelPermisosState extends State<PanelPermisos> {
     final activos =
         ent.permisos.values.where((v) => v).length;
     return Card(
-      margin: const EdgeInsets.only(bottom: 16),
+      margin: const EdgeInsets.only(bottom: AppEspacio.lg),
       child: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(AppEspacio.lg),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -399,7 +401,7 @@ class _PanelPermisosState extends State<PanelPermisos> {
                 }
               }),
               child: Padding(
-                padding: const EdgeInsets.symmetric(vertical: 8),
+                padding: const EdgeInsets.symmetric(vertical: AppEspacio.sm),
                 child: Row(
                   children: [
                     Expanded(

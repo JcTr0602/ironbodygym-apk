@@ -19,6 +19,7 @@ import '../localdb.dart';
 import '../sync.dart';
 import '../tiempo.dart';
 import '../cliente_protegido.dart';
+import 'app_bar.dart';
 import 'componentes.dart';
 import 'diseno.dart';
 import 'widgets.dart';
@@ -384,9 +385,10 @@ class _HistorialVentasScreenState
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-          title: Text(
-              widget.soloMias ? 'Mis ventas' : 'Ventas de suplementos')),
+      appBar: appBarIron(
+        context,
+        widget.soloMias ? 'Mis ventas' : 'Ventas de suplementos',
+      ),
       body: Column(
         children: [
           const SyncBanner(compact: true),
@@ -902,7 +904,7 @@ class _HistorialVentasScreenState
     if (!mounted) return;
 
     Widget fila(String e, String valor) => Padding(
-          padding: const EdgeInsets.only(bottom: 4),
+          padding: const EdgeInsets.only(bottom: AppEspacio.xs),
           child: Row(
             crossAxisAlignment:
                 CrossAxisAlignment.start,

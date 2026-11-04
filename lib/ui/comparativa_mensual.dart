@@ -6,6 +6,7 @@ import '../auth.dart';
 import '../negocio.dart';
 import '../localdb.dart';
 import '../tiempo.dart';
+import 'app_bar.dart';
 import 'diseno.dart';
 import 'componentes.dart';
 
@@ -246,15 +247,15 @@ class _ComparativaMensualState
     // P2#4: sin guarda de dueño, un entrenador veía cifras de caja.
     if (!AuthService().isOwner) {
       return Scaffold(
-          appBar: AppBar(
-              title: const Text('Comparativa Mensual')),
+          appBar: appBarIron(context, 'Comparativa Mensual'),
           body: const Center(
               child: Text('Solo el dueño ve esta pantalla.')));
     }
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Comparativa Mensual'),
-        actions: [
+      appBar: appBarIron(
+        context,
+        'Comparativa Mensual',
+        acciones: [
           IconButton(
             icon: const Icon(Icons.refresh_rounded),
             onPressed: _cargar,
@@ -267,7 +268,7 @@ class _ComparativaMensualState
           : Column(
               children: [
                 Padding(
-                  padding: const EdgeInsets.all(16),
+                  padding: const EdgeInsets.all(AppEspacio.lg),
                   child: Text(
                     '$_mesActual (al día ${ahoraHabana().day}) vs $_mesAnterior',
                     style: AppTexto.cuerpo.copyWith(color: Colors.grey),
@@ -277,7 +278,7 @@ class _ComparativaMensualState
                   child: GridView.builder(
                     padding:
                         const EdgeInsets.symmetric(
-                            horizontal: 16),
+                            horizontal: AppEspacio.lg),
                     gridDelegate:
                         const SliverGridDelegateWithFixedCrossAxisCount(
                       crossAxisCount: 2,
@@ -307,7 +308,7 @@ class _ComparativaMensualState
 
     return Card(
       child: Padding(
-        padding: const EdgeInsets.all(12),
+        padding: const EdgeInsets.all(AppEspacio.md),
         child: Column(
           crossAxisAlignment:
               CrossAxisAlignment.start,
@@ -347,7 +348,7 @@ class _ComparativaMensualState
                         ? Colors.green[50]
                         : Colors.red[50],
                     borderRadius:
-                        BorderRadius.circular(8),
+                        BorderRadius.circular(AppRadio.sm),
                   ),
                   child: Text(
                     '${esPositivo ? '+' : ''}${delta.toStringAsFixed(1)}%',

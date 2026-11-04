@@ -31,6 +31,7 @@ import '../servicios.dart' as servicios_svc;
 import '../sync.dart';
 import '../cliente_protegido.dart';
 import '../acceso_app_cache.dart';
+import 'app_bar.dart';
 import 'componentes.dart';
 import 'conciliacion.dart';
 import 'dialogo_pago.dart';
@@ -1216,7 +1217,7 @@ class _FichaScreenState extends State<FichaScreen> {
                 },
                 child: Container(
                   padding: const EdgeInsets.symmetric(
-                      horizontal: 12, vertical: 12),
+                      horizontal: AppEspacio.md, vertical: AppEspacio.md),
                   decoration: BoxDecoration(
                     border: Border.all(
                         color: AppColores.borde(context)),
@@ -1393,11 +1394,11 @@ class _FichaScreenState extends State<FichaScreen> {
       context: context,
       builder: (ctx) => Dialog(
         backgroundColor: Colors.transparent,
-        insetPadding: const EdgeInsets.all(16),
+        insetPadding: const EdgeInsets.all(AppEspacio.lg),
         child: GestureDetector(
           onTap: () => Navigator.of(ctx).pop(),
           child: ClipRRect(
-            borderRadius: BorderRadius.circular(16),
+            borderRadius: BorderRadius.circular(AppRadio.lg),
             child: Image.file(f, fit: BoxFit.contain),
           ),
         ),
@@ -1956,7 +1957,7 @@ class _FichaScreenState extends State<FichaScreen> {
     // permitido: ver no es modificar.
     if (c != null && esVistaProtegida(c)) {
       return Scaffold(
-        appBar: AppBar(title: Text(nombre)),
+        appBar: appBarIron(context, nombre),
         body: Column(
           children: [
             const SyncBanner(),
@@ -1996,9 +1997,10 @@ class _FichaScreenState extends State<FichaScreen> {
       );
     }
     return Scaffold(
-      appBar: AppBar(
-        title: Text(nombre),
-        actions: [
+      appBar: appBarIron(
+        context,
+        nombre,
+        acciones: [
           if (c != null) ...[
             IconButton(
                 tooltip: 'Verificar con servidor',
@@ -2076,13 +2078,13 @@ class _FichaScreenState extends State<FichaScreen> {
                             child: Container(
                               padding:
                                   const EdgeInsets.symmetric(
-                                      horizontal: 12,
+                                      horizontal: AppEspacio.md,
                                       vertical: 5),
                               decoration: BoxDecoration(
                                 color: AppColores.naranja
                                     .withValues(alpha: 0.12),
                                 borderRadius:
-                                    BorderRadius.circular(999),
+                                    BorderRadius.circular(AppRadio.circular),
                                 border: Border.all(
                                     color: AppColores.naranja),
                               ),

@@ -407,7 +407,7 @@ class _BandejaScreenState extends State<BandejaScreen>
 
   Widget _vacio(String texto) => Center(
         child: Padding(
-          padding: const EdgeInsets.all(24),
+          padding: const EdgeInsets.all(AppEspacio.xl),
           child: Text(texto, textAlign: TextAlign.center),
         ),
       );
@@ -498,7 +498,7 @@ class _BandejaScreenState extends State<BandejaScreen>
               : 'Ninguna solicitud descartada.');
     }
     return ListView(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(AppEspacio.lg),
       children: [
         for (final s in lista) ...[
           _tarjetaSolicitud(s, estado),
@@ -514,7 +514,7 @@ class _BandejaScreenState extends State<BandejaScreen>
           'solicitud pendiente.');
     }
     return ListView(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(AppEspacio.lg),
       children: [
         for (final b in _borradores) ...[
           Tarjeta(
@@ -593,10 +593,10 @@ class _BandejaScreenState extends State<BandejaScreen>
       return _vacio('Sin entrenadores registrados en la app.');
     }
     return ListView(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(AppEspacio.lg),
       children: [
         const Padding(
-          padding: EdgeInsets.only(bottom: 12),
+          padding: EdgeInsets.only(bottom: AppEspacio.md),
           child: Text('Con permiso, el entrenador ve la bandeja, '
               'descarta solicitudes y crea borradores. Publicar '
               'sigue siendo solo tuyo.'),

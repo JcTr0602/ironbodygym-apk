@@ -21,6 +21,7 @@ import '../localdb.dart';
 import '../negocio.dart';
 import '../nomina_calc.dart';
 import '../sync.dart';
+import 'app_bar.dart';
 import 'componentes.dart';
 import 'diseno.dart';
 import 'ficha.dart';
@@ -130,11 +131,10 @@ class _PagaronMesScreenState extends State<PagaronMesScreen> {
     // La lista en sí no tiene ninguna acción de edición.
     final esDueno = AuthService().isOwner;
     return Scaffold(
-      appBar: AppBar(
-        title: Text(_cargando
-            ? 'Pagaron este mes'
-            : 'Pagaron este mes ($_totalCanonico)'),
-        actions: [
+      appBar: appBarIron(
+        context,
+        _cargando ? 'Pagaron este mes' : 'Pagaron este mes ($_totalCanonico)',
+        acciones: [
           IconButton(
             icon: const Icon(Icons.refresh_rounded),
             tooltip: 'Actualizar (bajar cambios)',

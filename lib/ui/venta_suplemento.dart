@@ -30,6 +30,7 @@ import '../auth.dart';
 import '../permisos.dart';
 import '../tiempo.dart';
 import '../cliente_protegido.dart';
+import 'app_bar.dart';
 import 'componentes.dart';
 import 'aviso_duplicado.dart';
 import 'confirmacion_cobro.dart';
@@ -562,10 +563,10 @@ class _VentaSuplementoScreenState
             const SizedBox(height: 8),
             Container(
               width: double.infinity,
-              padding: const EdgeInsets.all(12),
+              padding: const EdgeInsets.all(AppEspacio.md),
               decoration: BoxDecoration(
                 color: const Color(0xFFE7F6EC),
-                borderRadius: BorderRadius.circular(12),
+                borderRadius: BorderRadius.circular(AppRadio.md),
               ),
               child: Text(c.texto.replaceAll('*', '')),
             ),
@@ -760,7 +761,7 @@ class _VentaSuplementoScreenState
     final stock =
         (widget.suplemento['stock'] as num?)?.toInt() ?? 0;
     return Scaffold(
-      appBar: AppBar(title: const Text('Registrar venta')),
+      appBar: appBarIron(context, 'Registrar venta'),
       body: ListView(
         padding: const EdgeInsets.all(AppEspacio.lg),
         children: [
@@ -1234,7 +1235,7 @@ class _DialogoBuscarClienteState extends State<_DialogoBuscarCliente> {
                 prefixIcon: Icon(Icons.search_rounded),
                 border: OutlineInputBorder(),
                 contentPadding:
-                    EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    EdgeInsets.symmetric(horizontal: AppEspacio.md, vertical: AppEspacio.sm),
               ),
               onChanged: (_) => setState(() {}),
             ),

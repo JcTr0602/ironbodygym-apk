@@ -10,6 +10,7 @@ import 'package:flutter/material.dart';
 import '../auth.dart';
 import '../negocio.dart';
 import '../tiempo.dart';
+import 'app_bar.dart';
 import 'componentes.dart';
 import 'detalle_entrenador.dart';
 import 'diseno.dart';
@@ -68,7 +69,7 @@ class _ComparativaEntrenadoresScreenState
       // conciliación y diferencias para el bloqueo de rol.
       return Scaffold(
         appBar:
-            AppBar(title: const Text('Comparativa de entrenadores')),
+            appBarIron(context, 'Comparativa de entrenadores'),
         body: const EstadoVacio(
           icono: Icons.lock_rounded,
           titulo: 'Solo el dueño',
@@ -79,7 +80,7 @@ class _ComparativaEntrenadoresScreenState
     final n = ahoraHabana();
     final esMesActual = _mes.year == n.year && _mes.month == n.month;
     return Scaffold(
-      appBar: AppBar(title: const Text('Comparativa de entrenadores')),
+      appBar: appBarIron(context, 'Comparativa de entrenadores'),
       body: ListView(
         padding: const EdgeInsets.all(AppEspacio.lg),
         children: [

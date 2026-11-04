@@ -100,11 +100,11 @@ class CabeceraFicha extends StatelessWidget {
                 else
                   Container(
                     padding: const EdgeInsets.symmetric(
-                        horizontal: 12, vertical: 5),
+                        horizontal: AppEspacio.md, vertical: 5),
                     decoration: BoxDecoration(
                       color:
                           AppColores.alerta.withValues(alpha: 0.15),
-                      borderRadius: BorderRadius.circular(999),
+                      borderRadius: BorderRadius.circular(AppRadio.circular),
                       border: Border.all(color: AppColores.alerta),
                     ),
                     child: Row(
@@ -230,7 +230,7 @@ class BarraMesFicha extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           ClipRRect(
-            borderRadius: BorderRadius.circular(999),
+            borderRadius: BorderRadius.circular(AppRadio.circular),
             child: LinearProgressIndicator(
               value: frac,
               minHeight: 8,
@@ -412,7 +412,7 @@ class TarjetaHistorialFicha extends StatelessWidget {
               ];
               if (partes.isEmpty) return const SizedBox.shrink();
               return Padding(
-                padding: const EdgeInsets.only(top: 8),
+                padding: const EdgeInsets.only(top: AppEspacio.sm),
                 child: Text(
                   'Acumulado: ${partes.join(' · ')}',
                   style: AppTexto.secundario,

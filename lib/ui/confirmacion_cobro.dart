@@ -227,7 +227,7 @@ class _ConfirmacionOperacionScreenState
                 ),
                 const SizedBox(height: 32),
                 Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 32),
+                  padding: const EdgeInsets.symmetric(horizontal: AppEspacio.xxl),
                   child: Text(
                     widget.titulo,
                     textAlign: TextAlign.center,
@@ -240,7 +240,7 @@ class _ConfirmacionOperacionScreenState
                 // importe arriba y la línea de corte punteada lo
                 // separa del detalle.
                 Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 32),
+                  padding: const EdgeInsets.symmetric(horizontal: AppEspacio.xxl),
                   child: Container(
                     decoration: BoxDecoration(
                       color: AppColores.superficie(context),
@@ -291,7 +291,7 @@ class _ConfirmacionOperacionScreenState
                   const SizedBox(height: 24),
                   Padding(
                     padding:
-                        const EdgeInsets.symmetric(horizontal: 32),
+                        const EdgeInsets.symmetric(horizontal: AppEspacio.xxl),
                     child: Container(
                       width: double.infinity,
                       decoration: BoxDecoration(
@@ -301,7 +301,7 @@ class _ConfirmacionOperacionScreenState
                         border: Border.all(
                             color: AppColores.borde(context)),
                       ),
-                      padding: const EdgeInsets.all(16),
+                      padding: const EdgeInsets.all(AppEspacio.lg),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
@@ -399,7 +399,7 @@ class _ConfirmacionOperacionScreenState
 
   Widget _fila(BuildContext context, String etiqueta, String valor) {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8),
+      padding: const EdgeInsets.symmetric(vertical: AppEspacio.sm),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
@@ -423,7 +423,7 @@ class _ConfirmacionOperacionScreenState
   /// hasta su valor con [MontoAnimado]; sin él, texto fijo.
   Widget _filaMonto(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8),
+      padding: const EdgeInsets.symmetric(vertical: AppEspacio.sm),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [

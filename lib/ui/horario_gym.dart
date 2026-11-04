@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'dart:convert';
 import '../auth.dart';
+import 'app_bar.dart';
 import 'diseno.dart';
 import 'componentes.dart';
 
@@ -321,7 +322,7 @@ class _HorarioGymState extends State<HorarioGym> {
     if (!AuthService().isOwner) {
       return Scaffold(
         appBar:
-            AppBar(title: const Text('Horario')),
+            appBarIron(context, 'Horario'),
         body: const Center(
           child: Text(
               'Solo el dueño puede configurar el horario.'),
@@ -329,9 +330,10 @@ class _HorarioGymState extends State<HorarioGym> {
       );
     }
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Horario del Gym'),
-        actions: [
+      appBar: appBarIron(
+        context,
+        'Horario del Gym',
+        acciones: [
           if (!_cargando)
             TextButton(
               onPressed:
@@ -364,7 +366,7 @@ class _HorarioGymState extends State<HorarioGym> {
                 // Esta pantalla queda solo para el horario del gym.
                 Expanded(
                   child: ListView.builder(
-                    padding: const EdgeInsets.all(16),
+                    padding: const EdgeInsets.all(AppEspacio.lg),
                     itemCount: _dias.length,
                     itemBuilder: (ctx, i) =>
                         _buildDiaCard(_dias[i]),
@@ -378,9 +380,9 @@ class _HorarioGymState extends State<HorarioGym> {
   Widget _buildDiaCard(DiaHorario dia) {
     return Card(
       margin:
-          const EdgeInsets.only(bottom: 12),
+          const EdgeInsets.only(bottom: AppEspacio.md),
       child: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(AppEspacio.lg),
         child: Column(
           crossAxisAlignment:
               CrossAxisAlignment.start,
@@ -426,7 +428,7 @@ class _HorarioGymState extends State<HorarioGym> {
                   const Padding(
                     padding:
                         EdgeInsets.symmetric(
-                            horizontal: 8),
+                            horizontal: AppEspacio.sm),
                     child: Text('—'),
                   ),
                   Expanded(
@@ -464,7 +466,7 @@ class _HorarioGymState extends State<HorarioGym> {
                   const Padding(
                     padding:
                         EdgeInsets.symmetric(
-                            horizontal: 8),
+                            horizontal: AppEspacio.sm),
                     child: Text('—'),
                   ),
                   Expanded(
@@ -498,12 +500,12 @@ class _HorarioGymState extends State<HorarioGym> {
       onLongPress: onLongPress,
       child: Container(
         padding: const EdgeInsets.symmetric(
-            vertical: 10, horizontal: 12),
+            vertical: 10, horizontal: AppEspacio.md),
         decoration: BoxDecoration(
           border: Border.all(
               color: Colors.grey[300]!),
           borderRadius:
-              BorderRadius.circular(8),
+              BorderRadius.circular(AppRadio.sm),
         ),
         child: Column(
           children: [

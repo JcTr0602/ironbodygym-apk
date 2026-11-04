@@ -147,20 +147,52 @@ void main() {
       // con botón «ENTENDIDO», y «Lo nuevo en esta versión»,
       // con botón «Entendido»): se aceptan en cadena hasta
       // que no quede ninguno tapando la pantalla.
-      for (var i = 0; i < 5; i++) {
-        final mayus = find.text('ENTENDIDO');
-        final boton = mayus.evaluate().isNotEmpty
-            ? mayus
-            : find.text('Entendido');
-        if (boton.evaluate().isEmpty) break;
-        await tester.tap(boton.first);
-        await tester.pump(const Duration(milliseconds: 400));
+      // 1.23 (integración Bloque 5): descartar por TOQUE es
+      // frágil aquí, medido en corrida: (a) el orden del
+      // árbol de los dos AlertDialog no coincide con el
+      // orden visual de apilado — el toque al botón del de
+      // abajo lo absorbía el contenido del de arriba; (b) un
+      // diálogo en animación de salida sigue en el árbol
+      // pero ignora punteros, y el toque cae a la pantalla;
+      // (c) el diálogo de permisos llega por una lectura
+      // REAL asíncrona y bajo carga puede aparecer DESPUÉS
+      // del primer descarte. Descarte determinista: cerrar
+      // la ruta del diálogo con el propio Navigator (sin
+      // hit-test). El botón de permisos además dispararía
+      // signOut: efecto incidental que esta prueba no
+      // necesita (su fin es destapar Home). El toque al
+      // selector va en un ciclo descartar→tocar por si un
+      // diálogo tardío tapa el primer toque.
+      Future<void> descartarDialogos() async {
+        for (var i = 0; i < 6; i++) {
+          if (find.byType(AlertDialog).evaluate().isEmpty) break;
+          // popUntil a la PRIMERA ruta (la propia Home): cierra
+          // todos los diálogos apilados en una pasada y jamás
+          // puede cerrar Home. (Un pop() por vuelta resultó
+          // peligroso: con el diálogo aún en animación de
+          // salida, la siguiente vuelta podía cerrar la ruta
+          // de Home y dejar el Navigator vacío.)
+          Navigator.of(tester.element(find.byType(HomeScreen)))
+              .popUntil((r) => r.isFirst);
+          await tester.pump(const Duration(milliseconds: 400));
+        }
       }
+
+      await descartarDialogos();
       // Nivel 1 por defecto: el selector se ve y el grid no.
       expect(find.text('Hoy'), findsOneWidget);
       expect(find.text('Módulos'), findsOneWidget);
       expect(find.text('MÓDULOS'), findsNothing);
-      await tester.tap(find.text('Módulos'));
+      for (var intento = 0; intento < 3; intento++) {
+        if (find.byType(AlertDialog).evaluate().isNotEmpty) {
+          await descartarDialogos();
+          continue;
+        }
+        if (find.text('Módulos').evaluate().isEmpty) break;
+        await tester.tap(find.text('Módulos'));
+        await tester.pump(const Duration(milliseconds: 600));
+        if (find.text('MÓDULOS').evaluate().isNotEmpty) break;
+      }
       await avanzarTiempo(tester);
       expect(find.text('MÓDULOS'), findsOneWidget);
       expect(find.byType(GridView), findsWidgets);

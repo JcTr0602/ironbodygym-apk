@@ -143,7 +143,7 @@ class _TarjetaMedidasState extends State<TarjetaMedidas> {
           ),
           if (_cargando)
             const Padding(
-              padding: EdgeInsets.symmetric(vertical: 8),
+              padding: EdgeInsets.symmetric(vertical: AppEspacio.sm),
               child: CircularProgressIndicator(strokeWidth: 2),
             )
           else if (_medidas.isEmpty)

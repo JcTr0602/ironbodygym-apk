@@ -26,6 +26,7 @@ import '../nomina_calc.dart';
 import '../nomina_foto.dart';
 import '../plus_reportes.dart';
 import '../tiempo.dart';
+import 'app_bar.dart';
 import 'componentes.dart';
 import 'diseno.dart';
 import 'nomina.dart';
@@ -327,16 +328,16 @@ class _ArqueoEntregaScreenState extends State<ArqueoEntregaScreen> {
   Widget build(BuildContext context) {
     if (!AuthService().isOwner) {
       return Scaffold(
-          appBar: AppBar(title: const Text('Arqueo de entrega')),
+          appBar: appBarIron(context, 'Arqueo de entrega'),
           body: const Center(
               child: Text('Solo el dueño ve esta pantalla.')));
     }
     return Scaffold(
-      appBar: AppBar(title: const Text('Arqueo de entrega')),
+      appBar: appBarIron(context, 'Arqueo de entrega'),
       body: _cargando
           ? const EstadoCargando(texto: 'Cargando caja…')
           : ListView(
-              padding: const EdgeInsets.all(16),
+              padding: const EdgeInsets.all(AppEspacio.lg),
               children: [
                 const Text(
                   'Pendiente = efectivo cobrado − adelantos de gaveta '
@@ -535,16 +536,16 @@ class _NominaPrecalculadaScreenState extends State<NominaPrecalculadaScreen> {
     // Lote 3 (BLOQUEANTE): ver guarda en _cargar.
     if (!AuthService().isOwner) {
       return Scaffold(
-          appBar: AppBar(title: const Text('Nómina pre-calculada')),
+          appBar: appBarIron(context, 'Nómina pre-calculada'),
           body: const Center(
               child: Text('Solo el dueño ve esta pantalla.')));
     }
     return Scaffold(
-      appBar: AppBar(title: const Text('Nómina pre-calculada')),
+      appBar: appBarIron(context, 'Nómina pre-calculada'),
       body: _cargando
           ? const EstadoCargando(texto: 'Cargando caja…')
           : ListView(
-              padding: const EdgeInsets.all(16),
+              padding: const EdgeInsets.all(AppEspacio.lg),
               children: [
                 const Text(
                   'Vista previa, puede cambiar con cobros hasta el 31. '
@@ -683,7 +684,7 @@ class _AdelantosListaScreenState extends State<AdelantosListaScreen> {
   Widget build(BuildContext context) {
     if (!AuthService().isOwner) {
       return Scaffold(
-          appBar: AppBar(title: const Text('Adelantos')),
+          appBar: appBarIron(context, 'Adelantos'),
           body: const Center(
               child: Text('Solo el dueño ve esta pantalla.')));
     }
@@ -698,11 +699,11 @@ class _AdelantosListaScreenState extends State<AdelantosListaScreen> {
             .where((f) => '${f['mes_nomina']}' == _filtroMes)
             .toList();
     return Scaffold(
-      appBar: AppBar(title: const Text('Adelantos')),
+      appBar: appBarIron(context, 'Adelantos'),
       body: _cargando
           ? const EstadoCargando(texto: 'Cargando caja…')
           : ListView(
-              padding: const EdgeInsets.all(16),
+              padding: const EdgeInsets.all(AppEspacio.lg),
               children: [
                 const Text(
                   'Vista de solo lectura. La lógica de adelantos es '
@@ -869,17 +870,17 @@ class _IngresosPeriodoScreenState extends State<IngresosPeriodoScreen> {
   Widget build(BuildContext context) {
     if (!AuthService().isOwner) {
       return Scaffold(
-          appBar: AppBar(title: const Text('Ingresos por período')),
+          appBar: appBarIron(context, 'Ingresos por período'),
           body: const Center(
               child: Text('Solo el dueño ve esta pantalla.')));
     }
     final r = _resumen;
     return Scaffold(
-      appBar: AppBar(title: const Text('Ingresos por período')),
+      appBar: appBarIron(context, 'Ingresos por período'),
       body: _cargando
           ? const EstadoCargando(texto: 'Cargando caja…')
           : ListView(
-              padding: const EdgeInsets.all(16),
+              padding: const EdgeInsets.all(AppEspacio.lg),
               children: [
                 const Text(
                   'Solo transacciones reales del rango, con el monto '
@@ -1066,16 +1067,16 @@ class _PreciosMetodoScreenState extends State<PreciosMetodoScreen> {
   Widget build(BuildContext context) {
     if (!AuthService().isOwner) {
       return Scaffold(
-          appBar: AppBar(title: const Text('Precios por método')),
+          appBar: appBarIron(context, 'Precios por método'),
           body: const Center(
               child: Text('Solo el dueño cambia precios.')));
     }
     return Scaffold(
-      appBar: AppBar(title: const Text('Precios por método')),
+      appBar: appBarIron(context, 'Precios por método'),
       body: _cargando
           ? const EstadoCargando(texto: 'Cargando caja…')
           : ListView(
-              padding: const EdgeInsets.all(16),
+              padding: const EdgeInsets.all(AppEspacio.lg),
               children: [
                 const Text(
                   'Única fuente de precios: todo lo que cambias aquí '
@@ -1089,7 +1090,7 @@ class _PreciosMetodoScreenState extends State<PreciosMetodoScreen> {
                 const SizedBox(height: 12),
                 for (final k in kClavesPreciosC6)
                   Padding(
-                    padding: const EdgeInsets.only(bottom: 8),
+                    padding: const EdgeInsets.only(bottom: AppEspacio.sm),
                     child: TextField(
                       controller: _ctrls[k],
                       keyboardType: TextInputType.number,

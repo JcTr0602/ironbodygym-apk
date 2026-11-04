@@ -28,12 +28,14 @@ import '../errores_sync.dart';
 import '../localdb.dart';
 import '../sync.dart';
 import '../tipos_operacion.dart';
+import 'app_bar.dart';
 import 'auditoria.dart';
 import 'auditoria_persona.dart';
 import 'componentes.dart';
 import 'diseno.dart';
 
 Widget _soloDueno(String titulo) => Scaffold(
+      // Sin appBarIron: función top-level, no hay BuildContext.
       appBar: AppBar(title: Text(titulo)),
       body: const Center(child: Text('Solo el dueño ve esta pantalla.')),
     );
@@ -74,10 +76,10 @@ class AuditoriaPanelScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     if (!AuthService().isOwner) {
       return Scaffold(
-        appBar: AppBar(title: const Text('Auditoría (F1)')),
+        appBar: appBarIron(context, 'Auditoría (F1)'),
         body: const Center(
           child: Padding(
-            padding: EdgeInsets.all(24),
+            padding: EdgeInsets.all(AppEspacio.xl),
             child: Text(
               'Por defecto, el entrenador no ve la auditoría. Solo el '
               'dueño la ve completa. Si el dueño lo autoriza, un '
@@ -92,9 +94,9 @@ class AuditoriaPanelScreen extends StatelessWidget {
     void ir(Widget p) => Navigator.push(
         context, RutaIron(builder: (_) => p));
     return Scaffold(
-      appBar: AppBar(title: const Text('Auditoría (F1)')),
+      appBar: appBarIron(context, 'Auditoría (F1)'),
       body: ListView(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(AppEspacio.lg),
         children: [
           const Text(
             'La misma auditoría de 1.8.0, con sus filtros (persona, '
@@ -175,11 +177,11 @@ class _ErroresSyncPanelScreenState extends State<ErroresSyncPanelScreen> {
   Widget build(BuildContext context) {
     final soyDueno = AuthService().isOwner;
     return Scaffold(
-      appBar: AppBar(title: const Text('Errores de sync (F3)')),
+      appBar: appBarIron(context, 'Errores de sync (F3)'),
       body: _cargando
           ? const EstadoCargando(texto: 'Cargando sistema…')
           : ListView(
-              padding: const EdgeInsets.all(16),
+              padding: const EdgeInsets.all(AppEspacio.lg),
               children: [
                 const Text(
                   'En palabras claras, con los textos de Diagnóstico. '
@@ -319,9 +321,9 @@ class _MantenimientoScreenState extends State<MantenimientoScreen> {
     void irSnack(String m) =>
         mostrarSnack(context, m, significado: SignificadoChip.exito);
     return Scaffold(
-      appBar: AppBar(title: const Text('Mantenimiento (F5)')),
+      appBar: appBarIron(context, 'Mantenimiento (F5)'),
       body: ListView(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(AppEspacio.lg),
         children: [
           const Text(
             'Lista cerrada, nada fuera de esto. PROHIBIDO: borrar datos '

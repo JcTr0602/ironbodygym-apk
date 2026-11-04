@@ -15,6 +15,7 @@ import '../negocio.dart';
 import '../tiempo.dart';
 import '../sync.dart';
 import '../cliente_protegido.dart';
+import 'app_bar.dart';
 import 'componentes.dart';
 import 'dialogo_pago.dart';
 import 'pago_diario.dart';
@@ -308,9 +309,10 @@ class _BuscarScreenState extends State<BuscarScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Buscar cliente'),
-        actions: [
+      appBar: appBarIron(
+        context,
+        'Buscar cliente',
+        acciones: [
           IconButton(
             tooltip: 'Actualizar (bajar cambios)',
             icon: const Icon(Icons.refresh_rounded),
@@ -322,7 +324,7 @@ class _BuscarScreenState extends State<BuscarScreen> {
         children: [
           const SyncBanner(),
           Padding(
-            padding: const EdgeInsets.all(12),
+            padding: const EdgeInsets.all(AppEspacio.md),
             child: CampoTexto(
               controller: _q,
               hint: 'Nombre, carnet o teléfono',
@@ -332,7 +334,7 @@ class _BuscarScreenState extends State<BuscarScreen> {
           ),
           Padding(
             padding:
-                const EdgeInsets.symmetric(horizontal: 12),
+                const EdgeInsets.symmetric(horizontal: AppEspacio.md),
             child: Row(
               children: [
                 Text('${_res.length} cliente(s)',
@@ -351,7 +353,7 @@ class _BuscarScreenState extends State<BuscarScreen> {
               padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
               child: Container(
                 padding: const EdgeInsets.symmetric(
-                    horizontal: 12, vertical: 8),
+                    horizontal: AppEspacio.md, vertical: AppEspacio.sm),
                 decoration: BoxDecoration(
                   color: AppColores.alerta.withValues(alpha: 0.12),
                   borderRadius:
@@ -380,7 +382,7 @@ class _BuscarScreenState extends State<BuscarScreen> {
           SingleChildScrollView(
             scrollDirection: Axis.horizontal,
             padding:
-                const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                const EdgeInsets.symmetric(horizontal: AppEspacio.md, vertical: AppEspacio.xs),
             child: Row(
               children: [
                 _chipFiltro('todos',
@@ -462,7 +464,7 @@ class _BuscarScreenState extends State<BuscarScreen> {
                               12, 0, 12, 4),
                           child: Tarjeta(
                             padding: const EdgeInsets.symmetric(
-                                horizontal: 12, vertical: 8),
+                                horizontal: AppEspacio.md, vertical: AppEspacio.sm),
                             child: Row(
                               children: [
                                 const Icon(Icons.swipe_rounded,
@@ -504,7 +506,7 @@ class _BuscarScreenState extends State<BuscarScreen> {
                                 // v1.3.1: ValueKey por id.
                                 final fila = Card(
                                   margin: const EdgeInsets.symmetric(
-                                      horizontal: 12, vertical: 4),
+                                      horizontal: AppEspacio.md, vertical: AppEspacio.xs),
                                   elevation: 0,
                                   shape: RoundedRectangleBorder(
                                     borderRadius:

@@ -397,10 +397,10 @@ class _MiDiaScreenState extends State<MiDiaScreen> {
         pendientes == 0 ? AppColores.exito : AppColores.alerta;
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      padding: const EdgeInsets.symmetric(horizontal: AppEspacio.md, vertical: AppEspacio.sm),
       decoration: BoxDecoration(
         color: color.withValues(alpha: 0.08),
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(AppRadio.sm),
         border: Border.all(color: color.withValues(alpha: 0.4)),
       ),
       child: Row(
@@ -419,7 +419,7 @@ class _MiDiaScreenState extends State<MiDiaScreen> {
     return RefreshIndicator(
       onRefresh: _cargarMes,
       child: ListView(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(AppEspacio.lg),
         children: [
           // Selector de mes.
           Tarjeta(
@@ -444,7 +444,7 @@ class _MiDiaScreenState extends State<MiDiaScreen> {
           const SizedBox(height: 12),
           Tarjeta(
             color: AppColores.naranja,
-            padding: const EdgeInsets.all(16),
+            padding: const EdgeInsets.all(AppEspacio.lg),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
@@ -470,7 +470,7 @@ class _MiDiaScreenState extends State<MiDiaScreen> {
                 return const SizedBox.shrink();
               }
               return Padding(
-                padding: const EdgeInsets.only(bottom: 8),
+                padding: const EdgeInsets.only(bottom: AppEspacio.sm),
                 child: Tarjeta(
                   padding: EdgeInsets.zero,
                   child: ListTile(
@@ -536,7 +536,7 @@ class _MiDiaScreenState extends State<MiDiaScreen> {
     return RefreshIndicator(
       onRefresh: () => _cargarDiaDetalle(_diaDetalle!),
       child: ListView(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(AppEspacio.lg),
         children: [
           for (final t in turnos)
             Builder(builder: (context) {
@@ -551,7 +551,7 @@ class _MiDiaScreenState extends State<MiDiaScreen> {
                 porQuien.putIfAbsent(q, () => []).add(d);
               }
               return Padding(
-                padding: const EdgeInsets.only(bottom: 12),
+                padding: const EdgeInsets.only(bottom: AppEspacio.md),
                 child: Tarjeta(
                   child: ExpansionTile(
                     tilePadding: EdgeInsets.zero,
@@ -573,12 +573,12 @@ class _MiDiaScreenState extends State<MiDiaScreen> {
                         if (cerrado)
                           Container(
                             padding: const EdgeInsets.symmetric(
-                                horizontal: 8, vertical: 2),
+                                horizontal: AppEspacio.sm, vertical: 2),
                             decoration: BoxDecoration(
                               color: Colors.green
                                   .withValues(alpha: 0.15),
                               borderRadius:
-                                  BorderRadius.circular(12),
+                                  BorderRadius.circular(AppRadio.md),
                             ),
                             child: Text('Caja cerrada',
                                 style: AppTexto.metadato.copyWith(color: Colors.green, fontWeight: FontWeight.w600)),
@@ -597,7 +597,7 @@ class _MiDiaScreenState extends State<MiDiaScreen> {
                       if (items.isEmpty)
                         const Padding(
                           padding: EdgeInsets.symmetric(
-                              vertical: 8),
+                              vertical: AppEspacio.sm),
                           child: Text('Sin pagos en este turno.',
                               style: AppTexto.secundario),
                         )
@@ -605,7 +605,7 @@ class _MiDiaScreenState extends State<MiDiaScreen> {
                         for (final q in porQuien.entries) ...[
                           Padding(
                             padding: const EdgeInsets.only(
-                                top: 8, bottom: 4),
+                                top: AppEspacio.sm, bottom: AppEspacio.xs),
                             child: Row(
                               children: [
                                 const Icon(Icons.person_outline_rounded,
@@ -652,13 +652,13 @@ class _MiDiaScreenState extends State<MiDiaScreen> {
 
   Widget _contenidoHoy() {
     return ListView(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(AppEspacio.lg),
       children: [
                   const SyncBanner(),
                   const SizedBox(height: 8),
                   Tarjeta(
                     color: AppColores.naranja,
-                    padding: const EdgeInsets.all(16),
+                    padding: const EdgeInsets.all(AppEspacio.lg),
                     child: Column(
                       children: [
                         Text('Cobrado hoy',
@@ -684,7 +684,7 @@ class _MiDiaScreenState extends State<MiDiaScreen> {
                   if (_turnosSinReporte.isNotEmpty)
                     Padding(
                       padding:
-                          const EdgeInsets.only(bottom: 12),
+                          const EdgeInsets.only(bottom: AppEspacio.md),
                       child: Tarjeta(
                         color: AppColores.alerta,
                         child: Row(
@@ -761,7 +761,7 @@ class _MiDiaScreenState extends State<MiDiaScreen> {
                         in _porEntrenador.entries)
                       Padding(
                         padding:
-                            const EdgeInsets.only(bottom: 8),
+                            const EdgeInsets.only(bottom: AppEspacio.sm),
                         child: Tarjeta(
                           child: ExpansionTile(
                             tilePadding: EdgeInsets.zero,
@@ -817,7 +817,7 @@ class _MiDiaScreenState extends State<MiDiaScreen> {
                     for (final c in _cobrados)
                       Padding(
                         padding:
-                            const EdgeInsets.only(bottom: 8),
+                            const EdgeInsets.only(bottom: AppEspacio.sm),
                         child: Tarjeta(
                           padding: EdgeInsets.zero,
                           child: ListTile(
@@ -863,7 +863,7 @@ class _MiDiaScreenState extends State<MiDiaScreen> {
                     for (final c in _porCobrar)
                       Padding(
                         padding:
-                            const EdgeInsets.only(bottom: 8),
+                            const EdgeInsets.only(bottom: AppEspacio.sm),
                         child: Tarjeta(
                           padding: EdgeInsets.zero,
                           child: ListTile(

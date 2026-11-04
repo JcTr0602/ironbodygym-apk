@@ -9,6 +9,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../config.dart';
 import '../localdb.dart';
 import '../negocio.dart';
+import 'app_bar.dart';
 import 'componentes.dart';
 import 'diseno.dart';
 import 'widgets.dart';
@@ -76,13 +77,13 @@ class _TransferenciaScreenState extends State<TransferenciaScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Datos de transferencia')),
+      appBar: appBarIron(context, 'Datos de transferencia'),
       body: Column(
         children: [
           const SyncBanner(compact: true),
           Expanded(
             child: ListView(
-              padding: const EdgeInsets.all(16),
+              padding: const EdgeInsets.all(AppEspacio.lg),
               children: [
                 const Text(
                     'Puedes pagar tu mensualidad con Transfermóvil o Enzona '
@@ -127,7 +128,7 @@ class _TransferenciaScreenState extends State<TransferenciaScreen> {
                 else
                   for (final e in _envios)
                     Padding(
-                      padding: const EdgeInsets.only(bottom: 4),
+                      padding: const EdgeInsets.only(bottom: AppEspacio.xs),
                       child: Text(
                         '${e['tarjeta']} → ${e['movil']} · ${e['canal']} '
                         '· ${textoFechaEnvio('${e['enviada_ts'] ?? ''}')}',
@@ -146,9 +147,9 @@ class _TransferenciaScreenState extends State<TransferenciaScreen> {
   Widget _tarjeta(BuildContext context, String etiqueta, String valor,
       TextEditingController movilCtrl) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.only(bottom: AppEspacio.md),
       child: Tarjeta(
-        padding: const EdgeInsets.all(12),
+        padding: const EdgeInsets.all(AppEspacio.md),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [

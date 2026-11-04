@@ -12,6 +12,7 @@ import '../perfil.dart';
 import '../permisos_entrenador.dart';
 import '../sync.dart';
 import '../tiempo.dart';
+import 'app_bar.dart';
 import 'componentes.dart';
 import 'diseno.dart';
 import 'mi_nomina.dart';
@@ -316,7 +317,7 @@ class _NominaScreenState extends State<NominaScreen> {
       );
       final liquidada = _nominaLiquidadaMes[ent] ?? false;
       return Padding(
-        padding: const EdgeInsets.only(bottom: 8),
+        padding: const EdgeInsets.only(bottom: AppEspacio.sm),
         child: Row(
           children: [
             Expanded(
@@ -386,7 +387,7 @@ class _NominaScreenState extends State<NominaScreen> {
     final nota = '${b['nota'] ?? ''}';
     final destino = _nombreDestino('${b['entrenador'] ?? 'ambos'}');
     return Card(
-      margin: const EdgeInsets.only(bottom: 8),
+      margin: const EdgeInsets.only(bottom: AppEspacio.sm),
       child: ListTile(
         leading: Icon(
           monto >= 0 ? Icons.add_circle_rounded : Icons.remove_circle_rounded,
@@ -452,9 +453,10 @@ class _NominaScreenState extends State<NominaScreen> {
         '${ahora.month.toString().padLeft(2, '0')}';
     final esDueno = AuthService().isOwner;
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Nómina del mes'),
-        actions: [
+      appBar: appBarIron(
+        context,
+        'Nómina del mes',
+        acciones: [
           IconButton(
             icon: const Icon(Icons.refresh_rounded),
             tooltip: 'Actualizar',
@@ -465,7 +467,7 @@ class _NominaScreenState extends State<NominaScreen> {
       body: _cargando
           ? const EstadoCargando(texto: 'Cargando nómina…')
           : ListView(
-              padding: const EdgeInsets.all(16),
+              padding: const EdgeInsets.all(AppEspacio.lg),
               children: [
                 Tarjeta(
                   padding: const EdgeInsets.all(20),
@@ -519,7 +521,7 @@ class _NominaScreenState extends State<NominaScreen> {
                       const SizedBox(height: 12),
                       Container(
                         padding: const EdgeInsets.symmetric(
-                            horizontal: 12, vertical: 8),
+                            horizontal: AppEspacio.md, vertical: AppEspacio.sm),
                         decoration: BoxDecoration(
                           color: AppColores.naranja
                               .withValues(alpha: 0.12),
@@ -554,7 +556,7 @@ class _NominaScreenState extends State<NominaScreen> {
                 if (esDueno) ...[
                   const SizedBox(height: 16),
                   Tarjeta(
-                    padding: const EdgeInsets.all(16),
+                    padding: const EdgeInsets.all(AppEspacio.lg),
                     child: Column(
                       crossAxisAlignment:
                           CrossAxisAlignment.start,
@@ -643,7 +645,7 @@ class _NominaScreenState extends State<NominaScreen> {
                   const SizedBox(height: 16),
                   // Tarifa por cliente (movido desde Administración)
                   Tarjeta(
-                    padding: const EdgeInsets.all(16),
+                    padding: const EdgeInsets.all(AppEspacio.lg),
                     child: Column(
                       crossAxisAlignment:
                           CrossAxisAlignment.start,
@@ -720,7 +722,7 @@ class _NominaScreenState extends State<NominaScreen> {
     final fechaConf = '${conf?['confirmada_en'] ?? ''}';
     if (conf != null && fechaConf.length >= 10) {
       return Padding(
-        padding: const EdgeInsets.only(top: 4),
+        padding: const EdgeInsets.only(top: AppEspacio.xs),
         child: Text(
           '✓ $nombre confirmó que recibió su nómina el '
           '${fmtFecha(fechaConf.substring(0, 10))}.',
@@ -730,7 +732,7 @@ class _NominaScreenState extends State<NominaScreen> {
       );
     }
     return Padding(
-      padding: const EdgeInsets.only(top: 4),
+      padding: const EdgeInsets.only(top: AppEspacio.xs),
       child: Text(
         'Nómina liquidada · $nombre aún no confirma la '
         'recepción.',
@@ -755,7 +757,7 @@ class _NominaScreenState extends State<NominaScreen> {
     final esDueno = AuthService().isOwner;
     final liquidada = _nominaLiquidadaMes[ent] ?? false;
     return Padding(
-      padding: const EdgeInsets.only(top: 16),
+      padding: const EdgeInsets.only(top: AppEspacio.lg),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -789,7 +791,7 @@ class _NominaScreenState extends State<NominaScreen> {
                   mesNomina: pref),
           if (libro != null && libro.deudaSaliente > 0)
             Padding(
-              padding: const EdgeInsets.only(top: 4),
+              padding: const EdgeInsets.only(top: AppEspacio.xs),
               child: Text(
                 'Queda una deuda de ${fmtMonto(libro.deudaSaliente)} '
                 'CUP para el mes que viene.',
@@ -938,7 +940,7 @@ class _NominaScreenState extends State<NominaScreen> {
     final metodo = '${e['metodo'] ?? 'efectivo'}';
     final nota = '${e['nota'] ?? ''}';
     return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.only(bottom: AppEspacio.sm),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -1413,7 +1415,7 @@ class TarjetaNominaEntrenador extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Tarjeta(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(AppEspacio.lg),
       child: InkWell(
         onTap: () {
           // #1 (Argón nómina + decisión Jc): la tarjeta del

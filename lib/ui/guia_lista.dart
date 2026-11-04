@@ -625,7 +625,7 @@ class _GuiaScreenState extends State<GuiaScreen> {
         const SizedBox(height: 8),
         if (publicadasFiltradas.isEmpty)
           const Padding(
-            padding: EdgeInsets.symmetric(vertical: 24),
+            padding: EdgeInsets.symmetric(vertical: AppEspacio.xl),
             child: Text(
               'Aún no bajó ninguna ficha. Toca Actualizar con conexión.',
               style: TextStyle(color: Colors.grey),
@@ -634,7 +634,7 @@ class _GuiaScreenState extends State<GuiaScreen> {
         for (final g in grupos)
           if ((porGrupo[g] ?? []).isNotEmpty) ...[
             Padding(
-              padding: const EdgeInsets.only(top: 12, bottom: 4),
+              padding: const EdgeInsets.only(top: AppEspacio.md, bottom: AppEspacio.xs),
               child: Text(
                 g == 'Otros' ? 'Otros' : _nombreEquipo(g),
                 style: const TextStyle(

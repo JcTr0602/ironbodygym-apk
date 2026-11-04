@@ -89,7 +89,7 @@ class _DialogoResolverState
                   const Padding(
                     padding:
                         EdgeInsets.only(
-                            left: 8),
+                            left: AppEspacio.sm),
                     child: Icon(
                         Icons.check_circle_rounded,
                         color: Colors.green),
@@ -99,7 +99,7 @@ class _DialogoResolverState
             if (_fotoObligatoria)
               Padding(
                 padding:
-                    EdgeInsets.only(top: 4),
+                    EdgeInsets.only(top: AppEspacio.xs),
                 child: Text(
                   'Foto obligatoria para este tipo',
                   style: AppTexto.metadato.copyWith(color: Colors.orange),

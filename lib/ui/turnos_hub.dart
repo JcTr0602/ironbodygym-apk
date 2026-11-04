@@ -8,6 +8,7 @@
 import 'package:flutter/material.dart';
 
 import '../auth.dart';
+import 'app_bar.dart';
 import 'componentes.dart';
 import 'diseno.dart';
 import 'horario_turnos.dart';
@@ -23,14 +24,14 @@ class TurnosHubScreen extends StatelessWidget {
     // aunque se llegue al hub por cualquier ruta.
     if (!AuthService().isOwner) {
       return Scaffold(
-        appBar: AppBar(title: const Text('Horario y turnos')),
+        appBar: appBarIron(context, 'Horario y turnos'),
         body: const Center(
           child: Text('Solo el dueño puede gestionar los turnos.'),
         ),
       );
     }
     return Scaffold(
-      appBar: AppBar(title: const Text('Horario y turnos')),
+      appBar: appBarIron(context, 'Horario y turnos'),
       body: ListView(
         padding: const EdgeInsets.all(AppEspacio.lg),
         children: [

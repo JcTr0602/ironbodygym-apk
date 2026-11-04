@@ -11,6 +11,7 @@ import 'package:flutter/material.dart';
 
 import '../config.dart';
 import '../novedades.dart';
+import 'app_bar.dart';
 import 'componentes.dart';
 import 'diseno.dart';
 import 'widgets.dart';
@@ -21,13 +22,13 @@ class AyudaScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Ayuda')),
+      appBar: appBarIron(context, 'Ayuda'),
       body: Column(
         children: [
           const SyncBanner(),
           Expanded(
             child: ListView(
-              padding: const EdgeInsets.all(16),
+              padding: const EdgeInsets.all(AppEspacio.lg),
               children: [
                 _novedadesCard(context),
                 const _Tema('Tu trabajo diario'),
@@ -259,7 +260,7 @@ class AyudaScreen extends StatelessWidget {
                 ),
                 Padding(
                   padding:
-                      const EdgeInsets.symmetric(vertical: 12),
+                      const EdgeInsets.symmetric(vertical: AppEspacio.md),
                   child: Text(
                     'Iron Body Gestión · versión ${AppConfig.appVersion}',
                     style: AppTexto.minuscula.copyWith(
@@ -284,7 +285,7 @@ class AyudaScreen extends StatelessWidget {
     final actual = novedades.first;
     final anteriores = novedades.skip(1).toList();
     return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.only(bottom: AppEspacio.md),
       child: Tarjeta(
         padding: EdgeInsets.zero,
         child: Column(
@@ -317,7 +318,7 @@ class AyudaScreen extends StatelessWidget {
                   ),
                   Container(
                     padding: const EdgeInsets.symmetric(
-                        horizontal: 10, vertical: 4),
+                        horizontal: 10, vertical: AppEspacio.xs),
                     decoration: BoxDecoration(
                       color: Colors.white.withValues(alpha: 0.22),
                       borderRadius: BorderRadius.circular(20),
@@ -336,7 +337,7 @@ class AyudaScreen extends StatelessWidget {
                   for (final c in actual.cambios)
                     Padding(
                       padding: const EdgeInsets.symmetric(
-                          vertical: 5, horizontal: 8),
+                          vertical: 5, horizontal: AppEspacio.sm),
                       child: Row(
                         crossAxisAlignment:
                             CrossAxisAlignment.start,
@@ -365,7 +366,7 @@ class AyudaScreen extends StatelessWidget {
                     dividerColor: Colors.transparent),
                 child: ExpansionTile(
                   tilePadding: const EdgeInsets.symmetric(
-                      horizontal: 16),
+                      horizontal: AppEspacio.lg),
                   title: Text('Versiones anteriores',
                       style: AppTexto.secundario.copyWith(color: AppColores.textoSecundario(
                               context))),
@@ -379,13 +380,13 @@ class AyudaScreen extends StatelessWidget {
                           child: Container(
                             padding:
                                 const EdgeInsets.symmetric(
-                                    horizontal: 8,
+                                    horizontal: AppEspacio.sm,
                                     vertical: 2),
                             decoration: BoxDecoration(
                               color: AppColores.naranja
                                   .withValues(alpha: 0.15),
                               borderRadius:
-                                  BorderRadius.circular(12),
+                                  BorderRadius.circular(AppRadio.md),
                             ),
                             child: Text('v${n.version}',
                                 style: AppTexto.metadato.copyWith(color: AppColores.naranja, fontWeight: FontWeight.bold)),
@@ -403,7 +404,7 @@ class AyudaScreen extends StatelessWidget {
                             children: [
                               Padding(
                                 padding:
-                                    const EdgeInsets.only(top: 4),
+                                    const EdgeInsets.only(top: AppEspacio.xs),
                                 child: Icon(
                                     Icons.fiber_manual_record_rounded,
                                     size: 8,
@@ -464,7 +465,7 @@ class _Seccion extends StatelessWidget {
   Widget build(BuildContext context) {
     final c = color ?? AppColores.textoSecundario(context);
     return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.only(bottom: AppEspacio.sm),
       child: Tarjeta(
         padding: EdgeInsets.zero,
         child: ExpansionTile(

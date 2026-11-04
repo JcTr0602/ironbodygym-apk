@@ -10,6 +10,7 @@ import '../localdb.dart';
 import '../negocio.dart';
 import '../sync.dart';
 import '../tiempo.dart';
+import 'app_bar.dart';
 import 'componentes.dart';
 import 'diseno.dart';
 
@@ -346,13 +347,13 @@ class _PanelCandadoScreenState extends State<PanelCandadoScreen> {
   Widget build(BuildContext context) {
     if (!AuthService().isOwner) {
       return Scaffold(
-        appBar: AppBar(title: const Text('Candado de acceso')),
+        appBar: appBarIron(context, 'Candado de acceso'),
         body: const Center(
             child: Text('Solo el dueño puede gestionar el candado.')),
       );
     }
     return Scaffold(
-      appBar: AppBar(title: const Text('Candado de acceso')),
+      appBar: appBarIron(context, 'Candado de acceso'),
       body: _cargando
           ? const EstadoCargando(texto: 'Cargando candados…')
           : ListView(

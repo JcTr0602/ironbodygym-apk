@@ -5,6 +5,7 @@
 import 'package:flutter/material.dart';
 
 import '../auth.dart';
+import 'app_bar.dart';
 import 'guia_lista.dart';
 import 'gympedia.dart';
 
@@ -15,7 +16,7 @@ class BibliotecaScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     if (!AuthService().isOwner) {
       return Scaffold(
-        appBar: AppBar(title: const Text('Biblioteca')),
+        appBar: appBarIron(context, 'Biblioteca'),
         body: const Center(
             child: Text('Solo el dueño administra la Biblioteca.')),
       );

@@ -13,6 +13,7 @@ import 'package:flutter/material.dart';
 import '../auth.dart';
 import '../negocio.dart';
 import '../sync.dart';
+import 'app_bar.dart';
 import 'componentes.dart';
 import 'diseno.dart';
 import 'widgets.dart';
@@ -182,16 +183,17 @@ class _IncidenciasSyncScreenState extends State<IncidenciasSyncScreen> {
   Widget build(BuildContext context) {
     if (!AuthService().isOwner) {
       return Scaffold(
-        appBar: AppBar(title: const Text('Incidencias de sync')),
+        appBar: appBarIron(context, 'Incidencias de sync'),
         body: const Center(
             child: Text('Solo el dueño puede revisar estas incidencias.')),
       );
     }
     final lista = _verResueltas ? _resueltas : _pendientes;
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Incidencias de sync'),
-        actions: [
+      appBar: appBarIron(
+        context,
+        'Incidencias de sync',
+        acciones: [
           IconButton(
             tooltip: 'Sincronizar',
             icon: const Icon(Icons.sync_rounded),
@@ -225,7 +227,7 @@ class _IncidenciasSyncScreenState extends State<IncidenciasSyncScreen> {
                 : lista.isEmpty
                     ? Center(
                         child: Padding(
-                          padding: const EdgeInsets.all(32),
+                          padding: const EdgeInsets.all(AppEspacio.xxl),
                           child: Column(
                             mainAxisSize: MainAxisSize.min,
                             children: [
@@ -250,7 +252,7 @@ class _IncidenciasSyncScreenState extends State<IncidenciasSyncScreen> {
                     : RefreshIndicator(
                         onRefresh: _cargar,
                         child: ListView.builder(
-                          padding: const EdgeInsets.all(16),
+                          padding: const EdgeInsets.all(AppEspacio.lg),
                           itemCount: lista.length,
                           itemBuilder: (_, i) =>
                               _tarjeta(lista[i]),
@@ -283,13 +285,13 @@ class _IncidenciasSyncScreenState extends State<IncidenciasSyncScreen> {
                 if (!pendiente)
                   Container(
                     padding: const EdgeInsets.symmetric(
-                        horizontal: 8, vertical: 2),
+                        horizontal: AppEspacio.sm, vertical: 2),
                     decoration: BoxDecoration(
                       color: (inc['estado'] == 'aprobada'
                               ? Colors.green
                               : AppColores.textoSecundario(context))
                           .withValues(alpha: 0.15),
-                      borderRadius: BorderRadius.circular(12),
+                      borderRadius: BorderRadius.circular(AppRadio.md),
                     ),
                     child: Text('${inc['estado']}',
                         style: AppTexto.metadato.copyWith(fontWeight: FontWeight.w600)),
@@ -302,12 +304,12 @@ class _IncidenciasSyncScreenState extends State<IncidenciasSyncScreen> {
                   style: AppTexto.secundario),
             if (resumen.isNotEmpty)
               Padding(
-                padding: const EdgeInsets.only(top: 4),
+                padding: const EdgeInsets.only(top: AppEspacio.xs),
                 child: Text(resumen,
                     style: AppTexto.metadato.copyWith(color: AppColores.textoSecundario(context))),
               ),
             Padding(
-              padding: const EdgeInsets.only(top: 4),
+              padding: const EdgeInsets.only(top: AppEspacio.xs),
               child: Text(
                 '${inc['dispositivo'] ?? '—'} · ${inc['creada_en'] ?? ''}',
                 style: AppTexto.metadato.copyWith(color: AppColores.textoSecundario(context)),
@@ -334,7 +336,7 @@ class _IncidenciasSyncScreenState extends State<IncidenciasSyncScreen> {
             ] else ...[
               if ((inc['resuelta_por'] as String?)?.isNotEmpty == true)
                 Padding(
-                  padding: const EdgeInsets.only(top: 4),
+                  padding: const EdgeInsets.only(top: AppEspacio.xs),
                   child: Text(
                     'Resuelta por ${inc['resuelta_por']} · '
                     '${inc['resuelta_en'] ?? ''}',

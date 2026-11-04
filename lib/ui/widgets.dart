@@ -202,17 +202,9 @@ class _SyncBannerState extends State<SyncBanner>
         if (widget.compact) {
           return Container(
             margin: const EdgeInsets.symmetric(
-                horizontal: 12, vertical: 4),
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                colors: gradiente,
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-              ),
-              borderRadius: BorderRadius.circular(12),
-            ),
+                horizontal: AppEspacio.md, vertical: AppEspacio.xs),
             child: InkWell(
-              borderRadius: BorderRadius.circular(12),
+              borderRadius: BorderRadius.circular(AppRadio.md),
               onTap: () {
                 if (enProgreso) return;
                 final alc = widget.alcance;
@@ -222,31 +214,49 @@ class _SyncBannerState extends State<SyncBanner>
                   SyncEngine.instance.run();
                 }
               },
-              child: Padding(
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 12, vertical: 8),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    RotationTransition(
-                      turns: enProgreso
-                          ? _giro
-                          : const AlwaysStoppedAnimation(0),
-                      child: Icon(icono,
-                          color: Colors.white, size: 16),
+              // 1.23 B11: la píldora medía ~32 de alto; el área
+              // tocable sube a 48 con la píldora (gradiente,
+              // icono y texto) intacta y centrada.
+              child: SizedBox(
+                height: 48,
+                child: Center(
+                  widthFactor: 1,
+                  child: Container(
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        colors: gradiente,
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                      ),
+                      borderRadius:
+                          BorderRadius.circular(AppRadio.md),
                     ),
-                    const SizedBox(width: 8),
-                    Flexible(
-                      child: Text(titulo,
-                          style: AppTexto.metadato.copyWith(color: Colors.white, fontWeight: FontWeight.w600),
-                          overflow: TextOverflow.ellipsis),
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: AppEspacio.md, vertical: AppEspacio.sm),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        RotationTransition(
+                          turns: enProgreso
+                              ? _giro
+                              : const AlwaysStoppedAnimation(0),
+                          child: Icon(icono,
+                              color: Colors.white, size: 16),
+                        ),
+                        const SizedBox(width: 8),
+                        Flexible(
+                          child: Text(titulo,
+                              style: AppTexto.metadato.copyWith(color: Colors.white, fontWeight: FontWeight.w600),
+                              overflow: TextOverflow.ellipsis),
+                        ),
+                        if (pct != null) ...[
+                          const SizedBox(width: 8),
+                          Text(pct,
+                              style: AppTexto.metadato.copyWith(color: Colors.white, fontWeight: FontWeight.bold)),
+                        ],
+                      ],
                     ),
-                    if (pct != null) ...[
-                      const SizedBox(width: 8),
-                      Text(pct,
-                          style: AppTexto.metadato.copyWith(color: Colors.white, fontWeight: FontWeight.bold)),
-                    ],
-                  ],
+                  ),
                 ),
               ),
             ),
@@ -254,13 +264,13 @@ class _SyncBannerState extends State<SyncBanner>
         }
         return Container(
           margin: const EdgeInsets.symmetric(
-              horizontal: 12, vertical: 8),
+              horizontal: AppEspacio.md, vertical: AppEspacio.sm),
           decoration: BoxDecoration(
             gradient: LinearGradient(
                 colors: gradiente,
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight),
-            borderRadius: BorderRadius.circular(16),
+            borderRadius: BorderRadius.circular(AppRadio.lg),
             boxShadow: [
               BoxShadow(
                   color: gradiente.last.withValues(alpha: 0.35),
@@ -269,7 +279,7 @@ class _SyncBannerState extends State<SyncBanner>
             ],
           ),
           child: InkWell(
-            borderRadius: BorderRadius.circular(16),
+            borderRadius: BorderRadius.circular(AppRadio.lg),
             onTap: () {
               if (enProgreso) {
                 setState(() => _expandido = !_expandido);
@@ -284,7 +294,7 @@ class _SyncBannerState extends State<SyncBanner>
             },
             child: Padding(
               padding: const EdgeInsets.symmetric(
-                  horizontal: 16, vertical: 12),
+                  horizontal: AppEspacio.lg, vertical: AppEspacio.md),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
@@ -329,7 +339,7 @@ class _SyncBannerState extends State<SyncBanner>
                   if (enProgreso)
                     Padding(
                       padding:
-                          const EdgeInsets.only(top: 8),
+                          const EdgeInsets.only(top: AppEspacio.sm),
                       child: TweenAnimationBuilder<double>(
                         tween: Tween<double>(
                             begin: 0,
@@ -373,7 +383,7 @@ class _SyncBannerState extends State<SyncBanner>
                         }
                         return Padding(
                           padding: const EdgeInsets.only(
-                              top: 8),
+                              top: AppEspacio.sm),
                           child: Text(det,
                               style: AppTexto.metadato.copyWith(color: Colors.white)),
                         );
@@ -404,7 +414,7 @@ class Campo extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.only(bottom: AppEspacio.md),
       child: TextField(
         controller: ctrl,
         keyboardType: teclado,
@@ -476,23 +486,31 @@ class SyncPill extends StatelessWidget {
         return InkWell(
           borderRadius: BorderRadius.circular(20),
           onTap: onTap,
-          child: Container(
-            padding: const EdgeInsets.symmetric(
-                horizontal: 12, vertical: 8),
-            decoration: BoxDecoration(
-              color: color.withValues(alpha: 0.15),
-              borderRadius: BorderRadius.circular(20),
-              border:
-                  Border.all(color: color.withValues(alpha: 0.4)),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(icono, size: 16, color: color),
-                const SizedBox(width: 4),
-                Text(texto,
-                    style: AppTexto.metadato.copyWith(color: color, fontWeight: FontWeight.w700)),
-              ],
+          // 1.23 B11: el chip medía ~32 de alto; el área
+          // tocable sube a 48 con el chip intacto y centrado.
+          child: SizedBox(
+            height: 48,
+            child: Center(
+              widthFactor: 1,
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                    horizontal: AppEspacio.md, vertical: AppEspacio.sm),
+                decoration: BoxDecoration(
+                  color: color.withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(20),
+                  border:
+                      Border.all(color: color.withValues(alpha: 0.4)),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(icono, size: 16, color: color),
+                    const SizedBox(width: 4),
+                    Text(texto,
+                        style: AppTexto.metadato.copyWith(color: color, fontWeight: FontWeight.w700)),
+                  ],
+                ),
+              ),
             ),
           ),
         );

@@ -485,7 +485,7 @@ Future<bool> mostrarNovedadesSiHay(BuildContext context) async {
               for (final c in n.cambios)
                 Padding(
                   padding:
-                      const EdgeInsets.only(bottom: 4),
+                      const EdgeInsets.only(bottom: AppEspacio.xs),
                   child: Text('• $c', style: AppTexto.secundario),
                 ),
               const SizedBox(height: 8),

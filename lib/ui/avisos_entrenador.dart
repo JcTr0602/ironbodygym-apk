@@ -11,6 +11,7 @@ import 'package:flutter/material.dart';
 
 import '../auth.dart';
 import '../bloque3.dart';
+import 'app_bar.dart';
 import 'componentes.dart';
 import 'diseno.dart';
 import 'widgets.dart';
@@ -250,13 +251,12 @@ class _AvisosEntrenadorScreenState
     // los pickers son solo UI y se dejan como están.
     if (!AuthService().isOwner) {
       return Scaffold(
-          appBar: AppBar(
-              title: const Text('Avisos para entrenadores')),
+          appBar: appBarIron(context, 'Avisos para entrenadores'),
           body: const Center(
               child: Text('Solo el dueño ve esta pantalla.')));
     }
     return Scaffold(
-      appBar: AppBar(title: const Text('Avisos para entrenadores')),
+      appBar: appBarIron(context, 'Avisos para entrenadores'),
       floatingActionButton: FloatingActionButton.extended(
         icon: const Icon(Icons.campaign_rounded),
         label: const Text('Nuevo aviso'),
@@ -322,7 +322,7 @@ class _AvisosEntrenadorScreenState
                       ),
                       Container(
                         padding: const EdgeInsets.symmetric(
-                            horizontal: 8, vertical: 3),
+                            horizontal: AppEspacio.sm, vertical: 3),
                         decoration: BoxDecoration(
                           color: (a.activo
                                   ? AppColores.exitoOscuro

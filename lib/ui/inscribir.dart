@@ -20,6 +20,7 @@ import '../negocio.dart';
 import '../sync.dart';
 import '../tiempo.dart';
 import '../tipos_pago.dart';
+import 'app_bar.dart';
 import 'componentes.dart';
 import 'dialogo_confirmar_inscripcion.dart';
 import 'diseno.dart';
@@ -589,10 +590,10 @@ class _InscribirScreenState extends State<InscribirScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-          title: Text(widget.conversion != null
-              ? 'Convertir invitado en cliente'
-              : 'Inscribir cliente')),
+      appBar: appBarIron(
+        context,
+        widget.conversion != null ? 'Convertir invitado en cliente' : 'Inscribir cliente',
+      ),
       body: Column(
         children: [
           const SyncBanner(compact: true),

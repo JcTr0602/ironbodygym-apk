@@ -13,6 +13,7 @@ import '../auth.dart';
 import '../diferencias_caja.dart';
 import '../negocio.dart';
 import '../sync.dart';
+import 'app_bar.dart';
 import 'componentes.dart';
 import 'diferencias_caja.dart';
 import 'diseno.dart';
@@ -68,15 +69,16 @@ class _ArqueoScreenState extends State<ArqueoScreen> {
   Widget build(BuildContext context) {
     if (!AuthService().isOwner) {
       return Scaffold(
-        appBar: AppBar(title: const Text('Arqueo de caja')),
+        appBar: appBarIron(context, 'Arqueo de caja'),
         body: const Center(
             child: Text('Solo el dueño puede ver el arqueo de caja.')),
       );
     }
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Arqueo de caja'),
-        actions: [
+      appBar: appBarIron(
+        context,
+        'Arqueo de caja',
+        acciones: [
           IconButton(
             tooltip: 'Sincronizar arqueo',
             icon: const Icon(Icons.sync_rounded),
@@ -129,7 +131,7 @@ class _ArqueoScreenState extends State<ArqueoScreen> {
                       ? ListView(
                           children: [
                             Padding(
-                              padding: const EdgeInsets.all(32),
+                              padding: const EdgeInsets.all(AppEspacio.xxl),
                               child: Column(
                                 children: [
                                   const Icon(Icons.check_circle_outline_rounded,
@@ -152,7 +154,7 @@ class _ArqueoScreenState extends State<ArqueoScreen> {
                           ],
                         )
                       : ListView.builder(
-                          padding: const EdgeInsets.all(16),
+                          padding: const EdgeInsets.all(AppEspacio.lg),
                           itemCount: _entrenadores.length,
                           itemBuilder: (_, i) {
                             final e = _entrenadores[i];
@@ -361,7 +363,7 @@ class _DetalleArqueoScreenState extends State<_DetalleArqueoScreen> {
             // falta; lo parcial queda como arrastre).
             const SizedBox(height: 12),
             ClipRRect(
-              borderRadius: BorderRadius.circular(999),
+              borderRadius: BorderRadius.circular(AppRadio.circular),
               child: LinearProgressIndicator(
                 value: esperado > 0
                     ? (entregado / esperado).clamp(0.0, 1.0)
@@ -474,7 +476,7 @@ class _DetalleArqueoScreenState extends State<_DetalleArqueoScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text('Arqueo · ${widget.nombre}')),
+      appBar: appBarIron(context, 'Arqueo · ${widget.nombre}'),
       body: Column(
         children: [
           const SyncBanner(),
@@ -482,7 +484,7 @@ class _DetalleArqueoScreenState extends State<_DetalleArqueoScreen> {
             child: _cargando
                 ? const EstadoCargando(texto: 'Cargando arqueo…')
                 : ListView(
-                    padding: const EdgeInsets.all(16),
+                    padding: const EdgeInsets.all(AppEspacio.lg),
                     children: [
                       // Selector de moneda (solo si hay USD).
                       if (_usd > 0)
@@ -596,14 +598,14 @@ class _DetalleArqueoScreenState extends State<_DetalleArqueoScreen> {
                                     Container(
                                       padding:
                                           const EdgeInsets.symmetric(
-                                              horizontal: 8, vertical: 2),
+                                              horizontal: AppEspacio.sm, vertical: 2),
                                       decoration: BoxDecoration(
                                         color: (h['estado'] == 'parcial'
                                                 ? AppColores.alerta
                                                 : Colors.green)
                                             .withValues(alpha: 0.15),
                                         borderRadius:
-                                            BorderRadius.circular(12),
+                                            BorderRadius.circular(AppRadio.md),
                                       ),
                                       child: Text(
                                         h['estado'] == 'parcial'

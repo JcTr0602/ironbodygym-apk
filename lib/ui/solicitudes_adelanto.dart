@@ -15,6 +15,7 @@ import 'package:flutter/material.dart';
 import '../auth.dart';
 import '../bloque3.dart';
 import '../negocio.dart';
+import 'app_bar.dart';
 import 'componentes.dart';
 import 'diseno.dart';
 import 'widgets.dart';
@@ -240,13 +241,12 @@ class _SolicitudesAdelantoScreenState
     // P2#9: pantalla SOLO dueño sin guarda.
     if (!AuthService().isOwner) {
       return Scaffold(
-          appBar: AppBar(
-              title: const Text('Solicitudes de adelanto')),
+          appBar: appBarIron(context, 'Solicitudes de adelanto'),
           body: const Center(
               child: Text('Solo el dueño ve esta pantalla.')));
     }
     return Scaffold(
-      appBar: AppBar(title: const Text('Solicitudes de adelanto')),
+      appBar: appBarIron(context, 'Solicitudes de adelanto'),
       body: Column(
         children: [
           const SyncBanner(compact: true),
@@ -367,7 +367,7 @@ class _SolicitudesAdelantoScreenState
       _ => AppColores.alertaOscuro,
     };
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      padding: const EdgeInsets.symmetric(horizontal: AppEspacio.sm, vertical: 3),
       decoration: BoxDecoration(
         color: color.withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(20),

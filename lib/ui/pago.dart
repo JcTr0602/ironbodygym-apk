@@ -19,6 +19,7 @@ import '../localdb.dart';
 import '../negocio.dart';
 import '../sync.dart';
 import '../tiempo.dart';
+import 'app_bar.dart';
 import 'buscar.dart';
 import 'componentes.dart';
 import 'dialogo_pago.dart';
@@ -594,14 +595,14 @@ class _PagoScreenState extends State<PagoScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Agregar pago')),
+      appBar: appBarIron(context, 'Agregar pago'),
       body: Column(
         children: [
           const SyncBanner(compact: true, alcance: 'pagos'),
           _resumenDia(),
           _ultimosCobros(),
           Padding(
-            padding: const EdgeInsets.all(12),
+            padding: const EdgeInsets.all(AppEspacio.md),
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -622,7 +623,7 @@ class _PagoScreenState extends State<PagoScreen> {
             ),
           ),
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12),
+            padding: const EdgeInsets.symmetric(horizontal: AppEspacio.md),
             child: Row(
               children: [
                 ChoiceChip(

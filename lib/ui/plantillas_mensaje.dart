@@ -18,6 +18,7 @@ import '../negocio.dart';
 import '../plantilla_mensaje.dart';
 import '../precio_cobro.dart';
 import '../tiempo.dart';
+import 'app_bar.dart';
 import 'componentes.dart';
 import 'diseno.dart';
 
@@ -49,7 +50,7 @@ class _PlantillasScreenState extends State<PlantillasScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Plantillas de mensajes')),
+      appBar: appBarIron(context, 'Plantillas de mensajes'),
       floatingActionButton: AuthService().isOwner
           ? FloatingActionButton.extended(
               onPressed: () async {
@@ -77,7 +78,7 @@ class _PlantillasScreenState extends State<PlantillasScreen> {
                 : RefreshIndicator(
                   onRefresh: _cargar,
                   child: ListView(
-                    padding: const EdgeInsets.all(16),
+                    padding: const EdgeInsets.all(AppEspacio.lg),
                     children: [
                       const Text(
                         'Variables permitidas: {{nombre}}, '
@@ -223,7 +224,7 @@ class _PlantillasScreenState extends State<PlantillasScreen> {
             Text(render.texto),
             if (render.bloqueadas.isNotEmpty)
               Padding(
-                padding: const EdgeInsets.only(top: 8),
+                padding: const EdgeInsets.only(top: AppEspacio.sm),
                 child: Text(
                   'Variables NO permitidas (quedaron sin sustituir): '
                   '${render.bloqueadas.map((b) => '{{$b}}').join(', ')}',
@@ -232,7 +233,7 @@ class _PlantillasScreenState extends State<PlantillasScreen> {
               ),
             if (aviso != null)
               Padding(
-                padding: const EdgeInsets.only(top: 8),
+                padding: const EdgeInsets.only(top: AppEspacio.sm),
                 child: Text(aviso,
                     style: const TextStyle(color: Colors.orange)),
               ),
@@ -365,7 +366,7 @@ class _PlantillasScreenState extends State<PlantillasScreen> {
             Text(render.texto),
             if (aviso != null)
               Padding(
-                padding: const EdgeInsets.only(top: 8),
+                padding: const EdgeInsets.only(top: AppEspacio.sm),
                 child: Text(aviso,
                     style: const TextStyle(color: Colors.orange)),
               ),

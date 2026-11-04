@@ -18,6 +18,7 @@ import '../localdb.dart';
 import '../notificaciones_recordatorios.dart';
 import '../recordatorios.dart';
 import '../tiempo.dart';
+import 'app_bar.dart';
 import 'componentes.dart';
 import 'diseno.dart';
 import 'ficha.dart';
@@ -244,7 +245,7 @@ class _RecordatoriosScreenState extends State<RecordatoriosScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Recordatorios automáticos (G2)')),
+      appBar: appBarIron(context, 'Recordatorios automáticos (G2)'),
       floatingActionButton: FloatingActionButton(
         onPressed: _crear,
         child: const Icon(Icons.add_rounded),
@@ -252,7 +253,7 @@ class _RecordatoriosScreenState extends State<RecordatoriosScreen> {
       body: _cargando
           ? const EstadoCargando(texto: 'Cargando recordatorios…')
           : ListView(
-              padding: const EdgeInsets.all(16),
+              padding: const EdgeInsets.all(AppEspacio.lg),
               children: [
                 // 1.22 R-9: sin permiso, los avisos de las
                 // 08:00 nunca se ven: avisar aquí, donde se

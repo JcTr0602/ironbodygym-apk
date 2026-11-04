@@ -23,6 +23,7 @@ import '../fotos_cola.dart';
 import '../localdb.dart';
 import '../negocio.dart';
 import '../sync.dart';
+import 'app_bar.dart';
 import 'componentes.dart';
 import 'categorias_suplemento.dart';
 import 'cuentas_por_cobrar.dart';
@@ -318,14 +319,15 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Suplementos'),
-        actions: [
+      appBar: appBarIron(
+        context,
+        'Suplementos',
+        acciones: [
           // v1.3.4 (C5): "+ Nuevo" compacto en la cabecera (solo dueño).
           // Ni FAB (tapaba el botón Vender) ni tarjeta en el grid.
           if (_esDueno)
             Padding(
-              padding: const EdgeInsets.symmetric(vertical: 8),
+              padding: const EdgeInsets.symmetric(vertical: AppEspacio.sm),
               child: FilledButton.tonalIcon(
                 onPressed: () => _irEditar(null),
                 icon: const Icon(Icons.add_rounded, size: 18),
@@ -705,7 +707,7 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
             children: [
               for (final s in top)
                 Padding(
-                  padding: const EdgeInsets.only(right: 8),
+                  padding: const EdgeInsets.only(right: AppEspacio.sm),
                   child: _miniTop(s),
                 ),
             ],
@@ -817,7 +819,7 @@ class _FilaSuplemento extends StatelessWidget {
               width: 56,
               height: 56,
               child: ClipRRect(
-                borderRadius: BorderRadius.circular(8),
+                borderRadius: BorderRadius.circular(AppRadio.sm),
                 child: _FotoSuplemento(sup: sup),
               ),
             ),
@@ -935,7 +937,7 @@ class _TarjetaSuplemento extends StatelessWidget {
         margin: EdgeInsets.zero,
         clipBehavior: Clip.antiAlias,
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(AppRadio.md),
           side: BorderSide(
             color: oscuro ? Colors.white10 : Colors.black12,
             width: 1,
@@ -962,7 +964,7 @@ class _TarjetaSuplemento extends StatelessWidget {
               ),
             Expanded(
               child: Padding(
-                padding: const EdgeInsets.all(8),
+                padding: const EdgeInsets.all(AppEspacio.sm),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -1270,7 +1272,7 @@ class _BadgeStock extends StatelessWidget {
       EstadoStockSuplemento.inactivo => Colors.grey,
     };
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      padding: const EdgeInsets.symmetric(horizontal: AppEspacio.sm, vertical: AppEspacio.xs),
       decoration: BoxDecoration(
         color: Colors.black87,
         borderRadius: BorderRadius.circular(20),
@@ -1681,12 +1683,10 @@ class _EditarSuplementoScreenState
         ? (widget.suplemento?['foto_local'] as String?)
         : null;
     return Scaffold(
-      appBar: AppBar(
-          title: Text(_editando
-              ? 'Editar suplemento'
-              : _duplicando
-                  ? 'Duplicar suplemento'
-                  : 'Nuevo suplemento')),
+      appBar: appBarIron(
+        context,
+        _editando ? 'Editar suplemento' : _duplicando ? 'Duplicar suplemento' : 'Nuevo suplemento',
+      ),
       body: ListView(
         padding: const EdgeInsets.symmetric(
             vertical: AppEspacio.lg),

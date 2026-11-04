@@ -18,6 +18,7 @@ import 'package:uuid/uuid.dart';
 
 import '../auth.dart';
 import '../localdb.dart';
+import 'app_bar.dart';
 import 'componentes.dart';
 import 'diseno.dart';
 
@@ -162,16 +163,17 @@ class _HorarioTurnosScreenState extends State<HorarioTurnosScreen> {
   Widget build(BuildContext context) {
     if (!AuthService().isOwner) {
       return Scaffold(
-        appBar: AppBar(title: const Text('Entrenadores por turno')),
+        appBar: appBarIron(context, 'Entrenadores por turno'),
         body: const Center(
           child: Text('Solo el dueño puede configurar el horario.'),
         ),
       );
     }
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Entrenadores por turno'),
-        actions: [
+      appBar: appBarIron(
+        context,
+        'Entrenadores por turno',
+        acciones: [
           if (!_cargando)
             TextButton(
               onPressed: _guardando ? null : _guardar,
@@ -190,7 +192,7 @@ class _HorarioTurnosScreenState extends State<HorarioTurnosScreen> {
       body: _cargando
           ? const EstadoCargando(texto: 'Cargando horario…')
           : ListView(
-              padding: const EdgeInsets.all(16),
+              padding: const EdgeInsets.all(AppEspacio.lg),
               children: [
                 Text(
                   'Quién cubre cada turno según el plan semanal. La app '
@@ -214,9 +216,9 @@ class _HorarioTurnosScreenState extends State<HorarioTurnosScreen> {
 
   Widget _tarjetaDia(int dia) {
     return Card(
-      margin: const EdgeInsets.only(bottom: 12),
+      margin: const EdgeInsets.only(bottom: AppEspacio.md),
       child: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(AppEspacio.lg),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -228,7 +230,7 @@ class _HorarioTurnosScreenState extends State<HorarioTurnosScreen> {
             _selectorFranja(dia, 'manana', 'Mañana'),
             if (dia == 6)
               Padding(
-                padding: EdgeInsets.only(top: 8),
+                padding: EdgeInsets.only(top: AppEspacio.sm),
                 child: Text('Sin franja de tarde los sábados',
                     style: AppTexto.metadato.copyWith(color: Colors.grey)),
               )

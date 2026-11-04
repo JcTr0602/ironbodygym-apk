@@ -11,6 +11,7 @@ import 'package:uuid/uuid.dart';
 import '../auth.dart';
 import '../guia_validacion.dart';
 import '../localdb.dart';
+import 'app_bar.dart';
 import 'componentes.dart';
 import 'diseno.dart';
 
@@ -298,13 +299,13 @@ class _GuiaEquiposScreenState extends State<GuiaEquiposScreen> {
   Widget build(BuildContext context) {
     if (!AuthService().isOwner) {
       return Scaffold(
-        appBar: AppBar(title: const Text('Equipamiento')),
+        appBar: appBarIron(context, 'Equipamiento'),
         body: const Center(
             child: Text('Solo el dueño administra la Biblioteca.')),
       );
     }
     return Scaffold(
-      appBar: AppBar(title: const Text('Equipamiento')),
+      appBar: appBarIron(context, 'Equipamiento'),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: _ocupado ? null : _crear,
         icon: const Icon(Icons.add_rounded),
@@ -324,7 +325,7 @@ class _GuiaEquiposScreenState extends State<GuiaEquiposScreen> {
                 const SizedBox(height: 12),
                 if (_equipos.isEmpty)
                   const Padding(
-                    padding: EdgeInsets.symmetric(vertical: 24),
+                    padding: EdgeInsets.symmetric(vertical: AppEspacio.xl),
                     child: Text(
                       'Aún no hay equipos. Crea el primero para '
                       'poder escribir fichas.',

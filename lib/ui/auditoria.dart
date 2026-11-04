@@ -15,6 +15,7 @@ import '../cliente_protegido.dart';
 import '../localdb.dart';
 import '../negocio.dart';
 import '../tiempo.dart';
+import 'app_bar.dart';
 import 'auditoria_persona.dart';
 import 'diseno.dart';
 import 'ficha.dart';
@@ -488,9 +489,10 @@ class _AuditoriaScreenState extends State<AuditoriaScreen> {
     final dias = grupos.keys.toList(); // ya en orden DESC
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Auditoría'),
-        actions: [
+      appBar: appBarIron(
+        context,
+        'Auditoría',
+        acciones: [
           // v1.8.0: vista por persona (turnos, dinero, sensibles).
           IconButton(
             icon: const Icon(Icons.person_search_rounded),
@@ -751,7 +753,7 @@ class _AuditoriaScreenState extends State<AuditoriaScreen> {
         File(fotoPath).existsSync();
 
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      padding: const EdgeInsets.symmetric(horizontal: AppEspacio.md, vertical: AppEspacio.sm),
       child: Tarjeta(
         padding: EdgeInsets.zero,
         child: ListTile(

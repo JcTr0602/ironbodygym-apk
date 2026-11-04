@@ -16,6 +16,7 @@ import '../nomina_total.dart';
 import '../permisos_entrenador.dart';
 import '../permisos_visibilidad.dart';
 import '../tiempo.dart';
+import 'app_bar.dart';
 import 'diseno.dart';
 import 'componentes.dart';
 import 'buscar.dart';
@@ -389,7 +390,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     showModalBottomSheet(
       context: context,
       shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadio.xl)),
       ),
       builder: (ctx) => Padding(
         padding: const EdgeInsets.all(20),
@@ -420,7 +421,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   Widget _filaDetalle(String etiqueta, double valor,
       {bool negrita = false}) {    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
+      padding: const EdgeInsets.symmetric(vertical: AppEspacio.xs),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
@@ -444,9 +445,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
       canVerCifras: PermisosEntrenador().canVerCifras,
     )) {
       return Scaffold(
-        appBar: AppBar(
-          title: const Text('Mi dashboard'),
-          actions: [
+        appBar: appBarIron(
+          context,
+          'Mi dashboard',
+          acciones: [
             IconButton(
               icon: const Icon(Icons.refresh_rounded),
               onPressed: _cargar,
@@ -454,7 +456,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           ],
         ),
         body: ListView(
-          padding: const EdgeInsets.all(16),
+          padding: const EdgeInsets.all(AppEspacio.lg),
           children: [
             const SyncBanner(),
             const SizedBox(height: 8),
@@ -486,9 +488,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
       );
     }
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Mi dashboard'),
-        actions: [
+      appBar: appBarIron(
+        context,
+        'Mi dashboard',
+        acciones: [
           IconButton(
             icon: const Icon(Icons.refresh_rounded),
             onPressed: _cargar,
@@ -500,7 +503,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           : RefreshIndicator(
               onRefresh: _cargar,
               child: ListView(
-                padding: const EdgeInsets.all(16),
+                padding: const EdgeInsets.all(AppEspacio.lg),
                 children: [
                   const SyncBanner(),
                   const SizedBox(height: 8),
@@ -666,7 +669,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     return Expanded(
       child: Tarjeta(
         padding:
-            const EdgeInsets.symmetric(vertical: 16, horizontal: 8),
+            const EdgeInsets.symmetric(vertical: AppEspacio.lg, horizontal: AppEspacio.sm),
         child: Column(
           children: [
             Icon(icono, color: AppColores.textoSecundario(context), size: 24),
@@ -704,7 +707,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       child: Tarjeta(
         onTap: onTap,
         padding:
-            const EdgeInsets.symmetric(vertical: 16, horizontal: 8),
+            const EdgeInsets.symmetric(vertical: AppEspacio.lg, horizontal: AppEspacio.sm),
         child: Column(
           children: [
             Icon(icono, color: AppColores.textoSecundario(context), size: 24),
@@ -742,12 +745,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final pct = _mesAnterior > 0 ? diff / _mesAnterior * 100 : 0.0;
     final sube = diff >= 0;
     return Container(
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.all(AppEspacio.md),
       decoration: BoxDecoration(
         color: sube
             ? AppColores.exito.withValues(alpha: 0.12)
             : AppColores.error.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(AppRadio.md),
         border: Border.all(
             color: sube
                 ? AppColores.exito.withValues(alpha: 0.35)
@@ -906,11 +909,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
             datos.length;
     return Container(
       height: 150,
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.all(AppEspacio.md),
       decoration: BoxDecoration(
         color: AppColores.superficie(context),
         border: Border.all(color: AppColores.borde(context)),
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(AppRadio.md),
       ),
       child: SingleChildScrollView(
         scrollDirection: Axis.horizontal,
@@ -999,7 +1002,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     Container(
                       color: AppColores.superficie(context),
                       padding:
-                          const EdgeInsets.symmetric(horizontal: 4),
+                          const EdgeInsets.symmetric(horizontal: AppEspacio.xs),
                       child: Text('prom ${fmtMonto(prom)}',
                           style: AppTexto.minuscula.copyWith(
                               color: AppColores.textoSecundario(
@@ -1034,7 +1037,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     showModalBottomSheet(
       context: context,
       shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadio.xl)),
       ),
       builder: (ctx) => Padding(
         padding: const EdgeInsets.all(20),
@@ -1069,9 +1072,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
       {String? subtitulo}) {
     return InkWell(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(12),
+      borderRadius: BorderRadius.circular(AppRadio.md),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        padding: const EdgeInsets.symmetric(horizontal: AppEspacio.md, vertical: AppEspacio.sm),
         child: Column(
           children: [
             Text(valor,
@@ -1101,9 +1104,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }) {
     return InkWell(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(12),
+      borderRadius: BorderRadius.circular(AppRadio.md),
       child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 8),
+        padding: const EdgeInsets.symmetric(vertical: AppEspacio.sm),
         child: Row(
           children: [
             CircleAvatar(
@@ -1286,9 +1289,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final pctAlDia =
         _activos > 0 ? (alDia / _activos).clamp(0.0, 1.0) : 0.0;
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Dashboard'),
-        actions: [
+      appBar: appBarIron(
+        context,
+        'Dashboard',
+        acciones: [
           IconButton(
             icon: const Icon(Icons.refresh_rounded),
             onPressed: _cargar,
@@ -1300,7 +1304,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           : RefreshIndicator(
               onRefresh: _cargar,
               child: ListView(
-                padding: const EdgeInsets.all(16),
+                padding: const EdgeInsets.all(AppEspacio.lg),
                 children: [
                   const SyncBanner(),
                   const SizedBox(height: 8),
@@ -1387,7 +1391,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           ),
                           const SizedBox(height: 12),
                           ClipRRect(
-                            borderRadius: BorderRadius.circular(8),
+                            borderRadius: BorderRadius.circular(AppRadio.sm),
                             child: LinearProgressIndicator(
                               value: pctAlDia,
                               minHeight: 10,
@@ -1407,12 +1411,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           if (_nuevos > 0 || _inactivos > 0) ...[
                             const SizedBox(height: 8),
                             Container(
-                              padding: const EdgeInsets.all(8),
+                              padding: const EdgeInsets.all(AppEspacio.sm),
                               decoration: BoxDecoration(
                                 color: AppColores.info
                                     .withValues(alpha: 0.12),
                                 borderRadius:
-                                    BorderRadius.circular(8),
+                                    BorderRadius.circular(AppRadio.sm),
                                 border: Border.all(
                                     color: AppColores.info
                                         .withValues(alpha: 0.3)),
@@ -1466,7 +1470,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         titulo: 'Ranking del mes'),
                     const SizedBox(height: 8),
                     Tarjeta(
-                      padding: const EdgeInsets.all(12),
+                      padding: const EdgeInsets.all(AppEspacio.md),
                       child: Text(
                         'Mes: ${_ranking.take(2).toList().asMap().entries.map((e) => '${e.key + 1}° ${e.value['nombre']} (${fmtMonto(e.value['total'])} CUP)').join(' · ')}',
                         style: AppTexto.secundario,

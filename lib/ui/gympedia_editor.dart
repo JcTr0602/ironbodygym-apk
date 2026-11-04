@@ -21,6 +21,7 @@ import '../config.dart';
 import '../gympedia_validacion.dart';
 import '../localdb.dart';
 import '../tiempo.dart';
+import 'app_bar.dart';
 import 'diseno.dart';
 import 'componentes.dart';
 
@@ -696,7 +697,7 @@ class _GympediaEditorScreenState extends State<GympediaEditorScreen> {
       bool mono = false,
       bool soloLectura = false}) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.only(bottom: AppEspacio.md),
       child: TextField(
         controller: c,
         maxLines: lineas,
@@ -735,7 +736,7 @@ class _GympediaEditorScreenState extends State<GympediaEditorScreen> {
             children: [
               Expanded(
                 child: Padding(
-                  padding: const EdgeInsets.only(bottom: 8),
+                  padding: const EdgeInsets.only(bottom: AppEspacio.sm),
                   child: TextField(
                     controller: cs[i],
                     maxLines: 2,
@@ -769,14 +770,14 @@ class _GympediaEditorScreenState extends State<GympediaEditorScreen> {
     // retirar y tocar imágenes del bucket público.
     if (!AuthService().isOwner) {
       return Scaffold(
-        appBar: AppBar(title: const Text('Artículo GymPedia')),
+        appBar: appBarIron(context, 'Artículo GymPedia'),
         body: const Center(
             child: Text('Solo el dueño administra la GymPedia.')),
       );
     }
     if (!_listo) {
       return Scaffold(
-        appBar: AppBar(title: const Text('Artículo GymPedia')),
+        appBar: appBarIron(context, 'Artículo GymPedia'),
         body: const EstadoCargando(texto: 'Cargando editor…'),
       );
     }
@@ -824,11 +825,10 @@ class _GympediaEditorScreenState extends State<GympediaEditorScreen> {
         }
       },
       child: Scaffold(
-      appBar: AppBar(
-        title: Text(_hayPublicado || _slugBloqueado
-            ? 'Editar artículo'
-            : 'Nuevo artículo'),
-        actions: [
+      appBar: appBarIron(
+        context,
+        _hayPublicado || _slugBloqueado ? 'Editar artículo' : 'Nuevo artículo',
+        acciones: [
           IconButton(
             icon: Icon(_vistaPrevia ? Icons.edit_rounded : Icons.visibility_rounded),
             tooltip: _vistaPrevia ? 'Editar explicación' : 'Vista previa',
@@ -841,7 +841,7 @@ class _GympediaEditorScreenState extends State<GympediaEditorScreen> {
         children: [
           Expanded(
             child: ListView(
-              padding: const EdgeInsets.all(16),
+              padding: const EdgeInsets.all(AppEspacio.lg),
               children: [
                 _campoTexto('Identificador (slug)', _slug,
                     ayuda: _slugBloqueado
@@ -921,7 +921,7 @@ class _GympediaEditorScreenState extends State<GympediaEditorScreen> {
                 if (_vistaPrevia)
                   Card(
                     child: Padding(
-                      padding: const EdgeInsets.all(12),
+                      padding: const EdgeInsets.all(AppEspacio.md),
                       child: MarkdownBody(
                           data: _explicacion.text.isEmpty
                               ? '_(sin explicación todavía)_'
@@ -938,7 +938,7 @@ class _GympediaEditorScreenState extends State<GympediaEditorScreen> {
                 for (var i = 0; i < _refs.length; i++)
                   Card(
                     child: Padding(
-                      padding: const EdgeInsets.all(12),
+                      padding: const EdgeInsets.all(AppEspacio.md),
                       child: Column(
                         children: [
                           _campoTexto('Título del estudio/artículo',
@@ -1010,7 +1010,7 @@ class _GympediaEditorScreenState extends State<GympediaEditorScreen> {
                 const SizedBox(height: 8),
                 if (_tieneImagen)
                   ClipRRect(
-                    borderRadius: BorderRadius.circular(8),
+                    borderRadius: BorderRadius.circular(AppRadio.sm),
                     child: _imagenLocal.isNotEmpty
                         ? Image(
                             image: providerFotoAcotada(
@@ -1026,7 +1026,7 @@ class _GympediaEditorScreenState extends State<GympediaEditorScreen> {
                             // campo: cacheWidth+cacheHeight
                             // estiraba la foto).
                             errorBuilder: (_, __, ___) => const Padding(
-                              padding: EdgeInsets.all(8),
+                              padding: EdgeInsets.all(AppEspacio.sm),
                               child:
                                   Text('Imagen local (sin vista previa)'),
                             ),
@@ -1042,7 +1042,7 @@ class _GympediaEditorScreenState extends State<GympediaEditorScreen> {
                             width: double.infinity,
                             fit: BoxFit.cover,
                             errorBuilder: (_, __, ___) => const Padding(
-                              padding: EdgeInsets.all(8),
+                              padding: EdgeInsets.all(AppEspacio.sm),
                               child:
                                   Text('Imagen enlazada (sin vista previa)'),
                             ),

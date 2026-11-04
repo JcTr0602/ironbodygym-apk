@@ -9,6 +9,7 @@ import 'package:flutter/material.dart';
 
 import '../auth.dart';
 import '../negocio.dart';
+import 'app_bar.dart';
 import 'componentes.dart';
 import 'diseno.dart';
 import 'ficha.dart';
@@ -151,12 +152,10 @@ class _DetallePendienteScreenState extends State<DetallePendienteScreen> {
   Widget build(BuildContext context) {
     if (_restringido) {
       return Scaffold(
-        appBar: AppBar(
-          title: Text(widget.nombre),
-        ),
+        appBar: appBarIron(context, widget.nombre),
         body: const Center(
           child: Padding(
-            padding: EdgeInsets.all(24),
+            padding: EdgeInsets.all(AppEspacio.xl),
             child: Text(
                 'Solo puedes ver tu propio pendiente a entregar.'),
           ),
@@ -167,9 +166,7 @@ class _DetallePendienteScreenState extends State<DetallePendienteScreen> {
     final total = _totalCup;
     final totalUsd = _totalUsd;
     return Scaffold(
-      appBar: AppBar(
-        title: Text(widget.nombre),
-      ),
+      appBar: appBarIron(context, widget.nombre),
       body: Column(
         children: [
           const SyncBanner(),
@@ -203,14 +200,14 @@ class _DetallePendienteScreenState extends State<DetallePendienteScreen> {
                                 color: AppColores
                                     .textoSecundario(context))))
                     : ListView.builder(
-                        padding: const EdgeInsets.all(12),
+                        padding: const EdgeInsets.all(AppEspacio.md),
                         itemCount: _items.length,
                         itemBuilder: (c, i) {
                           final it = _items[i];
                           if (it['tipo'] == 'suplemento') {
                             return Padding(
                               padding: const EdgeInsets.only(
-                                  bottom: 8),
+                                  bottom: AppEspacio.sm),
                               child: Tarjeta(
                                 padding: EdgeInsets.zero,
                                 child: ListTile(
@@ -235,7 +232,7 @@ class _DetallePendienteScreenState extends State<DetallePendienteScreen> {
                           if (it['tipo'] == 'servicio') {
                             return Padding(
                               padding: const EdgeInsets.only(
-                                  bottom: 8),
+                                  bottom: AppEspacio.sm),
                               child: Tarjeta(
                                 padding: EdgeInsets.zero,
                                 child: ListTile(
@@ -265,7 +262,7 @@ class _DetallePendienteScreenState extends State<DetallePendienteScreen> {
                           if (it['tipo'] == 'diario') {
                             return Padding(
                               padding: const EdgeInsets.only(
-                                  bottom: 8),
+                                  bottom: AppEspacio.sm),
                               child: Tarjeta(
                                 padding: EdgeInsets.zero,
                                 child: ListTile(
@@ -288,7 +285,7 @@ class _DetallePendienteScreenState extends State<DetallePendienteScreen> {
                               it['es_inscripcion'] == true;
                           return Padding(
                             padding:
-                                const EdgeInsets.only(bottom: 8),
+                                const EdgeInsets.only(bottom: AppEspacio.sm),
                             child: Tarjeta(
                               padding: EdgeInsets.zero,
                               child: ListTile(

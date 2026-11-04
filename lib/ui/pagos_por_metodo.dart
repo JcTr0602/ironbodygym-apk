@@ -6,6 +6,7 @@ import '../auth.dart';
 import '../negocio.dart';
 import '../localdb.dart';
 import '../tiempo.dart';
+import 'app_bar.dart';
 import 'componentes.dart';
 import 'diseno.dart';
 
@@ -248,7 +249,7 @@ class _PagosPorMetodoState
     // Argón P1#8: pantalla solo dueño.
     if (!AuthService().isOwner) {
       return Scaffold(
-        appBar: AppBar(title: const Text('Pagos por Método')),
+        appBar: appBarIron(context, 'Pagos por Método'),
         body: const Center(
           child: Text('Solo el dueño puede ver los pagos por método.'),
         ),
@@ -258,13 +259,11 @@ class _PagosPorMetodoState
         _efectivo + _transferencia + _mixto;
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Pagos por Método'),
-      ),
+      appBar: appBarIron(context, 'Pagos por Método'),
       body: Column(
         children: [
           Padding(
-            padding: const EdgeInsets.all(16),
+            padding: const EdgeInsets.all(AppEspacio.lg),
             child: SegmentedButton<int>(
               segments: const [
                 ButtonSegment(
@@ -293,7 +292,7 @@ class _PagosPorMetodoState
             Expanded(
               child: ListView(
                 padding: const EdgeInsets.symmetric(
-                    horizontal: 16),
+                    horizontal: AppEspacio.lg),
                 children: [
                   _buildBarra(
                     'Efectivo',
@@ -418,7 +417,7 @@ class _PagosPorMetodoState
           ),
           const SizedBox(height: 8),
           ClipRRect(
-            borderRadius: BorderRadius.circular(8),
+            borderRadius: BorderRadius.circular(AppRadio.sm),
             child: LinearProgressIndicator(
               value: total > 0 ? monto / total : 0,
               minHeight: 12,

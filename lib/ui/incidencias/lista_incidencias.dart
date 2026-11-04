@@ -4,6 +4,7 @@ import 'dart:async';
 import '../../localdb.dart';
 import '../../modelos/incidencia.dart';
 import '../../sync.dart';
+import '../app_bar.dart';
 import '../diseno.dart';
 import '../componentes.dart';
 import 'widgets/tarjeta_incidencia.dart';
@@ -193,11 +194,10 @@ class _ListaIncidenciasScreenState
         }
       },
       child: Scaffold(
-      appBar: AppBar(
-        title: _modoSeleccion
-            ? Text('${_seleccionadas.length} seleccionadas')
-            : const Text('Incidencias'),
-        actions: [
+      appBar: appBarIron(
+        context,
+        _modoSeleccion ? '${_seleccionadas.length} seleccionadas' : 'Incidencias',
+        acciones: [
           if (AuthService().isOwner)
             IconButton(
               icon: const Icon(
@@ -225,7 +225,7 @@ class _ListaIncidenciasScreenState
         children: [
           // Buscador
           Padding(
-            padding: const EdgeInsets.all(12),
+            padding: const EdgeInsets.all(AppEspacio.md),
             child: TextField(
               decoration: InputDecoration(
                 hintText: 'Buscar incidencia...',
@@ -233,11 +233,11 @@ class _ListaIncidenciasScreenState
                     const Icon(Icons.search_rounded),
                 border: OutlineInputBorder(
                   borderRadius:
-                      BorderRadius.circular(12),
+                      BorderRadius.circular(AppRadio.md),
                 ),
                 contentPadding:
                     const EdgeInsets.symmetric(
-                        horizontal: 12),
+                        horizontal: AppEspacio.md),
               ),
               onChanged: (v) =>
                   setState(() => _busqueda = v),
@@ -247,7 +247,7 @@ class _ListaIncidenciasScreenState
           SingleChildScrollView(
             scrollDirection: Axis.horizontal,
             padding: const EdgeInsets.symmetric(
-                horizontal: 12),
+                horizontal: AppEspacio.md),
             child: Row(
               children: [
                 _chipEstado(
@@ -372,7 +372,7 @@ class _ListaIncidenciasScreenState
       String? estado, String label, int? count) {
     final sel = _filtroEstado == estado;
     return Padding(
-      padding: const EdgeInsets.only(right: 8),
+      padding: const EdgeInsets.only(right: AppEspacio.sm),
       child: FilterChip(
         label: Text(count != null
             ? '$label ($count)'
@@ -390,7 +390,7 @@ class _ListaIncidenciasScreenState
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setB) => Padding(
-          padding: const EdgeInsets.all(16),
+          padding: const EdgeInsets.all(AppEspacio.lg),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment:

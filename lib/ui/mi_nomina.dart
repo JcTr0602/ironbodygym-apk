@@ -26,6 +26,7 @@ import '../nomina_precalc.dart';
 import '../perfil.dart';
 import '../permisos_entrenador.dart';
 import '../tiempo.dart';
+import 'app_bar.dart';
 import 'componentes.dart';
 import 'diseno.dart';
 import 'servicios.dart';
@@ -597,7 +598,7 @@ class _MiNominaScreenState extends State<MiNominaScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Mi nómina')),
+      appBar: appBarIron(context, 'Mi nómina'),
       body: Column(
         children: [
           const SyncBanner(compact: true),
@@ -623,7 +624,7 @@ class _MiNominaScreenState extends State<MiNominaScreen> {
               padding: const EdgeInsets.all(AppEspacio.md),
               decoration: BoxDecoration(
                 color: AppColores.naranja.withValues(alpha: 0.12),
-                borderRadius: BorderRadius.circular(12),
+                borderRadius: BorderRadius.circular(AppRadio.md),
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -664,7 +665,7 @@ class _MiNominaScreenState extends State<MiNominaScreen> {
                 padding: const EdgeInsets.all(AppEspacio.md),
                 decoration: BoxDecoration(
                   color: AppColores.alerta.withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(12),
+                  borderRadius: BorderRadius.circular(AppRadio.md),
                 ),
                 child: Text(
                   '⚠ Llevas ${_horasSinSubir!.toStringAsFixed(0)} horas '
@@ -741,7 +742,7 @@ class _MiNominaScreenState extends State<MiNominaScreen> {
                   // descontado (adelantos + deuda). Sin base, la
                   // barra queda gris y el texto lo dice.
                   ClipRRect(
-                    borderRadius: BorderRadius.circular(999),
+                    borderRadius: BorderRadius.circular(AppRadio.circular),
                     child: Stack(
                       children: [
                         Container(

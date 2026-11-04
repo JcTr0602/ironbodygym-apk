@@ -11,6 +11,7 @@ import '../fotos.dart';
 import '../localdb.dart';
 import '../negocio.dart';
 import '../sync.dart';
+import 'app_bar.dart';
 import 'diseno.dart';
 import 'componentes.dart';
 
@@ -434,9 +435,10 @@ Hola $username, estas son tus credenciales para la app del gym:
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Usuarios APK'),
-        actions: [
+      appBar: appBarIron(
+        context,
+        'Usuarios APK',
+        acciones: [
           IconButton(
             icon: const Icon(Icons.refresh_rounded),
             tooltip: 'Actualizar',

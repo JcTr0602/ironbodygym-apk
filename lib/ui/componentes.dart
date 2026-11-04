@@ -12,6 +12,54 @@ import 'package:flutter/material.dart';
 import 'diseno.dart';
 
 // ---------------------------------------------------------------------------
+// Scroll global (1.23 T8 — física de gama alta)
+// ---------------------------------------------------------------------------
+
+/// Comportamiento de scroll de TODA la app (lo aplica el
+/// MaterialApp de main.dart): inercia natural con rebote suave
+/// en los bordes — [BouncingScrollPhysics] con
+/// [AlwaysScrollableScrollPhysics] de padre, para que las
+/// listas cortas también puedan tirar y el gesto se sienta
+/// igual en todas las pantallas.
+///
+/// Pull-to-refresh: los RefreshIndicator de la app escuchan el
+/// overscroll del borde superior; con la física de rebote el
+/// contenido se desplaza en el borde en vez de encenderse el
+/// «glow» de ClampingScrollPhysics, pero la notificación de
+/// overscroll sigue llegando y el refresco dispara igual.
+///
+/// 90/120 Hz: nada en el código (ni Dart ni nativo) limita la
+/// tasa de refresco — Flutter dibuja a la tasa que dé el panel
+/// del teléfono. No hace falta código nativo para esto.
+class ComportamientoScrollSuave extends MaterialScrollBehavior {
+  const ComportamientoScrollSuave();
+
+  @override
+  ScrollPhysics getScrollPhysics(BuildContext context) {
+    return const BouncingScrollPhysics(
+      parent: AlwaysScrollableScrollPhysics(),
+    );
+  }
+
+  /// Panel Bloque 5 (ajuste 2): la física sola NO decide el
+  /// indicador visual de overscroll — lo decide este método, y
+  /// MaterialScrollBehavior aplicaría el «glow» (o el stretch)
+  /// de Android pese al rebote. Se devuelve el hijo sin
+  /// envolver: en los bordes se ve el rebote del contenido y
+  /// nada más, que es el acabado T8 buscado. La notificación
+  /// de overscroll no pasa por aquí: RefreshIndicator sigue
+  /// recibiéndola y disparando igual.
+  @override
+  Widget buildOverscrollIndicator(
+    BuildContext context,
+    Widget child,
+    ScrollableDetails details,
+  ) {
+    return child;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Botones
 // ---------------------------------------------------------------------------
 
@@ -669,7 +717,7 @@ Future<String?> elegirModoEliminacion(
     return InkWell(
       onTap: () => setState(() => modo = valor),
       child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 8),
+        padding: const EdgeInsets.symmetric(vertical: AppEspacio.sm),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -722,7 +770,7 @@ Future<String?> elegirModoEliminacion(
                 setState),
             if (avisoFiado != null && modo == 'conservar')
               Padding(
-                padding: const EdgeInsets.only(left: 32, bottom: 4),
+                padding: const EdgeInsets.only(left: AppEspacio.xxl, bottom: AppEspacio.xs),
                 child: Text(
                   avisoFiado,
                   style: const TextStyle(
@@ -1032,7 +1080,7 @@ class AvisoCarnetTelefono extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.only(top: 8),
+      padding: const EdgeInsets.only(top: AppEspacio.sm),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -1061,7 +1109,7 @@ class AvisoFechaCarnet extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.only(top: 8),
+      padding: const EdgeInsets.only(top: AppEspacio.sm),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -1126,7 +1174,7 @@ class EncabezadoSeccion extends StatelessWidget {
             IconButton(
               tooltip: accionTooltip,
               iconSize: 20,
-              padding: const EdgeInsets.all(12),
+              padding: const EdgeInsets.all(AppEspacio.md),
               constraints: const BoxConstraints(
                   minWidth: 44, minHeight: 44),
               color: Colors.grey,
@@ -1203,7 +1251,7 @@ class ChipEstado extends StatelessWidget {
     final c = color ?? colorSignificadoChip(significado!, oscuro);
     return Container(
       padding: const EdgeInsets.symmetric(
-          horizontal: AppEspacio.sm, vertical: 4),
+          horizontal: AppEspacio.sm, vertical: AppEspacio.xs),
       decoration: BoxDecoration(
         color: c.withValues(alpha: 0.14),
         borderRadius: BorderRadius.circular(AppRadio.lg),
@@ -1932,7 +1980,7 @@ class IconoModuloBadge extends StatelessWidget {
       height: 38,
       decoration: BoxDecoration(
         color: tinte.withValues(alpha: oscuro ? 0.14 : 0.12),
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(AppRadio.md),
         border: oscuro
             ? Border.all(color: tinte.withValues(alpha: 0.22), width: 1)
             : null,

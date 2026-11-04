@@ -17,6 +17,7 @@ import '../auth.dart';
 import '../localdb.dart';
 import '../sync.dart';
 import '../tiempo.dart';
+import 'app_bar.dart';
 import 'componentes.dart';
 import 'diseno.dart';
 import 'widgets.dart';
@@ -318,7 +319,7 @@ class _CuentasPorCobrarScreenState
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Fiados por cobrar')),
+      appBar: appBarIron(context, 'Fiados por cobrar'),
       body: Column(
         children: [
           const SyncBanner(compact: true),

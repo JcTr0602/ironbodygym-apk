@@ -11,6 +11,7 @@ import '../fotos.dart';
 import '../negocio.dart';
 import '../precio_cobro.dart';
 import '../tiempo.dart';
+import 'app_bar.dart';
 import 'componentes.dart';
 import 'diseno.dart';
 import 'ficha.dart';
@@ -101,9 +102,10 @@ class _CuentasCobrarScreenState
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Vencidos por cobrar'),
-        actions: [
+      appBar: appBarIron(
+        context,
+        'Vencidos por cobrar',
+        acciones: [
           IconButton(
             icon: const Icon(Icons.refresh_rounded),
             onPressed: _cargar,

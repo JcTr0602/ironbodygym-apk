@@ -967,15 +967,18 @@ class _HomeScreenState extends State<HomeScreen>
           : AppColores.textoSecundario(context);
       return Expanded(
         child: InkWell(
-          borderRadius: BorderRadius.circular(999),
+          borderRadius: BorderRadius.circular(AppRadio.circular),
           onTap: () => setState(() => _nivelActivo = nivel),
           child: Container(
+            // 1.23 B11: alto mínimo cómodo de 48 (antes ~42:
+            // icono 18 + padding vertical md×2).
+            constraints: const BoxConstraints(minHeight: 48),
             padding:
                 const EdgeInsets.symmetric(vertical: AppEspacio.md),
             decoration: BoxDecoration(
               gradient:
                   activo ? AppColores.gradienteNaranja : null,
-              borderRadius: BorderRadius.circular(999),
+              borderRadius: BorderRadius.circular(AppRadio.circular),
             ),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.center,
@@ -993,7 +996,7 @@ class _HomeScreenState extends State<HomeScreen>
                         horizontal: 7, vertical: 1),
                     decoration: BoxDecoration(
                       color: AppColores.error,
-                      borderRadius: BorderRadius.circular(999),
+                      borderRadius: BorderRadius.circular(AppRadio.circular),
                     ),
                     child: Text(contador > 99 ? '99+' : '$contador',
                         style: AppTexto.etiqueta.copyWith(
@@ -1014,10 +1017,10 @@ class _HomeScreenState extends State<HomeScreen>
       child: Container(
         decoration: BoxDecoration(
           color: Theme.of(context).cardColor,
-          borderRadius: BorderRadius.circular(999),
+          borderRadius: BorderRadius.circular(AppRadio.circular),
           border: Border.all(color: Theme.of(context).dividerColor),
         ),
-        padding: const EdgeInsets.all(4),
+        padding: const EdgeInsets.all(AppEspacio.xs),
         child: Row(
           children: [
             segmento(0, Icons.bolt_rounded, 'Hoy',
@@ -1204,7 +1207,7 @@ class _HomeScreenState extends State<HomeScreen>
             style: ElevatedButton.styleFrom(
               backgroundColor: AppColores.naranja,
               foregroundColor: Colors.white,
-              padding: const EdgeInsets.symmetric(horizontal: 4),
+              padding: const EdgeInsets.symmetric(horizontal: AppEspacio.xs),
             ),
             onPressed: ir,
             child: Column(
@@ -1263,17 +1266,25 @@ class _HomeScreenState extends State<HomeScreen>
             children: [
               // Avatar tocable -> Ajustes
               InkWell(
-                borderRadius: BorderRadius.circular(999),
+                borderRadius: BorderRadius.circular(AppRadio.circular),
                 onTap: () => _ir(const AjustesScreen()),
-                child: Tooltip(
-                  message: 'Ajustes',
-                  child: ClipRRect(
-                    borderRadius:
-                        BorderRadius.circular(999),
-                    child: Image.asset('assets/logo.jpg',
-                        height: 40,
-                        width: 40,
-                        fit: BoxFit.cover),
+                // 1.23 B11: el dibujo sigue en 40×40 pero el
+                // área tocable crece a 48×48 (mínimo cómodo).
+                child: SizedBox(
+                  width: 48,
+                  height: 48,
+                  child: Center(
+                    child: Tooltip(
+                      message: 'Ajustes',
+                      child: ClipRRect(
+                        borderRadius:
+                            BorderRadius.circular(AppRadio.circular),
+                        child: Image.asset('assets/logo.jpg',
+                            height: 40,
+                            width: 40,
+                            fit: BoxFit.cover),
+                      ),
+                    ),
                   ),
                 ),
               ),
@@ -1378,7 +1389,7 @@ class _HomeScreenState extends State<HomeScreen>
             height: 3,
             decoration: BoxDecoration(
               gradient: AppColores.gradienteNaranja,
-              borderRadius: BorderRadius.circular(999),
+              borderRadius: BorderRadius.circular(AppRadio.circular),
             ),
           ),
         ],
@@ -1390,10 +1401,10 @@ class _HomeScreenState extends State<HomeScreen>
   Widget _chipRol() {
     return Container(
       padding: const EdgeInsets.symmetric(
-          horizontal: 8, vertical: 2),
+          horizontal: AppEspacio.sm, vertical: 2),
       decoration: BoxDecoration(
         color: AppColores.naranja.withValues(alpha: 0.2),
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(AppRadio.md),
         border: Border.all(
             color:
                 AppColores.naranja.withValues(alpha: 0.5)),
@@ -1505,18 +1516,28 @@ class _HomeScreenState extends State<HomeScreen>
                     borderRadius:
                         BorderRadius.circular(AppRadio.md),
                     onTap: () => _ir(const MiTurnoScreen()),
-                    child: Row(
-                      children: [
-                        Icon(Icons.schedule_rounded,
-                            size: 18,
-                            color: AppColores.textoSecundario(context)),
-                        SizedBox(width: 8),
-                        Text('Mi Turno Hoy',
-                            style: AppTexto.subtitulo),
-                        SizedBox(width: 4),
-                        Icon(Icons.chevron_right_rounded,
-                            color: Colors.grey, size: 18),
-                      ],
+                    // 1.23 B11: la fila medía ~20 de alto; el
+                    // área tocable sube a 48 con el contenido
+                    // centrado (el dibujo no cambia).
+                    child: ConstrainedBox(
+                      constraints:
+                          const BoxConstraints(minHeight: 48),
+                      child: Center(
+                        child: Row(
+                          children: [
+                            Icon(Icons.schedule_rounded,
+                                size: 18,
+                                color:
+                                    AppColores.textoSecundario(context)),
+                            const SizedBox(width: 8),
+                            Text('Mi Turno Hoy',
+                                style: AppTexto.subtitulo),
+                            const SizedBox(width: 4),
+                            Icon(Icons.chevron_right_rounded,
+                                color: Colors.grey, size: 18),
+                          ],
+                        ),
+                      ),
                     ),
                   ),
                 ),
@@ -1696,6 +1717,9 @@ class _HomeScreenState extends State<HomeScreen>
               onTap: () =>
                   _ir(const MiDiaScreen()),
               child: Container(
+                // 1.23 B11: alto mínimo cómodo de 48 (con texto
+                // de una línea quedaba en ~36).
+                constraints: const BoxConstraints(minHeight: 48),
                 padding: const EdgeInsets.symmetric(
                     horizontal: AppEspacio.md,
                     vertical: AppEspacio.sm),
@@ -1721,7 +1745,7 @@ class _HomeScreenState extends State<HomeScreen>
                       ),
                     ),
                     InkWell(
-                      borderRadius: BorderRadius.circular(16),
+                      borderRadius: BorderRadius.circular(AppRadio.lg),
                       onTap: () async {
                         // Descarta solo las instancias visibles ahora
                         // (clave por turno: la tarjeta solo volverá a
@@ -1747,7 +1771,10 @@ class _HomeScreenState extends State<HomeScreen>
                         });
                       },
                       child: const Padding(
-                        padding: EdgeInsets.all(4),
+                        // 1.23 B11: la X medía 24×24 (icono 16 +
+                        // padding xs); el área tocable sube a
+                        // 48×48 con el mismo icono.
+                        padding: EdgeInsets.all(AppEspacio.lg),
                         child: Icon(Icons.close_rounded,
                             size: 16,
                             color: AppColores.alertaOscuro),
@@ -1802,7 +1829,7 @@ class _HomeScreenState extends State<HomeScreen>
 
   Widget _chipTurnoTexto(String texto, Color color) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      padding: const EdgeInsets.symmetric(horizontal: AppEspacio.md, vertical: AppEspacio.sm),
       decoration: BoxDecoration(
         color: color.withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(20),
@@ -1851,11 +1878,11 @@ class _HomeScreenState extends State<HomeScreen>
     final pend = _turnosPendientes;
     if (pend.isEmpty) return const SizedBox.shrink();
     return Container(
-      margin: const EdgeInsets.only(top: 8),
-      padding: const EdgeInsets.all(12),
+      margin: const EdgeInsets.only(top: AppEspacio.sm),
+      padding: const EdgeInsets.all(AppEspacio.md),
       decoration: BoxDecoration(
         color: AppColores.alerta.withValues(alpha: 0.08),
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(AppRadio.md),
         border:
             Border.all(color: AppColores.alerta.withValues(alpha: 0.4)),
       ),
@@ -1875,7 +1902,7 @@ class _HomeScreenState extends State<HomeScreen>
           const SizedBox(height: 8),
           for (final t in pend)
             Padding(
-              padding: const EdgeInsets.only(bottom: 4),
+              padding: const EdgeInsets.only(bottom: AppEspacio.xs),
               child: Text(
                   '• ${t['fecha_turno']} · ${_nombreTurno('${t['turno']}')} '
                   '· abierto ${horaCorta('${t['hora_apertura']}')}',
@@ -2104,7 +2131,7 @@ class _HomeScreenState extends State<HomeScreen>
         child: Stack(
           children: [
             Padding(
-              padding: const EdgeInsets.only(right: 16),
+              padding: const EdgeInsets.only(right: AppEspacio.lg),
               child: _datoFinanciero(titulo, valor, color),
             ),
             const Positioned(
@@ -2167,11 +2194,14 @@ class _HomeScreenState extends State<HomeScreen>
             const SizedBox(height: AppEspacio.sm),
             for (final f in filas)
               InkWell(
-                borderRadius: BorderRadius.circular(8),
+                borderRadius: BorderRadius.circular(AppRadio.sm),
                 onTap: f.ir,
                 child: Padding(
+                  // 1.23 B11: la fila medía ~42 de alto
+                  // (contenido ~26 + padding sm×2); con md×2
+                  // queda en ~50.
                   padding:
-                      const EdgeInsets.symmetric(vertical: 8),
+                      const EdgeInsets.symmetric(vertical: AppEspacio.md),
                   child: Row(
                     children: [
                       Icon(f.icono, size: 20, color: f.color),
@@ -2318,10 +2348,10 @@ class _HomeScreenState extends State<HomeScreen>
           if (pendientes > 0) ...[
             Container(
               padding: const EdgeInsets.symmetric(
-                  horizontal: 8, vertical: 2),
+                  horizontal: AppEspacio.sm, vertical: 2),
               decoration: BoxDecoration(
                 color: AppColores.exito.withValues(alpha: 0.15),
-                borderRadius: BorderRadius.circular(12),
+                borderRadius: BorderRadius.circular(AppRadio.md),
               ),
               child: Text('$pendientes',
                   style: AppTexto.etiqueta.copyWith(
@@ -2366,10 +2396,10 @@ class _HomeScreenState extends State<HomeScreen>
             const SizedBox(width: AppEspacio.sm),
             Container(
               padding: const EdgeInsets.symmetric(
-                  horizontal: 8, vertical: 2),
+                  horizontal: AppEspacio.sm, vertical: 2),
               decoration: BoxDecoration(
                 color: badgeColor ?? AppColores.error,
-                borderRadius: BorderRadius.circular(12),
+                borderRadius: BorderRadius.circular(AppRadio.md),
               ),
               child: Text(badge > 99 ? '99+' : '$badge',
                   style: AppTexto.etiqueta.copyWith(
@@ -2394,10 +2424,10 @@ class _HomeScreenState extends State<HomeScreen>
             ? AppColores.info
             : AppColores.alerta;
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+      padding: const EdgeInsets.symmetric(horizontal: AppEspacio.sm, vertical: 2),
       decoration: BoxDecoration(
         color: color,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(AppRadio.md),
       ),
       child: Text('Turno ${t.toLowerCase()}',
           style: AppTexto.etiqueta.copyWith(
@@ -2511,6 +2541,11 @@ class _FabAccionesRapidasState extends State<_FabAccionesRapidas>
   // UNA vez (antes nacía una nueva en cada build y nunca se
   // liberaba: fuga lenta de listeners sobre _ctrl).
   late final List<CurvedAnimation> _animsPildora;
+  // 1.23 T8: gemelas de ESCALA con rebote suave (easeOutBack
+  // contenido) para el despliegue; el fade y el deslizamiento
+  // siguen con easeOutCubic en _animsPildora (easeOutBack
+  // supera 1.0 y rompería el FadeTransition).
+  late final List<CurvedAnimation> _animsPildoraEscala;
 
   @override
   void initState() {
@@ -2530,11 +2565,23 @@ class _FabAccionesRapidasState extends State<_FabAccionesRapidas>
               curve: Curves.easeOutCubic),
         ),
     ];
+    _animsPildoraEscala = [
+      for (var index = 0; index < total; index++)
+        CurvedAnimation(
+          parent: _ctrl,
+          curve: Interval((0.3 / (total - 1)) * (total - 1 - index),
+              (0.3 / (total - 1)) * (total - 1 - index) + 0.7,
+              curve: Curves.easeOutBack),
+        ),
+    ];
   }
 
   @override
   void dispose() {
     for (final a in _animsPildora) {
+      a.dispose();
+    }
+    for (final a in _animsPildoraEscala) {
       a.dispose();
     }
     _ctrl.dispose();
@@ -2613,7 +2660,7 @@ class _FabAccionesRapidasState extends State<_FabAccionesRapidas>
             ignoring: !_abierto,
             child: ClipRect(
               child: Container(
-                margin: const EdgeInsets.only(bottom: 12),
+                margin: const EdgeInsets.only(bottom: AppEspacio.md),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.end,
@@ -2709,10 +2756,19 @@ class _FabAccionesRapidasState extends State<_FabAccionesRapidas>
           begin: const Offset(0, 0.35),
           end: Offset.zero,
         ).animate(itemAnim),
-        // Ancho fijo para que las 3 píldoras queden alineadas.
-        child: SizedBox(
-          width: 190,
-          child: _pildora(icono, texto, onTap),
+        // 1.23 T8: rebote suave al desplegar — la escala nace
+        // en 0.82 y easeOutBack la deja ~2% por encima de 1.0
+        // un instante antes de asentarse (anclada a la
+        // derecha, donde vive el FAB).
+        child: ScaleTransition(
+          scale: Tween<double>(begin: 0.82, end: 1.0)
+              .animate(_animsPildoraEscala[index]),
+          alignment: Alignment.centerRight,
+          // Ancho fijo para que las 3 píldoras queden alineadas.
+          child: SizedBox(
+            width: 190,
+            child: _pildora(icono, texto, onTap),
+          ),
         ),
       ),
     );

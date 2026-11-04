@@ -15,6 +15,7 @@ import '../cliente_protegido.dart';
 import '../localdb.dart';
 import '../negocio.dart';
 import '../tiempo.dart';
+import 'app_bar.dart';
 import 'componentes.dart';
 import 'diseno.dart';
 import 'ficha.dart';
@@ -63,7 +64,7 @@ Future<void> mostrarPermisosExplicados(BuildContext context) async {
           children: [
             for (final e in kPermisosExplicados.entries)
               Padding(
-                padding: const EdgeInsets.only(bottom: 8),
+                padding: const EdgeInsets.only(bottom: AppEspacio.sm),
                 child: Text('• ${e.value}', style: AppTexto.cuerpo),
               ),
             const Text(
@@ -133,10 +134,10 @@ class _CuentasCasaScreenState extends State<CuentasCasaScreen> {
   Widget build(BuildContext context) {
     if (_sinAcceso) {
       return Scaffold(
-        appBar: AppBar(title: const Text('Cuentas a la Casa')),
+        appBar: appBarIron(context, 'Cuentas a la Casa'),
         body: const Center(
           child: Padding(
-            padding: EdgeInsets.all(24),
+            padding: EdgeInsets.all(AppEspacio.xl),
             child: Text(
               'Solo el dueño puede ver las cuentas a la Casa.',
               style: AppTexto.secundario,
@@ -147,7 +148,7 @@ class _CuentasCasaScreenState extends State<CuentasCasaScreen> {
       );
     }
     return Scaffold(
-      appBar: AppBar(title: const Text('Cuentas a la Casa')),
+      appBar: appBarIron(context, 'Cuentas a la Casa'),
       body: _cargando
           ? const EstadoCargando(texto: 'Cargando…')
           : _casas.isEmpty
@@ -155,7 +156,7 @@ class _CuentasCasaScreenState extends State<CuentasCasaScreen> {
                   child: Text('Ninguna cuenta a la Casa.',
                       style: AppTexto.secundario))
               : ListView(
-                  padding: const EdgeInsets.all(16),
+                  padding: const EdgeInsets.all(AppEspacio.lg),
                   children: [
                     const Text(
                       'Precio 0, nunca vencen, fuera de ingresos, caja '
@@ -229,7 +230,7 @@ class _SinFotoPrecioScreenState extends State<SinFotoPrecioScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Productos sin foto o sin precio')),
+      appBar: appBarIron(context, 'Productos sin foto o sin precio'),
       body: _cargando
           ? const EstadoCargando(texto: 'Cargando…')
           : _mal.isEmpty
@@ -238,7 +239,7 @@ class _SinFotoPrecioScreenState extends State<SinFotoPrecioScreen> {
                       'Todos los productos tienen foto y precio.',
                       style: AppTexto.secundario))
               : ListView(
-                  padding: const EdgeInsets.all(16),
+                  padding: const EdgeInsets.all(AppEspacio.lg),
                   children: [
                     for (final s in _mal)
                       Card(
@@ -334,11 +335,11 @@ class _VencimientosProximosScreenState
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Vencimientos próximos')),
+      appBar: appBarIron(context, 'Vencimientos próximos'),
       body: _cargando
           ? const EstadoCargando(texto: 'Cargando…')
           : ListView(
-              padding: const EdgeInsets.all(16),
+              padding: const EdgeInsets.all(AppEspacio.lg),
               children: [
                 const Text('Ya vencidos', style: AppTexto.titulo),
                 const SizedBox(height: 8),

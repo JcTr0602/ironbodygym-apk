@@ -9,6 +9,7 @@ import '../auth.dart';
 import '../localdb.dart';
 import '../negocio.dart';
 import '../tiempo.dart';
+import 'app_bar.dart';
 import 'componentes.dart';
 import 'comparativa_entrenadores.dart';
 import 'detalle_entrenador.dart';
@@ -94,7 +95,7 @@ class _HistorialEntrenadorScreenState
     // Argón P1#8: pantalla solo dueño.
     if (!AuthService().isOwner) {
       return Scaffold(
-        appBar: AppBar(title: const Text('Historial por entrenador')),
+        appBar: appBarIron(context, 'Historial por entrenador'),
         body: const Center(
           child: Text('Solo el dueño puede ver el historial por entrenador.'),
         ),
@@ -106,9 +107,10 @@ class _HistorialEntrenadorScreenState
       'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'
     ];
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Historial por entrenador'),
-        actions: [
+      appBar: appBarIron(
+        context,
+        'Historial por entrenador',
+        acciones: [
           // F7 (1.20): comparativa lado a lado del mes.
           IconButton(
             tooltip: 'Comparativa del mes',
@@ -127,7 +129,7 @@ class _HistorialEntrenadorScreenState
         children: [
           const SyncBanner(),
           Padding(
-            padding: const EdgeInsets.all(12),
+            padding: const EdgeInsets.all(AppEspacio.md),
             child: Text(
               'Resumen de ${meses[n.month]} ${n.year}',
               style: AppTexto.titulo,
@@ -147,10 +149,10 @@ class _HistorialEntrenadorScreenState
                             final d = _datos[i];
                             return Padding(
                               padding: const EdgeInsets.symmetric(
-                                  horizontal: 12, vertical: 6),
+                                  horizontal: AppEspacio.md, vertical: 6),
                               child: Tarjeta(
                                 padding:
-                                    const EdgeInsets.all(12),
+                                    const EdgeInsets.all(AppEspacio.md),
                                 onTap: () =>
                                     Navigator.of(context).push(
                                   RutaIron(

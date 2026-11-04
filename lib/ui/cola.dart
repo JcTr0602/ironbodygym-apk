@@ -21,6 +21,7 @@ import '../negocio.dart';
 import '../sync.dart';
 import '../tiempo.dart';
 import '../tipos_operacion.dart';
+import 'app_bar.dart';
 import 'auditoria.dart';
 import 'componentes.dart';
 import 'diseno.dart';
@@ -816,7 +817,7 @@ class _ColaScreenState extends State<ColaScreen> {
     if (_totalPendientes == 0) {
       return Container(
         width: double.infinity,
-        padding: const EdgeInsets.all(12),
+        padding: const EdgeInsets.all(AppEspacio.md),
         decoration: BoxDecoration(
           color: AppColores.exito.withValues(alpha: 0.10),
           borderRadius: BorderRadius.circular(AppRadio.md),
@@ -849,7 +850,7 @@ class _ColaScreenState extends State<ColaScreen> {
         horasSinSubirDesde(_masAntiguaIso, ahoraHabana());
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.all(AppEspacio.md),
       decoration: BoxDecoration(
         color: AppColores.alerta.withValues(alpha: 0.10),
         borderRadius: BorderRadius.circular(AppRadio.md),
@@ -1077,7 +1078,7 @@ class _ColaScreenState extends State<ColaScreen> {
                 res.pendientesRestantes == 0 &&
                 (error == null || error.isEmpty))
               Padding(
-                padding: const EdgeInsets.only(top: 12),
+                padding: const EdgeInsets.only(top: AppEspacio.md),
                 child: Text(
                   'Todo estaba al día: no había nada nuevo que subir '
                   'ni bajar.',
@@ -1091,7 +1092,7 @@ class _ColaScreenState extends State<ColaScreen> {
                 error != null &&
                 error.isNotEmpty)
               Padding(
-                padding: const EdgeInsets.only(top: 12),
+                padding: const EdgeInsets.only(top: AppEspacio.md),
                 child: Text(
                   'No se pudo sincronizar. Revisa tu conexión e '
                   'inténtalo de nuevo.',
@@ -1254,7 +1255,7 @@ class _ColaScreenState extends State<ColaScreen> {
                 ? () => setState(
                     () => _fotosExpandido = !_fotosExpandido)
                 : null,
-            borderRadius: BorderRadius.circular(8),
+            borderRadius: BorderRadius.circular(AppRadio.sm),
             child: Row(
               children: [
                 Icon(Icons.photo_library_rounded,
@@ -1265,10 +1266,10 @@ class _ColaScreenState extends State<ColaScreen> {
                 ),
                 Container(
                   padding: const EdgeInsets.symmetric(
-                      horizontal: 10, vertical: 4),
+                      horizontal: 10, vertical: AppEspacio.xs),
                   decoration: BoxDecoration(
                     color: color.withValues(alpha: 0.15),
-                    borderRadius: BorderRadius.circular(12),
+                    borderRadius: BorderRadius.circular(AppRadio.md),
                   ),
                   child: Text(
                     total == 0
@@ -1409,13 +1410,13 @@ class _ColaScreenState extends State<ColaScreen> {
         (f['forzar_qos'] as int? ?? 0) != 1 &&
         (error == null || error.isEmpty);
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8),
+      padding: const EdgeInsets.symmetric(vertical: AppEspacio.sm),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           // Miniatura.
           ClipRRect(
-            borderRadius: BorderRadius.circular(8),
+            borderRadius: BorderRadius.circular(AppRadio.sm),
             child: ruta != null
                 ? Image.file(
                     File(ruta),
@@ -1451,10 +1452,10 @@ class _ColaScreenState extends State<ColaScreen> {
                     ),
                     Container(
                       padding: const EdgeInsets.symmetric(
-                          horizontal: 8, vertical: 2),
+                          horizontal: AppEspacio.sm, vertical: 2),
                       decoration: BoxDecoration(
                         color: colorEstado.withValues(alpha: 0.15),
-                        borderRadius: BorderRadius.circular(12),
+                        borderRadius: BorderRadius.circular(AppRadio.md),
                       ),
                       child: Text(
                         estado == 'error'
@@ -1770,11 +1771,11 @@ class _ColaScreenState extends State<ColaScreen> {
       subtitulo = 'Todo al día';
     }
     return Scaffold(
-      appBar: AppBar(title: const Text('Sincronización')),
+      appBar: appBarIron(context, 'Sincronización'),
       body: RefreshIndicator(
         onRefresh: _cargar,
         child: ListView(
-          padding: const EdgeInsets.all(16),
+          padding: const EdgeInsets.all(AppEspacio.lg),
           children: [
             // Cabecera de estado visual (v1.0.14: tres estados)
             Container(
@@ -1918,7 +1919,7 @@ class _ColaScreenState extends State<ColaScreen> {
             if (_det.error != null && _det.error!.isNotEmpty) ...[
               const SizedBox(height: 12),
               Container(
-                padding: const EdgeInsets.all(12),
+                padding: const EdgeInsets.all(AppEspacio.md),
                 decoration: BoxDecoration(
                   color: AppColores.error
                       .withValues(alpha: 0.12),
@@ -1947,10 +1948,10 @@ class _ColaScreenState extends State<ColaScreen> {
             // v1.2.5 (D15): bloqueadas que necesitan revisión manual.
             if (_bloqueadas.isNotEmpty) ...[
               Container(
-                padding: const EdgeInsets.all(16),
+                padding: const EdgeInsets.all(AppEspacio.lg),
                 decoration: BoxDecoration(
                   color: AppColores.error.withValues(alpha: 0.08),
-                  borderRadius: BorderRadius.circular(16),
+                  borderRadius: BorderRadius.circular(AppRadio.lg),
                   border: Border.all(
                       color: AppColores.error.withValues(alpha: 0.3)),
                 ),
@@ -2042,7 +2043,7 @@ class _ColaScreenState extends State<ColaScreen> {
                 final hace = tiempoRelativo(creada);
                 return Padding(
                   padding:
-                      const EdgeInsets.only(bottom: 8),
+                      const EdgeInsets.only(bottom: AppEspacio.sm),
                   child: Container(
                     decoration: BoxDecoration(
                       color: AppColores.superficie(context),
@@ -2091,7 +2092,7 @@ class _ColaScreenState extends State<ColaScreen> {
                               return Padding(
                                 padding:
                                     const EdgeInsets.only(
-                                        top: 4),
+                                        top: AppEspacio.xs),
                                 child: Text(
                                   errTraducido.mensaje,
                                   style: AppTexto.metadato.copyWith(color: AppColores.error),
@@ -2102,7 +2103,7 @@ class _ColaScreenState extends State<ColaScreen> {
                         if (esPendiente)
                           Padding(
                             padding:
-                                const EdgeInsets.only(top: 4),
+                                const EdgeInsets.only(top: AppEspacio.xs),
                             child: Text(
                               'Se subirá cuando haya conexión',
                               style: AppTexto.secundario.copyWith(
@@ -2385,10 +2386,10 @@ class _DetalleSyncScreenState extends State<DetalleSyncScreen> {
     final mostrarBanner =
         pushTs.isNotEmpty && detTs.isNotEmpty && pushTs != detTs;
     return ListView(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(AppEspacio.lg),
       children: [
         Padding(
-          padding: const EdgeInsets.only(bottom: 4),
+          padding: const EdgeInsets.only(bottom: AppEspacio.xs),
           child: Text(
             'Lote de ${_fmtHora(_pushDetalleTs ?? _pushTs)}',
             style: AppTexto.subtitulo,
@@ -2396,8 +2397,8 @@ class _DetalleSyncScreenState extends State<DetalleSyncScreen> {
         ),
         if (mostrarBanner)
           Container(
-            margin: const EdgeInsets.only(bottom: 12, top: 8),
-            padding: const EdgeInsets.all(12),
+            margin: const EdgeInsets.only(bottom: AppEspacio.md, top: AppEspacio.sm),
+            padding: const EdgeInsets.all(AppEspacio.md),
             decoration: BoxDecoration(
               color: AppColores.info.withValues(alpha: 0.12),
               borderRadius: BorderRadius.circular(AppRadio.md),
@@ -2435,7 +2436,7 @@ class _DetalleSyncScreenState extends State<DetalleSyncScreen> {
     final textoDetalles =
         detalles.isEmpty ? 'op $uuidCorto' : detalles.join(' · ');
     return Card(
-      margin: const EdgeInsets.only(bottom: 8),
+      margin: const EdgeInsets.only(bottom: AppEspacio.sm),
       child: ListTile(
         title: Text(tituloDeOp(op)),
         subtitle: Column(
@@ -2446,7 +2447,7 @@ class _DetalleSyncScreenState extends State<DetalleSyncScreen> {
             // para necesita_revision, no solo rechazada.
             if (estado == 'rechazada' || estado == 'necesita_revision')
               Padding(
-                padding: const EdgeInsets.only(top: 4),
+                padding: const EdgeInsets.only(top: AppEspacio.xs),
                 child: Text(
                   _motivoOp(op),
                   style: AppTexto.minuscula.copyWith(
@@ -2475,16 +2476,16 @@ class _DetalleSyncScreenState extends State<DetalleSyncScreen> {
     final mostrarBanner =
         pullTs.isNotEmpty && detTs.isNotEmpty && pullTs != detTs;
     return ListView(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(AppEspacio.lg),
       children: [
         Padding(
-          padding: const EdgeInsets.only(bottom: 4),
+          padding: const EdgeInsets.only(bottom: AppEspacio.xs),
           child: Text(cabecera, style: AppTexto.subtitulo),
         ),
         if (mostrarBanner)
           Container(
-            margin: const EdgeInsets.only(bottom: 12, top: 8),
-            padding: const EdgeInsets.all(12),
+            margin: const EdgeInsets.only(bottom: AppEspacio.md, top: AppEspacio.sm),
+            padding: const EdgeInsets.all(AppEspacio.md),
             decoration: BoxDecoration(
               color: AppColores.info.withValues(alpha: 0.12),
               borderRadius: BorderRadius.circular(AppRadio.md),
@@ -2511,7 +2512,7 @@ class _DetalleSyncScreenState extends State<DetalleSyncScreen> {
           const SizedBox(height: 12),
         ...entradas.map(
           (e) => Card(
-            margin: const EdgeInsets.only(bottom: 8),
+            margin: const EdgeInsets.only(bottom: AppEspacio.sm),
             child: ListTile(
               leading:
                   const Icon(Icons.download_rounded, color: AppColores.info),
@@ -2532,9 +2533,9 @@ class _DetalleSyncScreenState extends State<DetalleSyncScreen> {
   Widget build(BuildContext context) {
     final esSubidos = widget.tipo == TipoDetalleSync.subidos;
     return Scaffold(
-      appBar: AppBar(
-        title:
-            Text(esSubidos ? 'Detalle de subidos' : 'Detalle de bajados'),
+      appBar: appBarIron(
+        context,
+        esSubidos ? 'Detalle de subidos' : 'Detalle de bajados',
       ),
       body: _cargando
           ? const EstadoCargando(texto: 'Cargando cola de sync…')

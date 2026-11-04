@@ -37,6 +37,7 @@ import '../precio_cobro.dart';
 import '../servicios.dart';
 import '../sync.dart';
 import '../tiempo.dart';
+import 'app_bar.dart';
 import 'componentes.dart';
 import 'diseno.dart';
 import 'historial_ventas.dart';
@@ -266,14 +267,14 @@ class _CentroComprasScreenState extends State<CentroComprasScreen> {
     // P2#6: guarda de dueño en build (antes solo el FAB la tenía).
     if (!AuthService().isOwner) {
       return Scaffold(
-          appBar: AppBar(title: const Text('Extracto de compras')),
+          appBar: appBarIron(context, 'Extracto de compras'),
           body: const Center(
               child: Text('Solo el dueño ve esta pantalla.')));
     }
     return Scaffold(
       // v1.13.0: la vista de ventas se llama Extracto (E4 extendido,
       // no duplicado). El registro manual de compras sigue aquí.
-      appBar: AppBar(title: const Text('Extracto de compras')),
+      appBar: appBarIron(context, 'Extracto de compras'),
       floatingActionButton: AuthService().isOwner
           ? FloatingActionButton.extended(
               onPressed: () async {
@@ -298,7 +299,7 @@ class _CentroComprasScreenState extends State<CentroComprasScreen> {
                             child: Text('Sin compras para este filtro.',
                                 style: AppTexto.secundario))
                         : ListView(
-                            padding: const EdgeInsets.all(16),
+                            padding: const EdgeInsets.all(AppEspacio.lg),
                             children: [
                               for (final f in _visibles)
                                 _filaCompra(f),
@@ -396,7 +397,7 @@ class _CentroComprasScreenState extends State<CentroComprasScreen> {
             Text('Origen: ${esManual ? 'Manual (Panel)' : 'Venta del turno'}'),
             if (!esManual)
               const Padding(
-                padding: EdgeInsets.only(top: 8),
+                padding: EdgeInsets.only(top: AppEspacio.sm),
                 child: Text(
                   'Las ventas del turno se corrigen desde su pantalla, '
                   'no desde aquí, para no duplicar los flujos de '

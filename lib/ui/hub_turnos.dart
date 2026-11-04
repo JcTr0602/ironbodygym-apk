@@ -20,6 +20,7 @@ import '../negocio.dart';
 import '../tiempo.dart';
 import '../turno_service.dart';
 import '../turnos_resolucion.dart';
+import 'app_bar.dart';
 import 'arqueo.dart';
 import 'componentes.dart';
 import 'diseno.dart';
@@ -396,9 +397,10 @@ class _HubTurnosScreenState extends State<HubTurnosScreen> {
     final quienesHoy =
         _cargando || _hoy.weekday == 7 ? const <String>[] : _quienesTrabajanHoy();
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Turnos de hoy'),
-        actions: [
+      appBar: appBarIron(
+        context,
+        'Turnos de hoy',
+        acciones: [
           IconButton(
             icon: const Icon(Icons.refresh_rounded),
             tooltip: 'Actualizar',
@@ -409,7 +411,7 @@ class _HubTurnosScreenState extends State<HubTurnosScreen> {
       body: _cargando
           ? const EstadoCargando(texto: 'Cargando turnos…')
           : ListView(
-              padding: const EdgeInsets.all(16),
+              padding: const EdgeInsets.all(AppEspacio.lg),
               children: [
                 Text(
                   'Hoy ${_hoy.day}/${_hoy.month}/${_hoy.year}'
@@ -479,7 +481,7 @@ class _HubTurnosScreenState extends State<HubTurnosScreen> {
                   ];
                   if (suplen.isEmpty) return const SizedBox.shrink();
                   return Padding(
-                    padding: const EdgeInsets.only(bottom: 8),
+                    padding: const EdgeInsets.only(bottom: AppEspacio.sm),
                     child: Tarjeta(
                       child: Column(
                         crossAxisAlignment:
@@ -592,7 +594,7 @@ class _HubTurnosScreenState extends State<HubTurnosScreen> {
                 else
                   for (final p in _pendientes)
                     Padding(
-                      padding: const EdgeInsets.only(bottom: 8),
+                      padding: const EdgeInsets.only(bottom: AppEspacio.sm),
                       child: Tarjeta(
                         child: InkWell(
                           onTap: () => Navigator.of(context).push(

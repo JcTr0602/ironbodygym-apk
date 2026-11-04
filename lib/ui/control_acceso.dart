@@ -17,6 +17,7 @@ import '../localdb.dart';
 import '../tiempo.dart';
 import '../negocio.dart' show tiempoRelativo, normalizarTelefonoWaMe;
 import 'acciones_acceso.dart';
+import 'app_bar.dart';
 import 'campana_wa.dart';
 import 'estadisticas_adopcion.dart';
 import 'diseno.dart';
@@ -36,7 +37,7 @@ class ControlAccesoScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     if (!AuthService().isOwner) {
       return Scaffold(
-        appBar: AppBar(title: const Text('Usuarios')),
+        appBar: appBarIron(context, 'Usuarios'),
         body: const Center(
           child: Text('Solo el dueño puede gestionar los accesos.'),
         ),
@@ -441,7 +442,7 @@ class _AccesosClientesTabState extends State<AccesosClientesTab> {
                     prefixIcon: const Icon(Icons.search_rounded, size: 20),
                     isDense: true,
                     border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
+                      borderRadius: BorderRadius.circular(AppRadio.md),
                     ),
                   ),
                 ),
@@ -588,7 +589,7 @@ class _AccesosClientesTabState extends State<AccesosClientesTab> {
     return Padding(
       padding: const EdgeInsets.only(right: AppEspacio.sm),
       child: InkWell(
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(AppRadio.md),
         onTap: () {
           // Lote 1 Argón: la selección pertenece a la vista sinacceso;
           // al cambiar de tarjeta se limpia para no arrastrar
@@ -610,7 +611,7 @@ class _AccesosClientesTabState extends State<AccesosClientesTab> {
               color: seleccionada ? color : Colors.transparent,
               width: 1.4,
             ),
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: BorderRadius.circular(AppRadio.md),
           ),
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -1167,18 +1168,17 @@ class _AuditoriaAccesosScreenState extends State<AuditoriaAccesosScreen> {
     // única vía posible hasta aquí).
     if (!AuthService().isOwner) {
       return Scaffold(
-        appBar: AppBar(
-          title: const Text('Auditoría de accesos'),
-        ),
+        appBar: appBarIron(context, 'Auditoría de accesos'),
         body: const Center(
           child: Text('Solo el dueño puede ver la auditoría.'),
         ),
       );
     }
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Auditoría de accesos'),
-        actions: [
+      appBar: appBarIron(
+        context,
+        'Auditoría de accesos',
+        acciones: [
           IconButton(
             icon: const Icon(Icons.refresh_rounded),
             onPressed: _cargando ? null : _cargar,

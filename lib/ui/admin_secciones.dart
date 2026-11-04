@@ -23,6 +23,7 @@ import '../sync.dart';
 import '../tipos_pago.dart';
 import '../tiempo.dart';
 import '../ultimo_sync.dart';
+import 'app_bar.dart';
 import 'categorias_suplemento.dart';
 import 'componentes.dart';
 import 'cuentas_cobrar.dart';
@@ -65,7 +66,7 @@ Widget seccionAdmin(
 Widget filaAdmin(BuildContext context, IconData? icono, String etiqueta,
     String valor, {bool negrita = false}) {
   return Padding(
-    padding: const EdgeInsets.only(bottom: 8),
+    padding: const EdgeInsets.only(bottom: AppEspacio.sm),
     child: Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
@@ -107,9 +108,9 @@ class SeccionResumenScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Resumen')),
+      appBar: appBarIron(context, 'Resumen'),
       body: ListView(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(AppEspacio.lg),
         children: [
           seccionAdmin(context, Icons.bar_chart_rounded, 'Estadísticas del mes', [
             filaAdmin(context, Icons.payments_rounded, 'Ingresos',
@@ -192,9 +193,9 @@ class _SeccionCobrosScreenState extends State<SeccionCobrosScreen> {
         (caja['efectivo'] ?? 0) + (caja['transferencia'] ?? 0);
     final neto = cobradoHoy - gastosHoy;
     return Scaffold(
-      appBar: AppBar(title: const Text('Cobros')),
+      appBar: appBarIron(context, 'Cobros'),
       body: ListView(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(AppEspacio.lg),
         children: [
           seccionAdmin(context, Icons.point_of_sale_rounded, 'Cierre de caja (hoy)', [
             filaAdmin(context, Icons.payments_rounded, 'Efectivo',
@@ -382,16 +383,12 @@ class _SeccionAjustesScreenState extends State<SeccionAjustesScreen> {
   Widget build(BuildContext context) {
     final tipos = widget.getTipos();
     return Scaffold(
-      appBar: AppBar(
-          title: Text(widget.seccion == 'bancarios'
-              ? 'Datos bancarios'
-              : widget.seccion == 'precios'
-                  ? 'Otros precios'
-                  : widget.seccion == 'tipos'
-                      ? 'Tipos de pago'
-                      : 'Ajustes')),
+      appBar: appBarIron(
+        context,
+        widget.seccion == 'bancarios' ? 'Datos bancarios' : widget.seccion == 'precios' ? 'Otros precios' : widget.seccion == 'tipos' ? 'Tipos de pago' : 'Ajustes',
+      ),
       body: ListView(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(AppEspacio.lg),
         children: [
           if (widget.seccion == null || widget.seccion == 'tipos')
             seccionAdmin(context, Icons.payments_rounded, 'Tipos de pago', [
@@ -444,7 +441,7 @@ class _SeccionAjustesScreenState extends State<SeccionAjustesScreen> {
             seccionAdmin(context, Icons.price_change_rounded, 'Otros precios', [
             for (final (clave, etiqueta) in widget.clavesMonto)
               Padding(
-                padding: const EdgeInsets.only(bottom: 8),
+                padding: const EdgeInsets.only(bottom: AppEspacio.sm),
                 child: CampoTexto(
                   controller: widget.montos[clave],
                   etiqueta: etiqueta.contains('CUP') ? etiqueta : '$etiqueta (CUP)',
@@ -462,21 +459,21 @@ class _SeccionAjustesScreenState extends State<SeccionAjustesScreen> {
           if (widget.seccion == null || widget.seccion == 'bancarios')
             seccionAdmin(context, Icons.account_balance_rounded, 'Datos bancarios', [
             Padding(
-              padding: const EdgeInsets.only(bottom: 8),
+              padding: const EdgeInsets.only(bottom: AppEspacio.sm),
               child: CampoTexto(
                 controller: widget.bancarios['tarjeta_bandec'],
                 etiqueta: 'Tarjeta BANDEC',
               ),
             ),
             Padding(
-              padding: const EdgeInsets.only(bottom: 8),
+              padding: const EdgeInsets.only(bottom: AppEspacio.sm),
               child: CampoTexto(
                 controller: widget.bancarios['tarjeta_bpa'],
                 etiqueta: 'Tarjeta BPA',
               ),
             ),
             Padding(
-              padding: const EdgeInsets.only(bottom: 8),
+              padding: const EdgeInsets.only(bottom: AppEspacio.sm),
               child: CampoTexto(
                 controller: widget.bancarios['movil_confirmacion'],
                 etiqueta: 'Móvil confirmación',
@@ -484,7 +481,7 @@ class _SeccionAjustesScreenState extends State<SeccionAjustesScreen> {
               ),
             ),
             Padding(
-              padding: const EdgeInsets.only(bottom: 8),
+              padding: const EdgeInsets.only(bottom: AppEspacio.sm),
               child: CampoTexto(
                 controller: widget.bancarios['titular'],
                 etiqueta: 'Titular de la cuenta',
@@ -531,9 +528,9 @@ class _SeccionGastosScreenState extends State<SeccionGastosScreen> {
   Widget build(BuildContext context) {
     final gastos = widget.getGastos();
     return Scaffold(
-      appBar: AppBar(title: const Text('Gastos')),
+      appBar: appBarIron(context, 'Gastos'),
       body: ListView(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(AppEspacio.lg),
         children: [
           seccionAdmin(context, Icons.receipt_long_rounded, 'Últimos gastos', [
             if (gastos.isEmpty)
@@ -571,9 +568,9 @@ class SeccionSuplementosScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Suplementos')),
+      appBar: appBarIron(context, 'Suplementos'),
       body: ListView(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(AppEspacio.lg),
         children: [
           seccionAdmin(context, Icons.medication_rounded, 'Suplementos', [
             BotonPrimario(
@@ -890,14 +887,15 @@ class _SeccionDiagnosticoScreenState extends State<SeccionDiagnosticoScreen> {
     // con la pantalla.
     if (!AuthService().isOwner) {
       return Scaffold(
-          appBar: AppBar(title: const Text('Diagnóstico de sync')),
+          appBar: appBarIron(context, 'Diagnóstico de sync'),
           body: const Center(
               child: Text('El diagnóstico es solo el dueño.')));
     }
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Diagnóstico'),
-        actions: [
+      appBar: appBarIron(
+        context,
+        'Diagnóstico',
+        acciones: [
           IconButton(
             tooltip: 'Copiar informe',
             icon: const Icon(Icons.copy_all_rounded),
@@ -910,7 +908,7 @@ class _SeccionDiagnosticoScreenState extends State<SeccionDiagnosticoScreen> {
           : RefreshIndicator(
               onRefresh: _cargar,
               child: ListView(
-                padding: const EdgeInsets.all(16),
+                padding: const EdgeInsets.all(AppEspacio.lg),
                 children: [
                   seccionAdmin(context, Icons.monitor_heart_rounded, 'Estado', [
                     for (final e in _datos.entries)
@@ -938,7 +936,7 @@ class _SeccionDiagnosticoScreenState extends State<SeccionDiagnosticoScreen> {
                       else
                         ..._ultimoSync.map((f) => Padding(
                               padding:
-                                  const EdgeInsets.only(bottom: 8),
+                                  const EdgeInsets.only(bottom: AppEspacio.sm),
                               child: Row(
                                 children: [
                                   Expanded(
@@ -981,7 +979,7 @@ class _SeccionDiagnosticoScreenState extends State<SeccionDiagnosticoScreen> {
                     else
                       ..._eventosCarga.map((f) => Padding(
                             padding:
-                                const EdgeInsets.only(bottom: 8),
+                                const EdgeInsets.only(bottom: AppEspacio.sm),
                             child: Row(
                               children: [
                                 Expanded(
@@ -1107,14 +1105,12 @@ class _HistorialSyncScreenState extends State<HistorialSyncScreen> {
     // el detalle crudo de eventos de sync).
     if (!AuthService().isOwner) {
       return Scaffold(
-          appBar: AppBar(title: const Text('Historial de sync')),
+          appBar: appBarIron(context, 'Historial de sync'),
           body: const Center(
               child: Text('El historial es solo el dueño.')));
     }
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Historial de sync'),
-      ),
+      appBar: appBarIron(context, 'Historial de sync'),
       body: _cargando
           ? const EstadoCargando(texto: 'Leyendo historial…')
           : _fallo
@@ -1130,7 +1126,7 @@ class _HistorialSyncScreenState extends State<HistorialSyncScreen> {
               : RefreshIndicator(
                   onRefresh: _cargar,
                   child: ListView.builder(
-                    padding: const EdgeInsets.all(16),
+                    padding: const EdgeInsets.all(AppEspacio.lg),
                     itemCount: _eventos.length + 1,
                     itemBuilder: (context, i) {
                       // V32: resumen semántico arriba; el detalle
@@ -1145,7 +1141,7 @@ class _HistorialSyncScreenState extends State<HistorialSyncScreen> {
                             .length;
                         return Padding(
                           padding:
-                              const EdgeInsets.only(bottom: 12),
+                              const EdgeInsets.only(bottom: AppEspacio.md),
                           child: Tarjeta(
                             child: Row(
                               children: [
@@ -1172,7 +1168,7 @@ class _HistorialSyncScreenState extends State<HistorialSyncScreen> {
                       final nivel = '${f['nivel']}';
                       final detalle = f['detalle']?.toString();
                       return Padding(
-                        padding: const EdgeInsets.only(bottom: 12),
+                        padding: const EdgeInsets.only(bottom: AppEspacio.md),
                         child: Tarjeta(
                           child: Column(
                             crossAxisAlignment:
@@ -1204,7 +1200,7 @@ class _HistorialSyncScreenState extends State<HistorialSyncScreen> {
                                   tilePadding: EdgeInsets.zero,
                                   childrenPadding:
                                       const EdgeInsets.only(
-                                          bottom: 4),
+                                          bottom: AppEspacio.xs),
                                   children: [
                                     Align(
                                       alignment:
@@ -1419,14 +1415,15 @@ class _VerificacionEspejoScreenState
   Widget build(BuildContext context) {
     if (!AuthService().isOwner) {
       return Scaffold(
-          appBar: AppBar(title: const Text('Verificación del espejo')),
+          appBar: appBarIron(context, 'Verificación del espejo'),
           body: const Center(
               child: Text('Verificar el espejo es solo el dueño.')));
     }
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Verificación del espejo'),
-        actions: [
+      appBar: appBarIron(
+        context,
+        'Verificación del espejo',
+        acciones: [
           IconButton(
               icon: const Icon(Icons.refresh_rounded),
               onPressed: _cargar,
@@ -1443,7 +1440,7 @@ class _VerificacionEspejoScreenState
                   onReintentar: _cargar,
                 )
               : ListView(
-              padding: const EdgeInsets.all(16),
+              padding: const EdgeInsets.all(AppEspacio.lg),
               children: [
                 Tarjeta(
                   child: Column(
@@ -1486,11 +1483,11 @@ class _VerificacionEspejoScreenState
                       '${_tablas.length} tablas del espejo local',
                       style: AppTexto.secundario),
                   tilePadding: EdgeInsets.zero,
-                  childrenPadding: const EdgeInsets.only(top: 4),
+                  childrenPadding: const EdgeInsets.only(top: AppEspacio.xs),
                   children: [
                     for (final t in _tablas)
                       Padding(
-                    padding: const EdgeInsets.only(bottom: 8),
+                    padding: const EdgeInsets.only(bottom: AppEspacio.sm),
                     child: Tarjeta(
                       child: Builder(builder: (_) {
                         // AU1: delta explícito con color (verde
@@ -1656,15 +1653,15 @@ class _BajadaCompletaScreenState extends State<BajadaCompletaScreen> {
   Widget build(BuildContext context) {
     if (!AuthService().isOwner) {
       return Scaffold(
-          appBar: AppBar(title: const Text('Bajada completa')),
+          appBar: appBarIron(context, 'Bajada completa'),
           body: const Center(
               child: Text('La bajada completa es solo el dueño.')));
     }
     final sinPendientes = _pendientes == 0;
     return Scaffold(
-      appBar: AppBar(title: const Text('Bajada completa')),
+      appBar: appBarIron(context, 'Bajada completa'),
       body: ListView(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(AppEspacio.lg),
         children: [
           Tarjeta(
             child: Column(
