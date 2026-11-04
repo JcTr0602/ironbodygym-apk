@@ -40,6 +40,7 @@ Map<String, dynamic> _fila({
   String alcance = 'global',
   String app = 'ambas',
   String? objetivo,
+  String? tipoObjetivo,
   String? mensaje,
   Object? activo = 1,
   String? expiraTs,
@@ -48,6 +49,7 @@ Map<String, dynamic> _fila({
     'alcance': alcance,
     'app': app,
     if (objetivo != null) 'objetivo': objetivo,
+    if (tipoObjetivo != null) 'tipo_objetivo': tipoObjetivo,
     if (mensaje != null) 'mensaje': mensaje,
     'activo': activo,
     if (expiraTs != null) 'expira_ts': expiraTs,
@@ -120,6 +122,46 @@ void main() {
       expect(
           evaluarBloqueoLocal(filas,
               telegramId: 222, ahoraServidor: ahora),
+          isNotNull);
+    });
+
+    test('1.23 tipo_objetivo: un candado de cliente cuyo id '
+        'iguala mi telegram NO me bloquea', () {
+      final filas = [
+        _fila(
+            alcance: 'persona',
+            objetivo: '222',
+            tipoObjetivo: 'cliente')
+      ];
+      expect(
+          evaluarBloqueoLocal(filas,
+              telegramId: 222, ahoraServidor: ahora),
+          isNull);
+    });
+
+    test('1.23 tipo_objetivo: tipo telegram bloquea; tipo '
+        'invitado no; sin tipo (legado) bloquea como antes', () {
+      expect(
+          evaluarBloqueoLocal([
+            _fila(
+                alcance: 'persona',
+                objetivo: '222',
+                tipoObjetivo: 'telegram')
+          ], telegramId: 222, ahoraServidor: ahora),
+          isNotNull);
+      expect(
+          evaluarBloqueoLocal([
+            _fila(
+                alcance: 'persona',
+                objetivo: '222',
+                tipoObjetivo: 'invitado')
+          ], telegramId: 222, ahoraServidor: ahora),
+          isNull);
+      expect(
+          evaluarBloqueoLocal(
+              [_fila(alcance: 'persona', objetivo: '222')],
+              telegramId: 222,
+              ahoraServidor: ahora),
           isNotNull);
     });
 

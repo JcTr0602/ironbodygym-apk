@@ -70,13 +70,46 @@ void main() {
     expect(r.map((p) => p.nombre), isNot(contains('Mario Ruiz')));
   });
 
-  test('delta del panel (residual H1): un objetivo que coincide '
-      'con el telegram_id de un entrenador colisiona', () {
-    const telegramIds = ['969869611', '1403501391', '735772141'];
-    expect(objetivoCandadoColisiona('969869611', telegramIds),
-        isTrue);
-    expect(objetivoCandadoColisiona('205', telegramIds), isFalse);
-    expect(objetivoCandadoColisiona('uuid-1', telegramIds), isFalse);
+  test('1.23 tipo_objetivo: el dominio sale de la vía elegida',
+      () {
+    expect(
+        tipoObjetivoCandado(
+            personaTipo: 'entrenador',
+            esInvitado: false,
+            idManual: false,
+            objetivo: '969869611'),
+        'telegram');
+    expect(
+        tipoObjetivoCandado(
+            personaTipo: 'cliente',
+            esInvitado: false,
+            idManual: false,
+            objetivo: '205'),
+        'cliente');
+    expect(
+        tipoObjetivoCandado(
+            personaTipo: 'cliente',
+            esInvitado: true,
+            idManual: false,
+            objetivo: 'uuid-invitado'),
+        'invitado');
+    // Vía manual: numérico = cliente; uuid = invitado. Un id de
+    // cliente que coincida con un telegram ya NO se rechaza:
+    // el dominio declarado hace la colisión inocua.
+    expect(
+        tipoObjetivoCandado(
+            personaTipo: 'cliente',
+            esInvitado: false,
+            idManual: true,
+            objetivo: '969869611'),
+        'cliente');
+    expect(
+        tipoObjetivoCandado(
+            personaTipo: 'cliente',
+            esInvitado: false,
+            idManual: true,
+            objetivo: '9d2f1c44-1111-2222-3333-444455556666'),
+        'invitado');
   });
 
   test('el id del cliente viaja como texto (objetivo del servidor)',

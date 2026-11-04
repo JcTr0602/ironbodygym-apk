@@ -78,6 +78,14 @@ BloqueoVigente? evaluarBloqueoLocal(
     final int prio;
     switch (alcance) {
       case 'persona':
+        // 1.23 (tipo_objetivo): con dominio declarado, esta app
+        // solo se pausa con tipo 'telegram'; sin tipo (fila
+        // legada) vale la coincidencia histórica contra el
+        // telegram. Un candado de cliente o invitado cuyo id
+        // numérico iguale por azar el telegram de la sesión ya
+        // no pausa a este entrenador.
+        final tipo = f['tipo_objetivo']?.toString();
+        if (tipo != null && tipo != 'telegram') continue;
         if (telegramId == null || objetivo != '$telegramId') continue;
         prio = 1;
       case 'rol':

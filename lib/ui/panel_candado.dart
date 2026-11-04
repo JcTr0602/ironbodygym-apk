@@ -203,34 +203,15 @@ class _PanelCandadoScreenState extends State<PanelCandadoScreen> {
             significado: SignificadoChip.alerta);
         return;
       }
-      // Delta del panel (H1): el objetivo de Clientes se valida
-      // ANTES de encolar la op. El servidor casa el objetivo
-      // contra telegram_id, cliente_id e invitado_id a la vez,
-      // así que: (a) el id tecleado a mano debe ser de un
-      // cliente o invitado conocido — un dígito mal puesto no
-      // debe pausar a un desconocido ni quedarse en silencio
-      // sin pausar a nadie —; y (b) NINGÚN objetivo de esta vía
-      // (buscador o manual) puede coincidir con el telegram_id
-      // de un entrenador o del dueño, porque el servidor lo
-      // casaría también contra esa identidad y pausaría al
-      // entrenador. La solución de fondo (tipo_objetivo
-      // explícito en el protocolo) queda registrada en el
-      // inventario de servidor de la 1.23.
+      // El id tecleado a mano debe ser de un cliente o
+      // invitado conocido: un dígito mal puesto no debe pausar
+      // a un desconocido ni quedarse en silencio sin pausar a
+      // nadie. (El antiguo rechazo por colisión con telegram_id
+      // de entrenadores se retiró en la 1.23: con tipo_objetivo
+      // explícito en la op, cada evaluador casa solo dentro de
+      // su dominio y la colisión numérica es inocua — veredicto
+      // de Argón, condición B del diseño.)
       if (_personaTipo != 'entrenador') {
-        final telegramIds = <String>[
-          for (final e in _entrenadores) e.tid,
-          if (AuthService().telegramId != null)
-            '${AuthService().telegramId}',
-        ];
-        if (objetivoCandadoColisiona(objetivo, telegramIds)) {
-          mostrarSnack(
-              context,
-              'Ese id coincide con el Telegram de un '
-              'entrenador: no se aplica el candado para no '
-              'pausarlo por error.',
-              significado: SignificadoChip.alerta);
-          return;
-        }
         if (_idManual) {
           final conocidas = await _idsPersonasConocidas();
           if (!mounted) return;
@@ -258,11 +239,22 @@ class _PanelCandadoScreenState extends State<PanelCandadoScreen> {
     setState(() => _guardando = true);
     try {
       final mensaje = _mensajeCtrl.text.trim();
+      // 1.23 (tipo_objetivo): el dominio de la persona viaja
+      // explícito en la op; cada evaluador casará solo dentro
+      // de su dominio.
+      final tipoObj = _alcance == 'persona' && objetivo != null
+          ? tipoObjetivoCandado(
+              personaTipo: _personaTipo,
+              esInvitado: _personaElegida?.esInvitado ?? false,
+              idManual: _idManual,
+              objetivo: objetivo)
+          : null;
       await _enviarOp({
         'id': const Uuid().v4(),
         'alcance': _alcance,
         'app': _alcance == 'global' ? 'ambas' : _app,
         if (objetivo != null) 'objetivo': objetivo,
+        if (tipoObj != null) 'tipo_objetivo': tipoObj,
         if (mensaje.isNotEmpty) 'mensaje': mensaje,
         'activo': 1,
         if (_horasCaducidad > 0)
@@ -295,6 +287,10 @@ class _PanelCandadoScreenState extends State<PanelCandadoScreen> {
       'alcance': '${f['alcance'] ?? 'global'}',
       'app': '${f['app'] ?? 'ambas'}',
       if (f['objetivo'] != null) 'objetivo': '${f['objetivo']}',
+      // El tipo viaja si la fila lo trae (si no, el servidor
+      // preserva el guardado al desactivar: condición A).
+      if (f['tipo_objetivo'] != null)
+        'tipo_objetivo': '${f['tipo_objetivo']}',
       if ((f['mensaje']?.toString() ?? '').isNotEmpty)
         'mensaje': '${f['mensaje']}',
       'activo': 0,
@@ -306,10 +302,10 @@ class _PanelCandadoScreenState extends State<PanelCandadoScreen> {
 
   /// Ids que el panel reconoce como personas de Clientes
   /// (clientes del espejo + invitados vivos), leídos frescos al
-  /// confirmar. NUNCA se mezclan los telegram_id de
-  /// entrenadores: un id de entrenador tecleado en la vía de
-  /// Clientes no debe validar (con app «ambas» el servidor lo
-  /// casaría contra el telegram_id y pausaría al entrenador).
+  /// confirmar. La validación protege del error de dedo al
+  /// teclear el id a mano (que el id exista como cliente o
+  /// invitado); ya no protege de colisiones entre dominios:
+  /// con tipo_objetivo declarado, eso es inocuo.
   Future<Set<String>> _idsPersonasConocidas() async {
     try {
       final clientes = await listaClientes('');
@@ -624,14 +620,29 @@ class _PanelCandadoScreenState extends State<PanelCandadoScreen> {
   }
 }
 
-/// ¿El objetivo de un candado de Clientes coincide con el
-/// telegram_id de un entrenador o del dueño? El servidor casa
-/// el objetivo contra los tres dominios de identidad a la vez;
-/// si coincide, aplicar el candado pausaría también al
-/// entrenador (delta del panel, residual de H1).
-bool objetivoCandadoColisiona(
-        String objetivo, Iterable<String> telegramIds) =>
-    telegramIds.contains(objetivo);
+/// 1.23: dominio explícito del objetivo de un candado de
+/// alcance «persona» (protocolo tipo_objetivo, diseño aprobado
+/// por Argón). El panel conoce el dominio al crear:
+/// - entrenador → 'telegram';
+/// - persona del buscador → 'invitado' o 'cliente' según su
+///   clase (PersonaCandado.esInvitado);
+/// - id escrito a mano → el de cliente es numérico y el de
+///   invitado es un uuid: se distingue por la forma del texto.
+/// (El antiguo objetivoCandadoColisiona se retiró: con el
+/// dominio declarado, la colisión numérica entre dominios es
+/// estructuralmente inocua.)
+String tipoObjetivoCandado({
+  required String personaTipo,
+  required bool esInvitado,
+  required bool idManual,
+  required String objetivo,
+}) {
+  if (personaTipo == 'entrenador') return 'telegram';
+  if (!idManual) return esInvitado ? 'invitado' : 'cliente';
+  return RegExp(r'^\d+$').hasMatch(objetivo.trim())
+      ? 'cliente'
+      : 'invitado';
+}
 
 /// Persona elegible para un candado de alcance «persona» en la
 /// app de Clientes: un cliente del espejo local o un invitado de
