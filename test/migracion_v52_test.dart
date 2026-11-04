@@ -39,7 +39,7 @@ void main() {
     await LocalDb.resetParaTest();
     final d = await LocalDb.instance.db;
     expect(await d.getVersion(), LocalDb.versionActual);
-    expect(LocalDb.versionActual, 60);
+    expect(LocalDb.versionActual, 61);
     expect(await _columnas(), contains('frecuencia'));
   });
 
