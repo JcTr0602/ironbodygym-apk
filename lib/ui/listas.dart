@@ -17,16 +17,20 @@ import 'diseno.dart';
 import 'ficha.dart';
 import 'widgets.dart';
 
+/// 1.23 (Delta Argón 4ª#6): un solo RegExp reutilizado — antes
+/// se construía uno nuevo por cliente en cada búsqueda.
+final _reNoDigitosListas = RegExp(r'[^0-9]');
+
 /// Buscador de Listas (16/25, PURO): coincide por nombre (sin
 /// mayúsculas) o por dígitos del teléfono.
 bool coincideBusquedaListas(Map<String, dynamic> c, String texto) {
   final q = texto.trim().toLowerCase();
   if (q.isEmpty) return true;
   if ('${c['nombre'] ?? ''}'.toLowerCase().contains(q)) return true;
-  final digQ = q.replaceAll(RegExp(r'[^0-9]'), '');
+  final digQ = q.replaceAll(_reNoDigitosListas, '');
   if (digQ.isNotEmpty) {
     final tel =
-        '${c['telefono'] ?? ''}'.replaceAll(RegExp(r'[^0-9]'), '');
+        '${c['telefono'] ?? ''}'.replaceAll(_reNoDigitosListas, '');
     if (tel.contains(digQ)) return true;
   }
   return false;

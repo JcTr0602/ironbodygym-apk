@@ -676,11 +676,8 @@ class _FichaScreenState extends State<FichaScreen> {
     if (!mounted) return;
     final payload = await pagoDialogo(context, c);
     if (payload == null || !mounted) return;
-    // v1.0.11: si es el dueño quien cobra, se marca entregado automáticamente
-    // (no tiene sentido que se deba dinero a sí mismo)
-    if (AuthService().isOwner) {
-      payload['entregado'] = 1;
-    }
+    // 1.23 (Delta Argón 5ª#1): la marca 'entregado': 1 del dueño
+    // ya nace dentro de pagoDialogo; no se repite aquí.
     // Bloque 1: Preview obligatorio + Recibo con Deshacer 15 s.
     // Ningún cobro se guarda sin pasar por el preview.
     final deshecho = await cobrarConPreviewYRecibo(

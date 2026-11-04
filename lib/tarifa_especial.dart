@@ -17,6 +17,7 @@ library;
 
 import 'dart:convert';
 
+import 'package:sqflite/sqflite.dart' show Transaction;
 import 'package:uuid/uuid.dart';
 
 import 'app_log.dart';
@@ -448,6 +449,49 @@ Future<String> otorgarTarifaEspecial({
   // basta una copia local inactiva, que la fusión respeta por ser
   // más reciente que el espejo viejo.
   final fusionadasPrevias = await _todasFusionadas();
+  await db.transaction((txn) async {
+    await _otorgarTarifaEnTxn(
+      txn,
+      fusionadasPrevias: fusionadasPrevias,
+      id: id,
+      ts: ts,
+      clienteId: clienteId,
+      nombre: nombre,
+      montoEfectivo: montoEfectivo,
+      montoTransferencia: montoTransferencia,
+      periodo: periodo,
+      desde: desde,
+      vigenteHasta: vigenteHasta,
+      motivo: motivo,
+      otorgadoPor: otorgadoPor,
+    );
+  });
+  return id;
+}
+
+/// Núcleo de [otorgarTarifaEspecial] DENTRO de una transacción
+/// ya abierta (Delta Argón 3ª-O3): el otorgamiento múltiple lo
+/// reutiliza para N clientes con UNA lectura fusionada y UNA
+/// transacción, en vez de N lecturas completas + N
+/// transacciones. [fusionadasPrevias] la calcula el llamador
+/// una sola vez; las previas LOCALES se leen del propio txn
+/// (ven el estado intra-transacción); las del espejo se filtran
+/// de la lectura única por cliente.
+Future<void> _otorgarTarifaEnTxn(
+  Transaction txn, {
+  required List<Map<String, dynamic>> fusionadasPrevias,
+  required String id,
+  required String ts,
+  required int clienteId,
+  required String nombre,
+  double? montoEfectivo,
+  double? montoTransferencia,
+  required String periodo,
+  required String desde,
+  String? vigenteHasta,
+  required String motivo,
+  int? otorgadoPor,
+}) async {
   final previasEspejo = [
     for (final f in fusionadasPrevias)
       if ((f['cliente_id'] as num?)?.toInt() == clienteId &&
@@ -455,7 +499,6 @@ Future<String> otorgarTarifaEspecial({
           ((f['activa'] as num?)?.toInt() ?? 0) == 1)
         f,
   ];
-  await db.transaction((txn) async {
     final previas = await txn.query('tarifa_especial',
         where: 'cliente_id=? AND periodo=? AND activa=1',
         whereArgs: [clienteId, periodo]);
@@ -535,12 +578,14 @@ Future<String> otorgarTarifaEspecial({
       },
       txn: txn,
     );
-  });
-  return id;
 }
 
 /// Otorga la MISMA tarifa a varios clientes (selector visual 1..N de
-/// Administración): una fila por cliente, cada una en su transacción.
+/// Administración): una fila por cliente.
+/// 1.23 (Delta Argón 3ª-O3): UNA lectura fusionada y UNA
+/// transacción para todos (antes: una lectura completa y una
+/// transacción POR cliente vía [otorgarTarifaEspecial]).
+/// Todo o nada: si un cliente falla, no se otorga a ninguno.
 /// Devuelve los ids creados, en el orden de [clienteIds].
 Future<List<String>> otorgarTarifaEspecialMulti({
   required List<int> clienteIds,
@@ -553,20 +598,33 @@ Future<List<String>> otorgarTarifaEspecialMulti({
   required String motivo,
   int? otorgadoPor,
 }) async {
+  if (clienteIds.isEmpty) return const [];
+  final db = await LocalDb.instance.db;
+  final ts = isoHabana(ahoraHabana());
+  final desde = vigenteDesde ?? hoyHabanaIso();
+  final fusionadasPrevias = await _todasFusionadas();
   final ids = <String>[];
-  for (final cid in clienteIds) {
-    ids.add(await otorgarTarifaEspecial(
-      clienteId: cid,
-      nombre: nombre,
-      montoEfectivo: montoEfectivo,
-      montoTransferencia: montoTransferencia,
-      periodo: periodo,
-      vigenteDesde: vigenteDesde,
-      vigenteHasta: vigenteHasta,
-      motivo: motivo,
-      otorgadoPor: otorgadoPor,
-    ));
-  }
+  await db.transaction((txn) async {
+    for (final cid in clienteIds) {
+      final id = const Uuid().v4();
+      ids.add(id);
+      await _otorgarTarifaEnTxn(
+        txn,
+        fusionadasPrevias: fusionadasPrevias,
+        id: id,
+        ts: ts,
+        clienteId: cid,
+        nombre: nombre,
+        montoEfectivo: montoEfectivo,
+        montoTransferencia: montoTransferencia,
+        periodo: periodo,
+        desde: desde,
+        vigenteHasta: vigenteHasta,
+        motivo: motivo,
+        otorgadoPor: otorgadoPor,
+      );
+    }
+  });
   return ids;
 }
 

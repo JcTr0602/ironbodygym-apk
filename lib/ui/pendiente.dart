@@ -876,15 +876,18 @@ class _DiaTileState extends State<_DiaTile> {
       margin: const EdgeInsets.only(bottom: AppEspacio.sm),
       padding: const EdgeInsets.all(AppEspacio.md),
       decoration: BoxDecoration(
-        color: Colors.grey.shade50,
+        // 1.23 (Delta Argón 6ª): tokens del tema en vez del
+        // fondo claro fijo (grey.shade50/300) — en modo oscuro
+        // la tarjeta ya no queda como un parche blanco.
+        color: AppColores.superficie(context),
         borderRadius: BorderRadius.circular(AppRadio.md),
         border: Border.all(
-            color: Colors.grey.shade300),
+            color: AppColores.borde(context)),
       ),
-      // v1.3.2 (Argón): el fondo es claro fijo; blindar el color del texto
-      // para que ningún Text herede el blanco del tema oscuro.
+      // v1.3.2 → 1.23: el texto se blinda con el TOKEN de texto
+      // del tema (antes black87 fijo sobre el fondo claro fijo).
       child: DefaultTextStyle.merge(
-        style: const TextStyle(color: Colors.black87),
+        style: TextStyle(color: AppColores.texto(context)),
         child: Column(
         crossAxisAlignment:
             CrossAxisAlignment.start,

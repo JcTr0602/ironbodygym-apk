@@ -286,7 +286,7 @@ class _LoginScreenState extends State<LoginScreen>
                                         AppColores.naranja)),
                           )
                         : BotonPrimario(
-                            texto: 'ENTRAR',
+                            texto: 'Entrar',
                             icono: Icons.login_rounded,
                             onPressed: _entrar,
                           ),

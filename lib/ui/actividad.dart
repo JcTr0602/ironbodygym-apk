@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -275,6 +276,9 @@ class _ActividadScreenState extends State<ActividadScreen> {
   // montos en una sola moneda. Se carga en _cargar().
   double _tasaUsd = 0;
   final _busquedaCtrl = TextEditingController();
+  // 1.23 (Delta Argón 3ª-O2): debounce del buscador — cada
+  // tecla re-filtraba y re-agrupaba los ~500 ítems al instante.
+  Timer? _busquedaDebounce;
   // v1.4.1 (Pieza 7, D3): serie diaria agregada de 30 días (puente).
   List<Map<String, dynamic>> _serie = [];
   bool _verSerie = true;
@@ -481,6 +485,21 @@ class _ActividadScreenState extends State<ActividadScreen> {
         }
       }
     }
+    // 1.23 (Delta Argón 3ª-O2): PRECÓMPUTO de montos del
+    // servidor. El parseo del detalle (_montoServidor, regex
+    // sobre texto) se hacía por tarjeta y por KPI en cada
+    // rebuild/filtrado; ahora se calcula UNA vez por ítem al
+    // cargar y se guarda en las mismas claves que ya usan los
+    // ítems locales (_monto_cup/_monto_usd). Los lectores
+    // pasan por _montosDe, que lee lo precargado y solo
+    // parsea como respaldo (ítem construido fuera de _cargar).
+    for (final a in lista) {
+      if (a['_en_cola'] == true) continue;
+      if (a.containsKey('_monto_cup')) continue;
+      final m = _montoServidor('${a['detalle'] ?? ''}');
+      a['_monto_cup'] = m.$1;
+      a['_monto_usd'] = m.$2;
+    }
     // v1.4.1 (Pieza 7): serie diaria para el mini gráfico.
     try {
       final rawSerie =
@@ -524,6 +543,7 @@ class _ActividadScreenState extends State<ActividadScreen> {
 
   @override
   void dispose() {
+    _busquedaDebounce?.cancel();
     _busquedaCtrl.dispose();
     super.dispose();
   }
@@ -906,20 +926,23 @@ class _ActividadScreenState extends State<ActividadScreen> {
   /// entregas ni ajustes de precios). Delega en [esCobroServidor].
   bool _esCobroServidor(String accion) => esCobroServidor(accion);
 
+  /// 1.23 (Delta Argón 3ª-O2): montos (cup, usd) de un ítem
+  /// desde el PRECÓMPUTO de _cargar; el parseo del detalle
+  /// queda solo como respaldo para ítems sin precargar.
+  (double, double) _montosDe(Map<String, dynamic> a) {
+    final cup = (a['_monto_cup'] as num?)?.toDouble();
+    if (cup != null) {
+      return (cup, (a['_monto_usd'] as num?)?.toDouble() ?? 0);
+    }
+    return _montoServidor('${a['detalle'] ?? ''}');
+  }
+
   /// v1.3.7 (Fase 2, B2): monto total del item en CUP (para el filtro
   /// por monto). Convierte USD→CUP con la tasa del día; si no hay tasa,
   /// el USD no se convierte (solo suma el CUP).
   double _montoCupTotal(Map<String, dynamic> a) {
-    double cup = 0, usd = 0;
-    if (a['_en_cola'] == true) {
-      cup = (a['_monto_cup'] as num?)?.toDouble() ?? 0;
-      usd = (a['_monto_usd'] as num?)?.toDouble() ?? 0;
-    } else {
-      final m = _montoServidor('${a['detalle'] ?? ''}');
-      cup = m.$1;
-      usd = m.$2;
-    }
-    return cup + (_tasaUsd > 0 ? usd * _tasaUsd : 0);
+    final m = _montosDe(a);
+    return m.$1 + (_tasaUsd > 0 ? m.$2 * _tasaUsd : 0);
   }
 
   /// v1.3.7 (Fase 2, B2): ¿el item pasa el filtro por monto?
@@ -1073,7 +1096,7 @@ class _ActividadScreenState extends State<ActividadScreen> {
       cup = (a['_monto_cup'] as num?)?.toDouble() ?? 0;
       usd = (a['_monto_usd'] as num?)?.toDouble() ?? 0;
     } else if (_esCobroServidor(accion)) {
-      final m = _montoServidor('${a['detalle'] ?? ''}');
+      final m = _montosDe(a);
       cup = m.$1;
       usd = m.$2;
     }
@@ -1228,16 +1251,24 @@ class _ActividadScreenState extends State<ActividadScreen> {
     if (idRecibo != null && _protegidosIds.contains(idRecibo)) {
       return;
     }
-    final subtitulo = _subtituloNuevo(a, titulo);
+    // 1.23 (Delta Argón 5ª#3): el recibo de Actividad era el
+    // ÚNICO mensaje automático sin la línea fija de cierre de
+    // Jc y llevaba el subtítulo crudo de la lista («Tipo ·
+    // Método · Hora · Entrenador») como «Detalle», duplicando
+    // fecha y cobrador. Ahora compone líneas limpias como
+    // textoReciboPago (método por su línea, sin subtítulo) y
+    // cierra con lineaMensajeAutomatico.
+    final metodo = _metodoDe(a);
     final fechaLarga = _fechaHoraLarga('${a['ts'] ?? ''}');
     final actor = '${a['actor'] ?? ''}'.trim();
     final buf = StringBuffer()
       ..writeln('*Iron Body Gym* — Recibo')
       ..writeln('Cliente: $titulo');
     if (montoTxt.isNotEmpty) buf.writeln('Monto: $montoTxt');
-    if (subtitulo.isNotEmpty) buf.writeln('Detalle: $subtitulo');
+    if (metodo.isNotEmpty) buf.writeln('Método: $metodo');
     if (fechaLarga.isNotEmpty) buf.writeln('Fecha: $fechaLarga');
     if (actor.isNotEmpty) buf.writeln('Cobrado por: $actor');
+    buf.write(lineaMensajeAutomatico);
     final url = Uri.parse(
         'https://wa.me/$waNum?text=${Uri.encodeComponent(buf.toString().trim())}');
     try {
@@ -2068,6 +2099,7 @@ class _ActividadScreenState extends State<ActividadScreen> {
                     ? IconButton(
                         icon: const Icon(Icons.clear_rounded),
                         onPressed: () {
+                          _busquedaDebounce?.cancel();
                           _busquedaCtrl.clear();
                           setState(() => _busqueda = '');
                         },
@@ -2080,8 +2112,15 @@ class _ActividadScreenState extends State<ActividadScreen> {
                 contentPadding: const EdgeInsets.symmetric(
                     horizontal: AppEspacio.md, vertical: AppEspacio.sm),
               ),
-              onChanged: (v) =>
-                  setState(() => _busqueda = v),
+              onChanged: (v) {
+                // Debounce 3ª-O2: el filtro se aplica a los
+                // 180 ms de pausa, no por tecla.
+                _busquedaDebounce?.cancel();
+                _busquedaDebounce =
+                    Timer(const Duration(milliseconds: 180), () {
+                  if (mounted) setState(() => _busqueda = v);
+                });
+              },
             ),
           ),
           // v1.3.5 (Fase 1, A1+B1): UNA sola fila de filtros.
@@ -2259,8 +2298,7 @@ class _ActividadScreenState extends State<ActividadScreen> {
               0;
     } else if (_esCobroServidor(
         accion)) {
-      final m = _montoServidor(
-          '${a['detalle'] ?? ''}');
+      final m = _montosDe(a);
       badgeCup = m.$1;
       badgeUsd = m.$2;
     }
@@ -2441,7 +2479,7 @@ class _ActividadScreenState extends State<ActividadScreen> {
         final accion = '${a['accion'] ?? ''}';
         if (!_esCobroServidor(accion)) continue;
         if (_esFiado(a)) continue;
-        final m = _montoServidor('${a['detalle'] ?? ''}');
+        final m = _montosDe(a);
         cup = m.$1;
         usd = m.$2;
       }
@@ -2527,7 +2565,7 @@ class _ActividadScreenState extends State<ActividadScreen> {
         if (!_esCobroServidor(accion)) continue;
         // v1.3.7 (Fase 2, D2): el fiado no suma al total cobrado.
         if (_esFiado(a)) continue;
-        final m = _montoServidor('${a['detalle'] ?? ''}');
+        final m = _montosDe(a);
         cup = m.$1;
         u = m.$2;
         cat = _categoriaDe(accion);

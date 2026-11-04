@@ -11,7 +11,9 @@ library;
 
 import 'dart:io';
 import 'dart:math' as math;
+import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 import 'package:image/image.dart' as img;
 
@@ -155,20 +157,66 @@ class FotoTrabajo {
   Size get tamano => Size(ancho.toDouble(), alto.toDouble());
 }
 
-/// Escribe [bytes] en [ruta] de forma atómica (tmp + rename).
-/// Si la escritura o el renombrado fallan, el temporal se borra
-/// antes de relanzar (corrección del panel: no dejar .tmp
-/// huérfanos en ningún camino).
-Future<void> _escribirAtomico(String ruta, List<int> bytes) async {
-  final tmp = File('$ruta.tmp');
+/// 1.23 (Delta Argón 4ª#5): núcleo pesado de [prepararFotoTrabajo]
+/// en un isolate vía compute(): decodificar + hornear EXIF +
+/// codificar un JPEG de varios megapíxeles en el hilo principal
+/// congelaba el editor. package:image es Dart puro (sin
+/// plataforma), así que corre igual en el isolate; la escritura
+/// atómica va síncrona dentro del isolate y ante cualquier
+/// fallo se limpia el temporal y se devuelve null.
+({int ancho, int alto})? _prepararFotoEnIsolate(
+    (Uint8List, String) args) {
+  final (bytes, ruta) = args;
   try {
-    await tmp.writeAsBytes(bytes, flush: true);
-    await tmp.rename(ruta);
-  } catch (_) {
+    final im = img.decodeImage(bytes);
+    if (im == null) return null;
+    final ifd = im.exif.imageIfd;
+    final orientacion = ifd.hasOrientation ? ifd.orientation : null;
+    final orientada = (orientacion != null && orientacion != 1)
+        ? img.bakeOrientation(im)
+        : im;
+    final tmp = File('$ruta.tmp');
     try {
-      await tmp.delete();
-    } catch (_) {}
-    rethrow;
+      tmp.writeAsBytesSync(img.encodeJpg(orientada, quality: 92),
+          flush: true);
+      tmp.renameSync(ruta);
+    } catch (_) {
+      try {
+        tmp.deleteSync();
+      } catch (_) {}
+      return null;
+    }
+    return (ancho: orientada.width, alto: orientada.height);
+  } catch (_) {
+    return null;
+  }
+}
+
+/// 1.23 (Delta Argón 4ª#5): núcleo pesado de [aplicarRecorteFoto]
+/// en un isolate. El Rect (dart:ui) no viaja entre isolates:
+/// pasan sus 4 enteros.
+bool _aplicarRecorteEnIsolate(
+    (Uint8List, String, int, int, int, int) args) {
+  final (bytes, ruta, x, y, ancho, alto) = args;
+  try {
+    final im = img.decodeImage(bytes);
+    if (im == null) return false;
+    final cortada =
+        img.copyCrop(im, x: x, y: y, width: ancho, height: alto);
+    final tmp = File('$ruta.tmp');
+    try {
+      tmp.writeAsBytesSync(img.encodeJpg(cortada, quality: 88),
+          flush: true);
+      tmp.renameSync(ruta);
+    } catch (_) {
+      try {
+        tmp.deleteSync();
+      } catch (_) {}
+      return false;
+    }
+    return true;
+  } catch (_) {
+    return false;
   }
 }
 
@@ -189,8 +237,6 @@ Future<FotoTrabajo?> prepararFotoTrabajo(
 }) async {
   try {
     final bytes = await origen.readAsBytes();
-    final im = img.decodeImage(bytes);
-    if (im == null) return null;
     // Argón #8-2: el trabajo SIEMPRE es un archivo físico con los
     // píxeles ya orientados. Devolver `origen` cuando el
     // decodificador ya aplicó el EXIF dejaba la etiqueta en disco
@@ -198,18 +244,24 @@ Future<FotoTrabajo?> prepararFotoTrabajo(
     // de `original` si la compresión falla) mostraba la foto girada.
     // bake solo si el decodificador NO aplicó la orientación
     // (post-decode != 1); si ya la aplicó, hornear de nuevo giraría
-    // dos veces.
-    final ifd = im.exif.imageIfd;
-    final orientacion = ifd.hasOrientation ? ifd.orientation : null;
-    final orientada = (orientacion != null && orientacion != 1)
-        ? img.bakeOrientation(im)
-        : im;
-    await _escribirAtomico(
-        rutaOrientada, img.encodeJpg(orientada, quality: 92));
+    // dos veces. (La decisión vive en _prepararFotoEnIsolate.)
+    final r = await compute(
+        _prepararFotoEnIsolate, (bytes, rutaOrientada));
+    if (r == null) {
+      // Fallo dentro del isolate: misma limpieza que el camino
+      // clásico (ni archivo final parcial ni temporal).
+      try {
+        await File(rutaOrientada).delete();
+      } catch (_) {}
+      try {
+        await File('$rutaOrientada.tmp').delete();
+      } catch (_) {}
+      return null;
+    }
     return FotoTrabajo(
       archivo: File(rutaOrientada),
-      ancho: orientada.width,
-      alto: orientada.height,
+      ancho: r.ancho,
+      alto: r.alto,
     );
   } catch (_) {
     // [rutaOrientada] es una ruta de trabajo del llamador
@@ -235,17 +287,22 @@ Future<File?> aplicarRecorteFoto({
 }) async {
   try {
     final bytes = await trabajo.readAsBytes();
-    final im = img.decodeImage(bytes);
-    if (im == null) return null;
-    final cortada = img.copyCrop(
-      im,
-      x: recorte.left.toInt(),
-      y: recorte.top.toInt(),
-      width: recorte.width.toInt(),
-      height: recorte.height.toInt(),
-    );
-    await _escribirAtomico(
-        rutaDestino, img.encodeJpg(cortada, quality: 88));
+    final ok = await compute(
+        _aplicarRecorteEnIsolate,
+        (
+          bytes,
+          rutaDestino,
+          recorte.left.toInt(),
+          recorte.top.toInt(),
+          recorte.width.toInt(),
+          recorte.height.toInt(),
+        ));
+    if (!ok) {
+      try {
+        await File('$rutaDestino.tmp').delete();
+      } catch (_) {}
+      return null;
+    }
     return File(rutaDestino);
   } catch (_) {
     try {

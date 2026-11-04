@@ -172,17 +172,34 @@ class _AdminScreenState extends State<AdminScreen> {
     // se cargan los KPIs financieros aunque se invoque directo.
     if (!AuthService().isOwner) return;
     final ing = await ingresosMes();
-    final insc = await inscripcionesMes();
-    final mor = await morosos();
+    // 1.23 (Delta Argón 4ª#3): derivaciones en memoria en vez
+    // de re-escanear espejos enteros por cifra:
+    // - inscripcionesMes = suma de inscripcionesPorEntrenador
+    //   (ambas cuentan clientes no eliminados con
+    //   fecha_inscripcion del mes actual).
+    // - morosos y activos salen de resumenActivosMorosos (una
+    //   sola lectura del padrón activo).
+    final resumenAct = await resumenActivosMorosos();
+    final mor = resumenAct.morosos;
     final pend = await pendientePorEntrenador();
     final inscEntrenador = await inscripcionesPorEntrenador();
+    final insc = inscEntrenador.fold<int>(
+        0, (s, e) => s + ((e['cantidad'] as num?)?.toInt() ?? 0));
     final gastos = await gastosTodos();
     final caja = await cobradoHoyPorMetodo();
     final hoy = ahoraHabana();
     final hoyIso = '${hoy.year.toString().padLeft(4, '0')}-'
         '${hoy.month.toString().padLeft(2, '0')}-'
         '${hoy.day.toString().padLeft(2, '0')}';
-    final gh = await gastosDe(hoyIso);
+    // - gastosDe(hoy) derivado de la lista ya cargada por
+    //   gastosTodos (espejo + pendientes ya fusionados), con
+    //   el mismo predicado fila a fila (fechaNegocioHabana).
+    final gh = gastos
+        .where((g) =>
+            '${g['fecha'] ?? ''}'.length >= 10 &&
+            fechaNegocioHabana(g['fecha']) == hoyIso)
+        .fold<double>(
+            0, (s, g) => s + ((g['monto'] as num?)?.toDouble() ?? 0));
     final aj = await LocalDb.instance.getAjustes();
     final tipos = await getTiposPago(soloActivos: false);
     final pagoEnt = await PerfilService.instance.getPagoEntrenador();
@@ -198,7 +215,7 @@ class _AdminScreenState extends State<AdminScreen> {
     // otros usos; aquí no se usa.
     final pagosMes = await NominaCalc.clientesQuePagaronElMes(
         NominaCalc.prefMesActual());
-    final activos = await activosCount();
+    final activos = resumenAct.activos; // 4ª#3: de la lectura única
     final fotoRS = await _fotoReservasStock();
     final solicitadas = fotoRS.solicitadas;
     final nombreSupl = fotoRS.nombreSupl;

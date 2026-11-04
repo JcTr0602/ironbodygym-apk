@@ -243,13 +243,13 @@ class _PanelPermisosState extends State<PanelPermisos> {
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('CANCELAR'),
+              child: const Text('Cancelar'),
             ),
             TextButton(
               onPressed: () => Navigator.pop(ctx, true),
               style: TextButton.styleFrom(
                   foregroundColor: Colors.red),
-              child: const Text('SUSPENDER'),
+              child: const Text('Suspender'),
             ),
           ],
         ),

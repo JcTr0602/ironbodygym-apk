@@ -64,6 +64,20 @@ class LocalDb {
   static final LocalDb instance = LocalDb._();
   Database? _db;
 
+  /// 1.23 (Delta Argón 3ª-O4): caché en memoria de los ajustes.
+  /// Auditoría previa de escritores de la meta 'ajustes'
+  /// (2026-11-04): el ÚNICO escritor en todo lib/ es
+  /// [setAjustes] (nadie escribe la clave con setMeta directo;
+  /// purgarDatosSensibles no la toca; el reemplazo de archivo
+  /// al importar respaldo pasa por [close], que invalida).
+  /// Reglas: [getAjustes] con txn lee SIEMPRE de la BD (la
+  /// transacción puede ver datos aún no visibles fuera);
+  /// [setAjustes] sin executor refresca la caché y con executor
+  /// la INVALIDA (si la transacción se revierte, la caché no
+  /// debe quedarse con el valor no confirmado). Se guardan y se
+  /// devuelven COPIAS: los llamadores mutan el mapa recibido.
+  Map<String, dynamic>? _ajustesCache;
+
   /// v1.4.0 (Argón): versión actual del esquema local. Los tests de
   /// migración comparan contra esta constante en vez de un número
   /// fijo, para no caer en cascada de fallos con cada migración.
@@ -209,6 +223,7 @@ class LocalDb {
   static Future<void> resetParaTest({bool borrarArchivo = true}) async {
     await instance._db?.close();
     instance._db = null;
+    instance._ajustesCache = null;
     _ftsOk = null;
     _ftsReparado = false;
     // P1 (modo paralelo, IRONBODY_TEST_DB=1): «reset» = BD
@@ -1955,11 +1970,14 @@ class LocalDb {
   /// v1.8.0: IDs de las cáscaras (estado='eliminado') del espejo.
   /// Mismo patrón que [idsCuentasCasa]: una sola lectura del
   /// padrón (pequeño) para las exclusiones de personas.
+  /// 1.23 (Delta Argón 3ª-O1): el filtro baja a SQL vía
+  /// mirrorPorEstado en vez de decodificar el padrón entero en
+  /// Dart (esEliminadoDe es exactamente estado='eliminado').
   Future<Set<int>> idsClientesEliminados() async {
     final out = <int>{};
-    for (final c in await allMirror('clientes')) {
+    for (final c in await mirrorPorEstado('clientes', 'eliminado')) {
       final id = (c['id'] as num?)?.toInt();
-      if (id != null && esEliminadoDe(c)) out.add(id);
+      if (id != null) out.add(id);
     }
     return out;
   }
@@ -4302,6 +4320,34 @@ class LocalDb {
         where: 'id=?', whereArgs: [pagoId]);
   }
 
+  /// 1.23 (Delta Argón 3ª#4): reflejo optimista de `editar_pago`
+  /// en el espejo `pagos`: monto/fecha/método nuevos en el JSON
+  /// Y en las columnas dedicadas a la vez ([columnasPagos]),
+  /// para que la ficha y la caja vean la corrección sin esperar
+  /// al pull. Se parte del JSON existente y SOLO se tocan esas
+  /// tres claves: en particular se conserva la marca `anulado`
+  /// si el pago tiene una anulación viva (no resucitarlo en los
+  /// totales; si la anulación se rechaza luego, la edición
+  /// reflejada es justo lo que debe verse).
+  Future<void> reflejarEditarPagoEnEspejo(int pagoId,
+      {double? monto,
+      String? fecha,
+      String? metodo,
+      DatabaseExecutor? txn}) async {
+    final DatabaseExecutor ex = txn ?? await db;
+    final rows = await ex.query('pagos',
+        where: 'id=?', whereArgs: [pagoId], limit: 1);
+    if (rows.isEmpty) return;
+    final data =
+        jsonDecode(rows.first['data'] as String) as Map<String, dynamic>;
+    if (monto != null) data['monto'] = monto;
+    if (fecha != null && fecha.isNotEmpty) data['fecha'] = fecha;
+    if (metodo != null && metodo.isNotEmpty) data['metodo'] = metodo;
+    await ex.update('pagos',
+        {'data': jsonEncode(data), ...columnasPagos(data)},
+        where: 'id=?', whereArgs: [pagoId]);
+  }
+
   /// 1.23 (auditoría extra #6, delta panel A1): revierte la marca
   /// optimista `anulado` del espejo SOLO si ya no queda ninguna
   /// anulación VIVA (≠ 'rechazada': la misma definición de
@@ -4569,9 +4615,17 @@ class LocalDb {
   /// pendientes revertiría visualmente lo aún no sincronizado.)
   Future<bool> tieneOpsPendientesParaCliente(int clienteId) async {
     final d = await db;
+    // 1.23 (Delta Argón 4ª#6): pre-filtro LIKE en SQL por el
+    // cliente_id dentro del payload — SQLite descarta las ops
+    // que ni mencionan al cliente y en Dart solo se decodifican
+    // las candidatas (la igualdad exacta se sigue comprobando
+    // tras decodificar: el LIKE puede traer menciones ajenas,
+    // p. ej. dentro de una nota).
     final rows = await d.query('ops_queue',
         columns: ['payload'],
-        where: "estado NOT IN ('aplicada', 'rechazada', 'archivada')");
+        where: "estado NOT IN ('aplicada', 'rechazada', 'archivada') "
+            "AND payload LIKE ?",
+        whereArgs: ['%"cliente_id":$clienteId%']);
     for (final r in rows) {
       try {
         final p =
@@ -4648,9 +4702,16 @@ class LocalDb {
   /// Actualización optimista: extiende pagado_hasta de un cliente en el
   /// espejo local sin esperar al servidor. Se usa al regalar un mes
   /// de cumpleaños (v1.3.3).
+  ///
+  /// 1.23 (Delta Argón 3ª#2): acepta el [DatabaseExecutor] de una
+  /// transacción en curso; sin él, llamarla dentro de un callback
+  /// `transaction` leería por el handle principal y bloquearía
+  /// sqflite (la papelera la necesita dentro de su transacción
+  /// única cambiar_estado + pago_mensual).
   Future<void> updateMirrorPagadoHasta(
-      int clienteId, String pagadoHasta) async {
-    final d = await db;
+      int clienteId, String pagadoHasta,
+      {DatabaseExecutor? txn}) async {
+    final DatabaseExecutor d = txn ?? await db;
     final rows = await d.query('clientes',
         where: 'id=?', whereArgs: [clienteId], limit: 1);
     if (rows.isEmpty) return;
@@ -4673,7 +4734,11 @@ class LocalDb {
     // ENTERA por cada op aplicada; las filas optimistas son por
     // definición las de id negativo — se filtran en SQL y solo
     // se decodifican esas (unas pocas).
-    final rows = await d.query(tabla, where: 'id < 0');
+    // 1.23 (Delta Argón 4ª#6): el LIKE en SQL descarta ya en
+    // SQLite las optimistas de OTRAS ops (la comprobación exacta
+    // en Dart se mantiene como red).
+    final rows = await d.query(tabla,
+        where: 'id < 0 AND data LIKE ?', whereArgs: ['%$opUuid%']);
     for (final r in rows) {
       final id = r['id'] as int;
       try {
@@ -5893,16 +5958,16 @@ class LocalDb {
       List<String> ids) async {
     if (ids.isEmpty) return 0;
     final d = await db;
-    var n = 0;
-    for (final id in ids) {
-      n += await d.update(
-        'incidencias_fotos',
-        {'sync_estado': 'retry', 'intentos': 0},
-        where: "id = ? AND sync_estado = 'error'",
-        whereArgs: [id],
-      );
-    }
-    return n;
+    // 1.23 (Delta Argón 3ª-O3): UNA sentencia con IN (...) en
+    // vez de un update por foto (N round-trips por la misma
+    // condición exacta).
+    final marcas = List.filled(ids.length, '?').join(',');
+    return d.update(
+      'incidencias_fotos',
+      {'sync_estado': 'retry', 'intentos': 0},
+      where: "id IN ($marcas) AND sync_estado = 'error'",
+      whereArgs: ids,
+    );
   }
 
   /// v1.3.1 (Alto #4): actualiza el op_uuid de una incidencia local al
@@ -6195,34 +6260,43 @@ class LocalDb {
     required String dispositivoId,
   }) async {
     final d = await db;
-    final id =
-        'aud_${ahoraHabana().millisecondsSinceEpoch}_${accion.hashCode.abs()}';
+    // 1.23 (Delta Argón 3ª#3): el id viejo
+    // ('aud_<ms>_<hashCode de la acción>') colisionaba en la PK
+    // si dos eventos de la MISMA acción caían en el mismo
+    // milisegundo (lotes): ahora es un UUID v4. Y la lectura del
+    // hash previo + el insert van dentro de UNA transacción:
+    // fuera, dos inserciones concurrentes leían el mismo previo
+    // y la cadena de hashes se bifurcaba (dos eventos con el
+    // mismo hash_previo, cadena rota sin error visible).
+    final id = 'aud_${const Uuid().v4()}';
     final creadaEn = isoHabana(ahoraHabana()); // v1.3.4 (Argón)
-    final prev = await d.rawQuery(
-        'SELECT hash_propio FROM auditoria_local ORDER BY creada_en DESC, rowid DESC LIMIT 1');
-    final hashPrevio =
-        prev.isEmpty ? null : prev.first['hash_propio'] as String?;
-    final hashPropio = _hashAuditoria(
-      previo: hashPrevio,
-      actorId: actorId,
-      accion: accion,
-      objetoTipo: objetoTipo,
-      objetoId: objetoId,
-      creadaEn: creadaEn,
-    );
-    await d.insert('auditoria_local', {
-      'id': id,
-      'actor_id': actorId,
-      'actor_nombre': actorNombre,
-      'accion': accion,
-      'objeto_tipo': objetoTipo,
-      'objeto_id': objetoId,
-      'detalle': detalle != null ? jsonEncode(detalle) : null,
-      'dispositivo_id': dispositivoId,
-      'hash_previo': hashPrevio,
-      'hash_propio': hashPropio,
-      'creada_en': creadaEn,
-      'sincronizada': 0,
+    await d.transaction((txn) async {
+      final prev = await txn.rawQuery(
+          'SELECT hash_propio FROM auditoria_local ORDER BY creada_en DESC, rowid DESC LIMIT 1');
+      final hashPrevio =
+          prev.isEmpty ? null : prev.first['hash_propio'] as String?;
+      final hashPropio = _hashAuditoria(
+        previo: hashPrevio,
+        actorId: actorId,
+        accion: accion,
+        objetoTipo: objetoTipo,
+        objetoId: objetoId,
+        creadaEn: creadaEn,
+      );
+      await txn.insert('auditoria_local', {
+        'id': id,
+        'actor_id': actorId,
+        'actor_nombre': actorNombre,
+        'accion': accion,
+        'objeto_tipo': objetoTipo,
+        'objeto_id': objetoId,
+        'detalle': detalle != null ? jsonEncode(detalle) : null,
+        'dispositivo_id': dispositivoId,
+        'hash_previo': hashPrevio,
+        'hash_propio': hashPropio,
+        'creada_en': creadaEn,
+        'sincronizada': 0,
+      });
     });
     return id;
   }
@@ -7086,15 +7160,102 @@ class LocalDb {
     return n;
   }
 
+  /// Rango de avance de un estado de turno para la fusión de la
+  /// reconciliación: el estado más avanzado es el que más verdad
+  /// carga sobre el ciclo de vida (cerrado y confirmado por el
+  /// servidor > cerrado local > marcado no_cerrado > abierto
+  /// sincronizado > abierto local).
+  static int _rangoEstadoTurno(String estado) {
+    switch (estado) {
+      case 'cerrado_sincronizado':
+        return 5;
+      case 'cerrado_local':
+        return 4;
+      case 'no_cerrado':
+        return 3;
+      case 'abierto_sincronizado':
+        return 2;
+      case 'abierto_local':
+        return 1;
+      default:
+        return 0;
+    }
+  }
+
   /// Cambia el PK turno_id de un turno al canónico del servidor
   /// (Argón P1). Retorna true si se actualizó alguna fila.
+  ///
+  /// 1.23 (Delta Argón 3ª#1): si YA existe una fila con el id
+  /// canónico (llegó por otro camino: pull u otra apertura), el
+  /// UPDATE de PK chocaba con la UNIQUE y la reconciliación
+  /// fallaba EN BUCLE en cada sync. Ahora, en colisión, las dos
+  /// filas se FUSIONAN dentro de una transacción conservando el
+  /// estado más avanzado y rescatando de la perdedora los campos
+  /// que la ganadora no tenga (hora/cierre/snapshot/cubre_a e
+  /// incidencias). Prohibido el DELETE a ciegas: la fila
+  /// «fantasma» puede ser la real (p. ej. la ya cerrada).
   Future<bool> reconciliarTurnoIdLocal(String viejoId, String nuevoId) async {
     final d = await db;
     try {
-      final n = await d.update('turnos',
-          {'turno_id': nuevoId, 'turno_id_reconciliado': 1},
-          where: 'turno_id=?', whereArgs: [viejoId]);
-      return n > 0;
+      return await d.transaction((txn) async {
+        final viejas = await txn.query('turnos',
+            where: 'turno_id=?', whereArgs: [viejoId], limit: 1);
+        if (viejas.isEmpty) {
+          // Nada que mover: éxito solo si la canónica ya existe.
+          final nuevas = await txn.query('turnos',
+              columns: ['turno_id'],
+              where: 'turno_id=?',
+              whereArgs: [nuevoId],
+              limit: 1);
+          return nuevas.isNotEmpty;
+        }
+        if (viejoId == nuevoId) {
+          await txn.update(
+              'turnos', {'turno_id_reconciliado': 1},
+              where: 'turno_id=?', whereArgs: [viejoId]);
+          return true;
+        }
+        final nuevas = await txn.query('turnos',
+            where: 'turno_id=?', whereArgs: [nuevoId], limit: 1);
+        if (nuevas.isEmpty) {
+          final n = await txn.update('turnos',
+              {'turno_id': nuevoId, 'turno_id_reconciliado': 1},
+              where: 'turno_id=?', whereArgs: [viejoId]);
+          return n > 0;
+        }
+        // Colisión: fusión conservando el estado más avanzado
+        // (en empate gana la fila canónica, que ya trae el id
+        // del servidor).
+        final vieja = viejas.first;
+        final nueva = nuevas.first;
+        final ganaNueva = _rangoEstadoTurno('${nueva['estado']}') >=
+            _rangoEstadoTurno('${vieja['estado']}');
+        final ganadora = ganaNueva ? nueva : vieja;
+        final perdedora = ganaNueva ? vieja : nueva;
+        final fusion = Map<String, dynamic>.from(ganadora);
+        for (final k in const [
+          'hora_cierre',
+          'cierre_op_uuid',
+          'cierre_snapshot',
+          'cubre_a',
+        ]) {
+          if (fusion[k] == null && perdedora[k] != null) {
+            fusion[k] = perdedora[k];
+          }
+        }
+        if (((perdedora['tiene_incidencias'] as num?)?.toInt() ?? 0) ==
+            1) {
+          fusion['tiene_incidencias'] = 1;
+        }
+        fusion['turno_id'] = nuevoId;
+        fusion['turno_id_reconciliado'] = 1;
+        await txn.delete('turnos',
+            where: 'turno_id=?', whereArgs: [viejoId]);
+        await txn.delete('turnos',
+            where: 'turno_id=?', whereArgs: [nuevoId]);
+        await txn.insert('turnos', fusion);
+        return true;
+      });
     } catch (_) {
       return false;
     }
@@ -7467,14 +7628,28 @@ class LocalDb {
   }
 
   Future<Map<String, dynamic>> getAjustes({DatabaseExecutor? txn}) async {
+    // Caché 3ª-O4: solo fuera de transacción (ver [_ajustesCache]).
+    if (txn == null && _ajustesCache != null) {
+      return Map<String, dynamic>.from(_ajustesCache!);
+    }
     final raw = await getMeta('ajustes', txn: txn);
     if (raw == null) return {};
-    return jsonDecode(raw) as Map<String, dynamic>;
+    final out = jsonDecode(raw) as Map<String, dynamic>;
+    if (txn == null) {
+      _ajustesCache = Map<String, dynamic>.from(out);
+    }
+    return out;
   }
 
   Future<void> setAjustes(Map<String, dynamic> a,
-          {DatabaseExecutor? executor}) =>
-      setMeta('ajustes', jsonEncode(a), executor: executor);
+      {DatabaseExecutor? executor}) async {
+    await setMeta('ajustes', jsonEncode(a), executor: executor);
+    // Caché 3ª-O4: sin executor el valor ya es firme → se
+    // refresca; con executor la escritura vive en una
+    // transacción ajena que puede revertirse → se invalida.
+    _ajustesCache =
+        executor == null ? Map<String, dynamic>.from(a) : null;
+  }
 
   // -- Bloque 2 RESTO (v1.11.0, G2 + C1) ------------------------------
   // Recordatorios: CRUD local + log anti-duplicado. La sincronización
@@ -7743,6 +7918,21 @@ class LocalDb {
       final pid = (payload['pago_id'] as num?)?.toInt() ?? 0;
       if (pid > 0) {
         await marcarPagoAnuladoEnEspejo(pid, txn: ex);
+      }
+    }
+    // 1.23 (Delta Argón 3ª#4): reflejo optimista de la edición de
+    // un pago, sobre el mismo executor. Sin él, la corrección no
+    // se veía en ficha/caja hasta el pull.
+    if (tipo == 'editar_pago') {
+      final pid = (payload['pago_id'] as num?)?.toInt() ?? 0;
+      if (pid > 0) {
+        await reflejarEditarPagoEnEspejo(
+          pid,
+          monto: (payload['monto'] as num?)?.toDouble(),
+          fecha: payload['fecha'] as String?,
+          metodo: payload['metodo'] as String?,
+          txn: ex,
+        );
       }
     }
   }
@@ -8917,6 +9107,9 @@ class LocalDb {
     _db = null;
     // v1.3.1: resetear flags FTS para que se reconstruyan al reabrir.
     _ftsReparado = false;
+    // 1.23 (Delta Argón 3ª-O4): el archivo puede ser otro tras
+    // importar un respaldo — la caché de ajustes no sobrevive.
+    _ajustesCache = null;
     await d?.close();
   }
 

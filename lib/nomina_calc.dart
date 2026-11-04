@@ -59,18 +59,21 @@ class NominaCalc {
   /// (un cliente que paga dos veces en el mes cuenta UNA vez).
   /// Ante un error de lectura devuelve 0 (la pantalla muestra la base
   /// en 0 en vez de romperse, como hacía el cálculo original).
-  static Future<int> clientesQuePagaronElMes(String pref) async =>
-      (await _contar(pref)) ?? 0;
+  static Future<int> clientesQuePagaronElMes(String pref,
+          {Set<int>? cuentasCasaPre}) async =>
+      (await _contar(pref, cuentasCasaPre: cuentasCasaPre)) ?? 0;
 
   /// Igual que [clientesQuePagaronElMes] pero distingue el "0 real"
   /// (nadie pagó) de un error de lectura (null). La usa el
   /// pre-cálculo para NO persistir un 0 nacido de un error como si
   /// fuera una caché fresca (auditoría del código, DeepSeek).
-  static Future<int?> clientesQuePagaronElMesSeguro(String pref) =>
-      _contar(pref);
+  static Future<int?> clientesQuePagaronElMesSeguro(String pref,
+          {Set<int>? cuentasCasaPre}) =>
+      _contar(pref, cuentasCasaPre: cuentasCasaPre);
 
-  static Future<int?> _contar(String pref) async {
-    final ids = await _conjunto(pref);
+  static Future<int?> _contar(String pref,
+      {Set<int>? cuentasCasaPre}) async {
+    final ids = await _conjunto(pref, cuentasCasaPre: cuentasCasaPre);
     return ids?.length;
   }
 
@@ -80,12 +83,20 @@ class NominaCalc {
   /// que el listado «Pagaron este mes» y la cifra de Home nunca
   /// discrepen. Ante un error de lectura devuelve lista vacía, como
   /// el contador devuelve 0.
-  static Future<List<int>> idsQuePagaronElMes(String pref) async =>
-      (await _conjunto(pref))?.toList() ?? <int>[];
+  static Future<List<int>> idsQuePagaronElMes(String pref,
+          {Set<int>? cuentasCasaPre}) async =>
+      (await _conjunto(pref, cuentasCasaPre: cuentasCasaPre))
+          ?.toList() ??
+      <int>[];
 
   /// El conjunto de la base del mes [pref], o null si la lectura
   /// falló (para distinguir el "0 real" de un error).
-  static Future<Set<int>?> _conjunto(String pref) async {
+  /// [cuentasCasaPre] (Delta Argón 4ª#4): ids de Cuentas a la
+  /// Casa YA leídos por el llamador, para no re-escanear el
+  /// espejo de clientes en cada mes de un cálculo en cadena
+  /// (la foto de nómina cuenta varios meses seguidos).
+  static Future<Set<int>?> _conjunto(String pref,
+      {Set<int>? cuentasCasaPre}) async {
     try {
       final pagos = await LocalDb.instance.pagosDelMes(pref);
       // 1.23 (auditoría extra #6): un pago con anulación viva en
@@ -115,8 +126,8 @@ class NominaCalc {
       // 150 CUP ni entra en «pagaron el mes» aunque tenga un pago
       // suelto registrado (permitido pero inútil, diseño Casa §4).
       if (vistos.isNotEmpty) {
-        excluirCuentasCasa(
-            vistos, await LocalDb.instance.idsCuentasCasa());
+        excluirCuentasCasa(vistos,
+            cuentasCasaPre ?? await LocalDb.instance.idsCuentasCasa());
       }
       // Excepción del mes (ver la nota de la clase): se excluye
       // al cliente cuyo pagado_hasta cae en [pref]. 1.15 (M4c-01):

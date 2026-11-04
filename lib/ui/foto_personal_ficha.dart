@@ -191,7 +191,10 @@ class _SeccionFotoPersonalState extends State<SeccionFotoPersonal> {
                   height: 120,
                   width: double.infinity,
                   decoration: BoxDecoration(
-                    color: Colors.grey.shade200,
+                    // 1.23 (Delta Argón 6ª): token del tema en
+                    // vez de grey.shade200 fijo (parche claro en
+                    // modo oscuro).
+                    color: AppColores.superficieHundida(context),
                     borderRadius: BorderRadius.circular(AppRadio.md),
                   ),
                   // Argón #8-5: sin botón de reintento, el dueño

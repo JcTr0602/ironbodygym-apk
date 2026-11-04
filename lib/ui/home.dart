@@ -199,7 +199,7 @@ class _HomeScreenState extends State<HomeScreen>
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(ctx),
-              child: const Text('TODO EN ORDEN'),
+              child: const Text('Todo en orden'),
             ),
           ],
         ),
@@ -243,7 +243,7 @@ class _HomeScreenState extends State<HomeScreen>
               Navigator.pop(ctx);
               AuthService().signOut();
             },
-            child: const Text('ENTENDIDO'),
+            child: const Text('Entendido'),
           ),
         ],
       ),

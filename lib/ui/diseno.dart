@@ -223,11 +223,15 @@ class AppTexto {
   AppTexto._();
 
   /// Números grandes: dinero, conteos, vencimientos.
+  /// 1.23 (Delta Argón 6ª, pulido): cifras tabulares — los
+  /// dígitos ocupan el mismo ancho y las columnas de dinero
+  /// dejan de «bailar» al cambiar un valor.
   static const display = TextStyle(
     fontSize: 32,
     fontWeight: FontWeight.bold,
     letterSpacing: -0.5,
     height: 1.1,
+    fontFeatures: [FontFeature.tabularFigures()],
   );
 
   static const displayPequeno = TextStyle(
@@ -235,6 +239,7 @@ class AppTexto {
     fontWeight: FontWeight.bold,
     letterSpacing: -0.25,
     height: 1.15,
+    fontFeatures: [FontFeature.tabularFigures()],
   );
 
   /// Título de página (P0 1.20).
@@ -250,6 +255,7 @@ class AppTexto {
     fontWeight: FontWeight.bold,
     letterSpacing: -0.25,
     height: 1.2,
+    fontFeatures: [FontFeature.tabularFigures()],
   );
 
   /// Títulos de sección.

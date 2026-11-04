@@ -12,6 +12,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 
+import '../auth.dart';
 import '../localdb.dart';
 import '../negocio.dart';
 import '../precio_cobro.dart';
@@ -919,7 +920,10 @@ Future<Map<String, dynamic>?> pagoDialogo(
                   Padding(
                     padding: const EdgeInsets.only(top: 2),
                     child: Text(a,
-                        style: AppTexto.secundario.copyWith(color: Colors.orange)),
+                        // 1.23 (Delta Argón 6ª): naranja de la
+                        // casa adaptativo en vez de Colors.orange.
+                        style: AppTexto.secundario
+                            .copyWith(color: AppColores.textoNaranja(ctx))),
                   ),
                 Text('Nuevo vencimiento: ${fmtFecha(nuevo)}',
                     style:
@@ -957,6 +961,16 @@ Future<Map<String, dynamic>?> pagoDialogo(
   // sin cliente.
   if (clienteId <= 0) return null;
   final s = paso1;
+  // 1.23 (Delta Argón 5ª#1): lectura DEFENSIVA del dueño para
+  // la marca 'entregado' de abajo — el getter de sesión toca
+  // Supabase.instance y lanza si la instancia no está
+  // inicializada (tests sin Supabase). Mismo patrón defensivo
+  // que queueOp con AuthService. En la app real Supabase
+  // siempre está inicializado y esto no cambia nada.
+  var esDuenoCobro = false;
+  try {
+    esDuenoCobro = AuthService().isOwner;
+  } catch (_) {}
   final fpIso2 = isoFechaHabana(fechaPago);
   final nuevo = previewHastaDias(
       normalizarFechaCobro(cliente['pagado_hasta']), _diasDe(s),
@@ -985,5 +999,12 @@ Future<Map<String, dynamic>?> pagoDialogo(
     if (basePago != null) 'base': basePago,
     'siguio_viniendo': basePago != null,
     'fecha': isoFechaHabana(fechaPago),
+    // 1.23 (Delta Argón 5ª#1): el dueño no se debe a sí mismo —
+    // TODO cobro suyo nace con 'entregado': 1 en el propio
+    // payload, sea cual sea la pantalla que lo originó (ficha,
+    // pago rápido, buscar, listas, papelera). Antes solo la ficha
+    // lo marcaba tras recibir el payload; el cobro rápido del
+    // dueño quedaba como pendiente a entregar.
+    if (esDuenoCobro) 'entregado': 1,
   };
 }

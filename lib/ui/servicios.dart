@@ -22,6 +22,11 @@ import 'servicios_admin.dart';
 import 'servicios_estadisticas.dart';
 import 'servicios_historial.dart';
 
+/// 1.23 (Delta Argón 4ª#6): un solo RegExp reutilizado en el
+/// buscador de clientes — antes se construía uno nuevo por
+/// cliente en cada filtrado.
+final _reNoDigitosServicios = RegExp(r'[^0-9]');
+
 /// v1.8.0: Servicios por dosis — pantalla de venta y cuadre.
 ///
 /// El entrenador vende desde SU pomo; el dueño además gestiona
@@ -2357,7 +2362,7 @@ class _DialogoClienteState extends State<_DialogoCliente> {
     final q = _ctrl.text.trim().toLowerCase();
     // 1.14 (D14): buscar también por carnet (solo dígitos), para
     // distinguir homónimos por el documento y no solo por nombre.
-    final qDigitos = q.replaceAll(RegExp(r'[^0-9]'), '');
+    final qDigitos = q.replaceAll(_reNoDigitosServicios, '');
     final filtrados = q.isEmpty
         ? widget.clientes
         : widget.clientes.where((c) {
@@ -2369,7 +2374,7 @@ class _DialogoClienteState extends State<_DialogoCliente> {
             if (esVistaProtegida(c)) return false;
             if (qDigitos.isNotEmpty) {
               final carnet =
-                  '${c['carnet'] ?? ''}'.replaceAll(RegExp(r'[^0-9]'), '');
+                  '${c['carnet'] ?? ''}'.replaceAll(_reNoDigitosServicios, '');
               if (carnet.contains(qDigitos)) return true;
             }
             return false;

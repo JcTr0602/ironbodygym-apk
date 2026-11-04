@@ -158,11 +158,11 @@ class _EditorPlanNutricionalState
             TextButton(
                 onPressed: () =>
                     Navigator.pop(ctx, false),
-                child: const Text('CANCELAR')),
+                child: const Text('Cancelar')),
             TextButton(
                 onPressed: () =>
                     Navigator.pop(ctx, true),
-                child: const Text('REEMPLAZAR')),
+                child: const Text('Reemplazar')),
           ],
         ),
       );

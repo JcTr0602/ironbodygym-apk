@@ -409,7 +409,7 @@ class _PestanaProgresoState extends State<PestanaProgreso> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
-            child: const Text('CERRAR'),
+            child: const Text('Cerrar'),
           ),
         ],
       ),
@@ -502,10 +502,10 @@ class _PestanaProgresoState extends State<PestanaProgreso> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('CANCELAR'),
+            child: const Text('Cancelar'),
           ),
           BotonPrimario(
-            texto: 'GUARDAR',
+            texto: 'Guardar',
             onPressed: () => Navigator.pop(ctx, true),
             expandido: false,
           ),
@@ -574,13 +574,13 @@ class _PestanaProgresoState extends State<PestanaProgreso> {
           TextButton(
               onPressed: () =>
                   Navigator.of(ctx).pop(false),
-              child: const Text('CANCELAR')),
+              child: const Text('Cancelar')),
           TextButton(
               onPressed: () =>
                   Navigator.of(ctx).pop(true),
               style: TextButton.styleFrom(
                   foregroundColor: Colors.red),
-              child: const Text('ELIMINAR')),
+              child: const Text('Eliminar')),
         ],
       ),
     );

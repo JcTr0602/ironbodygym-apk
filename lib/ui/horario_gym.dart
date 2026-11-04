@@ -347,7 +347,7 @@ class _HorarioGymState extends State<HorarioGym> {
                               strokeWidth: 2,
                               color: Colors.white),
                     )
-                  : const Text('GUARDAR',
+                  : const Text('Guardar',
                       style: TextStyle(
                           color: Colors.white)),
             ),

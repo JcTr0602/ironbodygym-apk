@@ -6,8 +6,10 @@ import '../tiempo.dart';
 import 'diseno.dart';
 import 'pestana_progreso.dart';
 
-/// Naranja Iron Body
-const _naranja = Color(0xFFFF6B00);
+/// Naranja Iron Body (1.23, Delta Argón 6ª: el tono único de
+/// marca de diseno.dart; antes un 0xFFFF6B00 propio que no
+/// coincidía con el resto de la app).
+const _naranja = AppColores.naranja;
 
 class GraficoPesoEntrenador extends StatelessWidget {
   final List<Medicion> mediciones;

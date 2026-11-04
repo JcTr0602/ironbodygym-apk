@@ -867,7 +867,7 @@ class _AccesosClientesTabState extends State<AccesosClientesTab> {
             trailing: TextButton(
               onPressed:
                   _generandoAcceso ? null : () => _generarPin(c),
-              child: const Text('GENERAR PIN'),
+              child: const Text('Generar PIN'),
             ),
           ),
         );

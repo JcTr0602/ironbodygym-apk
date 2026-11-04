@@ -64,6 +64,21 @@ class FotoCache {
   // Fix Luna 8: lock simple para evitar evicciones concurrentes.
   bool _evictando = false;
 
+  /// 1.23 (Delta Argón 3ª#7): tope de entradas del índice en
+  /// memoria. El Map conserva el orden de inserción y
+  /// [_recordar] reinserta al final en cada uso: el índice es
+  /// un LRU y al pasar del tope cae la entrada más vieja (el
+  /// ARCHIVO sigue en disco; solo se olvida el atajo).
+  static const int _maxEntradasMemoria = 300;
+
+  void _recordar(String storagePath, File f) {
+    _memoria.remove(storagePath);
+    _memoria[storagePath] = f;
+    while (_memoria.length > _maxEntradasMemoria) {
+      _memoria.remove(_memoria.keys.first);
+    }
+  }
+
   Future<Directory> _dir() async {
     final base = await getApplicationDocumentsDirectory();
     // NOTA: 'fotos_cache' es distinto de 'fotos/' (cola de subida).
@@ -99,6 +114,7 @@ class FotoCache {
       // Argón #8-6: un caché truncado (0 bytes) no vale: forzar
       // re-descarga en vez de devolverlo siempre.
       if (await mem.length() > 0) {
+        _recordar(storagePath, mem); // LRU 3ª#7: uso = más reciente.
         await _tocar(mem);
         return mem;
       }
@@ -111,7 +127,7 @@ class FotoCache {
     final f = _archivoCache(d, storagePath);
     if (await f.exists()) {
       if (await f.length() > 0) {
-        _memoria[storagePath] = f;
+        _recordar(storagePath, f);
         await _tocar(f);
         return f;
       }
@@ -153,7 +169,7 @@ class FotoCache {
           '${f.path}.${DateTime.now().microsecondsSinceEpoch}.tmp');
       await tmp.writeAsBytes(r.bodyBytes, flush: true);
       await tmp.rename(f.path);
-      _memoria[storagePath] = f;
+      _recordar(storagePath, f);
       await _aplicarLRU();
       return f;
     } catch (e) {
@@ -227,6 +243,12 @@ class FotoCache {
 
       items.sort((a, b) => a.lastAccessed.compareTo(b.lastAccessed));
 
+      // 1.23 (Delta Argón 3ª#7): mapa inverso ruta→clave UNA
+      // vez (O(N) total); antes cada expulsión hacía un
+      // removeWhere O(N) sobre el índice en memoria.
+      final clavePorRuta = <String, String>{
+        for (final e in _memoria.entries) e.value.path: e.key,
+      };
       for (final item in items) {
         if (totalBytes <= maxBytes) break;
         totalBytes -= item.size;
@@ -237,7 +259,8 @@ class FotoCache {
             await item.file.delete();
           }
         } catch (_) {}
-        _memoria.removeWhere((k, v) => v.path == item.file.path);
+        final clave = clavePorRuta[item.file.path];
+        if (clave != null) _memoria.remove(clave);
       }
     } catch (_) {}
     finally {

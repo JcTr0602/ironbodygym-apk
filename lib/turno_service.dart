@@ -27,6 +27,7 @@ import 'localdb.dart';
 import 'negocio.dart';
 import 'sync.dart';
 import 'tiempo.dart';
+import 'turnos_resolucion.dart';
 
 // Reloj oficial (offsetHabana, ahoraHabana, isoHabana, hoyHabanaIso):
 // movido a lib/tiempo.dart (v1.3.4, estándar de Argón) para evitar
@@ -37,12 +38,31 @@ String fechaIsoDe(DateTime d) =>
     '${d.month.toString().padLeft(2, '0')}-'
     '${d.day.toString().padLeft(2, '0')}';
 
-/// Franja del turno según la hora (mismo criterio que MiTurnoScreen).
+/// Franja del turno según la hora.
+///
+/// 1.23 (Delta Argón 5ª#5, decisión de Jc «sin franja de
+/// noche»): se alinea a la resolución canónica de
+/// turnos_resolucion (ventanaFranja: L–V mañana 6–12 y tarde
+/// 14–20; sábado solo mañana 7–12; domingo sin franjas) con el
+/// colchón de 45 min de la vinculación T1 aplicado a ambos
+/// lados de la ventana: una apertura hasta 45 min antes del
+/// inicio ya es de esa franja, y un rezagado hasta 45 min
+/// después del fin sigue siendo de la suya (abrir a las 12:05
+/// entre semana es la mañana rezagada, no la tarde). En los
+/// huecos sin franja canónica (madrugada, mediodía entre
+/// colchones, sábado por la tarde, domingo) manda el respaldo
+/// por hora de PagoDiarioScreen (<12 'manana', ≥12 'tarde'):
+/// un turno SIEMPRE puede abrirse. 'noche' deja de emitirse;
+/// las filas 'noche' ya existentes en campo quedan como
+/// histórico y no se reescriben.
 String turnoIdDe(DateTime h) {
-  final hora = h.hour;
-  if (hora >= 5 && hora < 12) return 'manana';
-  if (hora >= 12 && hora < 18) return 'tarde';
-  return 'noche';
+  final mins = h.hour * 60 + h.minute;
+  for (final f in const ['manana', 'tarde']) {
+    final v = ventanaFranja(h, f);
+    if (v == null) continue;
+    if (mins >= v.inicio - 45 && mins < v.fin + 45) return f;
+  }
+  return h.hour < 12 ? 'manana' : 'tarde';
 }
 
 /// "HH:mm" de un ISO (acepta con o sin offset), SIEMPRE en hora
@@ -394,7 +414,20 @@ class TurnoService {
               revisionCount:
                   (snap['revision_count'] as num?)?.toInt(),
             );
-            await _db.marcarEstadoTurno(canonico, '${t['estado']}',
+            // 1.23 (Delta Argón 3ª#1): si el turno figuraba
+            // 'cerrado_sincronizado' era por el cierre
+            // DESVINCULADO (con el id viejo); la correctiva
+            // recién encolada aún no está aplicada, así que el
+            // estado se DEGRADA a 'cerrado_local' — la promoción
+            // con evidencia lo volverá a subir cuando la
+            // correctiva conste 'aplicada'. Antes se conservaba
+            // 'cerrado_sincronizado' y el turno podía figurar
+            // sincronizado sin estarlo si la correctiva fallaba.
+            final estadoTras =
+                '${t['estado']}' == 'cerrado_sincronizado'
+                    ? 'cerrado_local'
+                    : '${t['estado']}';
+            await _db.marcarEstadoTurno(canonico, estadoTras,
                 cierreOpUuid: nuevoUuid);
           } catch (_) {}
         }

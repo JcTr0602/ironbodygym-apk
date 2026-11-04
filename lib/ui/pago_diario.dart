@@ -254,8 +254,18 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
     if (_guardando) return;
     setState(() => _guardando = true);
     try {
-      final uuid = await _guardarOp(cantidad: 1);
+      // 1.23 (Delta Argón 5ª#7): el botón rápido también lleva
+      // la nota escrita — antes llamaba _guardarOp SIN nota y
+      // la nota del usuario se perdía en silencio en el camino
+      // más usado. Se consume y se limpia igual que en _guardar.
+      final uuid = await _guardarOp(
+        cantidad: 1,
+        nota: _notaCtrl.text.trim().isEmpty
+            ? null
+            : _notaCtrl.text.trim(),
+      );
       if (uuid == null) return;
+      _notaCtrl.clear();
       _trasGuardar(uuid, 1);
     } finally {
       if (mounted) setState(() => _guardando = false);

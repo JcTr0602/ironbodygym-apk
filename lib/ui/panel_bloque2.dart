@@ -244,8 +244,10 @@ class _SinFotoPrecioScreenState extends State<SinFotoPrecioScreen> {
                     for (final s in _mal)
                       Card(
                         child: ListTile(
+                          // 1.23 (Delta Argón 6ª): naranja de la
+                          // casa en vez de Colors.orange.
                           leading: const Icon(Icons.warning_amber_rounded,
-                              color: Colors.orange),
+                              color: AppColores.naranja),
                           title: Text('${s['nombre'] ?? 'Producto'}'),
                           subtitle: Text(_motivo(s)),
                           // P2#7: tocar abre la edición del producto.

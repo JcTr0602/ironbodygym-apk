@@ -150,6 +150,25 @@ Future<List<Map<String, dynamic>>> leerBonosMesConMigracion(
 /// pantalla lo consume para su estado y el panel para su
 /// tarjeta; no pueden divergir.
 Future<FotoNominaMes> fotoNominaMes(String pref) async {
+  // 1.23 (Delta Argón 4ª#4): precargas ÚNICAS de la foto —
+  // usuarios_apk se leía y parseaba DOS veces (comisiones y
+  // adelantos) y los ids de Cuentas a la Casa se re-escaneaban
+  // en cada conteo mensual de la cadena de adelantos.
+  final usuariosApk = <Map<String, dynamic>>[];
+  try {
+    final rawApk = await LocalDb.instance.getMeta('usuarios_apk');
+    if (rawApk != null && rawApk.isNotEmpty) {
+      for (final u in jsonDecode(rawApk) as List) {
+        usuariosApk.add(Map<String, dynamic>.from(u as Map));
+      }
+    }
+  } catch (_) {}
+  Set<int>? cuentasCasaPre;
+  try {
+    cuentasCasaPre = await LocalDb.instance.idsCuentasCasa();
+  } catch (_) {
+    cuentasCasaPre = null; // cada conteo leerá por su cuenta
+  }
   final tarifa =
       await PerfilService.instance.getPagoEntrenador();
   // v1.8.0: comisión por dosis del mes (espejo de ventas de
@@ -167,16 +186,8 @@ Future<FotoNominaMes> fotoNominaMes(String pref) async {
     final miTid = AuthService().telegramId;
     // Fix 1.15 (caso 2026-10-27): iterar también a quienes
     // GANARON comisión, no solo a quienes registraron. El
-    // nombre del que solo ganó sale de usuarios_apk.
-    final usuariosApk = <Map<String, dynamic>>[];
-    try {
-      final rawApk = await LocalDb.instance.getMeta('usuarios_apk');
-      if (rawApk != null && rawApk.isNotEmpty) {
-        for (final u in jsonDecode(rawApk) as List) {
-          usuariosApk.add(Map<String, dynamic>.from(u as Map));
-        }
-      }
-    } catch (_) {}
+    // nombre del que solo ganó sale de usuarios_apk (precarga
+    // única de arriba, 4ª#4).
     final nombrePorTid = NominaCalc.tidsConComisionServicio(
         ventasServ, usuariosApk);
     tidsPorClave = {};
@@ -221,27 +232,24 @@ Future<FotoNominaMes> fotoNominaMes(String pref) async {
   final personasAdelantos =
       <String, ({String id, int? telegramId, String nombre})>{};
   try {
-    final raw = await LocalDb.instance.getMeta('usuarios_apk');
-    if (raw != null && raw.isNotEmpty) {
-      for (final u in jsonDecode(raw) as List) {
-        final m = Map<String, dynamic>.from(u as Map);
-        // #6 (Argón nómina): llave única (antes filtro
-        // estricto aquí y contains en comisiones).
-        // Argón Dinero #8: respaldo por NOMBRE si el
-        // username no resuelve la clave (un username sin el
-        // nombre dejaba a la persona fuera del mapa).
-        final username =
-            NominaCalc.claveEntrenador('${m['username'] ?? ''}') ??
-                NominaCalc.claveEntrenador(
-                    '${m['nombre'] ?? ''}');
-        if (username != null) {
-          personasAdelantos[username] = (
-            id: '${m['id'] ?? ''}',
-            telegramId: (m['telegram_id'] as num?)?.toInt() ??
-                int.tryParse('${m['telegram_id'] ?? ''}'),
-            nombre: (m['nombre'] as String?) ?? username,
-          );
-        }
+    // 4ª#4: se consume la precarga única de usuarios_apk.
+    for (final m in usuariosApk) {
+      // #6 (Argón nómina): llave única (antes filtro
+      // estricto aquí y contains en comisiones).
+      // Argón Dinero #8: respaldo por NOMBRE si el
+      // username no resuelve la clave (un username sin el
+      // nombre dejaba a la persona fuera del mapa).
+      final username =
+          NominaCalc.claveEntrenador('${m['username'] ?? ''}') ??
+              NominaCalc.claveEntrenador(
+                  '${m['nombre'] ?? ''}');
+      if (username != null) {
+        personasAdelantos[username] = (
+          id: '${m['id'] ?? ''}',
+          telegramId: (m['telegram_id'] as num?)?.toInt() ??
+              int.tryParse('${m['telegram_id'] ?? ''}'),
+          nombre: (m['nombre'] as String?) ?? username,
+        );
       }
     }
   } catch (_) {}
@@ -267,8 +275,9 @@ Future<FotoNominaMes> fotoNominaMes(String pref) async {
     final brutoPorMes = <String, double>{};
     var mes = primero;
     while (mes.compareTo(pref) <= 0) {
-      conteoCache[mes] ??=
-          await NominaCalc.clientesQuePagaronElMes(mes);
+      conteoCache[mes] ??= await NominaCalc.clientesQuePagaronElMes(
+          mes,
+          cuentasCasaPre: cuentasCasaPre);
       brutoPorMes[mes] = conteoCache[mes]! * tarifa.toDouble();
       mes = mesSiguiente(mes);
     }

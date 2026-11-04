@@ -184,7 +184,7 @@ class _HorarioTurnosScreenState extends State<HorarioTurnosScreen> {
                       child: CircularProgressIndicator(
                           strokeWidth: 2, color: Colors.white),
                     )
-                  : const Text('GUARDAR',
+                  : const Text('Guardar',
                       style: TextStyle(color: Colors.white)),
             ),
         ],

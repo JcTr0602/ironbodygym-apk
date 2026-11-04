@@ -176,8 +176,8 @@ class _PapeleraScreenState extends State<PapeleraScreen> {
     }
     // P2#3-parte: un cobro del dueño en efectivo ya está entregado
     // (no suma al pendiente a entregar); el entrenador lo deja en
-    // pendiente como siempre.
-    if (AuthService().isOwner) payload['entregado'] = 1;
+    // pendiente como siempre. 1.23 (Delta Argón 5ª#1): la marca
+    // ya nace dentro de pagoDialogo; no se repite aquí.
     // DECISIÓN Jc 2026-10-30 (delega «decide lo mejor»): se
     // queda el DialogoApp.confirmar previo y NO se cablea
     // cobrarConPreviewYRecibo aquí. El preview es UI y no
@@ -213,6 +213,17 @@ class _PapeleraScreenState extends State<PapeleraScreen> {
           payload: payload,
           txn: txn,
         );
+        // 1.23 (Delta Argón 3ª#2): reflejo optimista del nuevo
+        // vencimiento en el espejo, sobre el MISMO executor. Sin
+        // esto, el cliente renovado desde la papelera seguía
+        // figurando vencido en Buscar/ficha (y en la bandeja de
+        // avisos) hasta que bajara el pull, porque este flujo no
+        // pasa por el preview que sí actualiza el espejo.
+        final nuevoHasta = payload['pagado_hasta'] as String?;
+        if (nuevoHasta != null && nuevoHasta.isNotEmpty) {
+          await LocalDb.instance
+              .updateMirrorPagadoHasta(id, nuevoHasta, txn: txn);
+        }
       });
       if (!mounted) return;
       mostrarSnack(context, '${c['nombre']} renovado', significado: SignificadoChip.exito);

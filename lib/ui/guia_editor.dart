@@ -987,7 +987,10 @@ class _GuiaEditorScreenState extends State<GuiaEditorScreen> {
               Text(
                 'Aviso: sin regresión, la ficha queda incompleta '
                 'para quien no pueda con la versión completa.',
-                style: AppTexto.metadato.copyWith(color: Colors.orange),
+                // 1.23 (Delta Argón 6ª): naranja de la casa
+                // adaptativo en vez de Colors.orange.
+                style: AppTexto.metadato
+                    .copyWith(color: AppColores.textoNaranja(context)),
               ),
           ]),
           _seccion('Imagen (1 por ficha)', [
