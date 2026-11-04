@@ -119,3 +119,138 @@ String etiquetaUltimoSync(Map<String, dynamic>? fila, DateTime ahora) {
   if (hace == null) return 'Sin registro de sync';
   return 'Última sync: $hace';
 }
+
+// ---------------------------------------------------------------------------
+// 1.23 (W5): alerta de teléfono sin sincronizar
+// ---------------------------------------------------------------------------
+
+/// Estado de un teléfono del staff según la antigüedad de su
+/// última sync efectiva, medida contra la hora del SERVIDOR
+/// (blindaje de Argón): el reloj del dispositivo puede estar
+/// mal y fabricar alertas — u ocultarlas.
+/// - atrasado: está EN TURNO y su última sync supera el
+///   umbral de turno. Es la alerta que importa: puede estar
+///   operando sin que su trabajo llegue al servidor.
+/// - inactivo: sin turno y más de 24 h sin sincronizar.
+/// - sinRegistro: nunca sincronizó (sin fila en el espejo).
+enum EstadoSyncTelefono { alDia, atrasado, inactivo, sinRegistro }
+
+/// En turno, media jornada sin una sola operación aplicada ya
+/// es señal de problema (la sync efectiva solo se mueve con
+/// operaciones aplicadas: es el contrato F4).
+const umbralAtrasoEnTurno = Duration(hours: 4);
+
+/// Fuera de turno, el umbral del diseño W5: 24 h.
+const umbralInactividad = Duration(hours: 24);
+
+/// Clasificación PURA: trabaja con instantes UTC (la edad es
+/// una diferencia de instantes; las zonas no intervienen).
+EstadoSyncTelefono clasificarSyncTelefono({
+  required String? ultimoSyncAt,
+  required DateTime ahoraServidorUtc,
+  required bool enTurno,
+}) {
+  if (ultimoSyncAt == null || ultimoSyncAt.isEmpty) {
+    return EstadoSyncTelefono.sinRegistro;
+  }
+  final u = DateTime.tryParse(ultimoSyncAt)?.toUtc();
+  if (u == null) return EstadoSyncTelefono.sinRegistro;
+  var edad = ahoraServidorUtc.toUtc().difference(u);
+  if (edad.isNegative) edad = Duration.zero;
+  if (enTurno) {
+    return edad > umbralAtrasoEnTurno
+        ? EstadoSyncTelefono.atrasado
+        : EstadoSyncTelefono.alDia;
+  }
+  return edad > umbralInactividad
+      ? EstadoSyncTelefono.inactivo
+      : EstadoSyncTelefono.alDia;
+}
+
+/// Evaluación completa de los teléfonos del staff para W5 y
+/// para el Paso 0 de W2 (delta del panel del Bloque 6): parte
+/// de TODAS las filas del espejo y AÑADE a quien está en turno
+/// hoy pero NO tiene fila (nunca sincronizó): ese teléfono no
+/// puede quedar invisible — en turno y sin registro es un
+/// riesgo (sinRegistro), no una ausencia de datos.
+/// [ahoraServidorUtc] debe ser la hora calibrada del servidor
+/// ([ahoraServidorUltimoSync]).
+Future<
+    List<
+        ({
+          int? telegramId,
+          Map<String, dynamic>? fila,
+          bool enTurno,
+          EstadoSyncTelefono estado,
+        })>> evaluarTelefonosSync() async {
+  final db = LocalDb.instance;
+  final filas = await ultimoSyncPorTelefono();
+  final h = ahoraHabana();
+  String dos(int n) => n.toString().padLeft(2, '0');
+  final enTurno = await db.telegramIdsConTurnoAbierto(
+      '${h.year}-${dos(h.month)}-${dos(h.day)}');
+  final ahoraSrv =
+      await ahoraServidorUltimoSync() ?? DateTime.now().toUtc();
+  final salida = <({
+    int? telegramId,
+    Map<String, dynamic>? fila,
+    bool enTurno,
+    EstadoSyncTelefono estado,
+  })>[];
+  final vistos = <int>{};
+  for (final f in filas) {
+    final tid = LocalDb.normalizarTelegramId(f['telegram_user_id']);
+    if (tid != null) vistos.add(tid);
+    final estaEnTurno = tid != null && enTurno.contains(tid);
+    salida.add((
+      telegramId: tid,
+      fila: f,
+      enTurno: estaEnTurno,
+      estado: clasificarSyncTelefono(
+        ultimoSyncAt: f['ultimo_sync_at'] as String?,
+        ahoraServidorUtc: ahoraSrv,
+        enTurno: estaEnTurno,
+      ),
+    ));
+  }
+  for (final tid in enTurno) {
+    if (vistos.contains(tid)) continue;
+    salida.add((
+      telegramId: tid,
+      fila: null,
+      enTurno: true,
+      estado: EstadoSyncTelefono.sinRegistro,
+    ));
+  }
+  return salida;
+}
+
+/// La hora del servidor de la última bajada del espejo
+/// sync_ultimo_sync (cabecera Date, guardada por el motor en
+/// la meta server_timestamp_ultimo_sync), CALIBRADA (delta
+/// del panel del Bloque 6): la marca guardada no avanza sola
+/// y usarla tal cual CONGELA la antigüedad (un teléfono
+/// parecía «al día» para siempre hasta el próximo pull). Se
+/// guarda también el instante local de recepción
+/// (server_timestamp_recibido_en, UTC real) y el «ahora del
+/// servidor» = marca + tiempo transcurrido desde la
+/// recepción. Así la referencia avanza entre pulls sin
+/// depender del reloj de pared del dispositivo (solo de su
+/// avance, que es lo que un reloj desviado sí hace bien).
+/// Null si aún no se ha capturado ninguna.
+Future<DateTime?> ahoraServidorUltimoSync() async {
+  final txt =
+      await LocalDb.instance.getMeta('server_timestamp_ultimo_sync');
+  if (txt == null || txt.isEmpty) return null;
+  final marca = DateTime.tryParse(txt)?.toUtc();
+  if (marca == null) return null;
+  final recTxt = await LocalDb.instance
+      .getMeta('server_timestamp_recibido_en');
+  final recibido = recTxt == null || recTxt.isEmpty
+      ? null
+      : DateTime.tryParse(recTxt)?.toUtc();
+  if (recibido == null) return marca;
+  final transcurrido = ahoraUtcReal().difference(recibido);
+  if (transcurrido.isNegative) return marca;
+  return marca.add(transcurrido);
+}

@@ -56,7 +56,7 @@ void main() {
   test('v58: app_log tiene firma, repeticiones y primer_ts',
       () async {
     await _preparar();
-    expect(LocalDb.versionActual, 59);
+    expect(LocalDb.versionActual, 60);
     final d = await LocalDb.instance.db;
     final cols = await d.rawQuery('PRAGMA table_info(app_log)');
     final nombres = cols.map((c) => '${c['name']}').toSet();

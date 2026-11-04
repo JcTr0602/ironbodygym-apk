@@ -23,7 +23,9 @@ import '../sync.dart';
 import '../tipos_pago.dart';
 import '../tiempo.dart';
 import '../ultimo_sync.dart';
+import '../visitas_invitados.dart';
 import 'app_bar.dart';
+import 'invitados.dart';
 import 'categorias_suplemento.dart';
 import 'componentes.dart';
 import 'cuentas_cobrar.dart';
@@ -622,6 +624,15 @@ class _SeccionDiagnosticoScreenState extends State<SeccionDiagnosticoScreen> {
   // Módulo 6 (estado único): filas de sync por teléfono, antes en
   // EstadoSyncScreen (F4). Solo se muestran al dueño.
   List<Map<String, dynamic>> _ultimoSync = [];
+  // 1.23 (W5): quién está en turno hoy y la hora del servidor
+  // capturada en la última bajada, para clasificar la
+  // antigüedad de cada teléfono sin fiarse del reloj local.
+  Set<int> _enTurnoHoy = {};
+  DateTime? _ahoraServidor;
+  // Delta del panel (Bloque 6): telegram_ids EN TURNO sin fila
+  // en el espejo (nunca sincronizaron): no pueden quedar
+  // invisibles en la sección.
+  Set<int> _enTurnoSinFila = {};
   // Módulo 6 (datos visibles): últimos eventos de carga/purga.
   List<Map<String, dynamic>> _eventosCarga = [];
   bool _cargando = true;
@@ -630,6 +641,56 @@ class _SeccionDiagnosticoScreenState extends State<SeccionDiagnosticoScreen> {
   void initState() {
     super.initState();
     _cargar();
+  }
+
+  /// 1.23 (W5): fila de un teléfono con su clase de
+  /// antigüedad. La edad se mide contra la hora del servidor
+  /// capturada en la última bajada (o el instante del
+  /// dispositivo si aún no hay ninguna). «Atrasado» (en turno
+  /// y pasado del umbral) va en error con icono: es el
+  /// teléfono que puede estar operando sin que su trabajo
+  /// llegue al servidor. «Inactivo» (>24 h sin turno) va en
+  /// alerta. El resto conserva la fila F4 de siempre.
+  Widget _filaTelefonoSync(Map<String, dynamic> f) {
+    final tid = LocalDb.normalizarTelegramId(f['telegram_user_id']);
+    final estado = clasificarSyncTelefono(
+      ultimoSyncAt: f['ultimo_sync_at'] as String?,
+      ahoraServidorUtc: _ahoraServidor ?? DateTime.now().toUtc(),
+      enTurno: tid != null && _enTurnoHoy.contains(tid),
+    );
+    final etiqueta = etiquetaUltimoSync(f, ahoraHabana());
+    final (Color? color, IconData? icono, String sufijo) =
+        switch (estado) {
+      EstadoSyncTelefono.atrasado => (
+          AppColores.error,
+          Icons.warning_amber_rounded,
+          ' · atrasado en turno'
+        ),
+      EstadoSyncTelefono.inactivo => (
+          AppColores.alerta,
+          Icons.schedule_rounded,
+          ' · inactivo'
+        ),
+      _ => (null, null, ''),
+    };
+    return Padding(
+      padding: const EdgeInsets.only(bottom: AppEspacio.sm),
+      child: Row(
+        children: [
+          if (icono != null) ...[
+            Icon(icono, size: 18, color: color),
+            const SizedBox(width: AppEspacio.xs),
+          ],
+          Expanded(
+            child: Text('${f['nombre']}',
+                style: AppTexto.cuerpo.copyWith(color: color)),
+          ),
+          Text('$etiqueta$sufijo',
+              style:
+                  AppTexto.secundario.copyWith(color: color)),
+        ],
+      ),
+    );
   }
 
   Future<void> _cargar() async {
@@ -741,11 +802,28 @@ class _SeccionDiagnosticoScreenState extends State<SeccionDiagnosticoScreen> {
       // Módulo 6 (estado único): sync por teléfono. Si falla, la
       // sección queda vacía pero el resto del diagnóstico se muestra.
       List<Map<String, dynamic>> ultimoSync = [];
+      var enTurnoHoy = <int>{};
+      DateTime? ahoraServidor;
       try {
         ultimoSync = await ultimoSyncPorTelefono();
+        // W5: en turno hoy (para la clase «atrasado») y la hora
+        // del servidor capturada por el motor. Si algo falla,
+        // la sección degrada a la lista F4 de siempre.
+        final h = ahoraHabana();
+        String dos(int n) => n.toString().padLeft(2, '0');
+        enTurnoHoy = await LocalDb.instance.telegramIdsConTurnoAbierto(
+            '${h.year}-${dos(h.month)}-${dos(h.day)}');
+        ahoraServidor = await ahoraServidorUltimoSync();
       } catch (_) {
         ultimoSync = [];
       }
+      final conFila = <int>{
+        for (final f in ultimoSync)
+          if (LocalDb.normalizarTelegramId(f['telegram_user_id'])
+              case final int t)
+            t,
+      };
+      final enTurnoSinFila = enTurnoHoy.difference(conFila);
       // Módulo 6 (datos visibles): últimos eventos de carga/purga.
       // Si falla la lectura, la sección queda vacía.
       List<Map<String, dynamic>> eventosCarga = [];
@@ -767,6 +845,9 @@ class _SeccionDiagnosticoScreenState extends State<SeccionDiagnosticoScreen> {
         _datos = datos;
         _ultimoError = (lastErr?.isNotEmpty ?? false) ? lastErr : null;
         _ultimoSync = ultimoSync;
+        _enTurnoHoy = enTurnoHoy;
+        _ahoraServidor = ahoraServidor;
+        _enTurnoSinFila = enTurnoSinFila;
         _eventosCarga = eventosCarga;
         _cargando = false;
       });
@@ -923,7 +1004,8 @@ class _SeccionDiagnosticoScreenState extends State<SeccionDiagnosticoScreen> {
                       const Text(
                         'Espejo sync_ultimo_sync: última sync '
                         'efectiva por usuario (solo cuentan las '
-                        'operaciones aplicadas).',
+                        'operaciones aplicadas). La antigüedad '
+                        'se mide contra la hora del servidor.',
                         style: AppTexto.secundario,
                       ),
                       const SizedBox(height: 8),
@@ -933,24 +1015,54 @@ class _SeccionDiagnosticoScreenState extends State<SeccionDiagnosticoScreen> {
                           'usuario sincronizó con éxito aún.',
                           style: AppTexto.secundario,
                         )
-                      else
-                        ..._ultimoSync.map((f) => Padding(
-                              padding:
-                                  const EdgeInsets.only(bottom: AppEspacio.sm),
-                              child: Row(
-                                children: [
-                                  Expanded(
-                                    child: Text('${f['nombre']}',
-                                        style: AppTexto.cuerpo),
-                                  ),
-                                  Text(
-                                    etiquetaUltimoSync(
-                                        f, ahoraHabana()),
-                                    style: AppTexto.secundario,
-                                  ),
-                                ],
-                              ),
-                            )),
+                      else ...[
+                        // W5: el resumen de atrasados manda —
+                        // si hay alguien en turno sin sincronizar,
+                        // se ve antes que la lista.
+                        if (_ultimoSync.any((f) =>
+                            clasificarSyncTelefono(
+                              ultimoSyncAt:
+                                  f['ultimo_sync_at'] as String?,
+                              ahoraServidorUtc: _ahoraServidor ??
+                                  DateTime.now().toUtc(),
+                              enTurno: _enTurnoHoy.contains(
+                                  LocalDb.normalizarTelegramId(
+                                      f['telegram_user_id'])),
+                            ) ==
+                            EstadoSyncTelefono.atrasado))
+                          Padding(
+                            padding: const EdgeInsets.only(
+                                bottom: AppEspacio.sm),
+                            child: Text(
+                              '⚠ Hay teléfonos EN TURNO pasados '
+                              'del umbral sin sincronizar: su '
+                              'trabajo puede no estar llegando '
+                              'al servidor.',
+                              style: AppTexto.secundario.copyWith(
+                                  color: AppColores.error,
+                                  fontWeight: FontWeight.bold),
+                            ),
+                          ),
+                        ..._ultimoSync.map(_filaTelefonoSync),
+                        // Delta del panel: en turno SIN fila =
+                        // nunca sincronizó: riesgo visible, no
+                        // ausencia silenciosa.
+                        if (_enTurnoSinFila.isNotEmpty)
+                          Padding(
+                            padding: const EdgeInsets.only(
+                                top: AppEspacio.sm),
+                            child: Text(
+                              '⚠ ${_enTurnoSinFila.length} '
+                              'teléfono(s) EN TURNO sin ninguna '
+                              'sincronización registrada '
+                              '(${_enTurnoSinFila.join(', ')}): su '
+                              'trabajo no consta en el servidor.',
+                              style: AppTexto.secundario.copyWith(
+                                  color: AppColores.error,
+                                  fontWeight: FontWeight.bold),
+                            ),
+                          ),
+                      ],
                     ]),
                   if (_ultimoError != null)
                     seccionAdmin(context, Icons.error_outline_rounded, 'Último error', [
@@ -1737,6 +1849,190 @@ class _BajadaCompletaScreenState extends State<BajadaCompletaScreen> {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// 1.23 (W7): invitados frecuentes — candidatos a cliente
+/// según el conteo LOCAL de visitas de este teléfono
+/// (lib/visitas_invitados.dart). El dueño ajusta el umbral y
+/// abre la ficha del invitado para convertirlo (el flujo de
+/// conversión es el de la ficha, con sus guardias).
+class InvitadosFrecuentesScreen extends StatefulWidget {
+  const InvitadosFrecuentesScreen({super.key});
+
+  @override
+  State<InvitadosFrecuentesScreen> createState() =>
+      _InvitadosFrecuentesScreenState();
+}
+
+class _InvitadosFrecuentesScreenState
+    extends State<InvitadosFrecuentesScreen> {
+  bool _cargando = true;
+  List<Map<String, dynamic>> _candidatos = [];
+  int _umbral = umbralVisitasDefecto;
+
+  @override
+  void initState() {
+    super.initState();
+    _cargar();
+  }
+
+  Future<void> _cargar() async {
+    setState(() => _cargando = true);
+    final umbral = await umbralVisitasInvitado();
+    final lista = await candidatosInvitados();
+    if (!mounted) return;
+    setState(() {
+      _umbral = umbral;
+      _candidatos = lista;
+      _cargando = false;
+    });
+  }
+
+  Future<void> _cambiarUmbral(int delta) async {
+    await fijarUmbralVisitasInvitado(_umbral + delta);
+    if (!mounted) return;
+    _cargar();
+  }
+
+  String _etiquetaClave(String clave) {
+    if (clave.startsWith('ci:')) return 'Carnet ${clave.substring(3)}';
+    if (clave.startsWith('tel:')) return 'Tel. ${clave.substring(4)}';
+    if (clave.startsWith('nom:')) return clave.substring(4);
+    return clave;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!AuthService().isOwner) {
+      return Scaffold(
+          appBar: appBarIron(context, 'Invitados frecuentes'),
+          body: const Center(
+              child:
+                  Text('Los candidatos son solo del dueño.')));
+    }
+    return Scaffold(
+      appBar: appBarIron(context, 'Invitados frecuentes'),
+      body: _cargando
+          ? const EstadoCargando(texto: 'Buscando candidatos…')
+          : RefreshIndicator(
+              onRefresh: _cargar,
+              child: ListView(
+                padding: const EdgeInsets.all(AppEspacio.lg),
+                children: [
+                  Tarjeta(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text('Umbral de candidato',
+                            style: AppTexto.subtitulo),
+                        const SizedBox(height: AppEspacio.sm),
+                        Text(
+                          'Un invitado es candidato cuando suma '
+                          '$_umbral visitas en $diasVentanaVisitas '
+                          'días, contadas en ESTE teléfono con el '
+                          'botón «Registrar visita» de su ficha.',
+                          style: AppTexto.cuerpo,
+                        ),
+                        const SizedBox(height: AppEspacio.md),
+                        Row(
+                          mainAxisAlignment:
+                              MainAxisAlignment.center,
+                          children: [
+                            IconButton(
+                              onPressed: _umbral <= 2
+                                  ? null
+                                  : () => _cambiarUmbral(-1),
+                              icon: const Icon(
+                                  Icons.remove_circle_outline_rounded),
+                            ),
+                            Text('$_umbral visitas',
+                                style: AppTexto.subtitulo),
+                            IconButton(
+                              onPressed: _umbral >= 30
+                                  ? null
+                                  : () => _cambiarUmbral(1),
+                              icon: const Icon(
+                                  Icons.add_circle_outline_rounded),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: AppEspacio.lg),
+                  if (_candidatos.isEmpty)
+                    const Tarjeta(
+                      child: Text(
+                        'Ningún invitado llega al umbral todavía. '
+                        'Registra las visitas desde la ficha de '
+                        'cada invitado y los frecuentes aparecerán '
+                        'aquí.',
+                        style: AppTexto.cuerpo,
+                      ),
+                    )
+                  else
+                    for (final c in _candidatos)
+                      Padding(
+                        padding: const EdgeInsets.only(
+                            bottom: AppEspacio.md),
+                        child: Tarjeta(
+                          onTap: c['invitado_id'] == null
+                              ? null
+                              : () async {
+                                  await Navigator.of(context).push(
+                                    MaterialPageRoute(
+                                      builder: (_) =>
+                                          InvitadoDetalleScreen(
+                                              invitadoId:
+                                                  '${c['invitado_id']}'),
+                                    ),
+                                  );
+                                  if (!mounted) return;
+                                  _cargar();
+                                },
+                          child: Row(
+                            children: [
+                              IconoModuloBadge.verde(
+                                  Icons.how_to_reg_rounded),
+                              const SizedBox(
+                                  width: AppEspacio.md),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment:
+                                      CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      (c['nombre'] as String?)
+                                                  ?.isNotEmpty ==
+                                              true
+                                          ? c['nombre'] as String
+                                          : _etiquetaClave(
+                                              '${c['clave']}'),
+                                      style: AppTexto.subtitulo,
+                                    ),
+                                    Text(
+                                      '${c['visitas']} visitas en '
+                                      '$diasVentanaVisitas días · '
+                                      'última: '
+                                      '${haceX(c['ultima'] as String?, ahoraHabana()) ?? '—'}'
+                                      '${c['invitado_id'] == null ? ' · sin ficha enlazada (regístrala desde su ficha)' : ''}',
+                                      style: AppTexto.secundario,
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              if (c['invitado_id'] != null)
+                                const Icon(
+                                    Icons.chevron_right_rounded),
+                            ],
+                          ),
+                        ),
+                      ),
+                ],
+              ),
+            ),
     );
   }
 }

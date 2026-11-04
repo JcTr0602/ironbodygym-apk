@@ -13,6 +13,7 @@ import '../permisos_entrenador.dart';
 import '../sync.dart';
 import '../tiempo.dart';
 import 'app_bar.dart';
+import 'cierre_mes.dart';
 import 'componentes.dart';
 import 'diseno.dart';
 import 'mi_nomina.dart';
@@ -469,6 +470,46 @@ class _NominaScreenState extends State<NominaScreen> {
           : ListView(
               padding: const EdgeInsets.all(AppEspacio.lg),
               children: [
+                // 1.23 (W2): la puerta del cierre de mes guiado
+                // vive aquí (solo dueño): es la pantalla desde
+                // la que naturalmente se cierra el mes.
+                if (esDueno) ...[
+                  Tarjeta(
+                    onTap: () async {
+                      await Navigator.of(context).push(
+                        MaterialPageRoute(
+                            builder: (_) => const CierreMesScreen()),
+                      );
+                      if (!mounted) return;
+                      _cargar();
+                    },
+                    child: Row(
+                      children: [
+                        IconoModuloBadge.verde(
+                            Icons.event_available_rounded),
+                        const SizedBox(width: AppEspacio.md),
+                        const Expanded(
+                          child: Column(
+                            crossAxisAlignment:
+                                CrossAxisAlignment.start,
+                            children: [
+                              Text('Cierre de mes guiado',
+                                  style: AppTexto.subtitulo),
+                              Text(
+                                'La ruta completa: sync, nómina, '
+                                'arqueo, entregas y respaldo, paso '
+                                'a paso con verificación.',
+                                style: AppTexto.secundario,
+                              ),
+                            ],
+                          ),
+                        ),
+                        const Icon(Icons.chevron_right_rounded),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: AppEspacio.lg),
+                ],
                 Tarjeta(
                   padding: const EdgeInsets.all(20),
                   child: Column(

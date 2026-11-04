@@ -16,6 +16,7 @@ import '../tiempo.dart';
 import '../sync.dart';
 import '../cliente_protegido.dart';
 import 'app_bar.dart';
+import 'diagnostico_espejo_card.dart';
 import 'componentes.dart';
 import 'dialogo_pago.dart';
 import 'pago_diario.dart';
@@ -446,6 +447,10 @@ class _BuscarScreenState extends State<BuscarScreen> {
               ),
             ],
           ),
+          // 1.23 (W1): si el espejo de clientes está vacío
+          // habiendo tenido clientes, la tarjeta de diagnóstico
+          // va sobre la lista (se auto-oculta si está sano).
+          const TarjetaDiagnosticoEspejo(),
           Expanded(
             child: _res.isEmpty
                 ? EstadoVacio(

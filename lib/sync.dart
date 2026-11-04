@@ -36,6 +36,7 @@ import 'acceso_bloqueo.dart';
 import 'app_log.dart';
 import 'auth.dart';
 import 'comprobantes.dart';
+import 'diagnostico_espejo.dart';
 import 'config.dart';
 import 'errores_sync.dart';
 import 'fotos.dart';
@@ -1984,6 +1985,18 @@ class SyncEngine {
       if (incidenciasOk) {
         await _db.setMeta(
             'last_pull_ok', isoHabana(ahoraHabana()));
+        // 1.23 (W1): testigo del diagnóstico de espejo vacío —
+        // cuántos clientes dejó esta bajada buena. Una bajada
+        // que llega vacía NO lo pisa (registrarTestigoClientes
+        // solo guarda conteos positivos): si lo pisara, el
+        // propio fallo borraría su evidencia. Un fallo aquí no
+        // puede tumbar el pull: es solo telemetría.
+        try {
+          await registrarTestigoClientes(
+              await _db.contarFilasMirror('clientes'));
+        } catch (e) {
+          AppLog.error('sync', 'w1_testigo_fallo', d: '$e');
+        }
       }
       // v1.13.0 (F4, CONTRATO_F4_20261024): pull del espejo
       // sync_ultimo_sync (una fila por usuario). No bloquea
@@ -5336,6 +5349,27 @@ class SyncEngine {
     }
     final rows = jsonDecode(r.body) as List;
     await _db.upsertUltimoSync(rows);
+    // 1.23 (W5): la cabecera Date de ESTA respuesta es la hora
+    // del servidor: se guarda como referencia para medir la
+    // antigüedad de cada teléfono contra el reloj del servidor
+    // y no contra el del dispositivo (que puede estar mal y
+    // fabricar —u ocultar— alertas). Es telemetría: un fallo
+    // aquí no tumba el pull.
+    try {
+      final dateHdr = r.headers['date'];
+      if (dateHdr != null) {
+        await _db.setMeta('server_timestamp_ultimo_sync',
+            HttpDate.parse(dateHdr).toUtc().toIso8601String());
+        // Delta del panel (Bloque 6): el instante local de
+        // recepción, para CALIBRAR la hora del servidor entre
+        // pulls (si no, la referencia queda congelada y la
+        // antigüedad de W5 deja de crecer).
+        await _db.setMeta('server_timestamp_recibido_en',
+            ahoraUtcReal().toIso8601String());
+      }
+    } catch (e) {
+      AppLog.error('sync', 'w5_server_ts_fallo', d: '$e');
+    }
     return rows.length;
   }
 

@@ -2212,6 +2212,13 @@ class _AdminScreenState extends State<AdminScreen> {
         'Por atender',
         () => _ir(const InvitadosScreen()),
       ),
+      // 1.23 (W7): candidatos por visitas registradas en la ficha.
+      _tarjetaFlujo(
+        Icons.how_to_reg_rounded,
+        'Invitados frecuentes',
+        'Candidatos a cliente por visitas (30 días)',
+        () => _ir(const InvitadosFrecuentesScreen()),
+      ),
       _subModulo('COMUNICACIÓN'),
       _tarjetaFlujo(
         Icons.message_rounded,

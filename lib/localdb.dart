@@ -41,7 +41,7 @@ class LocalDb {
   /// v1.4.0 (Argón): versión actual del esquema local. Los tests de
   /// migración comparan contra esta constante en vez de un número
   /// fijo, para no caer en cascada de fallos con cada migración.
-  static const int versionActual = 59;
+  static const int versionActual = 60;
 
   /// v37: marcas de información pública pendiente de republicar,
   /// UNA FILA POR CLAVE (compartido entre onCreate y la migración
@@ -1328,6 +1328,12 @@ class LocalDb {
           await _addColumnIfMissing(db, 'comprobantes_pago',
               'intentos', 'INTEGER NOT NULL DEFAULT 0');
         }
+        if (oldV < 60) {
+          // 1.23 (W7): registro LOCAL de visitas de invitados
+          // (ruta 1 de Jc: conteo por teléfono, sin sync de
+          // asistencia entre aparatos).
+          await _crearTablaVisitasInvitados(db);
+        }
       },
     );
     // v1.2.5+28: repara el índice FTS si la migración lo omitió y el
@@ -2147,6 +2153,8 @@ class LocalDb {
     // F1 (1.20, v55): comprobantes de pago por transferencia
     // (tabla local de control de subida, no espejo).
     await _crearTablaComprobantes(db);
+    // 1.23 (W7, v60): visitas locales de invitados.
+    await _crearTablaVisitasInvitados(db);
     // T22 (1.20, v56): espejos de la foto de liquidación de
     // nómina (con desglose) y de las confirmaciones de
     // recepción de los entrenadores.
@@ -2862,6 +2870,92 @@ class LocalDb {
         'creado_en TEXT NOT NULL, '
         // SA-05 (1.21): tope de intentos de subida reintentables.
         'intentos INTEGER NOT NULL DEFAULT 0)');
+  }
+
+  /// 1.23 (W7): tabla LOCAL (no espejo ni sync): visitas de
+  /// invitados registradas a mano desde la ficha, agrupadas
+  /// por la clave de identidad normalizada (carnet, si no
+  /// teléfono, si no nombre). Sirve para detectar al invitado
+  /// frecuente que ya es candidato a cliente. Vive solo en
+  /// ESTE teléfono (decisión de Jc, ruta 1).
+  static Future<void> _crearTablaVisitasInvitados(
+      DatabaseExecutor db) async {
+    await db.execute(
+        'CREATE TABLE IF NOT EXISTS visitas_invitados ('
+        'id INTEGER PRIMARY KEY AUTOINCREMENT, '
+        'clave TEXT NOT NULL, '
+        'invitado_id INTEGER, '
+        'nombre TEXT, '
+        'ts TEXT NOT NULL)');
+    await db.execute('CREATE INDEX IF NOT EXISTS '
+        'idx_visitas_invitados_clave ON visitas_invitados(clave, ts)');
+  }
+
+  /// Registra una visita de invitado (W7, local).
+  Future<void> registrarVisitaInvitado({
+    required String clave,
+    required int? invitadoId,
+    required String? nombre,
+    required String tsIso,
+  }) async {
+    final d = await db;
+    await d.insert('visitas_invitados', {
+      'clave': clave,
+      'invitado_id': invitadoId,
+      'nombre': nombre,
+      'ts': tsIso,
+    });
+  }
+
+  /// Visitas de UNA clave desde [desdeIso] (inclusive), de la
+  /// más reciente a la más vieja.
+  Future<List<Map<String, dynamic>>> visitasDeInvitado(
+      String clave, String desdeIso) async {
+    final d = await db;
+    return d.query('visitas_invitados',
+        where: 'clave = ? AND ts >= ?',
+        whereArgs: [clave, desdeIso],
+        orderBy: 'ts DESC');
+  }
+
+  /// Candidatos a cliente (W7): claves con al menos [umbral]
+  /// visitas desde [desdeIso]. Devuelve clave, conteo, último
+  /// nombre visto, invitado_id más reciente y última visita,
+  /// ordenado por conteo descendente. Delta del panel: el
+  /// nombre y el invitado_id salen de DENTRO de la ventana
+  /// (sin el filtro, un candidato vigente podía heredar el
+  /// nombre o la ficha de una visita vieja de otra época).
+  Future<List<Map<String, dynamic>>> candidatosInvitadosFrecuentes(
+      int umbral, String desdeIso) async {
+    final d = await db;
+    return d.rawQuery(
+        'SELECT clave, COUNT(*) AS visitas, MAX(ts) AS ultima, '
+        '(SELECT nombre FROM visitas_invitados v2 '
+        '  WHERE v2.clave = v.clave AND v2.ts >= ? '
+        '  ORDER BY v2.ts DESC LIMIT 1) '
+        '  AS nombre, '
+        '(SELECT invitado_id FROM visitas_invitados v3 '
+        '  WHERE v3.clave = v.clave AND v3.invitado_id IS NOT NULL '
+        '  AND v3.ts >= ? '
+        '  ORDER BY v3.ts DESC LIMIT 1) AS invitado_id '
+        'FROM visitas_invitados v WHERE ts >= ? '
+        'GROUP BY clave HAVING COUNT(*) >= ? '
+        'ORDER BY visitas DESC, ultima DESC',
+        [desdeIso, desdeIso, desdeIso, umbral]);
+  }
+
+  /// Reasigna a [claveNueva] las visitas previas de una ficha
+  /// (W7, delta del panel): la identidad puede FORTALECERSE
+  /// con el tiempo (primero solo nombre, luego teléfono, al
+  /// fin carnet) y sin esta migración el conteo quedaba
+  /// partido en dos claves. La ficha (invitado_id) es el
+  /// ancla: todas sus visitas pasan a la clave vigente.
+  Future<void> reasignarClaveVisitas(
+      int invitadoId, String claveNueva) async {
+    final d = await db;
+    await d.update('visitas_invitados', {'clave': claveNueva},
+        where: 'invitado_id = ? AND clave <> ?',
+        whereArgs: [invitadoId, claveNueva]);
   }
 
   /// T22 (1.20): espejos de la foto de liquidación de nómina
@@ -6038,6 +6132,23 @@ class LocalDb {
     return rows.isEmpty ? null : rows.first;
   }
 
+  /// 1.23 (W5): telegram_id de quienes tienen turno ABIERTO en
+  /// una fecha (para clasificar su antigüedad de sync como
+  /// «en turno» en el Panel del dueño).
+  Future<Set<int>> telegramIdsConTurnoAbierto(String fechaTurno) async {
+    final d = await db;
+    final rows = await d.query('turnos',
+        columns: ['telegram_id'],
+        distinct: true,
+        where: 'fecha_turno=? AND estado IN (?,?)',
+        whereArgs: [fechaTurno, 'abierto_local', 'abierto_sincronizado']);
+    return {
+      for (final r in rows)
+        if (normalizarTelegramId(r['telegram_id']) != null)
+          normalizarTelegramId(r['telegram_id'])!,
+    };
+  }
+
   /// Último turno de un entrenador en una FECHA, sin filtrar
   /// por franja ni estado. Respaldo de ultimoTurno (misma
   /// razón que turnoAbiertoDelDia).
@@ -7415,6 +7526,15 @@ class LocalDb {
     final d = await db;
     final r = await d.rawQuery(
         'SELECT COUNT(*) c FROM ops_queue WHERE estado IN (\'pendiente\', \'enviada\', \'error\')');
+    return (r.first['c'] as int?) ?? 0;
+  }
+
+  /// 1.23 (W1): filas crudas de una tabla espejo. El nombre es
+  /// siempre una constante interna de la app (nunca entrada
+  /// del usuario): sirve al diagnóstico de espejo vacío.
+  Future<int> contarFilasMirror(String tabla) async {
+    final d = await db;
+    final r = await d.rawQuery('SELECT COUNT(*) c FROM $tabla');
     return (r.first['c'] as int?) ?? 0;
   }
 

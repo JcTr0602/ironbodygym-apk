@@ -22,6 +22,7 @@ import '../negocio.dart';
 import '../plus_reportes.dart';
 import '../sync.dart';
 import '../tiempo.dart';
+import '../visitas_invitados.dart';
 import 'admin.dart';
 import 'app_bar.dart';
 import 'componentes.dart';
@@ -1371,6 +1372,11 @@ class _InvitadoDetalleScreenState extends State<InvitadoDetalleScreen> {
   String? _eliminadoEn;
   bool _offlineCache = false;
   DateTime? _cacheAt;
+  // 1.23 (W7): visitas locales del invitado (ventana 30 días)
+  // y el umbral de candidato vigente.
+  int _visitas30 = 0;
+  int _umbralVisitas = umbralVisitasDefecto;
+  String _claveVisitas = '';
 
   @override
   void initState() {
@@ -1445,6 +1451,9 @@ class _InvitadoDetalleScreenState extends State<InvitadoDetalleScreen> {
         _cacheAt = null;
         _cargando = false;
       });
+      // 1.23 (W7): conteo local de visitas (no bloquea la
+      // ficha: se pinta cuando llega).
+      _cargarVisitas(d);
     } catch (e) {
       if (!mounted) return;
       // v1.12.0 (D5): sin conexión, el detalle en caché se muestra
@@ -1714,6 +1723,10 @@ class _InvitadoDetalleScreenState extends State<InvitadoDetalleScreen> {
           ],
           const SizedBox(height: AppEspacio.md),
           _tarjetaSync(d),
+          if (!d.convertido) ...[
+            const SizedBox(height: AppEspacio.md),
+            _tarjetaVisitas(d),
+          ],
           const SizedBox(height: AppEspacio.md),
           _tarjetaConversion(d),
           if (d.staffAcciones.isNotEmpty) ...[
@@ -2230,6 +2243,100 @@ class _InvitadoDetalleScreenState extends State<InvitadoDetalleScreen> {
           ),
         );
     }
+  }
+
+  // ------------------------------------------------------------------
+  // 1.23 (W7): visitas del invitado — registro mínimo local.
+  // ------------------------------------------------------------------
+
+  Future<void> _cargarVisitas(InvitadoDetalle d) async {
+    final clave = claveIdentidadInvitado(
+        carnet: d.carnet, telefono: d.telefono, nombre: d.nombre);
+    var conteo = 0;
+    var umbral = umbralVisitasDefecto;
+    try {
+      if (clave.isNotEmpty) conteo = await conteoVisitasInvitado(clave);
+      umbral = await umbralVisitasInvitado();
+    } catch (_) {}
+    if (!mounted) return;
+    setState(() {
+      _claveVisitas = clave;
+      _visitas30 = conteo;
+      _umbralVisitas = umbral;
+    });
+  }
+
+  Future<void> _registrarVisita() async {
+    final d = _d;
+    if (d == null || _claveVisitas.isEmpty || _offlineCache) return;
+    final n = await registrarVisitaInvitadoAhora(
+      clave: _claveVisitas,
+      invitadoId: int.tryParse(d.id),
+      nombre: d.nombre,
+    );
+    if (!mounted) return;
+    setState(() => _visitas30 = n);
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(n >= _umbralVisitas
+          ? 'Visita registrada. Ya suma $n en 30 días: es '
+              'candidato a cliente.'
+          : 'Visita registrada ($n en 30 días en este teléfono).'),
+    ));
+  }
+
+  Widget _tarjetaVisitas(InvitadoDetalle d) {
+    final candidato = _claveVisitas.isNotEmpty &&
+        _visitas30 >= _umbralVisitas;
+    return Tarjeta(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.directions_walk_rounded,
+                  color: AppColores.textoSecundario(context)),
+              const SizedBox(width: AppEspacio.sm),
+              const Text('Visitas', style: AppTexto.subtitulo),
+              const Spacer(),
+              if (candidato)
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: AppEspacio.sm,
+                      vertical: AppEspacio.xs),
+                  decoration: BoxDecoration(
+                    color:
+                        AppColores.exito.withValues(alpha: 0.15),
+                    borderRadius:
+                        BorderRadius.circular(AppRadio.sm),
+                  ),
+                  child: Text('Candidato a cliente',
+                      style: AppTexto.etiqueta
+                          .copyWith(color: AppColores.exito)),
+                ),
+            ],
+          ),
+          const SizedBox(height: AppEspacio.sm),
+          Text(
+            _claveVisitas.isEmpty
+                ? 'Sin carnet, teléfono ni nombre utilizables: '
+                    'no se puede llevar su conteo de visitas.'
+                : '$_visitas30 visita(s) en los últimos '
+                    '$diasVentanaVisitas días en ESTE teléfono '
+                    '(el conteo no viaja entre teléfonos). El '
+                    'umbral de candidato es $_umbralVisitas.',
+            style: AppTexto.cuerpo,
+          ),
+          if (_claveVisitas.isNotEmpty && !_offlineCache) ...[
+            const SizedBox(height: AppEspacio.md),
+            BotonSecundario(
+              texto: 'Registrar visita',
+              icono: Icons.how_to_reg_rounded,
+              onPressed: _registrarVisita,
+            ),
+          ],
+        ],
+      ),
+    );
   }
 
   /// v1.8.0 — Bloque Plus del detalle (diseño §5.4): estado con

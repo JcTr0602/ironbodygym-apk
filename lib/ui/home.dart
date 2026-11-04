@@ -23,6 +23,7 @@ import '../novedades.dart';
 import '../perfil.dart';
 import '../permisos_entrenador.dart';
 import '../cierre_automatico.dart';
+import 'diagnostico_espejo_card.dart';
 import '../sync.dart';
 import '../theme.dart';
 import '../tiempo.dart';
@@ -927,6 +928,10 @@ class _HomeScreenState extends State<HomeScreen>
                 // _bannerSync): si coexisten fallo y aviso, manda
                 // el fallo; al descartarlo reaparece el aviso.
                 _bannerSync(),
+                // 1.23 (W1): diagnóstico de espejo vacío — solo
+                // pinta si el espejo de clientes está en cero
+                // habiendo tenido clientes tras una bajada buena.
+                const TarjetaDiagnosticoEspejo(),
                 // 1.23 (B2): selector de nivel fijo bajo la
                 // cabecera y el banner — Hoy | Módulos, a un toque
                 // y sin empujar ninguna zona interactiva (H-02).
