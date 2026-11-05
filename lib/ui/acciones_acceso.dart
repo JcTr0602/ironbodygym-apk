@@ -101,7 +101,9 @@ Future<void> accionSimpleAcceso(
   }
   try {
     await Supabase.instance.client
-        .rpc(rpc, params: {'p_cliente_id': clienteId});
+        .rpc(rpc, params: {'p_cliente_id': clienteId})
+        // 1.24 Bloque 4: toda RPC de escritura con timeout (12 s).
+        .timeout(const Duration(seconds: 12));
     if (!ctx.mounted) return;
     await alTerminar();
     _snack(ctx, mensajeOk);
@@ -138,10 +140,13 @@ Future<void> resetearPinAcceso(
   // la RPC invalidaría el PIN viejo sin poder mostrar el nuevo.
   if (!ctx.mounted) return;
   try {
-    final res = await Supabase.instance.client.rpc(
-      'resetear_pin_cliente',
-      params: {'p_cliente_id': clienteId},
-    );
+    final res = await Supabase.instance.client
+        .rpc(
+          'resetear_pin_cliente',
+          params: {'p_cliente_id': clienteId},
+        )
+        // 1.24 Bloque 4: timeout de escritura (12 s).
+        .timeout(const Duration(seconds: 12));
     final data = Map<String, dynamic>.from(res as Map);
     final pin = '${data['pin_temporal'] ?? ''}';
     if (pin.isEmpty) throw 'El servidor no devolvió el PIN';
@@ -229,16 +234,19 @@ Future<void> bloquearAcceso(
       ctrlMotivo.text.trim().isEmpty ? null : ctrlMotivo.text.trim();
   ctrlMotivo.dispose();
   try {
-    await Supabase.instance.client.rpc(
-      'bloquear_acceso_cliente',
-      params: {
-        'p_cliente_id': clienteId,
-        'p_hasta': dias < 0
-            ? null
-            : isoHabana(ahoraHabana().add(Duration(days: dias))),
-        'p_motivo': motivo,
-      },
-    );
+    await Supabase.instance.client
+        .rpc(
+          'bloquear_acceso_cliente',
+          params: {
+            'p_cliente_id': clienteId,
+            'p_hasta': dias < 0
+                ? null
+                : isoHabana(ahoraHabana().add(Duration(days: dias))),
+            'p_motivo': motivo,
+          },
+        )
+        // 1.24 Bloque 4: timeout de escritura (12 s).
+        .timeout(const Duration(seconds: 12));
     if (!ctx.mounted) return;
     await alTerminar();
     _snack(ctx, 'Acceso bloqueado.');
@@ -300,13 +308,16 @@ Future<void> cambiarTelefonoAcceso(
   final nuevoTelefono = ctrl.text.trim();
   ctrl.dispose();
   try {
-    await Supabase.instance.client.rpc(
-      'cambiar_telefono_acceso',
-      params: {
-        'p_cliente_id': clienteId,
-        'p_telefono': nuevoTelefono,
-      },
-    );
+    await Supabase.instance.client
+        .rpc(
+          'cambiar_telefono_acceso',
+          params: {
+            'p_cliente_id': clienteId,
+            'p_telefono': nuevoTelefono,
+          },
+        )
+        // 1.24 Bloque 4: timeout de escritura (12 s).
+        .timeout(const Duration(seconds: 12));
     if (!ctx.mounted) return;
     await alTerminar();
     _snack(ctx, 'Teléfono actualizado.');

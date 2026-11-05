@@ -122,9 +122,11 @@ class _EditorPlanNutricionalState
     try {
       await Supabase.instance.client
           .rpc('guardar_plan_nutricional', params: {
-        'p_cliente_id': widget.clienteId,
-        'p_contenido': texto,
-      });
+            'p_cliente_id': widget.clienteId,
+            'p_contenido': texto,
+          })
+          // 1.24 Bloque 4: timeout de escritura (12 s).
+          .timeout(const Duration(seconds: 12));
       if (mounted) {
         mostrarSnack(context, 'Plan guardado', significado: SignificadoChip.exito);
         Navigator.pop(context, true);

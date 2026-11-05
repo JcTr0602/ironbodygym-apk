@@ -89,6 +89,9 @@ class _PagoScreenState extends State<PagoScreen> {
   List<Map<String, dynamic>> _res = [];
   bool _busco = false;
   bool _soloVencidos = false;
+  // 1.24 Bloque 4: anti-doble-toque síncrono del diálogo de
+  // cobro (la bandera se pone antes del primer await).
+  bool _pagoEnCurso = false;
   List<_Cobro> _cobros = [];
   bool _cargandoCobros = true;
   // PagoIds del espejo con anular_pago ya en cola (ver _cargarDatos).
@@ -342,6 +345,18 @@ class _PagoScreenState extends State<PagoScreen> {
   }
 
   Future<void> _pagar(Map<String, dynamic> c) async {
+    // 1.24 Bloque 4: anti-doble-toque síncrono — sin esto, dos
+    // toques rápidos apilaban dos diálogos de cobro.
+    if (_pagoEnCurso) return;
+    _pagoEnCurso = true;
+    try {
+      await _pagarFlujo(c);
+    } finally {
+      _pagoEnCurso = false;
+    }
+  }
+
+  Future<void> _pagarFlujo(Map<String, dynamic> c) async {
     // 1.24 Bloque 3: permiso operativo al tocar (aviso, sin
     // abrir el diálogo para un cobro que el servidor rebotará).
     if (!permisoOperativoOk(context,

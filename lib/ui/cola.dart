@@ -344,6 +344,24 @@ class _ColaScreenState extends State<ColaScreen> {
 
   /// v1.3.1: permite descartar una foto pendiente (ej: sin cliente asociado).
   Future<void> _cancelarFoto(int id) async {
+    // 1.24 Bloque 4 (H-01, cinturón): si el worker la está
+    // subiendo, no se descarta (la fila desaparecería a mitad
+    // de la subida y los bytes quedarían huérfanos). La UI ya
+    // no ofrece el botón en ese estado; esto cubre la ventana
+    // en que la fila cambió tras pintarse.
+    try {
+      final db0 = await LocalDb.instance.db;
+      final filas = await db0.query('fotos_cola',
+          columns: ['estado'], where: 'id = ?', whereArgs: [id]);
+      if (filas.isNotEmpty && '${filas.first['estado']}' == 'subiendo') {
+        if (mounted) {
+          mostrarSnack(
+              context, 'Esa foto se está subiendo ahora mismo',
+              significado: SignificadoChip.alerta);
+        }
+        return;
+      }
+    } catch (_) {}
     final ok = await DialogoApp.confirmar(
       context,
       titulo: 'Descartar foto',
@@ -357,7 +375,7 @@ class _ColaScreenState extends State<ColaScreen> {
       final db = await LocalDb.instance.db;
       await db.delete(
         'fotos_cola',
-        where: 'id = ?',
+        where: "id = ? AND estado != 'subiendo'",
         whereArgs: [id],
       );
       AppLog.info('fotos', 'descartada_manual', d: 'id=$id');
@@ -582,7 +600,10 @@ class _ColaScreenState extends State<ColaScreen> {
     _fotosReintentando.add(id);
     try {
       final db = await LocalDb.instance.db;
-      await db.update(
+      // 1.24 Bloque 4 (H-01, cinturón): el UPDATE no toca una
+      // fila 'subiendo' — resetearla bajo el worker le quitaba
+      // el lease y otro reclamo podía duplicar la subida.
+      final tocadas = await db.update(
         'fotos_cola',
         {
           'estado': 'pendiente',
@@ -594,9 +615,18 @@ class _ColaScreenState extends State<ColaScreen> {
           // v1.3.10: el reintento manual salta el filtro QoS de 'original'.
           'forzar_qos': 1,
         },
-        where: 'id = ?',
+        where: "id = ? AND estado != 'subiendo'",
         whereArgs: [id],
       );
+      if (tocadas == 0) {
+        if (mounted) {
+          mostrarSnack(
+              context, 'Esa foto se está subiendo ahora mismo',
+              significado: SignificadoChip.alerta);
+        }
+        await _cargar();
+        return;
+      }
       AppLog.info('fotos', 'reintento_manual', d: 'id=$id');
       await _cargar();
       if (mounted) {
@@ -1487,17 +1517,34 @@ class _ColaScreenState extends State<ColaScreen> {
               ],
             ),
           ),
-          IconButton(
-            icon: const Icon(Icons.refresh_rounded, size: 20),
-            tooltip:
-                esperandoConexion ? 'Subir ahora' : 'Reintentar',
-            onPressed: () => _reintentarFoto(id),
-          ),
-          IconButton(
-            icon: const Icon(Icons.close_rounded, size: 20),
-            tooltip: 'Descartar',
-            onPressed: () => _cancelarFoto(id),
-          ),
+          // 1.24 Bloque 4 (H-01): mientras la foto está
+          // 'subiendo', el worker la tiene tomada: ofrecer
+          // Reintentar/Descartar aquí forzaba una carrera con
+          // la subida (doble reclamo de la fila, bytes huérfanos
+          // en el bucket al descartar). Sin botones: solo el
+          // indicador de que está en curso.
+          if (estado == 'subiendo')
+            const Padding(
+              padding: EdgeInsets.all(12),
+              child: SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+            )
+          else ...[
+            IconButton(
+              icon: const Icon(Icons.refresh_rounded, size: 20),
+              tooltip:
+                  esperandoConexion ? 'Subir ahora' : 'Reintentar',
+              onPressed: () => _reintentarFoto(id),
+            ),
+            IconButton(
+              icon: const Icon(Icons.close_rounded, size: 20),
+              tooltip: 'Descartar',
+              onPressed: () => _cancelarFoto(id),
+            ),
+          ],
         ],
       ),
     );

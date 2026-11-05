@@ -50,6 +50,8 @@ class ListasScreen extends StatefulWidget {
 class _ListasScreenState extends State<ListasScreen>
     with SingleTickerProviderStateMixin {
   late TabController _tab;
+  // 1.24 Bloque 4: anti-doble-toque síncrono del cobro rápido.
+  bool _pagoEnCurso = false;
   List<Map<String, dynamic>> _hoy = [];
   List<Map<String, dynamic>> _menos30 = [];
   List<Map<String, dynamic>> _mas30 = [];
@@ -161,6 +163,17 @@ class _ListasScreenState extends State<ListasScreen>
   }
 
   Future<void> _pagoRapido(Map<String, dynamic> c) async {
+    // 1.24 Bloque 4: anti-doble-toque síncrono.
+    if (_pagoEnCurso) return;
+    _pagoEnCurso = true;
+    try {
+      await _pagoRapidoFlujo(c);
+    } finally {
+      _pagoEnCurso = false;
+    }
+  }
+
+  Future<void> _pagoRapidoFlujo(Map<String, dynamic> c) async {
     // 1.24 Bloque 3: permiso operativo al tocar.
     if (!permisoOperativoOk(context,
         PermisosEntrenador().canCobrarPagos, 'cobrar pagos')) {

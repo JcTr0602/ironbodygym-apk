@@ -297,7 +297,34 @@ enum ResultadoCobro { cancelado, guardado, deshecho }
 /// (también si la pantalla se cerró tras encolar: la op existe).
 /// [ResultadoCobro.deshecho]: se confirmó y se deshizo dentro de
 /// la ventana de 15 s.
+/// 1.24 Bloque 4: candado anti-doble-toque SÍNCRONO del flujo
+/// de cobro. Un doble toque rápido en cualquier entrada (pago,
+/// listas, ficha, buscar) lanzaba dos flujos en paralelo antes
+/// de que el primero encolara. La bandera se pone ANTES del
+/// primer await (en el envoltorio, sin hueco) y se limpia en
+/// finally: un segundo flujo concurrente se descarta como
+/// cancelado sin tocar la cola.
+bool _cobroEnCurso = false;
+
 Future<ResultadoCobro> cobrarConPreviewYRecibo({
+  required BuildContext context,
+  required String nombreCliente,
+  required Map<String, dynamic> payload,
+}) async {
+  if (_cobroEnCurso) return ResultadoCobro.cancelado;
+  _cobroEnCurso = true;
+  try {
+    return await _cobrarConPreviewYReciboFlujo(
+      context: context,
+      nombreCliente: nombreCliente,
+      payload: payload,
+    );
+  } finally {
+    _cobroEnCurso = false;
+  }
+}
+
+Future<ResultadoCobro> _cobrarConPreviewYReciboFlujo({
   required BuildContext context,
   required String nombreCliente,
   required Map<String, dynamic> payload,

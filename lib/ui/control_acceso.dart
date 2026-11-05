@@ -900,13 +900,16 @@ class _AccesosClientesTabState extends State<AccesosClientesTab> {
     if (!AuthService().isOwner || _generandoAcceso) return;
     setState(() => _generandoAcceso = true);
     try {
-      final res = await Supabase.instance.client.rpc(
-        'generar_acceso_cliente',
-        params: {
-          'p_cliente_id': cli.clienteId,
-          'p_creado_por': AuthService().username,
-        },
-      );
+      final res = await Supabase.instance.client
+          .rpc(
+            'generar_acceso_cliente',
+            params: {
+              'p_cliente_id': cli.clienteId,
+              'p_creado_por': AuthService().username,
+            },
+          )
+          // 1.24 Bloque 4: timeout de escritura (12 s).
+          .timeout(const Duration(seconds: 12));
       final data = Map<String, dynamic>.from(res as Map);
       final pin = '${data['pin_temporal'] ?? ''}';
       if (pin.isEmpty) throw 'El servidor no devolvió el PIN';
@@ -977,10 +980,13 @@ class _AccesosClientesTabState extends State<AccesosClientesTab> {
     if (!AuthService().isOwner || _generandoAcceso) return;
     setState(() => _generandoAcceso = true);
     try {
-      final res = await Supabase.instance.client.rpc(
-        'generacion_masiva_accesos',
-        params: {'p_cliente_ids': ids},
-      );
+      final res = await Supabase.instance.client
+          .rpc(
+            'generacion_masiva_accesos',
+            params: {'p_cliente_ids': ids},
+          )
+          // 1.24 Bloque 4: timeout de escritura (12 s).
+          .timeout(const Duration(seconds: 12));
       final data = Map<String, dynamic>.from(res as Map);
       final resultados = ((data['resultados'] as List?) ?? [])
           .map((e) => Map<String, dynamic>.from(e as Map))

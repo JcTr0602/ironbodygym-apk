@@ -251,8 +251,10 @@ class _HorarioGymState extends State<HorarioGym> {
           _dias.map((d) => d.toJson()).toList();
       await Supabase.instance.client
           .rpc('guardar_horarios', params: {
-        'p_horarios': payload,
-      });
+            'p_horarios': payload,
+          })
+          // 1.24 Bloque 4: timeout de escritura (12 s).
+          .timeout(const Duration(seconds: 12));
       // Actualizar caché
       final prefs =
           await SharedPreferences.getInstance();

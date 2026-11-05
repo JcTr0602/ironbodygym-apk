@@ -2890,8 +2890,10 @@ class _FichaScreenState extends State<FichaScreen> {
     try {
       await Supabase.instance.client
           .rpc('revocar_acceso_cliente', params: {
-        'p_cliente_id': widget.clienteId,
-      });
+            'p_cliente_id': widget.clienteId,
+          })
+          // 1.24 Bloque 4: timeout de escritura (12 s).
+          .timeout(const Duration(seconds: 12));
       // v1.3.9 (ajuste Argón): recargar en vez de eliminar del caché —
       // el servidor pone activo=false, no borra el registro.
       await AccesoAppCache.instance.cargar();
@@ -2913,9 +2915,11 @@ class _FichaScreenState extends State<FichaScreen> {
     try {
       final res = await Supabase.instance.client
           .rpc('generar_acceso_cliente', params: {
-        'p_cliente_id': widget.clienteId,
-        'p_creado_por': AuthService().username,
-      });
+            'p_cliente_id': widget.clienteId,
+            'p_creado_por': AuthService().username,
+          })
+          // 1.24 Bloque 4: timeout de escritura (12 s).
+          .timeout(const Duration(seconds: 12));
       final data = Map<String, dynamic>.from(res as Map);
       final pin = '${data['pin_temporal'] ?? ''}';
       if (pin.isEmpty) throw 'El servidor no devolvió el PIN';

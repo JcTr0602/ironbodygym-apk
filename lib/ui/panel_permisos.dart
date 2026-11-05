@@ -197,14 +197,17 @@ class _PanelPermisosState extends State<PanelPermisos> {
       final anterior = ent.permisos[key] ?? false;
       if (mounted) setState(() => ent.permisos[key] = valor);
       try {
-        await Supabase.instance.client.rpc(
-          'actualizar_permiso_entrenador',
-          params: {
-            'p_email': ent.email,
-            'p_permiso_key': key,
-            'p_valor': valor,
-          },
-        );
+        await Supabase.instance.client
+            .rpc(
+              'actualizar_permiso_entrenador',
+              params: {
+                'p_email': ent.email,
+                'p_permiso_key': key,
+                'p_valor': valor,
+              },
+            )
+            // 1.24 Bloque 4: timeout de escritura (12 s).
+            .timeout(const Duration(seconds: 12));
         final verificado = await _releerEntrenador(ent);
         if (mounted) {
           mostrarSnack(
@@ -265,10 +268,13 @@ class _PanelPermisosState extends State<PanelPermisos> {
       final nuevo = objetivo;
       if (mounted) setState(() => ent.activo = nuevo);
       try {
-        await Supabase.instance.client.rpc(
-          'suspender_entrenador',
-          params: {'p_email': ent.email, 'p_activo': nuevo},
-        );
+        await Supabase.instance.client
+            .rpc(
+              'suspender_entrenador',
+              params: {'p_email': ent.email, 'p_activo': nuevo},
+            )
+            // 1.24 Bloque 4: timeout de escritura (12 s).
+            .timeout(const Duration(seconds: 12));
         // v1.4.4 (Permisos nivel 1): confirmación visible en AMBOS
         // sentidos + relectura de la fila real.
         final verificado = await _releerEntrenador(ent);

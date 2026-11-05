@@ -118,10 +118,13 @@ class _SeccionFotoPersonalState extends State<SeccionFotoPersonal> {
     if (ok != true || !mounted) return;
     setState(() => _retirando = true);
     try {
-      final res = await Supabase.instance.client.rpc(
-        'admin_retirar_foto_personal',
-        params: {'p_cliente_id': widget.clienteId},
-      );
+      final res = await Supabase.instance.client
+          .rpc(
+            'admin_retirar_foto_personal',
+            params: {'p_cliente_id': widget.clienteId},
+          )
+          // 1.24 Bloque 4: timeout de escritura (12 s).
+          .timeout(const Duration(seconds: 12));
       final data = Map<String, dynamic>.from(res as Map);
       if (data['ok'] != true) {
         throw Exception('${data['codigo'] ?? 'ERROR'}');

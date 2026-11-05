@@ -551,7 +551,9 @@ class _PestanaProgresoState extends State<PestanaProgreso> {
         'p_muslo_cm': _parseNum(musloStr),
         'p_notas': notasStr.trim().isEmpty ? null : notasStr.trim(),
         'p_medicion_id': existente?.id,
-      });
+          })
+          // 1.24 Bloque 4: timeout de escritura (12 s).
+          .timeout(const Duration(seconds: 12));
       if (mounted) {
         mostrarSnack(context, 'Medición guardada', significado: SignificadoChip.exito);
         _cargar();
@@ -588,8 +590,10 @@ class _PestanaProgresoState extends State<PestanaProgreso> {
     try {
       await Supabase.instance.client
           .rpc('eliminar_medicion', params: {
-        'p_medicion_id': m.id,
-      });
+            'p_medicion_id': m.id,
+          })
+          // 1.24 Bloque 4: timeout de escritura (12 s).
+          .timeout(const Duration(seconds: 12));
       if (mounted) {
         mostrarSnack(context, 'Medición eliminada', significado: SignificadoChip.exito);
         _cargar();
