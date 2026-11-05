@@ -186,10 +186,10 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
     final ayer = _ayerIso();
     double cobradoAyer = 0;
     double semanaAnt = 0;
-    final hace8 = ahoraHabana().subtract(const Duration(days: 8));
-    final hace15 = ahoraHabana().subtract(const Duration(days: 15));
-    final f8 = _iso(hace8);
-    final f15 = _iso(hace15);
+    // 1.24 B2: fechas límite por aritmética de fecha pura
+    // (sumarDiasIso), no por Duration sobre el wall-clock.
+    final f8 = sumarDiasIso(_hoy(), -8);
+    final f15 = sumarDiasIso(_hoy(), -15);
     for (final h in hist) {
       final f = '${h['fecha'] ?? ''}';
       final c = (h['cobrado'] as num?)?.toDouble() ?? 0;
@@ -233,7 +233,7 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
       int? tid) async {
     if (tid == null) return [];
     final hoy = _hoy();
-    final limite = _iso(ahoraHabana().add(const Duration(days: 7)));
+    final limite = sumarDiasIso(hoy, 7);
     // Clientes que el entrenador inscribió o a los que cobró
     final mios = <int>{};
     for (final c in await LocalDb.instance.allMirror('clientes')) {
@@ -323,7 +323,7 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
 
   /// Total cobrado en los últimos 7 días (incluye hoy).
   double _cobradoSemana() {
-    final hace7 = _iso(ahoraHabana().subtract(const Duration(days: 7)));
+    final hace7 = sumarDiasIso(_hoy(), -7);
     double t = 0;
     for (final h in _historial) {
       final f = '${h['fecha'] ?? ''}';

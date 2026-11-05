@@ -687,6 +687,21 @@ String previewHasta(String? pagadoHasta, int meses) =>
 ///
 /// v1.3.2: parámetro `base` explícito ("siguió viniendo"). Si el cliente
 /// estaba vencido y siguió entrenando, el período nuevo se cuenta desde
+/// 1.24 Bloque 2 (auditoría de reloj, hallazgo 4): suma `dias`
+/// a una fecha de negocio 'AAAA-MM-DD' con aritmética UTC pura,
+/// inmune al DST de la zona del teléfono. Sumar un Duration a un
+/// DateTime de pared puede caer a las 23:00 del día anterior si
+/// en la ventana hay un retroceso de reloj, y la fecha derivada
+/// se corre un día (ventanas de «por vencer» que perdían el día
+/// límite). Mismo patrón que previewHastaDias ya usaba.
+String sumarDiasIso(String fechaIso, int dias) {
+  final p = fechaIso.substring(0, 10).split('-').map(int.parse).toList();
+  final d = DateTime.utc(p[0], p[1], p[2]).add(Duration(days: dias));
+  return '${d.year.toString().padLeft(4, '0')}-'
+      '${d.month.toString().padLeft(2, '0')}-'
+      '${d.day.toString().padLeft(2, '0')}';
+}
+
 /// el vencimiento anterior, no desde hoy.
 String previewHastaDias(String? pagadoHasta, int dias,
     {String? fechaPago, String? base}) {
@@ -2275,9 +2290,9 @@ Future<List<Map<String, dynamic>>> listaClientes([String q = '']) async {
 Future<List<Map<String, dynamic>>> porVencer(
     {int dias = 3, List<Map<String, dynamic>>? activosPre}) async {
   final hoy = _hoyIso();
-  final limite = ahoraHabana().add(Duration(days: dias));
-  final limIso =
-      '${limite.year.toString().padLeft(4, '0')}-${limite.month.toString().padLeft(2, '0')}-${limite.day.toString().padLeft(2, '0')}';
+  // 1.24 B2: límite por aritmética de fecha pura (sumarDiasIso),
+  // no por Duration sobre el wall-clock.
+  final limIso = sumarDiasIso(hoy, dias);
   final rows = activosPre ?? await _activos();
   final res = rows.where((c) {
     // v1.7.0: la Cuenta a la Casa nunca está «por vencer».
@@ -5336,9 +5351,8 @@ Future<
       List<Map<String, dynamic>> vencenHoy,
     })> vencimientosResumen({int dias = 3}) async {
   final hoy = _hoyIso();
-  final limite = ahoraHabana().add(Duration(days: dias));
-  final limIso =
-      '${limite.year.toString().padLeft(4, '0')}-${limite.month.toString().padLeft(2, '0')}-${limite.day.toString().padLeft(2, '0')}';
+  // 1.24 B2: límite por aritmética de fecha pura (sumarDiasIso).
+  final limIso = sumarDiasIso(hoy, dias);
   return partirVencimientos(
       filas: await _activos(), hoy: hoy, limIso: limIso);
 }
@@ -5841,9 +5855,12 @@ Future<int> nuevosEsteMes() async {
 
 /// v1.0.15: clientes por vencer en 7 días.
 Future<List<Map<String, dynamic>>> porVencer7Dias() async {
-  final hoy = ahoraHabana();
-  final hoyDia = DateTime(hoy.year, hoy.month, hoy.day);
-  final limite = hoyDia.add(const Duration(days: 7));
+  // 1.24 B2: la ventana se compara por FECHAS (cadenas ISO, que
+  // ordenan igual que el calendario), sin DateTime de pared ni
+  // Duration: [hoy, hoy+7] inclusive en ambos extremos, igual
+  // que la versión anterior con medianoches.
+  final hoyIso = _hoyIso();
+  final limIso = sumarDiasIso(hoyIso, 7);
   final res = <Map<String, dynamic>>[];
   for (final c in await LocalDb.instance.allMirror('clientes')) {
     try {
@@ -5854,9 +5871,9 @@ Future<List<Map<String, dynamic>>> porVencer7Dias() async {
       if (esCuentaCasa(c)) continue;
       final ph = '${c['pagado_hasta'] ?? ''}';
       if (ph.length < 10) continue;
-      final v = DateTime.parse(ph.substring(0, 10));
-      if (v.isAfter(hoyDia.subtract(const Duration(days: 1))) &&
-          !v.isAfter(limite)) {
+      final phDia = ph.substring(0, 10);
+      if (phDia.compareTo(hoyIso) >= 0 &&
+          phDia.compareTo(limIso) <= 0) {
         res.add(c);
       }
     } catch (_) {}
@@ -5867,15 +5884,14 @@ Future<List<Map<String, dynamic>>> porVencer7Dias() async {
 
 /// v1.0.15: ingresos últimos 30 días (para gráfico extendido).
 Future<List<Map<String, dynamic>>> ingresosUltimos30Dias() async {
-  final hoy = ahoraHabana();
-  String iso(DateTime d) => '${d.year.toString().padLeft(4, '0')}-'
-      '${d.month.toString().padLeft(2, '0')}-'
-      '${d.day.toString().padLeft(2, '0')}';
+  // 1.24 B2: ventana y serie por aritmética de fecha pura
+  // (sumarDiasIso); el weekday sale del DateTime.utc de cada
+  // fecha, no de restar Duration al wall-clock.
+  final hastaIso = _hoyIso();
+  final desdeIso = sumarDiasIso(hastaIso, -29);
   const dias = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'];
   // v1.3-r3 (Gemini): UNA sola carga por rango de 30 días, no 60.
   // Antes: 30 iteraciones × 2 allMirror = 60 full scans.
-  final desdeIso = iso(hoy.subtract(const Duration(days: 29)));
-  final hastaIso = iso(hoy);
   final pagos = await LocalDb.instance
       .mirrorPorFecha('pagos', 'fecha', desdeIso, hastaIso);
   final diarios = await LocalDb.instance
@@ -5922,10 +5938,11 @@ Future<List<Map<String, dynamic>>> ingresosUltimos30Dias() async {
   }
   final res = <Map<String, dynamic>>[];
   for (var i = 29; i >= 0; i--) {
-    final dia = hoy.subtract(Duration(days: i));
-    final diaIso = iso(dia);
+    final diaIso = sumarDiasIso(hastaIso, -i);
+    final p = diaIso.split('-').map(int.parse).toList();
+    final weekday = DateTime.utc(p[0], p[1], p[2]).weekday;
     res.add({
-      'dia': dias[dia.weekday - 1],
+      'dia': dias[weekday - 1],
       'fecha': diaIso,
       'monto': porDia[diaIso] ?? 0.0,
     });

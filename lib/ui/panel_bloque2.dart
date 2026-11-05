@@ -301,9 +301,8 @@ class _VencimientosProximosScreenState
 
   Future<void> _cargar() async {
     final hoy = hoyHabanaIso();
-    final hoyDt = DateTime.parse(hoy);
-    final limite =
-        hoyDt.add(const Duration(days: 7)).toIso8601String().substring(0, 10);
+    // 1.24 B2: límite por aritmética de fecha pura (sumarDiasIso).
+    final limite = sumarDiasIso(hoy, 7);
     final todos = await LocalDb.instance.allMirror('clientes');
     final vencidos = <Map<String, dynamic>>[];
     final proximos = <Map<String, dynamic>>[];

@@ -751,8 +751,8 @@ class _ActividadScreenState extends State<ActividadScreen> {
         // P2#11 (Argón): hoy/ayer/7 días/mes en hora Habana.
         final ahora = ahoraHabana();
         final hoyStr = _isoDia(ahora);
-        final ayerStr =
-            _isoDia(ahora.subtract(const Duration(days: 1)));
+        // 1.24 B2: ayer por aritmética de fecha pura (sumarDiasIso).
+        final ayerStr = sumarDiasIso(hoyStr, -1);
         switch (_filtroFecha) {
           case 'hoy':
             if (dia != hoyStr) return false;
@@ -761,8 +761,7 @@ class _ActividadScreenState extends State<ActividadScreen> {
             if (dia != ayerStr) return false;
             break;
           case '7dias':
-            final limite = _isoDia(
-                ahora.subtract(const Duration(days: 7)));
+            final limite = sumarDiasIso(hoyStr, -7);
             if (dia.compareTo(limite) < 0) return false;
             break;
           case 'mes':

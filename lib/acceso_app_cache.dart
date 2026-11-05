@@ -95,8 +95,15 @@ class AccesoCliente {
           ? j['bloqueo_manual_vigente'] == true
           : (j['bloqueado'] == true &&
               (parseFecha(j['bloqueado_hasta']) == null ||
+                  // 1.24 Bloque 2 (auditoría de reloj, hallazgo 2):
+                  // bloqueado_hasta es un INSTANTE (el servidor lo
+                  // manda con zona) y se compara contra el instante
+                  // real, no contra el wall-clock de ahoraHabana():
+                  // mezclarlos desplazaba la vigencia del bloqueo
+                  // por la diferencia de zonas del teléfono (podía
+                  // expirar horas antes o durar horas de más).
                   parseFecha(j['bloqueado_hasta'])!
-                      .isAfter(ahoraHabana()))),
+                      .isAfter(ahoraUtcReal()))),
       motivoBloqueo: j['motivo_bloqueo']?.toString(),
       revocado: j['revocado'] == true,
       revocadoEn: parseFecha(j['revocado_en']),

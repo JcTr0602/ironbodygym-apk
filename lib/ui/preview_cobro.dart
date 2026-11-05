@@ -260,6 +260,26 @@ String periodoTextoPreview(Map<String, dynamic> payload) {
   }
 }
 
+/// 1.24 Bloque 2 (patrón Missail): ¿un pago en cola parece el
+/// duplicado de otro? Ya NO se exige el mismo monto: el
+/// duplicado real entró como oferta de 1000 + mensual de 1500
+/// el mismo día (montos y períodos distintos, misma cobertura).
+/// Lo que delata la repetición es el cliente y la FECHA del
+/// pago. Si alguna de las dos ops no trae fecha, basta el
+/// cliente (la ventana de opRecienteParecida ya es corta:
+/// 10 min). Función pura para poder probarla sin widgets.
+bool pagoPareceDuplicado(
+    Map<String, dynamic> enCola, Map<String, dynamic> nuevo) {
+  final idCola = (enCola['cliente_id'] as num?)?.toInt();
+  final idNuevo = (nuevo['cliente_id'] as num?)?.toInt();
+  if (idCola == null || idCola != idNuevo) return false;
+  String diaDe(String f) => f.length >= 10 ? f.substring(0, 10) : f;
+  final fNueva = '${nuevo['fecha'] ?? ''}';
+  final fOtra = '${enCola['fecha'] ?? ''}';
+  if (fNueva.isEmpty || fOtra.isEmpty) return true;
+  return diaDe(fNueva) == diaDe(fOtra);
+}
+
 /// Resultado del flujo de cobro. 1.24 Bloque 1 (botón roto de
 /// cobro): el bool anterior mezclaba «cancelado» con «guardado»
 /// en el mismo false y el llamador de la pantalla de pagos
@@ -303,15 +323,12 @@ Future<ResultadoCobro> cobrarConPreviewYRecibo({
 
   // T16 (1.20): aviso si ya hay un cobro igual en la cola
   // (doble toque o reintento con mala conexión).
-  final clienteIdDup = (payload['cliente_id'] as num?)?.toInt();
   final sigueCobro = await confirmarSiPareceDuplicado(
     context,
     tipo: 'pago_mensual',
-    coincide: (p) =>
-        (p['cliente_id'] as num?)?.toInt() == clienteIdDup &&
-        ((p['monto'] as num?) ?? 0) == monto,
+    coincide: (p) => pagoPareceDuplicado(p, payload),
     descripcion:
-        'un cobro de ${fmtMonto(monto)} CUP a $nombreCliente',
+        'otro cobro a $nombreCliente por ${fmtMonto(monto)} CUP',
   );
   if (!sigueCobro || !context.mounted) return ResultadoCobro.cancelado;
 

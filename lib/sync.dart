@@ -3065,6 +3065,17 @@ class SyncEngine {
       }.contains('${op['tipo']}')) {
         _pullProtegidoPendiente = true;
       }
+      if ('${op['tipo']}' == 'pago_mensual') {
+        // 1.24 Bloque 2: reversión DETERMINISTA del vencimiento
+        // optimista. El pull protegido de AT-04 es delta por
+        // sync_seq: si el pago rebotó, la fila del cliente en el
+        // servidor no cambió, su seq no avanzó y ese pull puede
+        // no traerla nunca — el vencimiento falso quedaba pegado
+        // (patrón Missail). El payload ya trae
+        // 'pagado_hasta_anterior' (contrato P1#4 del preview):
+        // se restaura el espejo en el acto, sin depender del pull.
+        await _revertirVencimientoOptimista(op);
+      }
       if (op['tipo'] == 'reponer_lote') {
         // Revierte el optimismo local de la reposición.
         try {
@@ -3080,9 +3091,42 @@ class SyncEngine {
           error: motivoRechazo(rec.resultado, rec.error) ??
               'El servidor pidió revisión manual de esta operación.');
       await _guardarResultadoServidor(uuid, rec.resultado);
+      // 1.24 Bloque 2: en revisión el pago TAMPOCO está aplicado:
+      // el vencimiento optimista no debe quedarse pintado como si
+      // fuera real. Si el dueño aprueba la op en el servidor, la
+      // fila del cliente cambia, su seq avanza y el pull trae el
+      // vencimiento verdadero.
+      if ('${op['tipo']}' == 'pago_mensual') {
+        await _revertirVencimientoOptimista(op);
+      }
       return false;
     }
     return false; // 'pendiente' u otro: en vuelo, no tocar.
+  }
+
+  /// 1.24 Bloque 2: restaura el `pagado_hasta` del espejo al valor
+  /// que traía ANTES del cobro optimista, usando el
+  /// 'pagado_hasta_anterior' que el preview guarda en el payload
+  /// (contrato P1#4, el mismo que usa el Deshacer de la pantalla
+  /// de pagos). Sin ese campo en el payload no se inventa nada:
+  /// la op no nació del preview y su espejo no fue tocado por él.
+  Future<void> _revertirVencimientoOptimista(
+      Map<String, dynamic> op) async {
+    try {
+      final p =
+          jsonDecode(op['payload'] as String) as Map<String, dynamic>;
+      if (!p.containsKey('pagado_hasta_anterior')) return;
+      final cid = (p['cliente_id'] as num?)?.toInt();
+      if (cid == null) return;
+      final anterior = p['pagado_hasta_anterior'];
+      if (anterior == null || '$anterior'.isEmpty) {
+        await _db.updateMirrorBasico(cid, {'pagado_hasta': null});
+      } else {
+        final f = '$anterior';
+        await _db.updateMirrorPagadoHasta(
+            cid, f.length >= 10 ? f.substring(0, 10) : f);
+      }
+    } catch (_) {}
   }
 
   /// Marca una op como rechazada por el SERVIDOR (el puente la procesó
