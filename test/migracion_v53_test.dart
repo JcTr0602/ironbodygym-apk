@@ -27,7 +27,7 @@ void main() {
     await LocalDb.resetParaTest();
     final d = await LocalDb.instance.db;
     expect(await d.getVersion(), LocalDb.versionActual);
-    expect(LocalDb.versionActual, 62);
+    expect(LocalDb.versionActual, 63); // pin movido: v63 (1.24.1)
     final cols = await d.rawQuery('PRAGMA table_info(turnos)');
     expect(cols.map((e) => '${e['name']}'), contains('cubre_a'));
   });

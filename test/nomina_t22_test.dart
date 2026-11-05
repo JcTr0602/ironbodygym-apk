@@ -36,7 +36,7 @@ void main() {
       () async {
     await _preparar();
     final d = await LocalDb.instance.db;
-    expect(LocalDb.versionActual, 62);
+    expect(LocalDb.versionActual, 63); // pin movido: v63 (1.24.1)
     final tablas = await d.rawQuery(
         "SELECT name FROM sqlite_master WHERE type='table' "
         "AND name IN ('nomina_liquidada_snapshot', "

@@ -697,19 +697,19 @@ class _AjustesScreenState extends State<AjustesScreen> {
   /// Exportar respaldo de la BD (item 17: solo el dueño).
   /// 1.24 Bloque 5 (F1): fotos y comprobantes que aún viven
   /// SOLO como archivos de este teléfono (no viajan en el
-  /// respaldo, que es solo la base). Las fotos ya subidas se
-  /// borran de fotos_cola al confirmarse, así que TODA fila de
-  /// la cola es una imagen que se perdería al cambiar de
-  /// teléfono; de los comprobantes cuentan los no subidos
-  /// ('pendiente' o 'error').
+  /// respaldo, que es solo la base).
+  /// 1.24.1 (Argón G-02): el conteo usa los contadores de
+  /// LocalDb — las fotos subidas NO se borran de fotos_cola al
+  /// confirmarse: quedan 'completada' retenidas 7 días, y el
+  /// conteo sin WHERE las contaba como pendientes (falso aviso
+  /// que además se repetía tras «Sincronizar ahora»). Las ops
+  /// pendientes NO se cuentan aquí a propósito: viven DENTRO
+  /// de la base y sí viajan en el respaldo (en importar es al
+  /// revés: ahí se pierde la base actual y sí cuentan).
   Future<(int, int)> _sinSubirRespaldo() async {
-    final db = await LocalDb.instance.db;
-    final f = await db.rawQuery('SELECT COUNT(*) AS n FROM fotos_cola');
-    final c = await db.rawQuery("SELECT COUNT(*) AS n FROM "
-        "comprobantes_pago WHERE estado IN ('pendiente', 'error')");
-    int n(List<Map<String, Object?>> r) =>
-        r.isEmpty ? 0 : (r.first['n'] as num?)?.toInt() ?? 0;
-    return (n(f), n(c));
+    final f = await LocalDb.instance.contarFotosSinSubir();
+    final c = await LocalDb.instance.contarComprobantesSinSubir();
+    return (f, c);
   }
 
   Future<void> _exportarRespaldo() async {

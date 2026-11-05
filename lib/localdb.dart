@@ -111,7 +111,7 @@ class LocalDb {
   /// A P-1 de Argón) y se resetea a 0 el watermark de
   /// turnos_cierre (trampa E-01: sin reset, los teléfonos con la
   /// 1.23 jamás bajarían las 7 columnas nuevas de los cierres).
-  static const int versionActual = 62;
+  static const int versionActual = 63;
 
   /// v37: marcas de información pública pendiente de republicar,
   /// UNA FILA POR CLAVE (compartido entre onCreate y la migración
@@ -1454,6 +1454,20 @@ class LocalDb {
           // histórica sin la tabla (la suite v52 lo cazó)
           // reventaba la apertura entera. Se crea si falta,
           // con el mismo esquema de _crearTablas.
+          await db.execute(
+              'CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT NOT NULL)');
+          await db.rawInsert(
+              "INSERT OR REPLACE INTO meta (k, v) "
+              "VALUES ('wm_turnos_cierre', '0')");
+        }
+        if (oldV < 63) {
+          // 1.24.1 (Argón G-08): el reset de v62 se CONSUMIÓ
+          // con el select viejo — los teléfonos re-bajaron los
+          // cierres SIN las 7 columnas de E-01 y el watermark
+          // volvió a avanzar. Con el select y el conversor ya
+          // completos (19 columnas), se resetea OTRA vez para
+          // que la tabla baje entera y bien. Misma tolerancia
+          // con meta que en v62.
           await db.execute(
               'CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT NOT NULL)');
           await db.rawInsert(
@@ -8669,6 +8683,17 @@ class LocalDb {
         'resultado_servidor=NULL WHERE op_uuid=?',
         [intentos, estado, error.toString(), ec.codigo, proximo, opUuid]);
     return ec.codigo;
+  }
+
+  /// 1.24.1 (Argón G-10b): estado actual de una op de la cola
+  /// (null si no existe). Lo usa el push tras cada bumpOp para
+  /// detectar la transición a 'necesita_revision' sin cambiar
+  /// el retorno de bumpOp (su código de error clasificado).
+  Future<String?> estadoOp(String opUuid) async {
+    final d = await db;
+    final rows = await d.query('ops_queue',
+        columns: ['estado'], where: 'op_uuid=?', whereArgs: [opUuid]);
+    return rows.isEmpty ? null : rows.first['estado'] as String?;
   }
 
   /// 1.21 (candado, Opción B): retiene una op pausada por el

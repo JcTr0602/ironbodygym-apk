@@ -246,13 +246,17 @@ bool actividadVisibleParaEntrenador(
   final cat = categoriaActividad('${a['accion'] ?? ''}');
   if (cat != 'mensualidades' && cat != 'inscripciones') return false;
   if (cliente == null) return false;
-  final firmaNum = cliente['registrado_por'];
+  // 1.24.1 (Argón G-04a): el registrado_por puede llegar como
+  // String numérico desde el servidor; se normaliza AQUÍ (la op
+  // sintética recibe el entero) porque actorIdNumericoDeOp trata
+  // un String como nombre por diseño y no lo parsea.
+  final idNorm = LocalDb.normalizarTelegramId(cliente['registrado_por']);
   final firmaTxt = '${cliente['registrado_por_nombre'] ?? ''}'.trim();
-  if (firmaNum is! num && firmaTxt.isEmpty) return false;
+  if (idNorm == null && firmaTxt.isEmpty) return false;
   return esOpMia(
     {
       'payload': {
-        'registrado_por': cliente['registrado_por'],
+        'registrado_por': idNorm ?? cliente['registrado_por'],
         'registrado_por_nombre': cliente['registrado_por_nombre'],
       },
     },
@@ -351,6 +355,13 @@ class _ActividadScreenState extends State<ActividadScreen> {
 
   Future<void> _cargar() async {
     setState(() => _cargando = true);
+    // 1.24.1 (Argón G-04b): asegurar los permisos ANTES de
+    // filtrar — Home los carga en asíncrono y entrar rápido a
+    // Actividad aplicaba el recorte fail-closed a entrenadores
+    // con can_ver_todos_pagos hasta la siguiente carga.
+    if (!PermisosEntrenador().cargado) {
+      await PermisosEntrenador().cargar();
+    }
     final raw = await LocalDb.instance.getMeta('sync_estado_actividad');
     final lista = <Map<String, dynamic>>[];
     if (raw != null && raw.isNotEmpty) {

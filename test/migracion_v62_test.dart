@@ -57,8 +57,10 @@ void main() {
       () async {
     await _init();
     final db = await _abrirDbVacia();
-    expect(await db.getVersion(), 62);
-    expect(LocalDb.versionActual, 62);
+    expect(await db.getVersion(), LocalDb.versionActual);
+    // 1.24.1: la versión vigente ya es 63 (v62 queda como
+    // peldaño histórico de la cadena de migración).
+    expect(LocalDb.versionActual, greaterThanOrEqualTo(62));
     final cols = await db.rawQuery('PRAGMA table_info(acceso_bloqueos)');
     final nombres = {for (final c in cols) '${c['name']}': c};
     expect(nombres.keys, containsAll(['id', 'data', 'sync_seq']));
@@ -110,7 +112,7 @@ void main() {
     await LocalDb.resetParaTest();
 
     db = await LocalDb.instance.db;
-    expect(await db.getVersion(), 62);
+    expect(await db.getVersion(), LocalDb.versionActual);
     expect(await LocalDb.instance.getWatermarkTabla('turnos_cierre'),
         0,
         reason: 'sin el reset, las filas de cierre con las '

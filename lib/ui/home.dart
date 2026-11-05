@@ -1663,7 +1663,12 @@ class _HomeScreenState extends State<HomeScreen>
                   const SizedBox(width: AppEspacio.sm),
                   Expanded(child: accion),
                 ],
-              ),
+              )
+            else if (accion != null)
+              // 1.24.1 (Argón G-01): sin vista de nómina, la acción
+              // de turno NO se oculta con ella — abrir/cerrar turno
+              // es operativo, no nómina: ocupa todo el ancho.
+              SizedBox(width: double.infinity, child: accion),
             // v1.3.3: turnos abiertos sin resolver (auditoría ChatGPT #2).
             // Solo se pinta si los hay (el método ya devuelve
             // shrink cuando está vacío).

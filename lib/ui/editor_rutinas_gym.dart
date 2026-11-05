@@ -6,14 +6,16 @@
 /// se lee y se escribe por las RPC admin_* (guarda es_admin()
 /// en el servidor; esta pantalla además se protege a sí misma
 /// como solo-dueño). Cada rutina es un nombre + la lista
-/// ORDENADA de fichas de GymPedia que la componen; el catálogo
-/// de fichas sale del espejo local gympedia_articulos (el
-/// mismo que alimenta la Biblioteca). Sin conexión, la
+/// ORDENADA de fichas de la Guía de musculación que la
+/// componen; el catálogo sale del espejo local guia_fichas
+/// (las publicadas), con el id CANÓNICO '${equipoId}_$slug'
+/// que la app de clientes cruza contra su guiaCatalogo al
+/// adoptar. (1.24.1, Argón G-09→G-07: la primera versión leía
+/// gympedia_articulos — los artículos de LECTURA — y toda
+/// rutina publicada era inadoptable.) Sin conexión, la
 /// pantalla muestra el error con reintento: nunca un spinner
 /// eterno ni datos inventados.
 library;
-
-import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -47,28 +49,33 @@ class RutinaGymAdmin {
   }
 }
 
-/// Una ficha del catálogo GymPedia (espejo local).
+/// Una ficha del catálogo de la Guía de musculación
+/// (espejo local guia_fichas, solo publicadas).
 class FichaCatalogo {
+  /// Id CANÓNICO '${equipoId}_$slug': el que la app de
+  /// clientes espera en ficha_ids al adoptar la rutina.
   final String id;
   final String titulo;
   const FichaCatalogo({required this.id, required this.titulo});
 }
 
 Future<List<FichaCatalogo>> _cargarCatalogo() async {
-  final filas = await LocalDb.instance.allMirror('gympedia_articulos');
+  // 1.24.1 (Argón G-07): la fuente son las fichas PUBLICADAS
+  // de la Guía (guiaPublicadas ya decodifica el espejo y
+  // deja el slug en 'id'; el equipoId viaja en el data). Una
+  // ficha sin equipoId no tiene id canónico: no entra (el
+  // cliente tampoco podría cruzarla).
+  final filas = await LocalDb.instance.guiaPublicadas();
   final out = <FichaCatalogo>[];
   for (final f in filas) {
-    try {
-      final data =
-          Map<String, dynamic>.from(jsonDecode('${f['data']}') as Map);
-      final titulo = '${data['titulo'] ?? ''}'.trim();
-      out.add(FichaCatalogo(
-        id: '${f['id']}',
-        titulo: titulo.isEmpty ? '${f['id']}' : titulo,
-      ));
-    } catch (_) {
-      // Fila ilegible del espejo: no entra al selector.
-    }
+    final slug = '${f['id'] ?? ''}'.trim();
+    final equipoId = '${f['equipoId'] ?? ''}'.trim();
+    if (slug.isEmpty || equipoId.isEmpty) continue;
+    final titulo = '${f['titulo'] ?? ''}'.trim();
+    out.add(FichaCatalogo(
+      id: '${equipoId}_$slug',
+      titulo: titulo.isEmpty ? slug : titulo,
+    ));
   }
   out.sort((a, b) => a.titulo.compareTo(b.titulo));
   return out;

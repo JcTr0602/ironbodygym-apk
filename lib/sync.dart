@@ -2776,7 +2776,7 @@ class SyncEngine {
           resultadoAmbiguo = true;
           // v1.2.5 (D14/D15): clasifica y aplica backoff o revisión.
           for (final op in lote) {
-            await _db.bumpOp(op['op_uuid'] as String, 'HTTP ${r.statusCode}',
+            await _bumpConReversion(op, 'HTTP ${r.statusCode}',
                 httpStatus: r.statusCode);
           }
         }
@@ -2790,7 +2790,7 @@ class SyncEngine {
           falloInequivoco = true;
         }
         for (final op in lote) {
-          await _db.bumpOp(op['op_uuid'] as String, e);
+          await _bumpConReversion(op, e);
         }
       }
       // Ítem 4: el lote cuenta como éxito solo si el POST del lote
@@ -2831,6 +2831,26 @@ class SyncEngine {
   /// Reintenta un lote op por op: la que falle con 4xx se marca
   /// 'rechazada' (definitiva y visible en la cola) y NO bloquea a las
   /// demás. Los fallos de red siguen siendo transitorios (reintento).
+  /// 1.24.1 (Argón G-10b): bumpOp + red de reversión. Si el
+  /// bump deja la op en 'necesita_revision' (transitorio o
+  /// auth agotados, o error permanente directo), la op nunca
+  /// llegó al servidor y _aplicarEstadoServidor jamás la
+  /// procesará: el vencimiento optimista de un pago_mensual
+  /// quedaba pintado para siempre (patrón Missail por la
+  /// puerta lateral). Aquí se revierte en el acto, igual que
+  /// hace el camino de estados del servidor.
+  Future<void> _bumpConReversion(Map<String, dynamic> op, Object error,
+      {int? httpStatus}) async {
+    final uuid = '${op['op_uuid']}';
+    await _db.bumpOp(uuid, error, httpStatus: httpStatus);
+    try {
+      if ('${op['tipo']}' == 'pago_mensual' &&
+          await _db.estadoOp(uuid) == 'necesita_revision') {
+        await _revertirVencimientoOptimista(op);
+      }
+    } catch (_) {}
+  }
+
   Future<void> _uploadUnaPorUna(List<Map<String, dynamic>> lote) async {
     final tag = await deviceTag();
     for (final op in lote) {
@@ -2868,7 +2888,7 @@ class SyncEngine {
             r.statusCode == 408 ||
             r.statusCode >= 500) {
           // v1.2.5 (D14): transitorios con backoff, no se marcan rechazadas.
-          await _db.bumpOp(uuid, 'HTTP ${r.statusCode}',
+          await _bumpConReversion(op, 'HTTP ${r.statusCode}',
               httpStatus: r.statusCode);
         } else if (r.statusCode >= 400 && r.statusCode < 500) {
           // v1.13.0 (G3, Fase D): conservar el body (antes se
@@ -2880,7 +2900,7 @@ class SyncEngine {
               ? r.body.substring(0, 500)
               : r.body;
           if (cuerpo.contains('23514')) {
-            await _db.bumpOp(uuid,
+            await _bumpConReversion(op,
                 'CHECK del servidor aún no conoce este tipo (23514): '
                 'en espera de ampliación',
                 httpStatus: r.statusCode);
@@ -2888,6 +2908,19 @@ class SyncEngine {
             await _db.markOp(uuid, 'rechazada',
                 error: 'El servidor la rechazó (HTTP ${r.statusCode}). '
                     '$cuerpo Revisa los datos o cancela la operación.');
+            // 1.24.1 (Argón G-10a): un 4xx de PostgREST nunca
+            // llega a sync_ops, así que _aplicarEstadoServidor
+            // jamás procesa esta op: la limpieza del rechazo
+            // se hace AQUÍ, espejo de la de aquel camino —
+            // optimista fuera, vencimiento revertido si es
+            // pago_mensual y entrega de efectivo deshecha.
+            await _limpiarOptimistaDeOp(op);
+            if ('${op['tipo']}' == 'pago_mensual') {
+              await _revertirVencimientoOptimista(op);
+            }
+            if ('${op['tipo']}' == 'liquidar_entrega_efectivo') {
+              await _db.eliminarEntregaEfectivoPorOp(uuid);
+            }
             if (op['tipo'] == 'reponer_lote') {
               // Revierte el optimismo local de la reposición.
               try {
@@ -2898,12 +2931,12 @@ class SyncEngine {
             }
           }
         } else {
-          await _db.bumpOp(uuid, 'HTTP ${r.statusCode}',
+          await _bumpConReversion(op, 'HTTP ${r.statusCode}',
               httpStatus: r.statusCode);
         }
       } catch (e) {
         if (e is SessionExpired) rethrow;
-        await _db.bumpOp(uuid, e);
+        await _bumpConReversion(op, e);
       }
     }
   }
@@ -3392,6 +3425,17 @@ class SyncEngine {
         'pagos_count': m['pagos_count'],
         'nota': m['nota'],
         'cerrado_en': m['cerrado_en'],
+        // 1.24.1 (Argón G-08): las 7 columnas de E-01 que la
+        // rama no copiaba (el contrato real del servidor son
+        // 19 columnas; 'diferencia' NO es una de ellas — se
+        // calcula en el lector, no viaja en el espejo).
+        'turno_id': m['turno_id'],
+        'hora_apertura': m['hora_apertura'],
+        'hora_cierre': m['hora_cierre'],
+        'pendientes_count': m['pendientes_count'],
+        'pendientes_cup': m['pendientes_cup'],
+        'pendientes_usd': m['pendientes_usd'],
+        'revision_count': m['revision_count'],
       };
       return {'id': id, 'dataJson': jsonEncode(data), 'esTexto': true};
     }
@@ -3451,6 +3495,13 @@ class SyncEngine {
         tabla == 'suplemento_ajustes' ||
         tabla == 'nomina_liquidada_snapshot' ||
         tabla == 'nomina_confirmaciones' ||
+        // 1.24.1 (Argón G-09): E-02 y aperturas — id TEXT
+        // ('YYYY-MM|entrenador' y UUID) con data jsonb, la
+        // misma forma. Sin esta rama caían al fallback de id
+        // entero: TypeError por fila, watermark topado en la
+        // primera fila y espejos vacíos para siempre.
+        tabla == 'nomina_liquidada' ||
+        tabla == 'turnos_apertura' ||
         tabla == 'diferencias_caja' ||
         // 1.21: candado de acceso (id TEXT + data jsonb).
         tabla == 'acceso_bloqueos') {
@@ -4223,9 +4274,17 @@ class SyncEngine {
           final select = switch (tabla) {
             'gastos' => 'id,fecha,concepto,monto,registrado_por,sync_seq',
             'turnos_cierre' =>
+              // 1.24.1 (Argón G-08): las 19 del contrato E-01
+              // (las 12 de siempre + turno_id, hora_apertura,
+              // hora_cierre, pendientes_count, pendientes_cup,
+              // pendientes_usd, revision_count). Sin las 7
+              // nuevas el reset de v62 re-bajaba la tabla
+              // mutilada y el watermark avanzaba igual.
               'id,entrenador_id,entrenador_nombre,telegram_id,fecha,'
                   'turno,total_cobrado,total_esperado,pagos_count,nota,'
-                  'cerrado_en,sync_seq',
+                  'cerrado_en,turno_id,hora_apertura,hora_cierre,'
+                  'pendientes_count,pendientes_cup,pendientes_usd,'
+                  'revision_count,sync_seq',
             // v1.3.6 (v28): esquemas planos con id TEXT (UUID).
             'liquidaciones_caja' =>
               'id,entrenador_telegram_id,entrenador_nombre,'

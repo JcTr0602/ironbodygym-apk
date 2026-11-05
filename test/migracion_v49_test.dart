@@ -45,7 +45,7 @@ void main() {
     await _abrirDbVacia();
     final d = await LocalDb.instance.db;
     expect(await d.getVersion(), LocalDb.versionActual);
-    expect(LocalDb.versionActual, 62);
+    expect(LocalDb.versionActual, 63); // pin movido: v63 (1.24.1)
     final tablas = (await d.rawQuery(
             "SELECT name FROM sqlite_master WHERE type='table'"))
         .map((e) => '${e['name']}')

@@ -16,6 +16,16 @@ class Novedad {
 }
 
 const novedades = [
+  Novedad('1.24.1', [
+    'Corrección: el botón de abrir/cerrar turno ya no desaparece del Inicio de un entrenador cuando el dueño le oculta la vista de nómina',
+    'Corrección: el aviso previo a exportar una copia de seguridad ya no cuenta como «sin subir» las fotos que ya subieron, ni repite la alerta tras sincronizar',
+    'Corrección: la vigencia de un bloqueo de acceso de cliente se calcula con el reloj correcto aunque el teléfono esté en otra zona horaria',
+    'Corrección: la Actividad de un entrenador reconoce a sus clientes aunque la firma de quién lo inscribió venga guardada como texto',
+    'Corrección: la sincronización ya completa — dos espejos nuevos (nómina liquidada y aperturas de turno) rechazaban sus datos en cada descarga y el ciclo nunca cerraba limpio',
+    'Corrección: los cierres de turno bajan por fin con su detalle completo (hora de apertura y cierre, pendientes y revisiones), no solo con los totales',
+    'Corrección: las rutinas del gym que armas en el Panel ya usan las fichas de la Guía de verdad — la app de clientes puede adoptarlas (antes tomaba los artículos de lectura y ninguna rutina encajaba)',
+    'Corrección: si un cobro se queda en revisión por fallos repetidos de red, el vencimiento adelantado también se revierte solo, no solo cuando el servidor lo rechaza',
+  ]),
   Novedad('1.24.0', [
     'Blindaje de pagos: si el servidor rechaza o deja en revisión un pago, el vencimiento que la app había adelantado se revierte solo al dato anterior (antes el espejo local quedaba adelantado hasta que alguien lo notara)',
     'Un pago parecido en la cola ya se detecta aunque el monto sea distinto: la app pregunta antes de duplicar un cobro del mismo cliente y el mismo día',

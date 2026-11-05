@@ -102,7 +102,13 @@ class AccesoCliente {
                   // mezclarlos desplazaba la vigencia del bloqueo
                   // por la diferencia de zonas del teléfono (podía
                   // expirar horas antes o durar horas de más).
-                  parseFecha(j['bloqueado_hasta'])!
+                  // 1.24.1 (Argón G-03): la comparación se hace con
+                  // el instante CRUDO en UTC — parseFecha devuelve
+                  // el wall-clock Habana (isUtc=false) y Dart lo
+                  // reinterpretaba en la zona del SO al compararlo
+                  // con ahoraUtcReal(), deshaciendo el arreglo.
+                  DateTime.tryParse('${j['bloqueado_hasta']}')!
+                      .toUtc()
                       .isAfter(ahoraUtcReal()))),
       motivoBloqueo: j['motivo_bloqueo']?.toString(),
       revocado: j['revocado'] == true,

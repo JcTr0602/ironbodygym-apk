@@ -225,14 +225,13 @@ Future<void> bloquearAcceso(
       ),
     ),
   );
-  if (ok != true) {
-    ctrlMotivo.dispose();
-    return;
-  }
+  // 1.24.1 (Argón G-05): sin dispose tras showDialog (pauta de
+  // admin.dart): el diálogo aún anima su cierre con el TextField
+  // montado.
+  if (ok != true) return;
   if (!ctx.mounted) return;
   final motivo =
       ctrlMotivo.text.trim().isEmpty ? null : ctrlMotivo.text.trim();
-  ctrlMotivo.dispose();
   try {
     await Supabase.instance.client
         .rpc(
@@ -300,13 +299,9 @@ Future<void> cambiarTelefonoAcceso(
       ],
     ),
   );
-  if (ok != true) {
-    ctrl.dispose();
-    return;
-  }
+  if (ok != true) return;
   if (!ctx.mounted) return;
   final nuevoTelefono = ctrl.text.trim();
-  ctrl.dispose();
   try {
     await Supabase.instance.client
         .rpc(

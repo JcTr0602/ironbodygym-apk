@@ -58,7 +58,15 @@ Future<File> exportarCopiaFria() async {
     // reconstruía a mano como getDatabasesPath() + 'ironbody.db',
     // lo que en los tests paralelos (P1) apuntaba a otro archivo.
     final origen = File(await LocalDb.instance.dbPath());
-    final tmp = await Directory.systemTemp.createTemp('ironbody_backup');
+    // 1.24.1 (Argón G-06): directorio FIJO reutilizado — antes
+    // cada exportación creaba un ironbody_backup* nuevo en el
+    // temporal del sistema y nunca se barrían (copias completas
+    // de la BD acumuladas).
+    final tmp = Directory(p.join(Directory.systemTemp.path, 'ironbody_backup'));
+    if (await tmp.exists()) {
+      await tmp.delete(recursive: true);
+    }
+    await tmp.create(recursive: true);
     final destino = File(p.join(tmp.path, 'ironbody_backup.db'));
     await origen.copy(destino.path);
     return destino;
