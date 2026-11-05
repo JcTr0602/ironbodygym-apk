@@ -70,7 +70,7 @@ Future<void> _preparar(WidgetTester tester) async {
 
 /// Monta un botón que ejecuta el flujo de cobro real completo
 /// (diálogo → preview/recibo) y guarda el resultado en [alCerrar].
-Widget _hostCobro(void Function(bool?) alCerrar) {
+Widget _hostCobro(void Function(ResultadoCobro?) alCerrar) {
   return MaterialApp(
     home: Builder(
       builder: (ctx) => Scaffold(
@@ -87,12 +87,12 @@ Widget _hostCobro(void Function(bool?) alCerrar) {
                 alCerrar(null);
                 return;
               }
-              final deshecho = await cobrarConPreviewYRecibo(
+              final resultadoCobro = await cobrarConPreviewYRecibo(
                 context: ctx,
                 nombreCliente: 'Cliente Banco',
                 payload: payload,
               );
-              alCerrar(deshecho);
+              alCerrar(resultadoCobro);
             },
             child: const Text('cobrar'),
           ),
@@ -208,7 +208,7 @@ void main() {
         'confirmar: op pago_mensual en cola y espejo actualizado',
         (tester) async {
       await _preparar(tester);
-      bool? resultado;
+      ResultadoCobro? resultado;
       await tester.pumpWidget(_hostCobro((r) => resultado = r));
       await _cobrarHastaRecibo(tester);
 
@@ -233,23 +233,23 @@ void main() {
 
       await tester.tap(find.text('Entendido'));
       await tester.pumpAndSettle();
-      expect(resultado, isFalse,
-          reason: 'confirmado y no deshecho devuelve false');
+      expect(resultado, ResultadoCobro.guardado,
+          reason: 'confirmado y no deshecho devuelve guardado');
       await tester.pump(const Duration(seconds: 16));
     });
 
     testWidgets('deshacer: la op se borra y el espejo se restaura',
         (tester) async {
       await _preparar(tester);
-      bool? resultado;
+      ResultadoCobro? resultado;
       await tester.pumpWidget(_hostCobro((r) => resultado = r));
       await _cobrarHastaRecibo(tester);
 
       expect(await LocalDb.instance.pendingOps(), isNotEmpty);
       await tester.tap(find.textContaining('Deshacer'));
       await tester.pumpAndSettle();
-      expect(resultado, isTrue,
-          reason: 'deshacer dentro de la ventana devuelve true');
+      expect(resultado, ResultadoCobro.deshecho,
+          reason: 'deshacer dentro de la ventana devuelve deshecho');
 
       final ops = await LocalDb.instance.pendingOps();
       expect(ops.where((o) => o['tipo'] == 'pago_mensual'), isEmpty,
@@ -258,6 +258,34 @@ void main() {
       expect(filas.single['pagado_hasta'], isNull,
           reason: 'el espejo vuelve al vencimiento anterior (null)');
       await tester.pump(const Duration(seconds: 16));
+    });
+
+    // 1.24 Bloque 1 (botón roto de cobro): cancelar en el preview
+    // NO guarda nada y el flujo lo dice con un resultado propio
+    // (antes devolvía el mismo false que «guardado» y la pantalla
+    // de pagos anunciaba «Pago guardado» sin haber cobrado).
+    testWidgets('cancelar en el preview: nada en cola, resultado cancelado',
+        (tester) async {
+      await _preparar(tester);
+      ResultadoCobro? resultado;
+      await tester.pumpWidget(_hostCobro((r) => resultado = r));
+      await tester.tap(find.text('cobrar'));
+      await tester.pumpAndSettle();
+      expect(find.text('Continuar'), findsOneWidget);
+      await tester.tap(find.text('Continuar'));
+      await tester.pumpAndSettle();
+      expect(find.text('Revisar cobro'), findsOneWidget);
+      await tester.tap(find.text('Cancelar'));
+      await tester.pumpAndSettle();
+
+      expect(resultado, ResultadoCobro.cancelado,
+          reason: 'cancelar en el preview devuelve cancelado');
+      final ops = await LocalDb.instance.pendingOps();
+      expect(ops.where((o) => o['tipo'] == 'pago_mensual'), isEmpty,
+          reason: 'el cobro cancelado nunca entra a la cola');
+      final filas = await LocalDb.instance.mirrorPorIds('clientes', [10]);
+      expect(filas.single['pagado_hasta'], isNull,
+          reason: 'el espejo no se toca al cancelar');
     });
   });
 

@@ -1,10 +1,14 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ironbody_gym/tipos_pago.dart';
 
-/// Default del diálogo de pago, decisión de Jc 2026-10-25:
-/// MIN menor/oferta como opción por defecto, NO aplicación automática.
-/// El entrenador puede cambiar el tipo en el desplegable antes de
-/// confirmar; estos tests cubren solo la preselección.
+/// Default del diálogo de pago para menores, decisión de Jc
+/// 2026-11-04 (1.24 Bloque 1, B H-1): el menor SIEMPRE abre en
+/// su tarifa ('menores', 1500 por defecto). DEROGA la regla del
+/// 2026-10-25 («la opción de 30 días más barata por defecto»),
+/// que preseleccionaba ofertas puntuales a menores (caso Keren:
+/// oferta_50 dos días seguidos). La oferta sigue elegible a
+/// mano en el desplegable; estos tests cubren solo la
+/// preselección.
 void main() {
   const menores = TipoPago(
       id: 'menores',
@@ -23,92 +27,62 @@ void main() {
   const semanal = TipoPago(
       id: 'semanal', nombre: 'Semana', monto: 600, dias: 7);
 
-  double monto(TipoPago t) => t.monto;
-
   group('tipoInicialPago', () {
-    test('menor con oferta más barata preselecciona la oferta', () {
+    test('1.24: menor con oferta más barata SIGUE en menores', () {
       final r = tipoInicialPago([menores, semanal, ofertaBarata],
-          menor: true, monto: monto);
-      expect(r.id, 'oferta50');
+          menor: true);
+      expect(r.id, 'menores');
     });
 
     test('menor con oferta más cara sigue en menores', () {
-      final r = tipoInicialPago([menores, ofertaCara],
-          menor: true, monto: monto);
+      final r = tipoInicialPago([menores, ofertaCara], menor: true);
       expect(r.id, 'menores');
     });
 
     test('menor sin oferta sigue en menores', () {
-      final r = tipoInicialPago([menores, semanal],
-          menor: true, monto: monto);
+      final r = tipoInicialPago([menores, semanal], menor: true);
       expect(r.id, 'menores');
     });
 
     test('oferta semanal barata no compite con la mensualidad', () {
-      final r = tipoInicialPago([menores, ofertaSemanal],
-          menor: true, monto: monto);
+      final r = tipoInicialPago([menores, ofertaSemanal], menor: true);
       expect(r.id, 'menores');
     });
 
-    test('empate entre menores y oferta mantiene menores', () {
+    test('menores gana sin importar el orden de la lista', () {
       const ofertaIgual = TipoPago(
           id: 'oferta_igual',
           nombre: 'Oferta igual',
           monto: 1500,
           dias: 30);
-      final r = tipoInicialPago([menores, ofertaIgual],
-          menor: true, monto: monto);
+      final r =
+          tipoInicialPago([ofertaIgual, menores], menor: true);
       expect(r.id, 'menores');
     });
 
-    test('1.15 M1d-01: empate mantiene menores aunque la oferta '
-        'vaya primera en la lista', () {
-      const ofertaIgual = TipoPago(
-          id: 'oferta_igual',
-          nombre: 'Oferta igual',
-          monto: 1500,
-          dias: 30);
-      final r = tipoInicialPago([ofertaIgual, menores],
-          menor: true, monto: monto);
-      expect(r.id, 'menores');
+    test('menor sin tipo menores en la lista cae al primer tipo', () {
+      final r = tipoInicialPago([ofertaBarata, semanal], menor: true);
+      expect(r.id, 'oferta50');
     });
 
-    test('1.15 M1d-01: lista vacía lanza ArgumentError claro', () {
-      expect(() => tipoInicialPago([], menor: true, monto: monto),
+    test('lista vacía lanza ArgumentError claro', () {
+      expect(() => tipoInicialPago([], menor: true),
           throwsArgumentError);
-      expect(() => tipoInicialPago([], menor: false, monto: monto),
+      expect(() => tipoInicialPago([], menor: false),
           throwsArgumentError);
     });
 
-    test('adulto sigue en mensual aunque la oferta sea más barata', () {
+    test('adulto sigue en mensual aunque la oferta sea más barata',
+        () {
       final r = tipoInicialPago([mensual, ofertaBarata],
-          menor: false, monto: monto);
+          menor: false);
       expect(r.id, 'mensual');
     });
 
     test('adulto sin mensual cae al primer tipo', () {
       final r = tipoInicialPago([semanal, ofertaBarata],
-          menor: false, monto: monto);
+          menor: false);
       expect(r.id, 'semanal');
-    });
-
-    test('1.19 Argón A1: menor Casa no salta a la oferta barata', () {
-      final r = tipoInicialPago([menores, ofertaBarata],
-          menor: true, monto: monto, esCasa: true);
-      expect(r.id, 'menores');
-    });
-
-    test('1.19 Argón A1: menor con especial mensual no salta a '
-        'la oferta barata', () {
-      final r = tipoInicialPago([menores, ofertaBarata],
-          menor: true, monto: monto, tieneEspecialMensual: true);
-      expect(r.id, 'menores');
-    });
-
-    test('1.19 Argón A1: menor Casa sin menores cae al primer tipo', () {
-      final r = tipoInicialPago([ofertaBarata, semanal],
-          menor: true, monto: monto, esCasa: true);
-      expect(r.id, 'oferta50');
     });
   });
 }

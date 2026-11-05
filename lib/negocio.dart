@@ -705,7 +705,14 @@ String previewHastaDias(String? pagadoHasta, int dias,
       '${d.day.toString().padLeft(2, '0')}';
 }
 
-bool esPendiente(dynamic v) => v == 0 || v == false;
+/// Pendiente a entregar salvo entrega EXPLÍCITA. 1.24 Bloque 1
+/// (A P-4 de la auditoría pre-1.24): con `entregado = NULL` la
+/// versión anterior devolvía false y el dinero desaparecía del
+/// pendiente sin que nadie lo entregara (mecanismo candidato de
+/// la incidencia «entregado solo» de Gabriel). La convención
+/// segura: NULL, 0 y false son pendiente; solo 1/true es
+/// entregado — el efectivo jamás se da por rendido sin dato.
+bool esPendiente(dynamic v) => v != 1 && v != true;
 
 /// v1.2.4 (Hark): texto de un total de venta con su equivalente en la
 /// otra moneda cuando se conoce la tasa (CUP por 1 USD). Regla única para

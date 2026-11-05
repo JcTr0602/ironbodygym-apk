@@ -166,13 +166,13 @@ class _ListasScreenState extends State<ListasScreen>
     if (!mounted) return;
     final payload = await pagoDialogo(context, c);
     if (payload == null || !mounted) return;
-    final deshecho = await cobrarConPreviewYRecibo(
+    final resultadoCobro = await cobrarConPreviewYRecibo(
       context: context,
       nombreCliente: '${c['nombre'] ?? ''}',
       payload: payload,
     );
     if (!mounted) return;
-    if (deshecho) {
+    if (resultadoCobro == ResultadoCobro.deshecho) {
       mostrarSnack(context, 'Cobro deshecho', significado: SignificadoChip.exito);
     }
     _cargar();

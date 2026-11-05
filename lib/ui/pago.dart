@@ -346,17 +346,29 @@ class _PagoScreenState extends State<PagoScreen> {
     if (!mounted) return;
     final payload = await pagoDialogo(context, c);
     if (payload == null || !mounted) return;
-    final deshecho = await cobrarConPreviewYRecibo(
+    final resultadoCobro = await cobrarConPreviewYRecibo(
       context: context,
       nombreCliente: '${c['nombre'] ?? ''}',
       payload: payload,
     );
-    // v1.0.15: vibración de confirmación (caja rápida).
-    if (!deshecho) HapticFeedback.lightImpact();
+    // v1.0.15: vibración de confirmación (caja rápida) — solo si
+    // el cobro quedó guardado de verdad (1.24 Bloque 1: al
+    // cancelar en el preview ya no se anuncia «Pago guardado»).
+    if (resultadoCobro == ResultadoCobro.guardado) {
+      HapticFeedback.lightImpact();
+    }
     if (!mounted) return;
-    mostrarSnack(context, deshecho
-            ? 'Cobro deshecho'
-            : 'Pago de ${c['nombre']} guardado', significado: SignificadoChip.exito);
+    switch (resultadoCobro) {
+      case ResultadoCobro.deshecho:
+        mostrarSnack(context, 'Cobro deshecho',
+            significado: SignificadoChip.exito);
+      case ResultadoCobro.guardado:
+        mostrarSnack(context, 'Pago de ${c['nombre']} guardado',
+            significado: SignificadoChip.exito);
+      case ResultadoCobro.cancelado:
+        mostrarSnack(context, 'Cobro cancelado',
+            significado: SignificadoChip.neutral);
+    }
     SyncEngine.instance.push();
     _cargarDatos();
     _buscar();

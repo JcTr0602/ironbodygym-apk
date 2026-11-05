@@ -30,11 +30,13 @@
 ///   propio monto y NO pasa por aquí; si un llamador pasa
 ///   [montoOferta], ese es el escalón Oferta de la cadena. En
 ///   producción ningún llamador pasa [montoOferta] (1.19, Argón):
-///   el MIN vive solo como preselección del diálogo (tipoInicialPago
-///   elige el tipo de 30 días más barato) y la oferta se aplica
-///   eligiendo ese TipoPago, no reenviando el monto. Los caminos
-///   sin diálogo (atrasados, renovación rápida, mensajes) cobran
-///   la tarifa base del menor (1500), no la promoción puntual.
+///   la oferta se aplica eligiendo ese TipoPago en el diálogo,
+///   no reenviando el monto. Desde la 1.24 (decisión de Jc
+///   2026-11-04) el diálogo tampoco preselecciona la oferta para
+///   menores: tipoInicialPago abre siempre en la tarifa de
+///   menores (1500). Los caminos sin diálogo (atrasados,
+///   renovación rápida, mensajes) cobran la tarifa base del
+///   menor (1500), no la promoción puntual.
 ///
 /// El monto devuelto es UNITARIO (por periodo); el diálogo multiplica
 /// por meses solo en mensual/menores, como siempre.

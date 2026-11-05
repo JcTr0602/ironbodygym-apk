@@ -305,11 +305,10 @@ Future<Map<String, dynamic>?> pagoDialogo(
   TipoPago tipoSel =
       tiposDisp.firstWhere((t) => t.id == (menor ? 'menores' : 'mensual'),
           orElse: () => tiposDisp.first);
-  // Decisión Jc 2026-10-25 (MIN): NO se auto-aplica la oferta
-  // al menor, pero SÍ es la opción por defecto. El valor inicial
-  // de abajo es provisional; tras definir montoEtiqueta se
-  // recalcula con tipoInicialPago (menor: opción mensual de
-  // 30 días más barata, cambiable en el desplegable).
+  // El valor inicial de abajo ya es el definitivo para menores
+  // desde la 1.24 (Jc 2026-11-04): tipoInicialPago abre siempre
+  // en 'menores'. (Antes regía el «MIN» del 2026-10-25: la
+  // opción de 30 días más barata por defecto, derogado.)
   int meses = 1;
   String metodo = aceptaEfectivo ? 'efectivo' : 'transferencia';
   // F1 (1.20): foto del comprobante (solo transferencia). Es una
@@ -481,21 +480,13 @@ Future<Map<String, dynamic>?> pagoDialogo(
     return t.monto;
   }
 
-  // Default MIN (Jc 2026-10-25): para menores, el tipo inicial es
-  // la opción mensual más barata (menores u oferta de 30 días).
-  // Es solo el valor preseleccionado: el desplegable sigue
-  // permitiendo cambiarlo y nada se cobra sin la vista previa.
-  // 1.19 (Argón A1): Casa o especial mensual vigente NO compiten
-  // contra ofertas: la preselección es 'menores' (el motor aplica
-  // Casa 0 o la especial; una oferta preseleccionada la saltaría).
-  // El entrenador sigue pudiendo elegir la oferta a mano.
+  // 1.24 (Jc 2026-11-04): para menores, el tipo inicial es
+  // SIEMPRE 'menores' (su tarifa). Deroga el «Default MIN» del
+  // 2026-10-25 (la opción de 30 días más barata): la oferta
+  // sigue en el desplegable para elegirla a mano, pero el
+  // diálogo abre en la tarifa del menor. Ver tipoInicialPago.
   if (menor) {
-    tipoSel = tipoInicialPago(tiposDisp,
-        menor: true,
-        monto: montoEtiqueta,
-        esCasa: esCasa,
-        tieneEspecialMensual:
-            especialPara('mensual') != null);
+    tipoSel = tipoInicialPago(tiposDisp, menor: true);
   }
 
   // 1.15 (m8): el personalizado delega en la función pura

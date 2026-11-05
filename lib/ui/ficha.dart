@@ -680,13 +680,13 @@ class _FichaScreenState extends State<FichaScreen> {
     // ya nace dentro de pagoDialogo; no se repite aquí.
     // Bloque 1: Preview obligatorio + Recibo con Deshacer 15 s.
     // Ningún cobro se guarda sin pasar por el preview.
-    final deshecho = await cobrarConPreviewYRecibo(
+    final resultadoCobro = await cobrarConPreviewYRecibo(
       context: context,
       nombreCliente: '${c['nombre'] ?? ''}',
       payload: payload,
     );
     if (!mounted) return;
-    if (deshecho) {
+    if (resultadoCobro == ResultadoCobro.deshecho) {
       mostrarSnack(context, 'Cobro deshecho', significado: SignificadoChip.exito);
     }
     _cargar();
@@ -1597,13 +1597,13 @@ class _FichaScreenState extends State<FichaScreen> {
       esDueno: AuthService().isOwner,
       tipoId: precio.escalon == 'menores' ? 'menores' : null,
     );
-    final deshecho = await cobrarConPreviewYRecibo(
+    final resultadoCobro = await cobrarConPreviewYRecibo(
       context: context,
       nombreCliente: '${c['nombre'] ?? ''}',
       payload: payload,
     );
     if (!mounted) return;
-    if (deshecho) {
+    if (resultadoCobro == ResultadoCobro.deshecho) {
       mostrarSnack(context, 'Cobro deshecho', significado: SignificadoChip.exito);
     }
     _cargar();

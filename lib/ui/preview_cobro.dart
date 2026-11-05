@@ -260,13 +260,22 @@ String periodoTextoPreview(Map<String, dynamic> payload) {
   }
 }
 
+/// Resultado del flujo de cobro. 1.24 Bloque 1 (botón roto de
+/// cobro): el bool anterior mezclaba «cancelado» con «guardado»
+/// en el mismo false y el llamador de la pantalla de pagos
+/// anunciaba «Pago guardado» también al cancelar en el preview.
+enum ResultadoCobro { cancelado, guardado, deshecho }
+
 /// Flujo completo de cobro de mensualidad para un [payload] ya
 /// dialogado (de [pagoDialogo], en `dialogo_pago.dart`).
 ///
-/// Devuelve true si el cobro se confirmó y luego se deshizo dentro de
-/// la ventana de 15 s. Devuelve false si se canceló en el preview, si
-/// se confirmó y quedó guardado, o si la pantalla se cerró.
-Future<bool> cobrarConPreviewYRecibo({
+/// [ResultadoCobro.cancelado]: se canceló en el preview o se
+/// declinó el aviso de posible duplicado — no se guardó nada.
+/// [ResultadoCobro.guardado]: el cobro quedó encolado/guardado
+/// (también si la pantalla se cerró tras encolar: la op existe).
+/// [ResultadoCobro.deshecho]: se confirmó y se deshizo dentro de
+/// la ventana de 15 s.
+Future<ResultadoCobro> cobrarConPreviewYRecibo({
   required BuildContext context,
   required String nombreCliente,
   required Map<String, dynamic> payload,
@@ -288,7 +297,9 @@ Future<bool> cobrarConPreviewYRecibo({
       ),
     ),
   );
-  if (confirmado != true || !context.mounted) return false;
+  if (confirmado != true || !context.mounted) {
+    return ResultadoCobro.cancelado;
+  }
 
   // T16 (1.20): aviso si ya hay un cobro igual en la cola
   // (doble toque o reintento con mala conexión).
@@ -302,7 +313,7 @@ Future<bool> cobrarConPreviewYRecibo({
     descripcion:
         'un cobro de ${fmtMonto(monto)} CUP a $nombreCliente',
   );
-  if (!sigueCobro || !context.mounted) return false;
+  if (!sigueCobro || !context.mounted) return ResultadoCobro.cancelado;
 
   // Argón P1#4 (contrato con PagoScreen._deshacerUltimo): leer el
   // pagado_hasta anterior del espejo ANTES de encolar, aplicar la
@@ -363,7 +374,9 @@ Future<bool> cobrarConPreviewYRecibo({
           rutaOrigen: rutaComprobante!);
     } catch (_) {}
   }
-  if (!context.mounted) return false;
+  // La op ya está encolada y el espejo actualizado: aunque la
+  // pantalla se haya cerrado, el cobro EXISTE → guardado.
+  if (!context.mounted) return ResultadoCobro.guardado;
 
   final resultado = await Navigator.of(context).push<String>(
     RutaIron(
@@ -398,5 +411,7 @@ Future<bool> cobrarConPreviewYRecibo({
       }
     } catch (_) {}
   }
-  return resultado == 'deshecho';
+  return resultado == 'deshecho'
+      ? ResultadoCobro.deshecho
+      : ResultadoCobro.guardado;
 }
