@@ -715,7 +715,24 @@ class _FichaScreenState extends State<FichaScreen> {
   ///   para las renovaciones normales; NO mes calendario).
   /// - spec 3: prioriza c['movil'] sobre c['telefono'] — muchos clientes
   ///   tienen el carnet (11 dígitos) en 'telefono'.
+  /// 1.24 Bloque 5 (auditoría de botones #6): anti-doble-toque
+  /// síncrono del regalo de cumpleaños — dos toques rápidos
+  /// apilaban dos confirmaciones y podían encolar dos ops
+  /// regalar_mes_cumpleanos (el candado anual se escribe tras
+  /// encolar). La bandera se pone antes del primer await.
+  bool _regaloEnCurso = false;
+
   Future<void> _regalarMes() async {
+    if (_regaloEnCurso) return;
+    _regaloEnCurso = true;
+    try {
+      await _regalarMesFlujo();
+    } finally {
+      _regaloEnCurso = false;
+    }
+  }
+
+  Future<void> _regalarMesFlujo() async {
     final c = _c;
     if (c == null || !mounted) return;
     // Candado anual: si ya se regaló este año, solo reenviar el mensaje.

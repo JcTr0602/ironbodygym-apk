@@ -1208,7 +1208,15 @@ class _HomeScreenState extends State<HomeScreen>
             AppEspacio.lg, AppEspacio.md, AppEspacio.lg, 0),
         child: Tarjeta(
           color: AppColores.alerta.withValues(alpha: 0.12),
-          onTap: () => _ir(const ColaScreen()),
+          // 1.24 Bloque 5 (auditoría de botones #4): la tarjeta
+          // promete «Toca para sincronizar ahora» — ahora el
+          // toque DISPARA la sincronización de verdad y luego
+          // abre la Cola, donde se ve el progreso (antes solo
+          // navegaba y había que tocar por segunda vez dentro).
+          onTap: () {
+            unawaited(SyncEngine.instance.run(forzar: true));
+            _ir(const ColaScreen());
+          },
           child: Row(
             children: [
               const Icon(Icons.warning_amber_rounded,

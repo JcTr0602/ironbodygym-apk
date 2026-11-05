@@ -192,5 +192,10 @@ Future<void> revertirBDaV24(Database db) async {
   // sin este DROP, el onUpgrade v37 no se ejercitaría de verdad
   // (su CREATE TABLE IF NOT EXISTS sería un no-op).
   await db.execute('DROP TABLE IF EXISTS info_publica_pendiente');
+  // v62 (1.24): acceso_bloqueos nace SOLO en el bloque v62;
+  // soltarla (y su índice) hace que la cadena 24→62 la cree de
+  // verdad al reabrir, igual que el DROP de v37.
+  await db.execute('DROP INDEX IF EXISTS idx_acceso_bloqueos_seq');
+  await db.execute('DROP TABLE IF EXISTS acceso_bloqueos');
   await db.execute('PRAGMA user_version = 24');
 }

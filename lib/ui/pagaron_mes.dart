@@ -55,9 +55,27 @@ class _PagaronMesScreenState extends State<PagaronMesScreen> {
   /// El ⟳ sincroniza el alcance de pagos y luego relee la lista local.
   Future<void> _actualizar() async {
     try {
-      await SyncEngine.instance.sincronizarScope('pagos');
+      // 1.23.1 (bug de campo 2026-11-04): se usa el resultado
+      // detallado: si el ciclo NO corrió (otra sincronización en
+      // curso o sin sesión) o corrió con error, no se anuncia
+      // «Lista actualizada» — mismo engaño que en Buscar.
+      final r = await SyncEngine.instance.sincronizarScopeDetallado('pagos');
       await _cargar();
       if (!mounted) return;
+      if (!r.corrio) {
+        mostrarSnack(
+            context,
+            r.motivo == SyncMotivoNoCorrio.sinSesion
+                ? 'Sin sesión activa para sincronizar'
+                : 'Ya hay una sincronización en curso',
+            significado: SignificadoChip.alerta);
+        return;
+      }
+      if (r.error) {
+        mostrarSnack(context, 'Sin conexión: mostrando datos locales',
+            significado: SignificadoChip.alerta);
+        return;
+      }
       mostrarSnack(context, 'Lista actualizada', significado: SignificadoChip.exito);
     } catch (_) {
       await _cargar();

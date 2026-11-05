@@ -285,7 +285,21 @@ class _BuscarScreenState extends State<BuscarScreen> {
   Future<void> _actualizar() async {
     // v1.3.1: manejar fallo de red (offline-first en Cuba).
     try {
-      await SyncEngine.instance.pull();
+      final res = await SyncEngine.instance.pull();
+      // 1.23.1 (bug de campo 2026-11-04): si el pull NO corrió
+      // (otra sincronización en curso o sin sesión), NO se anuncia
+      // «Lista actualizada»: no bajó nada y los carteles de
+      // novedades/desactualizada seguirían visibles, en
+      // contradicción con el aviso. El motor ya trae el resumen
+      // veraz (resumenCorto); se muestra como alerta y la lista
+      // se relee igual (datos locales).
+      if (!res.corrio) {
+        await _buscar();
+        if (!mounted) return;
+        mostrarSnack(context, res.resumenCorto,
+            significado: SignificadoChip.alerta);
+        return;
+      }
       // Bloque 1: la bajada quedó registrada en ultimo_pull_ts.
       final ts = await LocalDb.instance.getMeta('ultimo_pull_ts');
       if (mounted && ts != null) {

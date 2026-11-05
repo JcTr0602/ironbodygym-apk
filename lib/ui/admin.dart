@@ -167,6 +167,22 @@ class _AdminScreenState extends State<AdminScreen> {
     super.dispose();
   }
 
+  /// 1.24 Bloque 5 (B-01): el pull-to-refresh del Panel corre
+  /// un ciclo de sync real y DESPUÉS relee; el aviso es veraz
+  /// (si el ciclo no corrió o falló, se dice, no se finge).
+  Future<void> _actualizarPanel() async {
+    final res = await SyncEngine.instance.run();
+    await _cargar();
+    if (!mounted) return;
+    if (!res.corrio) {
+      mostrarSnack(context, res.resumenCorto,
+          significado: SignificadoChip.alerta);
+    } else if (res.error != null) {
+      mostrarSnack(context, 'Sin conexión: mostrando datos locales',
+          significado: SignificadoChip.alerta);
+    }
+  }
+
   Future<void> _cargar() async {
     // Ronda 17 M2-H1 (defensa en profundidad): sin dueño no
     // se cargan los KPIs financieros aunque se invoque directo.
@@ -1328,7 +1344,11 @@ class _AdminScreenState extends State<AdminScreen> {
             child: _cargando
                 ? const EstadoCargando(texto: 'Cargando administración…')
                 : RefreshIndicator(
-                    onRefresh: _cargar,
+                    // 1.24 Bloque 5 (B-01): el gesto de actualizar
+                    // del Panel ahora sincroniza DE VERDAD antes
+                    // de releer (antes solo releía espejos
+                    // locales y no bajaba nada del servidor).
+                    onRefresh: _actualizarPanel,
                     child: ListView(
                       padding: const EdgeInsets.all(AppEspacio.lg),
                       children: [

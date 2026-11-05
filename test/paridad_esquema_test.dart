@@ -1,15 +1,29 @@
-/// Test de paridad de esquema (v1.3.4, ítem 8, veredicto de Argón).
+/// Test de paridad de esquema (v1.3.4, ítem 8, veredicto de Argón;
+/// refrescado en 1.24 Bloque 5 — hallazgo F3 de la auditoría de
+/// respaldo: el test seguía titulado v26 con la app ya en v62).
 ///
-/// La BD creada limpia en v26 (onCreate) debe tener exactamente el mismo
-/// esquema que la BD migrada v24→v26 (onUpgrade): mismas tablas,
-/// mismas columnas (comparadas por nombre, no por posición) y mismos
-/// índices (nombre + columnas + SQL normalizado con
+/// La BD creada limpia en la versión actual (onCreate) debe tener
+/// exactamente el mismo esquema que la BD que llega por la cadena
+/// de migración (onUpgrade): mismas tablas, mismas columnas
+/// (comparadas por nombre, no por posición) y mismos índices
+/// (nombre + columnas + SQL normalizado con
 /// `.replaceAll(RegExp(r'\s+'),' ').toUpperCase()`).
 ///
-/// Construcción de la BD "migrada": se parte de una instalación limpia
-/// v26, se revierte al esquema v24 con [revertirBDaV24] (DROP COLUMN,
-/// requiere SQLite ≥ 3.35) fijando user_version=24, y se reabre con
-/// [LocalDb] para que corra el onUpgrade 24→25→26 real.
+/// Construcción de la BD "migrada": se parte de una instalación
+/// limpia actual, se revierte al esquema v24 con [revertirBDaV24]
+/// (DROP COLUMN, requiere SQLite ≥ 3.35) fijando user_version=24,
+/// y se reabre con [LocalDb] para que corra el onUpgrade real.
+///
+/// LIMITACIÓN CONOCIDA (F3, declarada, no escondida): la reversión
+/// solo deshace los deltas v25/v26, la tabla v37, el índice v43 y
+/// la tabla v62 — esos bloques SÍ se ejercitan de verdad. Los
+/// bloques v27–v61 corren como no-ops sobre un esquema que ya los
+/// contiene, así que una divergencia nacida SOLO en onCreate
+/// dentro de ese tramo la cazan los tests por versión
+/// (migracion_vXX_test, espejos_paridad_test), no este. La
+/// comparación manual completa v61 salió limpia (auditoría 5) y
+/// la v62 tiene su propio test de paridad del delta
+/// (migracion_v62_test).
 ///
 /// Tolerancia FTS5: `clientes_fts` puede faltar si el módulo no cargó;
 /// ausencia simétrica OK, asimétrica FAIL.
@@ -30,7 +44,7 @@ void main() {
   LocalDb.nombreArchivoDbForzado = 'test_paridad_esquema_test.db';
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  test('paridad onCreate(v26) vs onUpgrade(24→26)', () async {
+  test('paridad onCreate(actual) vs onUpgrade(24→actual)', () async {
     sqfliteFfiInit();
     databaseFactory = databaseFactoryFfi;
     SharedPreferences.setMockInitialValues({});

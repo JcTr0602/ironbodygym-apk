@@ -45,6 +45,10 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
   String _turno = 'mañana';
   int _cantidad = 1;
   bool _guardando = false;
+  // 1.24 Bloque 5 (ítem 6 del panel): controlador de la barra
+  // Deshacer viva — muere con su pantalla, como en Servicios.
+  ScaffoldFeatureController<SnackBar, SnackBarClosedReason>?
+      _ctrlDeshacer;
   bool _editandoRegistro = false;
   double _precio = 200;
   List<Map<String, dynamic>> _hoy = [];
@@ -60,6 +64,9 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
 
   @override
   void dispose() {
+    // 1.24 Bloque 5: la barra Deshacer muere con su pantalla
+    // (antes flotaba sobre Home hasta agotar sus 4 s).
+    _ctrlDeshacer?.close();
     _notaCtrl.dispose();
     super.dispose();
   }
@@ -207,7 +214,10 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
     if (!mounted) return;
     // Gramática de avisos (1.23): por el helper único, que
     // reemplaza la barra anterior en vez de encolarla.
-    mostrarSnack(context, '$cantidad pago(s) guardado(s)',
+    // 1.24 Bloque 5: con controlador (patrón de Servicios) para
+    // cerrarla en dispose — el Deshacer muere con su pantalla.
+    _ctrlDeshacer = mostrarSnackControladoEnMessenger(
+        ScaffoldMessenger.of(context), '$cantidad pago(s) guardado(s)',
         significado: SignificadoChip.exito,
         // v1.2.7 (A3): se descarta solo a los 4s, no obliga a interactuar.
         duracion: const Duration(seconds: 4),

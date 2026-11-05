@@ -109,10 +109,14 @@ class _CierreMesScreenState extends State<CierreMesScreen> {
     final hecho = await marcarMesCerrado(_pref);
     if (!mounted) return;
     if (!hecho) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text('Algún paso dejó de estar verificado: '
-            'revisa la lista actualizada antes de cerrar.'),
-      ));
+      // 1.24 Bloque 5 (C-06): por el helper de la casa, no una
+      // barra cruda — la cruda quedaba flotando sobre la
+      // pantalla siguiente.
+      mostrarSnack(
+          context,
+          'Algún paso dejó de estar verificado: '
+          'revisa la lista actualizada antes de cerrar.',
+          significado: SignificadoChip.alerta);
     }
     _cargar();
   }

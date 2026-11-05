@@ -2276,12 +2276,15 @@ class _InvitadoDetalleScreenState extends State<InvitadoDetalleScreen> {
     );
     if (!mounted) return;
     setState(() => _visitas30 = n);
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text(n >= _umbralVisitas
-          ? 'Visita registrada. Ya suma $n en 30 días: es '
-              'candidato a cliente.'
-          : 'Visita registrada ($n en 30 días en este teléfono).'),
-    ));
+    // 1.24 Bloque 5 (B-12): por el helper de la casa, no una
+    // barra cruda que flotaba sobre la pantalla siguiente.
+    mostrarSnack(
+        context,
+        n >= _umbralVisitas
+            ? 'Visita registrada. Ya suma $n en 30 días: es '
+                'candidato a cliente.'
+            : 'Visita registrada ($n en 30 días en este teléfono).',
+        significado: SignificadoChip.exito);
   }
 
   Widget _tarjetaVisitas(InvitadoDetalle d) {

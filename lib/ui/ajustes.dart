@@ -18,6 +18,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../auth.dart';
 import '../app_log.dart';
+import '../comprobantes.dart';
 import '../config.dart';
 import '../fotos_cola.dart';
 import '../fotos_foreground.dart';
@@ -694,11 +695,97 @@ class _AjustesScreenState extends State<AjustesScreen> {
   // ---------- Datos ----------
 
   /// Exportar respaldo de la BD (item 17: solo el dueño).
+  /// 1.24 Bloque 5 (F1): fotos y comprobantes que aún viven
+  /// SOLO como archivos de este teléfono (no viajan en el
+  /// respaldo, que es solo la base). Las fotos ya subidas se
+  /// borran de fotos_cola al confirmarse, así que TODA fila de
+  /// la cola es una imagen que se perdería al cambiar de
+  /// teléfono; de los comprobantes cuentan los no subidos
+  /// ('pendiente' o 'error').
+  Future<(int, int)> _sinSubirRespaldo() async {
+    final db = await LocalDb.instance.db;
+    final f = await db.rawQuery('SELECT COUNT(*) AS n FROM fotos_cola');
+    final c = await db.rawQuery("SELECT COUNT(*) AS n FROM "
+        "comprobantes_pago WHERE estado IN ('pendiente', 'error')");
+    int n(List<Map<String, Object?>> r) =>
+        r.isEmpty ? 0 : (r.first['n'] as num?)?.toInt() ?? 0;
+    return (n(f), n(c));
+  }
+
   Future<void> _exportarRespaldo() async {
     if (!_auth.isOwner) {
       _msg('Solo el dueño puede exportar el respaldo');
       return;
     }
+    // 1.24 Bloque 5 (F1): aviso con el conteo EXACTO de lo que
+    // el respaldo no incluye, con la salida de subirlo antes.
+    var intentoSync = false;
+    while (true) {
+      final (fotos, comprobantes) = await _sinSubirRespaldo();
+      if (fotos + comprobantes == 0 || !mounted) break;
+      final partes = <String>[
+        if (fotos > 0) '$fotos foto${fotos == 1 ? '' : 's'}',
+        if (comprobantes > 0)
+          '$comprobantes comprobante${comprobantes == 1 ? '' : 's'}',
+      ];
+      final accion = await showDialog<String>(
+        context: context,
+        builder: (ctx) => DialogoApp(
+          titulo: 'El respaldo no incluye las fotos',
+          iconoTitulo: Icons.photo_library_outlined,
+          contenido: Text('En este teléfono quedan sin subir '
+              '${partes.join(' y ')}. El respaldo guarda solo la '
+              'base de datos: si lo restauras en otro teléfono, '
+              'esas imágenes se pierden.\n\n'
+              'Sincroniza primero para subirlas, o exporta '
+              'igualmente el respaldo sin ellas.'),
+          acciones: [
+            TextButton(
+                onPressed: () => Navigator.pop(ctx, 'cancelar'),
+                child: const Text('Cancelar')),
+            if (!intentoSync)
+              TextButton(
+                  onPressed: () => Navigator.pop(ctx, 'sincronizar'),
+                  child: const Text('Sincronizar ahora')),
+            TextButton(
+                onPressed: () => Navigator.pop(ctx, 'exportar'),
+                child: const Text('Exportar igualmente')),
+          ],
+        ),
+      );
+      if (accion == 'sincronizar') {
+        intentoSync = true;
+        _msg('Sincronizando…');
+        await SyncEngine.instance.run(forzar: true);
+        await ComprobantesService.instance.procesar();
+        if (!mounted) return;
+        continue;
+      }
+      if (accion != 'exportar') return;
+      break;
+    }
+    // 1.24 Bloque 5 (F5): la copia se hace con el candado de
+    // sync tomado — el mismo rigor que al importar — para que
+    // ningún ciclo haga checkpoint a media copia. El candado
+    // se suelta tras COPIAR; compartir (la hoja del sistema,
+    // que puede tardar minutos) va fuera del candado.
+    String? candado;
+    for (var i = 0; i < 25 && candado == null; i++) {
+      candado = await LocalDb.instance.adquirirSyncLock();
+      if (candado == null) {
+        await Future<void>.delayed(const Duration(milliseconds: 600));
+      }
+    }
+    if (candado == null) {
+      _msg('Hay una sincronización en curso. Espera a que '
+          'termine y vuelve a exportar.');
+      return;
+    }
+    // 1.23 AT-15: fecha de La Habana, no la del reloj crudo
+    // del dispositivo (un teléfono fuera de zona fechaba el
+    // respaldo con otro día).
+    final fecha = hoyHabanaIso();
+    String? destino;
     try {
       // Vaciar el WAL al archivo principal para una copia consistente.
       // v1.2.1: wal_checkpoint retorna una fila, usar rawQuery (no execute).
@@ -726,18 +813,18 @@ class _AjustesScreenState extends State<AjustesScreen> {
       }
       final ruta = await LocalDb.instance.dbPath();
       final tmp = await getTemporaryDirectory();
-      // 1.23 AT-15: fecha de La Habana, no la del reloj crudo
-      // del dispositivo (un teléfono fuera de zona fechaba el
-      // respaldo con otro día).
-      final fecha = hoyHabanaIso();
-      final destino =
-          '${tmp.path}/ironbody-respaldo-$fecha.db';
+      destino = '${tmp.path}/ironbody-respaldo-$fecha.db';
       await File(ruta).copy(destino);
-      await Share.shareXFiles([XFile(destino)],
-          text: 'Respaldo Iron Body Gym $fecha');
     } catch (e) {
       _msg('No se pudo exportar: $e');
+      return;
+    } finally {
+      try {
+        await LocalDb.instance.liberarSyncLock(candado);
+      } catch (_) {}
     }
+    await Share.shareXFiles([XFile(destino)],
+        text: 'Respaldo Iron Body Gym $fecha');
   }
 
   /// v1.2.9+46 (AppLog): exportar la bitácora local para diagnóstico.
@@ -957,6 +1044,24 @@ class _AjustesScreenState extends State<AjustesScreen> {
         final faltan = requeridas.difference(nombres);
         if (faltan.isNotEmpty || !tieneFotos) {
           throw 'no es un respaldo válido (faltan: ${faltan.join(', ')})';
+        }
+        // 3. 1.24 Bloque 5 (F2): un respaldo de una versión MÁS
+        // NUEVA que la app NO puede entrar — una app vieja no
+        // migra sobre un esquema que no conoce y sqflite
+        // reescribiría user_version a su número menor, dejando
+        // el contador mintiendo y la puerta abierta a una
+        // doble migración al actualizar. El sentido contrario
+        // (respaldo viejo en app nueva) es la restauración
+        // prevista y sigue permitido.
+        final verRes = await testDb.rawQuery('PRAGMA user_version');
+        final verRespaldo = verRes.isEmpty
+            ? 0
+            : (verRes.first.values.first as num?)?.toInt() ?? 0;
+        if (verRespaldo > LocalDb.versionActual) {
+          throw 'el respaldo es de una versión más nueva de la '
+              'app (base v$verRespaldo; esta app usa '
+              'v${LocalDb.versionActual}). Actualiza la app '
+              'antes de importarlo';
         }
       } finally {
         await testDb.close();
