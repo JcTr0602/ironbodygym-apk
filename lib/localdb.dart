@@ -1450,6 +1450,12 @@ class LocalDb {
           // resetea a 0 SOLO en esta migración y la tabla se
           // redescarga entera en el próximo pull (es espejo: la
           // verdad vive en el servidor).
+          // La migración NO asume que meta exista: una BD
+          // histórica sin la tabla (la suite v52 lo cazó)
+          // reventaba la apertura entera. Se crea si falta,
+          // con el mismo esquema de _crearTablas.
+          await db.execute(
+              'CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT NOT NULL)');
           await db.rawInsert(
               "INSERT OR REPLACE INTO meta (k, v) "
               "VALUES ('wm_turnos_cierre', '0')");
