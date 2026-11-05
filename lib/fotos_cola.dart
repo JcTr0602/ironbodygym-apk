@@ -484,11 +484,20 @@ class FotosColaService {
       while (true) {
         // Refrescar el lease global cada iteración; si ya no somos
         // dueños, salir (el finally libera solo si aún lo somos).
+        // 1.24.2 (auditoría sync M5-A1): la propiedad se comprueba
+        // por el PREFIJO workerId, no por el valor exacto — el
+        // temporizador de _subirUna reescribe el valor cada 30 s
+        // durante una subida larga y el CAS por valor exacto
+        // fallaba siempre tras la primera foto: el bucle salía y
+        // el lease quedaba huérfano 10 min (la cola avanzaba de
+        // a una foto con congelamientos). Es el mismo criterio
+        // que ya usa el temporizador.
         final leaseNuevo =
             '$workerId|${isoHabana(ahoraHabana().add(const Duration(minutes: 10)))}';
         final refrescado = await db.rawUpdate(
-          "UPDATE meta SET v = ? WHERE k = 'fotos_worker_lease' AND v = ?",
-          [leaseNuevo, leaseValor],
+          "UPDATE meta SET v = ? WHERE k = 'fotos_worker_lease' "
+          "AND substr(v, 1, instr(v, '|') - 1) = ?",
+          [leaseNuevo, workerId],
         );
         if (refrescado != 1) break;
         leaseValor = leaseNuevo;
@@ -935,9 +944,15 @@ class FotosColaService {
       } // fin while (el siguiente } cierra el try)
     } finally {
       // Liberar el lease global solo si seguimos siendo dueños.
+      // 1.24.2 (auditoría sync M5-A1): por prefijo workerId, no
+      // por el valor exacto — si el temporizador de _subirUna
+      // refrescó el valor durante una subida larga, el valor
+      // reclamado ya no coincide y la liberación por valor
+      // dejaba el lease puesto hasta vencer (10 min).
       await db.rawUpdate(
-        "UPDATE meta SET v = '' WHERE k = 'fotos_worker_lease' AND v = ?",
-        [leaseValor],
+        "UPDATE meta SET v = '' WHERE k = 'fotos_worker_lease' "
+        "AND substr(v, 1, instr(v, '|') - 1) = ?",
+        [workerId],
       );
     }
     return subidas;

@@ -2325,6 +2325,44 @@ const String lineaMensajeAutomatico =
     'no lo envía una persona. Si vas a responder, escríbenos '
     'al 58191577._';
 
+/// 1.24.2: textos de aviso de vencimiento por WhatsApp — fuente
+/// única que comparten la bandeja de avisos y los avisos directos
+/// desde Buscar (botón en la fila y selección múltiple).
+String mensajeWaVencido(String nombre) =>
+    'Hola $nombre 👋, te escribe Iron Body Gym 🏋️.\n'
+    '⏰ Tu mensualidad está vencida. Puedes renovarla pasando por '
+    'el gym 🏋️ o por transferencia 💸 (respóndenos y te pasamos '
+    'los datos). ¡Te esperamos para seguir entrenando! 💪'
+    '$lineaMensajeAutomatico';
+
+String mensajeWaVenceHoy(String nombre) =>
+    'Hola $nombre 👋, te escribe Iron Body Gym 🏋️.\n'
+    '📅 Tu mensualidad vence hoy. Puedes renovarla pasando por '
+    'el gym 🏋️ o por transferencia 💸 (respóndenos y te pasamos '
+    'los datos). ¡Te esperamos! 💪'
+    '$lineaMensajeAutomatico';
+
+String mensajeWaPorVencer(String nombre, String fechaCorta) =>
+    'Hola $nombre 👋, te escribe Iron Body Gym 🏋️.\n'
+    '📅 Tu mensualidad vence el $fechaCorta. ¡No olvides renovar '
+    'a tiempo! Puedes hacerlo pasando por el gym 🏋️ o por '
+    'transferencia 💸 (respóndenos y te pasamos los datos). 💪'
+    '$lineaMensajeAutomatico';
+
+/// El mensaje de aviso que corresponde al estado del cliente:
+/// vencido (o sin fecha), vence hoy o por vencer.
+String mensajeWaSegunEstado(Map<String, dynamic> c) {
+  final nombre = '${c['nombre'] ?? 'Cliente'}'.trim();
+  final d = diasRestantes(c['pagado_hasta'] as String?);
+  if (d == null || d < 0) return mensajeWaVencido(nombre);
+  if (d == 0) return mensajeWaVenceHoy(nombre);
+  final ph = '${c['pagado_hasta']}';
+  final fechaCorta = ph.length >= 10
+      ? '${ph.substring(8, 10)}/${ph.substring(5, 7)}'
+      : ph;
+  return mensajeWaPorVencer(nombre, fechaCorta);
+}
+
 /// Arma la bandeja de avisos de WhatsApp del día: cumpleañeros, vencen hoy,
 /// por vencer (3 días) y recibos de pagos de hoy. Cada mapa trae:
 /// tipo, cliente_id, nombre, telefono, detalle y mensaje (texto pre-rellenado
@@ -2371,10 +2409,7 @@ Future<List<Map<String, dynamic>>> avisosWhatsappHoy() async {
       'detalle': dias > 0
           ? 'Vencido hace $dias día${dias == 1 ? '' : 's'}'
           : 'Mensualidad vencida',
-      'mensaje': 'Hola ${nombreDe(c)} 👋, te escribe Iron Body Gym 🏋️.\n'
-          '⏰ Tu mensualidad está vencida. Puedes renovarla pasando por '
-          'el gym 🏋️ o por transferencia 💸 (respóndenos y te pasamos '
-          'los datos). ¡Te esperamos para seguir entrenando! 💪$lineaMensajeAutomatico',
+      'mensaje': mensajeWaVencido(nombreDe(c)),
     });
   }
 
@@ -2420,10 +2455,7 @@ Future<List<Map<String, dynamic>>> avisosWhatsappHoy() async {
       'nombre': nombreDe(c),
       'telefono': telDe(c),
       'detalle': 'Su mensualidad vence hoy',
-      'mensaje': 'Hola ${nombreDe(c)} 👋, te escribe Iron Body Gym 🏋️.\n'
-          '📅 Tu mensualidad vence hoy. Puedes renovarla pasando por '
-          'el gym 🏋️ o por transferencia 💸 (respóndenos y te pasamos '
-          'los datos). ¡Te esperamos! 💪$lineaMensajeAutomatico',
+      'mensaje': mensajeWaVenceHoy(nombreDe(c)),
     });
   }
 
@@ -2441,10 +2473,7 @@ Future<List<Map<String, dynamic>>> avisosWhatsappHoy() async {
       'nombre': nombreDe(c),
       'telefono': telDe(c),
       'detalle': 'Vence el $fechaCorta',
-      'mensaje': 'Hola ${nombreDe(c)} 👋, te escribe Iron Body Gym 🏋️.\n'
-          '📅 Tu mensualidad vence el $fechaCorta. ¡No olvides renovar '
-          'a tiempo! Puedes hacerlo pasando por el gym 🏋️ o por '
-          'transferencia 💸 (respóndenos y te pasamos los datos). 💪$lineaMensajeAutomatico',
+      'mensaje': mensajeWaPorVencer(nombreDe(c), fechaCorta),
     });
   }
 

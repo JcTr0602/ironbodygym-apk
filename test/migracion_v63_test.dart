@@ -46,8 +46,8 @@ void main() {
   test('v63 limpia: la BD nace en la versión actual', () async {
     await _init();
     final db = await _abrirDbVacia();
-    expect(LocalDb.versionActual, 63);
-    expect(await db.getVersion(), 63);
+    expect(LocalDb.versionActual, greaterThanOrEqualTo(63));
+    expect(await db.getVersion(), LocalDb.versionActual);
   });
 
   test('upgrade 62→63: resetea el watermark de turnos_cierre '
@@ -64,7 +64,7 @@ void main() {
     await LocalDb.resetParaTest();
 
     db = await LocalDb.instance.db;
-    expect(await db.getVersion(), 63);
+    expect(await db.getVersion(), LocalDb.versionActual);
     expect(await LocalDb.instance.getWatermarkTabla('turnos_cierre'),
         0,
         reason: 'sin el reset de v63, los cierres con las 7 '

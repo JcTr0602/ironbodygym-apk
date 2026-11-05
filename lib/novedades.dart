@@ -16,6 +16,17 @@ class Novedad {
 }
 
 const novedades = [
+  Novedad('1.24.2', [
+    'Buscar clientes, renovada: anillo de color en la foto según el estado (verde al día, ámbar por vencer, rojo vencido, dorado Casa) y un icono cuando el cliente tiene notas',
+    'Orden a elegir en la lista de clientes (por nombre, por vencimiento o los vencidos primero) y vista compacta para ver más clientes por pantalla; la cabecera ocupa menos y la lista se ve desde más arriba',
+    'Mantén presionado un cliente para cobrar, registrar su pago diario, vender, escribir por WhatsApp, llamar o editar, sin entrar a su ficha',
+    'Botón de WhatsApp directo en los clientes vencidos o por vencer, con el aviso ya escrito según su estado; y selección múltiple para avisar a varios, uno tras otro',
+    'Sincronización más dura: los recordatorios recurrentes ya bajan con su frecuencia (antes llegaban como aviso único) y una foto lenta ya no traba la subida de las demás',
+    'Comprobantes de pago: si una subida falla, el reintento espera pausas crecientes en vez de gastar todos los intentos en pocos minutos',
+    'Corrección: si una operación queda en revisión, el dinero adelantado en el teléfono (vencimientos y entregas de efectivo) se revierte solo, igual que cuando el servidor la rechaza',
+    'Corrección: el cartel rojo de error de sincronización ahora se toca y muestra qué pasó y qué hacer (antes no respondía), y el resumen de la Cola ya no dice «completada» cuando hubo un error',
+    'Corrección: los interruptores apagados ya se distinguen en el tema oscuro, y la exención de batería para subir fotos pide el permiso de verdad y avisa si el teléfono no la concede',
+  ]),
   Novedad('1.24.1', [
     'Corrección: el botón de abrir/cerrar turno ya no desaparece del Inicio de un entrenador cuando el dueño le oculta la vista de nómina',
     'Corrección: el aviso previo a exportar una copia de seguridad ya no cuenta como «sin subir» las fotos que ya subieron, ni repite la alerta tras sincronizar',

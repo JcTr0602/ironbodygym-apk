@@ -415,6 +415,48 @@ class AppTema {
       ).copyWith(outline: borde),
       scaffoldBackgroundColor:
           oscuro ? AppColores.fondoOscuro : AppColores.fondoClaro,
+      // 1.24.2 (reporte de campo de Jc): sin switchTheme, el
+      // interruptor APAGADO por defecto de Material 3 casi no
+      // contrasta sobre las superficies oscuras de la casa y se
+      // veía como una mancha (Inscribir, Ajustes). OFF siempre
+      // visible: pista gris clara y pulgar claro en oscuro;
+      // ON sigue en el naranja de marca (el por defecto).
+      switchTheme: SwitchThemeData(
+        trackColor: WidgetStateProperty.resolveWith((estados) {
+          if (estados.contains(WidgetState.disabled)) {
+            return oscuro
+                ? const Color(0xFF333333)
+                : const Color(0xFFE0E0E0);
+          }
+          if (estados.contains(WidgetState.selected)) {
+            return AppColores.naranja;
+          }
+          return oscuro
+              ? const Color(0xFF555555)
+              : const Color(0xFFC9C9C9);
+        }),
+        thumbColor: WidgetStateProperty.resolveWith((estados) {
+          if (estados.contains(WidgetState.disabled)) {
+            return oscuro
+                ? const Color(0xFF5A5A5A)
+                : const Color(0xFFBDBDBD);
+          }
+          if (estados.contains(WidgetState.selected)) {
+            return Colors.white;
+          }
+          return oscuro
+              ? const Color(0xFFD8D8D8)
+              : const Color(0xFF757575);
+        }),
+        trackOutlineColor: WidgetStateProperty.resolveWith((estados) {
+          if (estados.contains(WidgetState.selected)) {
+            return AppColores.naranja;
+          }
+          return oscuro
+              ? const Color(0xFF7A7A7A)
+              : const Color(0xFF9E9E9E);
+        }),
+      ),
       appBarTheme: AppBarTheme(
         backgroundColor:
             oscuro ? AppColores.carbonProfundo : AppColores.carbon,

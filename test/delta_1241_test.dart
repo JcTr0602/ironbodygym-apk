@@ -137,7 +137,7 @@ void main() {
 
     test('G-08: la migración v63 existe y resetea el watermark '
         'de turnos_cierre otra vez', () {
-      expect(LocalDb.versionActual, 63);
+      expect(LocalDb.versionActual, greaterThanOrEqualTo(63));
       final i = localdb.indexOf('oldV < 63');
       expect(i, isNonNegative, reason: 'sin bloque v63');
       final bloque = localdb.substring(i, i + 1200);

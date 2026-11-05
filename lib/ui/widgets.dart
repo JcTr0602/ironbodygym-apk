@@ -190,6 +190,10 @@ class _SyncBannerState extends State<SyncBanner>
         final enProgreso = s.phase == SyncPhase.uploading ||
             s.phase == SyncPhase.downloading ||
             s.phase == SyncPhase.photos;
+        // 1.24.2 (auditoría sync M3-H02): la fase de error tiene
+        // su propio gesto (ver el onTap): el chevron prometía un
+        // detalle que no existía.
+        final esError = s.phase == SyncPhase.error;
         if (enProgreso && !_giro.isAnimating) {
           _giro.repeat();
         } else if (!enProgreso && _giro.isAnimating) {
@@ -281,7 +285,12 @@ class _SyncBannerState extends State<SyncBanner>
           child: InkWell(
             borderRadius: BorderRadius.circular(AppRadio.lg),
             onTap: () {
-              if (enProgreso) {
+              if (enProgreso || esError) {
+                // En error, el toque despliega el detalle (qué
+                // pasó y qué hacer); el reintento vive dentro
+                // como botón explícito. Antes el toque solo
+                // relanzaba el sync y, si fallaba igual, la
+                // pantalla quedaba idéntica: «no ocurre nada».
                 setState(() => _expandido = !_expandido);
               } else {
                 final alc = widget.alcance;
@@ -364,6 +373,56 @@ class _SyncBannerState extends State<SyncBanner>
                             minHeight: 6,
                           ),
                         ),
+                      ),
+                    ),
+                  if (_expandido && esError && s.lastError != null)
+                    Padding(
+                      padding:
+                          const EdgeInsets.only(top: AppEspacio.sm),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          if (s.lastError!.accionTexto.isNotEmpty)
+                            Text(
+                              'Qué hacer: ${s.lastError!.accionTexto}',
+                              style: AppTexto.metadato.copyWith(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.w600),
+                            ),
+                          if (s.lastError!.datosGuardadosLocalmente)
+                            Padding(
+                              padding: const EdgeInsets.only(
+                                  top: AppEspacio.xs),
+                              child: Text(
+                                'Tus cambios están guardados en '
+                                'este teléfono.',
+                                style: AppTexto.metadato.copyWith(
+                                    color: Colors.white),
+                              ),
+                            ),
+                          Align(
+                            alignment: Alignment.centerLeft,
+                            child: TextButton.icon(
+                              onPressed: () {
+                                final alc = widget.alcance;
+                                if (alc != null) {
+                                  SyncEngine.instance
+                                      .sincronizarScope(alc);
+                                } else {
+                                  SyncEngine.instance.run();
+                                }
+                              },
+                              icon: const Icon(
+                                  Icons.refresh_rounded,
+                                  color: Colors.white,
+                                  size: 18),
+                              label: Text('Reintentar ahora',
+                                  style: AppTexto.metadato.copyWith(
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.bold)),
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                   if (_expandido &&

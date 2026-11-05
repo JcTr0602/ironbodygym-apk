@@ -61,12 +61,19 @@ void main() {
     await db.db;
     // Todas las tablas al día en 100; borrados rezagado en 40 (su
     // cursor solo avanza hasta la última tumba bajada).
+    // 1.24.2: borrados ya NO está en tablasConWatermark (cursor
+    // propio; con su tabla vacía en el servidor clavaba el
+    // mínimo en 0 para siempre — campo 2026-11-05), así que ni
+    // el mínimo clásico ni el de las novedades lo arrastran.
     for (final t in LocalDb.tablasConWatermark) {
-      await db.setMeta('wm_$t', t == 'borrados' ? '40' : '100');
+      await db.setMeta('wm_$t', '100');
     }
-    expect(await db.getWatermarkMinimo(), 40,
-        reason: 'el mínimo clásico lo arrastra borrados');
+    await db.setMeta('wm_borrados', '40');
+    expect(LocalDb.tablasConWatermark.contains('borrados'), isFalse,
+        reason: 'borrados salió de la lista en la 1.24.2');
+    expect(await db.getWatermarkMinimo(), 100,
+        reason: 'el mínimo refleja el contenido, sin borrados');
     expect(await db.getWatermarkMinimo(excluir: {'borrados'}), 100,
-        reason: 'sin borrados, el mínimo refleja el contenido');
+        reason: 'la exclusión explícita sigue siendo válida');
   });
 }

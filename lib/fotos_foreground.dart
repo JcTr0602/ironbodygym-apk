@@ -127,16 +127,33 @@ Future<void> detenerSubidaFotosForeground() async {
   } catch (_) {}
 }
 
-/// ¿El paquete ya está exento de la optimización de batería?
-/// (La exención es por PAQUETE, no por usuario.)
-Future<bool> exencionBateriaActiva() async {
+/// Estado REAL de la exención de batería del paquete (la
+/// exención es por PAQUETE, no por usuario).
+///
+/// 1.24.2 (auditoría sync M3-H01/M5-A2): hasta hoy un error al
+/// comprobar se disfrazaba de `false` y la app afirmaba «sin
+/// exención» sin saberlo. El tercer estado lo separa.
+enum EstadoExencionBateria { activa, inactiva, desconocida }
+
+Future<EstadoExencionBateria> estadoExencionBateria() async {
   try {
-    return await FlutterForegroundTask
-        .isIgnoringBatteryOptimizations;
+    final v =
+        await FlutterForegroundTask.isIgnoringBatteryOptimizations;
+    return v
+        ? EstadoExencionBateria.activa
+        : EstadoExencionBateria.inactiva;
   } catch (_) {
-    return false;
+    return EstadoExencionBateria.desconocida;
   }
 }
+
+/// ¿El paquete ya está exento? Solo `true` si se COMPROBÓ.
+Future<bool> exencionBateriaActiva() async =>
+    await estadoExencionBateria() == EstadoExencionBateria.activa;
+
+/// Resultado de pedir la exención (para que la UI pueda decir
+/// qué pasó en vez de callar).
+enum ResultadoPedirExencion { yaActiva, pedida, error }
 
 /// Pide la exención de batería y deja la meta local
 /// `bateria_exencion_pedida` (sello de Argón: se verifica el
@@ -144,13 +161,21 @@ Future<bool> exencionBateriaActiva() async {
 /// repetir el diálogo). NO se llama tras el login: el diálogo
 /// del sistema pone la app en pausa y cortaría el arranque;
 /// la pide el dueño desde Ajustes, a mano.
-Future<void> solicitarExencionBateria() async {
+///
+/// 1.24.2: devuelve el resultado — antes tragaba todo error
+/// en un catch vacío y el botón parecía muerto (y faltaba el
+/// permiso en el manifiesto, sin el cual el diálogo ni abre).
+Future<ResultadoPedirExencion> solicitarExencionBateria() async {
   try {
     await LocalDb.instance.setMeta('bateria_exencion_pedida', '1');
-    if (!await FlutterForegroundTask.isIgnoringBatteryOptimizations) {
-      await FlutterForegroundTask.requestIgnoreBatteryOptimization();
+    if (await FlutterForegroundTask.isIgnoringBatteryOptimizations) {
+      return ResultadoPedirExencion.yaActiva;
     }
-  } catch (_) {}
+    await FlutterForegroundTask.requestIgnoreBatteryOptimization();
+    return ResultadoPedirExencion.pedida;
+  } catch (_) {
+    return ResultadoPedirExencion.error;
+  }
 }
 
 @pragma('vm:entry-point')

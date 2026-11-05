@@ -111,7 +111,7 @@ class LocalDb {
   /// A P-1 de Argón) y se resetea a 0 el watermark de
   /// turnos_cierre (trampa E-01: sin reset, los teléfonos con la
   /// 1.23 jamás bajarían las 7 columnas nuevas de los cierres).
-  static const int versionActual = 63;
+  static const int versionActual = 64;
 
   /// v37: marcas de información pública pendiente de republicar,
   /// UNA FILA POR CLAVE (compartido entre onCreate y la migración
@@ -1473,6 +1473,27 @@ class LocalDb {
           await db.rawInsert(
               "INSERT OR REPLACE INTO meta (k, v) "
               "VALUES ('wm_turnos_cierre', '0')");
+        }
+        if (oldV < 64) {
+          // 1.24.2 (auditoría sync M2): la columna 'frecuencia'
+          // de espejo_recordatorio_config nunca bajó (el select
+          // no la pedía ni el conversor la copiaba, aunque el
+          // puente la publica y la fusión la espera). Los
+          // watermarks de esa tabla ya avanzaron sin ella: se
+          // resetea el de la tabla para que baje entera con la
+          // frecuencia. Misma tolerancia con meta que en v62.
+          await db.execute(
+              'CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT NOT NULL)');
+          await db.rawInsert(
+              "INSERT OR REPLACE INTO meta (k, v) "
+              "VALUES ('wm_espejo_recordatorio_config', '0')");
+          // 1.24.2 (auditoría sync M5-A3): backoff de
+          // comprobantes — columna de próximo intento (epoch
+          // en segundos; 0 = lista ya). Sin ella, cada tick
+          // del FGS reintentaba todos los pendientes y un
+          // corte transitorio quemaba el tope de intentos.
+          await _addColumnIfMissing(db, 'comprobantes_pago',
+              'proximo_intento_en', 'INTEGER NOT NULL DEFAULT 0');
         }
       },
     );
@@ -3233,7 +3254,10 @@ class LocalDb {
         "estado TEXT NOT NULL DEFAULT 'pendiente', "
         'creado_en TEXT NOT NULL, '
         // SA-05 (1.21): tope de intentos de subida reintentables.
-        'intentos INTEGER NOT NULL DEFAULT 0)');
+        'intentos INTEGER NOT NULL DEFAULT 0, '
+        // 1.24.2 (auditoría sync M5-A3): backoff por fila
+        // (epoch en segundos; 0 = lista ya).
+        'proximo_intento_en INTEGER NOT NULL DEFAULT 0)');
   }
 
   /// 1.23 (W7): tabla LOCAL (no espejo ni sync): visitas de
@@ -7709,7 +7733,17 @@ class LocalDb {
     'turnos_apertura', // v1.8.0 (v39)
     'adelantos', // v1.8.0 (v40)
     'nomina_liquidada', // v1.8.0 (v40)
-    'borrados', // tombstones de sync_borrados
+    // 1.24.2: los tombstones ('borrados', 'gympedia_borrados',
+    // 'guia_borrados') quedan FUERA del mínimo global a propósito:
+    // su cursor es propio y solo avanza al tombstone más nuevo
+    // descargado; si la tabla del servidor está vacía o lleva
+    // tiempo sin tombstones, el cursor queda clavado (0 o un seq
+    // viejo) y el «completo» se vuelve inalcanzable para siempre
+    // (caso real 2026-11-05: sync_gympedia_borrados y
+    // sync_guia_borrados vacías → Watermark global 0 perpetuo y el
+    // manifiesto diario nunca disparaba). Su completitud la
+    // garantiza su propio bucle de descarga en cada ciclo, igual
+    // que las tablas de secuencia propia exentas.
     'liquidaciones_caja', // v1.3.6 (v28, ítem 1B)
     'incidencias_sync', // v1.3.6 (v28, ítem 1C)
     // v1.8.0 (v38): servicios por dosis (el cuadre depende de ellas;
@@ -7728,13 +7762,14 @@ class LocalDb {
     // Bloque 3. Sin ellos, getWatermarkMinimo no evaluaba si su
     // descarga estaba completa.
     'gympedia_articulos',
-    'gympedia_borrados',
+    // (gympedia_borrados fuera del mínimo: ver la nota de
+    // tombstones junto a 'nomina_liquidada'.)
     // Biblioteca / Guía (v47): mismo motivo. Las tablas ausentes
     // en Supabase (antes de ejecutar el SQL) se marcan ausentes
     // y no bloquean el «completo».
     'guia_fichas',
     'guia_equipos',
-    'guia_borrados',
+    // (guia_borrados fuera del mínimo: misma nota de tombstones.)
     'reservas',
     'solicitudes_adelanto',
     'avisos_entrenadores',

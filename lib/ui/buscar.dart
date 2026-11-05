@@ -7,6 +7,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../fotos.dart';
 import '../localdb.dart';
@@ -61,6 +62,15 @@ class _BuscarScreenState extends State<BuscarScreen> {
   // B1 (estéticas 1.19): aviso único del gesto deslizar.
   bool _mostrarAvisoSwipe = false;
   final _scroll = ScrollController();
+  // 1.24.2 (paquete Buscar): orden a elegir, densidad compacta,
+  // búsqueda avanzada plegada tras el botón de embudo y selección
+  // múltiple para avisar por WhatsApp. Orden y densidad se
+  // recuerdan entre visitas (meta local).
+  String _orden = 'nombre'; // nombre | venceAntes | vencidosPrimero | recientes
+  bool _compacta = false;
+  bool _mostrarAvanzada = false;
+  bool _modoSeleccion = false;
+  final Set<int> _seleccionados = {};
 
   @override
   void initState() {
@@ -78,11 +88,25 @@ class _BuscarScreenState extends State<BuscarScreen> {
     final der = await PerfilService.instance.getSwipeBuscarDer();
     final izq = await PerfilService.instance.getSwipeBuscarIzq();
     final ts = await LocalDb.instance.getMeta('ultimo_pull_ts');
+    final ordenGuardado =
+        await LocalDb.instance.getMeta('buscar_orden');
+    final compactaGuardada =
+        await LocalDb.instance.getMeta('buscar_compacta');
     if (!mounted) return;
     setState(() {
       _swipeDer = cerrada.contains(der) ? der : 'cobrar';
       _swipeIzq = cerrada.contains(izq) ? izq : 'ninguna';
       _ultimoPull = ts == null ? null : _pullEnHabana(ts);
+      const ordenes = {
+        'nombre',
+        'venceAntes',
+        'vencidosPrimero',
+        'recientes'
+      };
+      if (ordenGuardado != null && ordenes.contains(ordenGuardado)) {
+        _orden = ordenGuardado;
+      }
+      _compacta = compactaGuardada == '1';
     });
     // B1 (estéticas 1.19): aviso único la primera vez que hay
     // deslizables configurados. Se marca visto al mostrarse, así
@@ -241,6 +265,13 @@ class _BuscarScreenState extends State<BuscarScreen> {
         return ref == null || ref.isEmpty;
       }).toList();
     }
+    // 1.24.2: orden a elegir (antes del rescate por id exacto,
+    // que siempre manda y deja su cliente primero). Con la
+    // búsqueda en notas activa manda la relevancia (nombre
+    // primero, notas después), no el orden elegido.
+    if (!(_enNotas && q.isNotEmpty)) {
+      _aplicarOrden(r);
+    }
     // F11 (1.20): si lo escrito es un número que coincide
     // EXACTO con el id de un cliente, ese cliente va PRIMERO
     // (y entra aunque la búsqueda normal no lo trajera):
@@ -278,6 +309,54 @@ class _BuscarScreenState extends State<BuscarScreen> {
         _busco = true;
         _conteos = conteos;
       });
+    }
+  }
+
+  /// 1.24.2: aplica el orden elegido a la lista ya filtrada.
+  /// Comparadores por clave (transitivos): el protegido nunca
+  /// revela su estado por la posición — en «vence antes» va al
+  /// final por nombre y en «vencidos primero» cae en su propio
+  /// grupo final, también por nombre.
+  void _aplicarOrden(List<Map<String, dynamic>> r) {
+    switch (_orden) {
+      case 'venceAntes':
+        r.sort((a, b) {
+          String clave(Map<String, dynamic> c) => esVistaProtegida(c)
+              ? '~~~~'
+              : '${c['pagado_hasta'] ?? ''}';
+          final cmp = clave(a).compareTo(clave(b));
+          return cmp != 0 ? cmp : compararPorNombre(a, b);
+        });
+      case 'vencidosPrimero':
+        int grupo(Map<String, dynamic> c) {
+          if (esVistaProtegida(c)) return 4;
+          if (esCuentaCasa(c)) return 3;
+          final d = diasRestantes(c['pagado_hasta'] as String?);
+          if (d == null || d < 0) return 0;
+          if (d <= 7) return 1;
+          return 2;
+        }
+
+        r.sort((a, b) {
+          final ga = grupo(a);
+          final gb = grupo(b);
+          if (ga != gb) return ga.compareTo(gb);
+          if (ga <= 1) {
+            final cmp = '${a['pagado_hasta'] ?? ''}'
+                .compareTo('${b['pagado_hasta'] ?? ''}');
+            if (cmp != 0) return cmp;
+          }
+          return compararPorNombre(a, b);
+        });
+      case 'recientes':
+        r.sort((a, b) {
+          final ia = (a['id'] as num?)?.toInt() ?? 0;
+          final ib = (b['id'] as num?)?.toInt() ?? 0;
+          final cmp = ib.compareTo(ia);
+          return cmp != 0 ? cmp : compararPorNombre(a, b);
+        });
+      default:
+        r.sort(compararPorNombre);
     }
   }
 
@@ -339,27 +418,91 @@ class _BuscarScreenState extends State<BuscarScreen> {
       ),
       body: Column(
         children: [
-          const SyncBanner(),
+          // 1.24.2 (cabecera compacta): banner en su variante
+          // estrecha y buscador con las acciones en la misma fila
+          // (embudo = búsqueda avanzada, orden, densidad y
+          // selección múltiple). La lista gana ~90 px de alto.
+          const SyncBanner(compact: true),
           Padding(
-            padding: const EdgeInsets.all(AppEspacio.md),
-            child: CampoTexto(
-              controller: _q,
-              hint: 'Nombre, carnet o teléfono',
-              icono: Icons.search_rounded,
-              onChanged: (_) => _buscarConDebounce(),
+            padding: const EdgeInsets.fromLTRB(AppEspacio.md,
+                AppEspacio.sm, AppEspacio.sm, AppEspacio.xs),
+            child: Row(
+              children: [
+                Expanded(
+                  child: CampoTexto(
+                    controller: _q,
+                    hint: 'Nombre, carnet o teléfono',
+                    icono: Icons.search_rounded,
+                    onChanged: (_) => _buscarConDebounce(),
+                  ),
+                ),
+                IconButton(
+                  tooltip: 'Búsqueda avanzada',
+                  icon: Icon(Icons.tune_rounded,
+                      color: (_mostrarAvanzada ||
+                              _enNotas ||
+                              _rangoEdad != 'todas')
+                          ? AppColores.naranja
+                          : null),
+                  onPressed: () => setState(
+                      () => _mostrarAvanzada = !_mostrarAvanzada),
+                ),
+                PopupMenuButton<String>(
+                  tooltip: 'Ordenar la lista',
+                  icon: const Icon(Icons.sort_rounded),
+                  initialValue: _orden,
+                  onSelected: (v) {
+                    setState(() => _orden = v);
+                    LocalDb.instance.setMeta('buscar_orden', v);
+                    _buscar();
+                  },
+                  itemBuilder: (ctx) => const [
+                    PopupMenuItem(
+                        value: 'nombre',
+                        child: Text('Por nombre (A–Z)')),
+                    PopupMenuItem(
+                        value: 'venceAntes',
+                        child: Text('Vence antes primero')),
+                    PopupMenuItem(
+                        value: 'vencidosPrimero',
+                        child: Text('Vencidos primero')),
+                    PopupMenuItem(
+                        value: 'recientes',
+                        child: Text('Más recientes primero')),
+                  ],
+                ),
+                IconButton(
+                  tooltip: _compacta
+                      ? 'Vista normal'
+                      : 'Vista compacta',
+                  icon: Icon(_compacta
+                      ? Icons.density_medium_rounded
+                      : Icons.density_small_rounded),
+                  onPressed: () {
+                    setState(() => _compacta = !_compacta);
+                    LocalDb.instance.setMeta(
+                        'buscar_compacta', _compacta ? '1' : '0');
+                  },
+                ),
+                if (!_modoSeleccion)
+                  IconButton(
+                    tooltip: 'Seleccionar varios para avisar',
+                    icon: const Icon(Icons.checklist_rounded),
+                    onPressed: () =>
+                        setState(() => _modoSeleccion = true),
+                  ),
+              ],
             ),
           ),
           Padding(
             padding:
                 const EdgeInsets.symmetric(horizontal: AppEspacio.md),
-            child: Row(
-              children: [
-                Text('${_res.length} cliente(s)',
-                    style: AppTexto.metadato.copyWith(color: AppColores.textoSecundario(context))),
-                const Spacer(),
-                Text(_textoActualizado(),
-                    style: AppTexto.metadato.copyWith(color: AppColores.textoSecundario(context))),
-              ],
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                  '${_res.length} cliente(s) · ${_textoActualizado()}',
+                  style: AppTexto.metadato.copyWith(
+                      color: AppColores.textoSecundario(context))),
             ),
           ),
           // Bloque 1: cartel de lista vieja a las 24 h sin bajar
@@ -422,47 +565,73 @@ class _BuscarScreenState extends State<BuscarScreen> {
               ],
             ),
           ),
-          // v1.0.15: búsqueda avanzada (notas + rango de edad)
-          ExpansionTile(
-            dense: true,
-            visualDensity: VisualDensity.compact,
-            title: const Text('Búsqueda avanzada',
-                style: AppTexto.secundario),
-            children: [
-              SwitchListTile(
-                dense: true,
-                visualDensity: VisualDensity.compact,
-                title: const Text('Buscar también en notas',
-                    style: AppTexto.secundario),
-                value: _enNotas,
-                onChanged: (v) {
-                  setState(() => _enNotas = v);
-                  _buscar();
-                },
+          // v1.0.15: búsqueda avanzada (notas + rango de edad).
+          // 1.24.2: vive tras el botón de embudo de la cabecera
+          // (antes un ExpansionTile siempre visible que comía
+          // alto de lista aunque no se usara).
+          if (_mostrarAvanzada) ...[
+            SwitchListTile(
+              dense: true,
+              visualDensity: VisualDensity.compact,
+              title: const Text('Buscar también en notas',
+                  style: AppTexto.secundario),
+              value: _enNotas,
+              onChanged: (v) {
+                setState(() => _enNotas = v);
+                _buscar();
+              },
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('Rango de edad',
+                      style: AppTexto.metadato),
+                  const SizedBox(height: 4),
+                  Wrap(
+                    spacing: 6,
+                    children: [
+                      _chipEdad('todas', 'Todas'),
+                      _chipEdad('18-25', '18–25'),
+                      _chipEdad('26-35', '26–35'),
+                      _chipEdad('36-50', '36–50'),
+                      _chipEdad('50+', '50+'),
+                    ],
+                  ),
+                ],
               ),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text('Rango de edad',
-                        style: AppTexto.metadato),
-                    const SizedBox(height: 4),
-                    Wrap(
-                      spacing: 6,
-                      children: [
-                        _chipEdad('todas', 'Todas'),
-                        _chipEdad('18-25', '18–25'),
-                        _chipEdad('26-35', '26–35'),
-                        _chipEdad('36-50', '36–50'),
-                        _chipEdad('50+', '50+'),
-                      ],
-                    ),
-                  ],
-                ),
+            ),
+          ],
+          // 1.24.2: barra de selección múltiple para avisar.
+          if (_modoSeleccion)
+            Container(
+              color: AppColores.naranja.withValues(alpha: 0.12),
+              padding: const EdgeInsets.symmetric(
+                  horizontal: AppEspacio.md, vertical: AppEspacio.xs),
+              child: Row(
+                children: [
+                  Text('${_seleccionados.length} seleccionado(s)',
+                      style: AppTexto.etiqueta),
+                  const Spacer(),
+                  TextButton.icon(
+                    icon: const Icon(Icons.chat_rounded, size: 18),
+                    label: const Text('Avisar por WhatsApp'),
+                    onPressed: _seleccionados.isEmpty
+                        ? null
+                        : _avisarSeleccionados,
+                  ),
+                  IconButton(
+                    tooltip: 'Salir de la selección',
+                    icon: const Icon(Icons.close_rounded),
+                    onPressed: () => setState(() {
+                      _modoSeleccion = false;
+                      _seleccionados.clear();
+                    }),
+                  ),
+                ],
               ),
-            ],
-          ),
+            ),
           // 1.23 (W1): si el espejo de clientes está vacío
           // habiendo tenido clientes, la tarjeta de diagnóstico
           // va sobre la lista (se auto-oculta si está sano).
@@ -522,6 +691,15 @@ class _BuscarScreenState extends State<BuscarScreen> {
                               itemCount: _res.length,
                               itemBuilder: (ctx, i) {
                                 final c = _res[i];
+                                final cidFila =
+                                    (c['id'] as num?)?.toInt();
+                                final protegidoFila =
+                                    esVistaProtegida(c);
+                                final diasFila = diasRestantes(
+                                    c['pagado_hasta'] as String?);
+                                final telWaFila = normalizarTelefonoWaMe(
+                                        '${c['telefono'] ?? ''}')
+                                    .isNotEmpty;
                                 // Bloque 1 (A1): cada fila es una
                                 // tarjeta; el tap abre la ficha.
                                 // v1.3.1: ValueKey por id.
@@ -540,29 +718,60 @@ class _BuscarScreenState extends State<BuscarScreen> {
                                   child: FilaCliente(
                                     cliente: c,
                                     origenHero: 'buscar',
-                                    onTap: () {
-                                      final id = c['id'];
-                                      final cid = id is int
-                                          ? id
-                                          : int.tryParse('$id');
-                                      if (cid == null) return;
-                                      Navigator.of(context)
-                                          .push(RutaIron(
-                                              builder: (_) => FichaScreen(
-                                                  clienteId: cid,
-                                                  origenHero:
-                                                      'buscar')))
-                                          .then((_) {
-                                        if (mounted) _buscar();
-                                      });
-                                    },
+                                    compacta: _compacta,
+                                    leading: (_modoSeleccion &&
+                                            !protegidoFila &&
+                                            cidFila != null)
+                                        ? Checkbox(
+                                            value: _seleccionados
+                                                .contains(cidFila),
+                                            onChanged: (_) =>
+                                                _alternarSeleccion(c),
+                                          )
+                                        : null,
+                                    // 1.24.2: botón WhatsApp directo
+                                    // en vencidos y por vencer (con
+                                    // teléfono válido y sin ser Casa:
+                                    // la Casa no vence).
+                                    accionWhatsapp: (!_modoSeleccion &&
+                                            !protegidoFila &&
+                                            !esCuentaCasa(c) &&
+                                            telWaFila &&
+                                            (diasFila == null ||
+                                                diasFila <= 7))
+                                        ? () => _abrirWhatsapp(c)
+                                        : null,
+                                    onLongPress: (_modoSeleccion ||
+                                            protegidoFila)
+                                        ? null
+                                        : () => _menuRapido(c),
+                                    onTap: _modoSeleccion
+                                        ? () => _alternarSeleccion(c)
+                                        : () {
+                                            if (cidFila == null) {
+                                              return;
+                                            }
+                                            Navigator.of(context)
+                                                .push(RutaIron(
+                                                    builder: (_) =>
+                                                        FichaScreen(
+                                                            clienteId:
+                                                                cidFila,
+                                                            origenHero:
+                                                                'buscar')))
+                                                .then((_) {
+                                              if (mounted) _buscar();
+                                            });
+                                          },
                                   ),
                                 );
                                 // Ronda 17 M7-H1: cliente protegido
                                 // nunca se envuelve en Dismissible:
                                 // el gesto abriría cobro o edición
                                 // saltándose el bloqueo visual.
-                                if (esVistaProtegida(c)) {
+                                // 1.24.2: en modo selección tampoco
+                                // (el toque selecciona, no desliza).
+                                if (protegidoFila || _modoSeleccion) {
                                   return fila;
                                 }
                                 // Bloque 1: deslizables configurables
@@ -745,6 +954,246 @@ class _BuscarScreenState extends State<BuscarScreen> {
     }
   }
 
+  // ==================================================================
+  // 1.24.2 (paquete Buscar): menú rápido, WhatsApp directo y
+  // selección múltiple para avisar.
+  // ==================================================================
+
+  void _alternarSeleccion(Map<String, dynamic> c) {
+    if (esVistaProtegida(c)) return;
+    final cid = (c['id'] as num?)?.toInt();
+    if (cid == null) return;
+    setState(() {
+      if (!_seleccionados.remove(cid)) _seleccionados.add(cid);
+    });
+  }
+
+  /// Abre WhatsApp con el aviso que corresponde al estado del
+  /// cliente (o el chat pelado si no hace falta aviso).
+  Future<void> _abrirWhatsapp(Map<String, dynamic> c,
+      {bool conMensaje = true}) async {
+    final wa = normalizarTelefonoWaMe('${c['telefono'] ?? ''}');
+    if (wa.isEmpty) {
+      if (mounted) {
+        mostrarSnack(
+            context, 'Este cliente no tiene teléfono válido registrado.',
+            significado: SignificadoChip.alerta);
+      }
+      return;
+    }
+    final url = Uri.parse(conMensaje
+        ? 'https://wa.me/$wa?text=${Uri.encodeComponent(mensajeWaSegunEstado(c))}'
+        : 'https://wa.me/$wa');
+    try {
+      await launchUrl(url, mode: LaunchMode.externalApplication);
+    } catch (_) {
+      if (mounted) {
+        mostrarSnack(context, 'No se pudo abrir WhatsApp.',
+            significado: SignificadoChip.alerta);
+      }
+    }
+  }
+
+  /// Menú rápido al mantener presionada una fila: las acciones
+  /// del deslizable sin deslizar, más WhatsApp, llamada y la
+  /// entrada a la selección múltiple.
+  Future<void> _menuRapido(Map<String, dynamic> c) async {
+    if (esVistaProtegida(c)) return;
+    final telOk =
+        normalizarTelefonoWaMe('${c['telefono'] ?? ''}').isNotEmpty;
+    final accion = await showModalBottomSheet<String>(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              title: Text('${c['nombre'] ?? 'Cliente'}',
+                  style: AppTexto.subtitulo),
+              subtitle: const Text('Acciones rápidas'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.payments_rounded),
+              title: const Text('Cobrar mes'),
+              onTap: () => Navigator.pop(ctx, 'cobrar'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.today_rounded),
+              title: const Text('Pago diario'),
+              onTap: () => Navigator.pop(ctx, 'diario'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.shopping_bag_rounded),
+              title: const Text('Vender suplemento'),
+              onTap: () => Navigator.pop(ctx, 'venta'),
+            ),
+            if (telOk)
+              ListTile(
+                leading: const Icon(Icons.chat_rounded,
+                    color: Color(0xFF25D366)),
+                title: const Text('WhatsApp'),
+                onTap: () => Navigator.pop(ctx, 'whatsapp'),
+              ),
+            if (telOk)
+              ListTile(
+                leading: const Icon(Icons.call_rounded),
+                title: const Text('Llamar'),
+                onTap: () => Navigator.pop(ctx, 'llamar'),
+              ),
+            ListTile(
+              leading: const Icon(Icons.edit_rounded),
+              title: const Text('Editar cliente'),
+              onTap: () => Navigator.pop(ctx, 'editar'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.checklist_rounded),
+              title: const Text('Seleccionar varios para avisar'),
+              onTap: () => Navigator.pop(ctx, 'seleccionar'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (accion == null || !mounted) return;
+    switch (accion) {
+      case 'cobrar':
+      case 'diario':
+      case 'venta':
+      case 'editar':
+        await _ejecutarSwipe(accion, c);
+      case 'whatsapp':
+        final d = diasRestantes(c['pagado_hasta'] as String?);
+        final urgente =
+            !esCuentaCasa(c) && (d == null || d <= 7);
+        await _abrirWhatsapp(c, conMensaje: urgente);
+      case 'llamar':
+        final digitos =
+            '${c['telefono'] ?? ''}'.replaceAll(RegExp(r'[^0-9]'), '');
+        if (digitos.length >= 8) {
+          await launchUrl(
+              Uri.parse('tel:+53${digitos.substring(digitos.length - 8)}'));
+        }
+      case 'seleccionar':
+        setState(() => _modoSeleccion = true);
+        _alternarSeleccion(c);
+    }
+  }
+
+  /// Cadena de avisos a los seleccionados: uno por uno, en orden
+  /// de urgencia (sin fecha/vencido primero). Cada paso muestra
+  /// el cliente y espera confirmación — abrir WhatsApp no cuenta
+  /// como avisado hasta que el usuario dice «Ya avisé».
+  Future<void> _avisarSeleccionados() async {
+    final elegidos = _res
+        .where((c) =>
+            _seleccionados.contains((c['id'] as num?)?.toInt()) &&
+            !esVistaProtegida(c) &&
+            !esCuentaCasa(c))
+        .toList()
+      ..sort((a, b) => '${a['pagado_hasta'] ?? ''}'
+          .compareTo('${b['pagado_hasta'] ?? ''}'));
+    final conTel = elegidos
+        .where((c) =>
+            normalizarTelefonoWaMe('${c['telefono'] ?? ''}').isNotEmpty)
+        .toList();
+    if (conTel.isEmpty) {
+      mostrarSnack(context,
+          'Ningún seleccionado tiene teléfono válido para avisar.',
+          significado: SignificadoChip.alerta);
+      return;
+    }
+    var i = 0;
+    var avisados = 0;
+    while (mounted && i < conTel.length) {
+      final c = conTel[i];
+      final d = diasRestantes(c['pagado_hasta'] as String?);
+      final detalle = d == null
+          ? 'Sin fecha de vencimiento'
+          : d < 0
+              ? 'Vencido hace ${d.abs()} día(s)'
+              : d == 0
+                  ? 'Vence hoy'
+                  : 'Vence en $d día(s)';
+      final r = await showModalBottomSheet<String>(
+        context: context,
+        isDismissible: false,
+        builder: (ctx) => SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.all(AppEspacio.lg),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Aviso ${i + 1} de ${conTel.length}',
+                    style: AppTexto.metadato),
+                const SizedBox(height: 4),
+                Text('${c['nombre'] ?? 'Cliente'}',
+                    style: AppTexto.subtitulo),
+                Text(detalle, style: AppTexto.secundario),
+                const SizedBox(height: 12),
+                SizedBox(
+                  width: double.infinity,
+                  child: FilledButton.icon(
+                    icon: const Icon(Icons.chat_rounded),
+                    label: const Text('Abrir WhatsApp'),
+                    onPressed: () => Navigator.pop(ctx, 'abrir'),
+                  ),
+                ),
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: () => Navigator.pop(ctx, 'avise'),
+                        child: const Text('Ya avisé · Siguiente'),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: () => Navigator.pop(ctx, 'saltar'),
+                        child: const Text('Saltar'),
+                      ),
+                    ),
+                  ],
+                ),
+                Center(
+                  child: TextButton(
+                    onPressed: () => Navigator.pop(ctx, 'fin'),
+                    child: const Text('Terminar avisos'),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+      if (r == 'abrir') {
+        await _abrirWhatsapp(c);
+        // Sin avanzar: al volver de WhatsApp el mismo paso se
+        // muestra otra vez para confirmar con «Ya avisé».
+        continue;
+      }
+      if (r == 'avise') avisados++;
+      if (r == 'avise' || r == 'saltar') {
+        i++;
+        continue;
+      }
+      break; // 'fin' o cierre inesperado
+    }
+    if (!mounted) return;
+    setState(() {
+      _modoSeleccion = false;
+      _seleccionados.clear();
+    });
+    mostrarSnack(
+        context,
+        avisados > 0
+            ? 'Avisos completados: $avisados de ${conTel.length}'
+            : 'Avisos cancelados',
+        significado:
+            avisados > 0 ? SignificadoChip.exito : SignificadoChip.alerta);
+  }
+
   Widget _chipFiltro(String valor, String etiqueta,
       {Color? punto}) {
     final activo = _filtro == valor;
@@ -789,6 +1238,15 @@ class FilaCliente extends StatelessWidget {
   /// 'listas'…). Sin origen, la fila no vuela.
   final String? origenHero;
 
+  /// 1.24.2 (Buscar): densidad compacta — avatar más pequeño y
+  /// menos aire vertical. Por defecto la fila de siempre.
+  final bool compacta;
+
+  /// 1.24.2 (Buscar): si viene, la fila muestra el botón directo
+  /// de WhatsApp (aviso según el estado del cliente) en vez del
+  /// chevron. Un [trailing] explícito sigue mandando.
+  final VoidCallback? accionWhatsapp;
+
   const FilaCliente(
       {super.key,
       required this.cliente,
@@ -796,7 +1254,9 @@ class FilaCliente extends StatelessWidget {
       this.onLongPress,
       this.trailing,
       this.leading,
-      this.origenHero});
+      this.origenHero,
+      this.compacta = false,
+      this.accionWhatsapp});
 
   @override
   Widget build(BuildContext context) => _FilaCliente(
@@ -806,7 +1266,9 @@ class FilaCliente extends StatelessWidget {
       onLongPress: onLongPress,
       trailing: trailing,
       leading: leading,
-      origenHero: origenHero);
+      origenHero: origenHero,
+      compacta: compacta,
+      accionWhatsapp: accionWhatsapp);
 }
 
 class _FilaCliente extends StatefulWidget {
@@ -816,6 +1278,8 @@ class _FilaCliente extends StatefulWidget {
   final Widget? trailing;
   final Widget? leading;
   final String? origenHero;
+  final bool compacta;
+  final VoidCallback? accionWhatsapp;
   const _FilaCliente(
       {super.key,
       required this.cliente,
@@ -823,7 +1287,9 @@ class _FilaCliente extends StatefulWidget {
       this.onLongPress,
       this.trailing,
       this.leading,
-      this.origenHero});
+      this.origenHero,
+      this.compacta = false,
+      this.accionWhatsapp});
 
   @override
   State<_FilaCliente> createState() => _FilaClienteState();
@@ -903,6 +1369,31 @@ class _FilaClienteState extends State<_FilaCliente> {
           ? null
           : tagHeroCliente(widget.origenHero!, c['id']),
     );
+    // 1.24.2 (Buscar): semáforo en el avatar de la rama normal —
+    // el anillo dice el estado sin leer la fila: verde al día,
+    // ámbar por vencer (≤7 días), rojo vencido o sin fecha y
+    // dorado para la Cuenta a la Casa. La rama protegida no lo
+    // lleva (no debe filtrar el estado).
+    final esCasaAnillo = esCuentaCasa(c);
+    final colorSemaforo = esCasaAnillo
+        ? const Color(0xFFB8860B)
+        : (d == null || d < 0)
+            ? AppColores.error
+            : d <= 7
+                ? AppColores.alerta
+                : AppColores.exito;
+    final fotoSemaforo = AvatarCliente(
+      nombre: nombre,
+      foto: _foto,
+      tamano: widget.compacta ? TamanoAvatar.m : TamanoAvatar.l,
+      heroTag: widget.origenHero == null
+          ? null
+          : tagHeroCliente(widget.origenHero!, c['id']),
+      colorBorde: colorSemaforo,
+      grosorBorde: 2.5,
+    );
+    final tieneNotas =
+        '${c['notas'] ?? ''}'.trim().isNotEmpty;
     // Cliente protegido (2026-10-26, A1 Argón): el entrenador solo
     // ve avatar, nombre y candado. Sin badge, sin días, sin
     // leading (selección de papelera) y sin trailing (acciones
@@ -972,8 +1463,9 @@ class _FilaClienteState extends State<_FilaCliente> {
       onTap: widget.onTap,
       onLongPress: widget.onLongPress,
       child: Padding(
-        padding: const EdgeInsets.symmetric(
-            horizontal: AppEspacio.lg, vertical: AppEspacio.sm),
+        padding: EdgeInsets.symmetric(
+            horizontal: AppEspacio.lg,
+            vertical: widget.compacta ? AppEspacio.xs : AppEspacio.sm),
         child: Row(
           children: [
             // v1.1 papelera: el leading (checkbox) convive con la foto,
@@ -982,16 +1474,30 @@ class _FilaClienteState extends State<_FilaCliente> {
               widget.leading!,
               const SizedBox(width: AppEspacio.sm),
             ],
-            // Foto (definida arriba, compartida con la rama protegida).
-            foto,
+            // Foto con semáforo (la rama protegida usa la pelada).
+            fotoSemaforo,
             const SizedBox(width: AppEspacio.md),
-            // Nombre + badge + días
+            // Nombre (+ icono si tiene notas) + badge + días
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(nombre,
-                      style: AppTexto.subtitulo),
+                  Row(
+                    children: [
+                      Flexible(
+                        child: Text(nombre,
+                            style: AppTexto.subtitulo,
+                            overflow: TextOverflow.ellipsis),
+                      ),
+                      if (tieneNotas) ...[
+                        const SizedBox(width: 6),
+                        Icon(Icons.sticky_note_2_outlined,
+                            size: 15,
+                            color: AppColores.textoSecundario(
+                                context)),
+                      ],
+                    ],
+                  ),
                   const SizedBox(height: 4),
                   badge,
                   const SizedBox(height: 2),
@@ -1002,10 +1508,19 @@ class _FilaClienteState extends State<_FilaCliente> {
                 ],
               ),
             ),
-            // Acción rápida (o chevron por defecto)
+            // Acción rápida, botón de WhatsApp (1.24.2) o chevron.
             widget.trailing ??
-                Icon(Icons.chevron_right_rounded,
-                    color: AppColores.textoSecundario(context)),
+                (widget.accionWhatsapp != null
+                    ? IconButton(
+                        icon: const Icon(Icons.chat_rounded,
+                            color: Color(0xFF25D366)),
+                        tooltip: 'Avisar por WhatsApp',
+                        visualDensity: VisualDensity.compact,
+                        onPressed: widget.accionWhatsapp,
+                      )
+                    : Icon(Icons.chevron_right_rounded,
+                        color:
+                            AppColores.textoSecundario(context))),
           ],
         ),
       ),

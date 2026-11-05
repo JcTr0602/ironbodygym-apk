@@ -77,6 +77,6 @@ void main() {
 
   test('versión actual de la BD es 48', () async {
     await _abrirDbVacia();
-    expect(LocalDb.versionActual, 63); // pin movido: v63 (1.24.1)
+    expect(LocalDb.versionActual, greaterThanOrEqualTo(63)); // pin movido: v63 (1.24.1)
   });
 }

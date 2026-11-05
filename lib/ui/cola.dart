@@ -1037,8 +1037,14 @@ class _ColaScreenState extends State<ColaScreen> {
     await showDialog(
       context: context,
       builder: (ctx) => DialogoApp(
-        titulo: 'Sincronización completada',
-        iconoTitulo: Icons.sync_rounded,
+        // 1.24.2 (auditoría sync M3-H05): el título sale del
+        // resumen veraz del resultado — antes decía siempre
+        // «Sincronización completada» aunque la corrida
+        // hubiera terminado con error o parcial.
+        titulo: res.resumenCorto,
+        iconoTitulo: error != null && error.isNotEmpty
+            ? Icons.error_outline_rounded
+            : Icons.sync_rounded,
         contenido: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,

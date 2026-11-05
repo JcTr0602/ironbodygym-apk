@@ -1887,6 +1887,13 @@ class SyncEngine {
       // fotos ya NO viven en _doPush: push()/run()/
       // sincronizarScope() las lanzan con _lanzarFotosIncidencias
       // al soltar el candado, sin esperarlas.
+      // 1.24.2 (auditoría sync M1-F3): foto de la cola al
+      // entrar — los sellos de éxito del final la contrastan
+      // con lo aplicado para no sellar un push que falló entero.
+      var pendientesAlEntrar = 0;
+      try {
+        pendientesAlEntrar = await _db.countPendingOps();
+      } catch (_) {}
       final resPush1 = await _uploadOps(forzar: forzar);
       var totalOps = resPush1.aplicadas;
       final uuidsPush = <String>[...resPush1.uuids];
@@ -1962,7 +1969,20 @@ class SyncEngine {
         totalOps += resPush2.aplicadas;
         uuidsPush.addAll(resPush2.uuids);
       }
-      await _db.setMeta('last_push_ok', isoHabana(ahoraHabana()));
+      // 1.24.2 (auditoría sync M1-F3): last_push_ok SOLO si el
+      // push no fue un fallo total (había trabajo, no se aplicó
+      // nada y el trabajo sigue ahí). Antes se sellaba siempre
+      // y «sincronizado hace X» mentía tras un corte de red.
+      var pendientesAlSalir = 0;
+      try {
+        pendientesAlSalir = await _db.countPendingOps();
+      } catch (_) {}
+      final pushFalloTotal = pendientesAlEntrar > 0 &&
+          totalOps == 0 &&
+          pendientesAlSalir > 0;
+      if (!pushFalloTotal) {
+        await _db.setMeta('last_push_ok', isoHabana(ahoraHabana()));
+      }
       // v1.3.0: acumulativo (no solo última sincronización).
       final prevSubidos =
           int.tryParse(await _db.getMeta('total_subidos') ?? '0') ?? 0;
@@ -1984,7 +2004,11 @@ class SyncEngine {
         await _db.setMeta('ultimo_push_detalle_ts', tsPush);
       }
       // v1.2.5 (D12): el servidor confirmó (ack real, no optimista).
-      await marcarSincronizado();
+      // 1.24.2: con fallo total de push tampoco se sella
+      // ultimo_sincronizado (misma compuerta que last_push_ok).
+      if (!pushFalloTotal) {
+        await marcarSincronizado();
+      }
       _emit(SyncPhase.idle);
       // v1.2.9+46 (AppLog): push completo.
       AppLog.info('sync', 'push_fin', d: 'ops=$totalOps fotos=$fotosSubidas');
@@ -2378,7 +2402,10 @@ class SyncEngine {
       // detalle, igual que no pisa last_downloaded: el detalle
       // corresponde al último ciclo visible para el usuario.
       // Todo en meta: sin migraciones ni columnas nuevas.
-      if (!silencioso) {
+      if (!silencioso && resDownload.fallidas == 0) {
+        // 1.24.2: ultimo_pull_ts SOLO con la bajada limpia —
+        // es el sello que Buscar presenta como «Actualizado»;
+        // sellarlo con filas fallidas mentía (M3-H03).
         final tsPull = isoHabana(ahoraHabana());
         await _db.setMeta('ultimo_pull_ts', tsPull);
         if (debeActualizarDetallePull(n)) {
@@ -2409,7 +2436,8 @@ class SyncEngine {
       }
 
       // Fix #11: solo marcar OK si todo (incl. incidencias) funcionó.
-      if (incidenciasOk) {
+      // 1.24.2: y sin filas fallidas en la bajada principal.
+      if (incidenciasOk && resDownload.fallidas == 0) {
         await _db.setMeta(
             'last_pull_ok', isoHabana(ahoraHabana()));
         // 1.23 (W1): testigo del diagnóstico de espejo vacío —
@@ -2844,9 +2872,27 @@ class SyncEngine {
     final uuid = '${op['op_uuid']}';
     await _db.bumpOp(uuid, error, httpStatus: httpStatus);
     try {
-      if ('${op['tipo']}' == 'pago_mensual' &&
-          await _db.estadoOp(uuid) == 'necesita_revision') {
-        await _revertirVencimientoOptimista(op);
+      if (await _db.estadoOp(uuid) == 'necesita_revision') {
+        // 1.24.2 (auditoría sync M1-F1): la limpieza al entrar
+        // en revisión es la COMPLETA, no solo el vencimiento
+        // de pago_mensual (que era lo único que la 1.24.1
+        // revertía aquí): optimista fuera, entrega de
+        // efectivo deshecha y reposición revertida, espejo de
+        // la rama de revisión de _aplicarEstadoServidor.
+        if ('${op['tipo']}' == 'pago_mensual') {
+          await _revertirVencimientoOptimista(op);
+        }
+        await _limpiarOptimistaDeOp(op);
+        if ('${op['tipo']}' == 'liquidar_entrega_efectivo') {
+          await _db.eliminarEntregaEfectivoPorOp(uuid);
+        }
+        if (op['tipo'] == 'reponer_lote') {
+          try {
+            final p = jsonDecode(op['payload'] as String)
+                as Map<String, dynamic>;
+            await _db.revertirOptimismoReponerLote(p);
+          } catch (_) {}
+        }
       }
     } catch (_) {}
   }
@@ -3176,6 +3222,23 @@ class SyncEngine {
       // vencimiento verdadero.
       if ('${op['tipo']}' == 'pago_mensual') {
         await _revertirVencimientoOptimista(op);
+      }
+      // 1.24.2 (auditoría sync M1-F1): la revisión limpia el
+      // dinero optimista IGUAL que el rechazo — hasta hoy solo
+      // se revertía el vencimiento de pago_mensual: una
+      // liquidación en revisión dejaba su fila descontando el
+      // «pendiente a entregar», una venta quedaba fantasma en
+      // el espejo y una reposición no se deshacía.
+      await _limpiarOptimistaDeOp(op);
+      if ('${op['tipo']}' == 'liquidar_entrega_efectivo') {
+        await _db.eliminarEntregaEfectivoPorOp(uuid);
+      }
+      if (op['tipo'] == 'reponer_lote') {
+        try {
+          final p =
+              jsonDecode(op['payload'] as String) as Map<String, dynamic>;
+          await _db.revertirOptimismoReponerLote(p);
+        } catch (_) {}
       }
       return false;
     }
@@ -3648,6 +3711,9 @@ class SyncEngine {
           'target_key': m['target_key'],
           'dias_anticipacion': m['dias_anticipacion'],
           'fecha_fija': m['fecha_fija'],
+          // 1.24.2 (auditoría sync M2): la copia de la
+          // frecuencia que faltaba (ver el select).
+          'frecuencia': m['frecuencia'],
           'activa': m['activa'],
           'creado_por': m['creado_por'],
           'disparado_en_fecha_habana': m['disparado_en_fecha_habana'],
@@ -3933,7 +3999,8 @@ class SyncEngine {
     }
   }
 
-  Future<({int aplicadas, Map<String, int> porTabla})> _download(
+  Future<({int aplicadas, Map<String, int> porTabla, int fallidas})>
+      _download(
       {bool silencioso = false, List<String>? tablasFiltro}) async {
     // v1.2.8 (Paso 1): si se pasa tablasFiltro (scope), solo esas tablas.
     // H-08 (1.23): sin filtro explícito, el pull completo pide
@@ -3950,7 +4017,7 @@ class SyncEngine {
     // y el próximo reintenta con la sesión sana.
     if (!await _jwtVigente()) {
       AppLog.aviso('sync', 'pull_sin_jwt_valido');
-      return (aplicadas: 0, porTabla: const <String, int>{});
+      return (aplicadas: 0, porTabla: const <String, int>{}, fallidas: 0);
     }
     // v1.2.5 (D19): si el manifiesto marcó algún ámbito divergente,
     // re-descarga completa desde cero en este ciclo.
@@ -4326,8 +4393,13 @@ class SyncEngine {
                   'op_ids_json,resto_sin_ids,'
                   'sync_seq',
             'espejo_recordatorio_config' =>
+              // 1.24.2 (auditoría sync M2): 'frecuencia' entra
+              // en el select — el puente la publica y la fusión
+              // local la espera, pero nadie la pedía: todo
+              // recordatorio recurrente llegaba degradado a
+              // disparo único (patrón G-08).
               'id,titulo,tipo,alcance,target_key,dias_anticipacion,'
-                  'fecha_fija,activa,creado_por,'
+                  'fecha_fija,frecuencia,activa,creado_por,'
                   'disparado_en_fecha_habana,creada_ts,actualizada_ts,'
                   'sync_seq',
             // Bandeja (1.19, v49): permisos_bandeja es plano SIN
@@ -5250,7 +5322,11 @@ class SyncEngine {
       // pendiente.
       throw Exception('bajada incompleta: ${erroresTablas.first}');
     }
-    return (aplicadas: aplicadas, porTabla: porTabla);
+    // 1.24.2 (auditoría sync M1-F3/M3-H03): fallidas sale en el
+    // resultado — los sellos de «pull OK» lo consultan para no
+    // anunciar una bajada limpia cuando hubo filas rechazadas
+    // por el conversor (la clase del incidente G-09).
+    return (aplicadas: aplicadas, porTabla: porTabla, fallidas: fallidas);
   }
 
   /// v1.3.4 (Ítem 6 Capa 1, veredicto de Argón): reconciliación

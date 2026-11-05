@@ -102,6 +102,6 @@ void main() {
 
   test('la versión actual del esquema es 48 (pin movido: v48 Pomos)',
       () async {
-    expect(LocalDb.versionActual, 63); // pin movido: v63 (1.24.1)
+    expect(LocalDb.versionActual, greaterThanOrEqualTo(63)); // pin movido: v63 (1.24.1)
   });
 }

@@ -48,7 +48,8 @@ class _AjustesScreenState extends State<AjustesScreen> {
   // 1.23: estado nativo de la exención de batería (null =
   // aún comprobando). Se refresca al abrir Ajustes y al volver
   // del diálogo del sistema.
-  bool? _exencionBateria;
+  // 1.24.2: enum de tres estados (null = aún comprobando).
+  EstadoExencionBateria? _exencionBateria;
   File? _avatar;
   String? _nombreVisible;
   String? _movil;
@@ -77,20 +78,39 @@ class _AjustesScreenState extends State<AjustesScreen> {
   }
 
   Future<void> _refrescarExencionBateria() async {
-    final activa = await exencionBateriaActiva();
+    final estado = await estadoExencionBateria();
     if (!mounted) return;
-    setState(() => _exencionBateria = activa);
+    setState(() => _exencionBateria = estado);
   }
 
   Future<void> _pedirExencionBateria() async {
-    if (_exencionBateria == true) {
+    if (_exencionBateria == EstadoExencionBateria.activa) {
       _msg('La exención de batería ya está activa en este '
           'teléfono.');
       return;
     }
-    await solicitarExencionBateria();
+    // 1.24.2 (auditoría sync M3-H01): cada desenlace dice algo.
+    // Antes la petición tragaba los errores y el botón parecía
+    // muerto (y faltaba el permiso en el manifiesto).
+    final r = await solicitarExencionBateria();
     // Al volver del diálogo del sistema, el estado real manda.
     await _refrescarExencionBateria();
+    if (!mounted) return;
+    switch (r) {
+      case ResultadoPedirExencion.yaActiva:
+        _msg('La exención de batería ya está activa en este '
+            'teléfono.');
+      case ResultadoPedirExencion.error:
+        _msg('No se pudo abrir el ajuste de batería del '
+            'sistema. Actívala a mano: Ajustes del teléfono, '
+            'batería, aplicaciones sin restricción, Iron Body.');
+      case ResultadoPedirExencion.pedida:
+        if (_exencionBateria != EstadoExencionBateria.activa) {
+          _msg('Si el sistema no te mostró el diálogo, actívala '
+              'a mano: Ajustes del teléfono, batería, '
+              'aplicaciones sin restricción, Iron Body.');
+        }
+    }
   }
 
   Future<void> _cargar() async {
@@ -1848,14 +1868,19 @@ class _AjustesScreenState extends State<AjustesScreen> {
                 _opcion(
                   icono: Icons.battery_saver_rounded,
                   titulo: 'Subida en segundo plano',
-                  subtitulo: _exencionBateria == null
-                      ? 'Comprobando la exención de batería…'
-                      : _exencionBateria!
-                          ? 'Exención de batería activa: la subida '
-                              'de fondo no se duerme'
-                          : 'Sin exención de batería: el sistema '
-                              'puede dormir la subida de fondo. '
-                              'Toca para pedirla',
+                  subtitulo: switch (_exencionBateria) {
+                    null => 'Comprobando la exención de batería…',
+                    EstadoExencionBateria.activa =>
+                      'Exención de batería activa: la subida '
+                          'de fondo no se duerme',
+                    EstadoExencionBateria.inactiva =>
+                      'Sin exención de batería: el sistema '
+                          'puede dormir la subida de fondo. '
+                          'Toca para pedirla',
+                    EstadoExencionBateria.desconocida =>
+                      'No se pudo comprobar la exención de '
+                          'batería. Toca para intentarlo',
+                  },
                   onTap: _pedirExencionBateria,
                 ),
                 if (_auth.isOwner)

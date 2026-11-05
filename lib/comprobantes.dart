@@ -28,6 +28,15 @@ import 'localdb.dart';
 import 'sync.dart' show SyncEngine, EstadoSubida;
 import 'tiempo.dart';
 
+/// 1.24.2 (auditoría sync M5-A3): backoff entre reintentos de
+/// subida de un comprobante, en segundos: 60, 120, 240, 480,
+/// 960 y tope de 1800. Pura y testeable.
+int backoffComprobanteSegundos(int intentos) {
+  final n = intentos < 1 ? 1 : intentos;
+  final s = 60 << (n - 1);
+  return s > 1800 ? 1800 : s;
+}
+
 /// Ruta en el bucket para un comprobante (determinista).
 String rutaStorageComprobante(String uuid, String ext) =>
     'comprobantes/$uuid.$ext';
@@ -204,7 +213,9 @@ class ComprobantesService {
       // al instante por el tope ya alcanzado).
       await db.update(
         'comprobantes_pago',
-        {'estado': 'pendiente', 'intentos': 0},
+        // 1.24.2: la reactivación también limpia el backoff
+        // (si no, la fila reactivada seguiría dormida).
+        {'estado': 'pendiente', 'intentos': 0, 'proximo_intento_en': 0},
         where: 'comprobante_uuid = ?',
         whereArgs: [f['comprobante_uuid']],
       );
@@ -329,9 +340,17 @@ class ComprobantesService {
         return 0;
       }
       await purgarSubidosViejos();
+      // 1.24.2 (auditoría sync M5-A3): el lote honra el backoff
+      // por fila — sin él, cada tick del FGS (5 s) reintentaba
+      // TODOS los pendientes y un corte transitorio quemaba el
+      // tope de 10 intentos en minutos. El epoch va como ENTERO
+      // (regla de la casa: como texto, SQLite ordena por tipo y
+      // la comparación sale siempre verdadera).
+      final ahoraEpoch = DateTime.now().millisecondsSinceEpoch ~/ 1000;
       final filas = await db.query(
         'comprobantes_pago',
-        where: "estado = 'pendiente'",
+        where: "estado = 'pendiente' AND proximo_intento_en <= ?",
+        whereArgs: [ahoraEpoch],
         orderBy: 'creado_en ASC',
         limit: 10,
       );
@@ -461,9 +480,17 @@ class ComprobantesService {
       AppLog.error('comprobantes', 'tope_intentos',
           d: 'uuid=$uuid intentos=$intentos: pasa a error');
     } else {
+      // 1.24.2 (auditoría sync M5-A3): el fallo agenda el
+      // próximo intento con backoff creciente en vez de
+      // reintentar en el siguiente tick.
       await db.update(
         'comprobantes_pago',
-        {'intentos': intentos},
+        {
+          'intentos': intentos,
+          'proximo_intento_en':
+              (DateTime.now().millisecondsSinceEpoch ~/ 1000) +
+                  backoffComprobanteSegundos(intentos),
+        },
         where: 'comprobante_uuid = ?',
         whereArgs: [uuid],
       );

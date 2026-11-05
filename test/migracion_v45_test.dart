@@ -46,7 +46,7 @@ void main() {
     await _abrirDbVacia();
     final d = await LocalDb.instance.db;
     expect(await d.getVersion(), LocalDb.versionActual);
-    expect(LocalDb.versionActual, 63); // pin movido: v63 (1.24.1)
+    expect(LocalDb.versionActual, greaterThanOrEqualTo(63)); // pin movido: v63 (1.24.1)
     expect(await _columnas('pagos_diarios'),
         containsAll(['id', 'data', 'sync_seq', 'metodo']));
     final tablas = (await d.rawQuery(
