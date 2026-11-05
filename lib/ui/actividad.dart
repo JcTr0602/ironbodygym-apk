@@ -218,6 +218,49 @@ bool esActividadPropia(Map<String, dynamic> a,
   );
 }
 
+/// 1.24 Bloque 6 (ítem 8 del Panel + regla de atribución de
+/// Argón): qué ve un entrenador SIN el permiso de ver todo en
+/// su actividad reciente:
+/// - Mensualidades e inscripciones: lo que YO registré Y lo de
+///   MIS clientes lo haya cobrado quien lo haya cobrado (así
+///   se entera de que un cliente suyo pagó aunque cobrara el
+///   dueño; es el sustituto del viejo sistema de avisos).
+/// - Pagos diarios y el resto: SOLO lo que yo registré (el
+///   reporte de pagos diarios de otros entrenadores no se ve).
+/// «Mi cliente» = el que YO inscribí: en este gym no hay un
+/// entrenador asignado aparte; el cliente es de quien lo
+/// inscribió (clientes.registrado_por / _nombre, la misma
+/// firma que acredita las ops). Un cliente SIN firma no se
+/// acredita a nadie: la rama «sin firma = mía» de esOpMia es
+/// de la cola local y aquí no aplica (fail-closed).
+/// Top-level para tests.
+bool actividadVisibleParaEntrenador(
+  Map<String, dynamic> a, {
+  required Map<String, dynamic>? cliente,
+  String? miActor,
+  int? miTelegramId,
+}) {
+  if (esActividadPropia(a, miActor: miActor, miTelegramId: miTelegramId)) {
+    return true;
+  }
+  final cat = categoriaActividad('${a['accion'] ?? ''}');
+  if (cat != 'mensualidades' && cat != 'inscripciones') return false;
+  if (cliente == null) return false;
+  final firmaNum = cliente['registrado_por'];
+  final firmaTxt = '${cliente['registrado_por_nombre'] ?? ''}'.trim();
+  if (firmaNum is! num && firmaTxt.isEmpty) return false;
+  return esOpMia(
+    {
+      'payload': {
+        'registrado_por': cliente['registrado_por'],
+        'registrado_por_nombre': cliente['registrado_por_nombre'],
+      },
+    },
+    miActor: miActor,
+    miTelegramId: miTelegramId,
+  );
+}
+
 /// v1.3.7 (Fase 2, D2): calcula (texto, esPositiva) de la comparativa.
 /// Top-level para tests. Si previo <= 0 devuelve "—".
 (String, bool) textoComparativa(
@@ -408,22 +451,11 @@ class _ActividadScreenState extends State<ActividadScreen> {
       miActor = null;
       miTelegramId = null;
     }
-    // 1.24 Bloque 3 (H-7 de la auditoría de permisos):
-    // can_ver_todos_pagos por fin manda en su superficie. Con
-    // la clave (y la foto de permisos cargada), el entrenador
-    // ve la actividad completa; sin ella queda el recorte
-    // P2#2 de siempre: solo lo propio, fail-closed.
-    final verTodosPagos = pagosSinRestriccion(
-        esDueno: esDueno,
-        permisosCargados: PermisosEntrenador().cargado,
-        canVerTodosPagos: PermisosEntrenador().canVerTodosPagos);
-    if (!verTodosPagos) {
-      lista.removeWhere((a) => !esActividadPropia(a,
-          miActor: miActor, miTelegramId: miTelegramId));
-    }
     // P2#19 (Argón): UNA sola consulta al espejo para todos los
     // clientes distintos del feed, en vez de un clientePorId
-    // secuencial por cliente.
+    // secuencial por cliente. 1.24 Bloque 6: la consulta sube
+    // ANTES del recorte de visibilidad porque la atribución
+    // por cliente (ítem 8) necesita la fila del cliente.
     final idsDistintos = <int>{};
     for (final a in lista) {
       final id = _clienteIdDe(a);
@@ -449,6 +481,22 @@ class _ActividadScreenState extends State<ActividadScreen> {
       // Espejo no disponible: se sigue con marcadores
       // 'Cliente $id', sin nombres ni teléfonos reales.
       porId = {};
+    }
+    // 1.24 Bloque 3 (H-7 de la auditoría de permisos):
+    // can_ver_todos_pagos por fin manda en su superficie. Con
+    // la clave (y la foto de permisos cargada), el entrenador
+    // ve la actividad completa; sin ella manda la atribución
+    // del ítem 8 (Bloque 6): lo propio + lo de sus clientes en
+    // mensualidades/inscripciones; diarios solo lo propio.
+    final verTodosPagos = pagosSinRestriccion(
+        esDueno: esDueno,
+        permisosCargados: PermisosEntrenador().cargado,
+        canVerTodosPagos: PermisosEntrenador().canVerTodosPagos);
+    if (!verTodosPagos) {
+      lista.removeWhere((a) => !actividadVisibleParaEntrenador(a,
+          cliente: porId[_clienteIdDe(a)],
+          miActor: miActor,
+          miTelegramId: miTelegramId));
     }
     // P2#2 (Argón): un protegido nunca entra en la lista de un
     // no-dueño, ni su nombre ni su foto ni su teléfono se precargan.

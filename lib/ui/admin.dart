@@ -57,6 +57,8 @@ import 'app_bar.dart';
 import 'invitados.dart';
 import 'solicitudes_adelanto.dart';
 import 'avisos_entrenador.dart';
+import 'editor_avisos_clientes.dart';
+import 'editor_rutinas_gym.dart';
 import 'bandeja.dart';
 import 'exportar_excel.dart';
 import 'incidencias_sync.dart';
@@ -1756,6 +1758,19 @@ class _AdminScreenState extends State<AdminScreen> {
             ),
           ],
         ),
+        const SizedBox(height: 12),
+        // 1.24 Bloque 6 (ítem 8): la actividad reciente vive en
+        // la portada del Panel, a un toque (el feed completo,
+        // con la atribución por entrenador dentro).
+        Row(
+          children: [
+            Expanded(
+              child: _accionRapida(Icons.history_rounded,
+                  'Actividad reciente',
+                  onTap: () => _ir(const ActividadScreen())),
+            ),
+          ],
+        ),
       ],
     );
   }
@@ -2269,6 +2284,14 @@ class _AdminScreenState extends State<AdminScreen> {
         'PopUp en el Home de cada entrenador',
         () => _ir(const AvisosEntrenadorScreen()),
       ),
+      // 1.24 Bloque 6 (ítem 16): el centro de avisos de la app
+      // de clientes se publica desde aquí (RPC admin_*).
+      _tarjetaFlujo(
+        Icons.notifications_active_rounded,
+        'Avisos a clientes',
+        'El centro de avisos de la app de clientes',
+        () => _ir(const EditorAvisosClientesScreen()),
+      ),
       _tarjetaFlujo(
         Icons.notifications_rounded,
         'Recordatorios automáticos',
@@ -2386,6 +2409,14 @@ class _AdminScreenState extends State<AdminScreen> {
         'Biblioteca',
         'GymPedia y Guía para la app de clientes',
         () => _ir(const BibliotecaScreen()),
+      ),
+      // 1.24 Bloque 6 (ítem 17): el banco «Del gym» de la app
+      // de clientes se arma desde aquí (RPC admin_*).
+      _tarjetaFlujo(
+        Icons.fitness_center_rounded,
+        'Rutinas del gym',
+        'El banco «Del gym» que los clientes adoptan',
+        () => _ir(const EditorRutinasGymScreen()),
       ),
       _tarjetaFlujo(
         Icons.mail_rounded,

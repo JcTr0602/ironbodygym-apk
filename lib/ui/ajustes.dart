@@ -1731,6 +1731,8 @@ class _AjustesScreenState extends State<AjustesScreen> {
                 _switch(
                   icono: Icons.sync_problem_rounded,
                   titulo: 'Avisar si falla la sincronización',
+                  subtitulo:
+                      'Te alerta en pantalla cuando un ciclo de sync no logra completarse',
                   valor: _avisoFalloSync,
                   onChanged: (v) async {
                     await _perfil.setAvisoFalloSync(v);
@@ -1785,6 +1787,8 @@ class _AjustesScreenState extends State<AjustesScreen> {
                 _opcion(
                   icono: Icons.key_rounded,
                   titulo: 'Cambiar contraseña',
+                  subtitulo:
+                      'La de tu cuenta del gym; se aplica al instante',
                   onTap: _cambiarClave,
                 ),
                 _switch(
