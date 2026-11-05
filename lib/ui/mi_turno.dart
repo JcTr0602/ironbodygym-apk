@@ -12,6 +12,7 @@ import 'dart:convert';
 import '../auth.dart';
 import '../localdb.dart';
 import '../negocio.dart';
+import '../permisos_entrenador.dart';
 import '../sync.dart';
 import '../tiempo.dart';
 import '../turno_service.dart';
@@ -19,6 +20,7 @@ import '../turnos_resolucion.dart';
 import 'app_bar.dart';
 import 'componentes.dart';
 import 'diseno.dart';
+import 'permisos_ui.dart';
 import 'ficha.dart';
 import 'pendiente.dart';
 import 'widgets.dart';
@@ -377,6 +379,11 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
   /// "sincronizar ahora". Permite cerrar con pendientes bajo
   /// confirmación explícita del riesgo.
   Future<void> _cierreTurno() async {
+    // 1.24 Bloque 3: cerrar turno cuelga de can_gestionar_turnos.
+    if (!permisoOperativoOk(context,
+        PermisosEntrenador().canGestionarTurnos, 'gestionar turnos')) {
+      return;
+    }
     final nOps = _historial.isNotEmpty
         ? ((_historial
                     .firstWhere((h) => h['fecha'] == _hoy(),

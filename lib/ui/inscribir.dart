@@ -17,6 +17,7 @@ import '../invitados.dart';
 import '../localdb.dart';
 import '../fotos_cola.dart';
 import '../negocio.dart';
+import '../permisos_entrenador.dart';
 import '../sync.dart';
 import '../tiempo.dart';
 import '../tipos_pago.dart';
@@ -24,6 +25,7 @@ import 'app_bar.dart';
 import 'componentes.dart';
 import 'dialogo_confirmar_inscripcion.dart';
 import 'diseno.dart';
+import 'permisos_ui.dart';
 import 'editor_foto.dart';
 import 'widgets.dart';
 
@@ -275,6 +277,15 @@ class _InscribirScreenState extends State<InscribirScreen> {
   }
 
   Future<void> _guardar() async {
+    // 1.24 Bloque 3: sin can_inscribir_clientes, aviso al tocar
+    // y no se abre el flujo de guardado (el servidor rebotaría
+    // la op con PERMISO_DENEGADO tras inscribir «de mentira»).
+    if (!permisoOperativoOk(
+        context,
+        PermisosEntrenador().canInscribirClientes,
+        'inscribir clientes')) {
+      return;
+    }
     // Argón lote 4 BLOQUEANTE: la bandera se activaba DESPUÉS de los
     // awaits y los diálogos; un doble toque rápido abría dos
     // diálogos y encolaba dos veces al mismo cliente. Ahora se

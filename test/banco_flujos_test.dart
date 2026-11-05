@@ -36,6 +36,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ironbody_gym/localdb.dart';
+import 'package:ironbody_gym/permisos_entrenador.dart';
 import 'package:ironbody_gym/ui/dialogo_pago.dart';
 import 'package:ironbody_gym/ui/inscribir.dart';
 import 'package:ironbody_gym/ui/preview_cobro.dart';
@@ -44,6 +45,30 @@ import 'package:path/path.dart' as p;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+
+/// 1.24 Bloque 3: los flujos de cobro e inscripción consultan
+/// los permisos operativos (fail-closed sin foto). El banco
+/// siembra la foto completa en la caché, como en producción
+/// tras el login (mismo truco que argon_acceso_caza_test:
+/// sin sesión, el sufijo de las claves es '@').
+Future<void> _sembrarPermisosBanco() async {
+  final prefs = await SharedPreferences.getInstance();
+  await prefs.setString(
+      'cache_permisos_entrenador_json@',
+      jsonEncode({
+        'can_cobrar_pagos': true,
+        'can_inscribir_clientes': true,
+        'can_editar_fichas': true,
+        'can_gestionar_turnos': true,
+        'can_registrar_gastos': true,
+        'can_vender_suplementos': true,
+        'can_view_payroll': true,
+      }));
+  await prefs.setBool('cache_entrenador_activo@', true);
+  await prefs.setBool('cache_entrenador_habilitado@', true);
+  PermisosEntrenador().limpiar();
+  await PermisosEntrenador().cargar();
+}
 
 /// BD fresca + cliente 10 sembrado en el espejo. Toda la
 /// preparación va en runAsync (zona real): dentro de testWidgets
@@ -58,6 +83,7 @@ Future<void> _preparar(WidgetTester tester) async {
       await File(p.join(dir, 'ironbody.db')).delete();
     } catch (_) {}
     await LocalDb.resetParaTest();
+    await _sembrarPermisosBanco();
     await LocalDb.instance.db;
     await LocalDb.instance.upsertMirror('clientes', 10, {
       'id': 10,
@@ -153,6 +179,7 @@ Future<void> _prepararVacia(WidgetTester tester) async {
       await File(p.join(dir, 'ironbody.db')).delete();
     } catch (_) {}
     await LocalDb.resetParaTest();
+    await _sembrarPermisosBanco();
     await LocalDb.instance.db;
   });
 }

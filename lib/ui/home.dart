@@ -38,6 +38,7 @@ import 'buscar.dart';
 import 'bandeja_whatsapp.dart';
 import 'cola.dart';
 import 'componentes.dart';
+import 'permisos_ui.dart';
 import 'cumpleanos.dart';
 import 'dashboard.dart';
 import 'diseno.dart';
@@ -925,7 +926,15 @@ class _HomeScreenState extends State<HomeScreen>
       floatingActionButton: _FabAccionesRapidas(
         onCobrar: () => _ir(const PagoScreen()),
         onPagoDiario: () => _ir(const PagoDiarioScreen()),
-        onInscribir: () => _ir(const InscribirScreen()),
+        onInscribir: () {
+          // 1.24 Bloque 3: permiso operativo al tocar.
+          if (permisoOperativoOk(
+              context,
+              PermisosEntrenador().canInscribirClientes,
+              'inscribir clientes')) {
+            _ir(const InscribirScreen());
+          }
+        },
         onVenderAgua: () =>
             _ir(const ServiciosScreen(tipoInicial: 'agua_suelta')),
         onVenderRacion: () =>
@@ -1263,8 +1272,15 @@ class _HomeScreenState extends State<HomeScreen>
         accion(Icons.today_rounded, 'Pago diario',
             () => _ir(const PagoDiarioScreen())),
         const SizedBox(width: AppEspacio.sm),
-        accion(Icons.person_add_alt_1_rounded, 'Inscribir',
-            () => _ir(const InscribirScreen())),
+        accion(Icons.person_add_alt_1_rounded, 'Inscribir', () {
+          // 1.24 Bloque 3: permiso operativo al tocar.
+          if (permisoOperativoOk(
+              context,
+              PermisosEntrenador().canInscribirClientes,
+              'inscribir clientes')) {
+            _ir(const InscribirScreen());
+          }
+        }),
         const SizedBox(width: AppEspacio.sm),
         accion(Icons.bolt_rounded, 'Dosis',
             () => _ir(const ServiciosScreen())),
@@ -1609,7 +1625,12 @@ class _HomeScreenState extends State<HomeScreen>
             ),
             const SizedBox(height: AppEspacio.sm),
             // v1.12.0 (B3): vista previa de nómina en vivo.
-            if (accion == null)
+            // 1.24 Bloque 3 (H-6 de la auditoría de permisos):
+            // can_view_payroll por fin se lee — es VISIBILIDAD:
+            // sin la clave el botón se oculta en silencio (regla
+            // de Argón), no se avisa.
+            if (_auth.isOwner || PermisosEntrenador().canViewPayroll)
+              if (accion == null)
               SizedBox(
                 width: double.infinity,
                 child: OutlinedButton.icon(
@@ -1958,6 +1979,11 @@ class _HomeScreenState extends State<HomeScreen>
   /// v1.3.3: abre el turno (idempotente, offline-first).
   Future<void> _abrirTurno() async {
     if (_procesandoTurno) return;
+    // 1.24 Bloque 3: abrir turno cuelga de can_gestionar_turnos.
+    if (!permisoOperativoOk(context,
+        PermisosEntrenador().canGestionarTurnos, 'gestionar turnos')) {
+      return;
+    }
     setState(() => _procesandoTurno = true);
     try {
       // F9: al abrir se puede marcar a quién se cubre.

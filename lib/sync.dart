@@ -722,8 +722,53 @@ bool esAccesoPausado(dynamic resultado) {
 
 /// Motivo legible del rechazo: primero la columna `error` del RPC si
 /// existe, si no el campo `error` del envelope. null si no hay motivo.
+/// 1.24 Bloque 3 (O-5 de la auditoría de permisos): traduce
+/// los códigos del evaluador de permisos del servidor a un
+/// motivo legible para la cola. Sin esto, el rebote por un
+/// permiso revocado (la op se encoló ANTES de que el dueño lo
+/// quitara, o llegó por un camino sin guarda) se leía como un
+/// código crudo: 'PERMISO_DENEGADO:can_cobrar_pagos'.
+String? _motivoPermisoDenegado(String? texto) {
+  if (texto == null) return null;
+  const acciones = {
+    'can_cobrar_pagos': 'cobrar pagos',
+    'can_inscribir_clientes': 'inscribir clientes',
+    'can_editar_fichas': 'editar fichas',
+    'can_vender_suplementos': 'vender suplementos y servicios',
+    'can_registrar_gastos': 'registrar gastos',
+    'can_gestionar_turnos': 'gestionar turnos',
+    'can_record_measurements': 'registrar mediciones',
+    'can_generate_pin': 'generar accesos de clientes',
+    'can_edit_nutrition': 'editar planes nutricionales',
+  };
+  for (final entrada in acciones.entries) {
+    if (texto.contains('PERMISO_DENEGADO:${entrada.key}')) {
+      return 'El dueño te quitó el permiso para ${entrada.value}: '
+          'la operación no se aplicó.';
+    }
+  }
+  if (texto.contains('PERMISO_DENEGADO')) {
+    return 'El dueño te quitó el permiso para esta operación: '
+        'no se aplicó.';
+  }
+  if (texto.contains('SOLO_ADMIN')) {
+    return 'Esta operación solo puede hacerla el dueño: '
+        'no se aplicó.';
+  }
+  if (texto.contains('ENTRENADOR_INACTIVO') ||
+      texto.contains('ENTRENADOR_SIN_FILA')) {
+    return 'Tu cuenta de entrenador no está activa en el '
+        'servidor: la operación no se aplicó.';
+  }
+  return null;
+}
+
 String? motivoRechazo(dynamic resultado, String? errorServidor) {
   final e = errorServidor?.trim();
+  final traducido = _motivoPermisoDenegado(e) ??
+      _motivoPermisoDenegado(
+          resultado is Map ? '${resultado['error'] ?? ''}' : null);
+  if (traducido != null) return traducido;
   if (e != null && e.isNotEmpty) return e;
   if (resultado is Map) {
     final m = '${resultado['error'] ?? ''}'.trim();

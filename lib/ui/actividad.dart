@@ -11,6 +11,7 @@ import '../fotos.dart';
 import '../localdb.dart';
 import '../negocio.dart';
 import '../permisos_entrenador.dart';
+import '../permisos_visibilidad.dart';
 import '../tiempo.dart';
 import 'app_bar.dart';
 import 'auditoria.dart';
@@ -407,7 +408,16 @@ class _ActividadScreenState extends State<ActividadScreen> {
       miActor = null;
       miTelegramId = null;
     }
-    if (!esDueno) {
+    // 1.24 Bloque 3 (H-7 de la auditoría de permisos):
+    // can_ver_todos_pagos por fin manda en su superficie. Con
+    // la clave (y la foto de permisos cargada), el entrenador
+    // ve la actividad completa; sin ella queda el recorte
+    // P2#2 de siempre: solo lo propio, fail-closed.
+    final verTodosPagos = pagosSinRestriccion(
+        esDueno: esDueno,
+        permisosCargados: PermisosEntrenador().cargado,
+        canVerTodosPagos: PermisosEntrenador().canVerTodosPagos);
+    if (!verTodosPagos) {
       lista.removeWhere((a) => !esActividadPropia(a,
           miActor: miActor, miTelegramId: miTelegramId));
     }

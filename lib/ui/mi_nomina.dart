@@ -597,6 +597,17 @@ class _MiNominaScreenState extends State<MiNominaScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // 1.24 Bloque 3 (H-6): can_view_payroll también se cumple
+    // aquí dentro, no solo ocultando el botón de Home (mismo
+    // patrón que RankingServicios): cualquier otra ruta que
+    // aterrice en esta pantalla encuentra el candado puesto.
+    if (!AuthService().isOwner &&
+        !PermisosEntrenador().canViewPayroll) {
+      return Scaffold(
+          appBar: appBarIron(context, 'Mi nómina'),
+          body: const Center(
+              child: Text('No tienes permiso para ver tu nómina.')));
+    }
     return Scaffold(
       appBar: appBarIron(context, 'Mi nómina'),
       body: Column(

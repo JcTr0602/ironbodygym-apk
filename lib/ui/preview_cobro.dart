@@ -22,10 +22,12 @@ import 'package:uuid/uuid.dart';
 import '../comprobantes.dart';
 import '../localdb.dart';
 import '../negocio.dart';
+import '../permisos_entrenador.dart';
 import '../tiempo.dart';
 import 'app_bar.dart';
 import 'componentes.dart';
 import 'aviso_duplicado.dart';
+import 'permisos_ui.dart';
 import 'confirmacion_cobro.dart';
 import 'diseno.dart';
 
@@ -300,6 +302,15 @@ Future<ResultadoCobro> cobrarConPreviewYRecibo({
   required String nombreCliente,
   required Map<String, dynamic> payload,
 }) async {
+  // 1.24 Bloque 3 (cinturón del permiso operativo): TODOS los
+  // cobros de mensualidad pasan por aquí; sin can_cobrar_pagos
+  // no se muestra el preview ni se encola nada — el aviso sale
+  // al tocar y el servidor deja de recibir ops condenadas a
+  // rebotar con PERMISO_DENEGADO.
+  if (!permisoOperativoOk(context,
+      PermisosEntrenador().canCobrarPagos, 'cobrar pagos')) {
+    return ResultadoCobro.cancelado;
+  }
   final monto = (payload['monto'] as num?) ?? 0;
   final vencRaw = '${payload['pagado_hasta'] ?? ''}';
   final confirmado = await Navigator.of(context).push<bool>(

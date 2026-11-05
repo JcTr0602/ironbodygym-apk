@@ -6,11 +6,13 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../localdb.dart';
 import '../negocio.dart';
+import '../permisos_entrenador.dart';
 import '../tiempo.dart';
 import '../sync.dart';
 import '../cliente_protegido.dart';
 import 'buscar.dart';
 import 'componentes.dart';
+import 'permisos_ui.dart';
 import 'dialogo_pago.dart';
 import 'preview_cobro.dart';
 import 'diseno.dart';
@@ -159,6 +161,11 @@ class _ListasScreenState extends State<ListasScreen>
   }
 
   Future<void> _pagoRapido(Map<String, dynamic> c) async {
+    // 1.24 Bloque 3: permiso operativo al tocar.
+    if (!permisoOperativoOk(context,
+        PermisosEntrenador().canCobrarPagos, 'cobrar pagos')) {
+      return;
+    }
     // Bloque 1 (Argón AMARILLO): Casa no paga mensualidad, y el
     // «cobro en 2 toques» ya no existe: todo cobro pasa por el
     // Preview obligatorio + Recibo con Deshacer, sin excepciones.

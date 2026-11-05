@@ -104,7 +104,14 @@ class LocalDb {
   /// pagos v26 (ver columnasServicioVentas/columnasVentasSuplementos);
   /// + índice compuesto idx_ops_tipo_estado en ops_queue
   /// (Argón 3ª pasada, optimización 5).
-  static const int versionActual = 61;
+  /// v62 (1.24, Bloque 3): nace por fin la tabla local
+  /// `acceso_bloqueos` (estaba en las listas de pull/watermark y
+  /// en la rama de id TEXT, pero NINGÚN onCreate/onUpgrade la
+  /// creaba: el candado local quedaba inoperante, fail-open —
+  /// A P-1 de Argón) y se resetea a 0 el watermark de
+  /// turnos_cierre (trampa E-01: sin reset, los teléfonos con la
+  /// 1.23 jamás bajarían las 7 columnas nuevas de los cierres).
+  static const int versionActual = 62;
 
   /// v37: marcas de información pública pendiente de republicar,
   /// UNA FILA POR CLAVE (compartido entre onCreate y la migración
@@ -1432,6 +1439,21 @@ class LocalDb {
               'CREATE INDEX IF NOT EXISTS idx_ops_tipo_estado '
               'ON ops_queue(tipo, estado)');
         }
+        if (oldV < 62) {
+          // 1.24 Bloque 3 (A P-1 de Argón): la tabla del candado
+          // de acceso nunca se creó (ver _crearTablaAccesoBloqueos).
+          await _crearTablaAccesoBloqueos(db);
+          // Trampa E-01 de Argón: la 1.24 añadió en el servidor
+          // las 7 columnas que le faltaban a los cierres (Fase A,
+          // E-01). Un teléfono con el watermark de turnos_cierre
+          // ya avanzado jamás volvería a bajar esas filas: se
+          // resetea a 0 SOLO en esta migración y la tabla se
+          // redescarga entera en el próximo pull (es espejo: la
+          // verdad vive en el servidor).
+          await db.rawInsert(
+              "INSERT OR REPLACE INTO meta (k, v) "
+              "VALUES ('wm_turnos_cierre', '0')");
+        }
       },
     );
     // v1.2.5+28: repara el índice FTS si la migración lo omitió y el
@@ -2475,6 +2497,9 @@ class LocalDb {
     // T5 (1.20, v57): espejo de expedientes de diferencia
     // de caja (id TEXT = uuid del expediente).
     await _crearTablaDiferenciasCaja(db);
+    // v62 (1.24): espejo del candado de acceso (ver
+    // _crearTablaAccesoBloqueos).
+    await _crearTablaAccesoBloqueos(db);
     // v1.8.0 (v40): espejos de adelantos (id entero de gym.db) y
     // de las marcas de liquidación de nómina (id texto
     // 'YYYY-MM|entrenador'). Cursor propio desde 0.
@@ -3300,6 +3325,22 @@ class LocalDb {
         'CREATE TABLE IF NOT EXISTS diferencias_caja (id TEXT PRIMARY KEY, data TEXT NOT NULL, sync_seq INTEGER NOT NULL)');
     await db.execute(
         'CREATE INDEX IF NOT EXISTS idx_diferencias_caja_seq ON diferencias_caja(sync_seq)');
+  }
+
+  /// v62 (1.24, Bloque 3): espejo del candado de acceso de los
+  /// clientes de la app (id TEXT = uuid del bloqueo). La tabla
+  /// estaba referenciada desde la 1.21 en las listas de pull y
+  /// watermark y en la rama de parseo de id TEXT, pero ningún
+  /// onCreate/onUpgrade la creaba (A P-1 de Argón, confirmado
+  /// contra el código): AccesoBloqueoService leía una tabla
+  /// inexistente, el error se tragaba en un catch y el candado
+  /// local no se aplicaba (fail-open; anomalía B-06).
+  static Future<void> _crearTablaAccesoBloqueos(
+      DatabaseExecutor db) async {
+    await db.execute(
+        'CREATE TABLE IF NOT EXISTS acceso_bloqueos (id TEXT PRIMARY KEY, data TEXT NOT NULL, sync_seq INTEGER NOT NULL)');
+    await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_acceso_bloqueos_seq ON acceso_bloqueos(sync_seq)');
   }
 
   static Future<void> _crearTablaTurnos(Database db) async {

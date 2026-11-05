@@ -12,12 +12,14 @@ import '../fotos.dart';
 import '../localdb.dart';
 import '../perfil.dart';
 import '../negocio.dart';
+import '../permisos_entrenador.dart';
 import '../tiempo.dart';
 import '../sync.dart';
 import '../cliente_protegido.dart';
 import 'app_bar.dart';
 import 'diagnostico_espejo_card.dart';
 import 'componentes.dart';
+import 'permisos_ui.dart';
 import 'dialogo_pago.dart';
 import 'pago_diario.dart';
 import 'preview_cobro.dart';
@@ -678,6 +680,11 @@ class _BuscarScreenState extends State<BuscarScreen> {
     }
     switch (accion) {
       case 'cobrar':
+        // 1.24 Bloque 3: permiso operativo al tocar.
+        if (!permisoOperativoOk(context,
+            PermisosEntrenador().canCobrarPagos, 'cobrar pagos')) {
+          return;
+        }
         if (await mostrarBloqueoCasa(context, c)) return;
         if (!mounted) return;
         final payload = await pagoDialogo(context, c);

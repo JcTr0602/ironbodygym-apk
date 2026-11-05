@@ -17,12 +17,14 @@ import '../auth.dart';
 import '../cliente_protegido.dart';
 import '../localdb.dart';
 import '../negocio.dart';
+import '../permisos_entrenador.dart';
 import '../sync.dart';
 import '../tiempo.dart';
 import 'app_bar.dart';
 import 'buscar.dart';
 import 'componentes.dart';
 import 'dialogo_pago.dart';
+import 'permisos_ui.dart';
 import 'preview_cobro.dart';
 import 'diseno.dart';
 import 'ficha.dart';
@@ -340,6 +342,12 @@ class _PagoScreenState extends State<PagoScreen> {
   }
 
   Future<void> _pagar(Map<String, dynamic> c) async {
+    // 1.24 Bloque 3: permiso operativo al tocar (aviso, sin
+    // abrir el diálogo para un cobro que el servidor rebotará).
+    if (!permisoOperativoOk(context,
+        PermisosEntrenador().canCobrarPagos, 'cobrar pagos')) {
+      return;
+    }
     // Bloque 1 (Argón AMARILLO): Casa no paga mensualidad, y todo
     // cobro pasa por Preview + Recibo (sin atajos).
     if (await mostrarBloqueoCasa(context, c)) return;

@@ -33,6 +33,7 @@ import '../cliente_protegido.dart';
 import '../acceso_app_cache.dart';
 import 'app_bar.dart';
 import 'componentes.dart';
+import 'permisos_ui.dart';
 import 'conciliacion.dart';
 import 'dialogo_pago.dart';
 import 'panel_bloque2.dart';
@@ -666,6 +667,11 @@ class _FichaScreenState extends State<FichaScreen> {
   Future<void> _pagar() async {
     final c = _c;
     if (c == null) return;
+    // 1.24 Bloque 3: permiso operativo al tocar.
+    if (!permisoOperativoOk(context,
+        PermisosEntrenador().canCobrarPagos, 'cobrar pagos')) {
+      return;
+    }
     // Bloque 1 (Argón AMARILLO, 2026-10-24): una Cuenta a la Casa NO
     // paga mensualidad. Antes se avisaba y se permitía cobrar igual;
     // ahora se bloquea: cobrarle un mes no cambia nada, y el botón
@@ -869,7 +875,13 @@ class _FichaScreenState extends State<FichaScreen> {
               // 53), porque validarTelefono() en el resto de la app exige
               // d.length == 8; 10 dígitos romperían el formulario normal.
               final actual = _normalizarTelefono('${c?['telefono'] ?? ''}');
-              if (tel != actual) {
+              // 1.24 Bloque 3: persistir el teléfono nuevo es un
+              // editar_cliente (can_editar_fichas en el servidor).
+              // Sin la clave, el número tecleado se usa solo para
+              // abrir ESTE chat: no se toca el espejo ni se encola
+              // una op que rebotaría dejando el espejo divergente.
+              if (tel != actual &&
+                  PermisosEntrenador().canEditarFichas) {
                 final tel8 = tel.length == 10 ? tel.substring(2) : tel;
                 await LocalDb.instance.updateMirrorTelefono(
                     widget.clienteId, tel8);
@@ -951,6 +963,11 @@ class _FichaScreenState extends State<FichaScreen> {
   Future<void> _editar() async {
     final c = _c;
     if (c == null) return;
+    // 1.24 Bloque 3: editar la ficha cuelga de can_editar_fichas.
+    if (!permisoOperativoOk(context,
+        PermisosEntrenador().canEditarFichas, 'editar fichas')) {
+      return;
+    }
     // Ronda 3-9 #1 (CRÍTICO, defensa en profundidad): aunque se
     // invoque directo, un protegido no se edita.
     if (esVistaProtegida(c)) return;
@@ -1307,6 +1324,11 @@ class _FichaScreenState extends State<FichaScreen> {
   Future<void> _editarNotas() async {
     final c = _c;
     if (c == null) return;
+    // 1.24 Bloque 3: las notas viajan como editar_cliente.
+    if (!permisoOperativoOk(context,
+        PermisosEntrenador().canEditarFichas, 'editar fichas')) {
+      return;
+    }
     final ctrl =
         TextEditingController(text: '${c['notas'] ?? ''}');
     final ok = await showDialog<bool>(
@@ -1437,6 +1459,11 @@ class _FichaScreenState extends State<FichaScreen> {
 
   /// Elimina la foto del cliente (v1.0.15).
   Future<void> _eliminarFoto() async {
+    // 1.24 Bloque 3: eliminar_foto cuelga de can_editar_fichas.
+    if (!permisoOperativoOk(context,
+        PermisosEntrenador().canEditarFichas, 'editar fichas')) {
+      return;
+    }
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => DialogoApp(
@@ -1483,6 +1510,11 @@ class _FichaScreenState extends State<FichaScreen> {
 
   /// Cambia la foto del cliente: cámara, galería o eliminar (v1.0.15).
   Future<void> _cambiarFoto() async {
+    // 1.24 Bloque 3: la foto de ficha cuelga de can_editar_fichas.
+    if (!permisoOperativoOk(context,
+        PermisosEntrenador().canEditarFichas, 'editar fichas')) {
+      return;
+    }
     final tieneFoto = await _tieneFoto();
     if (!mounted) return;
     final origen = await showDialog<String>(
@@ -1568,6 +1600,11 @@ class _FichaScreenState extends State<FichaScreen> {
   Future<void> _renovar() async {
     final c = _c;
     if (c == null) return;
+    // 1.24 Bloque 3: permiso operativo al tocar.
+    if (!permisoOperativoOk(context,
+        PermisosEntrenador().canCobrarPagos, 'cobrar pagos')) {
+      return;
+    }
     // Panel 1.9 (Luna BLOQUEANTE): la renovación rápida NO puede
     // saltarse el preview ni el bloqueo Casa: antes encolaba
     // pago_mensual directo y el botón se mostraba con solo estar
@@ -1708,6 +1745,12 @@ class _FichaScreenState extends State<FichaScreen> {
   Future<void> _corregirPago(Map<String, dynamic> p) async {
     final pagoId = p['id'] as int?;
     if (pagoId == null) return;
+    // 1.24 Bloque 3: editar/anular pagos cuelga de
+    // can_cobrar_pagos en el servidor.
+    if (!permisoOperativoOk(context,
+        PermisosEntrenador().canCobrarPagos, 'corregir pagos')) {
+      return;
+    }
     final accion = await showDialog<String>(
       context: context,
       builder: (ctx) => DialogoApp(

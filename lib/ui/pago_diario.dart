@@ -12,11 +12,13 @@ import 'package:uuid/uuid.dart';
 import '../auth.dart';
 import '../localdb.dart';
 import '../negocio.dart';
+import '../permisos_entrenador.dart';
 import '../sync.dart';
 import '../tiempo.dart';
 import 'app_bar.dart';
 import 'componentes.dart';
 import 'diseno.dart';
+import 'permisos_ui.dart';
 import 'reporte_mensual_diarios.dart';
 import 'widgets.dart';
 
@@ -231,6 +233,13 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
 
   Future<void> _guardar() async {
     if (_guardando) return;
+    // 1.24 Bloque 3: el pago diario cuelga de can_cobrar_pagos
+    // en el servidor; sin la clave, aviso al tocar y no se
+    // encola una op condenada a rebotar.
+    if (!permisoOperativoOk(context,
+        PermisosEntrenador().canCobrarPagos, 'cobrar pagos')) {
+      return;
+    }
     setState(() => _guardando = true);
     try {
       final cantGuardada = _cantidad;
