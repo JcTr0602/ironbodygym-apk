@@ -3161,7 +3161,10 @@ class SyncEngine {
       final p =
           jsonDecode(op['payload'] as String) as Map<String, dynamic>;
       if (!p.containsKey('pagado_hasta_anterior')) return;
-      final cid = (p['cliente_id'] as num?)?.toInt();
+      // Tolerante num-o-texto (auditoría de cierre 1.24): un
+      // cast `as num?` lanzaría si el id llegara como String
+      // y el catch tragaría la reversión en silencio.
+      final cid = int.tryParse('${p['cliente_id']}');
       if (cid == null) return;
       final anterior = p['pagado_hasta_anterior'];
       if (anterior == null || '$anterior'.isEmpty) {
