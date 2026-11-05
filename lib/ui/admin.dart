@@ -34,6 +34,7 @@ import 'diseno.dart';
 import 'config_precios_bancarios.dart';
 import 'panel_dueno_swr.dart';
 import 'panel_dueno_atencion.dart';
+import 'actividad.dart';
 import 'buscar.dart';
 import 'admin_secciones.dart';
 import 'cola.dart';
@@ -1767,7 +1768,7 @@ class _AdminScreenState extends State<AdminScreen> {
             Expanded(
               child: _accionRapida(Icons.history_rounded,
                   'Actividad reciente',
-                  onTap: () => _ir(const ActividadScreen())),
+                  onTap: () => _ir(ActividadScreen())),
             ),
           ],
         ),

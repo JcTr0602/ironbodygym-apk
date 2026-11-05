@@ -16,6 +16,16 @@ class Novedad {
 }
 
 const novedades = [
+  Novedad('1.24.0', [
+    'Blindaje de pagos: si el servidor rechaza o deja en revisión un pago, el vencimiento que la app había adelantado se revierte solo al dato anterior (antes el espejo local quedaba adelantado hasta que alguien lo notara)',
+    'Un pago parecido en la cola ya se detecta aunque el monto sea distinto: la app pregunta antes de duplicar un cobro del mismo cliente y el mismo día',
+    'Permisos de entrenador que se cumplen de verdad: cobrar, inscribir, editar fichas y gestionar turnos respetan lo que el dueño haya apagado, y cuando un permiso falta el botón avisa en vez de fallar en silencio',
+    'Los menores siempre abren el cobro en 1500 CUP, sin excepción',
+    'Avisos y rutinas para la app de clientes (solo dueño): desde el Panel puedes publicar avisos y armar las rutinas del gym sin tocar el servidor',
+    'Actividad reciente en el Panel: lo último cobrado, inscrito y vendido; cada entrenador ve solo lo suyo y lo de sus clientes',
+    'Copias de seguridad más seguras: avisan cuántas fotos y comprobantes faltan por subir antes de exportar, y un respaldo de una versión más nueva de la app ya no se puede importar por error',
+    'Sincronización más honesta: si la lista no pudo actualizarse, la app lo dice en vez de anunciar «actualizada»',
+  ]),
   Novedad('1.23.0', [
     'Diseño renovado (segunda parte): tarjetas, superficies y diálogos uniformes en toda la app, con el naranja de la casa y cifras alineadas',
     'Sincronización en segundo plano: la app se pone al día sola aunque esté cerrada, sin tener que abrirla para sincronizar',

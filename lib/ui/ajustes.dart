@@ -717,6 +717,17 @@ class _AjustesScreenState extends State<AjustesScreen> {
       _msg('Solo el dueño puede exportar el respaldo');
       return;
     }
+    // Red exterior (autoauditoría del cierre 1.24): el conteo
+    // y el diálogo van FUERA del try de la copia; un fallo ahí
+    // no puede morir en silencio en el onTap.
+    try {
+      await _exportarRespaldoFlujo();
+    } catch (e) {
+      if (mounted) _msg('No se pudo exportar: $e');
+    }
+  }
+
+  Future<void> _exportarRespaldoFlujo() async {
     // 1.24 Bloque 5 (F1): aviso con el conteo EXACTO de lo que
     // el respaldo no incluye, con la salida de subirlo antes.
     var intentoSync = false;
