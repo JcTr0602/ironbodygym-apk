@@ -16,6 +16,7 @@ library;
 import 'package:flutter/material.dart';
 
 import '../auth.dart';
+import '../entrenador_identidad.dart';
 import '../localdb.dart';
 import '../negocio.dart';
 import '../tiempo.dart';
@@ -29,7 +30,14 @@ import 'widgets.dart';
 
 class DetalleEntrenadorScreen extends StatefulWidget {
   final String nombre;
-  const DetalleEntrenadorScreen({super.key, required this.nombre});
+
+  /// 1.25 T86: la identidad del entrenador (telegram_id)
+  /// cuando quien navega la conoce (la comparativa la
+  /// trae de su agrupación por ID). Sin ella, la
+  /// pantalla la resuelve por nombre desde usuarios_apk.
+  final int? telegramId;
+  const DetalleEntrenadorScreen(
+      {super.key, required this.nombre, this.telegramId});
 
   @override
   State<DetalleEntrenadorScreen> createState() =>
@@ -70,8 +78,16 @@ class _DetalleEntrenadorScreenState extends State<DetalleEntrenadorScreen> {
         widget.nombre.toLowerCase();
   }
 
+  /// 1.25 T86: mi telegram_id (el de la navegación o el
+  /// resuelto por nombre). Los PAGOS se atribuyen por
+  /// ID con filaEsDelEntrenador: un tocayo ya no mezcla
+  /// sus cobros aquí.
+  int? _miTid;
+
   Future<void> _cargar() async {
     setState(() => _cargando = true);
+    _miTid = widget.telegramId ??
+        await telegramIdDeEntrenador(widget.nombre);
     final ahora = ahoraHabana();
 
     // Rango según filtro
@@ -134,11 +150,11 @@ class _DetalleEntrenadorScreenState extends State<DetalleEntrenadorScreen> {
 
     for (final p in pagos) {
       final fecha = fechaCorta(p['fecha'] ?? '', 10);
-      final nombre = ('${p['registrado_por_nombre'] ?? ''}'.trim().isEmpty)
-          ? '${p['registrado_por'] ?? ''}'
-          : '${p['registrado_por_nombre']}'.trim();
       final monto = (p['monto'] as num?)?.toDouble() ?? 0;
-      final mio = _esMio(nombre);
+      // T86: por ID cuando la fila lo trae (el nombre
+      // queda para las filas viejas sin telegram_user_id).
+      final mio = filaEsDelEntrenador(p,
+          telegramId: _miTid, nombre: widget.nombre);
       if (enAnterior(fecha) && mio) _totalAnterior += monto;
       if (!mio || !enRango(fecha)) continue;
       _total += monto;

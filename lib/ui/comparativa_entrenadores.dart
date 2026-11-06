@@ -162,7 +162,10 @@ class _ComparativaEntrenadoresScreenState
                       context,
                       RutaIron(
                         builder: (_) => DetalleEntrenadorScreen(
-                            nombre: '${f['nombre']}'),
+                            nombre: '${f['nombre']}',
+                            telegramId:
+                                (f['telegram_id'] as num?)
+                                    ?.toInt()),
                       ),
                     ),
                     child: Padding(

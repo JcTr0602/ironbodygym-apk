@@ -13,6 +13,7 @@ import 'package:uuid/uuid.dart';
 import 'app_log.dart';
 import 'auth.dart';
 import 'cliente_protegido.dart';
+import 'entrenador_identidad.dart';
 import 'localdb.dart';
 import 'adelantos.dart';
 import 'sync.dart';
@@ -2764,26 +2765,40 @@ Future<Map<String, dynamic>?> opRecienteParecida({
 /// movido en CUP (cobros + ventas CUP + dosis).
 Future<List<Map<String, dynamic>>> comparativaEntrenadores(
     String prefijo) async {
-  final porNombre = <String, Map<String, dynamic>>{};
-  Map<String, dynamic> fila(String nombre) =>
-      porNombre.putIfAbsent(
-          nombre,
-          () => {
-                'nombre': nombre,
-                'cobros_n': 0,
-                'cobros_monto': 0.0,
-                'ventas_n': 0,
-                'ventas_cup': 0.0,
-                'ventas_usd': 0.0,
-                'dosis_n': 0,
-                'dosis_monto': 0.0,
-                'inscripciones': 0,
-              });
-  String nombreDe(Map<String, dynamic> r) {
-    final n = '${r['registrado_por_nombre'] ?? ''}'.trim();
-    if (n.isNotEmpty) return n;
-    final alt = '${r['registrado_por'] ?? ''}'.trim();
-    return alt.isEmpty ? 'Desconocido' : alt;
+  // 1.25 T86: la agrupación es por IDENTIDAD
+  // (telegram_id), no por nombre visible: dos personas
+  // con el mismo nombre ya no se mezclan y un cambio de
+  // nombre no abre una fila nueva. El nombre visible de
+  // la fila con ID es el canónico de usuarios_apk.
+  final canon86 = await nombresCanonEntrenadores();
+  final tidPorNombre86 = {
+    for (final e in canon86.entries)
+      e.value.trim().toLowerCase(): e.key,
+  };
+  final porClave = <String, Map<String, dynamic>>{};
+  Map<String, dynamic> filaDe(Map<String, dynamic> r) {
+    final clave =
+        claveIdentidadEntrenador(r, tidPorNombre: tidPorNombre86);
+    return porClave.putIfAbsent(
+        clave,
+        () {
+          final tid = clave.startsWith('tid:')
+              ? int.tryParse(clave.substring(4))
+              : null;
+          return {
+            'nombre': (tid != null ? canon86[tid] : null) ??
+                nombreEntrenadorDeFila(r),
+            'telegram_id': tid,
+            'cobros_n': 0,
+            'cobros_monto': 0.0,
+            'ventas_n': 0,
+            'ventas_cup': 0.0,
+            'ventas_usd': 0.0,
+            'dosis_n': 0,
+            'dosis_monto': 0.0,
+            'inscripciones': 0,
+          };
+        });
   }
 
   // Argón Dinero #11: Casa no es cobro de nadie (ingresosMes
@@ -2796,7 +2811,7 @@ Future<List<Map<String, dynamic>>> comparativaEntrenadores(
   for (final p in await LocalDb.instance.pagosDelMes(prefijo)) {
     if (_esPagoCasa(p, casasComp)) continue;
     if (esPagoAnulado(p, anuladosColaComp)) continue;
-    final f = fila(nombreDe(p));
+    final f = filaDe(p);
     f['cobros_n'] = (f['cobros_n'] as int) + 1;
     f['cobros_monto'] = (f['cobros_monto'] as double) +
         ((p['monto'] as num?)?.toDouble() ?? 0);
@@ -2806,7 +2821,7 @@ Future<List<Map<String, dynamic>>> comparativaEntrenadores(
   // puntuaba por debajo sin haber cobrado menos.
   for (final d in await LocalDb.instance.allMirror('pagos_diarios')) {
     if (mesHabanaDe(d['fecha']) != prefijo) continue;
-    final f = fila(nombreDe(d));
+    final f = filaDe(d);
     f['cobros_n'] = (f['cobros_n'] as int) + 1;
     f['cobros_monto'] = (f['cobros_monto'] as double) +
         ((d['total'] as num?)?.toDouble() ?? 0);
@@ -2822,7 +2837,7 @@ Future<List<Map<String, dynamic>>> comparativaEntrenadores(
     // cobrado — el resto de negocio.dart lo excluye de los
     // totales (ventasSuplementosCup/Usd); la comparativa igual.
     if (_esFiadoSinSaldar(v)) continue;
-    final f = fila(nombreDe(v));
+    final f = filaDe(v);
     f['ventas_n'] = (f['ventas_n'] as int) + 1;
     final monto = (v['total'] as num?)?.toDouble() ??
         ((v['precio'] as num?)?.toDouble() ?? 0) *
@@ -2868,9 +2883,15 @@ Future<List<Map<String, dynamic>>> comparativaEntrenadores(
     final respId =
         LocalDb.normalizarTelegramId(s['responsable_efectivo_id']) ??
             LocalDb.normalizarTelegramId(s['registrado_por']);
-    final f = fila(respId != null
-        ? (porIdServ[respId] ?? '$respId')
-        : nombreDe(s));
+    // T86: el servicio se atribuye por ID del
+    // responsable (porIdServ ya resolvía su nombre; la
+    // fila ahora se abre por su telegram_id).
+    final f = respId != null
+        ? filaDe({
+            'telegram_user_id': respId,
+            'registrado_por_nombre': porIdServ[respId] ?? '',
+          })
+        : filaDe(s);
     final cant = (s['cantidad'] as num?)?.toInt() ?? 0;
     final monto =
         ((s['precio_unitario'] as num?)?.toDouble() ?? 0) *
@@ -2888,11 +2909,11 @@ Future<List<Map<String, dynamic>>> comparativaEntrenadores(
   for (final cl in await LocalDb.instance.allMirror('clientes')) {
     if (esClienteEliminado(cl)) continue;
     if (mesHabanaDe(cl['fecha_inscripcion']) == prefijo) {
-      final f = fila(nombreDe(cl));
+      final f = filaDe(cl);
       f['inscripciones'] = (f['inscripciones'] as int) + 1;
     }
   }
-  final lista = porNombre.values.toList();
+  final lista = porClave.values.toList();
   for (final f in lista) {
     f['total_cup'] = (f['cobros_monto'] as double) +
         (f['ventas_cup'] as double) +
