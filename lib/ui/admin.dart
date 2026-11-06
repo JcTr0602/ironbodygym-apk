@@ -69,8 +69,10 @@ import 'reservas.dart';
 import 'suplementos.dart';
 import 'widgets.dart';
 import 'mi_dia.dart';
+import 'dashboard.dart';
 import 'panel_bloque2.dart';
 import 'panel_candado.dart';
+import 'panel_permisos.dart';
 import 'panel_resto_caja.dart';
 import 'panel_resto_config.dart';
 import 'panel_resto_sistema.dart';
@@ -90,10 +92,7 @@ class AdminScreen extends StatefulWidget {
 
 class _AdminScreenState extends State<AdminScreen> {
   double _ingresos = 0;
-  int _inscMes = 0;
-  int _morosos = 0;
   List<Map<String, dynamic>> _pend = [];
-  List<Map<String, dynamic>> _inscPorEntrenador = [];
   List<Map<String, dynamic>> _gastos = [];
   Map<String, double> _caja = {'efectivo': 0, 'transferencia': 0};
   double _gastosHoy = 0;
@@ -199,11 +198,10 @@ class _AdminScreenState extends State<AdminScreen> {
     // - morosos y activos salen de resumenActivosMorosos (una
     //   sola lectura del padrón activo).
     final resumenAct = await resumenActivosMorosos();
-    final mor = resumenAct.morosos;
     final pend = await pendientePorEntrenador();
-    final inscEntrenador = await inscripcionesPorEntrenador();
-    final insc = inscEntrenador.fold<int>(
-        0, (s, e) => s + ((e['cantidad'] as num?)?.toInt() ?? 0));
+    // 1.25 T40: inscripciones del mes y morosos ya no se
+    // calculan aquí: solo alimentaban el resumen fino que
+    // Ingresos dejó de abrir (el Dashboard trae los suyos).
     final gastos = await gastosTodos();
     final caja = await cobradoHoyPorMetodo();
     final hoy = ahoraHabana();
@@ -275,10 +273,7 @@ class _AdminScreenState extends State<AdminScreen> {
     if (mounted) {
       setState(() {
         _ingresos = ing;
-        _inscMes = insc;
-        _morosos = mor;
         _pend = pend;
-        _inscPorEntrenador = inscEntrenador;
         _gastos = gastos;
         _caja = caja;
         _gastosHoy = gh;
@@ -428,7 +423,6 @@ class _AdminScreenState extends State<AdminScreen> {
     final pagosMes = await NominaCalc.clientesQuePagaronElMes(
         NominaCalc.prefMesActual());
     final activos = await activosCount();
-    final mor = await morosos();
     final fotoRS = await _fotoReservasStock();
     final hoyH = ahoraHabana();
     String isoDia(DateTime d) =>
@@ -447,7 +441,6 @@ class _AdminScreenState extends State<AdminScreen> {
       _pendientesSubir = pendSubir;
       _pagosMes = pagosMes;
       _clientesActivos = activos;
-      _morosos = mor;
       _reservasSolicitadas = fotoRS.solicitadas;
       _nombreSupl = fotoRS.nombreSupl;
       _stockCritico = fotoRS.criticos;
@@ -1519,6 +1512,7 @@ class _AdminScreenState extends State<AdminScreen> {
           detalle: d.detalle,
           boton: d.boton,
           primario: d.primario,
+          gravedad: d.gravedad,
           onTap: () => _accionAtencion(d.destino),
         ),
     ];
@@ -1528,6 +1522,15 @@ class _AdminScreenState extends State<AdminScreen> {
     final visibles =
         _atencionExpandida ? pendientes : pendientes.take(5).toList();
     final ocultos = pendientes.length - visibles.length;
+    // 1.25 T35: si entre lo plegado hay bloqueantes (sync),
+    // el rótulo del pliegue lo dice y va en rojo: un «+N más»
+    // neutro escondía el error que bloquea todo lo demás.
+    final ocultosBloqueantes = _atencionExpandida
+        ? 0
+        : pendientes
+            .skip(visibles.length)
+            .where((p) => p.gravedad == 0)
+            .length;
     final oscuro = Theme.of(context).brightness == Brightness.dark;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1583,8 +1586,15 @@ class _AdminScreenState extends State<AdminScreen> {
                       child: Text(
                         _atencionExpandida
                             ? 'Ver menos'
-                            : '+$ocultos pendiente(s) más',
-                        style: AppTexto.metadato.copyWith(color: AppColores.naranja, fontWeight: FontWeight.w700),
+                            : ocultosBloqueantes > 0
+                                ? '+$ocultos pendiente(s) más · '
+                                    '$ocultosBloqueantes de sync'
+                                : '+$ocultos pendiente(s) más',
+                        style: AppTexto.metadato.copyWith(
+                            color: ocultosBloqueantes > 0
+                                ? AppColores.error
+                                : AppColores.naranja,
+                            fontWeight: FontWeight.w700),
                       ),
                     ),
                   ),
@@ -1827,18 +1837,18 @@ class _AdminScreenState extends State<AdminScreen> {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // 1.14 (rediseño): los 3 KPIs son tocables. Ingresos abre
-        // las estadísticas del mes; Clientes activos abre la lista
-        // de clientes (Buscar), donde se filtra por estado.
+        // 1.14 (rediseño): los 3 KPIs son tocables. Clientes
+        // activos abre la lista de clientes (Buscar), donde se
+        // filtra por estado.
+        // 1.25 T40: Ingresos abre el DASHBOARD completo
+        // (gráfico, comparativa, desgloses, balance): antes
+        // abría un resumen fino de 3 filas congeladas y la
+        // analítica rica quedaba en otra pantalla pese a que
+        // el Panel se presenta como la consola del dueño.
         Expanded(
             child: _kpi('\$${fmtMonto(_ingresos)}', 'Ingresos de $mes',
                 color: AppColores.exito,
-                onTap: () => _ir(SeccionResumenScreen(
-                      ingresos: _ingresos,
-                      inscMes: _inscMes,
-                      morosos: _morosos,
-                      inscPorEntrenador: _inscPorEntrenador,
-                    )))),
+                onTap: () => _ir(const DashboardScreen()))),
         const SizedBox(width: 8),
         // v1.6.0 (Jc, añadido 7): «Pagos este mes» abre el LISTADO
         // exacto de los que pagaron el mes (PagaronMesScreen, el
@@ -2328,19 +2338,28 @@ class _AdminScreenState extends State<AdminScreen> {
         'Plan semanal y ajustes por fecha',
         () => _ir(const TurnosHubScreen()),
       ),
-      _tarjetaFlujo(
-        Icons.schedule_rounded,
-        'Turnos y horarios',
-        'Enlaza el editor único de Turnos',
-        () => _ir(const TurnosPanelScreen()),
-      ),
+      // 1.25 T38: fuera la puerta intermedia «Turnos y
+      // horarios» (una pantalla con un solo enlace al editor,
+      // al que el hub ya llega directo): quedan DOS destinos
+      // nombrados por la tarea — el hub de turnos y el horario
+      // del gym.
       _tarjetaFlujo(
         Icons.schedule_rounded,
         'Horario del Gym',
-        'Configurar turnos',
+        'Apertura y cierre del gym (mueve las franjas de turno)',
         () => _ir(const HorarioGym()),
       ),
       _subModulo('PERMISOS'),
+      // 1.25 T37: la tarjeta PRINCIPAL de permisos: el
+      // interruptor real por entrenador. Antes el módulo
+      // «Equipo, Turnos y Permisos» solo traía el glosario y
+      // el control vivía escondido en otra zona.
+      _tarjetaFlujo(
+        Icons.admin_panel_settings_rounded,
+        'Permisos por entrenador',
+        'Qué puede hacer cada entrenador: activar o quitar al momento',
+        () => _ir(const PanelPermisos()),
+      ),
       _tarjetaFlujo(
         Icons.security_rounded,
         'Permisos explicados',
@@ -2438,22 +2457,29 @@ class _AdminScreenState extends State<AdminScreen> {
         '${_tipos.length} tipos configurados',
         () => _ir(_pantallaAjustes(seccion: 'tipos')),
       ),
+      // 1.25 T36: los nombres dicen la verdad. Esto editaba
+      // los precios GLOBALES y se llamaba «Tarifas especiales»
+      // (la de un cliente es la otra tarjeta): se podía subir
+      // la mensualidad de todos creyendo que era la de uno.
       _tarjetaFlujo(
         Icons.price_change_rounded,
-        'Tarifas especiales',
-        'Mensualidades, diario, tasa USD',
+        'Otros precios',
+        'Globales: transferencia, diario, menores, tasa USD, App Plus',
         () => _ir(_pantallaAjustes(seccion: 'precios')),
       ),
       _tarjetaFlujo(
         Icons.local_offer_rounded,
-        'Tarifas',
-        'Estándar y especiales, otorgar y revocar',
+        'Tarifas especiales',
+        'Por cliente: otorgar y revocar la suya',
         () => _ir(const TarifasScreen()),
       ),
+      // 1.25 T36: fuera el «Única fuente de precios» — no lo
+      // es: Tipos de pago y Otros precios editan montos que
+      // esta lista no trae, y viceversa.
       _tarjetaFlujo(
         Icons.tune_rounded,
         'Precios por método',
-        'Única fuente de precios',
+        'Mensualidad, períodos y App Plus: la lista completa',
         () => _ir(const PreciosMetodoScreen()),
       ),
       // 1.14 (rediseño): _elegirPagoEntrenador llevaba huérfano
@@ -2739,6 +2765,7 @@ class _PendientePanel {
   final String detalle;
   final String boton;
   final bool primario;
+  final int gravedad;
   final VoidCallback onTap;
 
   const _PendientePanel({
@@ -2748,6 +2775,7 @@ class _PendientePanel {
     required this.detalle,
     required this.boton,
     required this.primario,
+    required this.gravedad,
     required this.onTap,
   });
 }

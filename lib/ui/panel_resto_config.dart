@@ -1,4 +1,4 @@
-/// Pantallas H del Panel (1.11.0): H1, H2, H4, H5.
+/// Pantallas H del Panel (1.11.0): H1, H2, H5.
 ///
 /// - H1: ajustes del gym en un sitio. ENLAZA lo que ya tiene pantalla
 ///   (C6 precios, D6 especiales) y solo edita métodos aceptados y
@@ -6,8 +6,8 @@
 ///   pagos pasados (los cobros guardan su monto congelado).
 /// - H2: registro mensual, VISOR de solo lectura + «Copiar resumen en
 ///   Markdown». La app JAMÁS escribe el archivo maestro.
-/// - H4: turnos desde el panel: enlaza al editor único de Turnos de
-///   1.8.0 (HorarioTurnosScreen), no lo duplica.
+/// - H4 (retirada en 1.25 T38): su pantalla intermedia de un solo
+///   enlace sobraba; el hub de Turnos llega directo al editor único.
 /// - H5: copia de seguridad, EXPORTAR solo (sin restauración).
 ///   Antes de copiar: PRAGMA wal_checkpoint(TRUNCATE). NUNCA VACUUM.
 ///   Solo el .db, sin fotos personales. Aviso fijo de copia en frío
@@ -32,7 +32,6 @@ import '../tiempo.dart';
 import 'app_bar.dart';
 import 'componentes.dart';
 import 'diseno.dart';
-import 'horario_turnos.dart';
 import 'panel_resto_caja.dart';
 import 'tarifas_especiales.dart';
 
@@ -151,8 +150,12 @@ class _AjustesGymScreenState extends State<AjustesGymScreen> {
               padding: const EdgeInsets.all(AppEspacio.lg),
               children: [
                 const Text(
-                  'Los precios y períodos NO se editan aquí: viven en '
-                  'una sola pantalla de precios. Esto enlaza, no duplica.',
+                  // 1.25 T36: antes decía «una sola pantalla de
+                  // precios» y no era cierto (Tipos de pago y
+                  // Otros precios también editan montos).
+                  'Los precios y períodos NO se editan aquí: viven '
+                  'en el módulo de Precios del Panel. Esto enlaza '
+                  'las mismas pantallas, no duplica.',
                   style: AppTexto.secundario,
                 ),
                 const SizedBox(height: 12),
@@ -343,46 +346,6 @@ class _RegistroMensualScreenState extends State<RegistroMensualScreen> {
                   const Text('Sin datos.', style: AppTexto.secundario),
               ],
             ),
-    );
-  }
-}
-
-// ---------------------------------------------------------------------------
-// H4
-// ---------------------------------------------------------------------------
-
-class TurnosPanelScreen extends StatelessWidget {
-  const TurnosPanelScreen({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: appBarIron(context, 'Turnos y horarios'),
-      body: ListView(
-        padding: const EdgeInsets.all(AppEspacio.lg),
-        children: [
-          const Text(
-            'El editor de turnos es ÚNICO (1.8.0): esta pantalla lo '
-            'enlaza, no lo duplica. Solo el dueño crea o edita turnos; '
-            'el entrenador ve los suyos.',
-            style: AppTexto.secundario,
-          ),
-          const SizedBox(height: 12),
-          Tarjeta(
-            child: ListTile(
-              contentPadding: EdgeInsets.zero,
-              leading: Icon(Icons.schedule_rounded,
-                  color: AppColores.textoSecundario(context)),
-              title: const Text('Editor de turnos',
-                  style: AppTexto.cuerpo),
-              subtitle: const Text('Horarios y excepciones',
-                  style: AppTexto.secundario),
-              trailing: const Icon(Icons.chevron_right_rounded, size: 18),
-              onTap: () => _ir(context, const HorarioTurnosScreen()),
-            ),
-          ),
-        ],
-      ),
     );
   }
 }
