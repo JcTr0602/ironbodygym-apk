@@ -749,46 +749,13 @@ class _MiNominaScreenState extends State<MiNominaScreen> {
                       negrita: true, color: colorCifraNomina(_neto)),
                   const SizedBox(height: AppEspacio.sm),
                   // N2 (estéticas 1.19): el neto como barra
-                  // apilada — verde lo que cobra, rojo claro lo
-                  // descontado (adelantos + deuda). Sin base, la
-                  // barra queda gris y el texto lo dice.
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(AppRadio.circular),
-                    child: Stack(
-                      children: [
-                        Container(
-                          height: 10,
-                          color: (_base + _comision + _bonosMes) <= 0
-                              ? AppColores.borde(context)
-                                  .withValues(alpha: 0.3)
-                              : AppColores.error
-                                  .withValues(alpha: 0.3),
-                        ),
-                        FractionallySizedBox(
-                          widthFactor:
-                              (_base + _comision + _bonosMes) > 0
-                                  ? (_neto /
-                                          (_base +
-                                              _comision +
-                                              _bonosMes))
-                                      .clamp(0.0, 1.0)
-                                  : 0.0,
-                          child: Container(
-                            height: 10,
-                            color: AppColores.exito,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    (_base + _comision + _bonosMes) <= 0
-                        ? 'Sin base este mes'
-                        : (_adelantosMes + _deudaEntrante) > 0
-                            ? 'De ${fmtMonto(_base + _comision + _bonosMes)} brutos, descuentan ${fmtMonto(_adelantosMes + _deudaEntrante)}'
-                            : 'Sin descuentos este mes',
-                    style: AppTexto.secundario,
+                  // de composición. 1.25 T25: la pieza es
+                  // compartida con la Nómina del dueño
+                  // (BarraComposicionNomina).
+                  BarraComposicionNomina(
+                    bruto: _base + _comision + _bonosMes,
+                    neto: _neto,
+                    descuentos: _adelantosMes + _deudaEntrante,
                   ),
                   const SizedBox(height: AppEspacio.sm),
                   const Text(
@@ -1034,6 +1001,67 @@ class _MiNominaScreenState extends State<MiNominaScreen> {
 /// Siempre tokens de AppColores, nunca colores sueltos de
 /// Material. Vive aquí porque nomina.dart ya importa esta
 /// pantalla; es pura para fijarla en tests sin base de datos.
+/// 1.25 T25: barra de composición de la nómina — verde lo
+/// que se cobra (el neto sobre el bruto), rojo claro lo
+/// descontado (adelantos + deuda). Nació en Mi Nómina y la
+/// cara del dueño no la tenía: quien decide veía el neto
+/// peor explicado que quien lo cobra. Ahora es UNA sola
+/// pieza compartida por ambas pantallas.
+class BarraComposicionNomina extends StatelessWidget {
+  final double bruto;
+  final double neto;
+  final double descuentos;
+
+  const BarraComposicionNomina({
+    super.key,
+    required this.bruto,
+    required this.neto,
+    required this.descuentos,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        ClipRRect(
+          borderRadius:
+              BorderRadius.circular(AppRadio.circular),
+          child: Stack(
+            children: [
+              Container(
+                height: 10,
+                color: bruto <= 0
+                    ? AppColores.borde(context)
+                        .withValues(alpha: 0.3)
+                    : AppColores.error.withValues(alpha: 0.3),
+              ),
+              FractionallySizedBox(
+                widthFactor:
+                    bruto > 0 ? (neto / bruto).clamp(0.0, 1.0) : 0.0,
+                child: Container(
+                  height: 10,
+                  color: AppColores.exito,
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          bruto <= 0
+              ? 'Sin base este mes'
+              : descuentos > 0
+                  ? 'De ${fmtMonto(bruto)} brutos, descuentan '
+                      '${fmtMonto(descuentos)}'
+                  : 'Sin descuentos este mes',
+          style: AppTexto.secundario,
+        ),
+      ],
+    );
+  }
+}
+
 Color colorCifraNomina(num monto) =>
     monto >= 0 ? AppColores.exito : AppColores.error;
 

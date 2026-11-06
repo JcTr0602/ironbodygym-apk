@@ -319,7 +319,13 @@ class _NominaScreenState extends State<NominaScreen> {
       final liquidada = _nominaLiquidadaMes[ent] ?? false;
       return Padding(
         padding: const EdgeInsets.only(bottom: AppEspacio.sm),
-        child: Row(
+        // 1.25 T25: bajo las cifras, la barra de composición
+        // (la misma de Mi Nómina): el «por qué» del neto de
+        // un vistazo, no solo cuatro numeritos.
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
           children: [
             Expanded(
               child: Text(
@@ -367,6 +373,14 @@ class _NominaScreenState extends State<NominaScreen> {
                     style: AppTexto.metadato.copyWith(color: AppColores.exito),
                   ),
               ],
+            ),
+          ],
+        ),
+            const SizedBox(height: AppEspacio.sm),
+            BarraComposicionNomina(
+              bruto: base + bono + comision.total,
+              neto: total,
+              descuentos: adelantosMes + deudaEntrante,
             ),
           ],
         ),
