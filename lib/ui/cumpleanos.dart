@@ -50,6 +50,14 @@ class _CumpleanosScreenState extends State<CumpleanosScreen>
   // el regalo dos veces (el segundo extendía otros 30 días).
   final Set<int> _regalando = {};
 
+  // 1.26 (auditoría de botones, MEDIA 4 + BAJA): felicitaciones
+  // en curso por cliente (sin esto, un doble toque abría
+  // WhatsApp dos veces) y fallo de carga distinguible de
+  // «sin cumpleaños» (antes una carga fallida se disfrazaba
+  // de lista vacía).
+  final Set<int> _felicitando = {};
+  bool _falloCarga = false;
+
   static const _meses = [
     '',
     'enero',
@@ -88,7 +96,10 @@ class _CumpleanosScreenState extends State<CumpleanosScreen>
     // quedaba abierta de un año para otro y se refrescaba, las
     // claves de felicitado/regalo usaban el año viejo.
     _anio = '${ahoraHabana().year}';
-    setState(() => _cargando = true);
+    setState(() {
+      _cargando = true;
+      _falloCarga = false;
+    });
     try {
       // Cliente protegido (2026-10-26, Protegido 2 H6): la pantalla
       // de cumpleaños trae regalar, agregar teléfono y WhatsApp;
@@ -125,7 +136,12 @@ class _CumpleanosScreenState extends State<CumpleanosScreen>
         });
       }
     } catch (_) {
-      if (mounted) setState(() => _cargando = false);
+      if (mounted) {
+        setState(() {
+          _cargando = false;
+          _falloCarga = true;
+        });
+      }
     }
   }
 
@@ -179,8 +195,49 @@ class _CumpleanosScreenState extends State<CumpleanosScreen>
     }
   }
 
+  /// 1.26 (auditoría de botones, MEDIA 4): abrir WhatsApp
+  /// NO prueba que el mensaje se envió (launchUrl solo
+  /// confirma que la app abrió con el texto listo). La
+  /// marca «Felicitado» — que además apaga el aviso en la
+  /// Bandeja — solo se pone si el usuario confirma el
+  /// envío al volver, igual que la Bandeja pregunta el
+  /// resultado desde la 1.13.
+  Future<bool> _confirmarEnvioWhatsApp(String nombre) async {
+    if (!mounted) return false;
+    final r = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('¿Se envió la felicitación?'),
+        content: Text('WhatsApp se abrió con el mensaje listo '
+            'para $nombre. Solo se marca «Felicitado» si '
+            'confirmas que lo enviaste.'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('No lo envié')),
+          FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Sí, enviado')),
+        ],
+      ),
+    );
+    return r == true;
+  }
+
   /// 2B: felicitar por WhatsApp (SOLO saludo, sin mencionar regalo).
+  /// 1.26 (BAJA): guarda por cliente, como _regalarYFelicitar.
   Future<void> _felicitar(Map<String, dynamic> c) async {
+    final idPre = (c['id'] as num?)?.toInt() ?? 0;
+    if (idPre <= 0 || !mounted) return;
+    if (!_felicitando.add(idPre)) return;
+    try {
+      await _felicitarFlujo(c);
+    } finally {
+      _felicitando.remove(idPre);
+    }
+  }
+
+  Future<void> _felicitarFlujo(Map<String, dynamic> c) async {
     final id = (c['id'] as num?)?.toInt() ?? 0;
     final nombre = '${c['nombre'] ?? 'Cliente'}';
     final tel = '${c['telefono'] ?? ''}'.trim();
@@ -210,11 +267,15 @@ class _CumpleanosScreenState extends State<CumpleanosScreen>
         'https://wa.me/$waNum?text=${Uri.encodeComponent(mensaje)}');
     try {
       await launchUrl(url, mode: LaunchMode.externalApplication);
-      await _setFelicitado(id, true);
     } catch (_) {
       if (mounted) {
         mostrarSnack(context, 'No se pudo abrir WhatsApp.', significado: SignificadoChip.error);
       }
+      return;
+    }
+    // 1.26 (MEDIA 4): la marca espera la confirmación.
+    if (await _confirmarEnvioWhatsApp(nombre)) {
+      await _setFelicitado(id, true);
     }
   }
 
@@ -343,11 +404,17 @@ class _CumpleanosScreenState extends State<CumpleanosScreen>
         'https://wa.me/$waNum?text=${Uri.encodeComponent(mensaje.trim())}');
     try {
       await launchUrl(url, mode: LaunchMode.externalApplication);
-      await _setFelicitado(id, true);
     } catch (_) {
       if (mounted) {
         mostrarSnack(context, 'Regalo aplicado. No se pudo abrir WhatsApp.', significado: SignificadoChip.exito);
       }
+      return;
+    }
+    // 1.26 (MEDIA 4): el regalo ya se aplicó (es real);
+    // la marca «Felicitado» espera la confirmación del
+    // envío, igual que en _felicitarFlujo.
+    if (await _confirmarEnvioWhatsApp(nombre)) {
+      await _setFelicitado(id, true);
     }
   }
 
@@ -405,7 +472,18 @@ class _CumpleanosScreenState extends State<CumpleanosScreen>
                 ? const Padding(
                     padding: EdgeInsets.all(AppEspacio.lg),
                     child: SkeletonLista(items: 3))
-                : TabBarView(
+                : _falloCarga
+                    // 1.26 (BAJA): la carga fallida NO es «sin
+                    // cumpleaños»: se dice y se deja reintentar.
+                    ? EstadoVacio(
+                        icono: Icons.cloud_off_rounded,
+                        titulo: 'No se pudieron cargar los cumpleaños.',
+                        subtitulo:
+                            'Revisa los datos del teléfono y vuelve a intentarlo.',
+                        textoAccion: 'Reintentar',
+                        onAccion: _cargar,
+                      )
+                    : TabBarView(
                     controller: _tabs,
                     children: [
                       _lista(_proximos, 'próximos 7 días'),
@@ -532,7 +610,11 @@ class _CumpleanosScreenState extends State<CumpleanosScreen>
                 ),
                 // Botón Felicitar (wa.me).
                 IconButton(
-                  tooltip: 'Felicitar por WhatsApp',
+                  // 1.26 (BAJA): sin teléfono el botón abre
+                  // «agregar teléfono»; el tooltip lo dice.
+                  tooltip: tieneTelefono
+                      ? 'Felicitar por WhatsApp'
+                      : 'Agregar teléfono',
                   icon: Icon(Icons.chat_rounded,
                       color: tieneTelefono
                           ? const Color(0xFF25D366)
