@@ -82,6 +82,107 @@ void main() {
     });
   });
 
+  group('diasQuitablesVale (S7)', () {
+    test('la ventana manda sobre el pagado_hasta lejano', () {
+      // Canje el 1-nov por 7 días: ventana hasta el 8.
+      // Hoy 6-nov: quedan 2 días de ventana aunque el
+      // cliente haya renovado hasta diciembre.
+      final k = diasQuitablesVale(
+        pagadoHasta: '2026-12-01',
+        resueltoEn: '2026-11-01T11:00:00Z',
+        premioDias: 7,
+        hoy: DateTime(2026, 11, 6),
+      );
+      expect(k, 2);
+    });
+
+    test('el pagado_hasta cercano manda sobre la ventana', () {
+      final k = diasQuitablesVale(
+        pagadoHasta: '2026-11-07',
+        resueltoEn: '2026-11-01T11:00:00Z',
+        premioDias: 15,
+        hoy: DateTime(2026, 11, 6),
+      );
+      expect(k, 1);
+    });
+
+    test('vale consumido o datos ilegibles: 0', () {
+      expect(
+          diasQuitablesVale(
+            pagadoHasta: '2026-11-05',
+            resueltoEn: '2026-10-01T11:00:00Z',
+            premioDias: 15,
+            hoy: DateTime(2026, 11, 6),
+          ),
+          0);
+      expect(
+          diasQuitablesVale(
+            pagadoHasta: null,
+            resueltoEn: '2026-11-01',
+            premioDias: 15,
+            hoy: DateTime(2026, 11, 6),
+          ),
+          0);
+    });
+  });
+
+  testWidgets('anular un vale canjeado: elige modo y nota',
+      (tester) async {
+    // Fechas relativas a hoy: canje hace 5 días por 7
+    // días de premio -> ventana viva con 2 días por
+    // consumir (el diálogo usa hoyHabana() real).
+    String iso(DateTime d) =>
+        '${d.year.toString().padLeft(4, '0')}-'
+        '${d.month.toString().padLeft(2, '0')}-'
+        '${d.day.toString().padLeft(2, '0')}';
+    final hoy = DateTime.now();
+    final detalle = _jsonDetalle();
+    (detalle['vales'] as List)[0]['resuelto_en'] =
+        '${iso(hoy.subtract(const Duration(days: 5)))}T11:00:00Z';
+    final hastaFutura = iso(hoy.add(const Duration(days: 25)));
+    (int, String, int, String, String)? anulacion;
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: PremiosClientesTab(
+          buscarClientes: () async => [
+            (id: 7, nombre: 'Ana Prueba', telefono: '55551234'),
+          ],
+          cargarDetalle: (_) async => detalle,
+          cargarCatalogo: () async => const [],
+          concederVale: (_, __, ___, ____) async => {'ok': true},
+          reiniciarCiclo: (_, __) async => {'ok': true},
+          pagadoHastaDe: (_) async => hastaFutura,
+          anulacionEnCursoDe: (_) async => false,
+          anularVale: (id, vale, modo, k, nota) async {
+            anulacion = (id, vale.logroId, vale.id, modo, nota);
+            // k viaja aparte: se verifica por el diálogo.
+            expect(k, 2);
+          },
+        ),
+      ),
+    ));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Ana Prueba'));
+    await tester.pumpAndSettle();
+    // El vale canjeado (id 3, manual) trae el botón.
+    await tester.scrollUntilVisible(find.text('Anular vale'), 200);
+    await tester.tap(find.text('Anular vale'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Se quitan 2 días'), findsOneWidget);
+    // Sin nota no pasa.
+    await tester.tap(find.widgetWithText(ElevatedButton, 'Anular vale'));
+    await tester.pumpAndSettle();
+    expect(anulacion, isNull);
+    expect(find.textContaining('La nota es obligatoria'),
+        findsOneWidget);
+    await tester.enterText(
+        find.widgetWithText(TextField, 'Nota (obligatoria)'),
+        'Se arrepintió');
+    await tester.tap(find.widgetWithText(ElevatedButton, 'Anular vale'));
+    await tester.pumpAndSettle();
+    expect(anulacion, (7, 'manual', 3, 'no_consumidos', 'Se arrepintió'));
+  });
+
   testWidgets('buscar → detalle → conceder vale con nota',
       (tester) async {
     (int, String, int, String)? concesion;
@@ -109,6 +210,8 @@ void main() {
             return {'ok': true, 'vale_id': 9};
           },
           reiniciarCiclo: (_, __) async => {'ok': true},
+          pagadoHastaDe: (_) async => '2026-12-01',
+          anulacionEnCursoDe: (_) async => false,
         ),
       ),
     ));

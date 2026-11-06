@@ -229,6 +229,7 @@ class ValeHistorial {
   final String creadoNota;
   final String? resueltoEn;
   final String resueltoNota;
+  final String? anuladoEn;
   final String? pagoUuid;
 
   const ValeHistorial({
@@ -242,6 +243,7 @@ class ValeHistorial {
     required this.resueltoEn,
     required this.resueltoNota,
     required this.pagoUuid,
+    this.anuladoEn,
   });
 
   bool get canjeado => estado == 'canjeado';
@@ -322,6 +324,7 @@ DetallePremiosCliente parseDetallePremiosCliente(Object? json) {
         creadoNota: _texto(e['creado_nota']),
         resueltoEn: e['resuelto_en']?.toString(),
         resueltoNota: _texto(e['resuelto_nota']),
+        anuladoEn: e['anulado_en']?.toString(),
         pagoUuid: e['pago_uuid']?.toString(),
       ));
     }
@@ -368,6 +371,48 @@ DetallePremiosCliente parseDetallePremiosCliente(Object? json) {
     selloActualizadoEn: selloAct,
     marcas: marcas,
   );
+}
+
+/// S7: días del vale aún NO consumidos (la fórmula de
+/// Argón, espejo de la del servidor, que es quien
+/// manda: el handler recalcula y rechaza si no
+/// coincide). La ventana del vale termina en
+/// resuelto_en + premioDias; lo quitable es lo menor
+/// entre lo que le queda al pagado_hasta del cliente
+/// y lo que le queda a la ventana — así una
+/// renovación pagada después del canje nunca se
+/// toca. Fechas como ISO (se usan los 10 primeros
+/// caracteres); cualquier dato ilegible da 0.
+int diasQuitablesVale({
+  required String? pagadoHasta,
+  required String? resueltoEn,
+  required int premioDias,
+  required DateTime hoy,
+}) {
+  // Toda la aritmética en UTC: es matemática de
+  // CALENDARIO (como la del servidor en PostgreSQL),
+  // no de instantes. Con DateTime local, el cambio de
+  // horario de Cuba (1-nov) roba una hora al sumar
+  // días y difference().inDays recorta un día de más.
+  DateTime? fechaDe(String? iso) {
+    if (iso == null || iso.length < 10) return null;
+    final f = DateTime.tryParse(iso.substring(0, 10));
+    if (f == null) return null;
+    return DateTime.utc(f.year, f.month, f.day);
+  }
+
+  final hasta = fechaDe(pagadoHasta);
+  final resuelto = fechaDe(resueltoEn);
+  if (hasta == null || resuelto == null || premioDias <= 0) {
+    return 0;
+  }
+  final hoyFecha = DateTime.utc(hoy.year, hoy.month, hoy.day);
+  final finVentana = resuelto.add(Duration(days: premioDias));
+  final porHasta = hasta.difference(hoyFecha).inDays;
+  final porVentana = finVentana.difference(hoyFecha).inDays;
+  final k = porHasta < porVentana ? porHasta : porVentana;
+  if (k < 0) return 0;
+  return k > premioDias ? premioDias : k;
 }
 
 /// Interpreta el jsonb de admin_premios_catalogo (S2).

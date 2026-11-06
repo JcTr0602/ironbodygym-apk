@@ -1,9 +1,14 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:uuid/uuid.dart';
 
 import '../localdb.dart';
 import '../negocio.dart';
 import '../premios_panel.dart';
+import '../sync.dart';
+import '../tiempo.dart';
 import 'componentes.dart';
 import 'diseno.dart';
 
@@ -29,13 +34,23 @@ class PremiosClientesTab extends StatefulWidget {
   final Future<Map<String, dynamic>> Function(
       int clienteId, String nota)? reiniciarCiclo;
 
+  /// S7: anular un vale canjeado (encola la op; el
+  /// servidor recalcula y revierte el pago).
+  final Future<void> Function(int clienteId, ValeHistorial vale,
+      String modo, int diasQuitables, String nota)? anularVale;
+  final Future<String?> Function(int clienteId)? pagadoHastaDe;
+  final Future<bool> Function(int valeId)? anulacionEnCursoDe;
+
   const PremiosClientesTab(
       {super.key,
       this.buscarClientes,
       this.cargarDetalle,
       this.cargarCatalogo,
       this.concederVale,
-      this.reiniciarCiclo});
+      this.reiniciarCiclo,
+      this.anularVale,
+      this.pagadoHastaDe,
+      this.anulacionEnCursoDe});
 
   @override
   State<PremiosClientesTab> createState() => _PremiosClientesTabState();
@@ -50,6 +65,8 @@ class _PremiosClientesTabState extends State<PremiosClientesTab> {
   DetallePremiosCliente? _detalle;
   bool _cargandoDetalle = false;
   bool _falloDetalle = false;
+  String? _pagadoHasta;
+  Set<int> _anulacionesEnCurso = {};
 
   @override
   void initState() {
@@ -136,6 +153,55 @@ class _PremiosClientesTabState extends State<PremiosClientesTab> {
     }
   }
 
+  Future<String?> _pagadoHastaReal(int clienteId) async {
+    final filas =
+        await LocalDb.instance.mirrorPorIds('clientes', [clienteId]);
+    if (filas.isEmpty) return null;
+    return filas.first['pagado_hasta'] as String?;
+  }
+
+  Future<bool> _enCursoReal(int valeId) async {
+    return await LocalDb.instance
+            .getMeta('premio_vale_anulado_$valeId') !=
+        null;
+  }
+
+  /// S7 real: encola la op de anulación (el servidor
+  /// recalcula los días y revierte el pago), marca el
+  /// vale como «en curso» en este teléfono y ajusta el
+  /// espejo como avance (el pull lo confirma).
+  Future<void> _anularReal(int clienteId, ValeHistorial vale,
+      String modo, int diasQuitables, String nota) async {
+    final opUuid = const Uuid().v4();
+    final k = modo == 'completo' ? vale.premioDias : diasQuitables;
+    await LocalDb.instance.queueOp(
+      opUuid: opUuid,
+      tipo: 'anular_vale_premio',
+      payload: {
+        'cliente_id': clienteId,
+        'vale_id': vale.id,
+        'modo': modo,
+        'dias_quitados': k,
+        'nota': nota,
+      },
+    );
+    await LocalDb.instance
+        .setMeta('premio_vale_anulado_${vale.id}', opUuid);
+    if (k > 0 && _pagadoHasta != null) {
+      final hasta = DateTime.tryParse(_pagadoHasta!);
+      if (hasta != null) {
+        final nuevo = hasta.subtract(Duration(days: k));
+        await LocalDb.instance.updateMirrorPagadoHasta(
+          clienteId,
+          '${nuevo.year.toString().padLeft(4, '0')}-'
+          '${nuevo.month.toString().padLeft(2, '0')}-'
+          '${nuevo.day.toString().padLeft(2, '0')}',
+        );
+      }
+    }
+    unawaited(SyncEngine.instance.push());
+  }
+
   Future<void> _abrirDetalle(
       ({int id, String nombre, String telefono}) c) async {
     setState(() {
@@ -144,13 +210,36 @@ class _PremiosClientesTabState extends State<PremiosClientesTab> {
       _cargandoDetalle = true;
       _falloDetalle = false;
       _detalle = null;
+      _pagadoHasta = null;
+      _anulacionesEnCurso = {};
     });
     try {
       final json =
           await (widget.cargarDetalle ?? _detalleReal)(c.id);
       if (!mounted) return;
+      final detalle = parseDetallePremiosCliente(json);
+      // Datos locales de apoyo (vencimiento y marcas de
+      // anulación en curso): si el espejo local falla,
+      // el detalle del servidor se muestra igual, solo
+      // sin el botón de anular afinado.
+      String? hasta;
+      try {
+        hasta = await (widget.pagadoHastaDe ?? _pagadoHastaReal)(c.id);
+      } catch (_) {}
+      final enCurso = <int>{};
+      for (final v in detalle.vales) {
+        if (!v.canjeado) continue;
+        try {
+          if (await (widget.anulacionEnCursoDe ?? _enCursoReal)(v.id)) {
+            enCurso.add(v.id);
+          }
+        } catch (_) {}
+      }
+      if (!mounted) return;
       setState(() {
-        _detalle = parseDetallePremiosCliente(json);
+        _detalle = detalle;
+        _pagadoHasta = hasta;
+        _anulacionesEnCurso = enCurso;
         _cargandoDetalle = false;
       });
     } catch (_) {
@@ -205,6 +294,29 @@ class _PremiosClientesTabState extends State<PremiosClientesTab> {
           'para aplicar los días.',
           significado: SignificadoChip.exito);
       await _recargarDetalle();
+    }
+  }
+
+  Future<void> _anular(ValeHistorial v) async {
+    final id = _seleccionadoId;
+    if (id == null) return;
+    final hecho = await showDialog<bool>(
+      context: context,
+      builder: (_) => _DialogoAnularVale(
+        nombreCliente: _seleccionadoNombre,
+        vale: v,
+        pagadoHasta: _pagadoHasta,
+        hoy: ahoraHabana(),
+        anular: (modo, k, nota) =>
+            (widget.anularVale ?? _anularReal)(id, v, modo, k, nota),
+      ),
+    );
+    if (hecho == true && mounted) {
+      setState(() => _anulacionesEnCurso = {..._anulacionesEnCurso, v.id});
+      mostrarSnack(
+          context,
+          'Anulación encolada: se aplica al sincronizar.',
+          significado: SignificadoChip.exito);
     }
   }
 
@@ -472,8 +584,31 @@ class _PremiosClientesTabState extends State<PremiosClientesTab> {
           if (v.resueltoNota.isNotEmpty)
             Text('Resolución: ${v.resueltoNota}',
                 style: AppTexto.secundario),
-          // El botón «Anular vale» (S7) se añade aquí
-          // para los vales canjeados con pago.
+          if (v.estado == 'anulado' && v.anuladoEn != null)
+            Text(
+              'Anulado el ${fmtFecha(v.anuladoEn!.length >= 10 ? v.anuladoEn!.substring(0, 10) : v.anuladoEn!)}',
+              style: AppTexto.secundario,
+            ),
+          // S7: anular un vale canjeado con pago. El
+          // botón solo vive con la foto FRESCA del
+          // detalle (este historial viene de la RPC) y
+          // se apaga en este teléfono al encolar la op.
+          if (v.canjeado &&
+              (v.pagoUuid ?? '').isNotEmpty) ...[
+            const SizedBox(height: 6),
+            if (_anulacionesEnCurso.contains(v.id))
+              const Text('⏳ Anulación en curso (sincronizando)',
+                  style: AppTexto.secundario)
+            else
+              Align(
+                alignment: Alignment.centerRight,
+                child: TextButton.icon(
+                  onPressed: () => _anular(v),
+                  icon: const Icon(Icons.undo_rounded, size: 18),
+                  label: const Text('Anular vale'),
+                ),
+              ),
+          ],
         ],
       ),
     );
@@ -754,6 +889,170 @@ class _DialogoReiniciarCicloState
             ),
           ),
           child: Text(_guardando ? 'Reiniciando…' : 'Reiniciar'),
+        ),
+      ],
+    );
+  }
+}
+
+/// Diálogo «Anular vale» (S7, D2 de Jc): el dueño
+/// elige EN EL MOMENTO entre quitar el pago completo
+/// o solo los días no consumidos, viendo el efecto de
+/// cada vía antes de confirmar. Nota obligatoria.
+/// El servidor recalcula los días: lo que aquí se
+/// muestra es la misma fórmula, y si el servidor no
+/// coincide, la op se rechaza sin tocar nada.
+class _DialogoAnularVale extends StatefulWidget {
+  final String nombreCliente;
+  final ValeHistorial vale;
+  final String? pagadoHasta;
+  final DateTime hoy;
+  final Future<void> Function(String modo, int diasQuitables,
+      String nota) anular;
+
+  const _DialogoAnularVale(
+      {required this.nombreCliente,
+      required this.vale,
+      required this.pagadoHasta,
+      required this.hoy,
+      required this.anular});
+
+  @override
+  State<_DialogoAnularVale> createState() =>
+      _DialogoAnularValeState();
+}
+
+class _DialogoAnularValeState extends State<_DialogoAnularVale> {
+  String _modo = 'no_consumidos';
+  final _notaCtrl = TextEditingController();
+  String? _error;
+  bool _guardando = false;
+
+  late final int _k = diasQuitablesVale(
+    pagadoHasta: widget.pagadoHasta,
+    resueltoEn: widget.vale.resueltoEn,
+    premioDias: widget.vale.premioDias,
+    hoy: widget.hoy,
+  );
+
+  @override
+  void dispose() {
+    _notaCtrl.dispose();
+    super.dispose();
+  }
+
+  String _hastaTras(int diasMenos) {
+    final hasta = widget.pagadoHasta;
+    if (hasta == null) return '—';
+    final f = DateTime.tryParse(hasta);
+    if (f == null) return '—';
+    final n = f.subtract(Duration(days: diasMenos));
+    return fmtFecha(
+        '${n.year.toString().padLeft(4, '0')}-'
+        '${n.month.toString().padLeft(2, '0')}-'
+        '${n.day.toString().padLeft(2, '0')}');
+  }
+
+  Future<void> _enviar() async {
+    final nota = _notaCtrl.text.trim();
+    if (nota.isEmpty) {
+      setState(() => _error =
+          'La nota es obligatoria: explica el motivo de la anulación.');
+      return;
+    }
+    setState(() {
+      _guardando = true;
+      _error = null;
+    });
+    try {
+      await widget.anular(_modo, _k, nota);
+      if (mounted) Navigator.pop(context, true);
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _guardando = false;
+          _error = 'No se pudo encolar la anulación.';
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final v = widget.vale;
+    return DialogoApp(
+      titulo: 'Anular vale',
+      iconoTitulo: Icons.undo_rounded,
+      contenido: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            'El vale de ${v.premioDias} días de '
+            '${widget.nombreCliente} ya se aplicó. Elige '
+            'cómo revertirlo:',
+            style: AppTexto.secundario,
+          ),
+          RadioGroup<String>(
+            groupValue: _modo,
+            onChanged: _guardando
+                ? (_) {}
+                : (m) => setState(() => _modo = m ?? 'no_consumidos'),
+            child: Column(
+              children: [
+                RadioListTile<String>(
+                  contentPadding: EdgeInsets.zero,
+                  value: 'no_consumidos',
+                  title: const Text('Solo los días no consumidos'),
+                  subtitle: Text(_k > 0
+                      ? 'Se quitan $_k días: el vencimiento pasa '
+                          'de ${fmtFecha(widget.pagadoHasta)} a '
+                          '${_hastaTras(_k)}. Los ${v.premioDias - _k} '
+                          'ya disfrutados se quedan.'
+                      : 'Este vale ya se consumió entero: esta '
+                          'vía resta 0 días, solo cierra el vale '
+                          'como anulado.'),
+                ),
+                RadioListTile<String>(
+                  contentPadding: EdgeInsets.zero,
+                  value: 'completo',
+                  title: const Text('Quitar el pago completo'),
+                  subtitle: Text(
+                      'Se elimina el pago de cortesía de '
+                      '${v.premioDias} días y el vencimiento se '
+                      'recalcula sin él (también se caen los '
+                      'días ya disfrutados).'),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 8),
+          CampoTexto(
+              controller: _notaCtrl,
+              etiqueta: 'Nota (obligatoria)',
+              maxLineas: 2),
+          if (_error != null) ...[
+            const SizedBox(height: 8),
+            Text(_error!,
+                style: AppTexto.secundario
+                    .copyWith(color: AppColores.error)),
+          ],
+        ],
+      ),
+      acciones: [
+        TextButton(
+            onPressed:
+                _guardando ? null : () => Navigator.pop(context, false),
+            child: const Text('Cancelar')),
+        ElevatedButton(
+          onPressed: _guardando ? null : _enviar,
+          style: ElevatedButton.styleFrom(
+            backgroundColor: AppColores.error,
+            foregroundColor: Colors.white,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(AppRadio.md),
+            ),
+          ),
+          child: Text(_guardando ? 'Anulando…' : 'Anular vale'),
         ),
       ],
     );
