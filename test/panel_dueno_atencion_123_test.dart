@@ -131,7 +131,7 @@ void main() {
     expect(tres.single.detalle, contains('· …'));
   });
 
-  test('orden canónico completo con todo presente', () {
+  test('orden por gravedad completo con todo presente (1.25 T35)', () {
     final sol = BandejaSwr<invitados_svc.InvitadoResumen>()
       ..exito([inv('Ana')], sello);
     final reps = BandejaSwr<ReportePlus>()..exito([rep('Luis')], sello);
@@ -152,24 +152,49 @@ void main() {
         {'nombre': 'Creatina', 'stock': 1}
       ],
     ));
+    // 1.25 T35: los bloqueantes de sync (incidencias y error)
+    // van PRIMERO; luego decisiones/dinero en su orden de
+    // construcción; el stock (aviso) cierra. Antes este mismo
+    // foto dejaba incidencias y error tras el pliegue de 5.
     expect(
       filas.map((f) => f.destino).toList(),
       [
+        DestinoAtencion.incidencias,
+        DestinoAtencion.diagnostico,
         DestinoAtencion.solicitudes,
         DestinoAtencion.reservas,
         DestinoAtencion.reportes,
         DestinoAtencion.arqueo,
         DestinoAtencion.cierre,
         DestinoAtencion.cierre,
-        DestinoAtencion.incidencias,
-        DestinoAtencion.diagnostico,
         DestinoAtencion.suplementos,
       ],
     );
     // Con solicitudes presentes, la fila de reservas NO es primaria.
-    expect(filas[1].primario, isFalse);
-    expect(filas[5].titulo, 'Sin reporte de caja');
-    expect(filas[6].titulo, '2 incidencias de sync por revisar');
+    expect(filas[3].primario, isFalse);
+    // Un solo primario en toda la lista: el de solicitudes.
+    expect(filas.where((f) => f.primario).length, 1);
+    expect(filas[2].primario, isTrue);
+    expect(filas[7].titulo, 'Sin reporte de caja');
+    expect(filas[0].titulo, '2 incidencias de sync por revisar');
+    expect(filas[0].gravedad, 0);
+    expect(filas[8].gravedad, 2);
+  });
+
+  test('T35: sin cargar (bloqueante) salta delante de solicitudes', () {
+    // No pueden coexistir en la misma bandeja SWR, pero sí un
+    // «sin cargar» del Plus con solicitudes presentes: el
+    // bloqueante manda y el primario queda en solicitudes
+    // (la primera fila que lo merecía).
+    final sol = BandejaSwr<invitados_svc.InvitadoResumen>()
+      ..exito([inv('Ana')], sello);
+    final reps = BandejaSwr<ReportePlus>()..fallo();
+    final filas = pendientesAtencion(
+        foto(solicitudes: sol, reportes: reps));
+    expect(filas.first.destino, DestinoAtencion.reintentarReportes);
+    expect(filas.first.gravedad, 0);
+    expect(filas[1].destino, DestinoAtencion.solicitudes);
+    expect(filas[1].primario, isTrue);
   });
 
   test('reportes en caché con fallo: la fila queda y dice «Sin red»', () {

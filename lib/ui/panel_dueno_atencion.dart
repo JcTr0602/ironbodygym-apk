@@ -45,6 +45,13 @@ class PendienteAtencionDato {
   final String boton;
   final bool primario;
 
+  /// 1.25 T35: gravedad para ordenar la bandeja — 0 =
+  /// bloqueante (sync roto o bandeja sin cargar: nada de lo
+  /// demás se puede dar por bueno), 1 = decisión/dinero,
+  /// 2 = aviso suave. Antes el orden era el de construcción
+  /// y un error de sync quedaba tras el «+N más» sin señal.
+  final int gravedad;
+
   const PendienteAtencionDato({
     required this.destino,
     required this.icono,
@@ -53,7 +60,20 @@ class PendienteAtencionDato {
     required this.detalle,
     required this.boton,
     required this.primario,
+    this.gravedad = 1,
   });
+
+  PendienteAtencionDato conPrimario(bool v) =>
+      PendienteAtencionDato(
+        destino: destino,
+        icono: icono,
+        tinte: tinte,
+        titulo: titulo,
+        detalle: detalle,
+        boton: boton,
+        primario: v,
+        gravedad: gravedad,
+      );
 }
 
 /// La foto del estado del panel que alimenta el bloque.
@@ -83,10 +103,12 @@ class FotoAtencion {
   });
 }
 
-/// Deriva las filas de atención en su orden canónico. Las
-/// reglas (incluidas las de Argón para el SWR: «sin cargar» se
-/// mide por el sello, jamás se afirma «todo en orden» sobre un
-/// fallo) viven aquí y solo aquí.
+/// Deriva las filas de atención, ordenadas por gravedad
+/// (1.25 T35: bloqueantes de sync primero; dentro de cada
+/// nivel, el orden de construcción). Las reglas (incluidas
+/// las de Argón para el SWR: «sin cargar» se mide por el
+/// sello, jamás se afirma «todo en orden» sobre un fallo)
+/// viven aquí y solo aquí.
 List<PendienteAtencionDato> pendientesAtencion(FotoAtencion f) {
   final pendientes = <PendienteAtencionDato>[];
 
@@ -131,6 +153,7 @@ List<PendienteAtencionDato> pendientesAtencion(FotoAtencion f) {
       detalle: 'Sin conexión para consultar la bandeja',
       boton: 'Reintentar',
       primario: true,
+      gravedad: 0,
     ));
   }
 
@@ -145,6 +168,7 @@ List<PendienteAtencionDato> pendientesAtencion(FotoAtencion f) {
       detalle: f.solicitudes.notaSinRed,
       boton: 'Reintentar',
       primario: false,
+      gravedad: 2,
     ));
   }
 
@@ -208,6 +232,7 @@ List<PendienteAtencionDato> pendientesAtencion(FotoAtencion f) {
       detalle: 'Sin conexión para consultar la bandeja',
       boton: 'Reintentar',
       primario: false,
+      gravedad: 0,
     ));
   }
 
@@ -221,6 +246,7 @@ List<PendienteAtencionDato> pendientesAtencion(FotoAtencion f) {
       detalle: f.reportes.notaSinRed,
       boton: 'Reintentar',
       primario: false,
+      gravedad: 2,
     ));
   }
 
@@ -281,6 +307,7 @@ List<PendienteAtencionDato> pendientesAtencion(FotoAtencion f) {
       detalle: 'Operaciones rechazadas o en revisión',
       boton: 'Revisar',
       primario: false,
+      gravedad: 0,
     ));
   }
 
@@ -294,6 +321,7 @@ List<PendienteAtencionDato> pendientesAtencion(FotoAtencion f) {
       detalle: errorSyncLegible(f.syncError!),
       boton: 'Ver',
       primario: false,
+      gravedad: 0,
     ));
   }
 
@@ -312,8 +340,29 @@ List<PendienteAtencionDato> pendientesAtencion(FotoAtencion f) {
               '${s['nombre']} queda $stock',
       boton: 'Ver',
       primario: false,
+      gravedad: 2,
     ));
   }
 
-  return pendientes;
+  // 1.25 T35: orden por GRAVEDAD (estable: dentro de cada
+  // nivel manda el orden de construcción de arriba) y un
+  // solo «primario»: el primero que lo merecía en el orden
+  // final conserva el botón lleno; los demás lo pierden.
+  final indexada = [
+    for (var i = 0; i < pendientes.length; i++) (i, pendientes[i]),
+  ]..sort((a, b) {
+      final g = a.$2.gravedad.compareTo(b.$2.gravedad);
+      return g != 0 ? g : a.$1.compareTo(b.$1);
+    });
+  final res = <PendienteAtencionDato>[];
+  var primarioVisto = false;
+  for (final (_, d) in indexada) {
+    if (d.primario && primarioVisto) {
+      res.add(d.conPrimario(false));
+    } else {
+      if (d.primario) primarioVisto = true;
+      res.add(d);
+    }
+  }
+  return res;
 }
