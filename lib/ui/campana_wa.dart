@@ -363,8 +363,12 @@ class _CampanaWaScreenState extends State<CampanaWaScreen> {
       _items.where((i) => i['estado'] == 'saltado').length;
   int get _resueltos => _enviados + _saltados;
 
-  String _mensajePara(Map<String, dynamic> item) =>
-      _textoTanda.replaceAll('{nombre}', '${item['nombre'] ?? ''}');
+  // 1.25 T42: se sustituyen las DOS sintaxis, la doble
+  // primero (si la simple corriera antes, {{nombre}} quedaría
+  // como {Ana} con llaves y llegaba así al cliente).
+  String _mensajePara(Map<String, dynamic> item) => _textoTanda
+      .replaceAll('{{nombre}}', '${item['nombre'] ?? ''}')
+      .replaceAll('{nombre}', '${item['nombre'] ?? ''}');
 
   Future<void> _abrirWhatsApp(Map<String, dynamic> item) async {
     if (_abriendoWa) return; // doble toque (panel T5)

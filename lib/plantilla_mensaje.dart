@@ -47,18 +47,33 @@ class PlantillaRender {
 /// Render puro y testeable. [datos] puede traer claves prohibidas:
 /// se ignoran (no se sustituyen y se reportan si aparecen en el
 /// cuerpo).
+///
+/// 1.25 T42: se aceptan las DOS sintaxis — {{variable}} (la de
+/// esta pantalla) y {variable} (la de Campañas). Antes, una
+/// plantilla copiada de un sistema al otro llegaba al cliente
+/// con la variable LITERAL (o como {Ana} con llaves, al
+/// sustituir la simple dentro de la doble). La lista blanca
+/// manda igual: lo no permitido queda literal y se reporta.
 PlantillaRender renderPlantilla(
     String cuerpo, Map<String, String> datos) {
   final bloqueadas = <String>[];
-  final re = RegExp(r'\{\{\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*\}\}');
-  final texto = cuerpo.replaceAllMapped(re, (m) {
+  String sustituir(Match m) {
     final v = m.group(1)!;
     if (kVariablesPlantilla.contains(v)) {
       return datos[v] ?? m.group(0)!;
     }
     if (!bloqueadas.contains(v)) bloqueadas.add(v);
     return m.group(0)!;
-  });
+  }
+
+  var texto = cuerpo.replaceAllMapped(
+      RegExp(r'\{\{\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*\}\}'),
+      sustituir);
+  // Segunda pasada, llave simple: lo que quede de una doble NO
+  // permitida se repone idéntico (sustituir devuelve el propio
+  // match), así que nada se corrompe.
+  texto = texto.replaceAllMapped(
+      RegExp(r'\{\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*\}'), sustituir);
   return PlantillaRender(texto, bloqueadas);
 }
 

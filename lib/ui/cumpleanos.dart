@@ -151,6 +151,20 @@ class _CumpleanosScreenState extends State<CumpleanosScreen>
     } else {
       await prefs.remove(clave);
     }
+    // 1.25 T42: la marca se COMPARTE con la Bandeja WhatsApp
+    // (su marca vive en SQLite por día): felicitar aquí apaga
+    // el aviso «cumple» de hoy allí, y desmarcar lo revierte.
+    // Antes cada pantalla marcaba en su propio almacén y el
+    // cliente podía recibir dos felicitaciones el mismo día.
+    try {
+      if (valor) {
+        await LocalDb.instance
+            .marcarAvisoWaContactado(id, 'cumple', hoyHabanaIso());
+      } else {
+        await LocalDb.instance.desmarcarAvisoWaContactado(
+            id, 'cumple', hoyHabanaIso());
+      }
+    } catch (_) {}
     if (mounted) {
       setState(() {
         if (valor) {

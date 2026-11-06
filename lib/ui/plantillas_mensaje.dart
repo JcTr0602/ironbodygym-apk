@@ -81,10 +81,13 @@ class _PlantillasScreenState extends State<PlantillasScreen> {
                     padding: const EdgeInsets.all(AppEspacio.lg),
                     children: [
                       const Text(
+                        // 1.25 T42: también vale la sintaxis
+                        // simple de Campañas ({nombre}).
                         'Variables permitidas: {{nombre}}, '
                         '{{fecha_vencimiento}}, {{monto_a_pagar_vigente}}, '
-                        '{{dias_restantes}}, {{folio_recibo}}. Cualquier '
-                        'otra variable queda sin sustituir.',
+                        '{{dias_restantes}}, {{folio_recibo}} '
+                        '(también vale {nombre}, como en Campañas). '
+                        'Cualquier otra variable queda sin sustituir.',
                         style: AppTexto.secundario,
                       ),
                       const SizedBox(height: 12),

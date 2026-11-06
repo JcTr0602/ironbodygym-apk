@@ -191,6 +191,22 @@ class _BandejaWhatsappScreenState extends State<BandejaWhatsappScreen>
       await _migrarDesdePrefs();
       final tocados =
           await LocalDb.instance.avisosWaContactados(_hoy);
+      // 1.25 T42: la marca de la pantalla de Cumpleaños (prefs
+      // felicitado_<año>_<id>) también apaga el aviso aquí:
+      // las dos pantallas comparten marca o el cliente recibe
+      // dos felicitaciones el mismo día.
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        final anio = ahoraHabana().year;
+        for (final a in avisos) {
+          if ('${a['tipo']}' != 'cumple') continue;
+          final cid = (a['cliente_id'] as num?)?.toInt() ?? 0;
+          if (cid > 0 &&
+              prefs.getBool('felicitado_${anio}_$cid') == true) {
+            tocados.add(_clave(a));
+          }
+        }
+      } catch (_) {}
       if (mounted) {
         setState(() {
           _avisos = avisos;
@@ -332,6 +348,20 @@ class _BandejaWhatsappScreenState extends State<BandejaWhatsappScreen>
     } else {
       await LocalDb.instance
           .desmarcarAvisoWaContactado(cid, tipo, _hoy);
+    }
+    // 1.25 T42: espejo inverso de la marca compartida — un
+    // «cumple» atendido aquí marca Felicitado en la pantalla
+    // de Cumpleaños (prefs), y desmarcar lo quita.
+    if (tipo == 'cumple') {
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        final clave = 'felicitado_${ahoraHabana().year}_$cid';
+        if (valor) {
+          await prefs.setBool(clave, true);
+        } else {
+          await prefs.remove(clave);
+        }
+      } catch (_) {}
     }
     if (mounted) {
       setState(() {
