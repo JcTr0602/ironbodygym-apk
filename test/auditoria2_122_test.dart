@@ -222,7 +222,15 @@ void main() {
       final prc = _fuente('lib/ui/panel_resto_caja.dart');
       expect(prc, contains('!monto.isFinite'),
           reason: 'entrega parcial C1');
-      expect(prc, contains('!v.isFinite'), reason: 'precios del gym');
+      // 1.25 T99: la validación de los precios del gym se
+      // centralizó en parsePrecioCampo (bloque2_resto): la
+      // guarda sigue la validación a su sitio nuevo, como
+      // ya hizo con config_precios_bancarios.
+      expect(prc, contains('parsePrecioCampo'),
+          reason: 'precios del gym: la pantalla usa la pura');
+      expect(_fuente('lib/bloque2_resto.dart'),
+          contains('!v.isFinite'),
+          reason: 'precios del gym: finitud en parsePrecioCampo');
     });
 
     test('configuración y gastos del dueño', () {

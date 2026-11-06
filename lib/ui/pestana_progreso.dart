@@ -11,6 +11,7 @@ import '../permisos_entrenador.dart';
 import 'app_bar.dart';
 import 'editor_plan_nutricional.dart';
 import 'grafico_peso.dart';
+import 'grafico_metrica.dart';
 import 'componentes.dart';
 import 'diseno.dart';
 
@@ -247,6 +248,22 @@ class _PestanaProgresoState extends State<PestanaProgreso> {
           if (_mediciones.length >= 2) ...[
             GraficoPesoEntrenador(mediciones: _mediciones),
             const SizedBox(height: 16),
+            // 1.25 T109: el gráfico deja de ser solo del
+            // peso — cintura, brazo y muslo ganan el suyo
+            // cuando hay 2+ mediciones con ese dato.
+            for (final (titulo, serie) in [
+              ('Evolución de cintura',
+                  serieMetricaOpcional(_mediciones, (m) => m.cinturaCm)),
+              ('Evolución de brazo',
+                  serieMetricaOpcional(_mediciones, (m) => m.brazoCm)),
+              ('Evolución de muslo',
+                  serieMetricaOpcional(_mediciones, (m) => m.musloCm)),
+            ])
+              if (serie.length >= 2) ...[
+                GraficoMetricaGestion(
+                    titulo: titulo, unidad: 'cm', puntos: serie),
+                const SizedBox(height: 16),
+              ],
           ] else if (_mediciones.length == 1) ...[
             Card(
               child: Padding(
