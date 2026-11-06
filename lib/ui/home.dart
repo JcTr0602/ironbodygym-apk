@@ -159,6 +159,10 @@ class _HomeScreenState extends State<HomeScreen>
   int _atras30 = 0;
   double _pendiente = 0; // v1.3.3: pendiente a entregar (entrenador)
   int _pagaronMes = 0; // v1.4.0: clientes únicos que pagaron el mes
+  // 1.25 T43: denominador del anillo de salud del mes.
+  int _activosMes = 0;
+  // 1.25 T45: cobrado por día de los últimos 7 días (dueño).
+  List<Map<String, dynamic>> _serie7 = const [];
   int _tarifaMes = 150; // v1.4.0: tarifa por cliente (base del entrenador)
   double _pagoEntrenadoresNeto =
       0; // post-1.15: neto a pagar (suma de la nómina, no bruto ×300)
@@ -658,6 +662,12 @@ class _HomeScreenState extends State<HomeScreen>
             ? pendienteRecogerUsd(
                 excluirTelegramId: _auth.telegramId)
             : pendienteEntregaUsd(_auth.telegramId), // 19
+        // 1.25 T43: activos para el anillo «pagaron el mes».
+        activosCount(), // 20
+        // 1.25 T45: serie de 7 días para el mini-gráfico.
+        _auth.isOwner
+            ? ingresosUltimos7Dias()
+            : Future.value(const <Map<String, dynamic>>[]), // 21
       ]);
       // Cliente protegido (2026-10-26, Protegido 2 H6): los
       // contadores de la principal no cuentan protegidos para un
@@ -762,6 +772,8 @@ class _HomeScreenState extends State<HomeScreen>
           _incidenciasAbiertas = incidAbiertas;
           _avisosPendientes = res[15] as int;
           _pagaronMes = res[16] as int;
+          _activosMes = res[20] as int;
+          _serie7 = res[21] as List<Map<String, dynamic>>;
           _tarifaMes = res[17] as int;
           final neto = res[18] as double?;
           if (neto != null) _pagoEntrenadoresNeto = neto;
@@ -1010,6 +1022,22 @@ class _HomeScreenState extends State<HomeScreen>
                 // T7: ValueKey por nivel, nunca GlobalKey (H-03).
                 AnimatedSwitcher(
                   duration: const Duration(milliseconds: 220),
+                  // 1.25 T48: fundido con un leve
+                  // deslizamiento vertical — los dos
+                  // niveles se perciben como dos pisos de
+                  // la misma casa, no como dos pantallas
+                  // que se reemplazan.
+                  transitionBuilder: (child, anim) =>
+                      FadeTransition(
+                    opacity: anim,
+                    child: SlideTransition(
+                      position: Tween<Offset>(
+                        begin: const Offset(0, 0.03),
+                        end: Offset.zero,
+                      ).animate(anim),
+                      child: child,
+                    ),
+                  ),
                   child: _contenidoNivel(esDueno),
                 ),
               ],
@@ -1479,13 +1507,22 @@ class _HomeScreenState extends State<HomeScreen>
                       _ir(const ColaScreen())),
             ],
           ),
-          // B9: acento de marca — filete con el gradiente
-          // naranja de la casa cerrando la cabecera.
+          // B9: acento de marca cerrando la cabecera.
+          // 1.25 T49: el filete es VIVO — su color dice el
+          // estado del día antes de leer un solo número:
+          // verde sin atrasados ni vencimientos de hoy,
+          // ámbar si vencen hoy o hay atrasados leves, rojo
+          // si hay vencidos de +30 días (la prioridad de
+          // urgenciaVencimientos).
           const SizedBox(height: AppEspacio.sm),
           Container(
             height: 3,
             decoration: BoxDecoration(
-              gradient: AppColores.gradienteNaranja,
+              color: colorAcentoCabecera(
+                vencenHoy: _vencen,
+                atrasLeve: _atras - _atras30,
+                atras30: _atras30,
+              ),
               borderRadius: BorderRadius.circular(AppRadio.circular),
             ),
           ),
@@ -1779,6 +1816,9 @@ class _HomeScreenState extends State<HomeScreen>
                           : null)),
             ],
           ),
+          // 1.25 T44 + T45: la barra del dinero de hoy y la
+          // tendencia de la semana, en la misma tarjeta.
+          _barraYSemanaDueno(),
           const SizedBox(height: AppEspacio.sm),
           // v1.4.0 (Jc): pagaron el mes y la base ×300.
           // v1.6.0 (Jc): destinos CORREGIDOS — «Pagaron el mes» abre
@@ -1792,12 +1832,12 @@ class _HomeScreenState extends State<HomeScreen>
           // (totalNetoNominaMes), y sigue abriendo la Nómina.
           Row(
             children: [
-              Expanded(
-                  child: _datoFinancieroTappable(
-                      'Pagaron el mes',
-                      '$_pagaronMes',
-                      AppColores.naranja,
-                      () => _ir(const PagaronMesScreen()))),
+              // 1.25 T43: anillo de salud del mes — de un
+              // vistazo, qué parte de los activos ya pagó
+              // (el dato ya estaba cargado; faltaba el
+              // denominador y el dibujo). Tocar sigue
+              // abriendo el listado exacto.
+              Expanded(child: _celdaAnilloSaludMes()),
               Expanded(
                   child: _datoFinancieroTappable(
                       'Pago de entrenadores',
@@ -2275,6 +2315,187 @@ class _HomeScreenState extends State<HomeScreen>
               right: 0,
               child: Icon(Icons.arrow_outward_rounded,
                   size: 12, color: Colors.grey),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 1.25 T44 + T45 (solo dueño): bajo «Cobrado hoy», la
+  /// barra dividida del dinero de hoy —efectivo en mano
+  /// (sólido) contra transferencia ya en la cuenta
+  /// (contorno)— y el mini-gráfico de los últimos 7 días
+  /// con hoy destacado y la diferencia contra ayer. Sin
+  /// cobros hoy, la barra no se pinta (no se inventa la
+  /// proporción); la serie se pinta siempre que llegó.
+  Widget _barraYSemanaDueno() {
+    final total = _cobradoHoyEf + _cobradoHoyTr;
+    final difTxt = textoDiferenciaHoyAyer(_serie7);
+    final maxSerie = _serie7.fold<double>(
+        0, (m, d) => ((d['monto'] as num?)?.toDouble() ?? 0) > m
+            ? (d['monto'] as num).toDouble()
+            : m);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (total > 0) ...[
+          const SizedBox(height: AppEspacio.sm),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(AppRadio.sm),
+            child: SizedBox(
+              height: 10,
+              child: Row(
+                children: [
+                  if (_cobradoHoyEf > 0)
+                    Expanded(
+                      flex: (_cobradoHoyEf * 1000).round(),
+                      child: Container(color: AppColores.exito),
+                    ),
+                  if (_cobradoHoyTr > 0)
+                    Expanded(
+                      flex: (_cobradoHoyTr * 1000).round(),
+                      child: Container(
+                        decoration: BoxDecoration(
+                          color: AppColores.exito.withValues(alpha: 0.25),
+                          border: Border.all(color: AppColores.exito),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: AppEspacio.xs),
+          Text(
+            'En mano ${fmtMonto(_cobradoHoyEf)} · '
+            'En cuenta ${fmtMonto(_cobradoHoyTr)}',
+            style: AppTexto.metadato.copyWith(
+                color: AppColores.textoSecundario(context)),
+          ),
+        ],
+        if (_serie7.isNotEmpty) ...[
+          const SizedBox(height: AppEspacio.md),
+          Row(
+            children: [
+              const Text('Últimos 7 días', style: AppTexto.secundario),
+              const Spacer(),
+              if (difTxt.isNotEmpty)
+                Text(difTxt,
+                    style: AppTexto.metadato.copyWith(
+                        color: AppColores.textoSecundario(context))),
+            ],
+          ),
+          const SizedBox(height: AppEspacio.xs),
+          SizedBox(
+            height: 44,
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                for (var i = 0; i < _serie7.length; i++)
+                  Expanded(
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: AppEspacio.xs),
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.end,
+                        children: [
+                          Container(
+                            height: maxSerie > 0
+                                ? 4 +
+                                    22 *
+                                        (((_serie7[i]['monto'] as num?)
+                                                    ?.toDouble() ??
+                                                0) /
+                                            maxSerie)
+                                : 4,
+                            decoration: BoxDecoration(
+                              color: i == _serie7.length - 1
+                                  ? AppColores.naranja
+                                  : AppColores.exito
+                                      .withValues(alpha: 0.45),
+                              borderRadius: BorderRadius.circular(
+                                  AppRadio.sm),
+                            ),
+                          ),
+                          const SizedBox(height: AppEspacio.xs),
+                          Text('${_serie7[i]['dia'] ?? ''}',
+                              style: AppTexto.metadato.copyWith(
+                                  color: AppColores.textoSecundario(
+                                      context),
+                                  fontWeight:
+                                      i == _serie7.length - 1
+                                          ? FontWeight.w700
+                                          : FontWeight.w400)),
+                        ],
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+
+  /// 1.25 T43: celda «Pagaron el mes» con el anillo de salud:
+  /// el porcentaje de activos que ya pagó, en el centro del
+  /// anillo, y la fracción «N de M activos» debajo del título.
+  /// Sin activos (o sin cargar), el anillo va vacío y la
+  /// fracción no se inventa.
+  Widget _celdaAnilloSaludMes() {
+    final fraccion = fraccionSaludMes(_pagaronMes, _activosMes);
+    final pct = porcentajeSaludMes(_pagaronMes, _activosMes);
+    return InkWell(
+      borderRadius: BorderRadius.circular(AppRadio.md),
+      onTap: () => _ir(const PagaronMesScreen()),
+      child: Container(
+        padding: const EdgeInsets.all(AppEspacio.sm),
+        decoration: BoxDecoration(
+          color: Theme.of(context)
+              .scaffoldBackgroundColor
+              .withValues(alpha: 0.5),
+          borderRadius: BorderRadius.circular(AppRadio.sm),
+        ),
+        child: Row(
+          children: [
+            SizedBox(
+              width: 52,
+              height: 52,
+              child: CustomPaint(
+                painter: _AnilloSaludPainter(
+                  fraccion: fraccion.clamp(0.0, 1.0),
+                  color: AppColores.naranja,
+                  fondo: AppColores.borde(context),
+                ),
+                child: Center(
+                  child: Text(
+                    pct == null ? '—' : '$pct%',
+                    style: AppTexto.etiqueta.copyWith(
+                        fontWeight: FontWeight.w700),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: AppEspacio.sm),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('$_pagaronMes',
+                      style: AppTexto.displayPequeno
+                          .copyWith(color: AppColores.naranja)),
+                  const Text('Pagaron el mes', style: AppTexto.secundario),
+                  Text(
+                    _activosMes > 0
+                        ? 'de $_activosMes activos'
+                        : 'sin activos cargados',
+                    style: AppTexto.metadato.copyWith(
+                        color: AppColores.textoSecundario(context)),
+                  ),
+                ],
+              ),
             ),
           ],
         ),
@@ -2976,4 +3197,84 @@ class _FabAccionesRapidasState extends State<_FabAccionesRapidas>
       ),
     );
   }
+}
+
+/// 1.25 T43: pintor del anillo de salud del mes (arco de
+/// fondo completo + arco de progreso desde arriba).
+class _AnilloSaludPainter extends CustomPainter {
+  final double fraccion;
+  final Color color;
+  final Color fondo;
+
+  const _AnilloSaludPainter({
+    required this.fraccion,
+    required this.color,
+    required this.fondo,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final centro = Offset(size.width / 2, size.height / 2);
+    final radio = (size.shortestSide / 2) - 3;
+    final trazo = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 5
+      ..strokeCap = StrokeCap.round;
+    trazo.color = fondo;
+    canvas.drawCircle(centro, radio, trazo);
+    if (fraccion > 0) {
+      trazo.color = color;
+      canvas.drawArc(
+        Rect.fromCircle(center: centro, radius: radio),
+        -1.5708, // arriba
+        6.2832 * fraccion,
+        false,
+        trazo,
+      );
+    }
+  }
+
+  @override
+  bool shouldRepaint(_AnilloSaludPainter old) =>
+      old.fraccion != fraccion || old.color != color || old.fondo != fondo;
+}
+
+/// 1.25 T43: fracción del anillo de salud del mes. Sin
+/// activos no hay fracción (0) y sin porcentaje (null): la
+/// celda enseña «—» en vez de un 0% inventado.
+double fraccionSaludMes(int pagaron, int activos) =>
+    activos > 0 ? (pagaron / activos).clamp(0.0, 1.0) : 0.0;
+
+int? porcentajeSaludMes(int pagaron, int activos) => activos > 0
+    ? (fraccionSaludMes(pagaron, activos) * 100).round()
+    : null;
+
+/// 1.25 T45: texto de la diferencia de hoy contra ayer en
+/// la serie de 7 días. Serie corta → sin texto; ayer en
+/// cero con hoy positivo → «ayer sin cobros» (sin dividir
+/// por cero ni inventar un porcentaje infinito).
+String textoDiferenciaHoyAyer(List<Map<String, dynamic>> serie) {
+  if (serie.length < 2) return '';
+  final hoy = (serie.last['monto'] as num?)?.toDouble() ?? 0;
+  final ayer =
+      (serie[serie.length - 2]['monto'] as num?)?.toDouble() ?? 0;
+  if (ayer > 0) {
+    final dif = ((hoy - ayer) / ayer * 100).round();
+    return dif >= 0 ? 'hoy +$dif% vs ayer' : 'hoy $dif% vs ayer';
+  }
+  return hoy > 0 ? 'ayer sin cobros' : '';
+}
+
+/// 1.25 T49: color del filete vivo de la cabecera según el
+/// estado de vencimientos del día. Prioridad: vencidos de
+/// +30 días (rojo) > vencen hoy o atrasados leves (ámbar)
+/// > limpio (verde).
+Color colorAcentoCabecera({
+  required int vencenHoy,
+  required int atrasLeve,
+  required int atras30,
+}) {
+  if (atras30 > 0) return AppColores.error;
+  if (vencenHoy > 0 || atrasLeve > 0) return AppColores.alerta;
+  return AppColores.exito;
 }

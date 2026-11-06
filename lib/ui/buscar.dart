@@ -1450,6 +1450,11 @@ class FilaCliente extends StatelessWidget {
   /// solo con color y borde.
   final String? avisoChip;
 
+  /// 1.25 T46: días de atraso (> 0) para pintar la barra de
+  /// antigüedad bajo la fila (la pasan las pestañas de
+  /// atrasados de Listas). Null = sin barra.
+  final int? diasAtraso;
+
   const FilaCliente(
       {super.key,
       required this.cliente,
@@ -1461,6 +1466,7 @@ class FilaCliente extends StatelessWidget {
       this.compacta = false,
       this.desambiguar = false,
       this.avisoChip,
+      this.diasAtraso,
       this.accionWhatsapp});
 
   @override
@@ -1475,6 +1481,7 @@ class FilaCliente extends StatelessWidget {
       compacta: compacta,
       desambiguar: desambiguar,
       avisoChip: avisoChip,
+      diasAtraso: diasAtraso,
       accionWhatsapp: accionWhatsapp);
 }
 
@@ -1488,6 +1495,7 @@ class _FilaCliente extends StatefulWidget {
   final bool compacta;
   final bool desambiguar;
   final String? avisoChip;
+  final int? diasAtraso;
   final VoidCallback? accionWhatsapp;
   const _FilaCliente(
       {super.key,
@@ -1500,6 +1508,7 @@ class _FilaCliente extends StatefulWidget {
       this.compacta = false,
       this.desambiguar = false,
       this.avisoChip,
+      this.diasAtraso,
       this.accionWhatsapp});
 
   @override
@@ -1637,43 +1646,18 @@ class _FilaClienteState extends State<_FilaCliente> {
     // vez del badge de días, que la pintaba «Vencido»/«Sin
     // fecha» por su pagado_hasta nulo o viejo.
     final esCasa = esCuentaCasa(c);
-    final dias = d ?? 999999;
-    final badge = esCasa
-        ? Container(
-            padding: const EdgeInsets.symmetric(
-                horizontal: AppEspacio.sm, vertical: AppEspacio.xs),
-            decoration: BoxDecoration(
-              color: const Color(0xFFFFF3CD),
-              borderRadius:
-                  BorderRadius.circular(AppRadio.circular),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Icon(Icons.home_rounded,
-                    size: 16, color: Color(0xFFB8860B)),
-                const SizedBox(width: 4),
-                Text('CASA',
-                    style: AppTexto.etiqueta.copyWith(
-                        color: const Color(0xFF7A5A00))),
-              ],
-            ),
-          )
-        : BadgeEstado.desdeDias(dias);
-    // 1.25 T116 (F1-21): la fecha EXACTA siempre acompaña
-    // al texto relativo — ordenar por «Vencimiento» era
-    // inverificable en pantalla (solo salía la fecha si
-    // vencía hoy).
-    final textoDias = esCasa
-        ? 'Cuenta a la Casa · sin vencimiento'
-        : d == null
-        ? 'Sin fecha'
-        : dias < 0
-            ? 'Vencido hace ${dias.abs()} días · ${fmtFecha(ph)}'
-            : dias == 0
-                // v1.2.1: el badge ya dice "VENCE HOY", no repetir.
-                ? 'Vence ${fmtFecha(ph)}'
-                : '$dias días restantes · vence ${fmtFecha(ph)}';
+    // 1.25 T47: UN solo chip con el estado Y la fecha —
+    // la insignia corta y la línea de días se funden (la
+    // fecha exacta de F1-21 vive ahora dentro del chip).
+    // Sin fecha: chip «SIN PAGOS» gris (el truco de
+    // convertir null en 999999 días pintaba «AL DÍA» a
+    // quien nunca pagó; T04 lo curó en el modelo y aquí
+    // llega a la fila).
+    final chipFila = chipEstadoFila(dias: d, pagadoHasta: ph);
+    // 1.25 T47: el texto de días vive dentro del chip
+    // (chipEstadoFila); Casa conserva su chip dorado con
+    // el texto completo.
+    final textoDiasCasa = 'Cuenta a la Casa · sin vencimiento';
     // 1.25 T11: línea de contacto para desambiguar homónimos
     // (teléfono si hay; si no, la cola del carnet).
     String? lineaContacto;
@@ -1691,7 +1675,7 @@ class _FilaClienteState extends State<_FilaCliente> {
         }
       }
     }
-    return InkWell(
+    final filaPrincipal = InkWell(
       onTap: widget.onTap,
       onLongPress: widget.onLongPress,
       child: Padding(
@@ -1731,12 +1715,35 @@ class _FilaClienteState extends State<_FilaCliente> {
                     ],
                   ),
                   const SizedBox(height: 4),
-                  badge,
-                  const SizedBox(height: 2),
-                  Text(textoDias,
-                      style: AppTexto.secundario.copyWith(
-                          color: AppColores.textoSecundario(
-                              context))),
+                  // 1.25 T47: un solo chip de estado con
+                  // fecha (Casa: su chip dorado de siempre,
+                  // con el texto completo).
+                  if (esCasa)
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: AppEspacio.sm,
+                          vertical: AppEspacio.xs),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFFFF3CD),
+                        borderRadius: BorderRadius.circular(
+                            AppRadio.circular),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(Icons.home_rounded,
+                              size: 16, color: Color(0xFFB8860B)),
+                          const SizedBox(width: 4),
+                          Text(textoDiasCasa,
+                              style: AppTexto.etiqueta.copyWith(
+                                  color: const Color(0xFF7A5A00))),
+                        ],
+                      ),
+                    )
+                  else
+                    BadgeEstado(
+                        estado: chipFila.estado,
+                        texto: chipFila.texto),
                   if (lineaContacto != null) ...[
                     const SizedBox(height: 2),
                     Text(lineaContacto,
@@ -1792,5 +1799,86 @@ class _FilaClienteState extends State<_FilaCliente> {
         ),
       ),
     );
+    // 1.25 T46: barra de antigüedad bajo la fila (solo la
+    // piden las pestañas de atrasados): el largo crece con
+    // los días de atraso hasta los 60 y el color pasa de
+    // ámbar a rojo a los 30, como el semáforo de siempre.
+    final atraso = widget.diasAtraso;
+    if (atraso == null || atraso <= 0) return filaPrincipal;
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        filaPrincipal,
+        Padding(
+          padding: const EdgeInsets.fromLTRB(84, 0, 16, 6),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(AppRadio.sm),
+            child: SizedBox(
+              height: 4,
+              child: Row(
+                children: [
+                  Expanded(
+                    flex: (fraccionBarraAtraso(atraso) * 1000).round(),
+                    child: Container(
+                      color: atraso >= 30
+                          ? AppColores.error
+                          : AppColores.alerta,
+                    ),
+                  ),
+                  Expanded(
+                    flex: 1000 -
+                        (fraccionBarraAtraso(atraso) * 1000).round(),
+                    child: Container(color: AppColores.borde(context)),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
   }
+}
+
+/// 1.25 T46: fracción de la barra de antigüedad — crece
+/// lineal con los días de atraso y se llena a los 60 días
+/// (más allá, todos se leen «muy atrasado» por igual).
+double fraccionBarraAtraso(int dias) =>
+    dias <= 0 ? 0.0 : (dias / 60).clamp(0.0, 1.0);
+
+/// 1.25 T47: el chip único de estado de la fila — estado
+/// (para el color/icono de BadgeEstado) y texto completo
+/// con la fecha exacta. Sin fecha de vencimiento: estado
+/// sinPagos (gris), nunca «AL DÍA».
+({EstadoMembresia estado, String texto}) chipEstadoFila({
+  required int? dias,
+  required String? pagadoHasta,
+}) {
+  if (dias == null) {
+    return (
+      estado: EstadoMembresia.sinPagos,
+      texto: 'SIN PAGOS · sin fecha'
+    );
+  }
+  final fecha = fmtFecha(pagadoHasta);
+  if (dias < 0) {
+    final n = -dias;
+    return (
+      estado: EstadoMembresia.vencido,
+      texto: 'Venció $fecha · hace $n ${n == 1 ? 'día' : 'días'}'
+    );
+  }
+  if (dias == 0) {
+    return (
+      estado: EstadoMembresia.porVencer,
+      texto: 'Vence hoy · $fecha'
+    );
+  }
+  if (dias <= 7) {
+    return (
+      estado: EstadoMembresia.porVencer,
+      texto: 'Vence $fecha · en $dias ${dias == 1 ? 'día' : 'días'}'
+    );
+  }
+  return (estado: EstadoMembresia.alDia, texto: 'Al día · vence $fecha');
 }

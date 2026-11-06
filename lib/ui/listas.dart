@@ -10,6 +10,7 @@ import '../permisos_entrenador.dart';
 import '../tiempo.dart';
 import '../sync.dart';
 import '../cliente_protegido.dart';
+import '../precio_cobro.dart';
 import 'buscar.dart';
 import 'componentes.dart';
 import 'permisos_ui.dart';
@@ -57,6 +58,12 @@ class _ListasScreenState extends State<ListasScreen>
   List<Map<String, dynamic>> _mas30 = [];
   List<Map<String, dynamic>> _porVencer = [];
   List<Map<String, dynamic>> _alDia = []; // v1.2.1
+  // 1.25 T46: estimado por cobrar de cada pestaña de
+  // atrasados (una mensualidad por cliente, con su tarifa
+  // real vía precioCobroParaCliente — la misma fuente que
+  // «Vencidos por cobrar»).
+  double _estimadoMenos30 = 0;
+  double _estimadoMas30 = 0;
   String _orden = 'nombre'; // nombre | vencimiento | dias
   // 16/25: buscador dentro de Listas (nombre o teléfono).
   String _busqueda = '';
@@ -159,6 +166,20 @@ class _ListasScreenState extends State<ListasScreen>
     // cliente de la lista de por avisar.
     final avisados =
         await LocalDb.instance.avisadosVigentesConFecha();
+    // 1.25 T46: estimados de las pestañas de atrasados,
+    // calculados sobre las listas ya sin protegidos.
+    final pr = await preciosVigentes();
+    Future<double> estimadoDe(
+            List<Map<String, dynamic>> lista) async =>
+        (await Future.wait(lista.map((c) async =>
+            (await precioCobroParaCliente(
+                    cliente: c,
+                    periodo: 'mensual',
+                    metodo: 'efectivo',
+                    precios: pr))
+                .monto))).fold<double>(0, (a, b) => a + b);
+    final estMenos = await estimadoDe(sinProtegidos(m30));
+    final estMas = await estimadoDe(sinProtegidos(p30));
     if (mounted) {
       setState(() {
         _hoy = sinProtegidos(h);
@@ -167,6 +188,8 @@ class _ListasScreenState extends State<ListasScreen>
         _mas30 = sinProtegidos(p30);
         _porVencer = sinProtegidos(pv);
         _alDia = sinProtegidos(ad);
+        _estimadoMenos30 = estMenos;
+        _estimadoMas30 = estMas;
         _avisadoEl = avisados;
         _avisados = avisados.keys.toSet();
         _recalcularVisibles();
@@ -386,6 +409,8 @@ class _ListasScreenState extends State<ListasScreen>
                 _lista(_visMenos30,
                     Icons.check_circle_rounded, 'Sin atrasados',
                     'Nada de menos de un mes.',
+                    esColaCobro: true,
+                    estimado: _estimadoMenos30,
                     cola: _visSinFecha,
                     tituloCola: 'Sin fecha de vencimiento',
                     textoAccionVacio: 'Ver «Al día»',
@@ -393,6 +418,8 @@ class _ListasScreenState extends State<ListasScreen>
                 _lista(_visMas30,
                     Icons.check_circle_rounded, 'Sin atrasados',
                     'Nada de más de un mes.',
+                    esColaCobro: true,
+                    estimado: _estimadoMas30,
                     textoAccionVacio: 'Ver «Al día»',
                     onAccionVacio: () => _tab.animateTo(4)),
                 _lista(_visAlDia, // v1.2.1
@@ -530,7 +557,10 @@ class _ListasScreenState extends State<ListasScreen>
 
   Widget _lista(List<Map<String, dynamic>> rows, IconData iconoVacio,
       String tituloVacio, String subtituloVacio,
-      {List<Map<String, dynamic>>? cola,
+      {// 1.25 T46: cabecera de cola de cobro (atrasados).
+      bool esColaCobro = false,
+      double estimado = 0,
+      List<Map<String, dynamic>>? cola,
       String? tituloCola,
       // 1.25 T116 (F1-25): acción del vacío (p. ej. ir a
       // «Al día» desde un «Sin atrasados»).
@@ -566,15 +596,40 @@ class _ListasScreenState extends State<ListasScreen>
           textoAccion: textoAccionVacio,
           onAccion: onAccionVacio);
     }
-    return RefreshIndicator(
+    // 1.25 T46: la cabecera cuenta como primer ítem y
+    // desplaza los índices de filas y de la cola.
+    final desplaza = esColaCobro && rows.isNotEmpty ? 1 : 0;
+    // 1.25 T50: progreso de la sesión de avisos sobre ESTA
+    // lista — «N de M avisados» con su barra. Solo aparece
+    // cuando ya hay alguien avisado (la sesión empezó);
+    // sin avisos, la lista queda como siempre.
+    final totalLista = rows.length + (cola?.length ?? 0);
+    final avisadosLista = [...rows, ...?cola]
+        .where((c) => _avisados.contains((c['id'] as int?) ?? 0))
+        .length;
+    final lista = RefreshIndicator(
       onRefresh: _cargar,
       child: ListView.separated(
-        itemCount: rows.length + (hayCola ? cola.length + 1 : 0),
+        itemCount:
+            desplaza + rows.length + (hayCola ? cola.length + 1 : 0),
         separatorBuilder: (_, __) => Divider(
             height: 1,
             indent: 84,
             color: AppColores.borde(context)),
         itemBuilder: (ctx, i) {
+          if (desplaza == 1 && i == 0) {
+            return Padding(
+              padding: const EdgeInsets.fromLTRB(16, 14, 16, 6),
+              child: Text(
+                '${rows.length} clientes · '
+                '≈ ${fmtMonto(estimado)} CUP por cobrar '
+                '(una mensualidad de cada uno)',
+                style: AppTexto.secundario
+                    .copyWith(fontWeight: FontWeight.w700),
+              ),
+            );
+          }
+          i -= desplaza;
           if (hayCola && i == rows.length) {
             return Padding(
               padding:
@@ -611,6 +666,12 @@ class _ListasScreenState extends State<ListasScreen>
                     : null,
                 child: FilaCliente(
             cliente: c,
+            // 1.25 T46: en las pestañas de atrasados, la
+            // barra de antigüedad (los sin fecha no la
+            // llevan: sin fecha no hay antigüedad).
+            diasAtraso: esColaCobro && !enCola
+                ? -(diasRestantes(c['pagado_hasta'] as String?) ?? 0)
+                : null,
             // 1.25 T116 (F1-26): chip de texto con el día
             // del aviso, junto al borde verde de siempre.
             avisoChip: avisado && _avisadoEl[id] != null
@@ -686,6 +747,39 @@ class _ListasScreenState extends State<ListasScreen>
           );
       },
       ),
+    );
+    // 1.25 T50: con la sesión de avisos empezada, el
+    // progreso va fijo sobre la lista.
+    if (avisadosLista == 0) return lista;
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 10, 16, 2),
+          child: Row(
+            children: [
+              const Icon(Icons.check_circle_rounded,
+                  size: 16, color: AppColores.exito),
+              const SizedBox(width: 6),
+              Text('$avisadosLista de $totalLista avisados',
+                  style: AppTexto.secundario
+                      .copyWith(fontWeight: FontWeight.w700)),
+            ],
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 4, 16, 6),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(AppRadio.sm),
+            child: LinearProgressIndicator(
+              value: totalLista > 0 ? avisadosLista / totalLista : 0,
+              minHeight: 5,
+              backgroundColor: AppColores.borde(context),
+              color: AppColores.exito,
+            ),
+          ),
+        ),
+        Expanded(child: lista),
+      ],
     );
   }
 }
