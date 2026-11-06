@@ -346,7 +346,7 @@ class _SeccionAjustesScreenState extends State<SeccionAjustesScreen> {
     return Scaffold(
       appBar: appBarIron(
         context,
-        widget.seccion == 'bancarios' ? 'Datos bancarios' : widget.seccion == 'precios' ? 'Otros precios' : widget.seccion == 'tipos' ? 'Tipos de pago' : 'Ajustes',
+        widget.seccion == 'bancarios' ? 'Datos bancarios' : widget.seccion == 'tipos' ? 'Tipos de pago' : 'Ajustes',
       ),
       body: ListView(
         padding: const EdgeInsets.all(AppEspacio.lg),
@@ -398,24 +398,10 @@ class _SeccionAjustesScreenState extends State<SeccionAjustesScreen> {
               onPressed: widget.onGuardarTipos,
             ),
           ]),
-          if (widget.seccion == null || widget.seccion == 'precios')
-            seccionAdmin(context, Icons.price_change_rounded, 'Otros precios', [
-            for (final (clave, etiqueta) in widget.clavesMonto)
-              Padding(
-                padding: const EdgeInsets.only(bottom: AppEspacio.sm),
-                child: CampoTexto(
-                  controller: widget.montos[clave],
-                  etiqueta: etiqueta.contains('CUP') ? etiqueta : '$etiqueta (CUP)',
-                  teclado: const TextInputType.numberWithOptions(
-                      decimal: true),
-                ),
-              ),
-            BotonPrimario(
-              texto: 'Guardar otros precios',
-              icono: Icons.save_rounded,
-              onPressed: widget.onGuardarMontos,
-            ),
-          ]),
+          // 1.25 T99: la sección «Otros precios» se eliminó
+          // de esta pantalla: duplicaba las claves de
+          // «Precios por método» (la lista única del Centro
+          // de Precios, con la tasa USD incluida).
           // v1.2.4: datos bancarios para transferencias
           if (widget.seccion == null || widget.seccion == 'bancarios')
             seccionAdmin(context, Icons.account_balance_rounded, 'Datos bancarios', [

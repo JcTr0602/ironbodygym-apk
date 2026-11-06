@@ -2502,22 +2502,24 @@ class _AdminScreenState extends State<AdminScreen> {
   // -- Módulo 5 · Precios, Tarifas y Configuración ----------------------------
   List<Widget> _tarjetasModuloPrecios() {
     return [
+      // 1.25 T99: esto es el CENTRO único de Precios — un
+      // solo sitio con sus cinco secciones, en este orden.
+      // «Otros precios» desaparece: 4 de sus 5 claves
+      // duplicaban a «Precios por método» (el «¿qué
+      // pantalla manda?» de T36) y su única clave propia,
+      // la tasa USD, vive ahora en la lista única.
       _subModulo('PRECIOS Y TARIFAS'),
+      _tarjetaFlujo(
+        Icons.tune_rounded,
+        'Precios por método',
+        'La lista única: mensualidad, períodos, App Plus y tasa USD · se guarda por campo',
+        () => _ir(const PreciosMetodoScreen()),
+      ),
       _tarjetaFlujo(
         Icons.payments_rounded,
         'Tipos de pago',
         '${_tipos.length} tipos configurados',
         () => _ir(_pantallaAjustes(seccion: 'tipos')),
-      ),
-      // 1.25 T36: los nombres dicen la verdad. Esto editaba
-      // los precios GLOBALES y se llamaba «Tarifas especiales»
-      // (la de un cliente es la otra tarjeta): se podía subir
-      // la mensualidad de todos creyendo que era la de uno.
-      _tarjetaFlujo(
-        Icons.price_change_rounded,
-        'Otros precios',
-        'Globales: transferencia, diario, menores, tasa USD, App Plus',
-        () => _ir(_pantallaAjustes(seccion: 'precios')),
       ),
       _tarjetaFlujo(
         Icons.local_offer_rounded,
@@ -2525,14 +2527,13 @@ class _AdminScreenState extends State<AdminScreen> {
         'Por cliente: otorgar y revocar la suya',
         () => _ir(const TarifasScreen()),
       ),
-      // 1.25 T36: fuera el «Única fuente de precios» — no lo
-      // es: Tipos de pago y Otros precios editan montos que
-      // esta lista no trae, y viceversa.
+      // 1.25 T99: los Datos bancarios son parte del centro
+      // de Precios (antes vivían en Configuración).
       _tarjetaFlujo(
-        Icons.tune_rounded,
-        'Precios por método',
-        'Mensualidad, períodos y App Plus: la lista completa',
-        () => _ir(const PreciosMetodoScreen()),
+        Icons.account_balance_rounded,
+        'Datos bancarios',
+        'Tarjetas y móvil de confirmación',
+        () => _ir(_pantallaAjustes(seccion: 'bancarios')),
       ),
       // 1.14 (rediseño): _elegirPagoEntrenador llevaba huérfano
       // desde la v1.6.0 (sin botón). Vuelve como «Pago base a
@@ -2547,14 +2548,8 @@ class _AdminScreenState extends State<AdminScreen> {
       _tarjetaFlujo(
         Icons.settings_rounded,
         'Ajustes del gym',
-        'Precios, tarifas, métodos y textos',
+        'Métodos y textos del gym',
         () => _ir(const AjustesGymScreen()),
-      ),
-      _tarjetaFlujo(
-        Icons.account_balance_rounded,
-        'Datos bancarios',
-        'Tarjetas y móvil de confirmación',
-        () => _ir(_pantallaAjustes(seccion: 'bancarios')),
       ),
       _tarjetaFlujo(
         Icons.book_rounded,

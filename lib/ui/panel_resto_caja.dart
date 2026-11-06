@@ -975,19 +975,29 @@ const _kEtiquetasPrecios = {
   'pago_semanal': 'Semanal',
   'pago_quincenal': 'Quincenal',
   'precio_app_plus': 'App Plus (A++)',
+  'tasa_usd': 'Tasa USD (CUP por 1 USD)',
 };
 
 class _PreciosMetodoScreenState extends State<PreciosMetodoScreen> {
   bool _cargando = true;
-  bool _guardando = false;
   final _ctrls = <String, TextEditingController>{};
+  // 1.25 T99: autoguardado por campo — focos propios (al
+  // perder el foco se guarda ese campo), último valor
+  // vigente por clave y la marca «guardado» por campo.
+  final _focos = <String, FocusNode>{};
+  final _valores = <String, double>{};
+  final _okCampo = <String>{};
+  String? _guardandoCampo;
 
   @override
   void dispose() {
-    // Lote 3 (MENOR): los 7 controladores se creaban en _cargar y
+    // Lote 3 (MENOR): los controladores se creaban en _cargar y
     // nunca se liberaban.
     for (final c in _ctrls.values) {
       c.dispose();
+    }
+    for (final f in _focos.values) {
+      f.dispose();
     }
     super.dispose();
   }
@@ -1009,55 +1019,61 @@ class _PreciosMetodoScreenState extends State<PreciosMetodoScreen> {
       _ctrls[k]?.dispose();
       _ctrls[k] = TextEditingController(
           text: '${(aj[k] as num?)?.toDouble() ?? 0}');
+      _valores[k] = (aj[k] as num?)?.toDouble() ?? 0;
+      _focos[k]?.dispose();
+      final foco = FocusNode();
+      foco.addListener(() {
+        if (!foco.hasFocus) unawaited(_autoguardar(k));
+      });
+      _focos[k] = foco;
     }
     if (mounted) setState(() => _cargando = false);
   }
 
-  Future<void> _guardar() async {
-    // Pasada 2 de Argón (1.20): candado anti-doble-toque (dos
-    // toques encolaban dos configuraciones y dos RPC).
-    if (_guardando) return;
-    setState(() => _guardando = true);
-    try {
-      await _guardarPrecios();
-    } finally {
-      if (mounted) setState(() => _guardando = false);
-    }
-  }
-
-  Future<void> _guardarPrecios() async {
+  /// 1.25 T99: autoguardado por campo. Al salir del campo
+  /// (o con «Listo» en el teclado), SOLO ese precio se
+  /// guarda y se sincroniza: válido y distinto del
+  /// vigente. Inválido: aviso y el campo vuelve al valor
+  /// que SÍ rige (nunca queda en pantalla un precio que
+  /// no está guardado).
+  Future<void> _autoguardar(String k) async {
     // 1.22 T-10: cambiar precios es solo del dueño, también
     // guardado en el método.
     if (!AuthService().isOwner) return;
-    final cambios = <String, dynamic>{};
-    for (final k in kClavesPreciosC6) {
-      final v = double.tryParse(_ctrls[k]!.text.trim());
-      // P2#16: el 0 también se rechaza (antes pasaba con v < 0).
-      // Autoauditoría 1.22 #2 (clase N-2): NaN/Infinity tampoco
-      // son <= 0 y se guardaban como precio del gym.
-      if (v == null || !v.isFinite || v <= 0) {
-        mostrarSnack(context, 'Precio inválido: ${_kEtiquetasPrecios[k]}', significado: SignificadoChip.alerta);
-        return;
-      }
-      cambios[k] = v;
+    if (_guardandoCampo != null) return;
+    final ctrl = _ctrls[k];
+    if (ctrl == null) return;
+    final v = parsePrecioCampo(ctrl.text);
+    if (v == null) {
+      mostrarSnack(context, 'Precio inválido: ${_kEtiquetasPrecios[k]}', significado: SignificadoChip.alerta);
+      ctrl.text = '${_valores[k] ?? ''}';
+      return;
     }
+    if (v == _valores[k]) return;
+    setState(() {
+      _guardandoCampo = k;
+      _okCampo.remove(k);
+    });
     try {
-      await guardarConfigGym(cambios);
+      await guardarConfigGym({k: v});
       // P2#16: republicar precio_app_plus a info_publica con
-      // reintento durable, como hace admin (la cotización S2 lee
-      // el precio de ahí, no del ajuste local).
-      final precioPlus = cambios['precio_app_plus'];
-      if (precioPlus != null) {
-        final entero = (precioPlus as num).round();
+      // reintento durable (la cotización S2 lee el precio de
+      // ahí, no del ajuste local).
+      if (k == 'precio_app_plus') {
         unawaited(invitados_svc.InvitadosService()
             .guardarInfoPublicaConReintento(
-                'precio_app_plus', '$entero'));
+                'precio_app_plus', '${v.round()}'));
       }
+      _valores[k] = v;
       if (mounted) {
-        mostrarSnack(context, 'Precios guardados y sincronizados a los entrenadores', significado: SignificadoChip.exito);
+        setState(() {
+          _guardandoCampo = null;
+          _okCampo.add(k);
+        });
       }
     } catch (e) {
       if (mounted) {
+        setState(() => _guardandoCampo = null);
         mostrarSnack(context, '$e', significado: SignificadoChip.error);
       }
     }
@@ -1081,10 +1097,12 @@ class _PreciosMetodoScreenState extends State<PreciosMetodoScreen> {
                 const Text(
                   'Única fuente de precios: todo lo que cambias aquí '
                   'alimenta a calcularPrecioCobro() en todos los '
-                  'teléfonos. Las tarifas especiales NO se editan '
-                  'aquí: tienen su pantalla en Tarifas. Los '
-                  'cambios rigen hacia adelante: los cobros ya hechos '
-                  'conservan su monto congelado.',
+                  'teléfonos. Cada campo se guarda SOLO al salir de '
+                  'él (mira el ✓ de cada precio). Las tarifas '
+                  'especiales NO se editan aquí: tienen su pantalla '
+                  'en Tarifas. Los cambios rigen hacia adelante: '
+                  'los cobros ya hechos conservan su monto '
+                  'congelado.',
                   style: AppTexto.secundario,
                 ),
                 const SizedBox(height: 12),
@@ -1093,19 +1111,31 @@ class _PreciosMetodoScreenState extends State<PreciosMetodoScreen> {
                     padding: const EdgeInsets.only(bottom: AppEspacio.sm),
                     child: TextField(
                       controller: _ctrls[k],
+                      focusNode: _focos[k],
                       keyboardType: TextInputType.number,
+                      onSubmitted: (_) => _autoguardar(k),
+                      onChanged: (_) =>
+                          setState(() => _okCampo.remove(k)),
                       decoration: InputDecoration(
-                          labelText: _kEtiquetasPrecios[k],
-                          suffixText: 'CUP'),
+                        labelText: _kEtiquetasPrecios[k],
+                        suffixText: 'CUP',
+                        suffixIcon: _guardandoCampo == k
+                            ? const Padding(
+                                padding: EdgeInsets.all(12),
+                                child: SizedBox(
+                                  width: 16,
+                                  height: 16,
+                                  child: CircularProgressIndicator(
+                                      strokeWidth: 2),
+                                ),
+                              )
+                            : _okCampo.contains(k)
+                                ? const Icon(Icons.check_circle_rounded,
+                                    color: AppColores.exito, size: 20)
+                                : null,
+                      ),
                     ),
                   ),
-                const SizedBox(height: 12),
-                BotonPrimario(
-                  texto: 'Guardar y sincronizar',
-                  onPressed: _guardando ? null : _guardar,
-                  cargando: _guardando,
-                  expandido: false,
-                ),
               ],
             ),
     );

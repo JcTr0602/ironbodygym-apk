@@ -568,7 +568,20 @@ const kClavesPreciosC6 = [
   'pago_semanal',
   'pago_quincenal',
   'precio_app_plus',
+  // 1.25 T99: la tasa USD vivía en «Otros precios», la
+  // pantalla duplicada que el Centro de Precios elimina:
+  // era su única clave exclusiva. Pasa a la fuente única.
+  'tasa_usd',
 ];
+
+/// 1.25 T99, PURO: parseo de UN campo de precio para el
+/// autoguardado por campo: finito y > 0, o null (el 0 y
+/// NaN/Infinity se rechazan, clase N-2 de la 1.22).
+double? parsePrecioCampo(String texto) {
+  final v = double.tryParse(texto.trim());
+  if (v == null || !v.isFinite || v <= 0) return null;
+  return v;
+}
 
 /// Claves que H1 edita SIN duplicar C6: métodos aceptados y textos
 /// base. Los precios y períodos viven solo en C6 (Argón ajuste 3).
