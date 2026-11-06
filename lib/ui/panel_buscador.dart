@@ -139,6 +139,11 @@ const catalogoFuncionesPanel = <FuncionPanel>[
       sinonimos: ['a punto de vencer', 'vencen pronto'],
       icono: Icons.event_rounded),
   FuncionPanel(
+      id: 'comunicacion',
+      titulo: 'Comunicación',
+      sinonimos: ['mensajes', 'avisos', 'whatsapp', 'campañas', 'plantillas'],
+      icono: Icons.forum_rounded),
+  FuncionPanel(
       id: 'cumpleanos',
       titulo: 'Cumpleaños',
       sinonimos: ['cumple', 'felicitar', 'regalo de cumpleaños'],

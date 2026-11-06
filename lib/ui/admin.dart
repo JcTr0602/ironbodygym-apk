@@ -38,6 +38,7 @@ import 'panel_dueno_atencion.dart';
 import 'bandeja_whatsapp.dart';
 import 'ficha.dart';
 import 'panel_buscador.dart';
+import 'hub_comunicacion.dart';
 import 'actividad.dart';
 import 'buscar.dart';
 import 'admin_secciones.dart';
@@ -640,6 +641,8 @@ class _AdminScreenState extends State<AdminScreen> {
       return;
     }
     switch (id) {
+      case 'comunicacion':
+        _ir(const HubComunicacionScreen());
       case 'arqueo':
         _ir(const ArqueoScreen());
       case 'cierre_caja':
@@ -2667,15 +2670,8 @@ class _AdminScreenState extends State<AdminScreen> {
         'Vencidos + próximos 7 días, con acción',
         () => _ir(const VencimientosProximosScreen()),
       ),
-      // #3 (Argón cumpleaños): una sola pantalla. La vieja
-      // CumpleanosMes (sin filtro Casa, sin regalo ni Felicitado)
-      // se eliminó: CumpleanosScreen ya cubre próximos y mes.
-      _tarjetaFlujo(
-        Icons.cake_rounded,
-        'Cumpleaños',
-        'Próximos días, mes y regalo en un toque',
-        () => _ir(const CumpleanosScreen()),
-      ),
+      // 1.25 T108: Cumpleaños vive en el hub de
+      // Comunicación (su tarjeta sale de esta sección).
       _subModulo('INVITADOS'),
       _tarjetaFlujo(
         Icons.group_rounded,
@@ -2691,31 +2687,16 @@ class _AdminScreenState extends State<AdminScreen> {
         () => _ir(const InvitadosFrecuentesScreen()),
       ),
       _subModulo('COMUNICACIÓN'),
+      // 1.25 T108: UNA sola entrada «Comunicación» — el
+      // hub agrupa bandeja de hoy, cumpleaños, campañas,
+      // avisos de las dos apps, plantillas y
+      // recordatorios. Las tarjetas sueltas de cada
+      // pieza salen del módulo: viven en el hub.
       _tarjetaFlujo(
-        Icons.message_rounded,
-        'Plantillas de mensajes',
-        'Solo variables blancas, aviso si la sync es vieja',
-        () => _ir(const PlantillasScreen()),
-      ),
-      _tarjetaFlujo(
-        Icons.campaign_rounded,
-        'Avisos para entrenadores',
-        'PopUp en el Home de cada entrenador',
-        () => _ir(const AvisosEntrenadorScreen()),
-      ),
-      // 1.24 Bloque 6 (ítem 16): el centro de avisos de la app
-      // de clientes se publica desde aquí (RPC admin_*).
-      _tarjetaFlujo(
-        Icons.notifications_active_rounded,
-        'Avisos a clientes',
-        'El centro de avisos de la app de clientes',
-        () => _ir(const EditorAvisosClientesScreen()),
-      ),
-      _tarjetaFlujo(
-        Icons.notifications_rounded,
-        'Recordatorios automáticos',
-        'Hoy, con anti-duplicado; masivos solo en tu teléfono',
-        () => _ir(const RecordatoriosScreen()),
+        Icons.forum_rounded,
+        'Comunicación',
+        'Bandeja, cumpleaños, campañas, avisos y plantillas en un solo lugar',
+        () => _ir(const HubComunicacionScreen()),
       ),
       _tarjetaFlujo(
         Icons.public_rounded,
