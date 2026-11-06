@@ -32,6 +32,7 @@ import '../tiempo.dart';
 import 'app_bar.dart';
 import 'componentes.dart';
 import 'diseno.dart';
+import 'dialogo_pago.dart' show metodosAceptadosEfectivos;
 import 'panel_resto_caja.dart';
 import 'tarifas_especiales.dart';
 
@@ -49,18 +50,38 @@ class AjustesGymScreen extends StatefulWidget {
   State<AjustesGymScreen> createState() => _AjustesGymScreenState();
 }
 
+/// 1.25 T106: una fila del editor de textos base
+/// (clave + texto), con sus controladores propios.
+class _FilaTextoBase {
+  final claveCtrl = TextEditingController();
+  final textoCtrl = TextEditingController();
+  _FilaTextoBase([String clave = '', String texto = '']) {
+    claveCtrl.text = clave;
+    textoCtrl.text = texto;
+  }
+
+  void dispose() {
+    claveCtrl.dispose();
+    textoCtrl.dispose();
+  }
+}
+
 class _AjustesGymScreenState extends State<AjustesGymScreen> {
   bool _cargando = true;
   // 1.23 AT-14: candado anti-doble-toque del guardado.
   bool _guardando = false;
-  final _metodosCtrl = TextEditingController();
-  final _textosCtrl = TextEditingController();
+  // 1.25 T106: configuración SIN sintaxis — métodos como
+  // interruptores y textos base como filas, nada de
+  // comas ni JSON en crudo.
+  bool _metEfectivo = true;
+  bool _metTransferencia = true;
+  final List<_FilaTextoBase> _filasTextos = [];
 
   @override
   void dispose() {
-    // Argón lote 4 MENOR: faltaban los dispose.
-    _metodosCtrl.dispose();
-    _textosCtrl.dispose();
+    for (final f in _filasTextos) {
+      f.dispose();
+    }
     super.dispose();
   }
 
@@ -72,13 +93,18 @@ class _AjustesGymScreenState extends State<AjustesGymScreen> {
 
   Future<void> _cargar() async {
     final aj = await LocalDb.instance.getAjustes();
-    final metodos = aj['metodos_aceptados'];
-    _metodosCtrl.text = metodos is List
-        ? metodos.map((m) => '$m').join(', ')
-        : '${metodos ?? 'efectivo, transferencia'}';
+    // Los métodos salen por la MISMA función que los lee
+    // en el diálogo de cobro (efectivo/transferencia).
+    final metodos = metodosAceptadosEfectivos(aj['metodos_aceptados']);
+    _metEfectivo = metodos.efectivo;
+    _metTransferencia = metodos.transferencia;
     final textos = aj['textos_base'];
-    _textosCtrl.text =
-        textos is Map ? jsonEncode(textos) : '${textos ?? ''}';
+    if (textos is Map) {
+      for (final e in textos.entries) {
+        _filasTextos
+            .add(_FilaTextoBase('${e.key}', '${e.value ?? ''}'));
+      }
+    }
     if (mounted) setState(() => _cargando = false);
   }
 
@@ -91,36 +117,28 @@ class _AjustesGymScreenState extends State<AjustesGymScreen> {
     if (_guardando) return;
     setState(() => _guardando = true);
     try {
-      // Corrección panel 1.11 (ALTO): el servidor exige lista para
-      // metodos_aceptados y mapa para textos_base; antes se
-      // enviaban ambos como String y la op se rechazaba, mientras
-      // la app ya había guardado el cambio en local (el dueño lo
-      // veía aplicado y los entrenadores conservaban lo viejo).
-      final metodos = _metodosCtrl.text
-          .split(',')
-          .map((s) => s.trim())
-          .where((s) => s.isNotEmpty)
-          .toList();
-      // Argón lote 4 MEDIO: vaciar el texto dejaba metodos_aceptados
-      // en [] y la app sin métodos de pago válidos. Se rechaza.
+      // Corrección panel 1.11 (ALTO): el servidor exige lista
+      // para metodos_aceptados y mapa para textos_base — las
+      // puras de T106 arman exactamente esas formas desde
+      // los interruptores y las filas, sin sintaxis.
+      final metodos = metodosDesdeInterruptores(
+        efectivo: _metEfectivo,
+        transferencia: _metTransferencia,
+      );
+      // Argón lote 4 MEDIO: dejar la lista en [] dejaba la
+      // app sin métodos de pago válidos. Se rechaza.
       if (metodos.isEmpty) {
         throw Exception('Debe quedar al menos un método de pago');
       }
-      Map<String, dynamic>? textos;
-      final tb = _textosCtrl.text.trim();
-      if (tb.isNotEmpty) {
-        final dec = jsonDecode(tb);
-        if (dec is! Map) {
-          throw Exception(
-              'textos_base debe ser un mapa JSON, ej: {"saludo": "Hola"}');
-        }
-        textos = Map<String, dynamic>.from(dec);
-      }
+      final textos = textosBaseDesdeFilas([
+        for (final f in _filasTextos)
+          (f.claveCtrl.text, f.textoCtrl.text),
+      ]);
       await guardarConfigGym({
         'metodos_aceptados': metodos,
-        // Argón lote 4 MEDIO: omitir la clave dejaba el valor VIEJO
-        // (vaciar el texto no lo limpiaba). Mapa vacío = limpio.
-        'textos_base': textos ?? {},
+        // Argón lote 4 MEDIO: omitir la clave dejaba el valor
+        // VIEJO (sin filas = mapa vacío = limpio, como antes).
+        'textos_base': textos,
       });
       if (mounted) {
         mostrarSnack(context, 'Ajustes guardados y sincronizados', significado: SignificadoChip.exito);
@@ -184,19 +202,120 @@ class _AjustesGymScreenState extends State<AjustesGymScreen> {
                   ),
                 ),
                 const SizedBox(height: 12),
-                TextField(
-                  controller: _metodosCtrl,
-                  decoration: const InputDecoration(
-                      labelText: 'Métodos aceptados',
-                      helperText: 'Separados por coma, p. ej. efectivo, transferencia'),
+                // 1.25 T106: métodos como INTERRUPTORES
+                // (los dos únicos que la app reconoce) y
+                // textos base como FILAS etiquetadas.
+                const Text('Métodos de pago aceptados',
+                    style: AppTexto.titulo),
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Efectivo'),
+                  subtitle: const Text(
+                      'El cobro en mano, el de siempre.'),
+                  value: _metEfectivo,
+                  onChanged: (v) =>
+                      setState(() => _metEfectivo = v),
+                ),
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Transferencia'),
+                  subtitle: const Text(
+                      'A la tarjeta del gym (precio de '
+                      'transferencia).'),
+                  value: _metTransferencia,
+                  onChanged: (v) =>
+                      setState(() => _metTransferencia = v),
+                ),
+                if (!_metEfectivo && !_metTransferencia)
+                  const Text(
+                    'Debe quedar al menos un método encendido: '
+                    'sin ninguno, la app ofrecería los dos por '
+                    'defecto.',
+                    style: TextStyle(color: AppColores.error),
+                  ),
+                const SizedBox(height: 12),
+                const Text('Textos base', style: AppTexto.titulo),
+                const Text(
+                  'Textos reutilizables del gym, por nombre. '
+                  'Ejemplo: nombre «saludo», texto «Hola, te '
+                  'escribimos de Iron Body Gym». Sin filas, no '
+                  'hay textos.',
+                  style: AppTexto.secundario,
                 ),
                 const SizedBox(height: 8),
-                TextField(
-                  controller: _textosCtrl,
-                  maxLines: 4,
-                  decoration: const InputDecoration(
-                      labelText: 'Textos base',
-                      helperText: 'Textos base de mensajes del gym'),
+                for (var i = 0; i < _filasTextos.length; i++)
+                  Padding(
+                    padding:
+                        const EdgeInsets.only(bottom: AppEspacio.sm),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(
+                          flex: 2,
+                          child: CampoTexto(
+                            controller: _filasTextos[i].claveCtrl,
+                            etiqueta: 'Nombre',
+                            hint: 'saludo',
+                            onChanged: (_) => setState(() {}),
+                          ),
+                        ),
+                        const SizedBox(width: AppEspacio.sm),
+                        Expanded(
+                          flex: 3,
+                          child: CampoTexto(
+                            controller: _filasTextos[i].textoCtrl,
+                            etiqueta: 'Texto',
+                            onChanged: (_) => setState(() {}),
+                          ),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.close_rounded),
+                          tooltip: 'Quitar este texto',
+                          onPressed: () => setState(() {
+                            _filasTextos[i].dispose();
+                            _filasTextos.removeAt(i);
+                          }),
+                        ),
+                      ],
+                    ),
+                  ),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: OutlinedButton.icon(
+                    icon: const Icon(Icons.add_rounded, size: 18),
+                    label: const Text('Añadir texto'),
+                    onPressed: () => setState(
+                        () => _filasTextos.add(_FilaTextoBase())),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                // La vista previa: así queda lo que se va
+                // a guardar, en lenguaje común.
+                Tarjeta(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text('Vista previa',
+                          style: AppTexto.titulo),
+                      const SizedBox(height: 4),
+                      Text(
+                        'Al cobrar se ofrecerá: '
+                        '${[
+                          if (_metEfectivo) 'Efectivo',
+                          if (_metTransferencia) 'Transferencia',
+                        ].join(' y ')}'
+                        '${!_metEfectivo && !_metTransferencia ? '— (sin métodos: la app ofrecerá los dos por defecto)' : ''}',
+                        style: AppTexto.cuerpo,
+                      ),
+                      for (final f in _filasTextos)
+                        if (f.claveCtrl.text.trim().isNotEmpty)
+                          Text(
+                            'Texto «${f.claveCtrl.text.trim()}»: '
+                            '${f.textoCtrl.text}',
+                            style: AppTexto.cuerpo,
+                          ),
+                    ],
+                  ),
                 ),
                 const SizedBox(height: 12),
                 BotonPrimario(

@@ -587,6 +587,35 @@ double? parsePrecioCampo(String texto) {
 /// base. Los precios y períodos viven solo en C6 (Argón ajuste 3).
 const kClavesAjustesH1 = ['metodos_aceptados', 'textos_base'];
 
+/// 1.25 T106, PURO: la lista de métodos aceptados desde
+/// los interruptores de Ajustes del gym. La app solo
+/// reconoce 'efectivo' y 'transferencia'
+/// (metodosAceptadosEfectivos); el orden es el canónico.
+List<String> metodosDesdeInterruptores({
+  required bool efectivo,
+  required bool transferencia,
+}) {
+  return [
+    if (efectivo) 'efectivo',
+    if (transferencia) 'transferencia',
+  ];
+}
+
+/// 1.25 T106, PURO: el mapa textos_base desde las filas
+/// (clave, texto) del editor sin sintaxis: las filas
+/// sin clave no entran; si una clave se repite, gana
+/// la última fila (como al escribir el mapa a mano).
+Map<String, dynamic> textosBaseDesdeFilas(
+    List<(String, String)> filas) {
+  final out = <String, dynamic>{};
+  for (final (clave, texto) in filas) {
+    final k = clave.trim();
+    if (k.isEmpty) continue;
+    out[k] = texto;
+  }
+  return out;
+}
+
 /// Autoauditoría 1.22 #2 (D2-01): todo valor numérico de un
 /// cambio de configuración debe ser finito. Un NaN/Infinity que
 /// llegara al sumidero se guardaba en los ajustes locales y
