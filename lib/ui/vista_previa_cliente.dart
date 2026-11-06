@@ -284,16 +284,27 @@ class _VistaPreviaClienteScreenState
       ),
       body: Column(
         children: [
-          Container(
-            width: double.infinity,
-            color: _naranja,
-            padding:
-                const EdgeInsets.symmetric(vertical: AppEspacio.sm, horizontal: AppEspacio.lg),
-            child: Text(
-              'VISTA PREVIA — lo que ve el cliente en su app',
-              style: AppTexto.metadato.copyWith(color: Colors.white, fontWeight: FontWeight.w600),
-              textAlign: TextAlign.center,
-            ),
+          // 1.25 T117 (F1-76): la franja solo vive en la
+          // pestaña Inicio; antes ocupaba alto en las 5
+          // pestañas repitiendo lo que el título ya dice.
+          AnimatedBuilder(
+            animation: _tabs,
+            builder: (context, _) => _tabs.index == 0
+                ? Container(
+                    width: double.infinity,
+                    color: _naranja,
+                    padding: const EdgeInsets.symmetric(
+                        vertical: AppEspacio.sm,
+                        horizontal: AppEspacio.lg),
+                    child: Text(
+                      'VISTA PREVIA — lo que ve el cliente en su app',
+                      style: AppTexto.metadato.copyWith(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w600),
+                      textAlign: TextAlign.center,
+                    ),
+                  )
+                : const SizedBox.shrink(),
           ),
           Expanded(
             child: _cargando
@@ -435,6 +446,18 @@ class _VistaPreviaClienteScreenState
             ],
           ),
         ),
+        // 1.25 T117 (F1-76): los umbrales de aviso no coinciden
+        // a propósito (la app del cliente avisa a los 5 días y
+        // Gestión a los 7): se dice en la propia vista para que
+        // la diferencia no se lea como un error.
+        Padding(
+          padding: const EdgeInsets.only(bottom: AppEspacio.sm),
+          child: Text(
+              'Nota: en la app del cliente el aviso de vencimiento '
+              'sale a los 5 días; en Gestión, a los 7.',
+              style:
+                  AppTexto.metadato.copyWith(color: Colors.white38)),
+        ),
         // Entrenador de turno: abierto por horario ≠ entrenador asignado.
         _tarjeta([
           Text('ENTRENADOR DE TURNO HOY',
@@ -455,7 +478,10 @@ class _VistaPreviaClienteScreenState
                 style: TextStyle(color: Colors.white)),
           const SizedBox(height: 4),
           Text(
-              'Horario: ${_horarioCanonico ?? 'L–V 6:00–12:00 y 14:00–20:00 · Sáb 7:00–12:00 · Dom cerrado'}',
+              // 1.25 T117 (F1-70): si el horario canónico no
+              // cargó, el de respaldo se marca «sin confirmar»:
+              // no es el horario verificado del gym.
+              'Horario: ${_horarioCanonico ?? 'L–V 6:00–12:00 y 14:00–20:00 · Sáb 7:00–12:00 · Dom cerrado (sin confirmar)'}',
               style: AppTexto.metadato.copyWith(color: Colors.white54)),
         ]),
         // Resumen rápido.
@@ -495,8 +521,9 @@ class _VistaPreviaClienteScreenState
         if (total != null && total > pagos.length)
           _rotuloCorte(pagos.length, total),
         if (pagos.isEmpty)
-          const Text('Sin pagos registrados',
-              style: TextStyle(color: Colors.white70))
+          _vacioOscuro(Icons.receipt_long_rounded,
+              'Sin pagos registrados',
+              'En su app, esta lista saldría vacía.')
         else
           for (final p in pagos)
             _tarjeta([
@@ -592,8 +619,9 @@ class _VistaPreviaClienteScreenState
         if (totalCompras != null && totalCompras > compras.length)
           _rotuloCorte(compras.length, totalCompras),
         if (compras.isEmpty)
-          const Text('Sin compras registradas',
-              style: TextStyle(color: Colors.white70))
+          _vacioOscuro(Icons.shopping_bag_rounded,
+              'Sin compras registradas',
+              'En su app, esta lista saldría vacía.')
         else
           for (final vc in compras)
             _tarjeta([
@@ -650,9 +678,10 @@ class _VistaPreviaClienteScreenState
     final planCrudo = _datos?['plan_nutricional'];
     final plan = planCrudo == null ? null : mapaSeguro(planCrudo);
     if (plan == null) {
-      return const Center(
-        child: Text('Sin plan asignado',
-            style: TextStyle(color: Colors.white70)),
+      return Center(
+        child: _vacioOscuro(Icons.restaurant_menu_rounded,
+            'Sin plan asignado',
+            'En su app, aquí iría su plan nutricional.'),
       );
     }
     final detalle = '${plan['detalle'] ?? ''}';
@@ -663,7 +692,8 @@ class _VistaPreviaClienteScreenState
           Text('Objetivo: ${plan['objetivo'] ?? '—'}',
               style: const TextStyle(
                   color: Colors.white, fontWeight: FontWeight.w600)),
-          Text('Actualizado: ${plan['actualizado_en'] ?? '—'}',
+          // 1.25 T117 (F1-71): fecha legible, no el ISO crudo.
+          Text('Actualizado: ${fechaHumana(plan['actualizado_en'])}',
               style: AppTexto.secundario.copyWith(color: Colors.white70)),
         ]),
         if (detalle.isNotEmpty)
@@ -711,17 +741,22 @@ class _VistaPreviaClienteScreenState
         if (totalMed != null && totalMed > mediciones.length)
           _rotuloCorte(mediciones.length, totalMed),
         if (mediciones.isEmpty)
-          const Text('Sin mediciones registradas',
-              style: TextStyle(color: Colors.white70))
+          _vacioOscuro(Icons.monitor_weight_rounded,
+              'Sin mediciones registradas',
+              'En su app, esta lista saldría vacía.')
         else ...[
-          _tarjetaMedicion(mediciones.first, destacada: true),
+          _tarjetaMedicion(mediciones.first,
+              destacada: true,
+              anterior:
+                  mediciones.length > 1 ? mediciones[1] : null),
           for (final m in mediciones.skip(1)) _tarjetaMedicion(m),
         ],
         const SizedBox(height: 8),
         _tituloSeccion('Marcas — récords'),
         if (records.isEmpty)
-          const Text('Sin marcas registradas',
-              style: TextStyle(color: Colors.white70))
+          _vacioOscuro(Icons.emoji_events_rounded,
+              'Sin marcas registradas',
+              'En su app, esta lista saldría vacía.')
         else
           for (final r in records)
             _tarjeta([
@@ -763,7 +798,8 @@ class _VistaPreviaClienteScreenState
     );
   }
 
-  Widget _tarjetaMedicion(dynamic m, {bool destacada = false}) {
+  Widget _tarjetaMedicion(dynamic m,
+      {bool destacada = false, dynamic anterior}) {
     final medidas = <String>[
       if (m['peso_kg'] != null) 'Peso ${formatoMonto(m['peso_kg'])} kg',
       if (m['grasa_pct'] != null) 'Grasa ${formatoMonto(m['grasa_pct'])} %',
@@ -775,6 +811,27 @@ class _VistaPreviaClienteScreenState
         'Cadera ${formatoMonto(m['cadera_cm'])} cm',
       if (m['muslo_cm'] != null) 'Muslo ${formatoMonto(m['muslo_cm'])} cm',
     ];
+    // 1.25 T117 (F1-75): en la medición destacada, el cambio
+    // desde la anterior (peso, grasa, cintura) con flecha; sin
+    // color de bueno/malo: si subió o bajó es bueno depende
+    // del objetivo del cliente, que esta vista no conoce.
+    final deltas = <String>[];
+    if (destacada && anterior != null) {
+      void delta(String clave, String nombre, String unidad) {
+        final a = m[clave], b = anterior[clave];
+        if (a is num && b is num) {
+          final d = a.toDouble() - b.toDouble();
+          if (d != 0) {
+            deltas.add('$nombre ${d > 0 ? '▲' : '▼'} '
+                '${formatoMonto(d.abs())} $unidad');
+          }
+        }
+      }
+
+      delta('peso_kg', 'Peso', 'kg');
+      delta('grasa_pct', 'Grasa', '%');
+      delta('cintura_cm', 'Cintura', 'cm');
+    }
     return _tarjeta([
       Row(
         children: [
@@ -792,6 +849,9 @@ class _VistaPreviaClienteScreenState
         Text(medidas.join(' · '),
             style:
                 AppTexto.secundario.copyWith(color: Colors.white70)),
+      if (deltas.isNotEmpty)
+        Text('Desde la anterior: ${deltas.join(' · ')}',
+            style: AppTexto.secundario.copyWith(color: _naranja)),
       if ('${m['notas'] ?? ''}'.isNotEmpty)
         Text('${m['notas']}',
             style:
@@ -881,6 +941,32 @@ class _VistaPreviaClienteScreenState
     );
   }
 
+  // 1.25 T117 (F1-73): vacío propio de esta pantalla espejo —
+  // icono, título y subtítulo en su lenguaje oscuro. El
+  // EstadoVacio de Gestión pertenece al tema de Gestión y
+  // aquí rompería la fidelidad con la app del cliente.
+  Widget _vacioOscuro(
+      IconData icono, String titulo, String subtitulo) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: AppEspacio.lg),
+      child: Column(
+        children: [
+          Icon(icono, size: 36, color: Colors.white24),
+          const SizedBox(height: AppEspacio.sm),
+          Text(titulo,
+              style: const TextStyle(
+                  color: Colors.white70,
+                  fontWeight: FontWeight.w600)),
+          const SizedBox(height: 2),
+          Text(subtitulo,
+              style:
+                  AppTexto.metadato.copyWith(color: Colors.white38),
+              textAlign: TextAlign.center),
+        ],
+      ),
+    );
+  }
+
   Widget _fila(String etiqueta, String valor, {bool destacado = false}) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 2),
@@ -911,11 +997,19 @@ class _VistaPreviaClienteScreenState
   }
 
   Widget _chipDisponibilidad(String disp) {
-    final color = disp == 'Disponible'
-        ? Colors.green
-        : disp == 'Últimas unidades'
+    // 1.25 T117 (F1-72): sin texto no hay pastilla (antes la
+    // cadena vacía caía en el «resto» rojo y pintaba una
+    // pastilla vacía en rojo); el color se mapea por
+    // contenido, no por igualdad exacta con dos frases.
+    final t = disp.trim().toLowerCase();
+    if (t.isEmpty) return const SizedBox.shrink();
+    final color = t.contains('agot')
+        ? Colors.red
+        : (t.contains('últim') || t.contains('ultim'))
             ? Colors.amber
-            : Colors.red;
+            : t.contains('dispon')
+                ? Colors.green
+                : Colors.white54;
     return _chip(disp, color);
   }
 }
