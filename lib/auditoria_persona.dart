@@ -405,8 +405,11 @@ List<Map<String, dynamic>> serieMinutosPorDia({
 /// 1.25 T115: cobros por día del período (CUP), con
 /// LAS MISMAS reglas de auditarDineroPersona (mensual
 /// + diario + suplementos sin anuladas ni otra moneda
-/// + dosis sin Casa): la serie y el total del resumen
-/// nunca se contradicen.
+/// + dosis sin Casa). Precisión (autoauditoría 1.25):
+/// la serie acumula en double y redondea POR DÍA; con
+/// montos enteros (el caso real en CUP) la suma de la
+/// serie ES el total del resumen; con fraccionarios,
+/// puede diferir en menos de medio peso por día.
 List<Map<String, dynamic>> serieCobrosPorDia({
   required PersonaApk persona,
   required String desdeIso,
@@ -417,12 +420,14 @@ List<Map<String, dynamic>> serieCobrosPorDia({
   required List<Map<String, dynamic>> ventasServicios,
 }) {
   final dias = _diasDelPeriodo(desdeIso, hastaIso);
-  final porFecha = {for (final d in dias) '${d['fecha']}': d};
+  // Autoauditoría 1.25: se acumula en double y se
+  // redondea una sola vez POR DÍA (antes: por fila).
+  final sumas = <String, double>{};
   void suma(Map<String, dynamic> fila, double monto) {
     if (!_enPeriodo(fila, desdeIso, hastaIso)) return;
     if (!filaEsDePersona(fila, persona)) return;
-    final f = porFecha['${fila['fecha'] ?? ''}'.substring(0, 10)];
-    if (f != null) f['total'] = (f['total'] as int) + monto.round();
+    final fecha = '${fila['fecha'] ?? ''}'.substring(0, 10);
+    sumas[fecha] = (sumas[fecha] ?? 0) + monto;
   }
 
   for (final p in pagos) {
@@ -453,6 +458,9 @@ List<Map<String, dynamic>> serieCobrosPorDia({
     if ((v['casa'] as int? ?? 0) == 1) continue;
     final cant = (v['cantidad'] as num?)?.toDouble() ?? 0;
     suma(v, ((v['precio_unitario'] as num?)?.toDouble() ?? 0) * cant);
+  }
+  for (final d in dias) {
+    d['total'] = (sumas['${d['fecha']}'] ?? 0).round();
   }
   return dias;
 }

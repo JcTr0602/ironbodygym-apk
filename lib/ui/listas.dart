@@ -236,6 +236,12 @@ class _ListasScreenState extends State<ListasScreen>
           // Una vista corrupta no tumba a las demás.
         }
       }
+      // Autoauditoría 1.25: el tope también manda al
+      // cargar (preferencias escritas por otra versión
+      // o a mano no dejan el guardado bloqueado).
+      if (vistas.length > kMaxVistasListas) {
+        vistas.removeRange(kMaxVistasListas, vistas.length);
+      }
       if (!mounted) return;
       setState(() => _vistas = vistas);
     } catch (_) {

@@ -698,8 +698,13 @@ class _GuiaScreenState extends State<GuiaScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                // Autoauditoría 1.25: «Otros» es un cajón,
+                // no un equipo — el titular cuenta solo
+                // los equipos de verdad y nombra el cajón.
                 Text(
-                  '${_publicadas.length} fichas en ${conteosPortada.length} equipos',
+                  '${_publicadas.length} fichas en '
+                  '${conteosPortada.keys.where((g) => g != 'Otros').length} equipos'
+                  '${conteosPortada.containsKey('Otros') ? ' · ${conteosPortada['Otros']!.length} en Otros' : ''}',
                   style: AppTexto.subtitulo,
                 ),
                 const SizedBox(height: 8),

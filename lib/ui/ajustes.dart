@@ -1710,6 +1710,14 @@ class _AjustesScreenState extends State<AjustesScreen> {
               children: [
                 if (_busquedaAjustes.isNotEmpty &&
                     !titulosPorSeccionAjustes.keys
+                        // Autoauditoría 1.25: Diagnóstico es
+                        // solo del dueño; para el resto no
+                        // cuenta como sección visible (un
+                        // entrenador que busca «bitácora»
+                        // debe ver el aviso, no una lista
+                        // vacía sin explicación).
+                        .where((sec) =>
+                            sec != 'Diagnóstico' || _auth.isOwner)
                         .any((sec) => seccionVisibleAjustes(sec, _busquedaAjustes)))
                   const EstadoVacio(
                     icono: Icons.search_off_rounded,
