@@ -130,14 +130,17 @@ class _IncidenciasSyncScreenState extends State<IncidenciasSyncScreen> {
         ],
       ),
     );
+    // 1.25 T41: la nota se captura ANTES de liberar el
+    // controlador (el texto se leía DESPUÉS del dispose: la
+    // nota se perdía o reventaba — el mismo patrón corregido
+    // ya dos veces en la casa).
+    final nota = notaCtrl.text.trim();
     notaCtrl.dispose();
     if (ok != true || !mounted) return;
     setState(() => _procesando = true);
     try {
       await descartarIncidenciaSync('${inc['id']}',
-          nota: notaCtrl.text.trim().isEmpty
-              ? null
-              : notaCtrl.text.trim());
+          nota: nota.isEmpty ? null : nota);
       if (mounted) {
         mostrarSnack(context, 'Incidencia descartada.', significado: SignificadoChip.exito);
         await _cargar();
