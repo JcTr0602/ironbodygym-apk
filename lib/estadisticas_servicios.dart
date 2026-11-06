@@ -77,6 +77,34 @@ const Map<int, String> kNombresDiaSemana = {
   7: 'Domingo',
 };
 
+/// 1.25 T94, PURO: fracción 0..1 de una barra contra
+/// el máximo de su serie (máximo 0 → barra vacía, sin
+/// división por cero).
+double fraccionBarra(num valor, num maximo) {
+  if (maximo <= 0) return 0;
+  final f = valor / maximo;
+  if (f.isNaN || f < 0) return 0;
+  return f > 1 ? 1 : f.toDouble();
+}
+
+/// 1.25 T94, PURO: nivel del medidor de autonomía de
+/// un pomo por sus días estimados: 'holgada' (>= 14),
+/// 'justa' (7-13), 'critica' (< 7), 'sin_dato'.
+String nivelAutonomiaPomo(int? dias) {
+  if (dias == null) return 'sin_dato';
+  if (dias >= 14) return 'holgada';
+  if (dias >= 7) return 'justa';
+  return 'critica';
+}
+
+/// 1.25 T94, PURO: fracción del medidor de autonomía,
+/// con tope visual de 30 días (un mes de colchón).
+double fraccionAutonomiaPomo(int? dias) {
+  if (dias == null || dias <= 0) return 0;
+  final f = dias / 30;
+  return f > 1 ? 1 : f;
+}
+
 /// Ventas agrupadas por día de semana: dosis e ingresos por día.
 /// Solo ventas de dosis (no agua suelta) y sin Casa (precio 0).
 /// Las filas sin fecha válida se ignoran (no se inventa un día).

@@ -678,7 +678,55 @@ class _ServiciosEstadisticasScreenState
     }
   }
 
+  /// 1.25 T94: una barra horizontal proporcional con
+  /// su etiqueta y su valor. El patrón se VE; el texto
+  /// exacto queda a la derecha.
+  Widget _barra(String etiqueta, double fraccion, String valor,
+      {Color? color}) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 3),
+      child: Row(
+        children: [
+          SizedBox(
+            width: 92,
+            child: Text(etiqueta,
+                style: AppTexto.cuerpo, overflow: TextOverflow.ellipsis),
+          ),
+          Expanded(
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(AppRadio.sm),
+              child: LinearProgressIndicator(
+                value: fraccion,
+                minHeight: 10,
+                color: color ?? AppColores.naranja,
+                backgroundColor:
+                    AppColores.naranja.withValues(alpha: 0.12),
+              ),
+            ),
+          ),
+          const SizedBox(width: AppEspacio.sm),
+          Text(valor, style: AppTexto.cuerpo),
+        ],
+      ),
+    );
+  }
+
+  Color _colorNivelAutonomia(String nivel) => switch (nivel) {
+        'holgada' => AppColores.exito,
+        'justa' => const Color(0xFFD97706),
+        'critica' => AppColores.error,
+        _ => Colors.grey,
+      };
+
   Widget _tarjetaAgrupaciones() {
+    // 1.25 T94: las agrupaciones se dibujan como barras
+    // (antes, listas de texto idénticas: el patrón no se
+    // veía). Con el período «Este mes», estas barras SON
+    // los ingresos del mes por día de semana.
+    final maxDia = _porDia.values
+        .fold<int>(0, (m, g) => g.dosis > m ? g.dosis : m);
+    final maxFranja = _porFranja.values
+        .fold<int>(0, (m, v) => v > m ? v : m);
     return Tarjeta(
       padding: const EdgeInsets.all(AppEspacio.md),
       child: Column(
@@ -688,8 +736,9 @@ class _ServiciosEstadisticasScreenState
               style: AppTexto.titulo),
           const SizedBox(height: 4),
           for (var d = 1; d <= 7; d++)
-            _fila(
+            _barra(
               kNombresDiaSemana[d] ?? 'Día $d',
+              fraccionBarra(_porDia[d]?.dosis ?? 0, maxDia),
               '${_porDia[d]?.dosis ?? 0} dosis · '
               '${fmtMonto(_porDia[d]?.ingresos ?? 0)} CUP',
             ),
@@ -698,7 +747,11 @@ class _ServiciosEstadisticasScreenState
               style: AppTexto.titulo),
           const SizedBox(height: 4),
           for (final e in kNombresFranja.entries)
-            _fila(e.value, '${_porFranja[e.key] ?? 0} dosis'),
+            _barra(
+              e.value,
+              fraccionBarra(_porFranja[e.key] ?? 0, maxFranja),
+              '${_porFranja[e.key] ?? 0} dosis',
+            ),
           const Text(
             'Las ventas sin hora (anteriores a la 1.13.0) caen en '
             '«Sin hora registrada»: no se inventa su franja.',
@@ -881,6 +934,18 @@ class _ServiciosEstadisticasScreenState
                 'Pomo que antes se agota',
                 '${b['autonomia_pomo_nombre']}: '
                 '${b['autonomia_pomo_min']} días'),
+          // 1.25 T94: la autonomía como MEDIDOR con
+          // color (tope visual: 30 días). Verde >= 14,
+          // ámbar 7-13, rojo < 7.
+          if (b['autonomia_pomo_min'] != null)
+            _barra(
+              'Autonomía',
+              fraccionAutonomiaPomo(
+                  (b['autonomia_pomo_min'] as num?)?.toInt()),
+              '${b['autonomia_pomo_min']} días',
+              color: _colorNivelAutonomia(nivelAutonomiaPomo(
+                  (b['autonomia_pomo_min'] as num?)?.toInt())),
+            ),
         ],
       ),
     );
