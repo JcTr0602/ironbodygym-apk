@@ -146,6 +146,13 @@ class _HomeScreenState extends State<HomeScreen>
   double _pagoEntrenadoresNeto =
       0; // post-1.15: neto a pagar (suma de la nómina, no bruto ×300)
   double _porRecoger = 0; // v1.3.3: pendiente por recoger (dueño)
+  // 1.25 T07: el USD del pendiente (a entregar del entrenador /
+  // por recoger del dueño) y el desglose por método del
+  // «Cobrado hoy» del dueño: Home los omitía y había que
+  // entrar al Dashboard o a Mi Turno para verlos.
+  double _pendienteUsd = 0;
+  double _cobradoHoyEf = 0;
+  double _cobradoHoyTr = 0;
   int _noLeidas = 0;
   double _cobradoHoy = 0;
   int _pendientesSync = 0; // v1.3.3: badge de sincronización
@@ -621,6 +628,11 @@ class _HomeScreenState extends State<HomeScreen>
         _auth.isOwner
             ? totalNetoNominaMes(hoyHabanaIso().substring(0, 7))
             : Future.value(null), // 18
+        // 1.25 T07: el USD del pendiente según el rol.
+        _auth.isOwner
+            ? pendienteRecogerUsd(
+                excluirTelegramId: _auth.telegramId)
+            : pendienteEntregaUsd(_auth.telegramId), // 19
       ]);
       // Cliente protegido (2026-10-26, Protegido 2 H6): los
       // contadores de la principal no cuentan protegidos para un
@@ -714,6 +726,11 @@ class _HomeScreenState extends State<HomeScreen>
           _atras30 = a30.length;
           _pendiente = p;
           _porRecoger = porRecoger;
+          _pendienteUsd = res[19] as double;
+          if (_auth.isOwner) {
+            _cobradoHoyEf = cobrado['efectivo'] ?? 0;
+            _cobradoHoyTr = cobrado['transferencia'] ?? 0;
+          }
           _noLeidas = noLeidas;
           _cobradoHoy = cobradoHoy;
           _pendientesSync = porSubir;
@@ -1607,7 +1624,10 @@ class _HomeScreenState extends State<HomeScreen>
                         'A entregar',
                         fmtMonto(_pendiente),
                         AppColores.alerta,
-                        () => _ir(const MiTurnoScreen()))),
+                        () => _ir(const MiTurnoScreen()),
+                        detalle: _pendienteUsd > 0
+                            ? '+ ${fmtMonto(_pendienteUsd)} USD'
+                            : null)),
               ],
             ),
             const SizedBox(height: AppEspacio.sm),
@@ -1708,15 +1728,20 @@ class _HomeScreenState extends State<HomeScreen>
                       'Cobrado hoy',
                       fmtMonto(_cobradoHoy),
                       AppColores.exito,
-                      () =>
-                          _ir(const DashboardScreen()))),
+                      () => _ir(const DashboardScreen()),
+                      detalle: _cobradoHoyEf > 0 || _cobradoHoyTr > 0
+                          ? 'Ef. ${fmtMonto(_cobradoHoyEf)} · '
+                              'Transf. ${fmtMonto(_cobradoHoyTr)}'
+                          : null)),
               Expanded(
                   child: _datoFinancieroTappable(
                       'Por recoger',
                       fmtMonto(_porRecoger),
                       AppColores.alerta,
-                      () =>
-                          _ir(const PendienteScreen()))),
+                      () => _ir(const PendienteScreen()),
+                      detalle: _pendienteUsd > 0
+                          ? '+ ${fmtMonto(_pendienteUsd)} USD'
+                          : null)),
             ],
           ),
           const SizedBox(height: AppEspacio.sm),
@@ -1857,7 +1882,13 @@ class _HomeScreenState extends State<HomeScreen>
   /// - Estado desconocido → chip explícito, nunca botón de cierre.
   /// (v25) tiene_incidencias es columna aparte: el aviso se combina
   /// con el chip de estado, no es un estado propio.
-  Widget? _chipTurnoCompacto() {
+  /// (texto, color) del estado REAL del turno de hoy según
+  /// el registro (no el reloj), o null si hoy no hay turno
+  /// registrado. Única fuente de los dos chips de turno
+  /// (1.25 T08): antes la cabecera decía la franja del reloj
+  /// («Turno mañana») y la tarjeta el estado real («Cerrado»)
+  /// y podían contradecirse en la misma pantalla.
+  (String, Color)? _estadoTurnoReal() {
     final t = _turnoActual;
     if (t == null) return null;
     final estado = '${t['estado'] ?? ''}';
@@ -1867,20 +1898,23 @@ class _HomeScreenState extends State<HomeScreen>
     switch (estado) {
       case 'abierto_local':
       case 'abierto_sincronizado':
-        return _chipTurnoTexto(
-            'Abierto ✓ $horaAp', AppColores.exito);
+        return ('Abierto ✓ $horaAp', AppColores.exito);
       case 'cerrado_sincronizado':
-        return _chipTurnoTexto(
-            'Cerrado ✓$sufijoInc', AppColores.exito);
+        return ('Cerrado ✓$sufijoInc', AppColores.exito);
       case 'cerrado_local':
-        return _chipTurnoTexto(
-            'Cerrado ⏳$sufijoInc', AppColores.alerta);
+        return ('Cerrado ⏳$sufijoInc', AppColores.alerta);
       case 'no_cerrado':
-        return _chipTurnoTexto('Sin cerrar', AppColores.alerta);
+        return ('Sin cerrar', AppColores.alerta);
       default:
         AppLog.error('home', 'turno_estado_desconocido', d: estado);
-        return _chipTurnoTexto('Desconocido', AppColores.alerta);
+        return ('Desconocido', AppColores.alerta);
     }
+  }
+
+  Widget? _chipTurnoCompacto() {
+    final real = _estadoTurnoReal();
+    if (real == null) return null;
+    return _chipTurnoTexto(real.$1, real.$2);
   }
 
   Widget _chipTurnoTexto(String texto, Color color) {
@@ -2158,8 +2192,8 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   /// Dato financiero simple (no tocable).
-  Widget _datoFinanciero(
-      String titulo, String valor, Color color) {
+  Widget _datoFinanciero(String titulo, String valor, Color color,
+      {String? detalle}) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -2167,6 +2201,10 @@ class _HomeScreenState extends State<HomeScreen>
             style: AppTexto.displayPequeno
                 .copyWith(color: color)),
         Text(titulo, style: AppTexto.secundario),
+        if (detalle != null)
+          Text(detalle,
+              style: AppTexto.metadato.copyWith(
+                  color: AppColores.textoSecundario(context))),
       ],
     );
   }
@@ -2175,8 +2213,9 @@ class _HomeScreenState extends State<HomeScreen>
   /// Argón: cada celda lleva superficie sutil + micro-chevron
   /// para que se vea que es un botón independiente (antes
   /// parecían texto estático).
-  Widget _datoFinancieroTappable(String titulo,
-      String valor, Color color, VoidCallback onTap) {
+  Widget _datoFinancieroTappable(String titulo, String valor,
+      Color color, VoidCallback onTap,
+      {String? detalle}) {
     return InkWell(
       borderRadius:
           BorderRadius.circular(AppRadio.md),
@@ -2193,7 +2232,8 @@ class _HomeScreenState extends State<HomeScreen>
           children: [
             Padding(
               padding: const EdgeInsets.only(right: AppEspacio.lg),
-              child: _datoFinanciero(titulo, valor, color),
+              child: _datoFinanciero(titulo, valor, color,
+                  detalle: detalle),
             ),
             const Positioned(
               top: 0,
@@ -2477,20 +2517,30 @@ class _HomeScreenState extends State<HomeScreen>
   /// cabecera, en vez de texto gris. Mañana naranja, tarde azul,
   /// noche ámbar (mismo turnoActual() de siempre, 5-12 / 12-18 /
   /// resto).
+  ///
+  /// 1.25 T08: si hoy hay turno registrado, el chip manda con
+  /// el estado REAL («Tarde · Abierto ✓ 07:02», con el color
+  /// del estado) y la franja del reloj queda como contexto:
+  /// un solo chip, sin la contradicción de antes («Turno
+  /// mañana» en la cabecera y «Cerrado» en la tarjeta).
   Widget _chipTurno() {
     final t = turnoActual();
-    final color = t == 'Mañana'
-        ? AppColores.naranja
-        : t == 'Tarde'
-            ? AppColores.info
-            : AppColores.alerta;
+    final real = _estadoTurnoReal();
+    final color = real != null
+        ? real.$2
+        : t == 'Mañana'
+            ? AppColores.naranja
+            : t == 'Tarde'
+                ? AppColores.info
+                : AppColores.alerta;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: AppEspacio.sm, vertical: 2),
       decoration: BoxDecoration(
         color: color,
         borderRadius: BorderRadius.circular(AppRadio.md),
       ),
-      child: Text('Turno ${t.toLowerCase()}',
+      child: Text(
+          real != null ? '$t · ${real.$1}' : 'Turno ${t.toLowerCase()}',
           style: AppTexto.etiqueta.copyWith(
               color: Colors.white,
               fontWeight: FontWeight.bold)),
