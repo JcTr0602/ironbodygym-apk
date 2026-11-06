@@ -26,11 +26,13 @@
 library;
 
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:uuid/uuid.dart';
 
 import '../auth.dart';
+import '../fotos.dart';
 import '../localdb.dart';
 import '../negocio.dart';
 import '../precio_cobro.dart';
@@ -42,6 +44,33 @@ import 'componentes.dart';
 import 'diseno.dart';
 import 'historial_ventas.dart';
 import 'servicios_historial.dart';
+
+/// 1.25 T93, PURO: ¿la fecha cae en el período elegido
+/// del Extracto? 'hoy' | 'semana' (desde el lunes) |
+/// 'mes' | 'todo'. Fechas ISO comparables como texto;
+/// la semana se calcula con aritmética de fecha pura
+/// (sumarDiasIso), nunca con Duration sobre el reloj.
+bool filaEnPeriodoExtracto(
+    String fechaIso, String periodo, String hoyIso) {
+  if (periodo == 'todo') return true;
+  final f = fechaIso.length >= 10 ? fechaIso.substring(0, 10) : fechaIso;
+  if (f.isEmpty) return false;
+  final hoy = DateTime.tryParse(hoyIso);
+  switch (periodo) {
+    case 'hoy':
+      return f == hoyIso;
+    case 'semana':
+      if (hoy == null) return false;
+      final lunes = sumarDiasIso(hoyIso, -(hoy.weekday - 1));
+      return f.compareTo(lunes) >= 0 && f.compareTo(hoyIso) <= 0;
+    case 'mes':
+      return hoyIso.length >= 7 &&
+          f.length >= 7 &&
+          f.substring(0, 7) == hoyIso.substring(0, 7);
+    default:
+      return true;
+  }
+}
 
 /// Destino de «Ir a la venta» desde el Extracto (PURO): la venta del
 /// turno se abre en su pantalla (suplementos → Historial de ventas,
@@ -72,8 +101,22 @@ class CentroComprasScreen extends StatefulWidget {
 class _CentroComprasScreenState extends State<CentroComprasScreen> {
   var _cargando = true;
   var _filtro = 'todo'; // todo | suplemento | servicio
+  // 1.25 T93: período y buscador del Extracto. Los
+  // totales de la cabecera son LOS DEL PERÍODO (antes
+  // «Total general» mezclaba todo el histórico y no
+  // servía para cuadrar ningún período).
+  var _periodo = 'todo'; // hoy | semana | mes | todo
+  final _busquedaCtrl = TextEditingController();
+  var _busqueda = '';
   List<Map<String, dynamic>> _filas = [];
-  ResumenExtracto _resumen = const ResumenExtracto({}, {}, {});
+  // Suplementos por id: la foto de las filas (T93).
+  Map<int, Map<String, dynamic>> _supPorId = {};
+
+  @override
+  void dispose() {
+    _busquedaCtrl.dispose();
+    super.dispose();
+  }
 
   @override
   void initState() {
@@ -162,6 +205,7 @@ class _CentroComprasScreenState extends State<CentroComprasScreen> {
       filas.add({
         'origen': 'suplemento',
         'tipo': 'suplemento',
+        'suplemento_id': supId,
         'concepto': supId != null
             ? (nombreSup[supId] ?? 'Suplemento $supId')
             : 'Suplemento',
@@ -202,6 +246,7 @@ class _CentroComprasScreenState extends State<CentroComprasScreen> {
       filas.add({
         'origen': 'servicio',
         'tipo': 'servicio',
+        'suplemento_id': supId,
         'concepto': nombreProd == null
             ? concepto
             : '$concepto · $nombreProd',
@@ -238,7 +283,11 @@ class _CentroComprasScreenState extends State<CentroComprasScreen> {
     if (!mounted) return;
     setState(() {
       _filas = filas;
-      _resumen = resumenExtracto(filas);
+      _supPorId = {
+        for (final s in suplementos)
+          if ((s['id'] as num?) != null)
+            (s['id'] as num).toInt(): s,
+      };
       _cargando = false;
     });
   }
@@ -258,9 +307,40 @@ class _CentroComprasScreenState extends State<CentroComprasScreen> {
     }
   }
 
-  List<Map<String, dynamic>> get _visibles => _filtro == 'todo'
-      ? _filas
-      : _filas.where((f) => f['tipo'] == _filtro).toList();
+  /// Las filas del período elegido (sin el filtro de
+  /// tipo ni la búsqueda): la base de los totales.
+  List<Map<String, dynamic>> get _delPeriodo => _filas
+      .where((f) => filaEnPeriodoExtracto(
+          '${f['fecha'] ?? ''}', _periodo, hoyHabanaIso()))
+      .toList();
+
+  ResumenExtracto get _resumenPeriodo =>
+      resumenExtracto(_delPeriodo);
+
+  List<Map<String, dynamic>> get _visibles {
+    var out = _delPeriodo;
+    if (_filtro != 'todo') {
+      out = out.where((f) => f['tipo'] == _filtro).toList();
+    }
+    final q = _busqueda.trim().toLowerCase();
+    if (q.isNotEmpty) {
+      out = out
+          .where((f) =>
+              '${f['concepto'] ?? ''}'
+                  .toLowerCase()
+                  .contains(q) ||
+              '${f['cliente'] ?? ''}'.toLowerCase().contains(q))
+          .toList();
+    }
+    return out;
+  }
+
+  String get _nombrePeriodo => switch (_periodo) {
+        'hoy' => 'de hoy',
+        'semana' => 'de esta semana',
+        'mes' => 'de este mes',
+        _ => 'general',
+      };
 
   @override
   Widget build(BuildContext context) {
@@ -320,19 +400,23 @@ class _CentroComprasScreenState extends State<CentroComprasScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-                'Total general: ${textoMontosPorMoneda(_resumen.total)}',
+                _periodo == 'todo'
+                    ? 'Total general: ${textoMontosPorMoneda(_resumenPeriodo.total)}'
+                    : 'Total $_nombrePeriodo: ${textoMontosPorMoneda(_resumenPeriodo.total)}',
                 style: AppTexto.titulo),
             const SizedBox(height: 4),
             Text(
                 'Subtotal Suplementos: '
-                '${textoMontosPorMoneda(_resumen.suplementos)} · '
+                '${textoMontosPorMoneda(_resumenPeriodo.suplementos)} · '
                 'Subtotal Servicios: '
-                '${textoMontosPorMoneda(_resumen.servicios)}',
+                '${textoMontosPorMoneda(_resumenPeriodo.servicios)}',
                 style: AppTexto.cuerpo),
             const Text(
-              'Las anuladas no suman. Las ventas del turno aparecen '
-              'solas; desde aquí solo se registran compras fuera del '
-              'turno.',
+              'Las anuladas no suman. Los totales son del período '
+              'elegido (el filtro de tipo y la búsqueda solo '
+              'recortan la lista). Las ventas del turno aparecen '
+              'solas; desde aquí solo se registran compras fuera '
+              'del turno.',
               style: AppTexto.secundario,
             ),
           ],
@@ -341,27 +425,62 @@ class _CentroComprasScreenState extends State<CentroComprasScreen> {
 
   Widget _filtros() => Padding(
         padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-        child: SegmentedButton<String>(
-          segments: const [
-            ButtonSegment(value: 'todo', label: Text('Todo')),
-            ButtonSegment(value: 'suplemento', label: Text('Suplementos')),
-            ButtonSegment(value: 'servicio', label: Text('Servicios')),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            SegmentedButton<String>(
+              segments: const [
+                ButtonSegment(value: 'todo', label: Text('Todo')),
+                ButtonSegment(
+                    value: 'suplemento', label: Text('Suplementos')),
+                ButtonSegment(
+                    value: 'servicio', label: Text('Servicios')),
+              ],
+              selected: {_filtro},
+              onSelectionChanged: (s) =>
+                  setState(() => _filtro = s.first),
+            ),
+            const SizedBox(height: AppEspacio.sm),
+            // 1.25 T93: el período del Extracto.
+            SegmentedButton<String>(
+              segments: const [
+                ButtonSegment(value: 'hoy', label: Text('Hoy')),
+                ButtonSegment(
+                    value: 'semana', label: Text('Semana')),
+                ButtonSegment(value: 'mes', label: Text('Mes')),
+                ButtonSegment(value: 'todo', label: Text('Todo')),
+              ],
+              selected: {_periodo},
+              onSelectionChanged: (s) =>
+                  setState(() => _periodo = s.first),
+            ),
+            const SizedBox(height: AppEspacio.sm),
+            CampoTexto(
+              controller: _busquedaCtrl,
+              hint: 'Buscar por producto o cliente…',
+              icono: Icons.search_rounded,
+              onChanged: (v) => setState(() => _busqueda = v),
+            ),
           ],
-          selected: {_filtro},
-          onSelectionChanged: (s) => setState(() => _filtro = s.first),
         ),
       );
 
   Widget _filaCompra(Map<String, dynamic> f) {
     final anulada = f['anulada'] == 1;
     final esManual = f['origen'] == 'manual';
+    final sup = _supPorId[(f['suplemento_id'] as num?)?.toInt()];
     return Card(
       child: ListTile(
-        leading: Icon(
-            f['tipo'] == 'servicio'
-                ? Icons.fitness_center_rounded
-                : Icons.shopping_bag_rounded,
-            color: anulada ? Colors.grey : AppColores.naranja),
+        // 1.25 T93: la fila lleva la foto del producto
+        // cuando la venta lo resuelve (suplemento o
+        // dosis de un pomo); si no, el icono de siempre.
+        leading: sup != null
+            ? _FotoExtracto(sup: sup, anulada: anulada)
+            : Icon(
+                f['tipo'] == 'servicio'
+                    ? Icons.fitness_center_rounded
+                    : Icons.shopping_bag_rounded,
+                color: anulada ? Colors.grey : AppColores.naranja),
         title: Text(
             '${f['concepto']}'
             '${esManual ? ' (manual)' : ''}'
@@ -519,7 +638,10 @@ class _CentroComprasScreenState extends State<CentroComprasScreen> {
   Future<void> _registrarManual(BuildContext context) async {
     final conceptoCtrl = TextEditingController();
     final montoCtrl = TextEditingController();
-    final fechaCtrl = TextEditingController(text: hoyHabanaIso());
+    // 1.25 T93: la fecha se ELIGE en un selector, no se
+    // teclea «AAAA-MM-DD» (el texto libre era la única
+    // validación que fallaba al registrar a mano).
+    var fechaSel = hoyHabanaIso();
     var tipo = 'suplemento';
     String? clienteNombre;
     // 1.25 T32: el id viaja con el nombre (antes solo el
@@ -567,11 +689,30 @@ class _CentroComprasScreenState extends State<CentroComprasScreen> {
                         labelText: 'Monto (CUP)',
                         border: OutlineInputBorder())),
                 const SizedBox(height: 8),
-                TextField(
-                    controller: fechaCtrl,
-                    decoration: const InputDecoration(
-                        labelText: 'Fecha (AAAA-MM-DD)',
-                        border: OutlineInputBorder())),
+                OutlinedButton.icon(
+                  icon: const Icon(Icons.calendar_month_rounded,
+                      size: 18),
+                  label: Text('Fecha: $fechaSel'),
+                  onPressed: () async {
+                    final hoy = ahoraHabana();
+                    final elegida = await showDatePicker(
+                      context: ctx,
+                      initialDate:
+                          DateTime.tryParse(fechaSel) ?? hoy,
+                      firstDate: DateTime(2024, 1, 1),
+                      lastDate:
+                          DateTime(hoy.year, hoy.month, hoy.day),
+                    );
+                    if (elegida != null) {
+                      setS(() {
+                        fechaSel =
+                            '${elegida.year.toString().padLeft(4, '0')}-'
+                            '${elegida.month.toString().padLeft(2, '0')}-'
+                            '${elegida.day.toString().padLeft(2, '0')}';
+                      });
+                    }
+                  },
+                ),
                 const SizedBox(height: 8),
                 OutlinedButton(
                   onPressed: () async {
@@ -615,8 +756,8 @@ class _CentroComprasScreenState extends State<CentroComprasScreen> {
       // Autoauditoría 1.22 #2 (clase N-2): NaN/Infinity no son
       // <= 0 y llegaban a la fila local y al payload de la op.
       error = 'Monto inválido.';
-    } else if (DateTime.tryParse(fechaCtrl.text.trim()) == null) {
-      error = 'Fecha inválida (AAAA-MM-DD).';
+    } else if (DateTime.tryParse(fechaSel) == null) {
+      error = 'Fecha inválida.';
     }
     if (error != null) {
       if (!context.mounted) return;
@@ -632,7 +773,7 @@ class _CentroComprasScreenState extends State<CentroComprasScreen> {
         'tipo': tipo,
         'concepto': conceptoCtrl.text.trim(),
         'monto': monto,
-        'fecha': fechaCtrl.text.trim(),
+        'fecha': fechaSel,
         'cliente_id': clienteId,
         'cliente_nombre': clienteNombre ?? '',
         'metodo': 'efectivo',
@@ -649,7 +790,7 @@ class _CentroComprasScreenState extends State<CentroComprasScreen> {
           'tipo': tipo,
           'concepto': conceptoCtrl.text.trim(),
           'monto': monto,
-          'fecha': fechaCtrl.text.trim(),
+          'fecha': fechaSel,
           'cliente_id': clienteId,
           'cliente_nombre': clienteNombre ?? '',
         },
@@ -725,6 +866,65 @@ class _CentroComprasScreenState extends State<CentroComprasScreen> {
           );
         },
       ),
+    );
+  }
+}
+
+
+/// 1.25 T93: miniatura del producto en las filas del
+/// Extracto (mismo resolver que el catálogo; futuro en
+/// el State, nunca dentro del build).
+class _FotoExtracto extends StatefulWidget {
+  final Map<String, dynamic> sup;
+  final bool anulada;
+  const _FotoExtracto({required this.sup, required this.anulada});
+
+  @override
+  State<_FotoExtracto> createState() => _FotoExtractoState();
+}
+
+class _FotoExtractoState extends State<_FotoExtracto> {
+  late Future<File?> _futura;
+
+  @override
+  void initState() {
+    super.initState();
+    _futura = resolverFotoSuplemento(widget.sup);
+  }
+
+  @override
+  void didUpdateWidget(covariant _FotoExtracto oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.sup['id'] != widget.sup['id'] ||
+        oldWidget.sup['foto_local'] != widget.sup['foto_local'] ||
+        oldWidget.sup['foto_storage'] !=
+            widget.sup['foto_storage']) {
+      _futura = resolverFotoSuplemento(widget.sup);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<File?>(
+      future: _futura,
+      builder: (ctx, snap) {
+        final f = snap.data;
+        if (f == null) {
+          return Icon(Icons.shopping_bag_rounded,
+              color: widget.anulada
+                  ? Colors.grey
+                  : AppColores.naranja);
+        }
+        return ClipRRect(
+          borderRadius: BorderRadius.circular(AppRadio.sm),
+          child: Image(
+            image: providerFotoAcotada(FileImage(f), ancho: 200),
+            width: 40,
+            height: 40,
+            fit: BoxFit.cover,
+          ),
+        );
+      },
     );
   }
 }
